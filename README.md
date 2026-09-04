@@ -4,10 +4,13 @@ Logiciel d'analyse et de tracé de données scientifiques, façon OriginLab, éc
 
 ## État
 
-**Pré-alpha — phase 3.** Le squelette applicatif (fenêtre, packaging, CI), le
-**modèle de données**, le **bus de commandes annulables** et l'**UI
-worksheet** sont en place : saisie/collage dans une table, undo/redo,
-explorateur de projet.
+**Pré-alpha — phase 5.** Le squelette applicatif (fenêtre, packaging, CI), le
+**modèle de données**, le **bus de commandes annulables**, l'**UI worksheet**,
+la **persistance HDF5** et l'**import de fichiers** sont en place : saisie et
+collage dans une table, undo/redo, explorateur de projet, projets `.plx`
+avec autosave et récupération, import par registre de parseurs avec aperçu.
+
+Pas encore de tracé de courbes — c'est la phase 6.
 
 `plotyx.core` fournit `Project` / `Folder` / `Workbook` / `Worksheet` / `Column`
 (plus les nœuds minimaux `Graph`, `Matrix`, `Note`), la résolution de chemins
