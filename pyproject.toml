@@ -129,7 +129,7 @@ qt_api = "pyside6"
 # --- coverage -------------------------------------------------------------
 
 [tool.coverage.run]
-source = ["plotyx.core", "plotyx.commands", "plotyx.ui"]
+source = ["plotyx.core", "plotyx.commands", "plotyx.ui", "plotyx.persistence"]
 branch = true
 
 [tool.coverage.report]
