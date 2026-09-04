@@ -27,6 +27,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-qt>=4.4",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
 ]
 
@@ -66,6 +67,7 @@ requires = [
 test_requires = [
     "pytest>=8.0",
     "pytest-qt>=4.4",
+    "pytest-cov>=5.0",
 ]
 
 # Périmètre plateformes : Windows + Linux (release). macOS reste
@@ -113,3 +115,13 @@ known-first-party = ["plotyx"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
+
+# --- coverage -------------------------------------------------------------
+
+[tool.coverage.run]
+source = ["plotyx.core"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]

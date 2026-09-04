@@ -4,7 +4,14 @@ Logiciel d'analyse et de tracé de données scientifiques, façon OriginLab, éc
 
 ## État
 
-**Pré-alpha — phase 0.** Aucun code applicatif pour l'instant : le dépôt porte l'architecture et la roadmap.
+**Pré-alpha — phase 1.** Le squelette applicatif (fenêtre, packaging, CI) et le
+**modèle de données** sont en place ; l'UI ne les affiche pas encore.
+
+`plotyx.core` fournit `Project` / `Folder` / `Workbook` / `Worksheet` / `Column`
+(plus les nœuds minimaux `Graph`, `Matrix`, `Note`), la résolution de chemins
+`[Book1]Sheet1!ColA`, un registre de clés stables et un mécanisme de
+notification en Python pur. Prochaine étape : le bus de commandes annulables
+(phase 2).
 
 ## Stack
 
@@ -32,6 +39,6 @@ Licences 100 % compatibles avec une distribution closed-source, sans royalties.
 ## Principes non négociables
 
 1. **Aucune mutation du modèle de données en dehors d'une `QUndoCommand`.** C'est ce qui rend la console de script annulable sans code supplémentaire.
-2. **Le modèle de données ne dépend pas de Qt.** `plotyx/core/` et `plotyx/analysis/` sont testables sans UI.
+2. **Le modèle de données ne dépend pas de Qt.** `plotyx/core/` et `plotyx/analysis/` sont testables sans UI. Le modèle émet des signaux Python purs (`plotyx.core.signals`) que la couche `ui/` adapte en signaux Qt ; `tests/test_core_no_qt.py` vérifie automatiquement cette frontière.
 3. **Le packaging se valide en continu**, dès la première version, pas à la fin.
 4. **Aucun calcul lourd sur le thread UI.**
