@@ -39,6 +39,7 @@ from plotyx.commands import AddObjectCommand, CommandBus, DeleteObjectCommand, R
 from plotyx.core.nodes import Workbook
 from plotyx.core.project import Project
 from plotyx.core.worksheet import Worksheet
+from plotyx.io.registry import default_registry
 from plotyx.persistence import (
     FILE_EXTENSION,
     PersistenceError,
@@ -52,6 +53,7 @@ from plotyx.persistence import (
     save_project,
     write_autosave,
 )
+from plotyx.ui.import_wizard import ImportWizardDialog
 from plotyx.ui.project_tree_model import ProjectTreeModel
 from plotyx.ui.worksheet_model import WorksheetTableModel
 from plotyx.ui.worksheet_view import WorksheetView
@@ -133,9 +135,11 @@ class MainWindow(QMainWindow):
         self._base_title = "PlotYx"
         self.setWindowTitle(self._base_title)
         self.resize(1200, 800)
+        self.setAcceptDrops(True)
 
         self._current_path: Path | None = None
         self._session_id = uuid.uuid4().hex
+        self._parser_registry = default_registry()
 
         self._project = project if project is not None else _default_project()
         self._bus = CommandBus(self._project, undo_limit=1000, parent=self)
@@ -289,6 +293,57 @@ class MainWindow(QMainWindow):
         sub_window.show()
         return sub_window
 
+    # -- import de fichiers (phase 5) -------------------------------------------
+
+    def _target_worksheet_for_import(self) -> Worksheet | None:
+        """La feuille où atterrissent les colonnes importées.
+
+        La sous-fenêtre active si c'en est une, sinon la première feuille du
+        projet, sinon `None` — l'appelant doit alors renoncer : importer
+        sans feuille où écrire n'a pas de sens (créer un classeur à la
+        volée serait une mutation hors commande explicite non demandée
+        par l'utilisateur).
+        """
+        active = self._mdi_area.activeSubWindow()
+        if active is not None:
+            for key, sub_window in self._open_sheets.items():
+                if sub_window is active:
+                    try:
+                        return self._project.resolve_key(key)  # type: ignore[return-value]
+                    except KeyError:
+                        break
+        return self._first_worksheet()
+
+    def _open_import_wizard(self, paths: list[Path] | None = None) -> None:
+        sheet = self._target_worksheet_for_import()
+        if sheet is None:
+            QMessageBox.warning(
+                self, "Import impossible", "Aucune feuille n'existe pour recevoir l'import."
+            )
+            return
+        dialog = ImportWizardDialog(sheet, self._bus, paths, self._parser_registry, self)
+        dialog.exec()
+
+    # -- drag & drop OS → application (phase 5) ---------------------------------
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - API Qt
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - API Qt
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            super().dropEvent(event)
+            return
+        paths = [Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()]
+        paths = [p for p in paths if p.is_file()]
+        if not paths:
+            return
+        event.acceptProposedAction()
+        self._open_import_wizard(paths)
+
     # -- actions / menus / toolbar ---------------------------------------------
 
     def _build_file_actions(self) -> None:
@@ -298,6 +353,9 @@ class MainWindow(QMainWindow):
         self._open_action = QAction("&Ouvrir…", self)
         self._open_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Open))
         self._open_action.triggered.connect(self._on_open)
+
+        self._import_action = QAction("&Importer…", self)
+        self._import_action.triggered.connect(lambda: self._open_import_wizard())
 
         self._save_action = QAction("&Enregistrer", self)
         self._save_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Save))
@@ -317,6 +375,7 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("&Fichier")
         file_menu.addAction(self._new_action)
         file_menu.addAction(self._open_action)
+        file_menu.addAction(self._import_action)
         file_menu.addAction(self._save_action)
         file_menu.addAction(self._save_as_action)
         self._file_menu = file_menu
