@@ -68,6 +68,7 @@ Sous Linux, `xcb` est forcé par défaut en session Wayland : un `QDockWidget` d
 
 ## Documentation
 
+- [`docs/etat-du-projet.md`](docs/etat-du-projet.md) — **où en est le code et ce qui a été tranché**, avec les raisons
 - [`ROADMAP.md`](ROADMAP.md) — plan de développement en 13 phases, jalons, risques
 - [`docs/architecture.md`](docs/architecture.md) — architecture technique de référence
 
