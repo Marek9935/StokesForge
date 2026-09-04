@@ -171,10 +171,11 @@ def test_deleting_a_column_then_pushing_truncates_the_redo_branch(bus, sheet):
 def test_a_sheet_wide_row_insert_is_a_macro_of_column_commands(bus, sheet):
     """Les commandes de lignes visent une colonne ; la feuille est une macro.
 
-    `Worksheet.insert_rows` et `Worksheet.delete_rows` ne sont pas exactement
-    inverses l'une de l'autre sur une colonne plus courte que `at` (l'une
-    tombe en `min(at, len)`, l'autre ignore la colonne). Une macro de
-    commandes par colonne est exacte, et tient en une entrée d'historique.
+    Les primitives de feuille `Worksheet.insert_rows`/`delete_rows` sont
+    désormais des inverses strictes et pourraient être enveloppées telles
+    quelles. La macro par colonne reste le chemin retenu : elle tient en
+    une seule entrée d'historique et garde le jeu de commandes à l'échelle
+    de la colonne, plus fin.
     """
     import numpy as np
 

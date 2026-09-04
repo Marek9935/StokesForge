@@ -62,6 +62,36 @@ def test_row_operations_span_all_columns_but_respect_short_ones():
     assert list(sheet.column("B").values) == [1.0, 2.0]
 
 
+def test_row_insert_and_delete_are_strict_inverses_over_short_columns():
+    """Régression : `insert_rows` rabattait `at` en `min(at, len)`.
+
+    Une colonne trop courte pour atteindre `at` se voyait donc allonger
+    d'un NaN à sa fin, alors que `delete_rows` l'ignorait — les deux
+    primitives n'étaient pas inverses. Elles sautent désormais le même
+    ensemble de colonnes.
+    """
+    sheet = Worksheet()
+    sheet.add_column("longue", [1.0, 2.0, 3.0, 4.0, 5.0])
+    sheet.add_column("courte", [1.0, 2.0])
+    before = {column.name: np.array(column.values) for column in sheet}
+
+    sheet.insert_rows(3, 2)
+    assert len(sheet.column("longue")) == 7
+    assert len(sheet.column("courte")) == 2, "la colonne courte n'a pas de ligne 3"
+
+    removed = sheet.delete_rows(3, 2)
+    assert list(removed) == ["longue"]
+    for name, values in before.items():
+        np.testing.assert_array_equal(sheet.column(name).values, values)
+
+
+def test_inserting_rows_beyond_every_column_is_a_no_op():
+    sheet = Worksheet()
+    sheet.add_column("A", [1.0, 2.0])
+    sheet.insert_rows(10, 3)
+    assert len(sheet.column("A")) == 2
+
+
 def test_delete_rows_skips_columns_that_are_too_short():
     sheet = Worksheet()
     sheet.add_column("A", [1.0, 2.0, 3.0])

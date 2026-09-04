@@ -190,15 +190,34 @@ class Worksheet(ModelObject):
         return self.column(ref).set_values(row, [value])
 
     def insert_rows(self, at: int, count: int = 1) -> None:
-        """Insère `count` lignes vides dans **toutes** les colonnes."""
+        """Insère `count` lignes vides dans les colonnes concernées par `at`.
+
+        Les colonnes sont de longueur libre : une colonne de longueur L
+        **n'a pas de ligne** au-delà de L, ces lignes étant déjà manquantes
+        implicitement. Insérer à un index qui tombe hors d'une colonne est
+        donc sans effet sur elle, exactement comme `delete_rows` l'ignore —
+        c'est ce qui fait des deux primitives des inverses strictes.
+        """
         for column in self._columns:
-            column.insert_rows(min(at, len(column)), count)
+            if at < len(column):
+                column.insert_rows(at, count)
         self._notify_structure(
             StructureChanged(self, "rows_inserted", {"at": at, "count": count})
         )
 
     def delete_rows(self, at: int, count: int = 1) -> dict[str, np.ndarray]:
-        """Supprime `count` lignes de toutes les colonnes. Retourne les valeurs ôtées."""
+        """Supprime `count` lignes des colonnes concernées. Retourne les valeurs ôtées.
+
+        Les colonnes trop courtes pour atteindre `at` sont ignorées, comme
+        dans `insert_rows` : les deux primitives sautent le même ensemble de
+        colonnes et s'annulent donc exactement l'une l'autre.
+
+        Le dictionnaire retourné est indexé par **nom** de colonne. C'est
+        suffisant pour l'undo, dont l'ordre LIFO garantit qu'un renommage
+        intercalé est défait avant cette restauration, mais c'est une
+        hypothèse implicite : une clé de registre serait plus robuste si
+        cette contrainte venait à tomber.
+        """
         removed: dict[str, np.ndarray] = {}
         for column in self._columns:
             if at < len(column):
