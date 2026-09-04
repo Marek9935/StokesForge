@@ -134,7 +134,14 @@ markers = [
 # --- coverage -------------------------------------------------------------
 
 [tool.coverage.run]
-source = ["plotyx.core", "plotyx.commands", "plotyx.ui", "plotyx.persistence", "plotyx.io"]
+source = [
+    "plotyx.core",
+    "plotyx.commands",
+    "plotyx.plot",
+    "plotyx.ui",
+    "plotyx.persistence",
+    "plotyx.io",
+]
 branch = true
 
 [tool.coverage.report]

@@ -2,8 +2,7 @@
 
 Phase 3 : la fenêtre porte un `Project` et le `CommandBus` qui va avec. Le
 dock « Project Explorer » est rempli (arbre du projet, double-clic pour
-ouvrir une feuille) ; les docks « Properties » et « Script Console »
-restent des stubs, hors périmètre de cette phase (6/9). Les menus
+ouvrir une feuille) ; le dock « Script Console » reste un stub (phase 9). Les menus
 Undo/Redo utilisent `QKeySequence.StandardKey`, jamais un raccourci en
 dur — voir la Politique macOS de la roadmap, qui s'applique dès
 maintenant même si macOS est hors release.
@@ -14,6 +13,13 @@ point de passage unique qui échange le projet et le bus vivants — ouvrir
 un fichier ou récupérer un autosave **remplace** le projet, ça ne s'empile
 pas dessus (§ « la règle d'or » de la phase 4) : la pile d'undo précédente
 est détruite, une neuve la remplace.
+
+Phase 6 : les graphes s'ouvrent en sous-fenêtres MDI (`GraphWindow`) au
+même titre que les feuilles, et le dock « Properties » — jusqu'ici un
+`QLabel` de substitution — accueille le panneau de propriétés du graphe
+actif (`PlotPropertiesPanel`). Il se vide quand la sous-fenêtre active
+n'est pas un graphe : un panneau qui garderait à l'écran les propriétés
+d'une fenêtre qu'on ne regarde plus est pire qu'un panneau vide.
 """
 
 from __future__ import annotations
@@ -36,7 +42,8 @@ from PySide6.QtWidgets import (
 )
 
 from plotyx.commands import AddObjectCommand, CommandBus, DeleteObjectCommand, RenameCommand
-from plotyx.core.nodes import Workbook
+from plotyx.core.column import Column
+from plotyx.core.nodes import Graph, Workbook
 from plotyx.core.project import Project
 from plotyx.core.worksheet import Worksheet
 from plotyx.io.registry import default_registry
@@ -53,7 +60,10 @@ from plotyx.persistence import (
     save_project,
     write_autosave,
 )
+from plotyx.ui.graph_window import GraphWindow
 from plotyx.ui.import_wizard import ImportWizardDialog
+from plotyx.ui.plot_actions import create_graph_from_columns
+from plotyx.ui.plot_properties import PlotPropertiesPanel
 from plotyx.ui.project_tree_model import ProjectTreeModel
 from plotyx.ui.worksheet_model import WorksheetTableModel
 from plotyx.ui.worksheet_view import WorksheetView
@@ -69,8 +79,9 @@ _FILE_FILTER = f"Projets PlotYx (*{FILE_EXTENSION})"
 def _make_stub_dock(title: str, object_name: str, placeholder_text: str) -> QDockWidget:
     """Crée un dock stub : juste un titre et un texte de substitution.
 
-    Encore utilisé par « Properties » et « Script Console », hors périmètre
-    de la phase 3 (respectivement phases 6/8 et 9).
+    Encore utilisé par « Script Console » (phase 9), et par « Properties »
+    tant qu'aucun graphe n'est actif — le panneau de la phase 6 y prend sa
+    place à la demande (`_update_properties_dock`).
     """
     dock = QDockWidget(title)
     dock.setObjectName(object_name)
@@ -148,10 +159,13 @@ class MainWindow(QMainWindow):
         self._mdi_area = QMdiArea(self)
         self.setCentralWidget(self._mdi_area)
         self._open_sheets: dict[str, QMdiSubWindow] = {}
+        self._open_graphs: dict[str, QMdiSubWindow] = {}
+        self._properties_panel: PlotPropertiesPanel | None = None
 
+        self._mdi_area.subWindowActivated.connect(self._on_sub_window_activated)
         self._build_project_explorer_dock()
         self._properties_dock = _make_stub_dock(
-            "Properties", "propertiesDock", "(à venir — phase 3/6)"
+            "Properties", "propertiesDock", "(sélectionnez un graphe)"
         )
         self._script_console_dock = _make_stub_dock(
             "Script Console", "scriptConsoleDock", "(à venir — phase 9)"
@@ -162,6 +176,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._script_console_dock)
 
         self._build_file_actions()
+        self._build_plot_actions()
         self._build_actions()
         self._build_menus()
         self._build_toolbar()
@@ -228,6 +243,8 @@ class MainWindow(QMainWindow):
         node = self._project_tree_model.node_at(index)
         if isinstance(node, Worksheet):
             self.open_worksheet(node)
+        elif isinstance(node, Graph):
+            self.open_graph(node)
         elif isinstance(node, Workbook) and node.sheets:
             self.open_worksheet(node.sheets[0])
 
@@ -246,6 +263,9 @@ class MainWindow(QMainWindow):
         if isinstance(node, Workbook):
             act_add_sheet = menu.addAction("Nouvelle feuille")
             act_add_sheet.triggered.connect(lambda: self._add_sheet(node))
+        if isinstance(node, Column | Worksheet):
+            act_plot = menu.addAction("Tracer dans un nouveau graphe")
+            act_plot.triggered.connect(lambda: self._plot_nodes([node]))
         menu.exec(self._project_tree.viewport().mapToGlobal(pos))
 
     def _rename_node(self, node) -> None:
@@ -292,6 +312,117 @@ class MainWindow(QMainWindow):
         sub_window.destroyed.connect(_on_destroyed)
         sub_window.show()
         return sub_window
+
+    def open_graph(self, graph: Graph) -> QMdiSubWindow:
+        """Ouvre (ou ramène au premier plan) la sous-fenêtre d'un graphe."""
+        key = graph.key
+        existing = self._open_graphs.get(key)
+        if existing is not None:
+            self._mdi_area.setActiveSubWindow(existing)
+            return existing
+
+        widget = GraphWindow(graph, self._project, self._bus)
+        sub_window = self._mdi_area.addSubWindow(widget)
+        sub_window.setWindowTitle(f"[{graph.name}]")
+        sub_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._open_graphs[key] = sub_window
+
+        def _on_destroyed(_obj=None, widget=widget, key=key) -> None:
+            widget.disconnect_signals()
+            self._open_graphs.pop(key, None)
+            if self._properties_panel is not None and self._properties_panel.graph.key == key:
+                self._clear_properties_dock()
+
+        sub_window.destroyed.connect(_on_destroyed)
+        sub_window.show()
+        return sub_window
+
+    # -- création de graphes (phase 6) --------------------------------------------
+
+    def _active_worksheet_columns(self) -> list[Column]:
+        """Colonnes à tracer d'après la sous-fenêtre active.
+
+        Trois cas, alignés sur ce que fait déjà l'import
+        (`_target_worksheet_for_import`) :
+
+        * une **feuille** active → ses colonnes sélectionnées, ou toutes si
+          la sélection est vide (« tracer la feuille ») ;
+        * un **graphe** actif → rien : ajouter une série à un graphe
+          existant est une autre action, celle du glisser-déposer de la
+          phase 7 ;
+        * **aucune** sous-fenêtre → la première feuille du projet, faute de
+          quoi l'action serait inutilisable au démarrage.
+        """
+        active = self._mdi_area.activeSubWindow()
+        if active is None:
+            sheet = self._first_worksheet()
+            return list(sheet.columns) if sheet is not None else []
+        view = active.widget()
+        if not isinstance(view, WorksheetView):
+            return []
+        table_model = view.model()
+        if not isinstance(table_model, WorksheetTableModel):
+            return []
+        indexes = view.selectionModel().selectedIndexes() if view.selectionModel() else []
+        selected = sorted({index.column() for index in indexes})
+        columns = [table_model.column_at(index) for index in selected]
+        return columns or list(table_model.sheet.columns)
+
+    def _plot_nodes(self, nodes) -> None:
+        """Trace une sélection de l'explorateur (colonnes, ou feuille entière)."""
+        columns: list[Column] = []
+        for node in nodes:
+            if isinstance(node, Column):
+                columns.append(node)
+            elif isinstance(node, Worksheet):
+                columns.extend(node.columns)
+        self._create_graph(columns)
+
+    def _on_plot_action(self) -> None:
+        self._create_graph(self._active_worksheet_columns())
+
+    def _create_graph(self, columns: list[Column]) -> Graph | None:
+        """Crée le graphe et l'ouvre. Une seule entrée d'historique (macro)."""
+        try:
+            graph = create_graph_from_columns(self._project, self._bus, columns)
+        except ValueError as error:
+            QMessageBox.warning(self, "Tracé impossible", str(error))
+            return None
+        self.open_graph(graph)
+        return graph
+
+    # -- dock « Properties » ---------------------------------------------------------
+
+    def _on_sub_window_activated(self, sub_window: QMdiSubWindow | None) -> None:
+        widget = sub_window.widget() if sub_window is not None else None
+        if isinstance(widget, GraphWindow):
+            self._show_properties_for(widget.graph)
+        else:
+            self._clear_properties_dock()
+
+    def _show_properties_for(self, graph: Graph) -> None:
+        if self._properties_panel is not None:
+            if self._properties_panel.graph is graph:
+                return
+            self._properties_panel.disconnect_signals()
+        panel = PlotPropertiesPanel(graph, self._project, self._bus)
+        self._properties_dock.setWidget(panel)
+        self._properties_panel = panel
+
+    def _clear_properties_dock(self) -> None:
+        """Remet le texte de substitution : pas de graphe actif, rien à éditer."""
+        if self._properties_panel is not None:
+            self._properties_panel.disconnect_signals()
+            self._properties_panel = None
+        placeholder = QLabel("(sélectionnez un graphe)")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setEnabled(False)
+        self._properties_dock.setWidget(placeholder)
+
+    @property
+    def properties_panel(self) -> PlotPropertiesPanel | None:
+        """Le panneau de propriétés courant, ou `None` si aucun graphe actif."""
+        return self._properties_panel
 
     # -- import de fichiers (phase 5) -------------------------------------------
 
@@ -365,6 +496,13 @@ class MainWindow(QMainWindow):
         self._save_as_action.setShortcut(QKeySequence(QKeySequence.StandardKey.SaveAs))
         self._save_as_action.triggered.connect(self._on_save_as)
 
+    def _build_plot_actions(self) -> None:
+        self._plot_action = QAction("Nouveau &graphe", self)
+        self._plot_action.setToolTip(
+            "Trace les colonnes sélectionnées de la feuille active"
+        )
+        self._plot_action.triggered.connect(self._on_plot_action)
+
     def _build_actions(self) -> None:
         self._undo_action: QAction = self._bus.stack.createUndoAction(self, "Annuler")
         self._undo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Undo))
@@ -384,6 +522,10 @@ class MainWindow(QMainWindow):
         self._edit_menu.addAction(self._undo_action)
         self._edit_menu.addAction(self._redo_action)
 
+        graph_menu = self.menuBar().addMenu("&Graphe")
+        graph_menu.addAction(self._plot_action)
+        self._graph_menu = graph_menu
+
         view_menu = self.menuBar().addMenu("&Affichage")
         view_menu.addAction(self._project_explorer_dock.toggleViewAction())
         view_menu.addAction(self._properties_dock.toggleViewAction())
@@ -397,6 +539,8 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self._undo_action)
         toolbar.addAction(self._redo_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self._plot_action)
         self.addToolBar(toolbar)
         self._toolbar = toolbar
 
@@ -418,9 +562,11 @@ class MainWindow(QMainWindow):
         sous-fenêtre de feuille ouverte sur l'ancien projet est fermée : ses
         widgets pointent sur des `Worksheet` qui n'existent plus.
         """
-        for sub_window in list(self._open_sheets.values()):
+        for sub_window in [*self._open_sheets.values(), *self._open_graphs.values()]:
             sub_window.close()
         self._open_sheets.clear()
+        self._open_graphs.clear()
+        self._clear_properties_dock()
 
         old_bus = self._bus
         self._project = project

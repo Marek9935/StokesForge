@@ -69,19 +69,22 @@ test:linux:
     # La couverture est mesurée sur les couches testées : plotyx.core
     # (noyau métier, phase 1), plotyx.commands (bus d'undo, phase 2),
     # plotyx.ui (`QAbstractTableModel`/`QAbstractItemModel` sur
-    # `Worksheet`/`Project`, dialogues, fenêtre principale, wizard d'import
-    # — testés avec `pytest-qt` en headless) et, depuis la phase 5,
-    # plotyx.io (parseurs, registre — sans Qt, testable seul). La roadmap
-    # vise 85 % sur core/commands/io et >75 % sur l'UI ; le seuil global
-    # ci-dessous est le garde-fou automatique, tenu par la moyenne
-    # pondérée. `-m "not corpus"` exclut le test qui parcourt le corpus
-    # réel de la thèse : il n'existe que sur la machine de dev (données non
+    # `Worksheet`/`Project`, dialogues, fenêtre principale, wizard d'import,
+    # fenêtre de graphe et panneau de propriétés — testés avec `pytest-qt`
+    # en headless), plotyx.io (parseurs, registre — sans Qt, testable seul)
+    # et, depuis la phase 6, plotyx.plot : la couche `PlotSpec` neutre,
+    # sans Qt ni moteur de rendu, dont PyQtGraph et (phase 10) Matplotlib
+    # sont deux renderers. La roadmap vise 85 % sur core/commands/io/plot
+    # et >75 % sur l'UI ; le seuil global ci-dessous est le garde-fou
+    # automatique, tenu par la moyenne pondérée. `-m "not corpus"` exclut
+    # le test qui parcourt le corpus réel de la thèse : il n'existe que sur
+    # la machine de dev (données non
     # publiées, jamais committées — voir tests/test_io_corpus.py) et se
     # saute proprement en local ; l'exclure ici évite un skip silencieux
     # à chaque run CI plutôt qu'un vrai contrôle.
     - >
       QT_QPA_PLATFORM=offscreen xvfb-run -a pytest -v -m "not corpus" --junitxml=report.xml
-      --cov=plotyx.core --cov=plotyx.commands --cov=plotyx.ui --cov=plotyx.io
+      --cov=plotyx.core --cov=plotyx.commands --cov=plotyx.plot --cov=plotyx.ui --cov=plotyx.io
       --cov-report=term --cov-report=xml --cov-fail-under=85
   coverage: '/^TOTAL\s+\d+\s+\d+\s+(\d+%)$/'
   artifacts:

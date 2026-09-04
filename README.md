@@ -4,13 +4,14 @@ Logiciel d'analyse et de tracé de données scientifiques, façon OriginLab, éc
 
 ## État
 
-**Pré-alpha — phase 5.** Le squelette applicatif (fenêtre, packaging, CI), le
+**Pré-alpha — phase 6.** Le squelette applicatif (fenêtre, packaging, CI), le
 **modèle de données**, le **bus de commandes annulables**, l'**UI worksheet**,
-la **persistance HDF5** et l'**import de fichiers** sont en place : saisie et
-collage dans une table, undo/redo, explorateur de projet, projets `.plx`
-avec autosave et récupération, import par registre de parseurs avec aperçu.
-
-Pas encore de tracé de courbes — c'est la phase 6.
+la **persistance HDF5**, l'**import de fichiers** et les **graphes
+PyQtGraph** sont en place : saisie et collage dans une table, undo/redo,
+explorateur de projet, projets `.plx` avec autosave et récupération, import
+par registre de parseurs avec aperçu, et tracé interactif (nuage, ligne,
+points+ligne, barres, histogramme, barres d'erreur) en sous-fenêtre MDI,
+avec multi-panneaux, axes secondaires, légende et curseurs.
 
 `plotyx.core` fournit `Project` / `Folder` / `Workbook` / `Worksheet` / `Column`
 (plus les nœuds minimaux `Graph`, `Matrix`, `Note`), la résolution de chemins
@@ -22,13 +23,24 @@ d'historique, macros, état « document modifié ») et les commandes qui
 enveloppent les primitives de mutation du modèle. C'est le seul des trois
 paquets ci-dessous qui importait Qt jusqu'à cette phase : `core` reste pur.
 
+`plotyx.plot` décrit un graphe **sans connaître aucun moteur de rendu** :
+`PlotSpec` / `PanelSpec` / `SeriesSpec` / `AxisSpec` sont des dataclasses
+immuables de types standard, où une série désigne ses colonnes par **clé de
+registre** et jamais par copie des données. PyQtGraph en est le premier
+renderer (`plotyx.ui.plot_renderer`) ; Matplotlib s'ajoutera en phase 10
+sans que la description bouge. `tests/test_plot_spec_is_engine_neutral.py`
+vérifie qu'un `PlotSpec` se construit et s'inspecte dans un interpréteur où
+Qt, PyQtGraph et Matplotlib sont introuvables.
+
 `plotyx.ui` adapte ces deux couches en widgets Qt : un `QAbstractTableModel`
 sur `Worksheet` (en-têtes riches nom/unité/label, aucune copie des données),
 une `QTableView` avec copier/coller et menus contextuels, un dialogue
 « Column Properties », et un `QAbstractItemModel` façon explorateur de
 fichiers sur `Project` pour le dock « Project Explorer ». Toute écriture y
 passe par une commande du bus — jamais par une primitive de `core` en
-direct. Prochaine étape : la persistance HDF5 (phase 4).
+direct. Depuis la phase 6, le dock « Properties » édite le graphe actif, et
+chaque style, échelle ou limite d'axe est une commande annulable.
+Prochaine étape : le glisser-déposer interne (phase 7).
 
 ## Stack
 

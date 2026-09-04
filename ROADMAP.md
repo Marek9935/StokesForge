@@ -134,6 +134,31 @@ Les commandes de lignes restent volontairement à l'échelle de la **colonne**, 
 - Multi-panneaux / axes secondaires
 - ⚠️ Le détachement d'un graphe sur un second écran se heurte à la même limite Wayland que les docks flottants — voir « Wayland et géométrie des fenêtres »
 
+**Décisions tranchées ici** (2026-09-05) :
+
+1. **`PlotSpec` neutre, dans son propre paquet `plotyx/plot/`**, sans Qt ni
+   PyQtGraph ni Matplotlib — ni même numpy pour `spec.py`/`edit.py`. C'est
+   la mitigation du risque « divergence PyQtGraph / Matplotlib », conçue
+   ici et pas en phase 10. Vérifiée automatiquement par
+   `tests/test_plot_spec_is_engine_neutral.py`, sur le modèle de
+   `test_core_no_qt.py`.
+2. **Spec immuable** (dataclasses `frozen`), modifié par des fonctions
+   pures `spec → spec` (`plotyx.plot.edit`). Conséquence : une seule
+   commande, `SetPlotSpecCommand`, suffit à tout, son delta d'annulation
+   est l'ancien spec, et il ne pèse que ses chaînes — jamais des données.
+3. **Références rompues = état de première classe.** Une série dont la
+   colonne est supprimée n'est ni retirée du spec, ni tracée : elle est
+   signalée (bandeau de la fenêtre, marquage dans le panneau de
+   propriétés) et se répare d'elle-même au `undo`, le registre réinscrivant
+   la colonne sous la même clé.
+4. **Schéma HDF5 porté à la version 2** : attribut `plot_spec_json` sur les
+   groupes `graph`. Migration 1 → 2 additive et sans réécriture — un
+   fichier de schéma 1 a des graphes vides, ce qui est déjà la bonne
+   représentation.
+5. **Pas de détachement de graphe sur un second écran** : la limite Wayland
+   ci-dessous n'est pas levée, la fonction est reportée et documentée
+   plutôt qu'à moitié livrée.
+
 **Sortie de phase** : un graphe présentable à l'écran, interactif, à partir d'un import réel.
 
 ---
