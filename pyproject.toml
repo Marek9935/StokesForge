@@ -1,0 +1,115 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "plotyx"
+version = "0.0.1"
+description = "Logiciel d'analyse et de tracé de données scientifiques, façon OriginLab, écrit de zéro en Python."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
+authors = [{ name = "Aliocha Skrzypczak" }]
+
+dependencies = [
+    "PySide6>=6.7",
+    "qt-material>=2.14",
+    "pyqtgraph>=0.13",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "pandas>=2.2",
+    "h5py>=3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+plotyx = "plotyx.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plotyx"]
+
+# --- Briefcase --------------------------------------------------------
+
+[tool.briefcase]
+project_name = "PlotYx"
+bundle = "com.plotyx"
+version = "0.0.1"
+url = "https://gitlab.com/askrzypczak/plotyx"
+license = "LicenseRef-Proprietary"
+license_files = ["LICENSE"]
+author = "Aliocha Skrzypczak"
+author_email = "aliochask.pro@gmail.com"
+
+[tool.briefcase.app.plotyx]
+formal_name = "PlotYx"
+description = "Logiciel d'analyse et de tracé de données scientifiques, façon OriginLab."
+sources = ["src/plotyx"]
+test_sources = ["tests"]
+requires = [
+    "PySide6>=6.7",
+    "qt-material>=2.14",
+    "pyqtgraph>=0.13",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "pandas>=2.2",
+    "h5py>=3.10",
+]
+test_requires = [
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+]
+
+# Périmètre plateformes : Windows + Linux (release). macOS reste
+# déclaré et compilable (job CI non bloquant, non publié) — voir
+# ROADMAP.md § « Politique macOS ».
+
+[tool.briefcase.app.plotyx.macOS]
+requires = ["std-nslog>=1.0.3"]
+
+[tool.briefcase.app.plotyx.linux]
+requires = []
+
+[tool.briefcase.app.plotyx.linux.appimage]
+manylinux = "manylinux_2_28"
+system_requires = [
+    "gcc",
+    "make",
+    "pkg-config",
+    "libgl-devel",
+    "libEGL-devel",
+    "mesa-libGL-devel",
+    "libxcb-devel",
+    "libxkbcommon-devel",
+]
+
+[tool.briefcase.app.plotyx.windows]
+requires = []
+
+# --- ruff ---------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["plotyx"]
+
+# --- pytest ---------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"

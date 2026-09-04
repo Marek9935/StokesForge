@@ -1,0 +1,119 @@
+# CI GitLab — phase 0.
+#
+# Point de vigilance : GitLab CI n'offre PAS de runners Windows (ni
+# macOS) sur le tier gratuit — seulement Linux. Les jobs `windows-*`
+# et `macos-*` ci-dessous sont donc déclarés en `when: manual` et
+# `allow_failure: true` : ils documentent l'intention (matrice
+# complète Windows/Linux, macOS non bloquant — voir ROADMAP.md
+# « Politique macOS ») mais ne s'exécutent pas tant qu'aucun runner
+# compatible n'est branché. Pour les rendre réellement actifs il
+# faut soit :
+#   (a) un runner auto-hébergé Windows/macOS enregistré sur ce projet, ou
+#   (b) un miroir GitHub Actions (runners `windows-latest`/`macos-latest`
+#       gratuits sur repo public) déclenché depuis GitLab.
+# Voir le rapport de la phase 0 pour la recommandation.
+
+stages:
+  - lint
+  - test
+  - package
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  QT_QPA_PLATFORM: "offscreen"
+
+.linux_python_base:
+  image: python:3.12-bookworm
+  cache:
+    key: "pip-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .cache/pip
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends
+      libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0
+      libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1
+      libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
+      libdbus-1-3 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6
+      xvfb
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install -e ".[dev]"
+
+lint:ruff:
+  extends: .linux_python_base
+  stage: lint
+  script:
+    - source .venv/bin/activate
+    - ruff check .
+
+test:linux:
+  extends: .linux_python_base
+  stage: test
+  script:
+    - source .venv/bin/activate
+    # offscreen d'abord (rapide, pas de serveur X requis) ; xvfb-run en
+    # filet de sécurité si un test venait à exiger un vrai display.
+    - QT_QPA_PLATFORM=offscreen xvfb-run -a pytest -v --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+    expire_in: 1 week
+
+package:linux:appimage:
+  extends: .linux_python_base
+  stage: package
+  needs: ["lint:ruff", "test:linux"]
+  script:
+    - source .venv/bin/activate
+    - pip install briefcase
+    - briefcase create linux appimage --no-docker
+    - briefcase build linux appimage --no-docker
+    - briefcase package linux appimage --no-docker --adhoc-sign
+  artifacts:
+    paths:
+      - dist/*.AppImage
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+
+# --- Windows : nécessite un runner (auto-hébergé ou miroir GH Actions) ---
+
+package:windows:msi:
+  stage: package
+  tags:
+    - windows # runner auto-hébergé requis, absent du tier gratuit GitLab
+  when: manual
+  allow_failure: true
+  script:
+    - python -m venv .venv
+    - .venv\Scripts\activate
+    - pip install -e ".[dev]"
+    - pip install briefcase
+    - briefcase create windows app
+    - briefcase build windows app
+    - briefcase package windows app
+  artifacts:
+    paths:
+      - dist/*.msi
+    expire_in: 30 days
+
+# --- macOS : filet de sécurité non bloquant (Politique macOS, ROADMAP.md) ---
+
+package:macos:
+  stage: package
+  tags:
+    - macos # runner auto-hébergé requis, absent du tier gratuit GitLab
+  when: manual
+  allow_failure: true
+  script:
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip install -e ".[dev]"
+    - pip install briefcase
+    - briefcase create macOS app
+    - briefcase build macOS app
+    # Pas de `briefcase package` : pas de notarisation en phase 0,
+    # artefact non publié (voir Politique macOS, ROADMAP.md).
