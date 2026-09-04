@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication, QTreeView
+from PySide6.QtWidgets import QApplication, QMessageBox, QTreeView
 
 from plotyx.commands import AddObjectCommand, SetCellsCommand, mutation_guard
 from plotyx.core.project import Project
@@ -23,7 +23,21 @@ from plotyx.ui.worksheet_view import WorksheetView
 
 
 @pytest.fixture
-def window(qtbot):
+def window(qtbot, monkeypatch):
+    # Phase 4 : `closeEvent` peut ouvrir un `QMessageBox.warning` modal si
+    # le document est modifié. `qtbot.addWidget` programme sa propre
+    # fermeture automatique dans le hook `pytest_runtest_teardown` de
+    # pytest-qt (`_close_widgets`), qui s'exécute **avant** le code placé
+    # après le `yield` ci-dessous — poser le monkeypatch après le yield
+    # arriverait donc trop tard. Il est posé ici, en amont, pour être actif
+    # quel que soit qui appelle `close()` en premier. Plusieurs tests de ce
+    # fichier laissent le projet modifié à dessein (ajout de feuille,
+    # renommage...) sans rapport avec ce qu'ils vérifient ; on choisit
+    # « abandonner » à la fermeture, aucun n'attend quoi que ce soit d'un
+    # fichier sur disque.
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Discard)
+    )
     win = MainWindow()
     qtbot.addWidget(win)
     win.show()

@@ -97,11 +97,13 @@ Les commandes de lignes restent volontairement à l'échelle de la **colonne**, 
 
 ## Phase 4 — Persistance HDF5 (≈1 semaine)
 
-- Schéma `/project` : groupes = folders, datasets = colonnes, attributs HDF5 = métadonnées
+- Schéma `/project` : groupes = folders/classeurs, datasets = colonnes, attributs HDF5 = métadonnées
 - **Numéro de version de schéma dès le premier octet écrit** + fonction de migration (stub) — non négociable pour un format de projet
 - Save / Save As / Open ; état final uniquement (§4)
 - Autosave périodique vers fichier temporaire + recovery au démarrage après crash
 - Optionnel plus tard : groupe `/history` (journal d'opérations, traçabilité, non rejouable)
+
+> **Correction apportée à ce plan (2026-09-04)** : l'extension de fichier est `.plx`, pas `.pyx` — la mention `.pyx` qui figurait plus haut (jalon v0.2) était une erreur, `.pyx` étant déjà l'extension des sources Cython. Vérifié : `.plx` n'entre en collision avec aucune entrée de la base MIME du système.
 
 **Sortie de phase** : round-trip complet — créer, sauver, fermer, rouvrir, égalité stricte.
 
@@ -219,7 +221,7 @@ Phases 5 et 6 parallélisables une fois la 4 finie. Tout le reste est séquentie
 | Jalon | Contenu | Fin de phase |
 |---|---|---|
 | **v0.1** | Fenêtre + worksheet éditable + undo | 3 |
-| **v0.2** | Ouvrir/sauver un projet `.pyx` | 4 |
+| **v0.2** | Ouvrir/sauver un projet `.plx` | 4 |
 | **v0.3** | Importer un CSV réel et le tracer | 6 |
 | **v0.4** | Drag & drop colonne → graphe | 7 |
 | **v0.5** | Fit + console scriptable | 9 |

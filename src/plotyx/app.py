@@ -72,7 +72,7 @@ def create_application() -> QApplication:
 def main() -> int:
     select_linux_platform()  # avant toute création de QApplication
     app = create_application()
-    window = MainWindow()
+    window = MainWindow(check_recovery=True)
     window.show()
     return app.exec()
 
