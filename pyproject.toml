@@ -115,17 +115,16 @@ known-first-party = ["plotyx"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
-# `unraisableexception` (pytest core, activé par défaut) force un
-# `gc.collect()` complet à la fin de la session pour détecter les
-# exceptions non levables. Constaté en phase 3 (des centaines de QObject
-# PySide6 accumulés sur toute la session, chacun valide isolément) : ce
-# `gc.collect()` forcé fait planter l'interpréteur (SIGSEGV) en brisant des
-# cycles de références C++/Python dans un ordre que Shiboken ne gère pas
-# proprement à l'arrêt — un problème de nettoyage à la sortie, pas un bug
-# dans le code ou les tests eux-mêmes (chaque fichier de test, seul ou en
-# petits groupes, passe et se nettoie sans laisser de cycle vivant). Désarmé
-# ici plutôt que traqué fichier par fichier.
-addopts = "-p no:unraisableexception"
+# Note : la phase 3 avait désarmé le plugin `unraisableexception` (`-p
+# no:unraisableexception`), un SIGSEGV en fin de session ayant été attribué
+# au `gc.collect()` qu'il force. Le plantage ne se reproduit pas — suite
+# complète relancée 5 fois sur 5 sans le masque, code de sortie 0. Le masque
+# est donc retiré : ce plugin signale les exceptions avalées dans `__del__`
+# et pendant le ramasse-miettes, c'est-à-dire exactement la classe de bug
+# de durée de vie d'objets sur laquelle repose la rétention du bus de
+# commandes (phase 2). Si le SIGSEGV réapparaît, notamment en CI, le
+# réarmer serait une régression de diagnostic : il faut d'abord capturer
+# une reproduction.
 
 # --- coverage -------------------------------------------------------------
 
