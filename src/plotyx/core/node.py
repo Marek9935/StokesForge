@@ -116,6 +116,21 @@ class ModelObject:
     def name(self) -> str:
         return self._name
 
+    def _restore_key(self, key: str) -> None:
+        """Reprend une clé déjà attribuée : réservé au chargement de projet.
+
+        La phase 4 persiste la clé de naissance de chaque objet (voir
+        `plotyx.persistence`) pour que les références qui la traversent —
+        une série de graphe pointant sur une colonne, en phase 6 — restent
+        valables après un cycle sauver/fermer/rouvrir. `__init__` a déjà
+        attribué un UUID neuf ; ceci le remplace par celui du fichier,
+        **avant** que l'objet ne soit attaché à un parent inscrit au
+        registre (`attach()` est le seul point d'inscription, sous la clé
+        courante à cet instant). Appelé hors bus, à l'identique de la
+        construction d'un projet neuf : il n'y a rien à annuler vers.
+        """
+        self._key = key
+
     def __repr__(self) -> str:  # pragma: no cover - confort de debug
         return f"<{type(self).__name__} {self._name!r} key={self._key[:8]}>"
 

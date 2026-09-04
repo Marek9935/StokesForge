@@ -107,6 +107,17 @@ class Project:
         for descendant in node.walk():
             self._registry.unregister(descendant)
 
+    def _restore_root_key(self, key: str) -> None:
+        """Redonne au dossier racine sa clé d'origine (chargement de projet).
+
+        Le registre indexe par clé courante : le retirer puis le réinscrire
+        est nécessaire, sans quoi l'entrée existante resterait sous l'ancien
+        UUID généré par `Folder.__init__`. Voir `ModelObject._restore_key`.
+        """
+        self._registry.unregister(self._root)
+        self._root._restore_key(key)
+        self._registry.register(self._root)
+
     def resolve_key(self, key: str) -> ModelObject:
         """Objet inscrit sous cette clé. Insensible aux renommages/déplacements."""
         return self._registry.resolve(key)
