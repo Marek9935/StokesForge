@@ -40,6 +40,8 @@ Public, mais **pas open source** : la licence est propriétaire (« tous droits 
 
 **Windows et Linux.** macOS est hors périmètre de release ; la cible reste compilable en CI mais n'est ni publiée ni supportée — voir la section « Politique macOS » de la roadmap.
 
+Sous Linux, `xcb` est forcé par défaut en session Wayland : un `QDockWidget` détaché y est immobile, Wayland refusant qu'une application positionne ses propres fenêtres. Forcer `QT_QPA_PLATFORM=wayland` reste possible. Détails et condition de retour dans la roadmap, « Wayland et géométrie des fenêtres ».
+
 ## Documentation
 
 - [`ROADMAP.md`](ROADMAP.md) — plan de développement en 13 phases, jalons, risques

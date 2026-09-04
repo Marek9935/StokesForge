@@ -130,6 +130,7 @@ Les commandes de lignes restent volontairement à l'échelle de la **colonne**, 
 - Panneau de propriétés (dock) : styles, couleurs, échelles log, titres, limites d'axes
 - Perf : `downsample`/`clipToView` sur gros datasets, tests à 10⁶ points
 - Multi-panneaux / axes secondaires
+- ⚠️ Le détachement d'un graphe sur un second écran se heurte à la même limite Wayland que les docks flottants — voir « Wayland et géométrie des fenêtres »
 
 **Sortie de phase** : un graphe présentable à l'écran, interactif, à partir d'un import réel.
 
@@ -183,7 +184,7 @@ Dépend de 3 + 6. Le §5 du doc en entier :
 - Templates de graphe et de worksheet réutilisables
 - Page de layout multi-graphes pour figure d'article
 - Préférences utilisateur, thème clair/sombre, raccourcis
-- Sessions récentes, restauration de la disposition des fenêtres
+- Sessions récentes, restauration de la disposition des fenêtres — ⚠️ la géométrie d'une **fenêtre détachée** n'est pas restaurable sous Wayland natif ; `QMainWindow.restoreState()` ne couvre que les docks ancrés
 
 ---
 
@@ -233,7 +234,7 @@ Phases 5 et 6 parallélisables une fois la 4 finie. Tout le reste est séquentie
 |---|---|---|
 | Console qui contourne le bus d'undo | Réécriture de la couche métier | Règle « aucune mutation hors commande » testée automatiquement dès phase 2 |
 | Divergence PyQtGraph / Matplotlib | Rendu écran ≠ rendu export | Couche `PlotSpec` neutre conçue en phase 6 |
-| Drag & drop Wayland | Fonction cassée sur Fedora, la machine cible | Test dès le début de la phase 7, fallback xcb documenté |
+| Drag & drop Wayland | Fonction cassée sur Fedora, la machine cible | Test dès le début de la phase 7 ; `xcb` déjà forcé par défaut sous Wayland |
 | Format HDF5 non versionné | Projets utilisateurs illisibles après update | Version de schéma + migration dès phase 4 |
 | Packaging découvert tard | Semaines perdues en fin de projet | Build Windows + Linux en CI dès la phase 0 |
 | Dérive Windows-only pendant l'absence de macOS | Retour macOS à 6 semaines au lieu de 1 | Job CI macOS non bloquant + 4 règles de la Politique macOS |
@@ -294,3 +295,35 @@ Le tier gratuit GitLab.com limite les minutes de calcul sur runners partagés, e
 ### Reste ouvert
 
 - **Texte définitif du `LICENSE`** : le fichier actuel est un placeholder propriétaire. À trancher avant la première release publique.
+
+---
+
+## Wayland et géométrie des fenêtres (constat 2026-09-04)
+
+**`xcb` est forcé par défaut sous Wayland sur Linux**, un `QT_QPA_PLATFORM` explicite de l'utilisateur restant toujours prioritaire (`plotyx.app.select_linux_platform`).
+
+### Le problème
+
+Wayland interdit par conception à une application de connaître ou de fixer la position de ses propres fenêtres de premier niveau. Qt déplaçant un `QDockWidget` détaché en repositionnant sa fenêtre, un dock flottant devient **immobile** : seul le bouton d'ancrage le ramène. Constaté à l'usage, pas en théorie.
+
+Ce n'est pas un incident isolé mais un motif, qui touche trois besoins de ce plan :
+
+| Besoin | Phase | Sous Wayland natif |
+|---|---|---|
+| Docks flottants déplaçables | 0 | cassé |
+| Détacher un graphe sur un second écran | 6 | même impasse |
+| Restaurer la disposition des fenêtres | 11 | géométrie des fenêtres détachées non restaurable |
+
+Le modèle d'interface façon Origin — MDI, panneaux détachables, dispositions mémorisées — suppose que l'application maîtrise la géométrie de ses fenêtres. C'est précisément ce que Wayland retire.
+
+### Pourquoi ce n'est pas réparable côté application
+
+Le protocole `xdg_toplevel_drag_v1` existe pour ça — c'est lui qui permet l'arrachage d'onglet des navigateurs sous Wayland — et les **deux extrémités de la chaîne sont prêtes**. Vérifié sur Fedora / GNOME Shell 50.4 / Qt 6.11.2 : le compositeur l'implémente (`libmutter-18`) et Qt embarque les bindings client (`libQt6WaylandClient`). Ce qui manque est le câblage interne de `QDockWidget`, dont les classes Qt concernées sont privées et inatteignables depuis PySide6. **Le correctif ne peut venir que de Qt.**
+
+### Coût du contournement
+
+Sous XWayland, la mise à l'échelle **fractionnaire** (125 %, 150 %) est rendue à un facteur entier puis rééchantillonnée : léger flou sur écran HiDPI. À 100 % ou 200 %, le rendu est identique au Wayland natif. Écarts mineurs par ailleurs : pas de mise à l'échelle par écran sur configuration mixte, quelques cas limites de saisie.
+
+### Condition de retour à Wayland
+
+Lancer avec `QT_QPA_PLATFORM=wayland`, détacher un dock, le déplacer. Si ça fonctionne, Qt a câblé le protocole : **inverser le défaut** dans `select_linux_platform()` et garder `xcb` en repli. Le choix est délibérément réversible en une ligne — c'est ce qui l'a fait préférer à l'amputation du flottement des docks. À réévaluer en phase 12.
