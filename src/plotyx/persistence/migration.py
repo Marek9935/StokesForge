@@ -11,18 +11,27 @@ permet de distinguer, à l'ouverture, trois cas :
   récente que celle qui l'ouvre) → refus propre, message clair, jamais un
   plantage — `SchemaVersionError`.
 
-Il n'existe pour l'instant qu'une version de schéma (1), donc `migrate()`
-est un stub qui ne peut pas être atteint autrement qu'en test. Il est écrit
-maintenant, pas laissé "à faire plus tard", parce que c'est précisément le
-risque identifié par la roadmap : un format non versionné rend les projets
-utilisateurs illisibles après une mise à jour.
+## Les versions existantes
 
-## Comment ajoutera-t-on la version 2
+| Schéma | Introduit par | Ce qui change |
+|---|---|---|
+| 1 | phase 4 | arbre projet, colonnes, métadonnées |
+| 2 | phase 6 | attribut `plot_spec_json` sur les groupes `graph` |
+
+Le passage de 1 à 2 est **additif** : un fichier de schéma 1 contient des
+graphes sans contenu, ce qui est exactement l'état d'un graphe neuf en
+schéma 2 (`Graph.plot_spec is None`). La migration n'a donc rien à
+réécrire, et surtout : elle ne doit **pas** inventer un spec vide, ce qui
+transformerait un « graphe jamais tracé » en « graphe explicitement vide »
+et ferait diverger un round-trip. Elle est ici pour prendre la décision
+noir sur blanc, pas parce qu'il y aurait des octets à déplacer.
+
+## Comment ajoutera-t-on la version 3
 
 1. Incrémenter `schema.CURRENT_SCHEMA_VERSION`.
-2. Ajouter dans `migrate()` un bloc `if from_version < 2: ...` qui
-   transforme le fichier ouvert en écriture (`h5py.File(path, "r+")`) vers
-   la forme attendue par le lecteur courant.
+2. Ajouter dans `migrate()` un bloc `if from_version < 3: ...` qui
+   transforme le fichier ouvert en écriture vers la forme attendue par le
+   lecteur courant.
 3. Ne jamais retirer les blocs précédents : un fichier de 2026 doit encore
    s'ouvrir en 2030.
 """
@@ -70,7 +79,13 @@ def migrate(file: h5py.File, from_version: int) -> None:
     """
     if from_version == CURRENT_SCHEMA_VERSION:
         return
-    # pragma: no cover - inatteignable tant que CURRENT_SCHEMA_VERSION == 1
+    if from_version == 1:
+        # 1 → 2 : ajout de `plot_spec_json` sur les graphes. Purement
+        # additif, et volontairement sans écriture (voir le docstring du
+        # module) : l'absence de l'attribut est déjà la bonne
+        # représentation d'un graphe sans contenu. Un fichier de schéma 1
+        # s'ouvre donc en lecture seule, sans être réécrit.
+        return
     raise CorruptedProjectFileError(
         f"aucune migration connue depuis le schéma {from_version}"
-    )  # pragma: no cover
+    )

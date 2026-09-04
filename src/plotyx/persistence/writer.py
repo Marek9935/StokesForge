@@ -41,6 +41,7 @@ from plotyx.persistence.schema import (
     ATTR_METADATA_JSON,
     ATTR_NAME,
     ATTR_ORDER,
+    ATTR_PLOT_SPEC_JSON,
     ATTR_ROLE,
     ATTR_SCHEMA_VERSION,
     ATTR_TEXT,
@@ -142,6 +143,7 @@ def _write_folder_children(
         elif isinstance(child, Graph):
             _write_node_common(subgroup, child, TYPE_GRAPH)
             _write_window_common(subgroup, child)
+            _write_plot_spec(subgroup, child)
         elif isinstance(child, Matrix):
             _write_node_common(subgroup, child, TYPE_MATRIX)
             _write_window_common(subgroup, child)
@@ -182,6 +184,20 @@ def _write_worksheet(
         names.append(column.name)
         _write_column(group, column, compression, compression_opts)
     _write_order(group, names)
+
+
+def _write_plot_spec(group: h5py.Group, graph: Graph) -> None:
+    """Sérialise le `PlotSpec` d'un graphe (schéma 2), s'il en a un.
+
+    Un graphe vide (`plot_spec is None`) n'écrit rien du tout : l'absence
+    d'attribut est la représentation d'un graphe sans contenu, à
+    l'identique de ce qu'écrivait le schéma 1. C'est ce qui rend la
+    migration 1 → 2 sans réécriture.
+    """
+    spec = graph.plot_spec
+    if spec is None:
+        return
+    group.attrs[ATTR_PLOT_SPEC_JSON] = json.dumps(spec.to_dict(), ensure_ascii=False)
 
 
 # -- colonnes -----------------------------------------------------------------

@@ -52,9 +52,44 @@ class WindowNode(ModelObject):
 
 
 class Graph(WindowNode):
-    """Fenêtre graphique. Nœud minimal : le contenu arrive en phase 6."""
+    """Fenêtre graphique. Son contenu est un `PlotSpec` (phase 6).
+
+    ## Pourquoi `core` ne connaît pas `plotyx.plot`
+
+    Le spec est rangé ici sans être typé à l'exécution : `core` reste le
+    socle dont tout dépend et qui ne dépend de rien, et la dépendance va
+    dans un seul sens — `plotyx.plot.resolve` connaît `core`, jamais
+    l'inverse. Le seul contrat que `Graph` exige de l'objet stocké est
+    d'être immuable, ce que `PlotSpec` garantit (dataclasses `frozen`) :
+    c'est ce qui permet à `SetPlotSpecCommand` de s'annuler en reposant
+    l'ancien objet, sans copie ni delta.
+
+    `None` signifie « graphe encore vide » — l'état d'un `Graph` créé
+    avant qu'aucune série n'ait été tracée, et celui d'un graphe relu dans
+    un fichier de schéma 1, écrit avant que ce champ n'existe.
+    """
 
     type_name = "graph"
+
+    def __init__(self, name: str, **kwargs: Any) -> None:
+        super().__init__(name, **kwargs)
+        self._plot_spec: Any = None
+
+    @property
+    def plot_spec(self) -> Any:
+        """Le `PlotSpec` du graphe, ou `None` s'il n'a pas encore de contenu."""
+        return self._plot_spec
+
+    def set_plot_spec(self, spec: Any) -> Any:
+        """Primitive de mutation. Retourne le spec précédent (delta d'annulation).
+
+        Comme toutes les primitives du modèle : une seule notification, et
+        de quoi s'inverser. Enveloppée par
+        `plotyx.commands.plot.SetPlotSpecCommand`.
+        """
+        previous, self._plot_spec = self._plot_spec, spec
+        self._notify_structure(StructureChanged(self, "plot_spec_changed", {"spec": spec}))
+        return previous
 
 
 class Matrix(WindowNode):

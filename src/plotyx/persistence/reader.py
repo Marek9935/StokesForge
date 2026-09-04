@@ -18,6 +18,7 @@ d'inscription, sous la clé courante à cet instant précis.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import h5py
@@ -41,6 +42,7 @@ from plotyx.persistence.schema import (
     ATTR_METADATA_JSON,
     ATTR_NAME,
     ATTR_ORDER,
+    ATTR_PLOT_SPEC_JSON,
     ATTR_ROLE,
     ATTR_TEXT,
     ATTR_TYPE,
@@ -55,6 +57,7 @@ from plotyx.persistence.schema import (
     TYPE_NOTE,
     TYPE_WORKBOOK,
 )
+from plotyx.plot.spec import PlotSpec
 
 __all__ = ["load_project"]
 
@@ -102,8 +105,6 @@ def _apply_window_common(group: h5py.Group, node: WindowNode) -> None:
     node.comment = _attr_str(group, ATTR_COMMENT)
     raw_metadata = group.attrs.get(ATTR_METADATA_JSON)
     if raw_metadata:
-        import json
-
         node.metadata.update(json.loads(raw_metadata))
 
 
@@ -158,7 +159,36 @@ def _read_minimal_window(group: h5py.Group, name: str, node_type: str) -> Window
         node = Matrix(name)
     node._restore_key(_attr_str(group, ATTR_KEY))
     _apply_window_common(group, node)
+    if isinstance(node, Graph):
+        _apply_plot_spec(group, node)
     return node
+
+
+def _apply_plot_spec(group: h5py.Group, graph: Graph) -> None:
+    """Relit le `PlotSpec` d'un graphe (schéma 2), s'il y en a un.
+
+    Les séries y désignent leurs colonnes par **clé de registre**, et ces
+    clés sont restaurées telles quelles par `_restore_key` : un graphe
+    rouvert retrouve donc ses colonnes même si elles ont été renommées ou
+    déplacées entre-temps. C'est la raison d'être de la persistance des
+    clés décidée en phase 4.
+
+    Attribut absent = graphe sans contenu, y compris pour tout fichier de
+    schéma 1. `set_plot_spec` est appelé hors bus, comme le reste de la
+    construction du projet : il n'y a rien vers quoi annuler.
+    """
+    raw = group.attrs.get(ATTR_PLOT_SPEC_JSON)
+    if raw is None or raw == "":
+        return
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        payload = json.loads(raw)
+    except ValueError as error:
+        raise CorruptedProjectFileError(
+            f"le graphe {graph.name!r} porte un PlotSpec illisible : {error}"
+        ) from error
+    graph.set_plot_spec(PlotSpec.from_dict(payload))
 
 
 # -- colonnes -----------------------------------------------------------------

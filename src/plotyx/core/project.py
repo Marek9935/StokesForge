@@ -20,6 +20,8 @@ L'ensemble des primitives de mutation du modèle est **fermé** et se limite
   `rename_column`, `insert_rows`, `delete_rows`
 * `Workbook` : `insert_sheet`, `remove_sheet`, `move_sheet`, `rename_sheet`
 * `Folder` : `insert_child`, `remove_child`, `move_child`, `rename_child`
+* `Graph` : `set_plot_spec` (phase 6 — le contenu du graphe est un objet
+  immuable, l'ancien fait office de delta)
 * `ModelObject` : `_set_name`, appelée uniquement par le conteneur, seul à
   pouvoir valider l'unicité du nom
 

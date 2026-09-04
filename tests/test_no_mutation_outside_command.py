@@ -41,6 +41,7 @@ from plotyx.commands import (
     mutation_guard,
 )
 from plotyx.core import Column, ColumnType, Folder, Graph, Project, Worksheet
+from plotyx.plot import PlotSpec
 from tests.model_state import assert_same_state, snapshot
 
 
@@ -52,6 +53,7 @@ def _fresh_project() -> Project:
     sheet.add_column("B", [10.0, 20.0])
     book.add_sheet("Sheet2")
     project.add_folder("Autre")  # deux enfants à la racine : `move_child` a un effet
+    project.add_graph("GraphA")  # phase 6 : `Graph.set_plot_spec` est une primitive
     return project
 
 
@@ -61,6 +63,7 @@ def _primitive_calls(project: Project) -> dict[str, object]:
     book = project.resolve_path("[Book1]")
     sheet = project.resolve_path("[Book1]Sheet1")
     column = sheet.column("A")
+    graph = project.resolve_path("[GraphA]")
     return {
         "Column.set_values": lambda: column.set_values(0, [0.0]),
         "Column.set_length": lambda: column.set_length(1),
@@ -82,6 +85,7 @@ def _primitive_calls(project: Project) -> dict[str, object]:
         "Folder.remove_child": lambda: root.remove_child(book),
         "Folder.move_child": lambda: root.move_child(book, 1),
         "Folder.rename_child": lambda: root.rename_child(book, "Book9"),
+        "Graph.set_plot_spec": lambda: graph.set_plot_spec(PlotSpec.empty()),
         "ModelObject._set_name": lambda: root._set_name("Racine"),
     }
 

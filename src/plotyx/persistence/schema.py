@@ -21,9 +21,13 @@
         attrs: key, name, type="worksheet"
         attrs: children_order = [nom de colonne, ...]
         /<nom de colonne>                      # Column : voir plus bas
-      # Graph | Matrix | Note (nœuds minimaux, phase 6+ les remplira) :
+      # Graph | Matrix | Note :
       attrs: key, name, type="graph"|"matrix"|"note", label, comment,
              metadata_json, text (Note seulement)
+      attrs: plot_spec_json   # Graph uniquement, schéma >= 2 : le PlotSpec
+                              # sérialisé (voir plotyx.plot.spec). Absent
+                              # sur un graphe encore vide, et sur tout
+                              # fichier de schéma 1.
 
   /history                                     # RÉSERVÉ, phase 4 ne le crée
                                                 # pas — voir docs/architecture.md §4
@@ -59,6 +63,7 @@ __all__ = [
     "ATTR_LONG_NAME",
     "ATTR_METADATA_JSON",
     "ATTR_NAME",
+    "ATTR_PLOT_SPEC_JSON",
     "ATTR_ORDER",
     "ATTR_ROLE",
     "ATTR_SCHEMA_VERSION",
@@ -84,7 +89,11 @@ __all__ = [
 #: Premier octet écrit dans tout fichier `.plx` — non négociable (roadmap
 #: phase 4). Toute évolution du schéma incrémente ce nombre et ajoute une
 #: étape dans `plotyx.persistence.migration.migrate`.
-CURRENT_SCHEMA_VERSION = 1
+#: Schéma 2 (phase 6) : ajout de l'attribut `plot_spec_json` sur les
+#: groupes de type `graph`. Un fichier de schéma 1 reste lisible tel quel —
+#: ses graphes sont simplement vides — d'où une migration qui n'a rien à
+#: réécrire, voir `plotyx.persistence.migration`.
+CURRENT_SCHEMA_VERSION = 2
 
 #: Extension de fichier officielle des projets PlotYx (décision 2026-09-04) :
 #: `.pyx` collisionne avec l'extension Cython, `.plx` est libre.
@@ -117,6 +126,12 @@ ATTR_LABEL = "label"
 ATTR_COMMENT = "comment"
 ATTR_METADATA_JSON = "metadata_json"
 ATTR_TEXT = "text"  # Note.text
+#: `Graph.plot_spec` sérialisé en JSON (schéma 2). Un seul attribut plutôt
+#: qu'une arborescence de groupes : le spec ne contient aucune donnée, il
+#: pèse quelques kilo-octets au plus, et le garder opaque pour HDF5 évite
+#: d'avoir à faire évoluer le schéma du fichier à chaque nouvelle option de
+#: style — c'est `PlotSpec.from_dict` qui ignore les champs inconnus.
+ATTR_PLOT_SPEC_JSON = "plot_spec_json"
 
 # -- attributs de colonne -----------------------------------------------------
 
