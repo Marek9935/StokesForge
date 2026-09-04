@@ -13,6 +13,11 @@ Deux invariants structurent la suite du projet :
 * **Les notifications remontent l'arbre.** Un objet émet sur lui-même puis
   sur chacun de ses ancêtres, jusqu'au projet. La vue peut donc s'abonner
   au niveau qui l'arrange.
+
+Les deux méthodes de notification sont aussi le point d'observation du
+garde-fou de la phase 2 (`plotyx.core.guard`) : chaque primitive émettant
+exactement une notification, un hook branché là voit passer toutes les
+mutations du modèle. Désactivé par défaut, coût nul en production.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from plotyx.core import guard
 from plotyx.core.errors import InvalidNameError
 from plotyx.core.signals import Signal
 
@@ -166,12 +172,16 @@ class ModelObject:
 
     def _notify_data(self, event: DataChanged) -> None:
         """Émet `dataChanged` sur l'objet puis sur chacun de ses ancêtres."""
+        if guard.hook is not None:  # garde-fou « aucune mutation hors commande »
+            guard.hook(self, event)
         self.data_changed.emit(event)
         for ancestor in self.ancestors():
             ancestor.data_changed.emit(event)
 
     def _notify_structure(self, event: StructureChanged) -> None:
         """Émet `structureChanged` sur l'objet puis sur chacun de ses ancêtres."""
+        if guard.hook is not None:  # garde-fou « aucune mutation hors commande »
+            guard.hook(self, event)
         self.structure_changed.emit(event)
         for ancestor in self.ancestors():
             ancestor.structure_changed.emit(event)

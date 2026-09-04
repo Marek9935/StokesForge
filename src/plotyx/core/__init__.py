@@ -28,6 +28,12 @@ from plotyx.core.errors import (
     StructureError,
     UnknownKeyError,
 )
+from plotyx.core.guard import (
+    MutationHook,
+    get_mutation_hook,
+    mutation_hook,
+    set_mutation_hook,
+)
 from plotyx.core.node import DataChanged, ModelObject, StructureChanged
 from plotyx.core.nodes import Folder, Graph, Matrix, Note, WindowNode, Workbook
 from plotyx.core.paths import ObjectPath, format_path, parse_path
@@ -48,6 +54,7 @@ __all__ = [
     "InvalidNameError",
     "Matrix",
     "ModelObject",
+    "MutationHook",
     "Note",
     "ObjectPath",
     "ObjectRegistry",
@@ -63,5 +70,8 @@ __all__ = [
     "Workbook",
     "Worksheet",
     "format_path",
+    "get_mutation_hook",
+    "mutation_hook",
     "parse_path",
+    "set_mutation_hook",
 ]
