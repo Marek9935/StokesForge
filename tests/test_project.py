@@ -191,6 +191,25 @@ def test_path_of_refuses_a_foreign_object(project):
         project.path_of(Column("Orpheline"))
 
 
+def test_path_of_an_empty_worksheet_or_column_is_still_resolvable(project):
+    """Découvert par la phase 3 : `Worksheet`/`Column` définissent `__len__`,
+
+    donc une feuille ou une colonne fraîchement créée, encore vide, est
+    *falsy*. `path_of` testait `if sheet`/`if column` plutôt que
+    `is not None` — exactement le piège qu'un commentaire de `Project.add`
+    met déjà en garde contre, un peu plus haut dans ce même fichier. Une
+    feuille neuve sans colonnes, ou une colonne neuve sans valeurs, doit
+    rester adressable par chemin avant toute donnée.
+    """
+    book = project.find_window("Book1")
+    empty_sheet = book.add_sheet("VideSheet")
+    assert project.path_of(empty_sheet) == "/Manips/[Book1]VideSheet"
+
+    empty_column = empty_sheet.add_column("Z")
+    assert len(empty_column) == 0
+    assert project.path_of(empty_column) == "/Manips/[Book1]VideSheet!Z"
+
+
 # -- déplacements ---------------------------------------------------------
 
 

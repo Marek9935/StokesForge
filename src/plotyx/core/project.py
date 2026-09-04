@@ -167,9 +167,18 @@ class Project:
             names = [*self._folder_names(obj), obj.name]
             return format_path(ObjectPath(folders=tuple(names), rooted=True))
 
+        # `is not None`, jamais `if column`/`if sheet` : une colonne ou une
+        # feuille vide (longueur 0) est *falsy* (`__len__`), exactement le
+        # piège déjà évité plus haut dans `Project.add`. Une colonne ou une
+        # feuille fraîchement créée par l'UI de la phase 3, avant toute
+        # donnée, doit rester adressable par chemin.
         column = obj if isinstance(obj, Column) else None
-        sheet = obj if isinstance(obj, Worksheet) else (column.parent if column else None)
-        window = obj if isinstance(obj, WindowNode) else (sheet.parent if sheet else None)
+        sheet = obj
+        if not isinstance(obj, Worksheet):
+            sheet = column.parent if column is not None else None
+        window = obj
+        if not isinstance(obj, WindowNode):
+            window = sheet.parent if sheet is not None else None
         if window is None:
             raise StructureError(f"objet non adressable par chemin : {obj!r}")
         return format_path(
