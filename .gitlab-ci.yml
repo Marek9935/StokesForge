@@ -66,13 +66,17 @@ test:linux:
     - source .venv/bin/activate
     # offscreen d'abord (rapide, pas de serveur X requis) ; xvfb-run en
     # filet de sécurité si un test venait à exiger un vrai display.
-    # La couverture est mesurée sur les deux couches sans UI : plotyx.core
-    # (noyau métier, phase 1) et plotyx.commands (bus d'undo, phase 2). La
-    # roadmap met un seuil de 85 % sur chacune ; le seuil global ci-dessous
-    # est le garde-fou automatique.
+    # La couverture est mesurée sur les trois couches testées : plotyx.core
+    # (noyau métier, phase 1), plotyx.commands (bus d'undo, phase 2) et,
+    # depuis la phase 3, plotyx.ui (`QAbstractTableModel`/`QAbstractItemModel`
+    # sur `Worksheet`/`Project`, dialogues, fenêtre principale — testés avec
+    # `pytest-qt` en headless). La roadmap vise 85 % sur core/commands et
+    # >75 % sur l'UI ; le seuil global ci-dessous est le garde-fou
+    # automatique, tenu par la moyenne pondérée des trois (95 % mesuré en
+    # local au moment d'écrire ce commentaire).
     - >
       QT_QPA_PLATFORM=offscreen xvfb-run -a pytest -v --junitxml=report.xml
-      --cov=plotyx.core --cov=plotyx.commands --cov-report=term
+      --cov=plotyx.core --cov=plotyx.commands --cov=plotyx.ui --cov-report=term
       --cov-report=xml --cov-fail-under=85
   coverage: '/^TOTAL\s+\d+\s+\d+\s+(\d+%)$/'
   artifacts:

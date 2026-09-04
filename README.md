@@ -4,9 +4,10 @@ Logiciel d'analyse et de tracé de données scientifiques, façon OriginLab, éc
 
 ## État
 
-**Pré-alpha — phase 2.** Le squelette applicatif (fenêtre, packaging, CI), le
-**modèle de données** et le **bus de commandes annulables** sont en place ;
-l'UI ne les affiche pas encore.
+**Pré-alpha — phase 3.** Le squelette applicatif (fenêtre, packaging, CI), le
+**modèle de données**, le **bus de commandes annulables** et l'**UI
+worksheet** sont en place : saisie/collage dans une table, undo/redo,
+explorateur de projet.
 
 `plotyx.core` fournit `Project` / `Folder` / `Workbook` / `Worksheet` / `Column`
 (plus les nœuds minimaux `Graph`, `Matrix`, `Note`), la résolution de chemins
@@ -15,8 +16,16 @@ notification en Python pur.
 
 `plotyx.commands` fournit le `CommandBus` (une `QUndoStack` par projet, limite
 d'historique, macros, état « document modifié ») et les commandes qui
-enveloppent les primitives de mutation du modèle. C'est le seul paquet des deux
-qui importe Qt : `core` reste pur. Prochaine étape : l'UI worksheet (phase 3).
+enveloppent les primitives de mutation du modèle. C'est le seul des trois
+paquets ci-dessous qui importait Qt jusqu'à cette phase : `core` reste pur.
+
+`plotyx.ui` adapte ces deux couches en widgets Qt : un `QAbstractTableModel`
+sur `Worksheet` (en-têtes riches nom/unité/label, aucune copie des données),
+une `QTableView` avec copier/coller et menus contextuels, un dialogue
+« Column Properties », et un `QAbstractItemModel` façon explorateur de
+fichiers sur `Project` pour le dock « Project Explorer ». Toute écriture y
+passe par une commande du bus — jamais par une primitive de `core` en
+direct. Prochaine étape : la persistance HDF5 (phase 4).
 
 ## Stack
 
