@@ -18,9 +18,9 @@ Stack : PySide6 + qt-material / PyQtGraph + Matplotlib / numpy-scipy-pandas / HD
 | 0.1 | Layout `src/plotyx/`, `pyproject.toml` (Briefcase + hatchling), venv Fedora | Projet importable |
 | 0.2 | `QMainWindow` vide + qt-material + `QMdiArea` + 3 `QDockWidget` stubs | App qui se lance |
 | 0.3 | pytest + `pytest-qt`, un test smoke qui ouvre/ferme la fenêtre | CI verte |
-| 0.4 | GitHub Actions : matrice `ubuntu/windows`, lint (ruff) + tests | Pipeline |
-| 0.5 | `briefcase create/build/package` sur les 2 OS, **artefacts uploadés** | AppImage / MSI dès la v0.0.1 |
-| 0.6 | Job macOS **`continue-on-error: true`**, non bloquant, non publié | Filet de sécurité (voir Politique macOS) |
+| 0.4 | GitLab CI : lint (ruff) + tests + couverture sur runner Linux partagé | Pipeline |
+| 0.5 | `briefcase create/build/package` AppImage (manuel sur `main`, auto sur tag) | AppImage dès la v0.0.1 |
+| 0.6 | Jobs Windows / macOS déclarés mais inertes (`tags:`, `manual`) | Intention documentée |
 
 > ⚠️ Point de vigilance #3 du doc : le packaging se valide **maintenant**, pas à la fin. Un projet Qt+numpy qui ne s'empaquette qu'au mois 6 découvre 6 mois de dettes d'un coup.
 
@@ -34,13 +34,17 @@ Stack : PySide6 + qt-material / PyQtGraph + Matplotlib / numpy-scipy-pandas / HD
 
 - `Column` : `np.ndarray` + métadonnées (nom, unité, label long, commentaire, rôle X/Y/yErr, format d'affichage, type)
 - `Worksheet` : liste ordonnée de colonnes, longueurs hétérogènes tolérées, opérations insert/delete/move/rename
-- `Project` : arbre `Folder → Worksheet | Graph | Matrix | Note`, chemins uniques type `[Book1]Sheet1!ColA`
+- `Project` : arbre `Folder → Workbook → Worksheet → Column`, plus `Graph | Matrix | Note` comme nœuds frères du `Workbook` ; chemins uniques type `[Book1]Sheet1!ColA`
 - `ObjectRegistry` : clé stable ↔ objet, indispensable pour le drag & drop par référence (§5 du doc) et pour la console
+
+> **Correction apportée à ce plan (2026-09-04)** : le niveau `Workbook` (« classeur ») manquait à l'arbre initialement écrit `Folder → Worksheet`. La grammaire `[Book1]Sheet1!ColA`, héritée d'Origin, l'exige : sans classeur, la partie entre crochets n'a pas de référent. Écart validé, structurant pour le schéma HDF5 de la phase 4.
 - Signaux Qt (`dataChanged`, `structureChanged`) émis par le modèle → prépare la vue
 
-**Décisions à trancher ici** (coûteuses après) :
-1. Stockage colonne = ndarray nu ou wrapper masqué (`np.ma`) pour les valeurs manquantes ? → recommandation : ndarray `float64` + `NaN`, plus rapide, suffisant en scientifique.
-2. Colonne de longueur variable ou worksheet rectangulaire ? → recommandation : **variable** (Origin le fait), sinon padding NaN partout.
+**Décisions tranchées ici** (2026-09-04, coûteuses à revenir dessus) :
+1. Valeurs manquantes : **`ndarray` `float64` + `NaN`**, pas de `np.ma`. Plus rapide, suffisant en usage scientifique.
+2. **Colonnes de longueur variable**, pas de worksheet rectangulaire (comme Origin ; l'alternative impose du padding NaN partout). La lecture hors bornes rend la valeur manquante sans rien stocker, ce qui rend `row_count = max(len)` suffisant.
+3. **Notifications en Python pur** dans `core/`, adaptées vers les signaux Qt par la couche `ui/`. La roadmap demandait des « signaux Qt émis par le modèle », en contradiction avec le principe « aucun Qt dans `core/` » ; c'est le principe qui gagne, et un test le vérifie automatiquement.
+4. **Clés du registre = UUID de naissance**, jamais fonction du nom ni du chemin : renommer ou déplacer ne les invalide pas. Références faibles — un objet supprimé sort du registre et y revient sous la même clé au `undo`, ce qui reporte la responsabilité de sa durée de vie sur la `QUndoCommand` de la phase 2.
 
 **Sortie de phase** : `pytest` couvre le modèle à >85 %, aucune dépendance UI dans `plotyx/core/`.
 
@@ -170,6 +174,7 @@ Dépend de 3 + 6. Le §5 du doc en entier :
 
 ## Phase 12 — Distribution (≈1 semaine)
 
+- **Mise en place de la VM Windows auto-hébergée** : runner GitLab enregistré sur le projet, et machine propre pour tester l'installeur (point de vigilance #3). C'est ici que la validation continue du packaging Windows démarre réellement.
 - Signature Authenticode Windows (évite SmartScreen)
 - AppImage Linux `manylinux_2_28`, pas de signature obligatoire
 - Réduction du binaire (~150–300 Mo attendu, normal pour la catégorie)
@@ -246,3 +251,31 @@ Elles sont déjà exigées par le support Windows + Linux ; macOS n'en ajoute au
 | Règles relâchées, CI macOS supprimée | **5–8 semaines** — le coût n'est pas Apple, c'est de déterrer des hypothèses Windows disséminées dans 30 000 lignes |
 
 À rouvrir sur signal marché réel (demandes utilisateurs), pas par principe.
+
+---
+
+## Hébergement et CI (décision 2026-09-04)
+
+**Dépôt public sur GitLab, tout le CI/CD sur GitLab.** Pas de miroir GitHub Actions : le gain (minutes illimitées sur dépôt public, runners `windows-latest` gratuits) ne justifie pas d'entretenir une seconde plateforme, des secrets de synchronisation et une ambiguïté sur l'endroit où vivent les issues — pour un besoin qui ne se matérialise qu'à la phase 12.
+
+**Public ≠ open source.** La licence reste propriétaire (« tous droits réservés ») : le code est lisible, aucun droit n'est cédé. C'est du *source-available*, compatible avec la vente closed-source visée par l'architecture. Conséquence concrète unique : le programme « GitLab for Open Source » (quota de minutes étendu) exige une licence approuvée OSI et reste donc inaccessible.
+
+### Conséquence sur le quota de minutes
+
+Le tier gratuit GitLab.com limite les minutes de calcul sur runners partagés, et ne fournit que du Linux. D'où le découpage retenu :
+
+| Job | Déclenchement |
+|---|---|
+| `lint:ruff`, `test:linux` (+ couverture) | à chaque push — léger, c'est le filet des phases 1 à 11 |
+| `package:linux:appimage` | **manuel** sur `main`, **automatique sur tag** — lourd (~544 Mo), poste de consommation principal |
+| `package:windows:msi`, `package:macos` | inertes, en attente d'un runner auto-hébergé (`tags:`) |
+
+À surveiller dans *Settings → Usage Quotas*.
+
+### Coût assumé
+
+**La validation du packaging Windows n'est pas continue** d'ici la phase 12 — contrairement au principe posé en phase 0. C'est un écart délibéré : monter l'infra Windows à la phase 1 pour un besoin de la phase 12 coûte plus cher que le risque encouru, d'autant qu'une machine Windows propre sera de toute façon nécessaire pour tester l'installeur. À réévaluer si un bug de packaging Windows apparaît avant la phase 12.
+
+### Reste ouvert
+
+- **Texte définitif du `LICENSE`** : le fichier actuel est un placeholder propriétaire. À trancher avant la première release publique.

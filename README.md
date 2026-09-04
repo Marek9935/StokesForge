@@ -27,6 +27,10 @@ notification en Python pur. Prochaine étape : le bus de commandes annulables
 
 Licences 100 % compatibles avec une distribution closed-source, sans royalties.
 
+## Dépôt
+
+Public, mais **pas open source** : la licence est propriétaire (« tous droits réservés »), le code est lisible sans qu'aucun droit ne soit cédé. CI/CD entièrement sur GitLab — voir la section « Hébergement et CI » de la roadmap.
+
 ## Plateformes
 
 **Windows et Linux.** macOS est hors périmètre de release ; la cible reste compilable en CI mais n'est ni publiée ni supportée — voir la section « Politique macOS » de la roadmap.

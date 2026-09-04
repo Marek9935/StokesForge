@@ -1,17 +1,29 @@
-# CI GitLab — phase 0.
+# CI GitLab — tout le CI/CD reste sur GitLab (décision 2026-09-04).
 #
-# Point de vigilance : GitLab CI n'offre PAS de runners Windows (ni
-# macOS) sur le tier gratuit — seulement Linux. Les jobs `windows-*`
-# et `macos-*` ci-dessous sont donc déclarés en `when: manual` et
-# `allow_failure: true` : ils documentent l'intention (matrice
-# complète Windows/Linux, macOS non bloquant — voir ROADMAP.md
-# « Politique macOS ») mais ne s'exécutent pas tant qu'aucun runner
-# compatible n'est branché. Pour les rendre réellement actifs il
-# faut soit :
-#   (a) un runner auto-hébergé Windows/macOS enregistré sur ce projet, ou
-#   (b) un miroir GitHub Actions (runners `windows-latest`/`macos-latest`
-#       gratuits sur repo public) déclenché depuis GitLab.
-# Voir le rapport de la phase 0 pour la recommandation.
+# Le tier gratuit GitLab.com ne fournit de runners partagés que pour
+# Linux, et avec un quota mensuel de minutes de calcul limité. Deux
+# conséquences assumées :
+#
+# 1. Les jobs légers (lint, tests, couverture) tournent à chaque push :
+#    c'est ce qui protège les phases 1 à 11.
+# 2. Le build AppImage est LOURD (Briefcase télécharge beaucoup, ~544 Mo
+#    en sortie). Il ne tourne donc PAS à chaque commit : `when: manual`
+#    sur la branche par défaut, automatique uniquement sur les tags de
+#    release. C'est le poste de consommation à surveiller
+#    (Settings → Usage Quotas).
+#
+# Le programme « GitLab for Open Source » (quota étendu) exigerait une
+# licence approuvée OSI, incompatible avec la licence propriétaire
+# actuelle — porte fermée tant que ce choix tient.
+#
+# Windows et macOS n'ont pas de runner partagé ici. Les jobs ci-dessous
+# sont déclarés mais inertes tant qu'aucun runner auto-hébergé n'est
+# branché (`tags:`). Le build Windows sera automatisé via une VM Windows
+# auto-hébergée au moment de la phase 12 — une machine Windows propre
+# est de toute façon nécessaire pour tester l'installeur (point de
+# vigilance #3, docs/architecture.md). Jusque-là, la validation du
+# packaging Windows est manuelle et non continue : coût assumé.
+# macOS reste hors périmètre de release (ROADMAP.md, « Politique macOS »).
 
 stages:
   - lint
@@ -86,15 +98,23 @@ package:linux:appimage:
       - dist/*.AppImage
     expire_in: 30 days
   rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    # Automatique sur tag de release uniquement : c'est là qu'un
+    # artefact est réellement attendu.
     - if: '$CI_COMMIT_TAG'
+    # Sur la branche par défaut, déclenchement manuel — préserve le
+    # quota de minutes, l'AppImage n'a pas à être reconstruit à chaque
+    # commit. `allow_failure: true` pour qu'un job manuel non lancé ne
+    # marque pas le pipeline en attente.
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+      allow_failure: true
 
-# --- Windows : nécessite un runner (auto-hébergé ou miroir GH Actions) ---
+# --- Windows : inerte tant qu'aucun runner auto-hébergé n'est branché ---
 
 package:windows:msi:
   stage: package
   tags:
-    - windows # runner auto-hébergé requis, absent du tier gratuit GitLab
+    - windows # VM auto-hébergée requise (prévue phase 12), absente du tier gratuit
   when: manual
   allow_failure: true
   script:
@@ -115,7 +135,7 @@ package:windows:msi:
 package:macos:
   stage: package
   tags:
-    - macos # runner auto-hébergé requis, absent du tier gratuit GitLab
+    - macos # runner auto-hébergé requis, absent du tier gratuit — hors périmètre
   when: manual
   allow_failure: true
   script:
