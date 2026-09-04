@@ -66,13 +66,14 @@ test:linux:
     - source .venv/bin/activate
     # offscreen d'abord (rapide, pas de serveur X requis) ; xvfb-run en
     # filet de sécurité si un test venait à exiger un vrai display.
-    # La couverture est mesurée sur plotyx.core seul : c'est le noyau
-    # métier, testable sans UI, et la roadmap y met un seuil (>85 % en
-    # sortie de phase 1).
+    # La couverture est mesurée sur les deux couches sans UI : plotyx.core
+    # (noyau métier, phase 1) et plotyx.commands (bus d'undo, phase 2). La
+    # roadmap met un seuil de 85 % sur chacune ; le seuil global ci-dessous
+    # est le garde-fou automatique.
     - >
       QT_QPA_PLATFORM=offscreen xvfb-run -a pytest -v --junitxml=report.xml
-      --cov=plotyx.core --cov-report=term --cov-report=xml
-      --cov-fail-under=85
+      --cov=plotyx.core --cov=plotyx.commands --cov-report=term
+      --cov-report=xml --cov-fail-under=85
   coverage: '/^TOTAL\s+\d+\s+\d+\s+(\d+%)$/'
   artifacts:
     when: always

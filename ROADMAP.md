@@ -61,6 +61,17 @@ Stack : PySide6 + qt-material / PyQtGraph + Matplotlib / numpy-scipy-pandas / HD
 - `cleanChanged` → astérisque titre + prompt de sauvegarde
 - Test anti-régression : un test qui **échoue si une mutation du modèle est faite hors commande** (hook de mutation en mode debug)
 
+**Décisions tranchées ici** (2026-09-04) :
+
+1. **Paquet séparé `plotyx/commands/`.** `QUndoStack`/`QUndoCommand` sont des classes Qt et `core/` n'a pas le droit d'importer Qt. La couche d'undo vit donc à côté, avec une dépendance à sens unique : `commands` connaît `core`, jamais l'inverse. `tests/test_core_no_qt.py` reste vert sans modification.
+2. **Les commandes enveloppent les primitives, pas les façades `Project`.** Un module d'aiguillage (`commands/dispatch.py`) traduit `(conteneur, opération)` en appel de la primitive du conteneur. Les façades `Project.add/remove/rename/move` restent de l'ergonomie d'API ; `Project.move`, composite, masque justement les deux deltas dont l'annulation a besoin.
+3. **Application avant empilement.** `QUndoStack.push()` appelle `redo()` de l'autre côté de la frontière C++, où une exception Python n'a pas de comportement garanti. `CommandBus.push()` applique donc la commande lui-même : un échec (nom en double, index hors bornes) remonte proprement et la pile n'a pas bougé.
+4. **Durée de vie des objets supprimés.** Une commande de suppression garde une référence forte sur l'objet retiré tant qu'elle est sur la pile. Le bus tient un miroir de la pile et appelle `release()` sur toute commande qui en sort — éviction par `setUndoLimit`, troncature de la branche de redo, `clear()`. Testé pour de vrai avec `gc` et `weakref`, y compris sur un tableau de 2 Mo.
+5. **Un seul snapshot, documenté.** `SetColumnTypeCommand` conserve le tableau précédent : la conversion de type est destructrice dans les deux sens, aucun delta ne la reconstruit. Toutes les autres commandes s'annulent par delta ou par simples paramètres.
+6. **Abandon de macro.** `QUndoStack` n'a pas de `cancelMacro()`. `CommandBus.abort_macro()` ferme la macro, l'annule, puis pousse une commande qui se déclare obsolète pendant son `redo()` : la branche de redo est purgée et la commande disparaît, la pile retrouve exactement son état d'avant.
+
+**Écart constaté sur la phase 1** : `Worksheet.insert_rows` et `Worksheet.delete_rows` ne sont pas exactement inverses l'une de l'autre quand `at >= len(column)` sur une colonne courte (l'insertion tombe en `min(at, len)`, la suppression ignore la colonne). Le comportement n'est pas modifié — aucun test de la phase 1 ne l'exerce — mais les commandes de lignes s'appliquent à une **colonne**, et une opération à l'échelle de la feuille s'exprime comme une **macro de commandes par colonne** — exact, et tenant en une seule entrée d'historique (`test_a_sheet_wide_row_insert_is_a_macro_of_column_commands`). À trancher si la phase 3 a besoin d'envelopper la primitive de feuille elle-même.
+
 **Sortie de phase** : script de test qui applique 50 commandes aléatoires, undo tout, et vérifie l'égalité bit à bit avec l'état initial.
 
 ---
