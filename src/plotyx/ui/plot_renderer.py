@@ -1,12 +1,25 @@
-"""Renderer PyQtGraph — le **premier** moteur de rendu d'un `PlotSpec`.
+"""Renderer PyQtGraph — le moteur du **visualiseur léger**.
 
-Le second, Matplotlib, arrivera en phase 10 à côté de celui-ci, sans que
-`plotyx.plot` bouge. La règle qui garde les deux alignés tient en une
-phrase : **toute la traduction du vocabulaire neutre vers le vocabulaire
-d'un moteur est écrite ici**, dans les trois tables `_PEN_STYLES`,
-`_SYMBOLS` et `_LEGEND_ANCHORS`, et nulle part ailleurs. Si un jour une
-option de style ne peut pas s'exprimer sans nommer PyQtGraph, c'est le
-spec qu'il faut enrichir, pas ce module qu'il faut contourner.
+Premier renderer écrit (phase 6, 2026-09-05), et rendu par défaut jusqu'au
+2026-09-07 ; il est depuis le mode *secondaire*, réservé à l'acquisition
+live et au streaming, Matplotlib (`mpl_renderer.py`) ayant pris la place du
+défaut. Le raisonnement est dans
+`docs/decision-rendu-matplotlib-2026-09-07.md` ; ce qui l'a sauvé de la
+suppression tient en un point : le viewport OpenGL (`useOpenGL=True`) est
+un déchargement GPU réel, que Matplotlib n'a pas en usage standard.
+
+Ce que « léger » veut dire concrètement : le code ci-dessous reste
+complet — il était déjà écrit et testé, l'amputer coûterait sans rien
+rapporter — mais **rien de neuf n'y sera ajouté**. Une option de style
+nouvelle va dans le renderer Matplotlib ; si elle n'a pas d'équivalent
+ici, la vue directe l'ignore, et c'est le comportement attendu.
+
+La règle qui garde les deux moteurs alignés tient en une phrase :
+**toute la traduction du vocabulaire neutre vers le vocabulaire d'un
+moteur est écrite ici**, dans les trois tables `_PEN_STYLES`, `_SYMBOLS`
+et `_LEGEND_ANCHORS`, et nulle part ailleurs. Si un jour une option de
+style ne peut pas s'exprimer sans nommer PyQtGraph, c'est le spec qu'il
+faut enrichir, pas ce module qu'il faut contourner.
 
 Ce module ne mute jamais le modèle : il *lit* un `PlotSpec` et un
 `ResolvedPlot` et peint. Les interactions qui modifient le graphe (styles,
@@ -30,6 +43,7 @@ du `ndarray` de la colonne, passée telle quelle à `setData`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -49,7 +63,7 @@ from plotyx.plot.spec import (
     SymbolShape,
 )
 
-__all__ = ["PyQtGraphRenderer", "pen_style", "symbol_of"]
+__all__ = ["PyQtGraphRenderer", "new_plot_widget", "pen_style", "symbol_of"]
 
 #: Vocabulaire neutre → vocabulaire Qt. Table unique, cf. docstring.
 _PEN_STYLES: dict[LineStyle, Qt.PenStyle] = {
@@ -88,6 +102,17 @@ def symbol_of(shape: SymbolShape) -> str | None:
     return _SYMBOLS[SymbolShape(shape)]
 
 
+def new_plot_widget() -> pg.GraphicsLayoutWidget:
+    """Un widget vide, prêt à recevoir un `PyQtGraphRenderer`.
+
+    Pendant de `mpl_renderer.new_canvas` : `plotyx.ui.renderers` construit
+    l'un ou l'autre sans avoir à connaître le constructeur de chaque moteur.
+    """
+    widget = pg.GraphicsLayoutWidget()
+    widget.setObjectName("graphPlotWidget")
+    return widget
+
+
 class PyQtGraphRenderer:
     """Peint un `PlotSpec` résolu dans un `pg.GraphicsLayoutWidget`.
 
@@ -102,6 +127,11 @@ class PyQtGraphRenderer:
       l'appelant de repasser par `render`.
     """
 
+    #: La vue directe est volontairement minimale : le panneau de propriétés
+    #: expose plus de réglages qu'elle n'en honore, et `GraphWindow` le dit
+    #: à l'utilisateur au lieu de laisser croire à une édition sans effet.
+    supports_full_styling = False
+
     def __init__(self, widget: pg.GraphicsLayoutWidget) -> None:
         self._widget = widget
         self._plots: list[pg.PlotItem] = []
@@ -110,8 +140,15 @@ class PyQtGraphRenderer:
         self._spec: PlotSpec | None = None
         self._crosshair = False
         self._crosshair_items: list[tuple[pg.InfiniteLine, pg.InfiniteLine]] = []
+        self._coords: Callable[..., None] | None = None
+        self._detached = False
+        widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
     # -- accès ---------------------------------------------------------------
+
+    @property
+    def widget(self) -> pg.GraphicsLayoutWidget:
+        return self._widget
 
     @property
     def plot_items(self) -> tuple[pg.PlotItem, ...]:
@@ -125,6 +162,45 @@ class PyQtGraphRenderer:
     @property
     def crosshair_enabled(self) -> bool:
         return self._crosshair
+
+    def series_xy(self, series_id: str) -> tuple[np.ndarray, np.ndarray] | None:
+        """Les tableaux réellement tracés pour une série, ou `None`.
+
+        Point d'introspection **neutre**, commun aux deux moteurs : c'est
+        par lui que les tests de `GraphWindow` vérifient qu'une saisie s'est
+        propagée jusqu'au tracé, sans nommer de moteur.
+        """
+        curve = self._curves.get(series_id)
+        if curve is None:
+            return None
+        x, y = curve.getData()
+        return np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+
+    def detach(self) -> None:
+        """Coupe tout : appelé à la fermeture ou au changement de moteur.
+
+        **Idempotent**, et pas par excès de prudence : fermer une
+        sous-fenêtre MDI appelle `GraphWindow.disconnect_signals` par
+        `closeEvent`, souvent après un appel explicite. Un second
+        `disconnect` sur un signal déjà coupé ne lève pas côté PySide — il
+        émet un `RuntimeWarning` que le plugin `unraisableexception` a
+        vocation à faire remonter (voir l'état du projet, §4). Autant ne
+        pas le produire.
+        """
+        if self._detached:
+            return
+        self._detached = True
+        try:
+            self._widget.scene().sigMouseMoved.disconnect(self._on_mouse_moved)
+        except (RuntimeError, TypeError):
+            # Scène déjà détruite : il n'y a plus rien à couper, et lever
+            # ici empêcherait la fenêtre de se fermer.
+            pass
+        self._coords = None
+        self._widget.clear()
+
+    def set_coords_callback(self, callback: Callable[..., None] | None) -> None:
+        self._coords = callback
 
     # -- rendu complet --------------------------------------------------------
 
@@ -378,6 +454,7 @@ class PyQtGraphRenderer:
         dernier cas est un correctif : l'`ErrorBarItem` d'une série est un
         item distinct de sa courbe, que ce chemin ne réécrivait pas — des
         moustaches périmées restaient affichées à côté d'une courbe à jour.
+        Même règle côté Matplotlib, pour la même raison.
         """
         if self._spec is None:
             return False
@@ -447,3 +524,27 @@ class PyQtGraphRenderer:
         view = self._plots[panel_index].getViewBox()
         point = view.mapSceneToView(scene_pos)
         return float(point.x()), float(point.y())
+
+    def _on_mouse_moved(self, position: Any) -> None:
+        """Suit la souris : réticule et lecture des coordonnées.
+
+        Câblé ici et non dans `GraphWindow` : le suivi passe par la *scène*
+        PyQtGraph, une notion que la fenêtre ne doit pas connaître si elle
+        veut pouvoir héberger l'autre moteur sans rien changer.
+        """
+        index = self.panel_at(position)
+        if index is None:
+            if self._coords is not None:
+                self._coords(None)
+            return
+        x, y = self.data_coords(index, position)
+        self.move_crosshair(index, x, y)
+        if self._coords is not None:
+            self._coords((x, y))
+
+    # -- recadrage ------------------------------------------------------------------
+
+    def auto_range(self) -> None:
+        """Recadre tous les panneaux sur leurs données (zoom/déplacement annulés)."""
+        for plot in self._plots:
+            plot.getViewBox().autoRange()

@@ -240,7 +240,8 @@ def test_editing_a_cell_updates_the_open_graph(window):
     view: GraphWindow = window._open_graphs[graph.key].widget()
     window.bus.push(SetCellsCommand(sheet.column("V"), 0, [42.0]))
     view.refresh_now()
-    assert next(iter(view.renderer.curves.values())).getData()[1][0] == 42.0
+    series_id = next(iter(view.renderer.curves))
+    assert view.renderer.series_xy(series_id)[1][0] == 42.0
 
 
 def test_opening_another_project_closes_the_graph_windows(window, tmp_path):

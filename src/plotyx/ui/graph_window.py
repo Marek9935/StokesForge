@@ -5,7 +5,22 @@ Elle assemble trois choses qui, elles, sont testables séparément :
 * un `Graph` du modèle, dont le contenu est un `PlotSpec` (phase 6) ;
 * `plotyx.plot.resolve`, qui transforme les clés de registre du spec en
   colonnes réelles — sans copie ;
-* `plotyx.ui.plot_renderer`, qui peint le tout avec PyQtGraph.
+* un renderer, qui peint le tout — Matplotlib par défaut, PyQtGraph en
+  visualiseur léger (voir `plotyx.ui.renderers`).
+
+## Deux moteurs, une fenêtre
+
+Depuis la décision du 2026-09-07, cette fenêtre ne connaît plus aucun
+moteur : elle demande un renderer pour un `RenderMode` et ne parle qu'au
+protocole `PlotRenderer`. Tout ce que la bascule doit faire tient donc dans
+`set_render_mode` — détacher l'ancien renderer, en construire un autre,
+redessiner. Le mode est un état de fenêtre, jamais un attribut du graphe :
+rien n'en est écrit dans le `.plx`.
+
+Le suivi de la souris (coordonnées, réticule) est **dans le renderer**, pas
+ici : une scène `QGraphicsView` et un canevas Matplotlib ne le signalent pas
+de la même façon, et la fenêtre n'a pas à trancher entre les deux. Elle
+reçoit le résultat par `set_coords_callback`.
 
 ## Mise à jour automatique
 
@@ -26,13 +41,23 @@ Les notifications sont **coalescées** par un `QTimer` à 0 ms : une macro
 d'import qui ajoute cinquante colonnes ne provoque qu'un seul rendu, à la
 fin, quand la boucle d'événements reprend la main.
 
-## Références rompues
+## Le bandeau
 
-Une série dont la colonne a été supprimée n'est ni retirée du spec, ni
-tracée : un bandeau la nomme en haut de la fenêtre. C'est le seul
-traitement qui reste correct dans les deux sens — le registre est en
-références faibles, un `undo` de la suppression réinscrit la colonne sous
-la même clé et le graphe se répare de lui-même au rendu suivant.
+Un seul bandeau, deux motifs de l'afficher, cumulables :
+
+* **références rompues** — une série dont la colonne a été supprimée n'est
+  ni retirée du spec, ni tracée : le bandeau la nomme. C'est le seul
+  traitement correct dans les deux sens — le registre est en références
+  faibles, un `undo` de la suppression réinscrit la colonne sous la même
+  clé et le graphe se répare de lui-même au rendu suivant ;
+* **visualiseur léger** — ce mode n'honore pas tout ce que le panneau de
+  propriétés expose. Les contrôles y restent volontairement **actifs** :
+  ils éditent le `PlotSpec`, jamais un renderer, donc l'édition est bien
+  enregistrée, annulable et persistée, et devient visible au retour en vue
+  normale. Les griser aurait fait dépendre le panneau du moteur actif — ce
+  que l'architecture évite partout ailleurs — et interdirait de préparer
+  une mise en forme pendant une acquisition. Le bandeau est là pour que
+  « pas encore visible » ne se lise pas « perdu ».
 
 ## Wayland
 
@@ -44,9 +69,6 @@ et n'est **pas** implémenté ici — voir le rapport de phase.
 
 from __future__ import annotations
 
-from typing import Any
-
-import pyqtgraph as pg
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -63,10 +85,18 @@ from plotyx.core.nodes import Graph
 from plotyx.core.project import Project
 from plotyx.plot.resolve import ResolvedPlot, resolve_spec
 from plotyx.plot.spec import PlotSpec, PlotType
-from plotyx.ui.plot_renderer import PyQtGraphRenderer
 from plotyx.ui.plot_worker import ASYNC_POINT_THRESHOLD, PlotPrepareWorker
+from plotyx.ui.renderers import DEFAULT_RENDER_MODE, PlotRenderer, RenderMode, create_renderer
 
 __all__ = ["GraphWindow"]
+
+#: Texte du bandeau en visualiseur léger. Il dit les deux choses qui
+#: comptent : ce qui manque, et que rien n'est perdu.
+_DIRECT_VIEW_NOTICE = (
+    "Visualiseur léger (vue directe) : le rendu ignore une partie de la mise "
+    "en forme. Les réglages du panneau Propriétés restent enregistrés et "
+    "s'appliquent au retour en vue normale."
+)
 
 #: Kinds de `StructureChanged` qui n'affectent pas un graphe. Tout le reste
 #: déclenche un rendu complet — être trop large ici ne coûte qu'un rendu de
@@ -83,6 +113,7 @@ class GraphWindow(QWidget):
         project: Project,
         bus: CommandBus,
         parent: QWidget | None = None,
+        mode: RenderMode = DEFAULT_RENDER_MODE,
     ) -> None:
         super().__init__(parent)
         self.setObjectName(f"graphWindow_{graph.key}")
@@ -91,10 +122,9 @@ class GraphWindow(QWidget):
         self._bus = bus
         self._worker: PlotPrepareWorker | None = None
         self._pending_full_render = True
-
-        self._plot_widget = pg.GraphicsLayoutWidget()
-        self._plot_widget.setObjectName("graphPlotWidget")
-        self._renderer = PyQtGraphRenderer(self._plot_widget)
+        self._mode = RenderMode(mode)
+        self._renderer: PlotRenderer = create_renderer(self._mode)
+        self._renderer.set_coords_callback(self._on_coords)
 
         self._banner = QLabel("")
         self._banner.setObjectName("graphBanner")
@@ -122,9 +152,8 @@ class GraphWindow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(toolbar)
         layout.addWidget(self._banner)
-        layout.addWidget(self._plot_widget, 1)
-
-        self._plot_widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
+        layout.addWidget(self._renderer.widget, 1)
+        self._layout = layout
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
@@ -155,12 +184,16 @@ class GraphWindow(QWidget):
         return self._project
 
     @property
-    def renderer(self) -> PyQtGraphRenderer:
+    def renderer(self) -> PlotRenderer:
         return self._renderer
 
     @property
-    def plot_widget(self) -> pg.GraphicsLayoutWidget:
-        return self._plot_widget
+    def plot_widget(self) -> QWidget:
+        return self._renderer.widget
+
+    @property
+    def render_mode(self) -> RenderMode:
+        return self._mode
 
     @property
     def banner_text(self) -> str:
@@ -186,6 +219,39 @@ class GraphWindow(QWidget):
         self._data_conn.disconnect()
         self._structure_conn.disconnect()
         self._stop_worker()
+        self._renderer.detach()
+
+    # -- moteur de rendu ---------------------------------------------------------
+
+    def set_render_mode(self, mode: RenderMode) -> None:
+        """Change de moteur. Le graphe, lui, ne bouge pas d'un octet.
+
+        Tout ce qui décrit le tracé est dans le `PlotSpec` : basculer ne
+        fait donc que jeter des artistes et en repeindre d'autres à partir
+        de la même description. Rien n'est à sauvegarder avant, rien n'est
+        perdu après, et aucune commande n'est poussée sur le bus — un
+        changement de vue n'est pas une modification du projet, il n'a donc
+        pas à s'annuler ni à marquer le projet modifié.
+        """
+        mode = RenderMode(mode)
+        if mode is self._mode:
+            return
+        self._stop_worker()
+        old = self._renderer
+        crosshair = old.crosshair_enabled
+        self._layout.removeWidget(old.widget)
+        old.detach()
+        old.widget.setParent(None)
+        old.widget.deleteLater()
+
+        self._mode = mode
+        self._renderer = create_renderer(mode)
+        self._renderer.set_coords_callback(self._on_coords)
+        self._layout.addWidget(self._renderer.widget, 1)
+        self._coords.setText("")
+        self.refresh_now(full=True)
+        # Après le rendu : le réticule de PyQtGraph a besoin de ses panneaux.
+        self._renderer.set_crosshair(crosshair)
 
     def _stop_worker(self) -> None:
         worker, self._worker = self._worker, None
@@ -248,20 +314,32 @@ class GraphWindow(QWidget):
         self._update_banner(resolved)
 
     def _update_banner(self, resolved: ResolvedPlot) -> None:
+        """Compose le bandeau : avertissement de mode, puis séries rompues.
+
+        Les deux motifs se cumulent — être en vue directe ne dispense pas de
+        signaler une référence cassée, et l'inverse encore moins.
+        """
+        messages: list[str] = []
+        if not self._renderer.supports_full_styling:
+            messages.append(_DIRECT_VIEW_NOTICE)
+
         broken = resolved.broken_series
-        if not broken:
+        if broken:
+            names = ", ".join(
+                series.spec.name or f"série {position + 1}"
+                for position, series in enumerate(broken)
+            )
+            messages.append(
+                f"{len(broken)} série(s) sans données : {names}. "
+                "La ou les colonnes référencées ont été supprimées ; annuler la "
+                "suppression (Ctrl+Z) rebranche la série."
+            )
+
+        if not messages:
             self._banner.hide()
             self._banner.setText("")
             return
-        names = ", ".join(
-            series.spec.name or f"série {position + 1}"
-            for position, series in enumerate(broken)
-        )
-        self._show_banner(
-            f"{len(broken)} série(s) sans données : {names}. "
-            "La ou les colonnes référencées ont été supprimées ; annuler la "
-            "suppression (Ctrl+Z) rebranche la série."
-        )
+        self._show_banner("\n".join(messages))
 
     def _show_banner(self, text: str) -> None:
         self._banner.setText(text)
@@ -286,21 +364,19 @@ class GraphWindow(QWidget):
 
     def auto_range(self) -> None:
         """Recadre tous les panneaux sur leurs données (zoom/pan remis à zéro)."""
-        for plot in self._renderer.plot_items:
-            plot.getViewBox().autoRange()
+        self._renderer.auto_range()
 
     def _on_crosshair_toggled(self, enabled: bool) -> None:
         self._renderer.set_crosshair(enabled)
         if not enabled:
             self._coords.setText("")
 
-    def _on_mouse_moved(self, position: Any) -> None:
-        """Suit la souris : réticule et lecture des coordonnées."""
-        index = self._renderer.panel_at(position)
-        if index is None:
+    def _on_coords(self, position: tuple[float, float] | None) -> None:
+        """Affiche les coordonnées sous le curseur, rapportées par le renderer."""
+        if position is None:
+            self._coords.setText("")
             return
-        x, y = self._renderer.data_coords(index, position)
-        self._renderer.move_crosshair(index, x, y)
+        x, y = position
         self._coords.setText(f"x = {x:.6g}    y = {y:.6g}")
 
     # -- Qt ------------------------------------------------------------------------
