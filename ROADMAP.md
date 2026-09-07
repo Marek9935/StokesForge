@@ -124,7 +124,16 @@ Les commandes de lignes restent volontairement à l'échelle de la **colonne**, 
 
 ---
 
-## Phase 6 — Plots PyQtGraph (≈3 semaines)
+## Phase 6 — Plots (≈3 semaines, **rouverte** le 2026-09-07)
+
+> ⚠️ **Rendu par défaut changé de PyQtGraph à Matplotlib** — voir
+> « Rendu par défaut : Matplotlib au lieu de PyQtGraph » plus bas et
+> `docs/decision-rendu-matplotlib-2026-09-07.md` pour le raisonnement
+> complet. La description ci-dessous est celle de la livraison initiale
+> (2026-09-05) et reste vraie *pour le mode « vue directe » PyQtGraph*,
+> qui devient secondaire ; le rendu par défaut est à reconstruire côté
+> Matplotlib avec les mêmes garanties (édition via le panneau Properties,
+> références rompues signalées, etc.).
 
 - `GraphWindow` MDI : `PlotWidget`, axes, légende, curseurs, zoom/pan
 - Modèle de plot : une série = **référence** `(worksheet_key, x_col, y_col)`, pas une copie → mise à jour auto quand la donnée change
@@ -159,7 +168,7 @@ Les commandes de lignes restent volontairement à l'échelle de la **colonne**, 
    ci-dessous n'est pas levée, la fonction est reportée et documentée
    plutôt qu'à moitié livrée.
 
-**Sortie de phase** : un graphe présentable à l'écran, interactif, à partir d'un import réel.
+**Sortie de phase (2026-09-05, avant réouverture)** : un graphe présentable à l'écran, interactif, à partir d'un import réel — sur PyQtGraph. Réouverte le 2026-09-07 pour reconstruire ce même niveau de service sur Matplotlib comme rendu par défaut ; le socle ci-dessus (décisions 1 à 4, la couche `PlotSpec`) reste acquis et n'a pas à être repensé, seul le renderer change.
 
 ---
 
@@ -197,12 +206,17 @@ Dépend de 3 + 6. Le §5 du doc en entier :
 
 ---
 
-## Phase 10 — Export publication (≈1,5 semaine)
+## Phase 10 — Export publication (≈0,5 semaine, réduite le 2026-09-07)
 
-- Backend Matplotlib parallèle à PyQtGraph : mêmes séries, rendu qualité publication
+> ⚠️ Portée réduite par le changement de rendu par défaut (phase 6) : le
+> backend Matplotlib n'est plus « parallèle » à construire ici, il existe
+> déjà comme rendu principal. Cette phase se limite désormais à
+> l'habillage export.
+
+- ~~Backend Matplotlib parallèle à PyQtGraph~~ — devenu le rendu par défaut, livré en phase 6
 - Export PNG/SVG/PDF/EPS + **pgf/LaTeX**, DPI et taille physique paramétrables
 - Thèmes de rendu (police, tailles, épaisseurs) sauvegardés dans le projet
-- Piège identifié : deux moteurs de rendu = risque de divergence. Mitiger avec une couche `PlotSpec` neutre dont PyQtGraph et Matplotlib sont deux *renderers*. **À concevoir en phase 6, pas ici.**
+- Piège identifié à l'origine : deux moteurs de rendu = risque de divergence. Mitigé par la couche `PlotSpec` neutre (conçue en phase 6) ; désormais atténué plus fortement encore, PyQtGraph n'étant plus qu'un mode secondaire minimal, pas un second rendu complet à tenir à parité
 
 ---
 
@@ -239,6 +253,12 @@ Phases 5 et 6 parallélisables une fois la 4 finie. Tout le reste est séquentie
 
 **Total estimé** : **~21 semaines** à temps plein pour une v1.0 vendable (24 avant la coupe macOS). Le gain se répartit en ~1 semaine sur la phase 12, ~0,5 semaine sur la phase 0, et ~1,5 semaine diffuse de QA sur les phases UI (3, 6, 7, 11).
 
+> Estimation non recalculée depuis la réouverture de la phase 6 le
+> 2026-09-07 (rendu Matplotlib par défaut) : durée de la reprise inconnue
+> tant qu'elle n'est pas scopée. Le gain sur la phase 10 (~1 semaine, voir
+> plus bas) compense probablement une partie du surcoût, mais pas
+> nécessairement tout.
+
 ---
 
 ## Jalons de démo
@@ -260,7 +280,7 @@ Phases 5 et 6 parallélisables une fois la 4 finie. Tout le reste est séquentie
 | Risque | Impact | Mitigation |
 |---|---|---|
 | Console qui contourne le bus d'undo | Réécriture de la couche métier | Règle « aucune mutation hors commande » testée automatiquement dès phase 2 |
-| Divergence PyQtGraph / Matplotlib | Rendu écran ≠ rendu export | Couche `PlotSpec` neutre conçue en phase 6 |
+| Divergence rendu écran / export | Rendu écran ≠ rendu export | Depuis le 2026-09-07, Matplotlib est le rendu par défaut des deux — le risque de divergence ne subsiste que pour le mode secondaire « vue directe » PyQtGraph, minimal par construction. Couche `PlotSpec` neutre (conçue en phase 6) conservée comme mitigation |
 | Drag & drop Wayland | Fonction cassée sur Fedora, la machine cible | Test dès le début de la phase 7 ; `xcb` déjà forcé par défaut sous Wayland |
 | Format HDF5 non versionné | Projets utilisateurs illisibles après update | Version de schéma + migration dès phase 4 |
 | Packaging découvert tard | Semaines perdues en fin de projet | Build Windows + Linux en CI dès la phase 0 |
@@ -354,3 +374,60 @@ Sous XWayland, la mise à l'échelle **fractionnaire** (125 %, 150 %) est rendue
 ### Condition de retour à Wayland
 
 Lancer avec `QT_QPA_PLATFORM=wayland`, détacher un dock, le déplacer. Si ça fonctionne, Qt a câblé le protocole : **inverser le défaut** dans `select_linux_platform()` et garder `xcb` en repli. Le choix est délibérément réversible en une ligne — c'est ce qui l'a fait préférer à l'amputation du flottement des docks. À réévaluer en phase 12.
+
+---
+
+## Rendu par défaut : Matplotlib au lieu de PyQtGraph (décision 2026-09-07)
+
+Revient sur une partie de la phase 6 (livrée le 2026-09-05) après une
+session de test manuel du jalon v0.3. Raisonnement complet et trace des
+tests empiriques dans `docs/decision-rendu-matplotlib-2026-09-07.md` ; ce
+qui suit est la décision elle-même, pour qui doit l'appliquer sans relire
+tout le rapport.
+
+### La décision
+
+- **Matplotlib devient le rendu par défaut**, complet : légende, couleurs
+  fines, axes, grille, outils — tout ce qu'expose déjà le panneau
+  Properties (`plot_properties.py`, inchangé dans son principe : il édite
+  `PlotSpec`, jamais un renderer directement).
+- **PyQtGraph devient un mode secondaire, « vue directe »**, réservé à
+  l'acquisition live/streaming — volontairement minimal (pas de gestion
+  fine de la légende, des couleurs, des axes, de la grille, pas d'outils).
+  Usage estimé à 0,5 % des cas.
+- Bascule **manuelle**, dans le menu options, délibérément peu visible —
+  pas de bouton de barre d'outils.
+- À construire **avant la phase 7**, en rouvrant la phase 6.
+
+### Pourquoi (résumé — détail dans le rapport)
+
+L'architecture d'origine séparait les deux moteurs sur une hypothèse de
+fluidité : PyQtGraph rapide en interaction (pan/zoom/réticule/live) grâce à
+son mode de rendu retenu (`QGraphicsView`), Matplotlib trop coûteux au même
+usage à cause de son redessin complet par interaction. Des tests réels sur
+les données de l'utilisateur ont contredit le couplage volume/fluidité
+supposé : à 700 courbes × 400 points, les deux moteurs décrochent pareil
+(coût par **nombre d'objets graphiques**, pas par nombre de points) ; à 20
+courbes, les deux sont fluides. L'écart qui justifiait deux moteurs séparés
+ne se manifeste pas à l'échelle réelle des données visées (spectro,
+cinétique). Le seul avantage technique confirmé de PyQtGraph qui survit à
+ce constat est un déchargement GPU réel (`useOpenGL=True`), que Matplotlib
+n'a pas en usage standard — d'où son maintien, ciblé sur le cas qui en a
+vraiment besoin (acquisition live sur matériel modeste), plutôt que sa
+suppression pure et simple.
+
+### Asymétrie d'effort
+
+Le repli PyQtGraph est déjà construit (phase 6, testé, débogué le
+2026-09-07). Le rendu Matplotlib interactif par défaut (pan/zoom, réticule,
+rebranchement live sur le panneau Properties) n'existe pas encore — c'est
+le vrai chantier, pas le repli.
+
+### Conséquences déjà répercutées dans ce document
+
+Phase 6 rouverte (ci-dessus), phase 10 réduite à l'habillage export
+(ci-dessus), ligne « Divergence » de la table des risques mise à jour.
+Reste à trancher **avec** l'implémentation, pas avant : comportement du
+panneau Properties en vue directe (contrôles grisés ou inertes), et
+persistance ou non du mode d'affichage dans le `.plx` (piste : jamais
+persisté).

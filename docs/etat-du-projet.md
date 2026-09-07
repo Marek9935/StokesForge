@@ -105,10 +105,22 @@ Taux mesuré sur le corpus réel : **202/209 (96,7 %)**. Les 7 échecs sont des 
 
 | Décision | Raison |
 |---|---|
-| Couche **`PlotSpec` neutre**, dont PyQtGraph est le premier renderer | Deux moteurs de rendu (écran et export publication) divergent inévitablement s'ils ont chacun leur modèle. Conçue en phase 6 et non en phase 10, comme le plan l'exigeait |
+| Couche **`PlotSpec` neutre**, dont PyQtGraph était le premier renderer | Deux moteurs de rendu (écran et export publication) divergent inévitablement s'ils ont chacun leur modèle. Conçue en phase 6 et non en phase 10, comme le plan l'exigeait |
 | `PlotSpec` **immuable** | Modifier = calculer un nouveau spec. Une seule commande `SetPlotSpecCommand`, dont le delta d'annulation est l'ancien spec : un graphe de 10 séries d'un million de points coûte à la pile d'undo le prix d'un graphe vide |
 | Série = **référence par clé**, jamais une copie des données | Mise à jour automatique quand la donnée change |
 | Série orpheline = **état de première classe** | Une colonne supprimée ne fait ni planter ni disparaître la série : elle est signalée, reste modifiable, et se répare à l'`undo` |
+
+> **Rendu par défaut changé le 2026-09-07** : Matplotlib remplace PyQtGraph
+> comme rendu par défaut (légende, couleurs, axes, grille, outils
+> complets) ; PyQtGraph devient un mode secondaire minimal, « vue directe »,
+> pour l'acquisition live uniquement — bascule manuelle, peu visible. Motif :
+> des tests réels ont montré que l'écart de fluidité qui justifiait deux
+> moteurs séparés ne se manifeste pas à l'échelle de données de
+> l'utilisateur ; le seul avantage de PyQtGraph qui survit au constat est un
+> déchargement GPU réel (`useOpenGL`) dont Matplotlib est dépourvu. Phase 6
+> rouverte pour reconstruire le rendu par défaut sur Matplotlib avant la
+> phase 7. Détail complet : `docs/decision-rendu-matplotlib-2026-09-07.md`
+> et la section dédiée de `ROADMAP.md`.
 
 ---
 
@@ -151,6 +163,7 @@ Il avait été désarmé pour un SIGSEGV de fin de session attribué au `gc.coll
 | `folder or self._root` | `Project.add` | `Folder` définit `__len__` : un dossier **vide est falsy**, donc tout objet rangé dedans atterrissait à la racine |
 | `if sheet` / `if column` | `Project.path_of` | Même piège, deuxième occurrence : une feuille ou colonne vide n'était pas adressable par chemin |
 | `min(at, len(column))` | `Worksheet.insert_rows` | Allongeait d'un NaN toute colonne trop courte, quand `delete_rows` l'ignorait : les deux primitives n'étaient pas inverses, ce qui les tenait hors du bus |
+| `reload()` synchrone sur `structure_changed` | `PlotPropertiesPanel._on_structure_changed` | `editingFinished` d'un `QLineEdit` (titre du graphe, titre/unité d'un axe) part encore sur la pile C++ de `keyPressEvent` ; le panneau reconstruisait `_body` depuis ce même signal, détruisant le widget qui le traitait — use-after-free, plantage réel constaté en test manuel (2026-09-07). Corrigé en différant d'un tick d'événements, comme `GraphWindow.refresh` |
 
 Le piège du conteneur *falsy* s'est manifesté **deux fois**, malgré un commentaire d'avertissement dans le fichier même. À traiter comme un motif connu, pas comme deux accidents.
 
@@ -166,6 +179,8 @@ Le piège du conteneur *falsy* s'est manifesté **deux fois**, malgré un commen
 | **Poids du binaire** | 544 Mo mesurés, contre 150–300 Mo annoncés dans le document d'architecture |
 | **Détachement d'un graphe sur un second écran** | Piste retenue : une seconde `QMainWindow` en plein écran sur un `QScreen` choisi, plutôt qu'un arrachage à la souris — `showFullScreen()` n'exige pas de positionner la fenêtre. À traiter avec la phase 11 |
 | **Fragilité Shiboken en test** | Un SIGSEGV reproductible en construisant un `QDropEvent` réel en Python (code de production hors de cause), contourné par `Mock`. Deuxième signal du genre ; un troisième ferait un motif |
+| **Sous-fenêtre MDI orpheline** | Supprimer un `Worksheet`/`Graph` depuis l'explorateur ne ferme pas sa sous-fenêtre si elle est ouverte : `MainWindow` ne s'abonne nulle part à `structure_changed` du projet. Vérifié réel le 2026-09-07, délibérément reporté. À trancher avec le correctif : un `undo` de la suppression doit-il rouvrir la sous-fenêtre ? |
+| **Rendu Matplotlib par défaut** | Phase 6 rouverte le 2026-09-07 (§3.5) — reconstruire pan/zoom/réticule/édition live sur Matplotlib, PyQtGraph relégué en mode secondaire minimal. Reste à trancher avec l'implémentation : panneau Properties grisé ou inerte en vue directe ; persistance ou non du mode d'affichage dans le `.plx` |
 
 ---
 
