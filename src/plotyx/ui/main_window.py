@@ -624,7 +624,13 @@ class MainWindow(QMainWindow):
         graph_menu.addAction(self._plot_action)
         self._graph_menu = graph_menu
 
+        # Chaque menu est retenu côté Python. Un `QMenu` créé par `addMenu`
+        # appartient au C++ ; laisser tomber la référence Python libère son
+        # wrapper Shiboken, et une allocation suivante réutilisant l'adresse
+        # se retrouve associée au mauvais type. C'est la « fragilité
+        # Shiboken » de l'état du projet, §6 — pas cher à éviter.
         view_menu = self.menuBar().addMenu("&Affichage")
+        self._view_menu = view_menu
         view_menu.addAction(self._collapse_explorer_action)
         view_menu.addSeparator()
         view_menu.addAction(self._project_explorer_dock.toggleViewAction())
