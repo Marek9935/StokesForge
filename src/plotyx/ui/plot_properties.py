@@ -169,9 +169,23 @@ class PlotPropertiesPanel(QWidget):
         self._project_conn.disconnect()
 
     def _on_structure_changed(self, event: Any) -> None:
-        """Le graphe a changé (y compris par un `undo`) : on se relit."""
+        """Le graphe a changé (y compris par un `undo`) : on se relit.
+
+        Différé par le même `_reload_timer` que `_on_project_changed`, et
+        pour une raison plus grave qu'une simple coalescence ici : cette
+        notification part typiquement **pendant** `editingFinished` d'un
+        `QLineEdit` du panneau lui-même (`_push`/`_push_title` poussent la
+        commande depuis ce signal). Un `reload()` synchrone détruirait ce
+        widget alors que Qt traite encore son propre événement — c'est le
+        crash constaté en usage réel à l'édition du titre du graphe et du
+        titre d'un axe (les tests qui déclenchent `editingFinished` par
+        `.emit()` direct ne le reproduisaient pas : seul un vrai cycle
+        d'événements Qt, focus perdu par clic/Tab/Entrée, l'exhibe). Voir
+        `GraphWindow.refresh`, jamais synchrone pour la même famille de
+        raisons.
+        """
         if event.kind in ("plot_spec_changed", "node_renamed"):
-            self.reload()
+            self._reload_timer.start()
 
     def _on_project_changed(self, event: Any) -> None:
         """Une colonne a bougé : l'état « référence rompue » a pu changer."""

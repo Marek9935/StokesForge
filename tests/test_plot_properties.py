@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import shiboken6
+from PySide6.QtCore import Qt
 
 from plotyx.commands import CommandBus, DeleteColumnCommand
 from plotyx.commands.guard import mutation_guard
@@ -139,6 +141,25 @@ def test_axis_controls_reach_the_spec(panel):
     assert not panel_spec.left.auto_range
 
 
+def test_editing_an_axis_title_survives_its_own_qt_event(panel, qtbot):
+    """Plantage réel reproduit : éditer le titre d'un axe au clavier.
+
+    `label.editingFinished.emit()` (utilisé ci-dessus) appelle le slot en
+    Python pur, hors de tout traitement Qt réel, et ne reproduit pas le
+    plantage. `QTest.keyClick(..., Qt.Key.Key_Return)` fait émettre
+    `editingFinished` **depuis `QLineEdit::keyPressEvent`, encore sur la
+    pile d'appels C++** — exactement l'état dans lequel un `reload()`
+    synchrone (avant correctif) détruisait ce widget pendant que Qt
+    finissait de le traiter.
+    """
+    _project, _sheet, graph, _bus, widget = panel
+    label = _child(widget, "axis_bottom_labelEdit")
+    qtbot.keyClicks(label, "Temps")
+    qtbot.keyClick(label, Qt.Key.Key_Return)
+    assert shiboken6.isValid(label)  # pas détruit pendant son propre événement
+    qtbot.waitUntil(lambda: graph.plot_spec.panels[0].bottom.label == "Temps", timeout=1000)
+
+
 def test_axis_limits_are_pushed_and_used(panel):
     _project, _sheet, graph, _bus, widget = panel
     _child(widget, "axis_left_autoBox").setChecked(False)
@@ -171,6 +192,24 @@ def test_graph_title_panel_title_and_legend(panel):
     assert not graph.plot_spec.panels[0].legend.visible
 
 
+def test_editing_the_graph_title_survives_its_own_qt_event(panel, qtbot):
+    """Même plantage que `test_editing_an_axis_title_survives_its_own_qt_event`,
+    sur `_push_title` cette fois : `title.editingFinished` part depuis
+    `QLineEdit::keyPressEvent` (Entrée), toujours sur la pile C++, pendant
+    que `_push_title` pousse la commande qui va faire reconstruire (et donc
+    détruire) ce même widget.
+    """
+    _project, _sheet, graph, _bus, widget = panel
+    title = _child(widget, "plotTitleEdit")
+    original = title.text()
+    qtbot.keyClicks(title, " (campagne)")
+    qtbot.keyClick(title, Qt.Key.Key_Return)
+    assert shiboken6.isValid(title)  # pas détruit pendant son propre événement
+    qtbot.waitUntil(
+        lambda: graph.plot_spec.title == original + " (campagne)", timeout=1000
+    )
+
+
 def test_adding_a_panel_switches_the_selection_to_it(panel):
     _project, _sheet, graph, bus, widget = panel
     _child(widget, "plotAddPanelButton").click()
@@ -185,11 +224,11 @@ def test_adding_a_panel_switches_the_selection_to_it(panel):
     assert len(graph.plot_spec.panels) == 1
 
 
-def test_selecting_another_series_reloads_the_form(panel):
+def test_selecting_another_series_reloads_the_form(panel, qtbot):
     _project, sheet, graph, bus, widget = panel
     bus.push(add_series_command(graph, SeriesSpec(y_key=sheet.column("T").key, name="Deux")))
+    qtbot.waitUntil(lambda: _child(widget, "plotSeriesList").count() == 2, timeout=1000)
     listing = _child(widget, "plotSeriesList")
-    assert listing.count() == 2
     listing.setCurrentRow(1)
     assert widget.selected_series == graph.plot_spec.panels[0].series[1].id
     assert _child(widget, "seriesNameEdit").text() == "Deux"
@@ -218,21 +257,25 @@ def test_an_orphan_series_stays_listed_and_flagged(panel, qtbot):
     )
 
 
-def test_an_invisible_series_is_shown_in_parentheses(panel):
+def test_an_invisible_series_is_shown_in_parentheses(panel, qtbot):
     _project, _sheet, graph, bus, widget = panel
     series_id = graph.plot_spec.panels[0].series[0].id
     from plotyx.commands.plot import update_series_command
 
     bus.push(update_series_command(graph, series_id, visible=False))
-    assert _child(widget, "plotSeriesList").item(0).text().startswith("(")
+    # `_on_structure_changed` diffère la reconstruction d'un tick d'événements
+    # (voir son docstring) : le rechargement n'est pas encore fait ici.
+    qtbot.waitUntil(
+        lambda: _child(widget, "plotSeriesList").item(0).text().startswith("("), timeout=1000
+    )
 
 
-def test_the_panel_follows_an_undo_without_being_told(panel):
+def test_the_panel_follows_an_undo_without_being_told(panel, qtbot):
     """Le panneau n'a pas d'état propre : il se relit sur le signal du graphe."""
     _project, _sheet, graph, bus, widget = panel
     _child(widget, "seriesVisibleBox").setChecked(False)
     bus.undo()
-    assert _child(widget, "seriesVisibleBox").isChecked()
+    qtbot.waitUntil(lambda: _child(widget, "seriesVisibleBox").isChecked(), timeout=1000)
     assert graph.plot_spec.panels[0].series[0].visible
 
 
