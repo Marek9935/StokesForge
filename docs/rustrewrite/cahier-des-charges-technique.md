@@ -307,6 +307,14 @@ simplement le comportement correct d'une API à `Result`.
 `SetColumnType` reste le **seul** cas à snapshot de données documenté : la
 conversion de type est destructrice dans les deux sens.
 
+**Pas de coalescence.** Deux `SetCells` consécutifs sur la même colonne
+restent deux entrées distinctes dans l'historique — décidé le 2026-09-08,
+tranché plutôt que laissé ouvert. Le comportement « tableur » (fusionner
+des frappes successives en une seule entrée) exigerait un critère de
+regroupement (fenêtre de temps ? même cellule ? même appelant ?) qui
+n'apporte rien à ce socle et qui se décidera, si besoin, avec l'UI réelle
+où ces frappes ont lieu.
+
 ### 5.3 Macros — la discipline qui fait tenir l'hybride
 
 Une macro s'annule en rejouant ses entrées **strictement en ordre inverse
@@ -612,12 +620,16 @@ arrêtées : les rouvrir demanderait une raison nouvelle.
 4. **Interruption d'un script en boucle Python pure** (§8.2) — limite
    connue de CPython ; le mécanisme du §8.4 la contient sans la supprimer.
 
-**Questions non tranchées.**
+**Décisions différées sans risque pour le socle** — tranchées comme
+« pas ici », pas laissées ouvertes :
 
-- Coalescence des éditions consécutives dans une même colonne en une seule
-  entrée d'historique (comportement d'un tableur) : souhaitable, aucun
-  critère de regroupement arrêté.
-- Garder ou abandonner le mode « visualiseur léger » (ex-PyQtGraph) — son
-  seul argument différenciant (`useOpenGL`) n'est toujours activé nulle
-  part (`resume-decisions.md` §8).
-- Calendrier réel non chiffré.
+- **Coalescence des éditions** : explicitement écartée du socle, cf. §5.2.
+- **Mode « visualiseur léger »** (ex-PyQtGraph, garder ou abandonner) :
+  décidé le 2026-09-08 de reporter ce choix au chantier de l'UI réelle,
+  sans risque pour le socle — aucun crate ci-dessus n'en dépend, et son
+  seul argument différenciant (`useOpenGL`) n'est de toute façon toujours
+  activé nulle part aujourd'hui (`resume-decisions.md` §8). À trancher
+  quand l'UI se construira, pas avant.
+
+**Question non tranchée, hors architecture** : calendrier réel non
+chiffré.
