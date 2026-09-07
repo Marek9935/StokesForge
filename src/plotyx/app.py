@@ -7,10 +7,16 @@ from __future__ import annotations
 import os
 import sys
 
+import pyqtgraph as pg
 from PySide6.QtWidgets import QApplication
 from qt_material import apply_stylesheet
 
 from plotyx.ui.main_window import MainWindow
+
+#: Thème qt-material. Clair par défaut — axe de développement principal
+#: décidé le 2026-09-07 ; « dark_teal » reste utilisable en changeant cette
+#: seule constante si un thème sombre redevient nécessaire.
+DEFAULT_THEME = "light_teal.xml"
 
 
 def select_linux_platform(env: dict[str, str] | None = None) -> str | None:
@@ -63,9 +69,18 @@ def select_linux_platform(env: dict[str, str] | None = None) -> str | None:
 
 
 def create_application() -> QApplication:
-    """Crée (ou récupère) le `QApplication` et lui applique le thème."""
+    """Crée (ou récupère) le `QApplication` et lui applique le thème.
+
+    PyQtGraph a son propre système de couleurs, indépendant de la feuille
+    de style Qt : sans configuration explicite, un `GraphicsLayoutWidget`
+    garde son fond noir par défaut même sous un thème d'application clair.
+    On aligne les deux ici, au même point d'entrée, plutôt que dans
+    `plot_renderer.py` — `PlotSpec.background` reste prioritaire quand un
+    graphe fixe sa propre couleur (voir `PyQtGraphRenderer`).
+    """
     app = QApplication.instance() or QApplication(sys.argv)
-    apply_stylesheet(app, theme="dark_teal.xml")
+    apply_stylesheet(app, theme=DEFAULT_THEME)
+    pg.setConfigOptions(background="w", foreground="k")
     return app
 
 
