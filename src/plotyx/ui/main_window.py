@@ -239,6 +239,24 @@ class MainWindow(QMainWindow):
         dock.setWidget(tree)
         self._project_explorer_dock = dock
 
+        # Un classeur déroulé jusqu'aux colonnes, multiplié par plusieurs
+        # classeurs ouverts en même temps, rend l'arbre illisible. On garde
+        # le déroulement (utile pour retrouver une colonne) et on donne un
+        # moyen de tout réduire d'un coup plutôt que nœud par nœud.
+        self._collapse_explorer_action = QAction("Réduire tout", self)
+        self._collapse_explorer_action.setObjectName("collapseExplorerAction")
+        self._collapse_explorer_action.setToolTip(
+            "Replie tous les classeurs de l'explorateur de projet"
+        )
+        # Pas de QKeySequence.StandardKey pour ça : raccourci choisi, sans
+        # collision avec Fichier/Édition (voir l'en-tête du module).
+        self._collapse_explorer_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        self._collapse_explorer_action.setShortcutContext(
+            Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+        self._collapse_explorer_action.triggered.connect(tree.collapseAll)
+        tree.addAction(self._collapse_explorer_action)
+
     def _on_explorer_double_clicked(self, index) -> None:
         node = self._project_tree_model.node_at(index)
         if isinstance(node, Worksheet):
@@ -256,6 +274,8 @@ class MainWindow(QMainWindow):
         if node is None:
             return
         menu = QMenu()
+        menu.addAction(self._collapse_explorer_action)
+        menu.addSeparator()
         act_rename = menu.addAction("Renommer…")
         act_rename.triggered.connect(lambda: self._rename_node(node))
         act_delete = menu.addAction("Supprimer")
@@ -527,6 +547,8 @@ class MainWindow(QMainWindow):
         self._graph_menu = graph_menu
 
         view_menu = self.menuBar().addMenu("&Affichage")
+        view_menu.addAction(self._collapse_explorer_action)
+        view_menu.addSeparator()
         view_menu.addAction(self._project_explorer_dock.toggleViewAction())
         view_menu.addAction(self._properties_dock.toggleViewAction())
         view_menu.addAction(self._script_console_dock.toggleViewAction())
