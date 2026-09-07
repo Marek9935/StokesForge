@@ -15,13 +15,14 @@ workspace Cargo à la racine.
     d'UI n'est pas encore fait, voir plus bas).
 - **`docs/rustrewrite/`** — le plan et les décisions techniques :
   - [`cahier-des-charges-technique.md`](docs/rustrewrite/cahier-des-charges-technique.md) :
-    **le document qui fait foi sur l'architecture** — undo hybride, modèle
-    possédé par un acteur, rendu Matplotlib via PyO3, découpage en crates,
+    **le document qui fait foi sur l'architecture** du socle — undo hybride,
+    modèle possédé par un acteur, pont Rust ↔ Python, découpage en crates,
     avec les options écartées et leurs raisons.
-  - [`roadmap.md`](docs/rustrewrite/roadmap.md) : phases 0-4 (fondations,
-    modèle, bus de commandes/undo, persistance, coquille UI minimale) et le
-    répertoire des éléments déjà discutés pour l'UI réelle (à retravailler
-    entièrement en conversation le moment venu, pas phasée à l'avance).
+  - [`roadmap.md`](docs/rustrewrite/roadmap.md) : phases 0-5 — fondations,
+    modèle, bus de commandes/undo, persistance, coquille UI minimale, pont
+    Python. S'arrête au strict nécessaire pour ouvrir le chantier de
+    l'interface : ni système de graphes, ni UI réelle (celle-ci sera
+    retravaillée entièrement en conversation, pas phasée à l'avance).
   - [`resume-decisions.md`](docs/rustrewrite/resume-decisions.md) : le
     raisonnement complet du choix de portage (egui vs iced, PyO3 pour
     garder le renderer Matplotlib, etc.).

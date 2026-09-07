@@ -1,22 +1,30 @@
-# Roadmap Rust — jusqu'à la boucle complète (fenêtre + fichier + undo)
+# Roadmap Rust — le socle et le pont Python
 
 Statut : **étude, rien d'engagé**. Ce document ne remplace pas `ROADMAP.md`
-(Python/Qt, actif) — c'est le plan d'un portage éventuel.
+(Python/Qt, actif) — c'est le plan d'un portage éventuel. Il dit *quand* ;
+`cahier-des-charges-technique.md` dit *comment* et fait foi sur
+l'architecture.
 
-Phases 1-2 : le socle jugé « bas risque, portage mécanique » dans
-`resume-decisions.md` §7 — modèle de données, bus de commandes, undo/redo.
-Phases 3-4 : le prolongement logique décidé le 2026-09-07 pour valider ce
-socle en conditions réelles avant d'investir dans le confort visuel —
-persistance minimale puis coquille UI minimale, ensemble le premier jalon
-démontrable (« ça tourne, ça s'annule, ça se sauve »). Raisonnement complet
-de cet ordre en §5.
+**But de ce plan** : livrer le strict nécessaire pour **ouvrir le chantier
+de l'interface**, et rien de plus.
 
-Rien au-delà (docking, grille éditable, renderer Matplotlib embarqué,
-console de script, UI complète) n'est phasé ici — c'est le « vrai travail
-itératif » que `resume-decisions.md` renvoie à plus tard, et l'UI en
-particulier sera reprise entièrement en conversation au moment de la
-construire, pas planifiée à l'avance (§6 de ce document en garde une trace
-technique, pas un phasage).
+- Phases 1-2 : le socle jugé « bas risque, portage mécanique » dans
+  `resume-decisions.md` §7 — modèle, bus de commandes, undo/redo.
+- Phases 3-4 : persistance minimale puis coquille UI minimale — la
+  persistance passe avant l'UI parce qu'elle est le test le plus dur du
+  modèle, pas une fonctionnalité de confort (raisonnement en phase 3).
+- Phase 5 : le **pont Rust ↔ Python** — la tuyauterie, sans système de
+  graphes par-dessus.
+
+Le critère de fin est celui du §1.1 du cahier des charges : depuis un
+binaire empaqueté sur Linux et Windows, une cellule s'annule par Ctrl+Z, un
+fichier se rouvre à l'identique, **et un script Python lit une colonne sans
+copie, en écrit une autre via le bus, que Ctrl+Z annule.**
+
+Rien au-delà n'est phasé ici — système de graphes, surface `plotyx.api` v1,
+import, docking, grille éditable. L'UI en particulier sera reprise
+entièrement en conversation au moment de la construire (§7 en garde une
+trace technique, pas un phasage).
 
 Référence structurelle : `ROADMAP.md` phases 0-2 (Python), dont ce plan est
 la transposition Rust — même découpage, mêmes décisions quand elles tiennent
@@ -39,7 +47,7 @@ tout de suite, pas à la fin).
 | 0.5 | Un test smoke qui construit un `Project` vide et le détruit sans fuite (`cargo test`, éventuellement `miri` en CI optionnelle) | CI verte |
 
 > Pas de binaire packagé à ce stade (pas d'UI à empaqueter) — l'équivalent
-> `briefcase`/AppImage n'a de sens qu'une fois une UI choisie (§6), donc hors
+> `briefcase`/AppImage n'a de sens qu'une fois une UI choisie (§7), donc hors
 > périmètre de cette phase.
 
 **Sortie de phase** : trois crates qui compilent, testent en CI, sans aucune
@@ -103,7 +111,7 @@ générationnelle** (`slotmap` ou équivalent), pas des `Rc`:
   (`crossbeam-channel` ou callbacks enregistrés) rejoue le rôle de
   `dataChanged`/`structureChanged` ; la couche UI choisie plus tard
   s'abonne à ce canal — pas de traduction vers un event-loop UI décidée ici,
-  volontairement (dépend du choix UI, §6).
+  volontairement (dépend du choix UI, §7).
 
 ### 1.3 Ce qui ne se transpose pas tel quel
 
@@ -113,10 +121,10 @@ générationnelle** (`slotmap` ou équivalent), pas des `Rc`:
   emprunté deux fois panique plutôt que corrompre, ce qui est déjà une
   amélioration par rapport à l'équivalent Python silencieux).
 - Pas de `weakref` idiomatique en Rust — le rôle des références faibles de
-  `ObjectRegistry` (décision 4 phase 1 Python) est repris par la
-  génération de la clé d'arène (§1.1) : une clé dont la génération ne
-  correspond plus au slot est l'équivalent exact d'un `weakref` mort, sans
-  bibliothèque dédiée.
+  `ObjectRegistry` (décision 4 phase 1 Python) est repris par le `NodeId`
+  (§1.1, révisé) : une clé absente de l'arbre courant est l'équivalent
+  exact d'un `weakref` mort, sans bibliothèque dédiée. C'est ce que l'API
+  de script expose comme `BrokenReferenceError`.
 
 **Sortie de phase** : `cargo test` couvre `plotyx-core` à un niveau
 équivalent aux >85 % Python, zéro dépendance UI dans le crate (vérifié par
@@ -125,12 +133,25 @@ un test qui échoue si une dépendance non listée en whitelist apparaît dans
 
 ---
 
-## Phase 2 — Bus de commandes & Undo (≈1,5-2 semaines)
+## Phase 2 — Bus de commandes, Undo & acteur (≈2 semaines)
 
 **Objectif** : la même règle d'or que la phase 2 Python — **aucune mutation
 du modèle en dehors d'une commande** — sans `QUndoStack`, qui est une classe
 Qt et n'existe pas si le cœur reste sans dépendance Qt (cf. `resume-decisions.md`
 §3-4 : UI cible envisagée egui, pas cxx-qt).
+
+> **Révisé le 2026-09-08.** Deux points de cette phase sont remplacés par
+> `cahier-des-charges-technique.md`, qui fait foi :
+> - la pile n'est pas un `Vec<Box<dyn Command>>` homogène mais une pile à
+>   **deux natures d'entrée** (snapshot de structure / delta de données),
+>   cf. spec §2.1 et §5.1 — le §2.3 ci-dessous (durée de vie des objets
+>   supprimés) devient **sans objet** : l'ancien arbre retient l'objet ;
+> - la phase inclut désormais **l'acteur** (`plotyx-session`, spec §6) :
+>   c'est lui qui détient le `Project`, ce qui fait de la règle d'or une
+>   propriété de propriété plutôt qu'une convention testée.
+>
+> Restent valables tels quels : l'application avant empilement (§2.1), la
+> sémantique des macros (§2.1) et l'invariant lignes (§2.4).
 
 ### 2.1 Remplacement de `QUndoStack` — à construire, pas à importer
 
@@ -282,7 +303,8 @@ Volontairement pauvre — pas une ébauche de l'UI finale, un banc d'essai :
 
 - une fenêtre `egui`/`eframe` qui s'ouvre, une grille brute (pas
   d'éditique, pas de délégués) qui affiche une `Worksheet` ;
-- Ctrl+Z / Ctrl+Y câblés à la main sur `CommandBus::undo()`/`redo()` — **à
+- Ctrl+Z / Ctrl+Y (et Ctrl+Shift+Z) câblés à la main sur les requêtes
+  `Undo`/`Redo` de l'acteur — **à
   l'inverse de Qt, rien de tout ça n'existe avant d'être écrit.**
   `QUndoStack` + `QAction::Undo` donnaient le raccourci, le menu et son
   libellé (« Annuler *Renommer*… ») presque gratuitement dès que les
@@ -292,35 +314,71 @@ Volontairement pauvre — pas une ébauche de l'UI finale, un banc d'essai :
   avant qu'on les code ;
 - Ctrl+S / Ctrl+O câblés sur `save`/`load` (phase 3).
 
-**Sortie de phase** : le jalon démontrable — une fenêtre s'ouvre, on
-modifie une valeur, Ctrl+Z l'annule, Ctrl+S écrit un fichier, rouvrir ce
-fichier restitue l'état exact. Le docking, la grille éditable, le panneau
-Properties et le renderer restent hors de ce jalon (§5-6).
+**Sortie de phase** : une fenêtre s'ouvre, on modifie une valeur, Ctrl+Z
+l'annule, Ctrl+S écrit un fichier, rouvrir ce fichier restitue l'état
+exact. Ce n'est pas encore la fin du socle — il manque le pont Python
+(phase 5) pour que le chantier de l'interface puisse s'ouvrir. Le docking,
+la grille éditable, le panneau Properties et le système de graphes restent
+hors de ce jalon (§6-7).
 
 ---
 
-## 5 — Ce que ce plan ne couvre pas, volontairement
+## Phase 5 — Pont Rust ↔ Python (≈2-3 semaines)
 
-Conforme à `resume-decisions.md` §7 : au-delà d'ici, plus de portage
-mécanique ni de banc d'essai minimal, seulement du travail itératif à
-phaser plus tard si la piste avance :
+**Objectif** : la tuyauterie, éprouvée — **sans** système de graphes
+par-dessus. C'est la phase qui rend « Python accessible » avant d'ouvrir le
+chantier de l'interface. Spécification complète : `cahier-des-charges-technique.md`
+§8, qui fait foi.
 
-- arbre de projet exposé en UI, docking, grille éditable, panneau
-  Properties — le banc d'essai de la phase 4 n'en a volontairement aucun ;
-- pipeline PyO3 (renderer Matplotlib embarqué) et empaquetage d'un Python
-  figé par plateforme — indépendant, peut être mené en parallèle de la
-  phase 4 ou après, ne bloque rien d'elle ;
-- format de fichier `.plx` **final** (Zarr) — étudié séparément dans
-  `format-fichier-plx.md` ; la phase 3 ne construit qu'une frontière
-  provisoire, pas ce format ;
-- API de script — spécifiée dans `cahier-des-charges-api-script.md`,
-  s'appuie sur le bus de commandes (phase 2) *et* sur le pipeline PyO3
-  (non phasé) : elle ne peut être construite avant que les deux existent,
-  sous peine de deviner un contrat qu'il faudrait réécrire.
+Peut démarrer **en parallèle des phases 3-4** : `plotyx-python` ne dépend
+ni de la persistance ni de l'UI. Seule sa surface-témoin attend l'acteur de
+la phase 2.
+
+| # | Tâche | Verrou |
+|---|---|---|
+| 5.1 | Hello-world empaqueté **Linux + Windows** : binaire + interpréteur vendored + numpy | **avant tout le reste de la phase** |
+| 5.2 | Aller-retour de tableau mesuré **sur le harnais de 5.1**, avant d'écrire le vrai cycle de vie : emprunt sans copie Rust → numpy, copie numpy → Rust | après 5.1, avant 5.3 |
+| 5.3 | Cycle de vie de l'interpréteur : init paresseuse, pas de finalisation, `PYTHONHOME` embarqué | après 5.1 |
+| 5.4 | Thread de script : GIL relâché pendant l'attente de l'acteur, capture de `print`/tracebacks, interruption coopérative | après 5.3 et phase 2 |
+| 5.5 | Surface-témoin `resolve` / `column` / `set_column` / `undo` | après 5.4 |
+| 5.6 | Zone de saisie de script dans la coquille UI | après 5.5 et phase 4 |
+
+> ⚠️ **5.1 et 5.2 sont des verrous, pas des tâches.** L'empaquetage d'une
+> pile Python par plateforme est le risque le plus lourd de toute
+> l'architecture, et le budget de rendu du futur système de graphes repose
+> entièrement sur le zéro-copie de 5.2. Les découvrir en fin de phase
+> coûterait la phase entière — c'est le « point de vigilance n°3 » du
+> roadmap Python appliqué ici.
+
+**Sortie de phase — et sortie du socle** : le critère du §1.1 du cahier des
+charges. Un script tapé dans la fenêtre lit une colonne sans copie, en
+écrit une autre, et **Ctrl+Z annule ce qu'il a écrit**.
 
 ---
 
-## 6 — Notes techniques pour l'UI (mémoire, pas un phasage)
+## 6 — Ce que ce plan ne couvre pas, volontairement
+
+Au-delà d'ici, plus de socle : des chantiers qui se posent dessus, et dont
+les décisions sont déjà arrêtées (`cahier-des-charges-technique.md` §12)
+sans être planifiées :
+
+- **système de graphes** — `PlotSpec` neutre et renderer Matplotlib dans
+  l'interpréteur de la phase 5. Volontairement exclu du socle : la
+  tuyauterie doit être solide avant qu'on construise dessus ;
+- **surface `plotyx.api` v1** — `cahier-des-charges-api-script.md` ; la
+  surface-témoin de 5.5 en est un sous-ensemble strict, choisi pour
+  éprouver le pont, pas pour être utile ;
+- **UI réelle** — docking, grille éditable, panneau Properties ; la
+  coquille de la phase 4 n'en a volontairement rien ;
+- **format `.plx` final** (Zarr) — `format-fichier-plx.md` ; la phase 3 ne
+  construit qu'une frontière, pas ce format ;
+- **import de fichiers** — les 10 fixtures de
+  `legacy-python/tests/fixtures/import/` en sont la spécification le jour
+  venu.
+
+---
+
+## 7 — Notes techniques pour l'UI (mémoire, pas un phasage)
 
 L'UI sera retravaillée entièrement en conversation au moment de la
 construire — pas de phases figées à l'avance ici. Ce qui suit est le
