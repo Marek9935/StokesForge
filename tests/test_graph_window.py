@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PySide6.QtWidgets import QCheckBox
 
 from plotyx.commands import (
     AddColumnCommand,
@@ -229,12 +230,12 @@ def test_the_banner_reports_the_mode_and_the_broken_series_together(graphed):
 
 def test_the_crosshair_survives_a_change_of_engine(graphed):
     _project, _sheet, _graph, _bus, window = graphed
-    window._crosshair_box.setChecked(True)
+    window.set_crosshair(True)
     target = (
         RenderMode.FIGURE if window.render_mode is RenderMode.DIRECT else RenderMode.DIRECT
     )
     window.set_render_mode(target)
-    assert window.renderer.crosshair_enabled
+    assert window.crosshair_enabled
 
 
 def test_switching_to_the_same_mode_is_a_no_op(graphed):
@@ -259,18 +260,73 @@ def test_the_data_still_flows_after_a_change_of_engine(graphed):
 # -- interactions --------------------------------------------------------------------
 
 
-def test_the_crosshair_checkbox_drives_the_renderer(graphed):
+def test_the_toolbar_matches_the_engine(graphed):
+    """Matplotlib apporte sa barre standard ; le visualiseur léger, une barre minimale."""
     _project, _sheet, _graph, _bus, window = graphed
-    window._crosshair_box.setChecked(True)
-    assert window.renderer.crosshair_enabled
-    window._crosshair_box.setChecked(False)
-    assert not window.renderer.crosshair_enabled
+    if window.render_mode is RenderMode.FIGURE:
+        assert window._toolbar.objectName() == "graphNavigationToolbar"
+        labels = [action.text() for action in window._toolbar.actions() if action.text()]
+        assert {"Home", "Pan", "Zoom", "Save", "Curseurs"} <= set(labels)
+        # La barre Matplotlib affiche déjà les coordonnées : la fenêtre
+        # n'en pose pas une seconde.
+        assert window._coords is None
+    else:
+        assert window._toolbar.objectName() == "graphFallbackToolbar"
+        assert window._coords is not None
+
+
+def test_the_crosshair_toggles_from_either_toolbar(graphed):
+    _project, _sheet, _graph, _bus, window = graphed
+    window.set_crosshair(True)
+    assert window.crosshair_enabled
+    window.set_crosshair(False)
+    assert not window.crosshair_enabled
+
+
+def _crosshair_control(window):
+    """Le témoin « Curseurs » de la barre courante, quelle que soit sa forme."""
+    if window.render_mode is RenderMode.FIGURE:
+        return window._toolbar._crosshair_action
+    return window._toolbar.findChild(QCheckBox, "graphCrosshairBox")
+
+
+def test_the_toolbar_control_and_the_crosshair_stay_in_agreement(graphed):
+    """Un témoin qui ment sur l'état de ce qu'il commande est pire qu'aucun témoin."""
+    _project, _sheet, _graph, _bus, window = graphed
+    control = _crosshair_control(window)
+    control.setChecked(True)
+    assert window.crosshair_enabled
+    # Commandé d'ailleurs (API, bascule de moteur) : le témoin doit suivre.
+    window.set_crosshair(False)
+    assert not control.isChecked()
+    window.set_crosshair(True)
+    assert control.isChecked()
+
+
+def test_the_crosshair_control_survives_a_change_of_engine(graphed):
+    """La barre est reconstruite à la bascule : son témoin doit refléter l'état repris."""
+    _project, _sheet, _graph, _bus, window = graphed
+    window.set_crosshair(True)
+    target = (
+        RenderMode.FIGURE if window.render_mode is RenderMode.DIRECT else RenderMode.DIRECT
+    )
+    window.set_render_mode(target)
+    assert window.crosshair_enabled
+    assert _crosshair_control(window).isChecked()
 
 
 def test_the_coordinate_readout_follows_what_the_renderer_reports(graphed):
-    """La fenêtre ne suit plus la souris elle-même : elle reçoit un rappel."""
+    """La fenêtre ne suit plus la souris elle-même : elle reçoit un rappel.
+
+    Seul le visualiseur léger a une lecture à remplir — la barre
+    Matplotlib affiche la sienne. Le rappel doit malgré tout être inoffensif
+    dans les deux cas.
+    """
     _project, _sheet, _graph, _bus, window = graphed
     window._on_coords((1.5, -2.25))
+    if window._coords is None:
+        window._on_coords(None)  # ne doit pas lever
+        return
     assert "x = 1.5" in window._coords.text()
     assert "y = -2.25" in window._coords.text()
     # Hors de tout panneau : la lecture s'efface plutôt que de mentir.

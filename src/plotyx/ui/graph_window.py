@@ -22,6 +22,22 @@ ici : une scène `QGraphicsView` et un canevas Matplotlib ne le signalent pas
 de la même façon, et la fenêtre n'a pas à trancher entre les deux. Elle
 reçoit le résultat par `set_coords_callback`.
 
+## La barre d'outils appartient au moteur
+
+Même raison, poussée un cran plus loin. Matplotlib apporte sa
+`NavigationToolbar` standard — celle que tout utilisateur de Matplotlib
+sait déjà lire, avec l'historique des vues, la sélection rectangulaire et
+l'enregistrement de la figure — et sa propre lecture des coordonnées. La
+fenêtre la demande au renderer (`create_toolbar`) et n'en construit une
+que si celui-ci n'en a pas : c'est le cas du visualiseur léger, qui reçoit
+alors la barre minimale de `_build_fallback_toolbar` (réticule, recadrage,
+coordonnées).
+
+Conséquence pratique : la barre part et revient avec le moteur à chaque
+bascule. Le seul état à reporter à la main est le réticule — d'où la
+resynchronisation du témoin dans `set_crosshair`, sans quoi la case reste
+décochée devant un réticule bien visible.
+
 ## Mise à jour automatique
 
 C'est la contrepartie du « modèle de série = référence, jamais une copie »
@@ -124,33 +140,19 @@ class GraphWindow(QWidget):
         self._pending_full_render = True
         self._mode = RenderMode(mode)
         self._renderer: PlotRenderer = create_renderer(self._mode)
-        self._renderer.set_coords_callback(self._on_coords)
 
         self._banner = QLabel("")
         self._banner.setObjectName("graphBanner")
         self._banner.setWordWrap(True)
         self._banner.hide()
 
-        self._coords = QLabel("")
-        self._coords.setObjectName("graphCoords")
-        self._crosshair_box = QCheckBox("Curseurs")
-        self._crosshair_box.setObjectName("graphCrosshairBox")
-        self._crosshair_box.toggled.connect(self._on_crosshair_toggled)
-        auto_button = QPushButton("Ajuster")
-        auto_button.setObjectName("graphAutoRangeButton")
-        auto_button.setToolTip("Recadrer tous les panneaux sur les données")
-        auto_button.clicked.connect(self.auto_range)
-
-        toolbar = QHBoxLayout()
-        toolbar.setContentsMargins(4, 2, 4, 2)
-        toolbar.addWidget(self._crosshair_box)
-        toolbar.addWidget(auto_button)
-        toolbar.addStretch(1)
-        toolbar.addWidget(self._coords)
+        self._coords: QLabel | None = None
+        self._crosshair_box: QCheckBox | None = None
+        self._toolbar = self._build_toolbar()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(toolbar)
+        layout.addWidget(self._toolbar)
         layout.addWidget(self._banner)
         layout.addWidget(self._renderer.widget, 1)
         self._layout = layout
@@ -211,6 +213,52 @@ class GraphWindow(QWidget):
         spec = self._graph.plot_spec
         return spec if isinstance(spec, PlotSpec) else PlotSpec.empty(self._graph.name)
 
+    # -- barre d'outils ---------------------------------------------------------
+
+    def _build_toolbar(self) -> QWidget:
+        """La barre du moteur courant, ou celle de repli.
+
+        Matplotlib fournit la sienne — la `NavigationToolbar` standard, que
+        tout utilisateur de Matplotlib sait déjà lire, et qui apporte au
+        passage l'historique des vues et l'enregistrement de la figure. Le
+        visualiseur léger n'en a pas : il reçoit la barre minimale
+        ci-dessous, avec sa propre lecture des coordonnées (la barre
+        Matplotlib, elle, affiche les siennes toute seule).
+        """
+        toolbar = self._renderer.create_toolbar(self)
+        if toolbar is not None:
+            self._coords = None
+            self._crosshair_box = None
+            self._renderer.set_coords_callback(None)
+            return toolbar
+        return self._build_fallback_toolbar()
+
+    def _build_fallback_toolbar(self) -> QWidget:
+        """Barre minimale du visualiseur léger : réticule, recadrage, coordonnées."""
+        self._coords = QLabel("")
+        self._coords.setObjectName("graphCoords")
+        self._renderer.set_coords_callback(self._on_coords)
+
+        crosshair_box = QCheckBox("Curseurs")
+        crosshair_box.setObjectName("graphCrosshairBox")
+        crosshair_box.setChecked(self._renderer.crosshair_enabled)
+        crosshair_box.toggled.connect(self.set_crosshair)
+        self._crosshair_box = crosshair_box
+        auto_button = QPushButton("Ajuster")
+        auto_button.setObjectName("graphAutoRangeButton")
+        auto_button.setToolTip("Recadrer tous les panneaux sur les données")
+        auto_button.clicked.connect(self.auto_range)
+
+        bar = QWidget(self)
+        bar.setObjectName("graphFallbackToolbar")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(4, 2, 4, 2)
+        row.addWidget(crosshair_box)
+        row.addWidget(auto_button)
+        row.addStretch(1)
+        row.addWidget(self._coords)
+        return bar
+
     # -- cycle de vie ----------------------------------------------------------
 
     def disconnect_signals(self) -> None:
@@ -239,19 +287,23 @@ class GraphWindow(QWidget):
         self._stop_worker()
         old = self._renderer
         crosshair = old.crosshair_enabled
-        self._layout.removeWidget(old.widget)
         old.detach()
-        old.widget.setParent(None)
-        old.widget.deleteLater()
+        # La barre appartient au moteur (celle de Matplotlib est montée sur
+        # son canevas) : elle part avec lui, sans quoi elle piloterait un
+        # renderer détaché.
+        for widget in (old.widget, self._toolbar):
+            self._layout.removeWidget(widget)
+            widget.setParent(None)
+            widget.deleteLater()
 
         self._mode = mode
         self._renderer = create_renderer(mode)
-        self._renderer.set_coords_callback(self._on_coords)
+        self._toolbar = self._build_toolbar()
+        self._layout.insertWidget(0, self._toolbar)
         self._layout.addWidget(self._renderer.widget, 1)
-        self._coords.setText("")
         self.refresh_now(full=True)
         # Après le rendu : le réticule de PyQtGraph a besoin de ses panneaux.
-        self._renderer.set_crosshair(crosshair)
+        self.set_crosshair(crosshair)
 
     def _stop_worker(self) -> None:
         worker, self._worker = self._worker, None
@@ -366,13 +418,42 @@ class GraphWindow(QWidget):
         """Recadre tous les panneaux sur leurs données (zoom/pan remis à zéro)."""
         self._renderer.auto_range()
 
-    def _on_crosshair_toggled(self, enabled: bool) -> None:
+    def set_crosshair(self, enabled: bool) -> None:
+        """Affiche ou retire le réticule. Point d'entrée unique.
+
+        Les deux barres l'appellent — la case de la barre de repli comme le
+        bouton « Curseurs » de la barre Matplotlib — et la bascule de
+        moteur aussi, pour reporter l'état sur le nouveau renderer.
+
+        D'où la resynchronisation du témoin : après une bascule, la barre
+        vient d'être reconstruite sur un renderer neuf (réticule éteint),
+        puis l'état d'avant est reporté. Sans cette ligne, la case reste
+        décochée alors que le réticule est bien affiché — un témoin qui
+        ment sur ce qu'il commande. La barre Matplotlib se resynchronise de
+        la même façon, mais depuis son renderer (`sync_crosshair`), qui est
+        le seul à savoir qu'elle existe.
+        """
         self._renderer.set_crosshair(enabled)
-        if not enabled:
+        if self._crosshair_box is not None:
+            blocked = self._crosshair_box.blockSignals(True)
+            self._crosshair_box.setChecked(self._renderer.crosshair_enabled)
+            self._crosshair_box.blockSignals(blocked)
+        if not enabled and self._coords is not None:
             self._coords.setText("")
 
+    @property
+    def crosshair_enabled(self) -> bool:
+        return self._renderer.crosshair_enabled
+
     def _on_coords(self, position: tuple[float, float] | None) -> None:
-        """Affiche les coordonnées sous le curseur, rapportées par le renderer."""
+        """Affiche les coordonnées sous le curseur, rapportées par le renderer.
+
+        Branché uniquement quand la fenêtre porte la barre de repli : la
+        barre Matplotlib affiche déjà les siennes, et deux lectures côte à
+        côte ne vaudraient pas mieux qu'une.
+        """
+        if self._coords is None:
+            return
         if position is None:
             self._coords.setText("")
             return

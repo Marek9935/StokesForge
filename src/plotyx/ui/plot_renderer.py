@@ -206,6 +206,17 @@ class PyQtGraphRenderer:
     def set_coords_callback(self, callback: Callable[..., None] | None) -> None:
         self._coords = callback
 
+    def create_toolbar(self, parent: Any = None) -> None:
+        """Aucune barre propre : `GraphWindow` pose la sienne, minimale.
+
+        PyQtGraph n'a pas d'équivalent de la `NavigationToolbar` de
+        Matplotlib, et lui en écrire une irait contre ce que ce mode est —
+        volontairement pauvre. Le zoom à la molette et le déplacement au
+        glissé sont de toute façon natifs dans une `ViewBox`, sans qu'aucun
+        outil ait à être armé.
+        """
+        return None
+
     # -- rendu complet --------------------------------------------------------
 
     def render(self, resolved: ResolvedPlot) -> None:

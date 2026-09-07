@@ -27,22 +27,36 @@ figure par graphe ouvert.
 
 ## Interactions
 
-Matplotlib intégré à Qt n'apporte pas d'interaction par défaut : sans la
-`NavigationToolbar`, un canevas est inerte, et *avec* elle il faut d'abord
-armer un outil avant de pouvoir déplacer la vue. On câble donc directement
-les gestes attendus d'un graphe scientifique, ceux que PyQtGraph offrait
-sans rien demander :
+La barre d'outils est la **`NavigationToolbar` standard de Matplotlib**
+(`create_toolbar`) : Home / Back / Forward, Pan, Zoom rectangle, réglage
+des marges, éditeur d'axes et de courbes, enregistrement de la figure, et
+sa propre lecture des coordonnées. C'est le vocabulaire que connaît
+quiconque a déjà utilisé Matplotlib, et il apporte au passage un export
+d'image avant l'heure (phase 10).
+
+Deux écarts assumés, tous deux dans `PlotNavigationToolbar` :
+
+* **Home recadre sur les données** au lieu de restaurer la vue initiale.
+  La vue initiale d'origine devient fausse dès que les données changent —
+  or ici elles changent tout le temps, c'est le principe même du « modèle
+  de série = référence ». Home reprend donc le rôle de l'ancien bouton
+  « Ajuster ».
+* **Un bouton « Curseurs » est ajouté** : le réticule n'a pas d'équivalent
+  standard, et le perdre aurait été une régression.
+
+S'y ajoutent deux gestes que la barre ne couvre pas, actifs **seulement
+quand aucun de ses outils n'est armé** — sans quoi ils se battraient avec
+le Pan et le rectangle de zoom :
 
 * **molette** → zoom centré sur le curseur, axe par axe, correct en
   échelle logarithmique (le facteur s'applique dans l'espace transformé) ;
 * **glissé bouton gauche** → déplacement, délégué à `Axes.start_pan` /
-  `drag_pan` / `end_pan`, l'API publique que la barre de navigation utilise
-  elle-même — elle traite les axes log et inversés sans cas particulier ;
-* **survol** → coordonnées données et réticule.
+  `drag_pan` / `end_pan`, l'API publique que la barre utilise elle-même —
+  elle traite les axes log et inversés sans cas particulier.
 
-Un geste de zoom ou de déplacement **désarme le recadrage automatique** de
-l'axe concerné, comme le fait une `ViewBox` PyQtGraph ; le bouton
-« Ajuster » (`auto_range`) le réarme.
+Un geste de zoom ou de déplacement, d'où qu'il vienne, **désarme le
+recadrage automatique** de l'axe concerné, comme le fait une `ViewBox`
+PyQtGraph ; `auto_range` (donc Home) le réarme.
 
 ## Le réticule est *blitté*
 
@@ -66,8 +80,10 @@ from typing import Any
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QWidget
 
 from plotyx.plot.resolve import ResolvedPlot, ResolvedSeries, bar_width, histogram
 from plotyx.plot.spec import (
@@ -82,7 +98,13 @@ from plotyx.plot.spec import (
     SymbolShape,
 )
 
-__all__ = ["MatplotlibRenderer", "line_style", "marker_of", "new_canvas"]
+__all__ = [
+    "MatplotlibRenderer",
+    "PlotNavigationToolbar",
+    "line_style",
+    "marker_of",
+    "new_canvas",
+]
 
 #: Vocabulaire neutre → styles de trait Matplotlib. Table unique, cf. docstring.
 _LINE_STYLES: dict[LineStyle, str] = {
@@ -165,6 +187,92 @@ def _scaled_range(low: float, high: float, focus: float, factor: float, log: boo
     return new_low, new_high
 
 
+#: Info-bulles de la barre standard, en français. Clés = libellés
+#: Matplotlib. Un libellé absent (version différente, outil ajouté) est
+#: simplement laissé tel quel : traduire ne doit jamais casser la barre.
+_TOOLBAR_TOOLTIPS: dict[str, str] = {
+    "Home": "Recadrer tous les panneaux sur les données",
+    "Back": "Vue précédente",
+    "Forward": "Vue suivante",
+    "Pan": (
+        "Bouton gauche : déplacer · bouton droit : zoomer\n"
+        "x/y limite à un axe, Ctrl conserve le rapport"
+    ),
+    "Zoom": "Zoom sur un rectangle\nx/y limite à un axe",
+    "Subplots": "Régler les marges et l'espacement des panneaux",
+    "Customize": "Éditer les axes, les courbes et les images",
+    "Save": "Enregistrer la figure en image",
+}
+
+
+class PlotNavigationToolbar(NavigationToolbar2QT):
+    """La barre Matplotlib standard, avec deux ajustements.
+
+    Le parti pris est de **ne pas réinventer** ce que l'utilisateur connaît
+    déjà : Home / Back / Forward, Pan, Zoom rectangle, marges, éditeur
+    d'axes, enregistrement, et la lecture des coordonnées de la barre
+    elle-même. Seuls deux points sont touchés, chacun pour une raison
+    précise.
+
+    **`home` recadre sur les données.** Le Home d'origine restaure la vue
+    telle qu'elle était au premier affichage. Ici, les séries sont des
+    *références* : un import, une saisie ou un `undo` changent les données
+    sous le graphe, et cette vue initiale devient une position arbitraire
+    du passé. Le bouton reprend donc le rôle de l'ancien « Ajuster », et
+    la vue obtenue est empilée pour que Back y ramène.
+
+    **Un bouton « Curseurs »** est ajouté : le réticule n'a pas
+    d'équivalent dans la barre standard, et le perdre en adoptant celle-ci
+    aurait été une régression.
+    """
+
+    def __init__(
+        self,
+        canvas: FigureCanvasQTAgg,
+        renderer: MatplotlibRenderer,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(canvas, parent)
+        self.setObjectName("graphNavigationToolbar")
+        self._renderer = renderer
+        self._translate_tooltips()
+
+        # Inséré **avant** la dernière action, qui porte l'étiquette de
+        # coordonnées : celle-ci est collée à droite, et ajouter à la suite
+        # rejetterait le bouton loin des autres outils. `insertAction`
+        # accepte `None` comme repère et se comporte alors comme `addAction`,
+        # ce qui couvre le cas d'une barre construite sans coordonnées.
+        actions = self.actions()
+        before = actions[-1] if self.coordinates and actions else None
+        action = QAction("Curseurs", self)
+        action.setObjectName("graphCrosshairAction")
+        action.setCheckable(True)
+        action.setToolTip("Afficher un réticule suivant le curseur")
+        action.toggled.connect(renderer.set_crosshair)
+        self.insertSeparator(before)
+        self.insertAction(before, action)
+        self._crosshair_action = action
+
+    def _translate_tooltips(self) -> None:
+        for action in self.actions():
+            tooltip = _TOOLBAR_TOOLTIPS.get(action.text())
+            if tooltip:
+                action.setToolTip(tooltip)
+
+    def home(self, *args: Any) -> None:  # noqa: D102 - API Matplotlib
+        self._renderer.auto_range()
+        self.push_current()
+
+    def sync_crosshair(self, enabled: bool) -> None:
+        """Aligne le bouton sur l'état réel, sans le déclencher en retour.
+
+        Pas de garde contre la récurrence : `set_crosshair` sort tout de
+        suite quand l'état ne change pas, ce qui suffit à l'arrêter.
+        """
+        if self._crosshair_action.isChecked() != enabled:
+            self._crosshair_action.setChecked(enabled)
+
+
 class MatplotlibRenderer:
     """Peint un `PlotSpec` résolu dans un `FigureCanvasQTAgg`.
 
@@ -196,7 +304,8 @@ class MatplotlibRenderer:
         self._coords: Callable[[float, float] | None, None] | None = None
         self._background: Any = None
         self._panning: Axes | None = None
-        self._has_stale_artists = False
+        self._toolbar: PlotNavigationToolbar | None = None
+        self._detached = False
         self._cids = [
             canvas.mpl_connect("draw_event", self._on_draw),
             canvas.mpl_connect("scroll_event", self._on_scroll),
@@ -253,15 +362,54 @@ class MatplotlibRenderer:
         return np.asarray(data.edges, dtype=float), np.asarray(data.values, dtype=float)
 
     def detach(self) -> None:
-        """Coupe tout : appelé à la fermeture ou au changement de moteur."""
-        for cid in self._cids:
-            self._canvas.mpl_disconnect(cid)
-        self._cids.clear()
+        """Coupe tout : appelé à la fermeture ou au changement de moteur.
+
+        **Idempotent, et la barre part en premier.** `Figure.clear()`
+        appelle `toolbar.update()` sur la barre que la `NavigationToolbar`
+        s'est inscrite dans `canvas.toolbar` à sa construction. Or à la
+        fermeture d'une sous-fenêtre MDI, Qt a déjà détruit la barre —
+        enfant du widget — quand `destroyed` nous ramène ici : nettoyer la
+        figure ferait alors toucher des `QAction` mortes. On désinscrit
+        donc la barre avant, ce qui rend le nettoyage sans effet de bord.
+        """
+        if self._detached:
+            return
+        self._detached = True
         self._coords = None
-        self._figure.clear()
+        self._toolbar = None
+        try:
+            for cid in self._cids:
+                self._canvas.mpl_disconnect(cid)
+            self._canvas.toolbar = None
+            self._figure.clear()
+        except RuntimeError:
+            # Canevas déjà détruit par Qt (sous-fenêtre `WA_DeleteOnClose`,
+            # dont `destroyed` nous amène ici) : rien à nettoyer.
+            pass
+        self._cids.clear()
 
     def set_coords_callback(self, callback: Callable[..., None] | None) -> None:
         self._coords = callback
+
+    # -- barre d'outils --------------------------------------------------------
+
+    def create_toolbar(self, parent: QWidget | None = None) -> PlotNavigationToolbar:
+        """La barre Matplotlib standard, montée sur ce canevas.
+
+        Un seul renderer la construit — le visualiseur léger n'a pas
+        d'équivalent et rend `None` (voir `plotyx.ui.renderers`).
+        """
+        self._toolbar = PlotNavigationToolbar(self._canvas, self, parent)
+        return self._toolbar
+
+    def _tool_is_armed(self) -> bool:
+        """Vrai si Pan ou Zoom est actif dans la barre.
+
+        Les gestes maison (molette, glissé) se taisent alors : deux
+        mécanismes de déplacement simultanés ne se partagent pas une souris,
+        et le rectangle de zoom serait purement et simplement cassé.
+        """
+        return self._toolbar is not None and bool(str(self._toolbar.mode))
 
     # -- rendu complet --------------------------------------------------------
 
@@ -303,6 +451,11 @@ class MatplotlibRenderer:
         if self._crosshair:
             self._build_crosshair()
         self._canvas.draw_idle()
+
+        # La pile de vues de la barre (Back/Forward) est remise à zéro par
+        # le `Figure.clear()` du début — Matplotlib y appelle lui-même
+        # `toolbar.update()`. Sans ça, Back ramènerait à des limites
+        # calculées sur des axes qui n'existent plus.
 
     # -- configuration d'un panneau -------------------------------------------
 
@@ -563,6 +716,7 @@ class MatplotlibRenderer:
 
     def set_crosshair(self, enabled: bool) -> None:
         """Affiche ou retire le réticule sur tous les panneaux."""
+        enabled = bool(enabled)
         if enabled == self._crosshair:
             return
         self._crosshair = enabled
@@ -573,6 +727,10 @@ class MatplotlibRenderer:
                 vline.remove()
                 hline.remove()
             self._crosshair_items.clear()
+        if self._toolbar is not None:
+            # Le réticule s'allume aussi par la fenêtre (bascule de moteur,
+            # API) : le bouton doit suivre, sinon il ment.
+            self._toolbar.sync_crosshair(enabled)
         self._canvas.draw_idle()
 
     def _build_crosshair(self) -> None:
@@ -642,6 +800,8 @@ class MatplotlibRenderer:
         index = self.panel_at(event.inaxes)
         if index is None or event.xdata is None or event.ydata is None:
             return
+        if self._tool_is_armed():
+            return
         factor = _ZOOM_STEP ** (-event.step)
         ax = event.inaxes
         ax.set_xlim(
@@ -657,6 +817,12 @@ class MatplotlibRenderer:
     def _on_press(self, event: Any) -> None:
         index = self.panel_at(event.inaxes)
         if index is None or event.button != 1:
+            return
+        if self._tool_is_armed():
+            # La barre prend la main. On note quand même que l'utilisateur
+            # cadre lui-même : le recadrage automatique doit se taire, que
+            # le geste vienne d'ici ou d'un outil de la barre.
+            self._auto[index] = [False, False]
             return
         self._panning = event.inaxes
         self._auto[index] = [False, False]

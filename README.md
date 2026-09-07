@@ -11,8 +11,11 @@ Matplotlib** sont en place : saisie et collage dans une table, undo/redo,
 explorateur de projet, projets `.plx` avec autosave et récupération, import
 par registre de parseurs avec aperçu, et tracé interactif (nuage, ligne,
 points+ligne, barres, histogramme, barres d'erreur) en sous-fenêtre MDI,
-avec multi-panneaux, axes secondaires, légende, réticule, molette pour
-zoomer et glissé pour déplacer.
+avec multi-panneaux, axes secondaires et légende. La barre d'outils est
+celle de Matplotlib — Home, historique des vues, déplacement, zoom
+rectangle, éditeur d'axes, enregistrement de la figure — augmentée d'un
+bouton « Curseurs » ; la molette zoome et le glissé déplace sans avoir à
+armer d'outil.
 
 Un second moteur, **PyQtGraph**, reste accessible comme « visualiseur
 léger » — minimal, destiné à l'acquisition live, jamais enregistré dans le

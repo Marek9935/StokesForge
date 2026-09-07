@@ -86,6 +86,16 @@ class PlotRenderer(Protocol):
     def widget(self) -> QWidget:
         """Le widget à insérer dans la fenêtre."""
 
+    def create_toolbar(self, parent: QWidget | None = None) -> QWidget | None:
+        """La barre d'outils propre au moteur, ou `None` s'il n'en a pas.
+
+        Matplotlib rend sa `NavigationToolbar` standard — celle que
+        n'importe quel utilisateur de Matplotlib connaît déjà. PyQtGraph
+        rend `None` : son équivalent n'existe pas, et le visualiseur léger
+        est précisément l'endroit où l'on n'ajoute rien. `GraphWindow`
+        retombe alors sur sa barre minimale.
+        """
+
     @property
     def curves(self) -> dict[str, Any]:
         """Artistes « ligne » indexés par identifiant de série."""

@@ -188,11 +188,22 @@ l'implémentation a imposé :
    que l'architecture évite partout ailleurs — et interdirait de préparer
    une mise en forme pendant une acquisition. Un bandeau prévient à la
    place, pour que « pas encore visible » ne se lise pas « perdu ».
-8. **Le suivi de la souris descend dans le renderer.** Une scène
-   `QGraphicsView` et un canevas Matplotlib ne signalent pas un mouvement
-   de la même façon ; la fenêtre reçoit le résultat par un rappel
-   (`set_coords_callback`) au lieu d'arbitrer entre les deux. C'est ce qui
-   fait tenir `GraphWindow` sans un seul `isinstance` de moteur.
+8. **Le suivi de la souris et la barre d'outils descendent dans le
+   renderer.** Une scène `QGraphicsView` et un canevas Matplotlib ne
+   signalent pas un mouvement de la même façon ; la fenêtre reçoit le
+   résultat par un rappel (`set_coords_callback`) au lieu d'arbitrer entre
+   les deux. Même chose pour la barre : Matplotlib fournit sa
+   `NavigationToolbar` **standard** (`create_toolbar`), le visualiseur
+   léger n'en a pas et reçoit la barre minimale de `GraphWindow`. C'est ce
+   qui fait tenir la fenêtre sans un seul `isinstance` de moteur.
+   La barre standard apporte au passage l'historique des vues, la
+   sélection rectangulaire et l'enregistrement de la figure — l'export
+   d'image arrive donc avant la phase 10. Deux écarts assumés : `Home`
+   recadre sur les données plutôt que de restaurer la vue initiale (qui
+   devient fausse dès que les données changent, ce qui est ici la règle et
+   non l'exception), et un bouton « Curseurs » est ajouté, le réticule
+   n'ayant pas d'équivalent standard. Molette et glissé restent branchés
+   par-dessus, mais se taisent dès qu'un outil de la barre est armé.
 9. **Le réticule Matplotlib est blitté** (`animated=True` + `copy_from_bbox`).
    C'est le seul point où le redessin complet par interaction coûterait
    vraiment. Mesuré à 10⁶ points : **0,2 ms** par mouvement contre **107 ms**
