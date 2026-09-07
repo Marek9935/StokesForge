@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/plotyx-core",
+    "crates/plotyx-commands",
+    "crates/plotyx-cli",
+]
+
+[workspace.package]
+edition = "2021"
+
+[workspace.lints.clippy]
+all = "warn"

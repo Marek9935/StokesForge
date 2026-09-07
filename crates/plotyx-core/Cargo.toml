@@ -1,0 +1,13 @@
+[package]
+name = "plotyx-core"
+version = "0.0.0"
+edition.workspace = true
+description = "Modèle de données PlotYx (arbre de projet, colonnes) — zéro dépendance UI."
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+toml = "0.8"

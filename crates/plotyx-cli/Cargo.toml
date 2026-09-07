@@ -1,0 +1,12 @@
+[package]
+name = "plotyx-cli"
+version = "0.0.0"
+edition.workspace = true
+description = "Binaire headless de test — pas l'UI (pas encore choisie, voir docs/rustrewrite/roadmap.md §4)."
+
+[lints]
+workspace = true
+
+[dependencies]
+plotyx-core = { path = "../plotyx-core" }
+plotyx-commands = { path = "../plotyx-commands" }

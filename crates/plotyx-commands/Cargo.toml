@@ -1,0 +1,11 @@
+[package]
+name = "plotyx-commands"
+version = "0.0.0"
+edition.workspace = true
+description = "Bus de commandes annulables (undo/redo) sur plotyx-core."
+
+[lints]
+workspace = true
+
+[dependencies]
+plotyx-core = { path = "../plotyx-core" }
