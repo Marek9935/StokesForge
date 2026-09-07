@@ -33,6 +33,7 @@ from plotyx.core.project import Project
 from plotyx.plot import edit
 from plotyx.plot.resolve import histogram, prepare, resolve_spec
 from plotyx.plot.spec import PlotSpec, PlotType, SeriesSpec
+from plotyx.ui.mpl_renderer import MatplotlibRenderer, new_canvas
 from plotyx.ui.plot_renderer import PyQtGraphRenderer
 from plotyx.ui.plot_worker import ASYNC_POINT_THRESHOLD
 
@@ -188,3 +189,74 @@ def test_prepare_of_a_million_points_reports_progress(big_project):
     assert steps == [1.0]
     assert resolved.panels[0].series[0].histogram is not None
     print(f"\n[perf] prepare() sur {POINTS} points : {elapsed * 1000:.0f} ms")
+
+
+# -- le rendu par défaut : Matplotlib (décision 2026-09-07) --------------------------
+
+
+def test_first_render_of_a_million_points_on_matplotlib(big_project, big_spec, qtbot):
+    """Le chiffre qui a fait basculer le défaut, remis sous test.
+
+    Matplotlib n'a pas de `downsample` explicite : ce qui tient le coût est
+    `path.simplify`, actif par défaut, qui élimine au tracé les points
+    indiscernables à la résolution du canevas. Le test vérifie qu'il est
+    bien armé — le désactiver quelque part ferait exploser ce temps sans
+    qu'aucun autre test ne s'en aperçoive.
+    """
+    import matplotlib
+
+    project, _sheet = big_project
+    canvas = new_canvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(900, 600)
+    renderer = MatplotlibRenderer(canvas)
+
+    assert matplotlib.rcParams["path.simplify"] is True
+
+    start = time.perf_counter()
+    renderer.render(resolve_spec(project, big_spec))
+    canvas.draw()  # force la peinture, sinon on ne mesure que la construction
+    elapsed = time.perf_counter() - start
+
+    curve = next(iter(renderer.curves.values()))
+    # Aucune copie : l'artiste porte le million de points d'origine, c'est
+    # la rastérisation qui en peint moins.
+    assert curve.get_ydata().size == POINTS
+    assert elapsed < 5.0, f"premier rendu Matplotlib trop lent : {elapsed:.3f}s"
+    print(f"\n[perf] premier rendu Matplotlib de {POINTS} points : {elapsed * 1000:.0f} ms")
+
+
+def test_the_blitted_crosshair_is_far_cheaper_than_a_full_redraw(big_project, big_spec, qtbot):
+    """La justification du blit, mesurée plutôt que postulée.
+
+    C'est le point où le mode de rendu de Matplotlib (tout redessiner à
+    chaque interaction) coûterait vraiment : sans blit, chaque mouvement de
+    souris repeindrait la courbe entière. Le rapport mesuré ici est le seul
+    garde-fou contre un retour silencieux au `draw_idle`.
+    """
+    project, _sheet = big_project
+    canvas = new_canvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(900, 600)
+    renderer = MatplotlibRenderer(canvas)
+    renderer.render(resolve_spec(project, big_spec))
+    renderer.set_crosshair(True)
+
+    start = time.perf_counter()
+    canvas.draw()
+    full_draw = time.perf_counter() - start
+
+    renderer.move_crosshair(0, 1.0, 0.0)  # amorce la capture du fond
+    start = time.perf_counter()
+    for index in range(20):
+        renderer.move_crosshair(0, float(index), 0.0)
+    per_move = (time.perf_counter() - start) / 20
+
+    assert per_move < full_draw / 5, (
+        f"réticule non blitté ? {per_move * 1000:.1f} ms par mouvement "
+        f"contre {full_draw * 1000:.1f} ms pour un dessin complet"
+    )
+    print(
+        f"\n[perf] réticule blitté sur {POINTS} points : {per_move * 1000:.1f} ms "
+        f"par mouvement, contre {full_draw * 1000:.0f} ms pour un dessin complet"
+    )
