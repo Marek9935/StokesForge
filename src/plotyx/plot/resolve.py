@@ -56,6 +56,7 @@ __all__ = [
     "ResolvedPlot",
     "ResolvedSeries",
     "ComputeCancelled",
+    "bar_width",
     "histogram",
     "prepare",
     "resolve_column",
@@ -283,11 +284,28 @@ class ComputeCancelled(RuntimeError):
     """L'utilisateur a annulé la préparation d'un graphe."""
 
 
+def bar_width(x: np.ndarray, requested: float) -> float:
+    """Largeur des barres : celle demandée, sinon 80 % du pas médian.
+
+    Ici et pas dans un renderer : la déduction ne doit pas donner deux
+    largeurs différentes selon le moteur qui peint. C'est la même raison
+    qui a fait naître `PlotSpec` — tout ce qui n'est pas du vocabulaire de
+    moteur vit du côté neutre.
+    """
+    if requested > 0:
+        return float(requested)
+    if x is None or x.size < 2:
+        return 1.0
+    steps = np.diff(np.sort(x))
+    steps = steps[np.isfinite(steps) & (steps > 0)]
+    return float(np.median(steps) * 0.8) if steps.size else 1.0
+
+
 def histogram(values: np.ndarray, bins: int) -> tuple[np.ndarray, np.ndarray]:
     """Bornes et effectifs d'un histogramme, NaN exclus.
 
     Dans `plotyx.plot` — donc sans Qt — pour que le calcul soit testable
-    seul et réutilisable par le renderer Matplotlib de la phase 10.
+    seul et partagé par les deux renderers.
     """
     finite = values[np.isfinite(values)]
     if finite.size == 0:

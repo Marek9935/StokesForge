@@ -36,7 +36,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 
-from plotyx.plot.resolve import ResolvedPlot, ResolvedSeries, histogram
+from plotyx.plot.resolve import ResolvedPlot, ResolvedSeries, bar_width, histogram
 from plotyx.plot.spec import (
     AxisScale,
     AxisSide,
@@ -86,17 +86,6 @@ def pen_style(style: LineStyle) -> Qt.PenStyle:
 
 def symbol_of(shape: SymbolShape) -> str | None:
     return _SYMBOLS[SymbolShape(shape)]
-
-
-def _bar_width(x: np.ndarray, requested: float) -> float:
-    """Largeur des barres : celle demandée, sinon 80 % du pas médian."""
-    if requested > 0:
-        return requested
-    if x.size < 2:
-        return 1.0
-    steps = np.diff(np.sort(x))
-    steps = steps[np.isfinite(steps) & (steps > 0)]
-    return float(np.median(steps) * 0.8) if steps.size else 1.0
 
 
 class PyQtGraphRenderer:
@@ -305,7 +294,7 @@ class PyQtGraphRenderer:
             bar = pg.BarGraphItem(
                 x=series.x,
                 height=series.y,
-                width=_bar_width(series.x, spec.bar_width),
+                width=bar_width(series.x, spec.bar_width),
                 brush=pg.mkBrush(spec.line.color),
                 pen=pg.mkPen(spec.line.color),
             )
