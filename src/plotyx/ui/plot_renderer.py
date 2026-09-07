@@ -370,18 +370,25 @@ class PyQtGraphRenderer:
 
         Chemin rapide du « modèle de série = référence » : quand une valeur
         change dans la feuille, il n'y a ni item à recréer, ni axe à
-        reconfigurer — seulement des tableaux à repasser. Un changement de
-        structure (série ajoutée/supprimée, référence réparée par un undo)
-        rend `False` et l'appelant reconstruit.
+        reconfigurer — seulement des tableaux à repasser.
+
+        Trois cas rendent la main à `render` : le spec n'a jamais été rendu,
+        la structure a bougé (série ajoutée/supprimée, référence réparée par
+        un undo), ou le graphe contient des barres / barres d'erreur. Ce
+        dernier cas est un correctif : l'`ErrorBarItem` d'une série est un
+        item distinct de sa courbe, que ce chemin ne réécrivait pas — des
+        moustaches périmées restaient affichées à côté d'une courbe à jour.
         """
         if self._spec is None:
             return False
-        drawn = {
-            series.spec.id
-            for panel in resolved.panels
-            for series in panel.series
-            if series.spec.visible and series.ok and series.spec.plot_type is not PlotType.BAR
-        }
+        drawn: set[str] = set()
+        for panel in resolved.panels:
+            for series in panel.series:
+                if not (series.spec.visible and series.ok):
+                    continue
+                if series.spec.plot_type in (PlotType.BAR, PlotType.ERROR_BAR):
+                    return False
+                drawn.add(series.spec.id)
         if drawn != set(self._curves):
             return False
         for panel in resolved.panels:

@@ -335,6 +335,27 @@ def test_update_data_also_refreshes_a_histogram(data_project, scene):
     assert renderer.update_data(resolve_spec(project, spec)) is True
 
 
+@pytest.mark.parametrize("plot_type", [PlotType.BAR, PlotType.ERROR_BAR])
+def test_bars_and_error_bars_never_take_the_fast_path(data_project, scene, plot_type):
+    """Leurs items secondaires ne sont pas réécrits : ils resteraient périmés.
+
+    Correctif : l'`ErrorBarItem` d'une série est un item distinct de sa
+    courbe, et le chemin rapide ne réécrivait que la courbe — une saisie
+    dans la colonne d'erreur laissait des moustaches obsolètes à côté d'une
+    courbe à jour. Rendre la main à `render` est la seule réponse correcte
+    tant que ces items ne savent pas se mettre à jour.
+    """
+    project, sheet = data_project
+    _widget, renderer = scene
+    spec = _spec_with(
+        sheet,
+        plot_type,
+        y_error_key=sheet.column("E").key if plot_type is PlotType.ERROR_BAR else None,
+    )
+    _render(project, renderer, spec)
+    assert renderer.update_data(resolve_spec(project, spec)) is False
+
+
 # -- curseurs ------------------------------------------------------------------------------------
 
 
