@@ -35,7 +35,7 @@ tout de suite, pas à la fin).
 | 0.1 | Workspace Cargo multi-crates : `plotyx-core` (modèle, zéro dépendance UI), `plotyx-commands` (bus/undo), `plotyx-cli` (binaire de test headless) | `cargo build` vert, 3 crates |
 | 0.2 | `rustfmt` + `clippy -D warnings` en CI, sur le modèle du `ruff` déjà en place côté Python | Lint bloquant |
 | 0.3 | GitLab CI : build + test + clippy sur runner Linux, matrice Linux/Windows dès que 0.1 le permet | Pipeline |
-| 0.4 | Choix et verrouillage des crates de base : `uuid` (clés du registre), `slotmap` ou `generational-arena` (arène pour l'arbre, cf. §2 phase 1) | `Cargo.toml` figé |
+| 0.4 | Choix et verrouillage des crates de base — **voir `cahier-des-charges-technique.md` §4.1 : ni `slotmap` ni `uuid`**, l'undo hybride impose un `NodeId(u64)` monotone jamais réutilisé | `Cargo.toml` figé |
 | 0.5 | Un test smoke qui construit un `Project` vide et le détruit sans fuite (`cargo test`, éventuellement `miri` en CI optionnelle) | CI verte |
 
 > Pas de binaire packagé à ce stade (pas d'UI à empaqueter) — l'équivalent
@@ -53,6 +53,13 @@ dépendance UI dans `plotyx-core`.
 100 % testable sans UI.
 
 ### 1.1 Choix de structure — écart volontaire par rapport à Python
+
+> **Révisé le 2026-09-08** : la clé générationnelle proposée ci-dessous est
+> remplacée par un `NodeId(u64)` monotone jamais réutilisé — une arène à
+> réutilisation de slots entre en collision d'identité lors d'une
+> restauration par `undo`. Raisonnement complet et décision qui fait foi :
+> `cahier-des-charges-technique.md` §4.1. Le reste de cette section (une
+> arène plutôt que des `Rc`, l'arène tenant lieu de registre) reste valable.
 
 Le modèle Python utilise des références directes en mémoire (objets Qt-liés,
 signaux). En Rust, un arbre à parents/enfants avec références directes se
