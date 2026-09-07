@@ -410,3 +410,32 @@ def test_panel_at_and_data_coords(data_project, scene):
     outside = renderer.plot_items[0].sceneBoundingRect().bottomRight()
     outside.setX(outside.x() + 5000)
     assert renderer.panel_at(outside) is None
+
+
+# -- cycle de vie ---------------------------------------------------------------------
+
+
+def test_detaching_survives_a_widget_already_destroyed(data_project, qapp):
+    """Le cas normal à la fermeture, pas une bizarrerie.
+
+    Une sous-fenêtre MDI est `WA_DeleteOnClose` : Qt détruit l'arbre de
+    widgets **avant** d'émettre `destroyed`, et c'est ce signal qui déclenche
+    `GraphWindow.disconnect_signals`, donc `detach`. Nettoyer un objet C++
+    disparu n'a rien à nettoyer ; lever empêcherait la fermeture.
+
+    Le widget est construit hors de `qtbot` : celui-ci ferme ce qu'on lui
+    confie en fin de test, ce qui buterait ici sur l'objet détruit exprès.
+    """
+    import shiboken6
+
+    from plotyx.ui.plot_renderer import new_plot_widget
+
+    project, sheet = data_project
+    widget = new_plot_widget()
+    renderer = PyQtGraphRenderer(widget)
+    _render(project, renderer, _spec_with(sheet, PlotType.LINE))
+
+    shiboken6.delete(widget)
+    assert not shiboken6.isValid(widget)
+    renderer.detach()  # ne doit pas lever
+    renderer.detach()  # idempotent

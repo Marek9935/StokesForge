@@ -186,18 +186,22 @@ class PyQtGraphRenderer:
         émet un `RuntimeWarning` que le plugin `unraisableexception` a
         vocation à faire remonter (voir l'état du projet, §4). Autant ne
         pas le produire.
+
+        **Tolérant à un widget déjà mort**, ce qui est un cas courant et
+        non une bizarrerie : une sous-fenêtre MDI est `WA_DeleteOnClose`,
+        donc Qt détruit l'arbre de widgets *avant* d'émettre `destroyed`,
+        et c'est ce signal qui nous ramène ici. Nettoyer un objet C++
+        disparu n'a rien à nettoyer ; lever empêcherait la fermeture.
         """
         if self._detached:
             return
         self._detached = True
+        self._coords = None
         try:
             self._widget.scene().sigMouseMoved.disconnect(self._on_mouse_moved)
+            self._widget.clear()
         except (RuntimeError, TypeError):
-            # Scène déjà détruite : il n'y a plus rien à couper, et lever
-            # ici empêcherait la fenêtre de se fermer.
             pass
-        self._coords = None
-        self._widget.clear()
 
     def set_coords_callback(self, callback: Callable[..., None] | None) -> None:
         self._coords = callback
