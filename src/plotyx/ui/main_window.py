@@ -20,6 +20,14 @@ même titre que les feuilles, et le dock « Properties » — jusqu'ici un
 actif (`PlotPropertiesPanel`). Il se vide quand la sous-fenêtre active
 n'est pas un graphe : un panneau qui garderait à l'écran les propriétés
 d'une fenêtre qu'on ne regarde plus est pire qu'un panneau vide.
+
+Phase 6, réouverte le 2026-09-07 : un graphe se peint désormais avec
+Matplotlib par défaut, PyQtGraph n'étant plus qu'un « visualiseur léger »
+(`plotyx.ui.renderers`). Cette fenêtre en offre les deux entrées, toutes
+deux volontairement discrètes : « Ouvrir en visualiseur léger » dans le
+menu contextuel de l'explorateur, et une case dans le menu Options qui
+bascule la fenêtre de graphe **active**. Le mode n'est ni lu ni écrit dans
+le `.plx`, et n'a donc pas de défaut d'application à mémoriser.
 """
 
 from __future__ import annotations
@@ -65,6 +73,7 @@ from plotyx.ui.import_wizard import ImportWizardDialog
 from plotyx.ui.plot_actions import create_graph_from_columns
 from plotyx.ui.plot_properties import PlotPropertiesPanel
 from plotyx.ui.project_tree_model import ProjectTreeModel
+from plotyx.ui.renderers import DEFAULT_RENDER_MODE, RenderMode
 from plotyx.ui.worksheet_model import WorksheetTableModel
 from plotyx.ui.worksheet_view import WorksheetView
 
@@ -286,6 +295,17 @@ class MainWindow(QMainWindow):
         if isinstance(node, Column | Worksheet):
             act_plot = menu.addAction("Tracer dans un nouveau graphe")
             act_plot.triggered.connect(lambda: self._plot_nodes([node]))
+        if isinstance(node, Graph):
+            # Le seul chemin qui *ouvre* directement en vue directe. Le
+            # double-clic, lui, reste sur le rendu par défaut : c'est le
+            # geste courant, il ne doit pas dépendre d'un mode mémorisé.
+            act_light = menu.addAction("Ouvrir en visualiseur léger")
+            act_light.setToolTip(
+                "Rendu PyQtGraph, minimal mais direct — pour l'acquisition live"
+            )
+            act_light.triggered.connect(
+                lambda: self.open_graph(node, mode=RenderMode.DIRECT)
+            )
         menu.exec(self._project_tree.viewport().mapToGlobal(pos))
 
     def _rename_node(self, node) -> None:
@@ -333,15 +353,28 @@ class MainWindow(QMainWindow):
         sub_window.show()
         return sub_window
 
-    def open_graph(self, graph: Graph) -> QMdiSubWindow:
-        """Ouvre (ou ramène au premier plan) la sous-fenêtre d'un graphe."""
+    def open_graph(
+        self, graph: Graph, mode: RenderMode = DEFAULT_RENDER_MODE
+    ) -> QMdiSubWindow:
+        """Ouvre (ou ramène au premier plan) la sous-fenêtre d'un graphe.
+
+        `mode` choisit le moteur de rendu **à l'ouverture** ; il n'est ni
+        lu ni écrit dans le projet (voir `plotyx.ui.renderers`). Sur une
+        fenêtre déjà ouverte, demander l'autre mode la fait basculer plutôt
+        que d'en ouvrir une seconde : deux vues du même graphe côte à côte
+        seraient deux sources de vérité pour un seul `PlotSpec`.
+        """
         key = graph.key
         existing = self._open_graphs.get(key)
         if existing is not None:
+            view = existing.widget()
+            if isinstance(view, GraphWindow):
+                view.set_render_mode(mode)
             self._mdi_area.setActiveSubWindow(existing)
+            self._sync_light_view_action(existing)
             return existing
 
-        widget = GraphWindow(graph, self._project, self._bus)
+        widget = GraphWindow(graph, self._project, self._bus, mode=mode)
         sub_window = self._mdi_area.addSubWindow(widget)
         sub_window.setWindowTitle(f"[{graph.name}]")
         sub_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -419,6 +452,37 @@ class MainWindow(QMainWindow):
             self._show_properties_for(widget.graph)
         else:
             self._clear_properties_dock()
+        self._sync_light_view_action(sub_window)
+
+    # -- moteur de rendu (phase 6, réouverte le 2026-09-07) ------------------------
+
+    def _active_graph_window(self) -> GraphWindow | None:
+        active = self._mdi_area.activeSubWindow()
+        widget = active.widget() if active is not None else None
+        return widget if isinstance(widget, GraphWindow) else None
+
+    def _sync_light_view_action(self, sub_window: QMdiSubWindow | None) -> None:
+        """Aligne la case du menu sur la fenêtre active, sans la déclencher.
+
+        `setChecked` réémet `toggled` : sans la garde, activer une fenêtre en
+        vue directe ferait basculer... la fenêtre qu'on vient d'activer, et
+        un aller-retour entre deux graphes de modes différents les
+        contaminerait l'un l'autre.
+        """
+        widget = sub_window.widget() if sub_window is not None else None
+        graph_window = widget if isinstance(widget, GraphWindow) else None
+        self._light_view_action.setEnabled(graph_window is not None)
+        blocked = self._light_view_action.blockSignals(True)
+        self._light_view_action.setChecked(
+            graph_window is not None and graph_window.render_mode is RenderMode.DIRECT
+        )
+        self._light_view_action.blockSignals(blocked)
+
+    def _on_light_view_toggled(self, enabled: bool) -> None:
+        graph_window = self._active_graph_window()
+        if graph_window is None:
+            return
+        graph_window.set_render_mode(RenderMode.DIRECT if enabled else RenderMode.FIGURE)
 
     def _show_properties_for(self, graph: Graph) -> None:
         if self._properties_panel is not None:
@@ -523,6 +587,20 @@ class MainWindow(QMainWindow):
         )
         self._plot_action.triggered.connect(self._on_plot_action)
 
+        # Bascule du moteur de rendu. Volontairement discrète (décision du
+        # 2026-09-07) : dans un menu, jamais dans la barre d'outils, pour un
+        # usage estimé à 0,5 % des cas. L'état est celui de la fenêtre de
+        # graphe **active**, jamais un défaut d'application — un graphe
+        # d'acquisition et un graphe de dépouillement cohabitent.
+        self._light_view_action = QAction("&Visualiseur léger (vue directe)", self)
+        self._light_view_action.setObjectName("lightViewAction")
+        self._light_view_action.setCheckable(True)
+        self._light_view_action.setToolTip(
+            "Rendu PyQtGraph, minimal mais direct — pour l'acquisition live. "
+            "Jamais enregistré dans le projet."
+        )
+        self._light_view_action.toggled.connect(self._on_light_view_toggled)
+
     def _build_actions(self) -> None:
         self._undo_action: QAction = self._bus.stack.createUndoAction(self, "Annuler")
         self._undo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Undo))
@@ -552,6 +630,11 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self._project_explorer_dock.toggleViewAction())
         view_menu.addAction(self._properties_dock.toggleViewAction())
         view_menu.addAction(self._script_console_dock.toggleViewAction())
+
+        options_menu = self.menuBar().addMenu("&Options")
+        options_menu.addAction(self._light_view_action)
+        self._options_menu = options_menu
+        self._sync_light_view_action(None)
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Principale", self)

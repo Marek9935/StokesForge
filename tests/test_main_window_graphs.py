@@ -21,6 +21,7 @@ from plotyx.ui.graph_window import GraphWindow
 from plotyx.ui.main_window import MainWindow
 from plotyx.ui.plot_actions import create_graph_from_columns, plottable_columns
 from plotyx.ui.plot_properties import PlotPropertiesPanel
+from plotyx.ui.renderers import RenderMode
 
 
 def _project_with_data() -> Project:
@@ -268,3 +269,108 @@ def test_a_reopened_project_can_show_its_graphs_again(window, tmp_path):
     view: GraphWindow = window.open_graph(reloaded).widget()
     assert len(view.renderer.curves) == 2
     assert view.banner_text == ""
+
+
+# -- moteur de rendu : les deux entrées du visualiseur léger (2026-09-07) -----------
+
+
+def test_a_graph_opens_on_matplotlib_by_default(window):
+    sheet = window.project.resolve_path("[Book1]Sheet1")
+    graph = window._create_graph(list(sheet.columns))
+    view: GraphWindow = window._open_graphs[graph.key].widget()
+    assert view.render_mode is RenderMode.FIGURE
+    assert view.renderer.supports_full_styling
+
+
+def test_the_explorer_can_open_a_graph_straight_into_the_light_view(window):
+    """La seule entrée qui *ouvre* en vue directe, demandée au menu contextuel."""
+    graph = window.project.add_graph("G")
+    view: GraphWindow = window.open_graph(graph, mode=RenderMode.DIRECT).widget()
+    assert view.render_mode is RenderMode.DIRECT
+    assert "Visualiseur léger" in view.banner_text
+
+
+def test_reopening_an_open_graph_switches_it_instead_of_duplicating_it(window):
+    graph = window.project.add_graph("G")
+    first = window.open_graph(graph)
+    second = window.open_graph(graph, mode=RenderMode.DIRECT)
+    assert second is first
+    assert len(window._open_graphs) == 1
+    assert first.widget().render_mode is RenderMode.DIRECT
+
+
+def test_the_options_action_toggles_the_active_graph_window(window):
+    graph = window.project.add_graph("G")
+    sub = window.open_graph(graph)
+    window.mdi_area.setActiveSubWindow(sub)
+    assert window._light_view_action.isEnabled()
+    assert not window._light_view_action.isChecked()
+
+    window._light_view_action.setChecked(True)
+    assert sub.widget().render_mode is RenderMode.DIRECT
+    window._light_view_action.setChecked(False)
+    assert sub.widget().render_mode is RenderMode.FIGURE
+
+
+def test_the_options_action_is_disabled_without_an_active_graph(window):
+    sheet = window.project.resolve_path("[Book1]Sheet1")
+    window.mdi_area.setActiveSubWindow(window.open_worksheet(sheet))
+    assert not window._light_view_action.isEnabled()
+    assert not window._light_view_action.isChecked()
+
+
+def test_activating_a_window_syncs_the_checkbox_without_switching_it(window):
+    """Le piège du `setChecked` qui réémet `toggled` : deux graphes, deux modes."""
+    figure_graph = window.project.add_graph("Figure")
+    direct_graph = window.project.add_graph("Direct")
+    figure_sub = window.open_graph(figure_graph)
+    direct_sub = window.open_graph(direct_graph, mode=RenderMode.DIRECT)
+
+    window.mdi_area.setActiveSubWindow(figure_sub)
+    assert not window._light_view_action.isChecked()
+    window.mdi_area.setActiveSubWindow(direct_sub)
+    assert window._light_view_action.isChecked()
+    # Aucune des deux fenêtres n'a changé de moteur en cours de route.
+    assert figure_sub.widget().render_mode is RenderMode.FIGURE
+    assert direct_sub.widget().render_mode is RenderMode.DIRECT
+
+
+def test_the_render_mode_never_reaches_the_saved_project(window, tmp_path):
+    """Tranché le 2026-09-07 : le mode est un état de fenêtre, pas du projet."""
+    sheet = window.project.resolve_path("[Book1]Sheet1")
+    graph = window._create_graph(list(sheet.columns))
+    window.open_graph(graph, mode=RenderMode.DIRECT)
+    path = tmp_path / "p.plx"
+    save_project(window.project, path)
+
+    assert window.open_path(path) is True
+    reloaded = window.project.find_window("Graph1")
+    view: GraphWindow = window.open_graph(reloaded).widget()
+    assert view.render_mode is RenderMode.FIGURE
+
+
+def test_the_properties_panel_stays_live_in_the_light_view(window):
+    """Tranché le 2026-09-07 : contrôles actifs, pas grisés.
+
+    Le panneau édite le `PlotSpec`, jamais un renderer : l'édition faite en
+    vue directe est bien enregistrée, annulable, et devient visible au
+    retour en vue normale. C'est le bandeau qui prévient, pas un grisage.
+    """
+    from PySide6.QtWidgets import QLineEdit
+
+    sheet = window.project.resolve_path("[Book1]Sheet1")
+    graph = window._create_graph(list(sheet.columns))
+    sub = window.open_graph(graph, mode=RenderMode.DIRECT)
+    window.mdi_area.setActiveSubWindow(sub)
+    panel = window.properties_panel
+    assert isinstance(panel, PlotPropertiesPanel)
+
+    title_edit = panel.findChild(QLineEdit, "plotTitleEdit")
+    assert title_edit.isEnabled()
+    title_edit.setText("Campagne 3")
+    title_edit.editingFinished.emit()
+
+    assert graph.plot_spec.title == "Campagne 3"
+    view: GraphWindow = sub.widget()
+    view.set_render_mode(RenderMode.FIGURE)
+    assert view.renderer.figure.get_suptitle() == "Campagne 3"
