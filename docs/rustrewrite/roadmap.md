@@ -1,13 +1,21 @@
-# Roadmap Rust — jusqu'au bus de commandes / undo
+# Roadmap Rust — jusqu'à la boucle complète (fenêtre + fichier + undo)
 
 Statut : **étude, rien d'engagé**. Ce document ne remplace pas `ROADMAP.md`
-(Python/Qt, actif) — c'est le plan d'un portage éventuel, arrêté volontairement
-au socle jugé « bas risque, portage mécanique » dans `resume-decisions.md`
-§7 : modèle de données, bus de commandes, undo/redo, arbre de projet. Rien
-au-delà (docking, grille éditable, renderer, script) n'est phasé ici — c'est
-le « vrai travail itératif » que le même document renvoie à plus tard, et
-l'UI en particulier sera reprise entièrement en conversation au moment de la
-construire, pas planifiée à l'avance (§4 de ce document en garde une trace
+(Python/Qt, actif) — c'est le plan d'un portage éventuel.
+
+Phases 1-2 : le socle jugé « bas risque, portage mécanique » dans
+`resume-decisions.md` §7 — modèle de données, bus de commandes, undo/redo.
+Phases 3-4 : le prolongement logique décidé le 2026-09-07 pour valider ce
+socle en conditions réelles avant d'investir dans le confort visuel —
+persistance minimale puis coquille UI minimale, ensemble le premier jalon
+démontrable (« ça tourne, ça s'annule, ça se sauve »). Raisonnement complet
+de cet ordre en §5.
+
+Rien au-delà (docking, grille éditable, renderer Matplotlib embarqué,
+console de script, UI complète) n'est phasé ici — c'est le « vrai travail
+itératif » que `resume-decisions.md` renvoie à plus tard, et l'UI en
+particulier sera reprise entièrement en conversation au moment de la
+construire, pas planifiée à l'avance (§6 de ce document en garde une trace
 technique, pas un phasage).
 
 Référence structurelle : `ROADMAP.md` phases 0-2 (Python), dont ce plan est
@@ -31,7 +39,7 @@ tout de suite, pas à la fin).
 | 0.5 | Un test smoke qui construit un `Project` vide et le détruit sans fuite (`cargo test`, éventuellement `miri` en CI optionnelle) | CI verte |
 
 > Pas de binaire packagé à ce stade (pas d'UI à empaqueter) — l'équivalent
-> `briefcase`/AppImage n'a de sens qu'une fois une UI choisie (§4), donc hors
+> `briefcase`/AppImage n'a de sens qu'une fois une UI choisie (§6), donc hors
 > périmètre de cette phase.
 
 **Sortie de phase** : trois crates qui compilent, testent en CI, sans aucune
@@ -88,7 +96,7 @@ générationnelle** (`slotmap` ou équivalent), pas des `Rc`:
   (`crossbeam-channel` ou callbacks enregistrés) rejoue le rôle de
   `dataChanged`/`structureChanged` ; la couche UI choisie plus tard
   s'abonne à ce canal — pas de traduction vers un event-loop UI décidée ici,
-  volontairement (dépend du choix UI, §4).
+  volontairement (dépend du choix UI, §6).
 
 ### 1.3 Ce qui ne se transpose pas tel quel
 
@@ -198,25 +206,114 @@ initial (`proptest` ou un test maison équivalent à
 
 ---
 
-## 3 — Ce que ce plan ne couvre pas, volontairement
+## Phase 3 — Persistance minimale (≈1-1,5 semaine)
 
-Conforme à `resume-decisions.md` §7 : au-delà d'ici, plus de portage
-mécanique, seulement du travail itératif à phaser plus tard si la piste
-avance :
+**Objectif** : un `save`/`load` réel sur disque, pas encore le format
+`.plx` final. Placée **avant** l'UI, pas après — deux raisons de fond, pas
+de confort :
 
-- arbre de projet exposé en UI (dépend du choix UI, §4) ;
-- docking, grille éditable, panneau Properties ;
-- pipeline PyO3 (renderer Matplotlib embarqué) et empaquetage d'un Python
-  figé par plateforme ;
-- format de fichier (`.plx`) — étudié séparément dans
-  `format-fichier-plx.md`, indépendant du bus de commandes ;
-- API de script — spécifiée dans `cahier-des-charges-api-script.md`,
-  s'appuie sur le bus de commandes de ce document (§2) une fois construit,
-  mais n'est pas à construire en même temps.
+- Le schéma du modèle (phase 1) n'est vraiment validé que quand il a
+  survécu à un aller-retour disque réel — test plus dur que n'importe quel
+  test en mémoire, à faire porter tôt.
+- Le jalon de sortie de cette étape (phase 4) est « fenêtre + fichier +
+  Ctrl+Z » : « fichier » est une dépendance de ce jalon, pas une
+  conséquence — il doit donc exister avant la coquille UI, pas après.
+
+### 3.1 Frontière, pas format — ce qui compte à ce stade
+
+Pas besoin d'implémenter ici le schéma Zarr final étudié dans
+`format-fichier-plx.md` : un format provisoire (`serde` + `bincode`, ou
+équivalent) suffit, **à condition que la frontière soit la bonne** :
+
+```
+fn save(project: &Project, path: &Path) -> Result<(), PersistenceError>;
+fn load(path: &Path) -> Result<Project, PersistenceError>;
+```
+
+Une seule fonction dans chaque sens, qui prend/rend un `Project` complet,
+rien d'autre — aucun appelant (phase 4, futur binding script) ne doit
+connaître le format sous-jacent. Si cette frontière est respectée
+maintenant, le format binaire provisoire peut être remplacé par Zarr plus
+tard sans rien casser au-dessus ; la deviner autrement ferait porter le
+coût du changement de format à la coquille UI et au reste.
+
+### 3.2 Ce qui se garde du design déjà étudié, même en version provisoire
+
+Repris de `format-fichier-plx.md` §3, indépendamment du conteneur choisi
+pour cette phase :
+
+- écriture **atomique** (fichier temporaire + renommage), pas de mutation
+  in-place partielle qui pourrait laisser un fichier à moitié écrit ;
+- **numéro de version en premier**, lu avant tout le reste, avec refus
+  propre sur un fichier futur — même à ce stade provisoire, pour ne pas
+  avoir à le rajouter après coup sur des fichiers déjà écrits ;
+- distinction **valeur manquante vs chaîne vide** pour les colonnes texte.
+
+### 3.3 Ce qui n'est délibérément pas fait ici
+
+- Pas de chunking, pas de lecture partielle d'une colonne à 1M de points —
+  ce sont des propriétés du futur format Zarr, pas un besoin de ce jalon.
+- Pas de script de conversion depuis un `.plx` HDF5 existant
+  (`format-fichier-plx.md` §5) — à écrire seulement si et quand un tel
+  fichier doit réellement être ouvert.
+
+**Sortie de phase** : un test qui construit un `Project` non trivial
+(plusieurs `Workbook`/`Worksheet`/`Column`, valeurs manquantes incluses),
+le sauvegarde, le recharge, et vérifie l'égalité complète avec l'original.
 
 ---
 
-## 4 — Notes techniques pour l'UI (mémoire, pas un phasage)
+## Phase 4 — Coquille UI minimale (≈1 semaine)
+
+**Objectif** : faire tourner **la boucle complète** une fois — modèle →
+commande → undo → sauvegarde → rechargement — dans une vraie fenêtre, avant
+d'investir dans le docking ou la grille éditable. Une intégration bout-en-
+bout ratée coûte une réécriture à ce stade ; ratée après avoir construit du
+docking par-dessus, elle coûte la réécriture *et* le docking avec.
+
+Volontairement pauvre — pas une ébauche de l'UI finale, un banc d'essai :
+
+- une fenêtre `egui`/`eframe` qui s'ouvre, une grille brute (pas
+  d'éditique, pas de délégués) qui affiche une `Worksheet` ;
+- Ctrl+Z / Ctrl+Y câblés à la main sur `CommandBus::undo()`/`redo()` — **à
+  l'inverse de Qt, rien de tout ça n'existe avant d'être écrit.**
+  `QUndoStack` + `QAction::Undo` donnaient le raccourci, le menu et son
+  libellé (« Annuler *Renommer*… ») presque gratuitement dès que les
+  commandes existaient ; ici il n'y a aucun framework d'undo fourni par
+  `egui` — le gestionnaire de raccourci, l'état du menu (grisé si pile
+  vide) et le libellé sont à écrire un par un, et n'apparaissent jamais
+  avant qu'on les code ;
+- Ctrl+S / Ctrl+O câblés sur `save`/`load` (phase 3).
+
+**Sortie de phase** : le jalon démontrable — une fenêtre s'ouvre, on
+modifie une valeur, Ctrl+Z l'annule, Ctrl+S écrit un fichier, rouvrir ce
+fichier restitue l'état exact. Le docking, la grille éditable, le panneau
+Properties et le renderer restent hors de ce jalon (§5-6).
+
+---
+
+## 5 — Ce que ce plan ne couvre pas, volontairement
+
+Conforme à `resume-decisions.md` §7 : au-delà d'ici, plus de portage
+mécanique ni de banc d'essai minimal, seulement du travail itératif à
+phaser plus tard si la piste avance :
+
+- arbre de projet exposé en UI, docking, grille éditable, panneau
+  Properties — le banc d'essai de la phase 4 n'en a volontairement aucun ;
+- pipeline PyO3 (renderer Matplotlib embarqué) et empaquetage d'un Python
+  figé par plateforme — indépendant, peut être mené en parallèle de la
+  phase 4 ou après, ne bloque rien d'elle ;
+- format de fichier `.plx` **final** (Zarr) — étudié séparément dans
+  `format-fichier-plx.md` ; la phase 3 ne construit qu'une frontière
+  provisoire, pas ce format ;
+- API de script — spécifiée dans `cahier-des-charges-api-script.md`,
+  s'appuie sur le bus de commandes (phase 2) *et* sur le pipeline PyO3
+  (non phasé) : elle ne peut être construite avant que les deux existent,
+  sous peine de deviner un contrat qu'il faudrait réécrire.
+
+---
+
+## 6 — Notes techniques pour l'UI (mémoire, pas un phasage)
 
 L'UI sera retravaillée entièrement en conversation au moment de la
 construire — pas de phases figées à l'avance ici. Ce qui suit est le
