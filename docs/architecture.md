@@ -6,8 +6,8 @@
 |---|---|---|---|
 | UI | **PySide6** | LGPLv3 (OK commercial) | Framework fenêtres/widgets |
 | Thème | **qt-material** | MIT | Look moderne flat (dark/light) |
-| Plots | **PyQtGraph** | MIT | Graphes interactifs, gros datasets, temps réel |
-| Plots export | **Matplotlib** | BSD | Export publication (compatible LaTeX/pgf) |
+| Plots | **Matplotlib** | BSD | Graphes interactifs **et** export publication (compatible LaTeX/pgf) — rendu par défaut depuis le 2026-09-07 |
+| Plots (mode léger) | **PyQtGraph** | MIT | « Visualiseur léger » : acquisition live/streaming, viewport OpenGL. Était le rendu par défaut avant le 2026-09-07 — voir `decision-rendu-matplotlib-2026-09-07.md` |
 | Calcul | **numpy / scipy / pandas** | BSD | Traitement vectorisé |
 | Calcul (fallback) | **numba** | BSD | JIT pour boucles non-vectorisables |
 | Format projet | **HDF5** (`h5py`) | BSD | Données + métadonnées, un seul fichier |

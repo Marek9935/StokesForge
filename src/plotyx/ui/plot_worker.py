@@ -11,10 +11,13 @@ se lise pareil des deux côtés.
 ## Ce qui est calculé ici, et ce qui ne l'est pas
 
 Presque rien de la chaîne de tracé n'est en O(n) : une série est une
-**référence** (`plotyx.plot.resolve`), le tableau part tel quel vers
-PyQtGraph, et c'est PyQtGraph qui décime au moment de peindre. Le seul
-calcul qui parcourt réellement les données est le **binning d'un
-histogramme**, d'où `plotyx.plot.resolve.prepare`.
+**référence** (`plotyx.plot.resolve`), le tableau part tel quel au
+renderer, et c'est le moteur qui décime au moment de peindre — par
+`path.simplify` côté Matplotlib, par `downsample`/`clipToView` côté
+PyQtGraph. Le seul calcul qui parcourt réellement les données est le
+**binning d'un histogramme**, d'où `plotyx.plot.resolve.prepare`. Ce module
+est donc resté indifférent au changement de rendu par défaut du
+2026-09-07 : il ne connaît aucun moteur.
 
 Mesuré sur cette machine (voir `tests/test_plot_performance.py`) : un
 histogramme de 10⁶ points coûte de l'ordre de quelques millisecondes.

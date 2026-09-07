@@ -79,10 +79,13 @@ pas à l'échelle réelle des données de l'utilisateur.
 - **Matplotlib devient le rendu par défaut**, complet : légende, couleurs
   fines, axes, grille, outils — tout ce qu'expose déjà le panneau
   Properties.
-- **PyQtGraph devient un mode secondaire, « vue directe »**, réservé à
-  l'acquisition live/streaming. Volontairement minimal (pas de gestion fine
-  de la légende, des couleurs, des axes, de la grille, pas d'outils) —
-  usage estimé à 0,5 % des cas.
+- **PyQtGraph devient un mode secondaire**, réservé à l'acquisition
+  live/streaming. Volontairement minimal (pas de gestion fine de la
+  légende, des couleurs, des axes, de la grille, pas d'outils) — usage
+  estimé à 0,5 % des cas. Nommé **« visualiseur léger »** dans l'interface
+  (le terme « vue directe » de ce rapport n'a pas survécu à
+  l'implémentation : il décrit le mécanisme, pas ce que l'utilisateur en
+  attend).
 - Bascule **manuelle**, dans le menu options, délibérément peu visible (pas
   de bouton de barre d'outils).
 - À construire **avant la phase 7** (drag & drop), pas reporté à la phase
@@ -107,16 +110,56 @@ résumé : la phase 6 est rouverte pour cibler Matplotlib ; la phase 10
 d'export (format, DPI, taille) par-dessus un rendu déjà en place, plutôt
 qu'un second moteur à écrire.
 
-### Questions ouvertes, à trancher avec l'implémentation
+### Questions ouvertes — tranchées le même jour, à l'implémentation
 
-- Le panneau Properties grise-t-il les contrôles inutilisables en vue
-  directe, ou les garde-t-il actifs mais sans effet visible tant qu'on n'est
-  pas revenu en vue normale ?
-- Le mode d'affichage (direct/normal) est-il persisté dans le `.plx`, ou
-  purement une préférence d'exécution ? Piste : jamais persisté — à
-  confirmer explicitement avant de toucher au schéma.
+- **Le panneau Properties reste actif**, non grisé, avec un bandeau
+  d'avertissement dans la fenêtre du graphe. Il édite le `PlotSpec`, jamais
+  un renderer : l'édition faite en vue directe est donc enregistrée,
+  annulable, persistée, et devient visible au retour en vue normale. Le
+  griser aurait fait dépendre le panneau du moteur actif — ce que
+  l'architecture évite partout ailleurs — et aurait interdit de préparer
+  une mise en forme pendant une acquisition.
+- **Le mode n'est jamais persisté**, comme la piste le suggérait : ni dans
+  le `.plx` (schéma HDF5 inchangé, version 2), ni en `QSettings`. C'est un
+  état de fenêtre. Un fichier ne doit pas imposer un moteur de rendu à qui
+  l'ouvre : un projet enregistré sur une machine d'acquisition s'ouvrirait
+  sinon en vue dégradée sur le poste de dépouillement, sans que personne ne
+  l'ait demandé.
 
-## 4. Bug trouvé en cours de route, sans rapport avec le rendu
+Deux entrées, toutes deux volontairement discrètes : **« Ouvrir en
+visualiseur léger »** dans le menu contextuel d'un graphe dans
+l'explorateur de projet — la seule qui *ouvre* directement dans ce mode —
+et une case **« Visualiseur léger (vue directe) »** dans le menu Options,
+qui bascule la fenêtre de graphe active. Aucun bouton de barre d'outils,
+conformément à la décision.
+
+## 4. Ce que la mise en œuvre a appris
+
+Trois choses que le raisonnement de la décision n'avait pas anticipées :
+
+1. **L'asymétrie d'effort annoncée au §3 était juste, mais moins lourde que
+   prévu.** Le nouveau renderer par défaut fait ~600 lignes et n'a demandé
+   aucune modification de `plotyx.plot`. C'est la validation *a posteriori*
+   du pari le plus coûteux de la phase 6 : avoir conçu la couche neutre en
+   phase 6 plutôt qu'en phase 10. Si le `PlotSpec` avait été un modèle
+   PyQtGraph déguisé, cette bascule aurait été une réécriture.
+2. **Le vrai coût de Matplotlib n'est pas là où l'argument initial le
+   plaçait.** Le premier rendu de 10⁶ points tient en 141 ms (contre 66 ms
+   en PyQtGraph) — même ordre de grandeur, `path.simplify` fait son
+   travail. En revanche le redessin complet par interaction est bien réel
+   et coûte 107 ms sur ce même graphe : c'est *le réticule* qui aurait été
+   inutilisable, pas le tracé. Réglé par du *blitting*, qui ramène un
+   mouvement de réticule à 0,2 ms — indépendamment du contenu du graphe.
+   L'argument d'origine visait la bonne mécanique, mais la mauvaise
+   conséquence.
+3. **Écrire le second renderer a révélé un bug dans le premier.** Le chemin
+   rapide de `update_data` ne réécrivait pas l'`ErrorBarItem` d'une série,
+   laissant des moustaches périmées à côté d'une courbe à jour. Personne ne
+   l'avait vu en un an de renderer unique ; l'obligation de refaire la même
+   chose autrement l'a fait apparaître en une heure. Corrigé des deux
+   côtés.
+
+## 5. Bug trouvé en cours de route, sans rapport avec le rendu
 
 **Vérifié, réel, délibérément reporté** (« à traiter plus tard ») :
 supprimer un `Worksheet` ou un `Graph` depuis l'explorateur de projet ne

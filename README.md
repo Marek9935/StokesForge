@@ -7,11 +7,18 @@ Logiciel d'analyse et de tracé de données scientifiques, façon OriginLab, éc
 **Pré-alpha — phase 6.** Le squelette applicatif (fenêtre, packaging, CI), le
 **modèle de données**, le **bus de commandes annulables**, l'**UI worksheet**,
 la **persistance HDF5**, l'**import de fichiers** et les **graphes
-PyQtGraph** sont en place : saisie et collage dans une table, undo/redo,
+Matplotlib** sont en place : saisie et collage dans une table, undo/redo,
 explorateur de projet, projets `.plx` avec autosave et récupération, import
 par registre de parseurs avec aperçu, et tracé interactif (nuage, ligne,
 points+ligne, barres, histogramme, barres d'erreur) en sous-fenêtre MDI,
-avec multi-panneaux, axes secondaires, légende et curseurs.
+avec multi-panneaux, axes secondaires, légende, réticule, molette pour
+zoomer et glissé pour déplacer.
+
+Un second moteur, **PyQtGraph**, reste accessible comme « visualiseur
+léger » — minimal, destiné à l'acquisition live, jamais enregistré dans le
+projet. Il était le rendu par défaut jusqu'au 2026-09-07 ; le changement et
+ses raisons sont dans
+[`docs/decision-rendu-matplotlib-2026-09-07.md`](docs/decision-rendu-matplotlib-2026-09-07.md).
 
 `plotyx.core` fournit `Project` / `Folder` / `Workbook` / `Worksheet` / `Column`
 (plus les nœuds minimaux `Graph`, `Matrix`, `Note`), la résolution de chemins
@@ -26,9 +33,12 @@ paquets ci-dessous qui importait Qt jusqu'à cette phase : `core` reste pur.
 `plotyx.plot` décrit un graphe **sans connaître aucun moteur de rendu** :
 `PlotSpec` / `PanelSpec` / `SeriesSpec` / `AxisSpec` sont des dataclasses
 immuables de types standard, où une série désigne ses colonnes par **clé de
-registre** et jamais par copie des données. PyQtGraph en est le premier
-renderer (`plotyx.ui.plot_renderer`) ; Matplotlib s'ajoutera en phase 10
-sans que la description bouge. `tests/test_plot_spec_is_engine_neutral.py`
+registre** et jamais par copie des données. Deux renderers la peignent —
+Matplotlib (`plotyx.ui.mpl_renderer`, le défaut) et PyQtGraph
+(`plotyx.ui.plot_renderer`, le visualiseur léger) — sans que la description
+connaisse ni l'un ni l'autre. Basculer le rendu par défaut de l'un à
+l'autre n'a demandé aucune modification de `plotyx.plot` : c'est ce que
+cette couche est là pour garantir. `tests/test_plot_spec_is_engine_neutral.py`
 vérifie qu'un `PlotSpec` se construit et s'inspecte dans un interpréteur où
 Qt, PyQtGraph et Matplotlib sont introuvables.
 
@@ -47,7 +57,7 @@ Prochaine étape : le glisser-déposer interne (phase 7).
 | Couche | Techno |
 |---|---|
 | UI | PySide6 + qt-material |
-| Plots interactifs | PyQtGraph |
+| Plots interactifs | Matplotlib (défaut) · PyQtGraph (visualiseur léger) |
 | Export publication | Matplotlib (PNG/SVG/PDF/pgf) |
 | Calcul | numpy · scipy · pandas (numba si profilage le justifie) |
 | Format projet | HDF5 (`h5py`) |

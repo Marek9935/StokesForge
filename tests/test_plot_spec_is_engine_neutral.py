@@ -4,8 +4,15 @@ C'est le test de vérification exigé par la phase 6 pour la décision la plus
 coûteuse à revenir dessus du projet : « un `PlotSpec` doit être
 constructible et inspectable sans importer PyQtGraph ni Qt ». Sans ce
 garde-fou, un `import pyqtgraph` glissé dans `plotyx/plot/` pour une
-conversion de couleur suffirait à faire du renderer Matplotlib de la
-phase 10 une réécriture plutôt qu'un ajout.
+conversion de couleur suffirait à faire du second renderer une réécriture
+plutôt qu'un ajout.
+
+**Ce n'est plus une hypothèse.** Le 2026-09-07, Matplotlib a remplacé
+PyQtGraph comme rendu par défaut ; l'opération a coûté un module
+(`plotyx/ui/mpl_renderer.py`) et **zéro ligne** de `plotyx/plot/`. Ce
+fichier est ce qui a rendu ça possible — et le reste : le second moteur
+existe désormais pour de bon, donc la moindre fuite de vocabulaire vers la
+couche neutre se paierait tout de suite, dans les deux renderers.
 
 Même dispositif que `tests/test_core_no_qt.py`, étendu à trois familles de
 paquets :

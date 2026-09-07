@@ -124,16 +124,17 @@ Les commandes de lignes restent volontairement à l'échelle de la **colonne**, 
 
 ---
 
-## Phase 6 — Plots (≈3 semaines, **rouverte** le 2026-09-07)
+## Phase 6 — Plots (≈3 semaines, rouverte puis **refermée** le 2026-09-07)
 
 > ⚠️ **Rendu par défaut changé de PyQtGraph à Matplotlib** — voir
 > « Rendu par défaut : Matplotlib au lieu de PyQtGraph » plus bas et
 > `docs/decision-rendu-matplotlib-2026-09-07.md` pour le raisonnement
 > complet. La description ci-dessous est celle de la livraison initiale
-> (2026-09-05) et reste vraie *pour le mode « vue directe » PyQtGraph*,
-> qui devient secondaire ; le rendu par défaut est à reconstruire côté
-> Matplotlib avec les mêmes garanties (édition via le panneau Properties,
-> références rompues signalées, etc.).
+> (2026-09-05) et reste vraie *pour le mode « visualiseur léger »
+> PyQtGraph*, devenu secondaire ; le rendu par défaut a été reconstruit
+> côté Matplotlib le 2026-09-07, avec les mêmes garanties (édition via le
+> panneau Properties, références rompues signalées, chemin rapide de mise
+> à jour, curseurs).
 
 - `GraphWindow` MDI : `PlotWidget`, axes, légende, curseurs, zoom/pan
 - Modèle de plot : une série = **référence** `(worksheet_key, x_col, y_col)`, pas une copie → mise à jour auto quand la donnée change
@@ -168,7 +169,50 @@ Les commandes de lignes restent volontairement à l'échelle de la **colonne**, 
    ci-dessous n'est pas levée, la fonction est reportée et documentée
    plutôt qu'à moitié livrée.
 
-**Sortie de phase (2026-09-05, avant réouverture)** : un graphe présentable à l'écran, interactif, à partir d'un import réel — sur PyQtGraph. Réouverte le 2026-09-07 pour reconstruire ce même niveau de service sur Matplotlib comme rendu par défaut ; le socle ci-dessus (décisions 1 à 4, la couche `PlotSpec`) reste acquis et n'a pas à être repensé, seul le renderer change.
+**Décisions tranchées à la réouverture** (2026-09-07) — les deux questions
+que le rapport de décision laissait ouvertes, plus ce que
+l'implémentation a imposé :
+
+6. **Le mode de rendu n'est jamais persisté.** C'est un état de la
+   *fenêtre*, pas du graphe : il n'entre pas dans le `.plx` et le schéma
+   HDF5 **reste en version 2**. Un fichier ne doit pas imposer un moteur à
+   qui l'ouvre — un projet enregistré sur une machine d'acquisition
+   s'ouvrirait sinon en vue dégradée sur le poste de dépouillement. Deux
+   entrées, toutes deux discrètes : « Ouvrir en visualiseur léger » dans le
+   menu contextuel de l'explorateur, et une case dans le menu Options qui
+   bascule la fenêtre active.
+7. **Le panneau de propriétés reste actif en visualiseur léger**, non
+   grisé. Il édite le `PlotSpec`, jamais un renderer : l'édition est donc
+   enregistrée, annulable et persistée, et devient visible au retour en vue
+   normale. Le griser aurait fait dépendre le panneau du moteur actif — ce
+   que l'architecture évite partout ailleurs — et interdirait de préparer
+   une mise en forme pendant une acquisition. Un bandeau prévient à la
+   place, pour que « pas encore visible » ne se lise pas « perdu ».
+8. **Le suivi de la souris descend dans le renderer.** Une scène
+   `QGraphicsView` et un canevas Matplotlib ne signalent pas un mouvement
+   de la même façon ; la fenêtre reçoit le résultat par un rappel
+   (`set_coords_callback`) au lieu d'arbitrer entre les deux. C'est ce qui
+   fait tenir `GraphWindow` sans un seul `isinstance` de moteur.
+9. **Le réticule Matplotlib est blitté** (`animated=True` + `copy_from_bbox`).
+   C'est le seul point où le redessin complet par interaction coûterait
+   vraiment. Mesuré à 10⁶ points : **0,2 ms** par mouvement contre **107 ms**
+   pour un dessin complet, et le test de performance verrouille le rapport.
+10. **Ni les barres ni les barres d'erreur ne prennent le chemin rapide**,
+    dans les *deux* moteurs. Correctif au passage : l'`ErrorBarItem` de
+    PyQtGraph n'était pas réécrit par `update_data`, ce qui laissait des
+    moustaches périmées à côté d'une courbe à jour.
+
+**Sortie de phase (2026-09-07)** : un graphe présentable, interactif
+(molette = zoom, glissé = déplacement, réticule, recadrage), à partir d'un
+import réel — **sur Matplotlib**, avec PyQtGraph gardé comme visualiseur
+léger et bascule à chaud entre les deux sans rien perdre. Le socle
+(décisions 1 à 4, la couche `PlotSpec`) n'a pas bougé d'une ligne : c'est
+la démonstration que la mitigation « couche neutre conçue en phase 6 et non
+en phase 10 » a payé — changer de moteur par défaut a coûté un renderer,
+pas une réécriture.
+
+**Chiffres** : 748 → 752 tests verts, 94 % de couverture. Premier rendu de
+10⁶ points : **141 ms** en Matplotlib, 66 ms en visualiseur léger.
 
 ---
 
@@ -425,9 +469,22 @@ le vrai chantier, pas le repli.
 
 ### Conséquences déjà répercutées dans ce document
 
-Phase 6 rouverte (ci-dessus), phase 10 réduite à l'habillage export
-(ci-dessus), ligne « Divergence » de la table des risques mise à jour.
-Reste à trancher **avec** l'implémentation, pas avant : comportement du
-panneau Properties en vue directe (contrôles grisés ou inertes), et
-persistance ou non du mode d'affichage dans le `.plx` (piste : jamais
-persisté).
+Phase 6 rouverte puis refermée (ci-dessus), phase 10 réduite à l'habillage
+export (ci-dessus), ligne « Divergence » de la table des risques mise à
+jour.
+
+### État : livré le 2026-09-07
+
+Les deux questions laissées ouvertes ont été tranchées **avec**
+l'implémentation, comme prévu :
+
+* **panneau Properties en visualiseur léger** → **actif**, jamais grisé,
+  plus un bandeau d'avertissement dans la fenêtre du graphe ;
+* **persistance du mode** → **jamais**, ni dans le `.plx` ni ailleurs. Le
+  schéma HDF5 reste en version 2.
+
+Détail et raisons : décisions 6 à 10 de la phase 6 ci-dessus. Le code tient
+en trois modules — `ui/mpl_renderer.py` (le nouveau défaut),
+`ui/renderers.py` (les deux moteurs et leur contrat commun), et
+`ui/plot_renderer.py` inchangé dans son principe, désormais le visualiseur
+léger.

@@ -77,6 +77,13 @@ def create_application() -> QApplication:
     On aligne les deux ici, au même point d'entrée, plutôt que dans
     `plot_renderer.py` — `PlotSpec.background` reste prioritaire quand un
     graphe fixe sa propre couleur (voir `PyQtGraphRenderer`).
+
+    Rien à faire pour Matplotlib, devenu le rendu par défaut le
+    2026-09-07 : il est utilisé **sans `pyplot`**, donc sans état global à
+    configurer — pas de backend à choisir (`FigureCanvasQTAgg` est importé
+    directement), pas de gestionnaire de figures à vider. Son fond par
+    défaut est la constante `DEFAULT_BACKGROUND` de `mpl_renderer`, avec la
+    même priorité donnée à `PlotSpec.background`.
     """
     app = QApplication.instance() or QApplication(sys.argv)
     apply_stylesheet(app, theme=DEFAULT_THEME)
