@@ -37,3 +37,7 @@ htmlcov/
 *.h5
 *.hdf5
 *.pyx-project
+
+# Interpréteur Python vendored (python-build-standalone, cf. cahier-des-charges-technique.md §8.6.1)
+/vendor/python/*.tar.gz
+/vendor/python/extracted/

@@ -6,6 +6,14 @@ l'architecture ; il complète `roadmap.md` (qui dit *quand*) en disant
 *comment* et *pourquoi pas autrement*. Comme `resume-decisions.md` et
 `format-fichier-plx.md`, il conserve les options écartées et leur raison.
 
+**Revue technique du 2026-09-08.** Les quatre décisions du §2 sont
+confirmées ; **aucune n'est rouverte**. Ont été corrigés : l'argument
+d'écartement de `slotmap` (§4.1, faux dans sa formulation, juste dans sa
+conclusion), les hypothèses du chiffrage mémoire (§2.1.1), les noms d'API
+PyO3 (§8.2), le mécanisme exact de la vue numpy et son contrat de sûreté
+(§8.3), et les pièges d'empaquetage (§8.6.1). Ce qui reste à trancher est
+regroupé, expliqué sans prérequis Rust, dans `questions-ouvertes.md`.
+
 **Objet du socle** : disposer de tout ce qu'il faut pour **ouvrir le
 chantier de l'interface**, et de rien de plus. Le modèle, l'annulation, le
 fichier, une fenêtre, et surtout la **tuyauterie Rust ↔ Python** éprouvée.
@@ -27,8 +35,14 @@ démarrer sur un socle qui ne bougera plus sous eux.
 
 ### 1.1 Le critère de fin, en une phrase
 
-Le socle est terminé quand, **depuis un binaire empaqueté sur Linux et sur
-Windows** :
+**Cible resserrée le 2026-09-08 : Linux d'abord, seul.** Le développement
+et la validation du socle se concentrent sur Linux pur — Windows est une
+**étape ultérieure**, pas une contrainte à porter dès la première ligne.
+Ce n'est pas un abandon de la cible Windows (§8.6 la garde comme condition
+de clôture du socle), c'est un ordre : prouver l'architecture sur une
+seule plateforme avant de payer le coût du portage sur la seconde.
+
+Le socle est terminé quand, **depuis un binaire empaqueté sur Linux** :
 
 > une cellule éditée dans la fenêtre s'annule par Ctrl+Z et se rétablit par
 > Ctrl+Y ; Ctrl+S écrit un fichier que Ctrl+O rouvre à l'identique ; et un
@@ -38,6 +52,15 @@ Windows** :
 Cette dernière clause est le vrai test : elle traverse d'un coup l'acteur,
 le GIL, la durée de vie des buffers partagés et l'historique. Tant qu'elle
 ne passe pas, le pont n'est pas prouvé.
+
+**Windows n'est pas hors périmètre, il est reporté après ce critère.** Une
+fois la clause ci-dessus vraie sur Linux, le même hello-world et le même
+test d'intégration doivent être rejoués sur Windows (§8.6) avant de
+déclarer le socle définitivement clos — sans ça, l'objectif « binaire
+cross-platform » de `resume-decisions.md` §2 resterait non vérifié. Rien
+dans les quatre décisions du §2 ne dépend de la plateforme ; ce
+resserrement ne les rouvre pas, il change seulement l'ordre dans lequel
+elles se prouvent.
 
 ---
 
@@ -54,7 +77,10 @@ rouvre aucune** — §2.5 dit pourquoi, décision par décision.
   muter produit un nouvel arbre qui partage tout l'inchangé, annuler remet
   l'ancien pointeur ;
 - **données** (contenu des colonnes) → *delta* : la commande enregistre les
-  anciennes valeurs des seules cellules écrites.
+  anciennes **et** les nouvelles valeurs des seules cellules écrites — les
+  anciennes pour annuler, les nouvelles pour rétablir. N'enregistrer que
+  les anciennes, comme le disait la rédaction initiale, rend le **redo**
+  impossible dès que la commande d'origine a été relâchée.
 
 **Ce que ça achète.** Les inverses disparaissent là où ils sont difficiles
 à écrire — déplacements, collisions de noms, suppression/restauration — et
@@ -90,11 +116,41 @@ les chiffres du §2.1.1 montrent que la mémoire ne départage pas.
 Projet lourd de référence : 50 colonnes × 1M points = **400 Mo de
 données**, arbre de ~2000 nœuds, 100 entrées d'historique.
 
+**Hypothèses de calcul** — explicitées le 2026-09-08, à revérifier si le
+modèle change :
+
+- 50 × 1 000 000 × 8 octets (`f64`) = 400 Mo. ✔
+- un nœud est rangé **derrière un `Arc`** (§4.2) : cloner l'arbre recopie
+  ~2000 paires `(NodeId, Arc<Node>)` de 16 octets et incrémente ~2000
+  compteurs, **sans** recopier les noms, unités, étiquettes et
+  commentaires. Table à ~50 % de remplissage → ~4096 alvéoles × 16 o ≈
+  64 Ko, **~100 Ko** avec les à-côtés ;
+- une entrée de données d'une cellule retient `(NodeId, index, ancienne
+  valeur, nouvelle valeur)` = 32 o, plus l'indirection de l'entrée :
+  **~40 o**, et non 16 — 16 o ne suffisait qu'en n'enregistrant pas la
+  valeur nouvelle, ce que §2.1 vient de corriger ;
+- l'`after` d'une entrée est le `before` de la suivante — **le même
+  `Arc`**. Une pile de 100 entrées structurelles retient 101 arbres
+  distincts, pas 200.
+
 | | entrée structurelle | entrée de données (1 cellule) | pile de 100 |
 |---|---|---|---|
-| Delta pur | ~200 o | ~16 o | < 1 Mo |
-| **Hybride (retenu)** | taille de l'arbre, ~100 Ko | ~16 o | **~10 Mo** |
+| Delta pur | ~200 o | ~40 o | < 1 Mo |
+| **Hybride (retenu)** | taille de l'arbre, ~100 Ko | ~40 o | **~10 Mo** |
 | Snapshot intégral + chunks | ~100 Ko | 1 chunk : 32 à 512 Ko | 3 à 50 Mo |
+
+Les ~200 o du delta pur et les ~100 Ko de l'hybride **excluent tous deux
+les charges utiles retenues** : une colonne supprimée reste vivante
+derrière son `Arc` dans les deux schémas, à l'identique. Ce n'est pas ce
+qui les départage — voir le piège commun plus bas.
+
+> ⚠️ **Les ~100 Ko ne sont vrais que si les nœuds sont derrière un `Arc`.**
+> Avec une `HashMap<NodeId, Node>` possédant directement ses `String`,
+> chaque clone recopie ~2000 nœuds **et leurs ~10 000 chaînes** : ~1 Mo et
+> autant d'allocations par mutation, soit **~100 Mo** pour la pile de 100.
+> Toujours pas fatal face aux 400 Mo — la conclusion du §2.1 tient — mais
+> un facteur 10 perdu gratuitement, et une allocation lourde payée **à
+> chaque frappe** (§5.1). D'où la précision apportée au §4.2.
 
 Face aux 400 Mo de données, aucune de ces piles n'est un problème.
 L'historique est **entièrement en RAM** dans les trois cas, comme
@@ -207,22 +263,57 @@ permettra au futur `render-mpl` de se poser dessus sans passer par
 ### 4.1 Identité des nœuds — compteur monotone, **pas** `slotmap`
 
 **Écart assumé avec `roadmap.md` §0.4**, qui proposait `slotmap` /
-`generational-arena`. Le choix de l'undo hybride l'invalide :
+`generational-arena`. **La décision ne change pas ; son argument est
+corrigé le 2026-09-08** — la rédaction initiale parlait d'une « collision
+d'identité », précisément ce que les générations de `slotmap` empêchent.
 
-une arène à réutilisation de slots peut allouer `(slot 3, génération 2)`
-pour un nouveau nœud après qu'un nœud `(slot 3, génération 1)` a été retiré
-de l'arbre courant. Annuler la suppression réinsérerait `(3, v1)` dans un
-arbre où le slot 3 est repris — **une collision d'identité créée par
-l'annulation elle-même**.
+*Ce qui était faux.* Une clé `slotmap` est une paire `(alvéole, version)`.
+Retirer un nœud incrémente la version de l'alvéole : l'ancienne clé devient
+**définitivement invalide** et le reste même si l'alvéole est réattribuée à
+un autre nœud. Il n'y a donc jamais deux objets répondant à la même clé —
+c'est exactement ce que le versionnement est fait d'empêcher.
+
+*Ce qui reste vrai, et suffit à écarter l'arène* — trois raisons
+indépendantes :
+
+1. **La clé ne survit pas à l'annulation.** `SlotMap` choisit la clé à
+   l'insertion ; aucune API ne permet de réinsérer *à une clé donnée*. Un
+   nœud supprimé puis restauré par `undo` reçoit donc une clé **neuve**, et
+   toute poignée conservée par un script devient morte. Or
+   `cahier-des-charges-api-script.md` §3 en fait un contrat explicite :
+   « une clé résolue vers un objet supprimé puis restauré par `undo` reste
+   valide ». C'est ce contrat, et non une collision, que l'arène casse.
+2. **Le seul remède rouvre ce que §2.1 avait fermé.** Conserver la clé
+   impose de ne jamais appeler `remove` tant qu'une entrée d'historique
+   retient le nœud — donc de reconstruire la comptabilité de durée de vie
+   que l'undo hybride venait justement de supprimer (`roadmap.md` §2.3,
+   décision 4 de la phase 2 Python).
+3. **Une arène est un conteneur mutable unique**, à contre-emploi d'un
+   arbre partagé par `Arc` : la rendre persistante revient à la cloner
+   entière, c'est-à-dire à faire exactement ce que fait déjà une `HashMap`,
+   avec un crate de plus.
 
 **Retenu** : `NodeId(u64)`, compteur monotone, **jamais réutilisé**, dans
-une `HashMap<NodeId, Node>`. Une restauration ne peut structurellement pas
-entrer en collision. La valeur haute du compteur est **persistée avec le
-fichier**, sans quoi un rechargement rouvrirait le risque.
+une `HashMap<NodeId, Arc<Node>>` (§4.2). Une restauration réinsère le nœud
+sous son identifiant d'origine, sans arbitrage possible. La valeur haute du
+compteur est **persistée avec le fichier** (§7) ; au chargement, le
+compteur repart à `max(valeur persistée, plus grand NodeId lu) + 1` — lire
+le maximum effectif est une ceinture gratuite contre un fichier écrit par
+une version boguée. Un `u64` monotone ne déborde pas : à un million de
+nœuds créés par seconde, il tient un demi-million d'années.
+
+*Collision réelle, gardée en mémoire* : elle existe bel et bien avec une
+arène à **index nu** (un `Vec` et une liste de trous, **sans** version).
+C'est ce cas-là que la rédaction initiale décrivait, et que le compteur
+monotone écarte trivialement.
 
 Ce `NodeId` tient les trois rôles : clé d'arbre, clé opaque exposée aux
 scripts (`cahier-des-charges-api-script.md` §3), et — plus tard —
-référence de série dans un `PlotSpec`.
+référence de série dans un `PlotSpec`. Ce cahier des charges API décrit
+encore cette clé comme un « UUID stable », héritage d'`ObjectRegistry` :
+côté script, seule l'**opacité** est contractuelle, pas la forme. Un `u64`
+la respecte ; la mention « UUID » est à corriger le jour où ce document
+sera rouvert (`questions-ouvertes.md`, question 1).
 
 *Alternative en réserve* : UUID v4, seulement si l'identité doit un jour
 survivre à la fusion de deux projets distincts. Besoin inexistant, et un
@@ -230,10 +321,20 @@ survivre à la fusion de deux projets distincts. Besoin inexistant, et un
 
 ### 4.2 Arbre
 
-`Arc<Tree>`, où `Tree` contient la `HashMap<NodeId, Node>` et la racine.
-Muter = cloner l'arbre (`Arc::make_mut`) et remplacer les nœuds touchés.
-Un clone coûte la carte des nœuds — ~100 Ko au pire (§2.1.1) — les charges
-utiles étant derrière `Arc`, elles ne sont pas copiées.
+`Arc<Tree>`, où `Tree` contient la `HashMap<NodeId, Arc<Node>>` et la
+racine. Muter = cloner l'arbre (`Arc::make_mut` sur l'arbre) puis remplacer
+les seuls nœuds touchés (`Arc::make_mut` sur ces nœuds-là).
+
+**Le nœud est derrière un `Arc`, pas rangé par valeur** — précision ajoutée
+le 2026-09-08 par la revue technique : c'est elle qui rend vrai le chiffre
+du §2.1.1. Cloner la carte recopie alors ~2000 paires de 16 octets et
+incrémente ~2000 compteurs — ~100 Ko, **zéro allocation par nœud**. Avec
+des `Node` possédés par valeur, le même clone recopierait aussi les
+~10 000 `String` de noms, unités, étiquettes et commentaires : facteur 10
+en mémoire *et* en nombre d'allocations, payé **à chaque mutation**, y
+compris à chaque frappe dans une cellule (§5.1). La formule « les charges
+utiles étant derrière `Arc` » de la rédaction initiale ne visait que les
+colonnes ; elle doit couvrir le nœud entier.
 
 Structure conservée du modèle Python : `Folder → Workbook → Worksheet →
 Column`, `Graph` / `Matrix` / `Note` en nœuds frères du `Workbook`,
@@ -289,7 +390,24 @@ enum Entry {
 ```
 
 `before` et `after` partagent presque tout : garder les deux coûte un
-pointeur, et le redo devient symétrique de l'undo.
+pointeur, et le redo devient symétrique de l'undo. L'`after` d'une entrée
+**est** le `before` de la suivante — le même `Arc`, pas une seconde copie
+(§2.1.1).
+
+**Une écriture de cellules produit elle aussi un nouvel arbre.** La colonne
+vit dans un nœud, le nœud dans la carte : `Arc::make_mut` remonte la
+chaîne. Ce que l'hybride sépare n'est donc pas « l'arbre change / ne change
+pas », mais **ce que l'entrée retient** : `Structural` retient deux arbres,
+`Data` ne retient que des valeurs et les rejoue dans l'arbre courant. C'est
+ce qui garde une frappe à ~100 Ko de churn (§4.2) au lieu d'un arbre retenu
+par frappe.
+
+**Invariant LIFO — non négociable.** Une entrée `Structural` ne peut être
+annulée que si **toutes** les entrées postérieures l'ont déjà été.
+Restaurer un arbre entier écrase tout ce qui a été écrit après lui : hors
+de l'ordre de pile, l'annulation d'un snapshot avale silencieusement des
+deltas. La pile le garantit par construction ; le §5.3 énonce la même règle
+là où elle n'est **pas** gratuite — à l'intérieur d'une macro.
 
 ### 5.2 Commandes
 
@@ -313,7 +431,10 @@ tranché plutôt que laissé ouvert. Le comportement « tableur » (fusionner
 des frappes successives en une seule entrée) exigerait un critère de
 regroupement (fenêtre de temps ? même cellule ? même appelant ?) qui
 n'apporte rien à ce socle et qui se décidera, si besoin, avec l'UI réelle
-où ces frappes ont lieu.
+où ces frappes ont lieu. Les quatre critères possibles, et celui d'entre eux
+qui toucherait au protocole du §6, sont recensés dans
+`questions-ouvertes.md`, question 5 — pour ne pas rejouer la discussion à
+zéro le jour venu.
 
 ### 5.3 Macros — la discipline qui fait tenir l'hybride
 
@@ -335,6 +456,12 @@ déclarant obsolète pendant son `redo()` (décision 6) n'existe pas ici.
 Configurable, bornée par défaut. Seul garde-fou contre le piège mémoire du
 §2.1.1. Une entrée évincée relâche ses `Arc` ; les buffers qu'elle seule
 retenait sont libérés à ce moment.
+
+La **valeur** par défaut n'est pas fixée par ce document, et la revue du
+2026-09-08 relève qu'une limite comptée en *entrées* ne protège justement
+pas du cas coûteux : une seule suppression de classeur pèse 400 Mo, cent
+renommages ne pèsent rien. `questions-ouvertes.md`, question 7 — à trancher
+en phase 2, en même temps que le comportement à l'éviction.
 
 ---
 
@@ -376,6 +503,33 @@ qui rend impossible le cycle « le script tient le GIL et attend l'acteur,
 l'acteur attend le GIL ». La frontière est vérifiable : `plotyx-session` ne
 dépend pas de `plotyx-python` (§3).
 
+#### 6.3.1 Le chemin caché — `Drop`
+
+Le raisonnement ci-dessus était incomplet, complété le 2026-09-08. Une
+requête ou une réponse qui transporterait un objet Python (`Py<…>`) serait
+**détruite sur le thread de l'acteur** ; or détruire un objet Python
+décrémente son compteur de références, ce qui est une opération Python.
+Aucun appel visible à `plotyx-python`, et pourtant le GIL en jeu. D'où la
+règle complémentaire, qui ferme l'invariant :
+
+> **Aucun objet Python ne traverse le canal** — ni à l'aller, ni au retour,
+> ni comme champ enfoui d'une commande.
+
+C'est la **deuxième** justification de la copie à l'écriture (§8.3), et
+elle est indépendante de la première : un `Vec<f64>` copié est du Rust pur,
+il se détruit n'importe où. Deux garde-fous la tiennent sans discipline
+humaine : `plotyx-session` ne dépend pas de `plotyx-python` (le type ne
+serait même pas nommable), et le marqueur `Ungil` exigé par
+`Python::detach` (§8.2) rejette **à la compilation** toute valeur liée au
+GIL qui tenterait de franchir l'attente.
+
+Les deux autres chemins ont été vérifiés et sont clos : les **erreurs**
+(`CommandError` est un `thiserror` de `plotyx-commands`, traduit en
+exception Python par `plotyx-script`, sur le thread de script, GIL en
+main) et les **journaux** (l'acteur écrit via `tracing`, jamais via
+`sys.stdout` ; la capture de `print` du §8.4 est locale au thread de
+script).
+
 ---
 
 ## 7. Persistance — `plotyx-persistence`
@@ -407,6 +561,39 @@ Propriétés obligatoires **même en version provisoire**, reprises de
   permettra d'ajouter les `PlotSpec` plus tard sans casser les fichiers du
   socle.
 
+### 7.1 Le couplage caché : la forme du schéma, pas la signature
+
+La revue du 2026-09-08 confirme que la **signature** est suffisante — aucun
+appelant ne peut apprendre le format à travers elle. Deux couplages
+subsistent pourtant sous la signature, et se ferment maintenant, pas au
+moment de basculer sur Zarr :
+
+1. **Le format ne doit pas s'écrire dans le modèle.** `plotyx-persistence`
+   ne peut pas implémenter `Serialize` pour des types de `plotyx-core`
+   (règle d'orphelin) : soit `plotyx-core` porte les dérivations `serde`,
+   soit `plotyx-persistence` définit ses propres structures de transport.
+   **Retenu : les structures de transport dans `plotyx-persistence`.** Le
+   coût est une poignée de conversions à écrire ; le gain est que le schéma
+   sur disque devient un objet explicite, versionné indépendamment des
+   types en mémoire — et que le passage à Zarr, qui demande de toute façon
+   une correspondance écrite à la main, ne rouvre pas `plotyx-core`.
+   *Écarté — dérivations `serde` dans `plotyx-core`* : plus court à écrire,
+   mais fait entrer dans le cœur des noms de champs qui deviennent un
+   contrat de fichier, et rend toute renommée de champ interne
+   silencieusement incompatible avec les fichiers déjà écrits.
+2. **`load` rend tout, tout de suite.** La signature engage une sémantique
+   de chargement **intégral en mémoire** — celle d'aujourd'hui côté Python,
+   et celle du format provisoire. Elle est compatible avec Zarr comme
+   conteneur, mais **elle n'expose pas** ce que Zarr apporte de propre
+   (`format-fichier-plx.md` §2a) : lecture partielle d'une colonne à 1M de
+   points, croissance chunk par chunk pour l'acquisition live. Ces usages
+   demanderont une **entrée supplémentaire**, pas un changement de celle-ci.
+   Ce n'est donc pas une dette : le socle assume le chargement intégral,
+   et le jour où la lecture paresseuse devient un besoin, elle s'ajoute à
+   côté. Consigné comme tel dans `questions-ouvertes.md` (question 4),
+   parce que c'est le genre de limite qu'on redécouvre autrement au pire
+   moment.
+
 ---
 
 ## 8. Le pont Rust ↔ Python — le cœur du socle
@@ -418,8 +605,11 @@ seul à exposer l'accès au GIL.
 
 - Interpréteur **vendored et figé** (`python-build-standalone`), wheels
   numpy épinglées, un jeu par plateforme. Pas de Python système, pas de
-  `pip` exposé, `PYTHONHOME` pointé sur le préfixe embarqué,
-  auto-initialisation de PyO3 désactivée.
+  `pip` exposé, interpréteur pointé sur le préfixe embarqué **et isolé de
+  l'environnement de l'utilisateur** (§8.6.1 — la simple variable
+  `PYTHONHOME` n'y suffit pas), auto-initialisation de PyO3 désactivée
+  (feature `auto-initialize` non activée : c'est elle qui rend possible
+  l'initialisation paresseuse ci-dessous).
 - **Initialisation paresseuse, obligatoire.** L'interpréteur n'est chargé
   qu'au premier besoin réel (ouverture de la console). Une fenêtre et une
   feuille de calcul doivent s'ouvrir **sans** interpréteur : sans cette
@@ -431,19 +621,40 @@ seul à exposer l'accès au GIL.
 
 ### 8.2 GIL — trois règles
 
+**Noms d'API vérifiés sur PyO3 ≥ 0.25**, qui a renommé toute la famille GIL
+en prévision du Python sans GIL (3.13 *free-threaded*), où « prendre le
+GIL » n'a plus de sens universel. Les anciens noms restent appelables mais
+sont **dépréciés** ; ce document écrit les noms actuels :
+
+| Rôle | Nom actuel | Ancien nom, déprécié |
+|---|---|---|
+| Prendre le GIL le temps d'un bloc | `Python::attach` | `Python::with_gil` |
+| **Relâcher** le GIL le temps d'un bloc | `Python::detach` | `Python::allow_threads` |
+| Démarrer l'interpréteur | `Python::initialize` | `prepare_freethreaded_python` |
+
 1. **Le thread UI ne touche jamais à Python.** Dans le socle, il n'en a
    aucun besoin ; l'y autoriser ferait dépendre la fluidité du rendu de la
    disponibilité du GIL.
 2. **Le thread de script relâche le GIL pendant qu'il attend l'acteur**
-   (`allow_threads`). Sans ça, il affame tout autre usage de Python pendant
-   chaque aller-retour.
+   (`Python::detach`). Sans ça, il affame tout autre usage de Python
+   pendant chaque aller-retour. La signature réelle est
+   `fn detach<T, F>(self, f: F) -> T where F: Ungil + FnOnce() -> T, T: Ungil` :
+   le marqueur `Ungil` **interdit à la compilation** qu'une valeur liée au
+   GIL entre dans le bloc d'attente ou en ressorte. Cette règle n'est donc
+   pas une discipline à tenir mais une erreur de compilation si on la
+   manque — et elle vérifie au passage la règle « aucun objet Python sur le
+   canal » du §6.3.1.
 3. **L'acteur ne prend jamais le GIL** (§6.3) — la règle qui rend le
    deadlock structurellement impossible.
 
 **Limite assumée, à documenter plutôt qu'à prétendre résoudre** : un script
 exécutant une longue boucle Python pure garde le GIL. C'est inhérent à
 CPython et déjà vrai aujourd'hui ; c'est pourquoi l'interruption est un
-mécanisme à concevoir (§8.4), pas une case à cocher.
+mécanisme à concevoir (§8.4), pas une case à cocher. À noter en renfort :
+`Python::initialize` démarre l'interpréteur **avec la gestion des signaux
+désactivée**. Aucun `KeyboardInterrupt` ne sera donc levé tout seul — c'est
+souhaitable (pas de compétition avec la boucle d'événements de l'UI) mais
+ça confirme que l'arrêt d'un script est **entièrement à notre charge**.
 
 ### 8.3 Tableaux — l'asymétrie est une décision
 
@@ -459,17 +670,65 @@ durée de vie d'une colonne de celle d'un objet Python. Le contrat de
 `cahier-des-charges-api-script.md` §2.3 est respecté : la lecture est une
 vue, l'écriture passe par une commande.
 
-**Deux points à valider par la mesure, en tout premier** :
+#### 8.3.1 Le mécanisme exact et son contrat de sûreté
 
-- `rust-numpy` distingue les constructeurs qui **copient** de ceux qui
-  **empruntent** le buffer Rust. Seul l'emprunt tient le contrat — à
-  vérifier explicitement, pas à supposer d'après le nom de la fonction.
-- L'objet numpy rendu doit **maintenir l'`Arc` vivant** pendant toute son
-  existence (propriétaire attaché en `base`). Sans ça, une écriture
-  concurrente déclencherait le `Arc::make_mut` du §4.3 et libérerait le
-  buffer sous une vue encore utilisée par le script. Test dédié :
-  garder une vue vivante, écrire dans la colonne depuis l'UI, relire la
-  vue.
+Vérifié sur `rust-numpy` le 2026-09-08. La bibliothèque distingue bien les
+constructeurs qui **copient** (`PyArray::from_slice`,
+`ToPyArray::to_pyarray`) de celui qui **emprunte** un buffer Rust :
+
+```
+unsafe fn borrow_from_array<S>(array: &ArrayBase<S, D>,
+                               container: Bound<'py, PyAny>) -> Bound<'py, Self>
+```
+
+Trois points, tous à traiter comme du contrat et non comme du détail :
+
+- **La fonction est `unsafe`**, et sa clause est explicite : *le
+  `container` ne doit pas être détruit avant le tableau numpy, et le buffer
+  ne doit être ni déplacé ni réalloué tant que le `container` vit.*
+- **Le `container` est un `#[pyclass]` qui détient un clone du
+  `Arc<Vec<f64>>`.** Pas un pointeur, pas une référence empruntée : un
+  `Arc` cloné. Il devient l'attribut `base` du tableau numpy et il est le
+  seul lien qui maintienne le compte de références au-dessus de 1.
+- **C'est ce clone qui rend l'écriture concurrente sûre**, via
+  `Arc::make_mut` (§4.3) : tant qu'une vue existe, le compte vaut ≥ 2, donc
+  toute écriture côté modèle **alloue un buffer neuf** et laisse l'ancien
+  intact. Le buffer sous la vue n'est ni déplacé, ni réalloué, ni libéré —
+  la clause ci-dessus est honorée par construction, pas par vigilance.
+
+**Correction de rédaction (2026-09-08).** La version précédente disait que,
+sans `base`, `Arc::make_mut` « libérerait le buffer sous la vue ». C'est
+l'inverse : sans `base`, le compte reste à 1 et `make_mut` **écrit en
+place**. Les deux fautes sont donc distinctes, et aucune n'est visible dans
+un test qui se contente de relire des valeurs juste après l'écriture :
+
+| Sans le `base` qui clone l'`Arc` | Ce qui se passe |
+|---|---|
+| écriture de cellules | `make_mut` mute en place → la vue Python lit un buffer modifié sous elle (course de données) |
+| insertion de lignes | le `Vec` grandit → **réallocation** → la vue pointe sur de la mémoire libérée |
+| suppression de la colonne | le `Vec` est détruit → même chose, en pire |
+
+**Ce que la vue devient — à assumer, pas à corriger.** Une vue prise avant
+une écriture reste sur l'**ancien** buffer : le script continue de lire des
+valeurs périmées, silencieusement. C'est le comportement correct — une vue
+est un instantané, pas un abonnement — mais c'est un piège d'usage à
+documenter dans l'API de script.
+
+**Test dédié, dans ces termes exacts** : prendre une vue, écrire dans la
+colonne depuis l'acteur, puis vérifier que **(a)** la vue relit sans
+planter les **anciennes** valeurs, **(b)** un nouvel appel `pyx.column()`
+rend les nouvelles, **(c)** insérer des lignes pendant que la vue vit ne
+plante pas, **(d)** le tout sous **`valgrind` ou AddressSanitizer** — un
+usage après libération ne s'observe pas de façon fiable par des assertions,
+il se voit à l'instrumentation. À noter : **`miri` n'est pas utilisable
+ici** (il n'exécute pas d'appels FFI, donc rien qui traverse PyO3) ; il
+reste l'outil du reste du modèle, où tout est du Rust pur.
+
+**`writeable = False` est un garde-fou, pas une frontière.** Il attrape la
+faute d'inattention (`col[0] = 3` dans un script) et documente l'intention.
+Il ne résiste pas à un script déterminé, et n'a pas à le faire : le modèle
+de confiance du `cahier-des-charges-api-script.md` §6 donne déjà les pleins
+pouvoirs à l'interpréteur.
 
 ### 8.4 Thread de script
 
@@ -503,17 +762,51 @@ Vocabulaire d'erreurs limité à ce qu'elles peuvent lever :
 repris tels quels du cahier des charges API, pour ne pas avoir à les
 renommer ensuite.
 
-### 8.6 L'empaquetage se prouve en premier
+**Trou identifié le 2026-09-08** : aucune des trois ne couvre `pyx.undo()`
+sur une pile vide, et le cahier des charges API §7 n'en prévoit pas
+davantage. Une pile vide n'est pas une erreur — c'est le cas que l'UI
+traduit par un bouton grisé. `questions-ouvertes.md`, question 2, à
+trancher avec la tâche 5.5.
+
+### 8.6 L'empaquetage se prouve en premier — sur Linux d'abord
 
 **Exigence de séquencement, pas de confort.** Avant tout autre code du
-pont, un *hello-world* doit être empaqueté et lancé **sur Linux et sur
-Windows** : binaire Rust + interpréteur vendored + numpy, avec un aller
-simple et un retour de tableau mesurés.
+pont, un *hello-world* doit être empaqueté et lancé **sur Linux** : binaire
+Rust + interpréteur vendored + numpy, avec un aller simple et un retour de
+tableau mesurés. **Le même hello-world sur Windows est un jalon distinct,
+volontairement après** (§1.1) — pas sauté, pas simultané.
 
 C'est l'application du « point de vigilance n°3 » du roadmap Python (le
 packaging se valide maintenant, pas à la fin) au risque le plus lourd de
 cette architecture. Découvrir un blocage d'empaquetage après avoir écrit
-tout le pont coûterait le pont.
+tout le pont coûterait le pont — resserrer d'abord sur Linux limite ce
+risque à une plateforme pendant que le reste du pont s'écrit, au lieu de le
+porter en double dès le premier jour.
+
+#### 8.6.1 Pièges connus, à traiter dans le hello-world
+
+Recensés le 2026-09-08 : ils sont documentés, reproductibles, et aucun
+n'est rédhibitoire — mais chacun est capable de coûter une journée s'il est
+découvert sans être attendu. Le hello-world de 5.1 doit les traverser tous.
+**La colonne Windows reste dans ce tableau pour ne pas être redécouverte
+au moment du portage** — elle ne conditionne rien avant cette étape-là.
+
+| # | Piège | Ce qu'il faut faire (Linux, maintenant) | Ce qui attend (Windows, plus tard) |
+|---|---|---|---|
+| 1 | **PyO3 ne trouve pas `libpython` à la compilation** : le `sysconfig` livré par `python-build-standalone` n'est pas celui d'une installation ordinaire, et la détection automatique de PyO3 échoue dessus | fournir un `PYO3_CONFIG_FILE` écrit à la main (version, `lib_dir`, `lib_name`, `pointer_width`), figé dans le dépôt et pointé par le script de build | même mécanisme, valeurs Windows du build vendored à substituer |
+| 2 | **Le binaire ne trouve pas `libpython` à l'exécution.** | `libpython3.x.so.1.0` doit être trouvable : `-C link-arg=-Wl,-rpath,$ORIGIN/lib` — un `rpath` relatif, **pas** un `LD_LIBRARY_PATH` dans un script de lancement | `python3x.dll` doit être à côté de l'exécutable |
+| 3 | **Liaison statique de `libpython`** : elle paraît plus propre, mais les modules d'extension compilés (numpy en tête) attendent des symboles exportés par une `libpython` **partagée** | prendre la distribution partagée (`install_only`) et l'embarquer, ne pas chercher le binaire unique | identique |
+| 4 | **`PYTHONHOME` seul n'isole rien.** Il désigne le préfixe, mais laisse entrer `PYTHONPATH`, le `site-packages` utilisateur (`~/.local/lib/python3.x/…`) et les `.pth` du système — un utilisateur ayant un autre numpy installé peut le voir masquer le nôtre | initialiser en **mode isolé** (l'équivalent de `python -I`) via `PyConfig` : `isolated = 1`, `home` et `module_search_paths` renseignés explicitement | même config, chemins Windows |
+| 5 | **`Py_SetPythonHome` / `Py_SetProgramName` sont dépréciés depuis CPython 3.11 et supprimés en 3.13** ; et depuis 3.11, l'initialisation par `PyConfig` **ne lit plus `PYTHONPATH` par défaut** | passer par `Py_InitializeFromConfig` + `PyConfig` (accessible via `pyo3::ffi`), pas par les anciens setters ni par des variables d'environnement posées avant l'init | identique |
+| 6 | **numpy est lié à une version d'interpréteur précise** (ABI CPython, et ABI numpy 1.x vs 2.x) | figer ensemble, dans un même verrou : version de l'interpréteur, roues numpy, version de `rust-numpy` | même verrou, roues Windows en plus |
+| 7 | **Pas de `Py_Finalize`** (§8.1) — conséquence à connaître : les `atexit` Python ne tournent pas, les fichiers temporaires créés par une future pile Matplotlib ne sont pas nettoyés à la sortie | acceptable ici ; à revoir seulement si un jour du code Python doit écrire quelque chose en sortant | identique |
+
+**Non couvert volontairement** : macOS, comme Windows au sens de « pas
+maintenant ». Le piège spécifique connu côté macOS (l'`install_name` des
+bibliothèques `python-build-standalone` ne contient pas `@rpath`, ce qui
+rend le `rpath` de l'exécutable inopérant) est noté ici pour ne pas être
+redécouvert le jour où macOS entrerait dans le périmètre — aucune cible
+macOS n'est prévue pour l'instant.
 
 ---
 
@@ -612,7 +905,11 @@ arrêtées : les rouvrir demanderait une raison nouvelle.
 **Risques, par gravité décroissante.**
 
 1. **Empaquetage de la pile Python par plateforme** — le seul dont l'échec
-   invaliderait l'architecture. Mitigé par §8.6, pas éliminé.
+   invaliderait l'architecture. Mitigé par §8.6, pas éliminé. Le
+   resserrement du 2026-09-08 (Linux d'abord, §1.1) réduit l'exposition
+   pendant le développement du pont, mais **ne réduit pas le risque
+   lui-même** : le hello-world Windows reste à traverser avant de pouvoir
+   dire l'architecture prouvée cross-platform.
 2. **Zéro-copie et durée de vie sous vue numpy** (§8.3) — le contrat central
    du socle. À mesurer et à tester, pas à supposer.
 3. **Ordre d'annulation dans les macros mixtes** (§5.3) — la seule
@@ -631,5 +928,18 @@ arrêtées : les rouvrir demanderait une raison nouvelle.
   activé nulle part aujourd'hui (`resume-decisions.md` §8). À trancher
   quand l'UI se construira, pas avant.
 
-**Question non tranchée, hors architecture** : calendrier réel non
-chiffré.
+**Questions non tranchées** : rassemblées dans `questions-ouvertes.md`,
+rédigé pour être lu **sans connaissance de Rust** (il s'ouvre sur un
+lexique Rust → Python). Aucune ne rouvre les quatre décisions du §2, mais
+chacune finira par se poser :
+
+| # | Question | Où | À trancher |
+|---|---|---|---|
+| 1 | « UUID » du cahier API face au `NodeId(u64)` | §4.1 | avant `plotyx.api` v1 |
+| 2 | `pyx.undo()` sur une pile vide | §8.5 | tâche 5.5 |
+| 3 | Ce qu'on dit d'une vue numpy devenue périmée | §8.3.1 | tâche 5.2 |
+| 4 | Lecture partielle, non exposée par la frontière | §7.1 | quand l'acquisition live devient un besoin |
+| 5 | Coalescence des éditions — critères recensés | §5.2 | chantier de l'UI réelle |
+| 6 | Sort du mode « visualiseur léger » | ci-dessus | chantier de l'UI réelle |
+| 7 | **Valeur** de la limite d'historique, en entrées ou en octets | §5.4 | phase 2 |
+| 8 | Calendrier réel, toujours non chiffré | — | avant engagement |

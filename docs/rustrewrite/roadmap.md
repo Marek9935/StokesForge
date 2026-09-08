@@ -1,9 +1,11 @@
 # Roadmap Rust — le socle et le pont Python
 
-Statut : **étude, rien d'engagé**. Ce document ne remplace pas `ROADMAP.md`
-(Python/Qt, actif) — c'est le plan d'un portage éventuel. Il dit *quand* ;
+Statut : **architecture arrêtée le 2026-09-08** (`cahier-des-charges-technique.md`),
+**calendrier non engagé**. Ce document ne remplace pas `ROADMAP.md`
+(Python/Qt, actif) — c'est le plan du portage. Il dit *quand* ;
 `cahier-des-charges-technique.md` dit *comment* et fait foi sur
-l'architecture.
+l'architecture. En cas de divergence entre les deux, **c'est le cahier des
+charges qui gagne**, et ce document qui est à corriger.
 
 **But de ce plan** : livrer le strict nécessaire pour **ouvrir le chantier
 de l'interface**, et rien de plus.
@@ -16,10 +18,23 @@ de l'interface**, et rien de plus.
 - Phase 5 : le **pont Rust ↔ Python** — la tuyauterie, sans système de
   graphes par-dessus.
 
+**Cible resserrée le 2026-09-08 : Linux d'abord, seul** (cahier des
+charges §1.1). Windows n'est pas hors périmètre — il reste la condition de
+clôture définitive du socle (§8.6) — mais c'est une étape ultérieure,
+rejouée une fois le critère ci-dessous vrai sur Linux, pas portée en
+parallèle dès la phase 0.
+
 Le critère de fin est celui du §1.1 du cahier des charges : depuis un
-binaire empaqueté sur Linux et Windows, une cellule s'annule par Ctrl+Z, un
-fichier se rouvre à l'identique, **et un script Python lit une colonne sans
-copie, en écrit une autre via le bus, que Ctrl+Z annule.**
+binaire empaqueté sur Linux, une cellule s'annule par Ctrl+Z, un fichier se
+rouvre à l'identique, **et un script Python lit une colonne sans copie, en
+écrit une autre via le bus, que Ctrl+Z annule.** Windows rejoue ensuite le
+même critère, en aval, pas en même temps.
+
+Les points restant à trancher — aucun ne bloque une phase — sont regroupés
+dans `questions-ouvertes.md`, rédigé pour être lu sans connaissance de
+Rust. Trois tombent dans le périmètre phasé ici : la valeur de la limite
+d'historique (phase 2), le comportement de `pyx.undo()` sur une pile vide
+(tâche 5.5) et ce qu'on dit d'une vue numpy périmée (tâche 5.2).
 
 Rien au-delà n'est phasé ici — système de graphes, surface `plotyx.api` v1,
 import, docking, grille éditable. L'UI en particulier sera reprise
@@ -40,9 +55,9 @@ tout de suite, pas à la fin).
 
 | # | Tâche | Livrable |
 |---|---|---|
-| 0.1 | Workspace Cargo multi-crates : `plotyx-core` (modèle, zéro dépendance UI), `plotyx-commands` (bus/undo), `plotyx-cli` (binaire de test headless) | `cargo build` vert, 3 crates |
+| 0.1 | Workspace Cargo multi-crates : `plotyx-core` (modèle, zéro dépendance UI), `plotyx-commands` (bus/undo), `plotyx-cli` (binaire de test headless) — soit **2 des 7 crates cibles** de `cahier-des-charges-technique.md` §3, plus le binaire headless ; les cinq autres (`persistence`, `session`, `python`, `script`, `app`) arrivent avec leur phase | `cargo build` vert, 3 crates |
 | 0.2 | `rustfmt` + `clippy -D warnings` en CI, sur le modèle du `ruff` déjà en place côté Python | Lint bloquant |
-| 0.3 | GitLab CI : build + test + clippy sur runner Linux, matrice Linux/Windows dès que 0.1 le permet | Pipeline |
+| 0.3 | GitLab CI : build + test + clippy sur runner Linux — **matrice Windows différée à la phase 5** (cahier des charges §1.1, resserrement du 2026-09-08), pas construite par anticipation | Pipeline |
 | 0.4 | Choix et verrouillage des crates de base — **voir `cahier-des-charges-technique.md` §4.1 : ni `slotmap` ni `uuid`**, l'undo hybride impose un `NodeId(u64)` monotone jamais réutilisé | `Cargo.toml` figé |
 | 0.5 | Un test smoke qui construit un `Project` vide et le détruit sans fuite (`cargo test`, éventuellement `miri` en CI optionnelle) | CI verte |
 
@@ -62,12 +77,19 @@ dépendance UI dans `plotyx-core`.
 
 ### 1.1 Choix de structure — écart volontaire par rapport à Python
 
-> **Révisé le 2026-09-08** : la clé générationnelle proposée ci-dessous est
-> remplacée par un `NodeId(u64)` monotone jamais réutilisé — une arène à
-> réutilisation de slots entre en collision d'identité lors d'une
-> restauration par `undo`. Raisonnement complet et décision qui fait foi :
-> `cahier-des-charges-technique.md` §4.1. Le reste de cette section (une
-> arène plutôt que des `Rc`, l'arène tenant lieu de registre) reste valable.
+> **Révisé le 2026-09-08, argument corrigé le même jour par la revue
+> technique** : la clé générationnelle proposée ci-dessous est remplacée par
+> un `NodeId(u64)` monotone jamais réutilisé. Le motif n'est **pas** une
+> collision d'identité — les générations de `slotmap` l'empêchent
+> précisément — mais le fait qu'une arène **ne sait pas réinsérer à une clé
+> donnée** : un nœud restauré par `undo` recevrait une clé neuve, ce qui
+> casse le contrat de `cahier-des-charges-api-script.md` §3 (« une clé
+> résolue vers un objet supprimé puis restauré par `undo` reste valide »).
+> Raisonnement complet, et deux autres raisons indépendantes, dans
+> `cahier-des-charges-technique.md` §4.1, qui fait foi. Reste valable du
+> texte ci-dessous : une carte plate à clés plutôt que des `Rc`, et cette
+> carte tenant lieu de registre — c'est la `HashMap<NodeId, Arc<Node>>` de
+> la spec §4.2 qui joue ce rôle, pas une arène.
 
 Le modèle Python utilise des références directes en mémoire (objets Qt-liés,
 signaux). En Rust, un arbre à parents/enfants avec références directes se
@@ -91,7 +113,9 @@ générationnelle** (`slotmap` ou équivalent), pas des `Rc`:
 
 ### 1.2 Contenu du modèle — repris à l'identique, langage mis à part
 
-- `Column` : `Vec<f64>` (au lieu de `np.ndarray`) + métadonnées identiques
+- `Column` : `Arc<Vec<f64>>` (au lieu de `np.ndarray`) — le `Arc` est
+  requis par le partage sans copie vers numpy et par le
+  copie-à-l'écriture, cf. spec §4.3 — + métadonnées identiques
   (nom, unité, label, commentaire, rôle X/Y/yErr, format d'affichage, type) ;
   valeur manquante = `f64::NAN`, pas d'`Option<f64>` par élément — même
   décision 1 de la phase 1 Python, pour la même raison (vitesse, densité
@@ -106,20 +130,24 @@ générationnelle** (`slotmap` ou équivalent), pas des `Rc`:
   `[Book1]Sheet1!ColA` — grammaire de `core/paths.py` reprise telle quelle
   (déjà actée comme socle stable dans `cahier-des-charges-api-script.md`
   §3).
-- Notifications : pas de signal Qt possible dans `plotyx-core` (zéro
-  dépendance UI, même règle que Python). Un canal d'événements interne
-  (`crossbeam-channel` ou callbacks enregistrés) rejoue le rôle de
-  `dataChanged`/`structureChanged` ; la couche UI choisie plus tard
-  s'abonne à ce canal — pas de traduction vers un event-loop UI décidée ici,
-  volontairement (dépend du choix UI, §7).
+- ~~Notifications : canal d'événements interne (`crossbeam-channel` ou
+  callbacks enregistrés) rejouant `dataChanged`/`structureChanged`.~~
+  **Révisé le 2026-09-08 — sans objet.** Il n'y a pas d'abonnement dans
+  `plotyx-core` : l'acteur (spec §6) répond un `Snapshot { tree, revision }`
+  et le client compare la `revision` à celle qu'il détient. Pas d'abonné,
+  donc pas de ré-entrance possible, donc pas de traduction vers une boucle
+  d'événements à concevoir. La règle « pas de signal Qt dans `plotyx-core` »
+  reste vraie, elle est simplement devenue triviale.
 
 ### 1.3 Ce qui ne se transpose pas tel quel
 
-- Le canal d'événements du modèle doit rester **synchrone et sans
-  ré-entrance** (un abonné qui déclenche une mutation pendant qu'il traite
-  un événement est un bug, à interdire par construction — un `RefCell`
-  emprunté deux fois panique plutôt que corrompre, ce qui est déjà une
-  amélioration par rapport à l'équivalent Python silencieux).
+- ~~Le canal d'événements du modèle doit rester **synchrone et sans
+  ré-entrance**.~~ **Révisé le 2026-09-08 — sans objet**, pour la même
+  raison qu'en §1.2 : il n'y a pas de canal d'événements. La classe de bug
+  visée (un abonné qui mute le modèle pendant qu'il traite une
+  notification) disparaît avec l'abonnement lui-même — c'est un bénéfice
+  supplémentaire de l'acteur, à ne pas perdre de vue si l'idée d'un canal
+  d'abonnement revenait un jour.
 - Pas de `weakref` idiomatique en Rust — le rôle des références faibles de
   `ObjectRegistry` (décision 4 phase 1 Python) est repris par le `NodeId`
   (§1.1, révisé) : une clé absente de l'arbre courant est l'équivalent
@@ -183,8 +211,13 @@ struct CommandBus {
   contenir une exception traversant la frontière C++ de Qt ; en Rust,
   `Result<(), CommandError>` est le mécanisme d'erreur ordinaire, la même
   règle s'impose donc sans qu'il y ait de frontière FFI en jeu.
-- Commandes de base identiques : `SetCellsCommand`, `AddColumnCommand`,
-  `DeleteColumnCommand`, `RenameCommand`, `MoveCommand`.
+- Commandes de base — **liste faisant foi : spec §5.2**, huit primitives :
+  `SetCells`, `AddColumn`, `DeleteColumn`, `Rename`, `Move`,
+  `SetColumnType`, `InsertRows`, `DeleteRows`. (La rédaction initiale n'en
+  citait que cinq ; les trois manquantes sont celles qui portent
+  l'invariant lignes du §2.4 et le seul snapshot de données assumé,
+  `SetColumnType`.) Les commandes de `PlotSpec` viendront avec le système
+  de graphes, hors socle.
 - Stratégie mémoire identique : delta/paramètres d'abord, snapshot en
   dernier recours (ex. changement de type de colonne, décision 5 Python),
   copy-on-write sur les buffers non touchés — `Vec<f64>` derrière un `Arc`
@@ -207,17 +240,23 @@ cf. `cahier-des-charges-api-script.md`) sans embarquer la logique
 d'historique. Dépendance à sens unique conservée : `plotyx-commands` connaît
 `plotyx-core`, jamais l'inverse.
 
-### 2.3 Durée de vie des objets supprimés — via l'arène, pas via un compteur de références
+### 2.3 Durée de vie des objets supprimés — ~~via l'arène~~ sans objet
 
-Décision 4 de la phase 2 Python (une commande de suppression garde une
+> **Révisé le 2026-09-08 — cette section n'a plus d'objet**, et c'est le
+> bénéfice principal de l'undo hybride (spec §2.1). L'ancien arbre, retenu
+> par l'entrée d'historique, retient le nœud supprimé : il n'y a **rien à
+> libérer explicitement**, donc rien à comptabiliser. Une entrée évincée par
+> la limite d'historique relâche son `Arc`, et le nœud disparaît à ce
+> moment-là, tout seul (spec §5.4). Texte d'origine conservé ci-dessous
+> comme mémoire de l'option écartée.
+
+~~Décision 4 de la phase 2 Python (une commande de suppression garde une
 référence forte, le bus fait le ménage à l'éviction). En Rust, avec l'arène
 de la phase 1 : une commande de suppression retient la **clé** de l'objet
 retiré, pas l'objet lui-même — le slot de l'arène n'est marqué libre qu'au
 moment où la commande elle-même sort définitivement de la pile (éviction par
 `limit`, troncature de la branche redo, `clear()`). Testable directement en
-comptant les slots vivants de l'arène avant/après, sans `gc`/`weakref`
-(Rust n'en a pas besoin ici — c'est un test plus simple qu'en Python, pas
-un renoncement).
+comptant les slots vivants de l'arène avant/après, sans `gc`/`weakref`.~~
 
 ### 2.4 Invariant lignes — hérité tel quel
 
@@ -260,7 +299,11 @@ fn load(path: &Path) -> Result<Project, PersistenceError>;
 
 Une seule fonction dans chaque sens, qui prend/rend un `Project` complet,
 rien d'autre — aucun appelant (phase 4, futur binding script) ne doit
-connaître le format sous-jacent. Si cette frontière est respectée
+connaître le format sous-jacent. **Deux couplages sous la signature** sont
+traités en spec §7.1 : les structures de transport vivent dans
+`plotyx-persistence` (pas de dérivations `serde` dans `plotyx-core`), et le
+chargement est assumé **intégral** — la lecture partielle qu'autorisera
+Zarr s'ajoutera à côté, elle ne remplacera pas `load`. Si cette frontière est respectée
 maintenant, le format binaire provisoire peut être remplacé par Zarr plus
 tard sans rien casser au-dessus ; la deviner autrement ferait porter le
 coût du changement de format à la coquille UI et au reste.
@@ -336,23 +379,28 @@ la phase 2.
 
 | # | Tâche | Verrou |
 |---|---|---|
-| 5.1 | Hello-world empaqueté **Linux + Windows** : binaire + interpréteur vendored + numpy | **avant tout le reste de la phase** |
+| 5.1a | Hello-world empaqueté **Linux** : binaire + interpréteur vendored + numpy — les **7 pièges connus** à traverser sont listés en spec §8.6.1 (`PYO3_CONFIG_FILE`, `rpath`, `libpython` partagée, mode isolé, `PyConfig`, ABI numpy, pas de finalisation) | **avant tout le reste de la phase** |
+| 5.1b | Le même hello-world rejoué **sur Windows** — jalon distinct, après 5.1a, **avant de déclarer le socle clos** (spec §1.1, §8.6) ; peut glisser après 5.2-5.6 si Windows n'est pas encore requis pour avancer sur Linux | après 5.1a ; avant la clôture du socle |
 | 5.2 | Aller-retour de tableau mesuré **sur le harnais de 5.1**, avant d'écrire le vrai cycle de vie : emprunt sans copie Rust → numpy, copie numpy → Rust | après 5.1, avant 5.3 |
 | 5.3 | Cycle de vie de l'interpréteur : init paresseuse, pas de finalisation, `PYTHONHOME` embarqué | après 5.1 |
 | 5.4 | Thread de script : GIL relâché pendant l'attente de l'acteur, capture de `print`/tracebacks, interruption coopérative | après 5.3 et phase 2 |
 | 5.5 | Surface-témoin `resolve` / `column` / `set_column` / `undo` | après 5.4 |
 | 5.6 | Zone de saisie de script dans la coquille UI | après 5.5 et phase 4 |
 
-> ⚠️ **5.1 et 5.2 sont des verrous, pas des tâches.** L'empaquetage d'une
+> ⚠️ **5.1a et 5.2 sont des verrous, pas des tâches.** L'empaquetage d'une
 > pile Python par plateforme est le risque le plus lourd de toute
 > l'architecture, et le budget de rendu du futur système de graphes repose
 > entièrement sur le zéro-copie de 5.2. Les découvrir en fin de phase
 > coûterait la phase entière — c'est le « point de vigilance n°3 » du
-> roadmap Python appliqué ici.
+> roadmap Python appliqué ici. **5.1b (Windows) n'est pas un verrou sur le
+> reste de la phase** — resserrement du 2026-09-08 : le pont s'écrit et se
+> teste sur Linux, Windows valide ensuite qu'il n'y a rien d'implicite dans
+> ce qui a été construit.
 
-**Sortie de phase — et sortie du socle** : le critère du §1.1 du cahier des
-charges. Un script tapé dans la fenêtre lit une colonne sans copie, en
-écrit une autre, et **Ctrl+Z annule ce qu'il a écrit**.
+**Sortie de phase, sur Linux — le critère du §1.1 du cahier des charges** :
+un script tapé dans la fenêtre lit une colonne sans copie, en écrit une
+autre, et **Ctrl+Z annule ce qu'il a écrit**. **Sortie du socle** :
+le même critère rejoué sur Windows (5.1b), pas avant.
 
 ---
 
@@ -408,10 +456,13 @@ ordre ni un découpage :
   l'acquisition live, mode *zip store* pour garder un fichier unique).
   Détail complet, alternatives écartées et non-rétrocompatibilité assumée
   dans `format-fichier-plx.md`.
-- **Question ouverte, non tranchée** : garder PyQtGraph/le mode
-  « visualiseur léger » dans un portage Rust, ou l'abandonner — son seul
-  argument différenciant (`useOpenGL`) n'est toujours pas activé nulle part
-  à ce jour (`resume-decisions.md` §8).
+- **Mode « visualiseur léger » (ex-PyQtGraph) : plus une question ouverte.**
+  Tranché le 2026-09-08 (spec §13) — le choix « garder ou abandonner » est
+  **reporté au chantier de l'UI réelle**, pas laissé en suspens : aucun
+  crate du socle n'en dépend, et son seul argument différenciant
+  (`useOpenGL`) n'est de toute façon activé nulle part aujourd'hui
+  (`resume-decisions.md` §8). À trancher quand l'UI se construira, avec les
+  éléments qu'on n'a pas encore.
 - **Bug de classe éliminé par construction en UI immédiate** : la fuite par
   connexion signal Qt oubliée (cf. mémoire projet
   `plotyx-orphaned-subwindow-bug`) ne peut pas se produire de la même façon
