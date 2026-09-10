@@ -19,6 +19,18 @@ use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
 use crate::name::check_name;
 use crate::node::{containment_message, Node, NodeKind};
+use crate::path::{format_path, parse_path, ObjectPath};
+
+/// Forme lisible d'une suite de dossiers pour les messages d'erreur, `/` pour
+/// la racine. `pub(crate)` parce que `Project::resolve` s'appuyait dessus avant
+/// de déléguer, et que son test unitaire vit encore dans `project.rs`.
+pub(crate) fn display_folders(folders: &[String]) -> String {
+    if folders.is_empty() {
+        "/".to_string()
+    } else {
+        folders.join("/")
+    }
+}
 
 /// Catégorie d'unicité d'un nom entre frères : deux frères de la même
 /// catégorie ne peuvent pas porter le même nom.
@@ -371,6 +383,117 @@ impl Tree {
     /// Itère sur `(NodeId, &Node)` sans ordre garanti (persistance, statistiques).
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node)> {
         self.nodes.iter().map(|(id, node)| (*id, node.as_ref()))
+    }
+
+    // -- résolution de chemins --
+
+    /// Résout un chemin textuel de la grammaire `[Book1]Sheet1!ColA` vers
+    /// l'identifiant du nœud qu'il désigne.
+    ///
+    /// C'est **l'unique implémentation de la résolution du dépôt** :
+    /// `Project::resolve_path` s'y ramène, et un client qui ne détient qu'un
+    /// instantané `Arc<Tree>` (le pont Python, demain le rendu de graphes)
+    /// l'appelle directement au lieu d'en réécrire une copie contre l'API de
+    /// lecture. C'est la raison d'être de cette méthode : la résolution ne
+    /// demande que de la lecture, elle n'avait donc rien à faire dans la façade
+    /// de mutation.
+    ///
+    /// Toute erreur est un [`CoreError::Path`], que la faute soit de syntaxe ou
+    /// que l'objet manque : vu du dehors, c'est le même cas — un chemin qu'on
+    /// ne sait pas suivre — et seul le message distingue les deux.
+    pub fn resolve(&self, text: &str) -> CoreResult<NodeId> {
+        self.resolve_parsed(&parse_path(text)?)
+    }
+
+    /// Résout un chemin déjà analysé, pour l'appelant qui tient un
+    /// [`ObjectPath`] et n'a pas à le re-sérialiser pour le faire re-analyser.
+    ///
+    /// Deux propriétés de la grammaire, faciles à perdre en la réécrivant :
+    ///
+    /// - le drapeau `rooted` n'est **pas** consulté. Il n'y a pas de dossier
+    ///   courant dans le modèle — c'est une notion d'interface, pas de données —
+    ///   donc la descente part toujours de la racine et `Manips/[Book1]Sheet1`
+    ///   désigne le même nœud que `/Manips/[Book1]Sheet1` ;
+    /// - une fenêtre se cherche par son nom seul, **unique à l'échelle du
+    ///   projet** (invariant tenu par `check_name_available`). Un préfixe de
+    ///   dossiers ne sert donc jamais à la trouver, seulement à vérifier
+    ///   ensuite qu'elle est bien là où le chemin la dit. C'est ce qui permet
+    ///   d'écrire `[Book1]Sheet1!ColA` sans savoir où le classeur a été rangé,
+    ///   et ce qui fait qu'un préfixe faux est une erreur explicite plutôt
+    ///   qu'un « introuvable » trompeur.
+    ///
+    /// La comparaison des noms est celle de `child_by_name` et `find_window` :
+    /// égalité exacte, donc **sensible à la casse**.
+    pub fn resolve_parsed(&self, path: &ObjectPath) -> CoreResult<NodeId> {
+        // Chemin sans fenêtre : une descente de dossiers depuis la racine. Le
+        // filtre sur `is_folder` évite qu'un segment tombe sur une fenêtre ou
+        // une feuille homonyme et laisse croire à un dossier.
+        let Some(window_name) = path.window.as_deref() else {
+            let mut current = self.root();
+            for segment in &path.folders {
+                current = self
+                    .child_by_name(current, segment)?
+                    .filter(|id| self.node(*id).is_some_and(|node| node.kind().is_folder()))
+                    .ok_or_else(|| CoreError::Path(format!("dossier introuvable : {segment}")))?;
+            }
+            return Ok(current);
+        };
+
+        let window = self
+            .find_window(window_name)
+            .ok_or_else(|| CoreError::Path(format!("fenêtre introuvable : [{window_name}]")))?;
+
+        if !path.folders.is_empty() {
+            let actual = self.folder_names_above(window)?;
+            if actual != path.folders {
+                return Err(CoreError::Path(format!(
+                    "[{window_name}] n'est pas dans le dossier {} mais dans {}",
+                    display_folders(&path.folders),
+                    display_folders(&actual)
+                )));
+            }
+        }
+
+        let Some(sheet_name) = path.sheet.as_deref() else {
+            return Ok(window);
+        };
+        // Un graphe ou une note n'a pas de feuille : le dire vaut mieux que
+        // rendre « feuille introuvable » sur une fenêtre qui n'en aura jamais.
+        if !matches!(self.get(window)?.kind(), NodeKind::Workbook { .. }) {
+            return Err(CoreError::Path(format!(
+                "[{window_name}] n'est pas un classeur, il n'a pas de feuille"
+            )));
+        }
+        let sheet = self.child_by_name(window, sheet_name)?.ok_or_else(|| {
+            CoreError::Path(format!("feuille introuvable : [{window_name}]{sheet_name}"))
+        })?;
+
+        let Some(column_name) = path.column.as_deref() else {
+            return Ok(sheet);
+        };
+        // Le message reprend la forme canonique du chemin, pas la chaîne
+        // d'entrée : c'est la seule branche qui nomme le chemin entier, et
+        // `resolve_parsed` n'a de toute façon plus le texte d'origine.
+        self.child_by_name(sheet, column_name)?
+            .ok_or_else(|| CoreError::Path(format!("colonne introuvable : {}", format_path(path))))
+    }
+
+    /// Noms des dossiers au-dessus de `id`, de la racine (exclue) vers `id`.
+    ///
+    /// Sert des deux côtés du chemin : la résolution s'en sert pour vérifier un
+    /// préfixe, `Project::path_of` pour le reconstruire.
+    pub(crate) fn folder_names_above(&self, id: NodeId) -> CoreResult<Vec<String>> {
+        let root = self.root();
+        let mut names: Vec<String> = self
+            .ancestors(id)?
+            .into_iter()
+            .filter(|ancestor| *ancestor != root)
+            .filter_map(|ancestor| self.node(ancestor))
+            .filter(|node| node.kind().is_folder())
+            .map(|node| node.name().to_string())
+            .collect();
+        names.reverse();
+        Ok(names)
     }
 
     // -- validation (lecture seule) --
@@ -905,6 +1028,144 @@ mod tests {
             f.tree.node_mut(NodeId::from_raw(999)),
             Err(CoreError::UnknownNode(_))
         ));
+    }
+
+    // -- résolution de chemins --
+    //
+    // La résolution vit désormais ici, et non plus dans `Project` ni recopiée
+    // dans le pont Python : ces tests couvrent ce qui a déménagé, y compris les
+    // deux points sur lesquels les deux anciennes copies pouvaient diverger
+    // sans qu'aucun test ne le voie (le message de colonne introuvable, et le
+    // fait que `rooted` ne change rien).
+
+    #[test]
+    fn resolve_follows_the_four_levels_of_the_grammar() {
+        let f = Fixture::new();
+        assert_eq!(f.tree.resolve("/").unwrap(), f.root);
+        assert_eq!(f.tree.resolve("/Manips").unwrap(), f.folder);
+        assert_eq!(f.tree.resolve("[Book1]").unwrap(), f.book);
+        assert_eq!(f.tree.resolve("[Book1]Sheet1").unwrap(), f.sheet);
+        assert_eq!(f.tree.resolve("[Book1]Sheet1!A").unwrap(), f.column);
+        assert_eq!(f.tree.resolve("/Manips/[Book1]Sheet1!A").unwrap(), f.column);
+    }
+
+    #[test]
+    fn resolve_ignores_the_rooted_flag() {
+        // Il n'y a pas de dossier courant dans le modèle : la descente part
+        // toujours de la racine, avec ou sans `/` initial.
+        let f = Fixture::new();
+        assert_eq!(f.tree.resolve("Manips").unwrap(), f.folder);
+        assert_eq!(f.tree.resolve("Manips/[Book1]Sheet1!A").unwrap(), f.column);
+    }
+
+    #[test]
+    fn resolve_finds_a_window_without_its_folder_prefix() {
+        // Un nom de fenêtre est unique à l'échelle du projet : le préfixe n'est
+        // pas nécessaire pour trouver le classeur, seulement pour le vérifier.
+        let f = Fixture::new();
+        assert_eq!(f.tree.resolve("[Book1]Sheet1").unwrap(), f.sheet);
+        let err = f.tree.resolve("/Ailleurs/[Book1]Sheet1").unwrap_err();
+        let CoreError::Path(message) = err else {
+            panic!("attendu Path, obtenu {err:?}");
+        };
+        assert!(message.contains("n'est pas dans le dossier"), "{message}");
+    }
+
+    #[test]
+    fn resolve_is_case_sensitive() {
+        let f = Fixture::new();
+        assert!(matches!(
+            f.tree.resolve("[book1]Sheet1"),
+            Err(CoreError::Path(_))
+        ));
+        assert!(matches!(
+            f.tree.resolve("[Book1]sheet1"),
+            Err(CoreError::Path(_))
+        ));
+        assert!(matches!(
+            f.tree.resolve("[Book1]Sheet1!a"),
+            Err(CoreError::Path(_))
+        ));
+    }
+
+    #[test]
+    fn resolve_turns_every_failure_into_a_path_error() {
+        let mut f = Fixture::new();
+        f.add(
+            f.root,
+            "Fig1",
+            NodeKind::Graph {
+                meta: WindowMeta::default(),
+            },
+        );
+        for text in [
+            "",                      // syntaxe : chemin vide
+            "[Book1",                // syntaxe : crochet non fermé
+            "Sheet1!A",              // syntaxe : colonne sans classeur
+            "[Absent]",              // fenêtre inconnue
+            "[Book1]SheetX",         // feuille inconnue
+            "[Book1]Sheet1!Absente", // colonne inconnue
+            "/Inconnu",              // dossier inconnu
+            "[Fig1]Sheet1",          // fenêtre sans feuille
+        ] {
+            assert!(
+                matches!(f.tree.resolve(text), Err(CoreError::Path(_))),
+                "attendu Path pour {text:?}, obtenu {:?}",
+                f.tree.resolve(text)
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_does_not_mistake_a_window_for_a_folder() {
+        // `Manips/Book1` descend en dossiers : `Book1` est un classeur, donc le
+        // segment ne doit pas être suivi.
+        let f = Fixture::new();
+        assert!(matches!(
+            f.tree.resolve("/Manips/Book1"),
+            Err(CoreError::Path(_))
+        ));
+    }
+
+    #[test]
+    fn resolve_names_the_canonical_path_when_a_column_is_missing() {
+        // Le message reprend la forme canonique, pas la chaîne d'entrée : les
+        // espaces de bordure et les `//` en trop n'y ressortent pas.
+        let f = Fixture::new();
+        let err = f
+            .tree
+            .resolve("  /Manips//[Book1]Sheet1!Absente  ")
+            .unwrap_err();
+        let CoreError::Path(message) = err else {
+            panic!("attendu Path, obtenu {err:?}");
+        };
+        assert_eq!(
+            message,
+            "colonne introuvable : /Manips/[Book1]Sheet1!Absente"
+        );
+    }
+
+    #[test]
+    fn resolve_parsed_agrees_with_resolve() {
+        let f = Fixture::new();
+        let path = crate::path::parse_path("[Book1]Sheet1!A").unwrap();
+        assert_eq!(
+            f.tree.resolve_parsed(&path).unwrap(),
+            f.tree.resolve("[Book1]Sheet1!A").unwrap()
+        );
+    }
+
+    #[test]
+    fn folder_names_above_lists_folders_from_the_root_down() {
+        let mut f = Fixture::new();
+        let jour1 = f.add(f.folder, "Jour1", folder_kind());
+        let book2 = f.add(jour1, "Book2", workbook_kind());
+        assert_eq!(f.tree.folder_names_above(f.book).unwrap(), vec!["Manips"]);
+        assert_eq!(
+            f.tree.folder_names_above(book2).unwrap(),
+            vec!["Manips", "Jour1"]
+        );
+        assert!(f.tree.folder_names_above(f.root).unwrap().is_empty());
     }
 
     #[test]

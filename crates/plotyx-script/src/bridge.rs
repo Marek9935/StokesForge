@@ -6,21 +6,22 @@
 //! marqueur `Ungil` de vérifier à la compilation qu'aucune valeur liée au GIL
 //! ne traverse l'attente de l'acteur.
 //!
-//! # Pourquoi une résolution de chemin est réécrite ici
+//! # La résolution de chemin n'est plus réécrite ici
 //!
-//! `Project::resolve_path` est une méthode du `Project`, que **l'acteur**
-//! possède. Un client n'a qu'un `Arc<Tree>` via [`plotyx_session::Snapshot`].
-//! [`resolve_in_tree`] refait donc la même résolution contre un `Tree` seul,
-//! avec l'API publique de `plotyx-core` (`parse_path`, `Tree::find_window`,
-//! `Tree::child_by_name`, `Tree::ancestors`) — même grammaire
-//! `[Book1]Sheet1!ColA`, mêmes règles de dossiers. C'est un doublon assumé et
-//! visible ; le supprimer demanderait une `Tree::resolve` dans `plotyx-core`,
-//! ce que cette tâche n'a pas le droit de faire.
+//! Ce module a longtemps porté une copie de `Project::resolve` : la résolution
+//! vivait dans le `Project`, que **l'acteur** possède, alors qu'un client n'a
+//! qu'un `Arc<Tree>` via [`plotyx_session::Snapshot`]. Le doublon était assumé
+//! et documenté, faute d'avoir le droit de toucher au socle.
+//!
+//! Il a été supprimé : `plotyx-core` expose désormais [`Tree::resolve`], seule
+//! implémentation de la grammaire `[Book1]Sheet1!ColA` du dépôt, et le pont
+//! l'appelle sur l'arbre de son instantané. Il n'y a plus rien à garder
+//! synchronisé ici.
 
 use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError};
-use plotyx_core::{parse_path, CoreError, CoreResult, NodeId, NodeKind, Tree, ValueBlock};
+use plotyx_core::{CoreError, NodeId, ValueBlock};
 use plotyx_session::{SessionError, SessionHandle};
 
 /// Erreur de l'hôte **déjà traduite** dans le vocabulaire des trois exceptions
@@ -77,92 +78,16 @@ impl HostError {
     }
 }
 
-/// Résout un chemin d'objet contre un `Tree` seul.
-///
-/// Réplique fidèle de `Project::resolve` : mêmes règles de dossiers, même
-/// unicité globale des noms de fenêtre, mêmes messages. Toute erreur est un
-/// [`CoreError::Path`], que la syntaxe soit fautive ou que l'objet manque —
-/// la surface `pyx` les rend toutes deux comme `UnknownPathError`.
-pub(crate) fn resolve_in_tree(tree: &Tree, text: &str) -> CoreResult<NodeId> {
-    let path = parse_path(text)?;
-
-    let Some(window_name) = path.window.as_deref() else {
-        let mut current = tree.root();
-        for segment in &path.folders {
-            let child = tree
-                .child_by_name(current, segment)?
-                .filter(|id| tree.node(*id).is_some_and(|node| node.kind().is_folder()))
-                .ok_or_else(|| CoreError::Path(format!("dossier introuvable : {segment}")))?;
-            current = child;
-        }
-        return Ok(current);
-    };
-
-    let window = tree
-        .find_window(window_name)
-        .ok_or_else(|| CoreError::Path(format!("fenêtre introuvable : [{window_name}]")))?;
-
-    if !path.folders.is_empty() {
-        let actual = folder_names_above(tree, window)?;
-        if actual != path.folders {
-            return Err(CoreError::Path(format!(
-                "[{window_name}] n'est pas dans le dossier {} mais dans {}",
-                display_folders(&path.folders),
-                display_folders(&actual)
-            )));
-        }
-    }
-
-    let Some(sheet_name) = path.sheet.as_deref() else {
-        return Ok(window);
-    };
-    if !matches!(tree.get(window)?.kind(), NodeKind::Workbook { .. }) {
-        return Err(CoreError::Path(format!(
-            "[{window_name}] n'est pas un classeur, il n'a pas de feuille"
-        )));
-    }
-    let sheet = tree.child_by_name(window, sheet_name)?.ok_or_else(|| {
-        CoreError::Path(format!("feuille introuvable : [{window_name}]{sheet_name}"))
-    })?;
-
-    let Some(column_name) = path.column.as_deref() else {
-        return Ok(sheet);
-    };
-    tree.child_by_name(sheet, column_name)?
-        .ok_or_else(|| CoreError::Path(format!("colonne introuvable : {text}")))
-}
-
-/// Noms des dossiers au-dessus de `id`, de la racine (exclue) vers `id`.
-fn folder_names_above(tree: &Tree, id: NodeId) -> CoreResult<Vec<String>> {
-    let root = tree.root();
-    let mut names: Vec<String> = tree
-        .ancestors(id)?
-        .into_iter()
-        .filter(|ancestor| *ancestor != root)
-        .filter_map(|ancestor| tree.node(ancestor))
-        .filter(|node| node.kind().is_folder())
-        .map(|node| node.name().to_string())
-        .collect();
-    names.reverse();
-    Ok(names)
-}
-
-/// Forme lisible d'une suite de dossiers, `/` pour la racine.
-fn display_folders(folders: &[String]) -> String {
-    if folders.is_empty() {
-        "/".to_owned()
-    } else {
-        folders.join("/")
-    }
-}
-
 /// `pyx.resolve` : chemin d'objet → identifiant de nœud.
 pub(crate) fn resolve(session: &SessionHandle, path: &str) -> Result<NodeId, HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     // Toute erreur de résolution — syntaxe comprise — est un chemin qu'on ne
     // sait pas suivre : c'est `UnknownPathError` dans les deux cas, et le
     // message d'origine dit lequel des deux.
-    resolve_in_tree(&snapshot.tree, path).map_err(|error| HostError::UnknownPath(error.to_string()))
+    snapshot
+        .tree
+        .resolve(path)
+        .map_err(|error| HostError::UnknownPath(error.to_string()))
 }
 
 /// `pyx.column` : le buffer `f64` partagé de la colonne, prêt à être emprunté

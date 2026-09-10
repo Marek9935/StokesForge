@@ -135,6 +135,40 @@ architecture, aucun crate : du code jetable, jeté à la fin.
 
 ## Phase R1 — `Tree::resolve` dans le socle (≈2-3 jours)
 
+> **Statut : close le 2026-09-10.** `Tree::resolve(&str)` et
+> `Tree::resolve_parsed(&ObjectPath)` dans `plotyx-core` ;
+> `Project::resolve_path` et `Project::resolve` réduites à deux délégations
+> d'une ligne ; `bridge.rs::resolve_in_tree` supprimé (−67 lignes), en-tête
+> réécrit. Une seule implémentation de la grammaire dans le dépôt.
+> Vérifications : 257 tests du workspace, 21 tests de `plotyx-script` sous la
+> feature `python` — **aucun test modifié**, le critère de sortie est tenu —
+> et clippy sans avertissement, feature `python` comprise (`--workspace`
+> seul compile `plotyx-script` **vide** et ne voit pas `bridge.rs`).
+>
+> **La fusion a révélé une divergence, et c'était son but.** Les deux
+> implémentations rendaient un message différent pour une colonne
+> introuvable : `Project` donnait la forme **canonique** du chemin, `bridge`
+> la **chaîne brute** de l'appelant. Elles divergeaient dès que l'entrée
+> n'était pas déjà canonique, `parse_path` normalisant les espaces de bordure
+> et les `//` répétés — sur `"  /Manips//[Book1]Sheet1!Absente  "`, deux
+> messages distincts. Ce texte remonte tel quel dans `UnknownPathError` côté
+> Python, aucun test ne l'assertait. **Tranché pour la forme canonique** —
+> c'est l'original, et la seule disponible pour `resolve_parsed`, qui n'a pas
+> de texte d'entrée. Verrouillé par un test.
+>
+> Trois propriétés tacites de la résolution sont désormais documentées, parce
+> qu'elles se seraient perdues à la troisième réécriture : le drapeau
+> `rooted` n'est jamais consulté (pas de dossier courant dans le modèle) ; le
+> préfixe de dossiers ne sert jamais à *trouver* la fenêtre mais à vérifier
+> *après coup* qu'elle est là où le chemin le dit ; la casse est exacte
+> partout.
+>
+> Deux points laissés en l'état, à reprendre en R3 : `folder_names_above` est
+> `pub(crate)` et devra devenir publique si R3 veut un `path_of` côté `Tree` ;
+> et sur `Project`, `resolve` prend un `&ObjectPath` quand sur `Tree` elle
+> prend un `&str` — l'asymétrie suit la signature imposée ici, elle se lit
+> mal, à renommer si elle gêne.
+
 **Objectif** : une seule résolution de chemin dans le dépôt, avant qu'il n'y
 en ait trois.
 

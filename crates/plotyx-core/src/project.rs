@@ -16,7 +16,7 @@ use crate::column::{Column, ColumnMeta, ColumnType, ColumnValues, ValueBlock, Va
 use crate::error::{CoreError, CoreResult};
 use crate::id::{IdAllocator, NodeId};
 use crate::node::{Node, NodeKind, WindowMeta};
-use crate::path::{format_path, parse_path, ObjectPath};
+use crate::path::{format_path, ObjectPath};
 use crate::tree::Tree;
 
 /// Nom d'un dossier ou d'une colonne « façon tableur » : A, B, …, Z, AA, AB, …
@@ -32,15 +32,6 @@ fn spreadsheet_name(index: usize) -> String {
         }
     }
     name
-}
-
-/// Affichage d'un préfixe de dossiers pour les messages d'erreur.
-fn display_folders(folders: &[String]) -> String {
-    if folders.is_empty() {
-        "/".to_string()
-    } else {
-        folders.join("/")
-    }
 }
 
 /// Racine du modèle : l'arbre courant (partagé) et l'allocateur d'identifiants
@@ -499,67 +490,19 @@ impl Project {
     // -- chemins --
 
     /// Analyse `text` puis le résout.
+    ///
+    /// Simple délégation à [`Tree::resolve`] : la résolution ne demande que de
+    /// la lecture, elle vit donc dans `Tree`, où les clients qui n'ont qu'un
+    /// instantané `Arc<Tree>` peuvent l'atteindre. Cette méthode reste ici
+    /// parce qu'elle est le point d'entrée naturel quand on tient un `Project`.
     pub fn resolve_path(&self, text: &str) -> CoreResult<NodeId> {
-        let path = parse_path(text)?;
-        self.resolve(&path)
+        self.tree.resolve(text)
     }
 
-    /// Résout un chemin analysé vers un identifiant de nœud.
+    /// Résout un chemin analysé vers un identifiant de nœud. Délègue à
+    /// [`Tree::resolve_parsed`].
     pub fn resolve(&self, path: &ObjectPath) -> CoreResult<NodeId> {
-        let Some(window_name) = path.window.as_deref() else {
-            let mut current = self.root();
-            for segment in &path.folders {
-                let child = self
-                    .tree
-                    .child_by_name(current, segment)?
-                    .filter(|id| {
-                        self.tree
-                            .node(*id)
-                            .is_some_and(|node| node.kind().is_folder())
-                    })
-                    .ok_or_else(|| CoreError::Path(format!("dossier introuvable : {segment}")))?;
-                current = child;
-            }
-            return Ok(current);
-        };
-
-        let window = self
-            .tree
-            .find_window(window_name)
-            .ok_or_else(|| CoreError::Path(format!("fenêtre introuvable : [{window_name}]")))?;
-
-        if !path.folders.is_empty() {
-            let actual = self.folder_names_above(window)?;
-            if actual != path.folders {
-                return Err(CoreError::Path(format!(
-                    "[{window_name}] n'est pas dans le dossier {} mais dans {}",
-                    display_folders(&path.folders),
-                    display_folders(&actual)
-                )));
-            }
-        }
-
-        let Some(sheet_name) = path.sheet.as_deref() else {
-            return Ok(window);
-        };
-        if !matches!(self.tree.get(window)?.kind(), NodeKind::Workbook { .. }) {
-            return Err(CoreError::Path(format!(
-                "[{window_name}] n'est pas un classeur, il n'a pas de feuille"
-            )));
-        }
-        let sheet = self
-            .tree
-            .child_by_name(window, sheet_name)?
-            .ok_or_else(|| {
-                CoreError::Path(format!("feuille introuvable : [{window_name}]{sheet_name}"))
-            })?;
-
-        let Some(column_name) = path.column.as_deref() else {
-            return Ok(sheet);
-        };
-        self.tree
-            .child_by_name(sheet, column_name)?
-            .ok_or_else(|| CoreError::Path(format!("colonne introuvable : {}", format_path(path))))
+        self.tree.resolve_parsed(path)
     }
 
     /// Chemin canonique ancré : `/` pour la racine, `/A/B` pour un dossier,
@@ -682,17 +625,7 @@ impl Project {
 
     /// Noms des dossiers contenant `id`, racine exclue, du haut vers le bas.
     fn folder_names_above(&self, id: NodeId) -> CoreResult<Vec<String>> {
-        let mut names: Vec<String> = self
-            .tree
-            .ancestors(id)?
-            .into_iter()
-            .filter(|ancestor| *ancestor != self.root())
-            .filter_map(|ancestor| self.tree.node(ancestor))
-            .filter(|node| node.kind().is_folder())
-            .map(|node| node.name().to_string())
-            .collect();
-        names.reverse();
-        Ok(names)
+        self.tree.folder_names_above(id)
     }
 
     /// Parent de `id`, ou `Err(Structure)` s'il n'en a pas (nœud détaché ou racine).
@@ -749,6 +682,9 @@ impl Default for Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Le helper a suivi la résolution dans `tree.rs` ; son test reste ici,
+    // inchangé, et l'importe de son nouveau domicile.
+    use crate::tree::display_folders;
 
     #[test]
     fn spreadsheet_names_follow_the_reference_algorithm() {
