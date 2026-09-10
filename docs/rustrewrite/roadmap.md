@@ -7,6 +7,13 @@ Statut : **architecture arrêtée le 2026-09-08** (`cahier-des-charges-technique
 l'architecture. En cas de divergence entre les deux, **c'est le cahier des
 charges qui gagne**, et ce document qui est à corriger.
 
+**Amendement du 2026-09-10 — le renderer.** Le renderer n'est plus
+Matplotlib : le rendu passe à **Plotters** avec un backend egui écrit par
+nous (`docs/newarchitecture/`). **Aucune phase de ce plan ne change** —
+les phases 0 à 5 sont toutes en amont du choix de rendu, et le renderer
+était déjà hors périmètre depuis le 2026-09-08. Seuls les §6 et §7
+ci-dessous sont corrigés.
+
 **But de ce plan** : livrer le strict nécessaire pour **ouvrir le chantier
 de l'interface**, et rien de plus.
 
@@ -49,6 +56,8 @@ indépendamment du langage, écarts justifiés un par un.
 
 ## Phase 0 — Fondations projet Rust (≈3-5 jours)
 
+> **Statut : close le 2026-09-08.** Le test fumée 0.5 (`crates/plotyx-core/tests/smoke.rs`) a été livré avec la phase 1, faute de `Project` avant elle.
+
 **Objectif** : squelette qui compile, teste et s'exécute en CI, avant tout
 code métier — même principe que la phase 0 Python (le packaging/CI se valide
 tout de suite, pas à la fin).
@@ -71,6 +80,8 @@ dépendance UI dans `plotyx-core`.
 ---
 
 ## Phase 1 — Modèle de données (≈1,5-2 semaines)
+
+> **Statut : close le 2026-09-08.** Livré dans `plotyx-core` : `NodeId`/`IdAllocator`, `check_name`, grammaire de chemins, `Column` (buffers `Arc`, deltas), `Node`/`Tree`/`Project`. Écarts consignés : égalité des flottants **bit à bit** (`NaN == NaN`, sinon aucun test d'égalité d'arbre ne tient) ; primitives de lignes **par colonne** en plus de celles par feuille (nécessaires à l'annulation de `DeleteRows`) ; `path_of` d'une fenêtre à la racine rend `/[Book1]` (même forme qu'en Python). Coût réel d'une écriture sous snapshot : cahier des charges §4.3.
 
 **Objectif** : le même contrat que la phase 1 Python, dans `plotyx-core`,
 100 % testable sans UI.
@@ -162,6 +173,8 @@ un test qui échoue si une dépendance non listée en whitelist apparaît dans
 ---
 
 ## Phase 2 — Bus de commandes, Undo & acteur (≈2 semaines)
+
+> **Statut : close le 2026-09-08.** `plotyx-commands` (8 commandes, `History` à entrées `Structural`/`Data`/`Macro`, limite 100 par défaut, propriété `proptest` 50+ commandes → undo → égalité bit à bit → redo → égalité) et `plotyx-session` (acteur sur thread nommé, `std::sync::mpsc`, `Snapshot { tree, revision, history }`, 4 threads × 50 commandes → 200 révisions contiguës). Décisions consignées : spec §5.3 (macro avortée restaure le redo ; commande sans effet reste une entrée), §5.4 (limite), §6.1 (contenu du snapshot) ; `questions-ouvertes.md` question 9 (macro globale à la session). Les requêtes `Save`/`Load` de l'acteur arrivent avec la phase 3.
 
 **Objectif** : la même règle d'or que la phase 2 Python — **aucune mutation
 du modèle en dehors d'une commande** — sans `QUndoStack`, qui est une classe
@@ -275,6 +288,18 @@ initial (`proptest` ou un test maison équivalent à
 
 ## Phase 3 — Persistance minimale (≈1-1,5 semaine)
 
+> **Statut : close le 2026-09-08.** `plotyx-persistence` (`save`/`load` d'un
+> `Project` complet, écriture atomique, en-tête `PLYX` + version lue avant
+> tout, structures de transport propres au crate) et les requêtes
+> `Save`/`Load` de l'acteur (`Load` vide l'historique, est refusé pendant une
+> macro, et laisse le projet intact si la lecture échoue). **Format : `serde`
+> + MessagePack (`rmp-serde`), pas `bincode`** — la propriété « champs
+> inconnus ignorés » impose un conteneur auto-descriptif ; raison complète
+> dans le cahier des charges §7. Corrigé au passage : l'allocateur
+> d'identifiants sautait un cran à chaque rechargement (confusion entre
+> « prochain identifiant » et « plus grand attribué »).
+
+
 **Objectif** : un `save`/`load` réel sur disque, pas encore le format
 `.plx` final. Placée **avant** l'UI, pas après — deux raisons de fond, pas
 de confort :
@@ -336,6 +361,19 @@ le sauvegarde, le recharge, et vérifie l'égalité complète avec l'original.
 
 ## Phase 4 — Coquille UI minimale (≈1 semaine)
 
+> **Statut : close le 2026-09-08.** `plotyx-app` : fenêtre `eframe`/`egui`
+> 0.36, grille virtualisée, panneau des feuilles, barre de menus aux entrées
+> grisées et libellées (« Annuler *Saisie dans A* »), Ctrl+Z / Ctrl+Y /
+> Ctrl+Maj+Z / Ctrl+S / Ctrl+O. **Toute la logique est dans un `AppState`
+> sans dépendance à egui**, piloté par un enum d'actions : c'est ce qui rend
+> la boucle vérifiable en test automatique — 22 tests d'intégration sans
+> fenêtre, dont le critère de sortie de phase (saisir, enregistrer, saisir
+> autre chose, rouvrir, arbre **égal bit à bit**). La fenêtre elle-même est
+> prouvée par une auto-fermeture pilotée par variable d'environnement :
+> ouverture, rendu, sortie en code 0. Deux constats non anticipés en
+> §4.3 et §6.2 du cahier des charges.
+
+
 **Objectif** : faire tourner **la boucle complète** une fois — modèle →
 commande → undo → sauvegarde → rechargement — dans une vraie fenêtre, avant
 d'investir dans le docking ou la grille éditable. Une intégration bout-en-
@@ -368,6 +406,26 @@ hors de ce jalon (§6-7).
 
 ## Phase 5 — Pont Rust ↔ Python (≈2-3 semaines)
 
+> **Statut : close sur Linux le 2026-09-09**, hors tâche 5.1b (Windows), qui
+> reste la condition de clôture définitive du socle (§8.6). Le critère du
+> §1.1 est vérifié : `crates/plotyx-script/tests/script.rs`,
+> `critere_de_fin_lecture_sans_copie_ecriture_par_le_bus_annulation_par_ctrl_z`.
+> **Vérifiable en une commande depuis le paquet, depuis le 2026-09-09** :
+> `dist/plotyx-app/plotyx-selftest` rejoue les sept étapes du critère et sort
+> en 0 ou en 1 ; `scripts/app-dist.sh` le lance en fin d'empaquetage, en
+> environnement vidé et piégé, et échoue si le code n'est pas 0. La même
+> logique tourne dans `cargo test` (`crates/plotyx-script/tests/selftest.rs`).
+> Sa capacité à **échouer** a été prouvée en sabotant une étape.
+>
+> **Ce qui reste non prouvé, et qu'il ne faut pas croire couvert** : le
+> chemin **interface** proprement dit. L'auto-vérification appelle l'acteur
+> directement, comme le ferait la fenêtre ; elle ne passe par aucune ligne de
+> `plotyx-app`. Les raccourcis Ctrl+Z / Ctrl+Y / Ctrl+S / Ctrl+O, la saisie
+> dans la grille et le panneau de script ne sont couverts que par les tests
+> sans fenêtre de `plotyx-app`, et l'empaquetage ne prouve d'eux que
+> l'ouverture et la fermeture de la fenêtre. **Personne n'a encore cliqué.**
+
+
 **Objectif** : la tuyauterie, éprouvée — **sans** système de graphes
 par-dessus. C'est la phase qui rend « Python accessible » avant d'ouvrir le
 chantier de l'interface. Spécification complète : `cahier-des-charges-technique.md`
@@ -379,13 +437,13 @@ la phase 2.
 
 | # | Tâche | Verrou |
 |---|---|---|
-| 5.1a | Hello-world empaqueté **Linux** : binaire + interpréteur vendored + numpy — les **7 pièges connus** à traverser sont listés en spec §8.6.1 (`PYO3_CONFIG_FILE`, `rpath`, `libpython` partagée, mode isolé, `PyConfig`, ABI numpy, pas de finalisation) | **avant tout le reste de la phase** |
+| 5.1a | ✅ **Fait le 2026-09-08** — hello-world empaqueté Linux : binaire + CPython 3.12.14 vendored + numpy 2.5.3, PyO3 0.29.2 / rust-numpy 0.29.0. Les 7 pièges de la spec §8.6.1 traversés, **plus deux non prévus** (GIL retenu après l'initialisation, `__pycache__` à conserver — §8.6.1). Mesures : init ≈ 51 ms, aller 1M `f64` ≈ 0,8 ms, retour ≈ 0,5 ms, distribution 307 Mo. **Le verrou est levé.** | **avant tout le reste de la phase** |
 | 5.1b | Le même hello-world rejoué **sur Windows** — jalon distinct, après 5.1a, **avant de déclarer le socle clos** (spec §1.1, §8.6) ; peut glisser après 5.2-5.6 si Windows n'est pas encore requis pour avancer sur Linux | après 5.1a ; avant la clôture du socle |
-| 5.2 | Aller-retour de tableau mesuré **sur le harnais de 5.1**, avant d'écrire le vrai cycle de vie : emprunt sans copie Rust → numpy, copie numpy → Rust | après 5.1, avant 5.3 |
-| 5.3 | Cycle de vie de l'interpréteur : init paresseuse, pas de finalisation, `PYTHONHOME` embarqué | après 5.1 |
-| 5.4 | Thread de script : GIL relâché pendant l'attente de l'acteur, capture de `print`/tracebacks, interruption coopérative | après 5.3 et phase 2 |
-| 5.5 | Surface-témoin `resolve` / `column` / `set_column` / `undo` | après 5.4 |
-| 5.6 | Zone de saisie de script dans la coquille UI | après 5.5 et phase 4 |
+| 5.2 | ✅ **Fait le 2026-09-08** — emprunt sans copie Rust → numpy (`borrow_from_array` + conteneur `#[pyclass]` clonant l'`Arc`), copie numpy → Rust y compris **non contiguë**. 19 tests, dont l'égalité **du pointeur** vu par numpy et du buffer Rust, la vue périmée, la croissance sous la vue, la survie au `drop` côté Rust. **Emprunt ≈ 5-9 µs contre ≈ 2 ms pour la copie** d'un million de flottants. Contrôle instrumenté (`valgrind`) **exécuté le 2026-09-09 : zéro erreur** (§8.3.1). | après 5.1, avant 5.3 |
+| 5.3 | ✅ **Fait le 2026-09-09** — initialisation paresseuse et idempotente, mode isolé, aucune finalisation, préfixe embarqué. Le fil qui initialise **relâche le GIL** aussitôt (piège 8, §8.6.1). | après 5.1 |
+| 5.4 | ✅ **Fait le 2026-09-09** — `plotyx-script` : fil **permanent** (jamais un fil par script), GIL relâché pendant l'attente de l'acteur (vérifié par un test où un autre fil prend le GIL pendant que le script boucle), `print` et traces d'appels capturés, interruption à deux moitiés (drapeau lu par les appels `pyx` **et** `PyThreadState_SetAsyncExc` pour une boucle Python pure — les deux testées). | après 5.3 et phase 2 |
+| 5.5 | ✅ **Fait le 2026-09-09** — quatre appels, poignée opaque (`#[pyclass]`, pas un entier fabricable), trois erreurs nommées. **`pyx.undo()` rend `False` sur une pile vide** (question 2 tranchée par sa recommandation). 21 tests, dont **le critère de fin du §1.1** : un script lit `A` sans copie (adresse du buffer vérifiée identique), écrit `B` par le bus, et un `undo` venu du côté Rust rétablit l'arbre **bit à bit**. | après 5.4 |
+| 5.6 | ✅ **Fait le 2026-09-09** — panneau de script repliable dans la fenêtre : saisie, « Exécuter » (Ctrl+Entrée), « Arrêter », zone de sortie. Le script tourne sur un **fil détaché** sondé à chaque image : la fenêtre ne gèle pas, donc le bouton « Arrêter » reste utilisable. L'interpréteur ne démarre qu'au **premier** script, jamais à l'ouverture. `plotyx-script` est une dépendance **optionnelle** : sans la feature, la fenêtre s'ouvre et fonctionne sans Python. `scripts/app-dist.sh` empaquette le tout (333 Mo) et le lance en environnement nettoyé. | après 5.5 et phase 4 |
 
 > ⚠️ **5.1a et 5.2 sont des verrous, pas des tâches.** L'empaquetage d'une
 > pile Python par plateforme est le risque le plus lourd de toute
@@ -410,9 +468,16 @@ Au-delà d'ici, plus de socle : des chantiers qui se posent dessus, et dont
 les décisions sont déjà arrêtées (`cahier-des-charges-technique.md` §12)
 sans être planifiées :
 
-- **système de graphes** — `PlotSpec` neutre et renderer Matplotlib dans
-  l'interpréteur de la phase 5. Volontairement exclu du socle : la
-  tuyauterie doit être solide avant qu'on construise dessus ;
+- **système de graphes** — `PlotSpec` neutre et renderer **Plotters**
+  (backend egui écrit par nous), en trois crates : `plotyx-plot`,
+  `plotyx-render-egui`, `plotyx-render-svg`. Volontairement exclu du
+  socle : la tuyauterie doit être solide avant qu'on construise dessus.
+  **Désormais phasé à part** : `docs/newarchitecture/roadmap-rendu.md`
+  (phases R0-R8, arrêtées le 2026-09-10). Une seule phase y touche au
+  socle — R3, qui ancre le `PlotSpec` dans `NodeKind::Graph`, la « tranche
+  ultérieure » qu'annonce `node.rs`.
+  *Corrigé le 2026-09-10 — était « renderer Matplotlib dans l'interpréteur
+  de la phase 5 » ;*
 - **surface `plotyx.api` v1** — `cahier-des-charges-api-script.md` ; la
   surface-témoin de 5.5 en est un sous-ensemble strict, choisi pour
   éprouver le pont, pas pour être utile ;
@@ -435,17 +500,30 @@ ordre ni un découpage :
 
 - **egui retenu sur iced** pour le docking (`egui_dock`, éprouvé sur
   Rerun.io) — détail complet et limites connues (thème, HiDPI/IME, menu
-  natif, `QTableView` équivalent plus pauvre, `egui_plot` insuffisant pour
-  remplacer Matplotlib) dans `resume-decisions.md` §3.
-- **Renderer conservé, pas réécrit** : Matplotlib embarqué via **PyO3** +
-  **`rust-numpy`** (zéro copie dans les deux sens), sortie en buffer RGBA
-  (`FigureCanvasAgg.buffer_rgba()`) uploadée comme texture egui.
-  Interpréteur **vendored et figé** (`python-build-standalone`), pas de
-  Python système — détail en `resume-decisions.md` §4.
-- **Bénéfice de robustesse identifié pour cette architecture précise** : un
-  appel PyO3 renvoie un `PyResult`, donc une exception Matplotlib devient une
-  `Err` Rust gérée à la frontière plutôt que de dérouler la boucle
-  d'événements — contient le bug, ne l'élimine pas (nuance à garder).
+  natif, `QTableView` équivalent plus pauvre) dans `resume-decisions.md` §3.
+  La limite « `egui_plot` insuffisant pour remplacer Matplotlib » y reste
+  vraie et n'est **pas** contredite par la décision ci-dessous : le rendu
+  ne passe pas par `egui_plot`, mais par Plotters, egui ne servant que de
+  surface de dessin.
+- **Renderer réécrit en Rust natif — décidé le 2026-09-10.** **Plotters**
+  + un backend `DrawingBackend` écrit par nous sur egui (~250-300 lignes ;
+  `egui-plotter` écarté, il dépend d'egui 0.32/0.35 quand nous sommes en
+  0.36.2). Le backend collecte dans un `Vec<Shape>` et met en cache sur
+  `(revision, rect, pixels_per_point)` — le renderer devient un client de
+  plus de l'acteur. Labels scientifiques par **Typst**, derrière un
+  *feature flag* comme `python`. Export SVG natif, PDF via `svg2pdf`.
+  Détail, chiffrage et options écartées : `docs/newarchitecture/`.
+  > *Remplace « Renderer conservé, pas réécrit » (Matplotlib embarqué via
+  > PyO3 + `rust-numpy`, sortie `FigureCanvasAgg.buffer_rgba()` en texture
+  > egui, `resume-decisions.md` §4). L'interpréteur **vendored et figé**
+  > reste, lui — il sert la console de script, cf. ci-dessous.*
+- **Nuance de robustesse à reporter, pas à perdre** : l'argument « un appel
+  PyO3 renvoie un `PyResult`, donc une exception devient une `Err` Rust
+  gérée à la frontière plutôt que de dérouler la boucle d'événements »
+  visait Matplotlib. Il **reste valable pour la console de script**, qui
+  est désormais le seul consommateur de PyO3 — il contient le bug, il ne
+  l'élimine pas. Côté rendu, il devient sans objet : plus de Python sur ce
+  chemin, donc plus d'exception à contenir.
 - **Console de script** : même interpréteur PyO3 que le renderer, deuxième
   porte d'entrée quasi gratuite une fois le pipeline en place. Contrat
   complet dans `cahier-des-charges-api-script.md` (surface v1, modèle de

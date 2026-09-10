@@ -111,6 +111,13 @@ qu'on bouche par accident, différemment côté UI et côté script.
 d'erreur) et elle garde le vocabulaire d'exceptions du §7 réservé aux
 vraies erreurs.
 
+> **Tranchée le 2026-09-09 par sa recommandation, et implémentée** :
+> `pyx.undo()` rend `False` quand il n'y a rien à annuler. La question
+> jumelle est réglée du même coup et **testée** : il n'y a qu'une seule pile
+> d'historique dans la session, donc `pyx.undo()` annule aussi bien une
+> commande venue de l'interface qu'une commande venue du script — c'est ce
+> que vérifie le critère de fin.
+
 **Question jumelle, à trancher en même temps** : `pyx.redo()`, évidemment
 — et `pyx.undo()` doit-il pouvoir annuler une commande **lancée depuis
 l'UI**, pas seulement depuis le script ? Le socle n'a qu'une seule pile
@@ -256,11 +263,20 @@ options qui touche au protocole du §6.
 **Ce dont on parle.** La version Python a deux moteurs de tracé :
 Matplotlib (par défaut depuis le 2026-09-07) et PyQtGraph, gardé comme
 « visualiseur léger » pour l'acquisition live. Le portage Rust n'embarque
-pas PyQtGraph : la question est de savoir si ce mode doit exister
+ni l'un ni l'autre : la question est de savoir si ce mode doit exister
 autrement, ou disparaître.
 
 **Décidé le 2026-09-08 : le choix est reporté au chantier de l'UI réelle**,
 et ce report est sans risque — aucun crate du socle n'en dépend.
+
+> **Ce que la décision du 2026-09-10 change à cette question.** Le portage
+> Rust ne rend plus par Matplotlib non plus (`docs/newarchitecture/`) : le
+> rendu est Plotters + un backend egui natif. **La question ne disparaît
+> pas, elle rétrécit** — « un chemin rapide sans Python » n'est plus une
+> exception à construire, c'est devenu le cas nominal. Il ne reste donc à
+> trancher qu'une seule chose : *l'acquisition live existe-t-elle
+> réellement comme besoin ?* Si oui, c'est un mode de rafraîchissement du
+> même renderer, pas un second moteur.
 
 **Ce qu'on sait déjà, et qu'il ne faut pas redécouvrir** :
 
@@ -269,8 +285,9 @@ et ce report est sans risque — aucun crate du socle n'en dépend.
   (`resume-decisions.md` §8) — c'est-à-dire que l'avantage revendiqué n'a
   jamais été mesuré, et encore moins utilisé ;
 - Matplotlib tient 141 ms pour 1M de points et 0,2 ms pour le réticule
-  (mémoire projet `plotyx-matplotlib-default-renderer`) — ce qui reste
-  lourd pour un rafraîchissement continu à 10 Hz ;
+  (mémoire projet `plotyx-matplotlib-default-renderer`) — ce qui restait
+  lourd pour un rafraîchissement continu à 10 Hz. **Chiffre désormais
+  historique** : il décrit la version Python/Qt, plus la cible Rust ;
 - donc le vrai critère n'est pas « quel moteur est le meilleur » mais
   **« l'acquisition live existe-t-elle vraiment comme besoin ? »**. Si oui,
   il faudra *un* chemin rapide, et rien n'oblige à ce que ce soit
@@ -308,13 +325,57 @@ décider en même temps.
    ancienne est évincée silencieusement (comportement de `QUndoStack`
    aujourd'hui), ou l'utilisateur est prévenu ?
 
-**Recommandation** : **100 entrées** en dur pour le socle, éviction
-silencieuse de la plus ancienne — c'est ce que fait la version Python, donc
-zéro régression ressentie — et **rouvrir la question d'une limite en
-octets** seulement si un cas réel de saturation apparaît. Écrire le chiffre
-dans la spec plutôt que de le laisser au code.
+~~**Recommandation** : 100 entrées en dur, et rouvrir la question d'une
+limite en octets seulement si un cas réel de saturation apparaît.~~
 
-**Quand ça doit être tranché** : phase 2, au moment d'écrire la pile.
+> **Mise à jour du 2026-09-08 — le cas de saturation est mesuré, il n'est
+> pas hypothétique.** L'historique hybride retient un arbre entier par
+> entrée structurelle, donc les buffers de toutes les colonnes à cet
+> instant. En **alternant** une opération de structure et une écriture,
+> chaque entrée épingle une version complète du buffer de la colonne
+> écrite. Mesuré sur une colonne d'un million de points (7,6 Mo), 20
+> itérations : **191 Mo retenus contre 38 Mo** pour le même travail sans
+> historique, soit **5 fois plus**. Extrapolé à 100 entrées : **~800 Mo pour
+> une seule colonne**. Détail et méthode en `cahier-des-charges-technique.md`
+> §2.1.1.
+>
+> Autrement dit, la première ligne du tableau ci-dessus (« 100 entrées :
+> ~10 Mo de structure, plus les charges utiles retenues ») était juste, mais
+> le « plus les charges utiles retenues » vaut deux ordres de grandeur de
+> plus que ce que la formulation laissait entendre.
+
+**Recommandation révisée : une limite double**, la plus contraignante des
+deux gagnant, avec éviction silencieuse de l'entrée la plus ancienne :
+
+| | Valeur | Ce qu'elle protège |
+|---|---|---|
+| **entrées** | **100** | la profondeur d'annulation attendue par l'utilisateur, l'ordre de grandeur d'un tableur |
+| **octets retenus** | **512 Mo** | le motif mesuré ci-dessus, que la limite en entrées laisse passer |
+
+Compter les octets retenus n'est pas gratuit : il faut savoir ce que chaque
+entrée fait vivre **à elle seule**, ce qui n'est pas la somme naïve des
+tailles (les entrées partagent leurs arbres et leurs buffers). L'estimation
+honnête et peu coûteuse consiste à compter, à l'empilement, la taille des
+buffers **que cette entrée est seule à retenir** — ce que le compteur de
+références sait dire — et à décrémenter à l'éviction. Approximatif, mais
+dans le bon sens : on surestime rarement, on évince un peu trop tôt.
+
+**Coût de développement** : une trentaine de lignes dans la pile, plus des
+tests d'éviction par les octets. **Détectabilité d'un bug** : bonne, le test
+de mesure existe déjà et sert de harnais. **Coût de ne rien faire** : une
+machine qui rame sans raison visible après une heure de travail, exactement
+le symptôme que la limite est censée empêcher.
+
+**Quand ça doit être tranché** : ~~phase 2~~ ~~maintenant~~ — **tranchée le
+2026-09-09 : la limite double est adoptée et implémentée**, 100 entrées et
+512 Mo, la plus contraignante gagnant.
+
+> **Vérification** : le motif mesuré, qui épinglait 21 versions du buffer et
+> 191 Mo, en retient **9 et 61 Mo** sous un plafond de 64 Mo. La comptabilité
+> interne (`History::retained_bytes()`) et une mesure indépendante concordent
+> à **0,00 %**, et une évaluation coûte **~10 µs par commande**. La dernière
+> entrée n'est jamais évincée, même si elle dépasse le plafond à elle seule :
+> une opération lourde reste annulable juste après avoir été faite.
 
 ---
 
@@ -333,15 +394,114 @@ suite n'a de valeur.
 
 ---
 
+## 9. Une macro ouverte par un client absorbe les commandes des autres
+
+**Ce dont on parle.** L'acteur (spec §6) sert **une seule** pile d'historique
+à tous ses clients — l'UI et le thread de script. Une macro (`begin_macro`
+… `end_macro`) est donc **globale à la session** : si un script ouvre une
+macro « Import » et que, pendant qu'elle est ouverte, l'utilisateur tape
+dans une cellule, cette frappe **entre dans la macro du script** et sera
+annulée avec elle.
+
+Repéré le 2026-09-08 en construisant `plotyx-session`. La version Python
+avait exactement le même comportement (un seul `QUndoStack`, les commandes
+du script poussées sur le thread UI), sans que personne s'en aperçoive :
+un script tient rarement une macro ouverte assez longtemps pour qu'une
+frappe s'y glisse.
+
+| Option | Comportement | Pour | Contre |
+|---|---|---|---|
+| **a. Accepter et documenter** (retenu pour le socle) | la macro est celle de la session | zéro coût ; identique à aujourd'hui | une frappe peut être annulée « avec » l'import d'un script |
+| b. Refuser les commandes des autres clients pendant une macro | `Err(Busy)` côté UI | isolation stricte | l'UI doit gérer un refus transitoire ; exige l'**identité de l'émetteur** dans la requête |
+| c. Différer les autres clients jusqu'à `end_macro` | mise en file | rien n'est perdu ni mélangé | bloque l'UI pendant un script lent ; même exigence d'identité |
+
+**Ce qui est à retenir dès maintenant** : b et c exigent que la requête
+porte **qui l'envoie** — la même information que le critère « même
+appelant » de la question 5 (coalescence). Si l'une des deux questions
+mène à ajouter un identifiant de client au protocole du §6, l'autre en
+profite gratuitement. C'est le seul point qui touche au protocole, et il
+ne ferme rien : un champ de plus sur `Request`.
+
+**Recommandation** : option a pour le socle ; rouvrir avec la question 5
+au chantier de l'UI réelle, quand on saura si des scripts longs tiennent
+des macros ouvertes en pratique.
+
+**Quand ça doit être tranché** : chantier de l'UI réelle, avec la question 5.
+
+---
+
+## 10. 307 Mo pour un « hello world » — quelle distribution Python embarquer ?
+
+**Ce dont on parle.** Le hello-world empaqueté de la tâche 5.1a pèse
+**307 Mo**, dont **209 Mo** pour le seul fichier `libpython3.12.so`. Ce
+n'est pas numpy qui pèse : c'est que la distribution
+`python-build-standalone` retenue (`install_only`) livre ses binaires
+**avec leurs symboles de débogage**. Une `libpython` ordinaire pèse une
+vingtaine de mégaoctets.
+
+Le budget déjà estimé pour l'application empaquetée était de 150 à 300 Mo,
+**numpy et Matplotlib compris**. On est déjà au-dessus, sans Matplotlib.
+
+> **Amendement du 2026-09-10.** Matplotlib n'est plus au programme (rendu
+> Rust natif, `docs/newarchitecture/`), donc ce budget se détend : la pile
+> Python embarquée n'a plus à porter que l'interpréteur et numpy, pour la
+> console de script. Le chiffrage ci-dessous n'est pas refait pour autant
+> — il portait sur `libpython` et ses symboles de débogage, qui ne
+> dépendaient pas de Matplotlib.
+
+| Option | Taille attendue | Ce qu'on perd |
+|---|---|---|
+| **a. Passer à `install_only_stripped`** (recommandé) | ~110 Mo, dont ~20 de `libpython` | le débogage **natif** de CPython lui-même : une pile d'appels dans `libpython` n'affichera plus de noms de fonctions. Les tracebacks Python, eux, ne changent pas |
+
+> **Tranchée le 2026-09-09 : option a, appliquée et mesurée.** Le verrou
+> (`vendor/python/lock.env`) est passé à `install_only_stripped`.
+>
+> | | avant | après |
+> |---|---|---|
+> | archive téléchargée | 107 Mo | **33 Mo** |
+> | préfixe extrait | 428 Mo | **181 Mo** |
+> | `libpython3.12.so` | 209 Mo | **31 Mo** |
+> | distribution du hello-world | 307 Mo | **128 Mo** |
+> | **distribution de l'application** | 333 Mo | **155 Mo** |
+>
+> **Correction de ce qui est écrit ci-dessus** : la ligne « n'affichera plus
+> de noms de fonctions » est **fausse**, vérifiée après coup. Seules les
+> sections DWARF disparaissent (`readelf` : zéro section de débogage) ; la
+> table des symboles est conservée (1593 symboles de fonctions exportés).
+> On perd donc la correspondance **adresse → ligne de source** dans une pile
+> native, **pas** les noms de fonctions. La perte réelle est plus petite que
+> ce qui avait été présenté au moment de choisir. Les tracebacks Python sont
+> intacts, vérifié sur un script à trois niveaux d'appel : fichier, ligne,
+> nom de fonction et type d'exception, tous présents.
+| b. *Stripper* nous-mêmes au moment de l'empaquetage | idem | rien de plus, mais une étape de build en plus, à refaire par plateforme |
+| c. Garder `install_only` | 307 Mo | rien, sauf 200 Mo par installation et par téléchargement |
+
+**Ce qui n'est pas en jeu** : les messages d'erreur Python, les tracebacks
+d'un script utilisateur, les noms de fichiers et de lignes — tout cela
+vient de l'interpréteur lui-même, pas des symboles natifs, et survit au
+*stripping*.
+
+**Recommandation** : **option a**. On ne déboguera pas CPython au niveau
+natif ; si le besoin survient une fois dans la vie du projet, on
+retéléchargera la distribution non *strippée* ce jour-là. Le verrou de
+versions (`vendor/python/lock.env`) change d'une ligne.
+
+**Quand ça doit être tranché** : avant la première livraison à un
+utilisateur ; sans urgence pour le développement du socle.
+
+---
+
 ## Récapitulatif
 
 | # | Question | Bloque quoi ? | À trancher |
 |---|---|---|---|
 | 1 | « UUID » vs entier dans le cahier API | rien | avant `plotyx.api` v1 |
-| 2 | `pyx.undo()` sur pile vide | la surface-témoin | phase 5, tâche 5.5 |
-| 3 | Politique de la vue numpy périmée | le test de durée de vie | phase 5, tâche 5.2 |
+| 2 | `pyx.undo()` sur pile vide | la surface-témoin | ✅ tranchée le 2026-09-09 : `False` |
+| 3 | Politique de la vue numpy périmée | le test de durée de vie | ✅ tranchée le 2026-09-08 : documenter |
 | 4 | Lecture partielle d'un fichier | rien | quand l'acquisition live devient un besoin |
 | 5 | Coalescence des éditions | rien | chantier de l'UI réelle |
 | 6 | Sort du « visualiseur léger » | rien | chantier de l'UI réelle |
-| 7 | Limite d'historique par défaut | la pile | phase 2 |
+| 7 | Limite d'historique | la pile | ✅ tranchée le 2026-09-09 : **100 entrées et 512 Mo** |
 | 8 | Calendrier | rien | avant engagement |
+| 9 | Macro globale à la session (absorbe les autres clients) | rien | chantier de l'UI réelle, avec la 5 |
+| 10 | Distribution Python *strippée* | rien | ✅ tranchée le 2026-09-09 : strippée, 333 → **155 Mo** |

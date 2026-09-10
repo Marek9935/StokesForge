@@ -7,6 +7,25 @@ phase 6 (rendu Matplotlib) vient d'être livrée en Python le jour même (voir
 projet. Ce document sert de mémoire à la discussion, pour ne pas avoir à la
 rejouer, et de point de départ si la piste est reprise plus tard.
 
+> **Dépassé sur un point, le 2026-09-10 — document conservé tel quel.**
+> Ce texte est un compte rendu daté ; il n'est pas corrigé rétroactivement.
+> Deux de ses conclusions ne valent plus pour la cible Rust :
+>
+> - **§4, renderer Matplotlib embarqué via PyO3, sortie
+>   `FigureCanvasAgg.buffer_rgba()` en texture egui** — remplacé par
+>   Plotters + un backend egui écrit par nous (`docs/newarchitecture/`).
+>   Les mesures citées ici (141 ms pour 1M de points, réticule blitté à
+>   0,2 ms par `copy_from_bbox`) restent exactes **pour la version
+>   Python/Qt**, qui demeure la base active ; elles ne décrivent plus la
+>   cible.
+> - **§3, « `egui_plot` très en retrait face à Matplotlib/PyQtGraph »** —
+>   toujours vrai, et sans effet : le rendu ne passe pas par `egui_plot`,
+>   egui ne sert que de surface de dessin à Plotters.
+>
+> Ce qui **tient toujours** : PyO3 + interpréteur vendored et figé (§4),
+> conservés pour la console de script ; le gain mémoire attendu du passage
+> à egui (§7) ; et tout le §1.
+
 ## 1. Le motif initial et ce qui a été écarté
 
 Point de départ : la RAM d'une appli Python peut monter vite sur un graphe à

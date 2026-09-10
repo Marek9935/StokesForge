@@ -14,6 +14,21 @@ PyO3 (§8.2), le mécanisme exact de la vue numpy et son contrat de sûreté
 (§8.3), et les pièges d'empaquetage (§8.6.1). Ce qui reste à trancher est
 regroupé, expliqué sans prérequis Rust, dans `questions-ouvertes.md`.
 
+**Amendement du 2026-09-10 — le renderer.** Le §12 (hors périmètre) est
+amendé sur son premier point : le système de graphes ne sera **pas** rendu
+par Matplotlib, mais par **Plotters** avec un backend egui écrit par nous.
+Décision et chiffrage complets dans `docs/newarchitecture/`. Portée exacte
+de cet amendement, à ne pas élargir :
+
+- **aucune** des quatre décisions du §2 n'est rouverte — PyO3 (§2.3) est
+  conservé et sa justification ne change pas, elle était déjà autonome
+  depuis le 2026-09-08 (§2.5) ;
+- **aucune** ligne du socle construit n'est touchée : le renderer était
+  déjà hors périmètre, et les deux crates qu'il aurait occupés (`plot`,
+  `render-mpl`) n'ont jamais été écrits ;
+- ce qui disparaît, c'est le renderer Python — **pas** la console de
+  script, ni la surface `plotyx.api`, ni le zéro-copie du §8.3.
+
 **Objet du socle** : disposer de tout ce qu'il faut pour **ouvrir le
 chantier de l'interface**, et de rien de plus. Le modèle, l'annulation, le
 fichier, une fenêtre, et surtout la **tuyauterie Rust ↔ Python** éprouvée.
@@ -26,7 +41,7 @@ démarrer sur un socle qui ne bougera plus sous eux.
 
 | Dans le socle | Hors socle |
 |---|---|
-| Modèle de données (§4) | Système de graphes : `PlotSpec`, renderer Matplotlib |
+| Modèle de données (§4) | Système de graphes : `PlotSpec`, renderer (Plotters — voir l'amendement) |
 | Historique, Ctrl+Z / Ctrl+Y (§5) | Surface complète de `plotyx.api` (v1) |
 | Acteur possédant le modèle (§6) | Import de fichiers |
 | Persistance minimale (§7) | Format `.plx` final (Zarr) |
@@ -141,8 +156,54 @@ modèle change :
 
 Les ~200 o du delta pur et les ~100 Ko de l'hybride **excluent tous deux
 les charges utiles retenues** : une colonne supprimée reste vivante
-derrière son `Arc` dans les deux schémas, à l'identique. Ce n'est pas ce
-qui les départage — voir le piège commun plus bas.
+derrière son `Arc` dans les deux schémas, à l'identique. ~~Ce n'est pas ce
+qui les départage~~ — voir le piège commun plus bas.
+
+> ⚠️ **Mesuré le 2026-09-08, et cette dernière phrase était fausse.** Elle
+> n'est vraie que d'une colonne **supprimée**. Elle est fausse d'une colonne
+> **modifiée** : une entrée `Structural` retient un arbre entier, donc les
+> buffers de **toutes** les colonnes tels qu'ils étaient à cet instant. Si
+> une colonne est réécrite ensuite, la copie-à-l'écriture en crée une
+> nouvelle version — et l'ancienne reste vivante tant que l'entrée est sur
+> la pile. **En alternant opérations de structure et écritures, chaque
+> entrée structurelle épingle une version complète du buffer.**
+>
+> Mesure (colonne d'un million de `f64` ≈ 7,6 Mo, 20 itérations,
+> `crates/plotyx-commands/tests/memory_pinning.rs`, deux méthodes
+> indépendantes — comptage de `Weak` promouvables et allocateur compteur —
+> concordantes à moins de 1 %) :
+>
+> | Scénario | Versions vivantes | Retenu | Rapport |
+> |---|---|---|---|
+> | Écritures seules, 20 fois | 1 | 38 Mo | 1,0 × |
+> | **Renommage + écriture alternés, 20 fois** | **21** | **191 Mo** | **5,0 ×** |
+> | Idem, historique borné à 5 entrées | 3 | 53 Mo | 1,4 × |
+> | Idem, après annulation complète | 24 | 183 Mo | 4,8 × |
+> | Mêmes mutations **sans** historique | 1 | 38 Mo | 1,0 × |
+>
+> Extrapolé à la limite par défaut de 100 entrées, le pire cas de ce motif
+> retient **~800 Mo** pour une seule colonne d'un million de points, là où
+> un historique à deltas purs n'en retiendrait aucun. **C'est un coût propre
+> à l'hybride**, absent du chiffrage initial, et il ne se voit pas sur la
+> ligne « entrée structurelle ~100 Ko » du tableau ci-dessus : les 100 Ko
+> sont la **carte**, pas ce que la carte fait vivre.
+>
+> Trois nuances, toutes vérifiées et qui bornent la portée :
+> - **seules les colonnes réellement écrites** sont épinglées en plusieurs
+>   versions ; les colonnes témoins, jamais touchées, restent à une seule
+>   version dans tous les scénarios — le partage physique des nœuds
+>   inchangés est confirmé ;
+> - **annuler ne libère rien**, et c'est correct : l'entrée passe sur la
+>   pile de rétablissement, elle n'est pas détruite ;
+> - **l'éviction libère bien**, immédiatement et exactement (scénario
+>   témoin : 45,8 → 38,2 Mo, soit les 7,6 Mo attendus).
+>
+> **Ce que ça ne remet pas en cause** : l'hybride reste le bon choix, pour
+> la raison qui l'a fait retenir — il supprime la machinerie de durée de vie
+> des objets supprimés, là où le bug d'inverse faux s'était réellement
+> produit côté Python. Ce que ça change, c'est le **garde-fou** : une limite
+> comptée en entrées ne protège pas de ce motif. `questions-ouvertes.md`
+> question 7, désormais chiffrée.
 
 > ⚠️ **Les ~100 Ko ne sont vrais que si les nœuds sont derrière un `Arc`.**
 > Avec une `HashMap<NodeId, Node>` possédant directement ses `String`,
@@ -252,9 +313,15 @@ ou egui de remonter dans le cœur, et la CI exigerait Python partout.
 `plotyx-cli` (squelette de phase 0) reste comme binaire headless de test.
 
 **Frontière à tenir** : `plotyx-python` ignore tout du modèle — il ne sait
-que faire vivre un interpréteur et convertir des tableaux. C'est ce qui
-permettra au futur `render-mpl` de se poser dessus sans passer par
-`plotyx-script`.
+que faire vivre un interpréteur et convertir des tableaux.
+
+> **Amendement du 2026-09-10.** Cette frontière était aussi justifiée par un
+> futur `render-mpl` qui se serait posé dessus sans passer par
+> `plotyx-script`. Ce consommateur-là n'existera pas : le rendu est
+> désormais Rust natif et **ne touche pas à Python**. La frontière reste
+> néanmoins bonne telle quelle — elle est ce qui garantit que l'acteur ne
+> peut pas nommer un type Python (§6.3), et cet argument-là ne dépendait
+> pas du renderer.
 
 ---
 
@@ -357,9 +424,46 @@ La contiguïté est une **exigence contractuelle** : elle conditionne le
 zéro-copie du §8.3. Aucune évolution ne doit la remettre en cause sans
 rouvrir §2.1.
 
-Écriture par `Arc::make_mut` : la copie n'a lieu **que** si un script ou une
-tâche de fond détient encore ce buffer. En édition courante, sans lecteur
-concurrent, l'écriture est en place et gratuite.
+Écriture par `Arc::make_mut` : la copie n'a lieu **que** si quelqu'un
+d'autre détient encore ce buffer. ~~En édition courante, sans lecteur
+concurrent, l'écriture est en place et gratuite.~~
+
+> **Précision apportée par la phase 1 (2026-09-08).** La phrase barrée
+> était trop optimiste : dans l'architecture retenue, il y a **toujours** un
+> détenteur concurrent — l'UI garde le dernier `Snapshot { tree }` (§6.2),
+> et cet arbre retient le nœud colonne, qui retient le buffer. Chaque
+> écriture de cellule copie donc **le buffer de la colonne touchée**
+> (8 Mo pour 1M de points, de l'ordre de la milliseconde), pas seulement
+> ~100 Ko de carte. Ce n'est pas un coût mémoire cumulé : l'entrée
+> d'historique `Data` ne retient pas l'ancien buffer, et l'UI le relâche en
+> rafraîchissant son snapshot à la réponse suivante. C'est un coût **CPU
+> O(n) par écriture**, borné à une colonne. Acceptable pour le socle, à
+> **mesurer en phase 4** sur une colonne à 1M de points ; si c'est trop, la
+> parade est côté client (ne pas détenir le buffer pendant une frappe), pas
+> côté modèle — le chunking reste écarté (§2.1). L'écriture est bel et bien
+> en place et gratuite quand aucun snapshot n'est vivant, ce que le test
+> `critere_19` de `plotyx-core` vérifie.
+>
+> **Mesuré en phase 4 (2026-09-08), et la parade annoncée ne marche pas.**
+> Une écriture d'une cellule dans une colonne d'un million de points coûte
+> **≈ 0,55 ms**, que l'interface détienne un instantané **ou non** : les deux
+> scénarios sont indiscernables. La raison n'est pas l'interface, c'est le
+> bus : `History::execute` clone `Arc<Tree>` **avant** d'appliquer toute
+> commande — pour calculer le libellé sur l'arbre d'avant, et pour pouvoir
+> restaurer en cas d'échec. Ce clone local suffit à déclencher la cascade de
+> copie-à-l'écriture jusqu'au buffer, pour **tout** client, y compris un
+> script Python qui n'affiche rien.
+>
+> Conséquence : la copie de 8 Mo par écriture est aujourd'hui un coût
+> **structurel de l'historique**, pas une conséquence de l'interface, et la
+> phrase « gratuite sans lecteur concurrent » n'est vraie que du modèle nu,
+> jamais du chemin réel. Le rendre vrai à nouveau est possible et peu
+> coûteux — calculer le libellé sans retenir de clone, et ne pas garder
+> l'arbre d'avant pour les commandes de **données** (les primitives du cœur
+> garantissent déjà de ne rien changer en cas d'échec, et c'est testé) —
+> mais ce n'est **pas fait** : à 0,55 ms par frappe, la mesure ne le rend
+> pas urgent, et le gain ne profiterait qu'aux clients qui ne détiennent
+> aucun instantané, donc au pont Python plus qu'à l'interface.
 
 Longueurs hétérogènes tolérées entre colonnes d'une même feuille
 (décision 2 de la phase 1 Python — l'argument ne dépend pas du langage).
@@ -451,17 +555,65 @@ et une écriture de cellules dans la même macro, dans les deux ordres.
 la contrainte Qt qui imposait côté Python de pousser une commande se
 déclarant obsolète pendant son `redo()` (décision 6) n'existe pas ici.
 
+> **Précision de la phase 2 (2026-09-08) — une macro avortée ne laisse
+> aucune trace, y compris sur la branche de rétablissement.** `QUndoStack`
+> détruit la pile de redo dès `beginMacro()` ; avorter la macro ne la
+> rendait pas. Ici, la pile de redo est mise de côté à l'ouverture de la
+> macro la plus externe, **restaurée** si cette macro est avortée ou se
+> ferme vide, jetée si elle aboutit avec au moins une entrée (comme pour
+> toute commande aboutie). Une macro imbriquée avortée ne touche qu'à ses
+> propres entrées. Coût : une dizaine de lignes ; bénéfice : « annuler,
+> commencer un groupe, changer d'avis » ne perd plus le rétablissement.
+>
+> Deux autres choix de la même phase, consignés pour ne pas être rejoués :
+> une commande **valide sans effet** (insérer des lignes au-delà de toutes
+> les colonnes, réécrire une cellule à l'identique) **reste une entrée**
+> d'historique — sinon la position du curseur d'historique dépendrait des
+> données ; et le libellé d'une commande est calculé sur l'arbre **d'avant**
+> son application (le nom renommé y est encore), ce qui donne à
+> `AddColumn` un libellé fixe « Ajouter une colonne ».
+
 ### 5.4 Limite d'historique
 
 Configurable, bornée par défaut. Seul garde-fou contre le piège mémoire du
 §2.1.1. Une entrée évincée relâche ses `Arc` ; les buffers qu'elle seule
 retenait sont libérés à ce moment.
 
-La **valeur** par défaut n'est pas fixée par ce document, et la revue du
-2026-09-08 relève qu'une limite comptée en *entrées* ne protège justement
-pas du cas coûteux : une seule suppression de classeur pèse 400 Mo, cent
-renommages ne pèsent rien. `questions-ouvertes.md`, question 7 — à trancher
-en phase 2, en même temps que le comportement à l'éviction.
+La **valeur** par défaut, **tranchée le 2026-09-09** : une **limite double**,
+la plus contraignante des deux gagnant, avec éviction silencieuse de l'entrée
+la plus ancienne.
+
+| | Constante | Valeur | Ce qu'elle protège |
+|---|---|---|---|
+| entrées | `DEFAULT_LIMIT` | **100** | la profondeur d'annulation attendue |
+| octets retenus | `DEFAULT_BYTE_LIMIT` | **512 Mo** | le motif mesuré au §2.1.1, que la limite en entrées laisse passer |
+
+Ce qui est compté : les octets de charge utile que l'historique est **seul**
+à maintenir vivants — les buffers atteignables depuis les entrées et
+**absents de l'arbre courant**. Un buffer encore utilisé par l'arbre courant
+n'est pas un coût de l'historique. Chaque entrée calcule son empreinte
+(adresse du buffer → octets) **une fois, à l'empilement** — un arbre est
+immuable, donc son ensemble de buffers ne change jamais — et le total est
+l'union des empreintes des deux piles moins l'arbre courant. Coût mesuré :
+**~10 µs par empilement** à la limite par défaut. Les adresses ne servent
+que d'identité, jamais de déréférencement.
+
+Deux règles à ne pas perdre : **on n'évince jamais la dernière entrée**,
+même si elle dépasse à elle seule le plafond — une opération lourde doit
+rester annulable juste après avoir été faite, sinon la limite produit
+exactement le désagrément qu'elle cherche à éviter ; et l'éviction ne touche
+jamais la branche de rétablissement, qui peut donc maintenir le total
+au-dessus du plafond jusqu'à la commande suivante.
+
+**Efficacité vérifiée** (`tests/memory_pinning.rs`, scénario 7) : le motif
+qui épinglait 21 versions du buffer et 191 Mo en retient **9 et 61 Mo** sous
+un plafond de 64 Mo. La comptabilité interne et une mesure indépendante par
+`Weak` promouvables concordent à **0,00 %**. Une macro
+compte pour une entrée ; `0` = illimité (tests). La revue du 2026-09-08
+relève qu'une limite comptée en *entrées* ne protège pas du cas coûteux :
+une seule suppression de classeur pèse 400 Mo, cent renommages ne pèsent
+rien — la limite en octets reste à rouvrir seulement si un cas réel de
+saturation apparaît.
 
 ---
 
@@ -487,11 +639,56 @@ struct Snapshot { tree: Arc<Tree>, revision: u64 }
 La `Revision` est un compteur monotone : un client sait si son snapshot est
 périmé sans comparer les arbres.
 
+> **Précisions de la phase 2 (2026-09-08).** Le `Snapshot` porte aussi
+> l'état de l'historique (`can_undo`, `can_redo`, libellés, `in_macro`) :
+> c'est ce dont l'UI a besoin pour griser et libeller ses actions (§9) sans
+> requête supplémentaire. La révision s'incrémente à chaque changement
+> effectif (commande réussie, undo/redo effectif, ouverture/fermeture/
+> abandon de macro), jamais sur une erreur ni sur un undo à vide. `Undo`
+> répond `Option<Revision>` : `None` = rien à annuler, ce n'est pas une
+> erreur (même position que `questions-ouvertes.md` question 2). Une macro
+> est **globale à la session** — question 9 du même document.
+
 ### 6.2 Clients
 
 - **UI** : envoie des requêtes, conserve le dernier `Snapshot`, peint
   depuis lui sans verrou. Une réponse déclenche
   `egui::Context::request_repaint()`.
+
+> **Trou relevé par la phase 4 (2026-09-08) : rien ne prévient un client
+> qu'un autre a modifié le modèle.** Le protocole n'a que des requêtes et
+> leurs réponses ; il n'a **aucune notification poussée**. Une interface qui
+> ne rafraîchit son instantané qu'après ses propres requêtes reste donc
+> figée, sans le savoir, dès qu'un second client écrit — et le second
+> client, c'est précisément le fil de script du §8.4, c'est-à-dire l'objet
+> du socle. Le critère du §1.1 reste atteignable (la fenêtre rafraîchit
+> après avoir lancé le script), mais un script qui écrit progressivement
+> n'apparaîtrait pas.
+>
+> **Parade retenue pour le socle, sans changer le protocole** : l'interface
+> demande un `Snapshot` à chaque image et compare la `revision` — c'est
+> exactement ce pour quoi ce compteur existe, et le coût d'une réponse est
+> de deux `Arc` clonés. C'est ce que la coquille de la phase 4 devra faire
+> quand la zone de script arrivera (tâche 5.6).
+>
+> **Ce que la tâche 5.6 a effectivement fait, et sa limite (2026-09-09)** :
+> le script tourne sur un fil détaché, la fenêtre sonde le résultat à chaque
+> image et rafraîchit son instantané à la fin — donc la grille reflète bien
+> ce qu'un script a écrit, sans action de l'utilisateur. Mais **cette parade
+> suppose que des images se produisent**, et une interface en mode réactif
+> n'en produit pas au repos. Elle tient parce que la fenêtre demande
+> explicitement à se réveiller pendant qu'un script tourne. Elle ne
+> couvrirait **pas** un client extérieur écrivant pendant que la fenêtre est
+> inactive — cas qui n'existe pas dans le socle (un seul processus, un seul
+> script à la fois), mais qu'il faudra reconsidérer si un jour un second
+> processus parle à l'acteur.
+>
+> **Ce qu'il ne faut pas faire par réflexe** : ajouter un canal
+> d'abonnement. Ce serait réintroduire l'abonné qui mute pendant qu'il est
+> notifié — la classe de bug que l'acteur supprime par construction
+> (`roadmap.md` §1.2-1.3). Si le sondage par image devenait trop cher, la
+> forme à retenir est un canal **de révisions seules** (`u64`), jamais de
+> données, que le client utilise pour décider de demander un instantané.
 - **Script** : bloque sur la réponse, et **relâche le GIL pendant
   l'attente** (§8.2). C'est la subtilité la plus facile à rater du socle.
 
@@ -543,8 +740,19 @@ fn load(path: &Path) -> Result<Project, PersistenceError>;
 
 Une fonction par sens, un `Project` complet, rien d'autre. Aucun appelant
 ne connaît le format — c'est ce qui permettra de remplacer le provisoire
-(`serde` + `bincode`) par le Zarr de `format-fichier-plx.md` sans rien
-casser au-dessus.
+(~~`serde` + `bincode`~~ **`serde` + MessagePack via `rmp-serde`**, voir
+ci-dessous) par le Zarr de `format-fichier-plx.md` sans rien casser
+au-dessus.
+
+> **Correction de la phase 3 (2026-09-08) — pas `bincode`.** La propriété
+> « champs inconnus ignorés à la lecture » exige un conteneur
+> **auto-descriptif** (qui nomme ses champs) ; `bincode` est positionnel,
+> donc un champ ajouté casse tout fichier antérieur. Retenu : MessagePack
+> (`rmp-serde`, structures écrites comme des maps nommées), avec les
+> buffers de colonnes en octets bruts little-endian (`serde_bytes`, 8 octets
+> par `f64`, `NaN` préservés bit à bit). Disposition : 4 octets magiques
+> `PLYX`, version `u32` LE, corps MessagePack. Tout champ ajouté après la
+> version 1 porte `#[serde(default)]`.
 
 Propriétés obligatoires **même en version provisoire**, reprises de
 `format-fichier-plx.md` §3 — les rajouter après coup sur des fichiers déjà
@@ -666,7 +874,30 @@ souhaitable (pas de compétition avec la boucle d'événements de l'UI) mais
 La lecture sans copie est le livrable ; l'écriture avec copie est un
 **choix**, pas une concession : le modèle doit posséder ses buffers, et
 adopter de la mémoire allouée par l'allocateur Python ferait dépendre la
-durée de vie d'une colonne de celle d'un objet Python. Le contrat de
+durée de vie d'une colonne de celle d'un objet Python.
+
+> **Ce que la mesure de 5.1a change à l'argument (2026-09-08).** Copier un
+> million de `f64` coûte **0,8 ms** dans un sens et **0,5 ms** dans l'autre
+> (~10 Go/s). Face au budget de rendu de 141 ms d'une figure Matplotlib, la
+> copie est du bruit : **le zéro-copie ne se justifie donc pas par le temps,
+> mais par la mémoire** — chaque lecture dupliquerait la colonne, et un
+> script qui lit dix colonnes de 8 Mo en dupliquerait 80. La décision ne
+> change pas (elle est de toute façon contractuelle, cahier des charges API
+> §2.3 : « une colonne lue renvoie une vue »), mais **l'argument à défendre
+> n'est plus celui écrit en §2.1**. À chiffrer en Mo, pas en ms, le jour où
+> quelqu'un voudra la rouvrir.
+>
+> **Amendement du 2026-09-10.** Le point de comparaison des 141 ms
+> disparaît avec le renderer Matplotlib, et le zéro-copie perd un de ses
+> deux consommateurs — il ne sert plus qu'aux scripts. **La décision ne
+> bouge pas pour autant** : elle tenait déjà par la mémoire et par le
+> contrat de l'API, deux arguments que le changement de renderer ne touche
+> pas. Rien à défaire, c'est construit et testé.
+>
+> Piège d'implémentation relevé au passage : `to_vec()` **échoue sur un
+> tableau numpy non contigu**. Dès qu'un script passe une vue tranchée
+> (`v[::2]`) à `pyx.set_column`, il faut un chemin explicite de compactage,
+> pas une conversion directe — à traiter en tâche 5.5. Le contrat de
 `cahier-des-charges-api-script.md` §2.3 est respecté : la lecture est une
 vue, l'écriture passe par une commande.
 
@@ -724,6 +955,47 @@ il se voit à l'instrumentation. À noter : **`miri` n'est pas utilisable
 ici** (il n'exécute pas d'appels FFI, donc rien qui traverse PyO3) ; il
 reste l'outil du reste du modèle, où tout est du Rust pur.
 
+> **Résultat de la tâche 5.2 (2026-09-08).** Le mécanisme est construit et
+> vérifié par 19 tests. Points acquis, à ne pas rejouer :
+>
+> - **l'emprunt est réel** : l'adresse du buffer que numpy expose
+>   (`__array_interface__["data"][0]`) est **exactement** celle du `Vec`
+>   Rust. C'est le test décisif ; sans lui, une copie silencieuse passerait
+>   inaperçue derrière des valeurs justes ;
+> - (a), (b), (c) et la **survie au `drop` côté Rust** passent : le
+>   conteneur détient bien la dernière référence ;
+> - le **compteur de références est déterministe** (1 avant, ≥ 2 pendant,
+>   1 après destruction de la vue) — `FloatBufferOwner` ne forme aucun
+>   cycle, donc le comptage immédiat de CPython suffit, sans dépendre du
+>   ramasse-miettes ;
+> - **la copie de retour gère les tableaux non contigus** : une tranche
+>   `v[::2]` passe par un chemin de compactage explicite. C'était le piège
+>   annoncé plus haut ;
+> - **mesures** : emprunt **≈ 5 à 9 µs**, copie **≈ 2 ms** pour un million
+>   de flottants — un rapport de 240 à 370. (La tâche 5.1a mesurait la copie
+>   à 0,8 ms depuis le binaire empaqueté ; l'écart tient à la méthode de
+>   mesure, pas à un changement de mécanisme. Dans les deux cas la
+>   conclusion du §8.3 tient : la copie est du bruit devant les 141 ms d'un
+>   rendu, et **c'est la mémoire, pas le temps, qui justifie le
+>   zéro-copie**.)
+>
+> **Le point (d) a été exécuté le 2026-09-09** — `valgrind` installé, puis
+> `scripts/python-memcheck.sh` (avec `PYTHONMALLOC=malloc`, sans
+> `--leak-check`, en cherchant les lectures et écritures invalides) :
+> **19 tests, `ERROR SUMMARY: 0 errors from 0 contexts`**. Aucune lecture ni
+> écriture invalide. La sûreté mémoire du pont ne repose donc plus sur le
+> seul raisonnement — ce que ce paragraphe demandait précisément d'éviter.
+> Les allocations « encore joignables » relevées par l'outil (quelques
+> mégaoctets) sont les objets internes de CPython, attendues puisqu'on
+> n'appelle jamais `Py_Finalize` (§8.1) ; « definitely lost » est à zéro.
+>
+> **Angle mort relevé pour la surface de script (5.5)** : deux vues prises
+> de part et d'autre d'une écriture pointent silencieusement sur deux
+> buffers aux valeurs différentes. Rien ne signale à un script qu'il compare
+> des instantanés désynchronisés. C'est la politique retenue, mais le risque
+> croît avec le nombre de vues qu'un script accumule — argument de plus pour
+> la règle « ne gardez pas une vue plus longtemps qu'un calcul ».
+
 **`writeable = False` est un garde-fou, pas une frontière.** Il attrape la
 faute d'inattention (`col[0] = 3` dans un script) et documente l'intention.
 Il ne résiste pas à un script déterminé, et n'a pas à le faire : le modèle
@@ -733,6 +1005,13 @@ pouvoirs à l'interpréteur.
 ### 8.4 Thread de script
 
 - **Un script à la fois** dans le socle ; pas de scripts concurrents.
+- **Un seul fil, créé une fois pour la vie du processus** — précision
+  apportée par la tâche 5.1a le 2026-09-08. Le fil qui initialise
+  l'interpréteur devient le **fil principal** de CPython ; comme le fil UI
+  ne touche jamais à Python (§8.2 règle 1), c'est nécessairement celui-ci.
+  Un fil créé *par exécution de script* ferait donc mourir le fil principal
+  de CPython avec le premier script. Le fil de script est un **service
+  permanent** qui attend du travail, pas un fil jetable.
 - `print()` et tracebacks capturés et rendus au client, jamais perdus dans
   la sortie du processus.
 - **Interruption coopérative** : un drapeau vérifié par les appels de
@@ -800,6 +1079,36 @@ au moment du portage** — elle ne conditionne rien avant cette étape-là.
 | 5 | **`Py_SetPythonHome` / `Py_SetProgramName` sont dépréciés depuis CPython 3.11 et supprimés en 3.13** ; et depuis 3.11, l'initialisation par `PyConfig` **ne lit plus `PYTHONPATH` par défaut** | passer par `Py_InitializeFromConfig` + `PyConfig` (accessible via `pyo3::ffi`), pas par les anciens setters ni par des variables d'environnement posées avant l'init | identique |
 | 6 | **numpy est lié à une version d'interpréteur précise** (ABI CPython, et ABI numpy 1.x vs 2.x) | figer ensemble, dans un même verrou : version de l'interpréteur, roues numpy, version de `rust-numpy` | même verrou, roues Windows en plus |
 | 7 | **Pas de `Py_Finalize`** (§8.1) — conséquence à connaître : les `atexit` Python ne tournent pas, les fichiers temporaires créés par une future pile Matplotlib ne sont pas nettoyés à la sortie | acceptable ici ; à revoir seulement si un jour du code Python doit écrire quelque chose en sortant | identique |
+| **8** | **Le fil qui initialise garde le GIL.** Après `Py_InitializeFromConfig`, le fil appelant **détient** le GIL. Sans le relâcher, tout `Python::attach` depuis un autre fil se bloque — invisible en mono-fil, mortel dès qu'il y a un fil de script (§8.4) | appeler `PyEval_SaveThread()` **immédiatement après** l'initialisation | identique |
+| **9** | **Ne pas supprimer les `__pycache__`** de la distribution pour gagner de la place : la stdlib se recompile alors à chaque démarrage (init mesurée à **250 ms** au lieu de **50 ms**), et une installation en lecture seule ne peut même pas reconstituer le cache | garder les `.pyc` livrés ; retirer plutôt `bin/` et `pip` | identique |
+
+> **Ajoutés le 2026-09-08 par la tâche 5.1a**, qui a traversé les neuf.
+> Deux constats de la même tâche, à ne pas redécouvrir :
+> **PyO3 0.29 n'offre aucune API sûre** pour une configuration
+> d'initialisation personnalisée — `Python::initialize()` appelle
+> `Py_InitializeEx(0)`, qui lit l'environnement, donc l'isolation du piège 4
+> **oblige** à passer par `pyo3::ffi`, dans deux fonctions `unsafe` confinées ;
+> et le fil qui initialise devient le **fil principal** de CPython, ce qui
+> impose que ce soit le fil de script (§8.4), créé **une fois pour la vie du
+> processus** et non par exécution de script.
+>
+> **Mesures Linux (release, environnement nettoyé)** : démarrage de
+> l'interpréteur avec import de numpy **≈ 51 ms** ; copie d'un million de
+> `f64` Rust → numpy **≈ 0,8 ms** ; retour numpy → `Vec<f64>` **≈ 0,5 ms** ;
+> distribution complète **307 Mo**, dont **209 Mo** de `libpython` non
+> *strippée* — ramenés à **128 Mo** (hello-world) et **155 Mo**
+> (application) par le passage à `install_only_stripped` le 2026-09-09
+> (`questions-ouvertes.md`, question 10, tranchée).
+>
+> **Contrôle instrumenté, exécuté le 2026-09-09** : `valgrind` sur toute la
+> suite du zéro-copie — **19 tests, `ERROR SUMMARY: 0 errors from 0
+> contexts`**, aucune lecture ni écriture invalide. La réserve du §8.3.1 est
+> levée : la sûreté mémoire du pont ne repose plus sur le seul raisonnement.
+> Le test qui compare la vitesse de l'emprunt à celle de la copie se tait
+> sous instrumentation (`valgrind` ralentit inégalement : rapport apparent
+> de 9 contre 46 en exécution ordinaire) ; l'assertion reste active hors
+> instrumentation, où elle protège le zéro-copie contre une régression
+> silencieuse en copie.
 
 **Non couvert volontairement** : macOS, comme Windows au sens de « pas
 maintenant ». Le piège spécifique connu côté macOS (l'`install_name` des
@@ -823,6 +1132,23 @@ entièrement en conversation, et rien ici ne doit la préempter.
   fourni par un framework en Rust, contrairement à `QUndoStack` +
   `QAction` qui le tenaient à jour tout seuls ;
 - une zone de saisie de script minimale, suffisante pour exercer §8.5.
+
+> **Défaut d'environnement relevé le 2026-09-09, à ne pas rediagnostiquer.**
+> Sous le **Wayland natif** de cette machine (GNOME/Mutter), un réveil
+> différé (`egui::Context::request_repaint_after`) **ne réveille jamais** la
+> boucle d'événements : le processus reste dans `ep_poll` indéfiniment. Le
+> même binaire sous **Xwayland** (`DISPLAY` posé, `WAYLAND_DISPLAY` retiré)
+> s'ouvre et se ferme normalement. Vérifié des deux côtés, et vérifié aussi
+> que le code applicatif demande bien ce réveil : **le défaut est en amont**,
+> dans `winit`/`eframe`, pas chez nous.
+>
+> Portée réelle : cela n'affecte que ce qui dépend d'une **échéance** sans
+> entrée utilisateur — donc le mécanisme d'auto-fermeture qui sert à prouver
+> en ligne de commande que la fenêtre s'ouvre, et tout futur rafraîchissement
+> périodique (§6.2). Les scripts d'empaquetage lancent donc la vérification
+> sous Xwayland. À rejouer au moment du chantier de l'UI réelle : si le
+> défaut persiste, un rafraîchissement périodique ne sera pas une option
+> sous Wayland natif, et il faudra le réveil explicite plutôt que l'échéance.
 
 ---
 
@@ -867,7 +1193,7 @@ ce socle : ils reviendront avec le système de graphes.
 | Phase | Contenu | Verrou |
 |---|---|---|
 | 0 | Squelette Cargo, CI | fait |
-| 1 | Modèle (§4) | — |
+| 1 | Modèle (§4) | **fait le 2026-09-08** — `plotyx-core`, 116+ tests, zéro dépendance hors `thiserror` |
 | 2 | Historique + acteur (§5, §6) | après 1 |
 | 3 | Persistance (§7) | après 1 ; valide le modèle par aller-retour disque |
 | 4 | Coquille UI (§9) | après 2 et 3 |
@@ -884,11 +1210,28 @@ Ces chantiers ne sont pas dans le socle, mais leurs décisions sont
 arrêtées : les rouvrir demanderait une raison nouvelle.
 
 - **Système de graphes** : `PlotSpec` neutre (port de `plotyx.plot`), rendu
-  par **Matplotlib** dans l'interpréteur du §8, sortie
-  `FigureCanvasAgg.buffer_rgba()` en texture egui. Deux points de vigilance
-  déjà identifiés : le budget de 141 ms dépend du zéro-copie du §8.3, et le
-  réticule à 0,2 ms ne survit que si la texture est mise à jour
-  **partiellement**, sur la seule région modifiée.
+  par **Plotters** avec un backend `DrawingBackend` **écrit par nous** sur
+  egui — décision du 2026-09-10, `docs/newarchitecture/`. Trois crates :
+  `plotyx-plot` (spec neutre, sans dépendance de dessin), `plotyx-render-egui`
+  (backend + cache), `plotyx-render-svg` (export SVG, puis PDF via
+  `svg2pdf`). Le backend collecte dans un `Vec<Shape>` — **pas** dans un
+  `Painter` — et met en cache sur la clé `(revision, rect,
+  pixels_per_point)` : le renderer devient un client de plus du protocole
+  du §6.1. Deux points de vigilance, qui remplacent ceux du plan
+  Matplotlib : `estimate_text_size` doit mesurer par le même chemin que
+  celui qui dessine — **une seule `epaint::Fonts` partagée par les deux
+  backends**, constructible sans `Context` donc utilisable en export
+  headless — sous peine d'axes mal placés **sans erreur** ; et le cache
+  économise le pipeline Plotters, pas la tessellation egui (mesurer avant
+  d'ajouter un LTTB).
+  > *Écarté le 2026-09-10 — **Matplotlib embarqué**, sortie
+  > `FigureCanvasAgg.buffer_rgba()` en texture egui. Ses deux points de
+  > vigilance (budget de 141 ms adossé au zéro-copie du §8.3 ; réticule à
+  > 0,2 ms tenable seulement par mise à jour **partielle** de la texture)
+  > disparaissent avec lui, faute de texture. Ce qu'on perd en échange —
+  > échelles log, placement des ticks, légendes, export mature, trente ans
+  > de cas limites — est la vraie facture de la bascule, et elle est
+  > assumée : `docs/newarchitecture/options-explorees.md`.*
 - **Surface `plotyx.api` v1** : `cahier-des-charges-api-script.md`, sans
   modification. La surface-témoin du §8.5 en est un sous-ensemble strict.
 - **Format `.plx` final** : Zarr (`zarrs`), `format-fichier-plx.md`.

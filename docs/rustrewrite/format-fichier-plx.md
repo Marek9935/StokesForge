@@ -118,7 +118,10 @@ Avantages concrets :
   fixe) reste applicable manuellement avant compression si le gain compte.
 - Aucune bibliothèque scientifique C à porter derrière soi — le format de
   fichier ne dépend plus, à terme, d'un composant qu'il faudrait
-  potentiellement embarquer en plus du Python figé pour Matplotlib.
+  potentiellement embarquer en plus du Python figé. *(L'argument se
+  renforce depuis le 2026-09-10 : le rendu étant passé en Rust natif, la
+  pile Python embarquée ne porte plus que l'interpréteur et numpy pour la
+  console de script.)*
 
 ### c) Apache Arrow / Parquet (`arrow-rs`, `parquet`) — écarté pour v1
 
