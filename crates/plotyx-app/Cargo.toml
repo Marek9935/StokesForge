@@ -1,0 +1,38 @@
+[package]
+name = "plotyx-app"
+version = "0.0.0"
+edition.workspace = true
+description = "Coquille UI minimale (banc d'essai eframe) : fait tourner une fois la boucle modèle → commande → annulation → sauvegarde → rechargement."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Le pont Python (fil de script + interpréteur embarqué) est optionnel :
+# sans cette feature, plotyx-app compile, teste et s'exécute exactement comme
+# avant cette tâche, sans tirer PyO3 ni exiger d'interpréteur vendorisé. La
+# console de script reste visible mais désactivée (cf. `state::AppState::
+# script_available`).
+python = ["dep:plotyx-script", "dep:plotyx-python"]
+
+[dependencies]
+plotyx-core = { path = "../plotyx-core" }
+plotyx-commands = { path = "../plotyx-commands" }
+plotyx-session = { path = "../plotyx-session" }
+plotyx-persistence = { path = "../plotyx-persistence" }
+# Chemins optionnels, activés uniquement par la feature `python` de CE crate :
+# c'est elle qui active la feature `python` de chacun (dont dépend l'existence
+# même de leurs types publics, cf. la doc de tête de leurs `lib.rs`).
+plotyx-script = { path = "../plotyx-script", optional = true, features = ["python"] }
+plotyx-python = { path = "../plotyx-python", optional = true, features = ["python"] }
+eframe = "0.36.2"
+egui_extras = "0.36.2"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "plotyx-app"
+path = "src/main.rs"

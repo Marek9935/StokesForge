@@ -3,7 +3,12 @@ resolver = "2"
 members = [
     "crates/plotyx-core",
     "crates/plotyx-commands",
+    "crates/plotyx-session",
+    "crates/plotyx-persistence",
+    "crates/plotyx-python",
+    "crates/plotyx-script",
     "crates/plotyx-cli",
+    "crates/plotyx-app",
 ]
 
 [workspace.package]

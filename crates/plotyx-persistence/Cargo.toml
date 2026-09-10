@@ -1,0 +1,19 @@
+[package]
+name = "plotyx-persistence"
+version = "0.0.0"
+edition.workspace = true
+description = "save / load d'un Project complet — frontière figée, format provisoire (phase 3)."
+
+[lints]
+workspace = true
+
+[dependencies]
+plotyx-core = { path = "../plotyx-core" }
+rmp-serde = "1.3.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_bytes = "0.11.19"
+tempfile = "3.27.0"
+thiserror = "2"
+
+[dev-dependencies]
+toml = "0.8"

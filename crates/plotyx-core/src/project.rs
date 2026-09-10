@@ -1,0 +1,817 @@
+//! Racine du modèle : l'arbre courant (partagé) et l'allocateur d'identifiants.
+//!
+//! `Project` est la **seule façade publique de mutation** du crate. Ses
+//! méthodes prennent `&mut self` ; le seul `&mut Project` du processus sera
+//! détenu par l'acteur de `plotyx-session`, ce qui fait de « aucune mutation
+//! hors commande » une propriété de propriété, pas une convention.
+//!
+//! L'allocateur vit ici, **hors de l'arbre**, pour qu'une annulation qui
+//! restaure un ancien arbre (`replace_tree`) ne fasse pas reculer le compteur :
+//! un identifiant n'est jamais réutilisé sur toute la vie d'un projet,
+//! rechargement compris.
+
+use std::sync::Arc;
+
+use crate::column::{Column, ColumnMeta, ColumnType, ColumnValues, ValueBlock, ValuesDelta};
+use crate::error::{CoreError, CoreResult};
+use crate::id::{IdAllocator, NodeId};
+use crate::node::{Node, NodeKind, WindowMeta};
+use crate::path::{format_path, parse_path, ObjectPath};
+use crate::tree::Tree;
+
+/// Nom d'un dossier ou d'une colonne « façon tableur » : A, B, …, Z, AA, AB, …
+fn spreadsheet_name(index: usize) -> String {
+    let mut name = String::new();
+    let mut remaining = index as i64;
+    loop {
+        let offset = (remaining % 26) as u8;
+        name.insert(0, char::from(b'A' + offset));
+        remaining = remaining / 26 - 1;
+        if remaining < 0 {
+            break;
+        }
+    }
+    name
+}
+
+/// Affichage d'un préfixe de dossiers pour les messages d'erreur.
+fn display_folders(folders: &[String]) -> String {
+    if folders.is_empty() {
+        "/".to_string()
+    } else {
+        folders.join("/")
+    }
+}
+
+/// Racine du modèle : l'arbre courant (partagé) et l'allocateur d'identifiants
+/// (jamais remis en arrière).
+#[derive(Debug, Clone)]
+pub struct Project {
+    tree: Arc<Tree>,
+    ids: IdAllocator,
+}
+
+impl Project {
+    /// Projet neuf : un dossier racine nommé `name` (identifiant 1), rien d'autre.
+    pub fn new(name: &str) -> CoreResult<Self> {
+        let mut ids = IdAllocator::new();
+        let id = ids.next();
+        let root = Node::new(
+            id,
+            name,
+            NodeKind::Folder {
+                children: Vec::new(),
+            },
+        )?;
+        Ok(Self {
+            tree: Arc::new(Tree::new(root)?),
+            ids,
+        })
+    }
+
+    /// Projet neuf sans validation du nom : chemin infaillible réservé aux noms
+    /// littéraux du crate (voir `Default`).
+    fn with_root_name(name: &str) -> Self {
+        let mut ids = IdAllocator::new();
+        let id = ids.next();
+        let root = Node::new_unchecked(
+            id,
+            name,
+            NodeKind::Folder {
+                children: Vec::new(),
+            },
+        );
+        Self {
+            tree: Arc::new(Tree::with_root(root)),
+            ids,
+        }
+    }
+
+    /// Reconstruit depuis un arbre chargé et la valeur persistée du compteur ;
+    /// `next_id_hint` est déjà le **prochain** identifiant à attribuer (voir
+    /// [`IdAllocator::resume`]), et le compteur reprend à
+    /// `max(next_id_hint, plus grand identifiant de l'arbre + 1)`.
+    pub fn from_tree(tree: Arc<Tree>, next_id_hint: u64) -> Self {
+        let highest = tree.iter().map(|(id, _)| id.raw()).max().unwrap_or(0);
+        Self {
+            ids: IdAllocator::resume(next_id_hint, highest),
+            tree,
+        }
+    }
+
+    // -- lecture --
+
+    /// Arbre courant. Le cloner (`project.tree().clone()`) fige un instantané.
+    pub fn tree(&self) -> &Arc<Tree> {
+        &self.tree
+    }
+
+    /// Identifiant du dossier racine.
+    pub fn root(&self) -> NodeId {
+        self.tree.root()
+    }
+
+    /// Nom du projet, c'est-à-dire de son dossier racine.
+    pub fn name(&self) -> &str {
+        self.tree
+            .node(self.tree.root())
+            .map(Node::name)
+            .unwrap_or_default()
+    }
+
+    /// Valeur du prochain identifiant qui sera attribué (à persister).
+    pub fn next_id_hint(&self) -> u64 {
+        self.ids.peek()
+    }
+
+    // -- restauration (annulation) --
+
+    /// Remplace l'arbre courant par un instantané antérieur. **Ne touche pas**
+    /// au compteur d'identifiants : un nœud restauré revient sous son
+    /// identifiant d'origine, et les créations suivantes restent au-dessus.
+    pub fn replace_tree(&mut self, tree: Arc<Tree>) {
+        self.tree = tree;
+    }
+
+    // -- structure --
+
+    /// Ajoute un dossier en fin de `parent`.
+    pub fn add_folder(&mut self, parent: NodeId, name: &str) -> CoreResult<NodeId> {
+        let index = self.tree.children(parent)?.len();
+        self.insert_node(
+            parent,
+            index,
+            name,
+            NodeKind::Folder {
+                children: Vec::new(),
+            },
+        )
+    }
+
+    /// Ajoute un classeur muni d'une feuille « Sheet1 ». `name: None` → premier
+    /// « BookN » libre parmi les fenêtres du projet.
+    pub fn add_workbook(&mut self, parent: NodeId, name: Option<&str>) -> CoreResult<NodeId> {
+        self.add_workbook_with_sheet(parent, name, None)
+    }
+
+    /// Ajoute un classeur et sa première feuille, atomiquement : si l'ajout de
+    /// la feuille échoue, le classeur fraîchement créé est retiré et l'erreur
+    /// de la feuille est rendue telle quelle — l'arbre revient alors à
+    /// l'identique de son état d'avant l'appel. Seul le compteur
+    /// d'identifiants peut avoir avancé (il ne recule jamais, y compris sur ce
+    /// rollback), ce qui est sans conséquence puisqu'un identifiant n'est
+    /// jamais réutilisé.
+    fn add_workbook_with_sheet(
+        &mut self,
+        parent: NodeId,
+        name: Option<&str>,
+        sheet_name: Option<&str>,
+    ) -> CoreResult<NodeId> {
+        let book = self.add_empty_workbook(parent, name)?;
+        match self.add_worksheet(book, sheet_name) {
+            Ok(_) => Ok(book),
+            Err(err) => {
+                // Le classeur vient d'être créé, sans autre référence possible :
+                // ce retrait ne devrait jamais échouer. S'il échouait malgré
+                // tout, on préfère rendre l'erreur d'origine plutôt qu'une
+                // erreur de nettoyage qui la masquerait.
+                let _ = self.remove(book);
+                Err(err)
+            }
+        }
+    }
+
+    /// Ajoute un classeur **sans** feuille (persistance, tests).
+    pub fn add_empty_workbook(&mut self, parent: NodeId, name: Option<&str>) -> CoreResult<NodeId> {
+        let name = self.window_name(name, "Book");
+        let index = self.tree.children(parent)?.len();
+        self.insert_node(
+            parent,
+            index,
+            &name,
+            NodeKind::Workbook {
+                sheets: Vec::new(),
+                meta: WindowMeta::default(),
+            },
+        )
+    }
+
+    /// Ajoute une feuille en fin de classeur. `name: None` → premier « SheetN »
+    /// libre dans ce classeur.
+    pub fn add_worksheet(&mut self, book: NodeId, name: Option<&str>) -> CoreResult<NodeId> {
+        let name = match name {
+            Some(name) => name.to_string(),
+            None => self.next_child_name(book, "Sheet")?,
+        };
+        let index = self.tree.children(book)?.len();
+        self.insert_node(
+            book,
+            index,
+            &name,
+            NodeKind::Worksheet {
+                columns: Vec::new(),
+            },
+        )
+    }
+
+    /// Insère une colonne à `index` (`None` → en fin). `name: None` → premier
+    /// nom libre façon tableur (A, B, …, Z, AA, AB, …) dans cette feuille.
+    pub fn add_column(
+        &mut self,
+        sheet: NodeId,
+        index: Option<usize>,
+        name: Option<&str>,
+        column: Column,
+    ) -> CoreResult<NodeId> {
+        let sheet_node = self.tree.get(sheet)?;
+        if !sheet_node.kind().is_worksheet() {
+            return Err(CoreError::Structure(format!(
+                "{sheet} n'est pas une feuille mais {}",
+                sheet_node.kind().with_article()
+            )));
+        }
+        let index = index.unwrap_or_else(|| sheet_node.children().len());
+        let name = match name {
+            Some(name) => name.to_string(),
+            None => self.next_column_name(sheet)?,
+        };
+        self.insert_node(sheet, index, &name, NodeKind::Column(column))
+    }
+
+    /// Ajoute un graphe. `name: None` → premier « GraphN » libre.
+    pub fn add_graph(&mut self, parent: NodeId, name: Option<&str>) -> CoreResult<NodeId> {
+        let name = self.window_name(name, "Graph");
+        let index = self.tree.children(parent)?.len();
+        self.insert_node(
+            parent,
+            index,
+            &name,
+            NodeKind::Graph {
+                meta: WindowMeta::default(),
+            },
+        )
+    }
+
+    /// Ajoute une matrice. `name: None` → premier « MBookN » libre.
+    pub fn add_matrix(&mut self, parent: NodeId, name: Option<&str>) -> CoreResult<NodeId> {
+        let name = self.window_name(name, "MBook");
+        let index = self.tree.children(parent)?.len();
+        self.insert_node(
+            parent,
+            index,
+            &name,
+            NodeKind::Matrix {
+                meta: WindowMeta::default(),
+            },
+        )
+    }
+
+    /// Ajoute une note portant `text`. `name: None` → premier « NoteN » libre.
+    pub fn add_note(
+        &mut self,
+        parent: NodeId,
+        name: Option<&str>,
+        text: &str,
+    ) -> CoreResult<NodeId> {
+        let name = self.window_name(name, "Note");
+        let index = self.tree.children(parent)?.len();
+        self.insert_node(
+            parent,
+            index,
+            &name,
+            NodeKind::Note {
+                meta: WindowMeta::default(),
+                text: text.to_string(),
+            },
+        )
+    }
+
+    /// Insère un nœud générique **sans enfants** à `index` dans `parent`.
+    /// Façade bas niveau des méthodes `add_*`.
+    pub fn insert_node(
+        &mut self,
+        parent: NodeId,
+        index: usize,
+        name: &str,
+        kind: NodeKind,
+    ) -> CoreResult<NodeId> {
+        // Validation en lecture seule d'abord : un échec ne doit pas cloner
+        // l'arbre ni consommer un identifiant.
+        self.tree.validate_insert(parent, index, name, &kind)?;
+        let id = self.ids.next();
+        let node = Node::new(id, name, kind)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.insert(parent, index, node)
+    }
+
+    /// Retire `id` et toute sa descendance. Rend l'index qu'il occupait.
+    pub fn remove(&mut self, id: NodeId) -> CoreResult<usize> {
+        self.tree.validate_remove(id)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.remove(id)
+    }
+
+    /// Renomme `id`. Rend l'ancien nom.
+    pub fn rename(&mut self, id: NodeId, name: &str) -> CoreResult<String> {
+        let previous = self.tree.validate_rename(id, name)?;
+        if previous == name {
+            return Ok(previous);
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.rename(id, name)
+    }
+
+    /// Déplace `id` sous `new_parent` à `index`. Rend `(ancien parent, ancien index)`.
+    pub fn move_node(
+        &mut self,
+        id: NodeId,
+        new_parent: NodeId,
+        index: usize,
+    ) -> CoreResult<(NodeId, usize)> {
+        self.tree.validate_move(id, new_parent, index)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.move_node(id, new_parent, index)
+    }
+
+    /// Remplace les métadonnées d'une fenêtre. Rend les précédentes.
+    /// `Err(Structure)` si `id` n'est pas une fenêtre.
+    pub fn set_window_meta(&mut self, id: NodeId, meta: WindowMeta) -> CoreResult<WindowMeta> {
+        let node = self.tree.get(id)?;
+        if !node.kind().is_window() {
+            return Err(CoreError::Structure(format!(
+                "{id} n'est pas une fenêtre mais {}",
+                node.kind().with_article()
+            )));
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        let slot = tree
+            .node_mut(id)?
+            .kind_mut()
+            .window_meta_mut()
+            .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas une fenêtre")))?;
+        Ok(std::mem::replace(slot, meta))
+    }
+
+    /// Remplace le texte d'une note. Rend le précédent. `Err(Structure)` si `id`
+    /// n'est pas une note.
+    pub fn set_note_text(&mut self, id: NodeId, text: &str) -> CoreResult<String> {
+        let node = self.tree.get(id)?;
+        if !matches!(node.kind(), NodeKind::Note { .. }) {
+            return Err(CoreError::Structure(format!(
+                "{id} n'est pas une note mais {}",
+                node.kind().with_article()
+            )));
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        let slot = tree
+            .node_mut(id)?
+            .note_text_mut()
+            .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas une note")))?;
+        Ok(std::mem::replace(slot, text.to_string()))
+    }
+
+    // -- données --
+
+    /// Écrit `block` dans `column` à partir de la ligne `start`.
+    pub fn set_values(
+        &mut self,
+        column: NodeId,
+        start: usize,
+        block: ValueBlock,
+    ) -> CoreResult<ValuesDelta> {
+        self.check_column(column)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.column_mut(column)?.set_values(start, block)
+    }
+
+    /// Tronque ou complète `column` à `length` lignes.
+    pub fn set_length(&mut self, column: NodeId, length: usize) -> CoreResult<ValuesDelta> {
+        self.check_column(column)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        Ok(tree.column_mut(column)?.set_length(length))
+    }
+
+    /// Remplace les métadonnées d'une colonne. Rend les précédentes.
+    pub fn set_column_meta(&mut self, column: NodeId, meta: ColumnMeta) -> CoreResult<ColumnMeta> {
+        self.check_column(column)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        Ok(tree.column_mut(column)?.set_meta(meta))
+    }
+
+    /// Change le type d'une colonne. Rend `(ancien type, anciennes valeurs)`.
+    pub fn set_column_type(
+        &mut self,
+        column: NodeId,
+        column_type: ColumnType,
+    ) -> CoreResult<(ColumnType, ColumnValues)> {
+        self.check_column(column)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        Ok(tree.column_mut(column)?.set_column_type(column_type))
+    }
+
+    /// Restaure type et valeurs d'une colonne (annulation d'un changement de type).
+    pub fn restore_column(
+        &mut self,
+        column: NodeId,
+        column_type: ColumnType,
+        values: ColumnValues,
+    ) -> CoreResult<()> {
+        self.check_column(column)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.column_mut(column)?.restore(column_type, values)
+    }
+
+    /// Insère `count` lignes à `at` dans **chaque colonne de la feuille telle
+    /// que `at < len(colonne)`**. Une colonne trop courte pour avoir une ligne
+    /// `at` est ignorée : les longueurs sont libres entre colonnes d'une même
+    /// feuille, et allonger une colonne courte inventerait des données. Rend,
+    /// dans l'ordre de la feuille, les identifiants des colonnes effectivement
+    /// allongées (vide si aucune).
+    pub fn insert_rows(
+        &mut self,
+        sheet: NodeId,
+        at: usize,
+        count: usize,
+    ) -> CoreResult<Vec<NodeId>> {
+        let targets = self.row_targets(sheet, at)?;
+        if targets.is_empty() || count == 0 {
+            return Ok(Vec::new());
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        for &id in &targets {
+            tree.column_mut(id)?.insert_rows(at, count)?;
+        }
+        Ok(targets)
+    }
+
+    /// Supprime `count` lignes à `at` dans **le même ensemble** de colonnes
+    /// (`at < len`). Rend, par colonne touchée et dans l'ordre de la feuille,
+    /// `(NodeId, valeurs retirées)`.
+    pub fn delete_rows(
+        &mut self,
+        sheet: NodeId,
+        at: usize,
+        count: usize,
+    ) -> CoreResult<Vec<(NodeId, ValueBlock)>> {
+        let targets = self.row_targets(sheet, at)?;
+        if targets.is_empty() || count == 0 {
+            return Ok(Vec::new());
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        let mut removed = Vec::with_capacity(targets.len());
+        for id in targets {
+            let block = tree.column_mut(id)?.delete_rows(at, count)?;
+            removed.push((id, block));
+        }
+        Ok(removed)
+    }
+
+    /// Insère `count` lignes manquantes à `at` dans **cette seule colonne**
+    /// (`at` dans `0..=len`). Primitive par colonne, utilisée pour rejouer
+    /// l'annulation de `delete_rows` colonne par colonne (une colonne vidée
+    /// jusqu'à sa fin n'a plus de ligne `at` et échappe à `insert_rows`, qui
+    /// opère au niveau feuille).
+    pub fn insert_column_rows(
+        &mut self,
+        column: NodeId,
+        at: usize,
+        count: usize,
+    ) -> CoreResult<()> {
+        self.check_column(column)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.column_mut(column)?.insert_rows(at, count)
+    }
+
+    /// Supprime `count` lignes à `at` dans **cette seule colonne**, rabattu à
+    /// la fin. Rend les valeurs retirées. Primitive par colonne, symétrique
+    /// d'`insert_column_rows`.
+    pub fn delete_column_rows(
+        &mut self,
+        column: NodeId,
+        at: usize,
+        count: usize,
+    ) -> CoreResult<ValueBlock> {
+        self.check_column(column)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.column_mut(column)?.delete_rows(at, count)
+    }
+
+    // -- chemins --
+
+    /// Analyse `text` puis le résout.
+    pub fn resolve_path(&self, text: &str) -> CoreResult<NodeId> {
+        let path = parse_path(text)?;
+        self.resolve(&path)
+    }
+
+    /// Résout un chemin analysé vers un identifiant de nœud.
+    pub fn resolve(&self, path: &ObjectPath) -> CoreResult<NodeId> {
+        let Some(window_name) = path.window.as_deref() else {
+            let mut current = self.root();
+            for segment in &path.folders {
+                let child = self
+                    .tree
+                    .child_by_name(current, segment)?
+                    .filter(|id| {
+                        self.tree
+                            .node(*id)
+                            .is_some_and(|node| node.kind().is_folder())
+                    })
+                    .ok_or_else(|| CoreError::Path(format!("dossier introuvable : {segment}")))?;
+                current = child;
+            }
+            return Ok(current);
+        };
+
+        let window = self
+            .tree
+            .find_window(window_name)
+            .ok_or_else(|| CoreError::Path(format!("fenêtre introuvable : [{window_name}]")))?;
+
+        if !path.folders.is_empty() {
+            let actual = self.folder_names_above(window)?;
+            if actual != path.folders {
+                return Err(CoreError::Path(format!(
+                    "[{window_name}] n'est pas dans le dossier {} mais dans {}",
+                    display_folders(&path.folders),
+                    display_folders(&actual)
+                )));
+            }
+        }
+
+        let Some(sheet_name) = path.sheet.as_deref() else {
+            return Ok(window);
+        };
+        if !matches!(self.tree.get(window)?.kind(), NodeKind::Workbook { .. }) {
+            return Err(CoreError::Path(format!(
+                "[{window_name}] n'est pas un classeur, il n'a pas de feuille"
+            )));
+        }
+        let sheet = self
+            .tree
+            .child_by_name(window, sheet_name)?
+            .ok_or_else(|| {
+                CoreError::Path(format!("feuille introuvable : [{window_name}]{sheet_name}"))
+            })?;
+
+        let Some(column_name) = path.column.as_deref() else {
+            return Ok(sheet);
+        };
+        self.tree
+            .child_by_name(sheet, column_name)?
+            .ok_or_else(|| CoreError::Path(format!("colonne introuvable : {}", format_path(path))))
+    }
+
+    /// Chemin canonique ancré : `/` pour la racine, `/A/B` pour un dossier,
+    /// `/A/[Book1]Sheet1!Col` pour le reste (le préfixe est la suite des
+    /// dossiers contenant la fenêtre, racine exclue).
+    pub fn path_of(&self, id: NodeId) -> CoreResult<String> {
+        let node = self.tree.get(id)?;
+        let path = match node.kind() {
+            NodeKind::Folder { .. } => {
+                let mut folders = self.folder_names_above(id)?;
+                if id != self.root() {
+                    folders.push(node.name().to_string());
+                }
+                ObjectPath {
+                    folders,
+                    rooted: true,
+                    ..Default::default()
+                }
+            }
+            NodeKind::Workbook { .. }
+            | NodeKind::Graph { .. }
+            | NodeKind::Matrix { .. }
+            | NodeKind::Note { .. } => ObjectPath {
+                folders: self.folder_names_above(id)?,
+                window: Some(node.name().to_string()),
+                rooted: true,
+                ..Default::default()
+            },
+            NodeKind::Worksheet { .. } => {
+                let book = self.required_parent(id)?;
+                ObjectPath {
+                    folders: self.folder_names_above(book)?,
+                    window: Some(self.tree.get(book)?.name().to_string()),
+                    sheet: Some(node.name().to_string()),
+                    rooted: true,
+                    ..Default::default()
+                }
+            }
+            NodeKind::Column(_) => {
+                let sheet = self.required_parent(id)?;
+                let book = self.required_parent(sheet)?;
+                ObjectPath {
+                    folders: self.folder_names_above(book)?,
+                    window: Some(self.tree.get(book)?.name().to_string()),
+                    sheet: Some(self.tree.get(sheet)?.name().to_string()),
+                    column: Some(node.name().to_string()),
+                    rooted: true,
+                }
+            }
+        };
+        Ok(format_path(&path))
+    }
+
+    /// Premier `{prefix}{n}` (n ≥ 1) qui n'est le nom d'aucune fenêtre existante.
+    pub fn next_window_name(&self, prefix: &str) -> String {
+        let taken: Vec<&str> = self
+            .tree
+            .windows()
+            .into_iter()
+            .filter_map(|id| self.tree.node(id))
+            .map(Node::name)
+            .collect();
+        let mut n: u64 = 1;
+        loop {
+            let candidate = format!("{prefix}{n}");
+            if !taken.iter().any(|name| *name == candidate) {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+
+    // -- interne --
+
+    /// Nom de fenêtre demandé, ou premier « {prefix}N » libre.
+    fn window_name(&self, name: Option<&str>, prefix: &str) -> String {
+        match name {
+            Some(name) => name.to_string(),
+            None => self.next_window_name(prefix),
+        }
+    }
+
+    /// Premier « {prefix}N » (n ≥ 1) libre parmi les enfants directs de `parent`.
+    fn next_child_name(&self, parent: NodeId, prefix: &str) -> CoreResult<String> {
+        let taken: Vec<&str> = self
+            .tree
+            .children(parent)?
+            .iter()
+            .filter_map(|child| self.tree.node(*child))
+            .map(Node::name)
+            .collect();
+        let mut n: u64 = 1;
+        loop {
+            let candidate = format!("{prefix}{n}");
+            if !taken.iter().any(|name| *name == candidate) {
+                return Ok(candidate);
+            }
+            n += 1;
+        }
+    }
+
+    /// Premier nom de colonne libre façon tableur dans `sheet`.
+    fn next_column_name(&self, sheet: NodeId) -> CoreResult<String> {
+        let taken: Vec<&str> = self
+            .tree
+            .children(sheet)?
+            .iter()
+            .filter_map(|child| self.tree.node(*child))
+            .map(Node::name)
+            .collect();
+        let mut index: usize = 0;
+        loop {
+            let candidate = spreadsheet_name(index);
+            if !taken.iter().any(|name| *name == candidate) {
+                return Ok(candidate);
+            }
+            index += 1;
+        }
+    }
+
+    /// Noms des dossiers contenant `id`, racine exclue, du haut vers le bas.
+    fn folder_names_above(&self, id: NodeId) -> CoreResult<Vec<String>> {
+        let mut names: Vec<String> = self
+            .tree
+            .ancestors(id)?
+            .into_iter()
+            .filter(|ancestor| *ancestor != self.root())
+            .filter_map(|ancestor| self.tree.node(ancestor))
+            .filter(|node| node.kind().is_folder())
+            .map(|node| node.name().to_string())
+            .collect();
+        names.reverse();
+        Ok(names)
+    }
+
+    /// Parent de `id`, ou `Err(Structure)` s'il n'en a pas (nœud détaché ou racine).
+    fn required_parent(&self, id: NodeId) -> CoreResult<NodeId> {
+        self.tree
+            .parent(id)?
+            .ok_or_else(|| CoreError::Structure(format!("{id} n'a pas de parent")))
+    }
+
+    /// Vérifie en lecture seule que `id` est une colonne — évite de cloner
+    /// l'arbre pour rien sur le cas d'échec courant.
+    fn check_column(&self, id: NodeId) -> CoreResult<()> {
+        let node = self.tree.get(id)?;
+        if node.kind().is_column() {
+            Ok(())
+        } else {
+            Err(CoreError::Structure(format!(
+                "{id} n'est pas une colonne mais {}",
+                node.kind().with_article()
+            )))
+        }
+    }
+
+    /// Colonnes de `sheet`, dans l'ordre, qui possèdent une ligne `at`.
+    fn row_targets(&self, sheet: NodeId, at: usize) -> CoreResult<Vec<NodeId>> {
+        let sheet_node = self.tree.get(sheet)?;
+        if !sheet_node.kind().is_worksheet() {
+            return Err(CoreError::Structure(format!(
+                "{sheet} n'est pas une feuille mais {}",
+                sheet_node.kind().with_article()
+            )));
+        }
+        Ok(sheet_node
+            .children()
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.tree
+                    .node(*id)
+                    .and_then(Node::as_column)
+                    .is_some_and(|column| at < column.len())
+            })
+            .collect())
+    }
+}
+
+impl Default for Project {
+    /// Projet vide nommé « Project ».
+    fn default() -> Self {
+        Self::with_root_name("Project")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spreadsheet_names_follow_the_reference_algorithm() {
+        assert_eq!(spreadsheet_name(0), "A");
+        assert_eq!(spreadsheet_name(25), "Z");
+        assert_eq!(spreadsheet_name(26), "AA");
+        assert_eq!(spreadsheet_name(27), "AB");
+        assert_eq!(spreadsheet_name(51), "AZ");
+        assert_eq!(spreadsheet_name(52), "BA");
+        assert_eq!(spreadsheet_name(701), "ZZ");
+        assert_eq!(spreadsheet_name(702), "AAA");
+    }
+
+    #[test]
+    fn display_folders_shows_the_root_as_a_slash() {
+        assert_eq!(display_folders(&[]), "/");
+        assert_eq!(display_folders(&["A".to_string(), "B".to_string()]), "A/B");
+    }
+
+    #[test]
+    fn default_is_an_empty_project_named_project() {
+        let project = Project::default();
+        assert_eq!(project.name(), "Project");
+        assert_eq!(project.tree().len(), 1);
+        assert_eq!(project.next_id_hint(), 2);
+    }
+
+    #[test]
+    fn new_rejects_an_invalid_name() {
+        assert!(matches!(
+            Project::new("[oups]"),
+            Err(CoreError::InvalidName(_))
+        ));
+    }
+
+    #[test]
+    fn a_failed_insertion_consumes_no_identifier() {
+        let mut project = Project::new("Demo").unwrap();
+        let root = project.root();
+        project.add_folder(root, "Manips").unwrap();
+        let before = project.next_id_hint();
+        assert!(project.add_folder(root, "Manips").is_err());
+        assert_eq!(project.next_id_hint(), before);
+    }
+
+    #[test]
+    fn add_workbook_with_sheet_rolls_back_the_workbook_on_a_failed_sheet() {
+        let mut project = Project::new("Demo").unwrap();
+        let root = project.root();
+        let before = project.tree().clone();
+
+        let err = project.add_workbook_with_sheet(root, None, Some("Sheet!1"));
+        assert!(matches!(err, Err(CoreError::InvalidName(_))));
+        assert_eq!(**project.tree(), *before);
+    }
+
+    #[test]
+    fn window_names_skip_the_taken_ones() {
+        let mut project = Project::new("Demo").unwrap();
+        let root = project.root();
+        project.add_empty_workbook(root, Some("Book2")).unwrap();
+        assert_eq!(project.next_window_name("Book"), "Book1");
+        project.add_empty_workbook(root, Some("Book1")).unwrap();
+        assert_eq!(project.next_window_name("Book"), "Book3");
+    }
+}

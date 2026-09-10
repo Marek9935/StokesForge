@@ -8,6 +8,8 @@ description = "Modèle de données PlotYx (arbre de projet, colonnes) — zéro 
 workspace = true
 
 [dependencies]
+thiserror = "2"
 
 [dev-dependencies]
+proptest = "1"
 toml = "0.8"

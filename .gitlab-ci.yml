@@ -1,6 +1,26 @@
 # CI de la branche rewriterust — cœur Rust uniquement. Le CI Python
 # (legacy-python/.gitlab-ci.yml) est gardé pour référence mais n'est plus
 # exécuté : ce fichier racine est le seul lu par GitLab.
+#
+# ATTENTION — ce que `fmt`, `clippy` et `test` ne prouvent PAS :
+#
+# Ces trois travaux n'activent jamais la feature Cargo `python`. Tout ce qui
+# touche à PyO3 (crates `plotyx-python`, `plotyx-script`, et l'intégration
+# côté `plotyx-app`) est donc compilé **vide** ici : le pont Python — la
+# partie la plus risquée de toute l'architecture — n'est ni compilé, ni
+# vérifié par clippy, ni testé par ces trois travaux. Un pipeline vert sur ces
+# trois travaux dit seulement que le cœur Rust pur compile et passe ses
+# tests ; il ne dit rien du pont Python.
+#
+# C'est en partie voulu (règle : la CI reste verte sur une machine sans
+# Python installé) et en partie une impossibilité matérielle aujourd'hui :
+# l'interpréteur vendorisé n'est PAS versionné (`.gitignore` exclut
+# `/vendor/python/*.tar.gz` et `/vendor/python/extracted/`), donc un dépôt
+# fraîchement cloné n'a aucun interpréteur, et la compilation de PyO3
+# échouerait faute de `PYO3_CONFIG_FILE` (cf. `crates/plotyx-python/README.md`,
+# piège n°1).
+#
+# Le travail `test-python` ci-dessous couvre le pont — voir son commentaire.
 
 stages:
   - check
@@ -37,3 +57,51 @@ test:
   <<: *rust-cache
   script:
     - cargo test --workspace
+
+# Seul travail qui compile et teste le pont Python (feature `python`, absente
+# de `default`) : vendorise l'interpréteur CPython figé + numpy épinglé,
+# génère la configuration PyO3, puis lance `cargo test` sur `plotyx-python` et
+# `plotyx-script` contre cet interpréteur — exactement ce que fait
+# `scripts/python-test.sh`, réutilisé ici plutôt que dupliqué.
+#
+# Manuel (`when: manual`) et non bloquant (`allow_failure: true`) pour deux
+# raisons : `scripts/python-vendor.sh` télécharge une archive d'une centaine
+# de mégaoctets et installe numpy à chaque exécution à froid, ce qui est trop
+# coûteux pour tourner à chaque commit ; et son échec ne doit jamais faire
+# passer au rouge un pipeline déclenché par une modification qui ne touche
+# pas au pont Python.
+test-python:
+  stage: check
+  image: rust:1
+  when: manual
+  allow_failure: true
+  # Deux caches distincts (`.rust-cache` n'est pas réutilisable tel quel ici :
+  # son ancre porte déjà la clé `cache`, la fusionner dans un élément de liste
+  # imbriquerait `cache` sous `cache`). Le premier reprend la même forme que
+  # `.rust-cache` (dépendances et artefacts Cargo, clés par branche) ; le
+  # second est propre à ce travail — voir son commentaire.
+  cache:
+    - key: cargo-${CI_COMMIT_REF_SLUG}
+      paths:
+        - .cargo/
+        - target/
+    # Cache séparé, clé sur le verrou de versions : l'archive et le préfixe
+    # extrait ne changent que si vendor/python/lock.env change, donc restent
+    # en cache d'une exécution manuelle à l'autre sans retéléchargement.
+    - key:
+        files:
+          - vendor/python/lock.env
+      paths:
+        - vendor/python/*.tar.gz
+        - vendor/python/extracted/
+  before_script:
+    # Minimum requis par scripts/python-vendor.sh, vérifié dans le script
+    # lui-même : `curl` (téléchargement de l'archive python-build-standalone),
+    # `tar` (extraction), `ca-certificates` (validation TLS par curl du
+    # certificat de GitHub). Rien de plus : aucun compilateur ni Python
+    # système n'est nécessaire, l'interpréteur vendorisé amorce lui-même son
+    # pip par `ensurepip` si besoin.
+    - apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar
+  script:
+    - scripts/python-vendor.sh
+    - scripts/python-test.sh

@@ -2,10 +2,15 @@
 name = "plotyx-commands"
 version = "0.0.0"
 edition.workspace = true
-description = "Bus de commandes annulables (undo/redo) sur plotyx-core."
+description = "Commandes du modèle et pile d'historique à deux natures (snapshot de structure / delta de données)."
 
 [lints]
 workspace = true
 
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"
+toml = "0.8"

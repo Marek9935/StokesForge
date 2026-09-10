@@ -2,6 +2,9 @@
 /target/
 crates/*/target/
 
+# Distributions assemblées (scripts/pyhello-dist.sh, cf. crates/plotyx-python/README.md)
+/dist/
+
 # Python (legacy-python/ — gardé comme référence, cf. docs/rustrewrite/roadmap.md)
 __pycache__/
 *.py[cod]

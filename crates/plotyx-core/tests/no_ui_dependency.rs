@@ -5,7 +5,7 @@
 //! ce qui force une décision consciente plutôt qu'un import qui se glisse.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    // Aucune pour l'instant — le modèle (phase 1) n'a encore rien importé.
+    "thiserror", // erreurs typées, sans surface UI
 ];
 
 #[test]
