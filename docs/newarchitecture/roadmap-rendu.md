@@ -310,7 +310,7 @@ courbe. Tout le reste du plan consiste à le garder vrai en élargissant.
 | 5.3 | Légende (`LegendSpec`), styles de trait et de marqueur | Couverture du style |
 | 5.4 | Panneaux multiples (`PanelSpec`) | Couverture de la mise en page |
 | 5.5 | LTTB — **rendu nécessaire par la mesure 0.3** (22,1 ms contre un seuil de 8) | Décimation |
-| 5.5 bis | `TessellationOptions::feathering` conditionnel : le désactiver au-delà d'un seuil de densité, ou pendant un drag | Le levier qui pèse 78 % |
+| 5.5 bis | `TessellationOptions::feathering` désactivé **pendant l'interaction souris**, rétabli au repos | Le levier qui pèse 78 % |
 | 5.6 | Le test 4.5 étendu à chaque ajout | Divergence impossible |
 
 > **La règle de la phase, en une ligne : aucune fonctionnalité n'entre dans
@@ -347,6 +347,21 @@ Le coût est linéaire à **~75 ns/point**, et la barre des 8 ms tombe vers
 - si la cible est bien « 500 spectres à l'écran », **aucun des deux ne suffit
   durablement** et R5 devra poser la vraie question : réduire le nombre de
   formes, pas le nombre de points. Ce n'est pas tranché ici.
+
+**Décidé le 2026-09-10 : le feathering se coupe à l'entrée en interaction
+souris, et se rétablit au relâchement.** C'est le déclencheur qui rend
+l'arbitrage gratuit plutôt que douloureux — le crénelage ne se voit pas sur
+une image qui bouge, et c'est exactement pendant le déplacement que les
+22,1 ms font mal. Au repos, la qualité est pleine ; sous la main, on repasse
+à 4,88 ms, donc sous le seuil. Ce n'est pas un réglage exposé à
+l'utilisateur mais un état du rendu, à câbler avec la gestion du drag de la
+phase R7.
+
+Conséquence sur le cache : couper le feathering change la tessellation, pas
+les `Shape`. Le cache du §4.2 (clé `(revision, rect, pixels_per_point)`)
+n'est donc **pas** invalidé par le basculement — c'est la retessellation qui
+change de coût, et elle a lieu de toute façon à chaque frame. Rien à ajouter
+à la clé.
 
 Non mesuré, et à ne pas oublier : **l'upload GPU par frame** (aucun
 affichage dans l'environnement de R0). Les 22,1 ms sont du CPU seul.
