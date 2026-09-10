@@ -482,3 +482,125 @@ par `plotyx-commands::History`, déjà construit et testé).
    « un chemin rapide sans Python » n'est plus une exception à construire,
    c'est le cas nominal. Le point à trancher se réduit à : *l'acquisition
    live existe-t-elle comme besoin ?* (`questions-ouvertes.md` §6).
+8. ~~**Compteur de modification par colonne.**~~ **Clos le 2026-09-10 —
+   construit.** `Column::version()`, incrémenté par les six mutateurs de
+   données, persisté, exclu de `PartialEq`, conservateur sur les appels sans
+   effet. Support du test de péremption du §11.3 et de l'invalidation
+   sélective des caches de rendu. Aucun consommateur à ce jour : c'est un
+   champ posé pour ne pas avoir à revenir sur le format ni sur l'égalité.
+   Détail dans `cahier-des-charges-technique.md` §4.3.
+
+---
+
+## 11. Recalcul automatique — deux décisions prises d'avance
+
+Le 2026-09-10, une discussion de conception a porté sur le **recalcul
+automatique des nœuds dérivés** : un ajustement, une FFT, une colonne
+calculée doivent se rafraîchir quand leur source change. C'est le cadenas
+`Auto / Manual / None` d'Origin, et c'est aujourd'hui **absent du socle** —
+`Tree` est une hiérarchie de contenance pure, sans arête de dépendance.
+
+Distinguer deux choses souvent confondues : **un graphe, lui, se rafraîchit
+déjà tout seul.** Le spec référence des colonnes, la résolution relit
+l'arbre courant à chaque peinture, la `revision` déclenche le repaint. Ce
+qui ne suit pas, c'est le **calculé** — la courbe d'ajustement se
+redessinera fidèlement en montrant l'ancien ajustement sur les nouvelles
+données.
+
+**Le moteur n'est ni construit ni planifié** : il n'existe encore aucun
+calcul à recalculer. Les deux décisions ci-dessous ne le construisent pas.
+Elles évitent seulement de fermer la porte, et sont prises maintenant parce
+qu'elles se paieraient en migration de format et en réécriture d'API si
+elles étaient prises plus tard.
+
+### 11.1 Le spec référence par identité, pas par nom
+
+**Décidé** : toute référence d'un spec vers une colonne est un `NodeId`,
+jamais un nom ni un chemin textuel.
+
+| | Par nom | Par `NodeId` |
+|---|---|---|
+| Renommer « Tension » en « Voltage » | le graphe perd sa source | le graphe suit, sans rien faire |
+| Supprimer la colonne | référence pendante silencieuse | référence brisée **détectable** |
+| Déplacer la colonne dans un autre classeur | chemin invalide | inchangé |
+
+Une référence vers un nœud supprimé doit produire un état explicite — le
+concept existe déjà dans le socle (`BrokenReferenceError`, surface `pyx` de
+`plotyx-script`) — et le rendu doit l'afficher comme tel, jamais comme une
+série vide.
+
+**Où ça atterrit** : phase R3, tâche 3.1 (`roadmap-rendu.md` §3.3). Coût nul
+si c'est fait là ; migration de tous les fichiers déjà écrits si c'est fait
+après.
+
+Cette référence est aussi, littéralement, **la première arête de dépendance
+du projet** : un graphe est un nœud dérivé qui ne calcule rien.
+
+### 11.2 Un recalcul automatique n'entre pas dans l'historique
+
+**Décidé** : une commande émise par le moteur de recalcul mute le projet et
+la `revision`, **sans produire d'`Entry`** dans `plotyx-commands::History`.
+
+Sans cette règle : l'utilisateur saisit une valeur, appuie sur `Ctrl+Z`, et
+récupère l'ancien ajustement au lieu de sa saisie. Deux appuis pour une
+édition — trois ou quatre le long d'une cascade. **L'annulation ne doit
+défaire que ce que l'utilisateur a fait.**
+
+Conséquence assumée, et c'est le comportement d'Origin : après une
+annulation, le nœud dérivé porte encore l'ancien résultat, se retrouve donc
+périmé, et se recalcule. C'est le cadenas jaune.
+
+**Où ça atterrit** : dans le protocole de `plotyx-session`, comme drapeau
+sur la requête de commande. Ça **change la signature de soumission**, déjà
+utilisée par `plotyx-app` et `plotyx-script` : à poser avant que d'autres
+appelants ne s'y ajoutent.
+
+### 11.3 Ce qui a été examiné et écarté — l'index inverse
+
+Un index persistant `source → dépendants`, maintenu dans `Project`, a été
+proposé puis **écarté**. Non pour sa fragilité, mais parce qu'il est
+inutile.
+
+Le test de péremption d'un nœud dérivé est **local** : « les versions de mes
+entrées sont-elles encore celles de mon dernier calcul ? ». Le nœud y répond
+seul, depuis sa propre recette. Aucune arête inverse n'est jamais empruntée.
+L'index répondait à « qui dépend de B ? » — la question du modèle *push*
+(marquer les dépendants au moment de l'édition), abandonné au profit de la
+comparaison de versions.
+
+Restent deux besoins réels du graphe complet : l'**ordre topologique** d'une
+cascade et la **détection de cycle**. Les deux se construisent depuis les
+recettes en une passe au moment du dispatch, puis se jettent — une variable
+locale, pas un état à invalider.
+
+Les chiffres qui ferment le point, à 1 000 nœuds dérivés (un projet Origin
+lourd en compte 50 à 500 ; `Tree` stocke un `HashMap<NodeId, Arc<Node>>` et
+expose déjà `iter()`) :
+
+| | Coût |
+|---|---|
+| Test de péremption (comparaisons d'entiers) | ≈ 2-5 µs — tenable à chaque frame |
+| Construction du graphe + tri topologique + cycles, par dispatch | ≈ 100-200 µs |
+| **Le calcul que tout ça ordonnance** | **10 ms à plusieurs secondes** |
+
+Trois à quatre ordres de grandeur entre l'ordonnancement et le travail
+ordonnancé. L'index économiserait ~100 µs contre un état dérivé permanent
+dont le mode de panne est **silencieux** — « votre ajustement a cessé de se
+mettre à jour et vous ne le saurez pas ». Inacceptable dans un outil dont
+les sorties sont publiées.
+
+**La porte reste ouverte** : la recette est la vérité, un cache se greffe
+toujours après coup, sans rien réécrire. Il faudrait ~10⁵ nœuds dérivés
+pour que la passe de 200 µs devienne visible.
+
+### 11.4 Ce qui n'est pas décidé
+
+Le moteur lui-même : types de recette, ordonnanceur, pool de calcul,
+temporisation de fin de rafale (`end_macro` est la frontière de lot
+naturelle), politique `Auto / Manual / None`. Estimé à 1-2 semaines **plus**
+une recette par type d'analyse — à ouvrir quand une première analyse
+existera.
+
+Le compteur de modification par colonne qui porte le §11.3 est en revanche
+**déjà construit** (point ouvert n°8, clos) : `Column::version()`. C'est la
+seule pièce du dispositif qui existe en code.

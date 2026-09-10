@@ -424,6 +424,21 @@ La contiguïté est une **exigence contractuelle** : elle conditionne le
 zéro-copie du §8.3. Aucune évolution ne doit la remettre en cause sans
 rouvrir §2.1.
 
+> **Ajout du 2026-09-10 — compteur de modification.** Chaque colonne porte
+> un `version: u64`, incrémenté par tout appel réussi à un mutateur de
+> **données** (`set_meta` ne l'incrémente pas ; un appel refusé non plus).
+> Il répond à « cette colonne a-t-elle changé depuis ma dernière lecture ? »
+> sans relire les valeurs, ce qui est le support du recalcul automatique
+> (`newarchitecture/architecture-choisie.md` §11) et de l'invalidation
+> sélective des caches de rendu. **Trois propriétés à ne pas défaire** : il
+> est *persisté* (le remettre à zéro au chargement le rendrait menteur après
+> assez de réécritures) ; il est *exclu de `PartialEq`* (sinon la propriété
+> « après undo, l'arbre est bit à bit celui d'avant » échoue, annuler étant
+> une écriture de plus) ; et il est *conservateur* — il avance même quand
+> l'appel s'avère sans effet, parce qu'un faux « a changé » coûte un
+> recalcul quand un faux « n'a pas changé » afficherait un résultat faux.
+> Aucun consommateur à ce jour.
+
 Écriture par `Arc::make_mut` : la copie n'a lieu **que** si quelqu'un
 d'autre détient encore ce buffer. ~~En édition courante, sans lecteur
 concurrent, l'écriture est en place et gratuite.~~

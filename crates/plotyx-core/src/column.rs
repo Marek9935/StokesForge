@@ -2,12 +2,14 @@
 //! dans le nœud de l'arbre, pas ici) de longueur libre, plus ses métadonnées
 //! d'affichage et de tracé.
 //!
-//! Deux décisions d'architecture structurent ce module : les valeurs
+//! Trois décisions d'architecture structurent ce module : les valeurs
 //! manquantes sont `f64::NAN` pour les colonnes numériques/date-heure et
-//! `None` pour les colonnes texte (distinct de `Some(String::new())`) ; et
-//! les buffers sont des `Vec` contigus (jamais chunkés) partagés derrière un
+//! `None` pour les colonnes texte (distinct de `Some(String::new())`) ; les
+//! buffers sont des `Vec` contigus (jamais chunkés) partagés derrière un
 //! `Arc`, mutés via `Arc::make_mut` pour permettre au pont Python de tenir
-//! une vue numpy sans copie tant qu'il détient un clone de l'`Arc`.
+//! une vue numpy sans copie tant qu'il détient un clone de l'`Arc` ; et
+//! chaque colonne porte un **compteur de modification** ([`Column::version`])
+//! qui permet de savoir qu'elle a changé sans relire ses valeurs.
 
 use std::sync::Arc;
 
@@ -224,11 +226,30 @@ pub struct ValuesDelta {
 
 /// Vecteur de données de longueur libre plus ses métadonnées. Le nom vit
 /// dans le nœud de l'arbre.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Column {
     column_type: ColumnType,
     values: ColumnValues,
     meta: ColumnMeta,
+    version: u64,
+}
+
+/// **Le compteur de version est exclu de l'égalité, délibérément.**
+///
+/// L'invariant que teste `plotyx-commands` est « après undo, l'arbre est
+/// bit à bit celui d'avant » ; or annuler une écriture est *une écriture de
+/// plus*, donc incrémente le compteur. L'inclure ferait échouer cette
+/// propriété alors que les données sont bien identiques.
+///
+/// Conséquence à connaître : un aller-retour disque n'est **pas** couvert
+/// par cette égalité pour le compteur — d'où un test dédié dans
+/// `plotyx-persistence`.
+impl PartialEq for Column {
+    fn eq(&self, other: &Self) -> bool {
+        self.column_type == other.column_type
+            && self.values == other.values
+            && self.meta == other.meta
+    }
 }
 
 /// Écrit `new_values` dans `vec` à partir de `start`, en étendant `vec` avec
@@ -278,6 +299,7 @@ impl Column {
             column_type,
             values,
             meta: ColumnMeta::default(),
+            version: 0,
         }
     }
 
@@ -287,6 +309,7 @@ impl Column {
             column_type: ColumnType::Numeric,
             values: ColumnValues::Float(Arc::new(values.to_vec())),
             meta: ColumnMeta::default(),
+            version: 0,
         }
     }
 
@@ -296,6 +319,7 @@ impl Column {
             column_type: ColumnType::Text,
             values: ColumnValues::Text(Arc::new(values.to_vec())),
             meta: ColumnMeta::default(),
+            version: 0,
         }
     }
 
@@ -321,7 +345,23 @@ impl Column {
             column_type,
             values,
             meta,
+            version: 0,
         })
+    }
+
+    /// Comme [`Column::from_block`], mais avec un compteur de version imposé.
+    /// Réservé à la **reconstruction depuis un fichier** : le compteur est
+    /// persisté, et le repartir de zéro au chargement rendrait le compteur
+    /// menteur (voir [`Column::version`]).
+    pub fn from_block_with_version(
+        column_type: ColumnType,
+        block: ValueBlock,
+        meta: ColumnMeta,
+        version: u64,
+    ) -> CoreResult<Self> {
+        let mut column = Self::from_block(column_type, block, meta)?;
+        column.version = version;
+        Ok(column)
     }
 
     /// Type de données de la colonne.
@@ -337,6 +377,42 @@ impl Column {
     /// Métadonnées d'affichage et de tracé.
     pub fn meta(&self) -> &ColumnMeta {
         &self.meta
+    }
+
+    /// Compteur de modification des **données** : il répond à « cette colonne
+    /// a-t-elle changé depuis la dernière fois que je l'ai lue ? » sans relire
+    /// les valeurs. Un lecteur retient le compteur avec ce qu'il a produit et
+    /// se sait périmé quand il diffère.
+    ///
+    /// # Règle exacte
+    ///
+    /// Incrémenté par **tout appel réussi** à un mutateur de données
+    /// ([`Column::set_values`], [`Column::set_length`],
+    /// [`Column::insert_rows`], [`Column::delete_rows`],
+    /// [`Column::set_column_type`], [`Column::restore`]), **y compris quand
+    /// l'appel s'avère sans effet** (`insert_rows(_, 0)`, `set_length` à la
+    /// même longueur). Un appel refusé (`Err`) n'incrémente pas.
+    ///
+    /// [`Column::set_meta`] **n'incrémente pas** : une unité ou un commentaire
+    /// ne sont pas des données.
+    ///
+    /// Le sens de l'approximation est délibéré : un faux « a changé » coûte un
+    /// recalcul inutile, un faux « n'a pas changé » afficherait un résultat
+    /// faux. Seule la première erreur est tolérable.
+    ///
+    /// # Il est persisté
+    ///
+    /// Repartir de zéro au chargement le rendrait **menteur** : après un
+    /// rechargement, quarante-sept écritures ramèneraient le compteur à une
+    /// valeur qu'un lecteur d'avant la sauvegarde croirait reconnaître, sur
+    /// des données entre-temps devenues tout autres. Voir
+    /// [`Column::from_block_with_version`].
+    ///
+    /// # Il est hors de l'égalité
+    ///
+    /// `PartialEq` l'ignore — voir l'implémentation et sa justification.
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     /// Nombre de lignes de la colonne.
@@ -373,10 +449,13 @@ impl Column {
     /// écrasées (uniquement la partie de `block` qui recouvre des lignes existantes) et la
     /// longueur précédente. `Err(TypeMismatch)` si la variante du bloc ne correspond pas au type.
     pub fn set_values(&mut self, start: usize, block: ValueBlock) -> CoreResult<ValuesDelta> {
+        // Incrémenté sur les seules branches qui écrivent : la branche
+        // `Err(TypeMismatch)` laisse la colonne — compteur compris — intacte.
         match (&mut self.values, block) {
             (ColumnValues::Float(arc), ValueBlock::Float(new_values)) => {
                 let vec = Arc::make_mut(arc);
                 let (previous, previous_length) = write_block(vec, start, new_values, || f64::NAN);
+                self.version = self.version.wrapping_add(1);
                 Ok(ValuesDelta {
                     start,
                     previous: ValueBlock::Float(previous),
@@ -386,6 +465,7 @@ impl Column {
             (ColumnValues::Text(arc), ValueBlock::Text(new_values)) => {
                 let vec = Arc::make_mut(arc);
                 let (previous, previous_length) = write_block(vec, start, new_values, || None);
+                self.version = self.version.wrapping_add(1);
                 Ok(ValuesDelta {
                     start,
                     previous: ValueBlock::Text(previous),
@@ -403,6 +483,7 @@ impl Column {
     /// ou inchangé), `start = length`, `previous` = valeurs retirées (vide si aucune),
     /// `previous_length` = ancienne longueur.
     pub fn set_length(&mut self, length: usize) -> ValuesDelta {
+        self.version = self.version.wrapping_add(1);
         match &mut self.values {
             ColumnValues::Float(arc) => {
                 let vec = Arc::make_mut(arc);
@@ -450,6 +531,7 @@ impl Column {
                 "ligne {at} hors bornes (longueur {len})"
             )));
         }
+        self.version = self.version.wrapping_add(1);
         if count == 0 {
             return Ok(());
         }
@@ -476,6 +558,7 @@ impl Column {
                 "ligne {at} hors bornes (longueur {len})"
             )));
         }
+        self.version = self.version.wrapping_add(1);
         let stop = len.min(at.saturating_add(count));
         match &mut self.values {
             ColumnValues::Float(arc) => {
@@ -503,6 +586,7 @@ impl Column {
     pub fn set_column_type(&mut self, column_type: ColumnType) -> (ColumnType, ColumnValues) {
         let old_type = self.column_type;
         let old_values = self.values.clone();
+        self.version = self.version.wrapping_add(1);
 
         if column_type == old_type {
             return (old_type, old_values);
@@ -563,6 +647,7 @@ impl Column {
         }
         self.column_type = column_type;
         self.values = values;
+        self.version = self.version.wrapping_add(1);
         Ok(())
     }
 }
@@ -906,6 +991,103 @@ mod tests {
             Cell::Text(Some("a".to_string()))
         );
         assert_ne!(Cell::Text(None), Cell::Text(Some(String::new())));
+    }
+
+    #[test]
+    fn version_starts_at_zero_and_advances_on_every_data_mutator() {
+        let mut column = Column::from_f64(&[1.0, 2.0, 3.0]);
+        assert_eq!(column.version(), 0);
+
+        column.set_values(0, ValueBlock::Float(vec![9.0])).unwrap();
+        assert_eq!(column.version(), 1);
+        column.set_length(2);
+        assert_eq!(column.version(), 2);
+        column.insert_rows(0, 1).unwrap();
+        assert_eq!(column.version(), 3);
+        column.delete_rows(0, 1).unwrap();
+        assert_eq!(column.version(), 4);
+
+        let (old_type, old_values) = column.set_column_type(ColumnType::Text);
+        assert_eq!(column.version(), 5);
+        column.restore(old_type, old_values).unwrap();
+        assert_eq!(column.version(), 6);
+    }
+
+    #[test]
+    fn version_advances_even_when_the_call_turns_out_to_be_a_no_op() {
+        // Le sens de l'approximation est délibéré : un faux « a changé »
+        // coûte un recalcul, un faux « n'a pas changé » afficherait un
+        // résultat faux.
+        let mut column = Column::from_f64(&[1.0, 2.0]);
+        column.insert_rows(0, 0).unwrap();
+        assert_eq!(column.version(), 1);
+        column.set_length(2);
+        assert_eq!(column.version(), 2);
+        column.delete_rows(0, 0).unwrap();
+        assert_eq!(column.version(), 3);
+        assert_eq!(values_of(&column), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn version_ignores_metadata_and_refused_calls() {
+        let mut column = Column::from_f64(&[1.0, 2.0]);
+
+        column.set_meta(ColumnMeta {
+            unit: "ms".to_string(),
+            ..ColumnMeta::default()
+        });
+        assert_eq!(column.version(), 0, "une unité n'est pas une donnée");
+
+        assert!(column.set_values(0, ValueBlock::Text(vec![None])).is_err());
+        assert_eq!(column.version(), 0, "un appel refusé n'écrit rien");
+
+        assert!(column.insert_rows(99, 1).is_err());
+        assert_eq!(column.version(), 0, "un appel hors bornes n'écrit rien");
+
+        assert!(column
+            .restore(ColumnType::Numeric, ColumnValues::Text(Arc::new(vec![None])))
+            .is_err());
+        assert_eq!(column.version(), 0);
+    }
+
+    #[test]
+    fn equality_ignores_the_version_counter() {
+        // C'est ce qui permet à la propriété « après undo, l'arbre est bit à
+        // bit celui d'avant » de tenir : annuler est une écriture de plus.
+        let original = Column::from_f64(&[1.0, 2.0]);
+        let mut column = original.clone();
+
+        let delta = column
+            .set_values(0, ValueBlock::Float(vec![9.0]))
+            .expect("écriture valide");
+        column.set_values(delta.start, delta.previous).unwrap();
+        column.set_length(delta.previous_length);
+
+        assert_eq!(column.version(), 3);
+        assert_eq!(original.version(), 0);
+        assert_eq!(column, original, "mêmes données, compteurs différents");
+    }
+
+    #[test]
+    fn from_block_with_version_restores_an_imposed_counter() {
+        let column = Column::from_block_with_version(
+            ColumnType::Numeric,
+            ValueBlock::Float(vec![1.0]),
+            ColumnMeta::default(),
+            47,
+        )
+        .expect("bloc valide");
+        assert_eq!(column.version(), 47);
+        assert_eq!(
+            Column::from_block(
+                ColumnType::Numeric,
+                ValueBlock::Float(vec![1.0]),
+                ColumnMeta::default()
+            )
+            .unwrap()
+            .version(),
+            0
+        );
     }
 
     #[test]

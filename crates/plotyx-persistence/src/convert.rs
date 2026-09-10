@@ -122,6 +122,7 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                 comment: meta.comment.clone(),
                 display_format: meta.display_format.clone(),
                 values,
+                version: column.version(),
             }
         }
         NodeKind::Graph { meta } => KindRecord::Graph {
@@ -165,6 +166,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             comment,
             display_format,
             values,
+            version,
         } => {
             let column_type: ColumnType = column_type.into();
             let block = match values {
@@ -178,8 +180,10 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 comment,
                 display_format,
             };
-            let column =
-                Column::from_block(column_type, block, meta).map_err(ConvertError::Core)?;
+            // `from_block_with_version`, pas `from_block` : le compteur doit
+            // traverser le disque, sinon il ment après un rechargement.
+            let column = Column::from_block_with_version(column_type, block, meta, version)
+                .map_err(ConvertError::Core)?;
             NodeKind::Column(column)
         }
         KindRecord::Graph { label, comment } => NodeKind::Graph {

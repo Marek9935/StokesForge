@@ -97,6 +97,12 @@ pub(crate) enum KindRecord {
         display_format: String,
         /// Valeurs de la colonne.
         values: ValuesRecord,
+        /// Compteur de modification des données (`Column::version`). Absent
+        /// des fichiers écrits avant le 2026-09-10 : `#[serde(default)]` le
+        /// ramène alors à 0, ce qui est le comportement voulu — un fichier
+        /// sans compteur n'a de toute façon aucun lecteur qui en retienne un.
+        #[serde(default)]
+        version: u64,
     },
     /// Graphe.
     Graph {

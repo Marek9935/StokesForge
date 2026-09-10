@@ -194,6 +194,18 @@ Qt et n'existe pas si le cœur reste sans dépendance Qt (cf. `resume-decisions.
 > Restent valables tels quels : l'application avant empilement (§2.1), la
 > sémantique des macros (§2.1) et l'invariant lignes (§2.4).
 
+> **Décision du 2026-09-10 — une extension à venir, pas une révision.** La
+> phase reste close. Le jour où un moteur de recalcul automatique existera,
+> ses commandes devront muter le projet et la `revision` **sans produire
+> d'`Entry`** : sinon `Ctrl+Z` annule le recalcul au lieu de la saisie de
+> l'utilisateur, et il faut deux appuis — trois ou quatre le long d'une
+> cascade. L'annulation ne défait que ce que l'utilisateur a fait. Cela
+> ajoutera un drapeau à la requête de commande de `plotyx-session`, donc
+> **changera la signature de soumission**, déjà utilisée par `plotyx-app` et
+> `plotyx-script` : à poser avant que d'autres appelants ne s'y ajoutent.
+> Motivation et conséquences dans `newarchitecture/architecture-choisie.md`
+> §11.2. Le moteur lui-même n'est ni construit ni planifié (§11.4).
+
 ### 2.1 Remplacement de `QUndoStack` — à construire, pas à importer
 
 Pas d'équivalent Rust mûr à réutiliser tel quel pour ce cas précis (pile de

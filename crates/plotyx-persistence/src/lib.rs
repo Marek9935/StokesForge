@@ -366,6 +366,7 @@ mod tests {
                 comment: String::new(),
                 display_format: String::new(),
                 values: schema::ValuesRecord::Float(vec![0, 1, 2]), // 3 octets, pas multiple de 8
+                version: 0,
             },
         };
         let body = FileBody {

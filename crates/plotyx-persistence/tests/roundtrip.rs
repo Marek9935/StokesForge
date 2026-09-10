@@ -192,6 +192,52 @@ fn repeated_save_load_cycles_do_not_drift() {
 }
 
 #[test]
+fn the_modification_counter_survives_the_round_trip() {
+    // Il doit traverser le disque : un compteur remis à zéro au chargement
+    // finirait par repasser par une valeur qu'un lecteur d'avant la
+    // sauvegarde croirait reconnaître, sur des données devenues tout autres.
+    // `Column`'s `PartialEq` ignore le compteur, donc le test d'égalité bit à
+    // bit de l'arbre ne couvre pas ce cas — d'où ce test dédié.
+    let mut project = Project::new("Compteur").expect("projet valide");
+    let root = project.root();
+    let book = project
+        .add_empty_workbook(root, Some("Book1"))
+        .expect("classeur créé");
+    let sheet = project
+        .add_worksheet(book, Some("Sheet1"))
+        .expect("feuille créée");
+    let column_id = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0]))
+        .expect("colonne ajoutée");
+
+    for value in [10.0, 20.0, 30.0] {
+        project
+            .set_values(column_id, 0, ValueBlock::Float(vec![value]))
+            .expect("écriture valide");
+    }
+    let before = project
+        .tree()
+        .node(column_id)
+        .and_then(|node| node.as_column())
+        .expect("colonne présente")
+        .version();
+    assert_eq!(before, 3, "trois écritures, trois incréments");
+
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("compteur.plyx");
+    save(&project, &path).expect("sauvegarde réussie");
+    let loaded = load(&path).expect("chargement réussi");
+
+    let after = loaded
+        .tree()
+        .node(column_id)
+        .and_then(|node| node.as_column())
+        .expect("colonne présente")
+        .version();
+    assert_eq!(after, before);
+}
+
+#[test]
 fn empty_string_and_missing_text_survive_the_round_trip() {
     let mut project = Project::new("Texte").expect("projet valide");
     let root = project.root();

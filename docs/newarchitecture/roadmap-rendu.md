@@ -183,6 +183,7 @@ tranche ultérieure »*. C'est cette tranche.
 | 3.3 | Port de `resolve.py` contre un `Arc<Tree>` : `ResolvedSeries`, `ResolvedPanel`, `ResolvedPlot` | Spec → données prêtes à tracer |
 | 3.4 | Helpers `bar_width`, `histogram` | Port des deux fonctions |
 | 3.5 | Test d'aller-retour : un projet avec graphe, sauvé puis rechargé, rend un spec égal | Roundtrip vert |
+| 3.6 | Test : renommer une colonne référencée laisse le graphe résoluble ; la supprimer produit une référence brisée explicite | La décision §3.3 verrouillée par un test |
 
 ### 3.1 Pourquoi la persistance ne coûte pas de version de format
 
@@ -203,6 +204,23 @@ sous les yeux, qui dira quelles primitives sont les bonnes. Ici, le spec
 est **lu**, jamais écrit ; il se construit en dur dans les tests.
 
 C'est aussi pourquoi `edit.py` (187 l.) n'est pas au tableau des ports.
+
+### 3.3 Les références du spec sont des `NodeId` — décidé le 2026-09-10
+
+Une série du spec désigne sa colonne par **identité** (`NodeId`), jamais par
+nom ni par chemin textuel. Renommer ou déplacer une colonne laisse le graphe
+intact ; supprimer une colonne produit une référence **brisée et
+détectable**, à afficher comme telle et jamais comme une série vide — d'où
+la tâche 3.6.
+
+C'est aussi la première arête de dépendance du projet : un graphe est un
+nœud dérivé qui ne calcule rien. Le raisonnement complet, la seconde
+décision qui l'accompagne (un recalcul automatique n'entre pas dans
+l'historique) et l'index inverse écarté sont dans `architecture-choisie.md`
+§11.
+
+Coût nul décidé ici ; migration de tous les fichiers déjà écrits si c'est
+décidé après.
 
 **Sortie de phase** : un projet contenant un graphe avec deux séries se
 sauve, se recharge, et se résout en données traçables — sans qu'aucun
@@ -419,3 +437,6 @@ de produit.
 3. **Texte de l'export : tout outliner, ou assumer l'asymétrie ?**
    (`architecture-choisie.md` point ouvert n°6) — à trancher avant le
    premier export destiné à une publication.
+4. ~~Compteur de modification par colonne.~~ **Tranché et construit le
+   2026-09-10** : `Column::version()` (`architecture-choisie.md` point
+   ouvert n°8, clos).
