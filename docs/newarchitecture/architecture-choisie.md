@@ -189,6 +189,10 @@ no-ops, là où un backend à texture ferait de `present` un point d'upload.
 
 (`Shape` fait 64 octets — `epaint` a une assertion de test dessus.)
 
+> **Mesuré en R0 (0.3, 2026-09-10) : 2 432 000 octets, soit 2,432 Mo.** Le
+> chiffre ci-dessus est confirmé au chiffre près, `size_of::<Shape>()` = 64
+> octets compris.
+
 Le cache vectoriel est ~3× moins cher **et** indépendant de la résolution.
 Ce renversement enterre au passage les deux points de vigilance hérités du
 plan Matplotlib (spec §12) : **le budget de 141 ms et la mise à jour
@@ -204,6 +208,32 @@ frame. Si cela coince à 300 k points, deux leviers, dans cet ordre :
 2. cacher un cran plus loin en `Shape::Mesh(Arc<Mesh>)` — mais ~14 Mo pour
    300 k points (600 k `Vertex` à 20 o + indices `u32`), donc **plus cher
    que la texture**. C'est un bouton, pas un défaut.
+
+> **Corrigé par la mesure R0 du 2026-09-10 — deux erreurs, et un levier
+> oublié.**
+>
+> *L'estimation du levier 2 était fausse d'un facteur 3.* Une polyligne
+> anti-crénelée produit **4 sommets par point**, pas 2 — deux pour le trait,
+> deux pour la frange — et les indices n'avaient pas été comptés. Mesuré à
+> 300 k points : 1 200 000 sommets, 5 397 000 indices, **45,6 Mo**. Le cache
+> `Mesh` n'est donc pas « ~2× la texture RGBA », il est **~6×**. Sans
+> feathering : 19,2 Mo, ce qui reste 1,4× le chiffre annoncé. Le classement
+> (vectoriel < Mesh) tient ; l'écart est bien plus grand. **L'upload de
+> 45,6 Mo par frame n'a pas été chronométré** (aucun affichage dans
+> l'environnement de mesure) : à chiffrer avant d'appuyer sur ce bouton.
+>
+> *Il existe un troisième levier, absent de cette liste.* Le feathering pèse
+> **78 % du coût de tessellation** : 22,1 ms avec, **4,88 ms sans**, sur le
+> même graphe. Désactivé, ce cas repasse **sous le seuil de 8 ms**.
+> `TessellationOptions::feathering` devient donc un levier à part entière —
+> à arbitrer contre la qualité visuelle, éventuellement conditionné à la
+> densité ou limité à la durée d'un drag. Il entre en R5 aux côtés du LTTB.
+>
+> *Et le coût mesuré dépasse la frame.* 22,1 ms de tessellation seule à
+> 300 k points, c'est déjà plus qu'une frame à 60 Hz (16,7 ms), avant tout
+> upload GPU et tout dessin d'UI. Le coût est linéaire à **~75 ns/point**,
+> avec un surcoût par polyligne ; la barre des 8 ms tombe vers **110 000
+> points**.
 
 ### 4.3 `draw_text` — le point de contact avec Typst, et le seul piège
 
@@ -234,6 +264,37 @@ légende. Deux régimes, à séparer nettement :
 > la mesure avec un crate de fonts tiers : epaint 0.36 shape via `skrifa`
 > + `harfrust`, et reproduire son résultat au pixel près n'est pas un
 > exercice qu'on gagne.
+>
+> **Mesuré en R0 (0.1, 2026-09-10) — tenu, et plus facile à tenir que
+> décrit.** 540 comparaisons (30 chaînes réelles × 3 `pixels_per_point` × 3
+> tailles × 2 familles) entre une `Fonts` construite à la main et le chemin
+> `Context` : **écart maximal 0,000000 px**, égalité exacte. Le harnais
+> portait un témoin positif — famille remplacée par une autre police — qui
+> dépasse de 216 px, donc l'égalité n'est pas un artefact de mesure.
+>
+> Trois précisions que la mesure apporte, et qui **assouplissent**
+> l'invariant :
+>
+> 1. **Les métriques de texte sont indépendantes de `pixels_per_point`**
+>    (et du hinting, et du *subpixel binning*) : le cache d'avances d'epaint
+>    est clé par `(char, LocationHash)`, le hinting ne touche que le contour
+>    rastérisé. Il ne faut donc **pas** partager *le même objet* `Fonts` —
+>    il suffit de partager les mêmes `FontDefinitions`. Le danger réel n'est
+>    pas « deux instances », c'est « deux jeux de polices ». Un test de dix
+>    lignes suffit à le garder.
+> 2. **`Fonts` n'est ni `Clone`, ni utilisable par `&self`** (`layout` prend
+>    `&mut self`). Une instance réellement partagée serait un
+>    `Mutex<Fonts>`, pas un `Arc<Fonts>` — raison de plus de partager la
+>    *définition* plutôt que l'objet. Le commentaire « Cheap to clone » de
+>    la source d'`epaint` est un vestige.
+> 3. **La signature réelle en 0.36.2 est `Fonts::new(TextOptions,
+>    FontDefinitions)` — deux arguments**, le `pixels_per_point` passant par
+>    `with_pixels_per_point() -> FontsView`. Et `Context::run` s'appelle
+>    `run_ui`.
+>
+> Reste non vérifié : le **branchement** sur Plotters. R0 valide que l'outil
+> de mesure existe et qu'il est fidèle, pas que `estimate_text_size` le
+> consomme correctement — c'est la tâche R4.4.
 
 ### 4.4 Plotters sans ses fonts
 
@@ -462,11 +523,22 @@ les points 1, 2 et 5 de cette version sont **clos** (protocole Core ↔
 Plotter = `Snapshot` + `revision`, §4.2 ; granularité de l'undo = tranchée
 par `plotyx-commands::History`, déjà construit et testé).
 
-1. **Coût réel de la tessellation** à 300 k points — mesurer avant de
-   décider si le LTTB du §4.2 est nécessaire dès la v1 ou plus tard.
-2. **Latence de compilation Typst** par formule inédite, sur des cas réels
-   de labels (cinétique chimique, notations spectroscopiques), avant
-   d'engager du code de production.
+1. ~~**Coût réel de la tessellation** à 300 k points.~~ **Clos le
+   2026-09-10 par la mesure R0 0.3 : 22,1 ms/frame** (médiane de 30 frames,
+   ±3 %, Core Ultra 7 155H, release), soit 2,8× le seuil de 8 ms fixé
+   d'avance. **Le LTTB entre en R5.** Voir §4.2 pour les deux corrections
+   que cette mesure apporte — le levier `feathering` (78 % du coût) et le
+   cache `Mesh` à 45,6 Mo — et `roadmap-rendu.md` R5 pour la nuance sur le
+   modèle de charge.
+2. ~~**Latence de compilation Typst** par formule inédite.~~ **Clos le
+   2026-09-10 par la mesure R0 0.2 : 0,156 ms** par formule inédite en monde
+   chaud (médiane de 10 exécutions × 19 formules réelles de chimie/physique ;
+   0,096–0,450 ; froid, initialisation du monde comprise : 3,7 ms). **~1000×
+   sous le seuil de 150 ms : Typst est retenu tel quel**, sans rendu
+   asynchrone obligatoire. Le contrôle `comemo::evict` donne le même chiffre
+   (0,155 ms), donc le cache ne masque pas le coût ; un rendu PNG par formule
+   vérifie qu'on ne mesure pas une compilation vide. **Le chemin
+   `typst-svg`, lui, n'est pas mesuré** — voir point 6.
 3. **Choix de la lib de fitting** (`argmin`, `levenberg-marquardt`).
 4. **Gestion des données** pour les spectres — question à reformuler : le
    modèle possède déjà ses buffers (`plotyx-core::Column`, contigus, jamais

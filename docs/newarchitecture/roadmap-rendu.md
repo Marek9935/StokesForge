@@ -78,6 +78,30 @@ C'est l'argument le plus solide au dossier pour la garder neutre ici aussi.
 
 ## Phase R0 — Spike de mesure (≈3-4 jours)
 
+> **Statut : close le 2026-09-10.** Trois nombres, mesurés sur Core Ultra 7
+> 155H, en `--release`, versions épinglées `=0.36.2` et `=0.15.1` ; code du
+> spike jeté, aucun fichier du dépôt touché par la mesure.
+>
+> | # | Mesuré | Seuil fixé d'avance | Verdict |
+> |---|---|---|---|
+> | 0.1 | **0,000000 px** d'écart (540 comparaisons) | ≤ 0,05 px | **tenu, par égalité exacte** |
+> | 0.2 | **0,156 ms** / formule inédite, monde chaud (froid 3,7 ms) | ≤ 150 ms | **Typst retenu tel quel** |
+> | 0.3 | **22,1 ms** / frame à 300 k points | > 8 ms | **LTTB entre en R5** |
+>
+> Les trois nombres sont reportés dans `architecture-choisie.md` (points
+> ouverts 1 et 2, clos ; §4.2 et §4.3 corrigés). **La mesure a aussi
+> invalidé deux chiffres du document et révélé un levier absent** — détail
+> en §4.2 : le cache `Mesh` coûte 45,6 Mo et non 14, et le *feathering* pèse
+> 78 % de la tessellation. Le 2,4 Mo du cache `Vec<Shape>`, lui, est
+> confirmé au chiffre près.
+>
+> Corrections d'API relevées au passage, à ne pas redécouvrir :
+> `Fonts::new` prend **deux** arguments en 0.36.2, `Context::run` s'appelle
+> `run_ui`, et l'API `typst` 0.15.1 a bougé par rapport à tous les exemples
+> publics (`FileId::new` veut un `RootedPath`, `VirtualPath::new` rend un
+> `Result`, `PagedDocument` vient de `typst-layout`). Le `World` fait bien
+> ~90 lignes : l'estimation du §7 est bonne.
+
 **Objectif** : répondre aux trois questions qui peuvent **changer une
 décision**, avant qu'une ligne de code ne dépende de la réponse. Aucune
 architecture, aucun crate : du code jetable, jeté à la fin.
@@ -239,7 +263,7 @@ de marqueur, pas d'échelle log.
 
 | # | Tâche | Livrable |
 |---|---|---|
-| 4.1 | L'`epaint::Fonts` partagée : une instance, construite sans `Context`, exposée aux deux backends | Source de mesure unique |
+| 4.1 | Les mêmes `FontDefinitions` pour les deux backends, plus un test qui verrouille l'égalité des mesures | Source de mesure unique |
 | 4.2 | `plotyx-render-egui` : `DrawingBackend` collectant dans un `Vec<Shape>`, `estimate_text_size` sur 4.1 | ~250-300 lignes |
 | 4.3 | Cache sur `(revision, rect, pixels_per_point)` | Une frame sans changement = `painter.extend` |
 | 4.4 | `plotyx-render-svg` : `SVGBackend`, **`estimate_text_size` surchargé sur 4.1** | Export SVG |
@@ -285,13 +309,47 @@ courbe. Tout le reste du plan consiste à le garder vrai en élargissant.
 | 5.2 | Échelles logarithmiques, axes secondaires (`AxisScale`, `AxisSide`) | Couverture des axes |
 | 5.3 | Légende (`LegendSpec`), styles de trait et de marqueur | Couverture du style |
 | 5.4 | Panneaux multiples (`PanelSpec`) | Couverture de la mise en page |
-| 5.5 | LTTB, **si et seulement si** 0.3 l'a montré nécessaire | Décimation |
+| 5.5 | LTTB — **rendu nécessaire par la mesure 0.3** (22,1 ms contre un seuil de 8) | Décimation |
+| 5.5 bis | `TessellationOptions::feathering` conditionnel : le désactiver au-delà d'un seuil de densité, ou pendant un drag | Le levier qui pèse 78 % |
 | 5.6 | Le test 4.5 étendu à chaque ajout | Divergence impossible |
 
 > **La règle de la phase, en une ligne : aucune fonctionnalité n'entre dans
 > un seul backend.** C'est ce qui rend le plan différent d'un plan qui
 > ferait l'écran puis l'export — là, la divergence est structurellement
 > empêchée, pas surveillée.
+
+### 5.1 Ce que la mesure 0.3 dit vraiment — le seuil est franchi, mais le LTTB n'est pas l'outil
+
+Le seuil était fixé d'avance, il est franchi (22,1 ms contre 8), donc le
+LTTB entre en R5 : on conclut selon le seuil, sans le renégocier après coup.
+**Mais la même mesure montre que le LTTB ne réglerait pas le cas mesuré**,
+et il faut l'écrire avant de commencer la tâche 5.5.
+
+Le LTTB décime *le long* d'une série. Dans le cas de charge du document —
+500 spectres de 600 points — 600 points étalés sur 1 600 px sont déjà
+sous-échantillonnés : il n'y a rien à décimer. La charge vient du **nombre
+de séries**, pas de leur longueur. Le balayage le montre, à total de points
+constant :
+
+| séries | points/série | total | tessellation |
+|---|---|---|---|
+| 50 | 6 000 | 300 k | 18,3 ms — le LTTB ramènerait à 80 k pts ≈ 6,5 ms |
+| 500 | 600 | 300 k | 22,7 ms — le LTTB ne retire rien |
+
+Le coût est linéaire à **~75 ns/point**, et la barre des 8 ms tombe vers
+**110 000 points au total**. Donc :
+
+- le LTTB reste utile — il couvre le cas « quelques séries très longues »,
+  qui est le cas de l'acquisition ;
+- le **feathering** (tâche 5.5 bis) est le levier qui couvre le cas
+  « beaucoup de séries », et il suffit à lui seul à repasser sous le seuil
+  (4,88 ms) ;
+- si la cible est bien « 500 spectres à l'écran », **aucun des deux ne suffit
+  durablement** et R5 devra poser la vraie question : réduire le nombre de
+  formes, pas le nombre de points. Ce n'est pas tranché ici.
+
+Non mesuré, et à ne pas oublier : **l'upload GPU par frame** (aucun
+affichage dans l'environnement de R0). Les 22,1 ms sont du CPU seul.
 
 **Sortie de phase** : le critère de fin est vrai pour un graphe réaliste,
 issu d'un fichier d'exemple.
@@ -430,10 +488,11 @@ serait silencieux.
 Aucun ne bloque une phase. Deux sont des mesures de R0, un est une décision
 de produit.
 
-1. **Seuil d'abandon de Typst** (ms par formule inédite) — à fixer **avant**
-   la mesure 0.2.
-2. **Seuil d'entrée du LTTB** (ms par frame à 300 k points) — à fixer avant
-   la mesure 0.3.
+1. ~~Seuil d'abandon de Typst.~~ **Fixé puis mesuré le 2026-09-10** : seuil
+   à 150 ms, mesure à 0,156 ms — **Typst retenu**.
+2. ~~Seuil d'entrée du LTTB.~~ **Fixé puis mesuré le 2026-09-10** : seuil à
+   8 ms/frame, mesure à 22,1 ms — **LTTB en R5**, avec la nuance du §5.1 sur
+   ce que le LTTB ne règle pas.
 3. **Texte de l'export : tout outliner, ou assumer l'asymétrie ?**
    (`architecture-choisie.md` point ouvert n°6) — à trancher avant le
    premier export destiné à une publication.
