@@ -9,6 +9,8 @@
 //! `plotyx-plot`.
 pub use plotyx_id::NodeId;
 
+use crate::error::{CoreError, CoreResult};
+
 /// Allocateur d'identifiants : `next()` rend des valeurs strictement croissantes.
 /// N'est jamais remis en arrière — c'est le `Project` (tranche suivante) qui le
 /// possède, hors de l'arbre, pour qu'une annulation ne le fasse pas reculer.
@@ -34,14 +36,24 @@ impl IdAllocator {
         }
     }
 
-    /// Attribue l'identifiant suivant.
+    /// Attribue l'identifiant suivant. `Err(IdentifiersExhausted)` si `u64`
+    /// est épuisé, plutôt que de déborder silencieusement (B1,
+    /// `guide-de-correction-robustesse.md` §F2/F3/F4) : avant ce correctif,
+    /// `self.next += 1` sur `u64::MAX` débordait — panique en debug,
+    /// compteur qui **recule** en release, ouvrant la porte à deux nœuds
+    /// sous le même identifiant. `self.next` n'est incrémenté qu'après
+    /// vérification, donc un appel qui échoue laisse l'allocateur inchangé
+    /// (et tout appel suivant échoue pareillement, jamais de régression).
     // `IdAllocator` n'est pas un itérateur (il n'y a pas de fin, pas d'`Iterator::next`
     // à honorer) ; le nom `next` reste le plus clair pour cette API.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> NodeId {
+    pub fn next(&mut self) -> CoreResult<NodeId> {
         let id = NodeId::from_raw(self.next);
-        self.next += 1;
-        id
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or(CoreError::IdentifiersExhausted)?;
+        Ok(id)
     }
 
     /// Valeur du prochain identifiant qui serait rendu (à persister).
@@ -63,14 +75,14 @@ mod tests {
     #[test]
     fn new_allocator_starts_at_one() {
         let mut alloc = IdAllocator::new();
-        assert_eq!(alloc.next().raw(), 1);
+        assert_eq!(alloc.next().unwrap().raw(), 1);
     }
 
     #[test]
     fn successive_ids_are_strictly_increasing() {
         let mut alloc = IdAllocator::new();
-        let a = alloc.next();
-        let b = alloc.next();
+        let a = alloc.next().unwrap();
+        let b = alloc.next().unwrap();
         assert!(b > a);
     }
 
@@ -79,7 +91,7 @@ mod tests {
         // Le fichier dit « le prochain est 10 » ; son plus grand identifiant
         // lu est 3, ce qui ne contredit rien : le compteur repart bien à 10.
         let mut alloc = IdAllocator::resume(10, 3);
-        assert_eq!(alloc.next().raw(), 10);
+        assert_eq!(alloc.next().unwrap().raw(), 10);
     }
 
     #[test]
@@ -88,7 +100,7 @@ mod tests {
         // fichier (plus grand identifiant lu : 10) : il rendrait un
         // identifiant déjà attribué. La ceinture le rattrape au-dessus.
         let mut alloc = IdAllocator::resume(3, 10);
-        assert_eq!(alloc.next().raw(), 11);
+        assert_eq!(alloc.next().unwrap().raw(), 11);
     }
 
     #[test]
@@ -96,7 +108,7 @@ mod tests {
         // Projet vide : aucun identifiant lu, donc `highest_seen == 0`
         // (zéro n'est jamais attribué).
         let mut alloc = IdAllocator::resume(1, 0);
-        assert_eq!(alloc.next().raw(), 1);
+        assert_eq!(alloc.next().unwrap().raw(), 1);
     }
 
     #[test]

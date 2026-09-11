@@ -26,6 +26,12 @@ pub enum CoreError {
     /// Valeurs d'un type incompatible avec la colonne.
     #[error("type incompatible : {0}")]
     TypeMismatch(String),
+    /// `IdAllocator` a épuisé `u64` : plus aucun identifiant à attribuer.
+    /// B1 (`guide-de-correction-robustesse.md` §F2/F3/F4) — remplace le
+    /// débordement silencieux (`self.next += 1` sur `u64::MAX`, qui faisait
+    /// reculer le compteur et réattribuer un identifiant déjà vivant).
+    #[error("identifiants épuisés : plus aucun nœud ne peut être créé")]
+    IdentifiersExhausted,
 }
 
 /// Alias de résultat du crate.
@@ -64,6 +70,10 @@ mod tests {
         assert_eq!(
             CoreError::TypeMismatch("texte attendu".to_string()).to_string(),
             "type incompatible : texte attendu"
+        );
+        assert_eq!(
+            CoreError::IdentifiersExhausted.to_string(),
+            "identifiants épuisés : plus aucun nœud ne peut être créé"
         );
     }
 }

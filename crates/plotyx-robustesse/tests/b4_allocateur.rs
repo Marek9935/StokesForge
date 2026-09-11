@@ -4,24 +4,27 @@ use plotyx_core::{IdAllocator, Node, NodeId, NodeKind, Project, Tree};
 use std::sync::Arc;
 
 #[test]
-#[ignore = "reproduction B1 — IdAllocator::next() déborde sur u64::MAX : panique en debug, compteur qui recule en release"]
-fn b4_allocateur_sature_puis_deborde() {
+fn b4_allocateur_sature_puis_refuse() {
+    // B1 (`guide-de-correction-robustesse.md` §F2/F3/F4) — `next()` rend
+    // désormais `CoreResult<NodeId>` : à la frontière `u64::MAX`, il refuse
+    // au lieu de déborder silencieusement (`self.next += 1` sur `u64::MAX`,
+    // qui paniquait en debug et faisait **reculer** le compteur en release —
+    // deux nœuds sous le même identifiant).
+    //
     // `resume` sature volontairement (test unitaire existant du crate :
     // `resume_does_not_panic_at_the_u64_boundary`, qui n'appelle que `peek`).
     let mut alloc = IdAllocator::resume(u64::MAX, u64::MAX);
     assert_eq!(alloc.peek(), u64::MAX);
-    // Mais le premier `next()` fait `self.next += 1` sur u64::MAX.
     let premier = alloc.next();
-    assert_eq!(premier.raw(), u64::MAX);
-    println!("après le premier next(), peek = {}", alloc.peek());
-    let second = alloc.next();
-    println!("second identifiant rendu : {}", second.raw());
+    println!("next() à la frontière u64::MAX → {premier:?}");
     assert!(
-        second.raw() > premier.raw(),
-        "l'allocateur a reculé : {} après {} — un identifiant sera réattribué",
-        second.raw(),
-        premier.raw()
+        premier.is_err(),
+        "l'allocateur doit refuser plutôt que déborder ou reculer : {premier:?}"
     );
+    // Refuse à nouveau, sans avoir bougé : jamais de régression, jamais de
+    // réattribution.
+    let second = alloc.next();
+    assert!(second.is_err(), "un allocateur épuisé le reste : {second:?}");
 }
 
 #[test]

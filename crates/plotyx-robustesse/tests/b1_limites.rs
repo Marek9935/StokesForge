@@ -87,14 +87,16 @@ fn b1_bar_width_demandee_absurde_est_filtree() {
 // ------------------------------------------------------------ PlotSpec grid
 
 #[test]
-#[ignore = "reproduction B2 — PlotSpec::rows() déborde sur une position de panneau extrême"]
 fn b1_plotspec_rows_columns_sur_position_extreme() {
     let spec = PlotSpec {
         panels: vec![PanelSpec::at(usize::MAX, usize::MAX)].into(),
         ..PlotSpec::default()
     };
+    // B2 — `saturating_add(1)` : ni panique, ni débordement vers 0.
     println!("rows = {}", spec.rows());
     println!("columns = {}", spec.columns());
+    assert_eq!(spec.rows(), usize::MAX);
+    assert_eq!(spec.columns(), usize::MAX);
 }
 
 // ------------------------------------------------------------------ colonne

@@ -8,15 +8,20 @@ use std::sync::Arc;
 use plotyx_core::{Column, ColumnType, NodeId, Project, Tree, ValueBlock, WindowMeta};
 
 #[test]
-fn un_projet_vide_se_clone_et_se_detruit() {
+fn un_arbre_de_projet_vide_se_clone_et_se_detruit() {
+    // B9 (`guide-de-correction-robustesse.md` §F2) — `Project` n'est plus
+    // `Clone` : `#[derive(Clone)]` dupliquait `IdAllocator` avec l'arbre, si
+    // bien que deux copies d'un même projet attribuaient ensuite les mêmes
+    // identifiants à des nœuds différents. Ce que ce test de fumée voulait
+    // vraiment couvrir — une structure partagée qui survit à la destruction
+    // de ce qui l'a produite — reste vrai pour `Arc<Tree>`, qui est le seul
+    // type censé être cloné ici (gratuit, un compteur de références).
     let project = Project::new("Vide").expect("nom valide");
-    let clone = project.clone();
-    assert_eq!(clone.name(), "Vide");
-    assert_eq!(clone.tree().len(), project.tree().len());
+    let tree = Arc::clone(project.tree());
+    assert_eq!(tree.len(), project.tree().len());
     drop(project);
-    // Le clone reste utilisable après la destruction de l'original.
-    assert_eq!(clone.path_of(clone.root()).expect("chemin"), "/");
-    drop(clone);
+    // L'arbre partagé reste utilisable après la destruction du projet.
+    assert_eq!(tree.get(tree.root()).expect("racine").name(), "Vide");
 }
 
 #[test]

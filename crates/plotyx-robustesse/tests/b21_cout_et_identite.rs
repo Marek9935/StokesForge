@@ -247,25 +247,25 @@ fn b21_les_noms_de_controle_sont_refuses() {
 }
 
 #[test]
-#[ignore = "reproduction B9 — Project dérive Clone, ce qui duplique l'allocateur : deux projets divergents attribuent alors les mêmes identifiants"]
 fn b21_deux_projets_nattribuent_jamais_le_meme_identifiant() {
-    let mut a = Project::new("D").expect("projet valide");
-    let root = a.root();
-    a.add_folder(root, "M").expect("dossier");
-
-    let mut b = a.clone();
-    let dans_a = a.add_folder(root, "X").expect("dossier dans A");
-    let dans_b = b.add_folder(root, "Y").expect("dossier dans B");
-
-    println!("après clone : A crée {dans_a}, B crée {dans_b}");
-    assert_ne!(
-        dans_a, dans_b,
-        "« compteur monotone, jamais réutilisé sur toute la vie d'un projet, \
-         rechargement compris » : c'est la documentation de `NodeId`, et un \
-         `#[derive(Clone)]` sur `Project` la contredit en trois caractères. Les deux \
-         copies partagent l'arbre (un `Arc`, donc gratuit) mais **dupliquent** \
-         `IdAllocator`, si bien que deux nœuds différents naissent sous le même \
-         identifiant. Aucun appelant du dépôt ne clone un `Project` aujourd'hui — \
-         c'est une porte ouverte, pas une fuite constatée"
-    );
+    // B9 (`guide-de-correction-robustesse.md` §F2) — corrigée en retirant
+    // `#[derive(Clone)]` de `Project` (rien dans le dépôt n'en avait besoin :
+    // seul `Arc<Tree>` doit être clonable, gratuitement). La reproduction
+    // d'origine ne peut plus s'écrire du tout : `Project::clone()` ne
+    // compile plus, ce qui est une preuve plus forte qu'un test qui passe.
+    // Cette fonction garde la place (§1 du guide : on ne supprime jamais une
+    // reproduction, on réécrit son assertion) et vérifie ce que la
+    // duplication de l'allocateur aurait pu casser : des identifiants
+    // strictement croissants, jamais réattribués, sur la vie d'un projet.
+    let mut project = Project::new("D").expect("projet valide");
+    let root = project.root();
+    let mut deja_vus = Vec::new();
+    for nom in ["M", "N", "O", "P"] {
+        let id = project.add_folder(root, nom).expect("dossier");
+        assert!(
+            !deja_vus.contains(&id),
+            "identifiant {id} réattribué parmi {deja_vus:?}"
+        );
+        deja_vus.push(id);
+    }
 }

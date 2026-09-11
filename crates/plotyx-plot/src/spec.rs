@@ -136,15 +136,31 @@ impl PlotSpec {
     }
 
     /// Nombre de lignes de la grille de panneaux.
+    ///
+    /// B2 (`guide-de-correction-robustesse.md` §F3/F4/rendu) —
+    /// `saturating_add(1)` : une position de panneau venue d'un fichier peut
+    /// valoir `usize::MAX` (rien ne la borne à la lecture, voir C5/le
+    /// lecteur), et `+ 1` panique en debug, déborde sur 0 en release.
     pub fn rows(&self) -> usize {
-        self.panels.iter().map(|p| p.row).max().unwrap_or(0) + 1
+        self.panels
+            .iter()
+            .map(|p| p.row)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
     }
 
     /// Nombre de colonnes de la grille de panneaux. À ne pas confondre avec
     /// [`PlotSpec::referenced_columns`] : ici ce sont des colonnes de grille,
-    /// là des colonnes de données.
+    /// là des colonnes de données. Voir [`PlotSpec::rows`] pour le
+    /// `saturating_add`.
     pub fn columns(&self) -> usize {
-        self.panels.iter().map(|p| p.column).max().unwrap_or(0) + 1
+        self.panels
+            .iter()
+            .map(|p| p.column)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
     }
 
     /// Toutes les séries du graphe, avec leur adresse, panneau par panneau.

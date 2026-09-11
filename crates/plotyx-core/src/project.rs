@@ -38,7 +38,14 @@ fn spreadsheet_name(index: usize) -> String {
 
 /// Racine du modèle : l'arbre courant (partagé) et l'allocateur d'identifiants
 /// (jamais remis en arrière).
-#[derive(Debug, Clone)]
+///
+/// N'est **pas** `Clone` (B9, `guide-de-correction-robustesse.md` §F2) : un
+/// `#[derive(Clone)]` dupliquerait `IdAllocator` avec l'arbre, si bien que
+/// deux copies d'un même projet attribueraient ensuite les mêmes
+/// identifiants à des nœuds différents — exactement ce que la documentation
+/// de `NodeId` promet de ne jamais faire. `Arc<Tree>` (via [`Project::tree`])
+/// reste clonable, gratuitement, pour qui a besoin d'un instantané partagé.
+#[derive(Debug)]
 pub struct Project {
     tree: Arc<Tree>,
     ids: IdAllocator,
@@ -48,7 +55,10 @@ impl Project {
     /// Projet neuf : un dossier racine nommé `name` (identifiant 1), rien d'autre.
     pub fn new(name: &str) -> CoreResult<Self> {
         let mut ids = IdAllocator::new();
-        let id = ids.next();
+        // Le tout premier identifiant d'un allocateur neuf (`next == 1`) ne
+        // peut jamais épuiser `u64` ; `?` reste la forme la plus sobre pour
+        // une fonction qui rend déjà `CoreResult`.
+        let id = ids.next()?;
         let root = Node::new(
             id,
             name,
@@ -66,7 +76,12 @@ impl Project {
     /// littéraux du crate (voir `Default`).
     fn with_root_name(name: &str) -> Self {
         let mut ids = IdAllocator::new();
-        let id = ids.next();
+        // `Default` exige une fonction infaillible ; le tout premier
+        // identifiant d'un allocateur neuf (`next == 1`) ne peut jamais
+        // épuiser `u64`, donc cet `expect` ne se déclenche jamais en
+        // pratique — ce que le linter du crate ne peut pas savoir.
+        #[allow(clippy::expect_used)]
+        let id = ids.next().expect("le premier identifiant ne peut pas être épuisé");
         let root = Node::new_unchecked(
             id,
             name,
@@ -305,7 +320,7 @@ impl Project {
         // Validation en lecture seule d'abord : un échec ne doit pas cloner
         // l'arbre ni consommer un identifiant.
         self.tree.validate_insert(parent, index, name, &kind)?;
-        let id = self.ids.next();
+        let id = self.ids.next()?;
         let node = Node::new(id, name, kind)?;
         let tree = Arc::make_mut(&mut self.tree);
         tree.insert(parent, index, node)
