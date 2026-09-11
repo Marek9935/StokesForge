@@ -130,7 +130,13 @@ proptest! {
         let avant = std::sync::Arc::clone(p.tree());
         let mut h = History::new();
         h.execute(&mut p, Command::InsertRows { sheet, at, count }).unwrap();
-        prop_assert!(h.undo(&mut p).unwrap());
+        // B5 (`guide-de-correction-robustesse.md` §F5) — un `InsertRows` qui
+        // ne touche aucune colonne (ou `count == 0`) n'empile plus rien :
+        // `undo` rend alors `Ok(false)` (rien à annuler), ce qui est tout
+        // aussi neutre que défaire un vrai effet. Les deux cas laissent
+        // l'arbre égal à `avant` ; seule cette égalité est la propriété
+        // testée, pas le résultat de `undo`.
+        h.undo(&mut p).unwrap();
         prop_assert!(
             avant.as_ref() == p.tree().as_ref(),
             "InsertRows(at={at}, count={count}) puis annulation n'est pas neutre"

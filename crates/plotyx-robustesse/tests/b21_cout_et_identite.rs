@@ -156,7 +156,6 @@ fn b21_le_cout_dune_ecriture_ne_depend_pas_de_la_longueur_de_la_colonne() {
 // -- reproductions --------------------------------------------------------
 
 #[test]
-#[ignore = "reproduction D3 — chaque commande recalcule les octets retenus : un parcours complet de l'arbre plus l'union des empreintes de tout l'historique"]
 fn b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique() {
     let sans = cout_dune_ecriture(500, 0);
     let avec = cout_dune_ecriture(500, 100);
@@ -183,7 +182,23 @@ fn b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique() {
 }
 
 #[test]
-#[ignore = "reproduction D3 — même avec un historique vide, chaque commande parcourt toutes les colonnes du projet"]
+#[ignore = "reproduction D3 (diagnostic révisé) — le passage en O(entrées) de History::evict \
+            (voir b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique, désormais vert) a \
+            supprimé l'appel à `current_tree_pointers` sur ce chemin, mais le coût par colonne \
+            persiste : `History::execute` clone `project.tree()` dans `before` AVANT d'appliquer \
+            la commande et le garde vivant pendant toute son application (pour le label, et pour \
+            `Entry::Structural`/`just_orphaned_by_write`) ; `Arc::make_mut(&mut self.tree)`, \
+            appelé par toute primitive de mutation (`Project::set_values`, etc.), voit alors un \
+            compte de références de 2 et clone la `Tree` ENTIÈRE — sa HashMap de TOUS les nœuds \
+            — plutôt que de muter en place. Correct pour une commande structurelle (l'Entry en a \
+            réellement besoin), inutile pour une commande de données (SetCells, InsertRows, ...), \
+            qui ne retient jamais l'arbre — seulement son delta. Un correctif ne tenant plus dans \
+            « quelques lignes » : il faut que `History::execute` cesse de cloner `before` pour les \
+            commandes de données (calculer le label par un simple emprunt, capturer le pointeur du \
+            buffer déjà présent pour `just_orphaned_by_write` avant la mutation plutôt qu'après), \
+            sans affaiblir la garantie « aucune mutation partielle sur erreur » que `project.\
+            replace_tree(before)` offre aujourd'hui gratuitement. Non tenté ici : c'est un \
+            changement du chemin d'exécution central de l'annulation, à valider à part"]
 fn b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes() {
     let petit = cout_dune_ecriture(50, 0);
     let grand = cout_dune_ecriture(500, 0);
@@ -192,9 +207,10 @@ fn b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes() {
     assert!(
         grand <= petit * 3,
         "dix fois plus de colonnes, {:.1}× plus cher, pour écrire exactement la même \
-         valeur dans la même colonne : `current_tree_pointers` construit un `HashSet` \
-         de l'adresse de CHAQUE colonne du projet, à chaque commande, même quand \
-         l'historique est vide et qu'aucune éviction n'est possible",
+         valeur dans la même colonne : `History::execute` garde `before` (un clone de \
+         `project.tree()`) vivant pendant toute l'application de la commande, ce qui force \
+         `Arc::make_mut` à cloner la `Tree` entière plutôt que de muter en place — voir le \
+         diagnostic complet sur `#[ignore]` de ce test",
         grand as f64 / petit as f64
     );
 }

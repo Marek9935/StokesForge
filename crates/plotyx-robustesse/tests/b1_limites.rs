@@ -215,18 +215,24 @@ fn b1_delete_rows_count_max_ne_deborde_pas() {
 }
 
 #[test]
-fn b1_insert_rows_at_egal_longueur_est_ignore() {
+fn b1_insert_rows_at_egal_longueur_ajoute_en_fin_de_feuille() {
+    // B5 (`guide-de-correction-robustesse.md` §F5) — `at == len` est
+    // désormais une cible pour `insert_rows` (pas pour `delete_rows`, qui ne
+    // désigne aucune ligne existante à cette position) : c'est la seule
+    // façon d'ajouter une ligne en fin de feuille, la plage que
+    // `Column::insert_rows` accepte déjà par colonne (`at ∈ 0..=len`). Cette
+    // reproduction couvrait auparavant le bug inverse (« ignoré ») ; elle
+    // couvre maintenant la garantie qui le remplace.
     let mut project = Project::new("T").unwrap();
     let root = project.root();
     project.add_workbook(root, Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
-    project
+    let a = project
         .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0]))
         .unwrap();
-    // `at == len` : aucune colonne n'a de ligne `at`, rien ne bouge.
     let touched = project.insert_rows(sheet, 2, 3).unwrap();
-    assert!(touched.is_empty());
-    assert_eq!(project.tree().row_count(sheet).unwrap(), 2);
+    assert_eq!(touched, vec![a]);
+    assert_eq!(project.tree().row_count(sheet).unwrap(), 5);
 }
 
 #[test]

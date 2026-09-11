@@ -488,6 +488,34 @@ fn rename_round_trip() {
 }
 
 #[test]
+fn renaming_to_the_current_name_is_not_an_entry() {
+    // B5, le cas « Rename » (`guide-de-correction-robustesse.md` §F5, §7.3 —
+    // consigné sans identifiant ni reproduction jusqu'ici). `Renommer M en
+    // M` réussissait déjà et n'écrivait déjà rien dans l'arbre, mais
+    // empilait quand même une entrée « Renommer M en M » : un cran
+    // d'annulation qui ne défait rien. `entry_has_no_effect` compare
+    // l'arbre d'avant à celui d'après pour toute entrée structurelle, donc
+    // n'a pas besoin de connaître `Rename` par son nom.
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::Rename {
+                id: f.a,
+                name: "A".to_string(),
+            },
+        )
+        .expect("renommage vers le nom courant");
+    assert!(history.is_empty());
+    assert_eq!(history.undo_label(), None);
+    assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T"]);
+    assert_eq!(**f.project.tree(), *before);
+}
+
+#[test]
 fn renaming_the_root_is_accepted() {
     let mut f = fixture();
     let mut history = History::new();
@@ -663,8 +691,11 @@ fn insert_rows_touches_only_the_columns_that_have_that_row() {
     let after = snapshot(&f.project);
     assert_eq!(history.undo_label(), Some("Insérer 2 lignes"));
     assert_eq!(column_len(&f.project, f.a), 5);
-    // B fait 2 lignes : `2 < 2` est faux, elle n'a pas de ligne 2 à décaler.
-    assert_eq!(column_len(&f.project, f.b), 2);
+    // B5 (`guide-de-correction-robustesse.md` §F5) — B fait 2 lignes :
+    // `at == len` (2 == 2) est désormais une cible, pas seulement `at <
+    // len` : c'est la seule façon d'ajouter une ligne en fin de colonne, la
+    // plage que `Column::insert_rows` accepte déjà (`at ∈ 0..=len`).
+    assert_eq!(column_len(&f.project, f.b), 4);
     assert_eq!(column_len(&f.project, f.t), 5);
     let values = floats(&f.project, f.a);
     assert!(values[2].is_nan() && values[3].is_nan());
@@ -677,15 +708,20 @@ fn insert_rows_touches_only_the_columns_that_have_that_row() {
 }
 
 #[test]
-fn an_insert_that_changes_nothing_is_still_an_entry() {
+fn an_insert_that_changes_nothing_is_not_an_entry() {
+    // B5 (`guide-de-correction-robustesse.md` §F5) — une commande acceptée
+    // qui ne change rien n'occupe pas de cran d'annulation : l'ancienne
+    // version de ce test l'affirmait pour la raison inverse (« la position
+    // du curseur d'historique dépendrait de l'état des données »), mais
+    // c'est précisément ce qui trompait l'utilisateur — un succès sans
+    // effet, et un « Annuler » qui ne défait rien. `History::execute`
+    // reconnaît maintenant ce cas (`entry_has_no_effect`) et ne pousse rien.
     let mut f = fixture();
     let mut history = History::new();
     let before = snapshot(&f.project);
 
     // Aucune colonne n'a de ligne 10 : la commande est valide et ne change
-    // rien. Elle reste empilée — une commande acceptée est toujours
-    // annulable, sans quoi la position du curseur d'historique dépendrait de
-    // l'état des données, ce qui est intenable à expliquer à l'utilisateur.
+    // rien.
     history
         .execute(
             &mut f.project,
@@ -696,11 +732,12 @@ fn an_insert_that_changes_nothing_is_still_an_entry() {
             },
         )
         .expect("insertion sans effet");
-    assert_eq!(history.len(), 1);
-    assert_eq!(history.undo_label(), Some("Insérer 1 ligne"));
+    assert!(history.is_empty());
+    assert_eq!(history.undo_label(), None);
     assert_eq!(**f.project.tree(), *before);
 
-    assert_eq!(history.undo(&mut f.project), Ok(true));
+    // Rien à annuler : `undo` rend `Ok(false)`, pas une régression.
+    assert_eq!(history.undo(&mut f.project), Ok(false));
     assert_eq!(**f.project.tree(), *before);
 }
 

@@ -11,7 +11,7 @@
 //! Aucune des deux n'est un plantage ; les deux mentent à l'utilisateur.
 
 use plotyx_commands::{Command, History};
-use plotyx_core::{Column, ColumnType, NodeId, Project, ValueBlock};
+use plotyx_core::{Column, NodeId, Project, ValueBlock};
 
 /// `[Book1]Sheet1` vide, prête à recevoir des colonnes.
 fn feuille() -> (Project, NodeId) {
@@ -130,15 +130,18 @@ fn b12_setcells_ecrit_bien_au_dela_de_la_fin() {
 // -- reproductions --------------------------------------------------------
 
 #[test]
-#[ignore = "reproduction B5 — une commande de lignes qui ne touche aucune colonne réussit et occupe pourtant un cran d'annulation"]
 fn b12_une_commande_sans_effet_noccupe_pas_un_cran_dannulation() {
+    // B5 (`guide-de-correction-robustesse.md` §F5) a deux moitiés. Celle-ci
+    // couvre la cible vide : une feuille sans colonne, où `InsertRows` ne
+    // peut par construction toucher personne. L'ancien scénario ici — une
+    // feuille avec une seule colonne neuve, donc vide, à `at: 0` — testait
+    // en réalité l'AUTRE moitié de B5 (`row_targets` refusait `at == len`) :
+    // avec cette moitié-là corrigée (voir `Project::insert_rows`) et
+    // `plotyx-app/src/app.rs` qui ne code plus `at: 0` en dur, cette
+    // commande a désormais un effet réel — une ligne est ajoutée — et
+    // MÉRITE son entrée d'historique ; ce n'est donc plus le bon scénario
+    // pour ce test.
     let (mut project, sheet) = feuille();
-    // Le cas de tous les jours : une feuille neuve, une colonne neuve — donc
-    // vide. C'est exactement l'état dans lequel le bouton « Insérer 1 ligne »
-    // du banc (`plotyx-app/src/app.rs:248`, `at: 0` en dur) trouve l'utilisateur.
-    let a = project
-        .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
-        .expect("colonne");
     let mut history = History::with_limit(0);
 
     let resultat = history.execute(
@@ -149,25 +152,23 @@ fn b12_une_commande_sans_effet_noccupe_pas_un_cran_dannulation() {
             count: 1,
         },
     );
-    println!("InsertRows(at=0, count=1) sur une feuille vide → {resultat:?}");
+    println!("InsertRows(at=0, count=1) sur une feuille sans colonne → {resultat:?}");
     println!(
-        "longueur de la colonne = {}, lignes de la feuille = {}, entrées d'historique = {} ({:?})",
-        longueur(&project, a),
+        "lignes de la feuille = {}, entrées d'historique = {} ({:?})",
         project.tree().row_count(sheet).unwrap_or(0),
         history.len(),
         history.undo_label()
     );
     assert!(
         resultat.is_err() || history.is_empty(),
-        "la commande a réussi, n'a rien changé, et a pourtant empilé « {:?} » : \
-         l'utilisateur lit un succès, le menu Annuler propose une action qui ne défera \
-         rien, et un historique de 100 crans en perd un vrai",
+        "la commande a réussi, n'a rien changé (aucune colonne à toucher), et a pourtant \
+         empilé « {:?} » : l'utilisateur lit un succès, le menu Annuler propose une \
+         action qui ne défera rien, et un historique de 100 crans en perd un vrai",
         history.undo_label()
     );
 }
 
 #[test]
-#[ignore = "reproduction B5 — aucune commande du socle n'ajoute une ligne à la fin d'une feuille : `row_targets` exige `at < len`"]
 fn b12_une_ligne_peut_etre_ajoutee_a_la_fin_dune_feuille() {
     let (mut project, sheet) = feuille();
     let a = project

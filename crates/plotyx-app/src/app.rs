@@ -245,7 +245,17 @@ impl PlotyxApp {
                         actions.push(Action::AddColumn);
                     }
                     if ui.button("Insérer 1 ligne").clicked() {
-                        actions.push(Action::InsertRows { at: 0, count: 1 });
+                        // B5 (`guide-de-correction-robustesse.md` §F5) —
+                        // `at: 0` en dur n'insérait jamais rien sur une
+                        // feuille neuve : `row_targets` exige `at < len`, et
+                        // une colonne fraîchement créée a `len == 0`. Ajouter
+                        // une ligne en fin de feuille (`at == row_count`) est
+                        // le geste que le bouton promet, et c'est la plage
+                        // que `Project::insert_rows` accepte désormais.
+                        actions.push(Action::InsertRows {
+                            at: self.state.row_count(),
+                            count: 1,
+                        });
                     }
                     if ui.button("Supprimer 1 ligne").clicked() {
                         actions.push(Action::DeleteRows { at: 0, count: 1 });

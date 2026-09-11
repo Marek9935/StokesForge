@@ -429,18 +429,23 @@ impl Project {
     }
 
     /// Insère `count` lignes à `at` dans **chaque colonne de la feuille telle
-    /// que `at < len(colonne)`**. Une colonne trop courte pour avoir une ligne
-    /// `at` est ignorée : les longueurs sont libres entre colonnes d'une même
-    /// feuille, et allonger une colonne courte inventerait des données. Rend,
-    /// dans l'ordre de la feuille, les identifiants des colonnes effectivement
-    /// allongées (vide si aucune).
+    /// que `at <= len(colonne)`**. Une colonne trop courte pour avoir une
+    /// ligne `at` (`at > len`) est ignorée : les longueurs sont libres entre
+    /// colonnes d'une même feuille, et allonger une colonne courte
+    /// inventerait des données. `at == len` — la fin de la colonne — **est**
+    /// une cible : c'est la seule façon d'ajouter une ligne en fin de
+    /// feuille (B5, `guide-de-correction-robustesse.md` §F5), et c'est
+    /// exactement la plage que `Column::insert_rows` accepte déjà par
+    /// colonne (`at ∈ 0..=len`). Rend, dans l'ordre de la feuille, les
+    /// identifiants des colonnes effectivement allongées (vide si aucune) ;
+    /// `History::execute` n'empile alors rien pour ce cas-là (F5).
     pub fn insert_rows(
         &mut self,
         sheet: NodeId,
         at: usize,
         count: usize,
     ) -> CoreResult<Vec<NodeId>> {
-        let targets = self.row_targets(sheet, at)?;
+        let targets = self.row_targets(sheet, at, true)?;
         if targets.is_empty() || count == 0 {
             return Ok(Vec::new());
         }
@@ -452,15 +457,16 @@ impl Project {
     }
 
     /// Supprime `count` lignes à `at` dans **le même ensemble** de colonnes
-    /// (`at < len`). Rend, par colonne touchée et dans l'ordre de la feuille,
-    /// `(NodeId, valeurs retirées)`.
+    /// (`at < len` — contrairement à `insert_rows`, `at == len` ne désigne
+    /// aucune ligne existante et ne doit rien cibler). Rend, par colonne
+    /// touchée et dans l'ordre de la feuille, `(NodeId, valeurs retirées)`.
     pub fn delete_rows(
         &mut self,
         sheet: NodeId,
         at: usize,
         count: usize,
     ) -> CoreResult<Vec<(NodeId, ValueBlock)>> {
-        let targets = self.row_targets(sheet, at)?;
+        let targets = self.row_targets(sheet, at, false)?;
         if targets.is_empty() || count == 0 {
             return Ok(Vec::new());
         }
@@ -673,7 +679,11 @@ impl Project {
     }
 
     /// Colonnes de `sheet`, dans l'ordre, qui possèdent une ligne `at`.
-    fn row_targets(&self, sheet: NodeId, at: usize) -> CoreResult<Vec<NodeId>> {
+    /// Colonnes de `sheet` dont la ligne `at` existe (`insert_rows` :
+    /// `allow_append` inclut aussi `at == len`, la fin de la colonne ;
+    /// `delete_rows` ne le veut pas — voir B5, `guide-de-correction-
+    /// robustesse.md` §F5).
+    fn row_targets(&self, sheet: NodeId, at: usize, allow_append: bool) -> CoreResult<Vec<NodeId>> {
         let sheet_node = self.tree.get(sheet)?;
         if !sheet_node.kind().is_worksheet() {
             return Err(CoreError::Structure(format!(
@@ -686,10 +696,13 @@ impl Project {
             .iter()
             .copied()
             .filter(|id| {
-                self.tree
-                    .node(*id)
-                    .and_then(Node::as_column)
-                    .is_some_and(|column| at < column.len())
+                self.tree.node(*id).and_then(Node::as_column).is_some_and(|column| {
+                    if allow_append {
+                        at <= column.len()
+                    } else {
+                        at < column.len()
+                    }
+                })
             })
             .collect())
     }

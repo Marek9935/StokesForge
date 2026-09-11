@@ -168,6 +168,31 @@ struct Pinned {
     footprint: Footprint,
 }
 
+/// Ce qu'on sait, en permanence, d'un buffer que **au moins une** entrée de
+/// `undo` (l'invariant « `redo` est toujours vide entre deux commandes » —
+/// voir la doc de [`History::push`] — vaut ici aussi, donc `redo` n'a jamais
+/// besoin d'être suivi séparément) retient dans son empreinte : combien
+/// d'entrées le retiennent, et s'il a déjà quitté l'arbre courant.
+///
+/// C'est la contrepartie *vivante*, tenue à jour buffer par buffer, de ce
+/// que [`History::recompute_retained_bytes`] recalculait auparavant depuis
+/// zéro à chaque commande — voir [`History::pin_footprint`] et
+/// [`History::unpin_footprint`] pour comment elle est maintenue, et la
+/// section « Le suivi incrémental (anomalie D3) » sur [`History::evict`]
+/// pour pourquoi.
+#[derive(Debug, Clone, Copy)]
+struct PinnedBuffer {
+    /// Octets du buffer — copiés depuis la `Footprint` de l'entrée qui l'a
+    /// introduit, jamais recalculés.
+    bytes: usize,
+    /// Nombre d'entrées de `undo` qui le retiennent dans leur empreinte.
+    refcount: usize,
+    /// Vrai s'il a déjà quitté l'arbre courant (compté dans
+    /// `retained_bytes`) ; faux s'il lui est encore commun (gratuit — pas un
+    /// coût de l'historique).
+    orphaned: bool,
+}
+
 /// Limite d'historique par défaut, en nombre d'entrées : la profondeur
 /// d'annulation attendue, l'ordre de grandeur d'un tableur. Éviction
 /// silencieuse de la plus ancienne (`questions-ouvertes.md`, question 7 —
@@ -195,9 +220,14 @@ pub struct History {
     limit: usize,
     /// Octets maximaux de charge utile retenue ; `0` = illimité.
     byte_limit: usize,
-    /// Octets de charge utile retenus, tels que la dernière évaluation (le
-    /// dernier empilement) les a établis — voir [`History::retained_bytes`].
+    /// Octets de charge utile retenus — exact, maintenu à jour en continu
+    /// (voir [`History::retained_bytes`], et le suivi incrémental documenté
+    /// sur [`History::evict`]).
     retained_bytes: usize,
+    /// Comptabilité vivante, buffer par buffer, de ce que retient `undo` —
+    /// voir [`PinnedBuffer`]. `retained_bytes` est, en permanence, la somme
+    /// des `bytes` de ses entrées `orphaned`.
+    pinned: HashMap<usize, PinnedBuffer>,
     /// Macros ouvertes, de la plus externe à la plus interne : libellé et
     /// entrées déjà empreintées, accumulées avant de devenir une seule
     /// entrée `Macro` à la fermeture.
@@ -234,6 +264,7 @@ impl History {
             limit,
             byte_limit,
             retained_bytes: 0,
+            pinned: HashMap::new(),
             macros: Vec::new(),
             saved_redo: None,
         }
@@ -249,17 +280,13 @@ impl History {
         self.byte_limit
     }
 
-    /// Octets de charge utile que l'historique est seul à maintenir vivants,
-    /// tels que la dernière évaluation les a établis.
-    ///
-    /// L'évaluation a lieu à chaque empilement (voir [`History::evict`]) :
-    /// `undo`/`redo`/`begin_macro`/`abort_macro` seuls ne la redéclenchent
-    /// pas (aucun d'eux n'ajoute ni ne retire d'entrée du total retenu — ils
-    /// ne font que déplacer des entrées déjà comptées entre les deux piles,
-    /// ou les rejouer dans le projet). Une conséquence : juste après une
-    /// série d'annulations, la valeur rendue peut être **légèrement en
-    /// retard** sur la réalité (l'arbre courant a changé, donc ce qu'il
-    /// « couvre » gratuitement aussi) jusqu'à la commande suivante.
+    /// Octets de charge utile que l'historique est seul à maintenir
+    /// vivants — **exact**, en permanence (voir le suivi incrémental
+    /// documenté sur [`History::evict`] : `undo`/`redo`/`begin_macro`/
+    /// `abort_macro` n'ont pas besoin de le redéclencher, puisqu'aucun
+    /// d'eux n'ajoute, ne retire, ni ne change le statut « épinglé/orphelin »
+    /// d'aucun buffer — ils ne font que déplacer des entrées déjà comptées
+    /// entre les deux piles, ou les rejouer dans le projet).
     pub fn retained_bytes(&self) -> usize {
         self.retained_bytes
     }
@@ -307,7 +334,21 @@ impl History {
         let label = command.label(&before);
         match Self::apply(project, command, &before, label) {
             Ok(entry) => {
-                self.push(entry, project);
+                // B5 + le cas Rename (`guide-de-correction-robustesse.md`
+                // §F5) — une commande acceptée qui n'a RIEN changé n'occupe
+                // pas de cran d'annulation : ni `InsertRows`/`DeleteRows`
+                // sans colonne cible (voir `Project::row_targets`), ni
+                // `Rename` vers le nom déjà porté (« Renommer M en M »,
+                // consigné sans identifiant ni reproduction en §7.3 du
+                // guide — une entrée structurelle dont `before == after`
+                // couvre ce cas et tout autre qui lui ressemble, sans le
+                // nommer un par un). Le modèle a déjà été mis à jour par
+                // `apply` le cas échéant (aucun ici ne l'est), donc rien à
+                // défaire : on rend simplement `Ok` sans empiler.
+                if entry_has_no_effect(&entry) {
+                    return Ok(());
+                }
+                self.push(entry, &before, project);
                 Ok(())
             }
             Err(err) => {
@@ -336,6 +377,10 @@ impl History {
         };
         Self::revert(project, &pinned.entry)?;
         if let Some(pinned) = self.undo.pop() {
+            // `pinned`/`retained_bytes` comptent l'union de `undo` et
+            // `redo` (voir leur doc) : déplacer une entrée de l'une à
+            // l'autre ne change ni ce qu'elle retient, ni son statut
+            // épinglé/orphelin — rien à mettre à jour ici.
             self.redo.push(pinned);
         }
         Ok(true)
@@ -431,14 +476,28 @@ impl History {
             return Ok(());
         }
         if is_outermost {
-            self.saved_redo = None;
+            // Le redo sauvegardé à l'ouverture est bel et bien perdu : ses
+            // buffers doivent quitter la comptabilité (`self.pinned`)
+            // exactement comme s'il avait été vidé par un `push` ordinaire
+            // (voir [`History::push`]) — sans ça, `retained_bytes`
+            // continuerait de compter des buffers qu'aucune entrée vivante
+            // ne retient plus.
+            if let Some(discarded) = self.saved_redo.take() {
+                for pinned in discarded {
+                    self.unpin_footprint(&pinned.footprint);
+                }
+            }
         }
         let footprint = union_footprint(entries.iter().map(|pinned| &pinned.footprint));
         let entry = Entry::Macro {
             entries: entries.into_iter().map(|pinned| pinned.entry).collect(),
             label,
         };
-        self.push_pinned(Pinned { entry, footprint }, project);
+        // `before` n'est lu que sur les branches `Data`/`Structural` de
+        // `push_pinned` ; une entrée `Macro` retombe sur `resync_pinned`, qui
+        // ne le regarde pas. L'arbre courant convient donc ici, même s'il
+        // n'a plus de rapport avec « avant cette macro ».
+        self.push_pinned(Pinned { entry, footprint }, project.tree(), project);
         Ok(())
     }
 
@@ -490,6 +549,7 @@ impl History {
         // Exact, pas une simple économie de recalcul : l'union de deux piles
         // vides est vide.
         self.retained_bytes = 0;
+        self.pinned.clear();
         Ok(())
     }
 
@@ -509,31 +569,181 @@ impl History {
     /// rétablissement est vidée, l'empreinte de l'entrée est calculée une
     /// fois pour toutes, puis l'entrée rejoint la macro ouverte ou la pile
     /// principale.
-    fn push(&mut self, entry: Entry, project: &Project) {
-        self.redo.clear();
+    ///
+    /// `before` est l'arbre **juste avant** cette commande (celui que
+    /// [`History::execute`] avait cloné avant d'appliquer la commande) : une
+    /// entrée `Data` n'en garde pas trace elle-même (elle ne retient que son
+    /// delta), mais [`History::push_pinned`] en a besoin pour savoir si
+    /// l'écriture vient d'orpheliner l'ancien buffer d'une colonne qu'une
+    /// entrée *antérieure* retenait déjà (voir sa doc).
+    fn push(&mut self, entry: Entry, before: &Tree, project: &Project) {
+        // Le redo est perdu : ses buffers doivent quitter la comptabilité
+        // exactement comme ceux d'une macro abandonnée avec succès (voir
+        // `History::end_macro`) — sans ça, `retained_bytes` continuerait de
+        // compter des buffers qu'aucune entrée vivante ne retient plus.
+        let discarded = std::mem::take(&mut self.redo);
+        for pinned in discarded {
+            self.unpin_footprint(&pinned.footprint);
+        }
         let footprint = footprint_of(&entry);
-        self.push_pinned(Pinned { entry, footprint }, project);
+        self.push_pinned(Pinned { entry, footprint }, before, project);
     }
 
     /// Range une entrée déjà empreintée dans la macro ouverte, ou au sommet
-    /// de la pile principale (avec éviction). **Rien ne change au milieu
-    /// d'une macro ouverte** : ni éviction, ni recalcul des octets retenus —
-    /// seule la fermeture de la macro la plus externe qui aboutit avec au
-    /// moins une entrée (voir [`History::end_macro`]) rejoint la pile
-    /// principale et déclenche [`History::evict`].
-    fn push_pinned(&mut self, pinned: Pinned, project: &Project) {
+    /// de la pile principale (avec mise à jour de la comptabilité puis
+    /// éviction). **Rien ne change au milieu d'une macro ouverte** : ni
+    /// éviction, ni comptabilité des octets retenus — seule la fermeture de
+    /// la macro la plus externe qui aboutit avec au moins une entrée (voir
+    /// [`History::end_macro`]) rejoint la pile principale.
+    ///
+    /// # Le suivi incrémental (anomalie D3)
+    ///
+    /// Avant ce correctif, atterrir ici déclenchait, à **chaque** commande —
+    /// y compris une simple écriture de cellule — un recalcul complet de
+    /// `retained_bytes` : parcourir l'arbre courant en entier (toutes les
+    /// colonnes du projet) puis refaire l'union des empreintes de toutes les
+    /// entrées des deux piles. Le coût d'une frappe suivait donc la taille
+    /// du projet *et* la profondeur de l'historique, même quand aucune
+    /// éviction n'avait lieu (voir
+    /// `plotyx-robustesse/tests/b21_cout_et_identite.rs`, reproductions
+    /// `b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique` et
+    /// `..._du_nombre_de_colonnes`).
+    ///
+    /// La correction ne relâche **jamais** l'exactitude de `retained_bytes`
+    /// (voir `tests/memory_pinning.rs`) : au lieu de la recalculer depuis
+    /// zéro, elle la maintient **à jour buffer par buffer**, dans
+    /// [`History::pinned`], à chaque empilement — sans jamais parcourir
+    /// l'arbre entier ni relire l'historique complet :
+    ///
+    /// - une entrée `Structural` capture déjà `before` et `after` dans ses
+    ///   deux champs : un buffer de sa propre empreinte est orphelin s'il
+    ///   n'est pas dans `after` (donc plus dans l'arbre courant), vivant
+    ///   sinon. Un seul parcours de `after` (inévitable : c'est déjà le
+    ///   travail que fait [`footprint_of`] pour construire l'empreinte de
+    ///   *cette* entrée, pas un nouveau parcours ajouté par ce correctif) ;
+    /// - une entrée `Data` ne partage jamais son propre delta avec l'arbre
+    ///   (voir [`footprint_of`]) : toute son empreinte est orpheline dès
+    ///   l'empilement. Ce qui *peut* changer ailleurs, c'est qu'elle vient
+    ///   de remplacer, par copie-à-l'écriture, le buffer que sa colonne
+    ///   avait *avant* elle — si ce buffer était déjà épinglé par une entrée
+    ///   plus ancienne (une recherche par identifiant dans `before`, O(1),
+    ///   jamais un parcours), il vient de quitter l'arbre : voir
+    ///   [`just_orphaned_by_write`] ;
+    /// - évincer une entrée (ci-dessous) retire simplement sa part du
+    ///   compte, buffer par buffer (voir [`History::unpin_footprint`]).
+    ///
+    /// Le seul cas non modélisé ici est la fermeture d'une macro
+    /// (`Entry::Macro`) : elle agrège des sous-commandes déjà appliquées à
+    /// des instants différents, et retrouver *quand* chacune a orpheliné
+    /// quoi demanderait de rejouer leur avant/après un par un. Comme les
+    /// macros ne sont pas déclenchées par frappe — l'anomalie mesurée —
+    /// cette entrée retombe sur l'ancien calcul exhaustif
+    /// ([`History::resync_pinned`]), qui reconstruit `self.pinned` en même
+    /// temps qu'il recalcule `retained_bytes`, pour que le suivi incrémental
+    /// reste juste ensuite.
+    fn push_pinned(&mut self, pinned: Pinned, before: &Tree, project: &Project) {
         if let Some((_, entries)) = self.macros.last_mut() {
             entries.push(pinned);
-        } else {
-            self.undo.push(pinned);
-            self.evict(project);
+            return;
+        }
+        match &pinned.entry {
+            Entry::Macro { .. } => {
+                self.undo.push(pinned);
+                self.resync_pinned(project);
+            }
+            Entry::Data { delta, .. } => {
+                let just_orphaned = just_orphaned_by_write(before, delta);
+                self.mark_orphaned(&just_orphaned);
+                // Une entrée `Data` ne partage jamais son delta avec
+                // l'arbre : chacun de ses buffers propres est orphelin dès
+                // son introduction (voir la doc ci-dessus).
+                self.pin_footprint(&pinned.footprint, |_ptr| true);
+                self.undo.push(pinned);
+            }
+            Entry::Structural { .. } => {
+                // `after` (le champ de l'entrée) et `project.tree()` sont le
+                // même arbre à cet instant : rien n'a pu s'exécuter entre la
+                // fin de `apply` et cet appel.
+                let current = current_tree_pointers(project.tree());
+                self.pin_footprint(&pinned.footprint, |ptr| !current.contains(&ptr));
+                self.undo.push(pinned);
+            }
+        }
+        self.evict();
+    }
+
+    /// Pour chaque buffer de `footprint` : incrémente son compteur de
+    /// référence s'il est déjà connu de [`History::pinned`] (son statut
+    /// épinglé/orphelin, décidé à sa toute première entrée, ne change pas ici
+    /// — voir [`History::mark_orphaned`] pour la seule façon dont un buffer
+    /// déjà vivant peut ensuite devenir orphelin) ; sinon l'y introduit,
+    /// orphelin si `is_orphan` le dit vrai pour ce pointeur (et alors compté
+    /// tout de suite dans `retained_bytes`), vivant sinon.
+    fn pin_footprint(&mut self, footprint: &Footprint, is_orphan: impl Fn(usize) -> bool) {
+        for (&ptr, &bytes) in footprint {
+            match self.pinned.entry(ptr) {
+                std::collections::hash_map::Entry::Occupied(mut occupied) => {
+                    occupied.get_mut().refcount += 1;
+                }
+                std::collections::hash_map::Entry::Vacant(vacant) => {
+                    let orphaned = is_orphan(ptr);
+                    if orphaned {
+                        self.retained_bytes += bytes;
+                    }
+                    vacant.insert(PinnedBuffer {
+                        bytes,
+                        refcount: 1,
+                        orphaned,
+                    });
+                }
+            }
+        }
+    }
+
+    /// Pour chaque buffer de `just_left`, s'il est déjà épinglé (par une
+    /// entrée plus ancienne) et encore marqué vivant, le fait basculer
+    /// orphelin et ajoute ses octets à `retained_bytes`. Un buffer absent de
+    /// `self.pinned` n'est pas un coût de l'historique — il n'a jamais été
+    /// épinglé — et ne fait rien ici.
+    fn mark_orphaned(&mut self, just_left: &Footprint) {
+        for &ptr in just_left.keys() {
+            if let Some(buffer) = self.pinned.get_mut(&ptr) {
+                if !buffer.orphaned {
+                    buffer.orphaned = true;
+                    self.retained_bytes += buffer.bytes;
+                }
+            }
+        }
+    }
+
+    /// Retire la part d'une entrée évincée (ou d'une pile jetée) dans
+    /// [`History::pinned`] : décrémente le compteur de référence de chacun
+    /// de ses buffers, et quand il tombe à zéro (plus aucune entrée ne le
+    /// retient), l'ôte de la comptabilité — en retranchant ses octets de
+    /// `retained_bytes` s'il y était compté (orphelin).
+    fn unpin_footprint(&mut self, footprint: &Footprint) {
+        for &ptr in footprint.keys() {
+            if let std::collections::hash_map::Entry::Occupied(mut occupied) =
+                self.pinned.entry(ptr)
+            {
+                let buffer = occupied.get_mut();
+                buffer.refcount -= 1;
+                if buffer.refcount == 0 {
+                    if buffer.orphaned {
+                        self.retained_bytes -= buffer.bytes;
+                    }
+                    occupied.remove();
+                }
+            }
         }
     }
 
     /// Retire silencieusement les entrées les plus anciennes de `undo` tant
     /// que l'une des deux limites (nombre d'entrées, octets retenus) est
-    /// dépassée, et recalcule [`History::retained_bytes`] à chaque retrait
-    /// (voir [`History::recompute_retained_bytes`]).
+    /// dépassée. `retained_bytes` est déjà exact en entrée (voir
+    /// [`History::push_pinned`]) : évincer une entrée n'a plus qu'à
+    /// retrancher sa part (voir [`History::unpin_footprint`]), jamais à
+    /// reparcourir quoi que ce soit.
     ///
     /// **La dernière entrée restante n'est jamais évincée**, même si elle
     /// dépasse à elle seule la limite en octets : une opération lourde doit
@@ -544,16 +754,13 @@ impl History {
     /// en octets si cette entrée seule le dépasse déjà.
     ///
     /// L'éviction ne touche **jamais** la pile de rétablissement (`redo`) :
-    /// elle est vidée par le prochain empilement (voir [`History::push`]),
-    /// comme aujourd'hui pour la limite en nombre d'entrées. Le total retenu
-    /// est l'union des deux piles (voir
-    /// [`History::recompute_retained_bytes`]), donc **une longue branche de
-    /// rétablissement peut maintenir le total au-dessus du plafond en
+    /// elle est vidée par le prochain empilement (voir [`History::push`]).
+    /// Le total retenu est l'union des deux piles, donc **une longue branche
+    /// de rétablissement peut maintenir le total au-dessus du plafond en
     /// octets jusqu'à la commande suivante** — ce n'est pas un oubli : c'est
     /// le prix de ne jamais faire disparaître une branche de rétablissement
     /// autrement qu'à la prochaine mutation.
-    fn evict(&mut self, project: &Project) {
-        self.recompute_retained_bytes(project);
+    fn evict(&mut self) {
         while self.undo.len() > 1 {
             let over_count = self.limit != 0 && self.undo.len() > self.limit;
             let over_bytes = self.byte_limit != 0 && self.retained_bytes > self.byte_limit;
@@ -563,34 +770,40 @@ impl History {
             // La pile reste courte (une centaine d'entrées par défaut) : le
             // décalage d'un `Vec` est sans conséquence face au coût d'un
             // `VecDeque` partout ailleurs.
-            self.undo.remove(0);
-            self.recompute_retained_bytes(project);
+            let evicted = self.undo.remove(0);
+            self.unpin_footprint(&evicted.footprint);
         }
     }
 
-    /// Recalcule [`History::retained_bytes`] : l'union des empreintes déjà
-    /// mémorisées par chaque entrée des deux piles (`undo` et `redo` — une
-    /// entrée de rétablissement maintient ses buffers vivants tout autant
-    /// qu'une entrée annulable), moins les buffers présents dans l'arbre
-    /// **courant** (un buffer que l'arbre courant utilise encore serait là
-    /// de toute façon : ce n'est pas un coût de l'historique).
-    ///
-    /// Coûte un parcours de l'arbre courant — un seul, pour connaître ses
-    /// buffers, jamais ceux des entrées historiques — plus une fusion de
-    /// tables de hachage à l'échelle du nombre total d'entrées × colonnes
-    /// par entrée : quelques milliers d'éléments au pire, pas un nouveau
-    /// parcours des arbres retenus par les entrées, déjà mémorisés une fois
-    /// pour toutes à leur empilement (voir [`footprint_of`]).
-    fn recompute_retained_bytes(&mut self, project: &Project) {
-        let mut union = Footprint::new();
-        for pinned in self.undo.iter().chain(self.redo.iter()) {
-            union.extend(pinned.footprint.iter().map(|(&ptr, &bytes)| (ptr, bytes)));
-        }
+    /// Filet de sécurité : recalcule [`History::retained_bytes`] **et**
+    /// reconstruit [`History::pinned`] entièrement depuis zéro — l'ancien
+    /// calcul exhaustif (parcours complet de l'arbre courant, union de
+    /// toutes les empreintes de `undo` et `redo`), plus la reconstruction du
+    /// suivi incrémental sur lequel [`History::push_pinned`] s'appuie
+    /// ensuite. Réservé au seul cas que ce suivi ne modélise pas
+    /// (l'agrégation d'une macro à sa fermeture, voir
+    /// [`History::push_pinned`]) : jamais appelé sur le chemin d'une
+    /// commande simple, jamais le coût d'une frappe ordinaire.
+    fn resync_pinned(&mut self, project: &Project) {
+        self.pinned.clear();
         let current = current_tree_pointers(project.tree());
-        self.retained_bytes = union
-            .into_iter()
-            .filter(|(ptr, _)| !current.contains(ptr))
-            .map(|(_, bytes)| bytes)
+        for pinned in self.undo.iter().chain(self.redo.iter()) {
+            for (&ptr, &bytes) in &pinned.footprint {
+                self.pinned
+                    .entry(ptr)
+                    .and_modify(|buffer| buffer.refcount += 1)
+                    .or_insert(PinnedBuffer {
+                        bytes,
+                        refcount: 1,
+                        orphaned: !current.contains(&ptr),
+                    });
+            }
+        }
+        self.retained_bytes = self
+            .pinned
+            .values()
+            .filter(|buffer| buffer.orphaned)
+            .map(|buffer| buffer.bytes)
             .sum();
     }
 
@@ -828,6 +1041,35 @@ fn structural(before: &Arc<Tree>, project: &Project, label: String) -> Entry {
     }
 }
 
+/// Vrai si `entry`, quoique produite par une commande acceptée, n'a
+/// concrètement rien changé (F5, `guide-de-correction-robustesse.md`) : une
+/// entrée pareille ne doit pas occuper de cran d'annulation.
+///
+/// - `Structural` : `before == after` couvre tout command structurelle
+///   qui laisse l'arbre identique — `Rename` vers le nom déjà porté
+///   (« Renommer M en M », §7.3 du guide) en est un cas, `Move` vers sa
+///   position courante en serait un autre, sans qu'aucun des deux ait
+///   besoin d'être reconnu par son nom : la comparaison structurelle des
+///   deux arbres (`Tree` dérive `PartialEq`) les attrape tous les deux de
+///   la même façon.
+/// - `Data` : seuls `InsertRows`/`DeleteRows` peuvent cibler zéro colonne
+///   (voir `Project::row_targets`) — `Cells` et `ColumnType` écrivent
+///   toujours quelque chose dès qu'`apply` les a acceptés.
+/// - `Macro` : une macro refermée avec au moins une entrée a, par
+///   construction, appliqué au moins un delta réel (`end_macro` filtre déjà
+///   les macros vides) — jamais un no-op à ce niveau.
+fn entry_has_no_effect(entry: &Entry) -> bool {
+    match entry {
+        Entry::Structural { before, after, .. } => before == after,
+        Entry::Data { delta, .. } => match delta {
+            DataDelta::InsertRows { columns, .. } => columns.is_empty(),
+            DataDelta::DeleteRows { removed, .. } => removed.is_empty(),
+            DataDelta::Cells { .. } | DataDelta::ColumnType { .. } => false,
+        },
+        Entry::Macro { .. } => false,
+    }
+}
+
 /// Type et valeurs actuels d'une colonne (snapshot d'un changement de type).
 fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, ColumnValues)> {
     let node = project.tree().get(column)?;
@@ -962,6 +1204,43 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
             // d'arbre, pour que la déduplication par adresse joue son rôle.
             insert_column_footprint(&mut out, &before.1);
             insert_column_footprint(&mut out, &after.1);
+        }
+    }
+    out
+}
+
+/// Buffer(s) que les colonnes touchées par `delta` avaient dans `before`
+/// (l'arbre juste avant cette commande) — ce que la copie-à-l'écriture vient
+/// de remplacer. Un buffer qui n'y figure pas n'était pas déjà épinglé (voir
+/// [`History::pin_footprint`], qui ne fait rien pour un pointeur inconnu) :
+/// le chercher est donc sûr même quand rien n'a besoin de basculer orphelin.
+///
+/// Une seule recherche par identifiant dans `before` par colonne touchée —
+/// jamais un parcours de l'arbre — d'où le nom : `just_orphaned_by_write`
+/// donne les buffers qui *viennent de* quitter l'arbre courant à l'instant
+/// de cette écriture, pas tous ceux qu'une entrée plus ancienne retient.
+fn just_orphaned_by_write(before: &Tree, delta: &DataDelta) -> Footprint {
+    let mut out = Footprint::new();
+    let previous_buffer_of = |out: &mut Footprint, column: NodeId| {
+        if let Some(node) = before.node(column) {
+            if let Some(column) = node.as_column() {
+                insert_column_footprint(out, column.values());
+            }
+        }
+    };
+    match delta {
+        DataDelta::Cells { column, .. } | DataDelta::ColumnType { column, .. } => {
+            previous_buffer_of(&mut out, *column);
+        }
+        DataDelta::InsertRows { columns, .. } => {
+            for &column in columns {
+                previous_buffer_of(&mut out, column);
+            }
+        }
+        DataDelta::DeleteRows { removed, .. } => {
+            for (column, _) in removed {
+                previous_buffer_of(&mut out, *column);
+            }
         }
     }
     out
