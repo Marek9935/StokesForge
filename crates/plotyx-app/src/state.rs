@@ -692,6 +692,21 @@ impl AppState {
     }
 
     fn commit_cell(&mut self, column: NodeId, row: usize, text: String) {
+        // B6 + A9 (option 1, `guide-de-correction-robustesse.md` §F5) — un
+        // seul correctif pour deux anomalies : si le texte validé est
+        // exactement celui déjà affiché, rien n'a été saisi, et on ne
+        // dispatche pas de commande. Sans cette sortie anticipée, traverser
+        // une cellule sans y taper une frappe écrivait quand même (B6 :
+        // révision, version de colonne et entrée d'historique pour rien), et
+        // une chaîne vide présente (`Text(Some(""))`, affichée « » comme
+        // `Text(None)`) était réécrite en valeur absente à la moindre
+        // traversée (A9) — la branche `ColumnType::Text` ci-dessous ne
+        // distingue jamais les deux en entrée. Comparer au texte affiché
+        // évite les deux sans introduire de convention nouvelle : le cas où
+        // l'utilisateur retape à l'identique n'a jamais besoin d'écrire.
+        if text == self.cell_text(column, row) {
+            return;
+        }
         let Some(kind) = self
             .snapshot
             .tree

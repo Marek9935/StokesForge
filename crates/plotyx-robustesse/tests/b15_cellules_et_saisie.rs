@@ -113,7 +113,6 @@ fn b15_un_texte_qui_nest_pas_un_nombre_est_refuse_sans_ecrire() {
 // -- reproductions --------------------------------------------------------
 
 #[test]
-#[ignore = "reproduction A9 — traverser une cellule texte contenant une chaîne vide la transforme en valeur absente"]
 fn b15_une_chaine_vide_survit_a_la_traversee_de_sa_cellule() {
     let (_session, handle, texte, _nombres) = banc();
     let mut state = AppState::new(handle, "x.plx".to_string()).expect("état");
@@ -141,7 +140,6 @@ fn b15_une_chaine_vide_survit_a_la_traversee_de_sa_cellule() {
 }
 
 #[test]
-#[ignore = "reproduction B6 — traverser une cellule sans rien saisir écrit quand même : une révision, un incrément de version et une entrée d'historique par cellule traversée"]
 fn b15_traverser_une_cellule_sans_rien_taper_necrit_pas() {
     let (_session, handle, _texte, nombres) = banc();
     let mut state = AppState::new(handle, "x.plx".to_string()).expect("état");

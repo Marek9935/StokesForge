@@ -197,7 +197,6 @@ fn b12_une_ligne_peut_etre_ajoutee_a_la_fin_dune_feuille() {
 }
 
 #[test]
-#[ignore = "reproduction C3 — SetCells d'un bloc VIDE au-delà de la fin allonge quand même la colonne de valeurs manquantes"]
 fn b12_setcells_dun_bloc_vide_ne_change_rien() {
     let (mut project, sheet) = feuille();
     let a = project

@@ -262,6 +262,19 @@ fn write_block<T: Clone>(
     new_values: Vec<T>,
     missing: impl Fn() -> T,
 ) -> (Vec<T>, usize) {
+    // C3 (`guide-de-correction-robustesse.md` §F5, piège en §6) — un bloc
+    // vide n'a rien à écrire : sortie anticipée plutôt que de laisser
+    // `resize_with(start, missing)` ci-dessous allonger la colonne jusqu'à
+    // `start` avant de découvrir qu'il n'y a aucune valeur à y placer. Rendre
+    // `Ok` avec un delta neutre (`previous` vide, `previous_length`
+    // inchangée) est nécessaire, pas seulement suffisant :
+    // `History::revert_delta` appelle `set_values(start, before)` avec un
+    // `before` vide chaque fois qu'on annule une écriture faite au-delà de
+    // la fin de la colonne — un bloc vide qui échouerait casserait
+    // l'annulation.
+    if new_values.is_empty() {
+        return (Vec::new(), vec.len());
+    }
     let previous_length = vec.len();
     let overlap_start = start.min(previous_length);
     let overlap_end = previous_length.min(start.saturating_add(new_values.len()));
