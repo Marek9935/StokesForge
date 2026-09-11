@@ -104,6 +104,36 @@ modification de la configuration d'export par défaut, accès aux
 rédaction), tout ce qui toucherait aux préférences applicatives plutôt
 qu'au contenu du projet.
 
+### Concurrence optimiste sur les écritures de colonne
+
+**À savoir avant d'écrire une boucle de script** : `pyx.set_column` peut
+retenter d'elle-même, et peut échouer pour une raison qui n'a rien à voir avec
+la valeur envoyée. Un script qui l'ignore peut buter dessus la première fois
+qu'il tourne à côté d'un autre écrivain (l'UI, un autre script, un import).
+
+Un script lit une colonne (`pyx.column`), calcule, puis écrit
+(`pyx.set_column`) — mais entre les deux, un autre client de la session (l'UI,
+un autre script) a pu modifier cette même colonne. L'hôte le détecte : chaque
+colonne porte un numéro de version qui change à **toute** modification, quelle
+qu'elle soit (pas seulement un changement de longueur). `pyx.set_column`
+retient ce numéro au moment de la lecture et vérifie, **au moment d'écrire**,
+qu'il n'a pas bougé.
+
+- **S'il n'a pas bougé** : l'écriture est appliquée normalement, rien de
+  visible ne change pour le script.
+- **S'il a bougé** : l'écriture est refusée par l'hôte, `pyx.set_column`
+  relit la colonne, laisse le script recalculer sur l'état à jour, et
+  retente — jusqu'à **cinq tentatives**.
+- **Après la cinquième tentative infructueuse** : `pyx.set_column` lève
+  `ConcurrentWriteError` (§7) plutôt que de retenter indéfiniment ou d'écraser
+  silencieusement le travail d'un autre écrivain.
+
+Ce mécanisme concerne aujourd'hui `pyx.set_column` ; le même motif — lire un
+instantané, décider, puis écrire — s'applique à toute fonction qui mute une
+colonne (§4), donc `ConcurrentWriteError` doit être anticipée par tout script
+qui écrit en boucle pendant qu'un autre processus peut toucher au même projet,
+pas seulement par celui qui utilise `set_column` directement.
+
 ## 5. Exécution
 
 - **Thread dédié**, jamais le thread UI — même famille de pattern que
@@ -152,6 +182,11 @@ message pour savoir quoi faire :
   existant au même niveau.
 - `MacroAbortedError` — levée par `end_macro()` si le script a interrompu
   la macro par une exception avant de l'avoir explicitement close.
+- `ConcurrentWriteError` — une écriture de colonne (voir §4, « Concurrence
+  optimiste ») a échoué cinq fois de suite parce qu'un autre client modifiait
+  la même colonne entre chaque tentative. Ce n'est pas un bug du script ni une
+  valeur refusée : la bonne réaction est de relire l'état courant, ou de
+  retenter plus tard.
 
 ## 8. Compatibilité et versionnement
 
