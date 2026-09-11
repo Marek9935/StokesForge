@@ -36,10 +36,22 @@ use numpy::ndarray::aview1;
 use numpy::{
     dtype, PyArray1, PyArrayDescrMethods, PyArrayMethods, PyUntypedArray, PyUntypedArrayMethods,
 };
-use pyo3::exceptions::{PyRuntimeError, PyTypeError};
+use pyo3::create_exception;
+use pyo3::exceptions::{PyException, PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 
 use crate::interpreter::{attached, PythonError};
+
+create_exception!(
+    plotyx_python,
+    MaskedArrayError,
+    PyException,
+    "Un `numpy.ma.masked_array` porte au moins une valeur masquée : la copier \
+     écrirait cette valeur cachée comme une donnée réelle. Rendez le masque \
+     explicite avant l'appel — `.filled(float('nan'))` pour le traduire dans \
+     la valeur manquante du modèle, `.compressed()` pour l'écarter — plutôt \
+     que de laisser `copy_array_to_vec` deviner."
+);
 
 /// Conteneur Python qui maintient vivant le buffer Rust sous une vue numpy.
 ///
@@ -178,12 +190,48 @@ pub fn borrowed_readonly_array<'py>(
 /// le `Vec` rendu appartient à Rust, il ne dépend plus d'aucun objet Python et
 /// se détruit sur n'importe quel fil, GIL ou pas.
 ///
+/// # Un `numpy.ma.masked_array` est refusé, jamais deviné
+///
+/// `numpy.ma.MaskedArray` est une sous-classe d'`ndarray` : sans contrôle
+/// dédié, elle traverserait les trois vérifications ci-dessous (c'est un
+/// tableau, `float64`, une dimension) et ses cases masquées seraient copiées
+/// **comme si elles étaient des données réelles** — le masque, qui dit
+/// « valeur absente », serait tout simplement ignoré.
+///
+/// Le modèle a exactement une valeur manquante (`NaN`, documentée en tête de
+/// `plotyx-core::column`), mais choisir **ici** de traduire un masque en `NaN`
+/// couperait le script de la décision : `.filled()`, `.compressed()`, ou une
+/// autre valeur de repli lui appartiennent. Le dépôt a déjà tranché ce genre
+/// de cas pour `int64`, refusé plutôt que converti en silence « une
+/// conversion implicite cacherait une perte de précision au-delà de 2⁵³ » —
+/// le même raisonnement s'applique mot pour mot au masque : une conversion
+/// implicite cacherait la perte du masque lui-même. D'où [`MaskedArrayError`]
+/// dès qu'au moins une case est masquée ; un `MaskedArray` sans case masquée
+/// (masque `nomask`, ou entièrement `False`) ne cache rien et traverse comme
+/// un `ndarray` ordinaire.
+///
 /// # Erreurs
 ///
 /// [`Err`] avec un message explicite si l'objet n'est pas un tableau numpy, ou
-/// pas de `dtype` `float64`, ou pas à une dimension.
+/// pas de `dtype` `float64`, ou pas à une dimension, ou [`MaskedArrayError`]
+/// si l'objet est un `numpy.ma.masked_array` portant au moins une valeur
+/// masquée.
 pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     let py = array.py();
+
+    // 0. Masque numpy, avant tout le reste : un `MaskedArray` est un
+    //    `ndarray` valide aux yeux des trois contrôles suivants, donc c'est
+    //    le seul endroit où le distinguer.
+    if has_hidden_masked_values(array)? {
+        return Err(MaskedArrayError::new_err(format!(
+            "tableau numpy masqué (`{}`) refusé : au moins une valeur est \
+             masquée et serait copiée comme une donnée réelle si on l'acceptait \
+             — appelez `.filled(float('nan'))` (case masquée -> valeur \
+             manquante du modèle) ou `.compressed()` (case masquée -> écartée) \
+             avant `pyx.set_column`",
+            type_name(array)
+        )));
+    }
 
     // 1. Est-ce seulement un tableau numpy ? Une liste Python échoue ici.
     let untyped = array.cast::<PyUntypedArray>().map_err(|_| {
@@ -228,6 +276,26 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
         Some(contiguous) => Ok(contiguous.to_vec()),
         None => Ok(view.iter().copied().collect()),
     }
+}
+
+/// Vrai si `object` est un `numpy.ma.masked_array` avec **au moins une**
+/// valeur masquée.
+///
+/// Délègue à `numpy.ma.is_masked`, plutôt que de relire l'attribut `mask` et
+/// d'en décider ici : c'est numpy qui connaît le cas `nomask` (le sentinelle
+/// que porte un `MaskedArray` sans case masquée, pour lequel un examen manuel
+/// devrait aussi couvrir un masque explicite mais entièrement `False`).
+/// `is_masked` rend `False` pour tout objet qui n'est pas un `MaskedArray` —
+/// une liste, un entier, un `ndarray` ordinaire — donc cet appel est sûr avant
+/// même de savoir si `object` est un tableau numpy.
+///
+/// `numpy.ma` est déjà chargé dès que `numpy` l'est (son `__init__.py`
+/// importe son sous-module `ma`) : `py.import` retrouve donc un module déjà en
+/// mémoire, jamais un accès disque.
+fn has_hidden_masked_values(object: &Bound<'_, PyAny>) -> PyResult<bool> {
+    let py = object.py();
+    let ma = py.import("numpy.ma")?;
+    ma.call_method1("is_masked", (object,))?.extract()
 }
 
 /// Nom du type Python d'un objet, pour les messages d'erreur.
