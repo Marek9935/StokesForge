@@ -279,7 +279,16 @@ fn empty_text_writes_a_missing_text_value_and_undo_restores_it() {
         Cell::Text(None),
         "manquante, pas \"\""
     );
-    assert_eq!(state.cell_text(note, 0), "");
+    // A9 (option 2, `guide-de-correction-robustesse.md` §F1/§F8) : une valeur
+    // absente ne s'affiche plus comme une chaîne vide (qui représenterait une
+    // chaîne vide *présente*) mais selon la convention de `cell_text` — un
+    // espace insécable, ici comparé par la propriété plutôt que par sa valeur
+    // littérale pour ne pas dupliquer la constante hors de `plotyx-app`.
+    assert_ne!(
+        state.cell_text(note, 0),
+        "",
+        "une valeur absente ne s'affiche plus comme une chaîne vide présente"
+    );
 
     state.dispatch(Action::Undo);
     assert_eq!(cell(&state, note, 0), Cell::Text(Some("a".to_string())));
@@ -487,16 +496,36 @@ fn a_failing_save_reports_an_error_and_writes_nothing() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn reading_past_the_end_of_a_short_column_yields_an_empty_string() {
+fn reading_past_the_end_of_a_short_column_yields_a_missing_value() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, state) = start_demo(dir.path());
     let note = column_id(&state, "Note");
 
     assert_eq!(state.row_count(), 5);
+    // `Note` = [Some("a"), None, Some("")] : la ligne 2 est une chaîne vide
+    // *présente*, les lignes 3 et au-delà sont hors bornes — `Column::get`
+    // y rend `Cell::Text(None)`, la même valeur *absente* qu'une ligne 1
+    // écrite explicitement à `None`. A9 (option 2) : ces deux natures ne
+    // s'affichent plus de la même façon (avant ce correctif, les quatre
+    // assertions ci-dessous rendaient toutes `""`).
     assert_eq!(state.cell_text(note, 2), "", "Some(\"\") s'affiche vide");
-    assert_eq!(state.cell_text(note, 3), "", "au-delà de la colonne");
-    assert_eq!(state.cell_text(note, 4), "");
-    assert_eq!(state.cell_text(note, 10_000), "");
+    let absente = state.cell_text(note, 3);
+    assert_ne!(
+        absente,
+        state.cell_text(note, 2),
+        "hors bornes (valeur absente) doit s'afficher différemment de \
+         Some(\"\") (chaîne vide présente)"
+    );
+    assert_eq!(
+        state.cell_text(note, 4),
+        absente,
+        "toute position hors bornes affiche la même chose"
+    );
+    assert_eq!(
+        state.cell_text(note, 10_000),
+        absente,
+        "toute position hors bornes affiche la même chose"
+    );
 }
 
 // ---------------------------------------------------------------------------

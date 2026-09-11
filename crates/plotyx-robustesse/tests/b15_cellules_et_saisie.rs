@@ -119,9 +119,14 @@ fn b15_une_chaine_vide_survit_a_la_traversee_de_sa_cellule() {
 
     assert_eq!(cellule(&state, texte, 1), Cell::Text(Some(String::new())));
     assert_eq!(cellule(&state, texte, 2), Cell::Text(None));
-    // Les deux s'affichent pareil : rien, dans la grille, ne les distingue.
+    // A9 (option 2, déjà corrigée) : la chaîne vide présente et la valeur
+    // absente s'affichent désormais différemment — voir
+    // `b15_a9_option2_la_grille_distingue_absent_de_vide` pour la
+    // reproduction dédiée à cette moitié-là de l'anomalie. Ce test-ci ne
+    // porte que sur l'autre moitié (option 1) : la survie de `Some("")` à la
+    // traversée d'une cellule.
     assert_eq!(state.cell_text(texte, 1), "");
-    assert_eq!(state.cell_text(texte, 2), "");
+    assert_ne!(state.cell_text(texte, 2), "");
 
     // L'utilisateur clique dans la cellule 1 et clique ailleurs — ou passe au
     // clavier : `cell_widget` valide à **toute** perte de focus sauf Échap.
@@ -132,10 +137,44 @@ fn b15_une_chaine_vide_survit_a_la_traversee_de_sa_cellule() {
     assert_eq!(
         cellule(&state, texte, 1),
         Cell::Text(Some(String::new())),
-        "la chaîne vide présente est devenue une valeur absente : le modèle les \
-         distingue (`column.rs`), le format le promet depuis la version 1 (critère 3 \
-         de `plotyx-persistence`), et la grille les confond dans les deux sens — \
-         `cell_text` rend « » pour les deux, `commit_cell` rend `None` pour « »"
+        "la chaîne vide présente est devenue une valeur absente à la traversée de sa \
+         cellule : le modèle les distingue (`column.rs`), le format le promet depuis \
+         la version 1 (critère 3 de `plotyx-persistence`) — corrigé dans `commit_cell` \
+         (A9 option 1) : comparer le texte validé au texte déjà affiché avant de \
+         dispatcher évite d'écrire quoi que ce soit quand rien n'a été tapé"
+    );
+}
+
+/// A9 (option 2) — l'autre moitié de l'anomalie : même sans traversée, rien
+/// ne distinguait à l'écran une chaîne vide présente d'une valeur absente
+/// (`cell_text` rendait `""` pour les deux). Corrigé dans `state.rs::
+/// cell_text` : une valeur absente s'affiche désormais comme un espace
+/// insécable ([`plotyx_app::state::MISSING_TEXT_DISPLAY`]) plutôt que comme
+/// une chaîne vide.
+#[test]
+fn b15_a9_option2_la_grille_distingue_absent_de_vide() {
+    use plotyx_app::state::MISSING_TEXT_DISPLAY;
+
+    let (_session, handle, texte, _nombres) = banc();
+    let state = AppState::new(handle, "x.plx".to_string()).expect("état");
+
+    assert_eq!(cellule(&state, texte, 1), Cell::Text(Some(String::new())));
+    assert_eq!(cellule(&state, texte, 2), Cell::Text(None));
+
+    let vide_presente = state.cell_text(texte, 1);
+    let absente = state.cell_text(texte, 2);
+    assert_eq!(
+        vide_presente, "",
+        "une chaîne vide présente reste affichée comme une chaîne vide"
+    );
+    assert_eq!(
+        absente, MISSING_TEXT_DISPLAY,
+        "une valeur absente s'affiche selon la convention retenue par `cell_text`"
+    );
+    assert_ne!(
+        vide_presente, absente,
+        "« {vide_presente:?} » (présente) et « {absente:?} » (absente) doivent \
+         s'afficher différemment, sans quoi rien ne les distingue à l'écran"
     );
 }
 
@@ -168,7 +207,6 @@ fn b15_traverser_une_cellule_sans_rien_taper_necrit_pas() {
 }
 
 #[test]
-#[ignore = "reproduction C4 — le Display de f64 n'utilise jamais la notation scientifique : une mesure de l'ordre de 10⁻¹⁹ s'écrit sur 30 caractères"]
 fn b15_une_mesure_scientifique_tient_dans_une_cellule() {
     let (_session, handle, _texte, nombres) = banc();
     let state = AppState::new(handle, "x.plx".to_string()).expect("état");
