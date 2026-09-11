@@ -12,6 +12,8 @@
 
 use std::sync::Arc;
 
+use plotyx_plot::PlotSpec;
+
 use crate::column::{Column, ColumnMeta, ColumnType, ColumnValues, ValueBlock, ValuesDelta};
 use crate::error::{CoreError, CoreResult};
 use crate::id::{IdAllocator, NodeId};
@@ -229,8 +231,21 @@ impl Project {
         self.insert_node(sheet, index, &name, NodeKind::Column(column))
     }
 
-    /// Ajoute un graphe. `name: None` → premier « GraphN » libre.
-    pub fn add_graph(&mut self, parent: NodeId, name: Option<&str>) -> CoreResult<NodeId> {
+    /// Ajoute un graphe portant `spec`. `name: None` → premier « GraphN »
+    /// libre.
+    ///
+    /// Contrairement à `add_workbook`/`add_matrix`/`add_note`, le contenu
+    /// est un paramètre obligatoire — même choix que [`Project::add_column`]
+    /// pour la même raison : un graphe sans spec ne décrit rien de plus
+    /// qu'une fenêtre vide, autant le rendre explicite à l'appel plutôt que
+    /// de fabriquer un défaut que personne n'a demandé. Un appelant qui veut
+    /// vraiment un graphe vide passe `PlotSpec::default()`.
+    ///
+    /// C'est aussi la **seule** façon de doter un graphe d'un spec : il n'y a
+    /// pas de commande d'édition dans ce chantier
+    /// (`docs/newarchitecture/roadmap-rendu.md` §3.2) — le spec se construit
+    /// ici, une fois, jamais modifié ensuite.
+    pub fn add_graph(&mut self, parent: NodeId, name: Option<&str>, spec: PlotSpec) -> CoreResult<NodeId> {
         let name = self.window_name(name, "Graph");
         let index = self.tree.children(parent)?.len();
         self.insert_node(
@@ -239,6 +254,7 @@ impl Project {
             &name,
             NodeKind::Graph {
                 meta: WindowMeta::default(),
+                spec,
             },
         )
     }

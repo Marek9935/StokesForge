@@ -6,6 +6,10 @@
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
     "plotyx-core",
+    // le PlotSpec porté par NodeKind::Graph (phase R3) : la conversion vers
+    // son propre schéma (schema.rs) a besoin du type complet, pas seulement
+    // de ce que plotyx-core en réexporte
+    "plotyx-plot",
     "thiserror",
     "serde",
     "rmp-serde",

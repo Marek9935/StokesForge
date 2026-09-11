@@ -458,7 +458,7 @@ Restaure proprement le 9 → 7 de la spec §2.5, en remplaçant `render-mpl` :
 
 | Crate | Rôle | Dépend de | Dépendances lourdes |
 |---|---|---|---|
-| `plotyx-plot` | `PlotSpec` neutre (port de `plotyx.plot`) | `core` | **aucune** — même règle testée que `plotyx-core` |
+| `plotyx-plot` | `PlotSpec` neutre (port de `plotyx.plot`) | `id` | **aucune** — même règle testée que `plotyx-core` |
 | `plotyx-render-egui` | backend `DrawingBackend` + cache de `Shape` | `plot`, `session` | `plotters`, `egui` ; `typst` en feature |
 | `plotyx-render-svg` | export SVG et PDF | `plot` | `plotters/svg_backend`, `svg2pdf` |
 
@@ -466,6 +466,26 @@ Restaure proprement le 9 → 7 de la spec §2.5, en remplaçant `render-mpl` :
 `plotters`**. C'est ce qui laisse changer de moteur de dessin plus tard
 sans toucher au modèle de graphe — la même discipline que « aucun Qt dans
 `core` », rendue vérifiable par le compilateur.
+
+> **Ajout du 2026-09-11 — un neuvième crate, `plotyx-id`, imprévu au
+> découpage ci-dessus.** La phase R3 a dû faire porter `NodeKind::Graph` par
+> un `PlotSpec` : `plotyx-core` en vient donc à dépendre de `plotyx-plot`,
+> qui dépendait déjà de `plotyx-core` pour `NodeId` — un cycle Cargo direct,
+> vérifié empiriquement (`cargo check` refuse avec *cyclic package
+> dependency*). La sortie retenue descend `NodeId`, et lui seul (pas
+> `IdAllocator`), dans un crate minimal sans dépendance :
+>
+> ```text
+> plotyx-id  (zéro dépendance)
+>   ↑              ↑
+> plotyx-plot   plotyx-core → plotyx-plot
+> ```
+>
+> `plotyx-core` réexporte `NodeId` à l'identique
+> (`pub use plotyx_id::NodeId`) : aucun appelant existant n'a quoi que ce
+> soit à changer. `plotyx-plot` gagne en frontière plutôt qu'il n'en perd :
+> `cargo tree -p plotyx-plot` ne montre plus que `plotyx-id`, plus strict
+> que le critère de sortie de R2. Détail dans `roadmap-rendu.md`, phase R3.
 
 ---
 

@@ -1096,6 +1096,7 @@ mod tests {
             "Fig1",
             NodeKind::Graph {
                 meta: WindowMeta::default(),
+                spec: plotyx_plot::PlotSpec::default(),
             },
         );
         for text in [

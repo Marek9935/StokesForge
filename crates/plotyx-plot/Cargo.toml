@@ -8,7 +8,7 @@ description = "Description d'un graphe (PlotSpec) indépendante de tout moteur d
 workspace = true
 
 [dependencies]
-plotyx-core = { path = "../plotyx-core" }
+plotyx-id = { path = "../plotyx-id" }
 
 [dev-dependencies]
 toml = "0.8"

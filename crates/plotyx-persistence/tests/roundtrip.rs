@@ -3,8 +3,12 @@
 
 use std::path::Path;
 
-use plotyx_core::{Column, ColumnMeta, ColumnRole, ColumnType, Project, ValueBlock, WindowMeta};
+use plotyx_core::{Column, ColumnMeta, ColumnRole, ColumnType, NodeKind, Project, ValueBlock, WindowMeta};
 use plotyx_persistence::{load, save, PersistenceError};
+use plotyx_plot::{
+    AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec,
+    PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec,
+};
 
 /// Construit le projet de fixture décrit par le critère 1 : dossiers
 /// imbriqués, classeurs, feuilles, colonnes de tous les types avec cas
@@ -93,7 +97,7 @@ fn fixture_project() -> Project {
     }
 
     let graph = project
-        .add_graph(root, Some("Graph1"))
+        .add_graph(root, Some("Graph1"), Default::default())
         .expect("graphe créé");
     project
         .set_window_meta(
@@ -441,4 +445,109 @@ fn a_large_float_column_is_stored_as_raw_bytes_not_as_a_msgpack_array() {
         size < 100_000 * 8 + 4_096,
         "fichier de {size} octets : l'encodage ne doit pas dépasser les données brutes de plus de 4 Ko"
     );
+}
+
+/// Un `PlotSpec` non trivial : deux panneaux, plusieurs séries, des styles
+/// qui ne sont **pas** ceux par défaut — pour que l'égalité de la tâche 3.5
+/// ne puisse pas passer par accident sur des champs restés à leur valeur par
+/// défaut des deux côtés du disque.
+fn non_trivial_spec(x: plotyx_core::NodeId, y1: plotyx_core::NodeId, y2: plotyx_core::NodeId) -> PlotSpec {
+    let scatter = SeriesSpec {
+        name: "Brute".to_string(),
+        plot_type: PlotType::Scatter,
+        line: LineSpec {
+            color: "#112233".to_string(),
+            style: LineStyle::Dash,
+            width: 3.5,
+        },
+        symbol: SymbolSpec {
+            shape: SymbolShape::Diamond,
+            size: 9.0,
+            color: "#445566".to_string(),
+            edge_color: "#000000".to_string(),
+        },
+        axis: SeriesAxis::Right,
+        visible: false,
+        show_in_legend: false,
+        bar_width: Some(0.42),
+        ..SeriesSpec::new_xy(x, y1)
+    };
+    let histogram = SeriesSpec {
+        name: String::new(),
+        plot_type: PlotType::Histogram,
+        histogram_bins: std::num::NonZeroU32::new(17).expect("17 est non nul"),
+        ..SeriesSpec::new(y2)
+    };
+
+    let panel_a = PanelSpec {
+        title: "Signal".to_string(),
+        series: vec![scatter],
+        bottom: AxisSpec {
+            label: "Temps".to_string(),
+            unit: "s".to_string(),
+            scale: AxisScale::Log,
+            auto_range: false,
+            range_min: Some(-1.0),
+            range_max: Some(10.0),
+            grid: true,
+            visible: true,
+            inverted: true,
+        },
+        legend: LegendSpec {
+            visible: true,
+            position: LegendPosition::BottomLeft,
+        },
+        ..PanelSpec::at(0, 0)
+    };
+    let panel_b = PanelSpec {
+        title: "Répartition".to_string(),
+        series: vec![histogram],
+        legend: LegendSpec {
+            visible: false,
+            position: LegendPosition::TopLeft,
+        },
+        ..PanelSpec::at(1, 0)
+    };
+
+    PlotSpec {
+        background: "#0a0a0a".to_string(),
+        ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
+    }
+}
+
+/// Tâche 3.5 : un graphe au `PlotSpec` non trivial, sauvé puis rechargé,
+/// rend un spec **égal** — l'aller-retour disque ne perd et n'invente rien,
+/// y compris sur des références de colonnes dont l'ordre traverse deux
+/// panneaux.
+#[test]
+fn a_non_trivial_plot_spec_round_trips_intact() {
+    let mut project = Project::new("Demo").expect("projet valide");
+    let root = project.root();
+    let book = project.add_empty_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project.add_worksheet(book, Some("Sheet1")).expect("feuille");
+    let x = project
+        .add_column(sheet, None, Some("X"), Column::from_f64(&[0.0, 1.0, 2.0]))
+        .expect("colonne X");
+    let y1 = project
+        .add_column(sheet, None, Some("Y1"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .expect("colonne Y1");
+    let y2 = project
+        .add_column(sheet, None, Some("Y2"), Column::from_f64(&[4.0, 5.0, 6.0]))
+        .expect("colonne Y2");
+
+    let spec = non_trivial_spec(x, y1, y2);
+    let graph = project
+        .add_graph(root, Some("Fig1"), spec.clone())
+        .expect("graphe créé");
+
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("spec.plyx");
+    save(&project, &path).expect("sauvegarde réussie");
+    let loaded = load(&path).expect("chargement réussi");
+
+    let node = loaded.tree().node(graph).expect("graphe présent");
+    match node.kind() {
+        NodeKind::Graph { spec: reloaded, .. } => assert_eq!(*reloaded, spec),
+        other => panic!("attendu Graph, obtenu {other:?}"),
+    }
 }

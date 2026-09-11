@@ -1,28 +1,13 @@
 //! Identité des nœuds de l'arbre de projet.
-
-/// Identité d'un nœud : compteur monotone, jamais réutilisé sur toute la vie
-/// d'un projet (rechargement compris). Opaque pour les clients ; c'est aussi
-/// la clé que l'API de script exposera.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NodeId(u64);
-
-impl NodeId {
-    /// Reconstruit un identifiant depuis sa valeur brute (persistance uniquement).
-    pub const fn from_raw(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    /// Valeur brute (persistance uniquement).
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-impl std::fmt::Display for NodeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "nœud {}", self.0)
-    }
-}
+//!
+//! `NodeId` lui-même vit dans `plotyx-id`, un crate minimal sans dépendance :
+//! voir sa documentation de tête pour la raison (un cycle Cargo à casser en
+//! phase R3, entre ce crate et `plotyx-plot`). Ce module ne fait que le
+//! réexporter — `plotyx_core::NodeId` désigne exactement le même type
+//! qu'avant, aucun appelant n'a rien à changer — et porte l'allocateur, qui
+//! lui reste ici : il n'a besoin que de construire des `NodeId`, jamais de
+//! `plotyx-plot`.
+pub use plotyx_id::NodeId;
 
 /// Allocateur d'identifiants : `next()` rend des valeurs strictement croissantes.
 /// N'est jamais remis en arrière — c'est le `Project` (tranche suivante) qui le
@@ -54,7 +39,7 @@ impl IdAllocator {
     // à honorer) ; le nom `next` reste le plus clair pour cette API.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> NodeId {
-        let id = NodeId(self.next);
+        let id = NodeId::from_raw(self.next);
         self.next += 1;
         id
     }
@@ -130,16 +115,8 @@ mod tests {
         assert_eq!(alloc.peek(), 1);
     }
 
-    #[test]
-    fn display_formats_as_expected() {
-        assert_eq!(NodeId::from_raw(412).to_string(), "nœud 412");
-    }
-
-    #[test]
-    fn from_raw_and_raw_are_inverse() {
-        let id = NodeId::from_raw(42);
-        assert_eq!(NodeId::from_raw(id.raw()), id);
-    }
+    // `display_formats_as_expected` et `from_raw_and_raw_are_inverse` ont
+    // déménagé dans `plotyx-id` avec le type qu'elles testent (phase R3).
 
     #[test]
     fn default_matches_new() {

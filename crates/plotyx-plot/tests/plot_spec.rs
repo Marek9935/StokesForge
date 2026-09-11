@@ -35,7 +35,7 @@
 
 use std::num::NonZeroU32;
 
-use plotyx_core::NodeId;
+use plotyx_id::NodeId;
 use plotyx_plot::{
     palette_color, AxisScale, AxisSide, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,
     PanelSpec, Panels, PlotSpec, PlotType, SeriesAxis, SeriesRef, SeriesSpec, SymbolShape,

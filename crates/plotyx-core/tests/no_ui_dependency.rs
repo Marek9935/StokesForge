@@ -6,6 +6,10 @@
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
     "thiserror", // erreurs typées, sans surface UI
+    "plotyx-id", // identité de nœud seule (NodeId), zéro dépendance transitive
+    // le PlotSpec que NodeKind::Graph porte (phase R3) — pas de dépendance de
+    // dessin : cargo tree -p plotyx-plot ne montre toujours que plotyx-id
+    "plotyx-plot",
 ];
 
 #[test]

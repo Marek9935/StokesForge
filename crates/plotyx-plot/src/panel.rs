@@ -1,6 +1,6 @@
 //! Un panneau : une zone de tracé, ses quatre axes, sa légende, ses séries.
 
-use plotyx_core::NodeId;
+use plotyx_id::NodeId;
 
 use crate::axis::{AxisSide, AxisSpec};
 use crate::legend::LegendSpec;

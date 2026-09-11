@@ -249,6 +249,11 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
             path: path.to_path_buf(),
             detail: format!("colonne incohérente : {source}"),
         },
+        ConvertError::ZeroHistogramBins => PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: "histogram_bins d'une série vaut 0, ce qui n'est pas représentable"
+                .to_string(),
+        },
     }
 }
 
@@ -502,6 +507,84 @@ mod tests {
         assert_eq!(column.meta().role, plotyx_core::ColumnRole::X);
         assert_eq!(column.meta().unit, "ms");
         assert_eq!(column.len(), 1);
+    }
+
+    /// Copie locale de la forme du schéma *avant* la phase R3 : un `Graph`
+    /// sans champ `spec` — exactement ce qu'un fichier écrit par une version
+    /// antérieure du logiciel contient. Sert à prouver le critère de sortie
+    /// de la tâche 3.2 sans dépendre d'un fichier `.plyx` archivé : `spec`
+    /// est `#[serde(default)]`, donc un champ absent ne doit pas faire
+    /// échouer le chargement, et le graphe reconstruit doit porter
+    /// `PlotSpec::default()`.
+    #[derive(Serialize)]
+    struct PreR3FileBody {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<PreR3NodeRecord>,
+    }
+
+    #[derive(Serialize)]
+    struct PreR3NodeRecord {
+        id: u64,
+        name: String,
+        parent: Option<u64>,
+        kind: PreR3KindRecord,
+    }
+
+    #[derive(Serialize)]
+    enum PreR3KindRecord {
+        Folder { children: Vec<u64> },
+        Graph { label: String, comment: String },
+    }
+
+    /// Critère de sortie de la tâche 3.2 : un fichier écrit avant la phase R3
+    /// (donc sans le champ `spec`) se relit, et le graphe qu'il contient
+    /// porte un `PlotSpec` par défaut plutôt que de faire échouer le
+    /// chargement.
+    #[test]
+    fn a_graph_written_before_r3_loads_with_a_default_spec() {
+        let pre_r3 = PreR3FileBody {
+            root: 1,
+            next_id_hint: 3,
+            nodes: vec![
+                PreR3NodeRecord {
+                    id: 1,
+                    name: "Racine".to_string(),
+                    parent: None,
+                    kind: PreR3KindRecord::Folder { children: vec![2] },
+                },
+                PreR3NodeRecord {
+                    id: 2,
+                    name: "Graph1".to_string(),
+                    parent: Some(1),
+                    kind: PreR3KindRecord::Graph {
+                        label: String::new(),
+                        comment: String::new(),
+                    },
+                },
+            ],
+        };
+
+        let payload = rmp_serde::to_vec_named(&pre_r3).expect("encodage valide");
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = dir.path().join("pre_r3.plyx");
+        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+
+        let project = load(&path).expect("un fichier sans champ spec doit encore se relire");
+        let node = project
+            .tree()
+            .node(NodeId::from_raw(2))
+            .expect("graphe présent");
+        match node.kind() {
+            NodeKind::Graph { spec, .. } => {
+                assert_eq!(*spec, plotyx_plot::PlotSpec::default());
+            }
+            other => panic!("attendu Graph, obtenu {other:?}"),
+        }
     }
 
     /// `record_to_kind`/`kind_to_record` restent cohérents pour une colonne

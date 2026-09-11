@@ -6,6 +6,8 @@
 //! qui garantit à la compilation qu'une colonne, un graphe, une matrice ou
 //! une note n'en a pas.
 
+use plotyx_plot::PlotSpec;
+
 use crate::column::Column;
 use crate::error::CoreResult;
 use crate::id::NodeId;
@@ -43,10 +45,21 @@ pub enum NodeKind {
     },
     /// Colonne de données (le nom vit dans le nœud, pas dans la `Column`).
     Column(Column),
-    /// Graphe (contenu de tracé ajouté dans une tranche ultérieure).
+    /// Graphe : porte son contenu de tracé (phase R3, `docs/newarchitecture/roadmap-rendu.md`).
     Graph {
         /// Métadonnées de fenêtre.
         meta: WindowMeta,
+        /// Description du graphe, indépendante de tout moteur de rendu. Les
+        /// séries y référencent leurs colonnes par [`NodeId`] (`plotyx-plot`
+        /// §11.1 d'`architecture-choisie.md`) : renommer ou déplacer une
+        /// colonne laisse le graphe intact, la supprimer produit une
+        /// référence brisée détectable à la résolution
+        /// (`crate::resolve::resolve_spec`), jamais une série
+        /// silencieusement vide. Ce champ n'est **jamais** modifié après
+        /// création — il n'y a pas de commande d'édition de spec dans ce
+        /// chantier (`roadmap-rendu.md` §3.2) — donc pas de mutateur ici,
+        /// contrairement à `meta` ([`Project::set_window_meta`]).
+        spec: PlotSpec,
     },
     /// Matrice (contenu ajouté dans une tranche ultérieure).
     Matrix {
@@ -179,7 +192,7 @@ impl NodeKind {
     pub(crate) fn window_meta_mut(&mut self) -> Option<&mut WindowMeta> {
         match self {
             NodeKind::Workbook { meta, .. }
-            | NodeKind::Graph { meta }
+            | NodeKind::Graph { meta, .. }
             | NodeKind::Matrix { meta }
             | NodeKind::Note { meta, .. } => Some(meta),
             NodeKind::Folder { .. } | NodeKind::Worksheet { .. } | NodeKind::Column(_) => None,
@@ -352,6 +365,7 @@ mod tests {
     fn graph() -> NodeKind {
         NodeKind::Graph {
             meta: WindowMeta::default(),
+            spec: PlotSpec::default(),
         }
     }
 

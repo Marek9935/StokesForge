@@ -2586,16 +2586,23 @@ dependencies = [
 name = "plotyx-core"
 version = "0.0.0"
 dependencies = [
+ "plotyx-id",
+ "plotyx-plot",
  "proptest",
  "thiserror 2.0.20",
  "toml",
 ]
 
 [[package]]
+name = "plotyx-id"
+version = "0.0.0"
+
+[[package]]
 name = "plotyx-persistence"
 version = "0.0.0"
 dependencies = [
  "plotyx-core",
+ "plotyx-plot",
  "rmp-serde",
  "serde",
  "serde_bytes",
@@ -2608,7 +2615,7 @@ dependencies = [
 name = "plotyx-plot"
 version = "0.0.0"
 dependencies = [
- "plotyx-core",
+ "plotyx-id",
  "toml",
 ]
 

@@ -3,10 +3,24 @@
 //!
 //! Ce crate dit *ce qu'il faut tracer*. Il ne sait pas *comment* on le trace,
 //! et c'est vérifié par le compilateur : sa seule dépendance est
-//! `plotyx-core`, pour les [`plotyx_core::NodeId`]
+//! `plotyx-id`, pour les [`plotyx_id::NodeId`]
 //! (`tests/no_ui_dependency.rs`). Ni `plotters`, ni `egui`, ni `typst` — pas
 //! même `serde`, la persistance ayant ses propres types d'enregistrement et
 //! faisant elle-même la conversion.
+//!
+//! # Depuis la phase R3 : `plotyx-id`, pas `plotyx-core`
+//!
+//! Jusqu'à la phase R3, cette dépendance était `plotyx-core` en entier, pour
+//! ce seul type. `NodeKind::Graph` a dû se mettre à porter un [`PlotSpec`] —
+//! ce qui a fait naître l'arête inverse `plotyx-core → plotyx-plot` — et les
+//! deux arêtes ensemble auraient formé un cycle Cargo direct (`plotyx-plot →
+//! plotyx-core → plotyx-plot`), que Cargo refuse pour des dépendances
+//! normales. `NodeId` a donc été descendu dans `plotyx-id`, un crate minimal
+//! sans dépendance : ce crate-ci y pointe désormais, `plotyx-core` y pointe
+//! aussi *et* dépend de `plotyx-plot`. Rien dans l'API ou le comportement de
+//! ce crate n'a changé — seule l'adresse de son unique dépendance a bougé,
+//! vers un crate plus petit que l'ancien. Détail complet :
+//! `plotyx-id/src/lib.rs`.
 //!
 //! C'est la transposition exacte du « aucun Qt dans `core` » du socle, et la
 //! raison en est mesurée : la couche équivalente de la version Python a
@@ -33,7 +47,7 @@
 //! # Trois décisions structurent ce crate
 //!
 //! - **référence par identité** — une série désigne ses colonnes par
-//!   [`plotyx_core::NodeId`], jamais par nom ni par chemin
+//!   [`plotyx_id::NodeId`], jamais par nom ni par chemin
 //!   (`architecture-choisie.md` §11.1). Renommer ou déplacer une colonne
 //!   laisse le graphe intact ; la supprimer produit une référence brisée
 //!   *détectable*, que le rendu devra afficher comme telle et jamais comme une

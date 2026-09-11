@@ -562,7 +562,7 @@ fn row_actions_without_a_selected_sheet_are_refused() {
     // Un projet sans aucune feuille : rien ne peut être sélectionné.
     let mut project = Project::new("Vide").expect("projet vide");
     let root = project.root();
-    project.add_graph(root, Some("Graph1")).expect("un graphe");
+    project.add_graph(root, Some("Graph1"), Default::default()).expect("un graphe");
     let (_session, mut state) = start(project, &dir.path().join("vide.plotyx"));
 
     assert_eq!(state.selected_sheet(), None);

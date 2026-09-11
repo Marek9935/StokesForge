@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/plotyx-id",
     "crates/plotyx-core",
     "crates/plotyx-commands",
     "crates/plotyx-session",

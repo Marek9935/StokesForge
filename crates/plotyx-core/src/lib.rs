@@ -5,6 +5,32 @@
 //! Règle non négociable, vérifiée par `tests/no_ui_dependency.rs` : ce crate
 //! n'importe aucune dépendance UI.
 //!
+//! # Depuis la phase R3 : une dépendance à `plotyx-plot`, et une seule raison
+//!
+//! `NodeKind::Graph` porte désormais un `plotyx_plot::PlotSpec`
+//! (`docs/newarchitecture/roadmap-rendu.md` phase R3) : un graphe du projet
+//! porte son contenu de tracé, comme une colonne porte les siennes. Ce n'est
+//! **pas** une porte ouverte au rendu — `plotyx-plot` lui-même reste sans
+//! dépendance de dessin (`plotyx-plot/tests/no_ui_dependency.rs`), et sa
+//! seule dépendance est désormais `plotyx-id` (voir plus bas), pas ce crate.
+//! [`resolve`] est le seul module qui traduit un spec en données prêtes à
+//! tracer (`NodeId` → colonne) ; tout le reste du crate continue d'ignorer
+//! jusqu'à l'existence de `PlotSpec`.
+//!
+//! **Pourquoi `plotyx-id` et pas `plotyx-core` dans `Cargo.toml` de
+//! `plotyx-plot`.** Avant R3, `plotyx-plot` dépendait de ce crate en entier
+//! pour son seul usage de `NodeId`. Une fois ce crate lui-même dépendant de
+//! `plotyx-plot` (pour `PlotSpec`), garder les deux arêtes aurait formé un
+//! cycle Cargo direct — vérifié, pas supposé : `cargo check` le refuse avec
+//! *cyclic package dependency*, Cargo n'autorisant pas de dépendances
+//! normales circulaires (seules les dépendances de développement le
+//! peuvent, ce qui ne s'applique pas ici puisque `PlotSpec` est un champ de
+//! production, pas un besoin de test). `NodeId` a donc été descendu dans
+//! `plotyx-id`, crate minimal sans dépendance, réexporté ici à l'identique
+//! (`pub use id::NodeId`, ci-dessous) : aucun appelant de
+//! `plotyx_core::NodeId` n'a rien à changer. Détail complet dans
+//! `crates/plotyx-id/src/lib.rs`.
+//!
 //! Le modèle est désormais construit. Il repose sur trois décisions :
 //!
 //! - **identité** — `NodeId` est un compteur monotone, jamais réutilisé sur
@@ -31,6 +57,7 @@ pub mod name;
 pub mod node;
 pub mod path;
 pub mod project;
+pub mod resolve;
 pub mod tree;
 
 pub use column::{
@@ -42,4 +69,8 @@ pub use name::{check_name, RESERVED_NAME_CHARS};
 pub use node::{Node, NodeKind, WindowMeta};
 pub use path::{format_path, parse_path, ObjectPath, PathDepth};
 pub use project::Project;
+pub use resolve::{
+    bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_spec,
+    MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
+};
 pub use tree::Tree;

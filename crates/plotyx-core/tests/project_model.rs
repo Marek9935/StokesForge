@@ -145,7 +145,7 @@ fn critere_2_noms_par_defaut_des_fenetres() {
     let book2 = project.add_workbook(root, None).expect("classeur");
     assert_eq!(name_of(&project, book2), "Book2");
 
-    let graph = project.add_graph(root, None).expect("graphe");
+    let graph = project.add_graph(root, None, Default::default()).expect("graphe");
     assert_eq!(name_of(&project, graph), "Graph1");
 
     let matrix = project.add_matrix(root, None).expect("matrice");
@@ -487,7 +487,7 @@ fn critere_11_resolution_de_chemins() {
 fn critere_12_chemins_irresolubles() {
     let mut demo = Demo::new();
     demo.project
-        .add_graph(demo.root, Some("Fig1"))
+        .add_graph(demo.root, Some("Fig1"), Default::default())
         .expect("graphe");
     let p = &demo.project;
     for text in [
@@ -527,7 +527,7 @@ fn critere_13_path_of_et_resolve_sont_reciproques() {
     demo.project
         .add_column(feuille_vide, None, None, Column::new(ColumnType::Numeric))
         .expect("colonne vide");
-    demo.project.add_graph(demo.root, None).expect("graphe");
+    demo.project.add_graph(demo.root, None, Default::default()).expect("graphe");
     demo.project.add_note(demo.folder, None, "").expect("note");
 
     for id in demo.project.tree().walk_all() {

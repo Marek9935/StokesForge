@@ -279,6 +279,45 @@ ni `egui`, ni `typst`.
 
 ## Phase R3 — Ancrage dans le modèle (≈1,5 semaine)
 
+> **Statut : close le 2026-09-11.** `NodeKind::Graph { meta, spec: PlotSpec }`
+> dans `plotyx-core` ; persistance avec `#[serde(default)]`, `FORMAT_VERSION`
+> toujours à 1, vérifié par un test qui rejoue un fichier écrit *avant*
+> cette phase ; port de `resolve.py` en `plotyx-core::resolve` (18 tests) ;
+> `Project::add_graph` créé sur le patron d'`add_column`. 308 tests au
+> workspace (288 avant, +20), clippy sans avertissement, `plotyx-script`
+> inchangé et vert (21 tests).
+>
+> **Un neuvième crate est apparu, non prévu au découpage du §8
+> d'`architecture-choisie.md` : `plotyx-id`.** Faire porter `Graph` par un
+> `PlotSpec` demandait `plotyx-core → plotyx-plot`, alors que `plotyx-plot`
+> dépendait déjà de `plotyx-core` pour `NodeId` — un cycle Cargo direct,
+> vérifié empiriquement plutôt que supposé (`cargo check` refuse avec
+> *cyclic package dependency*). Résolu en descendant `NodeId` seul (pas
+> `IdAllocator`) dans un crate minimal sans dépendance, réexporté à
+> l'identique par `plotyx-core` : aucun appelant existant n'a rien à
+> changer, et `plotyx-plot` en ressort avec une frontière **plus** stricte
+> (`cargo tree` ne montre plus que `plotyx-id`). Détail complet en
+> `architecture-choisie.md` §8.
+>
+> **Les références brisées sont un état de première classe**, porté tel
+> quel depuis `resolve.py` : `ResolvedSeries` existe toujours, avec
+> `missing: Vec<MissingRole>` et `ok()`/`broken()` — jamais un panic, jamais
+> une série silencieusement vide. La tâche 3.6 le verrouille par deux tests
+> distincts : renommer la colonne référencée laisse la série résoluble (et
+> son libellé suit le nouveau nom) ; la supprimer produit `ok() == false`,
+> `missing == [Y]`, sans qu'aucune autre valeur de la série ne soit touchée.
+>
+> **Non porté, délibérément** : `ComputeCancelled` et `prepare()` de
+> `resolve.py`, l'annulation coopérative d'un calcul en fil de fond —
+> infrastructure qui n'existe pas côté Rust, le recalcul automatique
+> n'étant ni construit ni planifié (§11.4). `resolve_spec` couvre la
+> résolution ; le pré-calcul d'histogramme que `prepare()` intercalait reste
+> disponible séparément (`histogram`), à appeler par un futur renderer.
+>
+> **Écart assumé** : `Project::add_graph` prend désormais `spec: PlotSpec`
+> en paramètre obligatoire plutôt que de rester inchangée — cohérent avec
+> `add_column`, qui impose déjà son contenu à la construction.
+
 **Objectif** : un graphe du projet **porte** son spec, et le fichier le
 relit.
 

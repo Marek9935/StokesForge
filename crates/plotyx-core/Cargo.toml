@@ -9,6 +9,8 @@ workspace = true
 
 [dependencies]
 thiserror = "2"
+plotyx-id = { path = "../plotyx-id" }
+plotyx-plot = { path = "../plotyx-plot" }
 
 [dev-dependencies]
 proptest = "1"

@@ -2,7 +2,7 @@
 
 use std::ops::Deref;
 
-use plotyx_core::NodeId;
+use plotyx_id::NodeId;
 
 use crate::panel::PanelSpec;
 use crate::series::SeriesSpec;

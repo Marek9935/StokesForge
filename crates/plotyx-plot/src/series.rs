@@ -6,7 +6,7 @@
 
 use std::num::NonZeroU32;
 
-use plotyx_core::NodeId;
+use plotyx_id::NodeId;
 
 use crate::axis::AxisSide;
 use crate::style::{LineSpec, SymbolSpec};

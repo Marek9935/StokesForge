@@ -3,12 +3,23 @@
 //! dérive pas du modèle (voir la doc de crate) : ces fonctions sont le seul
 //! endroit où les deux mondes se rencontrent.
 
+use std::num::NonZeroU32;
+
 use plotyx_core::{
     Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError, Node, NodeId, NodeKind,
     ValueBlock, WindowMeta,
 };
+use plotyx_plot::{
+    AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec,
+    PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec,
+};
 
-use crate::schema::{KindRecord, NodeRecord, RoleRecord, TypeRecord, ValuesRecord};
+use crate::schema::{
+    AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord, LegendSpecRecord,
+    LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord,
+    RoleRecord, SeriesAxisRecord, SeriesSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
+    TypeRecord, ValuesRecord,
+};
 
 /// Erreur de décodage schéma → modèle qui n'est pas du ressort du cœur : une
 /// longueur de buffer flottant incohérente, ou une colonne dont le
@@ -22,6 +33,12 @@ pub(crate) enum ConvertError {
     BadFloatLength(usize),
     /// `Column::from_block` a refusé la paire (type, valeurs) reconstruite.
     Core(CoreError),
+    /// `histogram_bins` d'une série vaut 0 dans le fichier. `plotyx-plot`
+    /// exprime ce champ en `NonZeroU32` (décision R2 : zéro classe n'a pas de
+    /// réparation intéressante, autant refuser de le construire) — ne
+    /// survient jamais pour un fichier écrit par ce crate, signe d'un
+    /// fichier corrompu ou écrit par un outil tiers.
+    ZeroHistogramBins,
 }
 
 impl From<ColumnType> for TypeRecord {
@@ -70,6 +87,343 @@ impl From<RoleRecord> for ColumnRole {
             RoleRecord::None => ColumnRole::None,
         }
     }
+}
+
+// -- PlotSpec (phase R3) ------------------------------------------------
+
+impl From<AxisScale> for AxisScaleRecord {
+    fn from(value: AxisScale) -> Self {
+        match value {
+            AxisScale::Linear => AxisScaleRecord::Linear,
+            AxisScale::Log => AxisScaleRecord::Log,
+        }
+    }
+}
+
+impl From<AxisScaleRecord> for AxisScale {
+    fn from(value: AxisScaleRecord) -> Self {
+        match value {
+            AxisScaleRecord::Linear => AxisScale::Linear,
+            AxisScaleRecord::Log => AxisScale::Log,
+        }
+    }
+}
+
+impl From<PlotType> for PlotTypeRecord {
+    fn from(value: PlotType) -> Self {
+        match value {
+            PlotType::Scatter => PlotTypeRecord::Scatter,
+            PlotType::Line => PlotTypeRecord::Line,
+            PlotType::LineScatter => PlotTypeRecord::LineScatter,
+            PlotType::Bar => PlotTypeRecord::Bar,
+            PlotType::Histogram => PlotTypeRecord::Histogram,
+            PlotType::ErrorBar => PlotTypeRecord::ErrorBar,
+        }
+    }
+}
+
+impl From<PlotTypeRecord> for PlotType {
+    fn from(value: PlotTypeRecord) -> Self {
+        match value {
+            PlotTypeRecord::Scatter => PlotType::Scatter,
+            PlotTypeRecord::Line => PlotType::Line,
+            PlotTypeRecord::LineScatter => PlotType::LineScatter,
+            PlotTypeRecord::Bar => PlotType::Bar,
+            PlotTypeRecord::Histogram => PlotType::Histogram,
+            PlotTypeRecord::ErrorBar => PlotType::ErrorBar,
+        }
+    }
+}
+
+impl From<SeriesAxis> for SeriesAxisRecord {
+    fn from(value: SeriesAxis) -> Self {
+        match value {
+            SeriesAxis::Left => SeriesAxisRecord::Left,
+            SeriesAxis::Right => SeriesAxisRecord::Right,
+        }
+    }
+}
+
+impl From<SeriesAxisRecord> for SeriesAxis {
+    fn from(value: SeriesAxisRecord) -> Self {
+        match value {
+            SeriesAxisRecord::Left => SeriesAxis::Left,
+            SeriesAxisRecord::Right => SeriesAxis::Right,
+        }
+    }
+}
+
+impl From<LineStyle> for LineStyleRecord {
+    fn from(value: LineStyle) -> Self {
+        match value {
+            LineStyle::None => LineStyleRecord::None,
+            LineStyle::Solid => LineStyleRecord::Solid,
+            LineStyle::Dash => LineStyleRecord::Dash,
+            LineStyle::Dot => LineStyleRecord::Dot,
+            LineStyle::DashDot => LineStyleRecord::DashDot,
+        }
+    }
+}
+
+impl From<LineStyleRecord> for LineStyle {
+    fn from(value: LineStyleRecord) -> Self {
+        match value {
+            LineStyleRecord::None => LineStyle::None,
+            LineStyleRecord::Solid => LineStyle::Solid,
+            LineStyleRecord::Dash => LineStyle::Dash,
+            LineStyleRecord::Dot => LineStyle::Dot,
+            LineStyleRecord::DashDot => LineStyle::DashDot,
+        }
+    }
+}
+
+impl From<SymbolShape> for SymbolShapeRecord {
+    fn from(value: SymbolShape) -> Self {
+        match value {
+            SymbolShape::None => SymbolShapeRecord::None,
+            SymbolShape::Circle => SymbolShapeRecord::Circle,
+            SymbolShape::Square => SymbolShapeRecord::Square,
+            SymbolShape::Triangle => SymbolShapeRecord::Triangle,
+            SymbolShape::Diamond => SymbolShapeRecord::Diamond,
+            SymbolShape::Plus => SymbolShapeRecord::Plus,
+            SymbolShape::Cross => SymbolShapeRecord::Cross,
+        }
+    }
+}
+
+impl From<SymbolShapeRecord> for SymbolShape {
+    fn from(value: SymbolShapeRecord) -> Self {
+        match value {
+            SymbolShapeRecord::None => SymbolShape::None,
+            SymbolShapeRecord::Circle => SymbolShape::Circle,
+            SymbolShapeRecord::Square => SymbolShape::Square,
+            SymbolShapeRecord::Triangle => SymbolShape::Triangle,
+            SymbolShapeRecord::Diamond => SymbolShape::Diamond,
+            SymbolShapeRecord::Plus => SymbolShape::Plus,
+            SymbolShapeRecord::Cross => SymbolShape::Cross,
+        }
+    }
+}
+
+impl From<LegendPosition> for LegendPositionRecord {
+    fn from(value: LegendPosition) -> Self {
+        match value {
+            LegendPosition::TopLeft => LegendPositionRecord::TopLeft,
+            LegendPosition::TopRight => LegendPositionRecord::TopRight,
+            LegendPosition::BottomLeft => LegendPositionRecord::BottomLeft,
+            LegendPosition::BottomRight => LegendPositionRecord::BottomRight,
+        }
+    }
+}
+
+impl From<LegendPositionRecord> for LegendPosition {
+    fn from(value: LegendPositionRecord) -> Self {
+        match value {
+            LegendPositionRecord::TopLeft => LegendPosition::TopLeft,
+            LegendPositionRecord::TopRight => LegendPosition::TopRight,
+            LegendPositionRecord::BottomLeft => LegendPosition::BottomLeft,
+            LegendPositionRecord::BottomRight => LegendPosition::BottomRight,
+        }
+    }
+}
+
+impl From<&LineSpec> for LineSpecRecord {
+    fn from(value: &LineSpec) -> Self {
+        Self {
+            color: value.color.clone(),
+            style: value.style.into(),
+            width: value.width,
+        }
+    }
+}
+
+impl From<LineSpecRecord> for LineSpec {
+    fn from(value: LineSpecRecord) -> Self {
+        Self {
+            color: value.color,
+            style: value.style.into(),
+            width: value.width,
+        }
+    }
+}
+
+impl From<&SymbolSpec> for SymbolSpecRecord {
+    fn from(value: &SymbolSpec) -> Self {
+        Self {
+            shape: value.shape.into(),
+            size: value.size,
+            color: value.color.clone(),
+            edge_color: value.edge_color.clone(),
+        }
+    }
+}
+
+impl From<SymbolSpecRecord> for SymbolSpec {
+    fn from(value: SymbolSpecRecord) -> Self {
+        Self {
+            shape: value.shape.into(),
+            size: value.size,
+            color: value.color,
+            edge_color: value.edge_color,
+        }
+    }
+}
+
+impl From<&AxisSpec> for AxisSpecRecord {
+    fn from(value: &AxisSpec) -> Self {
+        Self {
+            label: value.label.clone(),
+            unit: value.unit.clone(),
+            scale: value.scale.into(),
+            auto_range: value.auto_range,
+            range_min: value.range_min,
+            range_max: value.range_max,
+            grid: value.grid,
+            visible: value.visible,
+            inverted: value.inverted,
+        }
+    }
+}
+
+impl From<AxisSpecRecord> for AxisSpec {
+    fn from(value: AxisSpecRecord) -> Self {
+        Self {
+            label: value.label,
+            unit: value.unit,
+            scale: value.scale.into(),
+            auto_range: value.auto_range,
+            range_min: value.range_min,
+            range_max: value.range_max,
+            grid: value.grid,
+            visible: value.visible,
+            inverted: value.inverted,
+        }
+    }
+}
+
+impl From<&LegendSpec> for LegendSpecRecord {
+    fn from(value: &LegendSpec) -> Self {
+        Self {
+            visible: value.visible,
+            position: value.position.into(),
+        }
+    }
+}
+
+impl From<LegendSpecRecord> for LegendSpec {
+    fn from(value: LegendSpecRecord) -> Self {
+        Self {
+            visible: value.visible,
+            position: value.position.into(),
+        }
+    }
+}
+
+/// `SeriesSpec` → enregistrement. Infaillible : le modèle en mémoire est
+/// toujours représentable (même patron que `kind_to_record`).
+fn series_spec_to_record(series: &SeriesSpec) -> SeriesSpecRecord {
+    SeriesSpecRecord {
+        y: series.y.raw(),
+        x: series.x.map(NodeId::raw),
+        x_error: series.x_error.map(NodeId::raw),
+        y_error: series.y_error.map(NodeId::raw),
+        plot_type: series.plot_type.into(),
+        name: series.name.clone(),
+        line: (&series.line).into(),
+        symbol: (&series.symbol).into(),
+        axis: series.axis.into(),
+        visible: series.visible,
+        show_in_legend: series.show_in_legend,
+        bar_width: series.bar_width,
+        histogram_bins: series.histogram_bins.get(),
+    }
+}
+
+/// Enregistrement → `SeriesSpec`. Le seul point de tout l'arbre `PlotSpec`
+/// qui peut échouer : `histogram_bins` doit être non nul
+/// ([`ConvertError::ZeroHistogramBins`]).
+fn record_to_series_spec(record: SeriesSpecRecord) -> Result<SeriesSpec, ConvertError> {
+    let histogram_bins =
+        NonZeroU32::new(record.histogram_bins).ok_or(ConvertError::ZeroHistogramBins)?;
+    Ok(SeriesSpec {
+        y: NodeId::from_raw(record.y),
+        x: record.x.map(NodeId::from_raw),
+        x_error: record.x_error.map(NodeId::from_raw),
+        y_error: record.y_error.map(NodeId::from_raw),
+        plot_type: record.plot_type.into(),
+        name: record.name,
+        line: record.line.into(),
+        symbol: record.symbol.into(),
+        axis: record.axis.into(),
+        visible: record.visible,
+        show_in_legend: record.show_in_legend,
+        bar_width: record.bar_width,
+        histogram_bins,
+    })
+}
+
+/// `PanelSpec` → enregistrement. Infaillible.
+fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
+    PanelSpecRecord {
+        title: panel.title.clone(),
+        series: panel.series.iter().map(series_spec_to_record).collect(),
+        bottom: (&panel.bottom).into(),
+        left: (&panel.left).into(),
+        right: (&panel.right).into(),
+        top: (&panel.top).into(),
+        legend: (&panel.legend).into(),
+        row: panel.row as u64,
+        column: panel.column as u64,
+    }
+}
+
+/// Enregistrement → `PanelSpec`. Propage l'échec de la première série
+/// fautive, s'il y en a une.
+fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertError> {
+    let series = record
+        .series
+        .into_iter()
+        .map(record_to_series_spec)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(PanelSpec {
+        title: record.title,
+        series,
+        bottom: record.bottom.into(),
+        left: record.left.into(),
+        right: record.right.into(),
+        top: record.top.into(),
+        legend: record.legend.into(),
+        row: record.row as usize,
+        column: record.column as usize,
+    })
+}
+
+/// `PlotSpec` → enregistrement. Infaillible.
+pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
+    PlotSpecRecord {
+        title: spec.title.clone(),
+        panels: spec.panels.iter().map(panel_spec_to_record).collect(),
+        background: spec.background.clone(),
+        format_version: spec.format_version,
+    }
+}
+
+/// Enregistrement → `PlotSpec`. `panels` vide n'est pas un échec : c'est le
+/// même cas que `Panels::new(Vec::new())` côté `plotyx-plot`, qui fournit un
+/// panneau par défaut plutôt que de refuser — la conversion `.into()` sur
+/// `Vec<PanelSpec>` le fait déjà.
+pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, ConvertError> {
+    let panels = record
+        .panels
+        .into_iter()
+        .map(record_to_panel_spec)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(PlotSpec {
+        title: record.title,
+        panels: panels.into(),
+        background: record.background,
+        format_version: record.format_version,
+    })
 }
 
 /// Encode un buffer de `f64` en octets bruts little-endian, 8 octets par
@@ -125,9 +479,10 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                 version: column.version(),
             }
         }
-        NodeKind::Graph { meta } => KindRecord::Graph {
+        NodeKind::Graph { meta, spec } => KindRecord::Graph {
             label: meta.label.clone(),
             comment: meta.comment.clone(),
+            spec: plot_spec_to_record(spec),
         },
         NodeKind::Matrix { meta } => KindRecord::Matrix {
             label: meta.label.clone(),
@@ -186,8 +541,13 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 .map_err(ConvertError::Core)?;
             NodeKind::Column(column)
         }
-        KindRecord::Graph { label, comment } => NodeKind::Graph {
+        KindRecord::Graph {
+            label,
+            comment,
+            spec,
+        } => NodeKind::Graph {
             meta: WindowMeta { label, comment },
+            spec: record_to_plot_spec(spec)?,
         },
         KindRecord::Matrix { label, comment } => NodeKind::Matrix {
             meta: WindowMeta { label, comment },
