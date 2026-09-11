@@ -197,6 +197,58 @@ bougé et le remplacement n'est pas neutre.
 
 ## Phase R2 — `plotyx-plot`, le spec neutre (≈1,5 semaine)
 
+> **Statut : close le 2026-09-11.** Crate `crates/plotyx-plot/` (1 307
+> lignes), 6 énumérations et 7 structures portées de
+> `legacy-python/src/plotyx/plot/spec.py`. **Critère de sortie tenu** :
+> `cargo tree -p plotyx-plot` ne montre que `plotyx-core`. 288 tests au
+> workspace (257 avant, +31), clippy sans avertissement ; hors du nouveau
+> crate, seules deux lignes ont bougé (le membre dans le `Cargo.toml` du
+> workspace, et le `Cargo.lock`).
+>
+> **Les références de colonnes sont des `NodeId`** — la décision §11.1
+> d'`architecture-choisie.md` s'applique ici, et le port l'a rendue facile :
+> la version Python utilisait déjà des « clés de registre » opaques, pas des
+> noms.
+>
+> **Le `__post_init__` a presque entièrement disparu dans les types.**
+> Quatorze validations sont devenues invérifiables : les six `_coerce` vers
+> des énumérations (aucune chaîne n'entre dans ce crate), les conversions
+> numériques, `y_key` obligatoire (`y: NodeId` non optionnel), et surtout
+> l'axe de rattachement — `SeriesAxis` n'a que deux variantes là où la
+> version Python vérifiait à l'exécution que `AxisSide` valait gauche ou
+> droite. Deux validations disparaissent **avec changement de comportement
+> assumé** : `histogram_bins` remonté de 0 à 1 devient un `NonZeroU32` (un
+> appelant qui passe 0 a un bug, autant qu'il ne compile pas), et les
+> `row`/`column` négatifs ramenés à 0 deviennent des `usize`. Une seule
+> survit, faute d'être exprimable : « au moins un panneau », tenue par un
+> newtype `Panels` dont aucune opération publique ne peut vider le contenu.
+>
+> **L'identifiant de série est supprimé**, remplacé par un adressage par
+> position (`SeriesRef { panel, index }`). Il n'existait que pour `edit.py`,
+> hors périmètre, et le porter aurait imposé `uuid` ou `rand` — donc cassé
+> le critère de sortie. *Point à surveiller* : si l'UI doit un jour retenir
+> une sélection **par-dessus** une édition qui supprime une autre série,
+> l'indice ne suffira plus ; la parade est de faire allouer l'identifiant
+> par la session, qui possède déjà l'`IdAllocator`, plutôt que de
+> réintroduire un générateur dans ce crate. Un champ à ajouter, pas une
+> forme à changer.
+>
+> **Dix-huit tests Python sur 33 ne sont pas transposés**, et la liste
+> figure en tête de `tests/plot_spec.rs` pour que la question ne se repose
+> pas : onze couvrent `edit.py` (hors programme), les sept autres couvrent
+> une sérialisation qui n'existe pas ici ou une validation devenue
+> impossible par construction. Deux propriétés de la section « édition » ont
+> quand même été reprises parce qu'elles portaient sur le spec :
+> l'immuabilité et le cycle de la palette.
+>
+> **Écarts de comportement par rapport à Python**, tous voulus : `0` n'est
+> plus remonté à `1` pour les classes d'histogramme ; les positions
+> négatives ne sont plus ramenées à zéro ; `bar_width = 0.0` devient
+> `Option::None` (0.0 était une largeur légale, donc une sentinelle
+> ambiguë) ; aucune valeur textuelle n'est plus acceptée là où Python
+> coerçait `"scatter"` — cette conversion appartient à la persistance,
+> comme pour `Column`.
+
 **Objectif** : le `PlotSpec` en Rust, **sans dépendance de dessin**.
 
 | # | Tâche | Livrable |
