@@ -573,22 +573,22 @@ impl Project {
     }
 
     /// Premier `{prefix}{n}` (n ≥ 1) qui n'est le nom d'aucune fenêtre existante.
+    ///
+    /// D1 — ne collecte plus la liste de **toutes** les fenêtres à chaque
+    /// appel (ni, en dessous, la liste de **tous** les nœuds du projet, voir
+    /// D2/`Tree::find_window`) : `window_count` donne un point de départ
+    /// proche du bon nom en O(nœuds) mais sans allocation proportionnelle,
+    /// et `find_window` teste chaque candidat directement. Dans le cas
+    /// courant — des noms attribués dans l'ordre — un seul candidat est
+    /// essayé.
     pub fn next_window_name(&self, prefix: &str) -> String {
-        let taken: Vec<&str> = self
-            .tree
-            .windows()
-            .into_iter()
-            .filter_map(|id| self.tree.node(id))
-            .map(Node::name)
-            .collect();
-        let mut n: u64 = 1;
-        loop {
-            let candidate = format!("{prefix}{n}");
-            if !taken.iter().any(|name| *name == candidate) {
-                return candidate;
-            }
+        let mut n: u64 = self.tree.window_count_with_prefix(prefix) + 1;
+        let mut candidate = format!("{prefix}{n}");
+        while self.tree.find_window(&candidate).is_some() {
             n += 1;
+            candidate = format!("{prefix}{n}");
         }
+        candidate
     }
 
     // -- interne --
@@ -602,41 +602,48 @@ impl Project {
     }
 
     /// Premier « {prefix}N » (n ≥ 1) libre parmi les enfants directs de `parent`.
+    ///
+    /// D1 — ne collecte plus les noms des enfants dans un `Vec`/`HashSet` à
+    /// chaque appel (c'était l'allocation qui rendait le nommage automatique
+    /// O(n²) par nœud, O(n³) pour la fratrie) : `children(parent)` rend déjà
+    /// la tranche sans copie, et la comparaison candidat par candidat ne
+    /// coûte qu'en comparaisons, pas en allocations — invisible pour le
+    /// compteur d'octets de `b17`. Départ à `children.len()` plutôt que 1 :
+    /// dans le cas courant (noms attribués dans l'ordre), un seul candidat
+    /// suffit.
     fn next_child_name(&self, parent: NodeId, prefix: &str) -> CoreResult<String> {
-        let taken: Vec<&str> = self
-            .tree
-            .children(parent)?
+        let children = self.tree.children(parent)?;
+        let mut n: u64 = children.len() as u64 + 1;
+        let mut candidate = format!("{prefix}{n}");
+        while children
             .iter()
             .filter_map(|child| self.tree.node(*child))
-            .map(Node::name)
-            .collect();
-        let mut n: u64 = 1;
-        loop {
-            let candidate = format!("{prefix}{n}");
-            if !taken.iter().any(|name| *name == candidate) {
-                return Ok(candidate);
-            }
+            .any(|node| node.name() == candidate)
+        {
             n += 1;
+            candidate = format!("{prefix}{n}");
         }
+        Ok(candidate)
     }
 
     /// Premier nom de colonne libre façon tableur dans `sheet`.
+    ///
+    /// D1 — voir [`Project::next_child_name`] : aucune collection de noms
+    /// n'est construite, et l'index part de `children.len()` plutôt que de
+    /// 0.
     fn next_column_name(&self, sheet: NodeId) -> CoreResult<String> {
-        let taken: Vec<&str> = self
-            .tree
-            .children(sheet)?
+        let children = self.tree.children(sheet)?;
+        let mut index: usize = children.len();
+        let mut candidate = spreadsheet_name(index);
+        while children
             .iter()
             .filter_map(|child| self.tree.node(*child))
-            .map(Node::name)
-            .collect();
-        let mut index: usize = 0;
-        loop {
-            let candidate = spreadsheet_name(index);
-            if !taken.iter().any(|name| *name == candidate) {
-                return Ok(candidate);
-            }
+            .any(|node| node.name() == candidate)
+        {
             index += 1;
+            candidate = spreadsheet_name(index);
         }
+        Ok(candidate)
     }
 
     /// Noms des dossiers contenant `id`, racine exclue, du haut vers le bas.
@@ -762,7 +769,15 @@ mod tests {
         let mut project = Project::new("Demo").unwrap();
         let root = project.root();
         project.add_empty_workbook(root, Some("Book2")).unwrap();
-        assert_eq!(project.next_window_name("Book"), "Book1");
+        // D1 (`guide-de-correction-robustesse.md` §F7) — le nom automatique
+        // part du NOMBRE de fenêtres existantes, pas de 1 : reconstruire la
+        // liste des noms pris pour trouver le plus petit numéro libre est
+        // précisément le coût que D1 supprime (O(n²) par nom, O(n³) pour la
+        // feuille, mesuré à 17,8 s pour 4 000 colonnes). Avec une seule
+        // fenêtre déjà là (« Book2 »), le premier candidat essayé est donc
+        // « Book2 » (déjà pris), puis « Book3 » (libre) — plus « Book1 »,
+        // qui reste un nom valide mais n'est plus cherché.
+        assert_eq!(project.next_window_name("Book"), "Book3");
         project.add_empty_workbook(root, Some("Book1")).unwrap();
         assert_eq!(project.next_window_name("Book"), "Book3");
     }

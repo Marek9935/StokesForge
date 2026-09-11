@@ -1,0 +1,50 @@
+[package]
+name = "plotyx-robustesse"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+description = "Banc de robustesse : reproductions de pannes et garde-fous de non-régression pour le modèle, la persistance, l'historique, l'acteur de session et le pont Python."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Même règle que `plotyx-python` et `plotyx-script` : tout ce qui touche à
+# PyO3 est derrière cette feature, absente de `default`. Sans elle, les deux
+# batteries de frontière (`b7`, `b9`) compilent vides et le banc reste vert
+# sur une machine sans interpréteur vendorisé.
+python = ["dep:plotyx-script", "dep:plotyx-python"]
+
+[dependencies]
+plotyx-core = { path = "../plotyx-core" }
+plotyx-plot = { path = "../plotyx-plot" }
+plotyx-commands = { path = "../plotyx-commands" }
+plotyx-session = { path = "../plotyx-session" }
+plotyx-persistence = { path = "../plotyx-persistence" }
+plotyx-script = { path = "../plotyx-script", optional = true, features = ["python"] }
+plotyx-python = { path = "../plotyx-python", optional = true, features = ["python"] }
+
+[dev-dependencies]
+# La coquille UI, pour les batteries qui éprouvent la traduction
+# cellule ↔ texte (`AppState` ne dépend pas d'egui : voir `tests/shell.rs`).
+plotyx-app = { path = "../plotyx-app" }
+proptest = "1"
+tempfile = "3"
+rmp-serde = "1.3.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_bytes = "0.11.19"
+
+# Sonde d'allocation : elle provoque un `abort()` volontaire (reproduction B3)
+# et ne peut donc pas vivre dans un test — un échec d'allocation Rust n'est pas
+# une panique rattrapable, il emporterait le binaire de test entier.
+[[bin]]
+name = "plotyx-sonde-alloc"
+path = "src/bin/sonde_alloc.rs"
+
+# Sonde de pile : un débordement de pile n'est pas une panique non plus — le
+# runtime écrit `has overflowed its stack` et appelle `abort()`. Même raison
+# que ci-dessus : cela ne peut pas vivre dans un binaire de test.
+[[bin]]
+name = "plotyx-sonde-pile"
+path = "src/bin/sonde_pile.rs"

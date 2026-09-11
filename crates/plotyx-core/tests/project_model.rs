@@ -185,7 +185,16 @@ fn critere_3_noms_de_colonnes_facon_tableur() {
         .expect("colonne");
     assert_eq!(name_of(&project, id), "AA");
 
-    // Un nom déjà pris est sauté.
+    // Un nom déjà pris est sauté — jamais réattribué, même s'il occupe un
+    // rang antérieur au nombre de colonnes déjà présentes. D1
+    // (`guide-de-correction-robustesse.md` §F7) fait partir la recherche du
+    // NOMBRE de colonnes déjà présentes plutôt que de « A » : retrouver le
+    // plus petit trou libre coûterait de reconstruire la liste des noms pris
+    // à chaque colonne ajoutée, précisément le coût en O(n³) que D1
+    // supprime. Une seule colonne existe (« B ») quand la première
+    // automatique est demandée, donc le premier candidat essayé est « B »
+    // (déjà pris), puis « C » (libre) — pas « A », qui reste un nom valide
+    // mais n'est plus cherché.
     let (mut project, sheet, _) = sheet_with(&[]);
     project
         .add_column(sheet, None, Some("B"), Column::new(ColumnType::Numeric))
@@ -193,11 +202,11 @@ fn critere_3_noms_de_colonnes_facon_tableur() {
     let first = project
         .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
         .expect("colonne");
-    assert_eq!(name_of(&project, first), "A");
+    assert_eq!(name_of(&project, first), "C");
     let second = project
         .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
         .expect("colonne");
-    assert_eq!(name_of(&project, second), "C");
+    assert_eq!(name_of(&project, second), "D");
 }
 
 #[test]

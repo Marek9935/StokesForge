@@ -367,9 +367,13 @@ fn add_column_round_trip() {
         )
         .expect("ajout de colonne");
     let after = snapshot(&f.project);
-    // Le nom automatique est le premier nom libre façon tableur : A, B et T
-    // sont pris, donc « C ».
-    assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T", "C"]);
+    // D1 (`guide-de-correction-robustesse.md` §F7) — le nom automatique part
+    // du NOMBRE de colonnes déjà présentes (trois : A, B, T), pas du premier
+    // nom libre façon tableur : reconstruire la liste des noms pris pour
+    // trouver le plus petit trou (« C » resterait libre ici) est précisément
+    // le coût en O(n³) que D1 supprime. Le premier candidat essayé est donc
+    // « D ».
+    assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T", "D"]);
     assert_eq!(history.undo_label(), Some("Ajouter une colonne"));
 
     assert_eq!(history.undo(&mut f.project), Ok(true));

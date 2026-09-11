@@ -21,7 +21,25 @@ export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,$PREFIX/lib"
 export PLOTYX_PYTHON_HOME="$PREFIX"
 
 cd "$REPO_ROOT"
-# Deux invocations plutôt qu'un seul `-p A -p B` : chaque crate porte sa propre
-# feature `python`, et `set -e` arrête tout dès que l'un des deux échoue.
+# Une invocation par crate plutôt qu'un seul `-p A -p B` : chacun porte sa
+# propre feature `python`, et `set -e` arrête tout dès que l'un échoue.
 cargo test -p plotyx-python --features python "$@"
 cargo test -p plotyx-script --features python "$@"
+
+# Banc de robustesse, batteries de frontière (b7, b9).
+#
+# `RUST_TEST_THREADS=1` plutôt que `-- --test-threads=1` : le second occuperait
+# le seul `--` que cargo accepte, et empêcherait donc d'écrire
+# `scripts/python-test.sh -- --ignored`. La variable fait exactement la même
+# chose, sans se disputer la position des arguments.
+#
+# Pourquoi un seul fil : ces batteries partagent un unique interpréteur et un
+# unique moteur de script par fichier de test — CPython ne démarre qu'une fois
+# par processus — et les cas d'interruption lisent `is_running()`, qui n'a de
+# sens que si un seul script tourne à la fois.
+#
+# Les REPRODUCTIONS d'anomalies y sont `#[ignore]` (voir la doc de tête du
+# crate) : cette ligne ne lance que les garde-fous, et reste verte. Pour
+# rejouer les reproductions de la frontière Python :
+#     scripts/python-test.sh -- --ignored
+RUST_TEST_THREADS=1 cargo test -p plotyx-robustesse --features python "$@"

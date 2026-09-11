@@ -51,6 +51,15 @@ clippy:
     - rustup component add clippy
     - cargo clippy --workspace --all-targets -- -D warnings
 
+# `cargo test --workspace` couvre désormais aussi `plotyx-robustesse` (banc de
+# robustesse, ajouté le 2026-09-11). Attention à ce que cela recouvre : ce
+# crate porte DEUX natures de test, et celle-ci n'en lance qu'une.
+#
+#   - les GARDE-FOUS passent et doivent continuer à passer — ils sont lancés
+#     ici, comme n'importe quel test du dépôt ;
+#   - les REPRODUCTIONS d'anomalies échouent délibérément. Elles sont
+#     `#[ignore]`, donc PAS lancées ici : c'est le travail `robustesse`
+#     ci-dessous qui s'en charge.
 test:
   stage: check
   image: rust:1
@@ -58,11 +67,46 @@ test:
   script:
     - cargo test --workspace
 
+# Reproductions d'anomalies du banc de robustesse — les `#[ignore]` de
+# `plotyx-robustesse`, une par anomalie consignée dans les rapports
+# `docs/rustrewrite/rapport-robustesse-2026-09-11.md` (A1 à C2) et
+# `docs/rustrewrite/rapport-robustesse-2026-09-11-suite.md` (A7 à D2, seize
+# anomalies), sous
+# l'identifiant que porte leur attribut (A1, B2, …).
+#
+# `allow_failure: true`, et ce n'est pas un aveu de faiblesse : ces tests
+# échouent PAR CONSTRUCTION tant que l'anomalie qu'ils décrivent n'est pas
+# corrigée. Les rendre bloquants mettrait le pipeline au rouge en permanence,
+# ce qui lui retirerait toute valeur de signal ; les retirer ferait perdre la
+# reproduction. Non bloquant, le travail garde les deux : la liste reste sous
+# les yeux à chaque pipeline, et son passage au vert est l'événement qu'on
+# attend.
+#
+# Pas de `when: manual`, contrairement à `test-python` : celui-ci est du Rust
+# pur, il ne vendorise rien et dure quelques secondes.
+#
+# **Quand une reproduction passe au vert**, c'est que le correctif est bon :
+# retirer son `#[ignore]` pour que le garde-fou prenne le relais dans le
+# travail `test`. Le nombre de rouges est la mesure d'avancement ; l'ordre
+# dans lequel les traiter est dans
+# `docs/rustrewrite/guide-de-correction-robustesse.md`.
+robustesse:
+  stage: check
+  image: rust:1
+  <<: *rust-cache
+  allow_failure: true
+  script:
+    - cargo test -p plotyx-robustesse -- --ignored
+
 # Seul travail qui compile et teste le pont Python (feature `python`, absente
 # de `default`) : vendorise l'interpréteur CPython figé + numpy épinglé,
 # génère la configuration PyO3, puis lance `cargo test` sur `plotyx-python` et
 # `plotyx-script` contre cet interpréteur — exactement ce que fait
-# `scripts/python-test.sh`, réutilisé ici plutôt que dupliqué.
+# `scripts/python-test.sh`, réutilisé ici plutôt que dupliqué — lequel lance
+# aussi, depuis le 2026-09-11, les deux batteries de frontière du banc de
+# robustesse (`plotyx-robustesse`, feature `python`). Là encore, seuls les
+# garde-fous : les reproductions de la frontière Python restent `#[ignore]` et
+# se rejouent par `scripts/python-test.sh -- --ignored`.
 #
 # Manuel (`when: manual`) et non bloquant (`allow_failure: true`) pour deux
 # raisons : `scripts/python-vendor.sh` télécharge une archive d'une centaine

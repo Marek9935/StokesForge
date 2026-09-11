@@ -147,9 +147,20 @@ pub(crate) fn run(
                 let _ = reply.send(snapshot);
             }
             Request::Save { path, reply } => {
-                // Ne touche ni au projet ni à l'historique : la révision
-                // n'avance pas, sauvegarder ne change pas le modèle.
-                let outcome = plotyx_persistence::save(&project, &path).map_err(SessionError::from);
+                // A11 — palliatif déclaré (guide-de-correction-robustesse.md
+                // §F6) : recopie de la garde de `load_project`, pas une
+                // réponse à « lesquelles des huit requêtes une macro ouverte
+                // doit-elle suspendre ? ». Sans elle, sauvegarder pendant une
+                // macro écrit sur le disque un état qu'un `abort_macro`
+                // ultérieur défera en mémoire — le fichier garde alors ce que
+                // l'annulation a effacé. Ne touche ni au projet ni à
+                // l'historique : la révision n'avance pas, sauvegarder ne
+                // change pas le modèle.
+                let outcome = if history.in_macro() {
+                    Err(SessionError::Command(CommandError::MacroOpen("save")))
+                } else {
+                    plotyx_persistence::save(&project, &path).map_err(SessionError::from)
+                };
                 let _ = reply.send(outcome);
             }
             Request::Load { path, reply } => {
@@ -193,7 +204,10 @@ fn build_snapshot(project: &Project, history: &History, revision: Revision) -> S
         tree: Arc::clone(project.tree()),
         revision,
         history: HistoryState {
-            can_undo: history.can_undo(),
+            // C6 — pendant une macro, `undo` est toujours refusé
+            // (`Err(MacroOpen)`) quoi que dise la pile : l'instantané ne doit
+            // pas annoncer une annulation que l'acteur refusera.
+            can_undo: history.can_undo() && !history.in_macro(),
             can_redo: history.can_redo(),
             undo_label: history.undo_label().map(str::to_string),
             redo_label: history.redo_label().map(str::to_string),

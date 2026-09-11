@@ -343,11 +343,78 @@ impl Tree {
             .collect()
     }
 
+    /// Nombre de fenêtres dont le nom commence par `prefix`.
+    ///
+    /// D1/D2 — même parcours que [`Tree::find_window`] : sert à `Project::
+    /// next_window_name` à deviner un point de départ proche du bon nom,
+    /// sans passer par `windows()` (qui, lui, retient effectivement la liste
+    /// et alloue en conséquence — nécessaire là où l'appelant veut les
+    /// identifiants, pas ici où seul le compte importe). Compté **par
+    /// préfixe** et non toutes fenêtres confondues : un projet avec deux
+    /// classeurs (« Book1 », « Book2 ») et zéro graphe doit proposer
+    /// « Graph1 » pour le premier graphe, pas « Graph3 ».
+    pub fn window_count_with_prefix(&self, prefix: &str) -> u64 {
+        let mut count = 0u64;
+        self.visit_windows(|id| {
+            if self.node(id).is_some_and(|node| node.name().starts_with(prefix)) {
+                count += 1;
+            }
+            false
+        });
+        count
+    }
+
     /// Fenêtre portant ce nom (unique à l'échelle du projet), ou `None`.
+    ///
+    /// D2 (option 2, `guide-de-correction-robustesse.md` §F7) — parcours
+    /// direct qui s'arrête au premier nœud trouvé, au lieu de passer par
+    /// `windows()` → `walk_all()`, qui allouaient un `Vec` de **tous** les
+    /// nœuds du projet à chaque résolution de chemin.
     pub fn find_window(&self, name: &str) -> Option<NodeId> {
-        self.windows()
-            .into_iter()
-            .find(|id| self.node(*id).is_some_and(|node| node.name() == name))
+        let mut found = None;
+        self.visit_windows(|id| {
+            let is_match = self.node(id).is_some_and(|node| node.name() == name);
+            if is_match {
+                found = Some(id);
+            }
+            is_match
+        });
+        found
+    }
+
+    /// Visite chaque fenêtre du projet, sans jamais empiler la totalité des
+    /// enfants d'un nœud d'un coup. `on_window` rend `true` pour arrêter le
+    /// parcours dès cette fenêtre (utilisé par `find_window`), `false` pour
+    /// continuer.
+    ///
+    /// Une fenêtre ne contient jamais d'autre fenêtre (seuls les dossiers en
+    /// contiennent) : il suffit donc de descendre dans les enfants qui sont
+    /// des dossiers, et de visiter les autres sur place sans les empiler. Sur
+    /// un dossier qui contient N fenêtres et aucun sous-dossier — le cas
+    /// courant, une racine qui contient tous les classeurs —, la pile ne
+    /// grandit jamais : `stack.extend` sur tous les enfants d'un coup (la
+    /// première version de ce correctif) aurait alloué un tampon de taille N
+    /// même en s'arrêtant à la première fenêtre visitée, ce qu'une visite
+    /// nœud par nœud ne fait pas.
+    fn visit_windows(&self, mut on_window: impl FnMut(NodeId) -> bool) {
+        let mut stack = vec![self.root];
+        while let Some(current) = stack.pop() {
+            let Some(node) = self.node(current) else {
+                continue;
+            };
+            for &child in node.children() {
+                let Some(child_node) = self.node(child) else {
+                    continue;
+                };
+                if child_node.kind().is_window() {
+                    if on_window(child) {
+                        return;
+                    }
+                } else if child_node.kind().is_folder() {
+                    stack.push(child);
+                }
+            }
+        }
     }
 
     /// Enfant direct de `parent` portant ce nom, ou `None`.

@@ -359,7 +359,10 @@ pub fn resolve_spec<'s>(tree: &Tree, spec: &'s PlotSpec) -> ResolvedPlot<'s> {
 /// `None` = déduite), donc pas de test `> 0` à faire ici pour le distinguer
 /// d'une valeur explicite de zéro.
 pub fn bar_width(x: Option<&[f64]>, requested: Option<f64>) -> f64 {
-    if let Some(requested) = requested {
+    // A6 — une largeur demandée absurde (négative, nulle, NaN ou infinie)
+    // n'est pas une largeur : on la traite comme absente et on retombe sur
+    // la déduction, plutôt que de la renvoyer telle quelle au renderer.
+    if let Some(requested) = requested.filter(|w| w.is_finite() && *w > 0.0) {
         return requested;
     }
     let Some(x) = x else {

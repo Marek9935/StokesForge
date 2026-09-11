@@ -2629,6 +2629,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "plotyx-robustesse"
+version = "0.0.0"
+dependencies = [
+ "plotyx-app",
+ "plotyx-commands",
+ "plotyx-core",
+ "plotyx-persistence",
+ "plotyx-plot",
+ "plotyx-python",
+ "plotyx-script",
+ "plotyx-session",
+ "proptest",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "tempfile",
+]
+
+[[package]]
 name = "plotyx-script"
 version = "0.0.0"
 dependencies = [
