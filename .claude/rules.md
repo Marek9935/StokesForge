@@ -53,6 +53,13 @@ familles de témoins avant. `roadmap-rendu.md` dit ce qui appartient à R6
 (PDF), R7 (interaction, rognage réel) ou R8 (Typst) plutôt qu'à maintenant.
 Ignorer : `commands`, `persistence`, `python`, `script`.
 
+Choix de police (`plotyx-render/src/fonts.rs`, ajout ponctuel du
+2026-09-13, hors R0-R8) : trois paires embarquées (Libertinus, Fira, Noto —
+fichiers dans `vendor/fonts/`, voir son `README.md`) ou une police système
+par son nom, avec repli sur Noto. `text::font_definitions` en est le point
+d'entrée par défaut ; l'invariant de mesure partagée du §4.3 ne change pas.
+Relire `architecture-choisie.md` §7 avant d'y retoucher.
+
 ## Robustesse — `plotyx-robustesse` (tests `b1`…`b20`)
 Charger : le crate ciblé par le test (ne pas ouvrir les 20 fichiers de
 `tests/`) + `plotyx-robustesse/src/lib.rs` (index des batteries) +

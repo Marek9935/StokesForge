@@ -503,11 +503,54 @@ mais :
 - la **latence de compilation par formule inédite**, à **mesurer avant**
   d'engager du code de production (c'est le point ouvert n°6 ci-dessous).
 
-**Fonts** : décision inchangée — deux sets possibles, *Libertinus Serif +
+**Fonts** : ~~décision inchangée — deux sets possibles, *Libertinus Serif +
 Libertinus Math* (cohérence classique/scientifique ; Libertinus Math à
 embarquer à la main, `typst-kit` n'embarque nativement que Libertinus
 Serif) ou *Liberation Sans + Noto Sans Math* (look « Arial »). Fonts
-embarquées uniquement, scan système désactivé.
+embarquées uniquement, scan système désactivé.~~
+
+**Remplacé le 2026-09-13** par une tâche ponctuelle d'embed de polices, hors
+séquencement R0-R8 (elle ne construit pas Typst — R8 le fait toujours — mais
+prépare les fonts Math qu'il consommera). Ce qui change, ce qui reste vrai :
+
+- **Trois paires, pas deux, et Libertinus *Sans*, pas *Serif***. La
+  distinction texte/Math n'était pas encore posée : ce paragraphe visait
+  encore l'ancien modèle « une police classique pour la prose, Typst pour le
+  reste ». Le renderer réel (§4.3) n'a pas de « prose » séparée du reste —
+  tout le texte ordinaire (graduations, titres) passe par les fonts egui,
+  jamais par Typst — donc la police de texte embarquée doit être une
+  sans-serif cohérente avec le reste de l'UI, pas une serif de lecture
+  longue. Les trois paires retenues, embarquées dans `plotyx-render`
+  (`crates/plotyx-render/src/fonts.rs`, fichiers dans `vendor/fonts/`) :
+  Libertinus Sans + Libertinus Math, Fira Sans + Fira Math, Noto Sans +
+  Noto Sans Math.
+- **« Fonts embarquées uniquement, scan système désactivé » devient « fonts
+  embarquées par défaut, système en option »**. La demande utilisateur du
+  2026-09-13 est explicite : « il doit toujours être possible de
+  récupérer/utiliser les polices système à la place ». `FontChoice::System`
+  désigne une police par son nom ; introuvable, elle replie silencieusement
+  sur Noto plutôt que de perdre le texte ou de remonter une erreur — le même
+  principe que R6 a déjà appliqué côté export (§5, `plotyx-render-svg::pdf`).
+  Le scan système n'est donc pas désactivé : il est optionnel, au choix de
+  l'appelant, et jamais automatique (pas de détection implicite de la police
+  du système d'exploitation).
+- **Noto Sans / Noto Sans Math est le défaut ET le repli**, un rôle double
+  qu'aucune des deux formulations écartées ne portait. Sans rien spécifier,
+  c'est Noto ; une police système demandée et absente retombe aussi sur
+  Noto.
+- **Ce qui reste vrai** : les polices Math n'ont toujours aucun appelant —
+  Typst n'existe pas encore dans ce dépôt (R8) — et cette tâche ne construit
+  aucun rendu Typst. Elle se contente d'exposer les six fichiers (trois
+  paires) en octets bruts, prêts à être consommés le jour venu, sans qu'un
+  futur R8 ait à les retélécharger ou à revalider leur licence.
+- **Hors périmètre, par choix explicite** : `plotyx_plot::PlotSpec` ne gagne
+  aucun champ de police. La demande évoque « une police définie par
+  l'utilisateur ou le projet », mais y répondre toucherait au format `.plx`
+  persisté — une décision plus large que cette tâche n'a pas mandat de
+  prendre (`cahier-des-charges-technique.md`, `format-fichier-plx.md`,
+  options déjà écartées). Le mécanisme de résolution
+  (`plotyx_render::fonts::resolve`) est écrit pour qu'un futur champ n'ait
+  qu'à lui passer un `FontChoice`, sans reprise.
 
 ---
 
