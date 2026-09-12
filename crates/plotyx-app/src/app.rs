@@ -556,12 +556,46 @@ impl PlotyxApp {
                             cache.misses(),
                             cache.shapes().len()
                         ));
+                        if let Some(drawn) = view.last_drawn() {
+                            ui.weak(Self::figure_summary(drawn));
+                        }
                     }
                     Err(err) => {
                         ui.colored_label(egui::Color32::RED, format!("rendu : {err}"));
                     }
                 }
             });
+    }
+
+    /// Ce que la figure a réellement tracé, en une ligne.
+    ///
+    /// Ajouté en R5 : avec les panneaux multiples, les types de tracé et la
+    /// décimation, « la figure s'affiche » ne dit plus grand-chose. Les
+    /// quatre compteurs du `DrawnPlot` disent lesquels des chemins de la
+    /// phase ont été empruntés — et c'est le seul endroit où on peut les
+    /// lire sur des données réelles plutôt que sur une fixture de test.
+    fn figure_summary(drawn: &plotyx_render_egui::DrawnPlot) -> String {
+        let mut ligne = format!(
+            "figure : {} panneau(x), {} série(s) tracée(s)",
+            drawn.panels.len(),
+            drawn.drawn_series
+        );
+        if drawn.broken_series > 0 {
+            ligne.push_str(&format!(
+                " — {} référence(s) brisée(s)",
+                drawn.broken_series
+            ));
+        }
+        if drawn.unknown_series > 0 {
+            ligne.push_str(&format!(
+                " — {} type(s) de tracé inconnu(s)",
+                drawn.unknown_series
+            ));
+        }
+        if drawn.decimated_points > 0 {
+            ligne.push_str(&format!(" — {} points décimés", drawn.decimated_points));
+        }
+        ligne
     }
 
     /// Dépose une capture de la fenêtre dans le fichier nommé par

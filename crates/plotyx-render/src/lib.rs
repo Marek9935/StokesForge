@@ -28,6 +28,9 @@
 //! - [`legend`] : la légende, mise en page sur la mesure du projet et non
 //!   sur celle de Plotters (la raison est dans le module) ;
 //! - [`decimate`] : le LTTB ;
+//! - [`sample`] : un graphe réaliste, partagé par l'exemple d'export et par
+//!   le test d'accord, pour que ce qu'on regarde soit ce que le test
+//!   compare.
 //!
 //! # Un crate non prévu par `architecture-choisie.md` §8
 //!
@@ -63,6 +66,7 @@ pub mod decimate;
 pub mod legend;
 pub mod paint;
 pub mod pipeline;
+pub mod sample;
 pub mod scale;
 pub mod series;
 pub mod text;

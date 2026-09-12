@@ -73,12 +73,16 @@ use plotyx_core::node::NodeKind;
 use plotyx_core::resolve::{resolve_spec, ResolvedPlot};
 use plotyx_core::{NodeId, Tree};
 use plotyx_plot::PlotSpec;
-use plotyx_render::pipeline::{self, DrawnPlot};
+use plotyx_render::pipeline::{self};
 use plotyx_session::Snapshot;
 
 pub use backend::{EguiBackend, EguiBackendError};
 pub use cache::{CacheKey, Outcome, ShapeCache};
 pub use feathering::Feathering;
+// Réexportés pour que l'UI n'ait pas à déclarer une arête vers
+// `plotyx-render` pour lire ce que la figure a tracé : ce crate est déjà sa
+// façade de rendu écran.
+pub use plotyx_render::pipeline::{DrawnPanel, DrawnPlot};
 pub use plotyx_render::text::{font_definitions, TextMeasurer, TextSource};
 
 /// Ce qui peut rater à l'affichage d'un graphe.

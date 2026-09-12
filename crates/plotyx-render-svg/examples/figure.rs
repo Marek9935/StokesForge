@@ -1,8 +1,10 @@
-//! Rendu **visible** hors écran — tâche R4.6, moitié export.
+//! Rendu **visible** hors écran — tâche R4.6 (moitié export), élargie par
+//! R5 au graphe réaliste.
 //!
 //! ```sh
-//! cargo run -p plotyx-render-svg --example figure          # ./spectre.svg
+//! cargo run -p plotyx-render-svg --example figure             # ./campagne.svg
 //! cargo run -p plotyx-render-svg --example figure /tmp/a.svg
+//! cargo run -p plotyx-render-svg --example figure /tmp/a.svg minimal
 //! ```
 //!
 //! Le séquencement « le contrat d'abord » a un défaut connu : cinq semaines
@@ -12,80 +14,47 @@
 //! regarde **sans serveur graphique** ; l'autre moitié est la fenêtre du
 //! banc d'essai (`cargo run -p plotyx-app`).
 //!
-//! Le graphe est le même que celui du test d'accord, à dessein : ce qu'on
-//! regarde est exactement ce que le test compare.
+//! Le graphe vient de [`plotyx_render::sample`], et c'est **le même** que
+//! celui du test d'accord — à dessein, et désormais par construction plutôt
+//! que par recopie : ce qu'on regarde ici est exactement ce que
+//! `plotyx-render-egui/tests/accord.rs` compare entre les deux backends.
 
-use plotyx_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
 use plotyx_core::resolve::resolve_spec;
-use plotyx_core::Project;
-use plotyx_plot::{AxisSpec, LineSpec, PanelSpec, PlotSpec, SeriesSpec};
+use plotyx_render::sample;
 use plotyx_render::TextMeasurer;
 
+/// Le graphe réaliste a cinq panneaux : à 900 × 600 ils seraient illisibles.
+const TAILLE: (u32, u32) = (1280, 860);
+/// Le graphe minimal de R4, lui, tient dans la taille d'origine.
+const TAILLE_MINIMALE: (u32, u32) = (900, 600);
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cible = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "spectre.svg".into());
+    let mut args = std::env::args().skip(1);
+    let cible = args.next().unwrap_or_else(|| "campagne.svg".into());
+    let minimal = args.next().is_some_and(|mot| mot == "minimal");
 
-    let mut project = Project::new("Démonstration")?;
-    let root = project.root();
-    let book = project.add_empty_workbook(root, Some("Book1"))?;
-    let sheet = project.add_worksheet(book, Some("Sheet1"))?;
-
-    let xs: Vec<f64> = (0..=120).map(|i| 400.0 + i as f64 * 2.5).collect();
-    let ys: Vec<f64> = xs
-        .iter()
-        .map(|x| {
-            let a = (x - 520.0) / 38.0;
-            let b = (x - 610.0) / 22.0;
-            0.85 * (-a * a).exp() + 0.32 * (-b * b).exp() + 0.04
-        })
-        .collect();
-
-    let x = project.add_column(sheet, None, Some("Lambda"), numerique(&xs))?;
-    let y = project.add_column(sheet, None, Some("Absorbance"), numerique(&ys))?;
-
-    let mut panel = PanelSpec::at(0, 0);
-    panel.bottom = AxisSpec {
-        label: "λ".into(),
-        unit: "nm".into(),
-        grid: true,
-        ..AxisSpec::default()
+    let (echantillon, taille) = if minimal {
+        (sample::minimal()?, TAILLE_MINIMALE)
+    } else {
+        (sample::realistic()?, TAILLE)
     };
-    panel.left = AxisSpec {
-        label: "Absorbance mesurée".into(),
-        unit: "u.a.".into(),
-        grid: true,
-        ..AxisSpec::default()
-    };
-    let mut serie = SeriesSpec::new_xy(x, y);
-    serie.name = "Échantillon µ1".into();
-    serie.line = LineSpec {
-        color: "#4c78a8".into(),
-        width: 2.0,
-        ..LineSpec::default()
-    };
-    panel.series.push(serie);
 
-    let spec = PlotSpec {
-        title: "Spectre d'absorption — λ_max".into(),
-        background: "#ffffff".into(),
-        ..PlotSpec::empty("")
-    }
-    .with_panels(panel);
-
-    let plot = resolve_spec(project.tree(), &spec);
+    let plot = resolve_spec(echantillon.project.tree(), &echantillon.spec);
     let measurer = TextMeasurer::default();
-    plotyx_render_svg::render_to_file(&cible, &plot, (900, 600), &measurer)?;
+    let document = plotyx_render_svg::render_to_string(&plot, taille, &measurer)?;
+    std::fs::write(&cible, document)?;
 
-    println!("écrit : {cible} ({} points)", plot.point_count());
+    let brisees = plot.broken_series().count();
+    println!(
+        "écrit : {cible} — {} panneaux, {} séries, {} points{}",
+        echantillon.spec.panels.len(),
+        echantillon.spec.series_count(),
+        plot.point_count(),
+        if brisees > 0 {
+            format!(", dont {brisees} à référence brisée")
+        } else {
+            String::new()
+        }
+    );
     Ok(())
-}
-
-fn numerique(values: &[f64]) -> Column {
-    Column::from_block(
-        ColumnType::Numeric,
-        ValueBlock::Float(values.to_vec()),
-        ColumnMeta::default(),
-    )
-    .expect("colonne numérique valide")
 }
