@@ -337,7 +337,14 @@ impl World {
                     }
                 }
                 Script::Group(steps) => {
-                    history.begin_macro("Groupe");
+                    // B7 : un refus (profondeur d'imbrication au plafond) est
+                    // un rejet de tirage, silencieux comme les autres — voir
+                    // la doc de `play_step`. Non-imbriqué ici (un groupe ne
+                    // s'ouvre jamais avant que le précédent ne se soit
+                    // refermé), donc jamais atteint en pratique.
+                    if history.begin_macro("Groupe").is_err() {
+                        return accepted;
+                    }
                     for step in steps {
                         if self.play_step(history, step) {
                             accepted += 1;

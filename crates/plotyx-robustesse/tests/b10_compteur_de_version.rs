@@ -151,7 +151,6 @@ fn b10_le_compteur_traverse_un_changement_de_type() {
 // -- reproductions --------------------------------------------------------
 
 #[test]
-#[ignore = "reproduction A7 — l'annulation d'une entrée structurelle restaure l'arbre d'avant, compteurs de version compris : le compteur recule"]
 fn b10_le_compteur_de_version_ne_recule_jamais() {
     let (mut project, _sheet, a, _b) = projet();
     let mut history = History::with_limit(0);
@@ -189,7 +188,6 @@ fn b10_le_compteur_de_version_ne_recule_jamais() {
 }
 
 #[test]
-#[ignore = "reproduction A7 — après le recul du compteur, une écriture réattribue un numéro déjà utilisé pour un autre contenu"]
 fn b10_deux_contenus_ne_partagent_jamais_un_numero_de_version() {
     let (mut project, _sheet, a, _b) = projet();
     let mut history = History::with_limit(0);

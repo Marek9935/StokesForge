@@ -261,7 +261,7 @@ fn clear_empties_both_stacks_and_is_refused_in_a_macro() {
     assert_eq!(history.len(), 0);
     assert_eq!(history.redo_len(), 0);
 
-    history.begin_macro("groupe");
+    history.begin_macro("groupe").unwrap();
     assert_eq!(history.clear(), Err(CommandError::MacroOpen("clear")));
     history
         .abort_macro(&mut f.project)
@@ -781,7 +781,7 @@ fn a_macro_is_a_single_entry() {
     let mut f = fixture();
     let mut history = History::new();
 
-    history.begin_macro("Import");
+    history.begin_macro("Import").unwrap();
     assert!(history.in_macro());
     assert_eq!(history.macro_depth(), 1);
     for name in ["D", "E"] {
@@ -825,7 +825,7 @@ fn nested_macros_collapse_into_one_entry() {
     let mut f = fixture();
     let mut history = History::new();
 
-    history.begin_macro("Externe");
+    history.begin_macro("Externe").unwrap();
     history
         .execute(
             &mut f.project,
@@ -837,7 +837,7 @@ fn nested_macros_collapse_into_one_entry() {
             },
         )
         .expect("ajout D");
-    history.begin_macro("Interne");
+    history.begin_macro("Interne").unwrap();
     assert_eq!(history.macro_depth(), 2);
     history
         .execute(
@@ -868,7 +868,7 @@ fn a_macro_mixing_structure_then_data_undoes_in_reverse_order() {
     let mut history = History::new();
     let before = snapshot(&f.project);
 
-    history.begin_macro("Mixte");
+    history.begin_macro("Mixte").unwrap();
     history
         .execute(
             &mut f.project,
@@ -897,7 +897,7 @@ fn a_macro_mixing_data_then_structure_undoes_in_reverse_order() {
     let mut history = History::new();
     let before = snapshot(&f.project);
 
-    history.begin_macro("Mixte");
+    history.begin_macro("Mixte").unwrap();
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[7.0]))
         .expect("saisie");
@@ -934,7 +934,7 @@ fn a_macro_deleting_then_recreating_a_homonym_restores_the_original_node() {
     let mut f = fixture();
     let mut history = History::new();
 
-    history.begin_macro("Remplacer A");
+    history.begin_macro("Remplacer A").unwrap();
     history
         .execute(&mut f.project, Command::DeleteColumn { column: f.a })
         .expect("suppression de A");
@@ -987,7 +987,7 @@ fn abort_macro_undoes_everything_it_applied() {
         )
         .expect("ajout hors macro");
 
-    history.begin_macro("raté");
+    history.begin_macro("raté").unwrap();
     history
         .execute(
             &mut f.project,
@@ -1018,7 +1018,7 @@ fn aborting_a_nested_macro_leaves_the_parent_alone() {
     let mut f = fixture();
     let mut history = History::new();
 
-    history.begin_macro("Parente");
+    history.begin_macro("Parente").unwrap();
     history
         .execute(
             &mut f.project,
@@ -1030,7 +1030,7 @@ fn aborting_a_nested_macro_leaves_the_parent_alone() {
             },
         )
         .expect("ajout D");
-    history.begin_macro("Interne");
+    history.begin_macro("Interne").unwrap();
     history
         .execute(
             &mut f.project,
@@ -1072,7 +1072,7 @@ fn macro_api_refusals() {
         Err(CommandError::NotInMacro)
     );
 
-    history.begin_macro("groupe");
+    history.begin_macro("groupe").unwrap();
     assert_eq!(
         history.undo(&mut f.project),
         Err(CommandError::MacroOpen("undo"))
@@ -1100,7 +1100,7 @@ fn an_empty_macro_leaves_no_entry() {
         .expect("saisie");
     let entries = history.len();
 
-    history.begin_macro("rien");
+    history.begin_macro("rien").unwrap();
     history
         .end_macro(&mut f.project)
         .expect("macro vide fermée");
@@ -1114,7 +1114,7 @@ fn a_failing_command_inside_a_macro_leaves_nothing_behind() {
     let mut f = fixture();
     let mut history = History::new();
 
-    history.begin_macro("Import");
+    history.begin_macro("Import").unwrap();
     history
         .execute(
             &mut f.project,
@@ -1302,7 +1302,7 @@ fn abort_macro_restores_the_redo_stack_that_predates_it() {
     assert!(history.can_redo());
     let before_macro = snapshot(&f.project);
 
-    history.begin_macro("m");
+    history.begin_macro("m").unwrap();
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[9.0]))
         .expect("saisie dans la macro");
@@ -1335,7 +1335,7 @@ fn a_successful_macro_drops_the_redo_stack_like_any_command() {
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert!(history.can_redo());
 
-    history.begin_macro("m");
+    history.begin_macro("m").unwrap();
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[9.0]))
         .expect("saisie dans la macro");
@@ -1361,7 +1361,7 @@ fn an_empty_macro_restores_the_redo_stack_on_close() {
     assert!(history.can_redo());
     let len_before = history.len();
 
-    history.begin_macro("m");
+    history.begin_macro("m").unwrap();
     history
         .end_macro(&mut f.project)
         .expect("macro vide fermee");
@@ -1386,7 +1386,7 @@ fn aborting_the_outer_macro_of_a_nested_pair_restores_redo() {
     assert!(history.can_redo());
     let before_macro = snapshot(&f.project);
 
-    history.begin_macro("ext");
+    history.begin_macro("ext").unwrap();
     history
         .execute(
             &mut f.project,
@@ -1399,7 +1399,7 @@ fn aborting_the_outer_macro_of_a_nested_pair_restores_redo() {
         )
         .expect("ajout D");
 
-    history.begin_macro("int");
+    history.begin_macro("int").unwrap();
     history
         .execute(
             &mut f.project,
@@ -1563,7 +1563,7 @@ fn set_byte_limit_requires_an_empty_stack_and_no_open_macro() {
 
     history.clear().expect("purge");
 
-    history.begin_macro("groupe");
+    history.begin_macro("groupe").unwrap();
     assert_eq!(
         history.set_byte_limit(1024),
         Err(CommandError::MacroOpen("set_byte_limit"))

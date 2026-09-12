@@ -783,6 +783,24 @@ impl Column {
         self.version = self.version.wrapping_add(1);
         Ok(())
     }
+
+    /// Impose un numéro de version, sans toucher ni aux valeurs ni au type.
+    ///
+    /// Réservé à [`crate::Project::restamp_column_version`], lui-même
+    /// réservé à `History::revert` dans `plotyx-commands` (A7,
+    /// `guide-de-correction-robustesse.md` §F2) : après qu'une restauration
+    /// de structure (`replace_tree`) a ramené un ancien compteur en
+    /// arrière, ré-attribuer un numéro **frais** (jamais vu) empêche qu'une
+    /// écriture future ne retombe, pour cette colonne, sur un numéro déjà
+    /// porté par un contenu différent — voir la doctrine des estampilles du
+    /// guide (§F2 : « une version de contenu ne désigne jamais deux
+    /// contenus »).
+    ///
+    /// Ne clone jamais le buffer (`self.values` n'est pas touché) : coût
+    /// `O(1)`, le buffer reste partagé avec l'arbre qu'on vient de quitter.
+    pub(crate) fn restamp_version(&mut self, version: u64) {
+        self.version = version;
+    }
 }
 
 #[cfg(test)]
