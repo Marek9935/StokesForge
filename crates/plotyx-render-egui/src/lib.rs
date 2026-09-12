@@ -6,6 +6,9 @@
 //!   `egui::Shape` au lieu de peindre ;
 //! - [`cache`] : la clé `(revision, rect, pixels_per_point)` qui fait qu'une
 //!   image sans changement ne rejoue pas le pipeline ;
+//! - [`feathering`] : le levier d'anticrénelage de la tâche R5.5 bis — le
+//!   seul morceau du rendu qui n'a pas d'équivalent côté export, parce que
+//!   la tessellation n'existe que pour l'écran ;
 //! - [`GraphView`], ici : ce que l'UI tient réellement, un cache plus la
 //!   mise en relation d'un `Snapshot` de session et d'un nœud `Graph`.
 //!
@@ -61,6 +64,7 @@
 
 pub mod backend;
 pub mod cache;
+pub mod feathering;
 
 use std::sync::Arc;
 
@@ -74,6 +78,7 @@ use plotyx_session::Snapshot;
 
 pub use backend::{EguiBackend, EguiBackendError};
 pub use cache::{CacheKey, Outcome, ShapeCache};
+pub use feathering::Feathering;
 pub use plotyx_render::text::{font_definitions, TextMeasurer, TextSource};
 
 /// Ce qui peut rater à l'affichage d'un graphe.
