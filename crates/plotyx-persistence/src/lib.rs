@@ -97,8 +97,8 @@ mod error;
 mod schema;
 
 use std::io::Write;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use plotyx_core::{Node, NodeId, Project, Tree};
 
@@ -106,6 +106,14 @@ use convert::ConvertError;
 use schema::{FileBody, NodeRecord, FORMAT_VERSION, MAGIC};
 
 pub use error::{PersistenceError, PersistenceResult};
+
+/// Borne haute d'un identifiant de nœud ou de `next_id_hint` lu d'un fichier
+/// (B1, `guide-de-correction-robustesse.md` §F3) : largement au-dessus de
+/// tout projet réel, largement en dessous de `u64::MAX` — l'endroit où
+/// `checked_add` de `IdAllocator::next` (mécanique, déjà en place côté
+/// `plotyx-core`) refuse de toute façon, mais trop tard pour qu'un projet
+/// chargé reste utilisable.
+const MAX_NODE_ID: u64 = 1_000_000_000_000;
 
 /// Sauvegarde `project` vers `path`, atomiquement : un fichier temporaire est
 /// écrit dans le même répertoire que `path` puis renommé sur la cible ; en
@@ -115,7 +123,41 @@ pub use error::{PersistenceError, PersistenceResult};
 /// Deux appels successifs sur le même `project` produisent des fichiers
 /// identiques octet à octet (ordre déterministe des nœuds : parcours
 /// préfixe depuis la racine).
+///
+/// # Détection d'un écrivain concurrent (B8)
+///
+/// Avant d'écrire, `save` compare le compteur de sauvegarde actuellement sur
+/// le disque (s'il existe déjà un fichier à `path`) à celui que **cette
+/// instance de `project`, dans ce processus**, a vu la dernière fois qu'elle
+/// a été chargée ou sauvegardée vers ce même chemin. S'ils diffèrent, un
+/// autre écrivain a modifié le fichier entre-temps : `save` refuse
+/// (`PersistenceError::ConcurrentModification`) plutôt que d'écraser son
+/// travail en silence. Ce suivi est un registre en mémoire, propre au
+/// processus (voir [`tracked_counter`]) — rien de tout cela ne traverse le
+/// disque à part le compteur lui-même (`FileBody::save_counter`), conforme à
+/// la doctrine des estampilles (§F2 du guide) : seule la valeur qui permet la
+/// comparaison est persistée, jamais l'identité de qui l'a vue.
+///
+/// Un `project` que ce processus n'a **jamais** chargé ni sauvegardé vers ce
+/// chemin (un projet neuf, ou une sauvegarde vers une nouvelle destination)
+/// n'a pas de baseline à comparer : `save` procède sans contrôle, comme
+/// avant B8 — il ne peut détecter qu'un changement depuis qu'IL a vu le
+/// fichier, pas depuis l'origine des temps.
 pub fn save(project: &Project, path: &Path) -> PersistenceResult<()> {
+    let disk_counter = peek_save_counter(path)?;
+    if let Some(found) = disk_counter {
+        if let Some(expected) = tracked_counter(path, project) {
+            if expected != found {
+                return Err(PersistenceError::ConcurrentModification {
+                    path: path.to_path_buf(),
+                    expected,
+                    found,
+                });
+            }
+        }
+    }
+    let save_counter = disk_counter.unwrap_or(0) + 1;
+
     let parent_dir = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -132,6 +174,7 @@ pub fn save(project: &Project, path: &Path) -> PersistenceResult<()> {
         root: tree.root().raw(),
         next_id_hint: project.next_id_hint(),
         nodes,
+        save_counter,
     };
 
     // Encoder ne devrait jamais échouer pour nos propres types de transport
@@ -156,12 +199,16 @@ pub fn save(project: &Project, path: &Path) -> PersistenceResult<()> {
     file.flush().map_err(io_err)?;
     file.as_file().sync_all().map_err(io_err)?;
     file.persist(path).map_err(|err| io_err(err.error))?;
+    track_counter(path, project, save_counter);
     Ok(())
 }
 
 /// Charge un [`Project`] complet depuis `path`. La version est lue et
 /// vérifiée avant tout décodage du corps : un fichier plus récent que ce
-/// lecteur est refusé sans que son corps soit touché.
+/// lecteur est refusé sans que son corps soit touché. Une version `0` — un
+/// numéro qui n'a jamais existé, la première version réelle étant 1 — est
+/// refusée elle aussi, explicitement, plutôt que d'être lue comme si
+/// c'était la version 1.
 pub fn load(path: &Path) -> PersistenceResult<Project> {
     let bytes = std::fs::read(path).map_err(|source| PersistenceError::Io {
         path: path.to_path_buf(),
@@ -182,6 +229,14 @@ pub fn load(path: &Path) -> PersistenceResult<Project> {
     let mut version_bytes = [0u8; 4];
     version_bytes.copy_from_slice(&bytes[MAGIC.len()..MAGIC.len() + 4]);
     let version = u32::from_le_bytes(version_bytes);
+    if version == 0 {
+        return Err(PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: "numéro de version 0 dans l'en-tête : ce numéro n'a jamais existé, \
+                     la première version réelle du format est 1"
+                .to_string(),
+        });
+    }
     if version > FORMAT_VERSION {
         return Err(PersistenceError::UnsupportedVersion {
             path: path.to_path_buf(),
@@ -190,14 +245,33 @@ pub fn load(path: &Path) -> PersistenceResult<Project> {
         });
     }
 
-    let body: FileBody = rmp_serde::from_slice(&bytes[MAGIC.len() + 4..]).map_err(|source| {
+    let body: FileBody = rmp_serde::from_slice(&bytes[MAGIC.len() + 4..])
+        .map_err(|source| classify_body_error(source, path))?;
+
+    let save_counter = body.save_counter;
+    let project = build_project(body, path)?;
+    track_counter(path, &project, save_counter);
+    Ok(project)
+}
+
+/// Classe une erreur de décodage du corps : une **variante d'énumération**
+/// inconnue (C5, niveau 1) n'est pas la même chose qu'un fichier vraiment
+/// corrompu — `rmp_serde`/`serde` nomment ce cas dans le message d'erreur
+/// (« unknown variant … »), ce qui suffit à le distinguer sans avoir besoin
+/// d'inspecter les octets nous-mêmes.
+fn classify_body_error(source: rmp_serde::decode::Error, path: &Path) -> PersistenceError {
+    let detail = source.to_string();
+    if detail.contains("unknown variant") {
+        PersistenceError::UnknownVariant {
+            path: path.to_path_buf(),
+            detail,
+        }
+    } else {
         PersistenceError::Corrupt {
             path: path.to_path_buf(),
-            detail: source.to_string(),
+            detail,
         }
-    })?;
-
-    build_project(body, path)
+    }
 }
 
 /// Reconstruit un `Project` depuis un corps déjà décodé. Séparé de `load`
@@ -205,6 +279,8 @@ pub fn load(path: &Path) -> PersistenceResult<Project> {
 /// (cas ceinture du compteur d'identifiants, champs inconnus, modèle
 /// invalide) sans repasser par l'encodage MessagePack.
 fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
+    check_node_id(body.root, path)?;
+    check_node_id(body.next_id_hint, path)?;
     let mut nodes = Vec::with_capacity(body.nodes.len());
     for record in body.nodes {
         let NodeRecord {
@@ -213,6 +289,10 @@ fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
             parent,
             kind,
         } = record;
+        check_node_id(id, path)?;
+        if let Some(parent_id) = parent {
+            check_node_id(parent_id, path)?;
+        }
         let kind = convert::record_to_kind(kind).map_err(|err| convert_error(err, path))?;
         let node = Node::with_parent(
             NodeId::from_raw(id),
@@ -236,6 +316,28 @@ fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
     Ok(Project::from_tree(Arc::new(tree), body.next_id_hint))
 }
 
+/// Refuse un identifiant de nœud (ou `next_id_hint`) au-delà de
+/// [`MAX_NODE_ID`] (B1) : bien au-dessus de tout projet réel, bien en
+/// dessous de `u64::MAX` où `IdAllocator::next` refuserait de toute façon —
+/// mais un projet dont un nœud porte déjà un identifiant proche de cette
+/// frontière resterait inutilisable dès la première création suivante.
+/// Borner à la lecture ferme ce chemin d'entrée plutôt que de compter sur le
+/// `checked_add` mécanique de `plotyx-core`, qui protège l'allocateur mais
+/// pas le fichier qui l'a fait démarrer si près du bord.
+fn check_node_id(id: u64, path: &Path) -> PersistenceResult<()> {
+    if id > MAX_NODE_ID {
+        Err(PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: format!(
+                "identifiant de nœud {id} dépasse la borne acceptée à la lecture \
+                 ({MAX_NODE_ID})"
+            ),
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /// Traduit une erreur de conversion bas niveau (`convert.rs`) en erreur
 /// publique : dans les deux cas, le fichier est incohérent d'une façon
 /// qu'un fichier écrit par ce crate ne produit jamais.
@@ -254,6 +356,176 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
             detail: "histogram_bins d'une série vaut 0, ce qui n'est pas représentable"
                 .to_string(),
         },
+        ConvertError::HistogramBinsTooLarge(bins) => PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: format!(
+                "histogram_bins d'une série vaut {bins}, au-delà de la borne acceptée \
+                 ({})",
+                convert::MAX_HISTOGRAM_BINS
+            ),
+        },
+        ConvertError::PanelPositionOutOfBounds { row, column } => PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: format!(
+                "panneau en position (row={row}, column={column}), au-delà de la borne \
+                 acceptée ({})",
+                convert::MAX_PANEL_POSITION
+            ),
+        },
+        ConvertError::UnsupportedSpecVersion { found, supported } => PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: format!(
+                "format_version {found} d'un PlotSpec, ce lecteur ne connaît que jusqu'à \
+                 {supported}"
+            ),
+        },
+    }
+}
+
+// -- B8 : détection d'un écrivain concurrent -------------------------------
+//
+// Registre en mémoire, propre à ce processus, associant (chemin canonique,
+// identité d'un `Project`) au dernier compteur de sauvegarde observé pour ce
+// couple. Ne persiste jamais sur disque — seul le compteur qu'il décrit
+// traverse le disque (`FileBody::save_counter`), conforme à la doctrine des
+// estampilles (§F2 du guide de correction).
+//
+// La clé n'est pas le chemin seul : deux `Project` distincts chargés depuis
+// le même fichier (deux fenêtres, un script et l'interface, …) ne doivent
+// pas se confondre entre eux — c'est précisément le cas que B8 doit
+// détecter. On retient une référence **faible** sur `Project::identity()` —
+// PAS sur l'arbre courant (`project.tree()`) : une première version de ce
+// registre clefait sur l'identité de l'arbre, en s'appuyant sur le fait que
+// `Arc::make_mut` réutilise la même allocation tant que personne d'autre ne
+// l'a clonée. C'est faux dès qu'un `undo`/`redo` entre en jeu :
+// `Project::replace_tree` réaffecte à l'instance un `Arc<Tree>` DÉJÀ VU à un
+// instant antérieur de CETTE MÊME instance (restauré depuis la pile
+// d'historique) — la même adresse redevient donc « courante » alors que le
+// compteur de sauvegarde a avancé entre-temps, et le registre y voyait à
+// tort un compteur périmé, refusant une sauvegarde parfaitement légitime
+// (trouvé par `b14_laller_retour_disque_tient_a_chaque_pas`, un balayage
+// aléatoire d'opérations incluant `Annuler`/`Rétablir`). `Project::identity
+// ()` est stable sur toute la vie d'une instance, quel que soit l'arbre
+// qu'elle affiche à un instant donné, et c'est exactement l'identité qu'il
+// faut ici — voir sa documentation dans `plotyx-core`. `Weak::upgrade`
+// échoue proprement pour un `Project` abandonné depuis longtemps plutôt que
+// de risquer une collision avec une adresse mémoire réutilisée par une
+// valeur sans rapport (tant qu'une `Weak` existe, l'allocation qu'elle vise
+// reste en vie — deux entrées encore « upgradables » en même temps ne
+// peuvent donc jamais partager une adresse).
+
+struct TrackedSave {
+    path: PathBuf,
+    identity: Weak<()>,
+    counter: u64,
+}
+
+fn registry() -> &'static Mutex<Vec<TrackedSave>> {
+    static REGISTRY: OnceLock<Mutex<Vec<TrackedSave>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Chemin canonique si le fichier existe déjà ; sinon le chemin tel quel —
+/// une destination qui n'existe pas encore n'a pas de forme canonique.
+fn canonical_or_given(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn matches(entry: &TrackedSave, canon: &Path, project: &Project) -> bool {
+    entry.path == canon
+        && entry.identity.upgrade().is_some()
+        && Weak::ptr_eq(&entry.identity, &project.identity())
+}
+
+/// Compteur que CETTE instance de `project` (au sens de l'identité de son
+/// arbre) a vu la dernière fois qu'elle a été chargée ou sauvegardée vers
+/// `path`, dans ce processus. `None` si ce couple (chemin, instance) est
+/// inconnu du registre : soit ce `Project` n'est jamais passé par
+/// `load`/`save` pour ce chemin, soit son arbre a depuis été remplacé
+/// (`replace_tree`, restauration d'annulation) — dans les deux cas, il n'y a
+/// rien à comparer, et `save` procède sans contrôle plutôt que de refuser à
+/// tort.
+fn tracked_counter(path: &Path, project: &Project) -> Option<u64> {
+    let canon = canonical_or_given(path);
+    let mut guard = match registry().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.retain(|entry| entry.identity.strong_count() > 0);
+    guard
+        .iter()
+        .find(|entry| matches(entry, &canon, project))
+        .map(|entry| entry.counter)
+}
+
+/// Enregistre (ou met à jour) le dernier compteur connu pour ce couple
+/// (chemin, instance) — appelé après chaque `load`/`save` réussi.
+fn track_counter(path: &Path, project: &Project, counter: u64) {
+    let canon = canonical_or_given(path);
+    let mut guard = match registry().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.retain(|entry| entry.identity.strong_count() > 0);
+    if let Some(entry) = guard.iter_mut().find(|entry| matches(entry, &canon, project)) {
+        entry.counter = counter;
+    } else {
+        guard.push(TrackedSave {
+            path: canon,
+            identity: project.identity(),
+            counter,
+        });
+    }
+}
+
+/// Lit uniquement le compteur de sauvegarde d'un fichier déjà écrit par ce
+/// format, sans construire de `Project` : c'est le contrôle bon marché que
+/// `save` fait avant d'écraser une cible existante.
+///
+/// `Ok(None)` si le fichier n'existe pas encore (rien à comparer : la
+/// sauvegarde est la première) ou s'il n'est pas reconnaissable comme un
+/// fichier de ce format (comportement historique conservé pour une cible qui
+/// n'est pas un `.plx` — B8 ne couvre que la collision entre deux écritures
+/// de ce format-ci, pas le remplacement d'un fichier étranger). Un fichier
+/// plus récent que ce lecteur (`version > FORMAT_VERSION`) reste refusé,
+/// comme au chargement : mieux vaut ne pas écraser à l'aveugle un fichier
+/// qu'on ne sait pas lire.
+fn peek_save_counter(path: &Path) -> PersistenceResult<Option<u64>> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(PersistenceError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    if bytes.len() < MAGIC.len() || &bytes[..MAGIC.len()] != MAGIC.as_slice() {
+        return Ok(None);
+    }
+    if bytes.len() < MAGIC.len() + 4 {
+        return Ok(None);
+    }
+    let mut version_bytes = [0u8; 4];
+    version_bytes.copy_from_slice(&bytes[MAGIC.len()..MAGIC.len() + 4]);
+    let version = u32::from_le_bytes(version_bytes);
+    if version == 0 {
+        return Ok(None);
+    }
+    if version > FORMAT_VERSION {
+        return Err(PersistenceError::UnsupportedVersion {
+            path: path.to_path_buf(),
+            found: version,
+            supported: FORMAT_VERSION,
+        });
+    }
+    match rmp_serde::from_slice::<FileBody>(&bytes[MAGIC.len() + 4..]) {
+        Ok(body) => Ok(Some(body.save_counter)),
+        // Le corps ne se décode pas : `save` n'est pas l'endroit qui
+        // diagnostique une corruption (c'est le rôle de `load`) — on traite
+        // ce cas comme « rien à comparer » plutôt que de bloquer l'écriture.
+        Err(_) => Ok(None),
     }
 }
 
@@ -284,6 +556,7 @@ mod tests {
             root: 1,
             next_id_hint: 2, // en retard : le plus grand id présent est 5
             nodes: vec![root, child],
+            save_counter: 0,
         };
         let project = build_project(body, Path::new("test.plyx")).expect("modèle valide");
         assert_eq!(project.next_id_hint(), 6);
@@ -305,6 +578,7 @@ mod tests {
             root: 1,
             next_id_hint: 3,
             nodes: vec![root, orphan],
+            save_counter: 0,
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -319,6 +593,7 @@ mod tests {
             root: 1,
             next_id_hint: 2,
             nodes: vec![a, b],
+            save_counter: 0,
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -341,6 +616,7 @@ mod tests {
             root: 1,
             next_id_hint: 2,
             nodes: vec![root],
+            save_counter: 0,
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -378,6 +654,7 @@ mod tests {
             root: 1,
             next_id_hint: 3,
             nodes: vec![root, column],
+            save_counter: 0,
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(matches!(err, PersistenceError::Corrupt { .. }), "{err:?}");

@@ -82,13 +82,50 @@ impl From<SeriesAxis> for AxisSide {
     }
 }
 
+/// Plafond de [`BinCount`] (B4, `guide-de-correction-robustesse.md` §F4) :
+/// au-delà, un histogramme ne décrit plus rien qu'un écran puisse afficher
+/// (quelques milliers de pixels de large au plus, dix fois moins que ce
+/// plafond), et le calculer allouerait des dizaines de gigaoctets pour des
+/// classes qu'aucun rendu ne montrera jamais.
+pub const MAX_HISTOGRAM_BINS: u32 = 1 << 16;
+
+/// Nombre de classes d'un histogramme : jamais nul (décision R2 — « les
+/// états illégaux ne s'écrivent pas »), jamais démesuré non plus (B4).
+/// `NonZeroU32` rendait déjà le zéro inexprimable ; ce type resserre l'autre
+/// bout du même intervalle, à la même échelle — au niveau du type, pas
+/// d'une validation qu'un appelant pourrait oublier d'appeler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BinCount(NonZeroU32);
+
+impl BinCount {
+    /// `None` si `value` vaut 0 ou dépasse [`MAX_HISTOGRAM_BINS`].
+    pub fn new(value: u32) -> Option<Self> {
+        if value == 0 || value > MAX_HISTOGRAM_BINS {
+            None
+        } else {
+            NonZeroU32::new(value).map(Self)
+        }
+    }
+
+    /// La valeur portée.
+    pub fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl std::fmt::Display for BinCount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
 /// Nombre de classes d'un histogramme par défaut.
 ///
 /// La forme `match` est le seul moyen d'écrire un [`NonZeroU32`] littéral dans
 /// un contexte constant sans passer par un `unwrap`, que le crate s'interdit.
-pub const DEFAULT_HISTOGRAM_BINS: NonZeroU32 = match NonZeroU32::new(40) {
-    Some(bins) => bins,
-    None => NonZeroU32::MIN,
+pub const DEFAULT_HISTOGRAM_BINS: BinCount = match NonZeroU32::new(40) {
+    Some(bins) => BinCount(bins),
+    None => BinCount(NonZeroU32::MIN),
 };
 
 /// Une série : des **identités de colonnes**, un type de tracé, un style.
@@ -129,8 +166,8 @@ pub struct SeriesSpec {
     pub show_in_legend: bool,
     /// Largeur des barres. `None` = déduite du pas des abscisses.
     pub bar_width: Option<f64>,
-    /// Nombre de classes d'un histogramme, jamais nul.
-    pub histogram_bins: NonZeroU32,
+    /// Nombre de classes d'un histogramme, jamais nul, jamais démesuré (B4).
+    pub histogram_bins: BinCount,
 }
 
 impl SeriesSpec {
