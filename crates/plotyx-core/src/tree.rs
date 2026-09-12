@@ -174,21 +174,26 @@ impl Tree {
     }
 
     /// Unicité des noms d'un arbre chargé : globale pour les fenêtres, entre
-    /// frères directs pour le reste.
+    /// **tous** les frères directs par ailleurs — fenêtres comprises.
     ///
-    /// A8 (`guide-de-correction-robustesse.md` §F9) — la portée d'unicité
-    /// entre frères reproduit ici, à l'identique, celle de
-    /// `check_name_available` : une fenêtre n'est comparée qu'à l'échelle
-    /// globale (ci-dessus), jamais à ses frères directs ; un enfant qui
-    /// n'est pas une fenêtre est comparé à **tous** les frères qui le
-    /// précèdent dans `children()`, quelle que soit leur nature — exactement
-    /// ce que `check_name_available` aurait vérifié en l'insérant à cette
-    /// place. La comparaison est délibérément asymétrique (un dossier ne
-    /// peut pas prendre le nom d'une fenêtre déjà là, l'inverse est permis)
-    /// et **dépend de l'ordre des enfants** : ce n'est pas relâché, c'est le
-    /// reflet fidèle de ce que l'API de mutation peut construire — un arbre
-    /// que `from_nodes` refuserait alors qu'`insert` avait pu le produire
-    /// serait la même incohérence que celle qu'A8 corrige, à l'envers.
+    /// A8 (`guide-de-correction-robustesse.md` §F9) — reproduit ici, à
+    /// l'identique, la portée de `check_name_available` : deux frères
+    /// directs ne partagent jamais un nom, quelle que soit leur nature.
+    /// Avant ce correctif, une fenêtre pouvait prendre le nom d'un dossier
+    /// frère (la branche « fenêtre » de `check_name_available` ne
+    /// regardait que les autres fenêtres, jamais ses frères directs) : un
+    /// dossier et une fenêtre homonymes rendaient le dossier introuvable
+    /// par son chemin canonique selon l'ordre d'arrivée des deux
+    /// (`b11_path_of_se_re_resout_toujours_sur_le_meme_noeud`). Le sens du
+    /// correctif est de refuser plus (§6 du guide) : `check_name_available`
+    /// compare désormais aussi une fenêtre à ses frères directs, et ce
+    /// contrôle-ci reprend la même règle, sans exception ni dépendance à
+    /// l'ordre des enfants dans `children()` (une première version de ce
+    /// correctif faisait dépendre le verdict de cette position — « le
+    /// premier arrivé gagne le nom » — et un balayage aléatoire,
+    /// `b14_laller_retour_disque_tient_a_chaque_pas`, a montré qu'un simple
+    /// déplacement, `Move`, suffit à la changer sans rien changer aux noms,
+    /// faisant rejeter au chargement un arbre pourtant valide).
     fn validate_loaded_names(&self) -> CoreResult<()> {
         let mut windows: HashSet<&str> = HashSet::new();
         for node in self.nodes.values() {
@@ -206,15 +211,20 @@ impl Tree {
                 let Some(child_node) = self.nodes.get(&child) else {
                     continue;
                 };
-                if !child_node.kind().is_window() {
-                    if let Some(&earlier) = seen.get(child_node.name()) {
-                        return Err(CoreError::Structure(format!(
-                            "{child} ({}) ne peut pas porter le nom {} dans {id} : {earlier} \
-                             le porte déjà",
-                            child_node.kind().type_name(),
-                            child_node.name()
-                        )));
-                    }
+                // Aucune exception pour les fenêtres ici : `check_name_
+                // available` (voir sa doc, A8) refuse maintenant qu'une
+                // fenêtre prenne le nom d'un dossier frère tout autant que
+                // l'inverse — deux frères directs ne partagent jamais un
+                // nom, quelle que soit leur nature. L'unicité globale des
+                // fenêtres (au-delà de la fratrie directe) reste vérifiée
+                // séparément, ci-dessus.
+                if let Some(&earlier) = seen.get(child_node.name()) {
+                    return Err(CoreError::Structure(format!(
+                        "{child} ({}) ne peut pas porter le nom {} dans {id} : {earlier} \
+                         le porte déjà",
+                        child_node.kind().type_name(),
+                        child_node.name()
+                    )));
                 }
                 seen.insert(child_node.name(), child);
             }
@@ -594,7 +604,15 @@ impl Tree {
                     )));
                 }
             }
-            return Ok(());
+            // A8 (`guide-de-correction-robustesse.md` §F9) — l'unicité
+            // globale entre fenêtres ne suffit pas : une fenêtre reste aussi
+            // un frère parmi d'autres pour la résolution de chemin
+            // (`resolve_parsed`), et ne doit donc pas pouvoir prendre le nom
+            // d'un dossier frère — sans quoi `path_of ∘ resolve_path` cesse
+            // d'être l'identité pour le dossier homonyme, selon l'ordre
+            // d'arrivée des deux. PAS de retour anticipé ici : on continue
+            // vers le contrôle de frère générique ci-dessous, qui s'applique
+            // maintenant à toute nature de nœud, fenêtre comprise.
         }
 
         let Some(parent) = parent else {
