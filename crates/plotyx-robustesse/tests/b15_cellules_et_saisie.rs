@@ -240,7 +240,17 @@ fn b15_une_mesure_scientifique_tient_dans_une_cellule() {
 }
 
 #[test]
-#[ignore = "reproduction C4 — la même absence d'exposant multiplie par 7,6 le coût mémoire d'une conversion Numérique → Texte"]
+#[ignore = "reproduction C4 (diagnostic révisé) — Column::set_column_type (Float→Text) utilise \
+            désormais format_f64_for_display (notation scientifique quand elle est plus courte), \
+            ce qui fait baisser le facteur mesuré de 7,6× à ~5,7× sur ce scénario, mais le plafond \
+            de 3× que ce test demande est hors de portée d'un simple choix de format : \
+            size_of::<Option<String>>() vaut 24 octets sur une machine 64 bits, contre 8 pour le \
+            f64 qu'il remplace — un facteur 3,0 rien que pour la structure, AVANT même le premier \
+            caractère de contenu. Aucune chaîne non vide ne peut donc jamais faire mieux que « un \
+            peu plus de 3× » avec Vec<Option<String>> comme représentation de colonne texte ; \
+            l'atteindre demanderait de changer cette représentation elle-même (une chaîne \
+            interned/packée plutôt qu'un String par cellule), un chantier bien plus large que la \
+            question de format que C4 posait"]
 fn b15_convertir_en_texte_ne_multiplie_pas_la_memoire() {
     use plotyx_commands::{Command, History};
 
