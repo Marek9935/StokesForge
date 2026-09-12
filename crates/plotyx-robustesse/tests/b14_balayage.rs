@@ -309,7 +309,6 @@ fn b14_une_version_ne_designe_jamais_deux_contenus() {
 }
 
 #[test]
-#[ignore = "reproduction A8 — sur une séquence tirée au sort, path_of rend un chemin qui ne redésigne plus son nœud"]
 fn b14_le_chemin_canonique_redesigne_toujours_son_noeud() {
     let mut runner = runner(16);
     runner

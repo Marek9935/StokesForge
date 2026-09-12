@@ -103,7 +103,6 @@ fn b11_le_chargeur_refuse_deux_fenetres_homonymes() {
 // -- reproductions --------------------------------------------------------
 
 #[test]
-#[ignore = "reproduction A8 — check_name_available sort par la branche « fenêtre » sans jamais regarder les frères : une fenêtre peut prendre le nom d'un dossier frère"]
 fn b11_une_fenetre_ne_prend_pas_le_nom_dun_dossier_frere() {
     let mut project = Project::new("R").expect("projet");
     let root = project.root();
@@ -119,45 +118,38 @@ fn b11_une_fenetre_ne_prend_pas_le_nom_dun_dossier_frere() {
 }
 
 #[test]
-#[ignore = "reproduction A8 — un dossier précédé d'une fenêtre homonyme devient introuvable par son chemin : path_of ∘ resolve_path n'est plus l'identité"]
 fn b11_path_of_se_re_resout_toujours_sur_le_meme_noeud() {
+    // A8 (`guide-de-correction-robustesse.md` §F9) — corrigée à la racine :
+    // `check_name_available` refuse maintenant qu'une fenêtre prenne le nom
+    // d'un dossier frère (voir `b11_une_fenetre_ne_prend_pas_le_nom_dun_
+    // dossier_frere`), donc le scénario que ce test mettait en place —
+    // « note X » acceptée à côté d'un « dossier X » — n'est plus
+    // constructible du tout via l'API de mutation. La propriété
+    // `path_of ∘ resolve_path = identité` (`b8_proprietes`) n'a donc plus
+    // besoin d'être défendue après coup contre ce cas précis : il est
+    // devenu impossible à atteindre, ce que ce test vérifie directement.
     let mut project = Project::new("R").expect("projet");
     let root = project.root();
     let dossier = project.add_folder(root, "X").expect("dossier X");
-    let note = project
-        .add_note(root, Some("X"), "texte")
-        .expect("note X acceptée — c'est déjà l'anomalie A8");
-
-    // Tant que le dossier vient en premier dans la liste d'enfants, tout va
-    // bien : `child_by_name` tombe sur lui.
-    assert_eq!(project.resolve_path("/X"), Ok(dossier));
-
-    // `Move` est l'une des huit primitives du socle, et elle accepte ce
-    // déplacement (la branche « fenêtre » de `check_name_available` ne
-    // regarde toujours pas les frères).
-    project
-        .move_node(note, root, 0)
-        .expect("déplacement accepté");
-
-    let chemin = project.path_of(dossier).expect("chemin du dossier");
-    let retour = project.resolve_path(&chemin);
-    println!("path_of({dossier}) = {chemin:?} → resolve_path = {retour:?}");
-    println!(
-        "le dossier est pourtant toujours là : {}",
-        project.tree().contains(dossier)
+    assert!(
+        matches!(
+            project.add_note(root, Some("X"), "texte"),
+            Err(CoreError::DuplicateName(_))
+        ),
+        "une note ne doit plus pouvoir prendre le nom d'un dossier frère"
     );
+
+    // Le dossier, lui, reste normalement résoluble.
+    assert_eq!(project.resolve_path("/X"), Ok(dossier));
+    let chemin = project.path_of(dossier).expect("chemin du dossier");
     assert_eq!(
-        retour,
+        project.resolve_path(&chemin),
         Ok(dossier),
-        "le chemin canonique d'un nœud doit toujours redésigner ce nœud — c'est la \
-         propriété que `b8_proprietes` énonce (path_of ∘ resolve_path = identité), et \
-         `child_by_name` la perd en rendant le PREMIER frère homonyme, que le filtre \
-         `is_folder` transforme ensuite en « dossier introuvable »"
+        "le chemin canonique d'un nœud doit toujours redésigner ce nœud"
     );
 }
 
 #[test]
-#[ignore = "reproduction A8 — validate_loaded_names ne compare qu'à catégorie égale : le chargeur accepte des arbres que l'API de mutation refuse"]
 fn b11_le_chargeur_refuse_ce_que_lapi_de_mutation_refuse() {
     // Une note puis un dossier homonymes : `Project::add_folder` refuse
     // exactement cette paire (garde-fou b11_un_dossier_ne_peut_pas…), le

@@ -216,7 +216,6 @@ fn b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes() {
 }
 
 #[test]
-#[ignore = "reproduction C7 — check_name ne refuse que le vide, les bords blancs et quatre caractères réservés : tout le reste passe, y compris NUL et les marques de direction"]
 fn b21_les_noms_de_controle_sont_refuses() {
     let mut project = Project::new("D").expect("projet valide");
     let root = project.root();

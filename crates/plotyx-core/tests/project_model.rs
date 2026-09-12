@@ -252,20 +252,33 @@ fn critere_5_regles_d_unicite_des_noms() {
         .add_folder(b, "Jour1")
         .expect("dossier homonyme ailleurs");
 
-    // Un dossier et un classeur frères de même nom : accepté.
+    // Un dossier et un classeur frères de même nom : refusé (A8,
+    // `guide-de-correction-robustesse.md` §F9 — voir
+    // `critere_5_bis_lunicite_entre_freres_ne_depend_pas_de_lordre`).
     project
         .add_folder(root, "Mesures")
         .expect("dossier Mesures");
-    project
-        .add_empty_workbook(root, Some("Mesures"))
-        .expect("classeur homonyme d'un dossier frère");
+    assert!(
+        matches!(
+            project.add_empty_workbook(root, Some("Mesures")),
+            Err(CoreError::DuplicateName(_))
+        ),
+        "un classeur ne doit plus pouvoir prendre le nom d'un dossier frère"
+    );
 }
 
 #[test]
-fn critere_5_bis_asymetrie_assumee_dossier_fenetre() {
-    // Héritée de la version Python : un dossier est unique parmi ses frères
-    // toutes natures confondues, une fenêtre seulement parmi les fenêtres.
-    // La règle n'est donc symétrique qu'à l'ordre de création près.
+fn critere_5_bis_lunicite_entre_freres_ne_depend_pas_de_lordre() {
+    // A8 (`guide-de-correction-robustesse.md` §F9) — corrigée : la version
+    // Python (et le socle Rust jusqu'à ce correctif) laissait un dossier
+    // unique parmi ses frères toutes natures confondues, mais une fenêtre
+    // seulement parmi les fenêtres — asymétrie qui rendait un dossier
+    // homonyme d'une fenêtre introuvable par son chemin canonique selon
+    // l'ordre de création des deux
+    // (`b11_path_of_se_re_resout_toujours_sur_le_meme_noeud`). Cette
+    // asymétrie n'est plus « assumée » : refuser plus, jamais moins (§6 du
+    // guide) — un dossier et une fenêtre frères ne partagent jamais un nom,
+    // quel que soit l'ordre dans lequel chacun l'a pris.
     let mut project = Project::new("Demo").expect("nom valide");
     let root = project.root();
     project
@@ -273,6 +286,15 @@ fn critere_5_bis_asymetrie_assumee_dossier_fenetre() {
         .expect("classeur X");
     assert!(matches!(
         project.add_folder(root, "X"),
+        Err(CoreError::DuplicateName(_))
+    ));
+
+    // Et dans l'autre sens désormais aussi.
+    let mut project = Project::new("Demo").expect("nom valide");
+    let root = project.root();
+    project.add_folder(root, "Y").expect("dossier Y");
+    assert!(matches!(
+        project.add_empty_workbook(root, Some("Y")),
         Err(CoreError::DuplicateName(_))
     ));
 }
@@ -1042,17 +1064,24 @@ fn critere_23_from_nodes_refuse_les_arbres_incoherents() {
 }
 
 #[test]
-fn from_nodes_accepte_un_dossier_et_une_fenetre_homonymes() {
-    // Ce que `insert` peut produire, `from_nodes` doit pouvoir relire.
+fn from_nodes_refuse_un_dossier_et_une_fenetre_homonymes() {
+    // A8 (`guide-de-correction-robustesse.md` §F9) — ce test affirmait
+    // auparavant que « ce que `insert` peut produire, `from_nodes` doit
+    // pouvoir relire », en construisant précisément le cas qu'A8 corrige :
+    // un dossier et un classeur frères homonymes. `insert` (via
+    // `check_name_available`) refuse désormais cette paire lui-même — la
+    // prémisse du test n'a donc plus lieu d'être, mais l'esprit reste : ce
+    // que l'API de mutation refuse de produire, `from_nodes` doit aussi le
+    // refuser en le relisant (c'est `critere_23_from_nodes_refuse_les_
+    // arbres_incoherents` qui couvre ce sens-là) ; ce test-ci vérifie le
+    // premier maillon, que la paire n'est plus produisible du tout.
     let mut project = Project::new("Demo").expect("nom valide");
     let root = project.root();
     project.add_folder(root, "X").expect("dossier");
-    project
-        .add_empty_workbook(root, Some("X"))
-        .expect("classeur");
-    let nodes: Vec<Node> = project.tree().iter().map(|(_, n)| n.clone()).collect();
-    let rebuilt = Tree::from_nodes(root, nodes).expect("arbre relisible");
-    assert_eq!(rebuilt, **project.tree());
+    assert!(matches!(
+        project.add_empty_workbook(root, Some("X")),
+        Err(CoreError::DuplicateName(_))
+    ));
 }
 
 #[test]

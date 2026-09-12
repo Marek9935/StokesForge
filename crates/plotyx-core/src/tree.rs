@@ -32,32 +32,6 @@ pub(crate) fn display_folders(folders: &[String]) -> String {
     }
 }
 
-/// Catégorie d'unicité d'un nom entre frères : deux frères de la même
-/// catégorie ne peuvent pas porter le même nom.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum NameCategory {
-    /// Dossier : unique parmi ses frères.
-    Folder,
-    /// Fenêtre : unique à l'échelle du projet (traité à part).
-    Window,
-    /// Feuille : unique dans son classeur.
-    Sheet,
-    /// Colonne : unique dans sa feuille.
-    Column,
-}
-
-/// Catégorie d'unicité d'une nature de nœud.
-fn category_of(kind: &NodeKind) -> NameCategory {
-    if kind.is_window() {
-        NameCategory::Window
-    } else if kind.is_folder() {
-        NameCategory::Folder
-    } else if kind.is_worksheet() {
-        NameCategory::Sheet
-    } else {
-        NameCategory::Column
-    }
-}
 
 /// Arbre du projet : carte plate `NodeId → Arc<Node>` et racine. Partagé par
 /// `Arc<Tree>` ; toute mutation passe par `Project`, qui fait `Arc::make_mut`
@@ -200,7 +174,26 @@ impl Tree {
     }
 
     /// Unicité des noms d'un arbre chargé : globale pour les fenêtres, entre
-    /// frères de même catégorie pour le reste.
+    /// **tous** les frères directs par ailleurs — fenêtres comprises.
+    ///
+    /// A8 (`guide-de-correction-robustesse.md` §F9) — reproduit ici, à
+    /// l'identique, la portée de `check_name_available` : deux frères
+    /// directs ne partagent jamais un nom, quelle que soit leur nature.
+    /// Avant ce correctif, une fenêtre pouvait prendre le nom d'un dossier
+    /// frère (la branche « fenêtre » de `check_name_available` ne
+    /// regardait que les autres fenêtres, jamais ses frères directs) : un
+    /// dossier et une fenêtre homonymes rendaient le dossier introuvable
+    /// par son chemin canonique selon l'ordre d'arrivée des deux
+    /// (`b11_path_of_se_re_resout_toujours_sur_le_meme_noeud`). Le sens du
+    /// correctif est de refuser plus (§6 du guide) : `check_name_available`
+    /// compare désormais aussi une fenêtre à ses frères directs, et ce
+    /// contrôle-ci reprend la même règle, sans exception ni dépendance à
+    /// l'ordre des enfants dans `children()` (une première version de ce
+    /// correctif faisait dépendre le verdict de cette position — « le
+    /// premier arrivé gagne le nom » — et un balayage aléatoire,
+    /// `b14_laller_retour_disque_tient_a_chaque_pas`, a montré qu'un simple
+    /// déplacement, `Move`, suffit à la changer sans rien changer aux noms,
+    /// faisant rejeter au chargement un arbre pourtant valide).
     fn validate_loaded_names(&self) -> CoreResult<()> {
         let mut windows: HashSet<&str> = HashSet::new();
         for node in self.nodes.values() {
@@ -213,22 +206,27 @@ impl Tree {
         }
 
         for (id, node) in &self.nodes {
-            let mut seen: HashSet<(NameCategory, &str)> = HashSet::new();
-            for child in node.children() {
-                let Some(child_node) = self.nodes.get(child) else {
+            let mut seen: HashMap<&str, NodeId> = HashMap::new();
+            for &child in node.children() {
+                let Some(child_node) = self.nodes.get(&child) else {
                     continue;
                 };
-                let category = category_of(child_node.kind());
-                if category == NameCategory::Window {
-                    continue; // déjà couvert par l'unicité globale
-                }
-                if !seen.insert((category, child_node.name())) {
+                // Aucune exception pour les fenêtres ici : `check_name_
+                // available` (voir sa doc, A8) refuse maintenant qu'une
+                // fenêtre prenne le nom d'un dossier frère tout autant que
+                // l'inverse — deux frères directs ne partagent jamais un
+                // nom, quelle que soit leur nature. L'unicité globale des
+                // fenêtres (au-delà de la fratrie directe) reste vérifiée
+                // séparément, ci-dessus.
+                if let Some(&earlier) = seen.get(child_node.name()) {
                     return Err(CoreError::Structure(format!(
-                        "{id} contient deux enfants nommés {} de même nature ({})",
-                        child_node.name(),
-                        child_node.kind().type_name()
+                        "{child} ({}) ne peut pas porter le nom {} dans {id} : {earlier} \
+                         le porte déjà",
+                        child_node.kind().type_name(),
+                        child_node.name()
                     )));
                 }
+                seen.insert(child_node.name(), child);
             }
         }
         Ok(())
@@ -427,6 +425,24 @@ impl Tree {
             .find(|child| self.node(*child).is_some_and(|node| node.name() == name)))
     }
 
+    /// Enfant **dossier** de `parent` portant ce nom, ou `None`.
+    ///
+    /// A8 (`guide-de-correction-robustesse.md` §F9) — distinct de
+    /// `child_by_name` : un dossier n'est le seul parent du modèle à
+    /// accueillir deux catégories d'enfants (dossiers et fenêtres,
+    /// `NodeKind::accepts_child`), et `check_name_available` n'empêche pas
+    /// une fenêtre de prendre le nom d'un dossier frère. Chercher par nom
+    /// *puis* filtrer par nature choisirait le frère homonyme rencontré en
+    /// premier dans `children()`, que ce soit le bon ou non ; chercher
+    /// directement parmi les enfants dossiers rend la résolution d'un
+    /// segment de chemin indépendante de cet ordre.
+    fn folder_child_by_name(&self, parent: NodeId, name: &str) -> CoreResult<Option<NodeId>> {
+        Ok(self.get(parent)?.children().iter().copied().find(|child| {
+            self.node(*child)
+                .is_some_and(|node| node.kind().is_folder() && node.name() == name)
+        }))
+    }
+
     /// Nombre de lignes d'une feuille : le maximum des longueurs de ses
     /// colonnes, 0 si elle n'en a aucune. `Err(Structure)` si `sheet` n'est pas
     /// une feuille.
@@ -492,15 +508,18 @@ impl Tree {
     /// La comparaison des noms est celle de `child_by_name` et `find_window` :
     /// égalité exacte, donc **sensible à la casse**.
     pub fn resolve_parsed(&self, path: &ObjectPath) -> CoreResult<NodeId> {
-        // Chemin sans fenêtre : une descente de dossiers depuis la racine. Le
-        // filtre sur `is_folder` évite qu'un segment tombe sur une fenêtre ou
-        // une feuille homonyme et laisse croire à un dossier.
+        // Chemin sans fenêtre : une descente de dossiers depuis la racine.
+        // `folder_child_by_name` ne considère que les enfants dossiers dès la
+        // recherche elle-même (A8) : `check_name_available` n'empêche pas une
+        // fenêtre de prendre le nom d'un dossier frère (voir sa doc), donc un
+        // `child_by_name` générique pourrait tomber sur la fenêtre plutôt que
+        // sur le dossier et rendre ce dernier « introuvable » selon l'ordre
+        // des enfants — ce qui casserait `path_of ∘ resolve_path = identité`.
         let Some(window_name) = path.window.as_deref() else {
             let mut current = self.root();
             for segment in &path.folders {
                 current = self
-                    .child_by_name(current, segment)?
-                    .filter(|id| self.node(*id).is_some_and(|node| node.kind().is_folder()))
+                    .folder_child_by_name(current, segment)?
                     .ok_or_else(|| CoreError::Path(format!("dossier introuvable : {segment}")))?;
             }
             return Ok(current);
@@ -585,7 +604,15 @@ impl Tree {
                     )));
                 }
             }
-            return Ok(());
+            // A8 (`guide-de-correction-robustesse.md` §F9) — l'unicité
+            // globale entre fenêtres ne suffit pas : une fenêtre reste aussi
+            // un frère parmi d'autres pour la résolution de chemin
+            // (`resolve_parsed`), et ne doit donc pas pouvoir prendre le nom
+            // d'un dossier frère — sans quoi `path_of ∘ resolve_path` cesse
+            // d'être l'identité pour le dossier homonyme, selon l'ordre
+            // d'arrivée des deux. PAS de retour anticipé ici : on continue
+            // vers le contrôle de frère générique ci-dessous, qui s'applique
+            // maintenant à toute nature de nœud, fenêtre comprise.
         }
 
         let Some(parent) = parent else {
