@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use anyhow::Context as _;
 use plotyx_app::app::PlotyxApp;
 use plotyx_app::state::AppState;
-use plotyx_core::{Column, Project};
+use plotyx_core::{Column, NodeId, Project};
+use plotyx_plot::{AxisSpec, LineSpec, PanelSpec, PlotSpec, SeriesSpec};
 use plotyx_session::Session;
 
 /// Nom du fichier proposé par défaut quand aucun chemin n'est donné.
@@ -54,7 +55,17 @@ fn main() -> anyhow::Result<()> {
     let outcome = eframe::run_native(
         "plotyx-app",
         options,
-        Box::new(|_cc| Ok(Box::new(PlotyxApp::new(state)))),
+        Box::new(|cc| {
+            // Tâche R4.1 : poser explicitement **les** définitions de police
+            // du projet sur le contexte, plutôt que de compter sur le fait
+            // qu'egui a par défaut les mêmes. C'est ce qui fait de l'accord
+            // écran/export une propriété et non une coïncidence — si egui
+            // changeait son défaut, la figure resterait la même des deux
+            // côtés.
+            cc.egui_ctx
+                .set_fonts(plotyx_render_egui::font_definitions());
+            Ok(Box::new(PlotyxApp::new(state)))
+        }),
     );
 
     // L'arrêt propre de l'acteur passe avant la remontée d'une erreur de
@@ -140,5 +151,65 @@ fn demo_project() -> anyhow::Result<Project> {
     project
         .add_column(sheet2, None, Some("Court"), Column::from_f64(&[7.0, 8.0]))
         .context("colonne Court")?;
+
+    // Le graphe de la phase R4. Ses colonnes sont **les siennes** et non
+    // `Temps`/`Signal` : celles-là portent volontairement un `NaN` et des
+    // longueurs inégales pour éprouver la grille, ce qui donnerait une
+    // courbe difficile à lire. Un banc doit montrer les cas tordus du
+    // modèle *et* un rendu qu'on puisse juger à l'œil.
+    let spectre = project
+        .add_worksheet(book, Some("Spectre"))
+        .context("feuille Spectre")?;
+    let xs: Vec<f64> = (0..=120).map(|i| 400.0 + i as f64 * 2.5).collect();
+    let ys: Vec<f64> = xs
+        .iter()
+        .map(|x| {
+            let a = (x - 520.0) / 38.0;
+            let b = (x - 610.0) / 22.0;
+            0.85 * (-a * a).exp() + 0.32 * (-b * b).exp() + 0.04
+        })
+        .collect();
+    let x = project
+        .add_column(spectre, None, Some("Lambda"), Column::from_f64(&xs))
+        .context("colonne Lambda")?;
+    let y = project
+        .add_column(spectre, None, Some("Absorbance"), Column::from_f64(&ys))
+        .context("colonne Absorbance")?;
+    project
+        .add_graph(root, Some("Graph1"), demo_spec(x, y))
+        .context("graphe de démonstration")?;
     Ok(project)
+}
+
+/// Le `PlotSpec` du graphe de démonstration : une `LineSeries`, axes
+/// linéaires, pas de légende — exactement le « graphe minimal » de la phase
+/// R4 (`docs/newarchitecture/roadmap-rendu.md`).
+fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
+    let mut panel = PanelSpec::at(0, 0);
+    panel.bottom = AxisSpec {
+        label: "λ".into(),
+        unit: "nm".into(),
+        grid: true,
+        ..AxisSpec::default()
+    };
+    panel.left = AxisSpec {
+        label: "Absorbance mesurée".into(),
+        unit: "u.a.".into(),
+        grid: true,
+        ..AxisSpec::default()
+    };
+    let mut serie = SeriesSpec::new_xy(x, y);
+    serie.name = "Échantillon µ1".into();
+    serie.line = LineSpec {
+        color: "#4c78a8".into(),
+        width: 2.0,
+        ..LineSpec::default()
+    };
+    panel.series.push(serie);
+    PlotSpec {
+        title: "Spectre d'absorption — λ_max".into(),
+        background: "#ffffff".into(),
+        ..PlotSpec::empty("")
+    }
+    .with_panels(panel)
 }

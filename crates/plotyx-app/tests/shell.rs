@@ -840,3 +840,34 @@ fn script_source_lives_in_state_and_is_not_lost_by_other_actions() {
         "relecture après remplacement"
     );
 }
+
+/// Phase R4 : le banc doit savoir où sont les graphes, puisqu'il en affiche
+/// un. Le pendant de `sheets()`, et la seule partie du panneau de rendu qui
+/// se teste sans fenêtre — le reste, c'est `plotyx-render-egui` qui le
+/// couvre (`tests/cache_session.rs`).
+#[test]
+fn les_graphes_du_projet_sont_enumeres_avec_leur_chemin() {
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let mut project = demo_project();
+    let root = project.root();
+    let sheet = sheet_named(project.tree(), "Sheet1");
+    let colonne = project
+        .tree()
+        .child_by_name(sheet, "Temps")
+        .expect("Sheet1 lisible")
+        .expect("colonne Temps");
+    let mut panel = plotyx_plot::PanelSpec::at(0, 0);
+    panel.series.push(plotyx_plot::SeriesSpec::new(colonne));
+    let spec = plotyx_plot::PlotSpec::empty("Essai").with_panels(panel);
+    project
+        .add_graph(root, Some("Graph1"), spec)
+        .expect("graphe");
+
+    let (session, state) = start(project, &dir.path().join("projet.plotyx"));
+    let graphes = state.graphs();
+    assert_eq!(graphes.len(), 1, "un seul graphe : {graphes:?}");
+    assert_eq!(graphes[0].1, "Graph1");
+    // Une feuille n'est pas un graphe, et réciproquement.
+    assert!(state.sheets().iter().all(|(id, _)| *id != graphes[0].0));
+    unused(&session.handle());
+}

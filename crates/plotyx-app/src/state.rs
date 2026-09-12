@@ -52,6 +52,7 @@ use std::sync::Arc;
 use std::thread;
 
 use plotyx_commands::Command;
+use plotyx_core::node::NodeKind;
 use plotyx_core::{Cell, Column, ColumnType, Node, NodeId, Tree, ValueBlock};
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
@@ -565,6 +566,23 @@ impl AppState {
             .filter(|id| {
                 tree.node(*id)
                     .is_some_and(|node| node.kind().is_worksheet())
+            })
+            .map(|id| (id, self.readable_path(id)))
+            .collect()
+    }
+
+    /// Les graphes du projet, sous la forme `(identifiant, chemin lisible)`.
+    ///
+    /// Le pendant exact de [`AppState::sheets`], pour le panneau de rendu de
+    /// la phase R4. Comme lui, il reconstruit le chemin à la main faute de
+    /// `Project::path_of` côté `Arc<Tree>`.
+    pub fn graphs(&self) -> Vec<(NodeId, String)> {
+        let tree = &self.snapshot.tree;
+        tree.walk_all()
+            .into_iter()
+            .filter(|id| {
+                tree.node(*id)
+                    .is_some_and(|node| matches!(node.kind(), NodeKind::Graph { .. }))
             })
             .map(|id| (id, self.readable_path(id)))
             .collect()

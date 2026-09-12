@@ -47,12 +47,24 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
 use plotyx_core::{ColumnType, NodeId};
+use plotyx_render_egui::GraphView;
 
 use crate::state::{Action, AppState};
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
 /// [`PlotyxApp::new`]).
 pub const AUTOQUIT_ENV: &str = "PLOTYX_APP_AUTOQUIT_MS";
+/// Variable d'environnement du mécanisme de capture (voir
+/// [`PlotyxApp::screenshot`]).
+pub const SCREENSHOT_ENV: &str = "PLOTYX_APP_SCREENSHOT";
+/// Images laissées passer avant de demander une capture.
+///
+/// egui résout la taille de ses panneaux sur deux ou trois images : capturer
+/// la première montrerait une mise en page transitoire — et, pour le panneau
+/// de graphe, un compteur de cache qui n'a pas encore eu l'occasion de
+/// servir une image inchangée. On regarde le régime établi, pas le
+/// démarrage.
+const SCREENSHOT_SETTLE_FRAMES: u32 = 8;
 
 /// Ctrl+Z — annuler.
 pub const SHORTCUT_UNDO: egui::KeyboardShortcut =
@@ -81,12 +93,26 @@ const ROW_HEIGHT: f32 = 20.0;
 const HEADER_HEIGHT: f32 = 22.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
+/// Largeur par défaut du panneau de graphe, en points.
+const GRAPH_PANEL_WIDTH: f32 = 460.0;
 
 /// L'application `eframe` : l'état du banc, plus le strict nécessaire au
 /// rendu.
 pub struct PlotyxApp {
     /// L'état, seul dépositaire de la logique.
     state: AppState,
+    /// La vue de graphe et son cache de formes (phase R4). Une seule : le
+    /// banc n'affiche qu'un graphe à la fois, et un cache par vue est la
+    /// règle (`plotyx_render_egui::GraphView`).
+    graph: GraphView,
+    /// Le graphe affiché, s'il y en a un. `None` tant qu'aucun n'a été
+    /// choisi ni trouvé.
+    shown_graph: Option<NodeId>,
+    /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
+    /// (mécanisme de vérification, voir [`PlotyxApp::screenshot`]).
+    screenshot: Option<std::path::PathBuf>,
+    /// Images restant à laisser passer avant de demander la capture.
+    screenshot_delay: u32,
     /// Délai d'auto-fermeture, s'il est demandé (mécanisme de vérification).
     autoquit: Option<Duration>,
     /// Instant du premier rendu, d'où se mesure le délai d'auto-fermeture.
@@ -119,6 +145,10 @@ impl PlotyxApp {
             autoquit,
             first_frame: None,
             script_panel_open: true,
+            graph: GraphView::new(),
+            shown_graph: None,
+            screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
+            screenshot_delay: SCREENSHOT_SETTLE_FRAMES,
         }
     }
 
@@ -467,6 +497,132 @@ impl PlotyxApp {
         });
     }
 
+    /// Panneau de graphe — le **rendu visible** de la phase R4 (tâche 4.6).
+    ///
+    /// Ce n'est pas une ébauche de la fenêtre de graphe finale : comme tout
+    /// ce banc, c'est la preuve que l'intégration bout en bout tient. Ce
+    /// qu'il montre vraiment, et qu'aucun test ne montre :
+    ///
+    /// - la figure elle-même, avec ses vraies polices et son vrai HiDPI ;
+    /// - le compteur de cache, qui rend visible la tâche R4.3. Au repos,
+    ///   `succès` monte et `calculs` ne bouge plus : une image sans
+    ///   changement ne rejoue pas le pipeline Plotters. Redimensionner la
+    ///   fenêtre, ou modifier une cellule, fait repartir `calculs` d'un cran
+    ///   — c'est la clé `(revision, rect, pixels_per_point)` au travail.
+    fn graph_panel(&mut self, ui: &mut egui::Ui) {
+        let graphs = self.state.graphs();
+        if graphs.is_empty() {
+            return;
+        }
+        // Par défaut, le premier graphe du projet : le banc doit montrer
+        // quelque chose sans qu'on ait à cliquer.
+        if !self
+            .shown_graph
+            .is_some_and(|shown| graphs.iter().any(|(id, _)| *id == shown))
+        {
+            self.shown_graph = graphs.first().map(|(id, _)| *id);
+        }
+
+        let state = &self.state;
+        let view = &mut self.graph;
+        let shown = &mut self.shown_graph;
+        egui::Panel::right("plotyx_graph")
+            .default_size(GRAPH_PANEL_WIDTH)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Graphe");
+                    for (id, path) in &graphs {
+                        if ui.selectable_label(*shown == Some(*id), path).clicked() {
+                            *shown = Some(*id);
+                        }
+                    }
+                });
+                ui.separator();
+
+                let Some(graph) = *shown else {
+                    return;
+                };
+                let available = ui.available_size_before_wrap();
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(available.x, (available.y - 24.0).max(120.0)),
+                    egui::Sense::hover(),
+                );
+                match view.paint(ui.painter(), rect, state.snapshot(), graph) {
+                    Ok(_) => {
+                        let cache = view.cache();
+                        ui.weak(format!(
+                            "cache : {} succès / {} calculs — {} formes",
+                            cache.hits(),
+                            cache.misses(),
+                            cache.shapes().len()
+                        ));
+                    }
+                    Err(err) => {
+                        ui.colored_label(egui::Color32::RED, format!("rendu : {err}"));
+                    }
+                }
+            });
+    }
+
+    /// Dépose une capture de la fenêtre dans le fichier nommé par
+    /// `PLOTYX_APP_SCREENSHOT`, puis n'en redemande plus.
+    ///
+    /// **Mécanisme de vérification, pas une fonctionnalité** — exactement
+    /// comme l'auto-fermeture, et pour un besoin voisin apparu avec la
+    /// phase R4 : sur un chantier de rendu, « la fenêtre s'ouvre et ne
+    /// plante pas » ne suffit plus, il faut pouvoir *regarder* ce qu'elle
+    /// peint. Les tests couvrent la géométrie (`plotyx-render-egui`), pas
+    /// l'apparence ; et une capture prise par la fenêtre elle-même est le
+    /// seul moyen d'y accéder sous Wayland, où aucun outil externe ne peut
+    /// photographier une fenêtre donnée.
+    ///
+    /// Le format est **PPM binaire** (`P6`), sept lignes de code et aucune
+    /// dépendance nouvelle. Le convertir en PNG est l'affaire d'un
+    /// `magick capture.ppm capture.png` ; faire entrer un encodeur PNG dans
+    /// le banc pour un outil de vérification serait payer cher un confort.
+    ///
+    /// Une erreur d'écriture est signalée sur la sortie d'erreur et rien de
+    /// plus : le banc ne doit pas s'arrêter parce qu'un outillage de
+    /// vérification a échoué.
+    fn screenshot(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.screenshot.clone() else {
+            return;
+        };
+        if self.screenshot_delay > 0 {
+            self.screenshot_delay -= 1;
+            ctx.request_repaint();
+            return;
+        }
+        // Une capture arrive à l'image *suivant* la demande : tant qu'on n'a
+        // rien reçu, on redemande.
+        let image = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        let Some(image) = image else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            ctx.request_repaint();
+            return;
+        };
+        self.screenshot = None;
+
+        let [width, height] = image.size;
+        let mut ppm = format!("P6\n{width} {height}\n255\n").into_bytes();
+        for pixel in &image.pixels {
+            let [r, g, b, _] = pixel.to_srgba_unmultiplied();
+            ppm.extend_from_slice(&[r, g, b]);
+        }
+        match std::fs::write(&path, ppm) {
+            Ok(()) => eprintln!("[plotyx-app] capture écrite : {}", path.display()),
+            Err(err) => eprintln!(
+                "[plotyx-app] capture impossible dans {} : {err}",
+                path.display()
+            ),
+        }
+    }
+
     /// Ferme la fenêtre si le délai d'auto-fermeture est écoulé.
     fn autoquit(&mut self, ctx: &egui::Context) {
         let Some(delay) = self.autoquit else {
@@ -503,6 +659,7 @@ impl eframe::App for PlotyxApp {
         self.status_bar(ui);
         self.sheet_panel(ui, &mut actions);
         self.script_panel(ui, &ctx, &mut actions);
+        self.graph_panel(ui);
         self.grid(ui, &mut actions);
 
         // Les actions ne sont appliquées qu'une fois l'image peinte : muter le
@@ -512,6 +669,7 @@ impl eframe::App for PlotyxApp {
             self.state.dispatch(action);
         }
 
+        self.screenshot(&ctx);
         self.autoquit(&ctx);
     }
 }

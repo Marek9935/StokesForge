@@ -21,6 +21,8 @@ plotyx-core = { path = "../plotyx-core" }
 plotyx-commands = { path = "../plotyx-commands" }
 plotyx-session = { path = "../plotyx-session" }
 plotyx-persistence = { path = "../plotyx-persistence" }
+plotyx-plot = { path = "../plotyx-plot" }
+plotyx-render-egui = { path = "../plotyx-render-egui" }
 # Chemins optionnels, activés uniquement par la feature `python` de CE crate :
 # c'est elle qui active la feature `python` de chacun (dont dépend l'existence
 # même de leurs types publics, cf. la doc de tête de leurs `lib.rs`).
