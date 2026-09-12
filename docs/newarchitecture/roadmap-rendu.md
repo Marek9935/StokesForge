@@ -698,7 +698,11 @@ courbe. Tout le reste du plan consiste à le garder vrai en élargissant.
 > légende). Enfin, si la cible est bien « 500 spectres à l'écran », ni le
 > LTTB ni le feathering ne suffisent durablement, et la vraie question —
 > réduire le **nombre de formes**, pas le nombre de points — reste entière ;
-> R5 ne l'a pas tranchée, comme le §5.1 ci-dessous l'annonçait.
+> R5 ne l'a pas tranchée, comme le §5.1 ci-dessous l'annonçait. **Devenue
+> sans objet le 2026-09-12** : ce scénario suppose un rafraîchissement
+> continu (l'acquisition live), tranchée hors périmètre du logiciel
+> (`questions-ouvertes.md` §6) — un affichage statique de 500 spectres ne
+> paie ce coût qu'une fois, `plotyx-app` ne redessinant que sur événement.
 
 **Objectif** : couvrir le `PlotSpec` réel, **en ajoutant aux deux backends
 à la fois**.
@@ -747,6 +751,14 @@ Le coût est linéaire à **~75 ns/point**, et la barre des 8 ms tombe vers
 - si la cible est bien « 500 spectres à l'écran », **aucun des deux ne suffit
   durablement** et R5 devra poser la vraie question : réduire le nombre de
   formes, pas le nombre de points. Ce n'est pas tranché ici.
+
+> **Devenu sans objet le 2026-09-12.** Ce troisième cas suppose un
+> rafraîchissement continu — l'écran redessiné en boucle sans qu'on y
+> touche — et ça décrit l'acquisition live, désormais tranchée hors
+> périmètre du logiciel (`questions-ouvertes.md` §6). Un affichage statique
+> de 500 spectres, lui, ne paie ce coût **qu'une fois** : `plotyx-app` ne
+> redessine que sur événement (entrée, script en cours, capture —
+> `crates/plotyx-app/src/app.rs`), jamais en boucle. Rien à construire ici.
 
 **Décidé le 2026-09-10 : le feathering se coupe à l'entrée en interaction
 souris, et se rétablit au relâchement.** C'est le déclencheur qui rend

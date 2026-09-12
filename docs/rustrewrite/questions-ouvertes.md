@@ -297,6 +297,21 @@ et ce report est sans risque — aucun crate du socle n'en dépend.
 **Quand ça doit être tranché** : au chantier de l'UI réelle, avec le
 système de graphes sous les yeux.
 
+> **Tranché le 2026-09-12 — l'acquisition live est hors périmètre du
+> logiciel.** La question ne « rétrécit » plus, elle se ferme : ce n'est pas
+> un report de plus, c'est un « non ». Ce que ça règle en cascade :
+>
+> - le mode « visualiseur léger » n'a plus de raison d'être — il n'existait
+>   que pour ce cas d'usage (§6 ci-dessus) ;
+> - la limite non résolue de `roadmap-rendu.md` R5 (« beaucoup de séries qui
+>   se rafraîchissent en continu, sans interaction souris, ni LTTB ni
+>   feathering ne suffisent ») ne s'applique à aucun usage réel du logiciel.
+>   Un affichage de 500 courbes qu'on ne touche pas ne coûte rien en continu
+>   — `plotyx-app` ne redessine que sur événement (entrée, script en cours,
+>   capture), jamais en boucle ; le coût de tessellation n'est payé qu'une
+>   fois, à l'affichage. Seul un rafraîchissement automatique et continu
+>   l'aurait fait revenir à chaque image, et ce cas d'usage n'existe pas.
+
 ---
 
 ## 7. La limite d'historique par défaut — un nombre à choisir

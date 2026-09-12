@@ -756,11 +756,11 @@ par `plotyx-commands::History`, déjà construit et testé).
    labels Typst sortent en contours autonomes, les graduations de Plotters
    en `<text font-family>` dépendant de la machine du lecteur (§5.1).
    Trancher avant le premier export destiné à une publication.
-7. **Mode « visualiseur léger »** — toujours reporté au chantier de l'UI
-   réelle (spec §13), mais l'argument change : avec un backend egui natif,
-   « un chemin rapide sans Python » n'est plus une exception à construire,
-   c'est le cas nominal. Le point à trancher se réduit à : *l'acquisition
-   live existe-t-elle comme besoin ?* (`questions-ouvertes.md` §6).
+7. ~~**Mode « visualiseur léger ».**~~ **Clos le 2026-09-12 — abandonné.**
+   Il n'existait que pour un besoin — l'acquisition live — désormais tranché
+   hors périmètre du logiciel (`questions-ouvertes.md` §6). Rien à écrire :
+   avec un backend egui natif, « un chemin rapide sans Python » est déjà le
+   cas nominal, sans qu'un second mode d'affichage soit nécessaire.
 8. ~~**Compteur de modification par colonne.**~~ **Clos le 2026-09-10 —
    construit.** `Column::version()`, incrémenté par les six mutateurs de
    données, persisté, exclu de `PartialEq`, conservateur sur les appels sans
