@@ -83,7 +83,11 @@ pub use feathering::Feathering;
 // `plotyx-render` pour lire ce que la figure a tracé : ce crate est déjà sa
 // façade de rendu écran.
 pub use plotyx_render::pipeline::{DrawnPanel, DrawnPlot};
-pub use plotyx_render::text::{font_definitions, TextMeasurer, TextSource};
+pub use plotyx_render::text::{font_definitions, font_definitions_for, TextMeasurer, TextSource};
+// Le choix de police (embed du 2026-09-13, `plotyx_render::fonts`) : une UI
+// qui veut proposer Fira/Libertinus/Noto ou une police système n'a pas à
+// déclarer sa propre arête vers `plotyx-render` pour ça non plus.
+pub use plotyx_render::{FontChoice, FontSet, FontSource, ResolvedFonts};
 
 /// Ce qui peut rater à l'affichage d'un graphe.
 #[derive(Debug, Clone, PartialEq, Eq)]
