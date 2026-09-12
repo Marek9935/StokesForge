@@ -571,6 +571,93 @@ sans toucher au modèle de graphe — la même discipline que « aucun Qt dans
 > `plotyx-render-svg/tests/frontiere.rs` vérifie en comptant les `epaint` du
 > `Cargo.lock`. `svg2pdf` reste absent : c'est la phase R6.
 
+> **Ajout du 2026-09-12 (phase R5) — aucun onzième crate, et c'est le
+> résultat qui compte.** L'élargissement au `PlotSpec` réel n'a créé aucun
+> crate : les six types de tracé, les deux échelles d'axe, l'axe secondaire,
+> les styles de trait et de marqueur, la légende, la grille de panneaux et
+> la décimation LTTB sont **tous** descendus dans `plotyx-render`, qui passe
+> de trois modules à neuf :
+>
+> | Module | Ce qu'il porte |
+> |---|---|
+> | `text`, `pipeline`, `color` | R4, inchangés dans leur rôle |
+> | `series` | un `PlotType` traduit en géométrie, **une fois**, pour le cadrage comme pour le tracé |
+> | `scale` | les échelles d'axe (voir ci-dessous : la log transforme les valeurs, pas le type de coordonnée) |
+> | `paint` | les primitives en pixels — styles de trait, marqueurs, barres, moustaches |
+> | `legend` | la légende, mise en page sur `estimate_text_size` et non sur Plotters |
+> | `decimate` | le LTTB |
+> | `sample` | le graphe minimal de R4 et le graphe réaliste de R5, partagés par l'exemple d'export et par le test d'accord |
+>
+> Les deux backends, eux, n'ont rien gagné que ce que leur nature impose :
+> `plotyx-render-egui` reçoit le module `feathering` (ci-dessous) et
+> `plotyx-render-svg` un exemple élargi. **La règle que R5 s'était donnée —
+> « aucune fonctionnalité n'entre dans un seul backend » — n'a donc pas eu à
+> être surveillée** : le pipeline générique de R4 la tenait par
+> construction, ce qui était l'argument avancé pour l'écrire, et qui se
+> vérifie ici.
+>
+> **Trois écarts par rapport à ce que ce document laissait attendre**, tous
+> assumés, détaillés dans `roadmap-rendu.md` (bloc de clôture de R5) :
+>
+> 1. **l'échelle logarithmique n'utilise pas `LogRange` de Plotters.** Ce
+>    combinateur change le *type* de la coordonnée ; avec deux axes, deux
+>    échelles et un axe secondaire, la fonction qui trace un panneau
+>    existerait en huit monomorphisations. C'est la divergence que le
+>    pipeline unique existe pour empêcher, qui rentrerait par la porte du
+>    système de types. Les valeurs sont donc transformées en amont, le
+>    `Cartesian2d<f64, f64>` reste unique, et le prix payé est que les
+>    graduations d'un axe log sont des **décades** ;
+> 2. **la légende n'est pas celle de Plotters.**
+>    `configure_series_labels()` dimensionne son cadre par
+>    `FontData::estimate_layout`, donc — nos fonts Plotters étant coupées —
+>    par l'heuristique monospace par octets UTF-8 du §4.4, et non par
+>    `estimate_text_size`. Le cadre serait faux là où le texte dedans serait
+>    juste, **identiquement des deux côtés**, donc invisible au test
+>    d'accord. C'est le contre-exemple qui montre que l'invariant du §4.3 ne
+>    se délègue pas à un test d'égalité : il faut savoir par où passe la
+>    mesure ;
+> 3. **les séries se peignent en coordonnées écran** (`use_screen_coord()`
+>    après `map_coordinate`) plutôt que par `draw_series`, parce qu'un
+>    tiret, un carré et un losange se décrivent en pixels. C'est le même
+>    chemin de sortie, troncature au rectangle comprise ; le graphe minimal
+>    de R4 est inchangé au pixel près.
+>
+> **Où vit le levier de *feathering*, et pourquoi là.** Dans
+> `plotyx-render-egui::feathering`, en fonction **libre** prenant un
+> `&egui::Context` — pas en méthode de `GraphView`, pas dans
+> `plotyx-render`, et surtout pas dans la clé de cache du §4.2 :
+>
+> - `TessellationOptions` est un réglage d'`egui::Context`, en **aval** de
+>   la collecte des `Shape`. `plotyx-render` ne connaît pas egui, et un SVG
+>   n'a pas de tessellation du tout — il décrit des courbes, il ne les
+>   triangule pas. C'est la seule exception de R5 à la règle « aucune
+>   fonctionnalité dans un seul backend », et ce n'en est pas vraiment une :
+>   il n'y a rien à mettre de l'autre côté ;
+> - le réglage vaut pour **tout** le `Context`, donc pour tous les widgets
+>   de l'image. Une `GraphView` qui le poserait en peignant le poserait pour
+>   les autres, et deux vues en poseraient deux valeurs contradictoires.
+>   L'appelant est le seul à savoir quand une interaction commence ;
+> - **la clé de cache n'a pas grossi.** Ce document le dit déjà au §4.2 ;
+>   R5 ajoute un test qui l'exige (`plotyx-render-egui/tests/feathering.rs` :
+>   basculer la frange deux fois laisse `ShapeCache::misses()` inchangé),
+>   parce que c'est exactement le terme qu'on ajoute « par prudence » et
+>   qu'un commentaire ne retient pas.
+>
+> Le levier est **mesuré** et non affirmé : le même test tessèle une figure
+> deux fois et compte les sommets. La frontière laissée à R7 tient en deux
+> appels, `apply(ctx, Feathering::Off)` à l'entrée du glisser et
+> `apply(ctx, Feathering::Full)` au relâchement — R5 pose le levier, R7
+> l'actionne.
+>
+> **Un module de fixtures dans un crate de production, à savoir.**
+> `plotyx_render::sample` porte les deux graphes de démonstration. Il n'est
+> pas en `[dev-dependencies]` parce qu'une dépendance de développement ne
+> traverse pas les crates, et le graphe doit être *le même* pour le test
+> d'accord (qui vit côté egui) et pour l'exemple d'export (qui ne doit pas
+> voir egui). Même figure qu'avec `plotyx-id` en R3 : la partie commune
+> descend d'un cran. À reconsidérer le jour où le dépôt portera un `.plx`
+> d'exemple — il n'en porte aucun.
+
 ---
 
 ## 9. Schéma d'architecture
@@ -644,7 +731,12 @@ par `plotyx-commands::History`, déjà construit et testé).
    d'avance. **Le LTTB entre en R5.** Voir §4.2 pour les deux corrections
    que cette mesure apporte — le levier `feathering` (78 % du coût) et le
    cache `Mesh` à 45,6 Mo — et `roadmap-rendu.md` R5 pour la nuance sur le
-   modèle de charge.
+   modèle de charge. **Les deux sont livrés le 2026-09-12**
+   (`plotyx_render::decimate` et `plotyx_render_egui::feathering`), le LTTB
+   pour le cas qu'il sert réellement — quelques séries très longues — et
+   non pour le cas mesuré, comme la nuance l'annonçait. Le coût n'a pas été
+   re-mesuré sur le pipeline de R5 : ce point reste à rouvrir avant
+   d'appuyer sur le bouton n° 2.
 2. ~~**Latence de compilation Typst** par formule inédite.~~ **Clos le
    2026-09-10 par la mesure R0 0.2 : 0,156 ms** par formule inédite en monde
    chaud (médiane de 10 exécutions × 19 formules réelles de chimie/physique ;

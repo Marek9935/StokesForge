@@ -524,6 +524,182 @@ courbe. Tout le reste du plan consiste à le garder vrai en élargissant.
 
 ## Phase R5 — Élargissement (≈2 semaines)
 
+> **Statut : close le 2026-09-12.** Le `PlotSpec` réel est couvert — six
+> types de tracé, deux échelles, axe secondaire, styles de trait et de
+> marqueur, légende, grille de panneaux, décimation — et **pas une ligne de
+> rendu n'est entrée dans un backend** : tout est descendu dans le pipeline
+> commun de `plotyx-render`, qui gagne six modules (`series`, `scale`,
+> `paint`, `legend`, `decimate`, `sample` : 1 780 lignes) pendant que
+> `plotyx-render-egui` et `plotyx-render-svg` n'ajoutent, à eux deux, que le
+> levier de *feathering* (133 lignes) et un exemple élargi. La règle de la
+> phase n'a pas eu à être surveillée : le pipeline générique de R4 la tenait
+> par construction, et c'est le vrai dividende de cette structure.
+> 518 tests au workspace (479 avant, **+39**), 9 `#[ignore]` inchangés,
+> clippy sans avertissement (features `typst` et `python` comprises),
+> `cargo fmt` sans dérive nouvelle (exactement les 25 échecs préexistants
+> de §7.4 du guide de robustesse, sur les mêmes 15 fichiers). **Critère de
+> sortie tenu** : `cargo tree -p plotyx-plot` ne montre toujours que
+> `plotyx-id`, et `cargo tree -p plotyx-render-svg` ni `egui`, ni `eframe`,
+> ni `winit`.
+>
+> **Le graphe réaliste existe et se regarde** :
+> `cargo run -p plotyx-render-svg --example figure` — cinq panneaux dans une
+> grille 2 × 3 (donc une cellule vide), 8 séries, ordonnée logarithmique,
+> axe secondaire, barres d'erreur, histogramme, barres, trois styles de
+> trait, quatre formes de marqueur, une légende par panneau, et une
+> référence brisée. Le test d'accord compare les deux backends sur **ce**
+> graphe-là, à trois dimensions de figure, en plus du graphe minimal de R4
+> qui continue de passer inchangé.
+>
+> **Quatre décisions prises en cours de route, qu'aucun document source
+> n'annonçait.**
+>
+> 1. **L'échelle logarithmique transforme les valeurs ; elle ne change pas
+>    le type de coordonnée.** `LogRange` de Plotters existe, et le prendre
+>    aurait fait exister la fonction qui trace un panneau en **huit**
+>    monomorphisations (deux axes × deux échelles × l'axe secondaire) — ou
+>    en huit branches redessinant la même chose. C'est la divergence que le
+>    pipeline unique existe pour empêcher, qui serait rentrée par la porte
+>    du système de types. Un seul `Cartesian2d<f64, f64>` donc : la zone de
+>    tracé raisonne en log₁₀, et deux endroits seulement savent qu'il y a
+>    une échelle, l'entrée des données et l'étiquetage. **Prix payé, réel** :
+>    les graduations sont des décades, pas les graduations mineures
+>    logarithmiques que `LogRange` sait poser ; et les valeurs nulles ou
+>    négatives disparaissent d'un axe log, comme les `NaN` disparaissent
+>    déjà partout.
+> 2. **L'axe secondaire est toujours attaché, même inutilisé.**
+>    `set_secondary_coord` ne prend à l'axe principal que les aires du haut
+>    et de la droite — qui n'existent pas quand on ne les a pas demandées.
+>    Une seule forme de `chart` pour les deux cas, donc un seul chemin de
+>    tracé de série ; la branche aurait coûté deux fois le même code.
+>    Vérifié plutôt que supposé : le rendu du graphe minimal de R4 est
+>    inchangé au pixel près.
+> 3. **La légende est écrite ici, pas déléguée à
+>    `configure_series_labels()`.** Plotters dimensionne son cadre avec
+>    `MultiLineText::estimate_dimension`, qui passe par
+>    `FontData::estimate_layout` — **pas** par `estimate_text_size` du
+>    backend. Nos fonts Plotters étant coupées, c'est l'heuristique
+>    monospace par octets UTF-8 du §4.4 : le cadre serait mesuré faux
+>    pendant que le texte dedans serait dessiné juste. Et il serait faux
+>    **de la même façon des deux côtés**, donc le test d'accord ne
+>    l'attraperait pas — c'est le cas qui montre qu'un test d'accord ne
+>    dispense pas de savoir par où passe la mesure.
+> 4. **Les séries se peignent en pixels, plus en coordonnées de données.**
+>    Un tiret se mesure en pixels ; Plotters n'a d'élément tout fait ni pour
+>    le carré, ni pour le losange, ni pour la croix droite ; et son
+>    `DashedLineSeries` ne connaît qu'un motif à deux temps, donc pas de
+>    `DashDot`. Le tracé passe donc par `plotting_area().use_screen_coord()`
+>    après `map_coordinate` — ce qui est **exactement** le chemin que
+>    `draw_series` empruntait, troncature au rectangle comprise
+>    (`element/mod.rs` : `rect.truncate(…)`), d'où l'absence de régression
+>    sur le graphe minimal.
+>
+> **Le levier de *feathering* vit dans `plotyx-render-egui::feathering`, et
+> nulle part ailleurs — c'est la seule exception de la phase à la règle
+> « aucune fonctionnalité dans un seul backend », et ce n'en est pas
+> vraiment une : il n'y a rien à mettre de l'autre côté.**
+> `TessellationOptions` est un réglage d'`egui::Context`, en aval de la
+> collecte des `Shape` ; `plotyx-render` ne connaît pas egui, et un SVG n'a
+> pas de tessellation du tout — il décrit des courbes, il ne les triangule
+> pas. Trois précisions à ne pas redécouvrir :
+>
+> - **ce n'est pas une méthode de `GraphView`.** Le réglage vaut pour tout
+>   le `Context`, donc pour tous les widgets de l'image ; une vue qui le
+>   poserait en peignant le poserait pour les autres, et deux vues en
+>   poseraient deux valeurs contradictoires. C'est une fonction libre qui
+>   prend le `Context`, appelée par qui sait qu'une interaction commence ;
+> - **la clé de cache n'a pas grossi**, et un test l'exige désormais plutôt
+>   que trois commentaires : basculer la frange deux fois de suite laisse
+>   `ShapeCache::misses()` inchangé. L'architecture le dit (§4.2) ; il
+>   fallait que quelque chose le vérifie, parce que c'est exactement le
+>   terme qu'on ajouterait « par prudence » ;
+> - **le levier est mesuré, pas affirmé** : `tests/feathering.rs` tessèle la
+>   même figure deux fois et compte les sommets. Si `epaint` changeait de
+>   stratégie de frange, le test tomberait et la décision du 2026-09-10
+>   serait à réexaminer.
+>
+> **La frontière posée pour R7 tient en deux appels** : à l'entrée du
+> glisser `feathering::apply(ctx, Feathering::Off)`, au relâchement
+> `apply(ctx, Feathering::Full)` — ou, en une ligne,
+> `apply(ctx, Feathering::during_drag(response.dragged()))`. Rien d'autre
+> n'est à écrire, et rien n'est à changer dans le module.
+>
+> **Le LTTB ne règle pas le cas mesuré, et il est livré en le sachant.** La
+> mesure R0 0.3 disait que la charge du cas de référence (500 séries × 600
+> points) vient du **nombre de séries** et non de leur longueur : 600 points
+> sur 1 600 px sont déjà sous-échantillonnés, le LTTB n'y retire rien. Il
+> est implémenté pour ce qu'il sert réellement — quelques séries très
+> longues, le cas de l'acquisition — et le test le vérifie sur ce cas-là :
+> 40 000 points sur 800 px, plus de la moitié retirés, cadrage inchangé,
+> **et les deux backends décimant à l'identique**. Ce dernier point n'est
+> pas une formalité : le seuil dépend de la largeur en pixels de la zone de
+> tracé, donc c'est le seul endroit du pipeline où la géométrie dépend de la
+> taille de la figure autrement que par une homothétie — et donc le seul où
+> un désaccord de mise en page se traduirait par un désaccord de *données*.
+> Deux règles écrites plutôt que devinées : on ne décime pas une série à
+> barres d'erreur (les moustaches se dissocieraient de leurs points) ni un
+> nuage sans trait (le LTTB raisonne le long d'un chemin).
+>
+> **Le test d'accord a gagné un second témoin, et c'est lui qui a le plus de
+> valeur.** Celui de R4 — le `SVGBackend` nu doit placer la figure ailleurs
+> — reste. R5 y ajoute : pour **chacune** des neuf fonctionnalités de la
+> phase, une variante du graphe réaliste qui la débranche doit produire une
+> figure **différente**, et les deux backends doivent rester d'accord sur la
+> variante aussi. Sans lui, une fonctionnalité jamais appliquée laisserait
+> l'accord au vert — deux figures identiquement amputées s'accordent
+> parfaitement. La comparaison elle-même s'est élargie des segments seuls
+> aux cercles, polygones, rectangles et **contenus de texte** ; le texte par
+> son contenu et non sa position, parce que le SVG porte le point d'ancrage
+> brut et egui le coin supérieur gauche du galley — deux descriptions
+> correctes et incomparables (`tests/formes.rs` couvre la position côté
+> egui). Un détail qui a mordu tout de suite : le cadre de référence du
+> message d'échec ne se calcule que sur les **segments**, le fond de la
+> figure étant un rectangle qui couvre toute la zone par construction — l'y
+> inclure rendait le témoin de R4 muet.
+>
+> **Une référence brisée se voit enfin.** R4 la comptait sans la dessiner,
+> faute d'endroit où l'écrire ; il y en a un maintenant : elle figure en
+> légende, en gris, annotée « — référence rompue ». C'est le minimum que
+> demandait le §11.1 (« à afficher comme telle et jamais comme une série
+> vide ») et pas plus : un bandeau d'avertissement appartient à l'UI réelle.
+>
+> **Trois plafonds posés, parce que rien ne borne ce qui vient d'un
+> fichier**, dans la même veine que les six de `questions-ouvertes.md` §11 :
+> `MAX_CELLS = 256` — une position de panneau est un `usize` libre, donc
+> deux panneaux en `0` et en `usize::MAX` déclarent une grille indécoupable ;
+> au-delà, les panneaux sont rangés dans l'ordre de déclaration dans la
+> grille la plus carrée qui les contienne ; `MIN_CELL = 48 × 36 px` — un
+> panneau plus petit est compté comme omis plutôt que dessiné en bouillie ;
+> `MAX_DASHES = 20 000` par polyligne — un pointillé de trois pixels sur un
+> chemin d'un million de pixels produirait des centaines de milliers de
+> formes, donc au-delà, trait plein. Et un quatrième, cosmétique :
+> `MAX_ENTRIES = 24` en légende, la dernière ligne disant combien manquent.
+>
+> **Un module de production qui n'en est pas tout à fait un :
+> `plotyx_render::sample`.** Le graphe réaliste doit être à la fois ce que
+> le test d'accord compare et ce que l'exemple SVG montre ; or le test vit
+> dans `plotyx-render-egui` (il lui faut les deux backends) et l'exemple
+> dans `plotyx-render-svg` (il ne doit pas voir egui), deux crates qui ne
+> peuvent pas dépendre l'un de l'autre — et un `[dev-dependency]` ne
+> traverse pas. Le graphe commun descend donc d'un cran, comme `plotyx-id`
+> en R3 et `plotyx-render` en R4. Le dupliquer aurait garanti qu'il
+> divergerait, et la divergence aurait porté précisément sur ce que le test
+> prétend vérifier. À reconsidérer le jour où il existera un `.plx`
+> d'exemple dans le dépôt : il n'y en a aucun aujourd'hui.
+>
+> **Reste ouvert.** Le rognage est celui de Plotters, c'est-à-dire une
+> **troncature au rectangle** : un segment qui sort voit son extrémité
+> ramenée au bord, pas coupée. Invisible tant que le cadrage suit les
+> données, ce sera faux dès le premier zoom — donc à traiter en R7, par un
+> vrai rognage (Liang-Barsky) au moment où le cadrage cesse de venir des
+> données. Le coût de tessellation n'a pas été **re-mesuré** sur le pipeline
+> réel : les 22,1 ms / 4,88 ms restent des chiffres de spike, et la phase
+> ajoute des formes que le spike ne comptait pas (marqueurs, barres,
+> légende). Enfin, si la cible est bien « 500 spectres à l'écran », ni le
+> LTTB ni le feathering ne suffisent durablement, et la vraie question —
+> réduire le **nombre de formes**, pas le nombre de points — reste entière ;
+> R5 ne l'a pas tranchée, comme le §5.1 ci-dessous l'annonçait.
+
 **Objectif** : couvrir le `PlotSpec` réel, **en ajoutant aux deux backends
 à la fois**.
 

@@ -38,14 +38,20 @@ supposer un framework précis, vérifier `Cargo.toml` de `plotyx-app` en cas
 de doute.
 
 ## Rendu — `plotyx-render`, `plotyx-render-egui`, `plotyx-render-svg`
-Charger : le crate ciblé + `plotyx-render` (il porte la mesure de texte et
-le pipeline Plotters communs aux deux backends) + `plotyx-plot` et
-`plotyx-core::resolve` en lecture. Relire
-`docs/newarchitecture/architecture-choisie.md` §4 et §5 avant de toucher à
-la mesure du texte ou au cache : l'accord écran/export est le seul endroit
-du chantier où un bug ne lève aucune erreur, et `roadmap-rendu.md` dit ce
-qui appartient à R5 plutôt qu'à maintenant. Ignorer : `commands`,
-`persistence`, `python`, `script`.
+Charger : `plotyx-render` **d'abord** — il porte la mesure de texte, le
+pipeline Plotters et, depuis R5, tout le rendu (`series`, `scale`, `paint`,
+`legend`, `decimate`, `sample`) — puis le crate ciblé, plus `plotyx-plot` et
+`plotyx-core::resolve` en lecture. **Une fonctionnalité de tracé ne s'écrit
+pas dans un backend** : les deux backends ne diffèrent que par la façon de
+poser des pixels, et la seule exception vivante est
+`plotyx-render-egui::feathering` (la tessellation n'existe que pour
+l'écran). Relire `docs/newarchitecture/architecture-choisie.md` §4 et §5
+avant de toucher à la mesure du texte ou au cache : l'accord écran/export
+est le seul endroit du chantier où un bug ne lève aucune erreur. Le filet
+est `plotyx-render-egui/tests/accord.rs` — s'il change, lire ses deux
+familles de témoins avant. `roadmap-rendu.md` dit ce qui appartient à R6
+(PDF), R7 (interaction, rognage réel) ou R8 (Typst) plutôt qu'à maintenant.
+Ignorer : `commands`, `persistence`, `python`, `script`.
 
 ## Robustesse — `plotyx-robustesse` (tests `b1`…`b20`)
 Charger : le crate ciblé par le test (ne pas ouvrir les 20 fichiers de
