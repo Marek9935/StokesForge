@@ -1199,6 +1199,24 @@ où elle ne sert à rien. C'est le même arbitrage que celui déjà retenu pour
 l'empreinte elle-même : « calculée une fois pour toutes au moment de
 l'empilement ».
 
+> **Clôture (2026-09-12).** Les deux moitiés de D3 sont maintenant fermées.
+> La première (`History::evict`/`recompute_retained_bytes` recalculés en
+> entier à chaque commande) a fermé avec l'option 1 ci-dessus — voir
+> `b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique`, désormais un
+> garde-fou vert. La seconde, révisée après coup (voir
+> `guide-de-correction-robustesse.md` §8) : une fois le majorant en place, le
+> coût par colonne persistait ailleurs — `History::execute` clonait
+> `project.tree()` dans `before` et le gardait vivant pendant toute
+> l'application de la commande, ce qui forçait `Arc::make_mut` (vu par
+> `Project::set_values` et consorts) à cloner la `Tree` entière plutôt que de
+> muter en place. Fermée en cessant de cloner `before` pour les commandes de
+> **données** (label et empreinte de `just_orphaned_by_write` capturés par
+> emprunt, avant la mutation) — les commandes **structurelles** continuent de
+> le cloner, leur `Entry::Structural` en a un besoin réel. Voir
+> `History::execute` et `History::apply_data` dans `history.rs`, et
+> `b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes`, désormais
+> lui aussi un garde-fou vert.
+
 ---
 
 ## 7. Ce qui a tenu, cette fois

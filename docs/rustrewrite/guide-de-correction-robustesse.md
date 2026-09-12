@@ -859,7 +859,7 @@ reproductions derrière la feature `python` (A1, A2) :  3
 29 des 30 anomalies ont au moins une reproduction ; B3 n'en a pas (§7.2)
 
 cargo test --workspace                       → vert (garde-fous seuls)
-cargo test -p plotyx-robustesse -- --ignored → 43 échecs attendus
+cargo test -p plotyx-robustesse -- --ignored → 42 échecs attendus
 scripts/python-test.sh -- --ignored          → 3 échecs attendus
 ```
 
@@ -879,17 +879,20 @@ vague 6  (F2 puis F6)          10                 →   0
 ```
 
 **Statut réel de clôture (2026-09-12, les six vagues sont fusionnées sur
-`rewriterust`) : 4 rouges, pas 0.** Les 30 anomalies ont chacune une
+`rewriterust`) : 3 rouges, pas 0.** Les 30 anomalies ont chacune une
 réponse (correctif + garde-fou vert, ou limitation assumée et documentée)
-mais quatre reproductions restent `#[ignore]` par choix, pas par oubli —
+mais trois reproductions restent `#[ignore]` par choix, pas par oubli —
 voir `questions-ouvertes.md` §11 pour le détail chiffré des plafonds, et
-la table ci-dessous pour ces quatre-là :
+la table ci-dessous pour ces trois-là. **D3 (2ᵉ moitié) a fermé le
+2026-09-12** : `History::execute` ne clone plus `before` pour une commande de
+données ; voir `History::apply_data` et le commentaire sans `#[ignore]` de
+`b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes`, désormais un
+garde-fou vert.
 
 | Test | Anomalie | Nature de la limite |
 |---|---|---|
 | `b15_convertir_en_texte_ne_multiplie_pas_la_memoire` | C4 | architecturale, mathématique : `Option<String>` (24 o) vs `f64` (8 o) impose un plancher ×3 avant tout contenu de chaîne ; ne se corrige qu'en changeant le stockage texte (pool de chaînes interné), jamais fait |
 | `b19_une_variante_inconnue_ne_perd_pas_tout_le_fichier`, `b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees` | C5 (niveau 2) | explicitement hors périmètre v1 par ce guide (dégradation gracieuse de variantes d'enum inconnues) |
-| `b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes` | D3 (2ᵉ moitié) | dette de perf identifiée, non traitée : `History::execute` clone `before` en entier même pour une commande de données ; correctif connu, non implémenté |
 | `b4_projet_charge_avec_identifiant_max_puis_creation` | B1 (test obsolète) | simule un scénario que le read-bound `MAX_NODE_ID` (B1, déjà corrigé) rend inatteignable par un vrai fichier depuis `plotyx-persistence::load` ; à réécrire pour tester le refus à la lecture plutôt que la création après coup — pas un bug ouvert |
 
 ---

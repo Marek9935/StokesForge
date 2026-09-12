@@ -136,6 +136,26 @@ impl Command {
     }
 }
 
+impl Command {
+    /// Vrai pour les quatre commandes qui touchent la **structure** (arbre,
+    /// noms, ordre) plutôt que le **contenu** d'une colonne — voir la
+    /// doctrine des deux natures en tête de `history.rs`. `History::execute`
+    /// s'en sert pour décider si `Entry::Structural` a besoin d'un
+    /// instantané complet de l'arbre (structure) ou si un simple delta
+    /// suffit (données) : c'est exactement la distinction qui a fait
+    /// diverger le coût d'une commande de données de la taille du projet
+    /// (D3, `guide-de-correction-robustesse.md`).
+    pub fn is_structural(&self) -> bool {
+        matches!(
+            self,
+            Command::AddColumn { .. }
+                | Command::DeleteColumn { .. }
+                | Command::Rename { .. }
+                | Command::Move { .. }
+        )
+    }
+}
+
 /// Nom d'un nœud s'il existe dans cet arbre.
 fn name_of(tree: &Tree, id: NodeId) -> Option<&str> {
     tree.node(id).map(plotyx_core::Node::name)
