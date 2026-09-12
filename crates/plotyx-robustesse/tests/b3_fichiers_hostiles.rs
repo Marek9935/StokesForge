@@ -332,7 +332,6 @@ fn b3_auto_parente_est_refusee() {
 }
 
 #[test]
-#[ignore = "reproduction B1 — un fichier portant l'identifiant u64::MAX est accepté, et le prochain identifiant à attribuer est déjà pris"]
 fn b3_identifiant_zero_et_max() {
     let dir = TempDir::new().unwrap();
     // NodeId 0 n'est jamais attribué par l'allocateur ; u64::MAX force
@@ -365,7 +364,6 @@ fn b3_identifiant_zero_et_max() {
 }
 
 #[test]
-#[ignore = "reproduction B2 — un panneau en (u64::MAX, u64::MAX) est accepté au chargement, puis fait déborder rows()"]
 fn b3_panneau_en_position_extreme() {
     let dir = TempDir::new().unwrap();
     let panneau = PanelSpecRecord {
@@ -397,25 +395,18 @@ fn b3_panneau_en_position_extreme() {
         ],
     };
     let path = ecrire(&dir, "grille.plx", &body);
-    let projet = load(&path).expect("le fichier est accepté");
-    let tree = projet.tree();
-    let node = tree.node(plotyx_core::NodeId::from_raw(2)).unwrap();
-    let spec = match node.kind() {
-        plotyx_core::NodeKind::Graph { spec, .. } => spec,
-        _ => panic!(),
-    };
-    println!(
-        "panneau chargé en ({}, {})",
-        spec.panels[0].row, spec.panels[0].column
+    // B2 (`guide-de-correction-robustesse.md` §F3/F4) — corrigée : un
+    // panneau en (row, column) au-delà de `MAX_PANEL_POSITION` (10 000) est
+    // désormais refusé AU CHARGEMENT, avant que `PlotSpec::rows()`/
+    // `columns()` n'aient la moindre chance de déborder sur la position
+    // qu'il portait.
+    let resultat = load(&path);
+    println!("chargement d'un panneau en (u64::MAX, u64::MAX) → {resultat:?}");
+    assert!(
+        resultat.is_err(),
+        "un panneau en position extrême doit être refusé au chargement, pas laissé à \
+         PlotSpec::rows()/columns() : {resultat:?}"
     );
-    let r = std::panic::catch_unwind(|| (spec.rows(), spec.columns()));
-    match r {
-        Ok((rows, cols)) => panic!(
-            "grille de {rows} ligne(s) x {cols} colonne(s) pour un panneau en \
-             (usize::MAX, usize::MAX) : débordement silencieux"
-        ),
-        Err(_) => panic!("PlotSpec::rows() panique sur un fichier accepté au chargement"),
-    }
 }
 
 #[test]
@@ -475,7 +466,6 @@ fn b3_serie_referencant_un_noeud_inexistant_ou_non_colonne() {
 }
 
 #[test]
-#[ignore = "reproduction C1 — le format_version d'un PlotSpec n'est jamais vérifié"]
 fn b3_version_de_format_de_spec_inconnue_est_acceptee_en_silence() {
     let dir = TempDir::new().unwrap();
     let spec = PlotSpecRecord {

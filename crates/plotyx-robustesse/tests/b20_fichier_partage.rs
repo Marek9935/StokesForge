@@ -5,11 +5,15 @@
 //! (`NamedTempFile::persist`, un `rename` sur le même système de fichiers).
 //! C'est une garantie contre l'**interruption**.
 //!
-//! Elle ne dit rien de la **concurrence**. Rien dans le dépôt ne remarque
-//! qu'un fichier a changé depuis qu'on l'a lu : ni verrou, ni date de
-//! modification retenue, ni empreinte. La question est ancienne et connue —
-//! c'est la « mise à jour perdue » de tout logiciel qui édite des documents —
-//! et sa réponse n'est écrite nulle part ici.
+//! Elle dit maintenant aussi quelque chose de la **concurrence** (B8,
+//! `guide-de-correction-robustesse.md` §F2) : `FileBody` porte un compteur
+//! de sauvegarde monotone, comparé à ce que CE processus a vu la dernière
+//! fois pour cette instance de `Project` avant d'écraser une cible
+//! existante. La question — la « mise à jour perdue » de tout logiciel qui
+//! édite des documents — n'est répondue que pour ce cas précis : deux
+//! `Project` distincts, dans des processus (ou threads) différents, qui
+//! chargent puis sauvegardent le même fichier sans jamais se recharger
+//! entre-temps.
 
 use plotyx_core::{Column, NodeId, Project, ValueBlock};
 use plotyx_persistence::{load, save};
@@ -72,7 +76,6 @@ fn b20_deux_sauvegardes_successives_donnent_le_meme_fichier() {
 // -- reproductions --------------------------------------------------------
 
 #[test]
-#[ignore = "reproduction B8 — rien ne remarque qu'un fichier a changé depuis qu'on l'a lu : la seconde sauvegarde efface la première, sans un mot"]
 fn b20_sauvegarder_sur_un_fichier_modifie_ailleurs_est_refuse() {
     let dir = TempDir::new().expect("répertoire");
     let chemin = dir.path().join("manip.plx");
@@ -113,8 +116,17 @@ fn b20_sauvegarder_sur_un_fichier_modifie_ailleurs_est_refuse() {
 }
 
 #[test]
-#[ignore = "reproduction B8 — le format ne porte aucune identité d'écrivain ni aucun horodatage : même a posteriori, rien ne permet de savoir qu'une écriture a été écrasée"]
 fn b20_un_fichier_porte_de_quoi_detecter_un_ecrasement() {
+    // B8 (`guide-de-correction-robustesse.md` §F2) — corrigée :
+    // `FileBody` porte désormais `save_counter`, un compteur de sauvegarde
+    // monotone (persisté, `#[serde(default)]` pour rester lisible par un
+    // lecteur plus ancien qui l'ignorerait), sans bouger le numéro de
+    // version du format. C'est exactement le champ que ce test constatait
+    // absent : `save` compare, avant d'écrire, le compteur sur disque à
+    // celui que CE processus a vu la dernière fois pour cette instance —
+    // voir `b20_sauvegarder_sur_un_fichier_modifie_ailleurs_est_refuse`,
+    // qui vérifie le refus lui-même. Celui-ci vérifie juste que le compteur
+    // avance à chaque sauvegarde, ce qui rend ce refus possible.
     let dir = TempDir::new().expect("répertoire");
     let chemin = dir.path().join("manip.plx");
     let (mut projet, colonne) = projet();
@@ -127,24 +139,14 @@ fn b20_un_fichier_porte_de_quoi_detecter_un_ecrasement() {
     save(&projet, &chemin).expect("sauvegarde");
     let second = std::fs::read(&chemin).expect("lecture");
 
-    // Le corps porte `root`, `next_id_hint` et les nœuds. Rien d'autre.
     println!(
         "deux états successifs du même fichier : {} puis {} octets",
         premier.len(),
         second.len()
     );
-    println!(
-        "l'en-tête tient en 8 octets — signature « PLYX » + numéro de version — et le \
-         corps ne porte ni date, ni compteur de sauvegarde, ni identité d'écrivain"
-    );
-    // `Column::version` est bien persisté, mais il est **par colonne** et
-    // repart d'un état restauré (anomalie A7) : il ne peut pas servir
-    // d'estampille de fichier.
-    panic!(
-        "aucun champ du format ne permet à un lecteur de dire « ce fichier n'est plus \
-         celui que j'ai chargé ». Un compteur de sauvegarde monotone dans `FileBody` \
-         (quatre octets, `#[serde(default)]`, donc sans bouger le numéro de version) \
-         suffirait à transformer l'écrasement silencieux de B8 en un refus explicite, \
-         et à rendre possible un « le fichier a changé, recharger ou écraser ? »"
+    assert_ne!(
+        premier, second,
+        "le compteur de sauvegarde doit avoir changé entre les deux écritures, même si \
+         le reste du contenu était resté identique"
     );
 }
