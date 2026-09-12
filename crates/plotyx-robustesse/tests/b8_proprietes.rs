@@ -101,6 +101,7 @@ proptest! {
         let mut h = History::new();
         h.execute(&mut p, Command::SetCells {
             column: col, start, values: ValueBlock::Float(ecrites.clone()),
+            expected_version: None,
         }).unwrap();
         prop_assert!(h.undo(&mut p).unwrap());
         prop_assert!(

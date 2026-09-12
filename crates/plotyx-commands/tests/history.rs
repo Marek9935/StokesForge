@@ -131,6 +131,7 @@ fn set_cells(column: NodeId, start: usize, values: &[f64]) -> Command {
         column,
         start,
         values: ValueBlock::Float(values.to_vec()),
+        expected_version: None,
     }
 }
 
@@ -304,6 +305,7 @@ fn set_cells_on_a_text_column() {
                 column: f.t,
                 start: 1,
                 values: ValueBlock::Text(vec![Some("b".to_string())]),
+                expected_version: None,
             },
         )
         .expect("saisie texte");
@@ -336,6 +338,7 @@ fn set_cells_with_the_wrong_block_variant_is_refused() {
                 column: f.a,
                 start: 0,
                 values: ValueBlock::Text(vec![Some("x".to_string())]),
+                expected_version: None,
             },
         )
         .expect_err("bloc texte sur colonne numérique");

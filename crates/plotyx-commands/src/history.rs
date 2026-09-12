@@ -843,7 +843,33 @@ impl History {
                 column,
                 start,
                 values,
+                expected_version,
             } => {
+                // A2 (`guide-de-correction-robustesse.md` §F6) — vérifié ICI,
+                // sur `before` (l'arbre courant au moment d'appliquer cette
+                // commande, pas un instantané que l'appelant a lu plus tôt),
+                // jamais avant l'envoi : c'est tout le sens du correctif. Une
+                // colonne absente ou d'un autre type n'est pas traitée ici —
+                // `project.set_values` ci-dessous rendra l'erreur naturelle
+                // (`UnknownNode`/`Structure`), qui ne doit pas se faire
+                // maquiller en désaccord de version.
+                if let Some(expected) = expected_version {
+                    if let Some(found) = before
+                        .get(column)
+                        .ok()
+                        .and_then(|node| node.as_column())
+                        .map(|column| column.version())
+                    {
+                        if found != expected {
+                            return Err(CoreError::ConcurrentModification {
+                                column,
+                                expected,
+                                found,
+                            }
+                            .into());
+                        }
+                    }
+                }
                 // Le bloc écrit est cloné avant application : c'est le `after`
                 // du delta, ce qu'il faudra réécrire pour rétablir.
                 let after = values.clone();

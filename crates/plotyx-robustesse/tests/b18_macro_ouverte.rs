@@ -46,6 +46,7 @@ fn ecrire(handle: &SessionHandle, colonne: NodeId, valeur: f64) {
             column: colonne,
             start: 0,
             values: ValueBlock::Float(vec![valeur]),
+            expected_version: None,
         })
         .expect("écriture acceptée");
 }
@@ -103,6 +104,7 @@ fn b18_une_macro_de_profondeur_raisonnable_sannule_dun_bloc() {
                 column: colonne,
                 start: 0,
                 values: ValueBlock::Float(vec![9.0]),
+                expected_version: None,
             },
         )
         .expect("écriture");

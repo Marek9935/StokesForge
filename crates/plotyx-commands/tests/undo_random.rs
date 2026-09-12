@@ -245,6 +245,7 @@ impl World {
                     column: target,
                     start: start % 8,
                     values: block,
+                    expected_version: None,
                 })
             }
             Step::AddColumn { sheet, index } => {

@@ -407,6 +407,7 @@ fn run_alternating_history(mut history: History) -> AlternatingRun {
                     column: target,
                     start: i,
                     values: ValueBlock::Float(vec![i as f64]),
+                    expected_version: None,
                 },
             )
             .expect("écriture acceptée");
@@ -538,6 +539,7 @@ fn scenario_1_writes_only() -> Row {
                     column: target,
                     start: i,
                     values: ValueBlock::Float(vec![i as f64]),
+                    expected_version: None,
                 },
             )
             .expect("écriture acceptée");

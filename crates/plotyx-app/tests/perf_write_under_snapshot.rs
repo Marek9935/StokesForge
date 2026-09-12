@@ -103,6 +103,7 @@ fn set_one_cell(column: NodeId, row: usize) -> Command {
         column,
         start: row,
         values: ValueBlock::Float(vec![row as f64]),
+        expected_version: None,
     }
 }
 

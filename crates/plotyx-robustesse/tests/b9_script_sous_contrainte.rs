@@ -91,6 +91,7 @@ fn reinit(col: NodeId, v: Vec<f64>) {
             column: col,
             start: 0,
             values: ValueBlock::Float(v),
+            expected_version: None,
         })
         .unwrap();
 }
@@ -180,7 +181,7 @@ fn b9_tableau_masque_ecrase_les_cellules_manquantes_par_des_valeurs() {
 // ============================================================ concurrence
 
 #[test]
-#[ignore = "reproduction A2 — pyx.set_column allonge la colonne quand l'interface édite des lignes en même temps (dépend de l'ordonnancement : dérive observée de +5 à +53 lignes)"]
+#[ignore = "hors du périmètre F6 de la campagne du 2026-09-11 — A2 est fermée (b6_toctou_entre_instantane_et_commande, `expected_version` + retentatives) mais CE test reste rouge, sous une forme différente : le script ne relit et ne retente plus en silence, il relance la même écriture jusqu'à épuiser ses cinq tentatives contre un `secoueur` qui ne s'arrête jamais, et lève `ConcurrentWriteError`, non rattrapée ici (`except pyx.InvalidValueError` seulement) — dépend de l'ordonnancement, non repris car cela demanderait de faire boucler le script sur cette exception, ce que le motif original ne prévoyait pas"]
 fn b9_course_entre_script_et_interface_sur_la_longueur() {
     // Le script écrit une colonne entière en boucle ; l'interface insère et
     // supprime des lignes en même temps. Le contrat de `pyx.set_column` est

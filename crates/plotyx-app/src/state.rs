@@ -849,6 +849,7 @@ impl AppState {
             column,
             start: row,
             values,
+            expected_version: None,
         });
     }
 

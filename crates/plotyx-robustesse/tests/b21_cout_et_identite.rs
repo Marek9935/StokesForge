@@ -97,6 +97,7 @@ fn cout_dune_ecriture(colonnes: usize, entrees: usize) -> usize {
                     column: cible,
                     start: 0,
                     values: ValueBlock::Float(vec![valeur]),
+                    expected_version: None,
                 },
             )
             .expect("écriture acceptée");

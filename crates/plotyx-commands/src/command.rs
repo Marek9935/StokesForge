@@ -22,6 +22,17 @@ pub enum Command {
         start: usize,
         /// Bloc écrit ; sa variante doit correspondre au type de la colonne.
         values: ValueBlock,
+        /// A2 (`guide-de-correction-robustesse.md` §F6) — condition
+        /// optimiste, vérifiée par `History::apply` **au moment d'appliquer**
+        /// la commande, jamais avant : `None` ne vérifie rien (comportement
+        /// historique, celui de l'UI qui n'a pas cette discipline) ;
+        /// `Some(v)` exige que `Column::version` de `column` vaille encore
+        /// exactement `v`, sans quoi la commande est refusée
+        /// (`CoreError::ConcurrentModification`) sans toucher au modèle ni à
+        /// l'historique. C'est le champ que `plotyx-script/bridge.rs`
+        /// remplit pour fermer le TOCTOU entre l'instantané lu par un script
+        /// et la commande qu'il envoie.
+        expected_version: Option<u64>,
     },
     /// Ajoute une colonne à `sheet`. `index: None` → en fin ;
     /// `name: None` → premier nom libre façon tableur.

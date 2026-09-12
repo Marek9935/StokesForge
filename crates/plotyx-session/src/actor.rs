@@ -10,6 +10,7 @@ use plotyx_core::Project;
 
 use crate::error::{SessionError, SessionResult};
 use crate::snapshot::{HistoryState, Revision, Snapshot};
+use crate::ClientId;
 
 /// Requête envoyée à l'acteur par un [`crate::SessionHandle`]. Privée au
 /// crate : les clients ne construisent jamais de `Request` eux-mêmes, ils
@@ -18,10 +19,13 @@ use crate::snapshot::{HistoryState, Revision, Snapshot};
 pub(crate) enum Request {
     /// Exécute une commande. Répond la nouvelle révision, ou l'erreur rendue
     /// par `History::execute` — l'arbre et l'historique restent alors
-    /// inchangés.
+    /// inchangés. Refusée (`ForeignMacro`) si une macro est ouverte par un
+    /// autre émetteur que `client` (A4, voir la table en tête de crate).
     Execute {
         /// Commande à appliquer.
         command: Command,
+        /// Émetteur de la requête.
+        client: ClientId,
         /// Réponse : nouvelle révision, ou erreur.
         reply: Sender<CommandResult<Revision>>,
     },
@@ -37,23 +41,36 @@ pub(crate) enum Request {
     },
     /// Ouvre une macro. `Err(MacroTooDeep)` au-delà de
     /// `History::MAX_MACRO_DEPTH` niveaux d'imbrication (B7,
-    /// `guide-de-correction-robustesse.md` §F4) — le seul cas de refus,
-    /// `History::begin_macro` n'en connaît pas d'autre.
+    /// `guide-de-correction-robustesse.md` §F4). `Err(ForeignMacro)` si une
+    /// macro est déjà ouverte par un autre émetteur que `client` (A4) — un
+    /// même émetteur peut toujours imbriquer la sienne.
     BeginMacro {
         /// Libellé de la macro.
         label: String,
+        /// Émetteur de la requête.
+        client: ClientId,
         /// Réponse : nouvelle révision (l'état de l'historique a changé), ou
         /// l'erreur de `History::begin_macro`.
         reply: Sender<CommandResult<Revision>>,
     },
-    /// Ferme la macro courante.
+    /// Ferme la macro courante. `Err(ForeignMacro)` si l'émetteur n'est pas
+    /// celui qui l'a ouverte (A4).
     EndMacro {
-        /// Réponse : nouvelle révision, ou erreur (`NotInMacro`).
+        /// Émetteur de la requête.
+        client: ClientId,
+        /// Réponse : nouvelle révision, ou erreur (`NotInMacro`,
+        /// `ForeignMacro`).
         reply: Sender<CommandResult<Revision>>,
     },
     /// Annule la macro courante et tout ce qu'elle avait appliqué.
+    /// `Err(ForeignMacro)` si l'émetteur n'est pas celui qui l'a ouverte —
+    /// c'est exactement le refus qui ferme A4 : un `abort_macro` ne peut
+    /// plus défaire le travail validé d'un autre client.
     AbortMacro {
-        /// Réponse : nouvelle révision, ou erreur (`NotInMacro`).
+        /// Émetteur de la requête.
+        client: ClientId,
+        /// Réponse : nouvelle révision, ou erreur (`NotInMacro`,
+        /// `ForeignMacro`).
         reply: Sender<CommandResult<Revision>>,
     },
     /// Demande un instantané de l'état courant.
@@ -96,14 +113,37 @@ pub(crate) fn run(
         None => History::new(),
     };
     let mut revision: Revision = 0;
+    // A3 (`guide-de-correction-robustesse.md` §F2/F6) — époque du projet
+    // courant : locale à ce fil, **jamais persistée** (voir la doc de
+    // `Snapshot::epoch`). N'avance que sur un `Load` qui réussit : ni
+    // `Execute`/`Undo`/`Redo`, qui font déjà avancer `revision`, ni les
+    // macros ne changent l'identité du projet.
+    let mut epoch: u64 = 0;
+    // A4 (`guide-de-correction-robustesse.md` §F6) — émetteur qui a ouvert la
+    // macro courante, `None` hors macro. Remis à `None` dès que
+    // `history.in_macro()` redevient faux, que la fermeture ait réussi ou
+    // non (voir les branches `EndMacro`/`AbortMacro` : `History::end_macro`/
+    // `abort_macro` peuvent avoir dépilé un niveau avant qu'une erreur ne
+    // remonte).
+    let mut macro_owner: Option<ClientId> = None;
 
     for request in rx {
         match request {
-            Request::Execute { command, reply } => {
-                let outcome = history.execute(&mut project, command).map(|()| {
-                    revision += 1;
-                    revision
-                });
+            Request::Execute {
+                command,
+                client,
+                reply,
+            } => {
+                // A4 — une macro ouverte par un autre émetteur n'absorbe plus
+                // silencieusement le travail de celui-ci : c'était le bug.
+                let outcome = if history.in_macro() && macro_owner != Some(client) {
+                    Err(CommandError::ForeignMacro("execute"))
+                } else {
+                    history.execute(&mut project, command).map(|()| {
+                        revision += 1;
+                        revision
+                    })
+                };
                 let _ = reply.send(outcome);
             }
             Request::Undo { reply } => {
@@ -124,35 +164,71 @@ pub(crate) fn run(
                 });
                 let _ = reply.send(outcome);
             }
-            Request::BeginMacro { label, reply } => {
-                // B7 (`guide-de-correction-robustesse.md` §F4) —
-                // `begin_macro` peut désormais refuser (`MacroTooDeep`) : la
-                // révision n'avance que si l'imbrication a réellement changé
-                // d'état. Un succès, en revanche, avance la révision même
-                // sans mutation du modèle (l'état de l'historique, `in_macro`,
-                // a changé).
-                let outcome = history.begin_macro(&label).map(|()| {
-                    revision += 1;
-                    revision
-                });
+            Request::BeginMacro {
+                label,
+                client,
+                reply,
+            } => {
+                // A4 — une macro déjà ouverte par un autre émetteur refuse
+                // qu'on s'y imbrique ; le même émetteur le peut toujours
+                // (jusqu'à `MAX_MACRO_DEPTH`, B7 ci-dessous).
+                let outcome = if history.in_macro() && macro_owner != Some(client) {
+                    Err(CommandError::ForeignMacro("begin_macro"))
+                } else {
+                    // B7 (`guide-de-correction-robustesse.md` §F4) —
+                    // `begin_macro` peut refuser (`MacroTooDeep`) : la
+                    // révision n'avance que si l'imbrication a réellement
+                    // changé d'état. Un succès, en revanche, avance la
+                    // révision même sans mutation du modèle (l'état de
+                    // l'historique, `in_macro`, a changé).
+                    let result = history.begin_macro(&label);
+                    if result.is_ok() {
+                        macro_owner = Some(client);
+                    }
+                    result.map(|()| {
+                        revision += 1;
+                        revision
+                    })
+                };
                 let _ = reply.send(outcome);
             }
-            Request::EndMacro { reply } => {
-                let outcome = history.end_macro(&mut project).map(|()| {
-                    revision += 1;
-                    revision
-                });
+            Request::EndMacro { client, reply } => {
+                // A4 — `NotInMacro` reste réservé au cas où aucune macro
+                // n'est ouverte ; `ForeignMacro` couvre le cas où une macro
+                // EST ouverte, mais pas par `client`.
+                let outcome = if history.in_macro() && macro_owner != Some(client) {
+                    Err(CommandError::ForeignMacro("end_macro"))
+                } else {
+                    let result = history.end_macro(&mut project);
+                    if !history.in_macro() {
+                        macro_owner = None;
+                    }
+                    result.map(|()| {
+                        revision += 1;
+                        revision
+                    })
+                };
                 let _ = reply.send(outcome);
             }
-            Request::AbortMacro { reply } => {
-                let outcome = history.abort_macro(&mut project).map(|()| {
-                    revision += 1;
-                    revision
-                });
+            Request::AbortMacro { client, reply } => {
+                // A4 — c'est ici que le bug se produisait : `abort_macro`
+                // défaisait le travail d'un autre client sans le refuser.
+                let outcome = if history.in_macro() && macro_owner != Some(client) {
+                    Err(CommandError::ForeignMacro("abort_macro"))
+                } else {
+                    let result = history.abort_macro(&mut project);
+                    if !history.in_macro() {
+                        macro_owner = None;
+                    }
+                    result.map(|()| {
+                        revision += 1;
+                        revision
+                    })
+                };
                 let _ = reply.send(outcome);
             }
             Request::Snapshot { reply } => {
-                let snapshot = build_snapshot(&project, &history, revision);
+                let snapshot = build_snapshot(&project, &history, revision, epoch);
                 let _ = reply.send(snapshot);
             }
             Request::Save { path, reply } => {
@@ -164,7 +240,11 @@ pub(crate) fn run(
                 // ultérieur défera en mémoire — le fichier garde alors ce que
                 // l'annulation a effacé. Ne touche ni au projet ni à
                 // l'historique : la révision n'avance pas, sauvegarder ne
-                // change pas le modèle.
+                // change pas le modèle. Refusée pour **quiconque** pendant
+                // une macro, pas seulement son propriétaire (voir la table de
+                // tête de crate) : l'état intermédiaire d'une macro que
+                // n'importe qui pourrait encore avorter ne doit pas atteindre
+                // le disque.
                 let outcome = if history.in_macro() {
                     Err(SessionError::Command(CommandError::MacroOpen("save")))
                 } else {
@@ -175,11 +255,40 @@ pub(crate) fn run(
             Request::Load { path, reply } => {
                 let outcome = load_project(&mut project, &mut history, &path).map(|()| {
                     revision += 1;
+                    // A3 — l'identité du projet change : une poignée
+                    // (`plotyx_script::surface::Handle`) qui a mémorisé
+                    // l'ancienne époque ne doit plus pouvoir désigner un
+                    // `NodeId` du projet neuf sans être détectée. Un `Load`
+                    // vide aussi l'historique (`load_project`), donc il n'y a
+                    // plus de macro ouverte à ce point : pas besoin de
+                    // remettre `macro_owner` à `None` ici, `load_project`
+                    // l'a déjà refusé si une macro était ouverte.
+                    epoch += 1;
                     revision
                 });
                 let _ = reply.send(outcome);
             }
-            Request::Shutdown => break,
+            Request::Shutdown => {
+                // Constat non reproductible (guide-de-correction-robustesse.md
+                // §7.3, table de tête de `plotyx-session`) : une macro encore
+                // ouverte à l'arrêt ne doit pas être commise en silence. Elle
+                // est annulée, niveau par niveau, comme si son propriétaire
+                // l'avait abandonnée avant de partir — il n'y a plus de
+                // client à qui répondre, donc pas de vérification de
+                // propriétaire ici (`abort_macro` prend `&mut project`
+                // directement, hors du protocole `Request`). Une erreur en
+                // cours de dépilement (cas déjà documenté par
+                // `History::abort_macro` : « l'arbre peut alors être à moitié
+                // défait ») ne doit pas transformer cette boucle en boucle
+                // infinie : elle arrête le dépilement plutôt que de
+                // l'ignorer.
+                while history.in_macro() {
+                    if history.abort_macro(&mut project).is_err() {
+                        break;
+                    }
+                }
+                break;
+            }
         }
     }
 
@@ -208,7 +317,12 @@ fn load_project(project: &mut Project, history: &mut History, path: &Path) -> Se
 
 /// Construit l'instantané courant : l'arbre est partagé (`Arc::clone`), rien
 /// n'est recopié.
-fn build_snapshot(project: &Project, history: &History, revision: Revision) -> Snapshot {
+fn build_snapshot(
+    project: &Project,
+    history: &History,
+    revision: Revision,
+    epoch: u64,
+) -> Snapshot {
     Snapshot {
         tree: Arc::clone(project.tree()),
         revision,
@@ -222,6 +336,7 @@ fn build_snapshot(project: &Project, history: &History, revision: Revision) -> S
             redo_label: history.redo_label().map(str::to_string),
             in_macro: history.in_macro(),
         },
+        epoch,
     }
 }
 

@@ -44,6 +44,7 @@ fn set_one(column: NodeId, start: usize, value: f64) -> Command {
         column,
         start,
         values: ValueBlock::Float(vec![value]),
+        expected_version: None,
     }
 }
 

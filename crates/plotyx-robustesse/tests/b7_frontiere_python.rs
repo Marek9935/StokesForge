@@ -94,6 +94,7 @@ fn remettre_a_zero() {
             column: col,
             start: 0,
             values: ValueBlock::Float(vec![1.0, 2.0, 3.0, 4.0, 5.0]),
+            expected_version: None,
         })
         .unwrap();
 }

@@ -75,6 +75,7 @@ fn travail(profondeur: usize, geste: &str) {
                 column: colonne,
                 start: 0,
                 values: ValueBlock::Float(vec![9.0]),
+                expected_version: None,
             },
         )
         .expect("écriture acceptée");

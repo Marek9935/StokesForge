@@ -34,6 +34,16 @@ pub enum CommandError {
     /// nomme la limite refusée.
     #[error("imbrication de macros trop profonde (limite : {0})")]
     MacroTooDeep(usize),
+    /// A4 (`guide-de-correction-robustesse.md` §F6) — refus d'un
+    /// `Execute`/`BeginMacro`/`EndMacro`/`AbortMacro` dont l'émetteur n'est
+    /// pas celui qui a ouvert la macro courante. Distinct de `MacroOpen` :
+    /// `MacroOpen` refuse une opération pour **quiconque** pendant qu'une
+    /// macro — n'importe laquelle — est ouverte (`undo`, `save`...) ; ici,
+    /// une macro **est** ouverte, l'opération lui serait normalement
+    /// permise, mais son émetteur n'est pas le propriétaire de celle-ci. Le
+    /// champ nomme l'opération refusée.
+    #[error("opération refusée : une macro est ouverte par un autre client ({0})")]
+    ForeignMacro(&'static str),
 }
 
 /// Alias de résultat du crate.
