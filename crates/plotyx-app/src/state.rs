@@ -160,6 +160,75 @@ impl From<ScriptOutcome> for ScriptOutput {
     }
 }
 
+/// Ce que [`AppState::cell_text`] affiche pour une valeur **absente**
+/// (`Cell::Text(None)`) — voir sa documentation (A9, option 2). Un espace
+/// insécable plutôt qu'une chaîne vide : il occupe la cellule comme un blanc
+/// ordinaire (rien à l'écran ne « saute aux yeux »), mais reste, en mémoire,
+/// une chaîne différente de `""` — donc distincte d'une chaîne vide
+/// **présente**. Choisi plutôt qu'un caractère visible (`—`, `∅`, `?`) parce
+/// qu'aucun de ceux-là n'est une réponse illégitime à « qu'est-ce qu'un
+/// utilisateur pourrait vouloir taper dans une cellule de texte ? » — un
+/// espace insécable, lui, n'est accessible à la frappe sur aucun clavier
+/// usuel.
+pub const MISSING_TEXT_DISPLAY: &str = "\u{00A0}";
+
+/// Seuils de bascule en notation scientifique pour [`format_f64_for_display`].
+///
+/// Choisis pour que `1.602176634e-19` (charge de l'électron) et
+/// `6.022140076e23` (nombre d'Avogadro) — les deux mesures de physicien
+/// citées par la reproduction de C4 — tombent chacune du bon côté, avec une
+/// marge confortable de part et d'autre plutôt qu'un seuil collé aux deux
+/// exemples : `SCI_LOWER` largement en dessous de la plus petite magnitude
+/// « ordinaire » qu'une mesure de laboratoire prend en unités SI de base, et
+/// `SCI_UPPER` largement au-dessus.
+const SCI_LOWER: f64 = 1e-4;
+const SCI_UPPER: f64 = 1e16;
+
+/// Formate un `f64` **fini et non nul** pour l'affichage en cellule de
+/// grille — bascule en notation scientifique aux magnitudes extrêmes plutôt
+/// que de s'en remettre au seul `Display` de `f64`, qui n'émet jamais
+/// d'exposant.
+///
+/// # C4 (moitié `plotyx-app`, `guide-de-correction-robustesse.md` §F8)
+///
+/// Une mesure de physicien comme la charge de l'électron
+/// (`1.602176634e-19`) s'écrivait, avant ce correctif, `0.0000000000000000001602176634`
+/// — trente caractères dans une colonne de grille large d'une centaine de
+/// pixels (une quinzaine de caractères ; vingt-quatre est déjà large). En
+/// dessous de [`SCI_LOWER`] ou à partir de [`SCI_UPPER`] (exclu en dessous,
+/// inclus au-dessus — une magnitude *nulle* ne bascule jamais : `0.0` reste
+/// `"0"`, pas `"0e0"`), la valeur s'écrit en notation scientifique
+/// (`{:e}` — Rust y choisit, comme pour `Display`, la représentation la plus
+/// courte qui redonne le même `f64` en le reparsant : l'aller-retour
+/// `f64 → texte → f64` reste exact bit à bit). En dehors de cette plage, le
+/// `Display` décimal habituel suffit et reste le plus lisible.
+///
+/// # §F8 — « une seule table, deux directions »
+///
+/// Le guide nomme deux appelants qui formatent aujourd'hui un `f64` sans se
+/// concerter : `AppState::cell_text` (ici, l'affichage) et
+/// `Column::set_column_type` (`Float → Text`, dans `plotyx-core`, la
+/// conversion) — « sans quoi l'affichage et la conversion diront deux choses
+/// différentes de la même valeur ». Le correctif de `plotyx-core` est mené en
+/// parallèle, dans un autre arbre de travail, par un autre agent ; au moment
+/// d'écrire cette fonction, `plotyx_core::column` n'expose encore aucune
+/// fonction de formatage publique à réutiliser ici (vérifié par
+/// `grep -n "pub fn format" crates/plotyx-core/src/column.rs`). Cette
+/// fonction reproduit donc, côté `plotyx-app` seulement, la même idée
+/// (seuils, bascule en notation scientifique) sans prétendre être
+/// bit-à-bit identique à ce que produira l'autre moitié du correctif : les
+/// deux devront être unifiées — dans `plotyx-core`, pour que `cell_text`
+/// délègue à la fonction publique du cœur plutôt que de la dupliquer — une
+/// fois les deux travaux fusionnés.
+fn format_f64_for_display(value: f64) -> String {
+    let magnitude = value.abs();
+    if magnitude != 0.0 && (magnitude < SCI_LOWER || magnitude >= SCI_UPPER) {
+        format!("{value:e}")
+    } else {
+        format!("{value}")
+    }
+}
+
 /// Saisie en cours dans une cellule.
 ///
 /// Une seule cellule est éditable à la fois : c'est ce qui permet à la grille
@@ -388,23 +457,54 @@ impl AppState {
             .unwrap_or(0)
     }
 
-    /// Texte à afficher dans une cellule : `""` pour une valeur manquante
-    /// (`NaN` en numérique, `None` en texte) ou hors bornes, sinon la valeur
+    /// Texte à afficher dans une cellule : [`MISSING_TEXT_DISPLAY`] pour une
+    /// valeur absente (`Cell::Text(None)`, y compris hors bornes — `get`
+    /// rend `None` au-delà de la fin d'une colonne texte), `""` pour une
+    /// valeur manquante numérique (`NaN`) ou pour une chaîne vide
+    /// **présente** (`Cell::Text(Some(String::new()))`), sinon la valeur
     /// formatée.
     ///
-    /// Le formatage numérique est le `Display` de `f64` (`1.5` → « 1.5 »,
-    /// `1.0` → « 1 »). Ce choix est délibéré pour un banc d'essai : il est
-    /// court, lisible, et n'invente pas de politique d'arrondi. Le vrai
-    /// formatage appartiendra à `ColumnMeta::display_format`, que cette phase
-    /// ne lit pas.
+    /// # A9 (option 2, `guide-de-correction-robustesse.md` §F1/§F8) — deux
+    /// choses différentes ne doivent pas avoir la même apparence
+    ///
+    /// Le modèle distingue `Some("")` (une chaîne vide qu'on a écrite) de
+    /// `None` (rien n'a jamais été écrit) — c'est la seule valeur manquante
+    /// du texte (voir la doc de tête de `column.rs`, invariant F1). Avant ce
+    /// correctif, `cell_text` rendait `""` dans les deux cas : rien, à
+    /// l'écran, ne permettait de savoir laquelle des deux était sous les
+    /// yeux — l'anomalie A9 (moitié affichage ; l'autre moitié, la survie de
+    /// `Some("")` à la traversée d'une cellule, est déjà corrigée dans
+    /// `commit_cell`, option 1).
+    ///
+    /// La convention retenue ici : une valeur **absente** s'affiche comme un
+    /// unique espace insécable U+00A0 ([`MISSING_TEXT_DISPLAY`]) — visible
+    /// nulle part (il occupe la cellule comme un blanc), mais distinct de la
+    /// chaîne vide en mémoire, et d'un caractère qu'un utilisateur ne tape
+    /// jamais en cherchant à écrire du texte ordinaire (contrairement à un
+    /// tiret ou un point d'interrogation, que « rien » comme « — » sont
+    /// d'authentiques réponses possibles à une question). Une chaîne vide
+    /// **présente** garde `""` : c'est littéralement ce qu'elle est.
+    ///
+    /// # C4 (moitié `plotyx-app`, §F8) — le formatage numérique
+    ///
+    /// Le formatage numérique n'est plus le seul `Display` de `f64` (qui
+    /// n'émet jamais d'exposant : une mesure comme la charge de l'électron,
+    /// 1,602176634·10⁻¹⁹, s'écrivait sur 30 caractères dans une cellule de
+    /// grille large d'une quinzaine). [`format_f64_for_display`] bascule en
+    /// notation scientifique pour les magnitudes extrêmes ; voir sa
+    /// documentation pour les seuils exacts et pour ce que cette moitié doit
+    /// à l'autre — la conversion `Column::set_column_type` (`Float → Text`)
+    /// de `plotyx-core`, corrigée séparément (§F8 : « une seule table, deux
+    /// directions »). Le vrai formatage restera un jour celui de
+    /// `ColumnMeta::display_format`, que cette phase ne lit pas.
     pub fn cell_text(&self, column: NodeId, row: usize) -> String {
         let Some(column) = self.snapshot.tree.node(column).and_then(Node::as_column) else {
             return String::new();
         };
         match column.get(row) {
             Cell::Float(value) if value.is_nan() => String::new(),
-            Cell::Float(value) => format!("{value}"),
-            Cell::Text(None) => String::new(),
+            Cell::Float(value) => format_f64_for_display(value),
+            Cell::Text(None) => MISSING_TEXT_DISPLAY.to_string(),
             Cell::Text(Some(text)) => text,
         }
     }
@@ -904,5 +1004,92 @@ impl AppState {
             }
             _ => self.notice("Aucun script en cours à interrompre.".to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests unitaires ciblés sur ce qui ne dépend d'aucune session ni
+    //! d'aucun projet : la frontière valeur ↔ texte elle-même (A9 option 2 et
+    //! C4, `guide-de-correction-robustesse.md` §F1/§F8). Le reste du fichier
+    //! (dispatch, historique, sauvegarde…) est couvert en intégration par
+    //! `tests/shell.rs` et par le banc `plotyx-robustesse` (batterie 15), qui
+    //! ont besoin d'une session réelle.
+
+    use super::{format_f64_for_display, MISSING_TEXT_DISPLAY};
+
+    /// A9 (option 2) — la convention d'affichage à elle seule : une valeur
+    /// absente ne doit jamais s'afficher comme la chaîne vide qui représente
+    /// une chaîne vide **présente**, quel que soit l'appelant.
+    #[test]
+    fn a9_option2_le_marqueur_dabsence_nest_pas_la_chaine_vide() {
+        assert_ne!(
+            MISSING_TEXT_DISPLAY, "",
+            "sans quoi une valeur absente et une chaîne vide présente \
+             s'affichent identiquement (l'anomalie A9)"
+        );
+        assert_eq!(
+            MISSING_TEXT_DISPLAY, "\u{00A0}",
+            "convention retenue : un unique espace insécable"
+        );
+    }
+
+    /// C4 — la reproduction du banc (`b15_une_mesure_scientifique_tient_dans_une_cellule`)
+    /// fixe la spécification ; ce test fige les mêmes trois valeurs au niveau
+    /// de la fonction de formatage elle-même, sans passer par une session.
+    #[test]
+    fn c4_les_trois_mesures_de_la_reproduction_tiennent_en_24_caracteres() {
+        const LISIBLE: usize = 24;
+        for valeur in [1.602_176_634e-19_f64, 6.022_140_76e23, 0.1 + 0.2] {
+            let affiche = format_f64_for_display(valeur);
+            assert!(
+                affiche.len() <= LISIBLE,
+                "{valeur} → « {affiche} » ({} caractères)",
+                affiche.len()
+            );
+        }
+    }
+
+    /// C4 — l'aller-retour reste exact bit à bit : c'est ce que §F8 du guide
+    /// vérifie déjà pour le `Display` par défaut, et qui doit rester vrai
+    /// pour la notation scientifique.
+    #[test]
+    fn c4_laller_retour_texte_est_exact_bit_a_bit() {
+        for valeur in [
+            1.602_176_634e-19_f64,
+            6.022_140_76e23,
+            0.1 + 0.2,
+            0.0,
+            -0.0,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+        ] {
+            let affiche = format_f64_for_display(valeur);
+            let relu: f64 = affiche.parse().unwrap_or_else(|e| {
+                panic!("« {affiche} » (depuis {valeur:e}) ne se reparse pas : {e}")
+            });
+            assert_eq!(
+                relu.to_bits(),
+                valeur.to_bits(),
+                "{valeur:e} → « {affiche} » → {relu:e} : bits différents"
+            );
+        }
+    }
+
+    /// C4 — zéro ne bascule jamais en notation scientifique (`"0e0"` serait
+    /// correct mais illisible pour un cas aussi courant).
+    #[test]
+    fn c4_zero_reste_decimal() {
+        assert_eq!(format_f64_for_display(0.0), "0");
+        assert_eq!(format_f64_for_display(-0.0), "-0");
+    }
+
+    /// C4 — une valeur ordinaire (celle que la grille affiche le plus
+    /// souvent) n'est pas touchée par le seuil.
+    #[test]
+    fn c4_une_valeur_ordinaire_reste_decimale() {
+        assert_eq!(format_f64_for_display(42.5), "42.5");
+        assert_eq!(format_f64_for_display(0.0), "0");
+        assert_eq!(format_f64_for_display(1.0), "1");
     }
 }
