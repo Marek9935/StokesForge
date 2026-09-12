@@ -828,8 +828,10 @@ elle.
 Deux autres constats annexes n'ont pas de famille et restent à leur place :
 `DeleteRows` puis `InsertRows` au niveau feuille n'est pas neutre (matin, §8 —
 à revoir le jour où l'interface expose les deux côte à côte), et
-`cargo fmt --all -- --check` échoue déjà sur treize emplacements antérieurs au
-banc (matin §8, suite §10 — hors périmètre, délibérément).
+`cargo fmt --all -- --check` échoue déjà sur des emplacements antérieurs au
+banc (treize à l'écriture de ce guide, vingt-cinq au 2026-09-12 — dérive de
+version de `rustfmt`, non de contenu ; matin §8, suite §10 — hors périmètre,
+délibérément).
 
 ### 7.4 Ce que cette révision du guide a corrigé
 
@@ -849,6 +851,8 @@ Aucune anomalie n'a changé. Trois erreurs de ce guide, en revanche :
 ---
 
 ## 8. Où en est le banc
+
+État de départ du chantier (2026-09-11, avant tout correctif) :
 
 ```text
 21 batteries · 46 reproductions · 2 sondes hors-processus
@@ -877,6 +881,15 @@ vague 4  (F1 et F8)             8                 →  15
 vague 5  (F9)                   5                 →  10
 vague 6  (F2 puis F6)          10                 →   0
 ```
+
+Seul `#[ignore]` restant dans `crates/plotyx-robustesse/tests/` à ce jour :
+`b9_script_sous_contrainte.rs`. Il ne compte pour aucune des trente
+anomalies — A2, dont il partage la famille F6, est fermée
+(`b6_toctou_entre_instantane_et_commande`) — et reste rouge pour une raison
+documentée dans son propre `#[ignore = "…"]` : il dépend de l'ordonnancement
+d'un `secoueur` qui ne s'arrête jamais, non repris car cela demanderait de
+faire boucler le script sur `ConcurrentWriteError`, ce que le motif original
+ne prévoyait pas.
 
 **Statut réel de clôture (2026-09-12, les six vagues sont fusionnées sur
 `rewriterust`) : 0 rouge.** Les 30 anomalies ont chacune une réponse
