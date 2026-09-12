@@ -283,7 +283,6 @@ fn b14_laller_retour_disque_tient_a_chaque_pas() {
 // -- reproductions --------------------------------------------------------
 
 #[test]
-#[ignore = "reproduction A7 — sur une séquence tirée au sort, un numéro de version finit par désigner deux contenus différents"]
 fn b14_une_version_ne_designe_jamais_deux_contenus() {
     let mut runner = runner(16);
     runner

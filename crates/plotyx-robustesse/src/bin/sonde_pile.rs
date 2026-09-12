@@ -56,7 +56,17 @@ fn travail(profondeur: usize, geste: &str) {
 
     let mut history = History::with_limit(0);
     for i in 0..profondeur {
-        history.begin_macro(&format!("m{i}"));
+        // B7 (`guide-de-correction-robustesse.md` §F4) — `begin_macro`
+        // refuse désormais (`MacroTooDeep`) au-delà d'une profondeur bornée,
+        // avant même d'approcher la frontière où `revert`/`Drop` (récursifs
+        // sur `Entry::Macro`) feraient déborder la pile. Une sonde lancée
+        // avec une `profondeur` au-delà de cette borne doit donc voir ce
+        // refus, pas un crash — c'est exactement la preuve que le correctif
+        // fonctionne.
+        if let Err(err) = history.begin_macro(&format!("m{i}")) {
+            println!("  begin_macro refusé au niveau {i} : {err} — REFUS PROPRE, pas de crash");
+            return;
+        }
     }
     history
         .execute(

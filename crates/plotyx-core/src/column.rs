@@ -252,16 +252,33 @@ impl PartialEq for Column {
     }
 }
 
+/// B3 (`guide-de-correction-robustesse.md` §F4) — plafond partagé par
+/// `write_block`, `insert_rows` et `set_length` : au-delà, dimensionner
+/// l'allocation demandée fait `abort()` (échec d'allocation, non
+/// rattrapable — voir `plotyx-sonde-alloc`) avant même qu'une erreur
+/// n'ait la moindre chance d'être construite. Cent millions de lignes,
+/// arbitraire mais documenté : très au-delà de tout projet réaliste, très en
+/// deçà de ce qui menace le processus (à 8 octets/valeur, l'allocation reste
+/// de l'ordre du gigaoctet).
+const MAX_COLUMN_ROWS: usize = 100_000_000;
+
 /// Écrit `new_values` dans `vec` à partir de `start`, en étendant `vec` avec
 /// des valeurs manquantes (`missing`) si besoin. Rend les valeurs écrasées
 /// (uniquement la portion de `new_values` qui recouvre des lignes déjà
 /// présentes) ainsi que la longueur précédente de `vec`.
+///
+/// B3 — `Err(CoreError::IndexOutOfBounds)` si la longueur résultante
+/// dépasserait [`MAX_COLUMN_ROWS`], **avant** tout redimensionnement : un
+/// `start` ou un `new_values.len()` incontrôlés (`SetCells { start: 1<<45 }`)
+/// ne doivent jamais atteindre `resize_with`/`extend`, seule façon d'éviter
+/// l'`abort()` d'un échec d'allocation, qu'aucun `Result` ne rattrape après
+/// coup.
 fn write_block<T: Clone>(
     vec: &mut Vec<T>,
     start: usize,
     new_values: Vec<T>,
     missing: impl Fn() -> T,
-) -> (Vec<T>, usize) {
+) -> CoreResult<(Vec<T>, usize)> {
     // C3 (`guide-de-correction-robustesse.md` §F5, piège en §6) — un bloc
     // vide n'a rien à écrire : sortie anticipée plutôt que de laisser
     // `resize_with(start, missing)` ci-dessous allonger la colonne jusqu'à
@@ -273,7 +290,13 @@ fn write_block<T: Clone>(
     // la fin de la colonne — un bloc vide qui échouerait casserait
     // l'annulation.
     if new_values.is_empty() {
-        return (Vec::new(), vec.len());
+        return Ok((Vec::new(), vec.len()));
+    }
+    let resulting_len = start.saturating_add(new_values.len()).max(vec.len());
+    if resulting_len > MAX_COLUMN_ROWS {
+        return Err(CoreError::IndexOutOfBounds(format!(
+            "l'écriture porterait la colonne à {resulting_len} lignes, au-delà de la borne de {MAX_COLUMN_ROWS}"
+        )));
     }
     let previous_length = vec.len();
     let overlap_start = start.min(previous_length);
@@ -298,7 +321,79 @@ fn write_block<T: Clone>(
     }
     vec.extend(incoming);
 
-    (previous, previous_length)
+    Ok((previous, previous_length))
+}
+
+/// Analyse un texte en valeur `f64` pour `Column::set_column_type`
+/// (`Text → Numeric`/`DateTime`). Rend `None` — même traitement que la valeur
+/// manquante du modèle — dans deux cas que ce parseur distingue
+/// délibérément l'un de l'autre :
+///
+/// - le texte ne s'analyse pas du tout (`"pas un nombre"`) ;
+/// - le texte s'analyse comme un nombre **fini** en toutes lettres (chiffres,
+///   point, exposant) mais la valeur qu'il désigne déborde `f64` — `"1e400"`
+///   est syntaxiquement un nombre, mais aucun `f64` fini ne le porte.
+///
+/// Un texte qui **demande** explicitement une non-finitude — `"inf"`,
+/// `"-Infinity"`, `"NaN"`, avec ou sans signe, insensible à la casse — n'est
+/// pas ce débordement : l'utilisateur a écrit ce qu'il voulait, on le lui
+/// rend tel quel (`"NaN"` devient d'ailleurs la valeur manquante du modèle,
+/// pas une erreur : c'est la même valeur, écrite en toutes lettres).
+///
+/// C2 (`guide-de-correction-robustesse.md` §F1, §F8) : la décision du dépôt
+/// pour une valeur d'entrée non représentable est de la refuser plutôt que
+/// de la convertir en silence — c'est déjà la règle pour `int64` côté pont
+/// Python. Ici, « refuser » un débordement veut dire : ne jamais produire de
+/// `+inf`/`-inf` implicite, retomber sur la valeur manquante du modèle,
+/// exactement comme pour un texte qui ne s'analyse pas.
+fn parse_f64_text(text: &str) -> Option<f64> {
+    let trimmed = text.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    match lower.as_str() {
+        "inf" | "+inf" | "infinity" | "+infinity" => return Some(f64::INFINITY),
+        "-inf" | "-infinity" => return Some(f64::NEG_INFINITY),
+        "nan" | "+nan" | "-nan" => return Some(f64::NAN),
+        _ => {}
+    }
+    match trimmed.parse::<f64>() {
+        Ok(value) if value.is_finite() => Some(value),
+        // Débordement réel (`"1e400"`) ou échec d'analyse : refusé, jamais
+        // silencieusement `+inf`/`-inf`.
+        Ok(_) | Err(_) => None,
+    }
+}
+
+/// Formate un `f64` pour l'affichage ou pour `Column::set_column_type`
+/// (`Numeric → Text`) — **la** forme écrite d'une valeur du modèle (C4,
+/// `guide-de-correction-robustesse.md` §F8) : `Column::set_column_type` et
+/// `AppState::cell_text` (`plotyx-app`) doivent produire la même chaîne pour
+/// la même valeur, faute de quoi l'affichage et la conversion se
+/// contrediraient.
+///
+/// Bascule vers la notation scientifique (`{v:e}`, jamais réémise par le
+/// `Display` de `f64`) chaque fois qu'elle est plus courte que la forme
+/// décimale : une mesure de l'ordre de 10⁻¹⁹ s'écrit alors sur une quinzaine
+/// de caractères plutôt que sur trente, et un entier ordinaire (`1`, `100`)
+/// garde sa forme décimale, plus courte que son exposant (`1e0`, `1e2`).
+///
+/// Fidèle bit à bit à l'aller-retour : `Display` et `LowerExp` de `f64`
+/// produisent chacun la représentation décimale la plus courte qui reparse
+/// exactement à la valeur d'origine (dénormaux et `-0.0` compris) ; ce
+/// choix ne fait que sélectionner laquelle des deux formes écrire.
+pub fn format_f64_for_display(v: f64) -> String {
+    if !v.is_finite() {
+        // "NaN" n'atteint jamais cette fonction en pratique (c'est la valeur
+        // manquante du modèle, traduite en `None` avant d'appeler ici) ;
+        // ±inf, en revanche, est une valeur du modèle comme une autre.
+        return v.to_string();
+    }
+    let decimal = v.to_string();
+    let scientific = format!("{v:e}");
+    if scientific.len() < decimal.len() {
+        scientific
+    } else {
+        decimal
+    }
 }
 
 impl Column {
@@ -467,7 +562,7 @@ impl Column {
         match (&mut self.values, block) {
             (ColumnValues::Float(arc), ValueBlock::Float(new_values)) => {
                 let vec = Arc::make_mut(arc);
-                let (previous, previous_length) = write_block(vec, start, new_values, || f64::NAN);
+                let (previous, previous_length) = write_block(vec, start, new_values, || f64::NAN)?;
                 self.version = self.version.wrapping_add(1);
                 Ok(ValuesDelta {
                     start,
@@ -477,7 +572,7 @@ impl Column {
             }
             (ColumnValues::Text(arc), ValueBlock::Text(new_values)) => {
                 let vec = Arc::make_mut(arc);
-                let (previous, previous_length) = write_block(vec, start, new_values, || None);
+                let (previous, previous_length) = write_block(vec, start, new_values, || None)?;
                 self.version = self.version.wrapping_add(1);
                 Ok(ValuesDelta {
                     start,
@@ -495,7 +590,19 @@ impl Column {
     /// Tronque ou complète à `length` lignes. Le delta porte la queue retirée (vide si extension
     /// ou inchangé), `start = length`, `previous` = valeurs retirées (vide si aucune),
     /// `previous_length` = ancienne longueur.
+    ///
+    /// B3 (`guide-de-correction-robustesse.md` §F4) : `length` est d'abord borné à
+    /// [`MAX_COLUMN_ROWS`], pour ne jamais tenter un `resize` qui dimensionnerait une
+    /// allocation catastrophique (échec d'allocation → `abort()`, non rattrapable — voir
+    /// `plotyx-sonde-alloc`). Contrairement à [`Column::set_values`] et
+    /// [`Column::insert_rows`], cette méthode reste **infaillible** par nécessité : c'est la
+    /// primitive qu'emploie `History::revert_delta` pour restaurer une longueur antérieure
+    /// pendant une annulation, et annuler ne doit jamais pouvoir échouer. En pratique une
+    /// longueur restaurée a toujours déjà traversé `write_block`/`insert_rows`, donc jamais
+    /// dépassé la borne ; le plafond ici protège un appel direct de l'API cœur avec une
+    /// longueur arbitraire (c'est le cas que couvre la sonde).
     pub fn set_length(&mut self, length: usize) -> ValuesDelta {
+        let length = length.min(MAX_COLUMN_ROWS);
         self.version = self.version.wrapping_add(1);
         match &mut self.values {
             ColumnValues::Float(arc) => {
@@ -536,12 +643,21 @@ impl Column {
     }
 
     /// Insère `count` lignes manquantes à partir de `at`. `at` doit être dans `0..=len`
-    /// (l'égalité insère en fin) sinon `Err(IndexOutOfBounds)`.
+    /// (l'égalité insère en fin) sinon `Err(IndexOutOfBounds)`. B3 (`guide-de-correction-
+    /// robustesse.md` §F4) : `Err(IndexOutOfBounds)` aussi si la longueur résultante
+    /// dépasserait [`MAX_COLUMN_ROWS`] — un `count` incontrôlé ne doit jamais atteindre
+    /// `Vec::splice`, seule façon d'éviter l'`abort()` d'un échec d'allocation.
     pub fn insert_rows(&mut self, at: usize, count: usize) -> CoreResult<()> {
         let len = self.len();
         if at > len {
             return Err(CoreError::IndexOutOfBounds(format!(
                 "ligne {at} hors bornes (longueur {len})"
+            )));
+        }
+        let resulting_len = len.saturating_add(count);
+        if resulting_len > MAX_COLUMN_ROWS {
+            return Err(CoreError::IndexOutOfBounds(format!(
+                "l'insertion porterait la colonne à {resulting_len} lignes, au-delà de la borne de {MAX_COLUMN_ROWS}"
             )));
         }
         self.version = self.version.wrapping_add(1);
@@ -593,8 +709,12 @@ impl Column {
     /// Change le type et convertit les données. Rend `(ancien type, anciennes valeurs)` —
     /// **snapshot** volontaire : la conversion est destructrice dans les deux sens.
     /// Conversions : `Numeric ↔ DateTime` sans changement de valeurs ; `Float → Text` :
-    /// `NaN → None`, sinon `Some(v.to_string())` ; `Text → Float` : `None → NaN`, `Some(s)` →
-    /// `s.trim().parse::<f64>()` ou `NaN` si l'analyse échoue. Même type → aucun changement,
+    /// `NaN → None`, sinon `Some(format_f64_for_display(v))` (C4 : notation scientifique pour
+    /// les magnitudes qu'elle rend plus courtes) ; `Text → Float` : `None → NaN`, `Some(s)` →
+    /// `parse_f64_text(s.trim())` ou `NaN` si l'analyse échoue **ou déborde** (C2 : un texte
+    /// dont la valeur écrite déborde `f64`, comme `"1e400"`, est refusé — jamais silencieusement
+    /// `+inf` — et retombe sur la valeur manquante, sauf s'il demandait explicitement une
+    /// non-finitude, `"inf"`/`"NaN"`, auquel cas il l'obtient). Même type → aucun changement,
     /// rend quand même `(type, clone des valeurs)`.
     pub fn set_column_type(&mut self, column_type: ColumnType) -> (ColumnType, ColumnValues) {
         let old_type = self.column_type;
@@ -616,7 +736,7 @@ impl Column {
                         if value.is_nan() {
                             None
                         } else {
-                            Some(value.to_string())
+                            Some(format_f64_for_display(*value))
                         }
                     })
                     .collect();
@@ -627,7 +747,7 @@ impl Column {
                     .iter()
                     .map(|value| match value {
                         None => f64::NAN,
-                        Some(text) => text.trim().parse::<f64>().unwrap_or(f64::NAN),
+                        Some(text) => parse_f64_text(text).unwrap_or(f64::NAN),
                     })
                     .collect();
                 ColumnValues::Float(Arc::new(converted))
@@ -662,6 +782,24 @@ impl Column {
         self.values = values;
         self.version = self.version.wrapping_add(1);
         Ok(())
+    }
+
+    /// Impose un numéro de version, sans toucher ni aux valeurs ni au type.
+    ///
+    /// Réservé à [`crate::Project::restamp_column_version`], lui-même
+    /// réservé à `History::revert` dans `plotyx-commands` (A7,
+    /// `guide-de-correction-robustesse.md` §F2) : après qu'une restauration
+    /// de structure (`replace_tree`) a ramené un ancien compteur en
+    /// arrière, ré-attribuer un numéro **frais** (jamais vu) empêche qu'une
+    /// écriture future ne retombe, pour cette colonne, sur un numéro déjà
+    /// porté par un contenu différent — voir la doctrine des estampilles du
+    /// guide (§F2 : « une version de contenu ne désigne jamais deux
+    /// contenus »).
+    ///
+    /// Ne clone jamais le buffer (`self.values` n'est pas touché) : coût
+    /// `O(1)`, le buffer reste partagé avec l'arbre qu'on vient de quitter.
+    pub(crate) fn restamp_version(&mut self, version: u64) {
+        self.version = version;
     }
 }
 

@@ -394,6 +394,15 @@ fn saving_leaves_no_temporary_file_behind() {
 
 #[test]
 fn saving_over_an_existing_valid_file_replaces_it_atomically() {
+    // B8 (`guide-de-correction-robustesse.md` §F2) — deux sauvegardes
+    // successives du même `project`, vers le même chemin, ne produisent
+    // plus des fichiers identiques octet à octet : chacune fait avancer
+    // `FileBody::save_counter`, qui doit changer pour que `save` puisse
+    // détecter un écrivain concurrent. Ce test vérifiait auparavant la
+    // stabilité bit à bit ; il vérifie maintenant ce qui reste vrai —
+    // l'écriture atomique, sans résidu — et ce que B8 ajoute : le compteur
+    // avance, et deux sauvegardes successives DEPUIS CE PROCESSUS restent
+    // acceptées (`tracked_counter` suit la dernière valeur vue).
     let project = fixture_project();
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let path = dir.path().join("demo.plyx");
@@ -401,10 +410,23 @@ fn saving_over_an_existing_valid_file_replaces_it_atomically() {
     save(&project, &path).expect("première sauvegarde");
     let first_bytes = std::fs::read(&path).expect("lecture du premier fichier");
 
-    save(&project, &path).expect("seconde sauvegarde par-dessus le premier fichier");
+    save(&project, &path).expect("seconde sauvegarde par-dessus le premier fichier, acceptée");
     let second_bytes = std::fs::read(&path).expect("lecture du second fichier");
 
-    assert_eq!(first_bytes, second_bytes);
+    assert_ne!(
+        first_bytes, second_bytes,
+        "le compteur de sauvegarde doit avoir avancé entre les deux écritures"
+    );
+    // Seule la fin du fichier (le compteur MessagePack) doit différer ; tout
+    // le reste — nœuds, next_id_hint — est inchangé.
+    assert_eq!(first_bytes.len(), second_bytes.len());
+    let first_prefix_len = first_bytes.len() - 1;
+    assert_eq!(
+        &first_bytes[..first_prefix_len],
+        &second_bytes[..first_prefix_len],
+        "seul le compteur de sauvegarde devait différer"
+    );
+
     let entries: Vec<_> = std::fs::read_dir(dir.path())
         .expect("lecture du répertoire")
         .collect::<Result<_, _>>()
@@ -475,7 +497,7 @@ fn non_trivial_spec(x: plotyx_core::NodeId, y1: plotyx_core::NodeId, y2: plotyx_
     let histogram = SeriesSpec {
         name: String::new(),
         plot_type: PlotType::Histogram,
-        histogram_bins: std::num::NonZeroU32::new(17).expect("17 est non nul"),
+        histogram_bins: plotyx_plot::BinCount::new(17).expect("17 est dans les bornes"),
         ..SeriesSpec::new(y2)
     };
 

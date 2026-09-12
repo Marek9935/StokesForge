@@ -172,7 +172,6 @@ fn b7_ordre_des_octets_dun_tableau_big_endian() {
 }
 
 #[test]
-#[ignore = "reproduction A1 — un tableau numpy masqué est accepté et son masque ignoré"]
 fn b7_tableau_masque_perd_son_masque() {
     remettre_a_zero();
     let src = "import numpy as np\n\

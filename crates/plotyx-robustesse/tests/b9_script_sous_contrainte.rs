@@ -98,33 +98,52 @@ fn reinit(col: NodeId, v: Vec<f64>) {
 // ======================================================== tableau masqué
 
 #[test]
-fn b9_tableau_masque_ecrit_les_donnees_que_le_masque_cachait() {
+fn b9_tableau_masque_est_refuse_plutot_que_decouvert() {
+    // A1 (`guide-de-correction-robustesse.md` §F1) — décidé : une valeur non
+    // représentable dans la convention du modèle est REFUSÉE, jamais
+    // convertie en silence. Un `np.ma.masked_array` qui porte au moins une
+    // valeur masquée est donc refusé par `pyx.set_column`, y compris ici où
+    // les positions masquées coïncident déjà avec des `NaN` — l'ancienne
+    // version de ce test acceptait l'écriture (elle vérifiait seulement que
+    // le résultat, une fois accepté, contenait bien des `NaN`), ce qui n'est
+    // plus le comportement voulu depuis A1.
     let (a, _b, _s) = ids();
     reinit(a, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-    // Cas réaliste : des mesures dont deux points sont invalidés.
     let out = run("import numpy as np\n\
          h = pyx.resolve('[Book1]Sheet1!A')\n\
          mesures = np.ma.masked_invalid(np.array([10.0, np.nan, 30.0, np.nan, 50.0]))\n\
          print('ce que Python voit  :', list(mesures.filled(np.nan)))\n\
          print('données sous masque :', list(mesures.data))\n\
-         pyx.set_column(h, mesures)\n");
+         try:\n\
+         \x20   pyx.set_column(h, mesures)\n\
+         \x20   print('refus: non')\n\
+         except pyx.InvalidValueError as exc:\n\
+         \x20   print('refus: oui', exc)\n");
     assert!(out.error.is_none(), "{:?}", out.error);
     println!("{}", out.stdout);
+    assert!(
+        out.stdout.contains("refus: oui"),
+        "un tableau masqué doit être refusé, même quand les positions masquées \
+         coïncident avec des NaN déjà présents : {}",
+        out.stdout
+    );
     let v = valeurs(a);
     println!("ce que le modèle contient : {v:?}");
-    assert!(
-        v[1].is_nan() && v[3].is_nan(),
-        "les points masqués ne sont pas manquants dans le modèle : {v:?}"
+    assert_eq!(
+        v,
+        vec![1.0, 2.0, 3.0, 4.0, 5.0],
+        "l'écriture refusée ne doit rien avoir changé au modèle : {v:?}"
     );
     reinit(a, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
 }
 
 #[test]
-#[ignore = "reproduction A1 — les mesures masquées sont écrites dans le modèle comme des valeurs ordinaires"]
 fn b9_tableau_masque_ecrase_les_cellules_manquantes_par_des_valeurs() {
-    // LE cas qui compte : un masque posé sur des données par ailleurs valides,
-    // idiome standard de numpy pour « mesure à écarter »
-    // (`np.ma.masked_where(qualite < 3, mesures)`).
+    // A1 — LE cas qui compte : un masque posé sur des données par ailleurs
+    // valides, idiome standard de numpy pour « mesure à écarter »
+    // (`np.ma.masked_where(qualite < 3, mesures)`). Corrigée : refusée par
+    // `pyx.set_column` (`pyx.InvalidValueError`), plutôt qu'écrite comme des
+    // données ordinaires.
     let (a, _b, _s) = ids();
     reinit(a, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
     let out = run("import numpy as np\n\
@@ -135,20 +154,25 @@ fn b9_tableau_masque_ecrase_les_cellules_manquantes_par_des_valeurs() {
          print('masque      :', list(m.mask))\n\
          print('vu de Python:', str(m))\n\
          print('moyenne     :', float(m.mean()))\n\
-         pyx.set_column(h, m)\n");
+         try:\n\
+         \x20   pyx.set_column(h, m)\n\
+         \x20   print('refus: non')\n\
+         except pyx.InvalidValueError as exc:\n\
+         \x20   print('refus: oui', exc)\n");
     assert!(out.error.is_none(), "{:?}", out.error);
     println!("{}", out.stdout);
+    assert!(
+        out.stdout.contains("refus: oui"),
+        "les deux mesures masquées (20 et 40) doivent être refusées, pas \
+         écrites comme des données ordinaires : {}",
+        out.stdout
+    );
     let v = valeurs(a);
     println!("ce que le modèle contient : {v:?}");
-    let moyenne_modele: f64 = v.iter().filter(|x| !x.is_nan()).sum::<f64>()
-        / v.iter().filter(|x| !x.is_nan()).count() as f64;
-    println!("moyenne côté modèle       : {moyenne_modele}");
-    assert!(
-        v[1].is_nan() && v[3].is_nan(),
-        "les deux mesures masquées (20 et 40) ont été écrites telles quelles \
-         dans le modèle : {v:?} — Python les tenait pour absentes (moyenne {}), \
-         le modèle les compte (moyenne {moyenne_modele})",
-        30.0
+    assert_eq!(
+        v,
+        vec![1.0, 2.0, 3.0, 4.0, 5.0],
+        "l'écriture refusée ne doit rien avoir changé au modèle : {v:?}"
     );
     reinit(a, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
 }
