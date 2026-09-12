@@ -1,0 +1,27 @@
+[package]
+name = "plotyx-render-svg"
+version = "0.0.0"
+edition.workspace = true
+description = "Export SVG d'un graphe PlotYx : le SVGBackend de plotters, dont estimate_text_size est surchargé sur la mesure partagée du chantier."
+
+[lints]
+workspace = true
+
+[dependencies]
+plotyx-core = { path = "../plotyx-core" }
+plotyx-plot = { path = "../plotyx-plot" }
+# Apporte la mesure de texte (donc `epaint`) et le pipeline Plotters commun
+# aux deux backends. C'est par ici, et non en direct, qu'`epaint` entre dans
+# ce crate : une seule arête, donc une seule version possible.
+plotyx-render = { path = "../plotyx-render" }
+plotters = { version = "0.3", default-features = false, features = [
+    "all_series",
+    "all_elements",
+    "svg_backend",
+] }
+plotters-backend = "0.3"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+toml = "0.8"
