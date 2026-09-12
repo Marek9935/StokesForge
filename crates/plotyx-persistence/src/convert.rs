@@ -144,8 +144,8 @@ impl From<AxisScaleRecord> for AxisScale {
     }
 }
 
-impl From<PlotType> for PlotTypeRecord {
-    fn from(value: PlotType) -> Self {
+impl From<&PlotType> for PlotTypeRecord {
+    fn from(value: &PlotType) -> Self {
         match value {
             PlotType::Scatter => PlotTypeRecord::Scatter,
             PlotType::Line => PlotTypeRecord::Line,
@@ -153,6 +153,11 @@ impl From<PlotType> for PlotTypeRecord {
             PlotType::Bar => PlotTypeRecord::Bar,
             PlotType::Histogram => PlotTypeRecord::Histogram,
             PlotType::ErrorBar => PlotTypeRecord::ErrorBar,
+            // Le modèle en mémoire porte déjà le nom et le contenu bruts
+            // (C5, niveau 2) : les faire traverser de nouveau à l'identique
+            // est ce qui rend deux sauvegardes successives byte-identiques
+            // (B20) même quand une série a un type de tracé inconnu.
+            PlotType::Unknown(raw) => PlotTypeRecord::Unknown(raw.clone()),
         }
     }
 }
@@ -166,6 +171,7 @@ impl From<PlotTypeRecord> for PlotType {
             PlotTypeRecord::Bar => PlotType::Bar,
             PlotTypeRecord::Histogram => PlotType::Histogram,
             PlotTypeRecord::ErrorBar => PlotType::ErrorBar,
+            PlotTypeRecord::Unknown(raw) => PlotType::Unknown(raw),
         }
     }
 }
@@ -362,7 +368,7 @@ fn series_spec_to_record(series: &SeriesSpec) -> SeriesSpecRecord {
         x: series.x.map(NodeId::raw),
         x_error: series.x_error.map(NodeId::raw),
         y_error: series.y_error.map(NodeId::raw),
-        plot_type: series.plot_type.into(),
+        plot_type: (&series.plot_type).into(),
         name: series.name.clone(),
         line: (&series.line).into(),
         symbol: (&series.symbol).into(),
@@ -565,6 +571,11 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
             comment: meta.comment.clone(),
             text: text.clone(),
         },
+        // Le modèle porte déjà le nom et le contenu bruts (C5, niveau 2) :
+        // les faire traverser à l'identique est ce qui rend deux
+        // sauvegardes successives byte-identiques (B20) même pour un nœud
+        // d'une nature inconnue.
+        NodeKind::Unknown(raw) => KindRecord::Unknown(raw.clone()),
     }
 }
 
@@ -632,6 +643,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             meta: WindowMeta { label, comment },
             text,
         },
+        KindRecord::Unknown(raw) => NodeKind::Unknown(raw),
     })
 }
 

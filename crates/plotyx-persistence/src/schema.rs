@@ -14,8 +14,20 @@
 //! lecture est silencieusement ignoré — c'est le mécanisme qui permettra
 //! d'ajouter des données (par exemple une spécification de graphe) sans
 //! casser les fichiers déjà écrits.
+//!
+//! Ce mécanisme ne couvrait, jusqu'ici, que les **champs** — pas les
+//! **variantes** des enums externally-tagged (`KindRecord`, `PlotTypeRecord`,
+//! …) : une variante inconnue faisait échouer tout l'enum qui la porte, donc
+//! tout le nœud, donc tout le fichier (C5, niveau 2,
+//! `guide-de-correction-robustesse.md` §F3). `KindRecord` et `PlotTypeRecord`
+//! écrivent maintenant `Serialize`/`Deserialize` à la main (voir
+//! `unknown.rs`) pour capturer une variante inconnue dans une variante
+//! `Unknown` plutôt que de propager l'échec.
 
+use plotyx_plot::RawVariant;
 use serde::{Deserialize, Serialize};
+
+use crate::unknown::{deserialize_with_fallback, serialize_raw_variant};
 
 /// Signature de fichier : les quatre premiers octets, avant même le numéro
 /// de version.
@@ -71,7 +83,12 @@ pub(crate) struct NodeRecord {
 /// une map à une seule clé (le nom de la variante) dont la valeur est le
 /// contenu — c'est ce qui garde le fichier auto-descriptif jusque dans ses
 /// enums.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// `Serialize`/`Deserialize` sont écrits à la main, pas dérivés (C5, niveau
+/// 2, `guide-de-correction-robustesse.md` §F3 — voir `unknown.rs` pour le
+/// mécanisme) : une variante que ce lecteur ne connaît pas devient
+/// [`KindRecord::Unknown`] au lieu de faire échouer tout le fichier.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum KindRecord {
     /// Dossier.
     Folder {
@@ -109,10 +126,10 @@ pub(crate) enum KindRecord {
         /// Valeurs de la colonne.
         values: ValuesRecord,
         /// Compteur de modification des données (`Column::version`). Absent
-        /// des fichiers écrits avant le 2026-09-10 : `#[serde(default)]` le
-        /// ramène alors à 0, ce qui est le comportement voulu — un fichier
-        /// sans compteur n'a de toute façon aucun lecteur qui en retienne un.
-        #[serde(default)]
+        /// des fichiers écrits avant le 2026-09-10 : `KindRecordKnown` (plus
+        /// bas) ramène ce champ à 0 via `#[serde(default)]`, ce qui est le
+        /// comportement voulu — un fichier sans compteur n'a de toute façon
+        /// aucun lecteur qui en retienne un.
         version: u64,
     },
     /// Graphe.
@@ -122,12 +139,11 @@ pub(crate) enum KindRecord {
         /// Commentaire de fenêtre.
         comment: String,
         /// Description du graphe (`PlotSpec`). Absente des fichiers écrits
-        /// avant la phase R3 : `#[serde(default)]` la ramène alors à
-        /// [`PlotSpecRecord::default`], qui convertit vers le
-        /// `PlotSpec::default()` de `plotyx-plot` (un panneau, aucune
-        /// série) — exactement ce qu'un fichier sans spec décrivait déjà en
-        /// mémoire avant cette phase.
-        #[serde(default)]
+        /// avant la phase R3 : `KindRecordKnown` ramène ce champ à
+        /// [`PlotSpecRecord::default`] via `#[serde(default)]`, qui convertit
+        /// vers le `PlotSpec::default()` de `plotyx-plot` (un panneau,
+        /// aucune série) — exactement ce qu'un fichier sans spec décrivait
+        /// déjà en mémoire avant cette phase.
         spec: PlotSpecRecord,
     },
     /// Matrice.
@@ -146,6 +162,239 @@ pub(crate) enum KindRecord {
         /// Texte de la note.
         text: String,
     },
+    /// Nature de nœud qu'aucune des variantes ci-dessus ne nomme : une
+    /// version plus récente de PlotYx a écrit ce fichier. Nom et contenu
+    /// bruts, conservés pour une ré-écriture fidèle.
+    Unknown(RawVariant),
+}
+
+/// Miroir strict de [`KindRecord`], sans [`KindRecord::Unknown`] : c'est le
+/// schéma qu'un fichier écrit par ce lecteur peut produire. `unknown.rs`
+/// l'utilise pour *essayer* le décodage strict avant de se rabattre sur
+/// [`KindRecord::Unknown`] — voir la doc de tête de ce module.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+enum KindRecordKnown {
+    Folder {
+        children: Vec<u64>,
+    },
+    Workbook {
+        sheets: Vec<u64>,
+        label: String,
+        comment: String,
+    },
+    Worksheet {
+        columns: Vec<u64>,
+    },
+    Column {
+        column_type: TypeRecord,
+        role: RoleRecord,
+        unit: String,
+        long_name: String,
+        comment: String,
+        display_format: String,
+        values: ValuesRecord,
+        #[serde(default)]
+        version: u64,
+    },
+    Graph {
+        label: String,
+        comment: String,
+        #[serde(default)]
+        spec: PlotSpecRecord,
+    },
+    Matrix {
+        label: String,
+        comment: String,
+    },
+    Note {
+        label: String,
+        comment: String,
+        text: String,
+    },
+}
+
+impl From<KindRecordKnown> for KindRecord {
+    fn from(value: KindRecordKnown) -> Self {
+        match value {
+            KindRecordKnown::Folder { children } => KindRecord::Folder { children },
+            KindRecordKnown::Workbook {
+                sheets,
+                label,
+                comment,
+            } => KindRecord::Workbook {
+                sheets,
+                label,
+                comment,
+            },
+            KindRecordKnown::Worksheet { columns } => KindRecord::Worksheet { columns },
+            KindRecordKnown::Column {
+                column_type,
+                role,
+                unit,
+                long_name,
+                comment,
+                display_format,
+                values,
+                version,
+            } => KindRecord::Column {
+                column_type,
+                role,
+                unit,
+                long_name,
+                comment,
+                display_format,
+                values,
+                version,
+            },
+            KindRecordKnown::Graph {
+                label,
+                comment,
+                spec,
+            } => KindRecord::Graph {
+                label,
+                comment,
+                spec,
+            },
+            KindRecordKnown::Matrix { label, comment } => KindRecord::Matrix { label, comment },
+            KindRecordKnown::Note {
+                label,
+                comment,
+                text,
+            } => KindRecord::Note {
+                label,
+                comment,
+                text,
+            },
+        }
+    }
+}
+
+impl From<RawVariant> for KindRecord {
+    fn from(value: RawVariant) -> Self {
+        KindRecord::Unknown(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for KindRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserialize_with_fallback::<D, KindRecordKnown, KindRecord>(deserializer)
+    }
+}
+
+/// Miroir de [`KindRecord`] **par référence** : sérialise une variante
+/// connue sans en cloner le contenu — en particulier les octets d'une
+/// colonne `Float`, potentiellement gros, que `Serialize` n'a besoin que de
+/// lire.
+#[derive(Serialize)]
+enum KindRecordRef<'a> {
+    Folder {
+        children: &'a [u64],
+    },
+    Workbook {
+        sheets: &'a [u64],
+        label: &'a str,
+        comment: &'a str,
+    },
+    Worksheet {
+        columns: &'a [u64],
+    },
+    Column {
+        column_type: TypeRecord,
+        role: RoleRecord,
+        unit: &'a str,
+        long_name: &'a str,
+        comment: &'a str,
+        display_format: &'a str,
+        values: &'a ValuesRecord,
+        version: u64,
+    },
+    Graph {
+        label: &'a str,
+        comment: &'a str,
+        spec: &'a PlotSpecRecord,
+    },
+    Matrix {
+        label: &'a str,
+        comment: &'a str,
+    },
+    Note {
+        label: &'a str,
+        comment: &'a str,
+        text: &'a str,
+    },
+}
+
+impl Serialize for KindRecord {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            KindRecord::Folder { children } => {
+                KindRecordRef::Folder { children }.serialize(serializer)
+            }
+            KindRecord::Workbook {
+                sheets,
+                label,
+                comment,
+            } => KindRecordRef::Workbook {
+                sheets,
+                label,
+                comment,
+            }
+            .serialize(serializer),
+            KindRecord::Worksheet { columns } => {
+                KindRecordRef::Worksheet { columns }.serialize(serializer)
+            }
+            KindRecord::Column {
+                column_type,
+                role,
+                unit,
+                long_name,
+                comment,
+                display_format,
+                values,
+                version,
+            } => KindRecordRef::Column {
+                column_type: *column_type,
+                role: *role,
+                unit,
+                long_name,
+                comment,
+                display_format,
+                values,
+                version: *version,
+            }
+            .serialize(serializer),
+            KindRecord::Graph {
+                label,
+                comment,
+                spec,
+            } => KindRecordRef::Graph {
+                label,
+                comment,
+                spec,
+            }
+            .serialize(serializer),
+            KindRecord::Matrix { label, comment } => {
+                KindRecordRef::Matrix { label, comment }.serialize(serializer)
+            }
+            KindRecord::Note {
+                label,
+                comment,
+                text,
+            } => KindRecordRef::Note {
+                label,
+                comment,
+                text,
+            }
+            .serialize(serializer),
+            KindRecord::Unknown(raw) => serialize_raw_variant(raw, serializer),
+        }
+    }
 }
 
 /// Type de données d'une colonne, à plat.
@@ -327,7 +576,12 @@ pub(crate) struct SeriesSpecRecord {
 }
 
 /// [`plotyx_plot::PlotType`], à plat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Serialize`/`Deserialize` écrits à la main, comme [`KindRecord`] (C5,
+/// niveau 2) : un type de tracé qu'une version future ajouterait devient
+/// [`PlotTypeRecord::Unknown`] plutôt que de faire échouer tout le graphe qui
+/// le porte — et le fichier entier avec lui, avant ce correctif.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PlotTypeRecord {
     Scatter,
     Line,
@@ -335,6 +589,66 @@ pub(crate) enum PlotTypeRecord {
     Bar,
     Histogram,
     ErrorBar,
+    /// Type de tracé d'une version plus récente de PlotYx.
+    Unknown(RawVariant),
+}
+
+/// Miroir strict de [`PlotTypeRecord`] (sans `Unknown`) — même rôle que
+/// `KindRecordKnown`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+enum PlotTypeRecordKnown {
+    Scatter,
+    Line,
+    LineScatter,
+    Bar,
+    Histogram,
+    ErrorBar,
+}
+
+impl From<PlotTypeRecordKnown> for PlotTypeRecord {
+    fn from(value: PlotTypeRecordKnown) -> Self {
+        match value {
+            PlotTypeRecordKnown::Scatter => PlotTypeRecord::Scatter,
+            PlotTypeRecordKnown::Line => PlotTypeRecord::Line,
+            PlotTypeRecordKnown::LineScatter => PlotTypeRecord::LineScatter,
+            PlotTypeRecordKnown::Bar => PlotTypeRecord::Bar,
+            PlotTypeRecordKnown::Histogram => PlotTypeRecord::Histogram,
+            PlotTypeRecordKnown::ErrorBar => PlotTypeRecord::ErrorBar,
+        }
+    }
+}
+
+impl From<RawVariant> for PlotTypeRecord {
+    fn from(value: RawVariant) -> Self {
+        PlotTypeRecord::Unknown(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for PlotTypeRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserialize_with_fallback::<D, PlotTypeRecordKnown, PlotTypeRecord>(deserializer)
+    }
+}
+
+impl Serialize for PlotTypeRecord {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let known = match self {
+            PlotTypeRecord::Scatter => PlotTypeRecordKnown::Scatter,
+            PlotTypeRecord::Line => PlotTypeRecordKnown::Line,
+            PlotTypeRecord::LineScatter => PlotTypeRecordKnown::LineScatter,
+            PlotTypeRecord::Bar => PlotTypeRecordKnown::Bar,
+            PlotTypeRecord::Histogram => PlotTypeRecordKnown::Histogram,
+            PlotTypeRecord::ErrorBar => PlotTypeRecordKnown::ErrorBar,
+            PlotTypeRecord::Unknown(raw) => return serialize_raw_variant(raw, serializer),
+        };
+        known.serialize(serializer)
+    }
 }
 
 /// [`plotyx_plot::SeriesAxis`], à plat.

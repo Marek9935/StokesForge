@@ -15,6 +15,14 @@ const ALLOWED_DEPENDENCIES: &[&str] = &[
     "rmp-serde",
     "serde_bytes",
     "tempfile",
+    // Capture générique d'une variante d'énumération inconnue (C5, niveau 2,
+    // `guide-de-correction-robustesse.md` §F3) : `rmpv::Value` modélise
+    // n'importe quelle valeur MessagePack, ce qui permet de tenter le
+    // décodage strict d'une variante connue puis, à l'échec, de conserver le
+    // contenu tel quel plutôt que de faire échouer tout le fichier. Ce
+    // n'est toujours pas une dépendance UI : c'est le même format que
+    // `rmp-serde` sait déjà lire/écrire, vu de façon non typée.
+    "rmpv",
 ];
 
 #[test]
