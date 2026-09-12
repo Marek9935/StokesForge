@@ -17,12 +17,15 @@
 //! **le rendu se teste sans serveur graphique**. Toute la suite de tests de
 //! ce crate tourne en intégration continue sans display.
 //!
+//! # PDF
+//!
+//! L'export PDF (`svg2pdf`, module [`pdf`]) est la phase R6 : une conversion
+//! de la `String` que [`render_to_string`] rend déjà, pas un troisième
+//! backend — voir la documentation du module pour ce que ça implique.
+//!
 //! # Ce qui n'est pas ici
 //!
-//! Le PDF (`svg2pdf`) est la phase R6 : le PDF est une conversion du SVG, pas
-//! un troisième backend, et il ne coûte rien de l'ajouter plus tard sur la
-//! `String` que [`render_to_string`] rend déjà. L'inlining de fragments
-//! Typst est la phase R8.
+//! L'inlining de fragments Typst outlinés dans l'export est la phase R8.
 
 #![cfg_attr(
     not(test),
@@ -30,6 +33,7 @@
 )]
 
 pub mod backend;
+pub mod pdf;
 
 use std::path::Path;
 
@@ -41,6 +45,7 @@ use plotyx_render::pipeline::{self, DrawnPlot};
 use plotyx_render::text::TextMeasurer;
 
 pub use backend::MeasuredSvgBackend;
+pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};
 pub use plotyx_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer};
 
 /// Taille par défaut d'une figure exportée, en unités SVG.

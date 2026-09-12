@@ -18,6 +18,7 @@ const DEPENDANCES_DIRECTES: &[&str] = &[
     "plotters",      // feature svg_backend
     "plotters-backend",
     "thiserror",
+    "svg2pdf", // R6 : conversion SVG → PDF, attendue par architecture-choisie.md §8
 ];
 
 /// Ce qu'un crate d'export ne doit jamais tirer, même de loin.
