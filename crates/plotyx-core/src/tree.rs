@@ -32,32 +32,6 @@ pub(crate) fn display_folders(folders: &[String]) -> String {
     }
 }
 
-/// Catégorie d'unicité d'un nom entre frères : deux frères de la même
-/// catégorie ne peuvent pas porter le même nom.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum NameCategory {
-    /// Dossier : unique parmi ses frères.
-    Folder,
-    /// Fenêtre : unique à l'échelle du projet (traité à part).
-    Window,
-    /// Feuille : unique dans son classeur.
-    Sheet,
-    /// Colonne : unique dans sa feuille.
-    Column,
-}
-
-/// Catégorie d'unicité d'une nature de nœud.
-fn category_of(kind: &NodeKind) -> NameCategory {
-    if kind.is_window() {
-        NameCategory::Window
-    } else if kind.is_folder() {
-        NameCategory::Folder
-    } else if kind.is_worksheet() {
-        NameCategory::Sheet
-    } else {
-        NameCategory::Column
-    }
-}
 
 /// Arbre du projet : carte plate `NodeId → Arc<Node>` et racine. Partagé par
 /// `Arc<Tree>` ; toute mutation passe par `Project`, qui fait `Arc::make_mut`
@@ -200,7 +174,21 @@ impl Tree {
     }
 
     /// Unicité des noms d'un arbre chargé : globale pour les fenêtres, entre
-    /// frères de même catégorie pour le reste.
+    /// frères directs pour le reste.
+    ///
+    /// A8 (`guide-de-correction-robustesse.md` §F9) — la portée d'unicité
+    /// entre frères reproduit ici, à l'identique, celle de
+    /// `check_name_available` : une fenêtre n'est comparée qu'à l'échelle
+    /// globale (ci-dessus), jamais à ses frères directs ; un enfant qui
+    /// n'est pas une fenêtre est comparé à **tous** les frères qui le
+    /// précèdent dans `children()`, quelle que soit leur nature — exactement
+    /// ce que `check_name_available` aurait vérifié en l'insérant à cette
+    /// place. La comparaison est délibérément asymétrique (un dossier ne
+    /// peut pas prendre le nom d'une fenêtre déjà là, l'inverse est permis)
+    /// et **dépend de l'ordre des enfants** : ce n'est pas relâché, c'est le
+    /// reflet fidèle de ce que l'API de mutation peut construire — un arbre
+    /// que `from_nodes` refuserait alors qu'`insert` avait pu le produire
+    /// serait la même incohérence que celle qu'A8 corrige, à l'envers.
     fn validate_loaded_names(&self) -> CoreResult<()> {
         let mut windows: HashSet<&str> = HashSet::new();
         for node in self.nodes.values() {
@@ -213,22 +201,22 @@ impl Tree {
         }
 
         for (id, node) in &self.nodes {
-            let mut seen: HashSet<(NameCategory, &str)> = HashSet::new();
-            for child in node.children() {
-                let Some(child_node) = self.nodes.get(child) else {
+            let mut seen: HashMap<&str, NodeId> = HashMap::new();
+            for &child in node.children() {
+                let Some(child_node) = self.nodes.get(&child) else {
                     continue;
                 };
-                let category = category_of(child_node.kind());
-                if category == NameCategory::Window {
-                    continue; // déjà couvert par l'unicité globale
+                if !child_node.kind().is_window() {
+                    if let Some(&earlier) = seen.get(child_node.name()) {
+                        return Err(CoreError::Structure(format!(
+                            "{child} ({}) ne peut pas porter le nom {} dans {id} : {earlier} \
+                             le porte déjà",
+                            child_node.kind().type_name(),
+                            child_node.name()
+                        )));
+                    }
                 }
-                if !seen.insert((category, child_node.name())) {
-                    return Err(CoreError::Structure(format!(
-                        "{id} contient deux enfants nommés {} de même nature ({})",
-                        child_node.name(),
-                        child_node.kind().type_name()
-                    )));
-                }
+                seen.insert(child_node.name(), child);
             }
         }
         Ok(())
@@ -427,6 +415,24 @@ impl Tree {
             .find(|child| self.node(*child).is_some_and(|node| node.name() == name)))
     }
 
+    /// Enfant **dossier** de `parent` portant ce nom, ou `None`.
+    ///
+    /// A8 (`guide-de-correction-robustesse.md` §F9) — distinct de
+    /// `child_by_name` : un dossier n'est le seul parent du modèle à
+    /// accueillir deux catégories d'enfants (dossiers et fenêtres,
+    /// `NodeKind::accepts_child`), et `check_name_available` n'empêche pas
+    /// une fenêtre de prendre le nom d'un dossier frère. Chercher par nom
+    /// *puis* filtrer par nature choisirait le frère homonyme rencontré en
+    /// premier dans `children()`, que ce soit le bon ou non ; chercher
+    /// directement parmi les enfants dossiers rend la résolution d'un
+    /// segment de chemin indépendante de cet ordre.
+    fn folder_child_by_name(&self, parent: NodeId, name: &str) -> CoreResult<Option<NodeId>> {
+        Ok(self.get(parent)?.children().iter().copied().find(|child| {
+            self.node(*child)
+                .is_some_and(|node| node.kind().is_folder() && node.name() == name)
+        }))
+    }
+
     /// Nombre de lignes d'une feuille : le maximum des longueurs de ses
     /// colonnes, 0 si elle n'en a aucune. `Err(Structure)` si `sheet` n'est pas
     /// une feuille.
@@ -492,15 +498,18 @@ impl Tree {
     /// La comparaison des noms est celle de `child_by_name` et `find_window` :
     /// égalité exacte, donc **sensible à la casse**.
     pub fn resolve_parsed(&self, path: &ObjectPath) -> CoreResult<NodeId> {
-        // Chemin sans fenêtre : une descente de dossiers depuis la racine. Le
-        // filtre sur `is_folder` évite qu'un segment tombe sur une fenêtre ou
-        // une feuille homonyme et laisse croire à un dossier.
+        // Chemin sans fenêtre : une descente de dossiers depuis la racine.
+        // `folder_child_by_name` ne considère que les enfants dossiers dès la
+        // recherche elle-même (A8) : `check_name_available` n'empêche pas une
+        // fenêtre de prendre le nom d'un dossier frère (voir sa doc), donc un
+        // `child_by_name` générique pourrait tomber sur la fenêtre plutôt que
+        // sur le dossier et rendre ce dernier « introuvable » selon l'ordre
+        // des enfants — ce qui casserait `path_of ∘ resolve_path = identité`.
         let Some(window_name) = path.window.as_deref() else {
             let mut current = self.root();
             for segment in &path.folders {
                 current = self
-                    .child_by_name(current, segment)?
-                    .filter(|id| self.node(*id).is_some_and(|node| node.kind().is_folder()))
+                    .folder_child_by_name(current, segment)?
                     .ok_or_else(|| CoreError::Path(format!("dossier introuvable : {segment}")))?;
             }
             return Ok(current);
