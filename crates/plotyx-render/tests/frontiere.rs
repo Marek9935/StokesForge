@@ -12,6 +12,12 @@ const AUTORISEES: &[&str] = &[
     "plotters",         // sans ses fonts (default-features = false)
     "plotters-backend", // BackendTextStyle, DrawingBackend
     "epaint",           // la mesure, et rien d'autre de la pile UI
+    // Résolution d'une police système par son nom (`fonts.rs`, embed de
+    // polices du 2026-09-13) : ni egui ni plotters-svg, juste une lecture du
+    // système de fichiers — même version que celle qu'`usvg` verrouille déjà
+    // ailleurs dans le workspace (`plotyx-render-svg` l'atteint par
+    // réexport, pas en direct, pour ne pas la déclarer deux fois).
+    "fontdb",
 ];
 
 #[test]

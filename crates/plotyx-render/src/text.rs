@@ -50,12 +50,26 @@
 //! compilation Typst par graduation (`architecture-choisie.md` §4.3). La
 //! tâche R8.5 ajoutera un aiguillage dans [`TextSource::measure`], pas
 //! ailleurs.
+//!
+//! # Ajout du 2026-09-13 — un choix de police, pas seulement un défaut
+//!
+//! [`font_definitions`] rendait jusqu'ici `FontDefinitions::default()`
+//! d'epaint sans discussion. Une tâche ponctuelle (hors séquencement R0-R8)
+//! lui a donné un vrai choix — trois paires de polices embarquées
+//! (Libertinus, Fira, Noto) ou une police système par son nom, avec repli
+//! silencieux sur Noto — porté par [`crate::fonts`]. **L'invariant de ce
+//! module ne change pas** : [`font_definitions`] reste le seul endroit que
+//! les deux backends appellent, avec le même résultat des deux côtés tant
+//! que le même [`fonts::FontChoice`] leur est passé. Détail dans
+//! `docs/newarchitecture/architecture-choisie.md` §7.
 
 use std::sync::{Arc, Mutex};
 
 use epaint::text::{FontDefinitions, FontFamily, FontId, Fonts, TextOptions};
 use epaint::{Color32, Galley, Vec2};
 use plotters_backend::{BackendTextStyle, FontFamily as PlottersFamily};
+
+use crate::fonts::{self, FontChoice};
 
 /// L'échelle à laquelle **toute** mesure de mise en page est faite.
 ///
@@ -82,10 +96,18 @@ pub fn font_size(plotters_size: f64) -> f32 {
 
 /// **La** définition des polices du projet, en un seul endroit.
 ///
-/// C'est `FontDefinitions::default()` d'epaint, c'est-à-dire exactement ce
-/// qu'un `egui::Context` neuf utilise : la mesure hors écran (export SVG,
-/// CLI, script) part donc du même jeu de polices que la fenêtre, ce que la
-/// mesure R0 0.1 a vérifié à 0,000000 px d'écart sur 540 comparaisons.
+/// Résout [`FontChoice::default`] — Noto Sans, embarquée
+/// (`fonts.rs`, embed de polices du 2026-09-13) — plutôt que le
+/// `FontDefinitions::default()` brut d'epaint que cette fonction rendait
+/// jusque-là : voir [`crate::fonts`] pour le mécanisme de choix (trois
+/// paires embarquées ou police système, avec repli) et
+/// `docs/newarchitecture/architecture-choisie.md` §7 pour la décision
+/// datée qui a remplacé l'ancienne phrase sur les fonts.
+///
+/// La mesure hors écran (export SVG, CLI, script) part donc du même jeu de
+/// polices que la fenêtre, ce que la mesure R0 0.1 a vérifié à 0,000000 px
+/// d'écart sur 540 comparaisons — propriété inchangée par ce choix, puisque
+/// les deux côtés continuent d'appeler cette fonction-ci et nulle autre.
 ///
 /// Pour que ce soit une propriété et non une coïncidence, l'application
 /// pose explicitement ces définitions sur son `Context` au démarrage
@@ -94,8 +116,22 @@ pub fn font_size(plotters_size: f64) -> f32 {
 ///
 /// **Ne pas appeler en boucle** : elle décode les polices embarquées. Un
 /// [`TextMeasurer`] par backend, construit une fois, suffit.
+///
+/// Pour choisir une autre police que le défaut (une autre paire embarquée,
+/// ou une police système), voir [`font_definitions_for`].
 pub fn font_definitions() -> FontDefinitions {
-    FontDefinitions::default()
+    font_definitions_for(&FontChoice::default())
+}
+
+/// Comme [`font_definitions`], mais avec un [`FontChoice`] explicite.
+///
+/// Un appelant qui veut Fira, Libertinus, ou une police système (le cas
+/// « Calibri » de la demande utilisateur) passe par ici — des deux côtés à
+/// la fois (écran et export), avec le **même** [`FontChoice`], sous peine de
+/// rompre l'invariant que ce module porte : voir [`crate::fonts::resolve`]
+/// pour le détail de la résolution et du repli.
+pub fn font_definitions_for(choice: &FontChoice) -> FontDefinitions {
+    fonts::resolve(choice).definitions
 }
 
 /// Les options de rendu de texte du projet.
@@ -190,13 +226,26 @@ pub struct TextMeasurer {
 
 impl TextMeasurer {
     /// Une source de texte dont les `Galley` seront mis en page à
-    /// `pixels_per_point`.
+    /// `pixels_per_point`, mesurant avec [`FontChoice::default`] (Noto Sans
+    /// embarquée).
     ///
     /// Ce paramètre ne concerne **que** le dessin : la mesure se fait
     /// toujours à [`MEASUREMENT_PIXELS_PER_POINT`].
+    ///
+    /// Pour choisir une autre police, voir [`Self::with_font_choice`].
     pub fn new(pixels_per_point: f32) -> Self {
+        Self::with_font_choice(pixels_per_point, &FontChoice::default())
+    }
+
+    /// Comme [`Self::new`], mais avec un [`FontChoice`] explicite.
+    ///
+    /// À appeler avec le **même** [`FontChoice`] que celui posé sur le
+    /// `egui::Context` de l'écran (`plotyx-app`) : c'est ce qui tient
+    /// l'invariant de ce module quand la police n'est pas le défaut — voir
+    /// [`crate::fonts`].
+    pub fn with_font_choice(pixels_per_point: f32, choice: &FontChoice) -> Self {
         Self {
-            fonts: Mutex::new(Fonts::new(text_options(), font_definitions())),
+            fonts: Mutex::new(Fonts::new(text_options(), font_definitions_for(choice))),
             pixels_per_point,
         }
     }

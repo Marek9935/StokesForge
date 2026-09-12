@@ -55,6 +55,16 @@
 //! et `plotters` sans ses fonts (pour construire la figure) — rien de la
 //! surface de sortie. C'est ce qui lui permet d'être la référence commune
 //! plutôt qu'un troisième dialecte.
+//!
+//! # Ce qu'une tâche ponctuelle du 2026-09-13 y a ajouté
+//!
+//! [`fonts`] : le choix entre trois paires de polices embarquées
+//! (Libertinus, Fira, Noto — texte et Math) ou une police système désignée
+//! par son nom, avec repli silencieux sur Noto. [`text::font_definitions`]
+//! en devient le point d'entrée par défaut ; l'invariant qui fait foi
+//! (mesurer avec exactement le même jeu de polices des deux côtés) ne change
+//! pas — voir la documentation du module et
+//! `docs/newarchitecture/architecture-choisie.md` §7.
 
 #![cfg_attr(
     not(test),
@@ -63,6 +73,7 @@
 
 pub mod color;
 pub mod decimate;
+pub mod fonts;
 pub mod legend;
 pub mod paint;
 pub mod pipeline;
@@ -73,6 +84,7 @@ pub mod text;
 
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
+pub use fonts::{FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use pipeline::{draw, draw_on, DrawnPanel, DrawnPlot};
 pub use series::{Geometry, Prepared};
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};

@@ -3052,10 +3052,12 @@ name = "plotyx-render"
 version = "0.0.0"
 dependencies = [
  "epaint",
+ "fontdb",
  "plotters",
  "plotters-backend",
  "plotyx-core",
  "plotyx-plot",
+ "skrifa 0.44.0",
  "toml",
 ]
 
