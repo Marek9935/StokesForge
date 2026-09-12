@@ -20,7 +20,6 @@ fn projet_avec_colonne(values: &[f64]) -> (Project, plotyx_core::NodeId) {
 // ---------------------------------------------------------------- histogram
 
 #[test]
-#[ignore = "reproduction A5 — histogram rend des bornes NaN et range tous les points en classe 0 quand l'étendue déborde f64"]
 fn b1_histogram_intervalle_infini_ne_produit_pas_de_nan() {
     // Deux valeurs finies dont l'écart déborde f64 : width = +inf.
     let values = [-f64::MAX, f64::MAX];
@@ -102,7 +101,6 @@ fn b1_plotspec_rows_columns_sur_position_extreme() {
 // ------------------------------------------------------------------ colonne
 
 #[test]
-#[ignore = "reproduction C2 — un texte hors bornes (« 1e400 ») devient +inf en silence"]
 fn b1_conversion_texte_vers_numerique_puis_retour() {
     let (mut project, col) = projet_avec_colonne(&[]);
     let textes: Vec<Option<String>> = vec![
@@ -129,13 +127,19 @@ fn b1_conversion_texte_vers_numerique_puis_retour() {
     };
     println!("texte -> numérique : {vals:?}");
     assert_eq!(vals.len(), textes.len(), "des lignes ont disparu");
-    // "1e400" déborde : parse rend Ok(inf) en Rust. Une valeur infinie
-    // stockée dans une colonne numérique n'est ni manquante ni traçable.
+    // C2 — décidé : un texte fini en toutes lettres dont la valeur déborde
+    // f64 ("1e400") est refusé, jamais silencieusement +inf ; il retombe sur
+    // la valeur manquante du modèle, exactement comme "pas un nombre".
     assert!(
-        vals[5].is_nan() || vals[5].is_finite(),
-        "« 1e400 » est devenu {} — une valeur infinie silencieuse",
+        vals[5].is_nan(),
+        "« 1e400 » déborde et doit devenir la valeur manquante (NaN), pas {}",
         vals[5]
     );
+    // Une non-finitude *explicitement demandée*, elle, n'est pas un
+    // débordement : elle est prise au mot.
+    assert_eq!(vals[6].to_bits(), (-0.0_f64).to_bits(), "« -0 » doit rester -0.0");
+    assert_eq!(vals[7], f64::INFINITY, "« inf » doit rester +inf");
+    assert!(vals[8].is_nan(), "« NaN » doit devenir la valeur manquante");
 }
 
 #[test]
