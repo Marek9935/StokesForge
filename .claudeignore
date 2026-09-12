@@ -1,0 +1,16 @@
+# Artefacts de build Rust — 31G, jamais utile en contexte
+/target/
+crates/*/target/
+
+# Interpréteur Python vendored (python-build-standalone), embarqué pour PyO3
+/vendor/
+
+# Venv orpheline (créait legacy-python/, plus rien ne la régénère ni ne s'en
+# sert — à supprimer si confirmé, cf. message)
+/.venv/
+
+# Distributions assemblées par scripts/*-dist.sh + logs d'exécution
+/dist/
+
+# Lockfile Rust : généré, volumineux (120K), quasi jamais à lire directement
+/Cargo.lock
