@@ -154,6 +154,18 @@ impl Entry {
 /// [`footprint_of`]).
 type Footprint = HashMap<usize, usize>;
 
+/// Ce que `just_orphaned_by_write` a besoin de savoir d'avant l'application
+/// d'une commande de données : pour chaque colonne qu'elle pourrait toucher,
+/// l'adresse et la taille du buffer qu'elle porte à cet instant.
+///
+/// Capturée par [`prior_columns`], par un simple emprunt de `project.tree()`
+/// **avant** d'appliquer la commande — jamais l'arbre entier, jamais gardé
+/// vivant au-delà de l'appel qui la construit (voir la doc de
+/// [`History::execute`], D3 (2ᵉ moitié) du guide) : c'est précisément ce qui
+/// permet à `Arc::make_mut` de muter la `Tree` en place plutôt que de la
+/// cloner.
+type PriorColumns = HashMap<NodeId, (usize, usize)>;
+
 /// Une entrée d'historique accompagnée de son empreinte mémoire.
 ///
 /// Ce couplage vit à côté de [`Entry`] plutôt que dans ses variantes : c'est
@@ -338,41 +350,82 @@ impl History {
 
     /// Applique `command` puis l'empile (ou l'ajoute à la macro ouverte).
     ///
-    /// **Application avant empilement** : en cas d'`Err`, ni l'arbre ni la pile
-    /// n'ont changé — l'arbre d'avant est remis par sécurité, sans se reposer
-    /// sur la promesse d'atomicité des primitives du cœur.
+    /// **Deux chemins, un seul et même contrat.** Le contrat — en cas
+    /// d'`Err`, ni l'arbre ni la pile n'ont changé — est identique pour les
+    /// deux natures ; seul le **mécanisme** qui le tient diffère (D3 (2ᵉ
+    /// moitié), `guide-de-correction-robustesse.md` §6 « ne pas supprimer la
+    /// comptabilité, seulement sa fréquence ») :
+    ///
+    /// - **structure** : `before` (un clone d'`Arc<Tree>`, un pointeur) est
+    ///   gardé vivant pendant toute l'application, puis remis par sécurité
+    ///   sur `Err` (`project.replace_tree(before)`), sans se reposer sur la
+    ///   promesse d'atomicité des primitives du cœur. `Entry::Structural` en
+    ///   a de toute façon besoin pour `before`/`after` : le coût est déjà
+    ///   payé, l'assurance est gratuite.
+    /// - **données** : garder `before` vivant forcerait `Arc::make_mut` (vu
+    ///   par `Project::set_values` et consorts) à cloner la `Tree` entière
+    ///   au lieu de muter en place — tout le sens de D3. On ne le fait donc
+    ///   pas ; le contrat repose alors sur ce que chaque primitive de
+    ///   donnée *valide avant de muter* (`Column::set_values`,
+    ///   `Column::insert_rows`... — testé dans `plotyx-core`) : un rejet n'a
+    ///   jamais commencé à écrire, donc rien n'est à moitié fait à
+    ///   restaurer. Seul ce qu'il faut pour `just_orphaned_by_write` (le
+    ///   pointeur du buffer déjà présent dans la ou les colonnes visées) est
+    ///   capturé, par un simple emprunt, **avant** d'appliquer la commande —
+    ///   jamais l'arbre.
     ///
     /// En cas de succès la pile de rétablissement est vidée, **y compris en
     /// macro** : dès qu'une nouvelle mutation est appliquée, ce qui avait été
     /// annulé n'a plus de branche où revenir.
     pub fn execute(&mut self, project: &mut Project, command: Command) -> CommandResult<()> {
-        let before = Arc::clone(project.tree());
-        let label = command.label(&before);
-        match Self::apply(project, command, &before, label) {
-            Ok(entry) => {
-                // B5 + le cas Rename (`guide-de-correction-robustesse.md`
-                // §F5) — une commande acceptée qui n'a RIEN changé n'occupe
-                // pas de cran d'annulation : ni `InsertRows`/`DeleteRows`
-                // sans colonne cible (voir `Project::row_targets`), ni
-                // `Rename` vers le nom déjà porté (« Renommer M en M »,
-                // consigné sans identifiant ni reproduction en §7.3 du
-                // guide — une entrée structurelle dont `before == after`
-                // couvre ce cas et tout autre qui lui ressemble, sans le
-                // nommer un par un). Le modèle a déjà été mis à jour par
-                // `apply` le cas échéant (aucun ici ne l'est), donc rien à
-                // défaire : on rend simplement `Ok` sans empiler.
-                if entry_has_no_effect(&entry) {
-                    return Ok(());
+        if command.is_structural() {
+            let before = Arc::clone(project.tree());
+            let label = command.label(&before);
+            match Self::apply_structural(project, command, &before, label) {
+                Ok(entry) => {
+                    // B5 + le cas Rename (`guide-de-correction-robustesse.md`
+                    // §F5) — une commande acceptée qui n'a RIEN changé n'occupe
+                    // pas de cran d'annulation : « Renommer M en M »
+                    // (consigné sans identifiant ni reproduction en §7.3 du
+                    // guide) — une entrée structurelle dont `before == after`
+                    // couvre ce cas et tout autre qui lui ressemble, sans le
+                    // nommer un par un. Rien n'est à défaire : on rend
+                    // simplement `Ok` sans empiler.
+                    if entry_has_no_effect(&entry) {
+                        return Ok(());
+                    }
+                    self.push(entry, &PriorColumns::new(), project);
+                    Ok(())
                 }
-                self.push(entry, &before, project);
-                Ok(())
+                Err(err) => {
+                    // Les primitives de `Project` promettent de ne rien changer en
+                    // cas d'échec, mais rétablir `before` est gratuit (un pointeur)
+                    // et rend la garantie indépendante du cœur.
+                    project.replace_tree(before);
+                    Err(err)
+                }
             }
-            Err(err) => {
-                // Les primitives de `Project` promettent de ne rien changer en
-                // cas d'échec, mais rétablir `before` est gratuit (un pointeur)
-                // et rend la garantie indépendante du cœur.
-                project.replace_tree(before);
-                Err(err)
+        } else {
+            // Pas de clone de l'arbre ici : voir la doc ci-dessus. `label`
+            // et `prior` ne font qu'emprunter `project.tree()`, jamais le
+            // retenir au-delà de cette ligne.
+            let label = command.label(project.tree());
+            let prior = prior_columns(project.tree(), &command);
+            match Self::apply_data(project, command, label) {
+                Ok(entry) => {
+                    // B5 (`guide-de-correction-robustesse.md` §F5) —
+                    // `InsertRows`/`DeleteRows` sans colonne cible (voir
+                    // `Project::row_targets`) n'occupent pas de cran
+                    // d'annulation.
+                    if entry_has_no_effect(&entry) {
+                        return Ok(());
+                    }
+                    self.push(entry, &prior, project);
+                    Ok(())
+                }
+                // Aucun `replace_tree` à faire ici : voir la doc ci-dessus —
+                // une primitive de donnée qui échoue n'a rien muté.
+                Err(err) => Err(err),
             }
         }
     }
@@ -517,11 +570,9 @@ impl History {
             entries: entries.into_iter().map(|pinned| pinned.entry).collect(),
             label,
         };
-        // `before` n'est lu que sur les branches `Data`/`Structural` de
-        // `push_pinned` ; une entrée `Macro` retombe sur `resync_pinned`, qui
-        // ne le regarde pas. L'arbre courant convient donc ici, même s'il
-        // n'a plus de rapport avec « avant cette macro ».
-        self.push_pinned(Pinned { entry, footprint }, project.tree(), project);
+        // `prior` n'est lu que sur la branche `Data` de `push_pinned` ; une
+        // entrée `Macro` retombe sur `resync_pinned`, qui ne le regarde pas.
+        self.push_pinned(Pinned { entry, footprint }, &PriorColumns::new(), project);
         Ok(())
     }
 
@@ -594,13 +645,14 @@ impl History {
     /// fois pour toutes, puis l'entrée rejoint la macro ouverte ou la pile
     /// principale.
     ///
-    /// `before` est l'arbre **juste avant** cette commande (celui que
-    /// [`History::execute`] avait cloné avant d'appliquer la commande) : une
-    /// entrée `Data` n'en garde pas trace elle-même (elle ne retient que son
-    /// delta), mais [`History::push_pinned`] en a besoin pour savoir si
-    /// l'écriture vient d'orpheliner l'ancien buffer d'une colonne qu'une
-    /// entrée *antérieure* retenait déjà (voir sa doc).
-    fn push(&mut self, entry: Entry, before: &Tree, project: &Project) {
+    /// `prior` est ce que [`prior_columns`] a capturé, par emprunt, sur
+    /// l'arbre **juste avant** cette commande — vide pour une entrée
+    /// `Structural` (elle ne s'en sert pas, voir [`History::push_pinned`]).
+    /// Une entrée `Data` ne garde pas trace de `prior` elle-même (elle ne
+    /// retient que son delta), mais [`History::push_pinned`] en a besoin
+    /// pour savoir si l'écriture vient d'orpheliner l'ancien buffer d'une
+    /// colonne qu'une entrée *antérieure* retenait déjà (voir sa doc).
+    fn push(&mut self, entry: Entry, prior: &PriorColumns, project: &Project) {
         // Le redo est perdu : ses buffers doivent quitter la comptabilité
         // exactement comme ceux d'une macro abandonnée avec succès (voir
         // `History::end_macro`) — sans ça, `retained_bytes` continuerait de
@@ -610,7 +662,7 @@ impl History {
             self.unpin_footprint(&pinned.footprint);
         }
         let footprint = footprint_of(&entry);
-        self.push_pinned(Pinned { entry, footprint }, before, project);
+        self.push_pinned(Pinned { entry, footprint }, prior, project);
     }
 
     /// Range une entrée déjà empreintée dans la macro ouverte, ou au sommet
@@ -665,7 +717,7 @@ impl History {
     /// ([`History::resync_pinned`]), qui reconstruit `self.pinned` en même
     /// temps qu'il recalcule `retained_bytes`, pour que le suivi incrémental
     /// reste juste ensuite.
-    fn push_pinned(&mut self, pinned: Pinned, before: &Tree, project: &Project) {
+    fn push_pinned(&mut self, pinned: Pinned, prior: &PriorColumns, project: &Project) {
         if let Some((_, entries)) = self.macros.last_mut() {
             entries.push(pinned);
             return;
@@ -676,7 +728,7 @@ impl History {
                 self.resync_pinned(project);
             }
             Entry::Data { delta, .. } => {
-                let just_orphaned = just_orphaned_by_write(before, delta);
+                let just_orphaned = just_orphaned_by_write(prior, delta);
                 self.mark_orphaned(&just_orphaned);
                 // Une entrée `Data` ne partage jamais son delta avec
                 // l'arbre : chacun de ses buffers propres est orphelin dès
@@ -831,60 +883,21 @@ impl History {
             .sum();
     }
 
-    /// Applique une commande et construit son entrée d'historique.
-    fn apply(
+    /// Applique une commande **structurelle** et construit son entrée
+    /// d'historique. `before` est l'`Arc<Tree>` que [`History::execute`] a
+    /// cloné avant d'appeler cette fonction — nécessaire ici : `Entry::
+    /// Structural` le retient, et `DeleteColumn` doit lire le nœud visé tel
+    /// qu'il était avant toute mutation.
+    ///
+    /// N'est jamais appelée avec une commande de données — `execute` aiguille
+    /// sur [`Command::is_structural`] avant d'appeler l'une ou l'autre.
+    fn apply_structural(
         project: &mut Project,
         command: Command,
         before: &Arc<Tree>,
         label: String,
     ) -> CommandResult<Entry> {
         match command {
-            Command::SetCells {
-                column,
-                start,
-                values,
-                expected_version,
-            } => {
-                // A2 (`guide-de-correction-robustesse.md` §F6) — vérifié ICI,
-                // sur `before` (l'arbre courant au moment d'appliquer cette
-                // commande, pas un instantané que l'appelant a lu plus tôt),
-                // jamais avant l'envoi : c'est tout le sens du correctif. Une
-                // colonne absente ou d'un autre type n'est pas traitée ici —
-                // `project.set_values` ci-dessous rendra l'erreur naturelle
-                // (`UnknownNode`/`Structure`), qui ne doit pas se faire
-                // maquiller en désaccord de version.
-                if let Some(expected) = expected_version {
-                    if let Some(found) = before
-                        .get(column)
-                        .ok()
-                        .and_then(|node| node.as_column())
-                        .map(|column| column.version())
-                    {
-                        if found != expected {
-                            return Err(CoreError::ConcurrentModification {
-                                column,
-                                expected,
-                                found,
-                            }
-                            .into());
-                        }
-                    }
-                }
-                // Le bloc écrit est cloné avant application : c'est le `after`
-                // du delta, ce qu'il faudra réécrire pour rétablir.
-                let after = values.clone();
-                let delta = project.set_values(column, start, values)?;
-                Ok(Entry::Data {
-                    delta: DataDelta::Cells {
-                        column,
-                        start,
-                        before: delta.previous,
-                        before_length: delta.previous_length,
-                        after,
-                    },
-                    label,
-                })
-            }
             Command::AddColumn {
                 sheet,
                 index,
@@ -920,6 +933,74 @@ impl History {
             } => {
                 project.move_node(id, new_parent, index)?;
                 Ok(structural(before, project, label))
+            }
+            Command::SetCells { .. }
+            | Command::SetColumnType { .. }
+            | Command::InsertRows { .. }
+            | Command::DeleteRows { .. } => {
+                unreachable!("apply_structural appelée avec une commande de données")
+            }
+        }
+    }
+
+    /// Applique une commande de **données** et construit son entrée
+    /// d'historique. Aucun `Arc<Tree>` en paramètre — voir la doc de
+    /// [`History::execute`], D3 (2ᵉ moitié) du guide : le tenir vivant ici
+    /// forcerait `Arc::make_mut` à cloner la `Tree` entière plutôt que de
+    /// muter en place. Tout ce que ces commandes lisent avant de muter (la
+    /// version d'une colonne pour `SetCells`) passe par un simple emprunt de
+    /// `project.tree()`, jamais retenu au-delà de la ligne qui le lit.
+    ///
+    /// N'est jamais appelée avec une commande structurelle — voir
+    /// [`History::apply_structural`].
+    fn apply_data(project: &mut Project, command: Command, label: String) -> CommandResult<Entry> {
+        match command {
+            Command::SetCells {
+                column,
+                start,
+                values,
+                expected_version,
+            } => {
+                // A2 (`guide-de-correction-robustesse.md` §F6) — vérifié ICI,
+                // sur l'arbre courant au moment d'appliquer cette commande
+                // (pas un instantané que l'appelant a lu plus tôt), jamais
+                // avant l'envoi : c'est tout le sens du correctif. Une
+                // colonne absente ou d'un autre type n'est pas traitée ici —
+                // `project.set_values` ci-dessous rendra l'erreur naturelle
+                // (`UnknownNode`/`Structure`), qui ne doit pas se faire
+                // maquiller en désaccord de version.
+                if let Some(expected) = expected_version {
+                    if let Some(found) = project
+                        .tree()
+                        .get(column)
+                        .ok()
+                        .and_then(|node| node.as_column())
+                        .map(|column| column.version())
+                    {
+                        if found != expected {
+                            return Err(CoreError::ConcurrentModification {
+                                column,
+                                expected,
+                                found,
+                            }
+                            .into());
+                        }
+                    }
+                }
+                // Le bloc écrit est cloné avant application : c'est le `after`
+                // du delta, ce qu'il faudra réécrire pour rétablir.
+                let after = values.clone();
+                let delta = project.set_values(column, start, values)?;
+                Ok(Entry::Data {
+                    delta: DataDelta::Cells {
+                        column,
+                        start,
+                        before: delta.previous,
+                        before_length: delta.previous_length,
+                        after,
+                    },
+                    label,
+                })
             }
             Command::SetColumnType {
                 column,
@@ -963,6 +1044,12 @@ impl History {
                     },
                     label,
                 })
+            }
+            Command::AddColumn { .. }
+            | Command::DeleteColumn { .. }
+            | Command::Rename { .. }
+            | Command::Move { .. } => {
+                unreachable!("apply_data appelée avec une commande structurelle")
             }
         }
     }
@@ -1347,23 +1434,66 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
     out
 }
 
-/// Buffer(s) que les colonnes touchées par `delta` avaient dans `before`
-/// (l'arbre juste avant cette commande) — ce que la copie-à-l'écriture vient
-/// de remplacer. Un buffer qui n'y figure pas n'était pas déjà épinglé (voir
-/// [`History::pin_footprint`], qui ne fait rien pour un pointeur inconnu) :
-/// le chercher est donc sûr même quand rien n'a besoin de basculer orphelin.
+/// Colonnes que `command` pourrait toucher, avec l'adresse et la taille du
+/// buffer que chacune porte **avant** son application — un simple emprunt de
+/// `tree`, jamais gardé vivant au-delà de cet appel (voir [`PriorColumns`] et
+/// la doc de [`History::execute`], D3 (2ᵉ moitié) du guide).
 ///
-/// Une seule recherche par identifiant dans `before` par colonne touchée —
+/// Cible exactement la ou les colonnes que la commande *nomme* (`column`
+/// pour `SetCells`/`SetColumnType`) ou, pour `InsertRows`/`DeleteRows` qui ne
+/// connaissent leurs cibles exactes qu'une fois `Project::row_targets`
+/// consulté (privé à `plotyx-core`), **toutes** les colonnes de la feuille
+/// visée — un sur-ensemble borné par la taille de cette feuille, jamais par
+/// celle du projet. [`just_orphaned_by_write`] n'y cherchera ensuite que les
+/// colonnes que le delta, une fois la commande appliquée, dit réellement
+/// touchées : le sur-ensemble ne fait jamais basculer orphelin un buffer qui
+/// ne l'est pas.
+///
+/// Vide pour une commande structurelle (elle n'est jamais appelée avec l'une
+/// d'elles depuis [`History::execute`], mais rester total ici évite un
+/// panique pour un coût nul).
+fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
+    let mut out = PriorColumns::new();
+    let mut record = |id: NodeId| {
+        if let Some(column) = tree.node(id).and_then(|node| node.as_column()) {
+            out.insert(id, column_footprint(column.values()));
+        }
+    };
+    match command {
+        Command::SetCells { column, .. } | Command::SetColumnType { column, .. } => {
+            record(*column);
+        }
+        Command::InsertRows { sheet, .. } | Command::DeleteRows { sheet, .. } => {
+            if let Ok(children) = tree.children(*sheet) {
+                for &id in children {
+                    record(id);
+                }
+            }
+        }
+        Command::AddColumn { .. }
+        | Command::DeleteColumn { .. }
+        | Command::Rename { .. }
+        | Command::Move { .. } => {}
+    }
+    out
+}
+
+/// Buffer(s) que les colonnes touchées par `delta` avaient dans `prior`
+/// (capturé par [`prior_columns`] avant cette commande) — ce que la
+/// copie-à-l'écriture vient de remplacer. Un buffer qui n'y figure pas
+/// n'était pas déjà épinglé (voir [`History::pin_footprint`], qui ne fait
+/// rien pour un pointeur inconnu) : le chercher est donc sûr même quand rien
+/// n'a besoin de basculer orphelin.
+///
+/// Une seule recherche par identifiant dans `prior` par colonne touchée —
 /// jamais un parcours de l'arbre — d'où le nom : `just_orphaned_by_write`
 /// donne les buffers qui *viennent de* quitter l'arbre courant à l'instant
 /// de cette écriture, pas tous ceux qu'une entrée plus ancienne retient.
-fn just_orphaned_by_write(before: &Tree, delta: &DataDelta) -> Footprint {
+fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint {
     let mut out = Footprint::new();
     let previous_buffer_of = |out: &mut Footprint, column: NodeId| {
-        if let Some(node) = before.node(column) {
-            if let Some(column) = node.as_column() {
-                insert_column_footprint(out, column.values());
-            }
+        if let Some(&(ptr, bytes)) = prior.get(&column) {
+            out.insert(ptr, bytes);
         }
     };
     match delta {

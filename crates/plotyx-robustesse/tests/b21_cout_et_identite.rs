@@ -183,23 +183,19 @@ fn b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique() {
 }
 
 #[test]
-#[ignore = "reproduction D3 (diagnostic révisé) — le passage en O(entrées) de History::evict \
-            (voir b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique, désormais vert) a \
-            supprimé l'appel à `current_tree_pointers` sur ce chemin, mais le coût par colonne \
-            persiste : `History::execute` clone `project.tree()` dans `before` AVANT d'appliquer \
-            la commande et le garde vivant pendant toute son application (pour le label, et pour \
-            `Entry::Structural`/`just_orphaned_by_write`) ; `Arc::make_mut(&mut self.tree)`, \
-            appelé par toute primitive de mutation (`Project::set_values`, etc.), voit alors un \
-            compte de références de 2 et clone la `Tree` ENTIÈRE — sa HashMap de TOUS les nœuds \
-            — plutôt que de muter en place. Correct pour une commande structurelle (l'Entry en a \
-            réellement besoin), inutile pour une commande de données (SetCells, InsertRows, ...), \
-            qui ne retient jamais l'arbre — seulement son delta. Un correctif ne tenant plus dans \
-            « quelques lignes » : il faut que `History::execute` cesse de cloner `before` pour les \
-            commandes de données (calculer le label par un simple emprunt, capturer le pointeur du \
-            buffer déjà présent pour `just_orphaned_by_write` avant la mutation plutôt qu'après), \
-            sans affaiblir la garantie « aucune mutation partielle sur erreur » que `project.\
-            replace_tree(before)` offre aujourd'hui gratuitement. Non tenté ici : c'est un \
-            changement du chemin d'exécution central de l'annulation, à valider à part"]
+// D3 (2ᵉ moitié) — corrigée : `History::execute` n'aiguille plus sur un seul
+// chemin. Pour une commande de données, il ne clone plus `project.tree()`
+// dans `before` : le libellé et le pointeur du buffer déjà présent (pour
+// `just_orphaned_by_write`) sont capturés par simple emprunt, avant la
+// mutation. `Arc::make_mut(&mut self.tree)` voit alors un compte de
+// références de 1 et mute la `Tree` en place au lieu de la cloner. La
+// garantie « aucune mutation partielle sur erreur » survit sans ce clone :
+// les primitives de données de `Project` valident intégralement avant de
+// muter (voir `Column::set_values`/`insert_rows`/`delete_rows`, testées en
+// ce sens dans `plotyx-core`), donc un rejet n'a jamais commencé à écrire.
+// Les commandes structurelles, elles, continuent de cloner `before` — leur
+// `Entry::Structural` en a un besoin réel (undo/redo par remplacement
+// d'arbre). Voir `History::execute` et `History::apply_data`.
 fn b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes() {
     let petit = cout_dune_ecriture(50, 0);
     let grand = cout_dune_ecriture(500, 0);
@@ -208,10 +204,11 @@ fn b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes() {
     assert!(
         grand <= petit * 3,
         "dix fois plus de colonnes, {:.1}× plus cher, pour écrire exactement la même \
-         valeur dans la même colonne : `History::execute` garde `before` (un clone de \
-         `project.tree()`) vivant pendant toute l'application de la commande, ce qui force \
-         `Arc::make_mut` à cloner la `Tree` entière plutôt que de muter en place — voir le \
-         diagnostic complet sur `#[ignore]` de ce test",
+         valeur dans la même colonne : régression de D3 (2ᵉ moitié) — `History::execute` \
+         garde de nouveau `before` (un clone de `project.tree()`) vivant pendant \
+         l'application d'une commande de données, ce qui force `Arc::make_mut` à cloner la \
+         `Tree` entière plutôt que de muter en place — voir la doc de `History::execute` et \
+         `History::apply_data`",
         grand as f64 / petit as f64
     );
 }
