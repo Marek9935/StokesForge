@@ -1,0 +1,216 @@
+//! La légende — tâche R5.3.
+//!
+//! # Pourquoi elle est écrite ici et non déléguée à Plotters
+//!
+//! `ChartContext::configure_series_labels()` existe et fait presque
+//! l'affaire. Presque : pour dimensionner son cadre, il appelle
+//! `MultiLineText::estimate_dimension`, qui passe par
+//! `FontData::estimate_layout` — **pas** par `estimate_text_size` du
+//! backend. Nos fonts Plotters étant coupées
+//! (`default-features = false`, `architecture-choisie.md` §4.4), cette
+//! estimation est l'heuristique monospace par octets UTF-8 : « λ » compte
+//! pour deux, « Échantillon » pour douze caractères et treize octets.
+//!
+//! Le cadre serait donc mesuré faux pendant que le texte dedans serait
+//! dessiné juste — un décalage qui ne lève aucune erreur, exactement le
+//! défaut silencieux que ce chantier est construit pour empêcher. Et il
+//! serait faux **de la même façon des deux côtés**, donc le test d'accord ne
+//! l'attraperait pas : c'est le cas qui justifie de ne pas s'en remettre au
+//! seul test.
+//!
+//! La légende est donc mise en page ici, sur
+//! [`plotters::drawing::DrawingArea::estimate_text_size`], qui est le
+//! chemin du backend — donc [`crate::text::estimate`], donc la mesure unique
+//! du projet.
+//!
+//! # Ce qu'une entrée montre
+//!
+//! Sa vignette est celle de la série : le trait avec son style, le marqueur
+//! avec sa forme, ou un aplat pour une série de barres. Une série à
+//! **référence brisée** y figure aussi, en gris et annotée — c'est le seul
+//! endroit de la figure où elle peut se montrer, puisqu'elle n'a rien à
+//! tracer (`architecture-choisie.md` §11.1 : « à afficher comme telle et
+//! jamais comme une série vide »).
+
+use plotters::coord::Shift;
+use plotters::element::{Rectangle, Text};
+use plotters::prelude::*;
+use plotters::style::TextStyle;
+use plotters_backend::{BackendCoord, DrawingBackend};
+use plotyx_plot::{LegendPosition, LegendSpec, PlotType};
+
+use crate::paint::{self, BROKEN, INK, SERIES_FALLBACK};
+use crate::series::{Geometry, Prepared};
+
+/// Marge entre le cadre de la légende et le bord de la zone de tracé.
+const MARGIN: i32 = 8;
+/// Marge intérieure du cadre.
+const PADDING: i32 = 6;
+/// Largeur de la vignette (le bout de trait, ou l'aplat).
+const KEY_WIDTH: i32 = 26;
+/// Écart entre la vignette et le texte.
+const KEY_GAP: i32 = 6;
+/// Écart vertical entre deux entrées.
+const ROW_GAP: i32 = 4;
+/// Nombre d'entrées au-delà duquel la légende est tronquée.
+///
+/// Un graphe peut porter des centaines de séries (le cas de charge du
+/// document en compte 500) ; une légende de 500 lignes ne rentre dans aucune
+/// zone de tracé et coûterait 500 mesures de texte par image. Au-delà, les
+/// premières sont listées et la dernière ligne dit combien manquent.
+const MAX_ENTRIES: usize = 24;
+
+/// Ce que la légende a effectivement inscrit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DrawnLegend {
+    /// Nombre d'entrées dessinées, la ligne de débordement non comprise.
+    pub entries: usize,
+    /// Nombre d'entrées laissées de côté faute de place.
+    pub omitted: usize,
+}
+
+/// Trace la légende d'un panneau dans sa zone de tracé.
+///
+/// `area` doit être la zone de tracé en coordonnées **écran**
+/// (`plotting_area().use_screen_coord()`), et `origin`/`size` sa position et
+/// sa taille : la légende se place par rapport à la zone de tracé, pas par
+/// rapport au panneau, pour ne pas chevaucher les graduations.
+pub fn draw<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    origin: BackendCoord,
+    size: (u32, u32),
+    spec: &LegendSpec,
+    entries: &[&Prepared<'_>],
+    style: &TextStyle<'_>,
+    background: (u8, u8, u8),
+) -> Result<DrawnLegend, DrawingAreaErrorKind<DB::ErrorType>> {
+    if !spec.visible || entries.is_empty() {
+        return Ok(DrawnLegend::default());
+    }
+
+    let omitted = entries.len().saturating_sub(MAX_ENTRIES);
+    let shown = &entries[..entries.len().min(MAX_ENTRIES)];
+
+    // Les textes sont mesurés une fois, et c'est la même mesure qui décide
+    // du cadre et qui a servi à placer les axes.
+    let mut texts: Vec<String> = shown.iter().map(|entry| entry.legend_text()).collect();
+    if omitted > 0 {
+        texts.push(format!("… et {omitted} autres"));
+    }
+
+    let mut label_width = 0i32;
+    let mut row_height = 1i32;
+    for text in &texts {
+        let (w, h) = area.estimate_text_size(text, style)?;
+        label_width = label_width.max(w as i32);
+        row_height = row_height.max(h as i32);
+    }
+
+    let rows = texts.len() as i32;
+    let box_width = PADDING * 2 + KEY_WIDTH + KEY_GAP + label_width;
+    let box_height = PADDING * 2 + rows * row_height + (rows - 1).max(0) * ROW_GAP;
+
+    let (area_w, area_h) = (size.0 as i32, size.1 as i32);
+    let left = match spec.position {
+        LegendPosition::TopLeft | LegendPosition::BottomLeft => MARGIN,
+        LegendPosition::TopRight | LegendPosition::BottomRight => area_w - box_width - MARGIN,
+    };
+    let top = match spec.position {
+        LegendPosition::TopLeft | LegendPosition::TopRight => MARGIN,
+        LegendPosition::BottomLeft | LegendPosition::BottomRight => area_h - box_height - MARGIN,
+    };
+    // Une légende plus large que sa zone de tracé reste ancrée en haut à
+    // gauche plutôt que de sortir par le côté opposé : le rognage de
+    // Plotters s'occupe du reste.
+    let x0 = origin.0 + left.max(0);
+    let y0 = origin.1 + top.max(0);
+
+    let frame = [(x0, y0), (x0 + box_width, y0 + box_height)];
+    area.draw(&Rectangle::new(
+        frame,
+        ShapeStyle {
+            color: paint::rgb(background).into(),
+            filled: true,
+            stroke_width: 1,
+        },
+    ))?;
+    area.draw(&Rectangle::new(
+        frame,
+        ShapeStyle {
+            color: paint::rgb(INK).into(),
+            filled: false,
+            stroke_width: 1,
+        },
+    ))?;
+
+    for (index, text) in texts.iter().enumerate() {
+        let row_top = y0 + PADDING + index as i32 * (row_height + ROW_GAP);
+        let middle = row_top + row_height / 2;
+        let key_left = x0 + PADDING;
+        if let Some(entry) = shown.get(index) {
+            key(area, entry, (key_left, middle))?;
+        }
+        area.draw(&Text::new(
+            text.as_str(),
+            (key_left + KEY_WIDTH + KEY_GAP, row_top),
+            style,
+        ))?;
+    }
+
+    Ok(DrawnLegend {
+        entries: shown.len(),
+        omitted,
+    })
+}
+
+/// La vignette d'une entrée : ce que la série a l'air d'être.
+fn key<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    entry: &Prepared<'_>,
+    (left, middle): BackendCoord,
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    let spec = entry.spec;
+    if matches!(entry.geometry, Geometry::Bars(_)) {
+        let color = if entry.broken {
+            BROKEN
+        } else {
+            crate::color::rgb_or(&spec.line.color, SERIES_FALLBACK)
+        };
+        let swatch = [(left, middle - 5), (left + KEY_WIDTH, middle + 5)];
+        area.draw(&Rectangle::new(
+            swatch,
+            ShapeStyle {
+                color: paint::rgb(color).into(),
+                filled: true,
+                stroke_width: 1,
+            },
+        ))?;
+        return area.draw(&Rectangle::new(
+            swatch,
+            ShapeStyle {
+                color: paint::rgb(INK).into(),
+                filled: false,
+                stroke_width: 1,
+            },
+        ));
+    }
+
+    let draws_line = spec.plot_type.draws_line() || entry.broken;
+    if draws_line {
+        paint::polyline(
+            area,
+            &[(left, middle), (left + KEY_WIDTH, middle)],
+            &spec.line,
+            entry.broken,
+        )?;
+    }
+    if spec.plot_type.draws_symbols() && !matches!(spec.plot_type, PlotType::Unknown(_)) {
+        paint::symbol_at(
+            area,
+            (left + KEY_WIDTH / 2, middle),
+            &spec.symbol,
+            entry.broken,
+        )?;
+    }
+    Ok(())
+}

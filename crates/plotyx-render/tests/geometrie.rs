@@ -140,10 +140,26 @@ fn le_cadrage_suit_les_donnees_avec_une_marge() {
         |ids| un_panneau(SeriesSpec::new_xy(ids[0], ids[1]), |_| {}),
     );
     // 5 % de marge de part et d'autre.
-    assert!((drawn.x_range.0 - -0.1).abs() < 1e-9, "{:?}", drawn.x_range);
-    assert!((drawn.x_range.1 - 2.1).abs() < 1e-9, "{:?}", drawn.x_range);
-    assert!((drawn.y_range.0 - 9.0).abs() < 1e-9, "{:?}", drawn.y_range);
-    assert!((drawn.y_range.1 - 31.0).abs() < 1e-9, "{:?}", drawn.y_range);
+    assert!(
+        (drawn.x_range().0 - -0.1).abs() < 1e-9,
+        "{:?}",
+        drawn.x_range()
+    );
+    assert!(
+        (drawn.x_range().1 - 2.1).abs() < 1e-9,
+        "{:?}",
+        drawn.x_range()
+    );
+    assert!(
+        (drawn.y_range().0 - 9.0).abs() < 1e-9,
+        "{:?}",
+        drawn.y_range()
+    );
+    assert!(
+        (drawn.y_range().1 - 31.0).abs() < 1e-9,
+        "{:?}",
+        drawn.y_range()
+    );
     assert_eq!(drawn.drawn_series, 1);
 }
 
@@ -155,13 +171,17 @@ fn une_serie_constante_ne_donne_pas_un_intervalle_vide() {
         &[("X", vec![1.0, 2.0, 3.0]), ("Y", vec![5.0, 5.0, 5.0])],
         |ids| un_panneau(SeriesSpec::new_xy(ids[0], ids[1]), |_| {}),
     );
-    assert!(drawn.y_range.0 < drawn.y_range.1, "{:?}", drawn.y_range);
+    assert!(
+        drawn.y_range().0 < drawn.y_range().1,
+        "{:?}",
+        drawn.y_range()
+    );
 
     let zero = geometrie(&[("Y", vec![0.0])], |ids| {
         un_panneau(SeriesSpec::new(ids[0]), |_| {})
     });
-    assert!(zero.y_range.0 < zero.y_range.1, "{:?}", zero.y_range);
-    assert!(zero.x_range.0 < zero.x_range.1, "{:?}", zero.x_range);
+    assert!(zero.y_range().0 < zero.y_range().1, "{:?}", zero.y_range());
+    assert!(zero.x_range().0 < zero.x_range().1, "{:?}", zero.x_range());
 }
 
 #[test]
@@ -173,7 +193,7 @@ fn une_serie_entierement_non_finie_ne_fait_pas_echouer_le_trace() {
         |ids| un_panneau(SeriesSpec::new(ids[0]), |_| {}),
     );
     assert_eq!(drawn.drawn_series, 0);
-    assert_eq!(drawn.y_range, (0.0, 1.0));
+    assert_eq!(drawn.y_range(), (0.0, 1.0));
 }
 
 #[test]
@@ -188,7 +208,7 @@ fn un_cadrage_explicite_prime_sur_les_donnees() {
             };
         })
     });
-    assert_eq!(drawn.y_range, (-5.0, 5.0));
+    assert_eq!(drawn.y_range(), (-5.0, 5.0));
 }
 
 #[test]
@@ -212,9 +232,9 @@ fn un_cadrage_explicite_incoherent_retombe_sur_les_donnees() {
             })
         });
         assert!(
-            drawn.y_range.0 < drawn.y_range.1,
+            drawn.y_range().0 < drawn.y_range().1,
             "cadrage {min:?}..{max:?} a donné {:?}",
-            drawn.y_range
+            drawn.y_range()
         );
     }
 
@@ -230,7 +250,7 @@ fn un_cadrage_explicite_incoherent_retombe_sur_les_donnees() {
             };
         })
     });
-    assert_eq!(drawn.y_range, (-9.0, 9.0));
+    assert_eq!(drawn.y_range(), (-9.0, 9.0));
 }
 
 #[test]
@@ -244,9 +264,9 @@ fn un_axe_inverse_rend_ses_bornes_a_lenvers() {
         })
     });
     assert!(
-        drawn.y_range.0 > drawn.y_range.1,
+        drawn.y_range().0 > drawn.y_range().1,
         "un axe inversé doit rendre (max, min) : {:?}",
-        drawn.y_range
+        drawn.y_range()
     );
 }
 
@@ -265,8 +285,8 @@ fn une_serie_invisible_ne_compte_ni_dans_le_trace_ni_dans_le_cadrage() {
     );
     assert_eq!(drawn.drawn_series, 1);
     assert!(
-        drawn.y_range.1 < 2.0,
+        drawn.y_range().1 < 2.0,
         "la série cachée a élargi le cadrage : {:?}",
-        drawn.y_range
+        drawn.y_range()
     );
 }

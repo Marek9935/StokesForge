@@ -164,14 +164,35 @@ fn la_serie_est_une_seule_polyligne() {
             _ => None,
         })
         .collect();
-    assert_eq!(series.len(), 1, "la série devrait être une seule polyligne");
+    // Deux depuis R5 : la courbe, et la vignette de la série dans la
+    // légende — qui est peinte avec le même style, c'est le principe d'une
+    // vignette. Ce que ce test verrouille est que la **courbe** reste une
+    // seule forme, pas que la figure n'en porte qu'une.
     assert_eq!(
-        series[0].points.len(),
+        series.len(),
+        2,
+        "attendu : la courbe et sa vignette de légende"
+    );
+    let courbe = series
+        .iter()
+        .max_by_key(|path| path.points.len())
+        .expect("la courbe");
+    assert_eq!(
+        courbe.points.len(),
         POINTS,
         "la polyligne devrait porter tous les points de la colonne"
     );
     assert_eq!(
-        series[0].stroke.width, 2.0,
+        courbe.stroke.width, 2.0,
         "l'épaisseur du spec n'est pas reportée"
+    );
+    let vignette = series
+        .iter()
+        .min_by_key(|path| path.points.len())
+        .expect("la vignette");
+    assert_eq!(
+        vignette.points.len(),
+        2,
+        "la vignette de légende est un simple segment"
     );
 }

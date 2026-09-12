@@ -13,6 +13,22 @@
 //! - [`color`] : la lecture des couleurs `#RRGGBB` du spec, également
 //!   partagée.
 //!
+//! # Ce que la phase R5 y a ajouté
+//!
+//! Tout l'élargissement au `PlotSpec` réel est descendu ici, et pas une
+//! ligne dans l'un ou l'autre backend — c'est la règle de la phase
+//! (« aucune fonctionnalité n'entre dans un seul backend »), tenue par la
+//! structure :
+//!
+//! - [`series`] : les six [`plotyx_plot::PlotType`] traduits en géométrie,
+//!   une fois, pour le cadrage comme pour le tracé ;
+//! - [`scale`] : les échelles d'axe, dont la logarithmique ;
+//! - [`paint`] : les primitives en pixels — styles de trait, marqueurs,
+//!   barres, moustaches ;
+//! - [`legend`] : la légende, mise en page sur la mesure du projet et non
+//!   sur celle de Plotters (la raison est dans le module) ;
+//! - [`decimate`] : le LTTB ;
+//!
 //! # Un crate non prévu par `architecture-choisie.md` §8
 //!
 //! Le découpage arrêté ne prévoyait que `plotyx-render-egui` et
@@ -44,10 +60,15 @@
 
 pub mod color;
 pub mod decimate;
+pub mod legend;
+pub mod paint;
 pub mod pipeline;
+pub mod scale;
+pub mod series;
 pub mod text;
 
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
-pub use pipeline::{draw, draw_on, DrawnPlot};
+pub use pipeline::{draw, draw_on, DrawnPanel, DrawnPlot};
+pub use series::{Geometry, Prepared};
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};
