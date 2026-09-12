@@ -74,4 +74,4 @@ pub mod history;
 
 pub use command::Command;
 pub use error::{CommandError, CommandResult};
-pub use history::{DataDelta, Entry, History, DEFAULT_BYTE_LIMIT, DEFAULT_LIMIT};
+pub use history::{DataDelta, Entry, History, DEFAULT_BYTE_LIMIT, DEFAULT_LIMIT, MAX_MACRO_DEPTH};

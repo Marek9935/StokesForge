@@ -125,12 +125,17 @@ pub(crate) fn run(
                 let _ = reply.send(outcome);
             }
             Request::BeginMacro { label, reply } => {
-                // Toujours un succès : l'état de l'historique (`in_macro`) a
-                // changé, donc la révision avance même sans mutation du
-                // modèle.
-                history.begin_macro(&label);
-                revision += 1;
-                let _ = reply.send(revision);
+                // B7 (`guide-de-correction-robustesse.md` §F4) —
+                // `begin_macro` peut désormais refuser (`MacroTooDeep`) : la
+                // révision n'avance que si l'imbrication a réellement changé
+                // d'état. Un succès, en revanche, avance la révision même
+                // sans mutation du modèle (l'état de l'historique, `in_macro`,
+                // a changé).
+                let outcome = history.begin_macro(&label).map(|()| {
+                    revision += 1;
+                    revision
+                });
+                let _ = reply.send(outcome);
             }
             Request::EndMacro { reply } => {
                 let outcome = history.end_macro(&mut project).map(|()| {

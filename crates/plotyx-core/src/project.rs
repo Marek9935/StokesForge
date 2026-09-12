@@ -61,6 +61,23 @@ pub struct Project {
     /// `Arc<()>` plutôt qu'un compteur : identité par adresse, gratuite,
     /// sans registre à tenir ici.
     identity: Arc<()>,
+    /// Prochain numéro de version de colonne à attribuer (A7,
+    /// `guide-de-correction-robustesse.md` §F2 — doctrine des estampilles :
+    /// « version de contenu, attribuée par le projet »). Une première
+    /// version de ce correctif laissait chaque `Column` s'incrémenter
+    /// elle-même (`wrapping_add(1)` local) et ne réattribuait un numéro
+    /// frais qu'au moment d'un `undo` sur une entrée structurelle, calculé
+    /// depuis les arbres encore visibles dans l'historique — insuffisant :
+    /// un balayage aléatoire
+    /// (`b14_une_version_ne_designe_jamais_deux_contenus`) a trouvé un
+    /// numéro réattribué à deux contenus différents malgré tout, une
+    /// écriture ordinaire pouvant faire progresser une colonne à un numéro
+    /// qu'un autre chemin (annulation puis nouvelle écriture) atteint aussi
+    /// par ailleurs. Un compteur unique, tenu par le projet et consulté par
+    /// **toute** écriture de colonne (ordinaire ou restauration), ferme la
+    /// question une fois pour toutes — le même patron qu'`IdAllocator` pour
+    /// les `NodeId`, à l'échelle des versions de colonnes.
+    column_version_counter: u64,
 }
 
 impl Project {
@@ -82,6 +99,7 @@ impl Project {
             tree: Arc::new(Tree::new(root)?),
             ids,
             identity: Arc::new(()),
+            column_version_counter: 1,
         })
     }
 
@@ -106,6 +124,7 @@ impl Project {
             tree: Arc::new(Tree::with_root(root)),
             ids,
             identity: Arc::new(()),
+            column_version_counter: 1,
         }
     }
 
@@ -115,10 +134,24 @@ impl Project {
     /// `max(next_id_hint, plus grand identifiant de l'arbre + 1)`.
     pub fn from_tree(tree: Arc<Tree>, next_id_hint: u64) -> Self {
         let highest = tree.iter().map(|(id, _)| id.raw()).max().unwrap_or(0);
+        // A7 — le compteur de version de colonne n'est pas encore persisté
+        // (contrairement à `next_id_hint`) : reprendre au-delà de la plus
+        // haute version déjà lue évite au moins de régresser DANS ce
+        // chargement ; deux `Project` chargés séparément du même fichier
+        // peuvent en revanche attribuer, chacun de son côté, les mêmes
+        // numéros à des contenus différents — hors du périmètre d'A7, qui
+        // ne couvre que la restauration en mémoire d'une seule instance.
+        let highest_version = tree
+            .iter()
+            .filter_map(|(_, node)| node.as_column())
+            .map(Column::version)
+            .max()
+            .unwrap_or(0);
         Self {
             ids: IdAllocator::resume(next_id_hint, highest),
             tree,
             identity: Arc::new(()),
+            column_version_counter: highest_version + 1,
         }
     }
 
@@ -419,6 +452,14 @@ impl Project {
     // -- données --
 
     /// Écrit `block` dans `column` à partir de la ligne `start`.
+    ///
+    /// A7 (`guide-de-correction-robustesse.md` §F2) — le numéro de version
+    /// que `Column::set_values` s'attribue en interne est écrasé par un
+    /// numéro tiré de [`Project::next_column_version`], jamais réattribué
+    /// sur toute la vie du projet (voir la doc du champ
+    /// `column_version_counter`). Tiré seulement après le `?` : un appel
+    /// refusé (bloc du mauvais type, borne dépassée) ne consomme aucun
+    /// numéro.
     pub fn set_values(
         &mut self,
         column: NodeId,
@@ -427,14 +468,26 @@ impl Project {
     ) -> CoreResult<ValuesDelta> {
         self.check_column(column)?;
         let tree = Arc::make_mut(&mut self.tree);
-        tree.column_mut(column)?.set_values(start, block)
+        let delta = tree.column_mut(column)?.set_values(start, block)?;
+        let fresh = self.next_column_version();
+        Arc::make_mut(&mut self.tree)
+            .column_mut(column)?
+            .restamp_version(fresh);
+        Ok(delta)
     }
 
-    /// Tronque ou complète `column` à `length` lignes.
+    /// Tronque ou complète `column` à `length` lignes. Voir [`Project::
+    /// set_values`] pour pourquoi le numéro de version est réattribué par
+    /// le projet (A7).
     pub fn set_length(&mut self, column: NodeId, length: usize) -> CoreResult<ValuesDelta> {
         self.check_column(column)?;
         let tree = Arc::make_mut(&mut self.tree);
-        Ok(tree.column_mut(column)?.set_length(length))
+        let delta = tree.column_mut(column)?.set_length(length);
+        let fresh = self.next_column_version();
+        Arc::make_mut(&mut self.tree)
+            .column_mut(column)?
+            .restamp_version(fresh);
+        Ok(delta)
     }
 
     /// Remplace les métadonnées d'une colonne. Rend les précédentes.
@@ -445,6 +498,7 @@ impl Project {
     }
 
     /// Change le type d'une colonne. Rend `(ancien type, anciennes valeurs)`.
+    /// Version réattribuée par le projet (A7) — voir [`Project::set_values`].
     pub fn set_column_type(
         &mut self,
         column: NodeId,
@@ -452,10 +506,19 @@ impl Project {
     ) -> CoreResult<(ColumnType, ColumnValues)> {
         self.check_column(column)?;
         let tree = Arc::make_mut(&mut self.tree);
-        Ok(tree.column_mut(column)?.set_column_type(column_type))
+        let previous = tree.column_mut(column)?.set_column_type(column_type);
+        let fresh = self.next_column_version();
+        Arc::make_mut(&mut self.tree)
+            .column_mut(column)?
+            .restamp_version(fresh);
+        Ok(previous)
     }
 
-    /// Restaure type et valeurs d'une colonne (annulation d'un changement de type).
+    /// Restaure type et valeurs d'une colonne (annulation d'un changement de
+    /// type). Version réattribuée par le projet (A7) — voir
+    /// [`Project::set_values`] : « annuler est une écriture de plus » (§6 du
+    /// guide), donc une écriture qui doit, elle aussi, recevoir un numéro
+    /// que ce projet n'a jamais attribué.
     pub fn restore_column(
         &mut self,
         column: NodeId,
@@ -464,7 +527,22 @@ impl Project {
     ) -> CoreResult<()> {
         self.check_column(column)?;
         let tree = Arc::make_mut(&mut self.tree);
-        tree.column_mut(column)?.restore(column_type, values)
+        tree.column_mut(column)?.restore(column_type, values)?;
+        let fresh = self.next_column_version();
+        Arc::make_mut(&mut self.tree)
+            .column_mut(column)?
+            .restamp_version(fresh);
+        Ok(())
+    }
+
+    /// Le prochain numéro de version de colonne, jamais réattribué (voir la
+    /// doc du champ `column_version_counter`). `pub` : `plotyx-commands`
+    /// (A7) en a besoin pour toute écriture de colonne, ordinaire ou
+    /// restauration — voir [`Project::restamp_column_version`].
+    pub fn next_column_version(&mut self) -> u64 {
+        let version = self.column_version_counter;
+        self.column_version_counter = self.column_version_counter.wrapping_add(1);
+        version
     }
 
     /// Impose un numéro de version à `column`, sans toucher à son contenu.
@@ -475,15 +553,13 @@ impl Project {
     /// compteurs de version compris, ce qui peut faire reculer celui d'une
     /// colonne vers un numéro qu'un contenu différent (le sien, à un autre
     /// instant de son histoire) a déjà porté. `History::revert` appelle
-    /// cette méthode juste après `replace_tree` pour ré-attribuer un
-    /// numéro **frais** (jamais vu dans le projet) aux seules colonnes
-    /// concernées, sans quoi une écriture future pourrait faire coïncider
-    /// deux contenus sous le même numéro — exactement ce que la doctrine
-    /// des estampilles du guide interdit.
+    /// cette méthode juste après `replace_tree`, avec un numéro tiré de
+    /// [`Project::next_column_version`], pour ré-attribuer aux seules
+    /// colonnes concernées un numéro que CE projet n'a jamais attribué à
+    /// personne — sans quoi une écriture future pourrait faire coïncider
+    /// deux contenus sous le même numéro, exactement ce que la doctrine des
+    /// estampilles du guide interdit.
     ///
-    /// N'importe quelle valeur peut être imposée : cette méthode ne
-    /// vérifie **pas** elle-même qu'elle est fraîche, c'est la
-    /// responsabilité de l'appelant (voir `History::restamp_regressed_versions`).
     /// `Err(Structure)` si `column` n'est pas une colonne.
     pub fn restamp_column_version(&mut self, column: NodeId, version: u64) -> CoreResult<()> {
         self.check_column(column)?;
@@ -513,9 +589,14 @@ impl Project {
         if targets.is_empty() || count == 0 {
             return Ok(Vec::new());
         }
+        // A7 — un numéro frais par colonne réellement touchée, tiré avant de
+        // prendre `tree` en emprunt exclusif (`next_column_version` a besoin
+        // de `&mut self` tout entier).
+        let fresh_versions: Vec<u64> = targets.iter().map(|_| self.next_column_version()).collect();
         let tree = Arc::make_mut(&mut self.tree);
-        for &id in &targets {
+        for (&id, fresh) in targets.iter().zip(fresh_versions) {
             tree.column_mut(id)?.insert_rows(at, count)?;
+            tree.column_mut(id)?.restamp_version(fresh);
         }
         Ok(targets)
     }
@@ -534,10 +615,13 @@ impl Project {
         if targets.is_empty() || count == 0 {
             return Ok(Vec::new());
         }
+        // A7 — voir `Project::insert_rows`.
+        let fresh_versions: Vec<u64> = targets.iter().map(|_| self.next_column_version()).collect();
         let tree = Arc::make_mut(&mut self.tree);
         let mut removed = Vec::with_capacity(targets.len());
-        for id in targets {
+        for (id, fresh) in targets.into_iter().zip(fresh_versions) {
             let block = tree.column_mut(id)?.delete_rows(at, count)?;
+            tree.column_mut(id)?.restamp_version(fresh);
             removed.push((id, block));
         }
         Ok(removed)
@@ -556,7 +640,14 @@ impl Project {
     ) -> CoreResult<()> {
         self.check_column(column)?;
         let tree = Arc::make_mut(&mut self.tree);
-        tree.column_mut(column)?.insert_rows(at, count)
+        tree.column_mut(column)?.insert_rows(at, count)?;
+        // A7 — voir `Project::insert_rows`. Primitive d'annulation : « annuler
+        // est une écriture de plus » (§6 du guide).
+        let fresh = self.next_column_version();
+        Arc::make_mut(&mut self.tree)
+            .column_mut(column)?
+            .restamp_version(fresh);
+        Ok(())
     }
 
     /// Supprime `count` lignes à `at` dans **cette seule colonne**, rabattu à
@@ -570,7 +661,13 @@ impl Project {
     ) -> CoreResult<ValueBlock> {
         self.check_column(column)?;
         let tree = Arc::make_mut(&mut self.tree);
-        tree.column_mut(column)?.delete_rows(at, count)
+        let removed = tree.column_mut(column)?.delete_rows(at, count)?;
+        // A7 — voir `Project::insert_column_rows`.
+        let fresh = self.next_column_version();
+        Arc::make_mut(&mut self.tree)
+            .column_mut(column)?
+            .restamp_version(fresh);
+        Ok(removed)
     }
 
     // -- chemins --

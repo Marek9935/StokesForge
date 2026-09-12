@@ -123,7 +123,8 @@ impl SessionHandle {
     /// crate : une macro est globale à la session).
     pub fn begin_macro(&self, label: &str) -> SessionResult<Revision> {
         let label = label.to_string();
-        self.request(|reply| Request::BeginMacro { label, reply })
+        self.request(|reply| Request::BeginMacro { label, reply })?
+            .map_err(SessionError::from)
     }
 
     /// Ferme la macro courante en une seule entrée d'historique.

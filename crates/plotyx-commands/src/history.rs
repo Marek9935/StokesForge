@@ -1126,13 +1126,26 @@ fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, Co
 // écriture normale — « annuler est une écriture de plus », §6 du guide) :
 // une écriture future repartant de ce numéro plus bas peut alors retomber sur
 // un numéro déjà porté par un autre contenu de cette même colonne.
+//
+// Deux versions antérieures de ce correctif calculaient un numéro « frais »
+// localement — d'abord depuis les deux arbres directement impliqués dans la
+// restauration, puis depuis tout ce que l'historique retenait encore — et
+// toutes deux se sont avérées insuffisantes : un balayage aléatoire
+// (`b14_une_version_ne_designe_jamais_deux_contenus`) a trouvé qu'une
+// écriture ORDINAIRE (jamais passée par un `revert`) peut, de son côté,
+// faire progresser une colonne jusqu'à un numéro que ni l'un ni l'autre
+// calcul local ne pouvait prévoir. Le seul calcul qui ferme la question pour
+// de bon est un compteur unique tenu par `Project` lui-même
+// (`Project::next_column_version`, doctrine des estampilles du guide :
+// « attribuée par le projet ») et consulté par **toute** écriture de
+// colonne, ordinaire ou restauration — jamais un calcul dérivé d'un
+// sous-ensemble de ce que le projet a vu.
 
-/// Ré-attribue un numéro de version **frais** (jamais vu dans `discarded` ni
-/// dans `restored`) à chaque colonne dont le buffer n'est **pas** le même
-/// objet dans les deux arbres — appelée juste après que `revert` a remplacé
-/// l'arbre courant (`discarded`, celui qu'on quitte) par `restored`.
-///
-/// # Quelles colonnes
+/// Ré-attribue un numéro de version **frais** (tiré de [`Project::
+/// next_column_version`]) à chaque colonne dont le buffer n'est **pas** le
+/// même objet dans `discarded` et `restored` — appelée juste après que
+/// `revert` a remplacé l'arbre courant (`discarded`, celui qu'on quitte) par
+/// `restored`.
 ///
 /// Comparée par **identité de pointeur** (voir [`column_footprint`]), jamais
 /// par égalité de valeurs : deux buffers distincts qui contiendraient par
@@ -1148,25 +1161,12 @@ fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, Co
 /// déjà sur ce genre de coût). Une colonne absente de `discarded` (elle
 /// vient de réapparaître) ou de `restored` (elle disparaît) n'est jamais
 /// concernée : voir le corps.
-///
-/// # Le numéro attribué
-///
-/// `1 + max(plus haute version de discarded, plus haute version de
-/// restored)`, incrémenté à chaque colonne restampée dans cette même
-/// passe : plus haut que tout numéro que **n'importe quelle** colonne du
-/// projet a jamais porté jusqu'ici, jamais deux fois le même. `discarded`
-/// est l'arbre courant au moment de l'appel — donc à jour de toute écriture
-/// passée, y compris celles qu'aucun compteur externe ne suit séparément —
-/// ce qui évite d'avoir à maintenir un allocateur de versions à part (sur
-/// le modèle d'`IdAllocator`) : la valeur repart toujours de ce qu'on vient
-/// de lire dans l'arbre courant, jamais d'un total mis en cache qui
-/// pourrait être périmé.
 fn restamp_regressed_versions(
     project: &mut Project,
     discarded: &Tree,
     restored: &Tree,
 ) -> CommandResult<()> {
-    let mut next_fresh = 1 + highest_column_version(discarded).max(highest_column_version(restored));
+    let mut targets = Vec::new();
     for (id, node) in restored.iter() {
         let Some(restored_column) = node.as_column() else {
             continue;
@@ -1181,22 +1181,14 @@ fn restamp_regressed_versions(
         let same_buffer = column_footprint(discarded_column.values()).0
             == column_footprint(restored_column.values()).0;
         if !same_buffer {
-            project.restamp_column_version(id, next_fresh)?;
-            next_fresh += 1;
+            targets.push(id);
         }
     }
+    for id in targets {
+        let fresh = project.next_column_version();
+        project.restamp_column_version(id, fresh)?;
+    }
     Ok(())
-}
-
-/// Plus haute version de colonne portée par `tree` ; `0` si `tree` n'en a
-/// aucune (un projet neuf n'a pas de colonne, et `Column::version` commence
-/// lui-même à `0`).
-fn highest_column_version(tree: &Tree) -> u64 {
-    tree.iter()
-        .filter_map(|(_, node)| node.as_column())
-        .map(|column| column.version())
-        .max()
-        .unwrap_or(0)
 }
 
 // ===========================================================================

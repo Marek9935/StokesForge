@@ -92,7 +92,9 @@ fn b18_une_macro_de_profondeur_raisonnable_sannule_dun_bloc() {
         .expect("colonne");
     let mut history = History::with_limit(0);
     for i in 0..1000 {
-        history.begin_macro(&format!("m{i}"));
+        history
+            .begin_macro(&format!("m{i}"))
+            .expect("dans la limite de MAX_MACRO_DEPTH");
     }
     history
         .execute(
@@ -155,39 +157,36 @@ fn b18_la_sauvegarde_est_refusee_pendant_une_macro() {
 }
 
 #[test]
-#[ignore = "reproduction B7 — rien ne borne l'imbrication des macros ; au-delà de 10 890 niveaux, l'annulation déborde la pile du fil de l'acteur et fait abort() le processus"]
 fn b18_limbrication_des_macros_est_bornee() {
-    // Sûr : **construire** l'imbrication ne déborde jamais (`begin_macro` et
-    // `end_macro` sont itératifs ; la sonde le vérifie jusqu'à 200 000). Seule
-    // sa traversée récurse — `History::revert` pour `Entry::Macro`, et le
-    // `Drop` dérivé de `Entry`. Ce test ne la traverse donc pas : il constate
-    // seulement qu'aucune borne n'existe.
-    const PROFONDEUR_SURE: usize = 10_000;
+    // B7 (`guide-de-correction-robustesse.md` §F4) — corrigée :
+    // `begin_macro` refuse (`Err(MacroTooDeep)`) au-delà de
+    // `plotyx_commands::MAX_MACRO_DEPTH`, avant même d'approcher la
+    // frontière où l'annulation (`History::revert`, récursif sur
+    // `Entry::Macro`) ferait déborder la pile du fil de l'acteur — mesurée
+    // à 10 891 niveaux (`cargo run --bin plotyx-sonde-pile -- <n> annuler`).
+    // Sûr : **construire** l'imbrication ne déborde jamais en soi
+    // (`begin_macro`/`end_macro` sont itératifs) ; c'est bien le refus lui,
+    // pas un plafond sur la construction, qui ferme l'anomalie.
     let mut history = History::with_limit(0);
+    let mut refusee_a = None;
     for i in 0..50_000 {
-        history.begin_macro(&format!("m{i}"));
+        if let Err(err) = history.begin_macro(&format!("m{i}")) {
+            println!("begin_macro refusé au niveau {i} : {err}");
+            refusee_a = Some(i);
+            break;
+        }
     }
-    println!(
-        "profondeur atteinte sans le moindre refus : {}",
-        history.macro_depth()
+    println!("profondeur atteinte : {}", history.macro_depth());
+    assert_eq!(
+        refusee_a,
+        Some(plotyx_commands::MAX_MACRO_DEPTH),
+        "l'ouverture d'une macro au niveau {} (la borne) doit être refusée, pas acceptée",
+        plotyx_commands::MAX_MACRO_DEPTH
     );
-    println!(
-        "seuils mesurés hors test, pile de 2 Mio (celle du fil de l'acteur) :\n  \
-         construire 200 000 niveaux : OK\n  \
-         annuler   : passe à 10 890, abort() à 10 891\n  \
-         `clear()` : passe à 26 147, abort() à 26 148  ← c'est ce que `load` appelle\n  \
-         lâcher    : passe à 26 145, abort() à 26 146\n  \
-         (`cargo run --bin plotyx-sonde-pile -- <n> <geste>`)"
-    );
-    assert!(
-        history.macro_depth() <= PROFONDEUR_SURE,
-        "l'historique a accepté {} niveaux d'imbrication. Un débordement de pile \
-         n'est pas une panique : le runtime appelle `abort()`, donc ni `catch_unwind` \
-         ni l'acteur ne peuvent intervenir — le processus meurt avec tout le travail \
-         non sauvegardé. Une borne explicite (`Err(CommandError::…)` au-delà d'une \
-         profondeur nommée) coûte trois lignes ; rendre `revert` et `Drop` itératifs \
-         coûte davantage mais lève la limite",
-        history.macro_depth()
+    assert_eq!(
+        history.macro_depth(),
+        plotyx_commands::MAX_MACRO_DEPTH,
+        "un refus ne doit pas avoir changé la profondeur atteinte"
     );
 }
 
