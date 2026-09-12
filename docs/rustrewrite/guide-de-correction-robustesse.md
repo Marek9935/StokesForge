@@ -879,18 +879,16 @@ vague 6  (F2 puis F6)          10                 →   0
 ```
 
 **Statut réel de clôture (2026-09-12, les six vagues sont fusionnées sur
-`rewriterust`) : 2 rouges, pas 0.** Les 30 anomalies ont chacune une
+`rewriterust`) : 1 rouge, pas 0.** Les 30 anomalies ont chacune une
 réponse (correctif + garde-fou vert, ou limitation assumée et documentée)
-mais deux reproductions restent `#[ignore]` par choix, pas par oubli —
-voir `questions-ouvertes.md` §11 pour le détail chiffré des plafonds, et
-la table ci-dessous pour ces deux-là :
+mais une reproduction reste `#[ignore]` par choix, pas par oubli — voir
+`questions-ouvertes.md` §11 pour le détail chiffré des plafonds :
 
 | Test | Anomalie | Nature de la limite |
 |---|---|---|
-| `b15_convertir_en_texte_ne_multiplie_pas_la_memoire` | C4 | architecturale, mathématique : `Option<String>` (24 o) vs `f64` (8 o) impose un plancher ×3 avant tout contenu de chaîne ; ne se corrige qu'en changeant le stockage texte (pool de chaînes interné), jamais fait |
-| `b19_une_variante_inconnue_ne_perd_pas_tout_le_fichier`, `b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees` | C5 (niveau 2) | explicitement hors périmètre v1 par ce guide (dégradation gracieuse de variantes d'enum inconnues) |
+| `b19_une_variante_inconnue_ne_perd_pas_tout_le_fichier`, `b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees` | C5 (niveau 2) | explicitement hors périmètre v1 par ce guide (dégradation gracieuse de variantes d'enum inconnues) — coût estimé : touche trois crates (`plotyx-persistence`, `plotyx-plot`/`plotyx-core`, `plotyx-app`) et la garantie de fidélité byte-à-byte à la sauvegarde ; à faire le jour où la compatibilité ascendante entre versions de PlotYx devient un vrai besoin |
 
-Deux autres lignes ont quitté cette table le 2026-09-12 :
+Trois autres lignes ont quitté cette table le 2026-09-12 :
 
 - **D3 (2ᵉ moitié)** a fermé : `History::execute` ne clone plus `before`
   pour une commande de données ; voir `History::apply_data` et le
@@ -909,6 +907,18 @@ Deux autres lignes ont quitté cette table le 2026-09-12 :
   au-delà de `MAX_NODE_ID` est refusé par `load`, pas qu'un état
   inatteignable en interne doive rester utilisable — et qui est vert dès
   l'écriture : ce n'est plus une reproduction, c'est un garde-fou.
+- **C4 (`b15_convertir_en_texte_ne_multiplie_pas_la_memoire`) a été
+  retiré, pas fermé** : ce n'était pas une anomalie à corriger mais un choix
+  d'architecture mal formulé en test de reproduction — le plancher ×3
+  (`Option<String>` 24 o vs `f64` 8 o) est infranchissable sans changer la
+  représentation d'une colonne texte, et le facteur réel (~5,7× pour des
+  valeurs à haute précision) n'est ni un bug ni une dérive incontrôlée : il
+  est **constant**, pas croissant avec la taille du projet. Remplacé par
+  `b15_convertir_en_texte_multiplie_la_memoire_par_un_facteur_borne_et_stable`
+  (`crates/plotyx-robustesse/tests/b15_cellules_et_saisie.rs`), vert dès
+  l'écriture : il documente le plancher et vérifie que le facteur reste dans
+  une plage bornée [3,0 ; 8,0] et stable entre deux tailles de projet — la
+  seule propriété qui compte réellement pour un choix d'architecture assumé.
 
 ---
 

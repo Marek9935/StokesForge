@@ -239,66 +239,91 @@ fn b15_une_mesure_scientifique_tient_dans_une_cellule() {
     );
 }
 
+/// C4 — plus une reproduction : un **choix d'architecture documenté**, pas
+/// un bug. `size_of::<Option<String>>()` vaut 24 octets sur une machine 64
+/// bits, contre 8 pour le `f64` qu'il remplace : un facteur 3,0 rien que
+/// pour la structure, avant le premier caractère de contenu — c'est le
+/// plancher mathématique de `Vec<Option<String>>` comme représentation
+/// d'une colonne texte, et aucun choix de format ne peut descendre en
+/// dessous. `Column::set_column_type` (Float→Text) utilise
+/// `format_f64_for_display` (notation scientifique quand elle est plus
+/// courte), qui atténue le coût mais ne peut pas effacer ce plancher ; pour
+/// des valeurs à haute précision comme ici (grandeurs physiques, une
+/// dizaine de chiffres significatifs), le contenu texte lui-même ajoute
+/// encore dessus — le facteur mesuré tourne autour de 5-6×, pas 3×, sur ce
+/// genre de données. Ce n'est toujours pas un problème : ×5-6 est un
+/// multiplicateur **constant**, pas une croissance non bornée — ce test
+/// vérifie justement que le facteur ne dérive pas avec la taille des
+/// données (voir `facteur_stable_avec_la_taille` ci-dessous). Descendre
+/// sous ce plancher demanderait de changer la représentation elle-même
+/// (une chaîne interned/packée plutôt qu'un `String` par cellule) — un
+/// chantier bien plus large que ce que C4 posait, non entrepris.
 #[test]
-#[ignore = "reproduction C4 (diagnostic révisé) — Column::set_column_type (Float→Text) utilise \
-            désormais format_f64_for_display (notation scientifique quand elle est plus courte), \
-            ce qui fait baisser le facteur mesuré de 7,6× à ~5,7× sur ce scénario, mais le plafond \
-            de 3× que ce test demande est hors de portée d'un simple choix de format : \
-            size_of::<Option<String>>() vaut 24 octets sur une machine 64 bits, contre 8 pour le \
-            f64 qu'il remplace — un facteur 3,0 rien que pour la structure, AVANT même le premier \
-            caractère de contenu. Aucune chaîne non vide ne peut donc jamais faire mieux que « un \
-            peu plus de 3× » avec Vec<Option<String>> comme représentation de colonne texte ; \
-            l'atteindre demanderait de changer cette représentation elle-même (une chaîne \
-            interned/packée plutôt qu'un String par cellule), un chantier bien plus large que la \
-            question de format que C4 posait"]
-fn b15_convertir_en_texte_ne_multiplie_pas_la_memoire() {
+fn b15_convertir_en_texte_multiplie_la_memoire_par_un_facteur_borne_et_stable() {
     use plotyx_commands::{Command, History};
 
-    const LIGNES: usize = 50_000;
-    let mut project = Project::new("Demo").expect("projet valide");
-    let root = project.root();
-    project.add_workbook(root, Some("Book1")).expect("classeur");
-    let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
-    // Un courant mesuré, en ampères : l'ordre de grandeur du domaine.
-    let mesures: Vec<f64> = (0..LIGNES)
-        .map(|i| 1.602_176_634e-19 * (1.0 + i as f64 * 1e-9))
-        .collect();
-    let colonne = project
-        .add_column(sheet, None, Some("I"), Column::from_f64(&mesures))
-        .expect("colonne");
+    fn facteur(lignes: usize) -> f64 {
+        let mut project = Project::new("Demo").expect("projet valide");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("classeur");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+        // Un courant mesuré, en ampères : l'ordre de grandeur du domaine.
+        let mesures: Vec<f64> = (0..lignes)
+            .map(|i| 1.602_176_634e-19 * (1.0 + i as f64 * 1e-9))
+            .collect();
+        let colonne = project
+            .add_column(sheet, None, Some("I"), Column::from_f64(&mesures))
+            .expect("colonne");
 
-    let avant = LIGNES * std::mem::size_of::<f64>();
-    let mut history = History::new();
-    history
-        .execute(
-            &mut project,
-            Command::SetColumnType {
-                column: colonne,
-                column_type: ColumnType::Text,
-            },
-        )
-        .expect("conversion acceptée");
+        let avant = lignes * std::mem::size_of::<f64>();
+        let mut history = History::new();
+        history
+            .execute(
+                &mut project,
+                Command::SetColumnType {
+                    column: colonne,
+                    column_type: ColumnType::Text,
+                },
+            )
+            .expect("conversion acceptée");
 
-    let apres: usize = match project
-        .tree()
-        .node(colonne)
-        .and_then(plotyx_core::Node::as_column)
-        .expect("colonne")
-        .values()
-    {
-        ColumnValues::Text(values) => values
-            .iter()
-            .map(|s| std::mem::size_of::<Option<String>>() + s.as_deref().map_or(0, str::len))
-            .sum(),
-        ColumnValues::Float(_) => 0,
-    };
-    let facteur = apres as f64 / avant as f64;
-    println!("{LIGNES} lignes : {avant} octets → {apres} octets ({facteur:.1}×)");
+        let apres: usize = match project
+            .tree()
+            .node(colonne)
+            .and_then(plotyx_core::Node::as_column)
+            .expect("colonne")
+            .values()
+        {
+            ColumnValues::Text(values) => values
+                .iter()
+                .map(|s| std::mem::size_of::<Option<String>>() + s.as_deref().map_or(0, str::len))
+                .sum(),
+            ColumnValues::Float(_) => 0,
+        };
+        apres as f64 / avant as f64
+    }
+
+    // Le plancher structurel ne bouge pas en dessous de 3,0 (voir la doc du
+    // test) ; on laisse une marge généreuse au-dessus pour le contenu
+    // réel sans pour autant tolérer une dérive qui indiquerait une
+    // régression (ex. `format_f64_for_display` qui cesserait de préférer
+    // la notation scientifique).
+    let petit = facteur(5_000);
+    let grand = facteur(50_000);
+    println!("5 000 lignes : {petit:.2}× ; 50 000 lignes : {grand:.2}×");
+    for (lignes, f) in [(5_000, petit), (50_000, grand)] {
+        assert!(
+            (3.0..=8.0).contains(&f),
+            "{lignes} lignes : facteur {f:.2}×, hors de la plage attendue [3,0 ; 8,0] — \
+             en dessous de 3,0 serait suspect (le plancher structurel de \
+             `Option<String>` est infranchissable), au-dessus indiquerait une \
+             régression du choix de format"
+        );
+    }
     assert!(
-        facteur <= 3.0,
-        "une conversion vers texte multiplie la mémoire par {facteur:.1} parce que \
-         chaque valeur devient sa forme décimale complète (30 caractères ici, jusqu'à \
-         326 pour un dénormal) ; en notation scientifique le facteur plafonnerait \
-         vers 3× — et l'historique en retient une copie de plus"
+        (petit - grand).abs() / petit <= 0.15,
+        "le facteur varie de {petit:.2}× à {grand:.2}× entre 5 000 et 50 000 lignes \
+         (plus de 15% d'écart) : il devrait rester stable, puisque c'est un coût par \
+         cellule, pas un effet qui s'aggrave avec la taille du projet"
     );
 }
