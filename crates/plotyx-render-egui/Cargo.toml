@@ -1,0 +1,41 @@
+[package]
+name = "plotyx-render-egui"
+version = "0.0.0"
+edition.workspace = true
+description = "Backend egui de plotters : collecte des egui::Shape dans un Vec, cache sur (revision, rect, pixels_per_point)."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Typst n'est pas construit — c'est la phase R8. La feature existe pourtant
+# dès le premier jour, parce que `architecture-choisie.md` §7 en fait une
+# condition du droit d'abandonner Typst sans rien démonter : le crate doit
+# compiler, tester et s'exécuter **sans** elle, et le prouver dès maintenant
+# plutôt qu'après avoir écrit du code qui la suppose. Sans implémentation
+# derrière, elle ne change rien au binaire ; elle réserve la place et le nom.
+typst = []
+
+[dependencies]
+plotyx-core = { path = "../plotyx-core" }
+plotyx-plot = { path = "../plotyx-plot" }
+plotyx-session = { path = "../plotyx-session" }
+plotyx-render = { path = "../plotyx-render" }
+plotters = { version = "0.3", default-features = false, features = [
+    "all_series",
+    "all_elements",
+] }
+plotters-backend = "0.3"
+# Alignée sur `plotyx-app`, qui est sur eframe 0.36.2 : `egui-plotter` a été
+# écarté précisément parce qu'aucune de ses versions ne suit
+# (`architecture-choisie.md` §4).
+egui = "0.36.2"
+
+[dev-dependencies]
+plotyx-commands = { path = "../plotyx-commands" }
+# Le test d'accord (R4.5) vit ici et non dans `plotyx-render-svg` : en
+# dépendance de développement, il ferait entrer egui dans l'arbre du crate
+# d'export, ce que `cargo tree -p plotyx-render-svg` doit continuer à
+# démentir.
+plotyx-render-svg = { path = "../plotyx-render-svg" }

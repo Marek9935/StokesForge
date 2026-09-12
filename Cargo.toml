@@ -7,6 +7,7 @@ members = [
     "crates/plotyx-session",
     "crates/plotyx-plot",
     "crates/plotyx-render",
+    "crates/plotyx-render-egui",
     "crates/plotyx-render-svg",
     "crates/plotyx-persistence",
     "crates/plotyx-python",
