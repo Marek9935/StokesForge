@@ -40,6 +40,7 @@ fn b5_macro_avortee_ne_laisse_aucune_trace() {
             column: cols[0],
             start: 0,
             values: ValueBlock::Float(vec![9.0]),
+            expected_version: None,
         },
     )
     .unwrap();
@@ -66,6 +67,7 @@ fn b5_macro_avortee_ne_laisse_aucune_trace() {
             column: cols[0],
             start: 0,
             values: ValueBlock::Float(vec![1.0, 2.0]),
+            expected_version: None,
         },
     )
     .unwrap();
@@ -129,6 +131,7 @@ fn b5_macro_imbriquee_avortee_ne_touche_pas_la_parente() {
             column: cols[1],
             start: 0,
             values: ValueBlock::Float(vec![5.0]),
+            expected_version: None,
         },
     )
     .unwrap();
@@ -202,6 +205,7 @@ fn b5_macro_avec_commande_refusee_reste_coherente() {
             column: cols[2],
             start: 1,
             values: ValueBlock::Float(vec![8.0, 9.0, 10.0]),
+            expected_version: None,
         },
     )
     .unwrap();
@@ -240,6 +244,7 @@ fn b5_macro_profondement_imbriquee() {
                 column: cols[i % 3],
                 start: 0,
                 values: ValueBlock::Float(vec![i as f64]),
+                expected_version: None,
             },
         )
         .unwrap();
@@ -325,6 +330,7 @@ fn b5_macro_puis_annulation_totale_ramene_larbre_initial() {
                 column: cible,
                 start: (tour % 4) as usize,
                 values: bloc,
+                expected_version: None,
             },
         )
         .unwrap();
@@ -395,6 +401,7 @@ fn b5_limite_en_octets_ne_fait_pas_disparaitre_le_dernier_cran() {
                 column: cols[0],
                 start: 0,
                 values: ValueBlock::Float(vec![i as f64; 100]),
+                expected_version: None,
             },
         )
         .unwrap();

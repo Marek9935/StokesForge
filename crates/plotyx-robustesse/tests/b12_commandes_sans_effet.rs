@@ -118,6 +118,7 @@ fn b12_setcells_ecrit_bien_au_dela_de_la_fin() {
                 column: a,
                 start: 3,
                 values: ValueBlock::Float(vec![4.0]),
+                expected_version: None,
             },
         )
         .expect("écriture acceptée");
@@ -213,6 +214,7 @@ fn b12_setcells_dun_bloc_vide_ne_change_rien() {
                 column: a,
                 start: 10,
                 values: ValueBlock::Float(Vec::new()),
+                expected_version: None,
             },
         )
         .expect("écriture acceptée");

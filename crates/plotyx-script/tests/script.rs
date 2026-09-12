@@ -594,6 +594,7 @@ fn une_seule_pile_dhistorique_pour_lacteur_et_le_script() {
             column: banc.a,
             start: 0,
             values: plotyx_core::ValueBlock::Float(vec![42.0]),
+            expected_version: None,
         })
         .expect("commande de l'acteur");
     assert_eq!(valeurs(&banc.session, banc.a), vec![42.0, 2.0, 3.0]);
@@ -869,7 +870,11 @@ except pyx.BrokenReferenceError:
 // --- Compléments : la surface reste minuscule et documentée -----------------
 
 #[test]
-fn la_surface_expose_quatre_appels_et_trois_erreurs() {
+fn la_surface_expose_quatre_appels_et_quatre_erreurs() {
+    // A2 (`guide-de-correction-robustesse.md` §F6) a ajouté une quatrième
+    // exception, `ConcurrentWriteError` — ce test s'appelait
+    // « ...et_trois_erreurs » et n'énumérait que les trois premières ; son
+    // nom et sa liste attendue suivent le vocabulaire d'erreurs à jour.
     let banc = banc();
     let outcome = executer(
         &banc,
@@ -884,8 +889,8 @@ print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, imp
     let lignes = lignes(&outcome);
     assert_eq!(
         lignes[0],
-        "['BrokenReferenceError', 'Handle', 'InvalidValueError', 'UnknownPathError', \
-         'column', 'resolve', 'set_column', 'undo']"
+        "['BrokenReferenceError', 'ConcurrentWriteError', 'Handle', 'InvalidValueError', \
+         'UnknownPathError', 'column', 'resolve', 'set_column', 'undo']"
     );
     assert_eq!(lignes[1], "True", "le module est documenté");
     assert_eq!(lignes[2], "True", "les quatre appels sont documentés");

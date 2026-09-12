@@ -57,6 +57,7 @@ fn ecrire(history: &mut History, project: &mut Project, column: NodeId, valeur: 
                 column,
                 start: 0,
                 values: ValueBlock::Float(vec![valeur]),
+                expected_version: None,
             },
         )
         .expect("écriture acceptée");
@@ -122,6 +123,7 @@ fn b10_une_commande_refusee_nincremente_rien() {
             column: a,
             start: 0,
             values: ValueBlock::Text(vec![Some("x".to_string())]),
+            expected_version: None,
         },
     );
     assert!(refus.is_err(), "la commande doit être refusée");

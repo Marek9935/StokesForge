@@ -45,16 +45,53 @@
 //!    compilation statique (`assert_send`, dans ce module et dans
 //!    `actor`).
 //!
-//! # Limite connue
+//! # Ce qu'une macro ouverte fait des huit requêtes, et ce que change l'identité de l'émetteur
 //!
-//! Une macro est **globale à la session** : le protocole ne porte pas
-//! l'identité de l'émetteur d'une requête. Si un client ouvre une macro
-//! (`begin_macro`), les commandes envoyées par d'autres clients avant sa
-//! fermeture (`end_macro`/`abort_macro`) y sont absorbées comme si elles en
-//! faisaient partie — l'acteur ne peut pas distinguer « ma macro » de
-//! « une macro ouverte par quelqu'un d'autre ». Ajouter cette identité au
-//! protocole (et refuser les commandes d'un émetteur qui n'a pas ouvert la
-//! macro en cours) reste possible plus tard ; ce n'est pas fait ici.
+//! F6 (`guide-de-correction-robustesse.md` §2, §6) : tout ce qu'un client
+//! sait du projet est une copie potentiellement périmée, donc toute
+//! hypothèse doit voyager dans la requête et être vérifiée par l'acteur au
+//! moment de l'appliquer — jamais avant. Cette table referme la question que
+//! le palliatif d'A11 (vague 1 de la campagne) avait seulement mise en
+//! évidence sans y répondre : *lesquelles des huit requêtes une macro
+//! ouverte doit-elle suspendre, et pour qui ?*
+//!
+//! Chaque [`SessionHandle`] porte désormais une identité stable (`ClientId`,
+//! privé au crate — voir sa doc) : deux `.clone()` d'une même poignée restent le même
+//! émetteur (un script qui clone sa poignée pour un thread reste « lui-même »)
+//! ; deux poignées issues de deux appels **indépendants** à [`Session::handle`]
+//! sont deux émetteurs distincts, même dans le même processus.
+//!
+//! | Requête | Pendant une macro ouverte, aujourd'hui | Ce que l'identité de l'émetteur y change |
+//! |---|---|---|
+//! | `Execute` | absorbée dans la macro courante, quel que soit l'émetteur (A4 : c'était le bug — le travail d'un client s'infiltrait dans la macro d'un autre) | **refusée** (`CommandError::ForeignMacro("execute")`) si l'émetteur n'est pas le propriétaire de la macro ; absorbée normalement sinon |
+//! | `Undo` | refusée pour **quiconque** (`CommandError::MacroOpen("undo")`) : annuler pendant une macro, la sienne ou celle d'un autre, laisserait un état incohérent | inchangé — ce refus ne dépend jamais de qui a ouvert la macro |
+//! | `Redo` | refusée pour quiconque (`CommandError::MacroOpen("redo")`), même raison qu'`Undo` | inchangé |
+//! | `BeginMacro` | ouvre un niveau d'imbrication supplémentaire, quel que soit l'émetteur, jusqu'à [`plotyx_commands::MAX_MACRO_DEPTH`] | **refusée** (`ForeignMacro("begin_macro")`) si une macro est déjà ouverte par un *autre* émetteur ; un même émetteur peut toujours imbriquer la sienne |
+//! | `EndMacro` | ferme le niveau courant en une entrée d'historique, quel que soit l'émetteur | **refusée** (`ForeignMacro("end_macro")`) si l'émetteur n'est pas le propriétaire — `CommandError::NotInMacro` reste réservé au cas où **aucune** macro n'est ouverte |
+//! | `AbortMacro` | annule le niveau courant et tout son contenu, quel que soit l'émetteur — **y compris le travail déjà validé d'un autre client, silencieusement** : c'était exactement A4 | **refusée** (`ForeignMacro("abort_macro")`) si l'émetteur n'est pas le propriétaire : un `abort_macro` ne peut plus défaire le travail de quelqu'un d'autre |
+//! | `Save` | refusée pour quiconque pendant une macro ouverte (A11, **palliatif déclaré** en vague 1 : la garde de `load_project` recopiée sans plus de nuance) | inchangé — le refus ne dépend pas de qui a ouvert la macro ; écrire sur le disque l'état intermédiaire d'une macro que *quelqu'un* pourrait encore avorter reste interdit à tous |
+//! | `Load` | refusée pour quiconque pendant une macro ouverte, avant même de toucher au disque | inchangé, même raison que `Save` |
+//!
+//! `Snapshot` et `Shutdown` ne mutent rien : `Snapshot` est une lecture pure,
+//! toujours servie ; `Shutdown` ne passe pas par ce tableau mais par le
+//! constat qui suit.
+//!
+//! **`Session::shutdown` pendant une macro ouverte — constat non
+//! reproductible, corrigé.** Une macro ouverte à l'arrêt de l'acteur n'avait
+//! aucune garde : `Request::Shutdown` rendait directement le `Project`
+//! courant, macro comprise — ses mutations, déjà appliquées au modèle en
+//! mémoire (une macro n'empêche jamais `Project` d'être muté, elle ne fait
+//! que différer l'entrée d'historique), se retrouvaient **commises en
+//! silence**, sans jamais être devenues une entrée annulable et sans que
+//! `end_macro` ait été appelé. Même absence de garde qu'A11, mais à la
+//! sortie plutôt qu'à la sauvegarde — et sans reproduction possible (le banc
+//! ne peut pas observer un `Project` qui n'existe plus après l'arrêt de
+//! l'acteur, voir `guide-de-correction-robustesse.md` §7.3). La correction
+//! retenue, triviale une fois A4 en place : `actor::run` annule (plutôt que
+//! de commettre) toute macro encore ouverte à la réception de `Shutdown`,
+//! niveau par niveau (`History::abort_macro`, sans distinction de
+//! propriétaire — il n'y a plus de client à qui répondre) — une macro
+//! ouverte à l'arrêt est désormais **annulée, pas commise**.
 
 #![cfg_attr(
     not(test),
@@ -66,6 +103,7 @@ mod error;
 mod snapshot;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
@@ -77,6 +115,30 @@ use actor::Request;
 pub use error::{SessionError, SessionResult};
 pub use snapshot::{HistoryState, Revision, Snapshot};
 
+/// Identité stable et comparable d'un émetteur de requêtes (A4,
+/// `guide-de-correction-robustesse.md` §F6).
+///
+/// Un compteur atomique global, incrémenté à chaque appel **indépendant** à
+/// [`Session::handle`] — jamais à `Clone` : deux `.clone()` d'une même
+/// poignée partagent la même identité (un script qui clone sa poignée pour
+/// la passer à un thread reste « le même émetteur » aux yeux de l'acteur),
+/// alors que deux poignées issues de deux appels distincts à `handle()` sont
+/// deux émetteurs différents, même s'ils vivent dans le même processus.
+/// C'est cette identité qui permet à l'acteur de refuser qu'une macro
+/// ouverte par l'un absorbe ou soit close par l'autre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ClientId(u64);
+
+impl ClientId {
+    /// Attribue une identité neuve, jamais réutilisée sur la vie du
+    /// processus (`AtomicU64`, `Ordering::Relaxed` : seule l'unicité compte,
+    /// pas un ordre entre threads).
+    fn fresh() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        ClientId(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 /// Poignée cliente vers une [`Session`] : clonable, envoyable à d'autres
 /// threads. Chaque méthode envoie une requête sur le canal FIFO de l'acteur
 /// et **bloque** jusqu'à la réponse. Rend `Err(SessionError::Disconnected)`
@@ -85,6 +147,10 @@ pub use snapshot::{HistoryState, Revision, Snapshot};
 #[derive(Debug, Clone)]
 pub struct SessionHandle {
     tx: mpsc::Sender<Request>,
+    /// Identité de cet émetteur (A4) : partagée par tous les `.clone()` de
+    /// cette poignée, distincte de celle de toute poignée issue d'un autre
+    /// appel à [`Session::handle`].
+    client: ClientId,
 }
 
 impl SessionHandle {
@@ -100,10 +166,17 @@ impl SessionHandle {
     }
 
     /// Exécute une commande. Rend la nouvelle révision, ou l'erreur du bus de
-    /// commandes — l'arbre et l'historique restent alors inchangés.
+    /// commandes — l'arbre et l'historique restent alors inchangés. Refusée
+    /// (`Command(ForeignMacro("execute"))`) si une macro est ouverte par un
+    /// autre émetteur (A4, voir la table en tête de crate).
     pub fn execute(&self, command: Command) -> SessionResult<Revision> {
-        self.request(|reply| Request::Execute { command, reply })?
-            .map_err(SessionError::from)
+        let client = self.client;
+        self.request(|reply| Request::Execute {
+            command,
+            client,
+            reply,
+        })?
+        .map_err(SessionError::from)
     }
 
     /// Annule l'entrée du sommet. `Ok(None)` si la pile est vide.
@@ -119,25 +192,40 @@ impl SessionHandle {
             .map_err(SessionError::from)
     }
 
-    /// Ouvre une macro portant `label` (voir la limite documentée en tête de
-    /// crate : une macro est globale à la session).
+    /// Ouvre une macro portant `label` — voir la table en tête de crate.
+    /// Refusée (`Command(ForeignMacro("begin_macro"))`) si une macro est déjà
+    /// ouverte par un *autre* émetteur ; un même émetteur peut toujours
+    /// imbriquer la sienne, jusqu'à [`plotyx_commands::MAX_MACRO_DEPTH`]
+    /// niveaux (`Err(MacroTooDeep)` au-delà).
     pub fn begin_macro(&self, label: &str) -> SessionResult<Revision> {
         let label = label.to_string();
-        self.request(|reply| Request::BeginMacro { label, reply })?
-            .map_err(SessionError::from)
+        let client = self.client;
+        self.request(|reply| Request::BeginMacro {
+            label,
+            client,
+            reply,
+        })?
+        .map_err(SessionError::from)
     }
 
     /// Ferme la macro courante en une seule entrée d'historique.
-    /// `Err(Command(NotInMacro))` hors macro.
+    /// `Err(Command(NotInMacro))` si aucune macro n'est ouverte ;
+    /// `Err(Command(ForeignMacro("end_macro")))` si une macro est ouverte
+    /// mais par un autre émetteur (A4, voir la table en tête de crate).
     pub fn end_macro(&self) -> SessionResult<Revision> {
-        self.request(|reply| Request::EndMacro { reply })?
+        let client = self.client;
+        self.request(|reply| Request::EndMacro { client, reply })?
             .map_err(SessionError::from)
     }
 
     /// Annule la macro courante et tout ce qu'elle avait appliqué.
-    /// `Err(Command(NotInMacro))` hors macro.
+    /// `Err(Command(NotInMacro))` si aucune macro n'est ouverte ;
+    /// `Err(Command(ForeignMacro("abort_macro")))` si une macro est ouverte
+    /// mais par un autre émetteur — un `abort_macro` ne peut plus défaire le
+    /// travail de quelqu'un d'autre (A4, voir la table en tête de crate).
     pub fn abort_macro(&self) -> SessionResult<Revision> {
-        self.request(|reply| Request::AbortMacro { reply })?
+        let client = self.client;
+        self.request(|reply| Request::AbortMacro { client, reply })?
             .map_err(SessionError::from)
     }
 
@@ -186,14 +274,23 @@ impl Session {
             .name("plotyx-session".to_string())
             .spawn(move || actor::run(project, history_limit, rx))?;
         Ok(Self {
-            handle: SessionHandle { tx },
+            handle: SessionHandle {
+                tx,
+                client: ClientId::fresh(),
+            },
             thread,
         })
     }
 
-    /// Clone de la poignée cliente vers cette session.
+    /// Poignée cliente **neuve** vers cette session : un émetteur distinct de
+    /// tout autre appel à `handle()` (A4, voir la table en tête de crate).
+    /// `.clone()` sur la poignée rendue reste le même émetteur ; seul un
+    /// nouvel appel à `handle()` en crée un autre.
     pub fn handle(&self) -> SessionHandle {
-        self.handle.clone()
+        SessionHandle {
+            tx: self.handle.tx.clone(),
+            client: ClientId::fresh(),
+        }
     }
 
     /// Demande l'arrêt de l'acteur et attend la fin de son thread ; rend le

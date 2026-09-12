@@ -72,6 +72,7 @@ fn main() {
                     column: col,
                     start: n,
                     values: ValueBlock::Float(vec![7.0]),
+                    expected_version: None,
                 },
             );
             match r {

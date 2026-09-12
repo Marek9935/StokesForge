@@ -14,12 +14,16 @@
 //!
 //! # Vocabulaire d'erreurs
 //!
-//! Trois exceptions, et seulement trois : [`UnknownPathError`],
-//! [`BrokenReferenceError`], [`InvalidValueError`]. Les noms sont repris tels
-//! quels de la spécification de l'API v1, pour ne pas avoir à les renommer
-//! ensuite. Toute erreur de l'hôte (`SessionError`, `CommandError`,
-//! `CoreError`) est **traduite** en l'une d'elles (cf. [`crate::bridge`]),
-//! jamais transportée telle quelle à travers le canal de l'acteur.
+//! Quatre exceptions, et seulement quatre : [`UnknownPathError`],
+//! [`BrokenReferenceError`], [`InvalidValueError`], [`ConcurrentWriteError`].
+//! Les trois premières sont reprises telles quelles de la spécification de
+//! l'API v1, pour ne pas avoir à les renommer ensuite ; la quatrième
+//! l'anticipe (A2, `guide-de-correction-robustesse.md` §F6) : `set_column`
+//! peut désormais retenter une écriture refusée pour cause de concurrence, et
+//! doit distinguer cet épuisement de tentatives des autres refus. Toute
+//! erreur de l'hôte (`SessionError`, `CommandError`, `CoreError`) est
+//! **traduite** en l'une d'elles (cf. [`crate::bridge`]), jamais transportée
+//! telle quelle à travers le canal de l'acteur.
 //!
 //! # Où le GIL est relâché
 //!
@@ -57,6 +61,14 @@ create_exception!(
     PyException,
     "Valeur refusée : mauvais type, mauvaise longueur, ou objet de nature inattendue."
 );
+create_exception!(
+    pyx,
+    ConcurrentWriteError,
+    PyException,
+    "pyx.set_column a été refusée cinq fois de suite par un autre client qui modifiait la \
+     même colonne. Ce n'est pas un bug du script ni une valeur refusée : relisez l'état \
+     courant, ou retentez plus tard."
+);
 
 /// Traduit une erreur de l'hôte, déjà classée, en exception Python.
 fn to_py_error(error: HostError) -> PyErr {
@@ -64,6 +76,7 @@ fn to_py_error(error: HostError) -> PyErr {
         HostError::UnknownPath(message) => UnknownPathError::new_err(message),
         HostError::BrokenReference(message) => BrokenReferenceError::new_err(message),
         HostError::InvalidValue(message) => InvalidValueError::new_err(message),
+        HostError::ConcurrentWrite(message) => ConcurrentWriteError::new_err(message),
     }
 }
 
@@ -77,11 +90,21 @@ fn to_py_error(error: HostError) -> PyErr {
 /// l'identité, assuré par le modèle lui-même (identifiants monotones, jamais
 /// réutilisés). Entre la suppression et l'annulation, l'utiliser lève
 /// `BrokenReferenceError`.
+///
+/// **Elle ne survit en revanche pas à un rechargement de projet** (A3,
+/// `guide-de-correction-robustesse.md` §F2/F6) : `epoch` mémorise l'identité
+/// du projet au moment de [`resolve`], et toute fonction qui reçoit une
+/// `Handle` la compare à l'époque courante **avant** de chercher `id` dans
+/// l'arbre — sans quoi un `NodeId` qui existe par coïncidence dans le
+/// nouveau projet (même forme de fichier, mêmes identifiants réattribués)
+/// désignerait silencieusement un tout autre objet.
 #[pyclass(frozen, module = "pyx", name = "Handle")]
 #[derive(Debug)]
 pub struct Handle {
     /// Nœud désigné. Champ privé : rien, depuis Python, n'y donne accès.
     id: NodeId,
+    /// Époque du projet au moment où [`resolve`] a produit cette poignée.
+    epoch: u64,
 }
 
 #[pymethods]
@@ -105,10 +128,10 @@ fn resolve(py: Python<'_>, chemin: &str) -> PyResult<Handle> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
     let session = context.session();
-    let id = py
+    let (id, epoch) = py
         .detach(|| bridge::resolve(session, chemin))
         .map_err(to_py_error)?;
-    Ok(Handle { id })
+    Ok(Handle { id, epoch })
 }
 
 /// Rend une vue numpy **en lecture seule et sans copie** sur les valeurs de la
@@ -132,8 +155,9 @@ fn column<'py>(py: Python<'py>, poignee: &Handle) -> PyResult<Bound<'py, PyArray
     context.check_interrupt()?;
     let session = context.session();
     let id = poignee.id;
+    let epoch = poignee.epoch;
     let buffer = py
-        .detach(|| bridge::float_buffer(session, id))
+        .detach(|| bridge::float_buffer(session, id, epoch))
         .map_err(to_py_error)?;
     borrowed_readonly_array(py, &buffer)
 }
@@ -159,13 +183,14 @@ fn set_column(py: Python<'_>, poignee: &Handle, valeurs: &Bound<'_, PyAny>) -> P
     let context = engine::current_context()?;
     context.check_interrupt()?;
     let id = poignee.id;
+    let epoch = poignee.epoch;
     // La copie se fait GIL en main ; le `Vec<f64>` obtenu est du Rust pur, il
     // peut traverser l'attente de l'acteur et se détruire sur n'importe quel
     // fil.
     let values = copy_array_to_vec(valeurs)
         .map_err(|error| InvalidValueError::new_err(error.to_string()))?;
     let session = context.session();
-    py.detach(move || bridge::set_column(session, id, values))
+    py.detach(move || bridge::set_column(session, id, epoch, values))
         .map_err(to_py_error)
 }
 
@@ -196,11 +221,16 @@ Surface-témoin de PlotYx : quatre appels pour piloter le projet ouvert.
     pyx.set_column(poignee, tab)   -> None (passe par l'historique)
     pyx.undo()                     -> bool (False si rien à annuler)
 
-Erreurs : UnknownPathError, BrokenReferenceError, InvalidValueError.
+Erreurs : UnknownPathError, BrokenReferenceError, InvalidValueError,
+          ConcurrentWriteError.
 
 Limites connues de cette surface :
   - la sortie (print) n'est rendue qu'à la fin du script, pas au fil de l'eau ;
-  - set_column exige la longueur exacte de la colonne ;
+  - set_column exige la longueur exacte de la colonne, et retente jusqu'à
+    cinq fois si un autre client modifie la colonne pendant l'écriture
+    (ConcurrentWriteError au-delà) ;
+  - une Handle ne survit pas à un rechargement de projet (BrokenReferenceError
+    à la prochaine utilisation) ;
   - atexit ne s'exécute jamais (l'interpréteur n'est pas finalisé) : tout ce
     qui doit être écrit sur disque doit l'être explicitement ;
   - une interruption ne coupe pas un appel natif long (une opération numpy sur
@@ -212,7 +242,7 @@ Limites connues de cette surface :
 /// Le module est **sans état** : les quatre fonctions retrouvent la session par
 /// le contexte du fil courant (cf. [`crate::engine`]). Deux moteurs de script
 /// vivant dans le même processus peuvent donc partager le même module sans se
-/// gêner, et les trois types d'exception sont des singletons du processus —
+/// gêner, et les quatre types d'exception sont des singletons du processus —
 /// un script attrape le même `pyx.UnknownPathError` quel que soit le moteur.
 pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     let module = PyModule::new(py, "pyx")?;
@@ -228,6 +258,10 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
         py.get_type::<BrokenReferenceError>(),
     )?;
     module.add("InvalidValueError", py.get_type::<InvalidValueError>())?;
+    module.add(
+        "ConcurrentWriteError",
+        py.get_type::<ConcurrentWriteError>(),
+    )?;
     py.import("sys")?
         .getattr("modules")?
         .set_item("pyx", &module)?;

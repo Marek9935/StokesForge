@@ -39,4 +39,18 @@ pub struct Snapshot {
     pub revision: Revision,
     /// État de l'historique à cette révision.
     pub history: HistoryState,
+    /// A3 (`guide-de-correction-robustesse.md` §F2/F6) — époque du projet
+    /// courant : un compteur local à l'acteur, **jamais persisté**,
+    /// incrémenté uniquement quand un `Load` réussit (jamais sur
+    /// `Execute`/`Undo`/`Redo`/macro, qui avancent déjà `revision`). Deux
+    /// instantanés de la même identité de projet partagent la même époque ;
+    /// un `Load`, même vers un fichier de forme identique, en change — à la
+    /// différence de `revision`, qui recommencerait à une petite valeur et
+    /// pourrait sembler « antérieure » sans jamais prouver qu'il s'agit
+    /// encore du même projet. Sert à `plotyx-script` à détecter qu'une
+    /// poignée (`Handle`) désigne un `NodeId` d'un projet qui n'est plus
+    /// celui qui l'a produite, avant même de chercher ce `NodeId` dans
+    /// l'arbre courant — où il pourrait, par coïncidence, désigner un autre
+    /// objet.
+    pub epoch: u64,
 }

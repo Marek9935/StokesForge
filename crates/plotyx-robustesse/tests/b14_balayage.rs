@@ -159,6 +159,7 @@ impl Monde {
                 column: c,
                 start: *debut,
                 values: ValueBlock::Float((0..*combien).map(|k| k as f64 + 0.5).collect()),
+                expected_version: None,
             }),
             Pas::AjouterColonne { index } => Some(Command::AddColumn {
                 sheet: self.sheet,

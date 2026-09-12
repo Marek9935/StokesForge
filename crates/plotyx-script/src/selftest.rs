@@ -351,6 +351,7 @@ fn step_edit_undo_redo(session: &SessionHandle, column_a: NodeId) -> SelfTestSte
         column: column_a,
         start: 0,
         values: ValueBlock::Float(vec![99.0]),
+        expected_version: None,
     }) {
         return SelfTestStep::fail(name, format!("écriture par le bus refusée : {error}"));
     }
@@ -492,6 +493,7 @@ fn step_disk_roundtrip(session: &SessionHandle, column_b: NodeId) -> SelfTestSte
         column: column_b,
         start: 0,
         values: ValueBlock::Float(vec![-1.0]),
+        expected_version: None,
     }) {
         return SelfTestStep::fail(
             name,
