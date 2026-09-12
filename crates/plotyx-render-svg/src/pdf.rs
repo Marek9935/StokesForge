@@ -37,11 +37,37 @@
 //! exemple) retrouve le comportement silencieux ci-dessus : aucune erreur,
 //! aucun texte. L'inlining de fragments Typst outlinés, seule façon de
 //! rendre ce choix inutile, est la phase R8.
+//!
+//! # Ajout du 2026-09-13 — les polices embarquées comme filet, sous les
+//! polices système
+//!
+//! `load_system_fonts()` reste la première source : une machine d'export
+//! normale garde le comportement déjà décrit ci-dessus, glyphes compris.
+//! Mais **si aucune police système ne satisfait la famille générique
+//! `sans-serif`** — le conteneur CI nu du paragraphe précédent —
+//! [`ensure_embedded_fallback`] charge Noto Sans, embarquée dans le binaire
+//! (`plotyx_render::fonts`, la même tâche que celle qui a donné un choix à
+//! [`plotyx_render::text::font_definitions`] côté écran), et la déclare
+//! comme police générique `sans-serif` de la base `fontdb`. Un export produit
+//! sur une machine totalement dépourvue de police système redevient donc
+//! lisible, sans dépendre de ce qui s'y trouve installé.
+//!
+//! Ceci ne déplace aucun axe : la géométrie est déjà figée par la mesure
+//! `epaint` avant que `document_to_pdf` ne s'exécute (voir le paragraphe
+//! ci-dessus et le test d'accord R4.5/R5.6) — seul le rendu des glyphes en
+//! dépend, exactement comme le choix entre deux polices système en
+//! dépendait déjà.
+//!
+//! `fontdb` n'est pas ajouté aux dépendances directes de ce crate
+//! (`tests/frontiere.rs`) : il est déjà atteint via `svg2pdf::usvg::fontdb`,
+//! que `usvg` réexporte publiquement — un chemin plutôt qu'une arête de
+//! plus.
 
 use std::path::Path;
 
 use plotyx_core::resolve::ResolvedPlot;
 use plotyx_render::text::TextMeasurer;
+use plotyx_render::FontSet;
 
 use crate::{render_to_string, SvgError};
 
@@ -83,11 +109,24 @@ pub enum PdfError {
 ///
 /// Charge les polices système de la machine d'export avant de convertir —
 /// voir la documentation du module : sans ça, `usvg` abandonne tout le texte
-/// sans la moindre erreur.
+/// sans la moindre erreur. Complète ensuite avec [`ensure_embedded_fallback`]
+/// pour le cas où aucune police système ne conviendrait.
 pub fn document_to_pdf(document: &str) -> Result<Vec<u8>, PdfError> {
     let mut options = svg2pdf::usvg::Options::default();
     options.fontdb_mut().load_system_fonts();
-    let tree = svg2pdf::usvg::Tree::from_str(document, &options)
+    ensure_embedded_fallback(options.fontdb_mut());
+    convert(document, &options)
+}
+
+/// La conversion elle-même, une fois les `Options` (et donc la base de
+/// polices) déjà décidées.
+///
+/// Séparée de [`document_to_pdf`] pour que les tests de
+/// [`ensure_embedded_fallback`] puissent choisir une base de polices sans
+/// passer par `load_system_fonts()` — donc reproduire, de façon
+/// déterministe, une machine d'export qui n'aurait aucune police système.
+fn convert(document: &str, options: &svg2pdf::usvg::Options<'_>) -> Result<Vec<u8>, PdfError> {
+    let tree = svg2pdf::usvg::Tree::from_str(document, options)
         .map_err(|err| PdfError::Parse(err.to_string()))?;
     svg2pdf::to_pdf(
         &tree,
@@ -95,6 +134,33 @@ pub fn document_to_pdf(document: &str) -> Result<Vec<u8>, PdfError> {
         svg2pdf::PageOptions::default(),
     )
     .map_err(|err| PdfError::Conversion(err.to_string()))
+}
+
+/// Garantit qu'un texte `font-family="sans-serif"` (celui qu'écrit
+/// `plotyx_render::pipeline::FONT_FAMILY`, seule famille que ce crate
+/// produit) trouve toujours une police, même sur une machine sans aucune
+/// police système installée.
+///
+/// N'agit que si la famille générique `sans-serif` ne résout déjà sur rien
+/// dans `fontdb` : une machine d'export normale, dont `load_system_fonts()`
+/// a déjà trouvé une police système convenable, n'est pas affectée — cette
+/// fonction ne fait qu'ajouter un filet, jamais remplacer un choix qui
+/// fonctionne déjà.
+fn ensure_embedded_fallback(fontdb: &mut svg2pdf::usvg::fontdb::Database) {
+    let deja_resolue = fontdb
+        .query(&svg2pdf::usvg::fontdb::Query {
+            families: &[svg2pdf::usvg::fontdb::Family::SansSerif],
+            ..svg2pdf::usvg::fontdb::Query::default()
+        })
+        .is_some();
+    if deja_resolue {
+        return;
+    }
+    // Noto Sans : le même défaut et repli que côté écran
+    // (`plotyx_render::fonts::FontSet::Noto`), pour que le choix ne soit
+    // pas arbitraire une deuxième fois.
+    fontdb.load_font_data(FontSet::Noto.sans_bytes().to_vec());
+    fontdb.set_sans_serif_family(FontSet::Noto.sans_family_name());
 }
 
 /// Exporte un graphe **déjà résolu** et rend le document PDF.
@@ -123,4 +189,109 @@ pub fn render_to_pdf_file(
         path: path.display().to_string(),
         source,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn requete_sans_serif() -> svg2pdf::usvg::fontdb::Query<'static> {
+        svg2pdf::usvg::fontdb::Query {
+            families: &[svg2pdf::usvg::fontdb::Family::SansSerif],
+            ..svg2pdf::usvg::fontdb::Query::default()
+        }
+    }
+
+    /// Nombre d'opérateurs `Tj` (affichage d'une chaîne) dans le flux de
+    /// contenu de la première page — la même mesure que celle citée en tête
+    /// de module pour le bogue de R6 (599 → 0).
+    fn compte_tj(pdf: &[u8]) -> usize {
+        let document = lopdf::Document::load_mem(pdf).expect("le PDF doit s'ouvrir sans erreur");
+        let (_, page_id) = document
+            .get_pages()
+            .into_iter()
+            .next()
+            .expect("au moins une page");
+        let contenu = document.get_page_content(page_id);
+        contenu.windows(3).filter(|f| *f == b" Tj").count()
+    }
+
+    /// Témoin, comme dans la documentation du module : une base de polices
+    /// vide (aucun `load_system_fonts()`) ne résout pas la famille générique
+    /// `sans-serif`. Sans ce fait, [`ensure_embedded_fallback`] n'aurait
+    /// rien à garantir.
+    #[test]
+    fn une_base_de_polices_vide_ne_resout_pas_sans_serif() {
+        let fontdb = svg2pdf::usvg::fontdb::Database::new();
+        assert!(
+            fontdb.query(&requete_sans_serif()).is_none(),
+            "témoin invalide : une base neuve résout déjà `sans-serif`"
+        );
+    }
+
+    #[test]
+    fn le_repli_garantit_une_resolution_de_sans_serif() {
+        let mut fontdb = svg2pdf::usvg::fontdb::Database::new();
+        ensure_embedded_fallback(&mut fontdb);
+        assert!(
+            fontdb.query(&requete_sans_serif()).is_some(),
+            "le repli doit garantir une résolution de `sans-serif`"
+        );
+    }
+
+    #[test]
+    fn le_repli_ne_remplace_pas_une_police_systeme_deja_presente() {
+        let mut fontdb = svg2pdf::usvg::fontdb::Database::new();
+        fontdb.load_font_data(FontSet::Fira.sans_bytes().to_vec());
+        fontdb.set_sans_serif_family(FontSet::Fira.sans_family_name());
+
+        ensure_embedded_fallback(&mut fontdb);
+
+        let id = fontdb
+            .query(&requete_sans_serif())
+            .expect("doit résoudre après le repli aussi");
+        let face = fontdb.face(id).expect("info de face");
+        assert!(
+            face.families
+                .iter()
+                .any(|(nom, _)| nom == FontSet::Fira.sans_family_name()),
+            "le repli a remplacé une police système qui fonctionnait déjà"
+        );
+    }
+
+    /// Bout en bout, la raison d'être de ce module : un export produit sur
+    /// une machine **sans aucune police système** — ici simulée en
+    /// n'appelant jamais `load_system_fonts()` — garde son texte grâce au
+    /// repli, alors qu'il le perdrait entièrement sans lui.
+    #[test]
+    fn un_export_sans_aucune_police_systeme_garde_son_texte() {
+        let echantillon = plotyx_render::sample::minimal().expect("graphe minimal");
+        let plot =
+            plotyx_core::resolve::resolve_spec(echantillon.project.tree(), &echantillon.spec);
+        let measurer = TextMeasurer::default();
+        let document = crate::render_to_string(&plot, (400, 300), &measurer).expect("export SVG");
+
+        // Sans repli : la base de polices ne contient rien, exactement le
+        // bogue documenté en tête de module.
+        let options_sans_repli = svg2pdf::usvg::Options::default();
+        let pdf_sans_repli =
+            convert(&document, &options_sans_repli).expect("conversion (sans repli)");
+        assert_eq!(
+            compte_tj(&pdf_sans_repli),
+            0,
+            "témoin invalide : le PDF porte du texte sans le moindre repli ni \
+             la moindre police système chargée"
+        );
+
+        // Avec repli : le même document, la même absence de police système,
+        // mais `ensure_embedded_fallback` en plus.
+        let mut options_avec_repli = svg2pdf::usvg::Options::default();
+        ensure_embedded_fallback(options_avec_repli.fontdb_mut());
+        let pdf_avec_repli =
+            convert(&document, &options_avec_repli).expect("conversion (avec repli)");
+        assert!(
+            compte_tj(&pdf_avec_repli) > 0,
+            "le repli n'a pas empêché la perte du texte"
+        );
+    }
 }
