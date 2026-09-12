@@ -1,0 +1,60 @@
+//! Le socle de rendu voit `epaint`, pas `egui`.
+//!
+//! C'est toute la raison d'être de ce crate : si sa liste de dépendances
+//! gagnait `egui`, `plotyx-render-svg` le gagnerait aussi, et l'export
+//! cesserait de pouvoir se tester sans serveur graphique. Même discipline
+//! que `plotyx-core/tests/no_ui_dependency.rs` : on liste ce qui est permis
+//! plutôt que de deviner ce qui est interdit.
+
+const AUTORISEES: &[&str] = &[
+    "plotyx-core",      // ResolvedPlot, Tree, Column
+    "plotyx-plot",      // PlotSpec
+    "plotters",         // sans ses fonts (default-features = false)
+    "plotters-backend", // BackendTextStyle, DrawingBackend
+    "epaint",           // la mesure, et rien d'autre de la pile UI
+];
+
+#[test]
+fn seules_les_dependances_prevues_sont_declarees() {
+    let manifest: toml::Value =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+            .expect("Cargo.toml lisible")
+            .parse()
+            .expect("Cargo.toml valide");
+    let deps = manifest
+        .get("dependencies")
+        .and_then(|d| d.as_table())
+        .expect("section [dependencies]");
+    for nom in deps.keys() {
+        assert!(
+            AUTORISEES.contains(&nom.as_str()),
+            "dépendance `{nom}` non listée : ce crate est la référence \
+             commune aux deux backends, il ne doit connaître ni egui, ni \
+             plotters-svg, ni typst"
+        );
+    }
+}
+
+#[test]
+fn plotters_est_pris_sans_ses_fonts() {
+    // `default-features = false` élimine font-kit, image, chrono et le scan
+    // des fonts système (`architecture-choisie.md` §4.4). Le retrait n'est
+    // sûr que parce que les deux backends surchargent `estimate_text_size` —
+    // et il faut qu'il reste en place, sinon Plotters se remettrait à
+    // mesurer tout seul, avec d'autres polices que l'écran.
+    let manifest: toml::Value =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+            .expect("Cargo.toml lisible")
+            .parse()
+            .expect("Cargo.toml valide");
+    let plotters = manifest
+        .get("dependencies")
+        .and_then(|d| d.get("plotters"))
+        .expect("dépendance plotters");
+    assert_eq!(
+        plotters.get("default-features").and_then(|v| v.as_bool()),
+        Some(false),
+        "plotters a retrouvé ses features par défaut : les fonts système \
+         reviennent, et avec elles une seconde source de mesure"
+    );
+}

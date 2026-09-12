@@ -6,6 +6,7 @@ members = [
     "crates/plotyx-commands",
     "crates/plotyx-session",
     "crates/plotyx-plot",
+    "crates/plotyx-render",
     "crates/plotyx-persistence",
     "crates/plotyx-python",
     "crates/plotyx-script",

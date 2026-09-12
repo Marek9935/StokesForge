@@ -1,0 +1,32 @@
+[package]
+name = "plotyx-render"
+version = "0.0.0"
+edition.workspace = true
+description = "Socle des deux backends de rendu : la source unique de mesure de texte (epaint) et le pipeline Plotters neutre vis-à-vis du backend."
+
+[lints]
+workspace = true
+
+[dependencies]
+plotyx-core = { path = "../plotyx-core" }
+plotyx-plot = { path = "../plotyx-plot" }
+# Plotters sans ses fonts (`architecture-choisie.md` §4.4) : ni font-kit, ni
+# image, ni chrono, ni ttf-parser, ni scan des fonts système. Le retrait n'est
+# sûr que parce que les DEUX backends surchargent `estimate_text_size` sur la
+# mesure de ce crate — c'est le seul point du chantier où un bug est
+# silencieux.
+plotters = { version = "0.3", default-features = false, features = [
+    "all_series",
+    "all_elements",
+] }
+plotters-backend = "0.3"
+# `epaint` seul, pas `egui` : ce crate n'a besoin que de la mise en page du
+# texte (`Fonts`, `FontDefinitions`, `TextOptions`), pas d'une pile UI. C'est
+# ce qui permet à `plotyx-render-svg` de mesurer comme l'écran sans faire
+# entrer egui/eframe/winit dans son arbre.
+epaint = { version = "0.36.2", default-features = false, features = [
+    "default_fonts",
+] }
+
+[dev-dependencies]
+toml = "0.8"
