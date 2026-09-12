@@ -491,6 +491,70 @@ utilisateur ; sans urgence pour le développement du socle.
 
 ---
 
+## 11. Les six plafonds — tranchés, et vérifiés inatteignables en usage réel
+
+`guide-de-correction-robustesse.md` (§F4) demandait ici « une table de six
+nombres ». Trois campagnes de correction plus tard (F2 à F6 closes), les
+six plafonds réels du format et du modèle sont fixés et testés. Cette
+section répond à une question qui revient : **est-ce qu'un usage intensif
+mais réaliste peut un jour les atteindre ?**
+
+Il faut distinguer deux familles, souvent confondues (y compris en
+interne — le nom de fichier `b4_allocateur.rs` teste l'anomalie **B1**, pas
+B4) :
+
+- des **compteurs incrémentaux**, qui montent à chaque événement et dont
+  trois seulement survivent à la fermeture du fichier (les trois autres
+  sont des variables de process, remises à zéro à chaque relance) ;
+- des **plafonds de validation fixes**, qui rejettent une valeur lue sur
+  disque ou reçue en entrée — ils ne comptent rien, ils bornent.
+
+### Compteurs incrémentaux persistés (accumulent sur la durée de vie du fichier)
+
+| Compteur | Sert à | Plafond | Débordement géré ? |
+|---|---|---|---|
+| `IdAllocator.next` → `NodeId` | identifier chaque nœud créé | `u64::MAX` (~1,8×10¹⁹) ; **borné à la lecture** à `MAX_NODE_ID = 10¹²` (`plotyx-persistence/src/lib.rs`, B1) | oui — `checked_add`, refuse via `CoreError::IdentifiersExhausted` avant `u64::MAX` |
+| `Project.column_version_counter` → `Column::version` | détecter qu'une commande porte sur un contenu de colonne périmé (A2, A7) | `u64::MAX` | non — `wrapping_add` ; jugé hors d'atteinte, jamais observé |
+| `FileBody.save_counter` | détecter qu'un fichier a été modifié ailleurs depuis le dernier chargement (B8) | `u64::MAX` | non — addition simple ; une sauvegarde par jour pendant l'âge de l'univers n'approche pas la borne |
+
+**Scénario concret vérifié** : un fichier rouvert tous les jours, quelques
+milliers de colonnes modifiées par jour, pendant 10 ans → de l'ordre de
+2×10⁷ incréments cumulés sur `NodeId` et `column_version_counter`, ~3 600
+sur `save_counter`. Marge de 5 à 12 ordres de grandeur avant le plafond le
+plus bas (`MAX_NODE_ID = 10¹²`). **Aucun des trois n'est atteignable par un
+usage réaliste, aussi intensif soit-il.** Le seul chemin réaliste vers ces
+plafonds est un fichier **forgé** portant directement une valeur proche de
+la limite — et c'est exactement le cas que le read-bound de B1 intercepte
+à la lecture.
+
+*(`revision` et `epoch` de `actor::run`, et le `ClientId` process-global,
+sont aussi des compteurs monotones mais ne persistent pas : ils repartent
+de zéro à chaque relance de l'application et n'accumulent donc jamais sur
+plusieurs jours.)*
+
+### Plafonds de validation fixes (rejettent une valeur, ne comptent rien)
+
+| Plafond | Constante | Valeur | Anomalie | Où il s'applique |
+|---|---|---|---|---|
+| Identifiant de nœud lu sur disque | `MAX_NODE_ID` | 10¹² | B1 | `plotyx-persistence::load` |
+| Lignes d'une colonne | `MAX_COLUMN_ROWS` | 100 000 000 | B1/B2 | `plotyx-core::Column` (écriture, insertion) |
+| Classes d'histogramme | `MAX_HISTOGRAM_BINS` | 65 536 (1<<16) | **B4** | `plotyx-plot::BinCount`, relu en `convert.rs` |
+| Profondeur d'imbrication de macro | `MAX_MACRO_DEPTH` | 1 000 | B7 | `plotyx-commands::History::begin_macro` |
+| Longueur d'un nom (nœud, colonne…) | `MAX_NAME_CHARS` | 255 caractères | — | `plotyx-core::name` |
+| Position d'un panneau (ligne/colonne) | `MAX_PANEL_POSITION` | 10 000 | B2 | `plotyx-persistence::convert` |
+
+Ces six-là n'« accumulent » rien : ils refusent une valeur hors bornes
+qu'un fichier prétend porter, qu'elle vienne d'un usage réel aberrant ou
+d'un fichier construit à la main. Ils sont dimensionnés très au-dessus de
+tout usage réel et très en-dessous de ce qui casserait un type ou un
+calcul en aval (`usize`, allocation, `as`).
+
+**Quand ça doit être tranché** : ✅ tranché — six plafonds fixés,
+vérifiés au test (`plotyx-robustesse`), et vérifiés ici comme inatteignables
+en usage réaliste.
+
+---
+
 ## Récapitulatif
 
 | # | Question | Bloque quoi ? | À trancher |
@@ -505,3 +569,4 @@ utilisateur ; sans urgence pour le développement du socle.
 | 8 | Calendrier | rien | avant engagement |
 | 9 | Macro globale à la session (absorbe les autres clients) | rien | chantier de l'UI réelle, avec la 5 |
 | 10 | Distribution Python *strippée* | rien | ✅ tranchée le 2026-09-09 : strippée, 333 → **155 Mo** |
+| 11 | Les six plafonds (compteurs vs bornes fixes) | rien | ✅ tranchée le 2026-09-12 : fixés, testés, vérifiés inatteignables en usage réel |
