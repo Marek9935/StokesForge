@@ -785,6 +785,85 @@ issu d'un fichier d'exemple.
 
 ## Phase R6 — Export PDF (≈2-3 jours)
 
+> **Statut : close le 2026-09-12.** `svg2pdf` 0.13.0 branché dans
+> `plotyx-render-svg` — pas de nouveau crate — via un module `pdf` de 108
+> lignes et un fichier de tests de 139 lignes (3 tests). 521 tests au
+> workspace (518 avant, **+3**), 9 `#[ignore]` inchangés, clippy sans
+> avertissement, `cargo fmt` sans dérive nouvelle (les 25 échecs
+> préexistants de §7.4 du guide de robustesse, sur les mêmes fichiers).
+> **Critère de sortie tenu** : `cargo tree -p plotyx-plot` toujours limité à
+> `plotyx-id`, `cargo tree -p plotyx-render-svg` toujours sans `egui`, ni
+> `eframe`, ni `winit` — avec `svg2pdf` désormais dedans, comme attendu.
+>
+> **Le chemin est exactement celui annoncé, à un détail d'API près.**
+> `document_to_pdf` reparse la `String` que [`render_to_string`] vient
+> d'écrire avec `usvg::Tree::from_str`, puis appelle `svg2pdf::to_pdf` —
+> `render_to_pdf` n'est qu'un appel à [`render_to_string`] suivi de celui-là.
+> Ce n'est pas un troisième backend : aucun `DrawingBackend` n'est écrit ici,
+> le module ne dessine rien.
+>
+> **Une décision prise en écrivant le module, qu'aucun document source
+> n'annonçait : charger les polices système de la machine d'export avant de
+> convertir.** Mesuré sur le graphe réaliste de R5 (110 balises `<text>`) :
+> sans le moindre `fontdb`, `usvg` ne signale **aucune erreur** mais
+> abandonne silencieusement tout le texte — le flux de contenu passe de 599
+> opérateurs `Tj` à zéro. Un export PDF sans un seul titre, libellé d'axe ni
+> graduation n'est pas un défaut de fidélité mineur, c'est un graphe muet ;
+> `fontdb_mut().load_system_fonts()` est un simple parcours du système de
+> fichiers, sans serveur graphique ni écran, donc sans coût pour la
+> discipline du chantier. **Ceci ne tranche pas le point ouvert n°6
+> d'`architecture-choisie.md` §5.2** (outliner ou non le texte de l'export) :
+> ça choisit seulement, en attendant, l'alternative la moins mauvaise entre
+> deux comportements non tranchés. Et ça déplace l'asymétrie déjà connue
+> côté SVG plutôt que de la reproduire à l'identique — côté SVG, c'est la
+> machine qui **lit** le fichier qui a besoin d'une police compatible ; côté
+> PDF, c'est la machine qui **l'exporte**, une fois, après quoi `svg2pdf`
+> embarque un sous-ensemble de la police choisie et le fichier devient
+> autonome. Un PDF est donc, une fois produit, plus portable qu'un SVG — mais
+> deux exports du même graphe sur deux machines peuvent embarquer deux
+> polices différentes pour « sans-serif », avec des glyphes différents et
+> sans effet sur la géométrie, puisque les axes sont déjà placés par la
+> mesure `epaint` avant que `svg2pdf` n'intervienne. **À savoir pour la CI de
+> ce dépôt** : `fmt`/`clippy`/`test` tournent sur `rust:1`, une image sans
+> aucune police installée — les PDF produits pendant ces jobs n'ont donc
+> aucun texte visible, silencieusement, exactement comme décrit ci-dessus.
+> Sans conséquence sur la tâche 6.2, dont aucune assertion ne porte sur la
+> présence de texte : seulement sur la structure PDF (nombre de pages,
+> `MediaBox`) et la taille du fichier. Une machine de développement normale
+> (celle qui fait tourner `plotyx-app`) a des polices, et le texte y
+> apparaît.
+>
+> **Le test 6.2 compare trois sources, pas deux.** La taille demandée à
+> l'export, celle réellement écrite dans l'attribut `width`/`height` du SVG,
+> et la `MediaBox` que `lopdf` retrouve dans le PDF — comparer seulement les
+> deux premières ne verrait pas une divergence entre [`render_to_string`] et
+> [`render_to_pdf`], deux appels séparés au pipeline même s'ils partagent
+> aujourd'hui tout leur code. Il porte sur le graphe réaliste de R5 (cinq
+> panneaux, six types de tracé, échelle logarithmique), pas un canevas vide
+> qui s'accorderait trivialement, et un second test fait varier la taille de
+> figure pour vérifier que la `MediaBox` varie avec elle — sans lui, une
+> fonction qui ignorerait `size` passerait le premier test pour une mauvaise
+> raison. Un troisième test écrit sur disque, symétrique à
+> `ecriture_sur_disque` côté SVG.
+>
+> **Un choix de dépendance de test, pas de production, documenté ici faute
+> d'un autre endroit où le faire : `lopdf`**, en dev-dépendance et sans
+> fonctionnalités par défaut (ni chiffrement, ni image, ni horodatage). « Le
+> PDF s'ouvre » demande un analyseur qui ne partage aucun code avec
+> `svg2pdf` ; une recherche d'octets dans notre propre sortie n'aurait prouvé
+> que « `svg2pdf` a écrit ce qu'on lui a demandé d'écrire ». `lopdf` n'entre
+> pas dans `architecture-choisie.md` §8 (qui ne couvre que les dépendances de
+> production) et ne pèse sur aucune des deux frontières surveillées :
+> `plotyx-render-svg/tests/frontiere.rs` reste vert, `lopdf` n'atteignant ni
+> `egui`, ni `eframe`, ni `winit`.
+>
+> **Reste ouvert**, et volontairement hors de cette phase : le point ouvert
+> n°6 d'`architecture-choisie.md` (outliner ou non le texte de l'export) ;
+> l'exemple visuel (`cargo run -p plotyx-render-svg --example figure`) n'a
+> pas été étendu au PDF — le tableau 6.1-6.2 n'en demandait pas, et R4/R5
+> l'ont déjà donné côté SVG ; l'inlining de fragments Typst outlinés, seule
+> façon de rendre le choix de police d'export sans objet, est la phase R8.
+
 | # | Tâche | Livrable |
 |---|---|---|
 | 6.1 | `svg2pdf` 0.13.0 branché sur la sortie de `plotyx-render-svg` | PDF |
@@ -922,7 +1001,14 @@ de produit.
    ce que le LTTB ne règle pas.
 3. **Texte de l'export : tout outliner, ou assumer l'asymétrie ?**
    (`architecture-choisie.md` point ouvert n°6) — à trancher avant le
-   premier export destiné à une publication.
+   premier export destiné à une publication. **Précision du 2026-09-12
+   (R6)** : côté PDF, l'asymétrie n'est pas celle du SVG (la machine qui
+   **lit**) mais celle de la machine qui **exporte** — sans police système
+   au moment de la conversion, `svg2pdf` abandonne tout le texte sans la
+   moindre erreur (mesuré : 599 opérateurs `Tj` sur le graphe réaliste de
+   R5, zéro sans police). `plotyx-render-svg` charge donc les polices
+   système par défaut ; ça ne tranche pas ce point, ça évite seulement
+   l'alternative strictement pire.
 4. ~~Compteur de modification par colonne.~~ **Tranché et construit le
    2026-09-10** : `Column::version()` (`architecture-choisie.md` point
    ouvert n°8, clos).

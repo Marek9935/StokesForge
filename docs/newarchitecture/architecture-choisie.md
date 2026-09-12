@@ -431,6 +431,21 @@ par une heuristique. C'est l'inverse de l'intuition.
 > le texte de l'export par le même chemin d'outline que Typst (cohérent,
 > portable, mais il faut outliner soi-même les labels ordinaires), soit
 > assumer l'asymétrie. Voir le point ouvert n°6.
+>
+> **Ajout du 2026-09-12 (phase R6)** : la même question se pose côté PDF,
+> sous une forme différente. `svg2pdf` ne surcharge rien de `plotters` — il
+> reparse le SVG déjà produit avec `usvg` — mais sans le moindre `fontdb`,
+> `usvg` **abandonne silencieusement tout le texte** (mesuré : 599
+> opérateurs `Tj` sur le graphe réaliste de R5, zéro sans police). L'export
+> PDF de `plotyx-render-svg` charge donc les polices système de la machine
+> qui exporte avant de convertir. Ça ne tranche pas ce point ouvert — ça
+> déplace seulement l'asymétrie : côté SVG, c'est la machine qui **lit** le
+> fichier qui a besoin d'une police compatible ; côté PDF, c'est la machine
+> qui **l'exporte**, une fois, après quoi `svg2pdf` embarque un
+> sous-ensemble de la police choisie et le fichier devient autonome — plus
+> portable que le SVG une fois produit, mais avec un choix de glyphes qui
+> dépend de la machine d'export plutôt que de lecture. Détail et chiffres :
+> `roadmap-rendu.md`, phase R6.
 
 **Ce qui reste réellement à faire pour la fusion**, et c'est mécanique :
 
