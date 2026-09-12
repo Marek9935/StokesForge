@@ -443,6 +443,31 @@ impl Project {
         tree.column_mut(column)?.restore(column_type, values)
     }
 
+    /// Impose un numéro de version à `column`, sans toucher à son contenu.
+    ///
+    /// **Réservé à `History::revert`** (`plotyx-commands`, A7,
+    /// `guide-de-correction-robustesse.md` §F2) : `Entry::Structural`
+    /// restaure un `Arc<Tree>` entier via [`Project::replace_tree`],
+    /// compteurs de version compris, ce qui peut faire reculer celui d'une
+    /// colonne vers un numéro qu'un contenu différent (le sien, à un autre
+    /// instant de son histoire) a déjà porté. `History::revert` appelle
+    /// cette méthode juste après `replace_tree` pour ré-attribuer un
+    /// numéro **frais** (jamais vu dans le projet) aux seules colonnes
+    /// concernées, sans quoi une écriture future pourrait faire coïncider
+    /// deux contenus sous le même numéro — exactement ce que la doctrine
+    /// des estampilles du guide interdit.
+    ///
+    /// N'importe quelle valeur peut être imposée : cette méthode ne
+    /// vérifie **pas** elle-même qu'elle est fraîche, c'est la
+    /// responsabilité de l'appelant (voir `History::restamp_regressed_versions`).
+    /// `Err(Structure)` si `column` n'est pas une colonne.
+    pub fn restamp_column_version(&mut self, column: NodeId, version: u64) -> CoreResult<()> {
+        self.check_column(column)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        tree.column_mut(column)?.restamp_version(version);
+        Ok(())
+    }
+
     /// Insère `count` lignes à `at` dans **chaque colonne de la feuille telle
     /// que `at <= len(colonne)`**. Une colonne trop courte pour avoir une
     /// ligne `at` (`at > len`) est ignorée : les longueurs sont libres entre

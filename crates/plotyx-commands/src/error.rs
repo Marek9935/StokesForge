@@ -23,6 +23,17 @@ pub enum CommandError {
     /// Changement de limite refusé : la pile n'est pas vide.
     #[error("la limite d'historique ne se change que sur une pile vide")]
     StackNotEmpty,
+    /// `begin_macro` refusé : l'imbrication a déjà atteint
+    /// [`crate::history::MAX_MACRO_DEPTH`] niveaux (B7,
+    /// `guide-de-correction-robustesse.md` §F4 — option 1 : une constante
+    /// nommée et une erreur, plutôt que de rendre `revert`/`Drop` itératifs
+    /// sur `Entry::Macro`). Rien n'empilait cette limite avant ce correctif
+    /// : au-delà de ~10 891 niveaux, annuler une imbrication aussi profonde
+    /// débordait la pile du fil de l'acteur et faisait `abort()` le
+    /// processus — voir `plotyx-robustesse/src/bin/sonde_pile.rs`. Le champ
+    /// nomme la limite refusée.
+    #[error("imbrication de macros trop profonde (limite : {0})")]
+    MacroTooDeep(usize),
 }
 
 /// Alias de résultat du crate.

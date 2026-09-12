@@ -204,6 +204,22 @@ pub const DEFAULT_LIMIT: usize = 100;
 /// la section « Deux limites » en tête de module.
 pub const DEFAULT_BYTE_LIMIT: usize = 512 * 1024 * 1024;
 
+/// Profondeur maximale d'imbrication des macros (B7,
+/// `guide-de-correction-robustesse.md` §F4 — option 1, retenue par le
+/// guide : une constante nommée et une erreur, plutôt que de rendre
+/// `revert`/`Drop` itératifs sur `Entry::Macro`, « du code délicat sur un
+/// enum récursif »). Rien ne bornait l'imbrication avant ce correctif :
+/// `begin_macro`/`end_macro` sont eux-mêmes itératifs (les construire ne
+/// déborde jamais, la sonde le vérifie jusqu'à 200 000 niveaux), mais
+/// `History::revert` et le `Drop` dérivé d'`Entry` récursent sur
+/// `Entry::Macro` — au-delà de ~10 891 niveaux, l'un ou l'autre déborde la
+/// pile du fil de l'acteur (2 Mio par défaut) et fait `abort()` le
+/// processus entier, y compris tout travail non sauvegardé (voir
+/// `plotyx-robustesse/src/bin/sonde_pile.rs`). Mille niveaux couvrent trois
+/// ordres de grandeur au-dessus de tout usage plausible (§7 du guide) tout
+/// en laissant une marge large sous le seuil mesuré de débordement.
+pub const MAX_MACRO_DEPTH: usize = 1000;
+
 /// Pile d'historique à deux natures.
 ///
 /// Elle **ne possède pas** le `Project` : chaque opération le reçoit en
@@ -438,17 +454,25 @@ impl History {
     }
 
     /// Ouvre une macro : les commandes suivantes s'y accumulent au lieu d'être
-    /// empilées. Les macros s'imbriquent.
+    /// empilées. Les macros s'imbriquent, jusqu'à [`MAX_MACRO_DEPTH`]
+    /// niveaux : au-delà, `Err(MacroTooDeep)` (B7,
+    /// `guide-de-correction-robustesse.md` §F4) plutôt que d'empiler encore
+    /// — voir la doc de [`MAX_MACRO_DEPTH`] pour ce que cette limite évite.
+    /// Un refus ne modifie rien : ni `self.macros`, ni `self.saved_redo`.
     ///
     /// À l'ouverture de la macro **la plus externe** (`macro_depth() == 0 →
     /// 1`), la pile de rétablissement courante est mise de côté : elle
     /// pourra être restaurée si cette macro est avortée, voir
     /// [`History::abort_macro`].
-    pub fn begin_macro(&mut self, label: &str) {
+    pub fn begin_macro(&mut self, label: &str) -> CommandResult<()> {
+        if self.macros.len() >= MAX_MACRO_DEPTH {
+            return Err(CommandError::MacroTooDeep(MAX_MACRO_DEPTH));
+        }
         if self.macros.is_empty() {
             self.saved_redo = Some(std::mem::take(&mut self.redo));
         }
         self.macros.push((label.to_string(), Vec::new()));
+        Ok(())
     }
 
     /// Ferme la macro courante : elle devient **une seule** entrée `Macro`,
@@ -921,7 +945,17 @@ impl History {
     fn revert(project: &mut Project, entry: &Entry) -> CommandResult<()> {
         match entry {
             Entry::Structural { before, .. } => {
+                // A7 (`guide-de-correction-robustesse.md` §F2) —
+                // `replace_tree` restaure l'arbre `before` tel quel,
+                // compteurs de version compris : une colonne peut alors
+                // reculer vers un numéro qu'un contenu différent (le sien,
+                // à un autre instant de son histoire) porte déjà. On
+                // mémorise l'arbre qu'on quitte avant de le remplacer, pour
+                // pouvoir comparer les deux ensuite — voir
+                // `restamp_regressed_versions`.
+                let discarded = Arc::clone(project.tree());
                 project.replace_tree(Arc::clone(before));
+                restamp_regressed_versions(project, &discarded, before)?;
                 Ok(())
             }
             Entry::Data { delta, .. } => Self::revert_delta(project, delta),
@@ -1077,6 +1111,92 @@ fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, Co
         .as_column()
         .ok_or_else(|| CoreError::Structure(format!("{column} n'est pas une colonne")))?;
     Ok((target.column_type(), target.values().clone()))
+}
+
+// ===========================================================================
+// A7 — le compteur de version d'une colonne ne recule jamais (§F2)
+// ===========================================================================
+//
+// `Entry::Structural::revert` remplace l'arbre entier (`Project::replace_tree`),
+// ce qui restaure aussi le compteur de version de chaque colonne qu'il porte
+// — voir la doctrine des estampilles du guide (§F2, tableau) : une version de
+// contenu doit être monotone et ne jamais désigner deux contenus. Restaurer un
+// ancien arbre peut faire reculer le compteur d'une colonne dont le contenu a,
+// entre-temps, divergé (par une écriture normale, ou par l'annulation d'une
+// écriture normale — « annuler est une écriture de plus », §6 du guide) :
+// une écriture future repartant de ce numéro plus bas peut alors retomber sur
+// un numéro déjà porté par un autre contenu de cette même colonne.
+
+/// Ré-attribue un numéro de version **frais** (jamais vu dans `discarded` ni
+/// dans `restored`) à chaque colonne dont le buffer n'est **pas** le même
+/// objet dans les deux arbres — appelée juste après que `revert` a remplacé
+/// l'arbre courant (`discarded`, celui qu'on quitte) par `restored`.
+///
+/// # Quelles colonnes
+///
+/// Comparée par **identité de pointeur** (voir [`column_footprint`]), jamais
+/// par égalité de valeurs : deux buffers distincts qui contiendraient par
+/// hasard les mêmes octets restent deux allocations différentes, donc deux
+/// moments distincts de l'histoire de cette colonne (la copie-à-l'écriture
+/// en crée une nouvelle dès qu'un buffer partagé est modifié — voir
+/// `Column::set_values`) ; son compteur a donc pu avancer sans que
+/// `restored` (figé au moment où l'entrée a été empilée) le sache, et
+/// pourrait reculer si on ne le touche pas. Une colonne dont le buffer est
+/// resté le **même** objet dans les deux arbres n'a subi aucune écriture
+/// entre les deux : rien n'a pu avancer, rien ne peut reculer, et la
+/// laisser intacte évite un `Arc::make_mut` pour rien (D3 du guide veille
+/// déjà sur ce genre de coût). Une colonne absente de `discarded` (elle
+/// vient de réapparaître) ou de `restored` (elle disparaît) n'est jamais
+/// concernée : voir le corps.
+///
+/// # Le numéro attribué
+///
+/// `1 + max(plus haute version de discarded, plus haute version de
+/// restored)`, incrémenté à chaque colonne restampée dans cette même
+/// passe : plus haut que tout numéro que **n'importe quelle** colonne du
+/// projet a jamais porté jusqu'ici, jamais deux fois le même. `discarded`
+/// est l'arbre courant au moment de l'appel — donc à jour de toute écriture
+/// passée, y compris celles qu'aucun compteur externe ne suit séparément —
+/// ce qui évite d'avoir à maintenir un allocateur de versions à part (sur
+/// le modèle d'`IdAllocator`) : la valeur repart toujours de ce qu'on vient
+/// de lire dans l'arbre courant, jamais d'un total mis en cache qui
+/// pourrait être périmé.
+fn restamp_regressed_versions(
+    project: &mut Project,
+    discarded: &Tree,
+    restored: &Tree,
+) -> CommandResult<()> {
+    let mut next_fresh = 1 + highest_column_version(discarded).max(highest_column_version(restored));
+    for (id, node) in restored.iter() {
+        let Some(restored_column) = node.as_column() else {
+            continue;
+        };
+        // Absente de `discarded` : elle vient de réapparaître (annulation
+        // d'une suppression, par exemple) — rien n'a pu s'écrire dans un
+        // nœud qui n'existait pas encore, son compteur ne peut pas avoir
+        // régressé.
+        let Some(discarded_column) = discarded.node(id).and_then(|node| node.as_column()) else {
+            continue;
+        };
+        let same_buffer = column_footprint(discarded_column.values()).0
+            == column_footprint(restored_column.values()).0;
+        if !same_buffer {
+            project.restamp_column_version(id, next_fresh)?;
+            next_fresh += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Plus haute version de colonne portée par `tree` ; `0` si `tree` n'en a
+/// aucune (un projet neuf n'a pas de colonne, et `Column::version` commence
+/// lui-même à `0`).
+fn highest_column_version(tree: &Tree) -> u64 {
+    tree.iter()
+        .filter_map(|(_, node)| node.as_column())
+        .map(|column| column.version())
+        .max()
+        .unwrap_or(0)
 }
 
 // ===========================================================================

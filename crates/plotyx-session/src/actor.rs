@@ -35,12 +35,16 @@ pub(crate) enum Request {
         /// Réponse : nouvelle révision si quelque chose a été rétabli.
         reply: Sender<CommandResult<Option<Revision>>>,
     },
-    /// Ouvre une macro. Toujours un succès (voir `History::begin_macro`).
+    /// Ouvre une macro. `Err(MacroTooDeep)` au-delà de
+    /// `History::MAX_MACRO_DEPTH` niveaux d'imbrication (B7,
+    /// `guide-de-correction-robustesse.md` §F4) — le seul cas de refus,
+    /// `History::begin_macro` n'en connaît pas d'autre.
     BeginMacro {
         /// Libellé de la macro.
         label: String,
-        /// Réponse : nouvelle révision (l'état de l'historique a changé).
-        reply: Sender<Revision>,
+        /// Réponse : nouvelle révision (l'état de l'historique a changé), ou
+        /// l'erreur de `History::begin_macro`.
+        reply: Sender<CommandResult<Revision>>,
     },
     /// Ferme la macro courante.
     EndMacro {
