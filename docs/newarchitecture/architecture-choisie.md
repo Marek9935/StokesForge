@@ -295,6 +295,40 @@ légende. Deux régimes, à séparer nettement :
 > Reste non vérifié : le **branchement** sur Plotters. R0 valide que l'outil
 > de mesure existe et qu'il est fidèle, pas que `estimate_text_size` le
 > consomme correctement — c'est la tâche R4.4.
+>
+> **Corrigé par R4 le 2026-09-12 — la précision 1 est vraie des avances,
+> fausse de la hauteur de ligne.** En écrivant le test qui devait entériner
+> l'indépendance au `pixels_per_point`, R4 a constaté qu'elle ne tient pas
+> pour la hauteur : `epaint` cale la hauteur d'une ligne sur la grille de
+> pixels **physiques** (`text_layout.rs` : `max_row_height =
+> point_scale.round_to_pixel(max_row_height)`). Mesuré à 9,7 pt de corps,
+> un galley fait 11 points de haut à `pixels_per_point = 1,0` et 12 à 1,25.
+> R0 ne pouvait pas le voir : elle comparait des avances de glyphes, pas des
+> rectangles de galley.
+>
+> Ce n'est pas un détail, parce que `DrawingArea::titled` fait descendre le
+> haut de la zone de tracé de la hauteur du titre : **la figure exportée
+> aurait dépendu de l'écran de celui qui l'exporte**, sans qu'aucune erreur
+> ne soit levée — précisément le mode de panne que ce paragraphe existe pour
+> empêcher.
+>
+> **Règle retenue, tenue par construction** : on **mesure** toujours à
+> `pixels_per_point = 1,0` (`plotyx_render::text::MEASUREMENT_PIXELS_PER_POINT`),
+> on ne **dessine** qu'au `pixels_per_point` réel. Le trait `TextSource` a
+> donc deux méthodes, `measure` et `layout`, et non une. Prix payé : au plus
+> un pixel physique d'écart entre la boîte réservée et les glyphes sur un
+> écran HiDPI — sans effet sur la géométrie, le texte étant ancré et non
+> étiré. Le fait est verrouillé *dans le sens de l'affirmation* par un test
+> (`plotyx-render/src/text.rs`) : si `epaint` changeait d'avis, le test
+> tomberait et la règle pourrait disparaître.
+>
+> **Conséquence sur le mécanisme du §4.3, et c'est un assouplissement de
+> plus** : puisqu'un `egui::Context` ne sait mettre en page qu'au
+> `pixels_per_point` courant, la mesure ne peut *pas* passer par lui. Elle
+> passe par une `Fonts` hors `Context` construite sur les mêmes
+> `FontDefinitions` — ce que R0 0.1 avait déjà validé à 0,000000 px. Mesurer
+> et dessiner ne sont donc pas le même appel ; ils partent du même jeu de
+> polices, et c'est cela, et seulement cela, que l'invariant demande.
 
 ### 4.4 Plotters sans ses fonts
 
@@ -331,6 +365,16 @@ fonts système**, que le choix Typst veut de toute façon désactiver
 > partagé du §4.3 est donc **obligatoire dans `plotyx-render-svg` aussi**,
 > pas seulement dans le backend egui. À cette condition, et seulement à
 > elle, le retrait des fonts de Plotters est sûr.
+>
+> **Complément de R4, le 2026-09-12 — ce n'est pas `estimate_text_size` le
+> plus dangereux, c'est `draw_text`.** Avec `default-features = false`,
+> l'implémentation **par défaut** de `draw_text` finit sur `FontData::draw`
+> de `style/font/naive.rs`, qui est un `panic!("The font implementation is
+> unable to draw text")`. Un backend qui ne surcharge pas `draw_text` ne
+> mesure donc pas mal : il **plante** à la première graduation. Les deux
+> backends du chantier la surchargent — egui directement, SVG par délégation
+> à `SVGBackend`, qui la surcharge lui-même — mais un troisième tomberait
+> dedans, et l'erreur ne ressemblerait en rien à un problème de police.
 
 ---
 
@@ -487,6 +531,46 @@ sans toucher au modèle de graphe — la même discipline que « aucun Qt dans
 > `cargo tree -p plotyx-plot` ne montre plus que `plotyx-id`, plus strict
 > que le critère de sortie de R2. Détail dans `roadmap-rendu.md`, phase R3.
 
+> **Ajout du 2026-09-12 — un dixième crate, `plotyx-render`, également
+> imprévu.** La phase R4 a dû donner aux deux backends **la même** mesure de
+> texte (tâche 4.1) et **le même** pipeline Plotters. Ces deux choses ne
+> peuvent vivre ni dans `plotyx-render-svg` — le backend écran dépendrait du
+> crate d'export — ni dans `plotyx-render-egui` — toute la pile egui
+> entrerait dans l'export, ce que la ligne « pas `egui`/`eframe` » du tableau
+> ci-dessus interdit. C'est la même figure qu'avec `plotyx-id` en R3 : la
+> partie commune descend d'un cran.
+>
+> ```text
+> plotyx-render   (plotters sans ses fonts, epaint, plot, core)
+>   ↑                        ↑
+> plotyx-render-egui   plotyx-render-svg
+> ```
+>
+> Ce que le crate porte : `text` (la `FontDefinitions` unique, le trait
+> `TextSource`, l'unique `estimate`), `pipeline` (la suite d'appels
+> Plotters, générique sur `DB: DrawingBackend`) et `color` (la lecture des
+> `#RRGGBB` du spec). Ce qu'il ne connaît pas : ni `egui`, ni `eframe`, ni
+> `plotters-svg`, ni `typst` — vérifié par `plotyx-render/tests/frontiere.rs`.
+>
+> **Le pipeline partagé n'est pas un effet de bord du partage de la
+> mesure ; c'est la pièce qui rend le critère de fin structurel.** La tâche
+> 4.5 demande un test qui *constate* l'accord des deux backends. Un test
+> constate, il n'empêche pas : avec deux `ChartBuilder` distincts, chaque
+> marge et chaque taille de police serait une occasion de diverger, à
+> découvrir après coup. Avec un seul, les deux backends ne diffèrent plus que
+> par la façon de poser des pixels, et la règle que R5 se donne — « aucune
+> fonctionnalité n'entre dans un seul backend » — est tenue par la structure
+> plutôt que par la vigilance.
+>
+> **Deux retouches au tableau ci-dessus**, mineures et voulues : les deux
+> backends dépendent aussi de `plotyx-core` (ils parlent `ResolvedPlot`, le
+> livrable de R3 ; `plotyx-core` était déjà dans leur arbre via `plot` et
+> `session`, donc c'est une arête déclarée, pas une arête nouvelle), et
+> `epaint` entre dans `plotyx-render-svg` par `plotyx-render` plutôt qu'en
+> direct — une seule arête, donc une seule version possible, ce que
+> `plotyx-render-svg/tests/frontiere.rs` vérifie en comptant les `epaint` du
+> `Cargo.lock`. `svg2pdf` reste absent : c'est la phase R6.
+
 ---
 
 ## 9. Schéma d'architecture
@@ -504,6 +588,7 @@ flowchart TD
 
     subgraph rendu["Chantier de rendu — ce document"]
         Spec["plotyx-plot<br/>PlotSpec neutre"]
+        Shared["plotyx-render<br/>mesure de texte + pipeline Plotters"]
         REgui["plotyx-render-egui<br/>backend + cache de Shape"]
         RSvg["plotyx-render-svg<br/>export"]
         Typst["Typst<br/>(feature)"]
@@ -518,8 +603,9 @@ flowchart TD
     Script --- Py
 
     Sess -->|Snapshot + revision| Spec
-    Spec --> REgui
-    Spec --> RSvg
+    Spec --> Shared
+    Shared --> REgui
+    Shared --> RSvg
     Typst -.->|labels : typst-render| REgui
     Typst -.->|labels : typst-svg| RSvg
     REgui -->|Vec&lt;Shape&gt; caché| UI
@@ -528,11 +614,20 @@ flowchart TD
     classDef done fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
     classDef todo fill:#e3f2fd,stroke:#1565c0,color:#0d47a1;
     class Core,Cmd,Sess,Persist,Py,Script done;
-    class Spec,REgui,RSvg,Typst todo;
+    class Spec,REgui,RSvg,Shared done;
+    class Typst todo;
 ```
 
 *Vert = construit et testé. Bleu = à écrire.* Le fil Python subsiste pour
 le script (§2.1) ; il ne participe plus au rendu.
+
+`plotyx-plot`, `plotyx-render`, `plotyx-render-egui` et `plotyx-render-svg`
+sont passés au vert le 2026-09-12 (phases R2, R3 et R4) : le critère de fin
+du plan de rendu — *axes au même endroit à l'écran et à l'export, vérifié
+par un test* — est tenu pour un graphe à une courbe. Vert **ne veut pas
+dire fini** : R5 élargit ces mêmes crates au `PlotSpec` réel (légende,
+échelles, panneaux, types de série) et R6 y ajoute le PDF. `Typst` reste
+bleu : c'est R8, et sa feature est vide.
 
 ---
 

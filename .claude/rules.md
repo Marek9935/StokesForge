@@ -37,6 +37,16 @@ Charger : `plotyx-app`, `plotyx-core`, `plotyx-commands`, `plotyx-session`,
 supposer un framework précis, vérifier `Cargo.toml` de `plotyx-app` en cas
 de doute.
 
+## Rendu — `plotyx-render`, `plotyx-render-egui`, `plotyx-render-svg`
+Charger : le crate ciblé + `plotyx-render` (il porte la mesure de texte et
+le pipeline Plotters communs aux deux backends) + `plotyx-plot` et
+`plotyx-core::resolve` en lecture. Relire
+`docs/newarchitecture/architecture-choisie.md` §4 et §5 avant de toucher à
+la mesure du texte ou au cache : l'accord écran/export est le seul endroit
+du chantier où un bug ne lève aucune erreur, et `roadmap-rendu.md` dit ce
+qui appartient à R5 plutôt qu'à maintenant. Ignorer : `commands`,
+`persistence`, `python`, `script`.
+
 ## Robustesse — `plotyx-robustesse` (tests `b1`…`b20`)
 Charger : le crate ciblé par le test (ne pas ouvrir les 20 fichiers de
 `tests/`) + `plotyx-robustesse/src/lib.rs` (index des batteries) +

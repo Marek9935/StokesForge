@@ -379,6 +379,105 @@ pixel n'ait encore été dessiné.
 
 ## Phase R4 — Les deux backends, graphe minimal (≈2 semaines)
 
+> **Statut : close le 2026-09-12.** Trois crates au lieu des deux prévus
+> (`plotyx-render`, `plotyx-render-egui`, `plotyx-render-svg` — 1 864 lignes
+> de code, 1 746 de tests et d'exemple), le test d'accord vert, et une figure
+> qu'on peut regarder des deux côtés. 479 tests au workspace (440 avant,
+> +39), 9 `#[ignore]` inchangés, clippy sans avertissement (feature `typst`
+> et feature `python` comprises), `cargo fmt` sans dérive nouvelle (les 25
+> échecs préexistants de §7.4 du guide de robustesse sont intacts).
+> **Critère de sortie tenu** : `cargo tree -p plotyx-plot` ne montre toujours
+> que `plotyx-id`, et `cargo tree -p plotyx-render-svg` ne montre ni `egui`,
+> ni `eframe`, ni `winit`.
+>
+> **Un crate non prévu : `plotyx-render`.** Le §8 d'`architecture-choisie.md`
+> n'annonçait que les deux backends. Il en manquait un troisième, pour la
+> même raison qu'en R3 avec `plotyx-id` : deux frères ont besoin de la même
+> chose et aucun ne peut dépendre de l'autre sans mentir sur ce qu'il est.
+> La chose commune est double — la mesure de texte (4.1) *et* la suite
+> d'appels Plotters. Faire porter l'une ou l'autre par `plotyx-render-svg`
+> obligerait le backend écran à dépendre du crate d'export ; les faire porter
+> par `plotyx-render-egui` ferait entrer toute la pile egui dans l'export, ce
+> que le découpage interdit. Détail et justification : §8 du même document.
+>
+> **Le pipeline Plotters est écrit une fois, générique sur le backend**, et
+> c'est le vrai enseignement de la phase. La tâche 4.5 demandait un test qui
+> constate l'accord ; un test constate, il n'empêche pas. Avec deux
+> `ChartBuilder` distincts, la moindre divergence de marge ou de taille de
+> police serait devenue un désaccord à trouver après coup. Avec un seul, les
+> deux backends ne diffèrent plus que par la façon de poser des pixels — la
+> règle que R5 se donne (« aucune fonctionnalité n'entre dans un seul
+> backend ») est ainsi tenue par la structure et non par la discipline.
+>
+> **Une correction à la mesure R0 0.1, trouvée en écrivant le test qui devait
+> l'entériner.** R0 concluait les métriques de texte indépendantes du
+> `pixels_per_point`. **C'est vrai des avances, faux de la hauteur de
+> ligne** : `epaint` cale la hauteur d'une ligne sur la grille de pixels
+> *physiques* (`text_layout.rs` : `max_row_height =
+> point_scale.round_to_pixel(max_row_height)`). Mesuré à 9,7 pt de corps : 11
+> points de haut à `pixels_per_point = 1,0`, 12 à 1,25. R0 ne pouvait pas le
+> voir, elle comparait des avances de glyphes et non des rectangles de
+> galley. La conséquence aurait été exactement du type que la phase existe
+> pour empêcher : `DrawingArea::titled` fait descendre la zone de tracé de la
+> hauteur du titre, donc **la figure exportée aurait dépendu de l'écran de
+> celui qui l'exporte**. Tranché en séparant les deux usages dans le trait
+> `TextSource` : on **mesure** toujours à `pixels_per_point = 1,0`, on ne
+> **dessine** qu'au `pixels_per_point` réel. Prix payé : au plus un pixel
+> physique d'écart entre la boîte réservée et les glyphes sur un écran HiDPI,
+> sans effet sur la géométrie puisque le texte est ancré et non étiré. Le
+> fait qui justifie la règle est verrouillé *dans le sens de l'affirmation*
+> par un test : si `epaint` corrigeait ce comportement, le test tomberait et
+> la constante pourrait disparaître.
+>
+> **Deuxième piège trouvé en chemin, celui-là mortel** : avec `plotters` en
+> `default-features = false`, l'implémentation **par défaut** de `draw_text`
+> finit sur `FontData::draw` de `style/font/naive.rs`, qui est un
+> `panic!("The font implementation is unable to draw text")`. Autrement dit,
+> tout backend qui ne surcharge pas `draw_text` ne mesure pas mal : il
+> **plante** à la première graduation. Les deux backends du chantier la
+> surchargent (egui directement, SVG par délégation à `SVGBackend`), et le
+> backend muet des tests de géométrie s'y est cogné — c'est là que le fait
+> est noté.
+>
+> **Le test d'accord compare tout, pas les axes seulement.** Même `PlotSpec`,
+> mêmes dimensions, et l'égalité porte sur le multiensemble de **tous les
+> segments** — axes, graduations, grille et courbe — en coordonnées entières,
+> à quatre dimensions de figure différentes. Il porte aussi un **témoin** :
+> la même figure tracée avec le `SVGBackend` nu, dont les positions doivent
+> **différer**. Sans lui, une enveloppe qui déléguerait `estimate_text_size`
+> par erreur passerait pour correcte — c'est la méthode du témoin positif du
+> spike R0 0.1. Il vit dans `plotyx-render-egui/tests/accord.rs` et non côté
+> SVG : en dépendance de développement, egui entrerait dans l'arbre du crate
+> d'export et ferait mentir sa frontière.
+>
+> **Écarts assumés du périmètre**, tous signalés par un `// R5 :` à l'endroit
+> exact où ils s'insèrent plutôt que par une liste qui se périmerait : un
+> seul panneau (le premier), toutes les séries tracées en ligne quel que soit
+> leur `PlotType`, pas de légende, pas d'axe secondaire, pas d'échelle
+> logarithmique. Une série à référence brisée est **comptée** et laissée de
+> côté, ce qui est le minimum honnête tant qu'il n'y a nulle part où
+> l'écrire ; le §11.1 demandera plus en R5. `fill_polygon` passe par
+> `PathShape::convex_polygon`, correct aujourd'hui (rien de concave n'est
+> tracé, `draw_path` étant surchargée) et à reprendre avec les barres et les
+> aires.
+>
+> **La tâche 4.6 est double.** La fenêtre du banc (`cargo run -p plotyx-app`)
+> montre le graphe peint par `plotyx-render-egui`, avec son compteur de cache
+> sous la figure — 8 succès pour 2 calculs après stabilisation de la mise en
+> page, c'est-à-dire la tâche 4.3 visible à l'œil nu. Et l'export se regarde
+> sans serveur graphique : `cargo run -p plotyx-render-svg --example figure`.
+> Un troisième mécanisme de vérification a été ajouté au banc, sur le modèle
+> de `PLOTYX_APP_AUTOQUIT_MS` : `PLOTYX_APP_SCREENSHOT=fichier.ppm` fait
+> déposer à la fenêtre une capture d'elle-même. Sous Wayland, aucun outil
+> externe ne peut photographier une fenêtre donnée ; et sur un chantier de
+> rendu, « la fenêtre s'ouvre et ne plante pas » a cessé de suffire.
+>
+> **Reste ouvert pour R5+** : le `pixels_per_point` est dans la clé de cache
+> mais n'entre plus dans la géométrie — il n'y reste que pour l'exception
+> `Shape::Text` d'`epaint`, ce qui est correct et mérite d'être su ; et la
+> mesure R0 0.3 n'a pas été refaite sur le pipeline réel, donc le 2,432 Mo
+> pour 300 000 points reste un chiffre de spike, pas de production.
+
 **Le cœur du plan.** Objectif : les deux backends existent **en même
 temps**, sur le graphe le plus pauvre possible, et un test les force à
 s'accorder.
