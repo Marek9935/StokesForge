@@ -3,7 +3,6 @@
 //! dérive pas du modèle (voir la doc de crate) : ces fonctions sont le seul
 //! endroit où les deux mondes se rencontrent.
 
-use std::num::NonZeroU32;
 
 use plotyx_core::{
     Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError, Node, NodeId, NodeKind,
@@ -11,7 +10,7 @@ use plotyx_core::{
 };
 use plotyx_plot::{
     AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec,
-    PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec,
+    PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec, SPEC_FORMAT_VERSION,
 };
 
 use crate::schema::{
@@ -20,6 +19,22 @@ use crate::schema::{
     RoleRecord, SeriesAxisRecord, SeriesSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
     TypeRecord, ValuesRecord,
 };
+
+/// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
+/// (B2, `guide-de-correction-robustesse.md` §F3/F4) : un écran ne fait pas
+/// 10 000 lignes ou colonnes de sous-graphes. Au-delà, `record.row as usize`
+/// ne panique pas lui-même, mais le débordement se déplace plus loin, dans
+/// `PlotSpec::rows()`/`columns()` (`max + 1`).
+pub(crate) const MAX_PANEL_POSITION: u64 = 10_000;
+
+/// Borne haute de `histogram_bins` lue d'un fichier (B4, même section du
+/// guide) — la même que celle que `plotyx_plot::BinCount` impose désormais
+/// au niveau du type (`plotyx_plot::MAX_HISTOGRAM_BINS`) : un seul chiffre à
+/// changer si jamais il devait bouger. `ConvertError::ZeroHistogramBins`
+/// borne déjà le bas ; ceci borne le haut, avant que le rendu ne demande
+/// l'allocation qui ferait `abort()` le processus (des dizaines de
+/// gigaoctets, `edges` et `counts` confondus).
+pub(crate) use plotyx_plot::MAX_HISTOGRAM_BINS;
 
 /// Erreur de décodage schéma → modèle qui n'est pas du ressort du cœur : une
 /// longueur de buffer flottant incohérente, ou une colonne dont le
@@ -39,6 +54,26 @@ pub(crate) enum ConvertError {
     /// survient jamais pour un fichier écrit par ce crate, signe d'un
     /// fichier corrompu ou écrit par un outil tiers.
     ZeroHistogramBins,
+    /// `histogram_bins` dépasse [`MAX_HISTOGRAM_BINS`] (B4) : même esprit que
+    /// `ZeroHistogramBins`, l'autre bout de l'intervalle.
+    HistogramBinsTooLarge(u32),
+    /// `row`/`column` d'un panneau dépasse [`MAX_PANEL_POSITION`] (B2).
+    PanelPositionOutOfBounds {
+        /// Ligne lue du fichier, hors bornes.
+        row: u64,
+        /// Colonne lue du fichier, hors bornes.
+        column: u64,
+    },
+    /// Le `format_version` d'un `PlotSpec` lu du fichier dépasse
+    /// [`SPEC_FORMAT_VERSION`], celui que ce lecteur connaît (C1) : accepter
+    /// en silence exposerait un graphe dont ce lecteur ne peut pas garantir
+    /// avoir compris toutes les variantes qu'il porte.
+    UnsupportedSpecVersion {
+        /// Version trouvée dans le fichier.
+        found: u32,
+        /// Version la plus élevée que ce lecteur sait interpréter.
+        supported: u32,
+    },
 }
 
 impl From<ColumnType> for TypeRecord {
@@ -339,12 +374,25 @@ fn series_spec_to_record(series: &SeriesSpec) -> SeriesSpecRecord {
     }
 }
 
-/// Enregistrement → `SeriesSpec`. Le seul point de tout l'arbre `PlotSpec`
-/// qui peut échouer : `histogram_bins` doit être non nul
-/// ([`ConvertError::ZeroHistogramBins`]).
+/// Enregistrement → `SeriesSpec`. `histogram_bins` doit être non nul
+/// ([`ConvertError::ZeroHistogramBins`]) et ne pas dépasser
+/// [`MAX_HISTOGRAM_BINS`] ([`ConvertError::HistogramBinsTooLarge`], B4).
 fn record_to_series_spec(record: SeriesSpecRecord) -> Result<SeriesSpec, ConvertError> {
-    let histogram_bins =
-        NonZeroU32::new(record.histogram_bins).ok_or(ConvertError::ZeroHistogramBins)?;
+    // Zéro et « trop grand » sont deux erreurs distinctes malgré
+    // `BinCount::new` qui rend `None` pour les deux : c'est ce qui manque au
+    // fichier (rien vs. une valeur absurde), et les deux méritent un message
+    // différent.
+    if record.histogram_bins == 0 {
+        return Err(ConvertError::ZeroHistogramBins);
+    }
+    if record.histogram_bins > MAX_HISTOGRAM_BINS {
+        return Err(ConvertError::HistogramBinsTooLarge(record.histogram_bins));
+    }
+    // Les deux bornes viennent d'être vérifiées ci-dessus : `BinCount::new`
+    // ne peut pas rendre `None` ici.
+    #[allow(clippy::expect_used)]
+    let histogram_bins = plotyx_plot::BinCount::new(record.histogram_bins)
+        .expect("bornes déjà vérifiées ci-dessus");
     Ok(SeriesSpec {
         y: NodeId::from_raw(record.y),
         x: record.x.map(NodeId::from_raw),
@@ -378,8 +426,17 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
 }
 
 /// Enregistrement → `PanelSpec`. Propage l'échec de la première série
-/// fautive, s'il y en a une.
+/// fautive, s'il y en a une, et refuse une position qui dépasse
+/// [`MAX_PANEL_POSITION`] (B2) avant le cast vers `usize` — un `u64` hors
+/// bornes ne panique pas ici, mais fait déborder `PlotSpec::rows()`/
+/// `columns()` plus loin (`max + 1`).
 fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertError> {
+    if record.row > MAX_PANEL_POSITION || record.column > MAX_PANEL_POSITION {
+        return Err(ConvertError::PanelPositionOutOfBounds {
+            row: record.row,
+            column: record.column,
+        });
+    }
     let series = record
         .series
         .into_iter()
@@ -412,7 +469,22 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
 /// même cas que `Panels::new(Vec::new())` côté `plotyx-plot`, qui fournit un
 /// panneau par défaut plutôt que de refuser — la conversion `.into()` sur
 /// `Vec<PanelSpec>` le fait déjà.
+///
+/// `format_version` **est** vérifié (C1) : un `PlotSpec` plus récent que
+/// [`SPEC_FORMAT_VERSION`] est refusé plutôt qu'accepté en silence — sans
+/// quoi une variante que ce lecteur ne connaît pas pourrait se cacher
+/// n'importe où dans l'arbre qui suit. C'est délibérément une simple
+/// comparaison de champ, pas la dégradation gracieuse d'une variante
+/// inconnue (C5, niveau 2, hors scope ici) : « un champ n'oblige pas à
+/// bouger le numéro de version, une variante l'oblige » — voir le guide,
+/// piège F3.
 pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, ConvertError> {
+    if record.format_version > SPEC_FORMAT_VERSION {
+        return Err(ConvertError::UnsupportedSpecVersion {
+            found: record.format_version,
+            supported: SPEC_FORMAT_VERSION,
+        });
+    }
     let panels = record
         .panels
         .into_iter()

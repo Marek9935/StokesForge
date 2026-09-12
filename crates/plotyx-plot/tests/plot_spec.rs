@@ -33,7 +33,6 @@
 //! Les onze tests d'édition (`edit.*`) sont hors périmètre de la phase, à
 //! l'exception de la palette, vérifiée ici et dans `src/style.rs`.
 
-use std::num::NonZeroU32;
 
 use plotyx_id::NodeId;
 use plotyx_plot::{
@@ -111,7 +110,10 @@ fn default_styles_match_the_python_defaults() {
 
 #[test]
 fn default_histogram_bins_is_forty() {
-    assert_eq!(DEFAULT_HISTOGRAM_BINS, NonZeroU32::new(40).expect("40 ≠ 0"));
+    // B4 (`guide-de-correction-robustesse.md` §F4) — `histogram_bins` est
+    // désormais un `BinCount` (borné aux deux bouts), plus un `NonZeroU32`
+    // nu (borné en bas seulement).
+    assert_eq!(DEFAULT_HISTOGRAM_BINS.get(), 40);
     assert_eq!(SeriesSpec::new(Y1).histogram_bins, DEFAULT_HISTOGRAM_BINS);
 }
 

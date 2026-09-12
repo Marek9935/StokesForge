@@ -114,7 +114,6 @@ fn b16_une_colonne_derreur_de_type_texte_est_une_reference_rompue() {
 // -- reproductions --------------------------------------------------------
 
 #[test]
-#[ignore = "reproduction A10 — une colonne d'erreur plus courte tronque les DONNÉES, et ok() reste vrai : 997 points sur 1000 disparaissent sans un mot"]
 fn b16_une_colonne_derreur_courte_ne_tronque_pas_les_donnees() {
     let mut banc = Banc::new(1000);
     let erreur = banc.colonne("dY", &[0.1, 0.2, 0.3]);
@@ -141,7 +140,6 @@ fn b16_une_colonne_derreur_courte_ne_tronque_pas_les_donnees() {
 }
 
 #[test]
-#[ignore = "reproduction A10 — une colonne d'erreur VIDE fait disparaître toute la série, sans que broken() ni missing ne le signalent"]
 fn b16_une_colonne_derreur_vide_ne_fait_pas_disparaitre_la_serie() {
     let mut banc = Banc::new(1000);
     let erreur = banc.vide("dY");

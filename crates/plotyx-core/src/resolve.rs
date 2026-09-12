@@ -292,13 +292,26 @@ pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries
 
     // Colonnes de longueur libre (décision du socle) : le tracé porte sur le
     // préfixe commun plutôt que d'être refusé.
-    let lengths: Vec<usize> = [&x, &y, &x_error, &y_error]
+    //
+    // A10 (`guide-de-correction-robustesse.md` §F1) : `n` — le nombre de
+    // points de la série — ne vient que des colonnes de **données** (`x`,
+    // `y`), qui vont par paires et se tronquent ensemble. Les colonnes
+    // d'erreur sont des **annotations par point** : elles ne participent pas
+    // à ce calcul, sous peine qu'une colonne d'erreur trop courte (ou vide)
+    // tronque le signal lui-même — c'est exactement l'anomalie.
+    let lengths: Vec<usize> = [&x, &y]
         .into_iter()
         .flatten()
         .map(|values| values.len())
         .collect();
     let n = lengths.iter().copied().min().unwrap_or(0);
-    let truncated = lengths.iter().any(|&len| len != n);
+    let error_lengths: Vec<usize> = [&x_error, &y_error]
+        .into_iter()
+        .flatten()
+        .map(|values| values.len())
+        .collect();
+    let truncated =
+        lengths.iter().any(|&len| len != n) || error_lengths.iter().any(|&len| len != n);
 
     if x.is_none() && series.plot_type.needs_x() {
         // Abscisse implicite : l'indice de ligne, façon Origin quand aucune
@@ -311,11 +324,31 @@ pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries
         label,
         x: x.map(|values| ResolvedValues::new(values, n)),
         y: y.map(|values| ResolvedValues::new(values, n)),
-        x_error: x_error.map(|values| ResolvedValues::new(values, n)),
-        y_error: y_error.map(|values| ResolvedValues::new(values, n)),
+        x_error: x_error.map(|values| conform_error_values(values, n)),
+        y_error: y_error.map(|values| conform_error_values(values, n)),
         missing,
         truncated,
     }
+}
+
+/// Conforme une colonne d'erreur (barre d'erreur en X ou en Y) à la longueur
+/// `n` des données qu'elle annote (A10, `guide-de-correction-robustesse.md`
+/// §F1) : tronquée si elle est plus longue, **complétée par `NaN`** — la
+/// valeur manquante du modèle — si elle est plus courte, jamais l'inverse
+/// (raccourcir `x`/`y` pour s'aligner sur elle).
+///
+/// Zéro copie dans le cas courant (assez de valeurs, ou trop) : ce n'est
+/// qu'une vue tronquée sur le même `Arc`, comme [`ResolvedValues::new`]
+/// partout ailleurs. Une colonne d'erreur trop courte est le cas rare ; elle
+/// seule paie une copie (le buffer d'origine, complété de `NaN`), plutôt que
+/// de faire payer `x`/`y` d'une troncature qui perdrait des mesures.
+fn conform_error_values(values: Arc<Vec<f64>>, n: usize) -> ResolvedValues {
+    if values.len() >= n {
+        return ResolvedValues::new(values, n);
+    }
+    let mut padded = (*values).clone();
+    padded.resize(n, f64::NAN);
+    ResolvedValues::new(Arc::new(padded), n)
 }
 
 /// Résout toutes les séries d'un panneau, dans l'ordre.
@@ -426,15 +459,36 @@ pub fn histogram(values: &[f64], bins: NonZeroU32) -> (Vec<f64>, Vec<f64>) {
     } else {
         (min, max)
     };
-    let width = last_edge - first_edge;
+
+    // A5 (`guide-de-correction-robustesse.md`, « Une échéance, pas une
+    // cause ») — `last_edge - first_edge` peut déborder `f64` (deux valeurs
+    // proches de `±f64::MAX`), ce qui rendait `width = +inf`, puis des
+    // bornes `NaN` (`inf * 0.0`) et un comptage qui rangeait tout en classe
+    // 0. On évite tout intermédiaire non fini :
+    //
+    // - les bornes se calculent par combinaison convexe
+    //   `first*(1-t) + last*t`, qui reste toujours dans `[first, last]`
+    //   (donc finie) quels que soient `first`/`last`, sans jamais passer par
+    //   une différence qui pourrait déborder ;
+    // - la position d'une valeur dans l'histogramme se calcule via
+    //   `half_width = last/2 - first/2` — la moitié de la largeur, mais
+    //   calculée en divisant d'abord chaque borne par deux, sans jamais
+    //   déborder — puis `t = (v/2 - first/2) / half_width`, qui rend le
+    //   même résultat que `(v - first) / width` sans jamais matérialiser une
+    //   différence non finie.
+    let half_width = last_edge / 2.0 - first_edge / 2.0;
 
     let edges: Vec<f64> = (0..=bins)
-        .map(|i| first_edge + width * (i as f64) / (bins as f64))
+        .map(|i| {
+            let t = (i as f64) / (bins as f64);
+            first_edge * (1.0 - t) + last_edge * t
+        })
         .collect();
 
     let mut counts = vec![0.0f64; bins];
     for &v in &finite {
-        let position = ((v - first_edge) / width) * bins as f64;
+        let t = (v / 2.0 - first_edge / 2.0) / half_width;
+        let position = t * bins as f64;
         let index = (position.floor() as isize).clamp(0, bins as isize - 1) as usize;
         counts[index] += 1.0;
     }

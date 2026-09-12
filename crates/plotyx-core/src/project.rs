@@ -49,6 +49,18 @@ fn spreadsheet_name(index: usize) -> String {
 pub struct Project {
     tree: Arc<Tree>,
     ids: IdAllocator,
+    /// Identité de **cette instance** de `Project`, stable sur toute sa vie —
+    /// contrairement à `tree`, que `replace_tree` (annulation/rétablissement
+    /// d'une entrée structurelle) réaffecte à un `Arc<Tree>` déjà existant,
+    /// potentiellement le même qu'à un instant antérieur de cette même
+    /// instance. Sert à quiconque a besoin de reconnaître « ce `Project`
+    /// précis, revu plus tard » sans se fier à l'identité de son arbre
+    /// courant — par exemple B8 (`plotyx-persistence`, détection d'un
+    /// écrivain concurrent), qui doit continuer à reconnaître une instance
+    /// après qu'un `undo` l'a fait pointer vers un arbre déjà vu. Un
+    /// `Arc<()>` plutôt qu'un compteur : identité par adresse, gratuite,
+    /// sans registre à tenir ici.
+    identity: Arc<()>,
 }
 
 impl Project {
@@ -69,6 +81,7 @@ impl Project {
         Ok(Self {
             tree: Arc::new(Tree::new(root)?),
             ids,
+            identity: Arc::new(()),
         })
     }
 
@@ -92,6 +105,7 @@ impl Project {
         Self {
             tree: Arc::new(Tree::with_root(root)),
             ids,
+            identity: Arc::new(()),
         }
     }
 
@@ -104,6 +118,7 @@ impl Project {
         Self {
             ids: IdAllocator::resume(next_id_hint, highest),
             tree,
+            identity: Arc::new(()),
         }
     }
 
@@ -112,6 +127,15 @@ impl Project {
     /// Arbre courant. Le cloner (`project.tree().clone()`) fige un instantané.
     pub fn tree(&self) -> &Arc<Tree> {
         &self.tree
+    }
+
+    /// Poignée faible sur l'identité de **cette instance**, stable sur toute
+    /// sa vie (voir la doc du champ `identity`). `Weak::upgrade` échoue dès
+    /// que ce `Project` est détruit ; deux instances distinctes — même
+    /// chargées du même fichier — ne rendent jamais deux poignées qui
+    /// s'upgradent vers la même adresse.
+    pub fn identity(&self) -> std::sync::Weak<()> {
+        Arc::downgrade(&self.identity)
     }
 
     /// Identifiant du dossier racine.

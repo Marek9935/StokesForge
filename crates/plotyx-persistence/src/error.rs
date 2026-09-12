@@ -58,6 +58,42 @@ pub enum PersistenceError {
         #[source]
         source: CoreError,
     },
+    /// Le corps ne s'est pas décodé à cause d'une **variante d'énumération**
+    /// que ce lecteur ne connaît pas (un type de trace, un type de colonne, …
+    /// ajouté par une version plus récente de PlotYx) — distinct de
+    /// [`Corrupt`](Self::Corrupt) : le fichier n'est pas endommagé, il est
+    /// simplement plus récent que ce lecteur. C5 (niveau 1,
+    /// `guide-de-correction-robustesse.md` §F3) : reconnaître ce cas plutôt
+    /// que de le confondre avec une vraie corruption ; la dégradation
+    /// gracieuse (garder ce qui se comprend, niveau 2) reste un chantier
+    /// séparé.
+    #[error(
+        "{path} a été écrit par une version plus récente de PlotYx (variante inconnue) : {detail}"
+    )]
+    UnknownVariant {
+        /// Chemin du fichier lu.
+        path: PathBuf,
+        /// Message d'origine de `rmp_serde`/`serde`, qui nomme la variante.
+        detail: String,
+    },
+    /// `save` a détecté que le fichier visé a été modifié — par une autre
+    /// fenêtre, un script, ou tout autre écrivain — depuis la dernière fois
+    /// que CE processus l'a chargé ou sauvegardé. B8
+    /// (`guide-de-correction-robustesse.md` §F2) : sans ce contrôle,
+    /// l'écriture écraserait silencieusement le travail de l'autre écrivain.
+    #[error(
+        "{path} a changé depuis le dernier chargement/sauvegarde par ce processus \
+         (compteur de sauvegarde attendu {expected}, trouvé {found}) : recharger avant \
+         d'écraser"
+    )]
+    ConcurrentModification {
+        /// Chemin du fichier visé par `save`.
+        path: PathBuf,
+        /// Compteur de sauvegarde que ce processus attendait.
+        expected: u64,
+        /// Compteur de sauvegarde réellement présent sur le disque.
+        found: u64,
+    },
 }
 
 /// Alias de résultat du crate.

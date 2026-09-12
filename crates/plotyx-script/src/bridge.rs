@@ -57,6 +57,13 @@ impl HostError {
             | CoreError::Structure(message)
             | CoreError::IndexOutOfBounds(message)
             | CoreError::TypeMismatch(message) => HostError::InvalidValue(message),
+            // B1 (`guide-de-correction-robustesse.md` §F2/F3/F4) — plus aucun
+            // nœud ne peut être créé : ce n'est ni un chemin, ni une
+            // référence cassée, mais la commande qui l'aurait créé qui doit
+            // être refusée.
+            CoreError::IdentifiersExhausted => {
+                HostError::InvalidValue(CoreError::IdentifiersExhausted.to_string())
+            }
         }
     }
 

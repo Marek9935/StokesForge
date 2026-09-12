@@ -38,6 +38,17 @@ pub(crate) struct FileBody {
     /// ordre est ce qui rend deux sauvegardes du même projet identiques
     /// octet à octet.
     pub(crate) nodes: Vec<NodeRecord>,
+    /// Compteur de sauvegarde du fichier (B8,
+    /// `guide-de-correction-robustesse.md` §F2) : incrémenté à chaque `save`
+    /// réussi. C'est ce qui permet à `save` de détecter qu'un autre écrivain
+    /// a modifié le fichier depuis le dernier chargement/sauvegarde de ce
+    /// processus, sans confondre deux instances distinctes chargées du même
+    /// fichier. Absent des fichiers écrits avant le 2026-09-11 :
+    /// `#[serde(default)]` le ramène alors à 0, ce qui est le comportement
+    /// voulu — un fichier sans compteur n'a de toute façon aucun lecteur qui
+    /// en retienne un.
+    #[serde(default)]
+    pub(crate) save_counter: u64,
 }
 
 /// Un nœud de l'arbre, à plat (l'appartenance aux enfants d'un parent est
