@@ -85,6 +85,7 @@
 pub mod axis;
 pub mod legend;
 pub mod panel;
+pub mod raw;
 pub mod series;
 pub mod spec;
 pub mod style;
@@ -92,6 +93,7 @@ pub mod style;
 pub use axis::{AxisScale, AxisSide, AxisSpec};
 pub use legend::{LegendPosition, LegendSpec};
 pub use panel::PanelSpec;
+pub use raw::RawVariant;
 pub use series::{
     BinCount, PlotType, SeriesAxis, SeriesSpec, DEFAULT_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS,
 };

@@ -708,7 +708,8 @@ impl Project {
             NodeKind::Workbook { .. }
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
-            | NodeKind::Note { .. } => ObjectPath {
+            | NodeKind::Note { .. }
+            | NodeKind::Unknown(_) => ObjectPath {
                 folders: self.folder_names_above(id)?,
                 window: Some(node.name().to_string()),
                 rooted: true,

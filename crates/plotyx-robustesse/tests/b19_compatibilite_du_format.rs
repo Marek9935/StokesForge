@@ -22,7 +22,8 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use plotyx_persistence::{load, PersistenceError};
+use plotyx_core::NodeKind;
+use plotyx_persistence::{load, save, PersistenceError};
 use serde::Serialize;
 use tempfile::TempDir;
 
@@ -290,10 +291,25 @@ fn b19_un_numero_de_version_superieur_est_refuse_proprement() {
     );
 }
 
-// -- reproductions --------------------------------------------------------
+// -- garde-fous (C5, niveau 2) ---------------------------------------------
 
 #[test]
-#[ignore = "reproduction C5 — une variante d'enum inconnue rend le fichier ENTIER illisible, et l'erreur annonce « corrompu »"]
+// C5 (niveau 2) — corrigée : `KindRecord`/`PlotTypeRecord` (`schema.rs`)
+// n'ont plus `Serialize`/`Deserialize` dérivés, mais écrits à la main
+// (`unknown.rs`). Le décodage capture d'abord la valeur MessagePack qui
+// suit le nom de variante dans un arbre générique (`rmpv::Value`), la
+// réencode, puis tente de la relire comme l'une des variantes connues avec
+// le même décodeur `rmp_serde` que pour le reste du fichier. Un nom de
+// variante inconnu — ou une variante connue dont le contenu échoue plus
+// profondément (un type de tracé inconnu enfoui dans le spec d'un graphe,
+// `b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees` ci-dessous) — ne
+// remonte plus l'erreur : le nom et le contenu bruts sont conservés dans
+// `KindRecord::Unknown`/`PlotTypeRecord::Unknown`, qui portent
+// `plotyx_plot::RawVariant` jusque dans le modèle en mémoire
+// (`NodeKind::Unknown`, `PlotType::Unknown`) pour qu'une sauvegarde
+// suivante réécrive le nœud à l'identique (voir `b20_fichier_partage.rs`,
+// inchangé et toujours vert). La perte est bornée à ce seul nœud, jamais au
+// fichier entier.
 fn b19_une_variante_inconnue_ne_perd_pas_tout_le_fichier() {
     let dir = TempDir::new().expect("répertoire");
     // Un projet parfaitement lisible : une racine, et **un seul** nœud d'une
@@ -321,25 +337,50 @@ fn b19_une_variante_inconnue_ne_perd_pas_tout_le_fichier() {
     // Version 1 dans l'en-tête, exprès : c'est le scénario que la
     // documentation encourage — ajouter des données sans toucher au numéro.
     let chemin = ecrire(&dir, "image.plx", 1, &body);
-    let resultat = load(&chemin);
-    match &resultat {
-        Ok(project) => println!("chargé : {} nœuds", project.tree().len()),
-        Err(erreur) => println!("refusé : {erreur}"),
+    let project = load(&chemin).expect(
+        "un nœud d'une nature inconnue ne doit plus emporter le fichier entier — les \
+         autres, parfaitement lisibles, ne doivent pas être perdus avec lui",
+    );
+    println!("chargé : {} nœuds", project.tree().len());
+    assert_eq!(
+        project.tree().len(),
+        2,
+        "la racine ET le nœud inconnu doivent survivre"
+    );
+
+    let photo = project
+        .tree()
+        .node(plotyx_core::NodeId::from_raw(2))
+        .expect("nœud « Photo » présent malgré sa nature inconnue");
+    match photo.kind() {
+        NodeKind::Unknown(raw) => assert_eq!(
+            raw.name, "Image",
+            "le nom de la variante d'origine doit survivre"
+        ),
+        other => panic!("attendu NodeKind::Unknown, obtenu {other:?}"),
     }
-    assert!(
-        resultat.is_ok(),
-        "un nœud d'une nature inconnue emporte le fichier entier — les autres, \
-         parfaitement lisibles, sont perdus avec lui. Et l'erreur rendue est \
-         `Corrupt` (« fichier corrompu »), qui envoie l'utilisateur chercher une \
-         sauvegarde alors que son fichier est intact et que la bonne réponse est \
-         « mettez PlotYx à jour ». Les deux mécanismes du format ne disent pas la \
-         même chose sur le numéro de version : un champ neuf n'exige pas de le \
-         bouger, une variante neuve l'exige — et rien ne l'écrit nulle part"
+
+    // Deux sauvegardes successives du même projet doivent produire le même
+    // fichier (B20, `b20_deux_sauvegardes_successives_donnent_le_meme_fichier`,
+    // inchangé et toujours vert) : c'est la garantie qui borne la perte au
+    // nœud inconnu, jamais à sa fidélité de ré-écriture.
+    let a = dir.path().join("image_a.plx");
+    let b = dir.path().join("image_b.plx");
+    save(&project, &a).expect("première sauvegarde d'un projet portant un nœud inconnu");
+    save(&project, &b).expect("seconde sauvegarde du même projet");
+    assert_eq!(
+        std::fs::read(&a).expect("lecture a"),
+        std::fs::read(&b).expect("lecture b"),
+        "le nœud d'une nature inconnue doit survivre à deux sauvegardes identiques, \
+         pas être perdu ni renormalisé"
     );
 }
 
 #[test]
-#[ignore = "reproduction C5 — même une variante inconnue enfouie dans le spec d'un seul graphe emporte tout le projet, mesures comprises"]
+// C5 (niveau 2) — corrigée, même mécanisme que ci-dessus appliqué à
+// `PlotTypeRecord`/`PlotType` : un type de tracé inconnu enfoui dans le
+// spec d'un graphe ne fait plus échouer le `Graph` qui le porte — ni,
+// a fortiori, le classeur et la colonne qui n'ont rien à voir avec lui.
 fn b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees() {
     // Le cas réaliste : un collègue trace un violon avec une version plus
     // récente et envoie le fichier. Tout le reste — le classeur, la feuille,
@@ -431,20 +472,67 @@ fn b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees() {
     };
 
     let chemin = ecrire(&dir, "violon.plx", 1, &body);
-    let resultat = load(&chemin);
-    match &resultat {
-        Ok(project) => println!("chargé : {} nœuds", project.tree().len()),
-        Err(erreur) => println!("refusé : {erreur}"),
+    let project = load(&chemin).expect(
+        "un seul champ `plot_type` inconnu, dans une seule série d'un seul graphe, ne \
+         doit plus emporter les mesures du même fichier",
+    );
+    println!("chargé : {} nœuds", project.tree().len());
+    assert_eq!(
+        project.tree().len(),
+        5,
+        "le classeur, la feuille, la colonne de {octets_de_donnees} octets et le graphe \
+         doivent tous survivre"
+    );
+
+    // Le type de tracé inconnu est capturé à l'échelle de la série, pas de
+    // tout le graphe : `PlotTypeRecord`/`PlotType` ont le même mécanisme
+    // `Unknown` que `KindRecord`/`NodeKind` (voir la doc au-dessus du
+    // test). Le graphe lui-même reste un `NodeKind::Graph` en bonne et due
+    // forme, avec son panneau et sa série — seul `plot_type` est opaque.
+    let graphe = project
+        .tree()
+        .node(plotyx_core::NodeId::from_raw(5))
+        .expect("nœud « Fig1 » présent");
+    match graphe.kind() {
+        NodeKind::Graph { spec, .. } => {
+            let serie = &spec.panels[0].series[0];
+            match &serie.plot_type {
+                plotyx_plot::PlotType::Unknown(raw) => {
+                    assert_eq!(raw.name, "Violin", "le nom du type de tracé doit survivre");
+                }
+                other => panic!("attendu PlotType::Unknown, obtenu {other:?}"),
+            }
+        }
+        other => panic!("attendu NodeKind::Graph (dégradation à l'échelle de la série, pas du nœud), obtenu {other:?}"),
     }
-    assert!(
-        resultat.is_ok(),
-        "un seul champ `plot_type` inconnu, dans une seule série d'un seul graphe, \
-         emporte les {octets_de_donnees} octets de mesures du même fichier. Le même \
-         raisonnement vaut pour `ColumnType`, `LineStyle`, `SymbolShape`, \
-         `LegendPosition` et `AxisScale` : six enums de plus dans le même fichier, six \
-         façons de le rendre entièrement illisible. Un lecteur devrait dégrader \
-         gracieusement — garder ce qu'il comprend, marquer le reste — ou, au minimum, \
-         rendre `UnsupportedVersion` plutôt que `Corrupt`, pour que le message dise la \
-         vérité : « mettez PlotYx à jour », et non « votre fichier est endommagé »"
+
+    // Les mesures elles-mêmes, portées par la colonne « Signal », doivent
+    // être intactes : ce nœud n'a rien à voir avec le type de tracé inconnu.
+    let colonne = project
+        .tree()
+        .node(plotyx_core::NodeId::from_raw(4))
+        .expect("nœud « Signal » présent")
+        .as_column()
+        .expect("« Signal » est une colonne");
+    assert_eq!(
+        colonne
+            .float_values()
+            .expect("colonne numérique")
+            .as_slice()
+            .len(),
+        1000,
+        "les 1000 mesures doivent survivre intactes"
+    );
+
+    // Même vérification de fidélité qu'au test précédent (B20) : deux
+    // sauvegardes successives du même projet sont identiques.
+    let a = dir.path().join("violon_a.plx");
+    let b = dir.path().join("violon_b.plx");
+    save(&project, &a).expect("première sauvegarde d'un projet portant un type de tracé inconnu");
+    save(&project, &b).expect("seconde sauvegarde du même projet");
+    assert_eq!(
+        std::fs::read(&a).expect("lecture a"),
+        std::fs::read(&b).expect("lecture b"),
+        "le type de tracé inconnu doit survivre à deux sauvegardes identiques"
     );
 }

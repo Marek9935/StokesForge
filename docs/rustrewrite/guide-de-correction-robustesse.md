@@ -879,14 +879,44 @@ vague 6  (F2 puis F6)          10                 →   0
 ```
 
 **Statut réel de clôture (2026-09-12, les six vagues sont fusionnées sur
-`rewriterust`) : 1 rouge, pas 0.** Les 30 anomalies ont chacune une
-réponse (correctif + garde-fou vert, ou limitation assumée et documentée)
-mais une reproduction reste `#[ignore]` par choix, pas par oubli — voir
-`questions-ouvertes.md` §11 pour le détail chiffré des plafonds :
+`rewriterust`) : 0 rouge.** Les 30 anomalies ont chacune une réponse
+(correctif + garde-fou vert, ou limitation assumée et documentée), et la
+dernière reproduction encore `#[ignore]` de ce tableau — C5 (niveau 2) — a
+fermé le même jour :
 
-| Test | Anomalie | Nature de la limite |
-|---|---|---|
-| `b19_une_variante_inconnue_ne_perd_pas_tout_le_fichier`, `b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees` | C5 (niveau 2) | explicitement hors périmètre v1 par ce guide (dégradation gracieuse de variantes d'enum inconnues) — coût estimé : touche trois crates (`plotyx-persistence`, `plotyx-plot`/`plotyx-core`, `plotyx-app`) et la garantie de fidélité byte-à-byte à la sauvegarde ; à faire le jour où la compatibilité ascendante entre versions de PlotYx devient un vrai besoin |
+- **C5 (niveau 2) a fermé** : `KindRecord`/`PlotTypeRecord` (`schema.rs`,
+  `plotyx-persistence`) n'ont plus `Serialize`/`Deserialize` dérivés, mais
+  écrits à la main (`unknown.rs`) — une variante d'enum inconnue à la
+  lecture (un futur type de nœud, un futur type de tracé) capture son nom
+  et son contenu MessagePack bruts dans une variante `Unknown` au lieu de
+  faire échouer tout l'enum qui la porte, donc tout le nœud, donc tout le
+  fichier. Cette capture vit aussi dans le modèle en mémoire
+  (`plotyx_core::NodeKind::Unknown`, `plotyx_plot::PlotType::Unknown`, tous
+  deux portant un `plotyx_plot::RawVariant`), pas seulement au niveau du
+  schéma disque : c'est ce qui permet à une sauvegarde suivante de
+  réécrire le nœud (ou la série) à l'identique, sans perdre ni renommer
+  l'inconnu — vérifié par les deux mêmes tests que ceux qui reproduisaient
+  le bug, désormais des garde-fous verts :
+  `b19_une_variante_inconnue_ne_perd_pas_tout_le_fichier` et
+  `b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees`
+  (`crates/plotyx-robustesse/tests/b19_compatibilite_du_format.rs`), qui
+  vérifient en plus que deux sauvegardes successives du projet ainsi chargé
+  restent byte-identiques (B20). Compromis assumé : le décodage passe par un
+  arbre générique (`rmpv::Value`) avant de retenter le décodeur `rmp_serde`
+  réel — `rmpv::ext::from_value` ne convient pas, il représente les enums
+  Rust par indice de variante plutôt que par nom externally-tagged — ce qui
+  copie une ou deux fois de plus les octets d'une colonne `Float` ; rien
+  dans ce dépôt ne mesure aujourd'hui le coût de `load()`/`save()`, donc ce
+  n'est pas une régression d'un garde-fou existant (voir la doc de tête de
+  `unknown.rs`). La dégradation reste à l'échelle du nœud (ou de la série)
+  contenant l'inconnu, jamais plus fine à l'intérieur d'un nœud connu — un
+  `ColumnType`/`ColumnRole`/`AxisScale`/`LineStyle`/`SymbolShape`/
+  `LegendPosition` inconnu fait encore basculer tout le `KindRecord` qui le
+  porte en `Unknown` plutôt que de garder le reste du nœud typé ; c'est un
+  compromis de portée assumé (`PlotTypeRecord` et `KindRecord` sont les deux
+  enums explicitement priorisés par la demande qui a fermé C5), pas un
+  oubli, à resserrer le jour où l'un de ces enums bouge assez souvent pour
+  que le grain « nœud entier » cesse d'être suffisant.
 
 Trois autres lignes ont quitté cette table le 2026-09-12 :
 

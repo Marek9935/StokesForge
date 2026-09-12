@@ -6,7 +6,7 @@
 //! qui garantit à la compilation qu'une colonne, un graphe, une matrice ou
 //! une note n'en a pas.
 
-use plotyx_plot::PlotSpec;
+use plotyx_plot::{PlotSpec, RawVariant};
 
 use crate::column::Column;
 use crate::error::CoreResult;
@@ -73,11 +73,26 @@ pub enum NodeKind {
         /// Texte de la note.
         text: String,
     },
+    /// Nature de nœud d'une version plus récente de PlotYx, inconnue de ce
+    /// lecteur (C5, niveau 2, `guide-de-correction-robustesse.md` §F3) : ce
+    /// nœud ne s'affiche pas comme un dossier, un classeur ou l'une des
+    /// autres natures connues, mais son contenu original (nom de la
+    /// variante et octets bruts) est conservé pour que la prochaine
+    /// sauvegarde réécrive le fichier à l'identique, plutôt que de perdre le
+    /// nœud — et le reste du fichier avec lui, avant ce correctif.
+    Unknown(RawVariant),
 }
 
 impl NodeKind {
     /// Vrai pour `Workbook`, `Graph`, `Matrix`, `Note` — les nœuds adressables
     /// par `[Nom]`, dont le nom est unique à l'échelle du projet.
+    ///
+    /// Vrai aussi pour `Unknown` : dans le schéma sur disque (`schema.rs`),
+    /// une nature de nœud est un enfant plat de `Folder` au même titre que
+    /// `Workbook`/`Graph`/`Matrix`/`Note` — jamais de `Worksheet`/`Column` —
+    /// donc une nature future se comporte forcément comme une fenêtre, pas
+    /// comme un dossier ou une feuille, du point de vue du confinement
+    /// (`accepts_child`) et de l'adressage (`Project::path_of`).
     pub fn is_window(&self) -> bool {
         matches!(
             self,
@@ -85,6 +100,7 @@ impl NodeKind {
                 | NodeKind::Graph { .. }
                 | NodeKind::Matrix { .. }
                 | NodeKind::Note { .. }
+                | NodeKind::Unknown(_)
         )
     }
 
@@ -113,7 +129,8 @@ impl NodeKind {
             NodeKind::Column(_)
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
-            | NodeKind::Note { .. } => &[],
+            | NodeKind::Note { .. }
+            | NodeKind::Unknown(_) => &[],
         }
     }
 
@@ -127,6 +144,11 @@ impl NodeKind {
             NodeKind::Graph { .. } => "graphe",
             NodeKind::Matrix { .. } => "matrice",
             NodeKind::Note { .. } => "note",
+            // Affichage dégradé plutôt qu'un panique ou un rendu absent
+            // (C5, niveau 2) : l'utilisateur voit « nature non reconnue »
+            // au lieu d'un texte de type inventé pour un contenu que ce
+            // lecteur ne comprend pas.
+            NodeKind::Unknown(_) => "nature non reconnue",
         }
     }
 
@@ -141,7 +163,8 @@ impl NodeKind {
             NodeKind::Column(_)
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
-            | NodeKind::Note { .. } => false,
+            | NodeKind::Note { .. }
+            | NodeKind::Unknown(_) => false,
         }
     }
 
@@ -156,6 +179,7 @@ impl NodeKind {
             NodeKind::Graph { .. } => "un graphe",
             NodeKind::Matrix { .. } => "une matrice",
             NodeKind::Note { .. } => "une note",
+            NodeKind::Unknown(_) => "une nature non reconnue",
         }
     }
 
@@ -171,7 +195,8 @@ impl NodeKind {
             NodeKind::Column(_)
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
-            | NodeKind::Note { .. } => None,
+            | NodeKind::Note { .. }
+            | NodeKind::Unknown(_) => None,
         }
     }
 
@@ -184,18 +209,27 @@ impl NodeKind {
             NodeKind::Column(_)
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
-            | NodeKind::Note { .. } => None,
+            | NodeKind::Note { .. }
+            | NodeKind::Unknown(_) => None,
         }
     }
 
     /// Métadonnées de fenêtre mutables, ou `None` si ce n'est pas une fenêtre.
+    ///
+    /// `Unknown` rend `None` bien qu'`is_window()` le compte comme une
+    /// fenêtre : son contenu est opaque, il n'y a pas de `WindowMeta` à en
+    /// extraire pour le muter — `Project::set_window_meta` échoue donc
+    /// proprement (`Structure`) sur un nœud d'une nature inconnue.
     pub(crate) fn window_meta_mut(&mut self) -> Option<&mut WindowMeta> {
         match self {
             NodeKind::Workbook { meta, .. }
             | NodeKind::Graph { meta, .. }
             | NodeKind::Matrix { meta }
             | NodeKind::Note { meta, .. } => Some(meta),
-            NodeKind::Folder { .. } | NodeKind::Worksheet { .. } | NodeKind::Column(_) => None,
+            NodeKind::Folder { .. }
+            | NodeKind::Worksheet { .. }
+            | NodeKind::Column(_)
+            | NodeKind::Unknown(_) => None,
         }
     }
 }

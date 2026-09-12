@@ -9,10 +9,20 @@ use std::num::NonZeroU32;
 use plotyx_id::NodeId;
 
 use crate::axis::AxisSide;
+use crate::raw::RawVariant;
 use crate::style::{LineSpec, SymbolSpec};
 
-/// Type de tracé d'une série. Jeu fermé.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+/// Type de tracé d'une série. Jeu fermé — sauf pour [`PlotType::Unknown`],
+/// qui porte le type de tracé d'une version plus récente de PlotYx que ce
+/// lecteur ne connaît pas (C5, niveau 2,
+/// `guide-de-correction-robustesse.md` §F3) : une série ainsi marquée ne
+/// dessine rien et ne bloque rien, mais son contenu original est conservé
+/// pour une ré-écriture fidèle.
+///
+/// Cette variante retire `Copy`/`Eq`/`Hash` du jeu de dérivations : un
+/// `RawVariant` porte une chaîne et des octets, ni l'un ni l'autre `Copy`,
+/// et l'égalité/le hachage d'un contenu inconnu n'a pas d'utilité ici.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum PlotType {
     /// Nuage de points.
     Scatter,
@@ -27,27 +37,35 @@ pub enum PlotType {
     Histogram,
     /// Courbe et barres d'erreur.
     ErrorBar,
+    /// Type de tracé d'une version plus récente de PlotYx, inconnu de ce
+    /// lecteur.
+    Unknown(RawVariant),
 }
 
 impl PlotType {
-    /// Vrai si ce type de tracé relie les points par un trait.
-    pub fn draws_line(self) -> bool {
+    /// Vrai si ce type de tracé relie les points par un trait. Toujours
+    /// faux pour [`PlotType::Unknown`] : sans savoir ce que c'est, le plus
+    /// sûr est de ne rien dessiner.
+    pub fn draws_line(&self) -> bool {
         matches!(
             self,
             PlotType::Line | PlotType::LineScatter | PlotType::ErrorBar
         )
     }
 
-    /// Vrai si ce type de tracé pose un marqueur sur chaque point.
-    pub fn draws_symbols(self) -> bool {
+    /// Vrai si ce type de tracé pose un marqueur sur chaque point. Toujours
+    /// faux pour [`PlotType::Unknown`], même raison que `draws_line`.
+    pub fn draws_symbols(&self) -> bool {
         matches!(
             self,
             PlotType::Scatter | PlotType::LineScatter | PlotType::ErrorBar
         )
     }
 
-    /// `false` pour un histogramme : il ne consomme qu'une variable.
-    pub fn needs_x(self) -> bool {
+    /// `false` pour un histogramme : il ne consomme qu'une variable. Vrai
+    /// pour [`PlotType::Unknown`] : à défaut de savoir, autant garder
+    /// l'abscisse plutôt que la perdre.
+    pub fn needs_x(&self) -> bool {
         !matches!(self, PlotType::Histogram)
     }
 }

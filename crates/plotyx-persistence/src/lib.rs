@@ -95,6 +95,7 @@
 mod convert;
 mod error;
 mod schema;
+mod unknown;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
