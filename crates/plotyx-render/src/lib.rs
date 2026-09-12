@@ -43,9 +43,11 @@
 )]
 
 pub mod color;
+pub mod decimate;
 pub mod pipeline;
 pub mod text;
 
 pub use color::{parse_hex, rgb_or};
+pub use decimate::lttb;
 pub use pipeline::{draw, draw_on, DrawnPlot};
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};
