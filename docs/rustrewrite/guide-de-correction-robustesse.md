@@ -526,7 +526,7 @@ partage entre plusieurs fichiers.
 | `column.rs` · `set_column_type` (`Text→Float`) | C2 | F1·F8 | faible | `"1e400"` devient `+inf` en silence | `b1_conversion_texte_vers_numerique_puis_retour` |
 | `column.rs` · `set_column_type` (`Float→Text`) ½ | C4 | F8 | faible | pas d'exposant : ×7,6 de mémoire, 30 caractères pour 1,6·10⁻¹⁹ | `b15_convertir_en_texte_ne_multiplie_pas_la_memoire` |
 | `column.rs` · doc de `Column::version` ½ | A7 | F2 | **haute** | le contrat que l'historique ne tient pas (voir `history.rs`) | `b10_le_compteur_de_version_ne_recule_jamais` |
-| `id.rs:43` · `IdAllocator::next` | B1 | F2·F3·F4 | **haute** | débordement sur `u64::MAX`, puis le compteur **recule** | `b4_allocateur_sature_puis_deborde` |
+| `id.rs:43` · `IdAllocator::next` | B1 | F2·F3·F4 | **haute** | débordement sur `u64::MAX`, puis le compteur **recule** | `b4_allocateur_sature_puis_deborde`, `b4_un_identifiant_de_noeud_au_dela_de_la_borne_est_refuse_a_la_lecture` |
 | `name.rs` · `check_name` | C7 | F4·F9 | faible | accepte `\0`, `\n`, les marques de direction ; aucune borne de longueur | `b21_les_noms_de_controle_sont_refuses` |
 | `project.rs:41` · `#[derive(Clone)]` | B9 | F2 | faible | deux copies attribuent les mêmes identifiants | `b21_deux_projets_nattribuent_jamais_le_meme_identifiant` |
 | `project.rs` · `row_targets` ½ | B5 | F5 | moy. | une commande de lignes sans cible réussit sans rien faire | `b12_une_commande_sans_effet_noccupe_pas_un_cran_dannulation` |
@@ -879,18 +879,30 @@ vague 6  (F2 puis F6)          10                 →   0
 ```
 
 **Statut réel de clôture (2026-09-12, les six vagues sont fusionnées sur
-`rewriterust`) : 4 rouges, pas 0.** Les 30 anomalies ont chacune une
+`rewriterust`) : 3 rouges, pas 0.** Les 30 anomalies ont chacune une
 réponse (correctif + garde-fou vert, ou limitation assumée et documentée)
-mais quatre reproductions restent `#[ignore]` par choix, pas par oubli —
+mais trois reproductions restent `#[ignore]` par choix, pas par oubli —
 voir `questions-ouvertes.md` §11 pour le détail chiffré des plafonds, et
-la table ci-dessous pour ces quatre-là :
+la table ci-dessous pour ces trois-là :
 
 | Test | Anomalie | Nature de la limite |
 |---|---|---|
 | `b15_convertir_en_texte_ne_multiplie_pas_la_memoire` | C4 | architecturale, mathématique : `Option<String>` (24 o) vs `f64` (8 o) impose un plancher ×3 avant tout contenu de chaîne ; ne se corrige qu'en changeant le stockage texte (pool de chaînes interné), jamais fait |
 | `b19_une_variante_inconnue_ne_perd_pas_tout_le_fichier`, `b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees` | C5 (niveau 2) | explicitement hors périmètre v1 par ce guide (dégradation gracieuse de variantes d'enum inconnues) |
 | `b21_le_cout_dune_ecriture_ne_depend_pas_du_nombre_de_colonnes` | D3 (2ᵉ moitié) | dette de perf identifiée, non traitée : `History::execute` clone `before` en entier même pour une commande de données ; correctif connu, non implémenté |
-| `b4_projet_charge_avec_identifiant_max_puis_creation` | B1 (test obsolète) | simule un scénario que le read-bound `MAX_NODE_ID` (B1, déjà corrigé) rend inatteignable par un vrai fichier depuis `plotyx-persistence::load` ; à réécrire pour tester le refus à la lecture plutôt que la création après coup — pas un bug ouvert |
+
+`b4_projet_charge_avec_identifiant_max_puis_creation` a quitté cette table
+le 2026-09-12 : ce test simulait, en construisant un `Project::from_tree` à
+la main, un état (un nœud d'identifiant `u64::MAX` déjà pris) qu'un vrai
+fichier `.plx` ne peut plus produire depuis que B1 est corrigée des deux
+côtés — `IdAllocator::next` (`checked_add`) et le read-bound `MAX_NODE_ID`
+de `plotyx_persistence::load`. Il a été réécrit en
+`b4_un_identifiant_de_noeud_au_dela_de_la_borne_est_refuse_a_la_lecture`
+(`crates/plotyx-robustesse/tests/b4_allocateur.rs`), qui vérifie le vrai
+chemin d'entrée — un fichier falsifié portant un identifiant de nœud
+au-delà de `MAX_NODE_ID` est refusé par `load`, pas qu'un état inatteignable
+en interne doive rester utilisable — et qui est vert dès l'écriture : ce
+n'est plus une reproduction, c'est un garde-fou.
 
 ---
 
