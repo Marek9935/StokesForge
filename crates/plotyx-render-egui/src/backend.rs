@@ -81,6 +81,12 @@ pub struct EguiBackend<'a> {
     origin: Pos2,
     size: (u32, u32),
     text: &'a dyn TextSource,
+    /// Chemin Typst de l'écran (tâche R8.3) — `None` tant que personne n'a
+    /// appelé [`Self::with_typst`], y compris quand la feature est
+    /// compilée : construire ce backend ne suffit pas à activer Typst,
+    /// c'est [`crate::GraphView`] qui décide.
+    #[cfg(feature = "typst")]
+    typst: Option<crate::typst_screen::TypstScreen<'a>>,
 }
 
 impl<'a> EguiBackend<'a> {
@@ -96,6 +102,8 @@ impl<'a> EguiBackend<'a> {
             origin,
             size,
             text,
+            #[cfg(feature = "typst")]
+            typst: None,
         }
     }
 
@@ -107,6 +115,18 @@ impl<'a> EguiBackend<'a> {
     pub fn in_rect(shapes: &'a mut Vec<Shape>, rect: egui::Rect, text: &'a dyn TextSource) -> Self {
         let size = (rect.width().max(1.0) as u32, rect.height().max(1.0) as u32);
         Self::new(shapes, rect.min, size, text)
+    }
+
+    /// Active le chemin Typst (tâche R8.3) sur ce backend : les labels
+    /// reconnus par [`plotyx_render::formula::is_formula`] passent par
+    /// `typst`, tous les autres restent en `Shape::Text`. Additif : les
+    /// appelants existants (`in_rect`, `new`) sont inchangés, et un backend
+    /// construit sans cet appel se comporte exactement comme avant R8,
+    /// feature compilée ou non (tâche 8.6).
+    #[cfg(feature = "typst")]
+    pub fn with_typst(mut self, typst: crate::typst_screen::TypstScreen<'a>) -> Self {
+        self.typst = Some(typst);
+        self
     }
 
     /// Passe d'un point de Plotters au repère de l'écran.
@@ -335,6 +355,32 @@ impl DrawingBackend for EguiBackend<'_> {
         if fill.alpha == 0.0 {
             return Ok(());
         }
+
+        // R8.3 : un label reconnu comme une formule Typst (`$...$`, voir
+        // `plotyx_render::formula::is_formula`) passe par la texture
+        // rastérisée plutôt que par le `Galley` egui. Dégrade silencieusement
+        // vers le chemin ordinaire si la formule ne compile pas ou que
+        // Typst n'est pas activé sur ce backend (`typst_screen`, tête de
+        // module) — jamais d'erreur remontée pour un label malformé.
+        #[cfg(feature = "typst")]
+        if let Some(typst) = &self.typst {
+            if plotyx_render::formula::is_formula(text) {
+                let size_pt = plotyx_render::text::font_size(style.size());
+                let pixels_per_point = typst.pixels_per_point();
+                if let Some(texture) = typst.render(text, size_pt, pixels_per_point) {
+                    let origin = self.at(pos);
+                    let shape = crate::typst_screen::mesh(
+                        &texture,
+                        origin,
+                        style.anchor(),
+                        style.transform(),
+                    );
+                    self.shapes.push(shape);
+                    return Ok(());
+                }
+            }
+        }
+
         let galley = self.text.layout(text, font_id(style), color(fill));
         let size = galley.rect.size();
         let anchor = style.anchor();
@@ -365,6 +411,22 @@ impl DrawingBackend for EguiBackend<'_> {
         text: &str,
         style: &S,
     ) -> Result<(u32, u32), DrawingErrorKind<Self::ErrorType>> {
+        // R8.5 — **l'invariant du chantier** : un label Typst se mesure en
+        // interrogeant Typst, jamais l'heuristique `epaint` (qui mesurerait
+        // le texte source `$...$` lui-même, pas la formule qu'il désigne).
+        // Dégrade vers la mesure `epaint` si Typst n'est pas activé ou que
+        // la formule ne compile pas — la même politique que `draw_text`,
+        // pour que la mesure et le dessin restent d'accord sur ce qu'ils
+        // font (`architecture-choisie.md` §4.3).
+        #[cfg(feature = "typst")]
+        if let Some(typst) = &self.typst {
+            if plotyx_render::formula::is_formula(text) {
+                let size_pt = plotyx_render::text::font_size(style.size());
+                if let Some(size) = typst.measure(text, size_pt) {
+                    return Ok(size);
+                }
+            }
+        }
         Ok(estimate(self.text, text, style))
     }
 

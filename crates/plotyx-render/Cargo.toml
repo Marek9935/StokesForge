@@ -7,6 +7,13 @@ description = "Socle des deux backends de rendu : la source unique de mesure de 
 [lints]
 workspace = true
 
+[features]
+default = []
+# R8 — voir la note sur les dépendances Typst ci-dessous, et
+# `docs/newarchitecture/architecture-choisie.md` §7 : absente de `default`,
+# condition du droit d'abandonner Typst sans rien démonter.
+typst = ["dep:typst", "dep:typst-layout"]
+
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
 plotyx-plot = { path = "../plotyx-plot" }
@@ -33,6 +40,19 @@ epaint = { version = "0.36.2", default-features = false, features = [
 # le texte silencieusement. Version alignée sur celle qu'`usvg` verrouille
 # déjà dans `Cargo.lock`, pour ne pas en faire coexister une deuxième.
 fontdb = "0.23"
+# R8 (Typst), derrière la feature `typst` — absente de `default`
+# (`architecture-choisie.md` §7) : le crate compile, teste et s'exécute sans
+# elle, avec repli sur `Shape::Text` brut. Versions épinglées exactement
+# (`=0.15.1`) comme le reste du dépôt le fait pour ses dépendances sensibles
+# (cf. `svg2pdf`, `eframe`) : l'API de Typst n'est pas stable d'une version
+# mineure à l'autre (vérifié en écrivant le `World`, R0).
+typst = { version = "=0.15.1", optional = true }
+# `PagedDocument` et la fonction de mise en page viennent de ce crate, pas de
+# `typst` (vérifié dans la source, pas supposé — R0 l'avait déjà noté).
+# `typst` réexporte tout `typst-library` (`Library`, `World`, `FontBook`,
+# `Font`, `Bytes`, `Datetime`…) et `typst-syntax` (`FileId`, `Source`,
+# `VirtualPath`…) sous `typst::` — pas besoin de ces crates en direct.
+typst-layout = { version = "=0.15.1", optional = true }
 
 [dev-dependencies]
 toml = "0.8"

@@ -18,6 +18,15 @@ const AUTORISEES: &[&str] = &[
     // ailleurs dans le workspace (`plotyx-render-svg` l'atteint par
     // réexport, pas en direct, pour ne pas la déclarer deux fois).
     "fontdb",
+    // R8, feature `typst` (optionnelle, absente de `default`) : le `World`
+    // Typst, la compilation et le cache générique vivent ici précisément
+    // pour que ni `plotyx-render-egui` ni `plotyx-render-svg` n'aient à
+    // réimplémenter le `World` chacun de leur côté
+    // (`architecture-choisie.md` §8 — « où va quoi »). Contrairement à
+    // `egui` ou `plotters-svg`, `typst`/`typst-layout` sont voulus ici, pas
+    // un défaut qui se serait glissé.
+    "typst",
+    "typst-layout",
 ];
 
 #[test]
@@ -35,8 +44,8 @@ fn seules_les_dependances_prevues_sont_declarees() {
         assert!(
             AUTORISEES.contains(&nom.as_str()),
             "dépendance `{nom}` non listée : ce crate est la référence \
-             commune aux deux backends, il ne doit connaître ni egui, ni \
-             plotters-svg, ni typst"
+             commune aux deux backends, il ne doit connaître ni egui ni \
+             plotters-svg"
         );
     }
 }

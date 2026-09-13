@@ -23,9 +23,17 @@
 //! de la `String` que [`render_to_string`] rend déjà, pas un troisième
 //! backend — voir la documentation du module pour ce que ça implique.
 //!
-//! # Ce qui n'est pas ici
+//! # Typst — tâche R8.4
 //!
-//! L'inlining de fragments Typst outlinés dans l'export est la phase R8.
+//! Derrière la feature `typst` (absente de `default`,
+//! `architecture-choisie.md` §7) : [`typst_export`] compile un label
+//! reconnu comme une formule ([`plotyx_render::formula::is_formula`]), pose
+//! un témoin substitué après coup par un fragment `typst-svg` inliné —
+//! voir la doc de [`typst_export`] pour le mécanisme complet, détaillé en
+//! tête de ce module. [`render_to_string_with_typst`] est le point d'entrée
+//! équivalent à [`render_to_string`], Typst activé. Sans la feature, ce
+//! module n'existe pas et [`render_to_string`] se comporte exactement comme
+//! avant R8.
 
 #![cfg_attr(
     not(test),
@@ -34,6 +42,8 @@
 
 pub mod backend;
 pub mod pdf;
+#[cfg(feature = "typst")]
+pub mod typst_export;
 
 use std::path::Path;
 
@@ -67,6 +77,16 @@ pub enum SvgError {
         /// Cause système.
         source: std::io::Error,
     },
+    /// La résolution des polices Typst a échoué — tâche R8.4. N'affecte que
+    /// [`render_to_string_with_typst`] : les polices embarquées étant
+    /// vérifiées valides par les tests de `plotyx_render::fonts`, ce n'est
+    /// atteignable en pratique que pour une police système demandée dont la
+    /// lecture échouerait d'une façon que
+    /// [`plotyx_render::fonts::resolve`] ne rencontre déjà pas lui-même
+    /// (repli silencieux sur Noto).
+    #[cfg(feature = "typst")]
+    #[error("résolution des polices Typst : {0}")]
+    Typst(String),
 }
 
 impl<E: std::error::Error + Send + Sync> From<DrawingAreaErrorKind<E>> for SvgError {
@@ -92,6 +112,35 @@ pub fn render_to_string(
         pipeline::draw(backend, plot)?;
     }
     Ok(buffer)
+}
+
+/// Comme [`render_to_string`], avec le chemin Typst de la tâche R8.4 activé
+/// pour les labels reconnus comme des formules
+/// ([`plotyx_render::formula::is_formula`]).
+///
+/// Point d'entrée additif — [`render_to_string`] n'est pas touché, tâche
+/// 8.6 — construit son propre [`plotyx_render::formula::FormulaCache`] en
+/// interne : un appelant qui exporte la même figure plusieurs fois (par
+/// exemple pour comparer des tailles) ne partage donc pas ce cache d'un
+/// appel à l'autre, contrairement à [`plotyx_render_egui::GraphView`] côté
+/// écran, qui vit plus longtemps qu'un export. Pas un problème pour un
+/// export, par nature ponctuel.
+#[cfg(feature = "typst")]
+pub fn render_to_string_with_typst(
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    choice: &plotyx_render::FontChoice,
+) -> Result<String, SvgError> {
+    let cache = plotyx_render::formula::FormulaCache::new();
+    let typst = typst_export::TypstExport::new(&cache, choice).map_err(SvgError::Typst)?;
+    let mut buffer = String::new();
+    {
+        let backend =
+            MeasuredSvgBackend::with_string(&mut buffer, size, measurer).with_typst(&typst);
+        pipeline::draw(backend, plot)?;
+    }
+    Ok(typst_export::splice(&buffer, &typst))
 }
 
 /// Exporte un graphe déjà résolu, et rend en plus la géométrie retenue.

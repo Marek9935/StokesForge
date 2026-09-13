@@ -74,6 +74,8 @@
 pub mod color;
 pub mod decimate;
 pub mod fonts;
+#[cfg(feature = "typst")]
+pub mod formula;
 pub mod interact;
 pub mod legend;
 pub mod paint;

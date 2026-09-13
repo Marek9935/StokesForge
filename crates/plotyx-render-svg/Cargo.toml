@@ -7,6 +7,15 @@ description = "Export SVG d'un graphe PlotYx : le SVGBackend de plotters, dont e
 [lints]
 workspace = true
 
+[features]
+default = []
+# R8 : le chemin export (8.4) — fragments `typst-svg` inlinés dans le SVG de
+# Plotters. `architecture-choisie.md` §7 : absente de `default`, condition
+# du droit d'abandonner Typst sans rien démonter. `plotyx-render/typst`
+# apporte le `World`, la compilation et le cache générique (8.1/8.2) ; ce
+# crate n'ajoute que ce qui est propre à l'export.
+typst = ["dep:typst", "dep:typst-svg", "plotyx-render/typst"]
+
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
 plotyx-plot = { path = "../plotyx-plot" }
@@ -25,6 +34,11 @@ thiserror = "2"
 # famille déjà adoptée. Pas de troisième backend : ce crate reparse le SVG
 # qu'il vient d'écrire (architecture-choisie.md §5).
 svg2pdf = "0.13.0"
+# R8, feature `typst` : le type `Font` de `TypstExport` et le fragment SVG
+# d'une page compilée. Version épinglée exactement, comme dans
+# `plotyx-render` et `plotyx-render-egui` (même raison).
+typst = { version = "=0.15.1", optional = true }
+typst-svg = { version = "=0.15.1", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

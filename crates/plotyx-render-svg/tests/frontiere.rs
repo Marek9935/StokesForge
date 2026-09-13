@@ -19,6 +19,14 @@ const DEPENDANCES_DIRECTES: &[&str] = &[
     "plotters-backend",
     "thiserror",
     "svg2pdf", // R6 : conversion SVG → PDF, attendue par architecture-choisie.md §8
+    // R8, feature `typst` (optionnelle, absente de `default`) : le fragment
+    // SVG d'une formule compilée (8.4). `typst` et `typst-svg` n'entrent
+    // dans l'arbre réel qu'avec `--features typst` ; leur simple présence
+    // dans `[dependencies]` (avec `optional = true`) suffit à faire lister
+    // leur nom ici, feature activée ou non — ce test lit `Cargo.toml`, pas
+    // l'arbre résolu pour une combinaison de features donnée.
+    "typst",
+    "typst-svg",
 ];
 
 /// Ce qu'un crate d'export ne doit jamais tirer, même de loin.

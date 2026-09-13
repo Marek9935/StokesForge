@@ -1025,6 +1025,172 @@ elle est faite pour Matplotlib et pour Qt.
 
 ## Phase R8 — Typst (≈2 semaines, peut se solder par un abandon)
 
+> **Statut : close le 2026-09-13.** Les six tâches du tableau sont faites et
+> testées — **pas d'abandon** : la mesure de sanité sur le pipeline réel
+> (`plotyx-render/src/formula.rs::latence_de_compilation_dune_formule_inedite`,
+> `#[ignore]`, 200 formules inédites) donne **0,666 ms/formule en `--release`**
+> (5,9 ms en `dev`), très en dessous des 150 ms fixés en R0 — un chiffre
+> différent du 0,156 ms du spike jeté, mais du même ordre, sur le vrai `World`
+> plutôt qu'un jouet. 550 tests au workspace **sans** la feature (inchangé
+> depuis R7, `default` n'ajoute rien de nouveau : tout ce que R8 écrit vit
+> derrière `#[cfg(feature = "typst")]`, module entier compris, pas seulement
+> des branches internes), 9 `#[ignore]` inchangés, clippy et `cargo fmt`
+> inchangés (mêmes 25 échecs préexistants sur les mêmes 15 fichiers,
+> documentés depuis R4-R7 comme un état connu). **Avec** `--features typst`,
+> crate par crate : `plotyx-render` 46 → 57 tests (+11, +1 `#[ignore]`),
+> `plotyx-render-egui` 36 → 42 (+6), `plotyx-render-svg` 14 → 20 (+6) — soit
+> 23 tests supplémentaires au total, plus la mesure de latence ignorée.
+> `cargo build`/`clippy -D warnings`/`test` vérifiés verts dans les deux
+> configurations pour les trois crates ; `cargo tree -p plotyx-render-svg`
+> toujours sans `egui`, `eframe` ni `winit`, feature `typst` comprise
+> (`ni_egui_ni_eframe_ni_winit_meme_transitivement`, inchangé et revérifié).
+>
+> **Dépendances ajoutées, toutes épinglées en exact (`=0.15.1`)** — l'API de
+> Typst n'est pas stable d'une version mineure à l'autre, vérifié en écrivant
+> le `World` : `typst` et `typst-layout` dans `plotyx-render` (le `World`, la
+> compilation, le cache générique — 8.1/8.2) ; `typst` et `typst-render` dans
+> `plotyx-render-egui` (8.3) ; `typst` et `typst-svg` dans `plotyx-render-svg`
+> (8.4). Toutes optionnelles, tirées uniquement par la feature `typst` de
+> chaque crate, absente de `default` partout (8.6). **Poids réel, mesuré et
+> non pas supposé** : `cargo build --features typst` fait entrer environ 90
+> paquets de plus dans l'arbre de compilation (`resvg`, `usvg`, `syntect`,
+> `hayagriva`, `hayro*`, les crates ICU de segmentation Unicode…) — la
+> bibliothèque standard de Typst couvre citations bibliographiques,
+> coloration syntaxique de blocs de code et images bitmap, dont ce chantier
+> n'utilise rien. C'est le prix visible de choisir un compilateur de document
+> complet plutôt qu'un moteur de formules seul ; il ne s'est pas traduit par
+> une latence perceptible (voir la mesure ci-dessus), donc n'a pas justifié
+> de rouvrir la décision prise en R0 — mais un futur lecteur qui s'étonne du
+> nombre de dépendances tirées par `--features typst` trouvera l'explication
+> ici plutôt que d'avoir à la redécouvrir.
+>
+> **La décision que le roadmap laissait explicitement ouverte — comment
+> reconnaître un label Typst dans un `String` ordinaire — est tranchée dans
+> `plotyx-render/src/formula.rs`, documentée en tête de module** : un `&str`
+> est une formule si et seulement s'il contient le caractère `$`, le
+> délimiteur natif du mode mathématique de Typst. Pas de nouveau champ dans
+> `plotyx_plot`, donc pas de migration du format `.plx` — la même discipline
+> que le choix de police du 2026-09-13. Choisi plutôt qu'un marqueur dédié
+> parce que (1) le texte est compilé **tel quel** par Typst, qui bascule
+> lui-même en mode mathématique aux `$...$` : un libellé mixte
+> `"$lambda$ (nm)"` produit une formule suivie de texte ordinaire dans un
+> **seul** appel à Typst, sans code de découpage à écrire ; (2) aucune
+> graduation numérique (produite par `scale::format_tick`) ne contient
+> jamais `$`, donc la détection ne peut pas les faire dévier de leur chemin
+> actuel par accident. **Limite assumée, écrite dans le code, pas cachée** :
+> un texte ordinaire contenant littéralement un `$` (« Coût ($) ») serait à
+> tort envoyé à Typst. Aucun texte de ce chantier n'a ce besoin aujourd'hui ;
+> l'échappement Typst natif (`\$`) est la sortie si le cas se présentait.
+>
+> **Trois autres décisions non annoncées par un document source, toutes
+> documentées dans le code à l'endroit où elles sont prises :**
+>
+> 1. **Le terme `pixels_per_point` du cache générique (`FormulaCache`,
+>    `plotyx-render/src/formula.rs`) est délibérément plus large que ce que
+>    la correction exige.** La compilation Typst elle-même (texte → document,
+>    en points) ne dépend d'aucune échelle d'écran — contrairement à la
+>    hauteur d'un galley `epaint`, qui elle en dépend réellement (`text.rs`).
+>    Le mettre quand même dans la clé, comme la tâche 8.2 du tableau le
+>    demande littéralement, n'est donc pas nécessaire à la mesure
+>    (8.5) : c'est un choix pour offrir **un seul** mécanisme de cache aux
+>    deux backends plutôt que d'en écrire un second, plus fin, réservé à
+>    l'écran. `plotyx-render-svg` l'appelle toujours avec un
+>    `pixels_per_point` constant (`1.0`, un fragment vectoriel n'a pas
+>    d'échelle) ; `plotyx-render-egui` le fait varier avec l'écran réel —
+>    c'est ce second cas qui seul justifie le terme.
+> 2. **`FontChoice::System` replie sur `FontSet::Noto` pour la police Typst,
+>    que la police système demandée soit trouvée ou non** — pas seulement en
+>    cas d'échec, contrairement à `crate::fonts::resolve` pour le texte
+>    ordinaire (`formula::resolve_fonts`, documenté sur place). Typst a
+>    besoin des octets de la police, pas seulement de son nom ; relire ces
+>    octets depuis `fontdb` une seconde fois pour les faire consommer par
+>    Typst est un mécanisme de plus qu'aucun appelant ne réclame aujourd'hui
+>    (`plotyx-app` ne propose encore aucun choix de police à l'utilisateur).
+>    Une police Math, elle, suit toujours ce que `crate::fonts::resolve`
+>    aurait choisi, donc les deux restent cohérentes entre elles.
+> 3. **Activer la feature `typst` à la compilation n'active pas Typst à
+>    l'exécution : c'est un choix explicite en plus, par appel.**
+>    `EguiBackend::with_typst`/`MeasuredSvgBackend::with_typst` sont des
+>    méthodes additives — `collect_shapes`/`render_to_string` existants ne
+>    changent pas de signature ni de comportement, `--features typst`
+>    compilée ou non. C'est plus restrictif que ce que la tâche 8.6 exigeait
+>    au minimum (elle ne demandait que « CI verte sans Typst »), et c'est
+>    voulu : toute la suite de tests écrite avant R8 (`accord.rs`,
+>    `formes.rs`, `interaction.rs`, `export.rs`, `pdf.rs`…) continue de
+>    passer **verbatim**, y compris compilée avec `--features typst`, parce
+>    qu'aucun de ces chemins n'invoque `with_typst`. `plotyx-app` n'a été
+>    câblé à aucun de ces deux points d'entrée (voir plus bas, reporté).
+>
+> **Le mécanisme de substitution de l'export (8.4), le point le plus délicat
+> de la phase.** `plotters-svg::SVGBackend` écrit directement dans sa
+> `String` cible à chaque `draw_*`, sans document intermédiaire modifiable
+> et avec un champ `target` privé — impossible d'y injecter du XML brut au
+> moment de dessiner un label Typst. Solution retenue, exactement celle que
+> §8.1 du tableau ci-dessous esquissait : un label Typst pose un
+> **rectangle-témoin** (`RGBColor(1, 2, 3)`, choisie pour n'avoir aucune
+> raison d'être choisie par un utilisateur) à la place du `<text>` ordinaire
+> ; une fois le document entier écrit, `typst_export::splice` retrouve
+> chaque témoin **par sa couleur**, dans l'ordre où ils ont été posés (pas
+> par ses coordonnées, déjà connues côté Rust au moment de l'enregistrement,
+> donc jamais reparsées depuis le texte SVG), et le remplace par un `<g
+> transform="rotate(...) translate(...)"><svg width=... height=...
+> viewBox=...>` portant le contenu intérieur du fragment `typst-svg` — sans
+> sa balise `<svg>` racine, dont les `width`/`height` en points CSS
+> (`"12,5pt"`) auraient sinon fait grandir le fragment d'un facteur ~1,33 par
+> rapport à la convention déjà en vigueur dans ce chantier (un nombre nu du
+> SVG de Plotters vaut un pixel). **Limite assumée, pas éliminée par
+> construction** : un vrai rectangle du spec qui utiliserait exactement
+> `RGBColor(1, 2, 3)` serait pris à tort pour un témoin — un vrai identifiant
+> coûterait de faire porter un attribut `id` par `plotters-svg`, ce qu'il ne
+> fait justement pas (`architecture-choisie.md` §5.2). Testé directement
+> (`typst_export.rs`, quatre tests) et de bout en bout
+> (`plotyx-render-svg/tests/typst.rs` : le document exporté contient un
+> `<svg>` imbriqué et plus aucun témoin résiduel).
+>
+> **Le test de l'invariant 8.5, écrit dès la première ligne qui touche
+> `estimate_text_size`, comme demandé, dans les deux backends** :
+> `plotyx-render-egui/tests/typst.rs::estimate_text_size_interroge_typst_pour_un_label_formule`
+> et `plotyx-render-svg/tests/typst.rs::le_document_typst_contient_un_fragment_inline_sans_temoin_residuel`
+> comparent le rendu produit avec et sans le chemin Typst pour le **même**
+> label, et vérifient que la géométrie tracée diffère et que la formule
+> apparaît bien par le mécanisme attendu (`Shape::Mesh` texturé à l'écran,
+> fragment `<svg>` inliné à l'export) plutôt que par une supposition sur la
+> valeur mesurée. `plotyx-render/src/formula.rs` porte en plus le fait
+> inverse et tout aussi nécessaire, verrouillé **dans le sens de
+> l'affirmation** comme le fait déjà `text.rs` pour son propre invariant : la
+> mesure d'une formule **ne dépend pas** du `pixels_per_point`, contrairement
+> à la hauteur d'un galley `epaint`. Les deux chemins de mesure ont des
+> raisons opposées de se comporter comme ils le font ; les deux sont
+> maintenant vérifiés, pas seulement l'un des deux.
+>
+> **Dégradation, jamais erreur, sur une formule qui ne compile pas** — la
+> même politique que les références de série brisées ou les types de tracé
+> inconnus (`architecture-choisie.md` §11.1). `EguiBackendError` reste
+> l'énumération inhabitée qu'elle était avant R8 : une formule invalide ne
+> lui ajoute aucune variante, elle fait simplement retomber `draw_text`/
+> `estimate_text_size` sur le chemin `Shape::Text` ordinaire, texte source
+> affiché tel quel. Testé (`une_formule_invalide_mesure_none`,
+> `une_formule_invalide_ne_senregistre_pas`, `une_formule_invalide_echoue_sans_paniquer`).
+>
+> **Reporté, une seule chose, et par manque de mandat plutôt que de temps** :
+> **`plotyx-app` ne câble ni `EguiBackend::with_typst` ni
+> `render_to_string_with_typst`.** Les deux point d'entrée existent, testés
+> indépendamment de toute UI (la méthode que ce chantier a choisie depuis R4,
+> « le rendu se teste sans serveur graphique »), mais brancher un choix de
+> police Typst dans `plotyx-app` demanderait une décision produit que cette
+> phase n'a pas mandat de prendre — le même mandat déjà refusé à la tâche de
+> police du 2026-09-13 pour la même raison (`architecture-choisie.md` §7 :
+> « `PlotSpec` ne gagne aucun champ »). `plotyx-app` n'affiche donc aucune
+> formule Typst tant que ce câblage n'est pas fait ; ce n'est pas un défaut
+> de R8, c'est une frontière déjà tracée avant elle.
+>
+> **Ce que R8 ne tranche toujours pas, comme prévu** : le point ouvert n°6
+> d'`architecture-choisie.md` (tout outliner à l'export, ou assumer
+> l'asymétrie de police pour le texte **ordinaire**) reste ouvert — les
+> fragments Typst eux-mêmes sortent déjà en contours autonomes
+> (`typst-svg`), ce qui n'est qu'une moitié de la question, et R8 ne devait
+> pas trancher l'autre moitié.
+
 **Objectif** : les notations scientifiques, derrière un *feature flag*.
 
 **Condition d'ouverture** : la mesure 0.2 est sous le seuil fixé en R0. Si

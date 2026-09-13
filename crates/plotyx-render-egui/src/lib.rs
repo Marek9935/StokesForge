@@ -49,13 +49,18 @@
 //! [`font_definitions`] sur son `Context` — `plotyx-app` le fait au
 //! démarrage.
 //!
-//! # Typst
+//! # Typst — tâche R8.3
 //!
-//! La feature `typst` existe et ne fait rien ; voir le `Cargo.toml` pour la
-//! raison (§7 d'`architecture-choisie.md` : le droit d'abandonner Typst sans
-//! rien démonter se garde en compilant sans lui **dès le premier jour**). Le
-//! texte ordinaire des graduations passe par `Shape::Text`, jamais par
-//! Typst, feature activée ou non.
+//! Derrière la feature `typst` (absente de `default`,
+//! `architecture-choisie.md` §7) : [`typst_screen`] rastérise une formule
+//! compilée par `plotyx-render` en RGBA (`typst-render`), la charge en
+//! texture `egui`, et [`EguiBackend::draw_text`]/[`estimate_text_size`]
+//! l'utilisent à la place du chemin `Shape::Text` pour un label reconnu
+//! comme une formule ([`plotyx_render::formula::is_formula`]). Sans la
+//! feature, ce module n'existe pas et rien ne change : tout le texte,
+//! `$...$` compris, reste du `Shape::Text` brut comme avant R8. Une formule
+//! qui ne compile pas dégrade vers ce même chemin plutôt que de faire
+//! échouer le rendu (voir `typst_screen`, tête de module).
 
 #![cfg_attr(
     not(test),
@@ -65,6 +70,8 @@
 pub mod backend;
 pub mod cache;
 pub mod feathering;
+#[cfg(feature = "typst")]
+pub mod typst_screen;
 pub mod view;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -97,6 +104,8 @@ pub use plotyx_render::{FontChoice, FontSet, FontSource, ResolvedFonts};
 // (voir `plotyx_render::interact`, générique sur le backend), ce crate ne
 // fait que la consommer avec des types egui.
 pub use plotyx_render::{nearest_on_curve, PanelTransform};
+#[cfg(feature = "typst")]
+pub use typst_screen::{FormulaTexture, TypstScreen};
 pub use view::{Framing, ViewState};
 
 /// Distance maximale, en pixels, à laquelle un point est encore « désigné »
@@ -171,6 +180,22 @@ pub fn collect_shapes(
     plot: &ResolvedPlot<'_>,
 ) -> Result<DrawnPlot, RenderError> {
     let backend = EguiBackend::in_rect(shapes, rect, text);
+    pipeline::draw(backend, plot).map_err(|error| RenderError::Drawing(error.to_string()))
+}
+
+/// Comme [`collect_shapes`], avec le chemin Typst de la tâche R8.3 activé.
+///
+/// Point d'entrée bas niveau équivalent, pour tester le chemin écran de
+/// Typst sans passer par un [`GraphView`] complet ni une session.
+#[cfg(feature = "typst")]
+pub fn collect_shapes_with_typst(
+    shapes: &mut Vec<Shape>,
+    rect: Rect,
+    text: &dyn TextSource,
+    typst: typst_screen::TypstScreen<'_>,
+    plot: &ResolvedPlot<'_>,
+) -> Result<DrawnPlot, RenderError> {
+    let backend = EguiBackend::in_rect(shapes, rect, text).with_typst(typst);
     pipeline::draw(backend, plot).map_err(|error| RenderError::Drawing(error.to_string()))
 }
 

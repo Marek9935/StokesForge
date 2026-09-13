@@ -9,13 +9,12 @@ workspace = true
 
 [features]
 default = []
-# Typst n'est pas construit — c'est la phase R8. La feature existe pourtant
-# dès le premier jour, parce que `architecture-choisie.md` §7 en fait une
-# condition du droit d'abandonner Typst sans rien démonter : le crate doit
-# compiler, tester et s'exécuter **sans** elle, et le prouver dès maintenant
-# plutôt qu'après avoir écrit du code qui la suppose. Sans implémentation
-# derrière, elle ne change rien au binaire ; elle réserve la place et le nom.
-typst = []
+# R8 : le chemin écran (8.3) — `typst-render` en RGBA, texture, `Shape::Mesh`.
+# `architecture-choisie.md` §7 : absente de `default`, condition du droit
+# d'abandonner Typst sans rien démonter. `plotyx-render/typst` apporte le
+# `World`, la compilation et le cache générique (8.1/8.2) ; ce crate n'ajoute
+# que ce qui est propre à l'écran.
+typst = ["dep:typst", "dep:typst-render", "plotyx-render/typst"]
 
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
@@ -31,6 +30,12 @@ plotters-backend = "0.3"
 # écarté précisément parce qu'aucune de ses versions ne suit
 # (`architecture-choisie.md` §4).
 egui = "0.36.2"
+# R8, feature `typst` : le type `Font`/`Bytes` de `TypstScreen` et le
+# rendu RGBA d'une page compilée. Version épinglée exactement, comme dans
+# `plotyx-render` — même raison (API non stabilisée entre versions
+# mineures).
+typst = { version = "=0.15.1", optional = true }
+typst-render = { version = "=0.15.1", optional = true }
 
 [dev-dependencies]
 plotyx-commands = { path = "../plotyx-commands" }

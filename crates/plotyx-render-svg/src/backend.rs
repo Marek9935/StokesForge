@@ -39,7 +39,15 @@ use plotters::prelude::*;
 use plotters_backend::{
     BackendColor, BackendCoord, BackendStyle, BackendTextStyle, DrawingErrorKind,
 };
+#[cfg(feature = "typst")]
+use plotyx_render::text::font_size;
 use plotyx_render::text::{estimate, TextMeasurer};
+
+/// Couleur-témoin d'un emplacement de formule Typst (tâche R8.4) — voir
+/// `crate::typst_export`, tête de module, pour ce qu'elle marque et
+/// pourquoi une couleur suffit plutôt qu'un vrai identifiant.
+#[cfg(feature = "typst")]
+pub(crate) const WITNESS_COLOR: RGBColor = RGBColor(1, 2, 3);
 
 /// `SVGBackend`, augmenté de la mesure de texte partagée du chantier.
 ///
@@ -49,12 +57,25 @@ use plotyx_render::text::{estimate, TextMeasurer};
 pub struct MeasuredSvgBackend<'a> {
     inner: SVGBackend<'a>,
     measurer: &'a TextMeasurer,
+    /// Chemin Typst de l'export (tâche R8.4) — une référence, pas une
+    /// valeur possédée : [`crate::typst_export::TypstExport`] doit rester
+    /// lisible par l'appelant **après** que ce backend a été abandonné
+    /// (`crate::render_to_string_with_typst`), pour que
+    /// [`crate::typst_export::splice`] retrouve les témoins enregistrés
+    /// pendant le tracé. Voir la doc de [`Self::with_typst`].
+    #[cfg(feature = "typst")]
+    typst: Option<&'a crate::typst_export::TypstExport<'a>>,
 }
 
 impl<'a> MeasuredSvgBackend<'a> {
     /// Enveloppe un `SVGBackend` déjà construit.
     pub fn new(inner: SVGBackend<'a>, measurer: &'a TextMeasurer) -> Self {
-        Self { inner, measurer }
+        Self {
+            inner,
+            measurer,
+            #[cfg(feature = "typst")]
+            typst: None,
+        }
     }
 
     /// Un backend qui écrit dans la `String` donnée.
@@ -64,6 +85,18 @@ impl<'a> MeasuredSvgBackend<'a> {
         measurer: &'a TextMeasurer,
     ) -> Self {
         Self::new(SVGBackend::with_string(buffer, size), measurer)
+    }
+
+    /// Active le chemin Typst (tâche R8.4) sur ce backend : les labels
+    /// reconnus par [`plotyx_render::formula::is_formula`] rendent un
+    /// témoin substitué après coup par [`crate::typst_export::splice`],
+    /// tous les autres restent le `<text>` ordinaire de `plotters-svg`.
+    /// Additif comme `EguiBackend::with_typst` : `new`/`with_string`
+    /// restent inchangés, tâche 8.6.
+    #[cfg(feature = "typst")]
+    pub fn with_typst(mut self, typst: &'a crate::typst_export::TypstExport<'a>) -> Self {
+        self.typst = Some(typst);
+        self
     }
 }
 
@@ -141,6 +174,39 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         style: &S,
         pos: BackendCoord,
     ) -> Result<(), DrawingErrorKind<Self::ErrorType>> {
+        // R8.4 : un label Typst pose un rectangle-témoin (couleur
+        // [`WITNESS_COLOR`]) à la place du `<text>` ordinaire ;
+        // `crate::typst_export::splice` le remplace après coup par le
+        // fragment `typst-svg` — voir `crate::typst_export`, tête de
+        // module, pour le mécanisme complet et pourquoi il n'a pas besoin
+        // de toucher `SVGBackend`. Dégrade vers le `<text>` ordinaire si
+        // Typst n'est pas activé ou que la formule ne compile pas.
+        #[cfg(feature = "typst")]
+        if let Some(typst) = &self.typst {
+            if plotyx_render::formula::is_formula(text) {
+                let size_pt = font_size(style.size());
+                if let Some((w, h)) = typst.record(
+                    text,
+                    size_pt,
+                    style.anchor(),
+                    style.transform(),
+                    (pos.0 as f64, pos.1 as f64),
+                ) {
+                    // Le témoin n'a besoin d'être ni bien placé ni bien
+                    // dimensionné : `splice` (`crate::typst_export`) le
+                    // repère par sa couleur et le remplace en entier, en
+                    // utilisant l'origine et la taille déjà enregistrées
+                    // par `record` ci-dessus, pas celles de ce rectangle.
+                    let (w, h) = (w.ceil().max(1.0) as i32, h.ceil().max(1.0) as i32);
+                    return self.inner.draw_rect(
+                        (pos.0, pos.1),
+                        (pos.0 + w, pos.1 + h),
+                        &WITNESS_COLOR,
+                        true,
+                    );
+                }
+            }
+        }
         self.inner.draw_text(text, style, pos)
     }
 
@@ -163,6 +229,19 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         text: &str,
         style: &S,
     ) -> Result<(u32, u32), DrawingErrorKind<Self::ErrorType>> {
+        // R8.5 — le même invariant que côté écran (`EguiBackend`) : un
+        // label Typst se mesure en interrogeant Typst, jamais l'heuristique
+        // `epaint`/naïve. Dégrade vers la mesure `epaint` si Typst n'est
+        // pas activé ou que la formule ne compile pas.
+        #[cfg(feature = "typst")]
+        if let Some(typst) = &self.typst {
+            if plotyx_render::formula::is_formula(text) {
+                let size_pt = font_size(style.size());
+                if let Some(size) = typst.measure(text, size_pt) {
+                    return Ok(size);
+                }
+            }
+        }
         Ok(estimate(self.measurer, text, style))
     }
 }
