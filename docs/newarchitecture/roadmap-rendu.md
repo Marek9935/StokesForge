@@ -876,7 +876,133 @@ est une conversion du SVG, pas un troisième backend.
 
 ## Phase R7 — Interaction (≈2 semaines)
 
-**Objectif** : le graphe devient manipulable.
+> **Statut : close le 2026-09-13.** Les quatre tâches du tableau sont faites
+> et testées ; le rognage réel (point 2 des contraintes d'ouverture de la
+> phase) reste reporté, comme R5 le prévoyait déjà en ouvrant cette phase —
+> précisions et raisons plus bas, dans le même esprit que R5 documentait son
+> propre report vers R7. 550 tests au workspace (530 avant, **+20**),
+> 9 `#[ignore]` inchangés, clippy sans avertissement (features `typst` et
+> `python` comprises), `cargo fmt` sans dérive nouvelle (exactement les 25
+> échecs préexistants du guide de robustesse, sur les mêmes 15 fichiers —
+> vérifié en revenant dessus après un `cargo fmt --all` complet, qui les
+> aurait sinon corrigés en silence et fait disparaître ce que R4-R6
+> documentaient comme un état connu, pas une propriété à réparer au passage).
+> **Critères de sortie tenus** : `cargo tree -p plotyx-plot` toujours limité à
+> `plotyx-id`, `cargo tree -p plotyx-render-svg` toujours sans `egui`, `eframe`
+> ni `winit`.
+>
+> **Deux crates gagnent un module, aucun n'en gagne un dépendant.**
+> `plotyx-render::interact` (nouveau, 300 lignes dont la moitié de tests) porte
+> `PanelTransform` — la correspondance pixel ↔ données d'un panneau tracé,
+> [`DrawnPanel::pixel_origin`]/[`pixel_size`] ajoutés à cet effet — et
+> `nearest_on_curve`, l'équivalent du couple `ReverseCoordTranslate` +
+> `min_by_key` de la tâche 7.2. **Générique sur le backend, comme le reste de
+> `plotyx-render`**, alors que `plotyx-render-svg` n'en a aujourd'hui aucun
+> usage (un SVG statique n'a pas de curseur) : le placer à côté de
+> `plotyx-render-egui` l'aurait rendu inaccessible le jour où un lecteur SVG
+> interactif en aurait besoin, pour un coût nul aujourd'hui — exactement le
+> raisonnement qui avait fait descendre `plotyx-render` lui-même en R4.
+> `plotyx-render-egui::view` (nouveau) porte `ViewState`/`Framing` : l'état de
+> vue éphémère, jamais une mutation du modèle, jamais posé sur le `PlotSpec`
+> stocké — il s'applique à un **clone**, juste avant résolution, en réutilisant
+> tel quel le mécanisme du cadrage explicite qu'`AxisSpec::has_explicit_range`
+> offrait déjà depuis R5 (`crates/plotyx-render/tests/geometrie.rs::un_cadrage_explicite_prime_sur_les_donnees`).
+> Rien de neuf n'a donc été inventé pour le cadrage lui-même, seulement pour
+> ce qui le déclenche.
+>
+> **La clé de cache gagne un quatrième terme, `view_generation: u64`** —
+> un compteur que `ViewState` avance à chaque zoom, pan ou rectangle élastique
+> commis, pas les bornes elles-mêmes (variables en nombre, par panneau, en
+> `f64` — peu `Copy`-friendly, et sans intérêt pour la clé : seul le fait
+> qu'elles aient changé compte). C'est la règle inverse de celle du
+> *feathering*, et volontairement : le zoom/pan **change la géométrie
+> tracée**, le feathering ne change que la tessellation — les deux moitiés de
+> la phrase d'`architecture-choisie.md` §4.2 sont maintenant exercées chacune
+> par un terme de la clé, l'une en l'ajoutant, l'autre en refusant de le
+> faire.
+>
+> **`GraphView::paint` change de signature : `&egui::Ui`, plus `&Painter`.**
+> La navigation a besoin d'un `Response` — molette, glissé, position du
+> curseur — qu'un `Painter` seul ne porte pas ; `paint` fait maintenant
+> lui-même `ui.interact(rect, self.id, Sense::click_and_drag())`, avec un
+> `egui::Id` propre à chaque `GraphView` (compteur atomique) plutôt que dérivé
+> du chemin d'`Ui` de l'appelant, pour que deux vues peintes depuis le même
+> point du code ne partagent pas le même geste. Trois fichiers de tests et
+> `plotyx-app/src/app.rs` mis à jour en conséquence ; aucune régression, les
+> anciens tests passent inchangés pour le reste (`ui.painter()` devient `ui`,
+> egui reborrow `&mut Ui` en `&Ui` tout seul).
+>
+> **Un piège trouvé en écrivant le test du rectangle élastique, pas en le
+> lisant dans une doc.** `egui` diffère la décision « clic ou glissé » sur un
+> widget sensible aux deux jusqu'à ce que le mouvement la tranche
+> (`egui::interaction::interact`, commentaire *"the mouse first is pressed,
+> it could be either [...] so we postpone the decision"*) : `drag_started_by`
+> ne devient vrai qu'à l'image où la décision tombe, et
+> `interact_pointer_pos()` y porte déjà la position **courante**, pas celle de
+> la pression initiale — capturer le coin de départ du rectangle à cet
+> instant-là le collabait au point d'arrivée (rectangle de largeur nulle,
+> jamais commis). `drag_delta()` reste fiable quelle que soit la date de la
+> décision (c'est le mouvement de **cette** image) : `pos - drag_delta()`
+> retrouve le point de départ réel, sans dépendre de `drag_started_by` du
+> tout. Le pan (bouton principal) n'y avait pas été exposé par hasard : il
+> utilisait déjà `pos - delta` pour retrouver le panneau visé, ce qui est la
+> même correction appliquée un cran plus tôt sans que le piège n'ait été vu
+> comme tel sur le moment.
+>
+> **Une décision arbitraire, à écrire parce que rien ne l'imposait** : le
+> bouton principal glisse (pan), le bouton secondaire trace le rectangle de
+> zoom élastique. Aucun document source ne tranchait ce choix ; matplotlib
+> et la plupart des outils scientifiques attachent plutôt le rectangle à une
+> touche modificatrice sur le bouton principal, ce qui resterait à faire si
+> `plotyx-app` veut un jour s'aligner dessus — le mécanisme (`PanelTransform`,
+> `ViewState`) est indifférent au choix de déclencheur.
+>
+> **Une désignation limitée à l'axe principal**, pas à l'axe secondaire
+> (droit) : une série de droite vivrait sur un second `PanelTransform` (bornes
+> `y2_range`, échelle `right.scale`) qu'il faudrait construire à côté, et rien
+> n'en a aujourd'hui l'usage (`plotyx-app` n'affiche encore qu'un banc, sans
+> axe secondaire visible). Écrit dans `PointHit` et dans `crate::view`, pas
+> seulement ici, pour ne pas se reperdre.
+>
+> **Une extension non demandée par le tableau, ajoutée parce que son absence
+> aurait rendu la démonstration inutilisable** : double-clic pour réinitialiser
+> le zoom. Sans lui, un zoom posé pendant la session `plotyx-app` n'a aucun
+> chemin de retour sinon relancer le banc — `GraphView::reset_view()` est
+> exposée publiquement, câblée au double-clic dans `handle_navigation`, et
+> testée comme les quatre tâches du tableau.
+>
+> **Le rognage réel (Liang-Barsky), reporté une deuxième fois — mais
+> confirmé, pas juste renvoyé.** R5 notait déjà que la troncature au
+> rectangle de Plotters (`element/mod.rs` : `BackendCoordOnly::map` appelle
+> `rect.truncate(coord_trans.translate(from))`, chemin qu'empruntent tous les
+> `area.draw(&PathElement::new(…))` de `plotyx_render::paint`) deviendrait
+> visible « dès le premier zoom ». R7 le vérifie plutôt que de le répéter :
+> un cadrage explicite étroit fait effectivement extrapoler la plupart des
+> points d'une série à des coordonnées pixel très éloignées, que Plotters
+> ramène ensuite **par composante** au bord du panneau — un segment qui sort
+> en diagonale se couche sur le bord au lieu d'être coupé à l'intersection
+> réelle. Un nouveau test,
+> `un_cadrage_etroit_zoome_reste_borne_au_rectangle`
+> (`plotyx-render-egui/tests/formes.rs`), le déclenche et vérifie ce qui doit
+> rester vrai malgré le défaut : aucune forme n'échappe au rectangle alloué,
+> aucune coordonnée `NaN` ni infinie — la dégradation reste bornée, pas
+> corrompue. **Reporté quand même**, faute d'un temps qui aurait dû couvrir
+> aussi la division d'une polyligne en plusieurs `PathElement` disjoints
+> quand un vrai rognage lui fait quitter puis retrouver le panneau plusieurs
+> fois, l'interaction avec les motifs de tirets et les moustaches d'erreur, et
+> la ré-vérification du test d'accord sur un graphe zoomé pour les deux
+> backends — un sous-chantier à part entière, pas un correctif ponctuel. Il
+> resterait, comme documenté depuis R5, une fonction de `plotyx-render`
+> générique sur le backend, pas un correctif d'un seul des deux.
+>
+> **Reste ouvert**, en plus du rognage réel ci-dessus : le zoom/pan et la
+> désignation de point ne couvrent que l'axe principal (voir plus haut) ; le
+> déclencheur du rectangle élastique (bouton secondaire) n'est pas
+> configurable et n'a pas été confronté à un utilisateur réel ; et
+> `feathering::apply` reste un réglage de tout l'`egui::Context`, donc commun
+> à toutes les vues si `plotyx-app` en affichait un jour plusieurs à la
+> fois — situation déjà documentée comme telle par R5.5 bis, inchangée ici
+> faute d'un second `GraphView` simultané pour l'exercer.
 
 | # | Tâche | Livrable |
 |---|---|---|

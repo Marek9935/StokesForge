@@ -83,9 +83,7 @@ fn formes(
 ) -> (Vec<egui::epaint::ClippedShape>, bool) {
     let mut depuis_le_cache = false;
     let mut sortie = context.run_ui(egui::RawInput::default(), |ui| {
-        depuis_le_cache = view
-            .paint(ui.painter(), RECT, snapshot, graph)
-            .expect("peinture");
+        depuis_le_cache = view.paint(ui, RECT, snapshot, graph).expect("peinture");
     });
     let shapes = std::mem::take(&mut sortie.shapes);
     // Sans fenêtre, personne ne téléverse l'atlas : `epaint` panique sur un

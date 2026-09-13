@@ -90,9 +90,7 @@ fn image(
 ) -> bool {
     let mut depuis_le_cache = false;
     let sortie = context.run_ui(egui::RawInput::default(), |ui| {
-        depuis_le_cache = view
-            .paint(ui.painter(), rect, snapshot, graph)
-            .expect("peinture");
+        depuis_le_cache = view.paint(ui, rect, snapshot, graph).expect("peinture");
     });
     consomme(sortie);
     depuis_le_cache
@@ -206,7 +204,7 @@ fn un_noeud_qui_nest_pas_un_graphe_est_une_erreur_pas_un_plantage() {
 
     let mut resultat = None;
     consomme(context.run_ui(egui::RawInput::default(), |ui| {
-        resultat = Some(view.paint(ui.painter(), rect, &snapshot, banc.column));
+        resultat = Some(view.paint(ui, rect, &snapshot, banc.column));
     }));
     assert!(matches!(
         resultat,
@@ -215,7 +213,7 @@ fn un_noeud_qui_nest_pas_un_graphe_est_une_erreur_pas_un_plantage() {
 
     let mut inconnu = None;
     consomme(context.run_ui(egui::RawInput::default(), |ui| {
-        inconnu = Some(view.paint(ui.painter(), rect, &snapshot, NodeId::from_raw(u64::MAX)));
+        inconnu = Some(view.paint(ui, rect, &snapshot, NodeId::from_raw(u64::MAX)));
     }));
     assert!(matches!(
         inconnu,

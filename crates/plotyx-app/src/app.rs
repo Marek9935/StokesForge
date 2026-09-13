@@ -543,11 +543,16 @@ impl PlotyxApp {
                     return;
                 };
                 let available = ui.available_size_before_wrap();
+                // R7 : la navigation (molette, glissé, rectangle élastique)
+                // a besoin de bien plus que `hover()` — `GraphView::paint`
+                // fait sa propre `ui.interact` sur ce rectangle avec
+                // `click_and_drag()` ; le `Sense` posé ici doit au moins ne
+                // pas lui faire concurrence.
                 let (rect, _) = ui.allocate_exact_size(
                     egui::vec2(available.x, (available.y - 24.0).max(120.0)),
-                    egui::Sense::hover(),
+                    egui::Sense::click_and_drag(),
                 );
-                match view.paint(ui.painter(), rect, state.snapshot(), graph) {
+                match view.paint(ui, rect, state.snapshot(), graph) {
                     Ok(_) => {
                         let cache = view.cache();
                         ui.weak(format!(
@@ -558,6 +563,15 @@ impl PlotyxApp {
                         ));
                         if let Some(drawn) = view.last_drawn() {
                             ui.weak(Self::figure_summary(drawn));
+                        }
+                        if let Some(hit) = view.hovered_point() {
+                            ui.weak(format!(
+                                "point désigné : panneau {}, série {}, indice {} — ({:.4}, {:.4}), à {:.1} px",
+                                hit.panel, hit.series, hit.point_index, hit.data.0, hit.data.1, hit.distance
+                            ));
+                        }
+                        if ui.small_button("réinitialiser le zoom").clicked() {
+                            view.reset_view();
                         }
                     }
                     Err(err) => {

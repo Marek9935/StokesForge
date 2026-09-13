@@ -1,8 +1,9 @@
 //! Le cache de formes — tâche R4.3.
 //!
-//! # La clé, et pourquoi elle a exactement trois termes
+//! # La clé, et pourquoi elle a exactement quatre termes
 //!
-//! `(revision, rect, pixels_per_point)` (`architecture-choisie.md` §4.2) :
+//! `(revision, rect, pixels_per_point, view_generation)`
+//! (`architecture-choisie.md` §4.2) :
 //!
 //! - **`revision`** — le compteur monotone de `plotyx-session`, qui existait
 //!   déjà et dont c'est l'usage prévu (*« un client sait si son instantané
@@ -14,7 +15,17 @@
 //! - **`pixels_per_point`** — c'est l'exception qu'`epaint` documente
 //!   lui-même dans sa source : *« storing [shapes] should also be fine with
 //!   one exception: `Shape::Text` depends on the current `pixels_per_point`
-//!   and so must be recreated every time `pixels_per_point` changes »*.
+//!   and so must be recreated every time `pixels_per_point` changes »* ;
+//! - **`view_generation`** (tâche R7.1) — le compteur de
+//!   [`crate::view::ViewState`], qui monte à chaque zoom, pan ou rectangle
+//!   de zoom élastique commis. Contrairement au *feathering* (voir plus
+//!   bas), le zoom/pan **change la géométrie tracée** — les bornes d'axe ne
+//!   sont plus celles des données — donc doit entrer dans la clé, sous
+//!   peine de servir une figure périmée depuis le cache après un geste de
+//!   navigation. Un compteur plutôt que les bornes elles-mêmes : elles
+//!   vivent dans des `f64` par panneau, pas franchement `Copy`-friendly en
+//!   nombre variable, et un entier qui change à chaque commit suffit à
+//!   invalider — la valeur exacte du cadrage n'a pas à transiter par ici.
 //!
 //! # Ce qui n'est délibérément *pas* dans la clé
 //!
@@ -49,6 +60,9 @@ pub struct CacheKey {
     pub rect: Rect,
     /// Échelle d'affichage au moment du calcul.
     pub pixels_per_point: f32,
+    /// Génération de [`crate::view::ViewState`] au moment du calcul — tâche
+    /// R7.1. `0` tant qu'aucun zoom ni pan n'a été commis.
+    pub view_generation: u64,
 }
 
 /// Les formes d'une figure, et de quoi savoir si elles sont encore bonnes.
@@ -150,10 +164,20 @@ mod tests {
     use super::*;
 
     fn key(revision: Revision, width: f32, pixels_per_point: f32) -> CacheKey {
+        key_with_view(revision, width, pixels_per_point, 0)
+    }
+
+    fn key_with_view(
+        revision: Revision,
+        width: f32,
+        pixels_per_point: f32,
+        view_generation: u64,
+    ) -> CacheKey {
         CacheKey {
             revision,
             rect: Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 100.0)),
             pixels_per_point,
+            view_generation,
         }
     }
 
@@ -173,8 +197,13 @@ mod tests {
     }
 
     #[test]
-    fn chacun_des_trois_termes_invalide() {
-        for suivante in [key(2, 200.0, 1.0), key(1, 201.0, 1.0), key(1, 200.0, 2.0)] {
+    fn chacun_des_quatre_termes_invalide() {
+        for suivante in [
+            key(2, 200.0, 1.0),
+            key(1, 201.0, 1.0),
+            key(1, 200.0, 2.0),
+            key_with_view(1, 200.0, 1.0, 1),
+        ] {
             let mut cache = ShapeCache::new();
             cache.get_or_build(key(1, 200.0, 1.0), une_forme).unwrap();
             assert!(

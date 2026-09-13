@@ -74,6 +74,7 @@
 pub mod color;
 pub mod decimate;
 pub mod fonts;
+pub mod interact;
 pub mod legend;
 pub mod paint;
 pub mod pipeline;
@@ -85,6 +86,7 @@ pub mod text;
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{FontChoice, FontSet, FontSource, ResolvedFonts};
+pub use interact::{nearest_on_curve, PanelTransform};
 pub use pipeline::{draw, draw_on, DrawnPanel, DrawnPlot};
 pub use series::{Geometry, Prepared};
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};

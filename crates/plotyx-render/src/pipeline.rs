@@ -123,6 +123,18 @@ pub struct DrawnPanel {
     pub y_range: (f64, f64),
     /// Bornes de l'ordonnée de droite, si une série s'y rattache.
     pub y2_range: Option<(f64, f64)>,
+    /// Coin haut-gauche de la zone de tracé, en pixels de backend.
+    ///
+    /// Ajouté en R7 (tâche 7.2/7.3) : c'est ce qui, combiné à
+    /// [`Self::pixel_size`] et aux bornes ci-dessus, donne la correspondance
+    /// pixel ↔ données qu'`interact::PanelTransform` construit — sans
+    /// redécouvrir le calcul de grille ni les aires de graduation, puisque
+    /// ce sont les pixels **réellement** alloués par Plotters
+    /// (`plotting.get_base_pixel()`) qui sont recopiés ici, pas une
+    /// approximation reconstruite à côté.
+    pub pixel_origin: (i32, i32),
+    /// Dimensions de la zone de tracé, en pixels de backend.
+    pub pixel_size: (u32, u32),
     /// Échelle de l'axe des abscisses, telle qu'elle a été appliquée.
     pub x_scale: AxisScale,
     /// Échelle de l'ordonnée de gauche.
@@ -449,6 +461,8 @@ fn draw_panel<DB: DrawingBackend>(
         x_range: data_range(x_scale, x_range),
         y_range: data_range(y_scale, y_range),
         y2_range: y2_range.map(|range| data_range(y2_scale, range)),
+        pixel_origin: origin,
+        pixel_size: size,
         x_scale,
         y_scale,
         drawn_series: 0,

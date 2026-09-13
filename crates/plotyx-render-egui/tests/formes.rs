@@ -24,6 +24,14 @@ const SIZE: (f32, f32) = (800.0, 600.0);
 const POINTS: usize = 64;
 
 fn figure() -> Vec<Shape> {
+    figure_avec(|_panel| {})
+}
+
+/// La même figure que [`figure`], avec `personnaliser` appliquée au panneau
+/// avant le tracé — pour la tâche R7 (`un_cadrage_etroit_zoome_reste_borne_au_rectangle`),
+/// qui a besoin d'un cadrage explicite sans dupliquer la construction du
+/// projet et de la série.
+fn figure_avec(personnaliser: impl FnOnce(&mut PanelSpec)) -> Vec<Shape> {
     let mut project = Project::new("Formes").expect("projet");
     let root = project.root();
     let book = project.add_empty_workbook(root, None).expect("classeur");
@@ -55,6 +63,7 @@ fn figure() -> Vec<Shape> {
         ..LineSpec::default()
     };
     panel.series.push(series);
+    personnaliser(&mut panel);
     let spec = PlotSpec {
         title: "Sinusoïde".into(),
         background: "#ffffff".into(),
@@ -195,4 +204,46 @@ fn la_serie_est_une_seule_polyligne() {
         2,
         "la vignette de légende est un simple segment"
     );
+}
+
+#[test]
+fn un_cadrage_etroit_zoome_reste_borne_au_rectangle() {
+    // La série couvre X = 0..64 ; ce cadrage n'en montre qu'un dixième. La
+    // majorité des points sont donc extrapolés par `map_coordinate` à des
+    // coordonnées pixel très éloignées, que Plotters ramène au bord du
+    // panneau par composante (`rect.truncate` — voir la tête de module de
+    // `plotyx_render::paint`, section « Le débordement est déjà traité »).
+    // Ce test ne prétend pas que le rendu est *correct* dans ce cas — c'est
+    // justement le défaut que `paint.rs` documente et que R7 reporte — mais
+    // vérifie ce qui doit rester vrai malgré lui : aucune forme n'échappe au
+    // rectangle qui lui a été alloué, et aucune coordonnée ne devient `NaN`
+    // ou infinie. C'est l'équivalent, pour un zoom extrême, de
+    // `rien_ne_deborde_du_rectangle_alloue` ci-dessus.
+    let cadre = Rect::from_min_size(Pos2::ZERO, egui::vec2(SIZE.0, SIZE.1));
+    let tolerance = 1.5;
+    let zoome = figure_avec(|panel| {
+        panel.bottom.auto_range = false;
+        panel.bottom.range_min = Some(28.0);
+        panel.bottom.range_max = Some(32.0);
+        panel.left.auto_range = false;
+        panel.left.range_min = Some(-0.1);
+        panel.left.range_max = Some(0.1);
+    });
+    assert!(!zoome.is_empty(), "la figure zoomée est vide");
+    for shape in zoome {
+        let bounds = shape.visual_bounding_rect();
+        assert!(
+            bounds.is_finite(),
+            "une forme a des coordonnées non finies sous un cadrage étroit : {bounds:?}"
+        );
+        assert!(
+            bounds.min.x >= cadre.min.x - tolerance
+                && bounds.min.y >= cadre.min.y - tolerance
+                && bounds.max.x <= cadre.max.x + tolerance
+                && bounds.max.y <= cadre.max.y + tolerance,
+            "{bounds:?} sort du cadre {cadre:?} sous un cadrage étroit : le \
+             rognage grossier de Plotters (`rect.truncate`) ne borne plus \
+             correctement, ce qui serait pire que le défaut documenté"
+        );
+    }
 }
