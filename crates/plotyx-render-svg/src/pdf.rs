@@ -146,7 +146,12 @@ fn convert(document: &str, options: &svg2pdf::usvg::Options<'_>) -> Result<Vec<u
 /// a déjà trouvé une police système convenable, n'est pas affectée — cette
 /// fonction ne fait qu'ajouter un filet, jamais remplacer un choix qui
 /// fonctionne déjà.
-fn ensure_embedded_fallback(fontdb: &mut svg2pdf::usvg::fontdb::Database) {
+///
+/// `pub(crate)` : [`crate::png`] la réutilise telle quelle plutôt que de
+/// dupliquer la politique de police — `resvg` (sa dépendance) tire la même
+/// version d'`usvg`, donc le même `fontdb::Database`, que `svg2pdf` ici (voir
+/// `Cargo.lock` et `tests/frontiere.rs`).
+pub(crate) fn ensure_embedded_fallback(fontdb: &mut svg2pdf::usvg::fontdb::Database) {
     let deja_resolue = fontdb
         .query(&svg2pdf::usvg::fontdb::Query {
             families: &[svg2pdf::usvg::fontdb::Family::SansSerif],

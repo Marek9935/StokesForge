@@ -17,11 +17,13 @@
 //! **le rendu se teste sans serveur graphique**. Toute la suite de tests de
 //! ce crate tourne en intégration continue sans display.
 //!
-//! # PDF
+//! # PDF et PNG
 //!
 //! L'export PDF (`svg2pdf`, module [`pdf`]) est la phase R6 : une conversion
 //! de la `String` que [`render_to_string`] rend déjà, pas un troisième
 //! backend — voir la documentation du module pour ce que ça implique.
+//! L'export PNG (`resvg`, module [`png`], ajout post-roadmap) suit exactement
+//! le même patron : voir la documentation du module.
 //!
 //! # Typst — tâche R8.4
 //!
@@ -42,6 +44,7 @@
 
 pub mod backend;
 pub mod pdf;
+pub mod png;
 #[cfg(feature = "typst")]
 pub mod typst_export;
 
@@ -57,6 +60,7 @@ use plotyx_render::text::TextMeasurer;
 pub use backend::MeasuredSvgBackend;
 pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};
 pub use plotyx_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer};
+pub use png::{document_to_png, render_to_png, render_to_png_file, PngError};
 
 /// Taille par défaut d'une figure exportée, en unités SVG.
 pub const DEFAULT_SIZE: (u32, u32) = (800, 600);

@@ -34,6 +34,11 @@ thiserror = "2"
 # famille déjà adoptée. Pas de troisième backend : ce crate reparse le SVG
 # qu'il vient d'écrire (architecture-choisie.md §5).
 svg2pdf = "0.13.0"
+# Export PNG : même patron que le PDF (conversion du SVG déjà produit), via
+# `resvg` — module `png`. Épinglé exactement sur la version que `svg2pdf`
+# tire déjà en interne (voir Cargo.lock) pour ne pas faire coexister deux
+# `usvg` dans l'arbre de dépendances.
+resvg = "=0.45.1"
 # R8, feature `typst` : le type `Font` de `TypstExport` et le fragment SVG
 # d'une page compilée. Version épinglée exactement, comme dans
 # `plotyx-render` et `plotyx-render-egui` (même raison).

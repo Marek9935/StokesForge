@@ -3753,6 +3753,7 @@ dependencies = [
  "plotyx-core",
  "plotyx-plot",
  "plotyx-render",
+ "resvg 0.45.1",
  "svg2pdf",
  "tempfile",
  "thiserror 2.0.20",

@@ -19,6 +19,7 @@ const DEPENDANCES_DIRECTES: &[&str] = &[
     "plotters-backend",
     "thiserror",
     "svg2pdf", // R6 : conversion SVG → PDF, attendue par architecture-choisie.md §8
+    "resvg",   // export PNG (ajout post-roadmap) : même patron, conversion SVG → PNG
     // R8, feature `typst` (optionnelle, absente de `default`) : le fragment
     // SVG d'une formule compilée (8.4). `typst` et `typst-svg` n'entrent
     // dans l'arbre réel qu'avec `--features typst` ; leur simple présence
