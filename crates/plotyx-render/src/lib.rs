@@ -71,6 +71,7 @@
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+pub mod clip;
 pub mod color;
 pub mod decimate;
 pub mod fonts;

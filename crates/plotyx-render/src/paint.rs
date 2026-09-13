@@ -24,43 +24,44 @@
 //! coordonnées entières ; les deux backends ne voient qu'un `draw_path`, un
 //! `draw_rect` ou un `draw_circle` déjà résolu.
 //!
-//! # Le débordement est déjà traité, par Plotters — mais pas correctement
+//! # Le débordement était mal traité par Plotters — corrigé le 2026-09-13
 //!
 //! Tout ce qui est peint ici passe par [`plotters::drawing::DrawingArea`],
 //! dont le mappage de coordonnées **tronque au rectangle de la zone**
 //! (`element/mod.rs` : `BackendCoordOnly::map` appelle
 //! `rect.truncate(coord_trans.translate(from))`, et c'est ce chemin que
 //! `area.draw(&PathElement::new(…))` emprunte ci-dessous). Un point hors
-//! cadrage est donc ramené au bord plutôt que peint sur les graduations.
-//! C'est un rognage grossier — un segment qui traverse la zone voit son
-//! **extrémité déplacée**, pas coupée à l'endroit où il franchit le bord —
-//! et c'est le comportement de R4, conservé tel quel jusqu'ici parce
-//! qu'invisible tant que le cadrage suit les données (la marge de 5 % de
-//! `pipeline::padded` laisse toujours un peu de jeu).
+//! cadrage est donc ramené au bord plutôt que peint sur les graduations,
+//! **par composante** : un segment qui traverse la zone en diagonale voyait
+//! son extrémité se coucher sur le bord au lieu d'être coupée à
+//! l'intersection réelle. Invisible en R4 tant que le cadrage suivait les
+//! données (la marge de 5 % de `pipeline::padded` laissait toujours du
+//! jeu), le défaut devenait visible dès qu'un cadrage explicite serrait la
+//! fenêtre (zoom molette, rectangle élastique — R7.1/7.4) : la plupart des
+//! points d'une série tombent alors hors du panneau, `map_coordinate` les
+//! extrapole linéairement à des coordonnées pixel très éloignées, et
+//! `rect.truncate` les ramenait au bord un axe à la fois plutôt qu'à
+//! l'intersection segment/rectangle. Documenté et reporté deux fois
+//! (R5, puis re-confirmé en R7 sans être traité).
 //!
-//! **R7 confirme que le zoom le rend visible, et le reporte encore.** Une
-//! fois le cadrage explicite (zoom molette, rectangle élastique — R7.1/7.4),
-//! la plupart des points d'une série tombent hors du panneau visible ;
-//! `map_coordinate` les extrapole linéairement à des coordonnées pixel très
-//! éloignées, que `rect.truncate` ramène ensuite **par composante** au bord
-//! — un trait qui sort en diagonale se couche donc sur le bord au lieu
-//! d'être coupé à l'intersection réelle. Ce n'est plus une conjecture : le
-//! test `un_cadrage_etroit_zoome_reste_borne_au_rectangle`
-//! (`plotyx-render-egui/tests/formes.rs`) le déclenche avec un cadrage
-//! explicite étroit — l'équivalent d'un zoom extrême — et vérifie ce qui
-//! reste vrai malgré le défaut : aucune forme ne sort du rectangle alloué
-//! (`rect.truncate` borne, il ne fait pas diverger), et aucune coordonnée
-//! n'est `NaN` ni infinie.
-//! **Reporté quand même**, faute d'un temps qui aurait dû aussi couvrir la
-//! division en plusieurs `PathElement` quand une ligne sort et rentre
-//! plusieurs fois (un vrai rognage Liang-Barsky d'une polyligne n'est plus
-//! un seul chemin mais plusieurs segments disjoints), son interaction avec
-//! les motifs de tirets ([`dashes`]) et les moustaches d'erreur, et la
-//! ré-vérification du test d'accord sur un graphe zoomé pour les deux
-//! backends. Un rognage réel resterait, comme documenté depuis R5, une
-//! fonction de `plotyx-render` (générique sur le backend) plutôt qu'un
-//! correctif d'un seul des deux — ne pas le faire entrer dans
-//! `plotyx-render-egui` le jour où quelqu'un s'y attaque.
+//! **Corrigé** par un vrai rognage géométrique (Liang-Barsky, sur le
+//! rectangle de tracé, **en pixels** — l'espace où la projection reste
+//! affine même pour un axe logarithmique) : [`crate::clip`]. Il s'intercale
+//! entre la projection donnée→pixel et l'appel à [`polyline`] ci-dessous
+//! (câblé dans `pipeline::paint_series`) : un segment qui traverse le
+//! rectangle est coupé au point exact de la traversée, un segment
+//! entièrement hors du rectangle est omis plutôt que plaqué sur un bord, et
+//! une polyligne qui sort et rentre plusieurs fois devient plusieurs
+//! sous-polylignes disjointes au lieu d'une seule qui longerait le bord.
+//! Sans cadrage explicite qui déborde des données (le cas courant), chaque
+//! segment reste entièrement dans le rectangle et ce rognage est un no-op
+//! visuel. Tests unitaires purs dans `crate::clip` (segment traversant,
+//! entièrement dehors, entièrement dedans, tangent à un bord) et test de
+//! bout en bout
+//! `un_cadrage_etroit_ne_plaque_plus_la_courbe_sur_un_bord`
+//! (`plotyx-render-egui/tests/formes.rs`), à côté de
+//! `un_cadrage_etroit_zoome_reste_borne_au_rectangle` qui vérifiait déjà,
+//! avant le correctif, ce qui restait vrai malgré le défaut.
 
 use plotters::coord::Shift;
 use plotters::element::{Circle, PathElement, Polygon, Rectangle};

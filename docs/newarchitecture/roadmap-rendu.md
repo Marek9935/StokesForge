@@ -995,6 +995,23 @@ est une conversion du SVG, pas un troisième backend.
 > resterait, comme documenté depuis R5, une fonction de `plotyx-render`
 > générique sur le backend, pas un correctif d'un seul des deux.
 >
+> **Clôture du 2026-09-13 : le rognage réel est fait.** Liang-Barsky, en
+> pixels, dans `plotyx_render::clip` (nouveau module), appelé depuis
+> `pipeline::paint_series` juste avant `paint::polyline` — un segment qui
+> traverse le rectangle de tracé est coupé au point exact de la traversée,
+> un segment entièrement dehors est omis, et une polyligne qui sort et
+> rentre plusieurs fois devient plusieurs `PathElement` disjoints plutôt
+> qu'un seul plaqué sur le bord. Sans cadrage qui déborde des données, ce
+> rognage est un no-op visuel — vérifié par la suite existante inchangée
+> (`cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg`).
+> Tests unitaires purs dans `clip::tests` (segment traversant coupé au bon
+> point, entièrement dehors, entièrement dedans, tangent à un bord sans
+> paniquer) et test de bout en bout
+> `un_cadrage_etroit_ne_plaque_plus_la_courbe_sur_un_bord`
+> (`plotyx-render-egui/tests/formes.rs`), qui démontre l'absence de la longue
+> file de sommets collés à un bord que `un_cadrage_etroit_zoome_reste_borne_au_rectangle`
+> (toujours présent, toujours vert) ne pouvait que borner sans l'éliminer.
+>
 > **Reste ouvert**, en plus du rognage réel ci-dessus : le zoom/pan et la
 > désignation de point ne couvrent que l'axe principal (voir plus haut) ; le
 > déclencheur du rectangle élastique (bouton secondaire) n'est pas

@@ -17,7 +17,7 @@ use plotyx_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
 use plotyx_core::resolve::resolve_spec;
 use plotyx_core::Project;
 use plotyx_plot::{AxisSpec, LineSpec, PanelSpec, PlotSpec, SeriesSpec};
-use plotyx_render::TextMeasurer;
+use plotyx_render::{DrawnPlot, TextMeasurer};
 use plotyx_render_egui::collect_shapes;
 
 const SIZE: (f32, f32) = (800.0, 600.0);
@@ -32,6 +32,13 @@ fn figure() -> Vec<Shape> {
 /// qui a besoin d'un cadrage explicite sans dupliquer la construction du
 /// projet et de la série.
 fn figure_avec(personnaliser: impl FnOnce(&mut PanelSpec)) -> Vec<Shape> {
+    figure_avec_drawn(personnaliser).0
+}
+
+/// Comme [`figure_avec`], mais rend aussi le [`DrawnPlot`] — pour un test qui
+/// a besoin du rectangle de tracé réel en pixels (`pixel_origin`/
+/// `pixel_size`) plutôt que de le redeviner.
+fn figure_avec_drawn(personnaliser: impl FnOnce(&mut PanelSpec)) -> (Vec<Shape>, DrawnPlot) {
     let mut project = Project::new("Formes").expect("projet");
     let root = project.root();
     let book = project.add_empty_workbook(root, None).expect("classeur");
@@ -75,8 +82,8 @@ fn figure_avec(personnaliser: impl FnOnce(&mut PanelSpec)) -> Vec<Shape> {
     let measurer = TextMeasurer::default();
     let mut shapes = Vec::new();
     let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(SIZE.0, SIZE.1));
-    collect_shapes(&mut shapes, rect, &measurer, &plot).expect("tracé");
-    shapes
+    let drawn = collect_shapes(&mut shapes, rect, &measurer, &plot).expect("tracé");
+    (shapes, drawn)
 }
 
 fn numeric(values: &[f64]) -> Column {
@@ -246,4 +253,70 @@ fn un_cadrage_etroit_zoome_reste_borne_au_rectangle() {
              correctement, ce qui serait pire que le défaut documenté"
         );
     }
+}
+
+/// Le défaut décrit ci-dessus, désormais corrigé par
+/// `plotyx_render::clip` : ce même cadrage étroit ne doit plus produire de
+/// segment parasite plaqué sur un bord du panneau.
+///
+/// Avant le rognage géométrique, la plupart des points de la série
+/// tombaient hors du panneau sous ce cadrage et Plotters les ramenait **par
+/// composante** au bord (`rect.truncate`) — une longue suite de sommets
+/// consécutifs partageait alors exactement le même x ou le même y, sur
+/// toute la largeur ou la hauteur du panneau. Avec le vrai rognage
+/// (Liang-Barsky, en pixels — `clip::clip_polyline`), un segment hors cadre
+/// est omis et un segment qui traverse est coupé au point exact de la
+/// traversée : aucune longue file de sommets consécutifs ne doit plus
+/// coïncider avec un bord du rectangle de tracé, seul un point de contact
+/// isolé (l'intersection elle-même) étant possible.
+#[test]
+fn un_cadrage_etroit_ne_plaque_plus_la_courbe_sur_un_bord() {
+    let (zoome, drawn) = figure_avec_drawn(|panel| {
+        panel.bottom.auto_range = false;
+        panel.bottom.range_min = Some(28.0);
+        panel.bottom.range_max = Some(32.0);
+        panel.left.auto_range = false;
+        panel.left.range_min = Some(-0.1);
+        panel.left.range_max = Some(0.1);
+    });
+    assert!(!zoome.is_empty(), "la figure zoomée est vide");
+    let panel = drawn.panel(0).expect("un panneau tracé");
+    let (ox, oy) = panel.pixel_origin;
+    let (w, h) = panel.pixel_size;
+    let (x_min, x_max) = (ox as f32, ox as f32 + w as f32);
+    let (y_min, y_max) = (oy as f32, oy as f32 + h as f32);
+    // Une tolérance d'un pixel pour l'arrondi entier des coordonnées, pas
+    // pour un vrai écart.
+    let epsilon = 0.6f32;
+    // Un unique point de contact avec le bord (l'intersection Liang-Barsky
+    // elle-même) est légitime ; une file plus longue ne l'est pas.
+    const MAX_TOLERE: usize = 2;
+
+    let sur_un_bord = |point: &Pos2| -> bool {
+        (point.x - x_min).abs() < epsilon
+            || (point.x - x_max).abs() < epsilon
+            || (point.y - y_min).abs() < epsilon
+            || (point.y - y_max).abs() < epsilon
+    };
+
+    let mut pire_troncon = 0usize;
+    for shape in &zoome {
+        let Shape::Path(path) = shape else { continue };
+        let mut courant = 0usize;
+        for point in &path.points {
+            if sur_un_bord(point) {
+                courant += 1;
+                pire_troncon = pire_troncon.max(courant);
+            } else {
+                courant = 0;
+            }
+        }
+    }
+    assert!(
+        pire_troncon <= MAX_TOLERE,
+        "un tronçon de {pire_troncon} sommets consécutifs colle exactement à \
+         un bord du panneau ({x_min}..{x_max} × {y_min}..{y_max}) : la \
+         courbe est encore plaquée sur le bord au lieu d'être coupée à \
+         l'intersection géométrique réelle"
+    );
 }

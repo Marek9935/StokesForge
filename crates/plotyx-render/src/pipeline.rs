@@ -61,6 +61,7 @@ use plotters::prelude::*;
 use plotyx_core::resolve::{ResolvedPanel, ResolvedPlot};
 use plotyx_plot::{AxisScale, AxisSpec, PlotSpec, SeriesAxis};
 
+use crate::clip::{self, PixelBounds};
 use crate::color::rgb_or;
 use crate::decimate;
 use crate::legend;
@@ -472,6 +473,12 @@ fn draw_panel<DB: DrawingBackend>(
         decimated_points: 0,
     };
 
+    // Le rectangle de tracé, en pixels : c'est contre lui que les segments
+    // d'une courbe sont rognés avant `paint::polyline` (voir `crate::clip`),
+    // et non contre le cadrage en données — un axe logarithmique n'y serait
+    // pas linéaire (doc de tête de `clip`).
+    let bounds = PixelBounds::of_panel(origin, size);
+
     for series in &mut prepared {
         if series.broken {
             drawn.broken_series += 1;
@@ -497,6 +504,7 @@ fn draw_panel<DB: DrawingBackend>(
             series,
             threshold,
             if right { secondary } else { y_range },
+            bounds,
         )?;
         series.decimated = removed;
         drawn.decimated_points += removed;
@@ -532,6 +540,7 @@ fn paint_series<DB: DrawingBackend>(
     series: &Prepared<'_>,
     threshold: usize,
     y_range: (f64, f64),
+    bounds: Option<PixelBounds>,
 ) -> Result<usize, DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = series.spec;
     match &series.geometry {
@@ -561,7 +570,22 @@ fn paint_series<DB: DrawingBackend>(
 
             let mapped: Vec<_> = drawn_points.iter().map(|point| map(*point)).collect();
             if spec.plot_type.draws_line() {
-                paint::polyline(screen, &mapped, &spec.line, false)?;
+                // Rognage géométrique contre le rectangle de tracé, **avant**
+                // `paint::polyline` : un segment qui traverse le panneau est
+                // coupé à l'intersection réelle plutôt que ramené sur le bord
+                // par composante (le défaut documenté en tête de
+                // `crate::paint`, corrigé par `crate::clip`). Sans cadrage
+                // qui déborde des données, chaque segment reste entièrement
+                // dans `bounds` et ce rognage ne change rien : `clip_segment`
+                // rend alors le segment tel quel.
+                match bounds {
+                    Some(bounds) => {
+                        for run in clip::clip_polyline(bounds, &mapped) {
+                            paint::polyline(screen, &run, &spec.line, false)?;
+                        }
+                    }
+                    None => paint::polyline(screen, &mapped, &spec.line, false)?,
+                }
             }
             if !whiskers.is_empty() {
                 let segments: Vec<_> = whiskers
