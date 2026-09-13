@@ -43,12 +43,6 @@ use plotters_backend::{
 use plotyx_render::text::font_size;
 use plotyx_render::text::{estimate, TextMeasurer};
 
-/// Couleur-témoin d'un emplacement de formule Typst (tâche R8.4) — voir
-/// `crate::typst_export`, tête de module, pour ce qu'elle marque et
-/// pourquoi une couleur suffit plutôt qu'un vrai identifiant.
-#[cfg(feature = "typst")]
-pub(crate) const WITNESS_COLOR: RGBColor = RGBColor(1, 2, 3);
-
 /// `SVGBackend`, augmenté de la mesure de texte partagée du chantier.
 ///
 /// L'enveloppe est fine par construction : tout ce qui dessine est délégué
@@ -174,18 +168,18 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         style: &S,
         pos: BackendCoord,
     ) -> Result<(), DrawingErrorKind<Self::ErrorType>> {
-        // R8.4 : un label Typst pose un rectangle-témoin (couleur
-        // [`WITNESS_COLOR`]) à la place du `<text>` ordinaire ;
-        // `crate::typst_export::splice` le remplace après coup par le
-        // fragment `typst-svg` — voir `crate::typst_export`, tête de
-        // module, pour le mécanisme complet et pourquoi il n'a pas besoin
-        // de toucher `SVGBackend`. Dégrade vers le `<text>` ordinaire si
-        // Typst n'est pas activé ou que la formule ne compile pas.
+        // R8.4 : un label Typst pose un rectangle-témoin à la place du
+        // `<text>` ordinaire ; `crate::typst_export::splice` le remplace
+        // après coup par le fragment `typst-svg` — voir
+        // `crate::typst_export`, tête de module, pour le mécanisme complet
+        // et pourquoi il n'a pas besoin de toucher `SVGBackend`. Dégrade
+        // vers le `<text>` ordinaire si Typst n'est pas activé ou que la
+        // formule ne compile pas.
         #[cfg(feature = "typst")]
         if let Some(typst) = &self.typst {
             if plotyx_render::formula::is_formula(text) {
                 let size_pt = font_size(style.size());
-                if let Some((w, h)) = typst.record(
+                if let Some(witness) = typst.record(
                     text,
                     size_pt,
                     style.anchor(),
@@ -193,15 +187,18 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
                     (pos.0 as f64, pos.1 as f64),
                 ) {
                     // Le témoin n'a besoin d'être ni bien placé ni bien
-                    // dimensionné : `splice` (`crate::typst_export`) le
-                    // repère par sa couleur et le remplace en entier, en
-                    // utilisant l'origine et la taille déjà enregistrées
-                    // par `record` ci-dessus, pas celles de ce rectangle.
-                    let (w, h) = (w.ceil().max(1.0) as i32, h.ceil().max(1.0) as i32);
+                    // dimensionné dans l'absolu : `splice`
+                    // (`crate::typst_export`) le repère par sa couleur
+                    // *propre* à cet appel et revérifie sa géométrie contre
+                    // celle enregistrée par `record` ci-dessus — donc la
+                    // position et la taille passées ici doivent être
+                    // exactement celles que `record` a calculées, pas
+                    // d'approximation possible des deux côtés.
+                    let (w, h) = witness.size;
                     return self.inner.draw_rect(
                         (pos.0, pos.1),
                         (pos.0 + w, pos.1 + h),
-                        &WITNESS_COLOR,
+                        &witness.color,
                         true,
                     );
                 }
