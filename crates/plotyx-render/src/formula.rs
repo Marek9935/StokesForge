@@ -399,34 +399,123 @@ pub fn round_size_pt((w, h): (f64, f64)) -> (u32, u32) {
     crate::text::round_size(epaint::Vec2::new(w as f32, h as f32))
 }
 
+/// Un choix de police Math, indépendant du choix de police de texte —
+/// branchement technique du 2026-09-13, en complément de
+/// [`resolve_fonts_with_math`].
+///
+/// Jusqu'ici, [`resolve_fonts`] déterminait la police Math uniquement à
+/// partir du [`FontChoice`] de texte (`crate::fonts::resolve(choice).math`,
+/// toujours une des trois paires embarquées) : aucun moyen d'exprimer « ce
+/// texte, mais cette Math-là ». Ce type comble cette lacune sans rien
+/// décider de plus : aucune valeur par défaut n'en dérive une politique
+/// produit, c'est un simple second axe de choix, au même titre que
+/// [`FontChoice`] pour le texte.
+///
+/// **Dégradation silencieuse pour [`MathFontChoice::System`], à savoir
+/// avant d'exposer ce choix à un utilisateur** : rien ne garantit qu'une
+/// police système porte une table Unicode Math (OpenType `MATH`) valide.
+/// Typst compilera quand même avec une police qui n'en a pas — fractions,
+/// exposants, opérateurs empilés seront mis en page avec les seules
+/// métriques de corps ordinaires (mal centrés verticalement, tailles
+/// d'opérateurs agrandissables absentes) — sans erreur ni avertissement
+/// remonté. Ce n'est pas un bug de ce mécanisme mais un fait connu de
+/// l'écosystème des polices Math OpenType (la table `MATH` est rare hors
+/// des polices conçues pour, comme les trois paires embarquées) : un futur
+/// appelant qui proposerait ce choix à un utilisateur doit le savoir avant
+/// de le faire, plutôt que de découvrir un rendu dégradé sans diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MathFontChoice {
+    /// Une des trois paires embarquées — sa moitié Math, indépendamment de
+    /// la police de texte demandée par ailleurs.
+    Embedded(FontSet),
+    /// Une police du système, par son nom exact. Introuvable ⇒ repli sur
+    /// [`FontSet::Noto`], la même politique que
+    /// [`crate::fonts::FontChoice::System`] applique déjà côté texte.
+    System(String),
+}
+
 /// Charge les polices Typst (texte + Math) correspondant à un
 /// [`FontChoice`] — pour que les deux backends (8.3, 8.4) n'aient pas
 /// chacun leur propre façon de le faire.
 ///
-/// **Limite assumée pour [`FontChoice::System`]** : Typst a besoin des
-/// octets de la police, pas seulement de son nom — retrouver les octets
-/// d'une police système déjà résolue par `fontdb` (comme
-/// [`crate::fonts::resolve`] le fait pour l'écran) et les faire consommer
-/// par Typst est un mécanisme de plus que cette phase n'a pas construit,
-/// faute d'un appelant qui en ait besoin aujourd'hui (`plotyx-app` ne
-/// propose encore aucun choix de police à l'utilisateur). Un choix système
-/// replie donc ici sur [`FontSet::Noto`] pour la police de texte, **que la
-/// police système demandée existe ou non** — pas seulement quand elle est
-/// introuvable, contrairement à [`crate::fonts::resolve`]. La police Math
-/// associée, elle, suit exactement ce que [`crate::fonts::resolve`] aurait
-/// choisi ([`FontSet::Noto`] dans ce cas aussi), donc les deux restent
-/// cohérentes entre elles.
+/// Équivalent à [`resolve_fonts_with_math`]`(choice, None)` : la police
+/// Math suit le [`FontChoice`] de texte, exactement comme avant l'ajout de
+/// [`MathFontChoice`] — voir sa documentation pour ce que `None` signifie
+/// précisément. Aucun appelant existant n'a besoin de changer pour garder
+/// son comportement actuel.
 pub fn resolve_fonts(choice: &FontChoice) -> Result<(Font, Font), String> {
-    let math_set = crate::fonts::resolve(choice).math;
-    let sans_set = match choice {
-        FontChoice::Embedded(set) => *set,
-        FontChoice::System(_) => FontSet::Noto,
+    resolve_fonts_with_math(choice, None)
+}
+
+/// Comme [`resolve_fonts`], avec un choix de police Math optionnel et
+/// indépendant du choix de texte.
+///
+/// `math_choice` à `None` reproduit exactement [`resolve_fonts`] tel qu'il
+/// se comportait avant cet ajout : la Math suit le [`FontChoice`] de texte
+/// (une des trois paires embarquées pour [`FontChoice::Embedded`],
+/// [`FontSet::Noto`] pour [`FontChoice::System`] — la même règle que
+/// [`crate::fonts::resolve`] applique déjà). `Some(..)` prend le dessus et
+/// résout la Math séparément via [`MathFontChoice`], dont la documentation
+/// détaille la dégradation silencieuse d'une police système sans table
+/// Math.
+///
+/// Contrairement à l'ancienne limite documentée ici pour
+/// [`FontChoice::System`] côté texte (repli sur Noto **que la police soit
+/// trouvée ou non**) : la police système demandée est désormais réellement
+/// cherchée via [`crate::fonts::load_system_font`] — le même mécanisme que
+/// [`crate::fonts::resolve`] utilise côté écran/export ordinaire — et
+/// utilisée si trouvée ; le repli sur Noto ne joue plus que si elle est
+/// introuvable, la même politique que le reste du projet applique déjà à
+/// une police système (`fonts.rs`, tête de module).
+pub fn resolve_fonts_with_math(
+    choice: &FontChoice,
+    math_choice: Option<&MathFontChoice>,
+) -> Result<(Font, Font), String> {
+    let sans = match choice {
+        FontChoice::Embedded(set) => embedded_font(set.sans_bytes(), "sans")?,
+        FontChoice::System(name) => match crate::fonts::load_system_font(name) {
+            Some(data) => system_font(data, "sans")?,
+            None => embedded_font(FontSet::Noto.sans_bytes(), "sans")?,
+        },
     };
-    let sans = Font::new(Bytes::new(sans_set.sans_bytes()), 0)
-        .ok_or_else(|| "police sans embarquée illisible".to_string())?;
-    let math = Font::new(Bytes::new(math_set.math_bytes()), 0)
-        .ok_or_else(|| "police Math embarquée illisible".to_string())?;
+
+    let math = match math_choice {
+        Some(MathFontChoice::Embedded(set)) => embedded_font(set.math_bytes(), "Math")?,
+        Some(MathFontChoice::System(name)) => match crate::fonts::load_system_font(name) {
+            Some(data) => system_font(data, "Math")?,
+            None => embedded_font(FontSet::Noto.math_bytes(), "Math")?,
+        },
+        // Comportement historique, inchangé : la Math suit le choix de
+        // texte plutôt qu'un scan système propre — voir la documentation
+        // de cette fonction et de `crate::fonts::resolve`.
+        None => {
+            let math_set = match choice {
+                FontChoice::Embedded(set) => *set,
+                FontChoice::System(_) => FontSet::Noto,
+            };
+            embedded_font(math_set.math_bytes(), "Math")?
+        }
+    };
+
     Ok((sans, math))
+}
+
+/// Construit une `Font` Typst à partir des octets d'une des paires
+/// embarquées — factorisé entre texte et Math, pour un message d'erreur qui
+/// nomme le rôle plutôt que de dupliquer le même `ok_or_else` quatre fois.
+fn embedded_font(bytes: &'static [u8], role: &str) -> Result<Font, String> {
+    Font::new(Bytes::new(bytes), 0).ok_or_else(|| format!("police {role} embarquée illisible"))
+}
+
+/// Construit une `Font` Typst à partir des octets bruts d'une police
+/// système déjà trouvée par [`crate::fonts::load_system_font`] — même
+/// index de face que celui que `fontdb` a résolu, pour ne pas retomber sur
+/// la première face d'un fichier qui en contiendrait plusieurs (une famille
+/// de polices variable, par exemple).
+fn system_font(data: epaint::text::FontData, role: &str) -> Result<Font, String> {
+    let index = data.index;
+    Font::new(Bytes::new(data.font), index)
+        .ok_or_else(|| format!("police {role} système illisible"))
 }
 
 /// Le décalage d'ancrage d'une boîte de `size_pt`, dans son propre repère
@@ -605,15 +694,83 @@ mod tests {
         );
     }
 
-    /// Une police système inconnue replie sur Noto pour la police de texte
-    /// **et** pour la Math, exactement comme documenté — pas seulement en
-    /// cas d'échec de la recherche système.
+    /// Une police système **introuvable** replie sur Noto pour la police de
+    /// texte et pour la Math — plus « toujours », comme avant le
+    /// branchement sur [`crate::fonts::load_system_font`] : seulement
+    /// quand la recherche système échoue réellement, la même politique que
+    /// `crate::fonts::resolve` applique déjà.
     #[test]
-    fn une_police_systeme_replie_toujours_sur_noto() {
-        let (sans, math) = resolve_fonts(&FontChoice::System("Police Inexistante".to_owned()))
-            .expect("résolution échouée");
+    fn une_police_systeme_introuvable_replie_sur_noto() {
+        let (sans, math) = resolve_fonts(&FontChoice::System(
+            "Police PlotYx Qui Ne Peut Pas Exister — Test R.13".to_owned(),
+        ))
+        .expect("résolution échouée");
         assert_eq!(sans.info().family, FontSet::Noto.sans_family_name());
         assert_eq!(math.info().family, FontSet::Noto.math_family_name());
+    }
+
+    /// Trouve dynamiquement le nom d'une police système réellement présente
+    /// sur la machine qui exécute le test, pour ne pas coder en dur un nom
+    /// qu'aucune machine CI ne garantit avoir. `None` si la machine n'a
+    /// vraiment aucune police système : le test qui en dépend est alors un
+    /// no-op plutôt qu'un échec qu'aucune correction de ce module ne
+    /// pourrait résoudre (`fonts.rs` n'a pas ce cas à couvrir : il ne teste
+    /// que le repli sur introuvable, jamais la police trouvée).
+    fn une_police_systeme_disponible() -> Option<String> {
+        let mut database = fontdb::Database::new();
+        database.load_system_fonts();
+        let id = database.faces().next()?.id;
+        let face = database.face(id)?;
+        face.families.first().map(|(name, _)| name.clone())
+    }
+
+    /// Une police système **trouvée** est réellement utilisée pour la
+    /// moitié texte — le comportement corrigé par cette tâche : avant,
+    /// `resolve_fonts` repliait sur Noto que la police existe ou non.
+    #[test]
+    fn une_police_systeme_disponible_est_reellement_utilisee_pour_le_texte() {
+        let Some(nom) = une_police_systeme_disponible() else {
+            eprintln!(
+                "aucune police système sur cette machine : \
+                 une_police_systeme_disponible_est_reellement_utilisee_pour_le_texte ignoré"
+            );
+            return;
+        };
+        let (sans, _math) =
+            resolve_fonts(&FontChoice::System(nom.clone())).expect("résolution échouée");
+        assert_eq!(
+            sans.info().family,
+            nom,
+            "la police système trouvée n'a pas été utilisée pour le texte"
+        );
+    }
+
+    /// La police Math est choisissable indépendamment de la police de
+    /// texte via [`MathFontChoice`] — texte et Math viennent chacun d'une
+    /// paire embarquée différente, et les deux `Font` obtenues
+    /// correspondent chacune à ce qui a été demandé, pas à une paire liée
+    /// par défaut.
+    #[test]
+    fn la_police_math_se_choisit_independamment_du_texte() {
+        let (sans, math) = resolve_fonts_with_math(
+            &FontChoice::Embedded(FontSet::Libertinus),
+            Some(&MathFontChoice::Embedded(FontSet::Fira)),
+        )
+        .expect("résolution échouée");
+        assert_eq!(sans.info().family, FontSet::Libertinus.sans_family_name());
+        assert_eq!(math.info().family, FontSet::Fira.math_family_name());
+    }
+
+    /// `None` passé à [`resolve_fonts_with_math`] reproduit exactement
+    /// [`resolve_fonts`] — le contrat documenté qui garantit qu'aucun
+    /// appelant existant ne change de comportement sans y toucher.
+    #[test]
+    fn aucun_choix_math_explicite_reproduit_lancien_comportement() {
+        let choice = FontChoice::Embedded(FontSet::Fira);
+        let (sans_a, math_a) = resolve_fonts(&choice).expect("résolution échouée");
+        let (sans_b, math_b) = resolve_fonts_with_math(&choice, None).expect("résolution échouée");
+        assert_eq!(sans_a.info().family, sans_b.info().family);
+        assert_eq!(math_a.info().family, math_b.info().family);
     }
 
     /// L'ancrage centré retranche bien la moitié de chaque dimension, et

@@ -296,7 +296,12 @@ fn definitions_for(name: &str, bytes: &'static [u8], owned: Option<FontData>) ->
 /// ses octets n'ont pas pu être lus » : dans les deux cas, [`resolve`]
 /// replie sur Noto sans faire de différence, exactement comme la demande
 /// utilisateur le prescrit (« sans erreur bloquante, sans texte perdu »).
-fn load_system_font(name: &str) -> Option<FontData> {
+///
+/// `pub(crate)` (et non privée) depuis la tâche du 2026-09-13 sur
+/// `formula.rs` : Typst a besoin des mêmes octets bruts pour construire ses
+/// propres `typst::text::Font`, texte et Math — même mécanisme de
+/// résolution système, pas un second à écrire pour ce seul consommateur.
+pub(crate) fn load_system_font(name: &str) -> Option<FontData> {
     let mut database = fontdb::Database::new();
     database.load_system_fonts();
 
