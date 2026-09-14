@@ -92,8 +92,71 @@ l'utilisateur doit toujours pouvoir y naviguer, onglet maximisé ou non).
 Restaurer revient à repeindre la `DockArea` normalement : la disposition
 qu'elle retient n'a jamais bougé pendant la maximisation, donc « restaurer »
 est exactement la disposition d'avant, pas un recalcul. Un menu « Fenêtre »
-porte le bouton de bascule, grisé quand l'onglet actif est le Project Manager
-lui-même (le maximiser n'aurait pas de sens : il est déjà toujours visible).
+porte le bouton de bascule.
+
+Le Project Manager est maximisable comme n'importe quel autre onglet — plus
+d'exclusion particulière pour lui. Deux endroits proposent l'action : le
+menu « Fenêtre » (« Maximiser l'onglet actif », qui grise seulement quand
+aucun onglet n'est focalisé) et le clic droit sur l'onglet PM lui-même
+(« Maximiser »/« Restaurer », voir la section suivante). Un détail de mise en
+œuvre en découle : quand le PM *est* l'onglet maximisé, le panneau fixe qui
+garde d'ordinaire le PM visible à côté d'un autre onglet maximisé serait un
+doublon de lui-même — `PlotyxApp::ui` ne le peint donc que si l'onglet
+maximisé n'est pas le PM, et peint son arbre cliquable directement dans la
+zone de maximisation dans le cas contraire (`tab_contents`, la fonction
+partagée dock/maximisation, ne sait délibérément pas peindre
+`Tab::ProjectManager` — il lui manquerait `open_requests` — donc ce n'est pas
+elle qui est appelée dans ce cas précis).
+
+### Attacher le Project Manager à gauche ou à droite
+
+`PlotyxApp::pm_side` (`PmSide::Left` par défaut, comme la disposition
+initiale) mémorise le dernier côté choisi pour le PM **dans le dock** —
+orthogonal au détachement en fenêtre OS ci-dessous, qui est un troisième état
+combinable avec n'importe quel côté mémorisé. Deux actions explicites le font
+basculer, jamais une détection de bord pendant un glisser (délibérément
+rejeté) :
+
+- le menu « Fenêtre » du haut (« Attacher à gauche »/« Attacher à droite »,
+  grisées sur le côté déjà actif, et pendant un détachement en fenêtre OS —
+  rien à réordonner dans le dock tant qu'il n'y est pas) ;
+- le clic droit sur l'onglet PM lui-même (`AppTabViewer::context_menu`), même
+  grisage.
+
+`PlotyxApp::set_project_manager_side` retire l'onglet du `dock_state` (où
+qu'il soit) puis le réinsère par un split gauche/droite du nœud que
+`PlotyxApp::top_region_node` désigne comme « la région du haut » — celle qui
+contient les onglets de contenu, au-dessus de la console de script, qui garde
+toujours toute la largeur en bas. Ce nœud est retrouvé à chaque appel plutôt
+que mémorisé : les indices d'`egui_dock` 0.21 (`NodeIndex`) désignent une
+position dans un arbre binaire indexé par formule, pas un identifiant stable —
+`remove_tab` peut réindexer les nœuds restants (`Tree::remove_leaf`) quand un
+nœud se retrouve vide, silencieusement. `top_region_node` part à la place du
+nœud de `Tab::Script` (structurel, toujours présent) et remonte à son parent,
+dont l'autre enfant est par construction la région du haut telle que
+`PlotyxApp::new` l'a créée (`split_below` place l'ancien contenu à
+`parent.left()`, la nouvelle feuille Script à `parent.right()`) — un repère
+qui résiste aux redispositions habituelles à l'intérieur de cette région,
+tant que la console elle-même n'est pas déplacée hors de son propre nœud
+(aucune action de ce module ne le fait). `reattach_project_manager`
+(ci-dessous) utilise le même mécanisme pour revenir au côté mémorisé, plutôt
+que `push_to_focused_leaf` (au hasard) comme avant cette fonctionnalité.
+
+Ce mécanisme ne restreint jamais le glisser-déposer natif d'`egui_dock` :
+l'onglet PM reste `draggable` comme les autres (le désactiver casserait aussi
+son détachement en fenêtre OS, constaté pendant une bisection antérieure).
+Le rectangle/l'icône de survol qu'`egui_dock` peint pendant un glisser pour
+indiquer où l'onglet atterrirait (`egui_dock::style::OverlayStyle`) est en
+revanche rendu **entièrement transparent, globalement, pour tous les
+onglets** (`selection_color`, `button_color`, `button_border_stroke`,
+`hovered_leaf_highlight.color`/`.stroke`, tous mis à `Color32::TRANSPARENT`/
+`Stroke::NONE` sur un `Style` dérivé de `Style::from_egui` avant de le passer
+à `DockArea::style`) : cette version d'`egui_dock` n'offre aucun crochet par
+onglet pour ce réglage, et le laisser actif ferait doublon visuel avec les
+actions explicites ci-dessus tout en suggérant, à tort, qu'un « bon » endroit
+de dépôt serait détecté pendant le glisser. Le glisser-déposer lui-même
+continue de fonctionner à l'identique — seul son rendu de zone de dépôt
+disparaît.
 
 ### Détachement du Project Manager
 
@@ -104,14 +167,18 @@ Deux mécanismes, tous deux disponibles :
   (`Surface::Window`) — gratuit, aucune configuration ne le restreint pour cet
   onglet (`TabViewer::allowed_in_windows` reste à sa valeur par défaut,
   `true`).
-- **Vraie fenêtre OS séparée** : un bouton du menu « Fenêtre » ouvre le
-  contenu du Project Manager dans un vrai viewport natif `eframe`
-  (`egui::Context::show_viewport_deferred`), déplaçable sur un autre écran —
-  ce que le flottant `egui_dock` ne peut pas faire, lui qui reste borné à la
-  fenêtre OS principale. Dans ce mode, `Tab::ProjectManager` est retiré du
-  `DockState` (`PlotyxApp::pm_detached`) pour ne jamais être montré à deux
-  endroits à la fois ; fermer la fenêtre OS ou cliquer « Réattacher » le
-  repousse proprement dans le dock.
+- **Vraie fenêtre OS séparée** : le menu « Fenêtre » du haut, **et** depuis
+  cette tâche le clic droit sur l'onglet PM lui-même (« Détacher en fenêtre
+  OS », utile pour un usage double-écran sans lâcher la souris pour la barre
+  de menu), ouvrent le contenu du Project Manager dans un vrai viewport natif
+  `eframe` (`egui::Context::show_viewport_deferred`), déplaçable sur un autre
+  écran — ce que le flottant `egui_dock` ne peut pas faire, lui qui reste
+  borné à la fenêtre OS principale. Dans ce mode, `Tab::ProjectManager` est
+  retiré du `DockState` (`PlotyxApp::pm_detached`) pour ne jamais être montré
+  à deux endroits à la fois ; fermer la fenêtre OS ou cliquer « Réattacher »
+  (menu du haut ou clic droit) le repousse proprement dans le dock, **au côté
+  mémorisé par `PlotyxApp::pm_side`** (voir la section précédente) plutôt
+  qu'au hasard.
 
   **`show_viewport_deferred`, pas `_immediate`** : ce mécanisme utilisait
   `show_viewport_immediate` jusqu'à ce que l'utilisateur constate,
@@ -163,8 +230,21 @@ détachée. Plusieurs onglets peuvent être détachés en même temps — une en
 par onglet dans `PlotyxApp::detached_tabs`, chaque `Tab` portant déjà un
 `NodeId` donne un `ViewportId::from_hash_of(tab)` unique par construction,
 sans collision possible entre deux classeurs détachés simultanément par
-exemple. `Tab::ProjectManager` garde son mécanisme dédié (ci-dessus) ;
-`Tab::Script` n'est pas détachable (voir plus bas).
+exemple. `Tab::ProjectManager` garde son propre menu contextuel, avec ses
+propres actions (voir les deux sections précédentes) plutôt que celui-ci ;
+`Tab::Script` n'a aucune entrée de menu contextuel, n'étant ni détachable en
+fenêtre de contenu ni le PM (voir plus bas).
+
+**Tailles par défaut des fenêtres détachées** (`show_detached_tabs`) :
+`Tab::Graph` garde un ratio 4:3 (800×600). Le reste (`Book`/`Matrix`/`Note`)
+partage une taille uniforme de 420×360, calculée pour montrer 3 colonnes de
+grille : `grid_contents`/`matrix_contents` utilisent
+`TableColumn::exact(56.0)` pour la colonne de numéro de ligne puis
+`TableColumn::initial(110.0)` par colonne de données, soit 56 + 3×110 = 386 ;
+420 ajoute une marge pour les bordures et la scrollbar verticale de la
+`ScrollArea`. `Tab::Note` n'a pas de grille à proprement parler mais reçoit la
+même taille que « les autres » pour rester cohérente avec eux — voulu, pas un
+oubli.
 
 **Une seule structure de `ViewModel`, pas une par nature de contenu.** Le PM
 n'a qu'une forme de contenu (un arbre en lecture seule) ; les quatre natures
