@@ -152,6 +152,77 @@ Deux mécanismes, tous deux disponibles :
   connue avant d'y ajouter un jour une position mémorisée entre deux
   détachements.
 
+### Détachement générique des onglets de contenu
+
+`PlotyxApp::detach_tab`/`reattach_tab`/`show_detached_tabs` généralisent le
+mécanisme ci-dessus à `Tab::Book`, `Tab::Graph`, `Tab::Matrix` et `Tab::Note` :
+un clic droit sur l'onglet (`egui_dock::TabViewer::context_menu`, le seul
+point d'extension de ce genre en 0.21.1) propose « Détacher dans une
+fenêtre », symétrique du bouton « Réattacher au dock principal » côté fenêtre
+détachée. Plusieurs onglets peuvent être détachés en même temps — une entrée
+par onglet dans `PlotyxApp::detached_tabs`, chaque `Tab` portant déjà un
+`NodeId` donne un `ViewportId::from_hash_of(tab)` unique par construction,
+sans collision possible entre deux classeurs détachés simultanément par
+exemple. `Tab::ProjectManager` garde son mécanisme dédié (ci-dessus) ;
+`Tab::Script` n'est pas détachable (voir plus bas).
+
+**Une seule structure de `ViewModel`, pas une par nature de contenu.** Le PM
+n'a qu'une forme de contenu (un arbre en lecture seule) ; les quatre natures
+détachables ici sont franchement différentes (grille éditable virtualisée,
+graphe interactif avec cache de formes, texte éditable, espace réservé).
+`DetachedTabViewModel` porte un champ par nature (`selected_sheet`/
+`cell_edit` pour un classeur, `note_edit` pour une note, `graph_view` pour un
+graphe) plutôt que quatre types disjoints à faire cohabiter dans la table des
+onglets détachés — les champs inutilisés pour la nature du `Tab` servi
+restent à leur valeur par défaut.
+
+**La lecture du modèle est factorisée, l'édition transitoire ne l'est pas.**
+`tab_contents` (déjà partagée par le dock normal et la zone de maximisation)
+prend `&mut AppState`, que la fermeture `'static`, `Send + Sync` de
+`show_viewport_deferred` ne peut pas capturer — le même problème déjà résolu
+pour le PM (mettre `AppState` entière derrière un verrou déborderait le
+problème à résoudre, pour un onglet comme pour l'autre). Le contournement :
+`DetachedTabViewModel::snapshot`, un clone de `Snapshot` (bon marché),
+resynchronisé depuis `self.state` à chaque image avant l'appel — même schéma
+que `ProjectManagerViewModel::tree`. Toute lecture pure passe par des
+fonctions libres de `crate::state`, factorisées sur un `&Tree` pour
+l'occasion (`cell_text_in`, `visible_columns_in`, `row_count_in`,
+`worksheets_of_in`, `note_text_in`, `node_title_in`) : le corps exact de la
+méthode `AppState` correspondante, pas une réécriture — le dock et une
+fenêtre détachée affichent donc littéralement la même règle.
+
+Le tampon de saisie transitoire (`AppState::editing`/`note_editing`), en
+revanche, n'est **pas** partagé avec `AppState` : un onglet détaché a son
+propre tampon (`DetachedTabViewModel::cell_edit`/`note_edit`), pas le verrou
+unique app-wide du dock. La limite déjà documentée plus bas (« une seule
+cellule éditable à la fois, toutes grilles confondues ») devient, pour un
+onglet détaché, « une seule cellule éditable à la fois **dans cette fenêtre
+détachée** » — conséquence assumée de la même contrainte technique que pour
+le PM, pas une nécessité produit. `detached_cell_widget`/
+`detached_note_contents` réimplémentent donc la petite machine à états
+(`gained_focus`/`lost_focus`/Échap) de `cell_widget`/`note_contents` sur ce
+tampon local plutôt que sur celui d'`AppState` — quelques lignes dupliquées
+plutôt qu'une abstraction supplémentaire pour un couplage aussi mince.
+Valider une saisie produit la **même** `Action::CommitCell`/`Action::
+SetNoteText`, appliquée par `AppState::dispatch` : le chemin de commande
+annulable ne connaît aucune différence entre un onglet docké et un onglet
+détaché.
+
+`Tab::Graph` échappe à cette limite : `GraphView` n'a pas de verrou global à
+`AppState` à respecter (son cache de formes et sa navigation zoom/pan sont
+déjà scopés par graphe, dans `PlotyxApp::graph_views`) — `graph_view_contents`
+est donc **littéralement** la même fonction pour le dock et pour une fenêtre
+détachée ; la vue elle-même migre simplement hors de `graph_views` le temps
+du détachement pour rester capturable par la fermeture sans dupliquer le
+cache. `Tab::Matrix` n'a aucun état à faire voyager (espace réservé).
+
+`Tab::Script` n'est pas détachable : sa saisie (`AppState::script_source`)
+est un champ direct d'`AppState`, pas un tampon différé comme
+`CellEdit`/`NoteEdit`, et son cycle de vie (fil détaché, `poll_script` à
+appeler image après image) est bien plus couplé à `AppState` que les quatre
+autres natures — le généraliser demanderait de faire voyager aussi l'état
+d'exécution du script, hors périmètre de cette tâche.
+
 ### Sélecteur de fichiers natif
 
 `tool_bar` n'a plus de champ de texte pour taper le chemin à la main : les
@@ -244,17 +315,22 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
   du modèle**, pas la dernière frappe : c'est le comportement attendu d'un
   tableur, et c'est aussi la limite — le banc ne sait pas distinguer les deux
   intentions.
-- **Une seule cellule éditable à la fois**, toutes grilles de tous les
-  classeurs ouverts confondues. La grille est virtualisée
+- **Une seule cellule éditable à la fois**, toutes grilles **dockées**
+  confondues (`AppState::editing`). La grille est virtualisée
   (`TableBuilder::body().rows()`) : une feuille peut avoir un million de
   lignes, il n'est pas question de garder un tampon par cellule. Le même
   principe vaut pour l'édition d'une note (`AppState::NoteEdit`), pour la même
-  raison de cohérence plutôt que de nécessité stricte.
+  raison de cohérence plutôt que de nécessité stricte. Un onglet **détaché**
+  a son propre tampon, indépendant de celui du dock et des autres onglets
+  détachés (voir « Détachement générique des onglets de contenu ») —
+  contrainte technique de la fermeture `'static` de `show_viewport_deferred`,
+  pas une extension délibérée de la limite.
 - **La disposition dockable ne persiste pas d'un lancement à l'autre** :
   `PlotyxApp::new` la reconstruit à chaque démarrage (Project Manager, script,
   premier classeur, premier graphe). Ce que l'utilisateur redispose en
-  session — y compris la maximisation et le détachement du Project Manager —
-  tient jusqu'à la fermeture de la fenêtre, pas au-delà.
+  session — y compris la maximisation et le détachement, du Project Manager
+  ou de tout autre onglet — tient jusqu'à la fermeture de la fenêtre, pas
+  au-delà.
 
 ### Un détail qui a l'air d'un détail
 

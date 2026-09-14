@@ -250,6 +250,77 @@ fn format_f64_for_display(value: f64) -> String {
     }
 }
 
+/// Corps de [`AppState::cell_text`], factorisé sur un `&Tree` plutôt que sur
+/// `&self` : c'est ce qui permet à une fenêtre détachée
+/// ([`crate::app::PlotyxApp::show_detached_tabs`], qui ne porte qu'un clone
+/// de [`Snapshot`], jamais `AppState` elle-même — voir sa doc de tête) de
+/// peindre une grille identique à celle du dock, sans dupliquer la règle
+/// d'affichage (`MISSING_TEXT_DISPLAY`, bascule scientifique A9/C4 — voir
+/// [`AppState::cell_text`] pour le détail de ces choix).
+pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
+    let Some(column) = tree.node(column).and_then(Node::as_column) else {
+        return String::new();
+    };
+    match column.get(row) {
+        Cell::Float(value) if value.is_nan() => String::new(),
+        Cell::Float(value) => format_f64_for_display(value),
+        Cell::Text(None) => MISSING_TEXT_DISPLAY.to_string(),
+        Cell::Text(Some(text)) => text,
+    }
+}
+
+/// Corps de [`AppState::visible_columns`], factorisé sur un `&Tree` — voir
+/// [`cell_text_in`].
+pub(crate) fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
+    let Some(node) = tree.node(sheet) else {
+        return Vec::new();
+    };
+    node.children()
+        .iter()
+        .filter_map(|id| {
+            let child = tree.node(*id)?;
+            let column = child.as_column()?;
+            Some((*id, child.name().to_string(), column.column_type()))
+        })
+        .collect()
+}
+
+/// Corps de [`AppState::row_count`], factorisé sur un `&Tree` — voir
+/// [`cell_text_in`].
+pub(crate) fn row_count_in(tree: &Tree, sheet: NodeId) -> usize {
+    tree.row_count(sheet).unwrap_or(0)
+}
+
+/// Corps de [`AppState::worksheets_of`], factorisé sur un `&Tree` — voir
+/// [`cell_text_in`].
+pub(crate) fn worksheets_of_in(tree: &Tree, book: NodeId) -> Vec<(NodeId, String)> {
+    let Some(node) = tree.node(book) else {
+        return Vec::new();
+    };
+    node.children()
+        .iter()
+        .filter_map(|id| tree.node(*id).map(|sheet| (*id, sheet.name().to_string())))
+        .collect()
+}
+
+/// Corps de [`AppState::note_text`], factorisé sur un `&Tree` — voir
+/// [`cell_text_in`].
+pub(crate) fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
+    match tree.node(note)?.kind() {
+        NodeKind::Note { text, .. } => Some(text.clone()),
+        _ => None,
+    }
+}
+
+/// Nom d'un nœud, ou `"{missing} {id} (supprimé)"` s'il n'existe plus dans
+/// `tree` — pendant de `crate::app::node_title`, factorisé sur un `&Tree`
+/// pour la même raison que [`cell_text_in`].
+pub(crate) fn node_title_in(tree: &Tree, id: NodeId, missing: &str) -> String {
+    tree.node(id)
+        .map(|node| node.name().to_string())
+        .unwrap_or_else(|| format!("{missing} {id} (supprimé)"))
+}
+
 /// Saisie en cours dans une cellule.
 ///
 /// Une seule cellule est éditable à la fois : c'est ce qui permet à la grille
@@ -541,24 +612,14 @@ impl AppState {
     /// Colonnes de `sheet`, dans l'ordre du modèle : `(NodeId, nom, type)`.
     /// Vide si `sheet` n'est pas (ou plus) une feuille de ce projet.
     pub fn visible_columns(&self, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
-        let Some(node) = self.snapshot.tree.node(sheet) else {
-            return Vec::new();
-        };
-        node.children()
-            .iter()
-            .filter_map(|id| {
-                let child = self.snapshot.tree.node(*id)?;
-                let column = child.as_column()?;
-                Some((*id, child.name().to_string(), column.column_type()))
-            })
-            .collect()
+        visible_columns_in(&self.snapshot.tree, sheet)
     }
 
     /// Nombre de lignes de `sheet` — le **maximum** des longueurs de ses
     /// colonnes, pas la longueur de la première : une feuille n'est pas un
     /// tableau rectangulaire. 0 si `sheet` n'est pas (ou plus) une feuille.
     pub fn row_count(&self, sheet: NodeId) -> usize {
-        self.snapshot.tree.row_count(sheet).unwrap_or(0)
+        row_count_in(&self.snapshot.tree, sheet)
     }
 
     /// Texte à afficher dans une cellule : [`MISSING_TEXT_DISPLAY`] pour une
@@ -602,15 +663,7 @@ impl AppState {
     /// directions »). Le vrai formatage restera un jour celui de
     /// `ColumnMeta::display_format`, que cette phase ne lit pas.
     pub fn cell_text(&self, column: NodeId, row: usize) -> String {
-        let Some(column) = self.snapshot.tree.node(column).and_then(Node::as_column) else {
-            return String::new();
-        };
-        match column.get(row) {
-            Cell::Float(value) if value.is_nan() => String::new(),
-            Cell::Float(value) => format_f64_for_display(value),
-            Cell::Text(None) => MISSING_TEXT_DISPLAY.to_string(),
-            Cell::Text(Some(text)) => text,
-        }
+        cell_text_in(&self.snapshot.tree, column, row)
     }
 
     /// Saisie de cellule en cours, s'il y en a une.
@@ -698,14 +751,7 @@ impl AppState {
     /// [`crate::app::Tab::Book`] : `(NodeId, nom)`. Vide si `book` n'existe
     /// plus ou n'est pas un classeur.
     pub fn worksheets_of(&self, book: NodeId) -> Vec<(NodeId, String)> {
-        let tree = &self.snapshot.tree;
-        let Some(node) = tree.node(book) else {
-            return Vec::new();
-        };
-        node.children()
-            .iter()
-            .filter_map(|id| tree.node(*id).map(|sheet| (*id, sheet.name().to_string())))
-            .collect()
+        worksheets_of_in(&self.snapshot.tree, book)
     }
 
     /// Les classeurs du projet, sous la forme `(identifiant, chemin
@@ -727,10 +773,7 @@ impl AppState {
     /// Texte d'une note, ou `None` si `note` n'est pas (ou plus) une note de
     /// ce projet.
     pub fn note_text(&self, note: NodeId) -> Option<String> {
-        match self.snapshot.tree.node(note)?.kind() {
-            NodeKind::Note { text, .. } => Some(text.clone()),
-            _ => None,
-        }
+        note_text_in(&self.snapshot.tree, note)
     }
 
     /// L'arbre du projet tel que le panneau Project Manager le montre :

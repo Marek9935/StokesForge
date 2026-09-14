@@ -102,6 +102,103 @@
 //!    (`ProjectManagerViewModel`, `DetachedProjectManagerRequests`) dans la
 //!    doc de tête de [`PlotyxApp::show_detached_project_manager`].
 //!
+//! # Détachement générique des onglets de contenu
+//!
+//! [`PlotyxApp::detach_tab`]/[`PlotyxApp::reattach_tab`]/
+//! [`PlotyxApp::show_detached_tabs`] généralisent le mécanisme ci-dessus à
+//! [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`] et [`Tab::Note`] — un clic
+//! droit sur l'onglet (menu contextuel `egui_dock::TabViewer::context_menu`,
+//! seul point d'extension de ce genre en 0.21.1 — vérifié dans
+//! `egui_dock-0.21.1/src/widgets/tab_viewer.rs`) propose « Détacher dans une
+//! fenêtre », symétrique de « Réattacher au dock principal » côté fenêtre
+//! détachée. Plusieurs onglets peuvent être détachés en même temps :
+//! [`PlotyxApp::detached_tabs`] est une table par [`Tab`] (chaque variante
+//! porte déjà un `NodeId`, donc un `ViewportId::from_hash_of(tab)` est
+//! unique par construction — pas de collision possible entre deux classeurs
+//! détachés simultanément, par exemple).
+//!
+//! # Pourquoi pas un `ViewModel` par nature de contenu comme pour le PM
+//!
+//! Le PM n'a qu'une seule forme de contenu (un arbre en lecture seule) ; les
+//! quatre natures de fenêtre ici sont franchement différentes (grille
+//! éditable virtualisée, graphe interactif avec cache de formes, texte
+//! éditable, espace réservé). Plutôt que quatre `ViewModel`/`Requests`
+//! disjoints à faire cohabiter dans [`PlotyxApp::detached_tabs`],
+//! [`DetachedTabViewModel`] est une seule structure portant un champ par
+//! nature de contenu (`selected_sheet`/`cell_edit` pour un classeur,
+//! `note_edit` pour une note, `graph_view` pour un graphe) — les champs
+//! inutilisés pour la nature du `Tab` qu'elle sert restent simplement à leur
+//! valeur par défaut. Moins de types, un seul `Arc<Mutex<_>>` par onglet
+//! détaché à faire voyager dans la fermeture, au prix d'un typage un peu
+//! large ; le commentaire de tête de chaque champ dit à qui il appartient.
+//!
+//! # La lecture du modèle est factorisée, l'édition transitoire ne l'est pas
+//!
+//! [`tab_contents`] (la fonction déjà partagée par le dock normal et la zone
+//! de maximisation) prend `&mut AppState` — un onglet détaché ne peut
+//! pourtant pas capturer `&mut AppState` dans la fermeture `'static`,
+//! `Send + Sync`, exigée par `show_viewport_deferred`, exactement le
+//! problème déjà résolu pour le Project Manager (voir plus haut) : mettre
+//! `AppState` entière derrière un verrou déborderait le problème à
+//! résoudre, pour un onglet comme pour l'autre.
+//!
+//! Le contournement retenu : [`DetachedTabViewModel::snapshot`], un clone de
+//! [`plotyx_session::Snapshot`] (bon marché — deux `Arc`, voir sa doc), est
+//! resynchronisé depuis `self.state` à chaque image, **avant** l'appel à
+//! `show_viewport_deferred` — même schéma que `ProjectManagerViewModel::tree`.
+//! Toute lecture pure (texte de cellule, colonnes visibles, feuilles d'un
+//! classeur, texte d'une note) passe par les fonctions libres de
+//! `crate::state` factorisées sur un `&Tree` pour l'occasion
+//! (`cell_text_in`, `visible_columns_in`, `row_count_in`, `worksheets_of_in`,
+//! `note_text_in`, `node_title_in`) — le corps exact de la méthode
+//! `AppState` correspondante, pas une réécriture : le dock et une fenêtre
+//! détachée affichent donc littéralement la même règle, jamais deux versions
+//! à tenir en accord.
+//!
+//! Ce qui n'est en revanche **pas** partagé avec `AppState`, délibérément :
+//! le tampon de saisie transitoire d'une cellule ou d'une note
+//! ([`AppState::editing`]/[`AppState::note_editing`]) reste un **verrou
+//! unique par fenêtre**, pas un verrou unique pour toute l'application. La
+//! limite documentée en tête de crate (« une seule cellule éditable à la
+//! fois, toutes grilles confondues ») devient, pour un onglet détaché, « une
+//! seule cellule éditable à la fois **dans cette fenêtre détachée** » — une
+//! fenêtre OS séparée ne peut de toute façon pas partager le verrou
+//! `AppState` de la fenêtre mère sans le mettre lui-même derrière un
+//! `Arc<Mutex<_>>`, ce que ce module refuse déjà pour le PM et pour la même
+//! raison. `detached_cell_widget`/`detached_note_contents` réimplémentent
+//! donc la même petite machine à états (`gained_focus`/`lost_focus`/Échap)
+//! que [`cell_widget`]/[`note_contents`], sur `DetachedTabViewModel::
+//! cell_edit`/`note_edit` plutôt que sur le champ d'`AppState` — quelques
+//! lignes dupliquées, documentées ici plutôt qu'une abstraction
+//! supplémentaire (trait, générique) pour un couplage aussi mince. Valider
+//! une saisie produit la **même** [`Action::CommitCell`]/[`Action::
+//! SetNoteText`] que le dock, appliquée par [`AppState::dispatch`] : le
+//! chemin de commande annulable, lui, ne connaît aucune différence entre un
+//! onglet docké et un onglet détaché.
+//!
+//! [`Tab::Graph`] échappe à cette limite : [`plotyx_render_egui::GraphView`]
+//! n'a pas de verrou global à `AppState` à respecter (son cache de formes et
+//! sa navigation zoom/pan sont déjà scopés par graphe, dans
+//! [`PlotyxApp::graph_views`]) — [`graph_view_contents`] est donc
+//! **littéralement** la même fonction pour le dock et pour une fenêtre
+//! détachée, la vue elle-même migrant simplement hors de `graph_views` le
+//! temps du détachement ([`PlotyxApp::detach_tab`]/[`PlotyxApp::
+//! reattach_tab`]) pour rester un `Arc<Mutex<_>>` capturable par la
+//! fermeture sans dupliquer le cache.
+//!
+//! [`Tab::Matrix`] n'a aucun état à faire voyager (espace réservé, voir
+//! [`matrix_contents`]) : [`detached_matrix_contents`] est un simple appel à
+//! [`node_title_in`].
+//!
+//! [`Tab::Script`] n'est **pas** détachable : sa saisie
+//! (`AppState::script_source`) est un champ direct d'`AppState`, pas un
+//! tampon différé comme `CellEdit`/`NoteEdit`, et son cycle de vie (fil
+//! détaché, `poll_script` à appeler image après image) est bien plus
+//! couplé à `AppState` que les quatre autres natures — le généraliser
+//! demanderait de faire voyager aussi l'état d'exécution du script, hors du
+//! périmètre de cette tâche. `TabViewer::context_menu` ne propose donc
+//! l'action que pour `Book`/`Graph`/`Matrix`/`Note`.
+//!
 //! # Sélecteur de fichiers natif
 //!
 //! [`tool_bar`](PlotyxApp::tool_bar) n'a plus de champ de texte pour le
@@ -149,12 +246,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
+use egui_dock::{DockArea, DockState, NodeIndex, NodePath, Style, TabViewer};
 use egui_extras::{Column as TableColumn, TableBuilder};
-use plotyx_core::{ColumnType, NodeId};
+use plotyx_core::{ColumnType, NodeId, Tree};
 use plotyx_render_egui::{DrawnPlot, GraphView};
+use plotyx_session::Snapshot;
 
-use crate::state::{Action, AppState, ProjectTreeNode, WindowKind};
+use crate::state::{
+    cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
+    Action, AppState, CellEdit, NoteEdit, ProjectTreeNode, WindowKind,
+};
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
 /// [`PlotyxApp::new`]).
@@ -279,6 +380,12 @@ pub struct PlotyxApp {
     /// reste du banc, juste posé par un callback différé plutôt que collecté
     /// en direct.
     pm_requests: Arc<Mutex<DetachedProjectManagerRequests>>,
+    /// Onglets de contenu (`Book`/`Graph`/`Matrix`/`Note`) actuellement
+    /// détachés en fenêtre OS séparée — voir la doc de tête du module,
+    /// § détachement générique. Une entrée par onglet détaché ; absent de
+    /// `dock_state` tant qu'il l'est (même invariant que `pm_detached` pour
+    /// `Tab::ProjectManager`, généralisé à plusieurs onglets simultanés).
+    detached_tabs: HashMap<Tab, DetachedTab>,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
     /// (mécanisme de vérification, voir [`PlotyxApp::screenshot`]).
     screenshot: Option<std::path::PathBuf>,
@@ -317,6 +424,65 @@ struct DetachedProjectManagerRequests {
     open: Vec<Tab>,
     /// Vrai si le bouton « Réattacher » ou la fermeture de la fenêtre OS a
     /// été actionné depuis la dernière vidange.
+    reattach: bool,
+}
+
+/// Un onglet de contenu détaché en fenêtre OS séparée — voir la doc de tête
+/// du module, § détachement générique. Même patron que le Project Manager
+/// (`pm_view_model`/`pm_requests`), répété une fois par onglet plutôt qu'une
+/// fois pour toute l'appli : [`PlotyxApp::detached_tabs`] en porte une par
+/// entrée.
+struct DetachedTab {
+    /// Ce que la fenêtre détachée peint, resynchronisé depuis `self.state`
+    /// (et `self.graph_views` pour un graphe) à chaque image par
+    /// [`PlotyxApp::show_detached_tabs`].
+    view_model: Arc<Mutex<DetachedTabViewModel>>,
+    /// Ce que la fenêtre détachée écrit, drainé chaque image par
+    /// [`PlotyxApp::ui`].
+    requests: Arc<Mutex<DetachedTabRequests>>,
+}
+
+/// Ce qu'une fenêtre détachée a besoin de peindre. Une seule structure pour
+/// les quatre natures détachables plutôt que quatre `ViewModel` disjoints —
+/// voir la doc de tête du module pour le compromis. Chaque champ, hormis
+/// `snapshot`, n'a de sens que pour une nature de [`Tab`] particulière ; le
+/// commentaire le dit.
+#[derive(Debug, Default)]
+struct DetachedTabViewModel {
+    /// Instantané du modèle, resynchronisé à chaque image — voir la doc de
+    /// tête du module, § « la lecture du modèle est factorisée ». `None`
+    /// seulement avant la toute première synchronisation (jamais observable
+    /// depuis l'extérieur de [`PlotyxApp::detach_tab`], qui le pose aussitôt).
+    snapshot: Option<Snapshot>,
+    /// `Tab::Book` : feuille actuellement choisie **dans cette fenêtre
+    /// détachée** — sa propre sous-navigation, indépendante de celle que le
+    /// classeur aurait dans le dock (il ne peut de toute façon pas être dans
+    /// les deux à la fois).
+    selected_sheet: Option<NodeId>,
+    /// `Tab::Book` : saisie de cellule en cours, propre à cette fenêtre — pas
+    /// le tampon global d'`AppState`, voir la doc de tête du module.
+    cell_edit: Option<CellEdit>,
+    /// `Tab::Note` : saisie de note en cours, propre à cette fenêtre — même
+    /// raison que `cell_edit`.
+    note_edit: Option<NoteEdit>,
+    /// `Tab::Graph` : la vue (cache de formes, zoom/pan), déplacée hors de
+    /// [`PlotyxApp::graph_views`] le temps du détachement — voir
+    /// [`PlotyxApp::detach_tab`]/[`PlotyxApp::reattach_tab`].
+    graph_view: Option<GraphView>,
+}
+
+/// Ce qu'une fenêtre détachée écrit, pour que [`PlotyxApp::ui`] (seule à
+/// porter `&mut AppState`) les applique après le rendu — même rôle que
+/// [`DetachedProjectManagerRequests`].
+#[derive(Debug, Default)]
+struct DetachedTabRequests {
+    /// Actions produites par cette fenêtre depuis la dernière vidange
+    /// (validation de cellule/note, structure de la grille…) — le même
+    /// chemin de commande annulable que le dock, voir la doc de tête du
+    /// module.
+    actions: Vec<Action>,
+    /// Vrai si « Réattacher au dock principal » ou la fermeture de la
+    /// fenêtre OS a été actionné depuis la dernière vidange.
     reattach: bool,
 }
 
@@ -372,6 +538,7 @@ impl PlotyxApp {
             pm_detached: false,
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
+            detached_tabs: HashMap::new(),
             autoquit,
             first_frame: None,
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
@@ -754,6 +921,157 @@ impl PlotyxApp {
         );
     }
 
+    /// Retire `tab` du dock et le détache en fenêtre OS séparée — voir la
+    /// doc de tête du module, § détachement générique. Sans effet si `tab`
+    /// est déjà détaché, n'existe pas dans le dock, ou n'est pas détachable
+    /// (`Tab::ProjectManager`/`Tab::Script`, filtrés en amont par
+    /// [`AppTabViewer::context_menu`] — cette fonction reste défensive plutôt
+    /// que de supposer que son seul appelant continuera de filtrer).
+    fn detach_tab(&mut self, tab: Tab) {
+        if matches!(tab, Tab::ProjectManager | Tab::Script) || self.detached_tabs.contains_key(&tab)
+        {
+            return;
+        }
+        if let Some(path) = self.dock_state.find_tab(&tab) {
+            self.dock_state.remove_tab(path);
+        } else {
+            return;
+        }
+        if self.maximized_tab == Some(tab) {
+            // Comme pour le PM : un onglet maximisé qui n'est plus dans le
+            // dock serait un état incohérent.
+            self.maximized_tab = None;
+        }
+        let graph_view = match tab {
+            Tab::Graph(id) => Some(self.graph_views.remove(&id).unwrap_or_default()),
+            _ => None,
+        };
+        let selected_sheet = match tab {
+            Tab::Book(id) => self.state.selected_sheet_in(id),
+            _ => None,
+        };
+        let view_model = DetachedTabViewModel {
+            snapshot: Some(self.state.snapshot().clone()),
+            selected_sheet,
+            cell_edit: None,
+            note_edit: None,
+            graph_view,
+        };
+        self.detached_tabs.insert(
+            tab,
+            DetachedTab {
+                view_model: Arc::new(Mutex::new(view_model)),
+                requests: Arc::new(Mutex::new(DetachedTabRequests::default())),
+            },
+        );
+    }
+
+    /// Retire `tab` de [`PlotyxApp::detached_tabs`] et le repousse dans le
+    /// dock (au nœud focalisé, ou en nouvelle feuille s'il n'y en a pas).
+    /// Sans effet s'il n'est pas détaché. Une éventuelle [`GraphView`]
+    /// déplacée par [`PlotyxApp::detach_tab`] revient dans
+    /// [`PlotyxApp::graph_views`] — le cache de formes du graphe survit au
+    /// détachement/réattachement, comme il survit déjà à la fermeture d'un
+    /// onglet docké.
+    fn reattach_tab(&mut self, tab: Tab) {
+        let Some(detached) = self.detached_tabs.remove(&tab) else {
+            return;
+        };
+        {
+            let mut model = detached
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            if let (Tab::Graph(id), Some(view)) = (tab, model.graph_view.take()) {
+                self.graph_views.insert(id, view);
+            }
+        }
+        if self.dock_state.find_tab(&tab).is_none() {
+            self.dock_state.push_to_focused_leaf(tab);
+        }
+    }
+
+    /// Peint chaque onglet de [`PlotyxApp::detached_tabs`] dans sa propre
+    /// fenêtre OS, via `show_viewport_deferred` — voir la doc de tête du
+    /// module, § détachement générique, et [`PlotyxApp::
+    /// show_detached_project_manager`] pour la justification du choix
+    /// `_deferred`/`Fn` déjà faite pour le Project Manager (identique ici).
+    ///
+    /// Ne draine **pas** les requêtes produites : [`PlotyxApp::ui`] le fait
+    /// juste après, une fois cette fonction revenue, exactement comme pour
+    /// `pm_requests`.
+    fn show_detached_tabs(&mut self, ctx: &egui::Context) {
+        let Self {
+            state,
+            detached_tabs,
+            ..
+        } = self;
+        for (tab, detached) in detached_tabs.iter() {
+            {
+                let mut model = detached
+                    .view_model
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner());
+                model.snapshot = Some(state.snapshot().clone());
+            }
+            let view_model = Arc::clone(&detached.view_model);
+            let requests = Arc::clone(&detached.requests);
+            let tab = *tab;
+            let title = format!("PlotYx — {}", tab_title(state, tab));
+            let size = match tab {
+                Tab::Matrix(_) => [420.0, 220.0],
+                Tab::Graph(_) => [800.0, 600.0],
+                _ => [720.0, 540.0],
+            };
+            ctx.show_viewport_deferred(
+                egui::ViewportId::from_hash_of(tab),
+                egui::ViewportBuilder::default()
+                    .with_title(title)
+                    .with_inner_size(size),
+                move |ui, _class| {
+                    let mut model = view_model.lock().unwrap_or_else(|err| err.into_inner());
+                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("Réattacher au dock principal").clicked() {
+                                requests.reattach = true;
+                            }
+                        });
+                        ui.separator();
+                        let Some(snapshot) = model.snapshot.clone() else {
+                            // Ne devrait jamais arriver : `detach_tab` pose le
+                            // premier instantané avant toute image détachée.
+                            return;
+                        };
+                        let tree = &snapshot.tree;
+                        match tab {
+                            Tab::Book(id) => {
+                                detached_book_contents(ui, tree, &mut model, &mut requests, id);
+                            }
+                            Tab::Graph(id) => {
+                                let view = model.graph_view.get_or_insert_with(GraphView::default);
+                                graph_view_contents(ui, view, &snapshot, id);
+                            }
+                            Tab::Matrix(id) => {
+                                detached_matrix_contents(ui, tree, id);
+                            }
+                            Tab::Note(id) => {
+                                detached_note_contents(ui, tree, &mut model, &mut requests, id);
+                            }
+                            Tab::ProjectManager | Tab::Script => {
+                                // Jamais détachables — voir `detach_tab`.
+                                ui.weak("(onglet non détachable)");
+                            }
+                        }
+                    });
+                    if ui.ctx().input(|input| input.viewport().close_requested()) {
+                        requests.reattach = true;
+                    }
+                },
+            );
+        }
+    }
+
     /// Dépose une capture de la fenêtre dans le fichier nommé par
     /// `PLOTYX_APP_SCREENSHOT`, puis n'en redemande plus.
     ///
@@ -840,6 +1158,10 @@ impl eframe::App for PlotyxApp {
         // détaché) : appliqués après le rendu, comme `actions` — muter
         // `dock_state` en plein parcours de la `DockArea` l'invaliderait.
         let mut open_requests: Vec<Tab> = Vec::new();
+        // Onglets dont le menu contextuel du dock a demandé le détachement
+        // cette image-ci — appliqués après le rendu, comme `open_requests`
+        // (voir [`AppTabViewer::detach_requests`]).
+        let mut detach_requests: Vec<Tab> = Vec::new();
 
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
@@ -870,6 +1192,27 @@ impl eframe::App for PlotyxApp {
             };
             if should_reattach {
                 self.reattach_project_manager();
+            }
+        }
+
+        if !self.detached_tabs.is_empty() {
+            self.show_detached_tabs(&ctx);
+            // Même vidange que pour le Project Manager, généralisée à
+            // plusieurs onglets : chacun peut avoir accumulé des actions et/ou
+            // demandé à être réattaché depuis la dernière image.
+            let mut to_reattach: Vec<Tab> = Vec::new();
+            for (tab, detached) in &self.detached_tabs {
+                let mut requests = detached
+                    .requests
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner());
+                actions.append(&mut requests.actions);
+                if std::mem::take(&mut requests.reattach) {
+                    to_reattach.push(*tab);
+                }
+            }
+            for tab in to_reattach {
+                self.reattach_tab(tab);
             }
         }
 
@@ -915,6 +1258,7 @@ impl eframe::App for PlotyxApp {
                     graph_views,
                     ctx: &ctx,
                     open_requests: &mut open_requests,
+                    detach_requests: &mut detach_requests,
                 };
                 DockArea::new(dock_state)
                     .style(Style::from_egui(ui.style()))
@@ -922,13 +1266,17 @@ impl eframe::App for PlotyxApp {
             }
         });
 
-        // Les onglets demandés (Project Manager, docké ou détaché) et les
-        // actions récoltées par tous les panneaux et onglets ne sont
-        // appliqués qu'une fois l'image peinte : muter le plan de
-        // disposition ou le modèle en plein rendu invaliderait ce que la
-        // `DockArea` est en train de parcourir.
+        // Les onglets demandés (Project Manager, docké ou détaché), les
+        // détachements demandés par le menu contextuel, et les actions
+        // récoltées par tous les panneaux et onglets ne sont appliqués
+        // qu'une fois l'image peinte : muter le plan de disposition ou le
+        // modèle en plein rendu invaliderait ce que la `DockArea` est en
+        // train de parcourir.
         for tab in open_requests {
             self.open_tab(tab);
+        }
+        for tab in detach_requests {
+            self.detach_tab(tab);
         }
         for action in actions {
             self.state.dispatch(action);
@@ -1315,6 +1663,25 @@ fn graph_contents(
     graph_id: NodeId,
 ) {
     let view = graph_views.entry(graph_id).or_default();
+    graph_view_contents(ui, view, state.snapshot(), graph_id);
+}
+
+/// Corps de [`graph_contents`], factorisé sur une [`GraphView`] et un
+/// [`Snapshot`] déjà en main plutôt que sur `&AppState`/la table
+/// [`PlotyxApp::graph_views`] : c'est ce qui permet à
+/// [`PlotyxApp::show_detached_tabs`] de peindre un `Tab::Graph` détaché avec
+/// **exactement** cette fonction — pas de version dégradée, voir la doc de
+/// tête du module. `GraphView` n'a pas le problème de verrou global à
+/// `AppState` qu'ont les tampons de saisie de cellule/note (son cache et sa
+/// navigation sont déjà scopés par graphe) : nul besoin d'une variante
+/// « détachée » séparée, à la différence de [`grid_contents`]/
+/// [`note_contents`].
+fn graph_view_contents(
+    ui: &mut egui::Ui,
+    view: &mut GraphView,
+    snapshot: &Snapshot,
+    graph_id: NodeId,
+) {
     let available = ui.available_size_before_wrap();
     // R7 : la navigation (molette, glissé, rectangle élastique) a besoin de
     // bien plus que `hover()` — `GraphView::paint` fait sa propre
@@ -1324,7 +1691,7 @@ fn graph_contents(
         egui::vec2(available.x, (available.y - 24.0).max(120.0)),
         egui::Sense::click_and_drag(),
     );
-    match view.paint(ui, rect, state.snapshot(), graph_id) {
+    match view.paint(ui, rect, snapshot, graph_id) {
         Ok(_) => {
             let cache = view.cache();
             ui.weak(format!(
@@ -1545,6 +1912,298 @@ fn cell_widget(
     }
 }
 
+/// Contenu d'un `Tab::Book` **détaché** : le pendant de [`book_contents`],
+/// opérant sur un `&Tree` (venant de `DetachedTabViewModel::snapshot`) et sur
+/// `DetachedTabViewModel::selected_sheet`/`cell_edit` plutôt que sur
+/// `&mut AppState` — voir la doc de tête du module pour pourquoi ce n'est
+/// pas littéralement `book_contents`. Mêmes gestes, même
+/// `Action::AddColumn`/`InsertRows`/`DeleteRows`/`CommitCell` poussés dans
+/// `requests.actions` plutôt que dans un `&mut Vec<Action>` direct.
+fn detached_book_contents(
+    ui: &mut egui::Ui,
+    tree: &Tree,
+    model: &mut DetachedTabViewModel,
+    requests: &mut DetachedTabRequests,
+    book: NodeId,
+) {
+    let sheets = worksheets_of_in(tree, book);
+    if sheets.is_empty() {
+        ui.centered_and_justified(|ui| {
+            ui.weak(format!(
+                "« {} » n'a aucune feuille (ou a été supprimé).",
+                node_title_in(tree, book, "Classeur")
+            ));
+        });
+        return;
+    }
+    let selected = model
+        .selected_sheet
+        .filter(|id| sheets.iter().any(|(sheet_id, _)| sheet_id == id))
+        .unwrap_or(sheets[0].0);
+    model.selected_sheet = Some(selected);
+
+    ui.horizontal(|ui| {
+        for (id, name) in &sheets {
+            if ui.selectable_label(selected == *id, name).clicked() {
+                model.selected_sheet = Some(*id);
+                requests.actions.push(Action::SelectSheet(*id));
+            }
+        }
+    });
+    ui.separator();
+    ui.horizontal(|ui| {
+        if ui.button("Ajouter une colonne").clicked() {
+            requests.actions.push(Action::AddColumn { sheet: selected });
+        }
+        if ui.button("Insérer 1 ligne").clicked() {
+            // Même correctif B5 que `book_contents` : insérer en fin de
+            // feuille, pas `at: 0` en dur (`Project::insert_rows` exige
+            // `at < len`, une colonne neuve a `len == 0`).
+            requests.actions.push(Action::InsertRows {
+                sheet: selected,
+                at: row_count_in(tree, selected),
+                count: 1,
+            });
+        }
+        if ui.button("Supprimer 1 ligne").clicked() {
+            requests.actions.push(Action::DeleteRows {
+                sheet: selected,
+                at: 0,
+                count: 1,
+            });
+        }
+        ui.separator();
+        ui.weak(format!(
+            "{} lignes × {} colonnes",
+            row_count_in(tree, selected),
+            visible_columns_in(tree, selected).len()
+        ));
+    });
+    ui.separator();
+    detached_grid_contents(ui, tree, model, requests, selected);
+}
+
+/// Pendant détaché de [`grid_contents`] — mêmes principes (virtualisation),
+/// sur `&Tree`/`DetachedTabViewModel` plutôt que `&mut AppState`.
+fn detached_grid_contents(
+    ui: &mut egui::Ui,
+    tree: &Tree,
+    model: &mut DetachedTabViewModel,
+    requests: &mut DetachedTabRequests,
+    sheet: NodeId,
+) {
+    let columns = visible_columns_in(tree, sheet);
+    let row_count = row_count_in(tree, sheet);
+    if columns.is_empty() {
+        ui.centered_and_justified(|ui| {
+            ui.weak("Aucune colonne dans cette feuille.");
+        });
+        return;
+    }
+    TableBuilder::new(ui)
+        .striped(true)
+        .resizable(true)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        .column(TableColumn::exact(56.0))
+        .columns(TableColumn::initial(110.0).at_least(56.0), columns.len())
+        .min_scrolled_height(0.0)
+        .header(HEADER_HEIGHT, |mut header| {
+            header.col(|ui| {
+                ui.strong("#");
+            });
+            for (_, name, column_type) in &columns {
+                header.col(|ui| {
+                    ui.strong(name);
+                    ui.weak(type_suffix(*column_type));
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(ROW_HEIGHT, row_count, |mut row| {
+                let index = row.index();
+                row.col(|ui| {
+                    ui.weak(format!("{}", index + 1));
+                });
+                for (id, _, _) in &columns {
+                    row.col(|ui| {
+                        detached_cell_widget(ui, tree, &mut model.cell_edit, requests, *id, index);
+                    });
+                }
+            });
+        });
+}
+
+/// Pendant détaché de [`cell_widget`] — même machine à états
+/// (`gained_focus`/`lost_focus`/Échap), sur `cell_edit: &mut Option<CellEdit>`
+/// propre à cette fenêtre plutôt que sur `AppState::editing`. Voir la doc de
+/// tête du module, § « la lecture du modèle est factorisée, l'édition
+/// transitoire ne l'est pas », pour pourquoi ce doublon minime est assumé
+/// plutôt qu'abstrait.
+fn detached_cell_widget(
+    ui: &mut egui::Ui,
+    tree: &Tree,
+    cell_edit: &mut Option<CellEdit>,
+    requests: &mut DetachedTabRequests,
+    column: NodeId,
+    row: usize,
+) {
+    let inner = ui.push_id((column.raw(), row), |ui| {
+        let editing_here = cell_edit
+            .as_ref()
+            .is_some_and(|edit| edit.column == column && edit.row == row);
+
+        if editing_here {
+            let edit = cell_edit.as_mut()?;
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut edit.buffer)
+                    .frame(egui::Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+            Some((response, None))
+        } else {
+            let original = cell_text_in(tree, column, row);
+            let mut shown = original.clone();
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut shown)
+                    .frame(egui::Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+            Some((response, Some((original, shown))))
+        }
+    });
+
+    let Some((response, typed)) = inner.inner else {
+        return;
+    };
+
+    if response.gained_focus() {
+        *cell_edit = Some(CellEdit {
+            column,
+            row,
+            buffer: cell_text_in(tree, column, row),
+        });
+        // Reprend une frappe déjà atterrie dans la chaîne jetable de cette
+        // image, comme `cell_widget` — sinon le premier caractère serait
+        // perdu.
+        if let Some((original, shown)) = typed {
+            if shown != original {
+                if let Some(edit) = cell_edit.as_mut() {
+                    edit.buffer = shown;
+                }
+            }
+        }
+        return;
+    }
+
+    if !response.lost_focus() {
+        return;
+    }
+
+    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+        *cell_edit = None;
+        return;
+    }
+
+    let pending = cell_edit
+        .as_ref()
+        .filter(|edit| edit.column == column && edit.row == row)
+        .map(|edit| edit.buffer.clone());
+    if let Some(text) = pending {
+        *cell_edit = None;
+        requests
+            .actions
+            .push(Action::CommitCell { column, row, text });
+    }
+}
+
+/// Pendant détaché de [`matrix_contents`] — même espace réservé, sur `&Tree`
+/// plutôt que sur `&AppState`.
+fn detached_matrix_contents(ui: &mut egui::Ui, tree: &Tree, matrix: NodeId) {
+    let name = node_title_in(tree, matrix, "Matrice");
+    ui.centered_and_justified(|ui| {
+        ui.weak(format!(
+            "« {name} » — édition de matrice non implémentée dans ce banc \
+             (hors périmètre ; `plotyx-core` n'expose pas encore de contenu \
+             de matrice à éditer)."
+        ));
+    });
+}
+
+/// Pendant détaché de [`note_contents`] — même machine à états, sur
+/// `note_edit: &mut Option<NoteEdit>` propre à cette fenêtre plutôt que sur
+/// `AppState::note_editing`. Voir la doc de tête du module.
+fn detached_note_contents(
+    ui: &mut egui::Ui,
+    tree: &Tree,
+    model: &mut DetachedTabViewModel,
+    requests: &mut DetachedTabRequests,
+    note: NodeId,
+) {
+    let Some(current_name) = tree.node(note).map(|node| node.name().to_string()) else {
+        ui.centered_and_justified(|ui| {
+            ui.weak(format!(
+                "« {} » a été supprimée.",
+                node_title_in(tree, note, "Note")
+            ));
+        });
+        return;
+    };
+    ui.heading(current_name);
+    ui.separator();
+
+    let editing_here = model
+        .note_edit
+        .as_ref()
+        .is_some_and(|edit| edit.note == note);
+    let mut buffer = if editing_here {
+        model
+            .note_edit
+            .as_ref()
+            .map(|edit| edit.buffer.clone())
+            .unwrap_or_default()
+    } else {
+        note_text_in(tree, note).unwrap_or_default()
+    };
+
+    let response = ui.add(
+        egui::TextEdit::multiline(&mut buffer)
+            .desired_rows(20)
+            .desired_width(f32::INFINITY),
+    );
+
+    if response.gained_focus() && !editing_here {
+        model.note_edit = Some(NoteEdit {
+            note,
+            buffer: note_text_in(tree, note).unwrap_or_default(),
+        });
+    }
+    if model
+        .note_edit
+        .as_ref()
+        .is_some_and(|edit| edit.note == note)
+    {
+        if let Some(edit) = model.note_edit.as_mut() {
+            edit.buffer = buffer;
+        }
+    }
+
+    if response.lost_focus() {
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            model.note_edit = None;
+        } else {
+            let pending = model
+                .note_edit
+                .as_ref()
+                .filter(|edit| edit.note == note)
+                .map(|edit| edit.buffer.clone());
+            if let Some(text) = pending {
+                model.note_edit = None;
+                requests.actions.push(Action::SetNoteText { note, text });
+            }
+        }
+    }
+}
+
 /// Peint le contenu de chaque onglet du plan de disposition.
 ///
 /// Emprunte les champs de [`PlotyxApp`] plutôt que l'application entière
@@ -1557,6 +2216,11 @@ struct AppTabViewer<'a> {
     graph_views: &'a mut HashMap<NodeId, GraphView>,
     ctx: &'a egui::Context,
     open_requests: &'a mut Vec<Tab>,
+    /// Onglets dont le menu contextuel a demandé le détachement depuis la
+    /// dernière vidange — appliqués par [`PlotyxApp::ui`] une fois la
+    /// `DockArea` peinte (muter `dock_state` en plein parcours
+    /// l'invaliderait, même raison que `open_requests`).
+    detach_requests: &'a mut Vec<Tab>,
 }
 
 impl TabViewer for AppTabViewer<'_> {
@@ -1592,6 +2256,20 @@ impl TabViewer for AppTabViewer<'_> {
                 self.graph_views,
                 *tab,
             ),
+        }
+    }
+
+    /// « Détacher dans une fenêtre » — pour toute nature de contenu sauf
+    /// [`Tab::ProjectManager`] (déjà son propre mécanisme, voir la doc de
+    /// tête du module) et [`Tab::Script`] (non détachable, même doc). Ne
+    /// touche pas `dock_state` ici : voir [`AppTabViewer::detach_requests`].
+    fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, _path: NodePath) {
+        if matches!(tab, Tab::ProjectManager | Tab::Script) {
+            return;
+        }
+        if ui.button("Détacher dans une fenêtre").clicked() {
+            self.detach_requests.push(*tab);
+            ui.close();
         }
     }
 }
