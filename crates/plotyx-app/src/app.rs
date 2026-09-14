@@ -276,7 +276,7 @@ use eframe::egui;
 use egui_dock::{DockArea, DockState, NodeIndex, NodePath, Style, TabViewer};
 use egui_extras::{Column as TableColumn, TableBuilder};
 use plotyx_core::{ColumnType, NodeId, Tree};
-use plotyx_render_egui::{DrawnPlot, GraphView};
+use plotyx_render_egui::{DrawnPlot, GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::Snapshot;
 
 use crate::state::{
@@ -1745,10 +1745,16 @@ fn graph_view_contents(
     // bien plus que `hover()` — `GraphView::paint` fait sa propre
     // `ui.interact` sur ce rectangle avec `click_and_drag()` ; le `Sense`
     // posé ici doit au moins ne pas lui faire concurrence.
-    let (rect, _) = ui.allocate_exact_size(
+    let (outer, _) = ui.allocate_exact_size(
         egui::vec2(available.x, (available.y - 24.0).max(120.0)),
         egui::Sense::click_and_drag(),
     );
+    // Taille de figure fixe (`DEFAULT_FIGURE_SIZE`), centrée dans l'espace
+    // disponible plutôt qu'élastique à l'onglet : le graphe ne suit pas le
+    // redimensionnement de la fenêtre, voir la doc de tête de
+    // `plotyx_render::pipeline::DEFAULT_FIGURE_SIZE`.
+    let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
+    let rect = egui::Rect::from_center_size(outer.center(), egui::vec2(fig_w as f32, fig_h as f32));
     match view.paint(ui, rect, snapshot, graph_id) {
         Ok(_) => {
             let cache = view.cache();

@@ -63,7 +63,13 @@ pub use plotyx_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer}
 pub use png::{document_to_png, render_to_png, render_to_png_file, PngError};
 
 /// Taille par défaut d'une figure exportée, en unités SVG.
-pub const DEFAULT_SIZE: (u32, u32) = (800, 600);
+///
+/// Reprend [`pipeline::DEFAULT_FIGURE_SIZE`] plutôt que sa propre valeur :
+/// l'export doit produire la même figure que l'écran par défaut. Toute
+/// fonction de ce module qui exporte prend `size` en paramètre — c'est déjà
+/// le point d'extension pour une taille configurable, seulement pas encore
+/// câblé à une UI.
+pub const DEFAULT_SIZE: (u32, u32) = pipeline::DEFAULT_FIGURE_SIZE;
 
 /// Ce qui peut rater pendant un export.
 #[derive(Debug, thiserror::Error)]

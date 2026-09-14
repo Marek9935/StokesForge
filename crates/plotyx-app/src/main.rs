@@ -194,13 +194,11 @@ fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
     panel.bottom = AxisSpec {
         label: "λ".into(),
         unit: "nm".into(),
-        grid: true,
         ..AxisSpec::default()
     };
     panel.left = AxisSpec {
         label: "Absorbance mesurée".into(),
         unit: "u.a.".into(),
-        grid: true,
         ..AxisSpec::default()
     };
     let mut serie = SeriesSpec::new_xy(x, y);
