@@ -4,7 +4,7 @@
 //! # Pourquoi ce crate existe (phase R3)
 //!
 //! `NodeId` vivait dans `plotyx-core` jusqu'à la phase R3
-//! (`docs/newarchitecture/roadmap-rendu.md`), qui a dû faire porter par
+//! (`docs/archive/newarchitecture/roadmap-rendu.md`), qui a dû faire porter par
 //! `NodeKind::Graph` un `plotyx_plot::PlotSpec`. `plotyx-plot`, lui, ne
 //! référence le modèle que par `NodeId` — sa seule dépendance jusque-là était
 //! `plotyx-core` en entier pour ce seul type. Faire dépendre `plotyx-core` de

@@ -1,4 +1,4 @@
-//! Garde-fou de la phase 1 (`docs/rustrewrite/roadmap.md`) : `plotyx-core`
+//! Garde-fou de la phase 1 (`docs/archive/rustrewrite/roadmap.md`) : `plotyx-core`
 //! ne doit jamais gagner de dépendance UI. Plutôt que de deviner ce qu'est
 //! "une dépendance UI", ce test liste les seules dépendances autorisées —
 //! toute addition dans `Cargo.toml` doit être ajoutée ici explicitement,

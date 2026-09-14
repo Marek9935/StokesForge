@@ -2,7 +2,7 @@
 //!
 //! Il porte deux choses, et rien d'autre :
 //!
-//! - `tests/` — vingt batteries qui éprouvent le socle aux limites :
+//! - `tests/` — vingt-et-une batteries qui éprouvent le socle aux limites :
 //!   valeurs numériques extrêmes, fichiers `.plx` malformés puis
 //!   sémantiquement hostiles, macros de l'historique, concurrence entre
 //!   clients de l'acteur, propriétés tirées au sort (proptest), la frontière
@@ -15,8 +15,9 @@
 //!   colonnes n'ont pas la même longueur (`b16`), le coût des opérations
 //!   courantes quand le projet grandit (`b17`), ce qui reste possible pendant
 //!   qu'une macro est ouverte (`b18`), ce qu'un fichier écrit par une version
-//!   plus récente fait à ce lecteur-ci (`b19`) et deux écrivains sur un même
-//!   fichier (`b20`) ;
+//!   plus récente fait à ce lecteur-ci (`b19`), deux écrivains sur un même
+//!   fichier (`b20`) et le coût comme l'identité sur le chemin d'écriture
+//!   (`b21`) ;
 //! - `src/bin/sonde_alloc.rs` et `src/bin/sonde_pile.rs` — deux sondes
 //!   hors-processus, parce que les cas qu'elles éprouvent se terminent par un
 //!   `abort()` que rien ne rattrape : un échec d'allocation pour la première,
@@ -30,8 +31,8 @@
 //!
 //! **Les reproductions** échouent, délibérément. Chacune reproduit une
 //! anomalie constatée le 2026-09-11 et consignée dans l'un des deux rapports
-//! de ce jour — `docs/rustrewrite/rapport-robustesse-2026-09-11.md` (A1 à C2,
-//! batteries 1 à 9) et `docs/rustrewrite/rapport-robustesse-2026-09-11-suite.md`
+//! de ce jour — `docs/archive/rustrewrite/rapport-robustesse-2026-09-11.md` (A1 à C2,
+//! batteries 1 à 9) et `docs/archive/rustrewrite/rapport-robustesse-2026-09-11-suite.md`
 //! (A7 à D2, batteries 10 à 20) — sous l'identifiant (A1, B2, …) que porte son
 //! attribut `#[ignore]`. Elles sont marquées
 //! `#[ignore]` pour que le pipeline garde sa valeur de signal — un CI rouge
@@ -47,7 +48,7 @@
 //!
 //! # Par où commencer
 //!
-//! `docs/rustrewrite/guide-de-correction-robustesse.md` range les trente
+//! `docs/archive/rustrewrite/guide-de-correction-robustesse.md` range les trente
 //! anomalies **par fichier**, sépare les correctifs mécaniques des décisions
 //! à prendre, donne un ordre qui minimise le travail refait, et liste six
 //! pièges de correction vérifiés sur le dépôt (dont celui-ci : un correctif

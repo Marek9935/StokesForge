@@ -33,7 +33,6 @@
 //! Les onze tests d'édition (`edit.*`) sont hors périmètre de la phase, à
 //! l'exception de la palette, vérifiée ici et dans `src/style.rs`.
 
-
 use plotyx_id::NodeId;
 use plotyx_plot::{
     palette_color, AxisScale, AxisSide, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,

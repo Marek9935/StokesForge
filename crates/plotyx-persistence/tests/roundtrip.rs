@@ -3,7 +3,9 @@
 
 use std::path::Path;
 
-use plotyx_core::{Column, ColumnMeta, ColumnRole, ColumnType, NodeKind, Project, ValueBlock, WindowMeta};
+use plotyx_core::{
+    Column, ColumnMeta, ColumnRole, ColumnType, NodeKind, Project, ValueBlock, WindowMeta,
+};
 use plotyx_persistence::{load, save, PersistenceError};
 use plotyx_plot::{
     AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec,
@@ -473,7 +475,11 @@ fn a_large_float_column_is_stored_as_raw_bytes_not_as_a_msgpack_array() {
 /// qui ne sont **pas** ceux par défaut — pour que l'égalité de la tâche 3.5
 /// ne puisse pas passer par accident sur des champs restés à leur valeur par
 /// défaut des deux côtés du disque.
-fn non_trivial_spec(x: plotyx_core::NodeId, y1: plotyx_core::NodeId, y2: plotyx_core::NodeId) -> PlotSpec {
+fn non_trivial_spec(
+    x: plotyx_core::NodeId,
+    y1: plotyx_core::NodeId,
+    y2: plotyx_core::NodeId,
+) -> PlotSpec {
     let scatter = SeriesSpec {
         name: "Brute".to_string(),
         plot_type: PlotType::Scatter,
@@ -545,8 +551,12 @@ fn non_trivial_spec(x: plotyx_core::NodeId, y1: plotyx_core::NodeId, y2: plotyx_
 fn a_non_trivial_plot_spec_round_trips_intact() {
     let mut project = Project::new("Demo").expect("projet valide");
     let root = project.root();
-    let book = project.add_empty_workbook(root, Some("Book1")).expect("classeur");
-    let sheet = project.add_worksheet(book, Some("Sheet1")).expect("feuille");
+    let book = project
+        .add_empty_workbook(root, Some("Book1"))
+        .expect("classeur");
+    let sheet = project
+        .add_worksheet(book, Some("Sheet1"))
+        .expect("feuille");
     let x = project
         .add_column(sheet, None, Some("X"), Column::from_f64(&[0.0, 1.0, 2.0]))
         .expect("colonne X");

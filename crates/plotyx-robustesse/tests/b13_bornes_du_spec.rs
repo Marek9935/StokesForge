@@ -384,7 +384,10 @@ fn b13_histogram_bins_venu_du_disque_est_borne() {
     // `BinCount` pour exister — d'où le fichier hostile forgé ici.
     let chemin = hostile::projet_avec_histogram_bins(&dir, u32::MAX);
     let resultat = plotyx_persistence::load(&chemin);
-    println!("chargement d'un fichier avec histogram_bins = {} → {resultat:?}", u32::MAX);
+    println!(
+        "chargement d'un fichier avec histogram_bins = {} → {resultat:?}",
+        u32::MAX
+    );
     assert!(
         resultat.is_err(),
         "un histogram_bins de {} (bien au-delà du plafond {PLAFOND_RAISONNABLE}) doit être \

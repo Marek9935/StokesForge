@@ -28,7 +28,10 @@ fn b4_allocateur_sature_puis_refuse() {
     // Refuse à nouveau, sans avoir bougé : jamais de régression, jamais de
     // réattribution.
     let second = alloc.next();
-    assert!(second.is_err(), "un allocateur épuisé le reste : {second:?}");
+    assert!(
+        second.is_err(),
+        "un allocateur épuisé le reste : {second:?}"
+    );
 }
 
 // --- Schéma minimal dupliqué de `plotyx-persistence`, pour forger un
@@ -69,8 +72,7 @@ fn ecrire(dir: &TempDir, nom: &str, body: &FileBody) -> PathBuf {
     path
 }
 
-// Pourquoi l'ancienne reproduction de ce fichier a été remplacée
-// ----------------------------------------------------------------
+// -- Pourquoi l'ancienne reproduction de ce fichier a été remplacée --
 //
 // Cette place portait `b4_projet_charge_avec_identifiant_max_puis_creation`
 // (B1, `guide-de-correction-robustesse.md` §F3/F4) : un `Project::from_tree`
@@ -80,9 +82,9 @@ fn ecrire(dir: &TempDir, nom: &str, body: &FileBody) -> PathBuf {
 //
 // Ce scénario est devenu inatteignable par un vrai fichier depuis que B1 est
 // corrigé des deux côtés :
-// - `IdAllocator::next` (`plotyx-core`, `id.rs:43`) refuse via `checked_add`
+// - `IdAllocator::next` (`plotyx-core/src/id.rs`) refuse via `checked_add`
 //   à la frontière `u64::MAX` plutôt que de déborder ou reculer ;
-// - `plotyx_persistence::load` (`lib.rs`, `check_node_id`, ~ligne 327)
+// - `plotyx_persistence::load` (`lib.rs`, `check_node_id`)
 //   refuse dès la lecture tout identifiant de nœud (ou `next_id_hint`)
 //   au-delà de `MAX_NODE_ID` (10¹²) — très loin de `u64::MAX`, mais bien
 //   avant que le fichier ne puisse faire arriver en mémoire un `Project`

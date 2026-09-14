@@ -16,18 +16,19 @@
 //! mal. Ce n'est donc pas un réglage exposé à l'utilisateur, mais un **état
 //! du rendu**.
 //!
-//! # Ce que R5 construit, et ce qu'elle ne construit pas
+//! # Ce que R5 construit, et ce que R7.3 a câblé par-dessus
 //!
 //! R5 pose **le levier**, pas l'événement qui l'actionne : détecter un
-//! glisser appartient à la phase R7 (Interaction), qui n'existe pas encore.
-//! La frontière est ici, et elle est nette :
+//! glisser était le travail de la phase R7 (Interaction), câblé depuis.
+//! La frontière est restée nette :
 //!
 //! - **R5 fournit** [`Feathering`], [`apply`] et [`current`] : de quoi dire
 //!   « dessine sans frange » / « dessine avec », et savoir où on en est ;
-//! - **R7 fournira l'appel** : à l'entrée du glisser (`Response::drag_started`
-//!   ou l'équivalent du zoom à la molette), `apply(ctx, Feathering::Off)` ;
-//!   au relâchement, `apply(ctx, Feathering::Full)`. Rien d'autre n'est à
-//!   écrire, et surtout rien à changer ici.
+//! - **R7.3 fournit l'appel**, dans `lib.rs` : à l'entrée du glisser
+//!   (`Response::dragged()` — pan ou rectangle de zoom, les deux comptent),
+//!   `apply(ctx, Feathering::Off)` ; au relâchement,
+//!   `apply(ctx, Feathering::Full)`. Rien d'autre n'était à écrire ici, et ce
+//!   module n'a pas changé depuis.
 //!
 //! # Pourquoi ce n'est pas dans [`crate::cache`], ni dans `plotyx-render`
 //!
@@ -79,7 +80,7 @@ impl Feathering {
 
     /// Le régime correspondant à « une interaction est en cours ».
     ///
-    /// Sert à écrire le futur câblage de R7 en une ligne, sans avoir à se
+    /// Sert au câblage R7.3 (`lib.rs`) en une ligne, sans avoir à se
     /// rappeler dans quel sens va le booléen.
     pub fn during_drag(dragging: bool) -> Self {
         if dragging {

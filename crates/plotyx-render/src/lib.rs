@@ -64,7 +64,7 @@
 //! en devient le point d'entrée par défaut ; l'invariant qui fait foi
 //! (mesurer avec exactement le même jeu de polices des deux côtés) ne change
 //! pas — voir la documentation du module et
-//! `docs/newarchitecture/architecture-choisie.md` §7.
+//! `docs/archive/newarchitecture/architecture-choisie.md` §7.
 
 #![cfg_attr(
     not(test),

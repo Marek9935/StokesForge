@@ -84,14 +84,14 @@ mod tests {
     #[test]
     fn rejects_control_and_deceptive_format_characters() {
         for name in [
-            "A\nB",           // saut de ligne
-            "A\tB",           // tabulation
-            "A\u{0}B",        // octet nul
-            "A\u{202e}B",     // RIGHT-TO-LEFT OVERRIDE
-            "A\u{200b}B",     // ZERO WIDTH SPACE
-            "A\u{7f}B",       // DEL
-            "A\u{200f}B",     // RIGHT-TO-LEFT MARK
-            "A\u{2066}B",     // LEFT-TO-RIGHT ISOLATE
+            "A\nB",       // saut de ligne
+            "A\tB",       // tabulation
+            "A\u{0}B",    // octet nul
+            "A\u{202e}B", // RIGHT-TO-LEFT OVERRIDE
+            "A\u{200b}B", // ZERO WIDTH SPACE
+            "A\u{7f}B",   // DEL
+            "A\u{200f}B", // RIGHT-TO-LEFT MARK
+            "A\u{2066}B", // LEFT-TO-RIGHT ISOLATE
         ] {
             assert!(
                 matches!(check_name(name), Err(CoreError::InvalidName(_))),

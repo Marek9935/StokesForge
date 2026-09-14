@@ -3,7 +3,6 @@
 //! dérive pas du modèle (voir la doc de crate) : ces fonctions sont le seul
 //! endroit où les deux mondes se rencontrent.
 
-
 use plotyx_core::{
     Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError, Node, NodeId, NodeKind,
     ValueBlock, WindowMeta,
@@ -397,8 +396,8 @@ fn record_to_series_spec(record: SeriesSpecRecord) -> Result<SeriesSpec, Convert
     // Les deux bornes viennent d'être vérifiées ci-dessus : `BinCount::new`
     // ne peut pas rendre `None` ici.
     #[allow(clippy::expect_used)]
-    let histogram_bins = plotyx_plot::BinCount::new(record.histogram_bins)
-        .expect("bornes déjà vérifiées ci-dessus");
+    let histogram_bins =
+        plotyx_plot::BinCount::new(record.histogram_bins).expect("bornes déjà vérifiées ci-dessus");
     Ok(SeriesSpec {
         y: NodeId::from_raw(record.y),
         x: record.x.map(NodeId::from_raw),

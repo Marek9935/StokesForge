@@ -25,7 +25,7 @@
 //! C'est la transposition exacte du « aucun Qt dans `core` » du socle, et la
 //! raison en est mesurée : la couche équivalente de la version Python a
 //! survécu à un changement complet de renderer sans qu'une ligne bouge
-//! (`docs/newarchitecture/roadmap-rendu.md`).
+//! (`docs/archive/newarchitecture/roadmap-rendu.md`).
 //!
 //! # Ce que la couche décrit
 //!

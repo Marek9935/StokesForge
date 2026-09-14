@@ -183,7 +183,7 @@ fn demo_project() -> anyhow::Result<Project> {
 
 /// Le `PlotSpec` du graphe de démonstration : une `LineSeries`, axes
 /// linéaires, pas de légende — exactement le « graphe minimal » de la phase
-/// R4 (`docs/newarchitecture/roadmap-rendu.md`).
+/// R4 (`docs/archive/newarchitecture/roadmap-rendu.md`).
 fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
     let mut panel = PanelSpec::at(0, 0);
     panel.bottom = AxisSpec {

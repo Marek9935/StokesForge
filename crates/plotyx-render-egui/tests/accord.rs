@@ -72,7 +72,7 @@ const SIZE: (u32, u32) = (800, 600);
 /// Le graphe réaliste a cinq panneaux : il lui faut de la place.
 const LARGE: (u32, u32) = (1280, 860);
 
-// ---------------------------------------------------------------- fixtures
+// -- fixtures --
 
 /// Le graphe minimal de R4 et le graphe réaliste de R5 viennent tous deux de
 /// `plotyx_render::sample`, et non d'ici : l'exemple qu'on regarde
@@ -96,7 +96,7 @@ fn numeric(values: &[f64]) -> Column {
     .expect("colonne numérique valide")
 }
 
-// ------------------------------------------------------- extraction
+// -- extraction --
 
 /// Un point en coordonnées entières de backend.
 type Point = (i32, i32);
@@ -240,7 +240,7 @@ fn unescape(text: &str) -> String {
         .replace("&amp;", "&")
 }
 
-// ------------------------------------------------------------- rendus
+// -- rendus --
 
 fn rendu_egui(tree: &Tree, spec: &PlotSpec, size: (u32, u32)) -> (Vec<Primitive>, DrawnPlot) {
     let plot = resolve_spec(tree, spec);
@@ -339,7 +339,7 @@ fn accord(
     (egui_primitives, egui_drawn)
 }
 
-// -------------------------------------------------- R4 : le graphe minimal
+// -- R4 : le graphe minimal --
 
 #[test]
 fn les_deux_backends_placent_les_axes_au_meme_endroit() {
@@ -418,7 +418,7 @@ fn une_reference_brisee_ne_casse_ni_le_rendu_ni_laccord() {
     assert_eq!(drawn.panels[0].legend_entries, 2);
 }
 
-// ------------------------------------------------ R5 : le graphe réaliste
+// -- R5 : le graphe réaliste --
 
 #[test]
 fn le_graphe_realiste_exerce_bien_ce_quil_pretend_exercer() {
@@ -577,7 +577,7 @@ fn temoin_chaque_fonctionnalite_de_r5_change_la_figure() {
     }
 }
 
-// ----------------------------------------------------- R5.5 : décimation
+// -- R5.5 : décimation --
 
 #[test]
 fn la_decimation_sapplique_et_les_deux_backends_deciment_pareil() {

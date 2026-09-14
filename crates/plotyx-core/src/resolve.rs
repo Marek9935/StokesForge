@@ -237,7 +237,9 @@ fn label_for(series: &SeriesSpec, tree: &Tree) -> String {
 /// `_numeric`, `resolve.py` ligne 77 : une colonne texte n'est pas traçable,
 /// ce n'est pas une erreur mais un choix de colonne inadapté).
 fn resolve_numeric(tree: &Tree, id: NodeId) -> Option<Arc<Vec<f64>>> {
-    resolve_column(tree, id).and_then(Column::float_values).cloned()
+    resolve_column(tree, id)
+        .and_then(Column::float_values)
+        .cloned()
 }
 
 /// Résout une série. Ne lève jamais : une référence rompue est un état
@@ -610,7 +612,10 @@ mod tests {
         assert!(resolved.broken());
         assert_eq!(resolved.missing, vec![MissingRole::Y]);
         assert!(resolved.y.is_none());
-        assert!(resolved.x.is_none(), "toute la série est marquée, pas juste Y");
+        assert!(
+            resolved.x.is_none(),
+            "toute la série est marquée, pas juste Y"
+        );
         assert_eq!(resolved.label, "(référence rompue)");
     }
 
@@ -650,7 +655,12 @@ mod tests {
         let book = project.add_empty_workbook(root, None).expect("classeur");
         let sheet = project.add_worksheet(book, None).expect("feuille");
         let x = project
-            .add_column(sheet, None, Some("X"), numeric_column(&[0.0, 1.0, 2.0, 3.0]))
+            .add_column(
+                sheet,
+                None,
+                Some("X"),
+                numeric_column(&[0.0, 1.0, 2.0, 3.0]),
+            )
             .expect("colonne X");
         let y = project
             .add_column(sheet, None, Some("Y"), numeric_column(&[10.0, 20.0]))

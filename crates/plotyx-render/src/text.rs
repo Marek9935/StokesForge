@@ -61,7 +61,7 @@
 //! module ne change pas** : [`font_definitions`] reste le seul endroit que
 //! les deux backends appellent, avec le même résultat des deux côtés tant
 //! que le même [`fonts::FontChoice`] leur est passé. Détail dans
-//! `docs/newarchitecture/architecture-choisie.md` §7.
+//! `docs/archive/newarchitecture/architecture-choisie.md` §7.
 
 use std::sync::{Arc, Mutex};
 
@@ -101,7 +101,7 @@ pub fn font_size(plotters_size: f64) -> f32 {
 /// `FontDefinitions::default()` brut d'epaint que cette fonction rendait
 /// jusque-là : voir [`crate::fonts`] pour le mécanisme de choix (trois
 /// paires embarquées ou police système, avec repli) et
-/// `docs/newarchitecture/architecture-choisie.md` §7 pour la décision
+/// `docs/archive/newarchitecture/architecture-choisie.md` §7 pour la décision
 /// datée qui a remplacé l'ancienne phrase sur les fonts.
 ///
 /// La mesure hors écran (export SVG, CLI, script) part donc du même jeu de

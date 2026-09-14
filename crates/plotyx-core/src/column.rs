@@ -1196,7 +1196,10 @@ mod tests {
         assert_eq!(column.version(), 0, "un appel hors bornes n'écrit rien");
 
         assert!(column
-            .restore(ColumnType::Numeric, ColumnValues::Text(Arc::new(vec![None])))
+            .restore(
+                ColumnType::Numeric,
+                ColumnValues::Text(Arc::new(vec![None]))
+            )
             .is_err());
         assert_eq!(column.version(), 0);
     }

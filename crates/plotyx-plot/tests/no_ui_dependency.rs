@@ -6,7 +6,7 @@
 //!
 //! C'est le critère de sortie de la phase R2 rendu exécutable : `cargo tree -p
 //! plotyx-plot` ne doit montrer ni `plotters`, ni `egui`, ni `typst`
-//! (`docs/newarchitecture/roadmap-rendu.md` §2.1).
+//! (`docs/archive/newarchitecture/roadmap-rendu.md` §2.1).
 //!
 //! Depuis la phase R3, la dépendance listée est `plotyx-id`, pas
 //! `plotyx-core` : `plotyx-core` a dû se mettre à dépendre de `plotyx-plot`

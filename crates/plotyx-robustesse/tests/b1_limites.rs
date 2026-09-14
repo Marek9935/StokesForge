@@ -17,7 +17,7 @@ fn projet_avec_colonne(values: &[f64]) -> (Project, plotyx_core::NodeId) {
     (project, col)
 }
 
-// ---------------------------------------------------------------- histogram
+// -- histogram --
 
 #[test]
 fn b1_histogram_intervalle_infini_ne_produit_pas_de_nan() {
@@ -66,7 +66,7 @@ fn b1_histogram_grand_nombre_de_classes_ne_panique_pas() {
     assert_eq!(counts.iter().sum::<f64>(), 2.0);
 }
 
-// ---------------------------------------------------------------- bar_width
+// -- bar_width --
 
 #[test]
 fn b1_bar_width_demandee_absurde_est_filtree() {
@@ -83,7 +83,7 @@ fn b1_bar_width_demandee_absurde_est_filtree() {
     }
 }
 
-// ------------------------------------------------------------ PlotSpec grid
+// -- PlotSpec grid --
 
 #[test]
 fn b1_plotspec_rows_columns_sur_position_extreme() {
@@ -98,7 +98,7 @@ fn b1_plotspec_rows_columns_sur_position_extreme() {
     assert_eq!(spec.columns(), usize::MAX);
 }
 
-// ------------------------------------------------------------------ colonne
+// -- colonne --
 
 #[test]
 fn b1_conversion_texte_vers_numerique_puis_retour() {
@@ -137,7 +137,11 @@ fn b1_conversion_texte_vers_numerique_puis_retour() {
     );
     // Une non-finitude *explicitement demandée*, elle, n'est pas un
     // débordement : elle est prise au mot.
-    assert_eq!(vals[6].to_bits(), (-0.0_f64).to_bits(), "« -0 » doit rester -0.0");
+    assert_eq!(
+        vals[6].to_bits(),
+        (-0.0_f64).to_bits(),
+        "« -0 » doit rester -0.0"
+    );
     assert_eq!(vals[7], f64::INFINITY, "« inf » doit rester +inf");
     assert!(vals[8].is_nan(), "« NaN » doit devenir la valeur manquante");
 }

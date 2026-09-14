@@ -1,6 +1,6 @@
 //! Modèle de données de PlotYx : l'arbre de projet (`Folder → Workbook →
 //! Worksheet → Column`, `Graph`/`Matrix`/`Note` en feuilles) et rien d'autre
-//! — voir `docs/rustrewrite/roadmap.md` phase 1.
+//! — voir `docs/archive/rustrewrite/roadmap.md` phase 1.
 //!
 //! Règle non négociable, vérifiée par `tests/no_ui_dependency.rs` : ce crate
 //! n'importe aucune dépendance UI.
@@ -8,7 +8,7 @@
 //! # Depuis la phase R3 : une dépendance à `plotyx-plot`, et une seule raison
 //!
 //! `NodeKind::Graph` porte désormais un `plotyx_plot::PlotSpec`
-//! (`docs/newarchitecture/roadmap-rendu.md` phase R3) : un graphe du projet
+//! (`docs/archive/newarchitecture/roadmap-rendu.md` phase R3) : un graphe du projet
 //! porte son contenu de tracé, comme une colonne porte les siennes. Ce n'est
 //! **pas** une porte ouverte au rendu — `plotyx-plot` lui-même reste sans
 //! dépendance de dessin (`plotyx-plot/tests/no_ui_dependency.rs`), et sa
@@ -70,7 +70,7 @@ pub use node::{Node, NodeKind, WindowMeta};
 pub use path::{format_path, parse_path, ObjectPath, PathDepth};
 pub use project::Project;
 pub use resolve::{
-    bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_spec,
-    MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
+    bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_spec, MissingRole,
+    ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
 };
 pub use tree::Tree;

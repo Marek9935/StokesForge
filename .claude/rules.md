@@ -1,68 +1,80 @@
 # Règles de chargement contextuel
 
-Ce projet n'a qu'un seul domaine actif : le portage Rust (`crates/`).
-`legacy-python/` a été supprimé de cette branche (il subsiste sur `main` si
-besoin de retrouver l'ancien comportement, mais rien ici n'y fait plus
-référence).
+Un seul domaine actif : le portage Rust (`crates/`). `legacy-python/` a été
+supprimé de cette branche et rien n'y fait plus référence.
 
-Charger uniquement les crates et docs pertinents pour la tâche, pas tout le
-workspace.
+**Charger ce que la tâche demande, pas le workspace.** Chaque domaine ci-dessous
+dit quoi ouvrir, dans quel ordre, et surtout **quoi ne pas ouvrir**.
 
-## Modèle de données — `plotyx-core`, `plotyx-id`, `plotyx-plot`
-Charger : les 3 crates. Ignorer : `commands`, `session`, `persistence`,
-`app` sauf si la tâche change une API publique qu'ils consomment.
+L'ordre est toujours le même : la page `docs/` **d'abord** (elle route et donne
+les invariants), le code ensuite. `docs/invariants.md` vaut pour tous les
+domaines — 10 règles, une table ; le lire avant de toucher au rendu, à
+l'historique ou à l'acteur.
 
-## Bus de commandes / undo — `plotyx-commands`
-Charger : `plotyx-commands` + `plotyx-core` en lecture (types manipulés).
-Ignorer : `session`, `persistence`, `app`.
+## Routage
 
-## Persistance / format `.plx` — `plotyx-persistence`
-Charger : `plotyx-persistence`, `plotyx-core`, `plotyx-plot` +
-`docs/rustrewrite/format-fichier-plx.md`. Relire ce doc avant toute
-modification de schéma — options déjà écartées avec leurs raisons.
+| Tâche | Lire d'abord | Charger | Ne pas ouvrir |
+|---|---|---|---|
+| Arbre, colonnes, `PlotSpec` | `docs/modele-de-donnees.md` | `plotyx-core`, `plotyx-id`, `plotyx-plot` | `commands`, `session`, `persistence`, `app` |
+| Undo/redo, macros | `docs/commandes-et-historique.md` | `plotyx-commands` + `plotyx-core` en lecture | `session`, `persistence`, `app` |
+| Format `.plx`, `save`/`load` | `docs/persistance.md` | `plotyx-persistence`, `plotyx-core`, `plotyx-plot` | `session`, `render*`, `app` |
+| Acteur, concurrence, instantanés | `docs/session.md` | `plotyx-session`, `plotyx-core`, `plotyx-commands`, `plotyx-persistence` | `python`, `script`, `app` |
+| Tracé, axes, export, formules | `docs/rendu.md` | `plotyx-render` **d'abord**, puis le backend visé, + `plotyx-plot` et `plotyx-core::resolve` en lecture | `commands`, `persistence`, `python`, `script` |
+| Pont PyO3, surface `pyx` | `docs/python-et-script.md` | `plotyx-python`, `plotyx-script` | `render*`, `persistence` |
+| Fenêtre, raccourcis, grille | `docs/application.md` | `plotyx-app`, `plotyx-session` ; `plotyx-render-egui` si la tâche touche au graphe | `render-svg`, `persistence` |
+| Test de robustesse `bN` | `docs/tests.md` | `plotyx-robustesse/src/lib.rs` (index) + le **seul** fichier `bN` visé + le crate qu'il éprouve | les 20 autres fichiers de `tests/` |
+| Question transverse (« où vit X ? ») | `docs/README.md` | rien encore | tout |
 
-## Acteur / concurrence — `plotyx-session`
-Charger : `plotyx-session`, `plotyx-core`, `plotyx-commands`,
-`plotyx-persistence`. Ignorer : `python`, `script`, `app` sauf si la tâche
-touche l'API exposée à l'acteur.
+## Les pièges qui coûtent le plus cher
 
-## Pont Python / API script — `plotyx-python`, `plotyx-script`
-Charger : ces 2 crates + `docs/rustrewrite/cahier-des-charges-api-script.md`.
-Spécifique PyO3, contre l'interpréteur vendored (`vendor/python/`) — sans
-lien avec l'ancienne implémentation Python/Qt (supprimée de cette branche).
+Quatre seulement, parce qu'ils ne lèvent aucune erreur et qu'on ne les voit pas
+en relisant son propre diff.
 
-## UI — `plotyx-app`
-Charger : `plotyx-app`, `plotyx-core`, `plotyx-commands`, `plotyx-session`,
-`plotyx-persistence`. Le choix de toolkit UI n'est pas encore fait — ne pas
-supposer un framework précis, vérifier `Cargo.toml` de `plotyx-app` en cas
-de doute.
+**Mesure de texte (rendu).** `plotters` est pris sans ses fonts. Un backend qui
+ne surcharge pas `draw_text` panique ; un qui ne surcharge pas
+`estimate_text_size` mesure le texte au nombre d'octets UTF-8, **silencieusement**.
+Toute mesure passe par `plotyx_render::text` et par nulle part ailleurs. Le
+filet est `plotyx-render-egui/tests/accord.rs` : s'il change, lire ses deux
+familles de **témoins** avant — sans elles, un test d'égalité passe aussi bien
+parce que les deux chemins sont justes que parce qu'ils sont faux de la même
+façon.
 
-## Rendu — `plotyx-render`, `plotyx-render-egui`, `plotyx-render-svg`
-Charger : `plotyx-render` **d'abord** — il porte la mesure de texte, le
-pipeline Plotters et, depuis R5, tout le rendu (`series`, `scale`, `paint`,
-`legend`, `decimate`, `sample`) — puis le crate ciblé, plus `plotyx-plot` et
-`plotyx-core::resolve` en lecture. **Une fonctionnalité de tracé ne s'écrit
-pas dans un backend** : les deux backends ne diffèrent que par la façon de
-poser des pixels, et la seule exception vivante est
-`plotyx-render-egui::feathering` (la tessellation n'existe que pour
-l'écran). Relire `docs/newarchitecture/architecture-choisie.md` §4 et §5
-avant de toucher à la mesure du texte ou au cache : l'accord écran/export
-est le seul endroit du chantier où un bug ne lève aucune erreur. Le filet
-est `plotyx-render-egui/tests/accord.rs` — s'il change, lire ses deux
-familles de témoins avant. `roadmap-rendu.md` dit ce qui appartient à R6
-(PDF), R7 (interaction, rognage réel) ou R8 (Typst) plutôt qu'à maintenant.
-Ignorer : `commands`, `persistence`, `python`, `script`.
+**Une fonctionnalité de tracé ne s'écrit pas dans un backend.** Elle va dans
+`plotyx-render`, générique sur `DrawingBackend`. Seule exception vivante :
+`plotyx-render-egui::feathering` (la tessellation n'existe que pour l'écran).
+Et le feathering n'entre **pas** dans la clé de cache.
 
-Choix de police (`plotyx-render/src/fonts.rs`, ajout ponctuel du
-2026-09-13, hors R0-R8) : trois paires embarquées (Libertinus, Fira, Noto —
-fichiers dans `vendor/fonts/`, voir son `README.md`) ou une police système
-par son nom, avec repli sur Noto. `text::font_definitions` en est le point
-d'entrée par défaut ; l'invariant de mesure partagée du §4.3 ne change pas.
-Relire `architecture-choisie.md` §7 avant d'y retoucher.
+**Zoom et pan ne sont pas des mutations du modèle.** `ViewState` vit à côté, sur
+`GraphView`, et ne touche jamais au `PlotSpec` du `Tree` — personne ne veut
+annuler un zoom avec `Ctrl+Z`. La règle « toute mutation passe par une commande »
+ne s'applique donc pas au cadrage de vue.
 
-## Robustesse — `plotyx-robustesse` (tests `b1`…`b20`)
-Charger : le crate ciblé par le test (ne pas ouvrir les 20 fichiers de
-`tests/`) + `plotyx-robustesse/src/lib.rs` (index des batteries) +
-`docs/rustrewrite/guide-de-correction-robustesse.md` et
-`docs/rustrewrite/questions-ouvertes.md` avant de traiter un comportement
-qui ressemble à un bug (plafonds/compteurs déjà documentés comme voulus).
+**Un plafond n'est pas forcément un bug.** Longueur de nom, `MAX_NODE_ID`,
+`MAX_CELLS`, nombre de classes d'histogramme, limites d'historique : déjà
+arbitrés, documentés à l'endroit de leur constante et recensés dans
+`docs/archive/rustrewrite/questions-ouvertes.md` §11. Vérifier avant de
+« corriger ».
+
+## Features : ce que `cargo build --workspace` ne compile pas
+
+Ni `python` ni `typst` n'est dans `default`. Une tâche qui les touche doit
+compiler et tester **explicitement**, sinon elle valide du code mort :
+
+- `typst` → `cargo test --workspace --all-features` ;
+- `python` → `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE` et les autres
+  variables ; sans lui, PyO3 ne compile pas). L'interpréteur est vendorisé dans
+  `vendor/python/` et **n'est pas versionné**.
+
+## `docs/archive/`
+
+Les commentaires du code citent des documents par leur nom de fichier
+(`architecture-choisie.md` §4.3, `guide-de-correction-robustesse.md` §F6,
+`roadmap-rendu.md`…) : ils sont tous dans `docs/archive/`. Non maintenus —
+utiles pour le *pourquoi* d'une décision et pour les options déjà écartées,
+jamais comme description de l'état actuel. Deux valent le détour avant d'agir :
+`format-fichier-plx.md` avant toute modification de schéma, et
+`questions-ouvertes.md` avant de traiter un comportement qui ressemble à un bug.
+
+Les phases citées un peu partout (0-5 pour le socle, R0-R8 pour le rendu) sont
+**toutes closes** : un `R6`/`R7`/`R8` dans un commentaire désigne du travail
+fait, pas du travail à venir.

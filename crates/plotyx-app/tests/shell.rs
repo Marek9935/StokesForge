@@ -138,9 +138,7 @@ fn sheet_named(tree: &Tree, name: &str) -> NodeId {
 #[allow(dead_code)]
 fn unused(_: &SessionHandle) {}
 
-// ---------------------------------------------------------------------------
-// 1. État initial
-// ---------------------------------------------------------------------------
+// -- 1. État initial --
 
 #[test]
 fn initial_state_selects_a_sheet_and_describes_it() {
@@ -173,9 +171,7 @@ fn initial_state_selects_a_sheet_and_describes_it() {
     assert_eq!(state.redo_label(), None);
 }
 
-// ---------------------------------------------------------------------------
-// 2. Saisie d'une cellule
-// ---------------------------------------------------------------------------
+// -- 2. Saisie d'une cellule --
 
 #[test]
 fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
@@ -200,9 +196,7 @@ fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
     assert!(state.snapshot().revision > before);
 }
 
-// ---------------------------------------------------------------------------
-// 3. Saisie invalide
-// ---------------------------------------------------------------------------
+// -- 3. Saisie invalide --
 
 #[test]
 fn invalid_numeric_input_reports_an_error_and_sends_no_command() {
@@ -229,9 +223,7 @@ fn invalid_numeric_input_reports_an_error_and_sends_no_command() {
     assert_eq!(state.snapshot().revision, before);
 }
 
-// ---------------------------------------------------------------------------
-// 4. Valeur manquante
-// ---------------------------------------------------------------------------
+// -- 4. Valeur manquante --
 
 #[test]
 fn blank_text_writes_a_missing_numeric_value() {
@@ -295,9 +287,7 @@ fn empty_text_writes_a_missing_text_value_and_undo_restores_it() {
     assert_eq!(state.cell_text(note, 0), "a");
 }
 
-// ---------------------------------------------------------------------------
-// 5. Annulation / rétablissement
-// ---------------------------------------------------------------------------
+// -- 5. Annulation / rétablissement --
 
 #[test]
 fn undo_and_redo_walk_the_history_both_ways() {
@@ -323,9 +313,7 @@ fn undo_and_redo_walk_the_history_both_ways() {
     assert_eq!(cell(&state, temps, 1), Cell::Float(42.5));
 }
 
-// ---------------------------------------------------------------------------
-// 6. Annuler à vide
-// ---------------------------------------------------------------------------
+// -- 6. Annuler à vide --
 
 #[test]
 fn undo_on_an_empty_history_is_a_notice_not_an_error() {
@@ -348,9 +336,7 @@ fn undo_on_an_empty_history_is_a_notice_not_an_error() {
     assert_eq!(state.snapshot().revision, before);
 }
 
-// ---------------------------------------------------------------------------
-// 7. La boucle complète — critère de sortie de phase
-// ---------------------------------------------------------------------------
+// -- 7. La boucle complète — critère de sortie de phase --
 
 #[test]
 fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
@@ -406,9 +392,7 @@ fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
     assert_eq!(state.cell_text(temps, 1), "42.5");
 }
 
-// ---------------------------------------------------------------------------
-// 8. Rechargement et sélection périmée
-// ---------------------------------------------------------------------------
+// -- 8. Rechargement et sélection périmée --
 
 #[test]
 fn loading_a_foreign_file_revalidates_the_stale_selection() {
@@ -451,9 +435,7 @@ fn loading_a_foreign_file_revalidates_the_stale_selection() {
     assert_eq!(names, vec!["Unique".to_string()]);
 }
 
-// ---------------------------------------------------------------------------
-// 9. Chemin invalide
-// ---------------------------------------------------------------------------
+// -- 9. Chemin invalide --
 
 #[test]
 fn a_failing_load_leaves_the_model_and_history_untouched() {
@@ -491,9 +473,7 @@ fn a_failing_save_reports_an_error_and_writes_nothing() {
     assert!(!target.parent().is_some_and(Path::exists));
 }
 
-// ---------------------------------------------------------------------------
-// 10. Colonnes de longueurs différentes
-// ---------------------------------------------------------------------------
+// -- 10. Colonnes de longueurs différentes --
 
 #[test]
 fn reading_past_the_end_of_a_short_column_yields_a_missing_value() {
@@ -528,9 +508,7 @@ fn reading_past_the_end_of_a_short_column_yields_a_missing_value() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// 11. Lignes et colonnes
-// ---------------------------------------------------------------------------
+// -- 11. Lignes et colonnes --
 
 #[test]
 fn inserting_then_undoing_rows_restores_the_tree_bit_for_bit() {
@@ -591,7 +569,9 @@ fn row_actions_without_a_selected_sheet_are_refused() {
     // Un projet sans aucune feuille : rien ne peut être sélectionné.
     let mut project = Project::new("Vide").expect("projet vide");
     let root = project.root();
-    project.add_graph(root, Some("Graph1"), Default::default()).expect("un graphe");
+    project
+        .add_graph(root, Some("Graph1"), Default::default())
+        .expect("un graphe");
     let (_session, mut state) = start(project, &dir.path().join("vide.plotyx"));
 
     assert_eq!(state.selected_sheet(), None);
@@ -624,9 +604,7 @@ fn selecting_something_that_is_not_a_sheet_is_refused() {
     assert_eq!(state.selected_sheet(), selected);
 }
 
-// ---------------------------------------------------------------------------
-// 12. Libellés
-// ---------------------------------------------------------------------------
+// -- 12. Libellés --
 
 #[test]
 fn labels_prefix_the_history_entry_and_vanish_when_the_action_is_impossible() {
@@ -655,9 +633,7 @@ fn labels_prefix_the_history_entry_and_vanish_when_the_action_is_impossible() {
     assert_eq!(state.undo_label(), None);
 }
 
-// ---------------------------------------------------------------------------
-// Divers : l'explorateur latéral
-// ---------------------------------------------------------------------------
+// -- Divers : l'explorateur latéral --
 
 #[test]
 fn sheets_lists_every_worksheet_with_a_readable_path() {
@@ -689,9 +665,7 @@ fn selecting_the_second_sheet_switches_the_grid() {
     assert_eq!(state.row_count(), 2);
 }
 
-// ---------------------------------------------------------------------------
-// Divers : le tampon de saisie d'une cellule
-// ---------------------------------------------------------------------------
+// -- Divers : le tampon de saisie d'une cellule --
 
 #[test]
 fn the_cell_buffer_only_reaches_the_model_on_commit() {
@@ -739,9 +713,7 @@ fn cancelling_an_edit_discards_the_buffer() {
     assert_eq!(state.snapshot().revision, revision);
 }
 
-// ---------------------------------------------------------------------------
-// 13. Le script Python — ce qui doit tenir SANS la feature `python`
-// ---------------------------------------------------------------------------
+// -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --
 //
 // Ce qui exige un interpréteur (exécution, sortie, annulation d'une écriture
 // de script, démarrage paresseux prouvé à l'exécution) vit dans

@@ -1,0 +1,71 @@
+# Documentation PlotYx — branche `rewriterust`
+
+Portage de PlotYx (analyse et tracé de données scientifiques, façon OriginLab)
+de Python/Qt vers Rust. Tout le code vit dans le workspace Cargo à la racine.
+
+## Ce que cette documentation est, et ce qu'elle n'est pas
+
+Elle **décrit le code tel qu'il est**. Elle ne planifie rien, ne spécifie rien
+et n'arbitre rien : pas de cahier des charges ici.
+
+Le raisonnement détaillé — *pourquoi* telle décision plutôt que telle autre,
+ce qui a été mesuré, ce qui a été écarté — vit dans les **commentaires de tête
+de module** (`//!`), au plus près du code qu'il justifie. Ces pages ne le
+recopient pas : elles disent **où le trouver**, et portent seulement ce qui ne
+tient dans aucun module parce que ça les traverse tous.
+
+Règle de lecture qui en découle : ces pages orientent, le code fait foi. Une
+page qui contredit le code a tort.
+
+## Par où entrer
+
+| Je veux… | Lire |
+|---|---|
+| comprendre le découpage en crates et pourquoi il est ainsi | [`architecture.md`](architecture.md) |
+| savoir ce que je n'ai pas le droit de casser | [`invariants.md`](invariants.md) |
+| toucher à l'arbre de projet, aux colonnes, au `PlotSpec` | [`modele-de-donnees.md`](modele-de-donnees.md) |
+| toucher à l'undo/redo, aux macros | [`commandes-et-historique.md`](commandes-et-historique.md) |
+| toucher au format `.plx`, à `save`/`load` | [`persistance.md`](persistance.md) |
+| toucher à l'acteur, à la concurrence, aux instantanés | [`session.md`](session.md) |
+| toucher au tracé, aux axes, à l'export SVG/PDF/PNG, aux formules | [`rendu.md`](rendu.md) |
+| toucher au pont PyO3 ou à la surface `pyx` des scripts | [`python-et-script.md`](python-et-script.md) |
+| toucher à la fenêtre, aux raccourcis, à la grille | [`application.md`](application.md) |
+| écrire ou lancer un test, comprendre la CI | [`tests.md`](tests.md) |
+
+`.claude/rules.md` complète ce tableau côté **chargement de contexte** : quels
+crates ouvrir, et surtout lesquels ne pas ouvrir, pour chaque domaine.
+
+## Commandes
+
+```sh
+cargo build --workspace
+cargo test --workspace                        # inclut plotyx-robustesse, sauf #[ignore]
+cargo test -p <crate> <nom_test>              # un seul test
+cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Les deux dernières sont obligatoires : la CI (`.gitlab-ci.yml`) les fait
+échouer au premier écart.
+
+## Conventions
+
+- Code, commentaires, commits et documentation **en français**.
+- Un commentaire de tête de module explique **pourquoi**, pas *quoi* : le
+  *quoi* se lit dans la signature juste en dessous.
+- Toute mutation du modèle passe par une commande annulable de
+  `plotyx-commands`, jamais par une primitive de `plotyx-core` en direct.
+
+## `docs/archive/` — l'historique, pas la référence
+
+`docs/archive/` conserve les documents de conception antérieurs : cahier des
+charges technique, roadmaps phasées (socle 0-5, rendu R0-R8), rapports de
+robustesse, options explorées. Ils ont produit le code actuel et gardent leur
+valeur d'archive — notamment parce que **les commentaires du code les citent
+par leur nom de fichier** (`architecture-choisie.md` §4.3,
+`guide-de-correction-robustesse.md` §F6, `roadmap-rendu.md`…). Toute citation
+de ce genre se résout dans `docs/archive/`.
+
+Ils ne sont pas maintenus. Là où ils divergent du code, c'est le code qui a
+raison.

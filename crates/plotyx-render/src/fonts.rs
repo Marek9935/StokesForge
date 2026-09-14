@@ -4,7 +4,7 @@
 //! paires police-de-texte-sans-serif + police-Math (Libertinus, Fira, Noto)
 //! et donner à [`text::font_definitions`] un vrai choix plutôt que le
 //! `FontDefinitions::default()` d'epaint qu'elle rendait jusqu'ici sans
-//! discussion. Voir `docs/newarchitecture/architecture-choisie.md` §7 pour
+//! discussion. Voir `docs/archive/newarchitecture/architecture-choisie.md` §7 pour
 //! la décision documentée et sa date : elle remplace la phrase « Fonts
 //! embarquées uniquement, scan système désactivé », qui datait d'avant cette
 //! tâche.
@@ -60,12 +60,12 @@
 //! [`resolve`] est écrit pour qu'un futur champ n'ait qu'à lui passer un
 //! [`FontChoice`], sans reprise.
 //!
-//! Les polices Math n'ont aujourd'hui aucun appelant : le texte ordinaire
-//! (graduations, titres d'axe) passe par les fonts egui et jamais par Typst,
-//! qui n'existe pas encore dans ce dépôt (R8, `architecture-choisie.md`
-//! §4.3). [`FontSet::math_bytes`] les expose en octets bruts — pas en
-//! `epaint::FontData`, puisque rien ne consomme ce type pour du Math — pour
-//! que R8 les trouve prêtes.
+//! Le texte ordinaire (graduations, titres d'axe) continue de passer par les
+//! fonts egui et jamais par Typst : seule une formule (`$...$`, R8, feature
+//! `typst`, `architecture-choisie.md` §4.3) consomme les polices Math, via
+//! [`crate::formula::resolve_fonts_with_math`]. [`FontSet::math_bytes`] les
+//! expose donc en octets bruts — pas en `epaint::FontData`, puisque rien ne
+//! consomme ce type pour du Math — pour ce seul appelant.
 
 use std::sync::Arc;
 
@@ -129,9 +129,10 @@ impl FontSet {
     /// Les octets bruts du fichier de police Math, embarqués dans le binaire
     /// à la compilation.
     ///
-    /// **Sans appelant aujourd'hui** — voir la documentation du module.
-    /// Octets bruts et non `epaint::FontData` : c'est un futur consommateur
-    /// Typst (R8) qui décidera de la forme qu'il lui faut, pas ce module.
+    /// Seul appelant : [`crate::formula::resolve_fonts_with_math`] (R8,
+    /// feature `typst`) — voir la documentation du module. Octets bruts et
+    /// non `epaint::FontData` : c'est ce consommateur Typst qui décide de la
+    /// forme qu'il lui faut, pas ce module.
     pub fn math_bytes(self) -> &'static [u8] {
         match self {
             FontSet::Libertinus => {
@@ -201,7 +202,7 @@ pub enum FontSource {
 /// Le résultat de [`resolve`] : les [`FontDefinitions`] réellement à poser
 /// sur un `epaint::Fonts` (écran ou export, indifféremment — c'est tout
 /// l'invariant de ce module), la provenance de la police de texte, et la
-/// police Math à associer pour un futur consommateur (R8).
+/// police Math à associer, pour le consommateur Typst (R8).
 #[derive(Debug, Clone)]
 pub struct ResolvedFonts {
     /// À poser tel quel sur un `epaint::Fonts` ou un `egui::Context`.
@@ -213,8 +214,9 @@ pub struct ResolvedFonts {
     /// Pour un choix embarqué, c'est la Math de la même paire. Pour une
     /// police système — trouvée ou non — c'est [`FontSet::Noto`] : une
     /// police système n'a pas de compagne Math, et Noto est déjà le repli
-    /// du reste du mécanisme. Un futur appelant Typst (R8) a ainsi toujours
-    /// une police Math cohérente à utiliser, sans avoir à deviner.
+    /// du reste du mécanisme. L'appelant Typst (R8,
+    /// `crate::formula::resolve_fonts_with_math`) a ainsi toujours une
+    /// police Math cohérente à utiliser, sans avoir à deviner.
     pub math: FontSet,
 }
 

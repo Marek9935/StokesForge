@@ -32,7 +32,6 @@ pub(crate) fn display_folders(folders: &[String]) -> String {
     }
 }
 
-
 /// Arbre du projet : carte plate `NodeId → Arc<Node>` et racine. Partagé par
 /// `Arc<Tree>` ; toute mutation passe par `Project`, qui fait `Arc::make_mut`
 /// dessus.
@@ -354,7 +353,10 @@ impl Tree {
     pub fn window_count_with_prefix(&self, prefix: &str) -> u64 {
         let mut count = 0u64;
         self.visit_windows(|id| {
-            if self.node(id).is_some_and(|node| node.name().starts_with(prefix)) {
+            if self
+                .node(id)
+                .is_some_and(|node| node.name().starts_with(prefix))
+            {
                 count += 1;
             }
             false

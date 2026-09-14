@@ -1,0 +1,127 @@
+# Session — l'acteur et la concurrence
+
+`plotyx-session` rend concrète la décision qui tient tout le socle : **le
+`Project` vit sur son propre thread**.
+
+L'acteur détient le **seul `&mut Project` du processus**. « Aucune mutation
+hors d'une commande » devient une propriété de propriété — vérifiable par le
+compilateur — plutôt qu'une convention à surveiller.
+
+## Le protocole
+
+Un canal de requêtes **FIFO** (`std::sync::mpsc`, ordre déterministe). Chaque
+requête reçoit **une** réponse, sur un canal à usage unique créé par le client
+pour cette requête.
+
+L'UI et le fil de script sont deux clients **symétriques** : ils envoient des
+requêtes et reçoivent des instantanés immuables. L'UI garde le dernier
+`Snapshot` reçu et peint depuis lui **sans verrou** ; elle sait que son
+instantané est périmé en comparant la `revision` — un compteur monotone —
+jamais en comparant les arbres entre eux.
+
+```rust
+Session::spawn(project, history_limit) -> Session   // démarre le fil
+session.handle()                       -> SessionHandle  // clonable, à donner aux clients
+session.shutdown()                     -> Project        // rend le projet
+```
+
+`SessionHandle` : `execute`, `undo`, `redo`, `begin_macro`, `end_macro`,
+`abort_macro`, `snapshot`, `save`, `load`.
+
+## Ce qu'un instantané porte
+
+```rust
+Snapshot { tree: Arc<Tree>, revision, history: HistoryState, epoch }
+```
+
+Le cloner est bon marché : deux `Arc` et une poignée de champs. **L'arbre n'est
+jamais recopié, seulement partagé.**
+
+`HistoryState` donne à l'UI ce qu'il lui faut pour ses menus — `can_undo`,
+`can_redo`, les deux libellés, `in_macro` — sans exposer la pile.
+
+`epoch` est distinct de `revision` et répond à une question que `revision` ne
+peut pas trancher : **est-ce encore le même projet ?** C'est un compteur local
+à l'acteur, jamais persisté, incrémenté **uniquement** quand un `Load` réussit.
+Après un `Load`, `revision` recommence à une petite valeur et pourrait sembler
+« antérieure » sans rien prouver ; `epoch`, lui, a changé. `plotyx-script` s'en
+sert pour détecter qu'une poignée désigne un `NodeId` d'un projet qui n'est plus
+celui qui l'a produite — avant même de chercher ce `NodeId` dans l'arbre, où il
+pourrait, par coïncidence, désigner un autre objet.
+
+## `save` et `load`
+
+Les deux passent par `plotyx-persistence` ([`persistance.md`](persistance.md)).
+
+- `save` écrit le projet courant **sans toucher** à la révision ni à
+  l'historique ;
+- `load` **remplace** le projet courant et **réinitialise l'historique**
+  (`undo`/`redo` redeviennent vides). Un ancien instantané n'a alors plus aucun
+  rapport avec l'arbre courant, y compris ses identifiants de nœud, qui
+  repartent de la valeur persistée dans le fichier.
+
+Les deux sont refusés pendant une macro ouverte. En cas d'échec, ni le projet
+ni l'historique ne sont modifiés.
+
+## Une macro ouverte, et l'identité de l'émetteur
+
+Chaque `SessionHandle` porte une identité stable (`ClientId`, privée au crate).
+Deux `.clone()` d'une même poignée restent **le même** émetteur — un script qui
+clone sa poignée pour un thread reste « lui-même » ; deux appels
+**indépendants** à `Session::handle()` sont deux émetteurs **distincts**, même
+dans le même processus.
+
+Cette identité existe pour une raison précise : sans elle, le travail d'un
+client s'infiltrait dans la macro d'un autre, et un `abort_macro` pouvait
+défaire silencieusement le travail déjà validé de quelqu'un d'autre.
+
+| Requête | Pendant une macro ouverte |
+|---|---|
+| `Execute` | **refusée** (`ForeignMacro`) si l'émetteur n'est pas le propriétaire ; absorbée dans la macro sinon |
+| `Undo` / `Redo` | refusées pour **quiconque** (`MacroOpen`) — annuler pendant une macro, la sienne ou celle d'un autre, laisserait un état incohérent |
+| `BeginMacro` | **refusée** si une macro est déjà ouverte par un *autre* émetteur ; un même émetteur peut imbriquer la sienne |
+| `EndMacro` | **refusée** si l'émetteur n'est pas le propriétaire (`NotInMacro` reste réservé au cas où aucune macro n'est ouverte) |
+| `AbortMacro` | **refusée** si l'émetteur n'est pas le propriétaire |
+| `Save` / `Load` | refusées pour quiconque — écrire l'état intermédiaire d'une macro que quelqu'un pourrait encore avorter reste interdit à tous |
+| `Snapshot` | toujours servie : lecture pure |
+| `Shutdown` | annule (plutôt que de commettre) toute macro encore ouverte, niveau par niveau |
+
+Le dernier point mérite son détail : une macro n'empêche jamais `Project` d'être
+muté — elle ne fait que **différer l'entrée d'historique**. Sans garde, un
+`Shutdown` rendait le projet avec ces mutations **commises en silence**, sans
+qu'elles soient jamais devenues une entrée annulable. Une macro ouverte à
+l'arrêt est donc désormais annulée.
+
+La table complète, avec ce qu'elle corrige et pourquoi, est en tête de
+`plotyx-session/src/lib.rs`.
+
+## Deux invariants tenus par construction
+
+1. **L'acteur ne touche jamais à Python.** Ce crate ne dépend d'aucun crate
+   Python, et `tests/no_ui_dependency.rs` force une décision consciente à toute
+   nouvelle dépendance. C'est le troisième pilier de l'invariant 9 : sans lui,
+   le blocage mutuel entre GIL et acteur serait structurel.
+2. **Aucun objet non-`Send` ne traverse le canal.** Requêtes et réponses sont
+   du Rust pur, `Send + 'static` — vérifié par une assertion de compilation
+   (`assert_send`).
+
+## Le principe qui gouverne les refus
+
+Tout ce qu'un client sait du projet est une copie **potentiellement périmée**.
+Donc : toute hypothèse doit voyager dans la requête et être vérifiée par
+l'acteur **au moment de l'appliquer**, jamais avant.
+
+C'est le même principe que `Command::SetCells { expected_version }`
+([`commandes-et-historique.md`](commandes-et-historique.md)) : ne rien vérifier
+côté client, tout vérifier côté acteur.
+
+## Ce qu'il faut savoir avant de modifier
+
+- Ajouter une requête, c'est décider sa ligne dans la table ci-dessus. Une
+  requête mutante qui n'y figure pas est un trou.
+- `tests/session.rs` porte les cas nommés ; côté robustesse, `b6`
+  (concurrence entre clients) et `b18` (ce qui reste possible pendant qu'une
+  macro est ouverte).
+
+**À lire** : `plotyx-session/src/lib.rs` (tête, et sa table), `src/actor.rs`,
+`src/snapshot.rs`.
