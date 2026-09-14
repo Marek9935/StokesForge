@@ -1,6 +1,10 @@
 //! La glu `eframe` : traduit clavier et souris en [`Action`] et peint
-//! l'[`AppState`]. Aucune logique ne vit ici — tout ce qui décide est dans
-//! [`crate::state`], qui se teste sans fenêtre.
+//! l'[`AppState`]. Aucune logique de modèle ne vit ici — tout ce qui décide
+//! est dans [`crate::state`], qui se teste sans fenêtre. Ce module choisit
+//! en revanche la **disposition** (docking `egui_dock`) et le **cadre**
+//! (menus, raccourcis, sélecteur de fichiers `rfd`) qui l'entourent — des
+//! décisions de présentation, pas de modèle, donc légitimement hors de
+//! `state`.
 //!
 //! # Ce que Qt donnait gratuitement et qu'il faut écrire ici
 //!
@@ -11,12 +15,39 @@
 //! `add_enabled`, le libellé vient de [`AppState::undo_label`], et rien ne
 //! garantit leur cohérence sinon la relecture.
 //!
+//! # Disposition dockable
+//!
+//! Les trois contenus qui, avant cette tâche, vivaient dans des panneaux
+//! fixes — la grille, le(s) panneau(x) de graphe, la console de script —
+//! sont désormais des onglets d'un [`egui_dock::DockState`] peint par une
+//! [`egui_dock::DockArea`]. C'est la charpente de disposition décidée par
+//! `docs/archive/rustrewrite/roadmap.md` §7 ; elle n'invente ni panneau
+//! Properties ni grille à délégués (hors périmètre, voir `docs/application.md`).
+//!
+//! Conséquence directe : la limite « un seul graphe affiché à la fois » —
+//! qui ne vivait que dans ce module (`state.rs` exposait déjà [`AppState::
+//! graphs`], la liste complète, sans jamais l'avoir imposée) — disparaît
+//! ici. Un onglet [`Tab::Graph`] par graphe ouvert, chacun avec son propre
+//! [`GraphView`] (donc son propre cache de formes, la règle déjà en vigueur
+//! phase R4) : [`PlotyxApp::graph_views`] remplace le champ `graph: GraphView`
+//! unique d'avant cette tâche. Le menu « Graphes » de la barre de menu ouvre
+//! ou focalise l'onglet d'un graphe du projet ; [`PlotyxApp::open_graph_tab`]
+//! est le seul endroit qui décide « ouvrir » vs « focaliser ».
+//!
+//! # Sélecteur de fichiers natif
+//!
+//! [`tool_bar`](PlotyxApp::tool_bar) n'a plus de champ de texte pour le
+//! chemin : les boutons « Enregistrer sous… » et « Ouvrir… » ouvrent un
+//! `rfd::FileDialog` natif (modal, comme tout sélecteur de fichiers de
+//! bureau — bloquer le rendu le temps que l'utilisateur choisisse un fichier
+//! est le comportement attendu, à ne pas confondre avec le blocage qu'évite
+//! `RunScript`, qui lui n'a pas de raison de durer). Ctrl+S et Ctrl+O
+//! (et les entrées de menu équivalentes) continuent d'agir directement sur
+//! le chemin déjà connu, sans dialogue : c'est le geste « enregistrer »/
+//! « recharger » rapide d'un tableur, distinct de « enregistrer sous ».
+//!
 //! # Limites assumées du banc
 //!
-//! - **Pas de sélecteur de fichiers natif.** Le chemin se tape dans un champ
-//!   de texte. Un vrai sélecteur veut une dépendance de plus (`rfd`) et, sous
-//!   Wayland, un portail système : deux choses qu'on ne veut pas faire entrer
-//!   dans la première intégration bout en bout.
 //! - **Les raccourcis sont consommés au niveau du contexte**, donc *avant*
 //!   les widgets. Conséquence mesurable : Ctrl+Z pendant la saisie d'une
 //!   cellule annule la dernière **commande du modèle**, pas la dernière
@@ -42,12 +73,14 @@
 //! tourne — sans quoi, egui ne redessinant que sur événement d'entrée, la fin
 //! du script n'apparaîtrait qu'au prochain mouvement de souris.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
+use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
 use egui_extras::{Column as TableColumn, TableBuilder};
 use plotyx_core::{ColumnType, NodeId};
-use plotyx_render_egui::GraphView;
+use plotyx_render_egui::{DrawnPlot, GraphView};
 
 use crate::state::{Action, AppState};
 
@@ -60,7 +93,7 @@ pub const SCREENSHOT_ENV: &str = "PLOTYX_APP_SCREENSHOT";
 /// Images laissées passer avant de demander une capture.
 ///
 /// egui résout la taille de ses panneaux sur deux ou trois images : capturer
-/// la première montrerait une mise en page transitoire — et, pour le panneau
+/// la première montrerait une mise en page transitoire — et, pour un onglet
 /// de graphe, un compteur de cache qui n'a pas encore eu l'occasion de
 /// servir une image inchangée. On regarde le régime établi, pas le
 /// démarrage.
@@ -77,10 +110,10 @@ pub const SHORTCUT_REDO_Z: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::Z,
 );
-/// Ctrl+S — enregistrer.
+/// Ctrl+S — enregistrer (dans le fichier déjà connu, sans dialogue).
 pub const SHORTCUT_SAVE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
-/// Ctrl+O — ouvrir (recharger depuis le chemin affiché).
+/// Ctrl+O — ouvrir (recharger depuis le chemin déjà connu, sans dialogue).
 pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
 /// Ctrl+Entrée — exécuter le script de la console.
@@ -93,21 +126,47 @@ const ROW_HEIGHT: f32 = 20.0;
 const HEADER_HEIGHT: f32 = 22.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
-/// Largeur par défaut du panneau de graphe, en points.
-const GRAPH_PANEL_WIDTH: f32 = 460.0;
+/// Fraction de hauteur laissée à la moitié haute (grille/graphes) du plan
+/// principal quand la console de script est amarrée en bas au démarrage —
+/// pendant `PlotyxApp::new`, choisie pour approcher la même proportion que
+/// l'ancien panneau fixe (`SCRIPT_OUTPUT_HEIGHT` sur la hauteur par défaut de
+/// la fenêtre, `main.rs`). L'utilisateur peut ensuite redimensionner ou
+/// redisposer librement : ce n'est qu'un point de départ.
+const INITIAL_TOP_FRACTION: f32 = 0.78;
+/// Fraction de largeur laissée à la grille quand un graphe est ouvert au
+/// démarrage — même logique que [`INITIAL_TOP_FRACTION`], approchant l'ancien
+/// `GRAPH_PANEL_WIDTH` fixe.
+const INITIAL_GRID_FRACTION: f32 = 0.58;
 
-/// L'application `eframe` : l'état du banc, plus le strict nécessaire au
-/// rendu.
+/// Un onglet du plan de disposition. Trois variantes seulement — la grille,
+/// la console de script, et un graphe donné — parce que c'est tout ce que ce
+/// banc affiche aujourd'hui (voir la doc de tête du module : pas de panneau
+/// Properties ni de grille à délégués ici).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Tab {
+    /// La feuille sélectionnée, en grille virtualisée.
+    Grid,
+    /// La console de script Python.
+    Script,
+    /// Un graphe ouvert, identifié par son nœud.
+    Graph(NodeId),
+}
+
+/// L'application `eframe` : l'état du banc, la disposition dockable, et le
+/// strict nécessaire au rendu.
 pub struct PlotyxApp {
     /// L'état, seul dépositaire de la logique.
     state: AppState,
-    /// La vue de graphe et son cache de formes (phase R4). Une seule : le
-    /// banc n'affiche qu'un graphe à la fois, et un cache par vue est la
-    /// règle (`plotyx_render_egui::GraphView`).
-    graph: GraphView,
-    /// Le graphe affiché, s'il y en a un. `None` tant qu'aucun n'a été
-    /// choisi ni trouvé.
-    shown_graph: Option<NodeId>,
+    /// Le plan de disposition : quels onglets, où, dans quel agencement de
+    /// panneaux amarrables. Persistant d'une image à l'autre — c'est ce qui
+    /// retient les glissers-déposés de l'utilisateur.
+    dock_state: DockState<Tab>,
+    /// Une vue de graphe (et son cache de formes, phase R4) par graphe
+    /// **ouvert** — c'est-à-dire ayant eu un onglet au moins une fois,
+    /// l'entrée survit à la fermeture de l'onglet. Un cache par vue est la
+    /// règle (`plotyx_render_egui::GraphView`) ; avec plusieurs graphes
+    /// affichables simultanément, une seule vue ne suffit plus.
+    graph_views: HashMap<NodeId, GraphView>,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
     /// (mécanisme de vérification, voir [`PlotyxApp::screenshot`]).
     screenshot: Option<std::path::PathBuf>,
@@ -117,13 +176,19 @@ pub struct PlotyxApp {
     autoquit: Option<Duration>,
     /// Instant du premier rendu, d'où se mesure le délai d'auto-fermeture.
     first_frame: Option<Instant>,
-    /// Vrai si la console de script est dépliée. Pur affichage : ça ne pilote
-    /// aucune décision de [`AppState`], donc ça ne vit pas là-bas.
-    script_panel_open: bool,
 }
 
 impl PlotyxApp {
     /// Construit l'application autour d'un état.
+    ///
+    /// # Disposition initiale
+    ///
+    /// La grille occupe le plan principal ; la console de script est amarrée
+    /// en bas (comme l'ancien panneau fixe) ; si le projet contient au moins
+    /// un graphe, le premier est ouvert à droite de la grille (comme l'ancien
+    /// comportement par défaut — montrer quelque chose sans qu'on ait à
+    /// cliquer). Tout ceci n'est qu'un point de départ : `egui_dock` retient
+    /// ensuite les redispositions de l'utilisateur.
     ///
     /// # Auto-fermeture
     ///
@@ -140,13 +205,21 @@ impl PlotyxApp {
             .ok()
             .and_then(|raw| raw.trim().parse::<u64>().ok())
             .map(Duration::from_millis);
+
+        let mut dock_state = DockState::new(vec![Tab::Grid]);
+        let surface = dock_state.main_surface_mut();
+        let [top, _script] =
+            surface.split_below(NodeIndex::root(), INITIAL_TOP_FRACTION, vec![Tab::Script]);
+        if let Some((first_graph, _)) = state.graphs().into_iter().next() {
+            surface.split_right(top, INITIAL_GRID_FRACTION, vec![Tab::Graph(first_graph)]);
+        }
+
         Self {
             state,
+            dock_state,
+            graph_views: HashMap::new(),
             autoquit,
             first_frame: None,
-            script_panel_open: true,
-            graph: GraphView::new(),
-            shown_graph: None,
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
             screenshot_delay: SCREENSHOT_SETTLE_FRAMES,
         }
@@ -176,8 +249,20 @@ impl PlotyxApp {
         });
     }
 
-    /// Barre de menu : « Fichier » et « Édition ».
-    fn menu_bar(&self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    /// Barre de menu : « Fichier », « Édition » et « Graphes ».
+    ///
+    /// « Graphes » liste tous les graphes du projet (pas seulement ceux déjà
+    /// ouverts) : cliquer un graphe déjà ouvert focalise son onglet, cliquer
+    /// un graphe fermé lui en ouvre un — [`PlotyxApp::open_graph_tab`] fait
+    /// les deux. C'est le seul endroit qui ouvre un onglet de graphe hors du
+    /// point de départ posé par [`PlotyxApp::new`].
+    fn menu_bar(
+        &self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        actions: &mut Vec<Action>,
+        open_graphs: &mut Vec<NodeId>,
+    ) {
         egui::Panel::top("plotyx_menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Fichier", |ui| {
@@ -242,33 +327,55 @@ impl PlotyxApp {
                         ui.close();
                     }
                 });
+                ui.menu_button("Graphes", |ui| {
+                    let graphs = self.state.graphs();
+                    if graphs.is_empty() {
+                        ui.weak("Aucun graphe dans ce projet.");
+                    }
+                    for (id, path) in graphs {
+                        if ui.button(path).clicked() {
+                            open_graphs.push(id);
+                            ui.close();
+                        }
+                    }
+                });
             });
         });
     }
 
-    /// Bandeau du chemin de fichier et des actions de structure.
+    /// Bandeau du chemin de fichier (lecture seule) et des actions de
+    /// structure. « Enregistrer sous… » et « Ouvrir… » passent par un
+    /// sélecteur de fichiers natif (`rfd`) ; voir la doc de tête du module.
     fn tool_bar(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        let mut path = self.state.path().to_string();
-        let mut edited = false;
         egui::Panel::top("plotyx_tool_bar")
             .resizable(false)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Fichier :");
-                    // Pas de sélecteur natif : voir la limite documentée en tête
-                    // de module.
-                    edited = ui
-                        .add(
-                            egui::TextEdit::singleline(&mut path)
-                                .hint_text("chemin du fichier .plotyx")
-                                .desired_width(360.0),
-                        )
-                        .changed();
+                    ui.weak(self.state.path());
+                    if ui.button("Enregistrer sous…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Enregistrer le projet")
+                            .add_filter("Projet PlotYx", &["plx", "plotyx"])
+                            .set_file_name(suggested_file_name(self.state.path()))
+                            .save_file()
+                        {
+                            self.state.set_path(path.display().to_string());
+                            actions.push(Action::Save);
+                        }
+                    }
                     if ui.button("Enregistrer").clicked() {
                         actions.push(Action::Save);
                     }
-                    if ui.button("Ouvrir").clicked() {
-                        actions.push(Action::Load);
+                    if ui.button("Ouvrir…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Ouvrir un projet")
+                            .add_filter("Projet PlotYx", &["plx", "plotyx"])
+                            .pick_file()
+                        {
+                            self.state.set_path(path.display().to_string());
+                            actions.push(Action::Load);
+                        }
                     }
                     ui.separator();
                     if ui.button("Ajouter une colonne").clicked() {
@@ -292,9 +399,6 @@ impl PlotyxApp {
                     }
                 });
             });
-        if edited {
-            self.state.set_path(path);
-        }
     }
 
     /// Explorateur des feuilles du projet.
@@ -344,272 +448,20 @@ impl PlotyxApp {
             });
     }
 
-    /// Console de script : zone de saisie, boutons « Exécuter »/« Arrêter »,
-    /// sortie. Redimensionnable (bord du panneau) et repliable (bouton ▾/▸
-    /// dans son en-tête).
+    /// Ouvre l'onglet du graphe `id`, ou le focalise s'il est déjà ouvert.
     ///
-    /// Ne bloque jamais la fenêtre : voir la doc de tête de ce module.
-    /// `Action::RunScript`/`InterruptScript` sont poussées comme n'importe
-    /// quelle autre action, appliquées après le rendu par la boucle
-    /// principale — c'est [`AppState::dispatch`] qui garantit qu'elles ne
-    /// bloquent pas.
-    fn script_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        egui::Panel::bottom("plotyx_script")
-            .resizable(true)
-            .default_size(220.0)
-            .show(ui, |ui| {
-                let running = self.state.script_running();
-                if running {
-                    // Sans ça, egui ne redessine que sur événement d'entrée :
-                    // la fin du script n'apparaîtrait qu'au prochain geste de
-                    // l'utilisateur.
-                    ctx.request_repaint();
-                }
-
-                ui.horizontal(|ui| {
-                    let toggle = if self.script_panel_open { "▾" } else { "▸" };
-                    if ui.button(toggle).clicked() {
-                        self.script_panel_open = !self.script_panel_open;
-                    }
-                    ui.heading("Script Python");
-                    if !self.state.script_available() {
-                        ui.weak("— compilé sans le pont Python : la surface pyx n'est pas disponible dans ce binaire.");
-                    }
-                });
-                if !self.script_panel_open {
-                    return;
-                }
-                ui.separator();
-
-                let available = self.state.script_available() && !running;
-                let mut source = self.state.script_source().to_string();
-                let edit = ui.add_enabled(
-                    available,
-                    egui::TextEdit::multiline(&mut source)
-                        .code_editor()
-                        .desired_rows(6)
-                        .desired_width(f32::INFINITY),
-                );
-                if edit.changed() {
-                    self.state.set_script_source(source);
-                }
-
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            available,
-                            egui::Button::new("Exécuter")
-                                .shortcut_text(ctx.format_shortcut(&SHORTCUT_RUN_SCRIPT)),
-                        )
-                        .clicked()
-                    {
-                        actions.push(Action::RunScript);
-                    }
-                    if ui
-                        .add_enabled(running, egui::Button::new("Arrêter"))
-                        .clicked()
-                    {
-                        actions.push(Action::InterruptScript);
-                    }
-                    if running {
-                        ui.spinner();
-                        ui.weak("exécution en cours…");
-                    }
-                });
-
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .max_height(SCRIPT_OUTPUT_HEIGHT)
-                    .show(ui, |ui| match self.state.script_output() {
-                        None => {
-                            ui.weak("Aucune exécution pour l'instant.");
-                        }
-                        Some(output) => {
-                            let mut empty = true;
-                            if !output.stdout.is_empty() {
-                                empty = false;
-                                ui.label("Sortie standard :");
-                                ui.monospace(&output.stdout);
-                            }
-                            if !output.stderr.is_empty() {
-                                empty = false;
-                                ui.label("Sortie d'erreur :");
-                                ui.monospace(&output.stderr);
-                            }
-                            if let Some(error) = &output.error {
-                                empty = false;
-                                ui.colored_label(ui.visuals().warn_fg_color, "Trace d'appels :");
-                                ui.monospace(error);
-                            }
-                            if empty {
-                                ui.weak("(sortie vide)");
-                            }
-                        }
-                    });
-            });
-    }
-
-    /// La grille, en lignes **virtualisées** : seules les lignes visibles sont
-    /// construites, sans quoi une feuille d'un million de lignes bloquerait
-    /// chaque image.
-    fn grid(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        let columns = self.state.visible_columns();
-        let row_count = self.state.row_count();
-        let state = &mut self.state;
-        egui::CentralPanel::default().show(ui, |ui| {
-            if columns.is_empty() {
-                ui.centered_and_justified(|ui| {
-                    ui.weak("Aucune colonne à afficher : choisissez une feuille à gauche.");
-                });
-                return;
-            }
-            TableBuilder::new(ui)
-                .striped(true)
-                .resizable(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(TableColumn::exact(56.0))
-                .columns(TableColumn::initial(110.0).at_least(56.0), columns.len())
-                .min_scrolled_height(0.0)
-                .header(HEADER_HEIGHT, |mut header| {
-                    header.col(|ui| {
-                        ui.strong("#");
-                    });
-                    for (_, name, column_type) in &columns {
-                        header.col(|ui| {
-                            ui.strong(name);
-                            ui.weak(type_suffix(*column_type));
-                        });
-                    }
-                })
-                .body(|body| {
-                    body.rows(ROW_HEIGHT, row_count, |mut row| {
-                        let index = row.index();
-                        row.col(|ui| {
-                            ui.weak(format!("{}", index + 1));
-                        });
-                        for (id, _, _) in &columns {
-                            row.col(|ui| {
-                                cell_widget(ui, state, actions, *id, index);
-                            });
-                        }
-                    });
-                });
-        });
-    }
-
-    /// Panneau de graphe — le **rendu visible** de la phase R4 (tâche 4.6).
-    ///
-    /// Ce n'est pas une ébauche de la fenêtre de graphe finale : comme tout
-    /// ce banc, c'est la preuve que l'intégration bout en bout tient. Ce
-    /// qu'il montre vraiment, et qu'aucun test ne montre :
-    ///
-    /// - la figure elle-même, avec ses vraies polices et son vrai HiDPI ;
-    /// - le compteur de cache, qui rend visible la tâche R4.3. Au repos,
-    ///   `succès` monte et `calculs` ne bouge plus : une image sans
-    ///   changement ne rejoue pas le pipeline Plotters. Redimensionner la
-    ///   fenêtre, ou modifier une cellule, fait repartir `calculs` d'un cran
-    ///   — c'est la clé `(revision, rect, pixels_per_point)` au travail.
-    fn graph_panel(&mut self, ui: &mut egui::Ui) {
-        let graphs = self.state.graphs();
-        if graphs.is_empty() {
-            return;
+    /// Le seul endroit qui décide entre les deux : un double-clic sur un
+    /// graphe déjà ouvert dans le menu « Graphes » ne doit pas dupliquer son
+    /// onglet, il doit l'amener au premier plan.
+    fn open_graph_tab(&mut self, id: NodeId) {
+        let tab = Tab::Graph(id);
+        if let Some(path) = self.dock_state.find_tab(&tab) {
+            let _ = self.dock_state.set_active_tab(path);
+            self.dock_state
+                .set_focused_node_and_surface(path.node_path());
+        } else {
+            self.dock_state.push_to_focused_leaf(tab);
         }
-        // Par défaut, le premier graphe du projet : le banc doit montrer
-        // quelque chose sans qu'on ait à cliquer.
-        if !self
-            .shown_graph
-            .is_some_and(|shown| graphs.iter().any(|(id, _)| *id == shown))
-        {
-            self.shown_graph = graphs.first().map(|(id, _)| *id);
-        }
-
-        let state = &self.state;
-        let view = &mut self.graph;
-        let shown = &mut self.shown_graph;
-        egui::Panel::right("plotyx_graph")
-            .default_size(GRAPH_PANEL_WIDTH)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Graphe");
-                    for (id, path) in &graphs {
-                        if ui.selectable_label(*shown == Some(*id), path).clicked() {
-                            *shown = Some(*id);
-                        }
-                    }
-                });
-                ui.separator();
-
-                let Some(graph) = *shown else {
-                    return;
-                };
-                let available = ui.available_size_before_wrap();
-                // R7 : la navigation (molette, glissé, rectangle élastique)
-                // a besoin de bien plus que `hover()` — `GraphView::paint`
-                // fait sa propre `ui.interact` sur ce rectangle avec
-                // `click_and_drag()` ; le `Sense` posé ici doit au moins ne
-                // pas lui faire concurrence.
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(available.x, (available.y - 24.0).max(120.0)),
-                    egui::Sense::click_and_drag(),
-                );
-                match view.paint(ui, rect, state.snapshot(), graph) {
-                    Ok(_) => {
-                        let cache = view.cache();
-                        ui.weak(format!(
-                            "cache : {} succès / {} calculs — {} formes",
-                            cache.hits(),
-                            cache.misses(),
-                            cache.shapes().len()
-                        ));
-                        if let Some(drawn) = view.last_drawn() {
-                            ui.weak(Self::figure_summary(drawn));
-                        }
-                        if let Some(hit) = view.hovered_point() {
-                            ui.weak(format!(
-                                "point désigné : panneau {}, série {}, indice {} — ({:.4}, {:.4}), à {:.1} px",
-                                hit.panel, hit.series, hit.point_index, hit.data.0, hit.data.1, hit.distance
-                            ));
-                        }
-                        if ui.small_button("réinitialiser le zoom").clicked() {
-                            view.reset_view();
-                        }
-                    }
-                    Err(err) => {
-                        ui.colored_label(egui::Color32::RED, format!("rendu : {err}"));
-                    }
-                }
-            });
-    }
-
-    /// Ce que la figure a réellement tracé, en une ligne.
-    ///
-    /// Ajouté en R5 : avec les panneaux multiples, les types de tracé et la
-    /// décimation, « la figure s'affiche » ne dit plus grand-chose. Les
-    /// quatre compteurs du `DrawnPlot` disent lesquels des chemins de la
-    /// phase ont été empruntés — et c'est le seul endroit où on peut les
-    /// lire sur des données réelles plutôt que sur une fixture de test.
-    fn figure_summary(drawn: &plotyx_render_egui::DrawnPlot) -> String {
-        let mut ligne = format!(
-            "figure : {} panneau(x), {} série(s) tracée(s)",
-            drawn.panels.len(),
-            drawn.drawn_series
-        );
-        if drawn.broken_series > 0 {
-            ligne.push_str(&format!(
-                " — {} référence(s) brisée(s)",
-                drawn.broken_series
-            ));
-        }
-        if drawn.unknown_series > 0 {
-            ligne.push_str(&format!(
-                " — {} type(s) de tracé inconnu(s)",
-                drawn.unknown_series
-            ));
-        }
-        if drawn.decimated_points > 0 {
-            ligne.push_str(&format!(" — {} points décimés", drawn.decimated_points));
-        }
-        ligne
     }
 
     /// Dépose une capture de la fenêtre dans le fichier nommé par
@@ -694,6 +546,7 @@ impl eframe::App for PlotyxApp {
         // d'emprunter `ui` en lecture pendant qu'on le peint.
         let ctx = ui.ctx().clone();
         let mut actions: Vec<Action> = Vec::new();
+        let mut open_graphs: Vec<NodeId> = Vec::new();
 
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
@@ -702,23 +555,107 @@ impl eframe::App for PlotyxApp {
         self.state.poll_script();
 
         self.collect_shortcuts(&ctx, &mut actions);
-        self.menu_bar(ui, &ctx, &mut actions);
+        self.menu_bar(ui, &ctx, &mut actions, &mut open_graphs);
         self.tool_bar(ui, &mut actions);
         self.status_bar(ui);
         self.sheet_panel(ui, &mut actions);
-        self.script_panel(ui, &ctx, &mut actions);
-        self.graph_panel(ui);
-        self.grid(ui, &mut actions);
 
-        // Les actions ne sont appliquées qu'une fois l'image peinte : muter le
-        // modèle en plein rendu invaliderait la liste de colonnes que la
-        // grille est en train de parcourir.
+        // Emprunts disjoints des champs (édition 2021) : la disposition et
+        // les contenus qu'elle amarre ont besoin, chacun, d'un accès distinct
+        // à `self`, simultanément le temps de peindre une image.
+        let Self {
+            state,
+            dock_state,
+            graph_views,
+            ..
+        } = self;
+        egui::CentralPanel::default().show(ui, |ui| {
+            let mut viewer = AppTabViewer {
+                state,
+                actions: &mut actions,
+                graph_views,
+                ctx: &ctx,
+            };
+            DockArea::new(dock_state)
+                .style(Style::from_egui(ui.style()))
+                .show_inside(ui, &mut viewer);
+        });
+
+        // Les onglets de graphe demandés depuis le menu, et les actions
+        // récoltées par tous les panneaux et onglets, ne sont appliqués
+        // qu'une fois l'image peinte : muter le plan de disposition ou le
+        // modèle en plein rendu invaliderait ce que la `DockArea` est en
+        // train de parcourir.
+        for id in open_graphs {
+            self.open_graph_tab(id);
+        }
         for action in actions {
             self.state.dispatch(action);
         }
 
         self.screenshot(&ctx);
         self.autoquit(&ctx);
+    }
+}
+
+/// Le nom de fichier suggéré par défaut au sélecteur « Enregistrer sous… » :
+/// le nom du chemin courant s'il en a un, sinon un nom de repli.
+fn suggested_file_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "demo.plotyx".to_string())
+}
+
+/// Peint le contenu de chaque onglet du plan de disposition.
+///
+/// Emprunte les champs de [`PlotyxApp`] plutôt que l'application entière
+/// (voir `PlotyxApp::ui`) : c'est ce qui permet à la `DockArea`
+/// (`&mut dock_state`) et à ce visiteur (`&mut state`, `&mut graph_views`)
+/// de coexister le temps d'une image.
+struct AppTabViewer<'a> {
+    state: &'a mut AppState,
+    actions: &'a mut Vec<Action>,
+    graph_views: &'a mut HashMap<NodeId, GraphView>,
+    ctx: &'a egui::Context,
+}
+
+impl TabViewer for AppTabViewer<'_> {
+    type Tab = Tab;
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(tab)
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        match *tab {
+            Tab::Grid => "Feuille".into(),
+            Tab::Script => "Script Python".into(),
+            Tab::Graph(id) => self
+                .state
+                .graphs()
+                .into_iter()
+                .find(|(graph_id, _)| *graph_id == id)
+                .map(|(_, path)| path)
+                .unwrap_or_else(|| format!("Graphe {id} (supprimé)"))
+                .into(),
+        }
+    }
+
+    // Les onglets structurels (grille, script) ne se ferment pas : ils n'ont
+    // pas d'équivalent « rouvrir » dans ce banc volontairement pauvre. Un
+    // onglet de graphe, lui, se ferme et se rouvre librement — c'est
+    // `PlotyxApp::open_graph_tab`, via le menu « Graphes », qui rouvre.
+    fn is_closeable(&self, tab: &Self::Tab) -> bool {
+        matches!(tab, Tab::Graph(_))
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        match *tab {
+            Tab::Grid => grid_contents(ui, self.state, self.actions),
+            Tab::Script => script_contents(ui, self.ctx, self.state, self.actions),
+            Tab::Graph(id) => graph_contents(ui, self.state, self.graph_views, id),
+        }
     }
 }
 
@@ -729,6 +666,237 @@ fn type_suffix(column_type: ColumnType) -> &'static str {
         ColumnType::DateTime => "date",
         ColumnType::Text => "texte",
     }
+}
+
+/// La grille, en lignes **virtualisées** : seules les lignes visibles sont
+/// construites, sans quoi une feuille d'un million de lignes bloquerait
+/// chaque image. Contenu de [`Tab::Grid`].
+fn grid_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>) {
+    let columns = state.visible_columns();
+    let row_count = state.row_count();
+    if columns.is_empty() {
+        ui.centered_and_justified(|ui| {
+            ui.weak("Aucune colonne à afficher : choisissez une feuille à gauche.");
+        });
+        return;
+    }
+    TableBuilder::new(ui)
+        .striped(true)
+        .resizable(true)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        .column(TableColumn::exact(56.0))
+        .columns(TableColumn::initial(110.0).at_least(56.0), columns.len())
+        .min_scrolled_height(0.0)
+        .header(HEADER_HEIGHT, |mut header| {
+            header.col(|ui| {
+                ui.strong("#");
+            });
+            for (_, name, column_type) in &columns {
+                header.col(|ui| {
+                    ui.strong(name);
+                    ui.weak(type_suffix(*column_type));
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(ROW_HEIGHT, row_count, |mut row| {
+                let index = row.index();
+                row.col(|ui| {
+                    ui.weak(format!("{}", index + 1));
+                });
+                for (id, _, _) in &columns {
+                    row.col(|ui| {
+                        cell_widget(ui, state, actions, *id, index);
+                    });
+                }
+            });
+        });
+}
+
+/// Console de script : zone de saisie, boutons « Exécuter »/« Arrêter »,
+/// sortie. Contenu de [`Tab::Script`].
+///
+/// Ne bloque jamais la fenêtre : voir la doc de tête de ce module.
+/// `Action::RunScript`/`InterruptScript` sont poussées comme n'importe
+/// quelle autre action, appliquées après le rendu par la boucle
+/// principale — c'est [`AppState::dispatch`] qui garantit qu'elles ne
+/// bloquent pas.
+fn script_contents(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+) {
+    let running = state.script_running();
+    if running {
+        // Sans ça, egui ne redessine que sur événement d'entrée : la fin du
+        // script n'apparaîtrait qu'au prochain geste de l'utilisateur.
+        ctx.request_repaint();
+    }
+
+    ui.horizontal(|ui| {
+        ui.heading("Script Python");
+        if !state.script_available() {
+            ui.weak(
+                "— compilé sans le pont Python : la surface pyx n'est pas disponible dans ce binaire.",
+            );
+        }
+    });
+    ui.separator();
+
+    let available = state.script_available() && !running;
+    let mut source = state.script_source().to_string();
+    let edit = ui.add_enabled(
+        available,
+        egui::TextEdit::multiline(&mut source)
+            .code_editor()
+            .desired_rows(6)
+            .desired_width(f32::INFINITY),
+    );
+    if edit.changed() {
+        state.set_script_source(source);
+    }
+
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(
+                available,
+                egui::Button::new("Exécuter")
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_RUN_SCRIPT)),
+            )
+            .clicked()
+        {
+            actions.push(Action::RunScript);
+        }
+        if ui
+            .add_enabled(running, egui::Button::new("Arrêter"))
+            .clicked()
+        {
+            actions.push(Action::InterruptScript);
+        }
+        if running {
+            ui.spinner();
+            ui.weak("exécution en cours…");
+        }
+    });
+
+    ui.separator();
+    egui::ScrollArea::vertical()
+        .max_height(SCRIPT_OUTPUT_HEIGHT)
+        .show(ui, |ui| match state.script_output() {
+            None => {
+                ui.weak("Aucune exécution pour l'instant.");
+            }
+            Some(output) => {
+                let mut empty = true;
+                if !output.stdout.is_empty() {
+                    empty = false;
+                    ui.label("Sortie standard :");
+                    ui.monospace(&output.stdout);
+                }
+                if !output.stderr.is_empty() {
+                    empty = false;
+                    ui.label("Sortie d'erreur :");
+                    ui.monospace(&output.stderr);
+                }
+                if let Some(error) = &output.error {
+                    empty = false;
+                    ui.colored_label(ui.visuals().warn_fg_color, "Trace d'appels :");
+                    ui.monospace(error);
+                }
+                if empty {
+                    ui.weak("(sortie vide)");
+                }
+            }
+        });
+}
+
+/// Un graphe ouvert — le **rendu visible** de la phase R4 (tâche 4.6).
+/// Contenu d'un [`Tab::Graph`].
+///
+/// Ce n'est pas une ébauche de la fenêtre de graphe finale : comme tout ce
+/// banc, c'est la preuve que l'intégration bout en bout tient. Ce qu'il
+/// montre vraiment, et qu'aucun test ne montre :
+///
+/// - la figure elle-même, avec ses vraies polices et son vrai HiDPI ;
+/// - le compteur de cache, qui rend visible la tâche R4.3. Au repos,
+///   `succès` monte et `calculs` ne bouge plus : une image sans changement
+///   ne rejoue pas le pipeline Plotters. Redimensionner l'onglet, ou
+///   modifier une cellule, fait repartir `calculs` d'un cran — c'est la clé
+///   `(revision, rect, pixels_per_point)` au travail.
+fn graph_contents(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    graph_views: &mut HashMap<NodeId, GraphView>,
+    graph_id: NodeId,
+) {
+    let view = graph_views.entry(graph_id).or_default();
+    let available = ui.available_size_before_wrap();
+    // R7 : la navigation (molette, glissé, rectangle élastique) a besoin de
+    // bien plus que `hover()` — `GraphView::paint` fait sa propre
+    // `ui.interact` sur ce rectangle avec `click_and_drag()` ; le `Sense`
+    // posé ici doit au moins ne pas lui faire concurrence.
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(available.x, (available.y - 24.0).max(120.0)),
+        egui::Sense::click_and_drag(),
+    );
+    match view.paint(ui, rect, state.snapshot(), graph_id) {
+        Ok(_) => {
+            let cache = view.cache();
+            ui.weak(format!(
+                "cache : {} succès / {} calculs — {} formes",
+                cache.hits(),
+                cache.misses(),
+                cache.shapes().len()
+            ));
+            if let Some(drawn) = view.last_drawn() {
+                ui.weak(figure_summary(drawn));
+            }
+            if let Some(hit) = view.hovered_point() {
+                ui.weak(format!(
+                    "point désigné : panneau {}, série {}, indice {} — ({:.4}, {:.4}), à {:.1} px",
+                    hit.panel, hit.series, hit.point_index, hit.data.0, hit.data.1, hit.distance
+                ));
+            }
+            if ui.small_button("réinitialiser le zoom").clicked() {
+                view.reset_view();
+            }
+        }
+        Err(err) => {
+            ui.colored_label(egui::Color32::RED, format!("rendu : {err}"));
+        }
+    }
+}
+
+/// Ce que la figure a réellement tracé, en une ligne.
+///
+/// Ajouté en R5 : avec les panneaux multiples, les types de tracé et la
+/// décimation, « la figure s'affiche » ne dit plus grand-chose. Les quatre
+/// compteurs du `DrawnPlot` disent lesquels des chemins de la phase ont été
+/// empruntés — et c'est le seul endroit où on peut les lire sur des données
+/// réelles plutôt que sur une fixture de test.
+fn figure_summary(drawn: &DrawnPlot) -> String {
+    let mut ligne = format!(
+        "figure : {} panneau(x), {} série(s) tracée(s)",
+        drawn.panels.len(),
+        drawn.drawn_series
+    );
+    if drawn.broken_series > 0 {
+        ligne.push_str(&format!(
+            " — {} référence(s) brisée(s)",
+            drawn.broken_series
+        ));
+    }
+    if drawn.unknown_series > 0 {
+        ligne.push_str(&format!(
+            " — {} type(s) de tracé inconnu(s)",
+            drawn.unknown_series
+        ));
+    }
+    if drawn.decimated_points > 0 {
+        ligne.push_str(&format!(" — {} points décimés", drawn.decimated_points));
+    }
+    ligne
 }
 
 /// Peint une cellule et récolte les actions qu'elle produit.

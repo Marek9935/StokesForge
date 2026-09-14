@@ -2,17 +2,61 @@
 
 ## `plotyx-app` — la coquille UI
 
-**Ce que ce crate n'est pas** : une ébauche de l'interface finale. Le docking,
-la grille éditable à délégués, le panneau de propriétés et le système de
-graphes seront repris entièrement plus tard ; rien ici ne doit les préempter.
+**Ce que ce crate n'est pas** : une ébauche de l'interface finale. La grille
+éditable à délégués, le panneau de propriétés et un système de graphes complet
+(sélection multiple, réorganisation, fermeture persistée…) seront repris
+entièrement plus tard ; rien ici ne doit les préempter.
 
-Le banc est volontairement pauvre. Son seul rôle est de prouver que
+Le banc est volontairement pauvre. Son rôle reste de prouver que
 l'intégration bout en bout tient — modèle → commande → annulation → sauvegarde
 → rechargement, dans une vraie fenêtre — **tant qu'une intégration ratée ne
 coûte qu'une réécriture de ce crate**, et non celle de tout ce qu'on aurait
-bâti par-dessus.
+bâti par-dessus. Deux fondations techniques sont posées au-dessus de ce
+principe (voir plus bas) : la disposition est **dockable** (`egui_dock`), et
+Save/Load passent par un vrai sélecteur de fichiers natif (`rfd`) — ce ne sont
+que des charpentes, pas les panneaux définitifs qu'elles accueilleront.
 
-Toolkit : `eframe` / `egui`.
+Toolkit : `eframe` / `egui`, `egui_dock` (disposition), `rfd` (sélecteur de
+fichiers natif).
+
+### Disposition dockable
+
+Les trois contenus qui vivaient dans des panneaux fixes — la grille, le(s)
+graphe(s), la console de script — sont des onglets d'un
+`egui_dock::DockState<Tab>` peint par une `DockArea`, dans `app.rs`. La
+disposition initiale (grille au centre, script amarré en bas, premier graphe
+du projet à droite s'il y en a un) n'est qu'un point de départ : l'utilisateur
+redispose, redimensionne et referme les onglets de graphe librement,
+`egui_dock` retient la disposition d'une image à l'autre.
+
+Conséquence directe et volontaire : la limite « un seul graphe affiché à la
+fois » qui vivait dans `app.rs` (jamais dans `state.rs`, qui exposait déjà
+`AppState::graphs()`, la liste complète) a disparu. Un onglet `Tab::Graph`
+par graphe ouvert, chacun avec son propre `plotyx_render_egui::GraphView`
+(donc son propre cache de formes — `PlotyxApp::graph_views` est une table
+indexée par `NodeId`, plus le champ unique d'avant). Le menu « Graphes » de la
+barre de menu ouvre ou focalise l'onglet d'un graphe du projet.
+
+Ce qui n'est **pas** fait : pas de bouton « nouveau panneau », pas de
+persistance de la disposition entre deux lancements, pas de panneau
+Properties ni de grille à délégués — hors périmètre de cette fondation.
+
+### Sélecteur de fichiers natif
+
+`tool_bar` n'a plus de champ de texte pour taper le chemin à la main : les
+boutons « Enregistrer sous… » et « Ouvrir… » ouvrent un `rfd::FileDialog`
+natif, modal. Ctrl+S/Ctrl+O (et les entrées de menu équivalentes) continuent
+d'agir directement sur le chemin déjà connu, sans dialogue — le geste
+« enregistrer »/« recharger » rapide d'un tableur, distinct de « enregistrer
+sous ».
+
+`rfd` (feature par défaut `xdg-portal` + `wayland`) compile et se lie sans
+portail système présent : le portail (`xdg-desktop-portal`, D-Bus) n'est
+qu'une dépendance d'exécution. Vérifié par une compilation `cargo build` et
+`cargo build --release` réussies dans un bac à sable sans session graphique
+garantie. L'ouverture réelle du sélecteur sur un vrai bureau Wayland reste à
+valider interactivement — ce qu'aucun outil non interactif de ce dépôt ne
+peut faire à la place d'un humain devant un écran.
 
 ### Deux modules, une ligne de partage
 
@@ -79,9 +123,6 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
 
 ### Limites assumées du banc
 
-- **Pas de sélecteur de fichiers natif** : le chemin se tape dans un champ de
-  texte. Un vrai sélecteur veut une dépendance de plus (`rfd`) et, sous
-  Wayland, un portail système.
 - **Les raccourcis sont consommés au niveau du contexte**, donc *avant* les
   widgets. Ctrl+Z pendant la saisie d'une cellule annule la dernière **commande
   du modèle**, pas la dernière frappe : c'est le comportement attendu d'un
@@ -90,7 +131,10 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
 - **Une seule cellule éditable à la fois.** La grille est virtualisée
   (`TableBuilder::body().rows()`) : une feuille peut avoir un million de
   lignes, il n'est pas question de garder un tampon par cellule.
-- **Un seul graphe affiché à la fois.**
+- **La disposition dockable ne persiste pas d'un lancement à l'autre** :
+  `PlotyxApp::new` la reconstruit à chaque démarrage (grille, script, premier
+  graphe). Ce que l'utilisateur redispose en session tient jusqu'à la
+  fermeture de la fenêtre, pas au-delà.
 
 ### Un détail qui a l'air d'un détail
 

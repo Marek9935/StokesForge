@@ -4,13 +4,16 @@
 //!
 //! # Ce que ce crate n'est pas
 //!
-//! Ce n'est **pas** une ébauche de l'interface finale. Le docking, la grille
-//! éditable à délégués, le panneau de propriétés et le système de graphes
+//! Ce n'est **pas** une ébauche de l'interface finale. La grille éditable à
+//! délégués, le panneau de propriétés et un système de graphes complet
 //! seront repris entièrement plus tard ; rien ici ne doit les préempter. Le
-//! banc est volontairement pauvre : son seul rôle est de prouver que
+//! banc est volontairement pauvre : son rôle est de prouver que
 //! l'intégration bout en bout tient, tant qu'une intégration ratée ne coûte
 //! qu'une réécriture de ce crate — et non celle de tout ce qu'on aurait bâti
-//! par-dessus.
+//! par-dessus. Deux fondations techniques y sont posées : la disposition est
+//! **dockable** (`egui_dock`, module [`app`]), et Save/Load passent par un
+//! sélecteur de fichiers natif (`rfd`) — voir `docs/application.md` pour le
+//! détail de ce qui est fait et de ce qui ne l'est pas encore.
 //!
 //! # Découpage
 //!

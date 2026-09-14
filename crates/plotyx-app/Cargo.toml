@@ -30,6 +30,18 @@ plotyx-script = { path = "../plotyx-script", optional = true, features = ["pytho
 plotyx-python = { path = "../plotyx-python", optional = true, features = ["python"] }
 eframe = "0.36.2"
 egui_extras = "0.36.2"
+# Disposition dockable (`docs/archive/rustrewrite/roadmap.md` §7 avait déjà
+# tranché contre `iced`) : 0.21.1 est la version la plus récente au moment de
+# cet ajout et compile contre `egui`/`eframe` 0.36.2, déjà fixés ailleurs dans
+# le workspace pour le rendu (vérifié par une compilation d'essai avant
+# d'ajouter la dépendance ici).
+egui_dock = "0.21.1"
+# Sélecteur de fichiers natif pour Save/Load (remplace le champ texte de
+# saisie manuelle du chemin, cf. `docs/application.md` § « Limites assumées
+# du banc »). `xdg-portal` (feature par défaut) est une dépendance runtime
+# sous Wayland, pas une dépendance de lien : ce crate compile sans portail
+# système présent.
+rfd = "0.17.2"
 anyhow = "1"
 
 [dev-dependencies]
