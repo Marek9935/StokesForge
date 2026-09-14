@@ -50,6 +50,26 @@ pub(crate) struct FileBody {
     /// ordre est ce qui rend deux sauvegardes du même projet identiques
     /// octet à octet.
     pub(crate) nodes: Vec<NodeRecord>,
+    /// Géométrie des fenêtres (position/taille), par identifiant de nœud —
+    /// bloc **séparé de l'arbre annulable** (voir la doc de tête de
+    /// `plotyx-session` : la géométrie ne vit pas dans `Project`, ne passe
+    /// jamais par une commande, et n'apparaît jamais dans `nodes` ci-dessus).
+    /// Absent des fichiers écrits avant l'ajout de ce bloc :
+    /// `#[serde(default)]` le ramène alors à une table vide, ce qui est le
+    /// comportement voulu — un ancien fichier ne décrivait aucune position de
+    /// fenêtre, il n'y a rien à retrouver. Les clés sont des `NodeId` bruts,
+    /// comme partout ailleurs dans ce schéma (`root`, `parent`, …) ; une clé
+    /// qui ne correspond à aucun nœud de `nodes` (fichier corrompu, ou nœud
+    /// supprimé par un outil tiers sans purger sa géométrie) est filtrée
+    /// silencieusement au chargement plutôt que de faire échouer tout le
+    /// fichier (invariant 10 : un défaut de donnée dégrade, il ne plante
+    /// pas) — voir `load_with_geometries`. Placé **avant** `save_counter`
+    /// ci-dessous : `tests/roundtrip.rs` (`saving_over_an_existing_valid_file_replaces_it_atomically`)
+    /// tient à ce que seul le dernier octet du fichier change entre deux
+    /// sauvegardes successives, ce qui suppose que `save_counter` reste le
+    /// tout dernier champ sérialisé.
+    #[serde(default)]
+    pub(crate) window_geometries: std::collections::HashMap<u64, crate::WindowGeometry>,
     /// Compteur de sauvegarde du fichier (B8,
     /// `guide-de-correction-robustesse.md` §F2) : incrémenté à chaque `save`
     /// réussi. C'est ce qui permet à `save` de détecter qu'un autre écrivain

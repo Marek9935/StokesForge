@@ -97,16 +97,51 @@ mod error;
 mod schema;
 mod unknown;
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use plotyx_core::{Node, NodeId, Project, Tree};
+use serde::{Deserialize, Serialize};
 
 use convert::ConvertError;
 use schema::{FileBody, NodeRecord, FORMAT_VERSION, MAGIC};
 
 pub use error::{PersistenceError, PersistenceResult};
+
+/// Position et taille d'une fenêtre de l'UI (classeur, graphe, matrice,
+/// note), en points logiques — même unité que le reste d'egui.
+///
+/// # Pourquoi ce type vit ici et pas dans `plotyx-session`
+///
+/// La géométrie des fenêtres vit hors de l'arbre du modèle, côté acteur de
+/// `plotyx-session` (voir la doc de tête de ce crate) : ce n'est ni un champ
+/// de `WindowMeta`, ni quoi que ce soit de persistant dans `plotyx-core`. Par
+/// défaut ce type aurait donc dû être défini dans `plotyx-session`. La
+/// raison structurelle qui l'en écarte : ce crate (`plotyx-persistence`) est
+/// **en dessous** de `plotyx-session` dans le graphe de dépendances
+/// (`plotyx-session` dépend de `plotyx-persistence`, jamais l'inverse), et
+/// [`save_with_geometries`]/[`load_with_geometries`] ont besoin de nommer ce
+/// type dans leur signature publique. Le définir ici, où `plotyx-session`
+/// vient simplement le réutiliser (`pub use plotyx_persistence::WindowGeometry`),
+/// évite un type dupliqué des deux côtés d'une conversion qui n'aurait rien
+/// à faire. Contrairement au reste du schéma (`schema.rs`), il n'existe pas
+/// de type "modèle" séparé dont il faudrait rester indépendant (la doctrine
+/// "le format ne s'écrit pas dans le modèle" concerne `plotyx-core`, qui ne
+/// porte justement pas ce champ) : ce type public sert donc directement de
+/// représentation sur le disque, sans `Record` privé qui le mirorerait.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WindowGeometry {
+    /// Abscisse du coin supérieur gauche.
+    pub x: f64,
+    /// Ordonnée du coin supérieur gauche.
+    pub y: f64,
+    /// Largeur.
+    pub width: f64,
+    /// Hauteur.
+    pub height: f64,
+}
 
 /// Borne haute d'un identifiant de nœud ou de `next_id_hint` lu d'un fichier
 /// (B1, `guide-de-correction-robustesse.md` §F3) : largement au-dessus de
@@ -144,7 +179,27 @@ const MAX_NODE_ID: u64 = 1_000_000_000_000;
 /// n'a pas de baseline à comparer : `save` procède sans contrôle, comme
 /// avant B8 — il ne peut détecter qu'un changement depuis qu'IL a vu le
 /// fichier, pas depuis l'origine des temps.
+///
+/// Équivalent à [`save_with_geometries`] avec une table de géométries vide :
+/// n'écrit aucun bloc de géométrie de fenêtre. C'est la fonction qu'utilisent
+/// les appelants qui ne connaissent pas cette notion (`plotyx-app`) ;
+/// `plotyx-session`, qui possède la table `NodeId -> WindowGeometry` à côté
+/// du `Project`, appelle `save_with_geometries` pour que le fichier retrouve
+/// la disposition des fenêtres à la réouverture.
 pub fn save(project: &Project, path: &Path) -> PersistenceResult<()> {
+    save_with_geometries(project, &HashMap::new(), path)
+}
+
+/// Comme [`save`], mais écrit en plus `geometries` dans un bloc **séparé de
+/// l'arbre annulable** (`FileBody::window_geometries`) — jamais mêlé aux
+/// `NodeRecord` de `nodes`, jamais passé par `convert.rs` (qui ne convertit
+/// que des `Node`). C'est la fonction qu'appelle `plotyx-session::actor`
+/// pour que la position des fenêtres survive à un rechargement du projet.
+pub fn save_with_geometries(
+    project: &Project,
+    geometries: &HashMap<NodeId, WindowGeometry>,
+    path: &Path,
+) -> PersistenceResult<()> {
     let disk_counter = peek_save_counter(path)?;
     if let Some(found) = disk_counter {
         if let Some(expected) = tracked_counter(path, project) {
@@ -171,11 +226,16 @@ pub fn save(project: &Project, path: &Path) -> PersistenceResult<()> {
         .filter_map(|id| tree.node(id))
         .map(convert::node_to_record)
         .collect();
+    let window_geometries = geometries
+        .iter()
+        .map(|(id, geometry)| (id.raw(), *geometry))
+        .collect();
     let body = FileBody {
         root: tree.root().raw(),
         next_id_hint: project.next_id_hint(),
         nodes,
         save_counter,
+        window_geometries,
     };
 
     // Encoder ne devrait jamais échouer pour nos propres types de transport
@@ -210,7 +270,25 @@ pub fn save(project: &Project, path: &Path) -> PersistenceResult<()> {
 /// numéro qui n'a jamais existé, la première version réelle étant 1 — est
 /// refusée elle aussi, explicitement, plutôt que d'être lue comme si
 /// c'était la version 1.
+///
+/// Équivalent à [`load_with_geometries`] dont le bloc de géométries de
+/// fenêtre est jeté : c'est la fonction qu'utilisent les appelants qui ne
+/// connaissent pas cette notion (`plotyx-app`, aujourd'hui).
 pub fn load(path: &Path) -> PersistenceResult<Project> {
+    load_with_geometries(path).map(|(project, _geometries)| project)
+}
+
+/// Comme [`load`], mais rend aussi le bloc de géométries de fenêtre lu dans
+/// le fichier (`FileBody::window_geometries`), clé par `NodeId`. Une entrée
+/// dont la clé ne correspond à aucun nœud du projet reconstruit (fichier
+/// corrompu, ou géométrie orpheline laissée par un outil tiers) est
+/// silencieusement écartée plutôt que de faire échouer le chargement —
+/// invariant 10 : un défaut de donnée dégrade, il ne plante pas. C'est la
+/// fonction qu'appelle `plotyx-session::actor` pour retrouver la disposition
+/// des fenêtres à la réouverture d'un projet.
+pub fn load_with_geometries(
+    path: &Path,
+) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>)> {
     let bytes = std::fs::read(path).map_err(|source| PersistenceError::Io {
         path: path.to_path_buf(),
         source,
@@ -246,13 +324,34 @@ pub fn load(path: &Path) -> PersistenceResult<Project> {
         });
     }
 
-    let body: FileBody = rmp_serde::from_slice(&bytes[MAGIC.len() + 4..])
+    let mut body: FileBody = rmp_serde::from_slice(&bytes[MAGIC.len() + 4..])
         .map_err(|source| classify_body_error(source, path))?;
 
     let save_counter = body.save_counter;
+    let raw_geometries = std::mem::take(&mut body.window_geometries);
+    for &id in raw_geometries.keys() {
+        check_node_id(id, path)?;
+    }
     let project = build_project(body, path)?;
     track_counter(path, &project, save_counter);
-    Ok(project)
+
+    // Une clé sans nœud correspondant (fichier corrompu, ou géométrie
+    // orpheline laissée par un outil tiers qui n'aurait pas purgé la sienne)
+    // est écartée en silence plutôt que de faire échouer le chargement —
+    // invariant 10. `plotyx-session::actor` purge lui-même, à chaque
+    // mutation, les entrées orphelines créées pendant la vie du processus ;
+    // ce filtre couvre le cas où le fichier en portait déjà avant même
+    // d'être ouvert.
+    let tree = project.tree();
+    let geometries = raw_geometries
+        .into_iter()
+        .filter_map(|(id, geometry)| {
+            let node = NodeId::from_raw(id);
+            tree.node(node).is_some().then_some((node, geometry))
+        })
+        .collect();
+
+    Ok((project, geometries))
 }
 
 /// Classe une erreur de décodage du corps : une **variante d'énumération**
@@ -354,8 +453,7 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
         },
         ConvertError::ZeroHistogramBins => PersistenceError::Corrupt {
             path: path.to_path_buf(),
-            detail: "histogram_bins d'une série vaut 0, ce qui n'est pas représentable"
-                .to_string(),
+            detail: "histogram_bins d'une série vaut 0, ce qui n'est pas représentable".to_string(),
         },
         ConvertError::HistogramBinsTooLarge(bins) => PersistenceError::Corrupt {
             path: path.to_path_buf(),
@@ -468,7 +566,10 @@ fn track_counter(path: &Path, project: &Project, counter: u64) {
         Err(poisoned) => poisoned.into_inner(),
     };
     guard.retain(|entry| entry.identity.strong_count() > 0);
-    if let Some(entry) = guard.iter_mut().find(|entry| matches(entry, &canon, project)) {
+    if let Some(entry) = guard
+        .iter_mut()
+        .find(|entry| matches(entry, &canon, project))
+    {
         entry.counter = counter;
     } else {
         guard.push(TrackedSave {
@@ -558,6 +659,7 @@ mod tests {
             next_id_hint: 2, // en retard : le plus grand id présent est 5
             nodes: vec![root, child],
             save_counter: 0,
+            window_geometries: std::collections::HashMap::new(),
         };
         let project = build_project(body, Path::new("test.plyx")).expect("modèle valide");
         assert_eq!(project.next_id_hint(), 6);
@@ -580,6 +682,7 @@ mod tests {
             next_id_hint: 3,
             nodes: vec![root, orphan],
             save_counter: 0,
+            window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -595,6 +698,7 @@ mod tests {
             next_id_hint: 2,
             nodes: vec![a, b],
             save_counter: 0,
+            window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -618,6 +722,7 @@ mod tests {
             next_id_hint: 2,
             nodes: vec![root],
             save_counter: 0,
+            window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -656,6 +761,7 @@ mod tests {
             next_id_hint: 3,
             nodes: vec![root, column],
             save_counter: 0,
+            window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(matches!(err, PersistenceError::Corrupt { .. }), "{err:?}");
@@ -889,5 +995,75 @@ mod tests {
             err,
             ConvertError::Core(CoreError::TypeMismatch(_))
         ));
+    }
+
+    /// Géométrie des fenêtres (tâche « géométrie des fenêtres ») : une entrée
+    /// posée via `save_with_geometries` se relit identique via
+    /// `load_with_geometries`, associée au bon `NodeId`.
+    #[test]
+    fn geometries_round_trip_through_save_and_load() {
+        let mut project = plotyx_core::Project::new("Demo").expect("projet valide");
+        let root = project.root();
+        let book = project
+            .add_empty_workbook(root, Some("Book1"))
+            .expect("classeur créé");
+
+        let mut geometries = HashMap::new();
+        geometries.insert(
+            book,
+            crate::WindowGeometry {
+                x: 12.0,
+                y: 34.0,
+                width: 640.0,
+                height: 480.0,
+            },
+        );
+
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = dir.path().join("geometries.plyx");
+        save_with_geometries(&project, &geometries, &path).expect("sauvegarde réussie");
+
+        let (loaded, loaded_geometries) = load_with_geometries(&path).expect("chargement réussi");
+        assert_eq!(loaded.tree().len(), project.tree().len());
+        assert_eq!(loaded_geometries, geometries);
+    }
+
+    /// Rétrocompatibilité : un fichier écrit avant l'ajout du bloc de
+    /// géométries (`FileBody` sans `window_geometries`) se recharge sans
+    /// erreur, avec une table de géométries vide — même patron que
+    /// `unknown_fields_are_ignored_on_load`/`a_graph_written_before_r3_loads_with_a_default_spec`
+    /// ci-dessus, qui simulent déjà un fichier plus ancien pour d'autres
+    /// champs `#[serde(default)]`.
+    #[derive(Serialize)]
+    struct PreGeometryFileBody {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<NodeRecord>,
+        save_counter: u64,
+    }
+
+    #[test]
+    fn a_file_without_the_geometry_block_loads_with_an_empty_geometry_table() {
+        let root = folder_record(1, "Racine", vec![]);
+        let pre_geometry = PreGeometryFileBody {
+            root: 1,
+            next_id_hint: 2,
+            nodes: vec![root],
+            save_counter: 3,
+        };
+
+        let payload = rmp_serde::to_vec_named(&pre_geometry).expect("encodage valide");
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = dir.path().join("pre_geometry.plyx");
+        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+
+        let (project, geometries) =
+            load_with_geometries(&path).expect("un fichier sans bloc de géométries doit se relire");
+        assert!(geometries.is_empty());
+        assert_eq!(project.next_id_hint(), 2);
     }
 }

@@ -1,16 +1,17 @@
 //! Boucle de l'acteur : le seul endroit du processus qui détient un
 //! `&mut Project`.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError, CommandResult, History};
-use plotyx_core::Project;
+use plotyx_core::{NodeId, Project};
 
 use crate::error::{SessionError, SessionResult};
 use crate::snapshot::{HistoryState, Revision, Snapshot};
-use crate::ClientId;
+use crate::{ClientId, WindowGeometry};
 
 /// Requête envoyée à l'acteur par un [`crate::SessionHandle`]. Privée au
 /// crate : les clients ne construisent jamais de `Request` eux-mêmes, ils
@@ -78,6 +79,24 @@ pub(crate) enum Request {
         /// Réponse : l'instantané demandé.
         reply: Sender<Snapshot>,
     },
+    /// Pose (ou remplace) la géométrie de fenêtre d'un nœud. Ne touche ni
+    /// `History` ni `revision` (voir la doc de tête de crate) : ce n'est pas
+    /// une mutation du modèle, donc pas une entrée annulable. Toujours
+    /// acceptée, y compris pour un `NodeId` qui n'existe pas (ou plus) dans
+    /// l'arbre courant — l'entrée serait de toute façon purgée à la
+    /// prochaine mutation qui constate son absence (voir `run`) ; valider ici
+    /// n'apporterait rien qu'un aller-retour de plus.
+    SetWindowGeometry {
+        /// Nœud dont la fenêtre a bougé ou changé de taille.
+        node: NodeId,
+        /// Nouvelle géométrie.
+        geometry: WindowGeometry,
+        /// Réponse : nouvelle valeur de `geometry_revision` (voir la doc de
+        /// tête de crate — un compteur distinct de `revision`, pour que
+        /// déplacer une fenêtre ne fasse pas croire à un client de rendu que
+        /// le modèle a changé).
+        reply: Sender<u64>,
+    },
     /// Sauvegarde le projet courant vers `path`. Ne change pas la révision :
     /// sauvegarder ne modifie pas le modèle.
     Save {
@@ -126,6 +145,13 @@ pub(crate) fn run(
     // `abort_macro` peuvent avoir dépilé un niveau avant qu'une erreur ne
     // remonte).
     let mut macro_owner: Option<ClientId> = None;
+    // Table `NodeId -> WindowGeometry`, à côté du `Project` (voir la doc de
+    // tête de crate) : mutée uniquement par `SetWindowGeometry`, jamais par
+    // une commande. `geometry_revision` est un compteur **distinct** de
+    // `revision` — voir la doc de tête de crate pour la décision et le
+    // pourquoi.
+    let mut geometries: HashMap<NodeId, WindowGeometry> = HashMap::new();
+    let mut geometry_revision: u64 = 0;
 
     for request in rx {
         match request {
@@ -141,6 +167,9 @@ pub(crate) fn run(
                 } else {
                     history.execute(&mut project, command).map(|()| {
                         revision += 1;
+                        if purge_orphaned_geometries(&project, &mut geometries) {
+                            geometry_revision += 1;
+                        }
                         revision
                     })
                 };
@@ -150,6 +179,9 @@ pub(crate) fn run(
                 let outcome = history.undo(&mut project).map(|reverted| {
                     reverted.then(|| {
                         revision += 1;
+                        if purge_orphaned_geometries(&project, &mut geometries) {
+                            geometry_revision += 1;
+                        }
                         revision
                     })
                 });
@@ -159,6 +191,9 @@ pub(crate) fn run(
                 let outcome = history.redo(&mut project).map(|restored| {
                     restored.then(|| {
                         revision += 1;
+                        if purge_orphaned_geometries(&project, &mut geometries) {
+                            geometry_revision += 1;
+                        }
                         revision
                     })
                 });
@@ -228,8 +263,27 @@ pub(crate) fn run(
                 let _ = reply.send(outcome);
             }
             Request::Snapshot { reply } => {
-                let snapshot = build_snapshot(&project, &history, revision, epoch);
+                let snapshot = build_snapshot(
+                    &project,
+                    &history,
+                    revision,
+                    epoch,
+                    &geometries,
+                    geometry_revision,
+                );
                 let _ = reply.send(snapshot);
+            }
+            Request::SetWindowGeometry {
+                node,
+                geometry,
+                reply,
+            } => {
+                // Ne touche ni `history` ni `revision` : voir la doc de tête
+                // de crate — ce n'est pas une mutation du modèle. Toujours
+                // acceptée (voir la doc de `Request::SetWindowGeometry`).
+                geometries.insert(node, geometry);
+                geometry_revision += 1;
+                let _ = reply.send(geometry_revision);
             }
             Request::Save { path, reply } => {
                 // A11 — palliatif déclaré (guide-de-correction-robustesse.md
@@ -245,27 +299,40 @@ pub(crate) fn run(
                 // tête de crate) : l'état intermédiaire d'une macro que
                 // n'importe qui pourrait encore avorter ne doit pas atteindre
                 // le disque.
+                //
+                // `save_with_geometries` (et non `save`) : la géométrie des
+                // fenêtres doit survivre à un rechargement (voir la doc de
+                // tête de crate) — écrite dans le bloc séparé que
+                // `plotyx-persistence` lui réserve, jamais mêlée à l'arbre
+                // annulable.
                 let outcome = if history.in_macro() {
                     Err(SessionError::Command(CommandError::MacroOpen("save")))
                 } else {
-                    plotyx_persistence::save(&project, &path).map_err(SessionError::from)
+                    plotyx_persistence::save_with_geometries(&project, &geometries, &path)
+                        .map_err(SessionError::from)
                 };
                 let _ = reply.send(outcome);
             }
             Request::Load { path, reply } => {
-                let outcome = load_project(&mut project, &mut history, &path).map(|()| {
-                    revision += 1;
-                    // A3 — l'identité du projet change : une poignée
-                    // (`plotyx_script::surface::Handle`) qui a mémorisé
-                    // l'ancienne époque ne doit plus pouvoir désigner un
-                    // `NodeId` du projet neuf sans être détectée. Un `Load`
-                    // vide aussi l'historique (`load_project`), donc il n'y a
-                    // plus de macro ouverte à ce point : pas besoin de
-                    // remettre `macro_owner` à `None` ici, `load_project`
-                    // l'a déjà refusé si une macro était ouverte.
-                    epoch += 1;
-                    revision
-                });
+                let outcome =
+                    load_project(&mut project, &mut history, &mut geometries, &path).map(|()| {
+                        revision += 1;
+                        // A3 — l'identité du projet change : une poignée
+                        // (`plotyx_script::surface::Handle`) qui a mémorisé
+                        // l'ancienne époque ne doit plus pouvoir désigner un
+                        // `NodeId` du projet neuf sans être détectée. Un `Load`
+                        // vide aussi l'historique (`load_project`), donc il n'y a
+                        // plus de macro ouverte à ce point : pas besoin de
+                        // remettre `macro_owner` à `None` ici, `load_project`
+                        // l'a déjà refusé si une macro était ouverte.
+                        epoch += 1;
+                        // La table de géométries est entièrement remplacée par
+                        // celle du fichier chargé (`load_project`, ci-dessous) :
+                        // un client de rendu doit le savoir même si son contenu,
+                        // par coïncidence, ressemblait à l'ancien.
+                        geometry_revision += 1;
+                        revision
+                    });
                 let _ = reply.send(outcome);
             }
             Request::Shutdown => {
@@ -296,17 +363,26 @@ pub(crate) fn run(
 }
 
 /// Charge un projet complet depuis `path` et le substitue à `*project` ; vide
-/// l'historique. Refuse (`Err(Command(MacroOpen))`) si une macro est ouverte,
-/// **avant** de toucher au disque : dans ce cas ni le projet ni l'historique
+/// l'historique et remplace entièrement `*geometries` par le bloc de
+/// géométries lu dans le fichier (`plotyx_persistence::load_with_geometries`
+/// filtre déjà les entrées orphelines — voir sa doc). Refuse
+/// (`Err(Command(MacroOpen))`) si une macro est ouverte, **avant** de toucher
+/// au disque : dans ce cas ni le projet, ni l'historique, ni les géométries
 /// ne sont affectés. Si le chargement lui-même échoue (fichier absent,
-/// corrompu, ...), l'erreur remonte telle quelle et, là aussi, ni le projet
-/// ni l'historique n'ont été touchés.
-fn load_project(project: &mut Project, history: &mut History, path: &Path) -> SessionResult<()> {
+/// corrompu, ...), l'erreur remonte telle quelle et, là aussi, rien n'a été
+/// touché.
+fn load_project(
+    project: &mut Project,
+    history: &mut History,
+    geometries: &mut HashMap<NodeId, WindowGeometry>,
+    path: &Path,
+) -> SessionResult<()> {
     if history.in_macro() {
         return Err(SessionError::Command(CommandError::MacroOpen("load")));
     }
-    let loaded = plotyx_persistence::load(path)?;
+    let (loaded, loaded_geometries) = plotyx_persistence::load_with_geometries(path)?;
     *project = loaded;
+    *geometries = loaded_geometries;
     // L'acteur est mono-thread et rien n'a pu rouvrir de macro entre la
     // vérification ci-dessus et cet appel : `clear()` ne peut pas échouer
     // ici. On ignore tout de même le résultat plutôt que d'appeler
@@ -315,13 +391,35 @@ fn load_project(project: &mut Project, history: &mut History, path: &Path) -> Se
     Ok(())
 }
 
-/// Construit l'instantané courant : l'arbre est partagé (`Arc::clone`), rien
-/// n'est recopié.
+/// Retire de `geometries` toute entrée dont le `NodeId` n'existe plus dans
+/// l'arbre de `project` (nœud supprimé par une commande d'`Execute`, ou par
+/// un `Undo`/`Redo` qui restaure un arbre où il n'existait pas) — nettoyage
+/// sans risque d'une entrée de `HashMap` non référencée (voir la doc de tête
+/// de crate : le choix retenu est de purger plutôt que de laisser traîner).
+/// Rend `true` si quelque chose a effectivement été retiré, pour que
+/// l'appelant décide s'il doit faire avancer `geometry_revision`.
+fn purge_orphaned_geometries(
+    project: &Project,
+    geometries: &mut HashMap<NodeId, WindowGeometry>,
+) -> bool {
+    let tree = project.tree();
+    let before = geometries.len();
+    geometries.retain(|id, _| tree.node(*id).is_some());
+    geometries.len() != before
+}
+
+/// Construit l'instantané courant : l'arbre et la table de géométries sont
+/// partagés (`Arc::clone`/`Arc::new`), rien n'est recopié pour l'arbre ; la
+/// table de géométries, elle, est recopiée dans un `Arc` neuf à chaque
+/// instantané — un coût négligeable, borné par le nombre de fenêtres
+/// ouvertes, pas par la taille du modèle.
 fn build_snapshot(
     project: &Project,
     history: &History,
     revision: Revision,
     epoch: u64,
+    geometries: &HashMap<NodeId, WindowGeometry>,
+    geometry_revision: u64,
 ) -> Snapshot {
     Snapshot {
         tree: Arc::clone(project.tree()),
@@ -337,6 +435,8 @@ fn build_snapshot(
             in_macro: history.in_macro(),
         },
         epoch,
+        window_geometries: Arc::new(geometries.clone()),
+        geometry_revision,
     }
 }
 

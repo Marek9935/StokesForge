@@ -1,8 +1,11 @@
 //! Instantané immuable rendu aux clients de la session.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use plotyx_core::Tree;
+use plotyx_core::{NodeId, Tree};
+
+use crate::WindowGeometry;
 
 /// Compteur monotone d'état : incrémenté à chaque changement effectif du
 /// modèle ou de l'historique (voir la doc de crate pour la liste exacte des
@@ -53,4 +56,21 @@ pub struct Snapshot {
     /// l'arbre courant — où il pourrait, par coïncidence, désigner un autre
     /// objet.
     pub epoch: u64,
+    /// Géométrie des fenêtres (position/taille), par `NodeId` — table tenue
+    /// par l'acteur **à côté** du `Project`, jamais dans l'arbre (voir la
+    /// doc de tête de crate). Cloner un `Snapshot` reste bon marché : cette
+    /// table est recopiée dans un `Arc` neuf à chaque instantané côté acteur
+    /// (`build_snapshot`), mais son coût est borné par le nombre de fenêtres
+    /// ouvertes, pas par la taille du modèle — sans commune mesure avec
+    /// `tree`, qui n'est jamais recopié.
+    pub window_geometries: Arc<HashMap<NodeId, WindowGeometry>>,
+    /// Compteur monotone **distinct** de `revision` : incrémenté à chaque
+    /// changement de `window_geometries` (une pose de géométrie, une purge
+    /// d'entrée orpheline, ou un `Load` qui remplace toute la table), jamais
+    /// par `Execute`/`Undo`/`Redo`/une macro. Voir la doc de tête de crate
+    /// pour la décision : dissocier ce compteur de `revision` est ce qui
+    /// permet à un client de rendu de savoir qu'une fenêtre a bougé sans que
+    /// ça ressemble à une mutation du modèle (et donc sans invalider un
+    /// cache qui n'a aucune raison de l'être).
+    pub geometry_revision: u64,
 }

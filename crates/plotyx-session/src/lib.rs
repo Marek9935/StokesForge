@@ -1,11 +1,11 @@
 //! Acteur qui possède le `Project` de PlotYx et le sert à ses clients (l'UI,
-//! un futur thread de script Python) par un canal de requêtes.
+//! le thread de script Python de `plotyx-script`) par un canal de requêtes.
 //!
 //! # Rôle
 //!
 //! Ce crate rend concrète une décision d'architecture du socle
-//! (`docs/rustrewrite/roadmap.md` §6) : **le `Project` vit sur son propre
-//! thread**. L'UI et un futur thread de script sont deux clients
+//! (`docs/archive/rustrewrite/roadmap.md` §6) : **le `Project` vit sur son propre
+//! thread**. L'UI et le thread de script sont deux clients
 //! symétriques : ils envoient des requêtes et reçoivent des instantanés
 //! immuables ([`Snapshot`]). L'acteur détient le **seul** `&mut Project` du
 //! processus, ce qui transforme la règle « aucune mutation hors d'une
@@ -36,10 +36,11 @@
 //! # Deux invariants tenus par construction
 //!
 //! 1. **L'acteur ne touche jamais à Python.** Ce crate ne dépend d'aucun
-//!    crate Python — il n'en existe pas encore, mais la garantie porte sur
-//!    l'avenir : une liste blanche de dépendances (`tests/no_ui_dependency.rs`)
-//!    force une décision consciente à toute nouvelle dépendance, plutôt que
-//!    de compter sur une relecture.
+//!    crate Python, alors même que `plotyx-script` existe et l'appelle : le
+//!    type d'un objet Python n'est pas nommable ici, ce qui rend le blocage
+//!    mutuel GIL ↔ acteur structurellement impossible. Une liste blanche de
+//!    dépendances (`tests/no_ui_dependency.rs`) force une décision consciente
+//!    à toute nouvelle dépendance, plutôt que de compter sur une relecture.
 //! 2. **Aucun objet non-`Send` ne traverse le canal.** Requêtes et réponses
 //!    sont du Rust pur, `Send + 'static` — vérifié par un test de
 //!    compilation statique (`assert_send`, dans ce module et dans
@@ -76,6 +77,47 @@
 //! toujours servie ; `Shutdown` ne passe pas par ce tableau mais par le
 //! constat qui suit.
 //!
+//! # Géométrie des fenêtres
+//!
+//! Position et taille des fenêtres de l'UI (un classeur, un graphe, une
+//! matrice, une note — tout nœud qui porte une `WindowMeta`) ne sont **pas**
+//! un champ du modèle : ni un ajout à `WindowMeta`
+//! (`crates/plotyx-core/src/node.rs`), ni quoi que ce soit de persistant
+//! dans `plotyx-core`. Raison : déplacer ou redimensionner une fenêtre ne
+//! doit **jamais** pousser d'entrée sur `History` — Ctrl+Z reste réservé aux
+//! vraies mutations de données (invariant 1).
+//!
+//! L'acteur garde donc une table `NodeId -> `[`WindowGeometry`]` **à côté**
+//! du `Project` (voir `actor::run`), mutée par
+//! [`SessionHandle::set_window_geometry`] : une requête légère qui ne passe
+//! ni par `History` ni par la `revision` qui accompagne undo/redo. Elle fait
+//! en revanche avancer un compteur **dédié**, `Snapshot::geometry_revision`
+//! — la question posée était : un client de rendu qui ne connaît la
+//! position des fenêtres que par le `Snapshot` a quand même besoin de
+//! savoir qu'elle a changé pour repeindre, sans que ça ressemble à une
+//! mutation du modèle qui invaliderait un cache d'affichage (le
+//! `(revision, rect, pixels_per_point, view_generation)` de
+//! `plotyx-render-egui`, voir `docs/rendu.md`) qui n'a aucune raison de
+//! l'être. Séparer les deux compteurs referme cette question : `revision`
+//! ne bouge jamais pour une géométrie, `geometry_revision` ne bouge jamais
+//! pour une mutation du modèle.
+//!
+//! Suppression d'un nœud : son entrée de géométrie devient orpheline dès
+//! qu'une commande (actuelle ou future) le retire de l'arbre. L'acteur la
+//! purge automatiquement — `actor::purge_orphaned_geometries`, appelée après
+//! tout `Execute`/`Undo`/`Redo` qui a effectivement changé l'arbre — plutôt
+//! que de la laisser traîner : c'est un nettoyage sans risque d'une simple
+//! entrée de `HashMap` non référencée, et la garder n'aurait aucun usage
+//! (rouvrir ce même `NodeId` un jour n'a pas de sens, les identifiants ne
+//! sont jamais réutilisés — invariant 7).
+//!
+//! Persistée malgré tout : [`SessionHandle::save`]/[`SessionHandle::load`]
+//! passent par `plotyx_persistence::save_with_geometries`/
+//! `load_with_geometries`, qui écrivent/lisent ce bloc **séparé de l'arbre
+//! annulable** dans le fichier `.plx` (`FileBody::window_geometries`,
+//! `#[serde(default)]` — voir `docs/persistance.md`) — jamais mêlé aux
+//! `NodeRecord`, jamais par `convert.rs`.
+//!
 //! **`Session::shutdown` pendant une macro ouverte — constat non
 //! reproductible, corrigé.** Une macro ouverte à l'arrêt de l'acteur n'avait
 //! aucune garde : `Request::Shutdown` rendait directement le `Project`
@@ -108,12 +150,20 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use plotyx_commands::Command;
-use plotyx_core::Project;
+use plotyx_core::{NodeId, Project};
 
 use actor::Request;
 
 pub use error::{SessionError, SessionResult};
 pub use snapshot::{HistoryState, Revision, Snapshot};
+
+/// Position et taille d'une fenêtre de l'UI — voir « Géométrie des fenêtres »
+/// ci-dessus pour ce qu'elle est et pourquoi elle vit ici plutôt que dans le
+/// modèle. Réutilise directement le type public de `plotyx-persistence` : la
+/// doc de tête de ce type explique pourquoi ce n'est pas une duplication
+/// (persistance est **sous** ce crate dans le graphe de dépendances et ne
+/// peut donc pas nommer un type défini ici).
+pub use plotyx_persistence::WindowGeometry;
 
 /// Identité stable et comparable d'un émetteur de requêtes (A4,
 /// `guide-de-correction-robustesse.md` §F6).
@@ -233,6 +283,28 @@ impl SessionHandle {
     /// l'arbre.
     pub fn snapshot(&self) -> SessionResult<Snapshot> {
         self.request(|reply| Request::Snapshot { reply })
+    }
+
+    /// Pose (ou remplace) la géométrie de la fenêtre de `node` — voir
+    /// « Géométrie des fenêtres » en tête de crate. Ne touche **ni**
+    /// `History` **ni** `revision` : ce n'est pas une mutation du modèle, il
+    /// n'y a rien à annuler. Rend la nouvelle valeur de
+    /// [`Snapshot::geometry_revision`], le compteur dédié qui permet à un
+    /// client de rendu de savoir que la géométrie a changé sans confondre ça
+    /// avec un changement du modèle. Toujours acceptée, y compris pendant
+    /// une macro ouverte par quelqu'un d'autre (ce n'est ni `Execute`, ni
+    /// `Undo`/`Redo`, ni `Save`/`Load` : rien dans la table de tête de crate
+    /// ne la concerne).
+    pub fn set_window_geometry(
+        &self,
+        node: NodeId,
+        geometry: WindowGeometry,
+    ) -> SessionResult<u64> {
+        self.request(|reply| Request::SetWindowGeometry {
+            node,
+            geometry,
+            reply,
+        })
     }
 
     /// Sauvegarde le projet courant vers `path`. Ne change pas la révision :
