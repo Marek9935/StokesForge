@@ -3658,6 +3658,7 @@ name = "plotyx-commands"
 version = "0.0.0"
 dependencies = [
  "plotyx-core",
+ "plotyx-plot",
  "proptest",
  "thiserror 2.0.20",
  "toml",

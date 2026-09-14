@@ -38,8 +38,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use plotyx_core::{ColumnType, ColumnValues};
+use plotyx_core::{ColumnMeta, ColumnType, ColumnValues, WindowMeta};
 use plotyx_core::{CoreError, CoreResult, NodeId, Project, Tree, ValueBlock};
+use plotyx_plot::PlotSpec;
 
 use crate::command::Command;
 use crate::error::{CommandError, CommandResult};
@@ -95,6 +96,50 @@ pub enum DataDelta {
         before: (ColumnType, ColumnValues),
         /// Type et valeurs d'après.
         after: (ColumnType, ColumnValues),
+    },
+    /// Remplacement des métadonnées d'une fenêtre : ni un instantané de
+    /// structure (aucun nœud ne bouge), ni un gros buffer — `before`/`after`
+    /// directement, comme `ColumnType`.
+    WindowMeta {
+        /// Fenêtre visée.
+        id: NodeId,
+        /// Métadonnées d'avant.
+        before: WindowMeta,
+        /// Métadonnées d'après.
+        after: WindowMeta,
+    },
+    /// Remplacement du texte d'une note.
+    NoteText {
+        /// Note visée.
+        id: NodeId,
+        /// Texte d'avant.
+        before: String,
+        /// Texte d'après.
+        after: String,
+    },
+    /// Remplacement des métadonnées d'une colonne (rôle, unité, nom long,
+    /// commentaire, format d'affichage) — distinct de `ColumnType` : ce
+    /// delta ne touche jamais aux valeurs de la colonne, seulement à ce petit
+    /// enregistrement d'affichage.
+    ColumnMeta {
+        /// Colonne visée.
+        column: NodeId,
+        /// Métadonnées d'avant.
+        before: ColumnMeta,
+        /// Métadonnées d'après.
+        after: ColumnMeta,
+    },
+    /// Remplacement du `PlotSpec` d'un graphe. Un spec ne porte que des
+    /// identités et du style, jamais de donnée (voir la tête de
+    /// `plotyx-plot/src/lib.rs`) : `before`/`after` directement, comme pour
+    /// les trois deltas ci-dessus.
+    PlotSpec {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Spec d'avant.
+        before: PlotSpec,
+        /// Spec d'après.
+        after: PlotSpec,
     },
 }
 
@@ -934,10 +979,46 @@ impl History {
                 project.move_node(id, new_parent, index)?;
                 Ok(structural(before, project, label))
             }
+            Command::AddFolder { parent, name } => {
+                project.add_folder(parent, &name)?;
+                Ok(structural(before, project, label))
+            }
+            Command::AddWorkbook { parent, name } => {
+                project.add_workbook(parent, name.as_deref())?;
+                Ok(structural(before, project, label))
+            }
+            Command::AddEmptyWorkbook { parent, name } => {
+                project.add_empty_workbook(parent, name.as_deref())?;
+                Ok(structural(before, project, label))
+            }
+            Command::AddWorksheet { book, name } => {
+                project.add_worksheet(book, name.as_deref())?;
+                Ok(structural(before, project, label))
+            }
+            Command::AddGraph { parent, name, spec } => {
+                project.add_graph(parent, name.as_deref(), spec)?;
+                Ok(structural(before, project, label))
+            }
+            Command::AddMatrix { parent, name } => {
+                project.add_matrix(parent, name.as_deref())?;
+                Ok(structural(before, project, label))
+            }
+            Command::AddNote { parent, name, text } => {
+                project.add_note(parent, name.as_deref(), &text)?;
+                Ok(structural(before, project, label))
+            }
+            Command::RemoveNode { id } => {
+                project.remove(id)?;
+                Ok(structural(before, project, label))
+            }
             Command::SetCells { .. }
             | Command::SetColumnType { .. }
             | Command::InsertRows { .. }
-            | Command::DeleteRows { .. } => {
+            | Command::DeleteRows { .. }
+            | Command::SetWindowMeta { .. }
+            | Command::SetNoteText { .. }
+            | Command::SetColumnMeta { .. }
+            | Command::SetPlotSpec { .. } => {
                 unreachable!("apply_structural appelée avec une commande de données")
             }
         }
@@ -1045,10 +1126,62 @@ impl History {
                     label,
                 })
             }
+            Command::SetWindowMeta { id, meta } => {
+                let before = project.set_window_meta(id, meta.clone())?;
+                Ok(Entry::Data {
+                    delta: DataDelta::WindowMeta {
+                        id,
+                        before,
+                        after: meta,
+                    },
+                    label,
+                })
+            }
+            Command::SetNoteText { id, text } => {
+                let before = project.set_note_text(id, &text)?;
+                Ok(Entry::Data {
+                    delta: DataDelta::NoteText {
+                        id,
+                        before,
+                        after: text,
+                    },
+                    label,
+                })
+            }
+            Command::SetColumnMeta { column, meta } => {
+                let before = project.set_column_meta(column, meta.clone())?;
+                Ok(Entry::Data {
+                    delta: DataDelta::ColumnMeta {
+                        column,
+                        before,
+                        after: meta,
+                    },
+                    label,
+                })
+            }
+            Command::SetPlotSpec { graph, spec } => {
+                let before = project.set_plot_spec(graph, spec.clone())?;
+                Ok(Entry::Data {
+                    delta: DataDelta::PlotSpec {
+                        graph,
+                        before,
+                        after: spec,
+                    },
+                    label,
+                })
+            }
             Command::AddColumn { .. }
             | Command::DeleteColumn { .. }
             | Command::Rename { .. }
-            | Command::Move { .. } => {
+            | Command::Move { .. }
+            | Command::AddFolder { .. }
+            | Command::AddWorkbook { .. }
+            | Command::AddEmptyWorkbook { .. }
+            | Command::AddWorksheet { .. }
+            | Command::AddGraph { .. }
+            | Command::AddMatrix { .. }
+            | Command::AddNote { .. }
+            | Command::RemoveNode { .. } => {
                 unreachable!("apply_data appelée avec une commande structurelle")
             }
         }
@@ -1132,6 +1265,22 @@ impl History {
                 project.restore_column(*column, before.0, before.1.clone())?;
                 Ok(())
             }
+            DataDelta::WindowMeta { id, before, .. } => {
+                project.set_window_meta(*id, before.clone())?;
+                Ok(())
+            }
+            DataDelta::NoteText { id, before, .. } => {
+                project.set_note_text(*id, before)?;
+                Ok(())
+            }
+            DataDelta::ColumnMeta { column, before, .. } => {
+                project.set_column_meta(*column, before.clone())?;
+                Ok(())
+            }
+            DataDelta::PlotSpec { graph, before, .. } => {
+                project.set_plot_spec(*graph, before.clone())?;
+                Ok(())
+            }
         }
     }
 
@@ -1165,6 +1314,22 @@ impl History {
             }
             DataDelta::ColumnType { column, after, .. } => {
                 project.restore_column(*column, after.0, after.1.clone())?;
+                Ok(())
+            }
+            DataDelta::WindowMeta { id, after, .. } => {
+                project.set_window_meta(*id, after.clone())?;
+                Ok(())
+            }
+            DataDelta::NoteText { id, after, .. } => {
+                project.set_note_text(*id, after)?;
+                Ok(())
+            }
+            DataDelta::ColumnMeta { column, after, .. } => {
+                project.set_column_meta(*column, after.clone())?;
+                Ok(())
+            }
+            DataDelta::PlotSpec { graph, after, .. } => {
+                project.set_plot_spec(*graph, after.clone())?;
                 Ok(())
             }
         }
@@ -1211,7 +1376,16 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
         Entry::Data { delta, .. } => match delta {
             DataDelta::InsertRows { columns, .. } => columns.is_empty(),
             DataDelta::DeleteRows { removed, .. } => removed.is_empty(),
-            DataDelta::Cells { .. } | DataDelta::ColumnType { .. } => false,
+            // Comme `Cells`/`ColumnType` : dès qu'`apply` les a acceptées,
+            // ces quatre commandes ont toujours remplacé quelque chose (un
+            // remplacement par une valeur égale reste un remplacement, pas
+            // un cas particulier à détecter ici).
+            DataDelta::Cells { .. }
+            | DataDelta::ColumnType { .. }
+            | DataDelta::WindowMeta { .. }
+            | DataDelta::NoteText { .. }
+            | DataDelta::ColumnMeta { .. }
+            | DataDelta::PlotSpec { .. } => false,
         },
         Entry::Macro { .. } => false,
     }
@@ -1430,6 +1604,15 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
             insert_column_footprint(&mut out, &before.1);
             insert_column_footprint(&mut out, &after.1);
         }
+        // Métadonnées de fenêtre/note/colonne et spec de graphe : aucun
+        // buffer partagé avec l'arbre à comptabiliser, contrairement à
+        // `ColumnType` — juste quelques chaînes ou identités, jamais le
+        // volume qui justifie ce mécanisme (colonnes de données). Même
+        // choix que `InsertRows` ci-dessus.
+        DataDelta::WindowMeta { .. }
+        | DataDelta::NoteText { .. }
+        | DataDelta::ColumnMeta { .. }
+        | DataDelta::PlotSpec { .. } => {}
     }
     out
 }
@@ -1470,10 +1653,28 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
                 }
             }
         }
+        // Aucune de ces commandes ne cible une colonne dont il faudrait
+        // relever le buffer avant application : les huit structurelles
+        // n'atteignent jamais cette fonction (voir la doc ci-dessus), et les
+        // quatre commandes de métadonnées/spec ne touchent jamais aux
+        // valeurs d'une colonne — `SetColumnMeta` remplace `ColumnMeta`, pas
+        // `ColumnValues`.
         Command::AddColumn { .. }
         | Command::DeleteColumn { .. }
         | Command::Rename { .. }
-        | Command::Move { .. } => {}
+        | Command::Move { .. }
+        | Command::AddFolder { .. }
+        | Command::AddWorkbook { .. }
+        | Command::AddEmptyWorkbook { .. }
+        | Command::AddWorksheet { .. }
+        | Command::AddGraph { .. }
+        | Command::AddMatrix { .. }
+        | Command::AddNote { .. }
+        | Command::RemoveNode { .. }
+        | Command::SetWindowMeta { .. }
+        | Command::SetNoteText { .. }
+        | Command::SetColumnMeta { .. }
+        | Command::SetPlotSpec { .. } => {}
     }
     out
 }
@@ -1510,6 +1711,12 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
                 previous_buffer_of(&mut out, *column);
             }
         }
+        // Voir `prior_columns` et `data_delta_footprint` : ces quatre deltas
+        // ne portent jamais de buffer de colonne, rien à orpheliner ici.
+        DataDelta::WindowMeta { .. }
+        | DataDelta::NoteText { .. }
+        | DataDelta::ColumnMeta { .. }
+        | DataDelta::PlotSpec { .. } => {}
     }
     out
 }

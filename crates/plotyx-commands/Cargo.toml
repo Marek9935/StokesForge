@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
+plotyx-plot = { path = "../plotyx-plot" }
 thiserror = "2"
 
 [dev-dependencies]

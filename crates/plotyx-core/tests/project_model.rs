@@ -9,7 +9,7 @@ use plotyx_core::{
     NodeKind, Project, Tree, ValueBlock, WindowMeta,
 };
 
-// ---------------------------------------------------------------- utilitaires
+// -- utilitaires --
 
 fn folder_kind() -> NodeKind {
     NodeKind::Folder {
@@ -118,7 +118,7 @@ fn sheet_with(columns: &[(&str, &[f64])]) -> (Project, NodeId, Vec<NodeId>) {
     (project, sheet, ids)
 }
 
-// ------------------------------------------------------------- 1. construction
+// -- 1. construction --
 
 #[test]
 fn critere_1_projet_neuf() {
@@ -145,7 +145,9 @@ fn critere_2_noms_par_defaut_des_fenetres() {
     let book2 = project.add_workbook(root, None).expect("classeur");
     assert_eq!(name_of(&project, book2), "Book2");
 
-    let graph = project.add_graph(root, None, Default::default()).expect("graphe");
+    let graph = project
+        .add_graph(root, None, Default::default())
+        .expect("graphe");
     assert_eq!(name_of(&project, graph), "Graph1");
 
     let matrix = project.add_matrix(root, None).expect("matrice");
@@ -222,7 +224,7 @@ fn critere_4_nom_de_feuille_par_defaut() {
     );
 }
 
-// --------------------------------------------------- 5-10. unicité, structure
+// -- 5-10. unicité, structure --
 
 #[test]
 fn critere_5_regles_d_unicite_des_noms() {
@@ -484,7 +486,7 @@ fn critere_10_deplacements_refuses_laissent_l_arbre_intact() {
     assert_eq!(**demo.project.tree(), *before);
 }
 
-// --------------------------------------------------------------- 11-13. chemins
+// -- 11-13. chemins --
 
 #[test]
 fn critere_11_resolution_de_chemins() {
@@ -558,7 +560,9 @@ fn critere_13_path_of_et_resolve_sont_reciproques() {
     demo.project
         .add_column(feuille_vide, None, None, Column::new(ColumnType::Numeric))
         .expect("colonne vide");
-    demo.project.add_graph(demo.root, None, Default::default()).expect("graphe");
+    demo.project
+        .add_graph(demo.root, None, Default::default())
+        .expect("graphe");
     demo.project.add_note(demo.folder, None, "").expect("note");
 
     for id in demo.project.tree().walk_all() {
@@ -576,7 +580,7 @@ fn critere_13_path_of_et_resolve_sont_reciproques() {
     ));
 }
 
-// ------------------------------------------------- 14-17. données et lignes
+// -- 14-17. données et lignes --
 
 #[test]
 fn critere_14_ecriture_de_valeurs() {
@@ -724,6 +728,37 @@ fn les_metadonnees_de_colonne_et_de_fenetre_rendent_les_precedentes() {
         demo.project.set_note_text(demo.book, "x"),
         Err(CoreError::Structure(_))
     ));
+
+    let graph = demo
+        .project
+        .add_graph(demo.root, None, plotyx_plot::PlotSpec::default())
+        .expect("graphe");
+    let spec = plotyx_plot::PlotSpec {
+        title: "Figure".to_string(),
+        ..Default::default()
+    };
+    assert_eq!(
+        demo.project
+            .set_plot_spec(graph, spec.clone())
+            .expect("spec"),
+        plotyx_plot::PlotSpec::default()
+    );
+    assert_eq!(
+        demo.project
+            .tree()
+            .get(graph)
+            .expect("graphe")
+            .kind()
+            .clone(),
+        plotyx_core::NodeKind::Graph {
+            meta: WindowMeta::default(),
+            spec: spec.clone(),
+        }
+    );
+    assert!(matches!(
+        demo.project.set_plot_spec(demo.book, spec),
+        Err(CoreError::Structure(_))
+    ));
 }
 
 #[test]
@@ -754,7 +789,7 @@ fn changement_de_type_et_restauration_d_une_colonne() {
     assert_eq!(floats(&project, column).len(), 4);
 }
 
-// -------------------------------------- 18-21. partage structurel, identité
+// -- 18-21. partage structurel, identité --
 
 #[test]
 fn critere_18_partage_structurel_apres_renommage() {
@@ -957,7 +992,7 @@ fn critere_21_bis_aller_retour_sans_disque_preserve_next_id_hint() {
     assert_eq!(new_id.raw(), expected);
 }
 
-// ---------------------------------------------------------- 22-23. from_nodes
+// -- 22-23. from_nodes --
 
 #[test]
 fn critere_22_from_nodes_reconstruit_la_fixture() {
@@ -1098,7 +1133,7 @@ fn les_valeurs_typees_survivent_a_un_aller_retour_from_nodes() {
     assert_eq!(column.len(), 2);
 }
 
-// --------------------------------- 24-26. primitives par colonne, atomicité
+// -- 24-26. primitives par colonne, atomicité --
 
 #[test]
 fn critere_24_les_primitives_par_colonne_annulent_delete_rows() {

@@ -5,7 +5,11 @@
 use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError, History, DEFAULT_BYTE_LIMIT, DEFAULT_LIMIT};
-use plotyx_core::{Cell, Column, ColumnType, CoreError, Node, NodeId, Project, Tree, ValueBlock};
+use plotyx_core::{
+    Cell, Column, ColumnMeta, ColumnRole, ColumnType, CoreError, Node, NodeId, NodeKind, Project,
+    Tree, ValueBlock, WindowMeta,
+};
+use plotyx_plot::PlotSpec;
 
 // -- fixture --------------------------------------------------------------
 
@@ -18,6 +22,7 @@ use plotyx_core::{Cell, Column, ColumnType, CoreError, Node, NodeId, Project, Tr
 /// tests.
 struct Fixture {
     project: Project,
+    book: NodeId,
     sheet1: NodeId,
     sheet2: NodeId,
     a: NodeId,
@@ -32,7 +37,6 @@ fn fixture() -> Fixture {
     let book = project
         .add_workbook(root, Some("Book1"))
         .expect("classeur Book1");
-    // `book` ne sert qu'au montage (la deuxième feuille) : il n'est pas exposé.
     let sheet1 = project
         .resolve_path("[Book1]Sheet1")
         .expect("feuille Sheet1");
@@ -58,6 +62,7 @@ fn fixture() -> Fixture {
         .expect("colonne X");
     Fixture {
         project,
+        book,
         sheet1,
         sheet2,
         a,
@@ -1618,4 +1623,439 @@ fn an_absurdly_low_byte_limit_still_settles_on_exactly_one_entry() {
         1,
         "la limite en octets, ici absurde, ramène la pile à une seule entrée"
     );
+}
+
+// -- création/suppression de nœud ------------------------------------------
+
+#[test]
+fn add_folder_round_trip() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let root = f.project.root();
+
+    history
+        .execute(
+            &mut f.project,
+            Command::AddFolder {
+                parent: root,
+                name: "Manips".to_string(),
+            },
+        )
+        .expect("ajout de dossier");
+    let after = snapshot(&f.project);
+    assert_eq!(history.undo_label(), Some("Ajouter le dossier Manips"));
+    assert!(names(&f.project, root).contains(&"Manips".to_string()));
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn add_workbook_round_trip_creates_a_default_sheet() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let root = f.project.root();
+
+    history
+        .execute(
+            &mut f.project,
+            Command::AddWorkbook {
+                parent: root,
+                name: Some("Book2".to_string()),
+            },
+        )
+        .expect("ajout de classeur");
+    let after = snapshot(&f.project);
+    let sheet = f
+        .project
+        .resolve_path("[Book2]Sheet1")
+        .expect("feuille par défaut créée avec le classeur");
+    assert!(f.project.tree().contains(sheet));
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn add_empty_workbook_round_trip_has_no_sheet() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let root = f.project.root();
+
+    history
+        .execute(
+            &mut f.project,
+            Command::AddEmptyWorkbook {
+                parent: root,
+                name: Some("Empty".to_string()),
+            },
+        )
+        .expect("ajout de classeur vide");
+    let after = snapshot(&f.project);
+    let book = f.project.resolve_path("[Empty]").expect("classeur vide");
+    assert!(f
+        .project
+        .tree()
+        .children(book)
+        .expect("classeur")
+        .is_empty());
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn add_worksheet_round_trip() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::AddWorksheet {
+                book: f.book,
+                name: None,
+            },
+        )
+        .expect("ajout de feuille");
+    let after = snapshot(&f.project);
+    // D1 — deux feuilles déjà présentes (Sheet1, Sheet2) : le premier
+    // candidat essayé est « Sheet3 ».
+    let sheet3 = f
+        .project
+        .resolve_path("[Book1]Sheet3")
+        .expect("nom automatique Sheet3");
+    assert!(f.project.tree().contains(sheet3));
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn add_graph_round_trip_carries_its_spec() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let root = f.project.root();
+    let spec = PlotSpec::empty("Courbe");
+
+    history
+        .execute(
+            &mut f.project,
+            Command::AddGraph {
+                parent: root,
+                name: Some("Fig1".to_string()),
+                spec: spec.clone(),
+            },
+        )
+        .expect("ajout de graphe");
+    let after = snapshot(&f.project);
+    let graph = f.project.resolve_path("[Fig1]").expect("graphe");
+    match f.project.tree().get(graph).expect("nœud").kind() {
+        NodeKind::Graph { spec: found, .. } => assert_eq!(found, &spec),
+        other => panic!("attendu un graphe, trouvé {other:?}"),
+    }
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn add_matrix_round_trip() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let root = f.project.root();
+
+    history
+        .execute(
+            &mut f.project,
+            Command::AddMatrix {
+                parent: root,
+                name: Some("Mat1".to_string()),
+            },
+        )
+        .expect("ajout de matrice");
+    let after = snapshot(&f.project);
+    assert!(f.project.resolve_path("[Mat1]").is_ok());
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn add_note_round_trip_carries_its_text() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let root = f.project.root();
+
+    history
+        .execute(
+            &mut f.project,
+            Command::AddNote {
+                parent: root,
+                name: Some("N1".to_string()),
+                text: "Bonjour".to_string(),
+            },
+        )
+        .expect("ajout de note");
+    let after = snapshot(&f.project);
+    let note = f.project.resolve_path("[N1]").expect("note");
+    match f.project.tree().get(note).expect("nœud").kind() {
+        NodeKind::Note { text, .. } => assert_eq!(text, "Bonjour"),
+        other => panic!("attendu une note, trouvé {other:?}"),
+    }
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn remove_node_round_trip_restores_the_same_node_id_and_its_descendants() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    history
+        .execute(&mut f.project, Command::RemoveNode { id: f.sheet2 })
+        .expect("suppression de Sheet2");
+    let after = snapshot(&f.project);
+    assert_eq!(history.undo_label(), Some("Supprimer Sheet2"));
+    assert!(!f.project.tree().contains(f.sheet2));
+    assert!(!f.project.tree().contains(f.x));
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert!(f.project.tree().contains(f.sheet2));
+    assert!(f.project.tree().contains(f.x));
+    assert_eq!(floats(&f.project, f.x), vec![0.5, 1.5]);
+    assert_eq!(**f.project.tree(), *before);
+
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert!(!f.project.tree().contains(f.sheet2));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+// -- édition de contenu : fenêtre, note, colonne, graphe --------------------
+
+#[test]
+fn set_window_meta_round_trip() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let meta = WindowMeta {
+        label: "Manip 3".to_string(),
+        comment: "essai".to_string(),
+    };
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetWindowMeta {
+                id: f.book,
+                meta: meta.clone(),
+            },
+        )
+        .expect("métadonnées de fenêtre");
+    let after = snapshot(&f.project);
+    assert_eq!(
+        history.undo_label(),
+        Some("Modifier les propriétés de Book1")
+    );
+    match f.project.tree().get(f.book).expect("nœud").kind() {
+        NodeKind::Workbook { meta: found, .. } => assert_eq!(found, &meta),
+        other => panic!("attendu un classeur, trouvé {other:?}"),
+    }
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    match f.project.tree().get(f.book).expect("nœud").kind() {
+        NodeKind::Workbook { meta: found, .. } => assert_eq!(found, &WindowMeta::default()),
+        other => panic!("attendu un classeur, trouvé {other:?}"),
+    }
+    assert_eq!(**f.project.tree(), *before);
+
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn set_window_meta_refuses_a_node_that_is_not_a_window() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    let err = history
+        .execute(
+            &mut f.project,
+            Command::SetWindowMeta {
+                id: f.sheet1,
+                meta: WindowMeta::default(),
+            },
+        )
+        .expect_err("une feuille n'est pas une fenêtre");
+    assert!(matches!(err, CommandError::Core(CoreError::Structure(_))));
+    assert!(history.is_empty());
+    assert_eq!(**f.project.tree(), *before);
+}
+
+#[test]
+fn set_note_text_round_trip() {
+    let mut f = fixture();
+    let root = f.project.root();
+    let note = f.project.add_note(root, Some("N1"), "avant").expect("note");
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetNoteText {
+                id: note,
+                text: "après".to_string(),
+            },
+        )
+        .expect("texte de note");
+    let after = snapshot(&f.project);
+    assert_eq!(history.undo_label(), Some("Modifier le texte de N1"));
+    match f.project.tree().get(note).expect("nœud").kind() {
+        NodeKind::Note { text, .. } => assert_eq!(text, "après"),
+        other => panic!("attendu une note, trouvé {other:?}"),
+    }
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    match f.project.tree().get(note).expect("nœud").kind() {
+        NodeKind::Note { text, .. } => assert_eq!(text, "avant"),
+        other => panic!("attendu une note, trouvé {other:?}"),
+    }
+    assert_eq!(**f.project.tree(), *before);
+
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn set_column_meta_round_trip() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let meta = ColumnMeta {
+        role: ColumnRole::X,
+        unit: "s".to_string(),
+        ..Default::default()
+    };
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetColumnMeta {
+                column: f.a,
+                meta: meta.clone(),
+            },
+        )
+        .expect("métadonnées de colonne");
+    let after = snapshot(&f.project);
+    assert_eq!(history.undo_label(), Some("Modifier les métadonnées de A"));
+    assert_eq!(
+        f.project
+            .tree()
+            .get(f.a)
+            .expect("colonne")
+            .as_column()
+            .expect("colonne")
+            .meta(),
+        &meta
+    );
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(
+        f.project
+            .tree()
+            .get(f.a)
+            .expect("colonne")
+            .as_column()
+            .expect("colonne")
+            .meta(),
+        &ColumnMeta::default()
+    );
+    assert_eq!(**f.project.tree(), *before);
+
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn set_plot_spec_round_trip() {
+    let mut f = fixture();
+    let root = f.project.root();
+    let graph = f
+        .project
+        .add_graph(root, Some("Fig1"), PlotSpec::default())
+        .expect("graphe");
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let spec = PlotSpec::empty("Courbe");
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetPlotSpec {
+                graph,
+                spec: spec.clone(),
+            },
+        )
+        .expect("spec de graphe");
+    let after = snapshot(&f.project);
+    assert_eq!(history.undo_label(), Some("Modifier le graphe Fig1"));
+    match f.project.tree().get(graph).expect("nœud").kind() {
+        NodeKind::Graph { spec: found, .. } => assert_eq!(found, &spec),
+        other => panic!("attendu un graphe, trouvé {other:?}"),
+    }
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    match f.project.tree().get(graph).expect("nœud").kind() {
+        NodeKind::Graph { spec: found, .. } => assert_eq!(found, &PlotSpec::default()),
+        other => panic!("attendu un graphe, trouvé {other:?}"),
+    }
+    assert_eq!(**f.project.tree(), *before);
+
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn set_plot_spec_refuses_a_node_that_is_not_a_graph() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    let err = history
+        .execute(
+            &mut f.project,
+            Command::SetPlotSpec {
+                graph: f.book,
+                spec: PlotSpec::default(),
+            },
+        )
+        .expect_err("un classeur n'est pas un graphe");
+    assert!(matches!(err, CommandError::Core(CoreError::Structure(_))));
+    assert!(history.is_empty());
+    assert_eq!(**f.project.tree(), *before);
 }

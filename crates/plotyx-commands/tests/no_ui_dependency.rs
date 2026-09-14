@@ -6,6 +6,7 @@
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
     "plotyx-core", // le modèle : dépendance à sens unique, sans surface UI
+    "plotyx-plot", // `PlotSpec`, porté par `Command::AddGraph`/`SetPlotSpec` ; sans dépendance de dessin (invariant 3)
     "thiserror",   // erreurs typées, sans surface UI
 ];
 

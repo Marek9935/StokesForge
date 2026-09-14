@@ -1,4 +1,4 @@
-//! Les huit primitives du socle.
+//! Les primitives du socle.
 //!
 //! Une commande est une **valeur**, pas un objet à état : elle ne retient ni
 //! `Project`, ni `Tree`, ni le moindre `Arc`. C'est ce qui lui permet de
@@ -7,10 +7,34 @@
 //!
 //! Tout ce qu'il faut pour annuler est calculé **à l'application**, par
 //! `History`, pas porté par la commande.
+//!
+//! # Création de nœud : une commande par nature, pas un `AddNode` générique
+//!
+//! Chaque nature de nœud (dossier, classeur, classeur vide, feuille, graphe,
+//! matrice, note) a sa propre variante plutôt qu'un unique
+//! `AddNode { kind: NodeKindSpec, .. }`. C'est la même logique que `Rename`
+//! ou `SetColumnType`, déjà fines : le style de ce module est « une commande
+//! par intention », et `plotyx_core::Project` expose lui-même une méthode
+//! `add_*` par nature plutôt qu'un constructeur générique paramétré par un
+//! `NodeKind` — suivre cette forme évite d'inventer, côté commandes, un
+//! niveau d'indirection que le cœur n'a pas. La suppression, elle, reste
+//! générique (`RemoveNode { id }`) : `Project::remove` l'est déjà, sur
+//! n'importe quel `NodeId`, sans distinction de nature à faire à l'appel.
+//!
+//! # Édition de contenu : remplacement en bloc, jamais par sous-champ
+//!
+//! `SetWindowMeta`, `SetNoteText`, `SetColumnMeta` et `SetPlotSpec`
+//! remplacent leur cible entière, à l'image de `SetCells` qui remplace une
+//! plage entière plutôt que cellule par cellule. Aucune de ces quatre
+//! commandes n'est **structurelle** au sens de [`Command::is_structural`] :
+//! elles ne changent ni la forme de l'arbre ni l'ordre des nœuds, seulement
+//! le contenu d'un nœud existant — même nature que `SetColumnType`, qui
+//! remplace elle aussi un contenu en bloc sans toucher à la structure.
 
-use plotyx_core::{Column, ColumnType, NodeId, Tree, ValueBlock};
+use plotyx_core::{Column, ColumnMeta, ColumnType, NodeId, Tree, ValueBlock, WindowMeta};
+use plotyx_plot::PlotSpec;
 
-/// Une des huit mutations du modèle exprimables par l'utilisateur.
+/// Une des mutations du modèle exprimables par l'utilisateur.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     /// Écrit `values` dans `column` à partir de la ligne `start`, en
@@ -92,6 +116,117 @@ pub enum Command {
         /// Nombre de lignes supprimées.
         count: usize,
     },
+
+    /// Ajoute un dossier en fin de `parent`. Contrairement aux fenêtres, un
+    /// dossier n'a pas de nom automatique dans `plotyx-core`
+    /// (`Project::add_folder` prend `name` obligatoire) : cette commande ne
+    /// le rend donc pas optionnel non plus.
+    AddFolder {
+        /// Dossier d'accueil.
+        parent: NodeId,
+        /// Nom du dossier.
+        name: String,
+    },
+    /// Ajoute un classeur muni d'une feuille « Sheet1 ». `name: None` →
+    /// premier « BookN » libre.
+    AddWorkbook {
+        /// Dossier d'accueil.
+        parent: NodeId,
+        /// Nom demandé, ou nom automatique.
+        name: Option<String>,
+    },
+    /// Ajoute un classeur **sans** feuille. `name: None` → premier « BookN »
+    /// libre. Distincte d'`AddWorkbook` : un classeur vide n'a pas la même
+    /// entrée d'historique à annuler (pas de feuille « Sheet1 » à recréer),
+    /// et un appelant qui veut construire ses propres feuilles ne doit pas
+    /// avoir à défaire celle qu'`AddWorkbook` aurait imposée.
+    AddEmptyWorkbook {
+        /// Dossier d'accueil.
+        parent: NodeId,
+        /// Nom demandé, ou nom automatique.
+        name: Option<String>,
+    },
+    /// Ajoute une feuille en fin de classeur. `name: None` → premier
+    /// « SheetN » libre dans ce classeur.
+    AddWorksheet {
+        /// Classeur d'accueil.
+        book: NodeId,
+        /// Nom demandé, ou nom automatique.
+        name: Option<String>,
+    },
+    /// Ajoute un graphe portant `spec`. `name: None` → premier « GraphN »
+    /// libre. `spec` est obligatoire, comme dans `Project::add_graph` : un
+    /// graphe sans spec ne décrit rien de plus qu'une fenêtre vide, autant le
+    /// rendre explicite ici aussi (`PlotSpec::default()` pour un graphe
+    /// vide).
+    AddGraph {
+        /// Dossier d'accueil.
+        parent: NodeId,
+        /// Nom demandé, ou nom automatique.
+        name: Option<String>,
+        /// Description du graphe.
+        spec: PlotSpec,
+    },
+    /// Ajoute une matrice. `name: None` → premier « MBookN » libre.
+    AddMatrix {
+        /// Dossier d'accueil.
+        parent: NodeId,
+        /// Nom demandé, ou nom automatique.
+        name: Option<String>,
+    },
+    /// Ajoute une note portant `text`. `name: None` → premier « NoteN » libre.
+    AddNote {
+        /// Dossier d'accueil.
+        parent: NodeId,
+        /// Nom demandé, ou nom automatique.
+        name: Option<String>,
+        /// Texte initial.
+        text: String,
+    },
+    /// Supprime un nœud quelconque et toute sa descendance — dossier,
+    /// classeur, feuille, colonne, graphe, matrice ou note.
+    /// `Project::remove` est déjà générique sur `NodeId` : cette commande
+    /// n'a donc pas besoin d'une variante par nature, contrairement aux
+    /// commandes de création (voir la doc de tête de ce module). Ce que
+    /// devient une fenêtre ouverte sur le nœud supprimé est une décision
+    /// d'UI, hors du périmètre de cette commande.
+    RemoveNode {
+        /// Nœud à supprimer, avec sa descendance.
+        id: NodeId,
+    },
+
+    /// Remplace les métadonnées d'une fenêtre (classeur, graphe, matrice,
+    /// note) en bloc.
+    SetWindowMeta {
+        /// Fenêtre visée.
+        id: NodeId,
+        /// Nouvelles métadonnées.
+        meta: WindowMeta,
+    },
+    /// Remplace le texte d'une note.
+    SetNoteText {
+        /// Note visée.
+        id: NodeId,
+        /// Nouveau texte.
+        text: String,
+    },
+    /// Remplace les métadonnées d'une colonne (rôle de tracé, unité, nom
+    /// long, commentaire, format d'affichage) en bloc.
+    SetColumnMeta {
+        /// Colonne visée.
+        column: NodeId,
+        /// Nouvelles métadonnées.
+        meta: ColumnMeta,
+    },
+    /// Remplace le `PlotSpec` d'un graphe existant, en bloc — pas d'édition
+    /// par sous-champ (série, axe, légende) : voir la doc de tête de ce
+    /// module.
+    SetPlotSpec {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Nouvelle description du graphe.
+        spec: PlotSpec,
+    },
 }
 
 impl Command {
@@ -132,19 +267,56 @@ impl Command {
             Command::DeleteRows { count, .. } => {
                 format!("Supprimer {count} {}", rows_word(*count))
             }
+            Command::AddFolder { name, .. } => format!("Ajouter le dossier {name}"),
+            Command::AddWorkbook { .. } => "Ajouter un classeur".to_string(),
+            Command::AddEmptyWorkbook { .. } => "Ajouter un classeur vide".to_string(),
+            Command::AddWorksheet { .. } => "Ajouter une feuille".to_string(),
+            Command::AddGraph { .. } => "Ajouter un graphe".to_string(),
+            Command::AddMatrix { .. } => "Ajouter une matrice".to_string(),
+            Command::AddNote { .. } => "Ajouter une note".to_string(),
+            Command::RemoveNode { id } => match name_of(tree, *id) {
+                Some(name) => format!("Supprimer {name}"),
+                None => "Supprimer".to_string(),
+            },
+            Command::SetWindowMeta { id, .. } => match name_of(tree, *id) {
+                Some(name) => format!("Modifier les propriétés de {name}"),
+                None => "Modifier les propriétés de la fenêtre".to_string(),
+            },
+            Command::SetNoteText { id, .. } => match name_of(tree, *id) {
+                Some(name) => format!("Modifier le texte de {name}"),
+                None => "Modifier le texte de la note".to_string(),
+            },
+            Command::SetColumnMeta { column, .. } => match name_of(tree, *column) {
+                Some(name) => format!("Modifier les métadonnées de {name}"),
+                None => "Modifier les métadonnées de la colonne".to_string(),
+            },
+            Command::SetPlotSpec { graph, .. } => match name_of(tree, *graph) {
+                Some(name) => format!("Modifier le graphe {name}"),
+                None => "Modifier le graphe".to_string(),
+            },
         }
     }
 }
 
 impl Command {
-    /// Vrai pour les quatre commandes qui touchent la **structure** (arbre,
-    /// noms, ordre) plutôt que le **contenu** d'une colonne — voir la
-    /// doctrine des deux natures en tête de `history.rs`. `History::execute`
-    /// s'en sert pour décider si `Entry::Structural` a besoin d'un
-    /// instantané complet de l'arbre (structure) ou si un simple delta
-    /// suffit (données) : c'est exactement la distinction qui a fait
-    /// diverger le coût d'une commande de données de la taille du projet
-    /// (D3, `guide-de-correction-robustesse.md`).
+    /// Vrai pour les commandes qui touchent la **structure** (arbre, noms,
+    /// ordre, apparition ou disparition de nœuds) plutôt que le **contenu**
+    /// d'un nœud existant — voir la doctrine des deux natures en tête de
+    /// `history.rs`. `History::execute` s'en sert pour décider si
+    /// `Entry::Structural` a besoin d'un instantané complet de l'arbre
+    /// (structure) ou si un simple delta suffit (données) : c'est exactement
+    /// la distinction qui a fait diverger le coût d'une commande de données
+    /// de la taille du projet (D3, `guide-de-correction-robustesse.md`).
+    ///
+    /// Les huit commandes de création/suppression de nœud (`AddFolder`,
+    /// `AddWorkbook`, `AddEmptyWorkbook`, `AddWorksheet`, `AddGraph`,
+    /// `AddMatrix`, `AddNote`, `RemoveNode`) rejoignent `AddColumn` et
+    /// `DeleteColumn` ici, pour la même raison qu'elles : elles changent la
+    /// forme de l'arbre. `SetWindowMeta`, `SetNoteText`, `SetColumnMeta` et
+    /// `SetPlotSpec` n'y sont **pas** : elles remplacent le contenu d'un nœud
+    /// déjà en place, sans toucher à sa position ni à celle d'aucun autre —
+    /// même nature que `SetColumnType`, qui reste côté données bien qu'il
+    /// remplace, lui aussi, tout un contenu en bloc.
     pub fn is_structural(&self) -> bool {
         matches!(
             self,
@@ -152,6 +324,14 @@ impl Command {
                 | Command::DeleteColumn { .. }
                 | Command::Rename { .. }
                 | Command::Move { .. }
+                | Command::AddFolder { .. }
+                | Command::AddWorkbook { .. }
+                | Command::AddEmptyWorkbook { .. }
+                | Command::AddWorksheet { .. }
+                | Command::AddGraph { .. }
+                | Command::AddMatrix { .. }
+                | Command::AddNote { .. }
+                | Command::RemoveNode { .. }
         )
     }
 }

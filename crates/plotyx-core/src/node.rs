@@ -45,7 +45,7 @@ pub enum NodeKind {
     },
     /// Colonne de données (le nom vit dans le nœud, pas dans la `Column`).
     Column(Column),
-    /// Graphe : porte son contenu de tracé (phase R3, `docs/newarchitecture/roadmap-rendu.md`).
+    /// Graphe : porte son contenu de tracé (phase R3, `docs/archive/newarchitecture/roadmap-rendu.md`).
     Graph {
         /// Métadonnées de fenêtre.
         meta: WindowMeta,
@@ -55,10 +55,11 @@ pub enum NodeKind {
         /// colonne laisse le graphe intact, la supprimer produit une
         /// référence brisée détectable à la résolution
         /// (`crate::resolve::resolve_spec`), jamais une série
-        /// silencieusement vide. Ce champ n'est **jamais** modifié après
-        /// création — il n'y a pas de commande d'édition de spec dans ce
-        /// chantier (`roadmap-rendu.md` §3.2) — donc pas de mutateur ici,
-        /// contrairement à `meta` ([`Project::set_window_meta`]).
+        /// silencieusement vide. Remplaçable **en bloc** après création par
+        /// [`Project::set_plot_spec`] — jamais par sous-champ (pas plus
+        /// qu'une écriture de cellule ne modifie une seule valeur d'un bloc,
+        /// voir la doctrine de `Project::set_values`) : la mutation fine
+        /// (série, axe, légende) reste hors périmètre.
         spec: PlotSpec,
     },
     /// Matrice (contenu ajouté dans une tranche ultérieure).
@@ -229,6 +230,21 @@ impl NodeKind {
             NodeKind::Folder { .. }
             | NodeKind::Worksheet { .. }
             | NodeKind::Column(_)
+            | NodeKind::Unknown(_) => None,
+        }
+    }
+
+    /// Spec de tracé mutable, ou `None` si ce n'est pas un graphe. Utilisé
+    /// par [`Project::set_plot_spec`] pour remplacer le `PlotSpec` en bloc.
+    pub(crate) fn plot_spec_mut(&mut self) -> Option<&mut PlotSpec> {
+        match self {
+            NodeKind::Graph { spec, .. } => Some(spec),
+            NodeKind::Folder { .. }
+            | NodeKind::Workbook { .. }
+            | NodeKind::Worksheet { .. }
+            | NodeKind::Column(_)
+            | NodeKind::Matrix { .. }
+            | NodeKind::Note { .. }
             | NodeKind::Unknown(_) => None,
         }
     }

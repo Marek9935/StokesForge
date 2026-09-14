@@ -112,7 +112,9 @@ impl Project {
         // épuiser `u64`, donc cet `expect` ne se déclenche jamais en
         // pratique — ce que le linter du crate ne peut pas savoir.
         #[allow(clippy::expect_used)]
-        let id = ids.next().expect("le premier identifiant ne peut pas être épuisé");
+        let id = ids
+            .next()
+            .expect("le premier identifiant ne peut pas être épuisé");
         let root = Node::new_unchecked(
             id,
             name,
@@ -313,11 +315,14 @@ impl Project {
     /// de fabriquer un défaut que personne n'a demandé. Un appelant qui veut
     /// vraiment un graphe vide passe `PlotSpec::default()`.
     ///
-    /// C'est aussi la **seule** façon de doter un graphe d'un spec : il n'y a
-    /// pas de commande d'édition dans ce chantier
-    /// (`docs/newarchitecture/roadmap-rendu.md` §3.2) — le spec se construit
-    /// ici, une fois, jamais modifié ensuite.
-    pub fn add_graph(&mut self, parent: NodeId, name: Option<&str>, spec: PlotSpec) -> CoreResult<NodeId> {
+    /// [`Project::set_plot_spec`] remplace ensuite le spec d'un graphe déjà
+    /// créé, toujours en bloc.
+    pub fn add_graph(
+        &mut self,
+        parent: NodeId,
+        name: Option<&str>,
+        spec: PlotSpec,
+    ) -> CoreResult<NodeId> {
         let name = self.window_name(name, "Graph");
         let index = self.tree.children(parent)?.len();
         self.insert_node(
@@ -447,6 +452,28 @@ impl Project {
             .note_text_mut()
             .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas une note")))?;
         Ok(std::mem::replace(slot, text.to_string()))
+    }
+
+    /// Remplace le `PlotSpec` d'un graphe existant, **en bloc** — jamais par
+    /// sous-champ (série, axe, légende) : même logique que
+    /// [`Project::set_values`], qui remplace une plage entière plutôt que
+    /// cellule par cellule. Rend le précédent. `Err(Structure)` si `id` n'est
+    /// pas un graphe.
+    pub fn set_plot_spec(&mut self, id: NodeId, spec: PlotSpec) -> CoreResult<PlotSpec> {
+        let node = self.tree.get(id)?;
+        if !matches!(node.kind(), NodeKind::Graph { .. }) {
+            return Err(CoreError::Structure(format!(
+                "{id} n'est pas un graphe mais {}",
+                node.kind().with_article()
+            )));
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        let slot = tree
+            .node_mut(id)?
+            .kind_mut()
+            .plot_spec_mut()
+            .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas un graphe")))?;
+        Ok(std::mem::replace(slot, spec))
     }
 
     // -- données --
@@ -858,13 +885,16 @@ impl Project {
             .iter()
             .copied()
             .filter(|id| {
-                self.tree.node(*id).and_then(Node::as_column).is_some_and(|column| {
-                    if allow_append {
-                        at <= column.len()
-                    } else {
-                        at < column.len()
-                    }
-                })
+                self.tree
+                    .node(*id)
+                    .and_then(Node::as_column)
+                    .is_some_and(|column| {
+                        if allow_append {
+                            at <= column.len()
+                        } else {
+                            at < column.len()
+                        }
+                    })
             })
             .collect())
     }
