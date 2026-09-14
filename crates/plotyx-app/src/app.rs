@@ -73,7 +73,7 @@
 //!    compris [`Tab::ProjectManager`].
 //! 2. **Vraie fenêtre OS séparée** ([`PlotyxApp::pm_detached`],
 //!    [`PlotyxApp::show_detached_project_manager`]) : `egui::Context::
-//!    show_viewport_immediate` ouvre un vrai viewport natif, déplaçable sur
+//!    show_viewport_deferred` ouvre un vrai viewport natif, déplaçable sur
 //!    un autre écran — ce que le flottant `egui_dock` ne peut pas faire, lui
 //!    qui reste borné à la fenêtre OS principale. Quand ce mode est actif,
 //!    l'onglet [`Tab::ProjectManager`] est retiré du `DockState`
@@ -86,6 +86,21 @@
 //!    compositeur placer la fenêtre), donc n'en souffre pas directement, mais
 //!    la limite vaut d'être connue avant d'y ajouter un jour une position
 //!    mémorisée.
+//!
+//!    **`show_viewport_deferred`, pas `_immediate`** : constaté
+//!    interactivement (Fedora/GNOME/Wayland, Mutter), la fenêtre détachée via
+//!    `show_viewport_immediate` restait draggable mais visuellement confinée
+//!    au rectangle de la fenêtre mère, même réduite — pas seulement
+//!    l'absence de positionnement absolu ci-dessus, autre chose empêchait la
+//!    fenêtre de sortir du cadre. `show_viewport_immediate` documente
+//!    lui-même « pause the current viewport and render the child viewport in
+//!    its own window » (rendu couplé des deux fenêtres), et `egui`
+//!    recommande explicitement `show_viewport_deferred` pour une vraie
+//!    fenêtre indépendante, repeinte indépendamment de la fenêtre parente —
+//!    un candidat plausible pour ce symptôme, **pas une preuve**. Détail du
+//!    choix, de l'incertitude assumée et du schéma de synchronisation
+//!    (`ProjectManagerViewModel`, `DetachedProjectManagerRequests`) dans la
+//!    doc de tête de [`PlotyxApp::show_detached_project_manager`].
 //!
 //! # Sélecteur de fichiers natif
 //!
@@ -130,6 +145,7 @@
 //! du script n'apparaîtrait qu'au prochain mouvement de souris.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
@@ -249,6 +265,20 @@ pub struct PlotyxApp {
     /// la doc de tête du module, § détachement). Dans cet état, `dock_state`
     /// ne porte plus `Tab::ProjectManager` du tout.
     pm_detached: bool,
+    /// Ce que la fenêtre OS détachée du Project Manager peint, resynchronisé
+    /// depuis `self.state` à chaque image par
+    /// [`PlotyxApp::show_detached_project_manager`] — voir sa doc de tête.
+    /// `Arc<Mutex<_>>` uniquement parce que le callback `show_viewport_deferred`
+    /// l'exige (`Fn` + `Send + Sync + 'static`, pas de capture de `&mut
+    /// self`) ; ce n'est **pas** `AppState` elle-même derrière un verrou,
+    /// seulement ce strict sous-ensemble.
+    pm_view_model: Arc<Mutex<ProjectManagerViewModel>>,
+    /// Ce que la fenêtre OS détachée du Project Manager écrit (clics
+    /// d'ouverture, demande de réattachement), drainé chaque image par
+    /// [`PlotyxApp::ui`] — même rôle que `open_requests`/`actions` pour le
+    /// reste du banc, juste posé par un callback différé plutôt que collecté
+    /// en direct.
+    pm_requests: Arc<Mutex<DetachedProjectManagerRequests>>,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
     /// (mécanisme de vérification, voir [`PlotyxApp::screenshot`]).
     screenshot: Option<std::path::PathBuf>,
@@ -258,6 +288,36 @@ pub struct PlotyxApp {
     autoquit: Option<Duration>,
     /// Instant du premier rendu, d'où se mesure le délai d'auto-fermeture.
     first_frame: Option<Instant>,
+}
+
+/// Ce que la fenêtre OS détachée du Project Manager a besoin de peindre —
+/// strictement ça, et rien de plus. Voir la doc de tête de
+/// [`PlotyxApp::show_detached_project_manager`] pour pourquoi ce détour
+/// plutôt que de mettre `AppState` entière derrière un verrou.
+#[derive(Debug, Default, Clone)]
+struct ProjectManagerViewModel {
+    /// Copie de [`AppState::project_tree`], resynchronisée à chaque image
+    /// par [`PlotyxApp::show_detached_project_manager`] avant l'appel à
+    /// `show_viewport_deferred` — `AppState` reste la seule source de
+    /// vérité, ceci n'en est qu'un instantané pour le callback différé.
+    tree: Vec<ProjectTreeNode>,
+}
+
+/// Ce que la fenêtre OS détachée du Project Manager écrit, pour que la
+/// boucle principale (seule à porter `&mut AppState` et `&mut DockState`)
+/// les applique après le rendu — même schéma que les `open_requests`/
+/// `actions` locaux à [`PlotyxApp::ui`], juste posés par un callback différé
+/// (potentiellement rappelé à une image où la fenêtre mère ne peint pas)
+/// plutôt que collectés en direct pendant la peinture.
+#[derive(Debug, Default)]
+struct DetachedProjectManagerRequests {
+    /// Onglets demandés par un clic dans l'arbre depuis la dernière
+    /// vidange ; [`PlotyxApp::ui`] les transfère dans son propre
+    /// `open_requests` puis les vide.
+    open: Vec<Tab>,
+    /// Vrai si le bouton « Réattacher » ou la fermeture de la fenêtre OS a
+    /// été actionné depuis la dernière vidange.
+    reattach: bool,
 }
 
 impl PlotyxApp {
@@ -310,6 +370,8 @@ impl PlotyxApp {
             graph_views: HashMap::new(),
             maximized_tab: None,
             pm_detached: false,
+            pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
+            pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             autoquit,
             first_frame: None,
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
@@ -582,41 +644,114 @@ impl PlotyxApp {
     }
 
     /// Peint le Project Manager dans sa propre fenêtre OS native, via un
-    /// viewport `eframe`/`egui` immédiat — voir la doc de tête du module,
+    /// viewport `eframe`/`egui` **différé** — voir la doc de tête du module,
     /// § détachement.
     ///
-    /// `show_viewport_immediate` (plutôt que `_deferred`) est le choix le
-    /// plus simple pour ce panneau : il n'anime rien en continu, le coût
-    /// d'un repaint couplé entre les deux fenêtres (documenté par
-    /// `egui::Context::show_viewport_immediate`) est négligeable ici.
-    fn show_detached_project_manager(&mut self, ctx: &egui::Context, open_requests: &mut Vec<Tab>) {
-        let mut should_reattach = false;
-        let state = &self.state;
-        ctx.show_viewport_immediate(
+    /// # Pourquoi `show_viewport_deferred`, pas `_immediate`
+    ///
+    /// Ce module utilisait `show_viewport_immediate` jusqu'ici — le choix le
+    /// plus simple, jugé suffisant tant que ce panneau n'anime rien en
+    /// continu. Constat interactif de l'utilisateur (Fedora/GNOME/Wayland,
+    /// compositeur Mutter) : la fenêtre détachée était bien draggable, mais
+    /// restait **confinée visuellement au rectangle de la fenêtre mère**,
+    /// même celle-ci réduite (pas plein écran) — pas seulement l'absence de
+    /// positionnement absolu propre à Wayland (déjà documentée ci-dessus
+    /// pour `rfd`), autre chose empêchait la fenêtre de sortir du cadre.
+    /// `egui::Context::show_viewport_immediate` documente lui-même : « This
+    /// call will pause the current viewport and render the child viewport
+    /// in its own window » — ce couplage de rendu synchronisé entre les deux
+    /// fenêtres est un candidat plausible pour mal interagir avec le modèle
+    /// de frame de Wayland. `egui::Context::show_viewport_deferred` est la
+    /// forme que la doc `egui` recommande explicitement pour une vraie
+    /// fenêtre indépendante (« To avoid this, use show_viewport_deferred
+    /// instead »), repeinte indépendamment de la fenêtre parente.
+    ///
+    /// **C'est un test, pas une garantie.** Rien ne prouve que le symptôme
+    /// observé côté Mutter vienne de ce couplage de rendu plutôt que d'autre
+    /// chose (un comportement du compositeur vis-à-vis des sous-fenêtres en
+    /// général, par exemple). Si l'utilisateur constate après coup que la
+    /// fenêtre détachée reste toujours confinée, ce sera à documenter comme
+    /// limite connue — à côté de la réserve Wayland déjà notée pour la
+    /// position — plutôt qu'à retenter une autre bascule sans piste
+    /// nouvelle.
+    ///
+    /// # Callback `Fn`, pas de `&mut self`
+    ///
+    /// `show_viewport_deferred` exige `impl Fn(&mut Ui, ViewportClass) +
+    /// Send + Sync + 'static` : pas de capture de `&mut self`, pas même
+    /// d'emprunt classique de `AppState` — le callback peut survivre à cette
+    /// image et être rappelé seul, à une image ultérieure de la fenêtre
+    /// détachée pendant que la fenêtre mère dort. Mettre `AppState` entière
+    /// derrière un verrou pour lui donner ce dont elle a besoin
+    /// déborderait largement du problème à résoudre (dispatch, boucle de
+    /// rendu principale) ; à la place, seul le strict nécessaire au panneau
+    /// voyage :
+    ///
+    /// - [`ProjectManagerViewModel`] (l'arbre du projet) est resynchronisé
+    ///   ici depuis `self.state` — la vraie source de vérité — à chaque
+    ///   image, **avant** l'appel à `show_viewport_deferred` ;
+    /// - [`DetachedProjectManagerRequests`] recueille dans l'autre sens ce
+    ///   que le callback produit (clics d'ouverture, réattachement demandé) ;
+    ///   [`PlotyxApp::ui`] la draine juste après cet appel pour produire les
+    ///   mêmes `open_requests`/`Action` qu'avant, sans dupliquer la logique
+    ///   de [`PlotyxApp::open_tab`] ni appeler
+    ///   [`PlotyxApp::reattach_project_manager`] depuis l'intérieur d'un
+    ///   callback qui n'a pas accès à `&mut self`.
+    fn show_detached_project_manager(&mut self, ctx: &egui::Context) {
+        {
+            let mut model = self
+                .pm_view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            model.tree = self.state.project_tree();
+        }
+        let view_model = Arc::clone(&self.pm_view_model);
+        let requests = Arc::clone(&self.pm_requests);
+        ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of("plotyx_project_manager_window"),
             egui::ViewportBuilder::default()
                 .with_title("PlotYx — Project Manager")
                 .with_inner_size([PROJECT_MANAGER_WIDTH + 40.0, 480.0]),
-            |ui, _class| {
+            move |ui, _class| {
+                let mut opened = Vec::new();
                 egui::CentralPanel::default().show(ui, |ui| {
                     if ui.button("Réattacher au dock principal").clicked() {
-                        should_reattach = true;
+                        requests
+                            .lock()
+                            .unwrap_or_else(|err| err.into_inner())
+                            .reattach = true;
                     }
                     ui.separator();
-                    project_manager_contents(ui, state, open_requests);
+                    // Lecture d'une copie plutôt que du verrou tenu pendant
+                    // toute la peinture : `project_manager_contents_from_tree`
+                    // ne doit pas retenir `view_model` verrouillé le temps
+                    // d'un `ScrollArea` entier.
+                    let tree = view_model
+                        .lock()
+                        .unwrap_or_else(|err| err.into_inner())
+                        .tree
+                        .clone();
+                    project_manager_contents_from_tree(ui, &tree, &mut opened);
                 });
+                if !opened.is_empty() {
+                    requests
+                        .lock()
+                        .unwrap_or_else(|err| err.into_inner())
+                        .open
+                        .append(&mut opened);
+                }
                 // L'utilisateur a cliqué le bouton de fermeture de cette
                 // fenêtre OS : on la referme proprement en la réattachant au
                 // dock plutôt que de laisser le panneau disparaître sans
                 // recours.
                 if ui.ctx().input(|input| input.viewport().close_requested()) {
-                    should_reattach = true;
+                    requests
+                        .lock()
+                        .unwrap_or_else(|err| err.into_inner())
+                        .reattach = true;
                 }
             },
         );
-        if should_reattach {
-            self.reattach_project_manager();
-        }
     }
 
     /// Dépose une capture de la fenêtre dans le fichier nommé par
@@ -718,7 +853,24 @@ impl eframe::App for PlotyxApp {
         self.status_bar(ui);
 
         if self.pm_detached {
-            self.show_detached_project_manager(&ctx, &mut open_requests);
+            self.show_detached_project_manager(&ctx);
+            // Vidange ce que la fenêtre OS détachée a écrit depuis la
+            // dernière image (voir la doc de tête de
+            // `show_detached_project_manager`) — même moment que le reste de
+            // `open_requests`, avant de peindre la `DockArea`/le panneau
+            // maximisé : muter `dock_state` en plein parcours l'invaliderait
+            // tout autant que pour les clics du Project Manager docké.
+            let should_reattach = {
+                let mut requests = self
+                    .pm_requests
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner());
+                open_requests.append(&mut requests.open);
+                std::mem::take(&mut requests.reattach)
+            };
+            if should_reattach {
+                self.reattach_project_manager();
+            }
         }
 
         // Emprunts disjoints des champs (édition 2021) : la disposition et
@@ -870,11 +1022,26 @@ fn tab_contents(
 /// dock normal, la zone de maximisation, et la fenêtre OS séparée — trois
 /// contextes, un seul rendu à tenir en accord.
 fn project_manager_contents(ui: &mut egui::Ui, state: &AppState, open_requests: &mut Vec<Tab>) {
+    let tree = state.project_tree();
+    project_manager_contents_from_tree(ui, &tree, open_requests);
+}
+
+/// Le corps de [`project_manager_contents`], à partir d'un arbre déjà
+/// construit plutôt que d'un `&AppState` vivant. Seul le callback
+/// `show_viewport_deferred` de
+/// [`PlotyxApp::show_detached_project_manager`] a besoin de cette forme :
+/// il ne porte qu'une copie de l'arbre ([`ProjectManagerViewModel`]), jamais
+/// `AppState` elle-même — voir la doc de tête de cette méthode.
+fn project_manager_contents_from_tree(
+    ui: &mut egui::Ui,
+    tree: &[ProjectTreeNode],
+    open_requests: &mut Vec<Tab>,
+) {
     ui.heading("Project Manager");
     ui.separator();
     egui::ScrollArea::vertical().show(ui, |ui| {
-        for node in state.project_tree() {
-            project_tree_node_ui(ui, &node, open_requests);
+        for node in tree {
+            project_tree_node_ui(ui, node, open_requests);
         }
     });
 }

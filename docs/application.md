@@ -106,12 +106,43 @@ Deux mécanismes, tous deux disponibles :
   `true`).
 - **Vraie fenêtre OS séparée** : un bouton du menu « Fenêtre » ouvre le
   contenu du Project Manager dans un vrai viewport natif `eframe`
-  (`egui::Context::show_viewport_immediate`), déplaçable sur un autre écran —
+  (`egui::Context::show_viewport_deferred`), déplaçable sur un autre écran —
   ce que le flottant `egui_dock` ne peut pas faire, lui qui reste borné à la
   fenêtre OS principale. Dans ce mode, `Tab::ProjectManager` est retiré du
   `DockState` (`PlotyxApp::pm_detached`) pour ne jamais être montré à deux
   endroits à la fois ; fermer la fenêtre OS ou cliquer « Réattacher » le
   repousse proprement dans le dock.
+
+  **`show_viewport_deferred`, pas `_immediate`** : ce mécanisme utilisait
+  `show_viewport_immediate` jusqu'à ce que l'utilisateur constate,
+  interactivement sur Fedora/GNOME/Wayland (compositeur Mutter), que la
+  fenêtre détachée restait draggable mais visuellement **confinée au
+  rectangle de la fenêtre mère**, même celle-ci réduite — pas seulement
+  l'absence de positionnement absolu déjà connue pour Wayland (voir
+  ci-dessous), autre chose empêchait la fenêtre de sortir du cadre.
+  `show_viewport_immediate` documente lui-même un rendu couplé entre les
+  deux fenêtres (« pause the current viewport and render the child viewport
+  in its own window ») ; `egui` recommande explicitement
+  `show_viewport_deferred` pour une vraie fenêtre indépendante, repeinte
+  indépendamment de la fenêtre parente — un candidat plausible pour ce
+  symptôme, **pas une preuve**. Si le symptôme persiste malgré ce
+  changement, ce sera à documenter ici comme limite connue plutôt qu'à
+  retenter une autre bascule sans piste nouvelle.
+
+  Contrainte technique de cette forme : le callback est `Fn(&mut Ui,
+  ViewportClass) + Send + Sync + 'static`, donc sans capture de `&mut self`
+  ni d'emprunt classique de `AppState` (il peut être rappelé seul, à une
+  image où la fenêtre mère ne peint pas). Plutôt que de mettre `AppState`
+  entière derrière un verrou, `PlotyxApp` porte deux petites structures
+  dédiées derrière un `Arc<Mutex<_>>` chacune, décrites dans la doc de tête
+  de `PlotyxApp::show_detached_project_manager` (`crates/plotyx-app/src/
+  app.rs`) : `ProjectManagerViewModel` (une copie de l'arbre du projet,
+  resynchronisée depuis `self.state` à chaque image avant l'appel) pour ce
+  que la fenêtre détachée lit, et `DetachedProjectManagerRequests` (clics
+  d'ouverture, demande de réattachement) pour ce qu'elle écrit — drainée par
+  `PlotyxApp::ui` juste après, qui produit à partir de là les mêmes
+  `open_requests`/`Action` qu'avant, sans dupliquer `PlotyxApp::open_tab` ni
+  appeler `reattach_project_manager` depuis l'intérieur du callback.
 
   **Réserve Wayland connue**, sur le même modèle que celle déjà documentée
   pour `rfd`/`xdg-portal` : le compositeur peut ignorer une position de
