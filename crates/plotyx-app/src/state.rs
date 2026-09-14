@@ -72,7 +72,11 @@ pub enum Action {
     Save,
     /// Recharge le projet depuis le fichier courant.
     Load,
-    /// Sélectionne la feuille affichée dans la grille.
+    /// Sélectionne la feuille affichée dans la grille du classeur qui la
+    /// contient (le classeur est déduit du parent de `id` dans l'arbre) — un
+    /// classeur affiché dans son propre onglet [`crate::app`], la sélection
+    /// d'une feuille dans l'un n'affecte jamais celle d'un autre classeur
+    /// ouvert simultanément.
     SelectSheet(NodeId),
     /// Valide la saisie d'une cellule : le texte tel que tapé, à convertir
     /// selon le type de la colonne.
@@ -84,21 +88,37 @@ pub enum Action {
         /// Texte saisi, non converti.
         text: String,
     },
-    /// Ajoute une colonne en fin de la feuille affichée.
-    AddColumn,
-    /// Insère `count` lignes à `at` dans la feuille affichée.
+    /// Ajoute une colonne en fin de `sheet`.
+    AddColumn {
+        /// Feuille visée — explicite, puisque plusieurs classeurs peuvent
+        /// être affichés simultanément, chacun dans son propre onglet.
+        sheet: NodeId,
+    },
+    /// Insère `count` lignes à `at` dans `sheet`.
     InsertRows {
+        /// Feuille visée.
+        sheet: NodeId,
         /// Ligne d'insertion.
         at: usize,
         /// Nombre de lignes insérées.
         count: usize,
     },
-    /// Supprime `count` lignes à `at` dans la feuille affichée.
+    /// Supprime `count` lignes à `at` dans `sheet`.
     DeleteRows {
+        /// Feuille visée.
+        sheet: NodeId,
         /// Première ligne supprimée.
         at: usize,
         /// Nombre de lignes supprimées.
         count: usize,
+    },
+    /// Remplace le texte d'une note en bloc (perte de focus de l'éditeur,
+    /// comme [`Action::CommitCell`] pour une cellule de grille).
+    SetNoteText {
+        /// Note visée.
+        note: NodeId,
+        /// Nouveau texte.
+        text: String,
     },
     /// Lance le script actuellement dans la zone de saisie
     /// ([`AppState::script_source`]).
@@ -247,6 +267,62 @@ pub struct CellEdit {
     pub buffer: String,
 }
 
+/// Saisie en cours dans une note. Le pendant exact de [`CellEdit`] pour
+/// [`Tab::Note`](crate::app) : un seul tampon à la fois (voir la doc de
+/// [`AppState::note_editing`]), envoyé au modèle seulement à la validation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteEdit {
+    /// Note en cours de saisie.
+    pub note: NodeId,
+    /// Texte tapé jusqu'ici.
+    pub buffer: String,
+}
+
+/// Nature d'une fenêtre du [`ProjectTreeNode`] montré par le panneau Project
+/// Manager — le sous-ensemble de `NodeKind::is_window()` qui a une fenêtre à
+/// ouvrir côté UI (`Unknown` n'en a pas : rien à afficher pour une nature de
+/// nœud que ce lecteur ne comprend pas, invariant 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowKind {
+    /// Classeur — [`crate::app`] l'ouvre en `Tab::Book`.
+    Book,
+    /// Graphe — `Tab::Graph`.
+    Graph,
+    /// Matrice — `Tab::Matrix`.
+    Matrix,
+    /// Note — `Tab::Note`.
+    Note,
+}
+
+/// Un nœud tel que le panneau Project Manager le montre : un dossier
+/// dépliable, ou une fenêtre feuille cliquable. Construit par
+/// [`AppState::project_tree`], qui **s'arrête** à `Workbook`/`Graph`/
+/// `Matrix`/`Note` — jamais de descente dans les feuilles d'un classeur ni
+/// dans le contenu d'un graphe, ces natures sont des feuilles de cet arbre-là
+/// même si elles ne le sont pas de `Tree` (`Workbook` a des `Worksheet`
+/// enfants dans le modèle, mais aucun dans cette vue).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProjectTreeNode {
+    /// Dossier de rangement.
+    Folder {
+        /// Identifiant du dossier.
+        id: NodeId,
+        /// Nom affiché.
+        name: String,
+        /// Enfants ordonnés, dossiers et fenêtres mêlés — l'ordre de l'arbre.
+        children: Vec<ProjectTreeNode>,
+    },
+    /// Fenêtre cliquable, jamais développée davantage.
+    Window {
+        /// Identifiant de la fenêtre.
+        id: NodeId,
+        /// Nom affiché.
+        name: String,
+        /// Nature de la fenêtre.
+        kind: WindowKind,
+    },
+}
+
 /// L'état du banc d'essai : une poignée vers l'acteur, le dernier instantané
 /// reçu, ce qui est sélectionné, le chemin de fichier courant, le dernier
 /// message et la saisie en cours.
@@ -255,14 +331,21 @@ pub struct AppState {
     handle: SessionHandle,
     /// Dernier instantané reçu : figé, à rafraîchir après toute mutation.
     snapshot: Snapshot,
-    /// Feuille affichée dans la grille, si l'arbre en contient une.
-    selected_sheet: Option<NodeId>,
+    /// Feuille affichée dans la grille de chaque classeur **ouvert** —
+    /// `Workbook -> Worksheet` sélectionnée dans son propre onglet
+    /// [`crate::app::Tab::Book`]. Un classeur qui n'a pas d'entrée ici (ou
+    /// dont l'entrée est devenue invalide) retombe sur sa première feuille,
+    /// voir [`AppState::selected_sheet_in`] — la carte n'a donc jamais besoin
+    /// d'être pré-remplie.
+    selected_sheets: std::collections::HashMap<NodeId, NodeId>,
     /// Chemin du fichier de travail (saisi à la main, cf. `crate::app`).
     path: String,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
     /// Saisie de cellule en cours, s'il y en a une.
     editing: Option<CellEdit>,
+    /// Saisie de note en cours, s'il y en a une (voir [`NoteEdit`]).
+    note_editing: Option<NoteEdit>,
     /// Texte de la zone de script.
     script_source: String,
     /// Sortie de la dernière exécution de script, s'il y en a eu une.
@@ -292,21 +375,27 @@ pub struct AppState {
 type PendingScriptResult = (Option<Arc<ScriptEngine>>, Result<ScriptOutcome, String>);
 
 impl AppState {
-    /// Construit l'état depuis une poignée d'acteur ; sélectionne la première
-    /// feuille trouvée en parcours préfixe. `Err` seulement si l'acteur ne
-    /// répond pas — il n'y a alors rien à afficher du tout.
+    /// Construit l'état depuis une poignée d'acteur. `Err` seulement si
+    /// l'acteur ne répond pas — il n'y a alors rien à afficher du tout.
+    ///
+    /// Ne présélectionne aucune feuille : avec un classeur par onglet
+    /// (`crate::app::Tab::Book`), il n'y a plus de « la » grille à préparer
+    /// à l'ouverture — chaque onglet de classeur retombe sur sa première
+    /// feuille de lui-même ([`AppState::selected_sheet_in`]) dès qu'il
+    /// s'ouvre.
     ///
     /// Ne touche **jamais** à l'interpréteur Python : voir la section « Le
     /// script Python » en tête de ce module.
     pub fn new(handle: SessionHandle, path: String) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
-        let mut state = Self {
+        Ok(Self {
             handle,
             snapshot,
-            selected_sheet: None,
+            selected_sheets: std::collections::HashMap::new(),
             path,
             status: None,
             editing: None,
+            note_editing: None,
             script_source: String::new(),
             script_output: None,
             #[cfg(feature = "python")]
@@ -315,9 +404,7 @@ impl AppState {
             engine: None,
             #[cfg(feature = "python")]
             pending_script: None,
-        };
-        state.revalidate_selection();
-        Ok(state)
+        })
     }
 
     /// Dernier instantané reçu.
@@ -330,9 +417,30 @@ impl AppState {
         &self.snapshot.tree
     }
 
-    /// Feuille affichée, si l'arbre en contient une.
-    pub fn selected_sheet(&self) -> Option<NodeId> {
-        self.selected_sheet
+    /// Feuille affichée dans la grille du classeur `book` : la dernière
+    /// sélectionnée par [`Action::SelectSheet`] pour ce classeur si elle
+    /// existe encore et lui appartient toujours, sinon sa première feuille.
+    /// `None` seulement si `book` n'a plus aucune feuille (ou n'existe plus).
+    ///
+    /// Toujours recalculé, jamais mis en cache : c'est ce qui rend la carte
+    /// [`AppState::selected_sheets`](Self) auto-cicatrisante — un classeur
+    /// jamais explicitement sélectionné, ou dont la sélection a été rendue
+    /// invalide par une suppression, retombe de lui-même sur sa première
+    /// feuille au prochain appel, sans passage par [`AppState::refresh`].
+    pub fn selected_sheet_in(&self, book: NodeId) -> Option<NodeId> {
+        let tree = &self.snapshot.tree;
+        if let Some(&sheet) = self.selected_sheets.get(&book) {
+            if tree
+                .node(sheet)
+                .is_some_and(|node| node.kind().is_worksheet() && node.parent() == Some(book))
+            {
+                return Some(sheet);
+            }
+        }
+        tree.node(book)?.children().iter().copied().find(|id| {
+            tree.node(*id)
+                .is_some_and(|node| node.kind().is_worksheet())
+        })
     }
 
     /// Chemin du fichier de travail.
@@ -430,12 +538,9 @@ impl AppState {
         self.snapshot.history.can_redo
     }
 
-    /// Colonnes de la feuille affichée, dans l'ordre du modèle :
-    /// `(NodeId, nom, type)`. Vide s'il n'y a pas de feuille sélectionnée.
-    pub fn visible_columns(&self) -> Vec<(NodeId, String, ColumnType)> {
-        let Some(sheet) = self.selected_sheet else {
-            return Vec::new();
-        };
+    /// Colonnes de `sheet`, dans l'ordre du modèle : `(NodeId, nom, type)`.
+    /// Vide si `sheet` n'est pas (ou plus) une feuille de ce projet.
+    pub fn visible_columns(&self, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
         let Some(node) = self.snapshot.tree.node(sheet) else {
             return Vec::new();
         };
@@ -449,13 +554,11 @@ impl AppState {
             .collect()
     }
 
-    /// Nombre de lignes de la feuille affichée — le **maximum** des longueurs
-    /// de ses colonnes, pas la longueur de la première : une feuille n'est pas
-    /// un tableau rectangulaire. 0 s'il n'y a pas de feuille sélectionnée.
-    pub fn row_count(&self) -> usize {
-        self.selected_sheet
-            .and_then(|sheet| self.snapshot.tree.row_count(sheet).ok())
-            .unwrap_or(0)
+    /// Nombre de lignes de `sheet` — le **maximum** des longueurs de ses
+    /// colonnes, pas la longueur de la première : une feuille n'est pas un
+    /// tableau rectangulaire. 0 si `sheet` n'est pas (ou plus) une feuille.
+    pub fn row_count(&self, sheet: NodeId) -> usize {
+        self.snapshot.tree.row_count(sheet).unwrap_or(0)
     }
 
     /// Texte à afficher dans une cellule : [`MISSING_TEXT_DISPLAY`] pour une
@@ -552,8 +655,148 @@ impl AppState {
         });
     }
 
-    /// Les feuilles du projet, pour l'explorateur : `(NodeId, chemin
-    /// lisible)`, en ordre de parcours préfixe.
+    /// Saisie de note en cours, s'il y en a une. Le pendant exact de
+    /// [`AppState::editing`] pour une note — un seul tampon à la fois, pour
+    /// la même raison de principe (même si rien ici ne force la limite à un
+    /// seul tampon : une note n'est pas virtualisée comme une grille d'un
+    /// million de lignes, mais suivre la même convention garde `crate::app`
+    /// simple, un seul mécanisme d'édition différée à comprendre).
+    pub fn note_editing(&self) -> Option<&NoteEdit> {
+        self.note_editing.as_ref()
+    }
+
+    /// Saisie de note en cours, modifiable.
+    pub fn note_editing_mut(&mut self) -> Option<&mut NoteEdit> {
+        self.note_editing.as_mut()
+    }
+
+    /// Ouvre la saisie d'une note, tampon initialisé à son texte actuel (vide
+    /// si `note` n'est pas — ou plus — une note de ce projet).
+    pub fn begin_note_edit(&mut self, note: NodeId) {
+        let buffer = self.note_text(note).unwrap_or_default();
+        self.note_editing = Some(NoteEdit { note, buffer });
+    }
+
+    /// Abandonne la saisie de note en cours sans rien écrire.
+    pub fn cancel_note_edit(&mut self) {
+        self.note_editing = None;
+    }
+
+    /// Valide la saisie de note en cours (équivaut à [`Action::SetNoteText`]
+    /// sur le tampon). Sans effet s'il n'y a pas de saisie ouverte.
+    pub fn commit_note_edit(&mut self) {
+        let Some(edit) = self.note_editing.take() else {
+            return;
+        };
+        self.dispatch(Action::SetNoteText {
+            note: edit.note,
+            text: edit.buffer,
+        });
+    }
+
+    /// Les feuilles de `book`, dans l'ordre des onglets internes
+    /// [`crate::app::Tab::Book`] : `(NodeId, nom)`. Vide si `book` n'existe
+    /// plus ou n'est pas un classeur.
+    pub fn worksheets_of(&self, book: NodeId) -> Vec<(NodeId, String)> {
+        let tree = &self.snapshot.tree;
+        let Some(node) = tree.node(book) else {
+            return Vec::new();
+        };
+        node.children()
+            .iter()
+            .filter_map(|id| tree.node(*id).map(|sheet| (*id, sheet.name().to_string())))
+            .collect()
+    }
+
+    /// Les classeurs du projet, sous la forme `(identifiant, chemin
+    /// lisible)`. Le pendant exact de [`AppState::graphs`], pour la
+    /// disposition initiale de [`crate::app::PlotyxApp::new`] : ouvrir le
+    /// premier classeur du projet, comme le premier graphe l'était déjà.
+    pub fn books(&self) -> Vec<(NodeId, String)> {
+        let tree = &self.snapshot.tree;
+        tree.walk_all()
+            .into_iter()
+            .filter(|id| {
+                tree.node(*id)
+                    .is_some_and(|node| matches!(node.kind(), NodeKind::Workbook { .. }))
+            })
+            .map(|id| (id, self.readable_path(id)))
+            .collect()
+    }
+
+    /// Texte d'une note, ou `None` si `note` n'est pas (ou plus) une note de
+    /// ce projet.
+    pub fn note_text(&self, note: NodeId) -> Option<String> {
+        match self.snapshot.tree.node(note)?.kind() {
+            NodeKind::Note { text, .. } => Some(text.clone()),
+            _ => None,
+        }
+    }
+
+    /// L'arbre du projet tel que le panneau Project Manager le montre :
+    /// dossiers dépliables, feuilles cliquables (`Workbook`, `Graph`,
+    /// `Matrix`, `Note`) jamais développées davantage — voir la doc de tête
+    /// de [`ProjectTreeNode`]. Racine exclue (elle n'a pas de nom à afficher
+    /// comme nœud du panneau) : ses enfants directs sont la racine de
+    /// l'arbre rendu.
+    pub fn project_tree(&self) -> Vec<ProjectTreeNode> {
+        self.project_tree_children(self.snapshot.tree.root())
+    }
+
+    fn project_tree_children(&self, parent: NodeId) -> Vec<ProjectTreeNode> {
+        let tree = &self.snapshot.tree;
+        let Some(node) = tree.node(parent) else {
+            return Vec::new();
+        };
+        node.children()
+            .iter()
+            .filter_map(|id| {
+                let child = tree.node(*id)?;
+                let name = child.name().to_string();
+                match child.kind() {
+                    NodeKind::Folder { .. } => Some(ProjectTreeNode::Folder {
+                        id: *id,
+                        name,
+                        children: self.project_tree_children(*id),
+                    }),
+                    NodeKind::Workbook { .. } => Some(ProjectTreeNode::Window {
+                        id: *id,
+                        name,
+                        kind: WindowKind::Book,
+                    }),
+                    NodeKind::Graph { .. } => Some(ProjectTreeNode::Window {
+                        id: *id,
+                        name,
+                        kind: WindowKind::Graph,
+                    }),
+                    NodeKind::Matrix { .. } => Some(ProjectTreeNode::Window {
+                        id: *id,
+                        name,
+                        kind: WindowKind::Matrix,
+                    }),
+                    NodeKind::Note { .. } => Some(ProjectTreeNode::Window {
+                        id: *id,
+                        name,
+                        kind: WindowKind::Note,
+                    }),
+                    // `Worksheet`/`Column` : jamais rencontrés ici, enfants
+                    // d'un `Workbook`/`Worksheet` que ce parcours n'atteint
+                    // jamais (on s'arrête à `Workbook`). `Unknown` : pas de
+                    // fenêtre à ouvrir côté UI pour une nature non reconnue
+                    // (invariant 10) — le nœud existe toujours et sera
+                    // réécrit tel quel à la sauvegarde, mais le Project
+                    // Manager n'a rien à en montrer.
+                    NodeKind::Worksheet { .. } | NodeKind::Column(_) | NodeKind::Unknown(_) => None,
+                }
+            })
+            .collect()
+    }
+
+    /// Les feuilles du projet, pour les tests et les usages génériques :
+    /// `(NodeId, chemin lisible)`, en ordre de parcours préfixe. Le panneau
+    /// Project Manager ne s'en sert pas (il s'arrête à `Workbook`, voir
+    /// [`AppState::project_tree`]) ; cette méthode reste le pendant exact de
+    /// [`AppState::graphs`] pour qui a besoin de la liste à plat.
     ///
     /// Le chemin est reconstruit ici (« Book1 / Sheet1 ») plutôt qu'obtenu de
     /// `Project::path_of` : cette méthode vit sur `Project`, que l'UI ne
@@ -622,9 +865,10 @@ impl AppState {
             Action::Load => self.load(),
             Action::SelectSheet(id) => self.select_sheet(id),
             Action::CommitCell { column, row, text } => self.commit_cell(column, row, text),
-            Action::AddColumn => self.add_column(),
-            Action::InsertRows { at, count } => self.rows(at, count, true),
-            Action::DeleteRows { at, count } => self.rows(at, count, false),
+            Action::AddColumn { sheet } => self.add_column(sheet),
+            Action::InsertRows { sheet, at, count } => self.rows(sheet, at, count, true),
+            Action::DeleteRows { sheet, at, count } => self.rows(sheet, at, count, false),
+            Action::SetNoteText { note, text } => self.set_note_text(note, text),
             Action::RunScript => self.run_script(),
             Action::InterruptScript => self.interrupt_script(),
         }
@@ -690,23 +934,46 @@ impl AppState {
 
     // -- détail interne ----------------------------------------------------
 
-    /// Si la feuille sélectionnée a disparu (rechargement, suppression), en
-    /// choisit une autre ; `None` si l'arbre n'a aucune feuille.
+    /// Purge les sélections de feuille et les tampons de saisie devenus
+    /// périmés — un classeur, une feuille ou une colonne qui n'existe plus
+    /// dans le nouvel arbre (rechargement, suppression, y compris par un
+    /// autre client de l'acteur).
+    ///
+    /// Contrairement à l'ancienne sélection globale unique, `selected_sheets`
+    /// n'a pas besoin d'être **réaffectée** ici : [`AppState::
+    /// selected_sheet_in`] retombe de lui-même sur la première feuille d'un
+    /// classeur dont l'entrée a disparu (ou n'a jamais existé). Cette méthode
+    /// ne fait donc qu'écarter ce qui ne pointe plus rien de valide, pour ne
+    /// pas laisser grossir la carte avec des entrées mortes au fil des
+    /// rechargements.
     fn revalidate_selection(&mut self) {
         let tree = &self.snapshot.tree;
-        let still_valid = self
-            .selected_sheet
-            .is_some_and(|id| tree.node(id).is_some_and(|node| node.kind().is_worksheet()));
-        if still_valid {
-            return;
-        }
-        self.selected_sheet = tree.walk_all().into_iter().find(|id| {
-            tree.node(*id)
-                .is_some_and(|node| node.kind().is_worksheet())
+        self.selected_sheets.retain(|&book, &mut sheet| {
+            tree.node(book)
+                .is_some_and(|node| matches!(node.kind(), NodeKind::Workbook { .. }))
+                && tree
+                    .node(sheet)
+                    .is_some_and(|node| node.kind().is_worksheet() && node.parent() == Some(book))
         });
-        // Le tampon de saisie pointe un nœud de l'arbre précédent : il n'a
-        // plus de sens ici.
-        self.editing = None;
+        // Le tampon de saisie pointe une colonne de l'arbre précédent : s'il
+        // n'a plus de nœud colonne, il n'a plus de sens ici (typiquement, un
+        // rechargement : les identifiants n'ont aucun rapport avec ceux
+        // d'avant). S'il pointe toujours une colonne valide, on le laisse
+        // survivre — c'est le cas d'un `refresh` déclenché par une action qui
+        // ne touche pas la colonne en cours de saisie.
+        if let Some(edit) = &self.editing {
+            if tree.node(edit.column).and_then(Node::as_column).is_none() {
+                self.editing = None;
+            }
+        }
+        if let Some(edit) = &self.note_editing {
+            if !matches!(
+                tree.node(edit.note).map(Node::kind),
+                Some(NodeKind::Note { .. })
+            ) {
+                self.note_editing = None;
+            }
+        }
     }
 
     /// Enregistre un message informatif.
@@ -795,18 +1062,21 @@ impl AppState {
     }
 
     fn select_sheet(&mut self, id: NodeId) {
-        let is_sheet = self
-            .snapshot
-            .tree
-            .node(id)
-            .is_some_and(|node| node.kind().is_worksheet());
-        if is_sheet {
-            self.selected_sheet = Some(id);
-            self.editing = None;
-            self.status = None;
-        } else {
+        let node = self.snapshot.tree.node(id);
+        if !node.is_some_and(|node| node.kind().is_worksheet()) {
             self.fail(format!("{id} n'est pas une feuille de ce projet"));
+            return;
         }
+        // Une feuille est toujours l'enfant directe d'un classeur (le seul
+        // parent qu'`accepts_child` autorise) : c'est ce classeur, pas la
+        // feuille elle-même, qui est la clé de `selected_sheets`.
+        let Some(book) = node.and_then(Node::parent) else {
+            self.fail(format!("{id} n'a pas de classeur parent"));
+            return;
+        };
+        self.selected_sheets.insert(book, id);
+        self.editing = None;
+        self.status = None;
     }
 
     fn commit_cell(&mut self, column: NodeId, row: usize, text: String) {
@@ -871,11 +1141,7 @@ impl AppState {
         });
     }
 
-    fn add_column(&mut self) {
-        let Some(sheet) = self.selected_sheet else {
-            self.fail("Aucune feuille sélectionnée".to_string());
-            return;
-        };
+    fn add_column(&mut self, sheet: NodeId) {
         self.execute(Command::AddColumn {
             sheet,
             index: None,
@@ -884,18 +1150,25 @@ impl AppState {
         });
     }
 
-    /// Insertion (`insert`) ou suppression de lignes sur la feuille affichée.
-    fn rows(&mut self, at: usize, count: usize, insert: bool) {
-        let Some(sheet) = self.selected_sheet else {
-            self.fail("Aucune feuille sélectionnée".to_string());
-            return;
-        };
+    /// Insertion (`insert`) ou suppression de lignes sur `sheet`.
+    fn rows(&mut self, sheet: NodeId, at: usize, count: usize, insert: bool) {
         let command = if insert {
             Command::InsertRows { sheet, at, count }
         } else {
             Command::DeleteRows { sheet, at, count }
         };
         self.execute(command);
+    }
+
+    /// Remplace le texte d'une note, sauf s'il est déjà exactement celui-là —
+    /// le même garde-fou que [`AppState::commit_cell`] (B6/A9 option 1) :
+    /// traverser l'éditeur d'une note sans y taper une frappe ne doit pas
+    /// écrire une entrée d'historique pour rien.
+    fn set_note_text(&mut self, note: NodeId, text: String) {
+        if self.note_text(note).as_ref() == Some(&text) {
+            return;
+        }
+        self.execute(Command::SetNoteText { id: note, text });
     }
 
     /// Refuse d'exécuter un script : ce binaire n'embarque pas le pont Python

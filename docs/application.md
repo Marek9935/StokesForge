@@ -21,25 +21,105 @@ fichiers natif).
 
 ### Disposition dockable
 
-Les trois contenus qui vivaient dans des panneaux fixes — la grille, le(s)
-graphe(s), la console de script — sont des onglets d'un
-`egui_dock::DockState<Tab>` peint par une `DockArea`, dans `app.rs`. La
-disposition initiale (grille au centre, script amarré en bas, premier graphe
-du projet à droite s'il y en a un) n'est qu'un point de départ : l'utilisateur
-redispose, redimensionne et referme les onglets de graphe librement,
-`egui_dock` retient la disposition d'une image à l'autre.
+Tous les contenus de ce banc sont des onglets d'un `egui_dock::DockState<Tab>`
+peint par une `DockArea`, dans `app.rs`. `Tab` a six variantes : le Project
+Manager, la console de script — tous deux structurels, jamais fermés — et
+quatre natures de fenêtre portant chacune un `NodeId` : `Book` (classeur),
+`Graph`, `Matrix`, `Note`. La disposition initiale (Project Manager au centre,
+script amarré en bas, premier classeur du projet puis premier graphe à droite
+s'ils existent) n'est qu'un point de départ : l'utilisateur redispose,
+redimensionne et referme les onglets de fenêtre librement, `egui_dock` retient
+la disposition d'une image à l'autre.
 
-Conséquence directe et volontaire : la limite « un seul graphe affiché à la
-fois » qui vivait dans `app.rs` (jamais dans `state.rs`, qui exposait déjà
-`AppState::graphs()`, la liste complète) a disparu. Un onglet `Tab::Graph`
-par graphe ouvert, chacun avec son propre `plotyx_render_egui::GraphView`
-(donc son propre cache de formes — `PlotyxApp::graph_views` est une table
-indexée par `NodeId`, plus le champ unique d'avant). Le menu « Graphes » de la
-barre de menu ouvre ou focalise l'onglet d'un graphe du projet.
+Un onglet par fenêtre **ouverte**, quelle que soit sa nature : `PlotyxApp::
+open_tab` est le seul endroit qui décide « ouvrir » vs « focaliser » (cliquer
+une seconde fois la même entrée du Project Manager ne duplique jamais son
+onglet). Un onglet `Tab::Graph` par graphe ouvert garde son propre
+`plotyx_render_egui::GraphView` (donc son propre cache de formes —
+`PlotyxApp::graph_views` est une table indexée par `NodeId`).
 
 Ce qui n'est **pas** fait : pas de bouton « nouveau panneau », pas de
 persistance de la disposition entre deux lancements, pas de panneau
-Properties ni de grille à délégués — hors périmètre de cette fondation.
+Properties ni de grille à délégués, pas d'éditeur de matrice — hors périmètre
+de cette fondation (voir « Project Manager et fenêtres par contenu »
+ci-dessous pour le détail de ce qui est, et n'est pas, câblé).
+
+### Project Manager et fenêtres par contenu
+
+`Tab::ProjectManager` affiche l'arbre du projet **arrêté** à `Workbook`,
+`Graph`, `Matrix`, `Note` : ces quatre natures sont des feuilles cliquables de
+ce panneau, jamais développées davantage (pas de descente dans les feuilles
+d'un classeur, pas de descente dans le contenu d'un graphe) ; les dossiers
+sont des nœuds dépliables, respectant la hiérarchie réelle de l'arbre.
+`AppState::project_tree` construit cette vue en généralisant le principe déjà
+posé par `AppState::graphs`/`AppState::sheets` (interroger l'instantané, ne
+jamais dupliquer l'accès à l'arbre) plutôt que de le réinventer : elle rend
+une structure légère (`ProjectTreeNode`, dossiers et fenêtres typées avec leur
+`NodeId` et leur nom), sans dépendance à egui.
+
+Cliquer une fenêtre l'ouvre ou la focalise, pour les quatre natures :
+
+- **`Tab::Book`** remplace l'ancien `Tab::Grid` unique et global : une fenêtre
+  par classeur ouvert, avec une sous-navigation interne entre ses feuilles
+  (`AppState::worksheets_of`, `AppState::selected_sheet_in` — une carte
+  `Workbook -> Worksheet` plutôt qu'une sélection globale unique, pour que
+  deux classeurs ouverts simultanément n'interfèrent jamais l'un avec
+  l'autre). La grille elle-même (virtualisation, une seule cellule éditable à
+  la fois, `MISSING_TEXT_DISPLAY`…) est inchangée dans son principe ; elle est
+  seulement scopée à « la feuille actuellement choisie dans ce classeur »
+  plutôt qu'à une sélection globale — `AppState::visible_columns` et
+  `AppState::row_count` prennent désormais un `NodeId` de feuille explicite.
+- **`Tab::Note`** est réellement éditable : `plotyx-core` expose déjà le texte
+  d'une note (`NodeKind::Note::text`) et une commande annulable
+  (`Command::SetNoteText`). L'éditeur suit le même principe de saisie
+  différée qu'une cellule de grille (`AppState::NoteEdit`, symétrique de
+  `CellEdit` : le tampon n'atteint le modèle qu'à la perte de focus).
+- **`Tab::Matrix`** est un **espace réservé documenté** : la fenêtre s'ouvre et
+  se focalise comme les trois autres, mais ne montre qu'un message explicite
+  — `plotyx-core::NodeKind::Matrix` n'a aujourd'hui aucun contenu à éditer, et
+  l'éditeur de matrice complet est explicitement hors périmètre de cette
+  tâche.
+
+### Maximiser un onglet
+
+`egui_dock` 0.21 n'expose aucune fonction « maximiser » native. Plutôt que de
+faire mentir le `DockState` lui-même, `PlotyxApp::maximized_tab` est un état
+**à côté** du plan de disposition, qui ne le touche jamais : quand il vaut
+`Some`, la `DockArea` normale n'est pas peinte du tout cette image-là — une
+zone séparée montre uniquement l'onglet maximisé, plein cadre, à côté d'un
+panneau fixe qui garde le Project Manager visible et accessible (le principe :
+l'utilisateur doit toujours pouvoir y naviguer, onglet maximisé ou non).
+Restaurer revient à repeindre la `DockArea` normalement : la disposition
+qu'elle retient n'a jamais bougé pendant la maximisation, donc « restaurer »
+est exactement la disposition d'avant, pas un recalcul. Un menu « Fenêtre »
+porte le bouton de bascule, grisé quand l'onglet actif est le Project Manager
+lui-même (le maximiser n'aurait pas de sens : il est déjà toujours visible).
+
+### Détachement du Project Manager
+
+Deux mécanismes, tous deux disponibles :
+
+- **Flottant dans la fenêtre mère** : glisser l'onglet Project Manager hors du
+  dock le fait flotter en `egui::Window`, via le mécanisme natif d'`egui_dock`
+  (`Surface::Window`) — gratuit, aucune configuration ne le restreint pour cet
+  onglet (`TabViewer::allowed_in_windows` reste à sa valeur par défaut,
+  `true`).
+- **Vraie fenêtre OS séparée** : un bouton du menu « Fenêtre » ouvre le
+  contenu du Project Manager dans un vrai viewport natif `eframe`
+  (`egui::Context::show_viewport_immediate`), déplaçable sur un autre écran —
+  ce que le flottant `egui_dock` ne peut pas faire, lui qui reste borné à la
+  fenêtre OS principale. Dans ce mode, `Tab::ProjectManager` est retiré du
+  `DockState` (`PlotyxApp::pm_detached`) pour ne jamais être montré à deux
+  endroits à la fois ; fermer la fenêtre OS ou cliquer « Réattacher » le
+  repousse proprement dans le dock.
+
+  **Réserve Wayland connue**, sur le même modèle que celle déjà documentée
+  pour `rfd`/`xdg-portal` : le compositeur peut ignorer une position de
+  fenêtre demandée par l'application. Cette tâche ne demande explicitement
+  aucune position pour la fenêtre détachée (elle laisse le compositeur la
+  placer), donc n'en souffre pas directement — la limite vaut néanmoins d'être
+  connue avant d'y ajouter un jour une position mémorisée entre deux
+  détachements.
 
 ### Sélecteur de fichiers natif
 
@@ -68,8 +148,13 @@ peut faire à la place d'un humain devant un écran.
 Une fenêtre ne se teste pas en intégration continue. C'est toute la raison du
 découpage : **rien de ce que contient `app` n'est une décision de produit**.
 
-`Action` : `Undo`, `Redo`, `Save`, `Load`, `CommitCell`, `AddColumn`,
-`InsertRows`, `DeleteRows`, `RunScript`, `InterruptScript`.
+`Action` : `Undo`, `Redo`, `Save`, `Load`, `SelectSheet`, `CommitCell`,
+`AddColumn`, `InsertRows`, `DeleteRows`, `SetNoteText`, `RunScript`,
+`InterruptScript`. `AddColumn`/`InsertRows`/`DeleteRows` portent désormais un
+`NodeId` de feuille explicite (`sheet`) : depuis que la grille est scopée par
+classeur (`Tab::Book`), il n'y a plus de « la » feuille affichée sur laquelle
+une action implicite pourrait agir sans ambiguïté quand plusieurs classeurs
+sont ouverts en même temps.
 
 ### Deux règles de conduite
 
@@ -128,13 +213,17 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
   du modèle**, pas la dernière frappe : c'est le comportement attendu d'un
   tableur, et c'est aussi la limite — le banc ne sait pas distinguer les deux
   intentions.
-- **Une seule cellule éditable à la fois.** La grille est virtualisée
+- **Une seule cellule éditable à la fois**, toutes grilles de tous les
+  classeurs ouverts confondues. La grille est virtualisée
   (`TableBuilder::body().rows()`) : une feuille peut avoir un million de
-  lignes, il n'est pas question de garder un tampon par cellule.
+  lignes, il n'est pas question de garder un tampon par cellule. Le même
+  principe vaut pour l'édition d'une note (`AppState::NoteEdit`), pour la même
+  raison de cohérence plutôt que de nécessité stricte.
 - **La disposition dockable ne persiste pas d'un lancement à l'autre** :
-  `PlotyxApp::new` la reconstruit à chaque démarrage (grille, script, premier
-  graphe). Ce que l'utilisateur redispose en session tient jusqu'à la
-  fermeture de la fenêtre, pas au-delà.
+  `PlotyxApp::new` la reconstruit à chaque démarrage (Project Manager, script,
+  premier classeur, premier graphe). Ce que l'utilisateur redispose en
+  session — y compris la maximisation et le détachement du Project Manager —
+  tient jusqu'à la fermeture de la fenêtre, pas au-delà.
 
 ### Un détail qui a l'air d'un détail
 

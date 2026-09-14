@@ -11,6 +11,17 @@
 //! construit par le helper local [`demo_project`] : les tests ne partagent
 //! aucun état et ne dépendent pas du projet de démonstration du binaire, qui
 //! peut changer sans invalider ces assertions.
+//!
+//! # Grille scopée par classeur
+//!
+//! Depuis que la grille est un onglet par classeur (`Tab::Book`, plutôt que
+//! le `Tab::Grid` unique et global d'avant cette tâche), `AppState` n'a plus
+//! de « la » feuille sélectionnée : [`AppState::visible_columns`] et
+//! [`AppState::row_count`] prennent un `NodeId` de feuille explicite, et
+//! [`AppState::selected_sheet_in`] rend la feuille choisie *dans un classeur
+//! donné*. Les tests ci-dessous résolvent donc le classeur ou la feuille
+//! visée par son nom ([`book_named`], [`sheet_named`]) plutôt que de
+//! compter sur une sélection implicite.
 
 use std::path::Path;
 
@@ -101,14 +112,14 @@ fn start_demo(dir: &Path) -> (Session, AppState) {
     start(demo_project(), &dir.join("projet.plotyx"))
 }
 
-/// Identifiant de la colonne `name` dans la feuille sélectionnée.
-fn column_id(state: &AppState, name: &str) -> NodeId {
+/// Identifiant de la colonne `name` dans `sheet`.
+fn column_id(state: &AppState, sheet: NodeId, name: &str) -> NodeId {
     state
-        .visible_columns()
+        .visible_columns(sheet)
         .into_iter()
         .find(|(_, column_name, _)| column_name == name)
         .map(|(id, _, _)| id)
-        .unwrap_or_else(|| panic!("colonne {name} visible"))
+        .unwrap_or_else(|| panic!("colonne {name} visible dans {sheet}"))
 }
 
 /// Cellule brute du modèle (au-delà de ce que `cell_text` laisse voir).
@@ -133,6 +144,21 @@ fn sheet_named(tree: &Tree, name: &str) -> NodeId {
         .unwrap_or_else(|| panic!("feuille {name} présente"))
 }
 
+/// Classeur nommé `name` dans l'arbre courant. Pendant de [`sheet_named`],
+/// nécessaire depuis que la sélection de feuille est scopée par classeur
+/// ([`AppState::selected_sheet_in`]).
+fn book_named(tree: &Tree, name: &str) -> NodeId {
+    tree.walk_all()
+        .into_iter()
+        .find(|id| {
+            tree.node(*id).is_some_and(|node| {
+                matches!(node.kind(), plotyx_core::node::NodeKind::Workbook { .. })
+                    && node.name() == name
+            })
+        })
+        .unwrap_or_else(|| panic!("classeur {name} présent"))
+}
+
 /// Poignée de session inutilisée hors construction : silence le lint sur les
 /// tests qui n'en ont pas besoin.
 #[allow(dead_code)]
@@ -141,14 +167,17 @@ fn unused(_: &SessionHandle) {}
 // -- 1. État initial --
 
 #[test]
-fn initial_state_selects_a_sheet_and_describes_it() {
+fn a_books_grid_defaults_to_its_first_sheet_and_describes_it() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, state) = start_demo(dir.path());
 
-    let sheet = state.selected_sheet().expect("une feuille sélectionnée");
+    let book1 = book_named(state.tree(), "Book1");
+    let sheet = state
+        .selected_sheet_in(book1)
+        .expect("une feuille par défaut");
     assert_eq!(sheet, sheet_named(state.tree(), "Sheet1"));
 
-    let columns = state.visible_columns();
+    let columns = state.visible_columns(sheet);
     let described: Vec<(&str, ColumnType)> = columns
         .iter()
         .map(|(_, name, kind)| (name.as_str(), *kind))
@@ -163,7 +192,7 @@ fn initial_state_selects_a_sheet_and_describes_it() {
     );
 
     // Maximum des longueurs (5, 5, 3), pas la longueur de la première colonne.
-    assert_eq!(state.row_count(), 5);
+    assert_eq!(state.row_count(sheet), 5);
 
     assert!(!state.can_undo());
     assert!(!state.can_redo());
@@ -177,7 +206,8 @@ fn initial_state_selects_a_sheet_and_describes_it() {
 fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
     let before = state.snapshot().revision;
 
     state.dispatch(Action::CommitCell {
@@ -202,7 +232,8 @@ fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
 fn invalid_numeric_input_reports_an_error_and_sends_no_command() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
     let before = state.snapshot().revision;
 
     state.dispatch(Action::CommitCell {
@@ -229,7 +260,8 @@ fn invalid_numeric_input_reports_an_error_and_sends_no_command() {
 fn blank_text_writes_a_missing_numeric_value() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
 
     state.dispatch(Action::CommitCell {
         column: temps,
@@ -252,7 +284,8 @@ fn blank_text_writes_a_missing_numeric_value() {
 fn empty_text_writes_a_missing_text_value_and_undo_restores_it() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let note = column_id(&state, "Note");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
 
     state.dispatch(Action::CommitCell {
         column: note,
@@ -293,7 +326,8 @@ fn empty_text_writes_a_missing_text_value_and_undo_restores_it() {
 fn undo_and_redo_walk_the_history_both_ways() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
 
     state.dispatch(Action::CommitCell {
         column: temps,
@@ -342,7 +376,8 @@ fn undo_on_an_empty_history_is_a_notice_not_an_error() {
 fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
 
     state.dispatch(Action::CommitCell {
         column: temps,
@@ -380,22 +415,15 @@ fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
     assert!(!state.can_undo(), "le chargement vide l'historique");
     assert!(!state.can_redo());
 
-    let sheet = state.selected_sheet().expect("une feuille sélectionnée");
-    assert!(
-        state
-            .tree()
-            .node(sheet)
-            .is_some_and(|node| node.kind().is_worksheet()),
-        "la sélection pointe une feuille du nouvel arbre"
-    );
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
     assert_eq!(state.cell_text(temps, 1), "42.5");
 }
 
 // -- 8. Rechargement et sélection périmée --
 
 #[test]
-fn loading_a_foreign_file_revalidates_the_stale_selection() {
+fn loading_a_foreign_file_leaves_no_stale_per_book_selection() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let mine = dir.path().join("mien.plotyx");
     let other = dir.path().join("autre.plotyx");
@@ -409,9 +437,10 @@ fn loading_a_foreign_file_revalidates_the_stale_selection() {
     }
 
     let (_session, mut state) = start_demo(&mine);
+    let book1 = book_named(state.tree(), "Book1");
     let sheet2 = sheet_named(state.tree(), "Sheet2");
     state.dispatch(Action::SelectSheet(sheet2));
-    assert_eq!(state.selected_sheet(), Some(sheet2));
+    assert_eq!(state.selected_sheet_in(book1), Some(sheet2));
     state.dispatch(Action::Save);
 
     state.set_path(other.display().to_string());
@@ -420,15 +449,24 @@ fn loading_a_foreign_file_revalidates_the_stale_selection() {
     assert!(
         !state.tree().contains(sheet2),
         "le fichier étranger ne porte pas l'identifiant de Sheet2 \
-         (sinon le critère ne teste rien)"
+         (sinon le critère ne teste rien) — `book1`, créé plus tôt dans les \
+         deux projets, peut en revanche coïncider : ce n'est pas ce que ce \
+         critère vérifie"
     );
-    let sheet = state.selected_sheet().expect("une feuille resélectionnée");
+
+    // Auto-cicatrisant : un classeur du nouvel arbre, jamais explicitement
+    // sélectionné, retombe de lui-même sur sa première feuille — voir la doc
+    // de `AppState::selected_sheet_in`.
+    let book = book_named(state.tree(), "Book1");
+    let sheet = state
+        .selected_sheet_in(book)
+        .expect("une feuille par défaut dans le classeur du nouveau fichier");
     assert!(state
         .tree()
         .node(sheet)
         .is_some_and(|node| node.kind().is_worksheet()));
     let names: Vec<String> = state
-        .visible_columns()
+        .visible_columns(sheet)
         .into_iter()
         .map(|(_, name, _)| name)
         .collect();
@@ -441,7 +479,8 @@ fn loading_a_foreign_file_revalidates_the_stale_selection() {
 fn a_failing_load_leaves_the_model_and_history_untouched() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
     state.dispatch(Action::CommitCell {
         column: temps,
         row: 0,
@@ -479,9 +518,10 @@ fn a_failing_save_reports_an_error_and_writes_nothing() {
 fn reading_past_the_end_of_a_short_column_yields_a_missing_value() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, state) = start_demo(dir.path());
-    let note = column_id(&state, "Note");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
 
-    assert_eq!(state.row_count(), 5);
+    assert_eq!(state.row_count(sheet1), 5);
     // `Note` = [Some("a"), None, Some("")] : la ligne 2 est une chaîne vide
     // *présente*, les lignes 3 et au-delà sont hors bornes — `Column::get`
     // y rend `Cell::Text(None)`, la même valeur *absente* qu'une ligne 1
@@ -514,44 +554,55 @@ fn reading_past_the_end_of_a_short_column_yields_a_missing_value() {
 fn inserting_then_undoing_rows_restores_the_tree_bit_for_bit() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
     let before = std::sync::Arc::clone(state.tree());
 
-    state.dispatch(Action::InsertRows { at: 1, count: 2 });
-    assert_eq!(state.row_count(), 7);
+    state.dispatch(Action::InsertRows {
+        sheet: sheet1,
+        at: 1,
+        count: 2,
+    });
+    assert_eq!(state.row_count(sheet1), 7);
 
     state.dispatch(Action::Undo);
     assert_eq!(**state.tree(), *before);
-    assert_eq!(state.row_count(), 5);
+    assert_eq!(state.row_count(sheet1), 5);
 }
 
 #[test]
 fn deleting_then_undoing_rows_restores_the_tree_bit_for_bit() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
     let before = std::sync::Arc::clone(state.tree());
 
-    state.dispatch(Action::DeleteRows { at: 1, count: 2 });
-    assert_eq!(state.row_count(), 3);
+    state.dispatch(Action::DeleteRows {
+        sheet: sheet1,
+        at: 1,
+        count: 2,
+    });
+    assert_eq!(state.row_count(sheet1), 3);
 
     state.dispatch(Action::Undo);
     assert_eq!(**state.tree(), *before);
-    assert_eq!(state.row_count(), 5);
+    assert_eq!(state.row_count(sheet1), 5);
 }
 
 #[test]
 fn adding_then_undoing_a_column_restores_the_tree_bit_for_bit() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
     let before = std::sync::Arc::clone(state.tree());
     let names_before: Vec<String> = state
-        .visible_columns()
+        .visible_columns(sheet1)
         .into_iter()
         .map(|(_, name, _)| name)
         .collect();
 
-    state.dispatch(Action::AddColumn);
+    state.dispatch(Action::AddColumn { sheet: sheet1 });
 
-    let columns = state.visible_columns();
+    let columns = state.visible_columns(sheet1);
     assert_eq!(columns.len(), names_before.len() + 1);
     let (_, new_name, new_type) = columns.last().cloned().expect("la colonne ajoutée");
     assert!(!new_name.is_empty(), "un nom a été généré");
@@ -560,30 +611,33 @@ fn adding_then_undoing_a_column_restores_the_tree_bit_for_bit() {
 
     state.dispatch(Action::Undo);
     assert_eq!(**state.tree(), *before);
-    assert_eq!(state.visible_columns().len(), names_before.len());
+    assert_eq!(state.visible_columns(sheet1).len(), names_before.len());
 }
 
 #[test]
-fn row_actions_without_a_selected_sheet_are_refused() {
+fn row_actions_on_something_that_is_not_a_sheet_are_refused() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
-    // Un projet sans aucune feuille : rien ne peut être sélectionné.
+    // Un nœud qui n'est pas une feuille : un graphe, par exemple.
     let mut project = Project::new("Vide").expect("projet vide");
     let root = project.root();
-    project
+    let graph = project
         .add_graph(root, Some("Graph1"), Default::default())
         .expect("un graphe");
     let (_session, mut state) = start(project, &dir.path().join("vide.plotyx"));
 
-    assert_eq!(state.selected_sheet(), None);
-    assert_eq!(state.row_count(), 0);
-    assert!(state.visible_columns().is_empty());
+    assert!(state.visible_columns(graph).is_empty());
+    assert_eq!(state.row_count(graph), 0);
 
     let revision = state.snapshot().revision;
-    state.dispatch(Action::InsertRows { at: 0, count: 1 });
+    state.dispatch(Action::InsertRows {
+        sheet: graph,
+        at: 0,
+        count: 1,
+    });
     assert!(state.status().is_some_and(|status| status.is_error));
     assert_eq!(state.snapshot().revision, revision);
 
-    state.dispatch(Action::AddColumn);
+    state.dispatch(Action::AddColumn { sheet: graph });
     assert!(state.status().is_some_and(|status| status.is_error));
     assert_eq!(state.snapshot().revision, revision);
 }
@@ -592,16 +646,21 @@ fn row_actions_without_a_selected_sheet_are_refused() {
 fn selecting_something_that_is_not_a_sheet_is_refused() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let selected = state.selected_sheet();
+    let book1 = book_named(state.tree(), "Book1");
+    let selected = state.selected_sheet_in(book1);
     let root = state.tree().root();
 
     state.dispatch(Action::SelectSheet(root));
     assert!(state.status().is_some_and(|status| status.is_error));
-    assert_eq!(state.selected_sheet(), selected, "sélection inchangée");
+    assert_eq!(
+        state.selected_sheet_in(book1),
+        selected,
+        "sélection inchangée"
+    );
 
     state.dispatch(Action::SelectSheet(NodeId::from_raw(9_999)));
     assert!(state.status().is_some_and(|status| status.is_error));
-    assert_eq!(state.selected_sheet(), selected);
+    assert_eq!(state.selected_sheet_in(book1), selected);
 }
 
 // -- 12. Libellés --
@@ -610,11 +669,12 @@ fn selecting_something_that_is_not_a_sheet_is_refused() {
 fn labels_prefix_the_history_entry_and_vanish_when_the_action_is_impossible() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
 
     assert_eq!(state.undo_label(), None);
     assert_eq!(state.redo_label(), None);
 
-    state.dispatch(Action::AddColumn);
+    state.dispatch(Action::AddColumn { sheet: sheet1 });
     let undo = state.undo_label().expect("un libellé d'annulation");
     assert!(
         undo.starts_with("Annuler "),
@@ -648,21 +708,49 @@ fn sheets_lists_every_worksheet_with_a_readable_path() {
 }
 
 #[test]
-fn selecting_the_second_sheet_switches_the_grid() {
+fn selecting_a_sheet_updates_its_books_selection() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
+    let book1 = book_named(state.tree(), "Book1");
     let sheet2 = sheet_named(state.tree(), "Sheet2");
 
     state.dispatch(Action::SelectSheet(sheet2));
 
-    assert_eq!(state.selected_sheet(), Some(sheet2));
+    assert_eq!(state.selected_sheet_in(book1), Some(sheet2));
     let names: Vec<String> = state
-        .visible_columns()
+        .visible_columns(sheet2)
         .into_iter()
         .map(|(_, name, _)| name)
         .collect();
     assert_eq!(names, vec!["Court".to_string()]);
-    assert_eq!(state.row_count(), 2);
+    assert_eq!(state.row_count(sheet2), 2);
+}
+
+/// Deux classeurs ouverts simultanément (deux `Tab::Book`) ne partagent pas
+/// leur feuille sélectionnée : sélectionner une feuille dans l'un ne doit
+/// jamais affecter l'autre — la raison d'être de [`AppState::
+/// selected_sheet_in`] scopé par classeur plutôt qu'une sélection globale.
+#[test]
+fn selecting_a_sheet_in_one_book_does_not_affect_another_book() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let mut project = demo_project();
+    let root = project.root();
+    let book2 = project
+        .add_workbook(root, Some("Book2"))
+        .expect("classeur Book2");
+    let book2_sheet2 = project
+        .add_worksheet(book2, Some("Autre"))
+        .expect("feuille Autre");
+
+    let (_session, mut state) = start(project, &dir.path().join("projet.plotyx"));
+    let book1 = book_named(state.tree(), "Book1");
+    let book1_sheet2 = sheet_named(state.tree(), "Sheet2");
+
+    state.dispatch(Action::SelectSheet(book1_sheet2));
+    state.dispatch(Action::SelectSheet(book2_sheet2));
+
+    assert_eq!(state.selected_sheet_in(book1), Some(book1_sheet2));
+    assert_eq!(state.selected_sheet_in(book2), Some(book2_sheet2));
 }
 
 // -- Divers : le tampon de saisie d'une cellule --
@@ -671,7 +759,8 @@ fn selecting_the_second_sheet_switches_the_grid() {
 fn the_cell_buffer_only_reaches_the_model_on_commit() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
     let revision = state.snapshot().revision;
 
     state.begin_edit(temps, 0);
@@ -699,7 +788,8 @@ fn the_cell_buffer_only_reaches_the_model_on_commit() {
 fn cancelling_an_edit_discards_the_buffer() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let temps = column_id(&state, "Temps");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
     let revision = state.snapshot().revision;
 
     state.begin_edit(temps, 0);
@@ -792,6 +882,7 @@ fn interrupt_script_is_also_explained_without_the_feature() {
 fn script_source_lives_in_state_and_is_not_lost_by_other_actions() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
 
     assert_eq!(state.script_source(), "", "vide par défaut");
 
@@ -800,7 +891,7 @@ fn script_source_lives_in_state_and_is_not_lost_by_other_actions() {
 
     // Des actions qui n'ont rien à voir avec le script ne doivent pas y
     // toucher : le tampon de script est indépendant du reste de l'état.
-    state.dispatch(Action::AddColumn);
+    state.dispatch(Action::AddColumn { sheet: sheet1 });
     assert_eq!(state.script_source(), "print('bonjour')");
     state.dispatch(Action::Undo);
     assert_eq!(state.script_source(), "print('bonjour')");
@@ -842,4 +933,117 @@ fn les_graphes_du_projet_sont_enumeres_avec_leur_chemin() {
     // Une feuille n'est pas un graphe, et réciproquement.
     assert!(state.sheets().iter().all(|(id, _)| *id != graphes[0].0));
     unused(&session.handle());
+}
+
+// -- Divers : le panneau Project Manager --
+
+/// Le Project Manager s'arrête à `Workbook`/`Graph`/`Matrix`/`Note` : jamais
+/// de descente dans les feuilles d'un classeur ni dans le contenu d'un
+/// graphe (§1 de la tâche). `books()` reste le pendant à plat de `graphs()`,
+/// utilisé par la disposition initiale de `crate::app::PlotyxApp::new`.
+#[test]
+fn books_are_enumerated_like_graphs_with_their_readable_path() {
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, state) = start_demo(dir.path());
+
+    let books = state.books();
+    assert_eq!(books.len(), 1, "un seul classeur : {books:?}");
+    assert_eq!(books[0].1, "Book1");
+}
+
+/// [`AppState::project_tree`] montre les dossiers et les quatre natures de
+/// fenêtre, jamais les feuilles d'un classeur.
+#[test]
+fn project_tree_stops_at_windows_and_never_descends_into_a_book() {
+    use plotyx_app::state::{ProjectTreeNode, WindowKind};
+
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let mut project = demo_project();
+    let root = project.root();
+    let folder = project.add_folder(root, "Manips").expect("dossier Manips");
+    project
+        .add_note(folder, Some("Note1"), "un texte")
+        .expect("note");
+
+    let (_session, state) = start(project, &dir.path().join("projet.plotyx"));
+    let tree = state.project_tree();
+
+    let book = tree
+        .iter()
+        .find(|node| {
+            matches!(
+                node,
+                ProjectTreeNode::Window { name, kind, .. }
+                    if name == "Book1" && *kind == WindowKind::Book
+            )
+        })
+        .expect("Book1 est une fenêtre du Project Manager");
+    // Une fenêtre du Project Manager n'a jamais d'enfants dans cette vue,
+    // même si `Workbook` a bien des `Worksheet` dans le modèle.
+    assert!(matches!(book, ProjectTreeNode::Window { .. }));
+
+    let folder_node = tree
+        .iter()
+        .find_map(|node| match node {
+            ProjectTreeNode::Folder { name, children, .. } if name == "Manips" => Some(children),
+            _ => None,
+        })
+        .expect("Manips est un dossier déplié dans le Project Manager");
+    assert!(
+        folder_node.iter().any(|child| matches!(
+            child,
+            ProjectTreeNode::Window {
+                kind: WindowKind::Note,
+                ..
+            }
+        )),
+        "la note apparaît dans son dossier"
+    );
+}
+
+// -- Divers : l'édition de note --
+
+#[test]
+fn editing_a_note_commits_on_dispatch_and_is_undoable() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let mut project = demo_project();
+    let root = project.root();
+    let note = project
+        .add_note(root, Some("Note1"), "avant")
+        .expect("note");
+
+    let (_session, mut state) = start(project, &dir.path().join("projet.plotyx"));
+    assert_eq!(state.note_text(note), Some("avant".to_string()));
+
+    state.begin_note_edit(note);
+    if let Some(edit) = state.note_editing_mut() {
+        edit.buffer = "après".to_string();
+    }
+    state.commit_note_edit();
+
+    assert_eq!(state.note_text(note), Some("après".to_string()));
+    assert!(state.editing().is_none());
+    assert!(state.can_undo());
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.note_text(note), Some("avant".to_string()));
+}
+
+#[test]
+fn committing_a_note_without_typing_writes_nothing() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let mut project = demo_project();
+    let root = project.root();
+    let note = project
+        .add_note(root, Some("Note1"), "inchangé")
+        .expect("note");
+
+    let (_session, mut state) = start(project, &dir.path().join("projet.plotyx"));
+    let revision = state.snapshot().revision;
+
+    state.begin_note_edit(note);
+    state.commit_note_edit();
+
+    assert_eq!(state.snapshot().revision, revision, "rien n'a été écrit");
+    assert!(!state.can_undo());
 }

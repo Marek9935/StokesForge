@@ -15,24 +15,77 @@
 //! `add_enabled`, le libellé vient de [`AppState::undo_label`], et rien ne
 //! garantit leur cohérence sinon la relecture.
 //!
+//! # Project Manager, et une fenêtre par contenu
+//!
+//! Le panneau qui liste l'arbre du projet — [`Tab::ProjectManager`] — et les
+//! quatre natures de fenêtre qu'il ouvre — [`Tab::Book`], [`Tab::Graph`],
+//! [`Tab::Matrix`], [`Tab::Note`] — sont les onglets de ce dock. La grille
+//! unique d'avant cette tâche (`Tab::Grid`, une seule feuille affichée à la
+//! fois pour tout le projet) a disparu : chaque classeur ouvert a désormais
+//! son propre onglet [`Tab::Book`], avec sa propre sous-navigation interne
+//! entre ses feuilles ([`AppState::worksheets_of`],
+//! [`AppState::selected_sheet_in`]) — un classeur peut avoir plusieurs
+//! feuilles, la grille d'un onglet ne montre jamais que celle actuellement
+//! choisie *dans ce classeur*. [`Tab::Matrix`] et [`Tab::Note`] existent
+//! aussi : la matrice est un **espace réservé documenté** (édition hors
+//! périmètre, voir [`matrix_contents`]), la note est réellement éditable
+//! (`plotyx-core` expose déjà son texte).
+//!
+//! [`PlotyxApp::open_tab`] est le seul endroit qui décide « ouvrir » vs
+//! « focaliser » un onglet, quelle que soit sa nature — le même geste que
+//! l'ancien `open_graph_tab`, généralisé.
+//!
 //! # Disposition dockable
 //!
-//! Les trois contenus qui, avant cette tâche, vivaient dans des panneaux
-//! fixes — la grille, le(s) panneau(x) de graphe, la console de script —
-//! sont désormais des onglets d'un [`egui_dock::DockState`] peint par une
-//! [`egui_dock::DockArea`]. C'est la charpente de disposition décidée par
-//! `docs/archive/rustrewrite/roadmap.md` §7 ; elle n'invente ni panneau
-//! Properties ni grille à délégués (hors périmètre, voir `docs/application.md`).
+//! Les contenus de ce banc sont des onglets d'un [`egui_dock::DockState`]
+//! peint par une [`egui_dock::DockArea`]. C'est la charpente de disposition
+//! décidée par `docs/archive/rustrewrite/roadmap.md` §7 ; elle n'invente ni
+//! panneau Properties ni grille à délégués (hors périmètre, voir
+//! `docs/application.md`).
 //!
-//! Conséquence directe : la limite « un seul graphe affiché à la fois » —
-//! qui ne vivait que dans ce module (`state.rs` exposait déjà [`AppState::
-//! graphs`], la liste complète, sans jamais l'avoir imposée) — disparaît
-//! ici. Un onglet [`Tab::Graph`] par graphe ouvert, chacun avec son propre
-//! [`GraphView`] (donc son propre cache de formes, la règle déjà en vigueur
-//! phase R4) : [`PlotyxApp::graph_views`] remplace le champ `graph: GraphView`
-//! unique d'avant cette tâche. Le menu « Graphes » de la barre de menu ouvre
-//! ou focalise l'onglet d'un graphe du projet ; [`PlotyxApp::open_graph_tab`]
-//! est le seul endroit qui décide « ouvrir » vs « focaliser ».
+//! # Maximiser un onglet
+//!
+//! `egui_dock` 0.21 n'expose aucune fonction « maximiser » native — pas de
+//! méthode qui redimensionnerait un nœud du `DockState` pour qu'il occupe
+//! tout l'espace sans toucher à la disposition sous-jacente. Plutôt que de
+//! tenter de faire mentir le `DockState` lui-même (un nœud qui « occuperait »
+//! tout l'espace resterait un nœud parmi d'autres dans l'arbre de
+//! disposition, et il faudrait défaire ce mensonge à la restauration sans
+//! perdre l'agencement exact d'avant), [`PlotyxApp::maximized_tab`] est un
+//! état **à côté** du `DockState`, qui ne le touche jamais : quand il vaut
+//! `Some`, [`PlotyxApp::ui`] ne peint pas du tout la `DockArea` cette
+//! image-là — à la place, une zone séparée montre uniquement l'onglet
+//! maximisé, plein cadre, à côté d'un panneau fixe qui garde le Project
+//! Manager visible (l'utilisateur doit toujours pouvoir y naviguer, onglet
+//! maximisé ou non). Restaurer (`maximized_tab = None`) revient à peindre la
+//! `DockArea` normalement : la disposition qu'elle retient n'a jamais bougé
+//! pendant la maximisation, donc « restaurer » est exactement « la
+//! disposition d'avant », pas un recalcul.
+//!
+//! # Détachement du Project Manager
+//!
+//! Deux mécanismes indépendants :
+//!
+//! 1. **Flottant dans la fenêtre mère** : glisser l'onglet hors du dock le
+//!    fait flotter en `egui::Window`, via le mécanisme natif d'`egui_dock`
+//!    (`Surface::Window`) — gratuit, `TabViewer::allowed_in_windows` n'est
+//!    pas surchargé donc reste `true` par défaut pour tous les onglets, y
+//!    compris [`Tab::ProjectManager`].
+//! 2. **Vraie fenêtre OS séparée** ([`PlotyxApp::pm_detached`],
+//!    [`PlotyxApp::show_detached_project_manager`]) : `egui::Context::
+//!    show_viewport_immediate` ouvre un vrai viewport natif, déplaçable sur
+//!    un autre écran — ce que le flottant `egui_dock` ne peut pas faire, lui
+//!    qui reste borné à la fenêtre OS principale. Quand ce mode est actif,
+//!    l'onglet [`Tab::ProjectManager`] est retiré du `DockState`
+//!    (`remove_tab`) pour ne jamais être montré à deux endroits à la fois ;
+//!    le fermer (bouton de la fenêtre OS, ou « Réattacher ») le repousse
+//!    dans le dock (`push_to_focused_leaf`). Sous Wayland, le compositeur
+//!    peut ignorer une position de fenêtre demandée par l'application — la
+//!    même réserve que documente déjà `docs/application.md` pour `rfd` ;
+//!    cette tâche ne demande explicitement aucune position (elle laisse le
+//!    compositeur placer la fenêtre), donc n'en souffre pas directement, mais
+//!    la limite vaut d'être connue avant d'y ajouter un jour une position
+//!    mémorisée.
 //!
 //! # Sélecteur de fichiers natif
 //!
@@ -55,9 +108,12 @@
 //!   masquée. C'est le comportement attendu d'un tableur, et c'est aussi la
 //!   limite : le banc ne sait pas distinguer « annuler ma saisie en cours »
 //!   de « annuler la dernière commande ».
-//! - **Une seule cellule est éditable à la fois.** La grille est virtualisée
+//! - **Une seule cellule est éditable à la fois** (toutes grilles de tous les
+//!   classeurs ouverts confondues). La grille est virtualisée
 //!   (`TableBuilder::body().rows()`), il n'est donc pas question de garder un
 //!   tampon par cellule : une feuille peut avoir un million de lignes.
+//! - **Pas de persistance de la disposition entre deux lancements** —
+//!   `PlotyxApp::new` la reconstruit à chaque démarrage.
 //!
 //! # La console de script ne fige pas la fenêtre
 //!
@@ -82,7 +138,7 @@ use egui_extras::{Column as TableColumn, TableBuilder};
 use plotyx_core::{ColumnType, NodeId};
 use plotyx_render_egui::{DrawnPlot, GraphView};
 
-use crate::state::{Action, AppState};
+use crate::state::{Action, AppState, ProjectTreeNode, WindowKind};
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
 /// [`PlotyxApp::new`]).
@@ -126,30 +182,45 @@ const ROW_HEIGHT: f32 = 20.0;
 const HEADER_HEIGHT: f32 = 22.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
-/// Fraction de hauteur laissée à la moitié haute (grille/graphes) du plan
-/// principal quand la console de script est amarrée en bas au démarrage —
-/// pendant `PlotyxApp::new`, choisie pour approcher la même proportion que
-/// l'ancien panneau fixe (`SCRIPT_OUTPUT_HEIGHT` sur la hauteur par défaut de
-/// la fenêtre, `main.rs`). L'utilisateur peut ensuite redimensionner ou
-/// redisposer librement : ce n'est qu'un point de départ.
+/// Fraction de hauteur laissée à la moitié haute (Project Manager/classeurs/
+/// graphes) du plan principal quand la console de script est amarrée en bas
+/// au démarrage — pendant `PlotyxApp::new`, choisie pour approcher la même
+/// proportion que l'ancien panneau fixe (`SCRIPT_OUTPUT_HEIGHT` sur la
+/// hauteur par défaut de la fenêtre, `main.rs`). L'utilisateur peut ensuite
+/// redimensionner ou redisposer librement : ce n'est qu'un point de départ.
 const INITIAL_TOP_FRACTION: f32 = 0.78;
-/// Fraction de largeur laissée à la grille quand un graphe est ouvert au
-/// démarrage — même logique que [`INITIAL_TOP_FRACTION`], approchant l'ancien
-/// `GRAPH_PANEL_WIDTH` fixe.
-const INITIAL_GRID_FRACTION: f32 = 0.58;
+/// Fraction de largeur laissée au Project Manager quand un classeur ou un
+/// graphe est ouvert au démarrage — même logique que
+/// [`INITIAL_TOP_FRACTION`], approchant l'ancien `GRAPH_PANEL_WIDTH` fixe.
+const INITIAL_PM_FRACTION: f32 = 0.24;
+/// Largeur par défaut du panneau Project Manager fixe affiché à côté d'un
+/// onglet maximisé, et de la fenêtre OS séparée quand il est détaché.
+const PROJECT_MANAGER_WIDTH: f32 = 260.0;
 
-/// Un onglet du plan de disposition. Trois variantes seulement — la grille,
-/// la console de script, et un graphe donné — parce que c'est tout ce que ce
-/// banc affiche aujourd'hui (voir la doc de tête du module : pas de panneau
-/// Properties ni de grille à délégués ici).
+/// Un onglet du plan de disposition.
+///
+/// - [`Tab::ProjectManager`] et [`Tab::Script`] sont **structurels** : un par
+///   fenêtre, jamais fermés (voir [`TabViewer::is_closeable`] plus bas).
+/// - [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] portent un
+///   [`NodeId`] : une instance par fenêtre **ouverte**, focalisée plutôt que
+///   dupliquée si on la rouvre — voir [`PlotyxApp::open_tab`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Tab {
-    /// La feuille sélectionnée, en grille virtualisée.
-    Grid,
+    /// L'arbre du projet, arrêté à `Workbook`/`Graph`/`Matrix`/`Note` — voir
+    /// [`AppState::project_tree`].
+    ProjectManager,
     /// La console de script Python.
     Script,
+    /// Un classeur ouvert, identifié par son nœud. Contient la grille,
+    /// scopée à la feuille actuellement choisie *dans ce classeur*.
+    Book(NodeId),
     /// Un graphe ouvert, identifié par son nœud.
     Graph(NodeId),
+    /// Une matrice ouverte, identifiée par son nœud. Contenu **espace
+    /// réservé** — voir [`matrix_contents`].
+    Matrix(NodeId),
+    /// Une note ouverte, identifiée par son nœud.
+    Note(NodeId),
 }
 
 /// L'application `eframe` : l'état du banc, la disposition dockable, et le
@@ -159,7 +230,9 @@ pub struct PlotyxApp {
     state: AppState,
     /// Le plan de disposition : quels onglets, où, dans quel agencement de
     /// panneaux amarrables. Persistant d'une image à l'autre — c'est ce qui
-    /// retient les glissers-déposés de l'utilisateur.
+    /// retient les glissers-déposés de l'utilisateur. Ne contient **jamais**
+    /// `Tab::ProjectManager` pendant que [`PlotyxApp::pm_detached`] est vrai
+    /// (voir la doc de tête du module, § détachement).
     dock_state: DockState<Tab>,
     /// Une vue de graphe (et son cache de formes, phase R4) par graphe
     /// **ouvert** — c'est-à-dire ayant eu un onglet au moins une fois,
@@ -167,6 +240,15 @@ pub struct PlotyxApp {
     /// règle (`plotyx_render_egui::GraphView`) ; avec plusieurs graphes
     /// affichables simultanément, une seule vue ne suffit plus.
     graph_views: HashMap<NodeId, GraphView>,
+    /// Onglet actuellement maximisé, s'il y en a un — voir la doc de tête du
+    /// module, § maximiser. Jamais `Some(Tab::ProjectManager)` : ce panneau
+    /// reste toujours visible par lui-même, le maximiser n'aurait pas de
+    /// sens (voir [`PlotyxApp::menu_bar`], qui grise l'action dans ce cas).
+    maximized_tab: Option<Tab>,
+    /// Vrai quand le Project Manager est détaché en fenêtre OS séparée (voir
+    /// la doc de tête du module, § détachement). Dans cet état, `dock_state`
+    /// ne porte plus `Tab::ProjectManager` du tout.
+    pm_detached: bool,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
     /// (mécanisme de vérification, voir [`PlotyxApp::screenshot`]).
     screenshot: Option<std::path::PathBuf>,
@@ -183,11 +265,12 @@ impl PlotyxApp {
     ///
     /// # Disposition initiale
     ///
-    /// La grille occupe le plan principal ; la console de script est amarrée
-    /// en bas (comme l'ancien panneau fixe) ; si le projet contient au moins
-    /// un graphe, le premier est ouvert à droite de la grille (comme l'ancien
-    /// comportement par défaut — montrer quelque chose sans qu'on ait à
-    /// cliquer). Tout ceci n'est qu'un point de départ : `egui_dock` retient
+    /// Le Project Manager occupe le plan principal ; la console de script est
+    /// amarrée en bas (comme l'ancien panneau fixe) ; si le projet contient
+    /// au moins un classeur, son onglet s'ouvre à droite du Project Manager,
+    /// suivi de l'onglet du premier graphe s'il y en a un — montrer quelque
+    /// chose sans qu'on ait à cliquer, comme l'ancien comportement par
+    /// défaut. Tout ceci n'est qu'un point de départ : `egui_dock` retient
     /// ensuite les redispositions de l'utilisateur.
     ///
     /// # Auto-fermeture
@@ -206,18 +289,27 @@ impl PlotyxApp {
             .and_then(|raw| raw.trim().parse::<u64>().ok())
             .map(Duration::from_millis);
 
-        let mut dock_state = DockState::new(vec![Tab::Grid]);
+        let mut dock_state = DockState::new(vec![Tab::ProjectManager]);
         let surface = dock_state.main_surface_mut();
         let [top, _script] =
             surface.split_below(NodeIndex::root(), INITIAL_TOP_FRACTION, vec![Tab::Script]);
+        let mut opened = Vec::new();
+        if let Some((first_book, _)) = state.books().into_iter().next() {
+            opened.push(Tab::Book(first_book));
+        }
         if let Some((first_graph, _)) = state.graphs().into_iter().next() {
-            surface.split_right(top, INITIAL_GRID_FRACTION, vec![Tab::Graph(first_graph)]);
+            opened.push(Tab::Graph(first_graph));
+        }
+        if !opened.is_empty() {
+            surface.split_right(top, INITIAL_PM_FRACTION, opened);
         }
 
         Self {
             state,
             dock_state,
             graph_views: HashMap::new(),
+            maximized_tab: None,
+            pm_detached: false,
             autoquit,
             first_frame: None,
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
@@ -249,20 +341,13 @@ impl PlotyxApp {
         });
     }
 
-    /// Barre de menu : « Fichier », « Édition » et « Graphes ».
+    /// Barre de menu : « Fichier », « Édition » et « Fenêtre ».
     ///
-    /// « Graphes » liste tous les graphes du projet (pas seulement ceux déjà
-    /// ouverts) : cliquer un graphe déjà ouvert focalise son onglet, cliquer
-    /// un graphe fermé lui en ouvre un — [`PlotyxApp::open_graph_tab`] fait
-    /// les deux. C'est le seul endroit qui ouvre un onglet de graphe hors du
-    /// point de départ posé par [`PlotyxApp::new`].
-    fn menu_bar(
-        &self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        actions: &mut Vec<Action>,
-        open_graphs: &mut Vec<NodeId>,
-    ) {
+    /// « Fenêtre » porte les deux fonctionnalités qui touchent à la
+    /// disposition elle-même plutôt qu'au modèle : maximiser/restaurer
+    /// l'onglet actif, et détacher/réattacher le Project Manager en fenêtre
+    /// OS séparée — voir la doc de tête du module.
+    fn menu_bar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
         egui::Panel::top("plotyx_menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Fichier", |ui| {
@@ -327,25 +412,63 @@ impl PlotyxApp {
                         ui.close();
                     }
                 });
-                ui.menu_button("Graphes", |ui| {
-                    let graphs = self.state.graphs();
-                    if graphs.is_empty() {
-                        ui.weak("Aucun graphe dans ce projet.");
-                    }
-                    for (id, path) in graphs {
-                        if ui.button(path).clicked() {
-                            open_graphs.push(id);
+                ui.menu_button("Fenêtre", |ui| {
+                    if let Some(tab) = self.maximized_tab {
+                        if ui
+                            .button(format!("Restaurer « {} »", tab_title(&self.state, tab)))
+                            .clicked()
+                        {
+                            self.maximized_tab = None;
                             ui.close();
                         }
+                    } else {
+                        // `find_active_focused` lit l'onglet actif du nœud
+                        // focalisé du dock — celui que l'utilisateur regarde
+                        // en ce moment, même sans avoir cliqué dedans cette
+                        // image-ci.
+                        let active = self.dock_state.find_active_focused().map(|(_, tab)| *tab);
+                        let can_maximize =
+                            matches!(active, Some(tab) if tab != Tab::ProjectManager);
+                        if ui
+                            .add_enabled(
+                                can_maximize,
+                                egui::Button::new("Maximiser l'onglet actif"),
+                            )
+                            .clicked()
+                        {
+                            self.maximized_tab = active;
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    if self.pm_detached {
+                        if ui.button("Réattacher le Project Manager").clicked() {
+                            self.reattach_project_manager();
+                            ui.close();
+                        }
+                    } else if ui
+                        .button("Détacher le Project Manager en fenêtre séparée")
+                        .clicked()
+                    {
+                        self.detach_project_manager();
+                        ui.close();
                     }
                 });
             });
         });
     }
 
-    /// Bandeau du chemin de fichier (lecture seule) et des actions de
-    /// structure. « Enregistrer sous… » et « Ouvrir… » passent par un
+    /// Bandeau du chemin de fichier (lecture seule) et des actions
+    /// globales. « Enregistrer sous… » et « Ouvrir… » passent par un
     /// sélecteur de fichiers natif (`rfd`) ; voir la doc de tête du module.
+    ///
+    /// Les actions de structure (ajouter une colonne, insérer/supprimer des
+    /// lignes) ne vivent plus ici depuis que la grille est scopée par
+    /// classeur (`Tab::Book`) : il n'y a plus de « la » feuille affichée sur
+    /// laquelle un bouton global pourrait agir sans ambiguïté quand
+    /// plusieurs classeurs sont ouverts en même temps. Elles vivent
+    /// désormais dans [`book_contents`], à côté de la grille qu'elles
+    /// modifient.
     fn tool_bar(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         egui::Panel::top("plotyx_tool_bar")
             .resizable(false)
@@ -377,49 +500,15 @@ impl PlotyxApp {
                             actions.push(Action::Load);
                         }
                     }
-                    ui.separator();
-                    if ui.button("Ajouter une colonne").clicked() {
-                        actions.push(Action::AddColumn);
-                    }
-                    if ui.button("Insérer 1 ligne").clicked() {
-                        // B5 (`guide-de-correction-robustesse.md` §F5) —
-                        // `at: 0` en dur n'insérait jamais rien sur une
-                        // feuille neuve : `row_targets` exige `at < len`, et
-                        // une colonne fraîchement créée a `len == 0`. Ajouter
-                        // une ligne en fin de feuille (`at == row_count`) est
-                        // le geste que le bouton promet, et c'est la plage
-                        // que `Project::insert_rows` accepte désormais.
-                        actions.push(Action::InsertRows {
-                            at: self.state.row_count(),
-                            count: 1,
-                        });
-                    }
-                    if ui.button("Supprimer 1 ligne").clicked() {
-                        actions.push(Action::DeleteRows { at: 0, count: 1 });
-                    }
                 });
             });
     }
 
-    /// Explorateur des feuilles du projet.
-    fn sheet_panel(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        egui::Panel::left("plotyx_sheets")
-            .default_size(190.0)
-            .show(ui, |ui| {
-                ui.heading("Feuilles");
-                ui.separator();
-                let selected = self.state.selected_sheet();
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (id, path) in self.state.sheets() {
-                        if ui.selectable_label(selected == Some(id), path).clicked() {
-                            actions.push(Action::SelectSheet(id));
-                        }
-                    }
-                });
-            });
-    }
-
-    /// Barre d'état : dernier message, révision, dimensions.
+    /// Barre d'état : dernier message, révision.
+    ///
+    /// Les dimensions (lignes × colonnes) qu'elle affichait ont disparu avec
+    /// « la » feuille sélectionnée globale : chaque onglet de classeur les
+    /// montre pour sa propre feuille, dans [`book_contents`].
     fn status_bar(&self, ui: &mut egui::Ui) {
         egui::Panel::bottom("plotyx_status")
             .resizable(false)
@@ -437,30 +526,96 @@ impl PlotyxApp {
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.weak(format!(
-                            "révision {} — {} lignes × {} colonnes",
-                            self.state.snapshot().revision,
-                            self.state.row_count(),
-                            self.state.visible_columns().len()
-                        ));
+                        ui.weak(format!("révision {}", self.state.snapshot().revision));
                     });
                 });
             });
     }
 
-    /// Ouvre l'onglet du graphe `id`, ou le focalise s'il est déjà ouvert.
+    /// Ouvre l'onglet `tab`, ou le focalise s'il est déjà ouvert.
     ///
-    /// Le seul endroit qui décide entre les deux : un double-clic sur un
-    /// graphe déjà ouvert dans le menu « Graphes » ne doit pas dupliquer son
-    /// onglet, il doit l'amener au premier plan.
-    fn open_graph_tab(&mut self, id: NodeId) {
-        let tab = Tab::Graph(id);
+    /// Le seul endroit qui décide entre les deux, pour toute nature de
+    /// fenêtre (classeur, graphe, matrice, note) : cliquer une seconde fois
+    /// la même entrée du Project Manager ne doit jamais dupliquer son
+    /// onglet, seulement l'amener au premier plan.
+    fn open_tab(&mut self, tab: Tab) {
         if let Some(path) = self.dock_state.find_tab(&tab) {
             let _ = self.dock_state.set_active_tab(path);
             self.dock_state
                 .set_focused_node_and_surface(path.node_path());
         } else {
             self.dock_state.push_to_focused_leaf(tab);
+        }
+    }
+
+    /// Retire `Tab::ProjectManager` du dock et bascule en mode détaché : le
+    /// prochain rendu l'ouvre dans sa propre fenêtre OS
+    /// ([`PlotyxApp::show_detached_project_manager`]). Sans effet s'il l'est
+    /// déjà.
+    fn detach_project_manager(&mut self) {
+        if self.pm_detached {
+            return;
+        }
+        if let Some(path) = self.dock_state.find_tab(&Tab::ProjectManager) {
+            self.dock_state.remove_tab(path);
+        }
+        if self.maximized_tab == Some(Tab::ProjectManager) {
+            // Ne devrait jamais arriver (le menu grise ce cas), mais un
+            // onglet maximisé qui n'existe plus dans le dock serait un état
+            // incohérent : mieux vaut restaurer que planter.
+            self.maximized_tab = None;
+        }
+        self.pm_detached = true;
+    }
+
+    /// Bascule hors du mode détaché et repousse `Tab::ProjectManager` dans le
+    /// dock (au nœud focalisé, ou en nouvelle feuille s'il n'y en a pas).
+    /// Sans effet s'il n'est pas détaché.
+    fn reattach_project_manager(&mut self) {
+        if !self.pm_detached {
+            return;
+        }
+        self.pm_detached = false;
+        if self.dock_state.find_tab(&Tab::ProjectManager).is_none() {
+            self.dock_state.push_to_focused_leaf(Tab::ProjectManager);
+        }
+    }
+
+    /// Peint le Project Manager dans sa propre fenêtre OS native, via un
+    /// viewport `eframe`/`egui` immédiat — voir la doc de tête du module,
+    /// § détachement.
+    ///
+    /// `show_viewport_immediate` (plutôt que `_deferred`) est le choix le
+    /// plus simple pour ce panneau : il n'anime rien en continu, le coût
+    /// d'un repaint couplé entre les deux fenêtres (documenté par
+    /// `egui::Context::show_viewport_immediate`) est négligeable ici.
+    fn show_detached_project_manager(&mut self, ctx: &egui::Context, open_requests: &mut Vec<Tab>) {
+        let mut should_reattach = false;
+        let state = &self.state;
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("plotyx_project_manager_window"),
+            egui::ViewportBuilder::default()
+                .with_title("PlotYx — Project Manager")
+                .with_inner_size([PROJECT_MANAGER_WIDTH + 40.0, 480.0]),
+            |ui, _class| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    if ui.button("Réattacher au dock principal").clicked() {
+                        should_reattach = true;
+                    }
+                    ui.separator();
+                    project_manager_contents(ui, state, open_requests);
+                });
+                // L'utilisateur a cliqué le bouton de fermeture de cette
+                // fenêtre OS : on la referme proprement en la réattachant au
+                // dock plutôt que de laisser le panneau disparaître sans
+                // recours.
+                if ui.ctx().input(|input| input.viewport().close_requested()) {
+                    should_reattach = true;
+                }
+            },
+        );
+        if should_reattach {
+            self.reattach_project_manager();
         }
     }
 
@@ -546,7 +701,10 @@ impl eframe::App for PlotyxApp {
         // d'emprunter `ui` en lecture pendant qu'on le peint.
         let ctx = ui.ctx().clone();
         let mut actions: Vec<Action> = Vec::new();
-        let mut open_graphs: Vec<NodeId> = Vec::new();
+        // Onglets demandés par un clic dans le Project Manager (docké ou
+        // détaché) : appliqués après le rendu, comme `actions` — muter
+        // `dock_state` en plein parcours de la `DockArea` l'invaliderait.
+        let mut open_requests: Vec<Tab> = Vec::new();
 
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
@@ -555,10 +713,13 @@ impl eframe::App for PlotyxApp {
         self.state.poll_script();
 
         self.collect_shortcuts(&ctx, &mut actions);
-        self.menu_bar(ui, &ctx, &mut actions, &mut open_graphs);
+        self.menu_bar(ui, &ctx, &mut actions);
         self.tool_bar(ui, &mut actions);
         self.status_bar(ui);
-        self.sheet_panel(ui, &mut actions);
+
+        if self.pm_detached {
+            self.show_detached_project_manager(&ctx, &mut open_requests);
+        }
 
         // Emprunts disjoints des champs (édition 2021) : la disposition et
         // les contenus qu'elle amarre ont besoin, chacun, d'un accès distinct
@@ -567,27 +728,55 @@ impl eframe::App for PlotyxApp {
             state,
             dock_state,
             graph_views,
+            maximized_tab,
+            pm_detached,
             ..
         } = self;
         egui::CentralPanel::default().show(ui, |ui| {
-            let mut viewer = AppTabViewer {
-                state,
-                actions: &mut actions,
-                graph_views,
-                ctx: &ctx,
-            };
-            DockArea::new(dock_state)
-                .style(Style::from_egui(ui.style()))
-                .show_inside(ui, &mut viewer);
+            if let Some(tab) = *maximized_tab {
+                // § maximiser (doc de tête du module) : la `DockArea` normale
+                // n'est pas peinte du tout cette image-ci. Le Project
+                // Manager reste visible par ailleurs — dans ce panneau fixe
+                // s'il n'est pas déjà montré dans sa propre fenêtre OS.
+                if !*pm_detached {
+                    egui::Panel::left("plotyx_project_manager_pinned")
+                        .resizable(true)
+                        .default_size(PROJECT_MANAGER_WIDTH)
+                        .show(ui, |ui| {
+                            project_manager_contents(ui, state, &mut open_requests);
+                        });
+                }
+                ui.horizontal(|ui| {
+                    ui.heading(tab_title(state, tab));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Restaurer la disposition").clicked() {
+                            *maximized_tab = None;
+                        }
+                    });
+                });
+                ui.separator();
+                tab_contents(ui, &ctx, state, &mut actions, graph_views, tab);
+            } else {
+                let mut viewer = AppTabViewer {
+                    state,
+                    actions: &mut actions,
+                    graph_views,
+                    ctx: &ctx,
+                    open_requests: &mut open_requests,
+                };
+                DockArea::new(dock_state)
+                    .style(Style::from_egui(ui.style()))
+                    .show_inside(ui, &mut viewer);
+            }
         });
 
-        // Les onglets de graphe demandés depuis le menu, et les actions
-        // récoltées par tous les panneaux et onglets, ne sont appliqués
-        // qu'une fois l'image peinte : muter le plan de disposition ou le
-        // modèle en plein rendu invaliderait ce que la `DockArea` est en
-        // train de parcourir.
-        for id in open_graphs {
-            self.open_graph_tab(id);
+        // Les onglets demandés (Project Manager, docké ou détaché) et les
+        // actions récoltées par tous les panneaux et onglets ne sont
+        // appliqués qu'une fois l'image peinte : muter le plan de
+        // disposition ou le modèle en plein rendu invaliderait ce que la
+        // `DockArea` est en train de parcourir.
+        for tab in open_requests {
+            self.open_tab(tab);
         }
         for action in actions {
             self.state.dispatch(action);
@@ -607,54 +796,114 @@ fn suggested_file_name(path: &str) -> String {
         .unwrap_or_else(|| "demo.plotyx".to_string())
 }
 
-/// Peint le contenu de chaque onglet du plan de disposition.
-///
-/// Emprunte les champs de [`PlotyxApp`] plutôt que l'application entière
-/// (voir `PlotyxApp::ui`) : c'est ce qui permet à la `DockArea`
-/// (`&mut dock_state`) et à ce visiteur (`&mut state`, `&mut graph_views`)
-/// de coexister le temps d'une image.
-struct AppTabViewer<'a> {
-    state: &'a mut AppState,
-    actions: &'a mut Vec<Action>,
-    graph_views: &'a mut HashMap<NodeId, GraphView>,
-    ctx: &'a egui::Context,
+/// Traduit une nature de fenêtre du Project Manager en l'onglet qui l'ouvre.
+fn tab_for_window(id: NodeId, kind: WindowKind) -> Tab {
+    match kind {
+        WindowKind::Book => Tab::Book(id),
+        WindowKind::Graph => Tab::Graph(id),
+        WindowKind::Matrix => Tab::Matrix(id),
+        WindowKind::Note => Tab::Note(id),
+    }
 }
 
-impl TabViewer for AppTabViewer<'_> {
-    type Tab = Tab;
-
-    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
-        egui::Id::new(tab)
+/// Titre d'un onglet : le nom du nœud qu'il porte, ou un texte « supprimé »
+/// explicite s'il a disparu de l'arbre entre-temps (fermeture depuis un
+/// autre onglet, ou par un script) — un onglet resté ouvert sur un nœud
+/// disparu ne doit jamais paniquer ni disparaître silencieusement
+/// (invariant 10).
+fn tab_title(state: &AppState, tab: Tab) -> String {
+    match tab {
+        Tab::ProjectManager => "Project Manager".to_string(),
+        Tab::Script => "Script Python".to_string(),
+        Tab::Book(id) => node_title(state, id, "Classeur"),
+        Tab::Graph(id) => node_title(state, id, "Graphe"),
+        Tab::Matrix(id) => node_title(state, id, "Matrice"),
+        Tab::Note(id) => node_title(state, id, "Note"),
     }
+}
 
-    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        match *tab {
-            Tab::Grid => "Feuille".into(),
-            Tab::Script => "Script Python".into(),
-            Tab::Graph(id) => self
-                .state
-                .graphs()
-                .into_iter()
-                .find(|(graph_id, _)| *graph_id == id)
-                .map(|(_, path)| path)
-                .unwrap_or_else(|| format!("Graphe {id} (supprimé)"))
-                .into(),
+/// Le nom du nœud `id`, ou `"{missing} {id} (supprimé)"` s'il n'existe plus.
+fn node_title(state: &AppState, id: NodeId, missing: &str) -> String {
+    state
+        .tree()
+        .node(id)
+        .map(|node| node.name().to_string())
+        .unwrap_or_else(|| format!("{missing} {id} (supprimé)"))
+}
+
+/// Peint le contenu de l'onglet `tab`, quelle que soit sa provenance —
+/// [`AppTabViewer::ui`] (dock normal) ou la zone de maximisation
+/// ([`PlotyxApp::ui`]) l'appellent toutes les deux : **une seule** fonction
+/// qui sait peindre un onglet, jamais deux implémentations à tenir en
+/// accord.
+fn tab_contents(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    graph_views: &mut HashMap<NodeId, GraphView>,
+    tab: Tab,
+) {
+    match tab {
+        // N'arrive jamais en pratique : `AppTabViewer::ui` peint
+        // `Tab::ProjectManager` séparément (il a besoin de `open_requests`,
+        // que cette fonction ne reçoit pas), et le menu « Fenêtre » ne permet
+        // pas de le maximiser (voir `PlotyxApp::menu_bar`). Un message plutôt
+        // qu'un panic si cette invariant venait un jour à se rompre
+        // (invariant 10).
+        Tab::ProjectManager => {
+            ui.weak("Project Manager (rendu indisponible ici).");
         }
+        Tab::Script => script_contents(ui, ctx, state, actions),
+        Tab::Book(id) => book_contents(ui, state, actions, id),
+        Tab::Graph(id) => graph_contents(ui, state, graph_views, id),
+        Tab::Matrix(id) => matrix_contents(ui, state, id),
+        Tab::Note(id) => note_contents(ui, state, actions, id),
     }
+}
 
-    // Les onglets structurels (grille, script) ne se ferment pas : ils n'ont
-    // pas d'équivalent « rouvrir » dans ce banc volontairement pauvre. Un
-    // onglet de graphe, lui, se ferme et se rouvre librement — c'est
-    // `PlotyxApp::open_graph_tab`, via le menu « Graphes », qui rouvre.
-    fn is_closeable(&self, tab: &Self::Tab) -> bool {
-        matches!(tab, Tab::Graph(_))
-    }
+/// Le panneau Project Manager lui-même : l'arbre du projet
+/// ([`AppState::project_tree`]), dossiers dépliables et fenêtres cliquables.
+/// Cliquer une fenêtre pousse l'onglet qui l'ouvre dans `open_requests` (une
+/// ouverture ou une focalisation, tranchée par [`PlotyxApp::open_tab`] après
+/// le rendu). Fonction libre plutôt que méthode : appelée à la fois depuis le
+/// dock normal, la zone de maximisation, et la fenêtre OS séparée — trois
+/// contextes, un seul rendu à tenir en accord.
+fn project_manager_contents(ui: &mut egui::Ui, state: &AppState, open_requests: &mut Vec<Tab>) {
+    ui.heading("Project Manager");
+    ui.separator();
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for node in state.project_tree() {
+            project_tree_node_ui(ui, &node, open_requests);
+        }
+    });
+}
 
-    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        match *tab {
-            Tab::Grid => grid_contents(ui, self.state, self.actions),
-            Tab::Script => script_contents(ui, self.ctx, self.state, self.actions),
-            Tab::Graph(id) => graph_contents(ui, self.state, self.graph_views, id),
+/// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants.
+fn project_tree_node_ui(ui: &mut egui::Ui, node: &ProjectTreeNode, open_requests: &mut Vec<Tab>) {
+    match node {
+        ProjectTreeNode::Folder { name, children, .. } => {
+            egui::CollapsingHeader::new(format!("📁 {name}"))
+                .default_open(false)
+                .show(ui, |ui| {
+                    if children.is_empty() {
+                        ui.weak("(vide)");
+                    }
+                    for child in children {
+                        project_tree_node_ui(ui, child, open_requests);
+                    }
+                });
+        }
+        ProjectTreeNode::Window { id, name, kind } => {
+            let icon = match kind {
+                WindowKind::Book => "📗",
+                WindowKind::Graph => "📈",
+                WindowKind::Matrix => "🔢",
+                WindowKind::Note => "📝",
+            };
+            if ui.button(format!("{icon} {name}")).clicked() {
+                open_requests.push(tab_for_window(*id, *kind));
+            }
         }
     }
 }
@@ -668,15 +917,83 @@ fn type_suffix(column_type: ColumnType) -> &'static str {
     }
 }
 
+/// Contenu d'un [`Tab::Book`] : la sous-navigation entre les feuilles du
+/// classeur (`egui_dock` n'a pas besoin d'être imbriqué pour ça — de simples
+/// `selectable_label` scopés à `book` suffisent), les actions de structure
+/// qui vivaient avant dans la barre d'outils globale, et la grille elle-même
+/// — [`grid_contents`], inchangée dans son principe (virtualisation, une
+/// seule cellule éditable à la fois), désormais scopée à la feuille choisie
+/// *dans ce classeur* plutôt qu'à une sélection globale.
+fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>, book: NodeId) {
+    let sheets = state.worksheets_of(book);
+    if sheets.is_empty() {
+        ui.centered_and_justified(|ui| {
+            ui.weak(format!(
+                "« {} » n'a aucune feuille (ou a été supprimé).",
+                node_title(state, book, "Classeur")
+            ));
+        });
+        return;
+    }
+    let selected = state.selected_sheet_in(book).unwrap_or(sheets[0].0);
+
+    ui.horizontal(|ui| {
+        for (id, name) in &sheets {
+            if ui.selectable_label(selected == *id, name).clicked() {
+                actions.push(Action::SelectSheet(*id));
+            }
+        }
+    });
+    ui.separator();
+    ui.horizontal(|ui| {
+        if ui.button("Ajouter une colonne").clicked() {
+            actions.push(Action::AddColumn { sheet: selected });
+        }
+        if ui.button("Insérer 1 ligne").clicked() {
+            // B5 (`guide-de-correction-robustesse.md` §F5) — insérer en fin
+            // de feuille (`at == row_count`) est le geste que le bouton
+            // promet ; `at: 0` en dur n'insérait jamais rien sur une feuille
+            // neuve (`Project::insert_rows` exige `at < len`, une colonne
+            // fraîche a `len == 0`).
+            actions.push(Action::InsertRows {
+                sheet: selected,
+                at: state.row_count(selected),
+                count: 1,
+            });
+        }
+        if ui.button("Supprimer 1 ligne").clicked() {
+            actions.push(Action::DeleteRows {
+                sheet: selected,
+                at: 0,
+                count: 1,
+            });
+        }
+        ui.separator();
+        ui.weak(format!(
+            "{} lignes × {} colonnes",
+            state.row_count(selected),
+            state.visible_columns(selected).len()
+        ));
+    });
+    ui.separator();
+    grid_contents(ui, state, actions, selected);
+}
+
 /// La grille, en lignes **virtualisées** : seules les lignes visibles sont
 /// construites, sans quoi une feuille d'un million de lignes bloquerait
-/// chaque image. Contenu de [`Tab::Grid`].
-fn grid_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>) {
-    let columns = state.visible_columns();
-    let row_count = state.row_count();
+/// chaque image. Scopée à `sheet` — voir [`book_contents`], son seul
+/// appelant.
+fn grid_contents(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+) {
+    let columns = state.visible_columns(sheet);
+    let row_count = state.row_count(sheet);
     if columns.is_empty() {
         ui.centered_and_justified(|ui| {
-            ui.weak("Aucune colonne à afficher : choisissez une feuille à gauche.");
+            ui.weak("Aucune colonne dans cette feuille.");
         });
         return;
     }
@@ -868,6 +1185,83 @@ fn graph_contents(
     }
 }
 
+/// Contenu d'un [`Tab::Matrix`] — **espace réservé documenté**. L'édition de
+/// matrice est explicitement hors périmètre de cette tâche
+/// (`docs/application.md`) : la fenêtre s'ouvre et se focalise exactement
+/// comme les trois autres natures, mais ne montre qu'un message plutôt qu'un
+/// éditeur. `plotyx-core::NodeKind::Matrix` n'a aujourd'hui aucun contenu
+/// (juste des métadonnées de fenêtre) — il n'y a donc littéralement rien
+/// d'autre à afficher tant que cette nature n'a pas de valeurs.
+fn matrix_contents(ui: &mut egui::Ui, state: &AppState, matrix: NodeId) {
+    let name = node_title(state, matrix, "Matrice");
+    ui.centered_and_justified(|ui| {
+        ui.weak(format!(
+            "« {name} » — édition de matrice non implémentée dans ce banc \
+             (hors périmètre ; `plotyx-core` n'expose pas encore de contenu \
+             de matrice à éditer)."
+        ));
+    });
+}
+
+/// Contenu d'un [`Tab::Note`] : un éditeur multi-lignes, sur le même principe
+/// de saisie différée que [`cell_widget`] — le tampon ([`crate::state::
+/// NoteEdit`]) n'atteint le modèle qu'à la perte de focus, jamais à chaque
+/// frappe (sinon l'historique compterait une entrée par caractère). Échap
+/// abandonne la saisie sans rien écrire, comme pour une cellule.
+fn note_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>, note: NodeId) {
+    let Some(current_name) = state.tree().node(note).map(|node| node.name().to_string()) else {
+        ui.centered_and_justified(|ui| {
+            ui.weak(format!(
+                "« {} » a été supprimée.",
+                node_title(state, note, "Note")
+            ));
+        });
+        return;
+    };
+    ui.heading(current_name);
+    ui.separator();
+
+    let editing_here = state.note_editing().is_some_and(|edit| edit.note == note);
+    let mut buffer = if editing_here {
+        state
+            .note_editing()
+            .map(|edit| edit.buffer.clone())
+            .unwrap_or_default()
+    } else {
+        state.note_text(note).unwrap_or_default()
+    };
+
+    let response = ui.add(
+        egui::TextEdit::multiline(&mut buffer)
+            .desired_rows(20)
+            .desired_width(f32::INFINITY),
+    );
+
+    if response.gained_focus() && !editing_here {
+        state.begin_note_edit(note);
+    }
+    if state.note_editing().is_some_and(|edit| edit.note == note) {
+        if let Some(edit) = state.note_editing_mut() {
+            edit.buffer = buffer;
+        }
+    }
+
+    if response.lost_focus() {
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            state.cancel_note_edit();
+        } else {
+            let pending = state
+                .note_editing()
+                .filter(|edit| edit.note == note)
+                .map(|edit| edit.buffer.clone());
+            if let Some(text) = pending {
+                state.cancel_note_edit();
+                actions.push(Action::SetNoteText { note, text });
+            }
+        }
+    }
+}
+
 /// Ce que la figure a réellement tracé, en une ligne.
 ///
 /// Ajouté en R5 : avec les panneaux multiples, les types de tracé et la
@@ -981,5 +1375,56 @@ fn cell_widget(
     if let Some(text) = pending {
         state.cancel_edit();
         actions.push(Action::CommitCell { column, row, text });
+    }
+}
+
+/// Peint le contenu de chaque onglet du plan de disposition.
+///
+/// Emprunte les champs de [`PlotyxApp`] plutôt que l'application entière
+/// (voir `PlotyxApp::ui`) : c'est ce qui permet à la `DockArea`
+/// (`&mut dock_state`) et à ce visiteur (`&mut state`, `&mut graph_views`)
+/// de coexister le temps d'une image.
+struct AppTabViewer<'a> {
+    state: &'a mut AppState,
+    actions: &'a mut Vec<Action>,
+    graph_views: &'a mut HashMap<NodeId, GraphView>,
+    ctx: &'a egui::Context,
+    open_requests: &'a mut Vec<Tab>,
+}
+
+impl TabViewer for AppTabViewer<'_> {
+    type Tab = Tab;
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(tab)
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        tab_title(self.state, *tab).into()
+    }
+
+    // Les onglets structurels (Project Manager, script) ne se ferment pas :
+    // ils n'ont pas d'équivalent « rouvrir » dans ce banc volontairement
+    // pauvre. Un onglet de classeur, graphe, matrice ou note, lui, se ferme
+    // et se rouvre librement — c'est le Project Manager, via
+    // `PlotyxApp::open_tab`, qui rouvre.
+    fn is_closeable(&self, tab: &Self::Tab) -> bool {
+        !matches!(tab, Tab::ProjectManager | Tab::Script)
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        match *tab {
+            Tab::ProjectManager => {
+                project_manager_contents(ui, self.state, self.open_requests);
+            }
+            _ => tab_contents(
+                ui,
+                self.ctx,
+                self.state,
+                self.actions,
+                self.graph_views,
+                *tab,
+            ),
+        }
     }
 }
