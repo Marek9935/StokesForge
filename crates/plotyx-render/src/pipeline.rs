@@ -117,7 +117,7 @@ pub const MIN_CELL: (u32, u32) = (48, 36);
 /// future (par graphe, par export) passe par ce point unique plutôt que par
 /// une constante recopiée dans chaque backend — `plotyx-app` (vue écran) et
 /// `plotyx-render-svg` (`DEFAULT_SIZE`, export) s'y réfèrent tous les deux.
-pub const DEFAULT_FIGURE_SIZE: (u32, u32) = (640, 480);
+pub const DEFAULT_FIGURE_SIZE: (u32, u32) = (480, 360);
 
 /// Ce qu'un panneau a fini par tracer — de quoi écrire un test sans relire
 /// des pixels.
