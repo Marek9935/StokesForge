@@ -223,6 +223,25 @@ appeler image après image) est bien plus couplé à `AppState` que les quatre
 autres natures — le généraliser demanderait de faire voyager aussi l'état
 d'exécution du script, hors périmètre de cette tâche.
 
+### Thème
+
+L'appli **ne suit pas** le thème clair/sombre du système : `plotyx_app::theme`
+pose, une seule fois au démarrage (`main.rs`, dans la fermeture de création
+d'`eframe::run_native`, aux côtés du réglage des polices), une palette maison
+dérivée de `egui::Visuals::light()` — jamais du sombre. `Context::set_theme`
+verrouille la préférence sur `Theme::Light` (empêche egui de re-suivre le
+système à la moindre notification `winit`), puis `Context::set_visuals`
+applique la palette (`theme::visuals`) : accent bleu-pétrole (sélection,
+liens, contours des widgets actifs/survolés), coins légèrement moins arrondis
+que le défaut egui. Le reste (gris de fond, contrastes de texte) vient tel
+quel du thème clair d'egui, déjà calibré pour la lisibilité.
+
+Deux raisons à ce choix, documentées en tête de `theme.rs` : `plotyx-render`
+dessine les tracés sur un fond clair implicite (axes, grilles, texte noir) —
+un thème sombre romprait ce contraste sans qu'aucun code de rendu n'en soit
+informé ; et un thème qui change avec le système est un thème qu'on ne peut
+pas garantir en capture d'écran ni en support.
+
 ### Sélecteur de fichiers natif
 
 `tool_bar` n'a plus de champ de texte pour taper le chemin à la main : les

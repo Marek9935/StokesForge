@@ -64,6 +64,11 @@ fn main() -> anyhow::Result<()> {
             // côtés.
             cc.egui_ctx
                 .set_fonts(plotyx_render_egui::font_definitions());
+            // Thème maison, clair, indépendant du thème système (voir la doc
+            // de tête de `plotyx_app::theme`) — posé ici, une seule fois, aux
+            // côtés des polices : les deux relèvent du même geste (« ce que
+            // l'appli impose sur le `Context` avant le premier rendu »).
+            plotyx_app::theme::install(&cc.egui_ctx);
             Ok(Box::new(PlotyxApp::new(state)))
         }),
     );

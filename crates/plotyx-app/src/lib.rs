@@ -21,7 +21,10 @@
 //!   d'actions — donc testable en intégration continue, sans serveur
 //!   graphique (`tests/shell.rs`) ;
 //! - [`app`] : la glu `eframe`, qui traduit clavier et souris en actions et
-//!   peint l'état. Rien de ce qu'elle contient n'est une décision de produit.
+//!   peint l'état. Rien de ce qu'elle contient n'est une décision de produit ;
+//! - [`theme`] : la palette visuelle maison, posée une fois sur le
+//!   `Context` au démarrage (`main.rs`) — l'appli ne suit pas le thème
+//!   clair/sombre du système.
 //!
 //! # Ce que Qt donnait et qu'il faut écrire ici
 //!
@@ -38,3 +41,4 @@
 
 pub mod app;
 pub mod state;
+pub mod theme;
