@@ -85,6 +85,11 @@ impl HostError {
             CoreError::ConcurrentModification { .. } => {
                 HostError::ConcurrentWrite(error.to_string())
             }
+            // Une colonne-formule refuse toute écriture directe de cellule
+            // (`plotyx-commands::History::apply_data`) : côté script, c'est
+            // une valeur invalide au même titre qu'un type incompatible, pas
+            // une référence cassée ni un conflit de version.
+            CoreError::FormulaColumnReadOnly { .. } => HostError::InvalidValue(error.to_string()),
         }
     }
 
