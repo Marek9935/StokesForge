@@ -15,10 +15,35 @@ PREFIX="$REPO_ROOT/vendor/python/extracted/python"
 
 PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
-# Seuls les crates listés plus bas sont construits ici : on n'impose ce rpath
-# à aucun autre crate du dépôt.
-export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,$PREFIX/lib"
-export PLOTYX_PYTHON_HOME="$PREFIX"
+
+# `PLOTYX_PYTHON_HOME` est lu côté Rust par `std::env::var` puis `PathBuf`
+# (`EmbeddedPython::locate`, piège n°4) : comme `PYO3_CONFIG_FILE`, ce n'est
+# pas PATH, MSYS ne le traduit pas pour le process natif — même conversion
+# `/c/foo` → `c:/foo` que scripts/python-config.sh.
+if [[ "${OS:-}" == "Windows_NT" ]]; then
+    PLOTYX_PYTHON_HOME="$(printf '%s' "$PREFIX" | sed -E 's#^/([A-Za-z])/#\1:/#')"
+else
+    PLOTYX_PYTHON_HOME="$PREFIX"
+fi
+export PLOTYX_PYTHON_HOME
+
+# Où le binaire de test trouve `libpython`/`python312.dll` à l'EXÉCUTION
+# (piège n°2) — mécanisme différent par OS, pas seulement un chemin différent :
+#   - Unix : rpath absolu posé à l'édition de liens (`ld` sait chercher une
+#     bibliothèque partagée par un chemin gravé dans le binaire) ;
+#   - Windows : le chargeur ne connaît pas de rpath, il résout les DLL par
+#     PATH (et le répertoire de l'exécutable) — `-Wl,-rpath` n'existe même
+#     pas pour `link.exe`/`lld-link`, qui rejette le flag. On préfixe donc
+#     PATH avec le préfixe embarqué (racine, `python312.dll` y vit
+#     directement — pas de `lib/`, cf. pyo3-config.windows.template.txt) au
+#     lieu de toucher à RUSTFLAGS.
+if [[ "${OS:-}" == "Windows_NT" ]]; then
+    export PATH="$PREFIX:$PATH"
+else
+    # Seuls les crates listés plus bas sont construits ici : on n'impose ce
+    # rpath à aucun autre crate du dépôt.
+    export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,$PREFIX/lib"
+fi
 
 cd "$REPO_ROOT"
 # Une invocation par crate plutôt qu'un seul `-p A -p B` : chacun porte sa

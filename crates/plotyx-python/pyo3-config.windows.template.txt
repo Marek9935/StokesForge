@@ -1,0 +1,23 @@
+# Gabarit de configuration PyO3 pour l'interpréteur embarqué — Windows
+# (tâche 5.1b). Pendant de pyo3-config.template.txt (Unix) : même raison
+# d'être (court-circuiter la détection automatique de PyO3, piège n°1), mais
+# disposition `python-build-standalone` différente sur Windows :
+#   - pas de `bin/`      : l'exécutable est <prefix>/python.exe ;
+#   - pas de `lib/`      : la bibliothèque d'import est <prefix>/libs/python312.lib ;
+#   - `lib_name=python312` (pas `python3.12` : le lieur MSVC veut le nom du
+#     fichier .lib sans point ni extension, cf. `libs/python312.lib`).
+#
+# Même mécanique de substitution que le gabarit Unix : @PYTHON_PREFIX@ est
+# remplacé par scripts/python-config.sh, qui écrit target/pyo3-config.txt et
+# retire les lignes de commentaire (pyo3-build-config n'attend que des paires
+# clé=valeur).
+implementation=CPython
+version=3.12
+shared=true
+abi3=false
+lib_name=python312
+lib_dir=@PYTHON_PREFIX@/libs
+executable=@PYTHON_PREFIX@/python.exe
+pointer_width=64
+build_flags=
+suppress_build_script_link_lines=false

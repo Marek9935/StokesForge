@@ -122,6 +122,18 @@ fn mode_isole_actif() {
     );
 }
 
+/// `Path::canonicalize` sur Windows rend un chemin **verbatim**
+/// (`\\?\C:\...`, cf. `std::fs::canonicalize`) : préfixe que `sys.path`, rendu
+/// par Python en forme normale, ne porte jamais. Rien à voir avec le pont
+/// Python — un piège de `std::fs` sur cette seule plateforme, retiré ici pour
+/// que la comparaison de préfixe ait un sens des deux côtés.
+fn sans_prefixe_verbatim(chemin: String) -> String {
+    chemin
+        .strip_prefix(r"\\?\")
+        .map(str::to_owned)
+        .unwrap_or(chemin)
+}
+
 #[test]
 fn sys_path_ne_contient_que_le_prefixe_embarque() {
     let embedded = prepare();
@@ -129,7 +141,7 @@ fn sys_path_ne_contient_que_le_prefixe_embarque() {
         .home()
         .canonicalize()
         .expect("le préfixe embarqué doit exister");
-    let prefixe = prefixe.to_string_lossy().into_owned();
+    let prefixe = sans_prefixe_verbatim(prefixe.to_string_lossy().into_owned());
 
     let chemins = interpreter::sys_path().expect("sys.path");
     assert!(!chemins.is_empty());

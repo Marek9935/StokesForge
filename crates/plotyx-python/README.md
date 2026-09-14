@@ -17,7 +17,7 @@ lue par les scripts (bash) **et** par les tests (`include_str!`).
 
 | Élément | Version |
 |---|---|
-| CPython (python-build-standalone `20260901`, `x86_64-unknown-linux-gnu`, `install_only_stripped`) | `3.12.14` |
+| CPython (python-build-standalone `20260901`, `install_only_stripped`, `x86_64-unknown-linux-gnu` **et** `x86_64-pc-windows-msvc` — § Windows ci-dessous) | `3.12.14` |
 | Roue numpy (`cp312`, manylinux x86_64) | `2.5.3` |
 | Crate `pyo3` | `0.29.2` |
 | Crate `numpy` (rust-numpy) | `0.29.0` |
@@ -473,8 +473,46 @@ PlotYx, qui est du Rust pur sans FFI.
   prises du GIL, libération) — tâche **5.3**.
 * **Fil de script dédié** (console utilisateur, interruption, `detach` pendant
   les calculs longs) — tâche **5.4**. Ici tout tourne sur le fil appelant.
-* **Windows** — tâche **5.1b** : `wchar_t` y fait 16 bits, il n'y a pas de
-  `$ORIGIN` (le chargeur cherche à côté de l'exécutable, ce qui change la
-  disposition), et `Py_DecodeLocale` n'a pas le même comportement. Le code de
-  `start_interpreter` est écrit pour être portable, mais **rien n'a été testé
-  ailleurs que sur Linux x86_64**.
+
+## Windows (tâche 5.1b)
+
+**Faite.** Le critère de fin du socle (§1.1) rejoue vert sur Windows :
+`scripts/python-test.sh` (lui-même OS-aware) lance les mêmes suites
+(`embedded.rs`, `zerocopy.rs`, `plotyx-script`, `plotyx-robustesse` b7/b8/b9)
+contre un CPython 3.12.14 `python-build-standalone` vendorisé pour
+`x86_64-pc-windows-msvc` — même verrou de versions que Linux
+(`vendor/python/lock.env`, `PBS_TRIPLE_WINDOWS`), aucune n'a bougé.
+
+Ce qui différait vraiment de Linux, et comment c'est traité :
+
+* **Disposition du préfixe.** `python-build-standalone` livre un layout
+  différent par OS : `<home>/lib/python3.12` + `lib-dynload/` sur Unix,
+  `<home>/Lib` + `<home>/DLLs` sur Windows (pas de `lib-dynload` dans cette
+  disposition). `EmbeddedPython::stdlib_dir`/`search_paths`
+  (`src/interpreter.rs`) branchent sur `cfg(windows)` — la seule différence
+  entre les deux chemins de code, le reste de `start_interpreter` (PyConfig
+  isolée, `module_search_paths`) est identique sur les deux OS.
+* **Configuration PyO3 (piège n°1).** Gabarit dédié
+  [`pyo3-config.windows.template.txt`](pyo3-config.windows.template.txt) :
+  `lib_name=python312` (nom du `.lib` d'import, pas `python3.12`) et
+  `lib_dir=<prefix>/libs` (pas `<prefix>/lib`). `scripts/python-config.sh`
+  choisit le bon gabarit sur `$OS`.
+* **`libpython` à l'exécution (piège n°2).** Pas de rpath sous Windows (le
+  chargeur ne connaît pas la notion, et `-Wl,-rpath` ferait échouer
+  `link.exe`) : `scripts/python-test.sh` préfixe `PATH` avec le préfixe
+  embarqué à la place — `python312.dll` y vit directement, à la racine.
+* **`Py_DecodeLocale`/`wchar_t` 16 bits.** Aucun contournement nécessaire :
+  ce sont des détails internes de la C-API que `pyo3::ffi` expose déjà de
+  façon portable ; `start_interpreter`/`append_search_path` n'ont pas changé
+  d'une ligne entre les deux OS.
+* **`link.exe` de Git for Windows.** Piège d'environnement, pas de code :
+  `Git\usr\bin\link.exe` (un outil POSIX homonyme, sans rapport avec MSVC)
+  peut passer avant celui de Visual Studio sur le `PATH` — voir la section
+  Windows du `CLAUDE.md` racine pour l'ordre à respecter, et pourquoi
+  compiler directement en PowerShell plutôt que via `bash -lc`.
+
+Un seul test du dépôt reposait sur une hypothèse Unix en dehors du pont
+Python lui-même : `tests/embedded.rs::sys_path_ne_contient_que_le_prefixe_embarque`
+comparait `sys.path` à `Path::canonicalize()`, qui sur Windows rend un chemin
+**verbatim** (`\\?\C:\...`) que `sys.path` ne porte jamais — corrigé en
+retirant ce préfixe avant comparaison, sans rapport avec le pont Rust/Python.

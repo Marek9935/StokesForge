@@ -39,6 +39,23 @@ Règles de chargement par domaine (quel crate/doc charger selon la tâche) : `.c
 - Commits et docs techniques en français.
 - Toute mutation du modèle passe par une commande annulable de `plotyx-commands`, jamais par une primitive `core` en direct.
 
+## Windows (poste de développement, tâche 5.1b)
+
+- Machine à **16 Go de RAM** : ne pas lancer plusieurs `cargo build`/`cargo test`
+  en tâche de fond simultanément (chaque compilation du workspace peut
+  consommer plusieurs Go — `rustc` parallélise déjà en interne par CGU). En
+  cas de besoin, réduire `cargo build -j <n>` plutôt que multiplier les
+  invocations concurrentes.
+- Compiler depuis un *Developer PowerShell for VS 2022* (ou charger
+  `Common7\Tools\Launch-VsDevShell.ps1`) : `link.exe` de MSVC doit précéder
+  celui de Git for Windows (`Git\usr\bin\link.exe`, homonyme sans rapport) sur
+  le PATH.
+- Les scripts `scripts/python-*.sh` restent des scripts bash (Git Bash) même
+  sur Windows ; ne pas les lancer en `bash -lc` pour la compilation elle-même
+  (le shell de login MSYS réordonne le PATH et fait passer le mauvais
+  `link.exe` devant) — seulement pour la génération de `pyo3-config.txt`,
+  ensuite `cargo` s'invoque directement en PowerShell.
+
 ## Pièges connus
 
 - Avant undo/historique ou format `.plx` : `docs/commandes-et-historique.md`, `docs/persistance.md`, puis `docs/archive/rustrewrite/format-fichier-plx.md` pour les options déjà écartées.

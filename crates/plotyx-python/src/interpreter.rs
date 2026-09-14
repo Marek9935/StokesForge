@@ -113,20 +113,44 @@ impl EmbeddedPython {
         &self.home
     }
 
-    /// `<home>/lib/python3.12` : la bibliothèque standard.
+    /// La bibliothèque standard, sous le préfixe embarqué.
+    ///
+    /// Disposition `python-build-standalone` : `<home>/lib/python3.12` sur
+    /// Unix, `<home>/Lib` sur Windows (tâche 5.1b) — deux dispositions de
+    /// fabricant différentes, pas un choix de PlotYx.
     fn stdlib_dir(&self) -> PathBuf {
-        self.home.join("lib").join(format!("python{PYTHON_XY}"))
+        #[cfg(windows)]
+        {
+            self.home.join("Lib")
+        }
+        #[cfg(not(windows))]
+        {
+            self.home.join("lib").join(format!("python{PYTHON_XY}"))
+        }
     }
 
-    /// Les trois répertoires injectés dans `sys.path`, dans l'ordre.
+    /// Les répertoires injectés dans `sys.path`, dans l'ordre.
     ///
-    /// Rien d'autre n'y entre : ni `PYTHONPATH`, ni `~/.local`, ni les `.pth`
-    /// d'un Python système.
+    /// Rien d'autre n'y entre : ni `PYTHONPATH`, ni `~/.local`/`%APPDATA%`, ni
+    /// les `.pth` d'un Python système.
+    ///
+    /// Sur Windows, les extensions du cœur (`_socket`, `_ctypes`…) sont des
+    /// `.pyd` livrés dans `<home>/DLLs`, pas dans un `lib-dynload` sous la
+    /// bibliothèque standard (qui n'existe pas dans cette disposition) —
+    /// deuxième différence de fabricant entre les deux dispositions.
     fn search_paths(&self) -> [PathBuf; 3] {
         let stdlib = self.stdlib_dir();
-        let dynload = stdlib.join("lib-dynload");
         let site = stdlib.join("site-packages");
-        [stdlib, dynload, site]
+        #[cfg(windows)]
+        {
+            let dynload = self.home.join("DLLs");
+            [stdlib, dynload, site]
+        }
+        #[cfg(not(windows))]
+        {
+            let dynload = stdlib.join("lib-dynload");
+            [stdlib, dynload, site]
+        }
     }
 
     /// Démarre l'interpréteur, **une seule fois par processus**, en mode isolé,
