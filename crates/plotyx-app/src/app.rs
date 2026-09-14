@@ -17,19 +17,32 @@
 //!
 //! # Project Manager, et une fenêtre par contenu
 //!
-//! Le panneau qui liste l'arbre du projet — [`Tab::ProjectManager`] — et les
-//! quatre natures de fenêtre qu'il ouvre — [`Tab::Book`], [`Tab::Graph`],
-//! [`Tab::Matrix`], [`Tab::Note`] — sont les onglets de ce dock. La grille
-//! unique d'avant cette tâche (`Tab::Grid`, une seule feuille affichée à la
-//! fois pour tout le projet) a disparu : chaque classeur ouvert a désormais
-//! son propre onglet [`Tab::Book`], avec sa propre sous-navigation interne
-//! entre ses feuilles ([`AppState::worksheets_of`],
-//! [`AppState::selected_sheet_in`]) — un classeur peut avoir plusieurs
-//! feuilles, la grille d'un onglet ne montre jamais que celle actuellement
-//! choisie *dans ce classeur*. [`Tab::Matrix`] et [`Tab::Note`] existent
-//! aussi : la matrice est un **espace réservé documenté** (édition hors
-//! périmètre, voir [`matrix_contents`]), la note est réellement éditable
-//! (`plotyx-core` expose déjà son texte).
+//! Le panneau qui liste l'arbre du projet n'est **plus un onglet** du dock
+//! depuis cette tâche : c'est un [`egui::Panel::left`] fixe, peint par
+//! [`PlotyxApp::project_manager_panel`], toujours à gauche, jamais recouvert
+//! par ni ne recouvrant la [`egui_dock::DockArea`] — garanti par
+//! construction en le peignant *avant* elle dans [`PlotyxApp::ui`], comme la
+//! barre de menu (`egui::Panel::top`). Il reste redimensionnable en largeur
+//! par glisser du bord (comportement par défaut d'`egui::Panel::left`), mais
+//! **figé en position** : pas de bascule vers la droite, pas de
+//! repositionnement par glisser — voir § Attacher à gauche ou à droite
+//! ci-dessous pour pourquoi, et pour ce qui reste volontairement hors
+//! périmètre. Le contenu lui-même ([`project_manager_contents`], l'arbre
+//! cliquable du projet) n'a pas changé : seule sa charpente de disposition a
+//! bougé, du dock vers un panneau.
+//!
+//! Les quatre natures de fenêtre que le Project Manager ouvre — [`Tab::Book`],
+//! [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] — restent, elles, des
+//! onglets du dock. La grille unique d'avant une tâche antérieure
+//! (`Tab::Grid`, une seule feuille affichée à la fois pour tout le projet) a
+//! disparu : chaque classeur ouvert a désormais son propre onglet
+//! [`Tab::Book`], avec sa propre sous-navigation interne entre ses feuilles
+//! ([`AppState::worksheets_of`], [`AppState::selected_sheet_in`]) — un
+//! classeur peut avoir plusieurs feuilles, la grille d'un onglet ne montre
+//! jamais que celle actuellement choisie *dans ce classeur*. [`Tab::Matrix`]
+//! et [`Tab::Note`] existent aussi : la matrice est un **espace réservé
+//! documenté** (édition hors périmètre, voir [`matrix_contents`]), la note
+//! est réellement éditable (`plotyx-core` expose déjà son texte).
 //!
 //! [`PlotyxApp::open_tab`] est le seul endroit qui décide « ouvrir » vs
 //! « focaliser » un onglet, quelle que soit sa nature — le même geste que
@@ -37,11 +50,13 @@
 //!
 //! # Disposition dockable
 //!
-//! Les contenus de ce banc sont des onglets d'un [`egui_dock::DockState`]
-//! peint par une [`egui_dock::DockArea`]. C'est la charpente de disposition
-//! décidée par `docs/archive/rustrewrite/roadmap.md` §7 ; elle n'invente ni
-//! panneau Properties ni grille à délégués (hors périmètre, voir
-//! `docs/application.md`).
+//! Les contenus de fenêtre (`Tab::Script` et les quatre natures ci-dessus)
+//! sont des onglets d'un [`egui_dock::DockState`] peint par une
+//! [`egui_dock::DockArea`] — le Project Manager n'y participe plus, voir la
+//! section précédente. C'est la charpente de disposition décidée par
+//! `docs/archive/rustrewrite/roadmap.md` §7 pour les contenus de fenêtre ;
+//! elle n'invente ni panneau Properties ni grille à délégués (hors
+//! périmètre, voir `docs/application.md`).
 //!
 //! # Maximiser un onglet
 //!
@@ -55,102 +70,64 @@
 //! état **à côté** du `DockState`, qui ne le touche jamais : quand il vaut
 //! `Some`, [`PlotyxApp::ui`] ne peint pas du tout la `DockArea` cette
 //! image-là — à la place, une zone séparée montre uniquement l'onglet
-//! maximisé, plein cadre, à côté d'un panneau fixe qui garde le Project
-//! Manager visible (l'utilisateur doit toujours pouvoir y naviguer, onglet
-//! maximisé ou non). Restaurer (`maximized_tab = None`) revient à peindre la
-//! `DockArea` normalement : la disposition qu'elle retient n'a jamais bougé
-//! pendant la maximisation, donc « restaurer » est exactement « la
-//! disposition d'avant », pas un recalcul.
+//! maximisé, plein cadre. Restaurer (`maximized_tab = None`) revient à
+//! peindre la `DockArea` normalement : la disposition qu'elle retient n'a
+//! jamais bougé pendant la maximisation, donc « restaurer » est exactement
+//! « la disposition d'avant », pas un recalcul.
 //!
-//! Le Project Manager est maximisable comme n'importe quel autre onglet
-//! (`Some(Tab::ProjectManager)` est une valeur normale de `maximized_tab`
-//! depuis que le clic droit sur son onglet et le menu « Fenêtre » proposent
-//! tous deux l'action, voir plus bas) — le panneau fixe qui le garde visible
-//! pendant qu'*un autre* onglet est maximisé serait redondant si c'est *lui*
-//! qui l'est : [`PlotyxApp::ui`] ne peint ce panneau fixe que quand l'onglet
-//! maximisé n'est pas le Project Manager, et peint son contenu réel (l'arbre
-//! cliquable, pas le message de repli de [`tab_contents`]) dans la zone de
-//! maximisation elle-même quand c'est lui.
+//! Le Project Manager n'a plus de valeur dans `maximized_tab` depuis cette
+//! tâche : ce n'est plus un onglet, et un panneau fixe toujours entièrement
+//! visible n'a de toute façon rien à gagner à être « maximisé ». Il reste
+//! visible sans rien de spécial pendant qu'un *autre* onglet est maximisé,
+//! puisque [`PlotyxApp::project_manager_panel`] est peint avant la zone de
+//! maximisation comme avant la `DockArea` — un panneau fixe séparé, jamais
+//! dédoublé, n'a besoin d'aucun cas particulier ici.
 //!
 //! # Attacher le Project Manager à gauche ou à droite
 //!
-//! [`PlotyxApp::pm_side`] mémorise le dernier côté choisi pour le Project
-//! Manager dans le dock (gauche par défaut, comme la disposition initiale).
-//! Deux actions explicites — jamais une détection de bord pendant un
-//! glisser, délibérément : voir plus bas pourquoi le glisser natif
-//! d'`egui_dock` reste, lui, sans restriction — le font basculer :
-//! [`PlotyxApp::set_project_manager_side`] retire l'onglet du `dock_state`
-//! puis le réinsère par un split gauche/droite du nœud que
-//! [`PlotyxApp::top_region_node`] désigne comme « la région du haut » (voir
-//! sa doc de tête pour comment ce nœud est retrouvé sans jamais mémoriser un
-//! `NodeIndex` d'une image à l'autre — les indices d'`egui_dock` 0.21 ne
-//! sont **pas** stables après un `remove_tab`, contrairement à ce qu'on
-//! pourrait attendre d'un identifiant persistant). Exposé à deux endroits :
-//! le menu « Fenêtre » du haut (« Attacher à gauche »/« Attacher à droite »,
-//! grisées sur le côté déjà actif) et le clic droit sur l'onglet PM
-//! (`AppTabViewer::context_menu`), qui doit passer par
-//! [`PlotyxApp::pm_menu_actions`] plutôt qu'appeler ces méthodes en direct —
-//! le visiteur de la `DockArea` n'a qu'un emprunt disjoint de `PlotyxApp`,
-//! jamais `&mut self` entier.
-//!
-//! Ce mécanisme ne touche jamais au glisser-déposer natif d'`egui_dock`
-//! : l'onglet PM reste `draggable` comme les autres (le désactiver casserait
-//! aussi son détachement en fenêtre OS, constaté pendant une bisection
-//! antérieure — ne pas y retoucher). Le rectangle/l'icône de survol
-//! qu'`egui_dock` peint pendant un glisser pour indiquer où l'onglet
-//! atterrirait (`egui_dock::style::OverlayStyle`) est en revanche rendu
-//! invisible **globalement**, pour tous les onglets — voir
-//! [`PlotyxApp::ui`], § style de la `DockArea` — sans quoi il ferait
-//! doublon visuel avec ces deux boutons explicites tout en suggérant, à
-//! tort, qu'un « bon » endroit de dépôt serait détecté pendant le glisser.
+//! **Hors périmètre, délibérément.** Une tâche antérieure avait donné au
+//! Project Manager une bascule gauche/droite dans le dock (menu « Fenêtre »
+//! et clic droit sur son onglet) ; elle a disparu avec le passage à un
+//! panneau fixe. Le côté droit et le repositionnement par glisser sont un
+//! travail futur volontairement laissé de côté par cette tâche-ci — pas
+//! implémentés, même partiellement.
 //!
 //! # Détachement du Project Manager
 //!
-//! Deux mécanismes indépendants :
+//! Le flottant `egui_dock` (`Surface::Window`) qu'un onglet pouvait obtenir
+//! en le glissant hors du dock n'existe plus pour le Project Manager,
+//! puisqu'il n'est plus un onglet — seul reste :
 //!
-//! 1. **Flottant dans la fenêtre mère** : glisser l'onglet hors du dock le
-//!    fait flotter en `egui::Window`, via le mécanisme natif d'`egui_dock`
-//!    (`Surface::Window`) — gratuit, `TabViewer::allowed_in_windows` n'est
-//!    pas surchargé donc reste `true` par défaut pour tous les onglets, y
-//!    compris [`Tab::ProjectManager`].
-//! 2. **Vraie fenêtre OS séparée** ([`PlotyxApp::pm_detached`],
-//!    [`PlotyxApp::show_detached_project_manager`]) : `egui::Context::
-//!    show_viewport_deferred` ouvre un vrai viewport natif, déplaçable sur
-//!    un autre écran — ce que le flottant `egui_dock` ne peut pas faire, lui
-//!    qui reste borné à la fenêtre OS principale. Quand ce mode est actif,
-//!    l'onglet [`Tab::ProjectManager`] est retiré du `DockState`
-//!    (`remove_tab`) pour ne jamais être montré à deux endroits à la fois ;
-//!    le fermer (bouton de la fenêtre OS, ou « Réattacher ») le repousse
-//!    dans le dock **au côté mémorisé par [`PlotyxApp::pm_side`]**
-//!    (`PlotyxApp::top_region_node` + un split gauche/droite, voir la
-//!    section précédente) plutôt qu'au hasard via `push_to_focused_leaf`
-//!    (ce qu'il faisait avant l'ajout du côté mémorisé). Déclenchable de
-//!    deux endroits équivalents, l'utilisateur choisit celui qui lui va :
-//!    le menu « Fenêtre » du haut, déjà là, et — depuis cette tâche — le
-//!    clic droit sur l'onglet PM lui-même, utile pour un usage double-écran
-//!    sans lâcher la souris pour aller chercher la barre de menu. Sous
-//!    Wayland, le compositeur
-//!    peut ignorer une position de fenêtre demandée par l'application — la
-//!    même réserve que documente déjà `docs/application.md` pour `rfd` ;
-//!    cette tâche ne demande explicitement aucune position (elle laisse le
-//!    compositeur placer la fenêtre), donc n'en souffre pas directement, mais
-//!    la limite vaut d'être connue avant d'y ajouter un jour une position
-//!    mémorisée.
+//! **Vraie fenêtre OS séparée** ([`PlotyxApp::pm_detached`],
+//! [`PlotyxApp::show_detached_project_manager`]) : `egui::Context::
+//! show_viewport_deferred` ouvre un vrai viewport natif, déplaçable sur
+//! un autre écran. Quand ce mode est actif, [`PlotyxApp::project_manager_panel`]
+//! n'est simplement pas peint cette image-là (au lieu d'un `remove_tab` sur
+//! un `DockState` qui ne le porte de toute façon plus) ; le fermer (bouton
+//! de la fenêtre OS, ou « Réattacher ») repose `pm_detached` à `false`, ce
+//! qui fait réapparaître le panneau au prochain rendu — toujours au même
+//! endroit, puisqu'il est figé à gauche. Déclenchable du menu « Fenêtre » du
+//! haut. Sous Wayland, le compositeur peut ignorer une position de fenêtre
+//! demandée par l'application — la même réserve que documente déjà
+//! `docs/application.md` pour `rfd` ; cette tâche ne demande explicitement
+//! aucune position (elle laisse le compositeur placer la fenêtre), donc n'en
+//! souffre pas directement, mais la limite vaut d'être connue avant d'y
+//! ajouter un jour une position mémorisée.
 //!
-//!    **`show_viewport_deferred`, pas `_immediate`** : constaté
-//!    interactivement (Fedora/GNOME/Wayland, Mutter), la fenêtre détachée via
-//!    `show_viewport_immediate` restait draggable mais visuellement confinée
-//!    au rectangle de la fenêtre mère, même réduite — pas seulement
-//!    l'absence de positionnement absolu ci-dessus, autre chose empêchait la
-//!    fenêtre de sortir du cadre. `show_viewport_immediate` documente
-//!    lui-même « pause the current viewport and render the child viewport in
-//!    its own window » (rendu couplé des deux fenêtres), et `egui`
-//!    recommande explicitement `show_viewport_deferred` pour une vraie
-//!    fenêtre indépendante, repeinte indépendamment de la fenêtre parente —
-//!    un candidat plausible pour ce symptôme, **pas une preuve**. Détail du
-//!    choix, de l'incertitude assumée et du schéma de synchronisation
-//!    (`ProjectManagerViewModel`, `DetachedProjectManagerRequests`) dans la
-//!    doc de tête de [`PlotyxApp::show_detached_project_manager`].
+//! **`show_viewport_deferred`, pas `_immediate`** : constaté
+//! interactivement (Fedora/GNOME/Wayland, Mutter), la fenêtre détachée via
+//! `show_viewport_immediate` restait draggable mais visuellement confinée
+//! au rectangle de la fenêtre mère, même réduite — pas seulement
+//! l'absence de positionnement absolu ci-dessus, autre chose empêchait la
+//! fenêtre de sortir du cadre. `show_viewport_immediate` documente
+//! lui-même « pause the current viewport and render the child viewport in
+//! its own window » (rendu couplé des deux fenêtres), et `egui`
+//! recommande explicitement `show_viewport_deferred` pour une vraie
+//! fenêtre indépendante, repeinte indépendamment de la fenêtre parente —
+//! un candidat plausible pour ce symptôme, **pas une preuve**. Détail du
+//! choix, de l'incertitude assumée et du schéma de synchronisation
+//! (`ProjectManagerViewModel`, `DetachedProjectManagerRequests`) dans la
+//! doc de tête de [`PlotyxApp::show_detached_project_manager`].
 //!
 //! # Détachement générique des onglets de contenu
 //!
@@ -349,47 +326,30 @@ const ROW_HEIGHT: f32 = 20.0;
 const HEADER_HEIGHT: f32 = 22.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
-/// Fraction de hauteur laissée à la moitié haute (Project Manager/classeurs/
-/// graphes) du plan principal quand la console de script est amarrée en bas
-/// au démarrage — pendant `PlotyxApp::new`, choisie pour approcher la même
-/// proportion que l'ancien panneau fixe (`SCRIPT_OUTPUT_HEIGHT` sur la
-/// hauteur par défaut de la fenêtre, `main.rs`). L'utilisateur peut ensuite
-/// redimensionner ou redisposer librement : ce n'est qu'un point de départ.
+/// Fraction de hauteur laissée à la moitié haute (classeurs/graphes) du plan
+/// principal (dock de contenu, hors Project Manager) quand la console de
+/// script est amarrée en bas au démarrage — pendant `PlotyxApp::new`,
+/// choisie pour approcher la même proportion que l'ancien panneau fixe
+/// (`SCRIPT_OUTPUT_HEIGHT` sur la hauteur par défaut de la fenêtre,
+/// `main.rs`). L'utilisateur peut ensuite redimensionner ou redisposer
+/// librement : ce n'est qu'un point de départ.
 const INITIAL_TOP_FRACTION: f32 = 0.78;
-/// Fraction de largeur laissée au Project Manager quand un classeur ou un
-/// graphe est ouvert au démarrage — même logique que
-/// [`INITIAL_TOP_FRACTION`], approchant l'ancien `GRAPH_PANEL_WIDTH` fixe.
-const INITIAL_PM_FRACTION: f32 = 0.24;
-/// Largeur par défaut du panneau Project Manager fixe affiché à côté d'un
-/// onglet maximisé, et de la fenêtre OS séparée quand il est détaché.
+/// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
+/// séparée quand il est détaché.
 const PROJECT_MANAGER_WIDTH: f32 = 260.0;
-
-/// Le côté du plan principal où le Project Manager est attaché dans le dock
-/// — voir la doc de tête du module, § attacher à gauche/à droite. Ne décrit
-/// que la position *dans* le dock : le détachement en fenêtre OS séparée
-/// ([`PlotyxApp::pm_detached`]) est un état orthogonal, qui peut se combiner
-/// à n'importe quelle valeur de ce côté (mémorisé pendant tout le
-/// détachement pour que la réattache revienne au bon endroit).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum PmSide {
-    /// Disposition initiale de [`PlotyxApp::new`] — le côté par défaut.
-    #[default]
-    Left,
-    Right,
-}
 
 /// Un onglet du plan de disposition.
 ///
-/// - [`Tab::ProjectManager`] et [`Tab::Script`] sont **structurels** : un par
-///   fenêtre, jamais fermés (voir [`TabViewer::is_closeable`] plus bas).
+/// - [`Tab::Script`] est **structurel** : un par fenêtre, jamais fermé (voir
+///   [`TabViewer::is_closeable`] plus bas). Le Project Manager n'est plus un
+///   onglet depuis cette tâche — voir la doc de tête du module, § Project
+///   Manager : c'est un `egui::Panel` fixe, peint par
+///   [`PlotyxApp::project_manager_panel`].
 /// - [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] portent un
 ///   [`NodeId`] : une instance par fenêtre **ouverte**, focalisée plutôt que
 ///   dupliquée si on la rouvre — voir [`PlotyxApp::open_tab`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Tab {
-    /// L'arbre du projet, arrêté à `Workbook`/`Graph`/`Matrix`/`Note` — voir
-    /// [`AppState::project_tree`].
-    ProjectManager,
     /// La console de script Python.
     Script,
     /// Un classeur ouvert, identifié par son nœud. Contient la grille,
@@ -411,9 +371,10 @@ pub struct PlotyxApp {
     state: AppState,
     /// Le plan de disposition : quels onglets, où, dans quel agencement de
     /// panneaux amarrables. Persistant d'une image à l'autre — c'est ce qui
-    /// retient les glissers-déposés de l'utilisateur. Ne contient **jamais**
-    /// `Tab::ProjectManager` pendant que [`PlotyxApp::pm_detached`] est vrai
-    /// (voir la doc de tête du module, § détachement).
+    /// retient les glissers-déposés de l'utilisateur. Ne porte plus le
+    /// Project Manager depuis cette tâche (voir la doc de tête du module,
+    /// § Project Manager) : uniquement `Tab::Script` et les onglets de
+    /// contenu.
     dock_state: DockState<Tab>,
     /// Une vue de graphe (et son cache de formes, phase R4) par graphe
     /// **ouvert** — c'est-à-dire ayant eu un onglet au moins une fois,
@@ -422,23 +383,14 @@ pub struct PlotyxApp {
     /// affichables simultanément, une seule vue ne suffit plus.
     graph_views: HashMap<NodeId, GraphView>,
     /// Onglet actuellement maximisé, s'il y en a un — voir la doc de tête du
-    /// module, § maximiser. Peut valoir `Some(Tab::ProjectManager)` : ce
-    /// panneau est maximisable comme les autres depuis cette tâche (menu
-    /// « Fenêtre » et clic droit sur l'onglet, voir § attacher à
-    /// gauche/à droite) — [`PlotyxApp::ui`] adapte alors la zone de
-    /// maximisation pour ne pas dupliquer le panneau fixe qu'elle montre
-    /// d'ordinaire à côté d'un autre onglet maximisé.
+    /// module, § maximiser. Ne peut plus valoir le Project Manager depuis
+    /// cette tâche : ce n'est plus un onglet, et un panneau fixe toujours
+    /// entièrement visible n'a rien à gagner à être « maximisé ».
     maximized_tab: Option<Tab>,
     /// Vrai quand le Project Manager est détaché en fenêtre OS séparée (voir
-    /// la doc de tête du module, § détachement). Dans cet état, `dock_state`
-    /// ne porte plus `Tab::ProjectManager` du tout.
+    /// la doc de tête du module, § détachement). Dans cet état,
+    /// [`PlotyxApp::project_manager_panel`] n'est simplement pas peint.
     pm_detached: bool,
-    /// Le côté du dock où réinsérer le Project Manager — voir
-    /// [`PmSide`] et la doc de tête du module, § attacher à gauche/à
-    /// droite. Vaut aussi pendant un détachement en fenêtre OS
-    /// (`pm_detached == true`) : c'est alors la mémoire de l'endroit où
-    /// `reattach_project_manager` le repoussera.
-    pm_side: PmSide,
     /// Ce que la fenêtre OS détachée du Project Manager peint, resynchronisé
     /// depuis `self.state` à chaque image par
     /// [`PlotyxApp::show_detached_project_manager`] — voir sa doc de tête.
@@ -457,7 +409,7 @@ pub struct PlotyxApp {
     /// détachés en fenêtre OS séparée — voir la doc de tête du module,
     /// § détachement générique. Une entrée par onglet détaché ; absent de
     /// `dock_state` tant qu'il l'est (même invariant que `pm_detached` pour
-    /// `Tab::ProjectManager`, généralisé à plusieurs onglets simultanés).
+    /// le Project Manager, généralisé à plusieurs onglets simultanés).
     detached_tabs: HashMap<Tab, DetachedTab>,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
     /// (mécanisme de vérification, voir [`PlotyxApp::screenshot`]).
@@ -564,13 +516,17 @@ impl PlotyxApp {
     ///
     /// # Disposition initiale
     ///
-    /// Le Project Manager occupe le plan principal ; la console de script est
-    /// amarrée en bas (comme l'ancien panneau fixe) ; si le projet contient
-    /// au moins un classeur, son onglet s'ouvre à droite du Project Manager,
+    /// Le Project Manager n'entre pour rien dans ce plan : c'est un panneau
+    /// fixe peint à part (voir [`PlotyxApp::project_manager_panel`]), pas un
+    /// onglet du `DockState` construit ici. La console de script est amarrée
+    /// en bas (comme l'ancien panneau fixe d'avant le dock) ; si le projet
+    /// contient au moins un classeur, son onglet occupe le reste du plan,
     /// suivi de l'onglet du premier graphe s'il y en a un — montrer quelque
     /// chose sans qu'on ait à cliquer, comme l'ancien comportement par
-    /// défaut. Tout ceci n'est qu'un point de départ : `egui_dock` retient
-    /// ensuite les redispositions de l'utilisateur.
+    /// défaut. À défaut de classeur ou de graphe, la console de script est le
+    /// seul onglet du dock au démarrage. Tout ceci n'est qu'un point de
+    /// départ : `egui_dock` retient ensuite les redispositions de
+    /// l'utilisateur.
     ///
     /// # Auto-fermeture
     ///
@@ -588,10 +544,6 @@ impl PlotyxApp {
             .and_then(|raw| raw.trim().parse::<u64>().ok())
             .map(Duration::from_millis);
 
-        let mut dock_state = DockState::new(vec![Tab::ProjectManager]);
-        let surface = dock_state.main_surface_mut();
-        let [top, _script] =
-            surface.split_below(NodeIndex::root(), INITIAL_TOP_FRACTION, vec![Tab::Script]);
         let mut opened = Vec::new();
         if let Some((first_book, _)) = state.books().into_iter().next() {
             opened.push(Tab::Book(first_book));
@@ -599,9 +551,17 @@ impl PlotyxApp {
         if let Some((first_graph, _)) = state.graphs().into_iter().next() {
             opened.push(Tab::Graph(first_graph));
         }
-        if !opened.is_empty() {
-            surface.split_right(top, INITIAL_PM_FRACTION, opened);
-        }
+        // Sans classeur ni graphe à montrer, la console de script est le
+        // seul onglet du dock — pas de région du haut à créer par
+        // `split_below` s'il n'y a rien d'autre à y mettre.
+        let dock_state = if opened.is_empty() {
+            DockState::new(vec![Tab::Script])
+        } else {
+            let mut dock_state = DockState::new(opened);
+            let surface = dock_state.main_surface_mut();
+            surface.split_below(NodeIndex::root(), INITIAL_TOP_FRACTION, vec![Tab::Script]);
+            dock_state
+        };
 
         Self {
             state,
@@ -609,7 +569,6 @@ impl PlotyxApp {
             graph_views: HashMap::new(),
             maximized_tab: None,
             pm_detached: false,
-            pm_side: PmSide::default(),
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
@@ -728,11 +687,9 @@ impl PlotyxApp {
                         // `find_active_focused` lit l'onglet actif du nœud
                         // focalisé du dock — celui que l'utilisateur regarde
                         // en ce moment, même sans avoir cliqué dedans cette
-                        // image-ci.
-                        // Le Project Manager se maximise comme n'importe quel
-                        // autre onglet depuis cette tâche — voir la doc de
-                        // tête du module, § maximiser : `active` seul décide,
-                        // plus d'exclusion particulière ici.
+                        // image-ci. Le Project Manager n'y figure jamais
+                        // depuis cette tâche (ce n'est plus un onglet), donc
+                        // rien de spécial à exclure ici.
                         let active = self.dock_state.find_active_focused().map(|(_, tab)| *tab);
                         let can_maximize = active.is_some();
                         if ui
@@ -759,36 +716,12 @@ impl PlotyxApp {
                         self.detach_project_manager();
                         ui.close();
                     }
-                    // Attacher à gauche/à droite — actions explicites, pas de
-                    // détection de bord pendant un glisser (voir la doc de
-                    // tête du module, § attacher à gauche/à droite). Grisées
-                    // pendant un détachement en fenêtre OS (rien à réordonner
-                    // dans le dock tant qu'il n'y est pas) et sur le côté déjà
-                    // actif — même patron de grisage que le clic droit sur
-                    // l'onglet PM (`AppTabViewer::context_menu`), gardé
-                    // cohérent entre les deux endroits d'où ce choix est
-                    // accessible. Structure volontairement extensible : cette
-                    // liste d'actions de disposition est appelée à grandir.
-                    if ui
-                        .add_enabled(
-                            !self.pm_detached && self.pm_side != PmSide::Left,
-                            egui::Button::new("Attacher le Project Manager à gauche"),
-                        )
-                        .clicked()
-                    {
-                        self.set_project_manager_side(PmSide::Left);
-                        ui.close();
-                    }
-                    if ui
-                        .add_enabled(
-                            !self.pm_detached && self.pm_side != PmSide::Right,
-                            egui::Button::new("Attacher le Project Manager à droite"),
-                        )
-                        .clicked()
-                    {
-                        self.set_project_manager_side(PmSide::Right);
-                        ui.close();
-                    }
+                    // Pas d'« Attacher à gauche/à droite » ici : le Project
+                    // Manager est un panneau fixe, figé à gauche, depuis
+                    // cette tâche (voir la doc de tête du module, § attacher
+                    // à gauche ou à droite — le côté droit et le
+                    // repositionnement par glisser sont un travail futur
+                    // délibérément hors périmètre).
                 });
             });
         });
@@ -868,6 +801,27 @@ impl PlotyxApp {
             });
     }
 
+    /// Peint le Project Manager dans son panneau fixe, ancré à gauche — voir
+    /// la doc de tête du module, § Project Manager. Appelé par
+    /// [`PlotyxApp::ui`] *avant* la `DockArea`/le `CentralPanel`, comme
+    /// [`PlotyxApp::menu_bar`] (`egui::Panel::top`) : peindre un panneau
+    /// ancré avant le reste garantit par construction qu'il n'est jamais
+    /// recouvert ni ne recouvre ce qui vient après. N'est pas appelé quand
+    /// [`PlotyxApp::pm_detached`] vaut `true` — cette image-là, rien ne
+    /// remplace ce panneau, la vraie fenêtre OS séparée
+    /// ([`PlotyxApp::show_detached_project_manager`]) en tient lieu. Reste
+    /// redimensionnable en largeur par glisser du bord (comportement par
+    /// défaut d'`egui::Panel::left`) mais figé en position : pas de bascule
+    /// vers la droite ni de repositionnement par glisser, voir la doc de tête
+    /// du module, § attacher à gauche ou à droite.
+    fn project_manager_panel(&mut self, ui: &mut egui::Ui, open_requests: &mut Vec<Tab>) {
+        egui::Panel::left("plotyx_pm")
+            .default_size(PROJECT_MANAGER_WIDTH)
+            .show(ui, |ui| {
+                project_manager_contents(ui, &self.state, open_requests);
+            });
+    }
+
     /// Ouvre l'onglet `tab`, ou le focalise s'il est déjà ouvert.
     ///
     /// Le seul endroit qui décide entre les deux, pour toute nature de
@@ -884,122 +838,19 @@ impl PlotyxApp {
         }
     }
 
-    /// Retire `Tab::ProjectManager` du dock et bascule en mode détaché : le
-    /// prochain rendu l'ouvre dans sa propre fenêtre OS
-    /// ([`PlotyxApp::show_detached_project_manager`]). Sans effet s'il l'est
-    /// déjà.
+    /// Bascule en mode détaché : le prochain rendu ouvre le Project Manager
+    /// dans sa propre fenêtre OS ([`PlotyxApp::show_detached_project_manager`])
+    /// au lieu du panneau fixe ([`PlotyxApp::project_manager_panel`]). Sans
+    /// effet s'il l'est déjà.
     fn detach_project_manager(&mut self) {
-        if self.pm_detached {
-            return;
-        }
-        if let Some(path) = self.dock_state.find_tab(&Tab::ProjectManager) {
-            self.dock_state.remove_tab(path);
-        }
-        if self.maximized_tab == Some(Tab::ProjectManager) {
-            // Contrairement à avant cette tâche, ceci *peut* arriver en
-            // pratique : le clic droit sur l'onglet PM propose « Détacher en
-            // fenêtre OS » et « Maximiser »/« Restaurer » côte à côte, sans
-            // que l'une grise l'autre (voir `AppTabViewer::context_menu`) —
-            // rien n'empêche donc de détacher un Project Manager déjà
-            // maximisé. Redescendre proprement de la maximisation avant de
-            // retirer l'onglet du dock plutôt que de laisser `maximized_tab`
-            // pointer sur un onglet qui n'y est plus.
-            self.maximized_tab = None;
-        }
         self.pm_detached = true;
     }
 
-    /// Bascule hors du mode détaché et repousse `Tab::ProjectManager` dans le
-    /// dock, du côté mémorisé par [`PlotyxApp::pm_side`] — voir
-    /// [`PlotyxApp::set_project_manager_side`] et la doc de tête du module,
-    /// § attacher à gauche/à droite. Sans effet s'il n'est pas détaché.
+    /// Bascule hors du mode détaché : le panneau fixe réapparaît au prochain
+    /// rendu, toujours à gauche puisqu'il est figé en position. Sans effet
+    /// s'il n'est pas détaché.
     fn reattach_project_manager(&mut self) {
-        if !self.pm_detached {
-            return;
-        }
         self.pm_detached = false;
-        if self.dock_state.find_tab(&Tab::ProjectManager).is_none() {
-            self.insert_project_manager_at(self.pm_side);
-        }
-    }
-
-    /// Retrouve le nœud représentant « la région du haut » du plan
-    /// principal — celle qui contient les onglets de contenu, au-dessus de
-    /// la console de script — pour y attacher le Project Manager à gauche ou
-    /// à droite (voir [`PlotyxApp::set_project_manager_side`]).
-    ///
-    /// [`Tab::Script`] est **structurel** (jamais fermé, voir
-    /// [`TabViewer::is_closeable`]) : son nœud existe toujours, et
-    /// `PlotyxApp::new` le crée par `split_below(root, …, vec![Script])`, qui
-    /// place l'ancien contenu à `parent.left()` et la nouvelle feuille
-    /// Script à `parent.right()` (`egui_dock::Tree::split`, cas
-    /// `Split::Below` — vérifié dans `egui_dock-0.21.1/src/dock_state/
-    /// tree/mod.rs`). Partir du nœud de la console et remonter à son parent
-    /// donne donc, par construction, le nœud frère : la région du haut,
-    /// quelle que soit la façon dont l'utilisateur a redisposé les onglets
-    /// *à l'intérieur* de cette région depuis. Ce repère n'est mis en défaut
-    /// que si la console elle-même est déplacée hors de son propre nœud —
-    /// aucune action de ce module ne le fait.
-    ///
-    /// **Pourquoi ne pas mémoriser ce `NodeIndex` une bonne fois** plutôt que
-    /// de le retrouver à chaque appel : les indices d'`egui_dock` 0.21
-    /// désignent une position dans un arbre binaire indexé par formule
-    /// (`NodeIndex::left`/`right`/`parent`), pas un identifiant stable —
-    /// `Tree::remove_leaf` (déclenché par `remove_tab` quand un nœud se
-    /// retrouve vide) **réindexe** les nœuds restants pour combler le trou.
-    /// Un `NodeIndex` gardé d'une image à l'autre pointerait donc, après un
-    /// remove/split, potentiellement vers un tout autre nœud — silencieusement,
-    /// sans qu'aucun type ne le signale. Repli sur `NodeIndex::root()` dans
-    /// le seul cas où la console occupe déjà la racine (plus aucun autre
-    /// onglet nulle part dans le dock) : il n'y a alors aucune région du
-    /// haut distincte à viser.
-    fn top_region_node(&self) -> NodeIndex {
-        let Some(script_path) = self.dock_state.find_tab(&Tab::Script) else {
-            return NodeIndex::root();
-        };
-        let node = script_path.node;
-        match node.parent() {
-            Some(parent) if node.is_left() => parent.right(),
-            Some(parent) => parent.left(),
-            None => NodeIndex::root(),
-        }
-    }
-
-    /// Retire `Tab::ProjectManager` du dock, où qu'il soit, puis le
-    /// réinsère par un split à `side` de [`PlotyxApp::top_region_node`].
-    /// Fonction interne partagée par [`PlotyxApp::set_project_manager_side`]
-    /// (déjà docké, change juste de côté) et
-    /// [`PlotyxApp::reattach_project_manager`] (pas encore docké, revient au
-    /// côté mémorisé) — les deux finissent par le même geste : « pas là où
-    /// il est, là où `pm_side` le veut ».
-    fn insert_project_manager_at(&mut self, side: PmSide) {
-        if let Some(path) = self.dock_state.find_tab(&Tab::ProjectManager) {
-            self.dock_state.remove_tab(path);
-        }
-        let parent = self.top_region_node();
-        let surface = self.dock_state.main_surface_mut();
-        match side {
-            PmSide::Left => {
-                surface.split_left(parent, INITIAL_PM_FRACTION, vec![Tab::ProjectManager]);
-            }
-            PmSide::Right => {
-                surface.split_right(parent, INITIAL_PM_FRACTION, vec![Tab::ProjectManager]);
-            }
-        }
-    }
-
-    /// Change le côté d'attache du Project Manager dans le dock — voir la
-    /// doc de tête du module, § attacher à gauche/à droite. Sans effet sur
-    /// la disposition elle-même s'il est actuellement détaché en fenêtre OS
-    /// (`pm_detached == true`) : `pm_side` est mémorisé quand même, pour que
-    /// [`PlotyxApp::reattach_project_manager`] revienne au bon côté — il n'y
-    /// a simplement rien à repousser dans le dock tant qu'il n'y est pas.
-    fn set_project_manager_side(&mut self, side: PmSide) {
-        self.pm_side = side;
-        if self.pm_detached {
-            return;
-        }
-        self.insert_project_manager_at(side);
     }
 
     /// Peint le Project Manager dans sa propre fenêtre OS native, via un
@@ -1116,12 +967,13 @@ impl PlotyxApp {
     /// Retire `tab` du dock et le détache en fenêtre OS séparée — voir la
     /// doc de tête du module, § détachement générique. Sans effet si `tab`
     /// est déjà détaché, n'existe pas dans le dock, ou n'est pas détachable
-    /// (`Tab::ProjectManager`/`Tab::Script`, filtrés en amont par
-    /// [`AppTabViewer::context_menu`] — cette fonction reste défensive plutôt
-    /// que de supposer que son seul appelant continuera de filtrer).
+    /// (`Tab::Script`, filtré en amont par [`AppTabViewer::context_menu`] —
+    /// cette fonction reste défensive plutôt que de supposer que son seul
+    /// appelant continuera de filtrer). Le Project Manager n'entre pas dans
+    /// ce chemin du tout depuis cette tâche : ce n'est plus un onglet, voir
+    /// [`PlotyxApp::detach_project_manager`] pour son propre mécanisme.
     fn detach_tab(&mut self, tab: Tab) {
-        if matches!(tab, Tab::ProjectManager | Tab::Script) || self.detached_tabs.contains_key(&tab)
-        {
+        if matches!(tab, Tab::Script) || self.detached_tabs.contains_key(&tab) {
             return;
         }
         if let Some(path) = self.dock_state.find_tab(&tab) {
@@ -1130,8 +982,8 @@ impl PlotyxApp {
             return;
         }
         if self.maximized_tab == Some(tab) {
-            // Comme pour le PM : un onglet maximisé qui n'est plus dans le
-            // dock serait un état incohérent.
+            // Un onglet maximisé qui n'est plus dans le dock serait un état
+            // incohérent : redescendre proprement avant de le détacher.
             self.maximized_tab = None;
         }
         let graph_view = match tab {
@@ -1259,8 +1111,8 @@ impl PlotyxApp {
                             Tab::Note(id) => {
                                 detached_note_contents(ui, tree, &mut model, &mut requests, id);
                             }
-                            Tab::ProjectManager | Tab::Script => {
-                                // Jamais détachables — voir `detach_tab`.
+                            Tab::Script => {
+                                // Jamais détachable — voir `detach_tab`.
                                 ui.weak("(onglet non détachable)");
                             }
                         }
@@ -1355,21 +1207,15 @@ impl eframe::App for PlotyxApp {
         // d'emprunter `ui` en lecture pendant qu'on le peint.
         let ctx = ui.ctx().clone();
         let mut actions: Vec<Action> = Vec::new();
-        // Onglets demandés par un clic dans le Project Manager (docké ou
-        // détaché) : appliqués après le rendu, comme `actions` — muter
-        // `dock_state` en plein parcours de la `DockArea` l'invaliderait.
+        // Onglets demandés par un clic dans le Project Manager (panneau fixe
+        // ou détaché en fenêtre OS) : appliqués après le rendu, comme
+        // `actions` — muter `dock_state` en plein parcours de la `DockArea`
+        // l'invaliderait.
         let mut open_requests: Vec<Tab> = Vec::new();
         // Onglets dont le menu contextuel du dock a demandé le détachement
         // cette image-ci — appliqués après le rendu, comme `open_requests`
         // (voir [`AppTabViewer::detach_requests`]).
         let mut detach_requests: Vec<Tab> = Vec::new();
-        // Actions demandées par le clic droit sur l'onglet Project Manager
-        // (attacher à gauche/à droite, détacher en fenêtre OS, maximiser/
-        // restaurer) — appliquées après le rendu, même raison que
-        // `detach_requests` : `AppTabViewer` n'a qu'un emprunt disjoint de
-        // `PlotyxApp`, jamais `&mut self` entier (voir
-        // [`AppTabViewer::pm_menu_actions`]).
-        let mut pm_menu_actions: Vec<PmMenuAction> = Vec::new();
 
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
@@ -1387,9 +1233,8 @@ impl eframe::App for PlotyxApp {
             // Vidange ce que la fenêtre OS détachée a écrit depuis la
             // dernière image (voir la doc de tête de
             // `show_detached_project_manager`) — même moment que le reste de
-            // `open_requests`, avant de peindre la `DockArea`/le panneau
-            // maximisé : muter `dock_state` en plein parcours l'invaliderait
-            // tout autant que pour les clics du Project Manager docké.
+            // `open_requests`, avant de peindre le panneau fixe (qui ne sera
+            // de toute façon pas peint cette image-ci) et la `DockArea`.
             let should_reattach = {
                 let mut requests = self
                     .pm_requests
@@ -1401,6 +1246,13 @@ impl eframe::App for PlotyxApp {
             if should_reattach {
                 self.reattach_project_manager();
             }
+        } else {
+            // Panneau fixe, peint *avant* la `DockArea`/le `CentralPanel` —
+            // voir la doc de tête du module, § Project Manager : c'est ce qui
+            // garantit par construction qu'il n'est jamais recouvert par elle
+            // ni ne la recouvre, comme la barre de menu (`egui::Panel::top`)
+            // peinte plus haut.
+            self.project_manager_panel(ui, &mut open_requests);
         }
 
         if !self.detached_tabs.is_empty() {
@@ -1424,11 +1276,6 @@ impl eframe::App for PlotyxApp {
             }
         }
 
-        // Copié avant l'emprunt disjoint ci-dessous (`PmSide` est `Copy`) :
-        // à la fois lu par la branche « maximisé » (aucun impact, juste pour
-        // cohérence visuelle éventuelle future) et passé par valeur à
-        // `AppTabViewer` pour le grisage du clic droit sur l'onglet PM.
-        let pm_side = self.pm_side;
         // Emprunts disjoints des champs (édition 2021) : la disposition et
         // les contenus qu'elle amarre ont besoin, chacun, d'un accès distinct
         // à `self`, simultanément le temps de peindre une image.
@@ -1437,26 +1284,15 @@ impl eframe::App for PlotyxApp {
             dock_state,
             graph_views,
             maximized_tab,
-            pm_detached,
             ..
         } = self;
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(tab) = *maximized_tab {
                 // § maximiser (doc de tête du module) : la `DockArea` normale
                 // n'est pas peinte du tout cette image-ci. Le Project
-                // Manager reste visible par ailleurs — dans ce panneau fixe,
-                // *sauf* si c'est justement lui l'onglet maximisé (montrer le
-                // panneau fixe à côté de lui-même serait un doublon), et sauf
-                // s'il est déjà montré dans sa propre fenêtre OS.
-                let show_pinned_pm = !*pm_detached && tab != Tab::ProjectManager;
-                if show_pinned_pm {
-                    egui::Panel::left("plotyx_project_manager_pinned")
-                        .resizable(true)
-                        .default_size(PROJECT_MANAGER_WIDTH)
-                        .show(ui, |ui| {
-                            project_manager_contents(ui, state, &mut open_requests);
-                        });
-                }
+                // Manager n'a plus besoin d'aucun traitement particulier
+                // ici : son panneau fixe est peint plus haut, avant ce
+                // `CentralPanel`, qu'un autre onglet soit maximisé ou non.
                 ui.horizontal(|ui| {
                     ui.heading(tab_title(state, tab));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1466,37 +1302,24 @@ impl eframe::App for PlotyxApp {
                     });
                 });
                 ui.separator();
-                if tab == Tab::ProjectManager {
-                    // `tab_contents` ne sait délibérément pas peindre
-                    // `Tab::ProjectManager` (il lui manquerait
-                    // `open_requests`, voir sa doc de tête) : c'est ce
-                    // chemin-ci, et non lui, qui peint le PM maximisé.
-                    project_manager_contents(ui, state, &mut open_requests);
-                } else {
-                    tab_contents(ui, &ctx, state, &mut actions, graph_views, tab);
-                }
+                tab_contents(ui, &ctx, state, &mut actions, graph_views, tab);
             } else {
                 let mut viewer = AppTabViewer {
                     state,
                     actions: &mut actions,
                     graph_views,
                     ctx: &ctx,
-                    open_requests: &mut open_requests,
                     detach_requests: &mut detach_requests,
-                    pm_menu_actions: &mut pm_menu_actions,
-                    pm_detached: *pm_detached,
-                    pm_side,
-                    maximized_tab: *maximized_tab,
                 };
                 // `overlay` est le rectangle/l'icône qu'`egui_dock` peint
                 // pendant un glisser pour indiquer où l'onglet atterrirait
                 // (`egui_dock::style::OverlayStyle`) — rendu entièrement
                 // transparent, globalement (pas de crochet par-onglet dans
-                // cette version d'`egui_dock`), pour ne pas faire doublon
-                // visuel avec les actions explicites « Attacher à
-                // gauche/à droite » (voir la doc de tête du module, § attacher
-                // à gauche/à droite) tout en suggérant, à tort, qu'un « bon »
-                // endroit de dépôt serait détecté pendant le glisser. Le
+                // cette version d'`egui_dock`). Hérité de l'époque où le
+                // Project Manager avait des boutons « Attacher à gauche/à
+                // droite » avec lesquels ce rectangle aurait fait doublon ;
+                // conservé tel quel, une zone de dépôt visible n'apporterait
+                // rien de plus pour les onglets de contenu restants. Le
                 // glisser-déposer natif d'`egui_dock` continue de fonctionner
                 // à l'identique : seul son rendu de zone de dépôt disparaît.
                 let mut style = Style::from_egui(ui.style());
@@ -1511,7 +1334,7 @@ impl eframe::App for PlotyxApp {
             }
         });
 
-        // Les onglets demandés (Project Manager, docké ou détaché), les
+        // Les onglets demandés (Project Manager, panneau fixe ou détaché), les
         // détachements demandés par le menu contextuel, et les actions
         // récoltées par tous les panneaux et onglets ne sont appliqués
         // qu'une fois l'image peinte : muter le plan de disposition ou le
@@ -1522,24 +1345,6 @@ impl eframe::App for PlotyxApp {
         }
         for tab in detach_requests {
             self.detach_tab(tab);
-        }
-        // Même raison : le clic droit sur l'onglet PM ne peut qu'accumuler
-        // des demandes pendant le parcours de la `DockArea`, jamais muter
-        // `PlotyxApp` en direct (voir [`AppTabViewer::pm_menu_actions`]).
-        for action in pm_menu_actions {
-            match action {
-                PmMenuAction::AttachLeft => self.set_project_manager_side(PmSide::Left),
-                PmMenuAction::AttachRight => self.set_project_manager_side(PmSide::Right),
-                PmMenuAction::DetachWindow => self.detach_project_manager(),
-                PmMenuAction::Reattach => self.reattach_project_manager(),
-                PmMenuAction::ToggleMaximize => {
-                    self.maximized_tab = if self.maximized_tab == Some(Tab::ProjectManager) {
-                        None
-                    } else {
-                        Some(Tab::ProjectManager)
-                    };
-                }
-            }
         }
         for action in actions {
             self.state.dispatch(action);
@@ -1576,7 +1381,6 @@ fn tab_for_window(id: NodeId, kind: WindowKind) -> Tab {
 /// (invariant 10).
 fn tab_title(state: &AppState, tab: Tab) -> String {
     match tab {
-        Tab::ProjectManager => "Project Manager".to_string(),
         Tab::Script => "Script Python".to_string(),
         Tab::Book(id) => node_title(state, id, "Classeur"),
         Tab::Graph(id) => node_title(state, id, "Graphe"),
@@ -1608,17 +1412,6 @@ fn tab_contents(
     tab: Tab,
 ) {
     match tab {
-        // N'arrive jamais en pratique : `AppTabViewer::ui` peint
-        // `Tab::ProjectManager` séparément dans le dock (il a besoin
-        // d'`open_requests`, que cette fonction ne reçoit pas), et
-        // `PlotyxApp::ui` fait de même pour la zone de maximisation depuis
-        // que le PM est maximisable — les deux seuls appelants de
-        // `tab_contents` contournent donc ce cas avant même de l'atteindre.
-        // Un message plutôt qu'un panic si cette invariant venait un jour à
-        // se rompre (invariant 10).
-        Tab::ProjectManager => {
-            ui.weak("Project Manager (rendu indisponible ici).");
-        }
         Tab::Script => script_contents(ui, ctx, state, actions),
         Tab::Book(id) => book_contents(ui, state, actions, id),
         Tab::Graph(id) => graph_contents(ui, state, graph_views, id),
@@ -2469,68 +2262,25 @@ fn detached_note_contents(
     }
 }
 
-/// Une action demandée par le clic droit sur l'onglet du Project Manager
-/// (`AppTabViewer::context_menu`) — voir la doc de tête du module, § attacher
-/// à gauche/à droite et § détachement. Un simple enum plutôt que d'appeler
-/// les méthodes de [`PlotyxApp`] en direct : `AppTabViewer` n'a qu'un emprunt
-/// disjoint de `PlotyxApp` pendant le parcours de la `DockArea`, jamais
-/// `&mut self` entier — [`PlotyxApp::ui`] draine
-/// [`AppTabViewer::pm_menu_actions`] et applique chaque variante une fois la
-/// `DockArea` peinte, même patron que `detach_requests`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PmMenuAction {
-    /// Attache le PM à gauche de la région du haut — sans effet si déjà là
-    /// (le bouton correspondant est grisé dans ce cas, voir
-    /// `AppTabViewer::context_menu`).
-    AttachLeft,
-    /// Symétrique pour la droite.
-    AttachRight,
-    /// Détache le PM en vraie fenêtre OS — voir
-    /// [`PlotyxApp::detach_project_manager`]. Utile pour un usage
-    /// double-écran : la fenêtre détachée peut être glissée sur un second
-    /// écran, ce que le flottant natif d'`egui_dock` ne permet pas (borné à
-    /// la fenêtre OS principale).
-    DetachWindow,
-    /// Réattache le PM détaché en fenêtre OS — voir
-    /// [`PlotyxApp::reattach_project_manager`].
-    Reattach,
-    /// Bascule le PM entre maximisé et restauré — voir
-    /// [`PlotyxApp::maximized_tab`], § maximiser (doc de tête du module).
-    ToggleMaximize,
-}
-
 /// Peint le contenu de chaque onglet du plan de disposition.
 ///
 /// Emprunte les champs de [`PlotyxApp`] plutôt que l'application entière
 /// (voir `PlotyxApp::ui`) : c'est ce qui permet à la `DockArea`
 /// (`&mut dock_state`) et à ce visiteur (`&mut state`, `&mut graph_views`)
-/// de coexister le temps d'une image.
+/// de coexister le temps d'une image. Le Project Manager n'entre plus dans
+/// ce visiteur depuis cette tâche : ce n'est plus un onglet du dock (voir la
+/// doc de tête du module, § Project Manager) — ses propres clics sont
+/// recueillis à part, par [`PlotyxApp::project_manager_panel`].
 struct AppTabViewer<'a> {
     state: &'a mut AppState,
     actions: &'a mut Vec<Action>,
     graph_views: &'a mut HashMap<NodeId, GraphView>,
     ctx: &'a egui::Context,
-    open_requests: &'a mut Vec<Tab>,
     /// Onglets dont le menu contextuel a demandé le détachement depuis la
     /// dernière vidange — appliqués par [`PlotyxApp::ui`] une fois la
     /// `DockArea` peinte (muter `dock_state` en plein parcours
     /// l'invaliderait, même raison que `open_requests`).
     detach_requests: &'a mut Vec<Tab>,
-    /// Actions demandées par le clic droit sur l'onglet Project Manager
-    /// depuis la dernière vidange — voir [`PmMenuAction`].
-    pm_menu_actions: &'a mut Vec<PmMenuAction>,
-    /// Copie de [`PlotyxApp::pm_detached`] pour cette image : lue par
-    /// [`AppTabViewer::context_menu`] pour choisir entre « Réattacher » et
-    /// le reste des actions (attacher/détacher/maximiser). Copie plutôt
-    /// qu'emprunt — `bool` est `Copy`, et `AppTabViewer` ne porte déjà que
-    /// des emprunts disjoints de `PlotyxApp`, jamais `&mut self` entier.
-    pm_detached: bool,
-    /// Copie de [`PlotyxApp::pm_side`] pour cette image : lue pour griser
-    /// « Attacher à gauche »/« Attacher à droite » sur le côté déjà actif.
-    pm_side: PmSide,
-    /// Copie de [`PlotyxApp::maximized_tab`] pour cette image : lue pour
-    /// afficher « Maximiser » ou « Restaurer » selon l'état courant.
-    maximized_tab: Option<Tab>,
 }
 
 impl TabViewer for AppTabViewer<'_> {
@@ -2544,88 +2294,31 @@ impl TabViewer for AppTabViewer<'_> {
         tab_title(self.state, *tab).into()
     }
 
-    // Les onglets structurels (Project Manager, script) ne se ferment pas :
-    // ils n'ont pas d'équivalent « rouvrir » dans ce banc volontairement
-    // pauvre. Un onglet de classeur, graphe, matrice ou note, lui, se ferme
-    // et se rouvre librement — c'est le Project Manager, via
-    // `PlotyxApp::open_tab`, qui rouvre.
+    // L'onglet structurel (script) ne se ferme pas : il n'a pas d'équivalent
+    // « rouvrir » dans ce banc volontairement pauvre. Un onglet de classeur,
+    // graphe, matrice ou note, lui, se ferme et se rouvre librement — c'est
+    // le Project Manager, via `PlotyxApp::open_tab`, qui rouvre.
     fn is_closeable(&self, tab: &Self::Tab) -> bool {
-        !matches!(tab, Tab::ProjectManager | Tab::Script)
+        !matches!(tab, Tab::Script)
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        match *tab {
-            Tab::ProjectManager => {
-                project_manager_contents(ui, self.state, self.open_requests);
-            }
-            _ => tab_contents(
-                ui,
-                self.ctx,
-                self.state,
-                self.actions,
-                self.graph_views,
-                *tab,
-            ),
-        }
+        tab_contents(
+            ui,
+            self.ctx,
+            self.state,
+            self.actions,
+            self.graph_views,
+            *tab,
+        );
     }
 
-    /// [`Tab::ProjectManager`] a son propre menu contextuel (attacher à
-    /// gauche/à droite, détacher en fenêtre OS, maximiser/restaurer — voir
-    /// [`PmMenuAction`] et la doc de tête du module) ; les autres onglets
-    /// détachables proposent simplement « Détacher dans une fenêtre »
+    /// Les onglets détachables proposent « Détacher dans une fenêtre »
     /// (symétrique de « Réattacher au dock principal » côté fenêtre
-    /// détachée) ; [`Tab::Script`] n'a aucune entrée, n'étant ni l'un ni
-    /// l'autre (non détachable, même doc). Ne touche `dock_state` ni
-    /// `PlotyxApp` directement dans aucun des deux premiers cas : voir
-    /// [`AppTabViewer::detach_requests`]/[`AppTabViewer::pm_menu_actions`].
+    /// détachée) ; [`Tab::Script`] n'a aucune entrée, n'étant pas détachable
+    /// (même doc). Ne touche `dock_state` ni `PlotyxApp` directement : voir
+    /// [`AppTabViewer::detach_requests`].
     fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, _path: NodePath) {
-        if *tab == Tab::ProjectManager {
-            if self.pm_detached {
-                if ui.button("Réattacher").clicked() {
-                    self.pm_menu_actions.push(PmMenuAction::Reattach);
-                    ui.close();
-                }
-                return;
-            }
-            if ui
-                .add_enabled(
-                    self.pm_side != PmSide::Left,
-                    egui::Button::new("Attacher à gauche"),
-                )
-                .clicked()
-            {
-                self.pm_menu_actions.push(PmMenuAction::AttachLeft);
-                ui.close();
-            }
-            if ui
-                .add_enabled(
-                    self.pm_side != PmSide::Right,
-                    egui::Button::new("Attacher à droite"),
-                )
-                .clicked()
-            {
-                self.pm_menu_actions.push(PmMenuAction::AttachRight);
-                ui.close();
-            }
-            ui.separator();
-            if ui.button("Détacher en fenêtre OS").clicked() {
-                // Utile pour un usage double-écran : la fenêtre détachée
-                // peut être glissée sur un second écran, ce que le flottant
-                // natif d'`egui_dock` ne permet pas (borné à la fenêtre OS
-                // principale) — voir la doc de tête du module.
-                self.pm_menu_actions.push(PmMenuAction::DetachWindow);
-                ui.close();
-            }
-            let maximized = self.maximized_tab == Some(Tab::ProjectManager);
-            if ui
-                .button(if maximized { "Restaurer" } else { "Maximiser" })
-                .clicked()
-            {
-                self.pm_menu_actions.push(PmMenuAction::ToggleMaximize);
-                ui.close();
-            }
-            return;
-        }
         if matches!(tab, Tab::Script) {
             return;
         }
