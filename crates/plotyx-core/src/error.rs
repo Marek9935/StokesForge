@@ -52,6 +52,19 @@ pub enum CoreError {
         /// Version réelle de la colonne au moment du refus.
         found: u64,
     },
+    /// Colonnes calculées (v1) — `Command::SetCells` refusé parce que
+    /// `column` porte une formule (`ColumnMeta::formula.is_some()`) : ses
+    /// valeurs sont recalculées automatiquement par `plotyx-session::actor`,
+    /// une écriture directe de cellule n'y a pas de sens. Le refus arrive
+    /// **avant** toute mutation (vérifié sur l'arbre courant, comme A2 pour
+    /// `ConcurrentModification`) : ni le modèle ni l'historique ne sont
+    /// touchés. Éditer le texte de la formule reste possible
+    /// (`Command::SetColumnMeta`), lui aussi annulable.
+    #[error("colonne en lecture seule : {column} est calculée par formule")]
+    FormulaColumnReadOnly {
+        /// Colonne-formule visée par l'écriture refusée.
+        column: NodeId,
+    },
 }
 
 /// Alias de résultat du crate.
@@ -104,6 +117,13 @@ mod tests {
             .to_string(),
             "version concurrente : la colonne nœud 7 attendait la version 3, elle est à la \
              version 4"
+        );
+        assert_eq!(
+            CoreError::FormulaColumnReadOnly {
+                column: NodeId::from_raw(9),
+            }
+            .to_string(),
+            "colonne en lecture seule : nœud 9 est calculée par formule"
         );
     }
 }

@@ -61,6 +61,15 @@ pub struct ColumnMeta {
     pub comment: String,
     /// Format d'affichage (chaîne libre interprétée par la couche UI).
     pub display_format: String,
+    /// Formule de calcul (`"A+B"`, `"(A-B)*2"`, ...), `None` pour une colonne
+    /// ordinaire. Une colonne dont la formule est `Some(_)` est recalculée
+    /// automatiquement — voir `plotyx_core::formula` pour l'évaluateur et
+    /// `plotyx-session::actor` pour l'orchestration du recalcul — et refuse
+    /// une écriture directe (`Command::SetCells`, voir `plotyx-commands`) :
+    /// ses valeurs ne sont jamais la source de vérité, seule la formule
+    /// l'est. `#[serde(default)]` côté persistance (`plotyx-persistence`) :
+    /// un fichier écrit avant ce champ n'a que des colonnes ordinaires.
+    pub formula: Option<String>,
 }
 
 /// Bloc de valeurs typé, tel qu'on l'écrit dans une colonne ou qu'on le

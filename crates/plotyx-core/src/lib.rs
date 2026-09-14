@@ -52,6 +52,7 @@
 
 pub mod column;
 pub mod error;
+pub mod formula;
 pub mod id;
 pub mod name;
 pub mod node;
@@ -64,6 +65,9 @@ pub use column::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, ValueBlock, ValuesDelta,
 };
 pub use error::{CoreError, CoreResult};
+pub use formula::{
+    evaluate as evaluate_formula, topological_order, Formula, FormulaError, FormulaEvaluation,
+};
 pub use id::{IdAllocator, NodeId};
 pub use name::{check_name, RESERVED_NAME_CHARS};
 pub use node::{Node, NodeKind, WindowMeta};

@@ -158,8 +158,15 @@ pub enum Entry {
     },
     /// Delta de données.
     Data {
-        /// Ce qu'il faut rejouer dans l'arbre courant.
-        delta: DataDelta,
+        /// Ce qu'il faut rejouer dans l'arbre courant. `Box`é : depuis
+        /// l'ajout de `ColumnMeta::formula` (colonnes calculées), la
+        /// variante `DataDelta::ColumnMeta { before, after }` porte deux
+        /// `ColumnMeta` complètes et fait de `DataDelta` la plus grosse
+        /// variante d'`Entry` de loin — `clippy::large_enum_variant`
+        /// (déclenché à cet ajout) recommande cette indirection plutôt que
+        /// de faire porter à *toutes* les entrées de structure/macro le coût
+        /// mémoire du plus gros delta possible.
+        delta: Box<DataDelta>,
         /// Libellé d'historique.
         label: String,
     },
@@ -1068,18 +1075,37 @@ impl History {
                         }
                     }
                 }
+                // Colonnes calculées (v1, `plotyx_core::formula`) — refusé
+                // **avant** tout appel à `project.set_values` (pas d'état
+                // partiel), sur l'arbre courant au moment d'appliquer (même
+                // discipline qu'A2 ci-dessus, pas sur un instantané que
+                // l'appelant a lu plus tôt) : une colonne-formule n'accepte
+                // une écriture directe de cellule d'aucun client, ses valeurs
+                // ne sont recalculées que par `plotyx-session::actor` après
+                // coup, en dehors de l'historique. Une colonne absente ou
+                // d'un autre type n'est pas traitée ici, comme pour A2 :
+                // `project.set_values` ci-dessous rendra l'erreur naturelle.
+                if project
+                    .tree()
+                    .get(column)
+                    .ok()
+                    .and_then(|node| node.as_column())
+                    .is_some_and(|column| column.meta().formula.is_some())
+                {
+                    return Err(CoreError::FormulaColumnReadOnly { column }.into());
+                }
                 // Le bloc écrit est cloné avant application : c'est le `after`
                 // du delta, ce qu'il faudra réécrire pour rétablir.
                 let after = values.clone();
                 let delta = project.set_values(column, start, values)?;
                 Ok(Entry::Data {
-                    delta: DataDelta::Cells {
+                    delta: Box::new(DataDelta::Cells {
                         column,
                         start,
                         before: delta.previous,
                         before_length: delta.previous_length,
                         after,
-                    },
+                    }),
                     label,
                 })
             }
@@ -1090,11 +1116,11 @@ impl History {
                 let before_state = project.set_column_type(column, column_type)?;
                 let after_state = column_state(project, column)?;
                 Ok(Entry::Data {
-                    delta: DataDelta::ColumnType {
+                    delta: Box::new(DataDelta::ColumnType {
                         column,
                         before: before_state,
                         after: after_state,
-                    },
+                    }),
                     label,
                 })
             }
@@ -1110,63 +1136,63 @@ impl History {
                 // ligne `at`).
                 let columns = project.insert_rows(sheet, at, count)?;
                 Ok(Entry::Data {
-                    delta: DataDelta::InsertRows { columns, at, count },
+                    delta: Box::new(DataDelta::InsertRows { columns, at, count }),
                     label,
                 })
             }
             Command::DeleteRows { sheet, at, count } => {
                 let removed = project.delete_rows(sheet, at, count)?;
                 Ok(Entry::Data {
-                    delta: DataDelta::DeleteRows {
+                    delta: Box::new(DataDelta::DeleteRows {
                         sheet,
                         at,
                         count,
                         removed,
-                    },
+                    }),
                     label,
                 })
             }
             Command::SetWindowMeta { id, meta } => {
                 let before = project.set_window_meta(id, meta.clone())?;
                 Ok(Entry::Data {
-                    delta: DataDelta::WindowMeta {
+                    delta: Box::new(DataDelta::WindowMeta {
                         id,
                         before,
                         after: meta,
-                    },
+                    }),
                     label,
                 })
             }
             Command::SetNoteText { id, text } => {
                 let before = project.set_note_text(id, &text)?;
                 Ok(Entry::Data {
-                    delta: DataDelta::NoteText {
+                    delta: Box::new(DataDelta::NoteText {
                         id,
                         before,
                         after: text,
-                    },
+                    }),
                     label,
                 })
             }
             Command::SetColumnMeta { column, meta } => {
                 let before = project.set_column_meta(column, meta.clone())?;
                 Ok(Entry::Data {
-                    delta: DataDelta::ColumnMeta {
+                    delta: Box::new(DataDelta::ColumnMeta {
                         column,
                         before,
                         after: meta,
-                    },
+                    }),
                     label,
                 })
             }
             Command::SetPlotSpec { graph, spec } => {
                 let before = project.set_plot_spec(graph, spec.clone())?;
                 Ok(Entry::Data {
-                    delta: DataDelta::PlotSpec {
+                    delta: Box::new(DataDelta::PlotSpec {
                         graph,
                         before,
                         after: spec,
-                    },
+                    }),
                     label,
                 })
             }
@@ -1373,7 +1399,7 @@ fn structural(before: &Arc<Tree>, project: &Project, label: String) -> Entry {
 fn entry_has_no_effect(entry: &Entry) -> bool {
     match entry {
         Entry::Structural { before, after, .. } => before == after,
-        Entry::Data { delta, .. } => match delta {
+        Entry::Data { delta, .. } => match delta.as_ref() {
             DataDelta::InsertRows { columns, .. } => columns.is_empty(),
             DataDelta::DeleteRows { removed, .. } => removed.is_empty(),
             // Comme `Cells`/`ColumnType` : dès qu'`apply` les a acceptées,

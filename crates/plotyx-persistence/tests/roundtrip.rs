@@ -58,6 +58,7 @@ fn fixture_project() -> Project {
                 long_name: "Temps".to_string(),
                 comment: "colonne de temps".to_string(),
                 display_format: "0.000".to_string(),
+                formula: None,
             },
         )
         .expect("colonne numérique valide");
@@ -582,4 +583,47 @@ fn a_non_trivial_plot_spec_round_trips_intact() {
         NodeKind::Graph { spec: reloaded, .. } => assert_eq!(*reloaded, spec),
         other => panic!("attendu Graph, obtenu {other:?}"),
     }
+}
+
+/// `ColumnMeta::formula` (colonnes calculées, v1) survit à `save`/`load`,
+/// `None` comme `Some(_)`.
+#[test]
+fn column_formula_survives_save_and_load() {
+    let mut project = Project::new("Demo").expect("projet valide");
+    let root = project.root();
+    let book = project
+        .add_empty_workbook(root, Some("Book1"))
+        .expect("classeur");
+    let sheet = project
+        .add_worksheet(book, Some("Sheet1"))
+        .expect("feuille");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0]))
+        .expect("colonne A");
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[10.0, 20.0]))
+        .expect("colonne B");
+    project
+        .set_column_meta(
+            b,
+            ColumnMeta {
+                formula: Some("A*2".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("formule posée");
+
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("formule.plyx");
+    save(&project, &path).expect("sauvegarde réussie");
+    let loaded = load(&path).expect("chargement réussi");
+
+    let node_a = loaded.tree().node(a).expect("colonne A présente");
+    assert_eq!(node_a.as_column().expect("colonne").meta().formula, None);
+
+    let node_b = loaded.tree().node(b).expect("colonne B présente");
+    assert_eq!(
+        node_b.as_column().expect("colonne").meta().formula,
+        Some("A*2".to_string())
+    );
 }

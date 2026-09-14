@@ -151,6 +151,17 @@ pub(crate) enum KindRecord {
         /// comportement voulu — un fichier sans compteur n'a de toute façon
         /// aucun lecteur qui en retienne un.
         version: u64,
+        /// Formule de calcul (`ColumnMeta::formula`), `None` pour une colonne
+        /// ordinaire. Absente des fichiers écrits avant l'ajout des colonnes
+        /// calculées : `KindRecordKnown` ramène ce champ à `None` via
+        /// `#[serde(default)]`, ce qui est le comportement voulu — un ancien
+        /// fichier ne décrivait que des colonnes ordinaires. Les valeurs déjà
+        /// présentes dans `values` ci-dessus sont traitées comme un cache :
+        /// `plotyx-session::actor` déclenche un recalcul après tout
+        /// chargement (voir sa doc de tête), donc un désaccord entre un
+        /// fichier écrit par un tiers et ce que la formule recalculerait ne
+        /// survit pas au premier `load`.
+        formula: Option<String>,
     },
     /// Graphe.
     Graph {
@@ -215,6 +226,8 @@ enum KindRecordKnown {
         values: ValuesRecord,
         #[serde(default)]
         version: u64,
+        #[serde(default)]
+        formula: Option<String>,
     },
     Graph {
         label: String,
@@ -256,6 +269,7 @@ impl From<KindRecordKnown> for KindRecord {
                 display_format,
                 values,
                 version,
+                formula,
             } => KindRecord::Column {
                 column_type,
                 role,
@@ -265,6 +279,7 @@ impl From<KindRecordKnown> for KindRecord {
                 display_format,
                 values,
                 version,
+                formula,
             },
             KindRecordKnown::Graph {
                 label,
@@ -330,6 +345,7 @@ enum KindRecordRef<'a> {
         display_format: &'a str,
         values: &'a ValuesRecord,
         version: u64,
+        formula: &'a Option<String>,
     },
     Graph {
         label: &'a str,
@@ -378,6 +394,7 @@ impl Serialize for KindRecord {
                 display_format,
                 values,
                 version,
+                formula,
             } => KindRecordRef::Column {
                 column_type: *column_type,
                 role: *role,
@@ -387,6 +404,7 @@ impl Serialize for KindRecord {
                 display_format,
                 values,
                 version: *version,
+                formula,
             }
             .serialize(serializer),
             KindRecord::Graph {

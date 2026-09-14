@@ -2001,6 +2001,50 @@ fn set_column_meta_round_trip() {
     assert_eq!(**f.project.tree(), *after);
 }
 
+/// Colonnes calculées (v1) — `SetCells` direct sur une colonne dont
+/// `ColumnMeta.formula` est renseignée est refusé avant toute mutation, et
+/// ne pousse rien sur l'historique (ni de nouvelle entrée à annuler, ni de
+/// changement observable de l'arbre).
+#[test]
+fn set_cells_on_a_formula_column_is_refused() {
+    let mut f = fixture();
+    let mut history = History::new();
+    history
+        .execute(
+            &mut f.project,
+            Command::SetColumnMeta {
+                column: f.a,
+                meta: ColumnMeta {
+                    formula: Some("B*2".to_string()),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("poser une formule sur A");
+    let before = snapshot(&f.project);
+    let undo_label_before = history.undo_label().map(str::to_string);
+
+    let err = history
+        .execute(
+            &mut f.project,
+            Command::SetCells {
+                column: f.a,
+                start: 0,
+                values: ValueBlock::Float(vec![99.0]),
+                expected_version: None,
+            },
+        )
+        .expect_err("une colonne-formule refuse une écriture directe de cellule");
+    assert_eq!(
+        err,
+        CommandError::Core(CoreError::FormulaColumnReadOnly { column: f.a })
+    );
+
+    // Ni le modèle ni l'historique n'ont bougé.
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.undo_label(), undo_label_before.as_deref());
+}
+
 #[test]
 fn set_plot_spec_round_trip() {
     let mut f = fixture();

@@ -1,13 +1,13 @@
 //! Boucle de l'acteur : le seul endroit du processus qui détient un
 //! `&mut Project`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError, CommandResult, History};
-use plotyx_core::{NodeId, Project};
+use plotyx_core::{evaluate_formula, topological_order, Formula, NodeId, Project, ValueBlock};
 
 use crate::error::{SessionError, SessionResult};
 use crate::snapshot::{HistoryState, Revision, Snapshot};
@@ -167,6 +167,7 @@ pub(crate) fn run(
                 } else {
                     history.execute(&mut project, command).map(|()| {
                         revision += 1;
+                        recalc_formulas(&mut project);
                         if purge_orphaned_geometries(&project, &mut geometries) {
                             geometry_revision += 1;
                         }
@@ -179,6 +180,7 @@ pub(crate) fn run(
                 let outcome = history.undo(&mut project).map(|reverted| {
                     reverted.then(|| {
                         revision += 1;
+                        recalc_formulas(&mut project);
                         if purge_orphaned_geometries(&project, &mut geometries) {
                             geometry_revision += 1;
                         }
@@ -191,6 +193,7 @@ pub(crate) fn run(
                 let outcome = history.redo(&mut project).map(|restored| {
                     restored.then(|| {
                         revision += 1;
+                        recalc_formulas(&mut project);
                         if purge_orphaned_geometries(&project, &mut geometries) {
                             geometry_revision += 1;
                         }
@@ -257,6 +260,15 @@ pub(crate) fn run(
                     }
                     result.map(|()| {
                         revision += 1;
+                        // Un `abort_macro` revient à rejouer, d'un bloc,
+                        // l'annulation de chaque commande absorbée dans la
+                        // macro — exactement ce que ferait une suite
+                        // d'`Undo` (qui, eux, recalculent après coup) : les
+                        // colonnes-formule touchées par le travail défait
+                        // doivent l'être aussi ici, sans quoi elles
+                        // resteraient sur des valeurs qu'aucune formule
+                        // actuellement en vigueur ne justifie plus.
+                        recalc_formulas(&mut project);
                         revision
                     })
                 };
@@ -317,6 +329,18 @@ pub(crate) fn run(
                 let outcome =
                     load_project(&mut project, &mut history, &mut geometries, &path).map(|()| {
                         revision += 1;
+                        // Les valeurs d'une colonne-formule sont écrites sur
+                        // le disque (`plotyx-persistence`, voir sa doc) mais
+                        // traitées comme un cache qu'on ne fait pas confiance
+                        // à l'aveugle : un fichier a pu être modifié par un
+                        // autre processus, une version antérieure de PlotYx,
+                        // ou porter des colonnes dont l'ordre (donc les
+                        // lettres) a changé sans que les valeurs suivent.
+                        // Recalculer systématiquement ici est le choix
+                        // retenu (peu coûteux — voir `recalc_formulas` — et
+                        // toujours correct) plutôt que de faire confiance au
+                        // contenu chargé.
+                        recalc_formulas(&mut project);
                         // A3 — l'identité du projet change : une poignée
                         // (`plotyx_script::surface::Handle`) qui a mémorisé
                         // l'ancienne époque ne doit plus pouvoir désigner un
@@ -389,6 +413,165 @@ fn load_project(
     // `unwrap`/`expect`, bannis hors tests.
     let _ = history.clear();
     Ok(())
+}
+
+/// Recalcule toutes les colonnes-formule du projet — accès **direct** à
+/// `Project` (`Project::set_length`/`Project::set_values`), jamais via
+/// `History::apply`/`Command::execute` : c'est un effet de bord silencieux
+/// rejoué après coup, pas une mutation annulable (voir la doc de tête de
+/// crate, `docs/commandes-et-historique.md`) — exactement le même statut que
+/// [`purge_orphaned_geometries`], qui rejoue déjà la purge de géométrie
+/// après toute exécution structurelle. Le texte de la formule
+/// (`Command::SetColumnMeta`) et les cellules sources (`Command::SetCells`,
+/// `InsertRows`, `DeleteRows`, ...) restent, eux, annulables normalement :
+/// c'est seulement le recalcul qui ne pousse jamais sa propre entrée.
+///
+/// # Portée du déclenchement
+///
+/// Appelée après **tout** `Execute`/`Undo`/`Redo`/`AbortMacro` qui a réussi
+/// (donc a pu changer le projet) et après tout `Load` (voir `run`,
+/// ci-dessus, pour chaque site d'appel et sa justification propre — en
+/// particulier `Load`, qui recalcule plutôt que de faire confiance aux
+/// valeurs lues du disque).
+///
+/// À l'intérieur de cette fonction, la portée est volontairement **large** :
+/// tout l'arbre est balayé, pas seulement « la feuille que la commande vient
+/// de toucher ». Deux raisons à ce choix plutôt qu'un déclenchement plus fin
+/// piloté par `Command::is_structural()` ou par les variantes précises de
+/// `Command` :
+///
+/// - `Undo`/`Redo`/`AbortMacro` ne portent aucune commande à inspecter ici —
+///   seule `History` sait ce qu'elle vient de restaurer, et elle ne l'expose
+///   pas (elle n'a d'ailleurs pas à le faire : c'est un détail
+///   d'implémentation d'`Entry`) ; il faudrait lui ajouter une surface
+///   dédiée rien que pour ce besoin.
+/// - Même côté `Execute`, `Command::Move` peut déplacer une **colonne**
+///   d'une feuille à une autre : les lettres de position changent à la fois
+///   dans la feuille de départ et dans celle d'arrivée, alors que `Move` ne
+///   distingue en rien ce cas d'un déplacement de dossier sans le moindre
+///   effet sur une formule.
+///
+/// Le coût de ce balayage est celui de [`purge_orphaned_geometries`] :
+/// linéaire dans le nombre de nœuds pour trouver les feuilles, puis borné
+/// par le nombre de colonnes-formule effectivement présentes (le cas
+/// courant : aucune) — jamais par la taille des données des colonnes qui
+/// n'en portent pas.
+fn recalc_formulas(project: &mut Project) {
+    let sheets: Vec<NodeId> = project
+        .tree()
+        .iter()
+        .filter(|(_, node)| node.kind().is_worksheet())
+        .map(|(id, _)| id)
+        .collect();
+    for sheet in sheets {
+        recalc_sheet(project, sheet);
+    }
+}
+
+/// Recalcule les colonnes-formule d'une seule feuille, dans l'ordre de leurs
+/// dépendances (tri topologique, [`plotyx_core::topological_order`]) — une
+/// colonne-formule qui en référence une autre lit sa valeur **déjà
+/// recalculée**, jamais celle d'avant cette passe. Un cycle de dépendance
+/// (direct ou transitif) est détecté sans boucler : chaque colonne qui y
+/// participe reçoit un bloc entièrement `NaN` et
+/// `FormulaError::Cycle` plutôt qu'une valeur qui n'aurait de toute façon
+/// aucun sens à choisir.
+fn recalc_sheet(project: &mut Project, sheet: NodeId) {
+    let Ok(columns) = project.tree().children(sheet).map(<[NodeId]>::to_vec) else {
+        return;
+    };
+    // Longueur cible commune à toute la feuille : le maximum des longueurs
+    // actuelles de ses colonnes (formule comprises), au moment où cette
+    // passe commence — la même notion que `Tree::row_count`, qui gouverne
+    // déjà `InsertRows`/`DeleteRows`.
+    let target_len = project.tree().row_count(sheet).unwrap_or(0);
+
+    // Formules analysées à l'avance : une erreur de *parse* est déjà un
+    // résultat final (bloc `NaN`, `FormulaError::Parse`), elle ne participe
+    // pas au graphe de dépendance — une colonne qui la référencerait la
+    // trouve immédiatement disponible (à `NaN`), pas « en attente ».
+    let mut parsed: BTreeMap<NodeId, Formula> = BTreeMap::new();
+    for &id in &columns {
+        let Some(source) = project
+            .tree()
+            .node(id)
+            .and_then(|node| node.as_column())
+            .and_then(|column| column.meta().formula.clone())
+        else {
+            continue;
+        };
+        match Formula::parse(&source) {
+            Ok(formula) => {
+                parsed.insert(id, formula);
+            }
+            Err(_error) => write_formula_column(project, id, vec![f64::NAN; target_len]),
+        }
+    }
+
+    // Graphe de dépendance entre colonnes-formule uniquement : une référence
+    // vers une colonne ordinaire n'est pas une arête à ordonner, elle est
+    // déjà disponible (voir la doc de `plotyx_core::topological_order`).
+    let mut edges: BTreeMap<NodeId, BTreeSet<NodeId>> =
+        parsed.keys().map(|&id| (id, BTreeSet::new())).collect();
+    for (&id, formula) in &parsed {
+        for index in formula.referenced_columns() {
+            if let Some(&dep_id) = columns.get(index) {
+                if parsed.contains_key(&dep_id) {
+                    if let Some(deps) = edges.get_mut(&id) {
+                        deps.insert(dep_id);
+                    }
+                }
+            }
+        }
+    }
+    let (order, blocked) = topological_order(&edges);
+
+    for id in blocked {
+        write_formula_column(project, id, vec![f64::NAN; target_len]);
+    }
+    for id in order {
+        let Some(formula) = parsed.get(&id) else {
+            continue;
+        };
+        let Some(self_index) = columns.iter().position(|&c| c == id) else {
+            continue;
+        };
+        // Relu à chaque colonne, pas une fois pour toute la feuille : les
+        // colonnes-formule déjà traitées dans cette boucle (celles dont `id`
+        // dépend, forcément plus tôt dans `order`) doivent être vues à jour.
+        let values: Vec<_> = columns
+            .iter()
+            .map(|&column_id| {
+                project
+                    .tree()
+                    .node(column_id)
+                    .and_then(|node| node.as_column())
+                    .map(|column| column.values().clone())
+            })
+            .collect();
+        // Une colonne de `columns` a disparu entre la lecture de `columns`
+        // et maintenant : ne peut pas arriver (cette fonction ne touche
+        // jamais la structure de l'arbre), garde défensive plutôt qu'un
+        // panic si l'hypothèse venait à être fausse un jour (invariant 10).
+        if values.iter().any(Option::is_none) {
+            continue;
+        }
+        let values: Vec<_> = values.into_iter().flatten().collect();
+        let evaluation = evaluate_formula(formula, self_index, &values, target_len);
+        write_formula_column(project, id, evaluation.values);
+    }
+}
+
+/// Écrit `values` dans `column`, en le tronquant/étendant d'abord à sa
+/// longueur (`Project::set_length`) puisque `Project::set_values` n'écrase
+/// jamais une queue de colonne plus longue que le bloc écrit. Ignore
+/// silencieusement un échec (`column` disparu entre-temps, ce que rien dans
+/// cette fonction ne provoque) plutôt que de paniquer — invariant 10.
+fn write_formula_column(project: &mut Project, column: NodeId, values: Vec<f64>) {
+    if project.set_length(column, values.len()).is_err() {
+        return;
+    }
+    let _ = project.set_values(column, 0, ValueBlock::Float(values));
 }
 
 /// Retire de `geometries` toute entrée dont le `NodeId` n'existe plus dans

@@ -170,6 +170,7 @@ fn b2_aller_retour_preserve_tout() {
                 long_name: "Nom long".into(),
                 comment: "".into(),
                 display_format: "%.3f".into(),
+                formula: None,
             },
         )
         .unwrap();
