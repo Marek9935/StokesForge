@@ -31,6 +31,42 @@
 //! cliquable du projet) n'a pas changé : seule sa charpente de disposition a
 //! bougé, du dock vers un panneau.
 //!
+//! # Console de script, et l'ordre des panneaux
+//!
+//! La console de script (édition de [`AppState::script_source`], boutons
+//! Exécuter/Arrêter, sortie) suit depuis cette tâche le même patron que le
+//! Project Manager : ce n'est plus un onglet **structurel** du
+//! [`egui_dock::DockState`], mais un [`egui::Panel::bottom`] fixe, peint par
+//! [`PlotyxApp::script_panel`]. Son contenu ([`script_contents`]) n'a pas
+//! changé : seule sa charpente de disposition a bougé, du dock vers un
+//! panneau — même mouvement que pour le Project Manager, appliqué au bord du
+//! bas plutôt qu'à celui de gauche.
+//!
+//! Point d'ordre important avec `egui::Panel` : **le premier panneau ajouté
+//! est le plus extérieur**, chaque panneau suivant est inséré à l'intérieur
+//! de ce que les précédents laissent. Pour que la console de script coure sur
+//! toute la largeur de la fenêtre — y compris sous le Project Manager, pas
+//! seulement sous la zone de la `DockArea` — [`PlotyxApp::script_panel`] doit
+//! donc être appelé *avant* [`PlotyxApp::project_manager_panel`] dans
+//! [`PlotyxApp::ui`]. L'ordre d'appel complet y est : barre de menu
+//! (`egui::Panel::top`) → console de script (`egui::Panel::bottom`) → Project
+//! Manager (`egui::Panel::left`) → `DockArea`/`CentralPanel` en dernier ; un
+//! panneau posé plus tôt réserve sa bande sur toute la largeur/hauteur
+//! restante, donc la console de script, postée avant le Project Manager,
+//! s'étend bien sous lui plutôt que d'être resserrée entre lui et le bord
+//! droit.
+//!
+//! `egui::Panel::bottom` (comme `Panel::top`) **n'est pas redimensionnable
+//! par défaut**, à la différence de `left`/`right` — contrairement au Project
+//! Manager, [`PlotyxApp::script_panel`] appelle donc explicitement
+//! `.resizable(true)` pour retrouver le glisser du bord en hauteur qu'avait
+//! la console dans le dock.
+//!
+//! Comme pour le Project Manager, aucune bascule de position n'existe ici (il
+//! n'y en a jamais eu à basculer : la console a toujours été en bas), et le
+//! panneau ne montre aucun mécanisme d'onglet — pas de `TabViewer`, pas de
+//! tab strip.
+//!
 //! Les quatre natures de fenêtre que le Project Manager ouvre — [`Tab::Book`],
 //! [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] — restent, elles, des
 //! onglets du dock. La grille unique d'avant une tâche antérieure
@@ -50,10 +86,10 @@
 //!
 //! # Disposition dockable
 //!
-//! Les contenus de fenêtre (`Tab::Script` et les quatre natures ci-dessus)
-//! sont des onglets d'un [`egui_dock::DockState`] peint par une
-//! [`egui_dock::DockArea`] — le Project Manager n'y participe plus, voir la
-//! section précédente. C'est la charpente de disposition décidée par
+//! Les quatre natures de fenêtre ci-dessus sont des onglets d'un
+//! [`egui_dock::DockState`] peint par une [`egui_dock::DockArea`] — ni le
+//! Project Manager ni la console de script n'y participent plus, voir les
+//! deux sections précédentes. C'est la charpente de disposition décidée par
 //! `docs/archive/rustrewrite/roadmap.md` §7 pour les contenus de fenêtre ;
 //! elle n'invente ni panneau Properties ni grille à délégués (hors
 //! périmètre, voir `docs/application.md`).
@@ -217,14 +253,11 @@
 //! [`matrix_contents`]) : [`detached_matrix_contents`] est un simple appel à
 //! [`node_title_in`].
 //!
-//! [`Tab::Script`] n'est **pas** détachable : sa saisie
-//! (`AppState::script_source`) est un champ direct d'`AppState`, pas un
-//! tampon différé comme `CellEdit`/`NoteEdit`, et son cycle de vie (fil
-//! détaché, `poll_script` à appeler image après image) est bien plus
-//! couplé à `AppState` que les quatre autres natures — le généraliser
-//! demanderait de faire voyager aussi l'état d'exécution du script, hors du
-//! périmètre de cette tâche. `TabViewer::context_menu` ne propose donc
-//! l'action que pour `Book`/`Graph`/`Matrix`/`Note`.
+//! La console de script n'entre pour rien dans ce mécanisme depuis cette
+//! tâche : ce n'est plus un onglet du dock (voir § Console de script
+//! ci-dessus), donc rien à détacher ici — `TabViewer::context_menu` ne
+//! propose « Détacher dans une fenêtre » que pour `Book`/`Graph`/`Matrix`/
+//! `Note`, seules natures encore portées par le `DockState`.
 //!
 //! # Sélecteur de fichiers natif
 //!
@@ -273,7 +306,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use egui_dock::{DockArea, DockState, NodeIndex, NodePath, Style, TabViewer};
+use egui_dock::{DockArea, DockState, NodePath, Style, TabViewer};
 use egui_extras::{Column as TableColumn, TableBuilder};
 use plotyx_core::{ColumnType, NodeId, Tree};
 use plotyx_render_egui::{DrawnPlot, GraphView, DEFAULT_FIGURE_SIZE};
@@ -326,32 +359,26 @@ const ROW_HEIGHT: f32 = 20.0;
 const HEADER_HEIGHT: f32 = 22.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
-/// Fraction de hauteur laissée à la moitié haute (classeurs/graphes) du plan
-/// principal (dock de contenu, hors Project Manager) quand la console de
-/// script est amarrée en bas au démarrage — pendant `PlotyxApp::new`,
-/// choisie pour approcher la même proportion que l'ancien panneau fixe
-/// (`SCRIPT_OUTPUT_HEIGHT` sur la hauteur par défaut de la fenêtre,
-/// `main.rs`). L'utilisateur peut ensuite redimensionner ou redisposer
-/// librement : ce n'est qu'un point de départ.
-const INITIAL_TOP_FRACTION: f32 = 0.78;
+/// Hauteur par défaut du panneau fixe de la console de script — point de
+/// départ seulement, l'utilisateur peut ensuite le redimensionner en
+/// glissant son bord (`.resizable(true)`, voir [`PlotyxApp::script_panel`]).
+const SCRIPT_PANEL_HEIGHT: f32 = 220.0;
 /// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
 /// séparée quand il est détaché.
 const PROJECT_MANAGER_WIDTH: f32 = 260.0;
 
 /// Un onglet du plan de disposition.
 ///
-/// - [`Tab::Script`] est **structurel** : un par fenêtre, jamais fermé (voir
-///   [`TabViewer::is_closeable`] plus bas). Le Project Manager n'est plus un
-///   onglet depuis cette tâche — voir la doc de tête du module, § Project
-///   Manager : c'est un `egui::Panel` fixe, peint par
-///   [`PlotyxApp::project_manager_panel`].
-/// - [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] portent un
-///   [`NodeId`] : une instance par fenêtre **ouverte**, focalisée plutôt que
-///   dupliquée si on la rouvre — voir [`PlotyxApp::open_tab`].
+/// Ni le Project Manager ni la console de script n'en sont plus depuis les
+/// deux tâches successives qui les ont sortis du dock — voir la doc de tête
+/// du module, §§ Project Manager et Console de script : ce sont deux
+/// `egui::Panel` fixes, peints respectivement par
+/// [`PlotyxApp::project_manager_panel`] et [`PlotyxApp::script_panel`].
+/// [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] portent un
+/// [`NodeId`] : une instance par fenêtre **ouverte**, focalisée plutôt que
+/// dupliquée si on la rouvre — voir [`PlotyxApp::open_tab`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Tab {
-    /// La console de script Python.
-    Script,
     /// Un classeur ouvert, identifié par son nœud. Contient la grille,
     /// scopée à la feuille actuellement choisie *dans ce classeur*.
     Book(NodeId),
@@ -371,10 +398,10 @@ pub struct PlotyxApp {
     state: AppState,
     /// Le plan de disposition : quels onglets, où, dans quel agencement de
     /// panneaux amarrables. Persistant d'une image à l'autre — c'est ce qui
-    /// retient les glissers-déposés de l'utilisateur. Ne porte plus le
-    /// Project Manager depuis cette tâche (voir la doc de tête du module,
-    /// § Project Manager) : uniquement `Tab::Script` et les onglets de
-    /// contenu.
+    /// retient les glissers-déposés de l'utilisateur. Ne porte plus ni le
+    /// Project Manager ni la console de script (voir la doc de tête du
+    /// module, §§ Project Manager et Console de script) : uniquement les
+    /// quatre natures de fenêtre de contenu.
     dock_state: DockState<Tab>,
     /// Une vue de graphe (et son cache de formes, phase R4) par graphe
     /// **ouvert** — c'est-à-dire ayant eu un onglet au moins une fois,
@@ -516,15 +543,15 @@ impl PlotyxApp {
     ///
     /// # Disposition initiale
     ///
-    /// Le Project Manager n'entre pour rien dans ce plan : c'est un panneau
-    /// fixe peint à part (voir [`PlotyxApp::project_manager_panel`]), pas un
-    /// onglet du `DockState` construit ici. La console de script est amarrée
-    /// en bas (comme l'ancien panneau fixe d'avant le dock) ; si le projet
-    /// contient au moins un classeur, son onglet occupe le reste du plan,
-    /// suivi de l'onglet du premier graphe s'il y en a un — montrer quelque
-    /// chose sans qu'on ait à cliquer, comme l'ancien comportement par
-    /// défaut. À défaut de classeur ou de graphe, la console de script est le
-    /// seul onglet du dock au démarrage. Tout ceci n'est qu'un point de
+    /// Ni le Project Manager ni la console de script n'entrent pour rien
+    /// dans ce plan : ce sont deux panneaux fixes peints à part (voir
+    /// [`PlotyxApp::project_manager_panel`] et [`PlotyxApp::script_panel`]),
+    /// pas des onglets du `DockState` construit ici. Si le projet contient au
+    /// moins un classeur, son onglet occupe le dock, suivi de l'onglet du
+    /// premier graphe s'il y en a un — montrer quelque chose sans qu'on ait à
+    /// cliquer, comme l'ancien comportement par défaut. À défaut de classeur
+    /// ou de graphe, le dock démarre vide (seuls les deux panneaux fixes et
+    /// la barre de menu sont visibles). Tout ceci n'est qu'un point de
     /// départ : `egui_dock` retient ensuite les redispositions de
     /// l'utilisateur.
     ///
@@ -551,17 +578,10 @@ impl PlotyxApp {
         if let Some((first_graph, _)) = state.graphs().into_iter().next() {
             opened.push(Tab::Graph(first_graph));
         }
-        // Sans classeur ni graphe à montrer, la console de script est le
-        // seul onglet du dock — pas de région du haut à créer par
-        // `split_below` s'il n'y a rien d'autre à y mettre.
-        let dock_state = if opened.is_empty() {
-            DockState::new(vec![Tab::Script])
-        } else {
-            let mut dock_state = DockState::new(opened);
-            let surface = dock_state.main_surface_mut();
-            surface.split_below(NodeIndex::root(), INITIAL_TOP_FRACTION, vec![Tab::Script]);
-            dock_state
-        };
+        // Sans classeur ni graphe à montrer, le dock démarre simplement
+        // vide — ni la console de script ni le Project Manager n'y ont plus
+        // leur place depuis leur passage en panneaux fixes.
+        let dock_state = DockState::new(opened);
 
         Self {
             state,
@@ -801,19 +821,43 @@ impl PlotyxApp {
             });
     }
 
+    /// Peint la console de script dans son panneau fixe, ancré en bas — voir
+    /// la doc de tête du module, § Console de script. Appelé par
+    /// [`PlotyxApp::ui`] *avant* [`PlotyxApp::project_manager_panel`]
+    /// (`egui::Panel::left`) : avec `egui::Panel`, le premier panneau ajouté
+    /// est le plus extérieur, donc celui-ci, posé en premier, réserve sa
+    /// bande sur toute la largeur de la fenêtre — y compris sous le Project
+    /// Manager, pas seulement sous la zone de la `DockArea` — plutôt que
+    /// d'être resserré entre lui et le bord droit. `egui::Panel::bottom`
+    /// n'est **pas** redimensionnable par défaut (à la différence de
+    /// `left`/`right`) : `.resizable(true)` restaure le glisser du bord en
+    /// hauteur qu'avait la console dans le dock. Contrairement au Project
+    /// Manager, aucun mode détaché en fenêtre OS séparée ni bascule de
+    /// position : la console de script a toujours été en bas, et le reste.
+    fn script_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        egui::Panel::bottom("plotyx_script")
+            .resizable(true)
+            .default_size(SCRIPT_PANEL_HEIGHT)
+            .show(ui, |ui| {
+                script_contents(ui, ctx, &mut self.state, actions);
+            });
+    }
+
     /// Peint le Project Manager dans son panneau fixe, ancré à gauche — voir
     /// la doc de tête du module, § Project Manager. Appelé par
-    /// [`PlotyxApp::ui`] *avant* la `DockArea`/le `CentralPanel`, comme
-    /// [`PlotyxApp::menu_bar`] (`egui::Panel::top`) : peindre un panneau
-    /// ancré avant le reste garantit par construction qu'il n'est jamais
-    /// recouvert ni ne recouvre ce qui vient après. N'est pas appelé quand
-    /// [`PlotyxApp::pm_detached`] vaut `true` — cette image-là, rien ne
-    /// remplace ce panneau, la vraie fenêtre OS séparée
-    /// ([`PlotyxApp::show_detached_project_manager`]) en tient lieu. Reste
-    /// redimensionnable en largeur par glisser du bord (comportement par
-    /// défaut d'`egui::Panel::left`) mais figé en position : pas de bascule
-    /// vers la droite ni de repositionnement par glisser, voir la doc de tête
-    /// du module, § attacher à gauche ou à droite.
+    /// [`PlotyxApp::ui`] *avant* la `DockArea`/le `CentralPanel`, mais
+    /// *après* [`PlotyxApp::script_panel`] — voir sa doc de tête pour
+    /// pourquoi cet ordre précis. Comme [`PlotyxApp::menu_bar`]
+    /// (`egui::Panel::top`) : peindre un panneau ancré avant le reste
+    /// garantit par construction qu'il n'est jamais recouvert ni ne recouvre
+    /// ce qui vient après. N'est pas appelé quand [`PlotyxApp::pm_detached`]
+    /// vaut `true` — cette image-là, rien ne remplace ce panneau, la vraie
+    /// fenêtre OS séparée ([`PlotyxApp::show_detached_project_manager`]) en
+    /// tient lieu. Reste redimensionnable en largeur par glisser du bord
+    /// (comportement par défaut d'`egui::Panel::left`) mais figé en
+    /// position : pas de bascule vers la droite ni de repositionnement par
+    /// glisser, voir la doc de tête du module, § attacher à gauche ou à
+    /// droite.
     fn project_manager_panel(&mut self, ui: &mut egui::Ui, open_requests: &mut Vec<Tab>) {
         egui::Panel::left("plotyx_pm")
             .default_size(PROJECT_MANAGER_WIDTH)
@@ -966,14 +1010,13 @@ impl PlotyxApp {
 
     /// Retire `tab` du dock et le détache en fenêtre OS séparée — voir la
     /// doc de tête du module, § détachement générique. Sans effet si `tab`
-    /// est déjà détaché, n'existe pas dans le dock, ou n'est pas détachable
-    /// (`Tab::Script`, filtré en amont par [`AppTabViewer::context_menu`] —
-    /// cette fonction reste défensive plutôt que de supposer que son seul
-    /// appelant continuera de filtrer). Le Project Manager n'entre pas dans
-    /// ce chemin du tout depuis cette tâche : ce n'est plus un onglet, voir
-    /// [`PlotyxApp::detach_project_manager`] pour son propre mécanisme.
+    /// est déjà détaché ou n'existe pas dans le dock. Ni le Project Manager
+    /// ni la console de script n'entrent dans ce chemin depuis leur passage
+    /// en panneaux fixes — voir [`PlotyxApp::detach_project_manager`] pour le
+    /// premier ; la seconde n'a simplement plus de mécanisme de détachement
+    /// du tout.
     fn detach_tab(&mut self, tab: Tab) {
-        if matches!(tab, Tab::Script) || self.detached_tabs.contains_key(&tab) {
+        if self.detached_tabs.contains_key(&tab) {
             return;
         }
         if let Some(path) = self.dock_state.find_tab(&tab) {
@@ -1111,10 +1154,6 @@ impl PlotyxApp {
                             Tab::Note(id) => {
                                 detached_note_contents(ui, tree, &mut model, &mut requests, id);
                             }
-                            Tab::Script => {
-                                // Jamais détachable — voir `detach_tab`.
-                                ui.weak("(onglet non détachable)");
-                            }
                         }
                     });
                     if ui.ctx().input(|input| input.viewport().close_requested()) {
@@ -1227,6 +1266,13 @@ impl eframe::App for PlotyxApp {
         self.menu_bar(ui, &ctx, &mut actions);
         self.tool_bar(ui, &mut actions);
         self.status_bar(ui);
+        // Panneau fixe, peint *avant* `PlotyxApp::project_manager_panel` —
+        // voir la doc de tête du module, § Console de script, et la doc de
+        // tête de `PlotyxApp::script_panel` : c'est cet ordre précis qui lui
+        // garantit de courir sur toute la largeur de la fenêtre, y compris
+        // sous le Project Manager, plutôt que d'être resserré entre lui et
+        // le bord droit.
+        self.script_panel(ui, &ctx, &mut actions);
 
         if self.pm_detached {
             self.show_detached_project_manager(&ctx);
@@ -1302,13 +1348,12 @@ impl eframe::App for PlotyxApp {
                     });
                 });
                 ui.separator();
-                tab_contents(ui, &ctx, state, &mut actions, graph_views, tab);
+                tab_contents(ui, state, &mut actions, graph_views, tab);
             } else {
                 let mut viewer = AppTabViewer {
                     state,
                     actions: &mut actions,
                     graph_views,
-                    ctx: &ctx,
                     detach_requests: &mut detach_requests,
                 };
                 // `overlay` est le rectangle/l'icône qu'`egui_dock` peint
@@ -1381,7 +1426,6 @@ fn tab_for_window(id: NodeId, kind: WindowKind) -> Tab {
 /// (invariant 10).
 fn tab_title(state: &AppState, tab: Tab) -> String {
     match tab {
-        Tab::Script => "Script Python".to_string(),
         Tab::Book(id) => node_title(state, id, "Classeur"),
         Tab::Graph(id) => node_title(state, id, "Graphe"),
         Tab::Matrix(id) => node_title(state, id, "Matrice"),
@@ -1402,17 +1446,17 @@ fn node_title(state: &AppState, id: NodeId, missing: &str) -> String {
 /// [`AppTabViewer::ui`] (dock normal) ou la zone de maximisation
 /// ([`PlotyxApp::ui`]) l'appellent toutes les deux : **une seule** fonction
 /// qui sait peindre un onglet, jamais deux implémentations à tenir en
-/// accord.
+/// accord. Ne prend plus de `&egui::Context` depuis que la console de script
+/// (seule nature à en avoir eu besoin, pour son `request_repaint`) est sortie
+/// du dock — voir [`PlotyxApp::script_panel`].
 fn tab_contents(
     ui: &mut egui::Ui,
-    ctx: &egui::Context,
     state: &mut AppState,
     actions: &mut Vec<Action>,
     graph_views: &mut HashMap<NodeId, GraphView>,
     tab: Tab,
 ) {
     match tab {
-        Tab::Script => script_contents(ui, ctx, state, actions),
         Tab::Book(id) => book_contents(ui, state, actions, id),
         Tab::Graph(id) => graph_contents(ui, state, graph_views, id),
         Tab::Matrix(id) => matrix_contents(ui, state, id),
@@ -1604,7 +1648,7 @@ fn grid_contents(
 }
 
 /// Console de script : zone de saisie, boutons « Exécuter »/« Arrêter »,
-/// sortie. Contenu de [`Tab::Script`].
+/// sortie. Contenu de [`PlotyxApp::script_panel`].
 ///
 /// Ne bloque jamais la fenêtre : voir la doc de tête de ce module.
 /// `Action::RunScript`/`InterruptScript` sont poussées comme n'importe
@@ -2273,15 +2317,15 @@ fn detached_note_contents(
 /// Emprunte les champs de [`PlotyxApp`] plutôt que l'application entière
 /// (voir `PlotyxApp::ui`) : c'est ce qui permet à la `DockArea`
 /// (`&mut dock_state`) et à ce visiteur (`&mut state`, `&mut graph_views`)
-/// de coexister le temps d'une image. Le Project Manager n'entre plus dans
-/// ce visiteur depuis cette tâche : ce n'est plus un onglet du dock (voir la
-/// doc de tête du module, § Project Manager) — ses propres clics sont
-/// recueillis à part, par [`PlotyxApp::project_manager_panel`].
+/// de coexister le temps d'une image. Ni le Project Manager ni la console de
+/// script n'entrent dans ce visiteur : ce ne sont plus des onglets du dock
+/// (voir la doc de tête du module, §§ Project Manager et Console de script)
+/// — leurs propres clics sont recueillis à part, par
+/// [`PlotyxApp::project_manager_panel`] et [`PlotyxApp::script_panel`].
 struct AppTabViewer<'a> {
     state: &'a mut AppState,
     actions: &'a mut Vec<Action>,
     graph_views: &'a mut HashMap<NodeId, GraphView>,
-    ctx: &'a egui::Context,
     /// Onglets dont le menu contextuel a demandé le détachement depuis la
     /// dernière vidange — appliqués par [`PlotyxApp::ui`] une fois la
     /// `DockArea` peinte (muter `dock_state` en plein parcours
@@ -2300,34 +2344,21 @@ impl TabViewer for AppTabViewer<'_> {
         tab_title(self.state, *tab).into()
     }
 
-    // L'onglet structurel (script) ne se ferme pas : il n'a pas d'équivalent
-    // « rouvrir » dans ce banc volontairement pauvre. Un onglet de classeur,
-    // graphe, matrice ou note, lui, se ferme et se rouvre librement — c'est
-    // le Project Manager, via `PlotyxApp::open_tab`, qui rouvre.
-    fn is_closeable(&self, tab: &Self::Tab) -> bool {
-        !matches!(tab, Tab::Script)
-    }
-
+    // `is_closeable` n'est plus surchargé depuis que la console de script est
+    // sortie du dock : les quatre natures restantes (`Book`/`Graph`/
+    // `Matrix`/`Note`) se ferment et se rouvrent toutes librement — c'est le
+    // Project Manager, via `PlotyxApp::open_tab`, qui rouvre — donc la valeur
+    // par défaut du trait (`true`) convient sans exception à filtrer.
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        tab_contents(
-            ui,
-            self.ctx,
-            self.state,
-            self.actions,
-            self.graph_views,
-            *tab,
-        );
+        tab_contents(ui, self.state, self.actions, self.graph_views, *tab);
     }
 
-    /// Les onglets détachables proposent « Détacher dans une fenêtre »
+    /// Chaque onglet du dock propose « Détacher dans une fenêtre »
     /// (symétrique de « Réattacher au dock principal » côté fenêtre
-    /// détachée) ; [`Tab::Script`] n'a aucune entrée, n'étant pas détachable
-    /// (même doc). Ne touche `dock_state` ni `PlotyxApp` directement : voir
-    /// [`AppTabViewer::detach_requests`].
+    /// détachée) — les quatre natures restantes le sont toutes, depuis que la
+    /// console de script est sortie du dock. Ne touche `dock_state` ni
+    /// `PlotyxApp` directement : voir [`AppTabViewer::detach_requests`].
     fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, _path: NodePath) {
-        if matches!(tab, Tab::Script) {
-            return;
-        }
         if ui.button("Détacher dans une fenêtre").clicked() {
             self.detach_requests.push(*tab);
             ui.close();
