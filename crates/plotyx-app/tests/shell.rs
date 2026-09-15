@@ -135,6 +135,17 @@ fn cell(state: &AppState, column: NodeId, row: usize) -> Cell {
         .get(row)
 }
 
+/// Type d'une colonne dans l'arbre courant.
+fn column_type(state: &AppState, column: NodeId) -> ColumnType {
+    state
+        .tree()
+        .get(column)
+        .expect("colonne présente")
+        .as_column()
+        .expect("nœud colonne")
+        .column_type()
+}
+
 /// Feuille nommée `name` dans l'arbre courant.
 fn sheet_named(tree: &Tree, name: &str) -> NodeId {
     tree.walk_all()
@@ -274,32 +285,65 @@ fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
     assert!(state.snapshot().revision > before);
 }
 
-// -- 3. Saisie invalide --
+// -- 3. Saisie non numérique dans une colonne numérique --
 
+/// Taper un texte dans une colonne numérique **n'est plus une erreur** : la
+/// colonne passe à [`ColumnType::Mixed`] et la cellule porte le texte, les
+/// autres gardant leurs nombres (`Command::SetCellsPromoting`). Avant les
+/// colonnes à types mixtes, la saisie était refusée et il fallait convertir
+/// toute la colonne en texte — donc rendre tout le reste intraçable — pour
+/// noter un « n/a » sur une seule ligne.
 #[test]
-fn invalid_numeric_input_reports_an_error_and_sends_no_command() {
+fn non_numeric_input_promotes_the_column_to_mixed() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let temps = column_id(&state, sheet1, "Temps");
     let before = state.snapshot().revision;
+    let voisin = cell(&state, temps, 0);
 
     state.dispatch(Action::CommitCell {
         column: temps,
         row: 1,
-        text: "abc".to_string(),
+        text: "n/a".to_string(),
     });
 
-    let status = state.status().expect("un message");
-    assert!(status.is_error, "une saisie invalide est une erreur");
     assert!(
-        status.text.contains("abc"),
-        "le message cite la saisie refusée : {}",
-        status.text
+        state.status().is_none_or(|status| !status.is_error),
+        "une saisie non numérique n'est plus une erreur"
     );
+    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
+    assert_eq!(state.cell_text(temps, 1), "n/a");
+    assert_eq!(
+        cell(&state, temps, 0),
+        voisin,
+        "les autres lignes gardent leur nombre"
+    );
+    assert!(state.snapshot().revision > before);
+
+    // Une seule entrée d'historique pour la conversion **et** l'écriture :
+    // annuler ramène à la fois le type et la valeur d'avant.
+    state.dispatch(Action::Undo);
+    assert_eq!(column_type(&state, temps), ColumnType::Numeric);
     assert_eq!(cell(&state, temps, 1), Cell::Float(0.5), "valeur intacte");
-    assert!(!state.can_undo(), "aucune commande n'a été envoyée");
-    assert_eq!(state.snapshot().revision, before);
+
+    // Et la deuxième saisie tolérante, sur une colonne déjà mixte, ne change
+    // plus le type : elle écrit simplement une cellule texte.
+    state.dispatch(Action::Redo);
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 2,
+        text: "hs".to_string(),
+    });
+    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
+    assert_eq!(state.cell_text(temps, 2), "hs");
+    // Et un nombre tapé dans une colonne devenue mixte reste un nombre.
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 3,
+        text: "7.25".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 3), Cell::Float(7.25));
 }
 
 // -- 4. Valeur manquante --

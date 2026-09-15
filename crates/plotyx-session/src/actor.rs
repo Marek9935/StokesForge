@@ -7,7 +7,9 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError, CommandResult, History};
-use plotyx_core::{evaluate_formula, topological_order, Formula, NodeId, Project, ValueBlock};
+use plotyx_core::{
+    evaluate_formula, topological_order, ColumnType, Formula, NodeId, Project, ValueBlock,
+};
 
 use crate::error::{SessionError, SessionResult};
 use crate::snapshot::{HistoryState, Revision, Snapshot};
@@ -568,10 +570,27 @@ fn recalc_sheet(project: &mut Project, sheet: NodeId) {
 /// silencieusement un échec (`column` disparu entre-temps, ce que rien dans
 /// cette fonction ne provoque) plutôt que de paniquer — invariant 10.
 fn write_formula_column(project: &mut Project, column: NodeId, values: Vec<f64>) {
-    if project.set_length(column, values.len()).is_err() {
+    // Le bloc doit correspondre au type de la colonne, sans quoi
+    // `set_values` refuse et le recalcul serait silencieusement perdu. Une
+    // colonne-formule est presque toujours numérique, mais rien n'interdit
+    // de poser une formule sur une colonne mixte : `ValueBlock::into_mixed`
+    // fait alors des `NaN` des cellules vides, ce que la formule voulait
+    // dire (invariant 10 — dégrader, pas avaler).
+    let is_mixed = project
+        .tree()
+        .node(column)
+        .and_then(|node| node.as_column())
+        .is_some_and(|target| target.column_type() == ColumnType::Mixed);
+    let length = values.len();
+    let block = if is_mixed {
+        ValueBlock::Mixed(ValueBlock::Float(values).into_mixed())
+    } else {
+        ValueBlock::Float(values)
+    };
+    if project.set_length(column, length).is_err() {
         return;
     }
-    let _ = project.set_values(column, 0, ValueBlock::Float(values));
+    let _ = project.set_values(column, 0, block);
 }
 
 /// Retire de `geometries` toute entrée dont le `NodeId` n'existe plus dans
