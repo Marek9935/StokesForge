@@ -19,6 +19,7 @@ python = ["dep:plotyx-script", "dep:plotyx-python"]
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
 plotyx-commands = { path = "../plotyx-commands" }
+plotyx-import = { path = "../plotyx-import" }
 plotyx-session = { path = "../plotyx-session" }
 plotyx-persistence = { path = "../plotyx-persistence" }
 plotyx-plot = { path = "../plotyx-plot" }

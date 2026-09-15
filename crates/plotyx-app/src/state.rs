@@ -202,6 +202,18 @@ pub enum Action {
         /// Nouvelle formule, ou `None` pour une colonne non calculée.
         formula: Option<String>,
     },
+    /// Importe chaque fichier de `paths` dans sa propre nouvelle feuille de
+    /// `book`, avec la recette `recipe` — voir [`AppState::import_files`].
+    /// Tout le lot (toutes les feuilles, toutes les colonnes) tient dans une
+    /// seule entrée d'historique.
+    ImportFiles {
+        /// Classeur d'accueil.
+        book: NodeId,
+        /// Réglages d'analyse à appliquer à chaque fichier.
+        recipe: plotyx_import::ImportRecipe,
+        /// Fichiers à importer, chacun dans sa propre feuille.
+        paths: Vec<std::path::PathBuf>,
+    },
 }
 
 /// Un message à afficher à l'utilisateur, avec sa gravité.
@@ -495,6 +507,29 @@ pub struct NoteEdit {
     pub buffer: String,
 }
 
+/// État transitoire de la fenêtre d'import (voir [`crate::app`] pour son
+/// rendu) : jamais dans l'historique, jamais envoyé à l'acteur — même
+/// famille que [`HeaderEdit`]/[`CellEdit`]/[`NoteEdit`]. Porte tout ce que la
+/// fenêtre a besoin de retenir entre deux images, y compris le
+/// [`plotyx_import::store::RecipeStore`] chargé une seule fois à l'ouverture
+/// (pas rechargé à chaque image — `RecipeStore::load` touche le disque).
+pub struct ImportState {
+    /// Classeur cible, fixé à l'ouverture ([`AppState::open_import`]).
+    pub book: NodeId,
+    /// Recette en cours d'édition dans la fenêtre.
+    pub recipe: plotyx_import::ImportRecipe,
+    /// Fichiers choisis (« Choisir des fichiers… »), dans l'ordre du
+    /// sélecteur.
+    pub paths: Vec<std::path::PathBuf>,
+    /// Modèles enregistrés, chargés une fois à l'ouverture de la fenêtre.
+    pub store: plotyx_import::RecipeStore,
+    /// Nom sous lequel enregistrer la recette courante comme modèle (champ
+    /// texte de la fenêtre, distinct de `recipe.name` : on ne veut pas
+    /// écraser le nom du modèle chargé tant que « Enregistrer le modèle »
+    /// n'a pas été cliqué).
+    pub save_as_name: String,
+}
+
 /// Nature d'une fenêtre du [`ProjectTreeNode`] montré par le panneau Project
 /// Manager — le sous-ensemble de `NodeKind::is_window()` qui a une fenêtre à
 /// ouvrir côté UI (`Unknown` n'en a pas : rien à afficher pour une nature de
@@ -570,6 +605,9 @@ pub struct AppState {
     selection: std::collections::HashMap<NodeId, Selection>,
     /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
     header_editing: Option<HeaderEdit>,
+    /// État de la fenêtre d'import, tant qu'elle est ouverte — voir
+    /// [`ImportState`].
+    import_state: Option<ImportState>,
     /// Texte de la zone de script.
     script_source: String,
     /// Sortie de la dernière exécution de script, s'il y en a eu une.
@@ -622,6 +660,7 @@ impl AppState {
             note_editing: None,
             selection: std::collections::HashMap::new(),
             header_editing: None,
+            import_state: None,
             script_source: String::new(),
             script_output: None,
             #[cfg(feature = "python")]
@@ -1369,6 +1408,11 @@ impl AppState {
             Action::SetColumnFormula { column, formula } => {
                 self.set_column_meta_field(column, |meta| meta.formula = formula);
             }
+            Action::ImportFiles {
+                book,
+                recipe,
+                paths,
+            } => self.import_files(book, recipe, paths),
         }
     }
 
@@ -1428,6 +1472,137 @@ impl AppState {
                 Err(message) => self.fail(message),
             }
         }
+    }
+
+    /// État courant de la fenêtre d'import, si elle est ouverte.
+    pub fn import_state(&self) -> Option<&ImportState> {
+        self.import_state.as_ref()
+    }
+
+    /// État courant de la fenêtre d'import, modifiable — la couche fenêtre y
+    /// branche ses widgets (ComboBox, boutons radio, champs texte) pour muter
+    /// `recipe` directement, sans passer par [`Action`] : mutation
+    /// transitoire, comme [`AppState::header_editing_mut`].
+    pub fn import_state_mut(&mut self) -> Option<&mut ImportState> {
+        self.import_state.as_mut()
+    }
+
+    /// Ouvre la fenêtre d'import pour `book`. Charge le [`plotyx_import::
+    /// RecipeStore`] depuis le disque une fois pour toute la durée
+    /// d'ouverture de la fenêtre (jamais rechargé à chaque image) et
+    /// démarre sur son premier modèle enregistré s'il y en a un, sinon sur
+    /// une recette permissive par défaut ([`plotyx_import::ImportRecipe::
+    /// new`]). Remplace sans confirmation une fenêtre d'import déjà ouverte
+    /// (même patron que [`AppState::begin_edit`] pour une saisie de
+    /// cellule).
+    pub fn open_import(&mut self, book: NodeId) {
+        let store = plotyx_import::RecipeStore::load();
+        let recipe = store
+            .recipes()
+            .first()
+            .cloned()
+            .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
+        let save_as_name = recipe.name.clone();
+        self.import_state = Some(ImportState {
+            book,
+            recipe,
+            paths: Vec::new(),
+            store,
+            save_as_name,
+        });
+    }
+
+    /// Ferme la fenêtre d'import sans rien importer.
+    pub fn cancel_import(&mut self) {
+        self.import_state = None;
+    }
+
+    /// Repart d'une recette neuve et permissive (bouton « Nouveau modèle »).
+    /// Sans effet si la fenêtre d'import n'est pas ouverte.
+    pub fn new_import_recipe(&mut self) {
+        if let Some(state) = &mut self.import_state {
+            state.recipe = plotyx_import::ImportRecipe::new("Sans titre");
+            state.save_as_name = state.recipe.name.clone();
+        }
+    }
+
+    /// Charge le modèle `name` du `RecipeStore` dans la recette en cours
+    /// d'édition (sélection dans la liste déroulante). Sans effet si `name`
+    /// n'est pas un modèle enregistré, ou si la fenêtre n'est pas ouverte.
+    pub fn select_import_recipe(&mut self, name: &str) {
+        if let Some(state) = &mut self.import_state {
+            if let Some(recipe) = state.store.recipes().iter().find(|r| r.name == name) {
+                state.recipe = recipe.clone();
+                state.save_as_name = recipe.name.clone();
+            }
+        }
+    }
+
+    /// Remplace les fichiers choisis (« Choisir des fichiers… », sélecteur
+    /// natif ouvert par la couche fenêtre — `rfd` est une dépendance UI,
+    /// elle n'a pas sa place ici). Sans effet si la fenêtre n'est pas
+    /// ouverte.
+    pub fn set_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
+        if let Some(state) = &mut self.import_state {
+            state.paths = paths;
+        }
+    }
+
+    /// Enregistre la recette en cours d'édition comme modèle nommé
+    /// `save_as_name` (champ texte de la fenêtre) dans le `RecipeStore`, et
+    /// persiste le store sur disque. Un échec d'écriture (dossier de config
+    /// inaccessible) devient un [`StatusMessage`], jamais une panique — sans
+    /// effet si la fenêtre n'est pas ouverte ou si le nom est vide.
+    pub fn save_import_recipe(&mut self) {
+        let Some(state) = &mut self.import_state else {
+            return;
+        };
+        let name = state.save_as_name.trim().to_string();
+        if name.is_empty() {
+            self.fail("Le modèle doit avoir un nom pour être enregistré".to_string());
+            return;
+        }
+        state.recipe.name = name;
+        state.store.upsert(state.recipe.clone());
+        let save_result = state.store.save();
+        let saved_name = state.recipe.name.clone();
+        if let Err(err) = save_result {
+            self.fail(format!("Échec de l'enregistrement du modèle : {err}"));
+            return;
+        }
+        self.notice(format!("Modèle « {saved_name} » enregistré"));
+    }
+
+    /// Supprime le modèle `name` du `RecipeStore` et persiste le store sur
+    /// disque. Même politique d'échec que [`AppState::save_import_recipe`].
+    pub fn delete_import_recipe(&mut self, name: &str) {
+        let Some(state) = &mut self.import_state else {
+            return;
+        };
+        state.store.remove(name);
+        if let Err(err) = state.store.save() {
+            self.fail(format!("Échec de la suppression du modèle : {err}"));
+            return;
+        }
+        self.notice(format!("Modèle « {name} » supprimé"));
+    }
+
+    /// Aperçu du **premier** fichier choisi, reparsé avec les réglages
+    /// courants — recalculé à chaque appel plutôt que mis en cache (les
+    /// fichiers d'aperçu sont petits, voir la doc de tête de [`ImportState`]).
+    /// `None` si la fenêtre n'est pas ouverte ou si aucun fichier n'a encore
+    /// été choisi ; `Some(Err(_))` si la lecture ou l'analyse du fichier a
+    /// échoué (fichier illisible traité comme une erreur d'analyse pour ne
+    /// pas multiplier les types d'échec exposés à la fenêtre).
+    pub fn import_preview(&self) -> Option<Result<plotyx_import::ParsedTable, String>> {
+        let state = self.import_state.as_ref()?;
+        let path = state.paths.first()?;
+        let result = std::fs::read(path)
+            .map_err(|err| format!("{}: {err}", path.display()))
+            .and_then(|bytes| {
+                plotyx_import::parse(&bytes, &state.recipe).map_err(|err| err.to_string())
+            });
+        Some(result)
     }
 
     // -- détail interne ----------------------------------------------------
@@ -1844,6 +2019,118 @@ impl AppState {
             Command::DeleteRows { sheet, at, count }
         };
         self.execute(command);
+    }
+
+    /// Importe chaque fichier de `paths` dans sa propre nouvelle feuille de
+    /// `book`, avec `recipe` — [`Action::ImportFiles`]. Un fichier illisible
+    /// ou inanalysable devient un [`StatusMessage`] et fait passer au
+    /// suivant, jamais un abandon complet du lot. Tout le lot tient dans une
+    /// seule entrée d'historique : `self.handle.begin_macro`/`end_macro`
+    /// encadrent toute la boucle, même si un seul fichier réussit — voir
+    /// `History::begin_macro`/`end_macro` (`plotyx-commands/src/
+    /// history.rs`) pour l'absorption d'une macro qui finirait vide.
+    fn import_files(
+        &mut self,
+        book: NodeId,
+        recipe: plotyx_import::ImportRecipe,
+        paths: Vec<PathBuf>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        if self.handle.begin_macro("Importer").is_err() {
+            self.fail(
+                "Impossible de grouper l'import dans une seule entrée d'historique".to_string(),
+            );
+            return;
+        }
+        let mut imported = 0usize;
+        for path in &paths {
+            let file_stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("fichier");
+            let bytes = match std::fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    self.fail(format!("{}: {err}", path.display()));
+                    continue;
+                }
+            };
+            let table = match plotyx_import::parse(&bytes, &recipe) {
+                Ok(table) => table,
+                Err(err) => {
+                    self.fail(format!("{}: {err}", path.display()));
+                    continue;
+                }
+            };
+            // `Command::AddWorksheet` ne rend que la `Revision`, jamais
+            // l'identifiant de la feuille créée. `Project::add_worksheet`
+            // (côté `plotyx-core`) insère toujours la nouvelle feuille en
+            // dernière position des enfants de `book` ; `self.execute`
+            // rafraîchit déjà `self.snapshot.tree` en cas de succès (voir sa
+            // doc), donc le dernier enfant de `book` juste après est bien la
+            // feuille qu'on vient de créer — c'est le seul moyen de la
+            // retrouver depuis ce banc, qui n'a qu'un `Arc<Tree>` figé, pas
+            // le `Project` qui l'a construite. Piège à ne pas redécouvrir à
+            // la dure : voir la tâche « feat/import-ui » §2.
+            self.execute(Command::AddWorksheet { book, name: None });
+            let Some(sheet) = self
+                .snapshot
+                .tree
+                .node(book)
+                .and_then(|node| node.children().last().copied())
+            else {
+                self.fail(format!(
+                    "{}: échec de la création de la feuille",
+                    path.display()
+                ));
+                continue;
+            };
+            // Nomme la feuille d'après le fichier plutôt que de garder le nom
+            // automatique « SheetN » — best-effort : si le nom est déjà pris,
+            // `Rename` échoue et `self.execute` le rapporte via `self.fail`
+            // (qui écrase alors ce message avec le suivant), la feuille
+            // garde son nom automatique. Ce n'est pas bloquant.
+            self.execute(Command::Rename {
+                id: sheet,
+                name: file_stem.to_string(),
+            });
+            for (index, parsed_column) in table.columns.iter().enumerate() {
+                let mut column = Column::from_f64(&parsed_column.values);
+                let long_name = match (index, &parsed_column.name) {
+                    (_, Some(name)) => name.clone(),
+                    (0, None) => "X".to_string(),
+                    (_, None) => plotyx_import::resolve_series_name(&recipe, &table, file_stem),
+                };
+                column.set_meta(ColumnMeta {
+                    long_name,
+                    ..Default::default()
+                });
+                self.execute(Command::AddColumn {
+                    sheet,
+                    index: None,
+                    name: None,
+                    column,
+                });
+            }
+            imported += 1;
+        }
+        if self.handle.end_macro().is_err() {
+            self.fail("Échec de la clôture de l'entrée d'historique d'import".to_string());
+        }
+        // `self.execute` (appelé dans la boucle ci-dessus) rafraîchit déjà
+        // l'instantané à chaque commande, mais toujours **pendant** que la
+        // macro est ouverte : `self.snapshot.history` n'y reflète donc
+        // jamais l'annulabilité de la macro une fois close. `end_macro` lui-
+        // même ne rafraîchit rien (il ne passe pas par `self.execute`) — sans
+        // cet appel, `AppState::can_undo` resterait sur l'état d'avant la
+        // clôture jusqu'au prochain rafraîchissement fortuit.
+        self.refresh();
+        self.notice(format!(
+            "{imported} fichier(s) importé(s) sur {}",
+            paths.len()
+        ));
     }
 
     /// Remplace le texte d'une note, sauf s'il est déjà exactement celui-là —

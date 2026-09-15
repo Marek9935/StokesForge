@@ -317,6 +317,7 @@ use crate::state::{
     cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
     Action, AppState, CellEdit, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
 };
+use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
 /// [`PlotyxApp::new`]).
@@ -1411,6 +1412,15 @@ impl eframe::App for PlotyxApp {
             }
         });
 
+        // Fenêtre d'import (`Action::ImportFiles`, voir la doc de tête de
+        // [`import_window`]) : un dialogue transitoire, peint tant que
+        // `self.state.import_state()` est `Some`, plutôt qu'un onglet du
+        // dock — après la `DockArea`/le `CentralPanel` mais avant la
+        // vidange des requêtes ci-dessous, pour que l'`Action::ImportFiles`
+        // qu'elle pousse éventuellement soit dispatchée cette image-ci comme
+        // toute autre action.
+        import_window(&ctx, &mut self.state, &mut actions);
+
         // Les onglets demandés (Project Manager, panneau fixe ou détaché), les
         // détachements demandés par le menu contextuel, et les actions
         // récoltées par tous les panneaux et onglets ne sont appliqués
@@ -1832,6 +1842,9 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
         if ui.button("Ajouter une colonne").clicked() {
             actions.push(Action::AddColumn { sheet: selected });
         }
+        if ui.button("Importer…").clicked() {
+            state.open_import(book);
+        }
         ui.separator();
         ui.weak(format!(
             "{} lignes × {} colonnes",
@@ -1865,6 +1878,336 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
             }
         }
     });
+}
+
+/// Libellé affiché pour un [`Separator`] dans la fenêtre d'import.
+fn separator_label(separator: Separator) -> &'static str {
+    match separator {
+        Separator::Comma => "Virgule",
+        Separator::Semicolon => "Point-virgule",
+        Separator::Tab => "Tabulation",
+        Separator::Whitespace => "Espaces",
+        Separator::Auto => "Auto",
+    }
+}
+
+/// Libellé affiché pour un [`DecimalStyle`] dans la fenêtre d'import.
+fn decimal_label(decimal: DecimalStyle) -> &'static str {
+    match decimal {
+        DecimalStyle::Dot => "Point",
+        DecimalStyle::Comma => "Virgule",
+    }
+}
+
+/// La fenêtre d'import (« Importer… », voir [`book_contents`]) : dialogue
+/// transitoire (`egui::Window`, pas un onglet dockable), peinte depuis
+/// [`PlotyxApp::ui`] tant que [`AppState::import_state`] est `Some`. Ferme sur
+/// la croix native de la fenêtre exactement comme sur « Annuler » — les deux
+/// abandonnent sans rien importer.
+fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
+    if state.import_state().is_none() {
+        return;
+    }
+    let mut still_open = true;
+    // Ramassés pendant la fermeture pour être appliqués **après** `.show`,
+    // jamais depuis l'intérieur des blocs ci-dessous qui emprûntent `import`
+    // (`&mut`/`&` issus de `state`) : `save_import_recipe`/`cancel_import`
+    // ont besoin de `&mut AppState` entier (pour `self.fail`/`self.notice`),
+    // ce que le compilateur refuse tant qu'`import` est encore emprunté.
+    let mut want_save = false;
+    let mut want_cancel = false;
+    let mut pending_import: Option<(NodeId, plotyx_import::ImportRecipe, Vec<std::path::PathBuf>)> =
+        None;
+    egui::Window::new("Importer des fichiers")
+        .collapsible(false)
+        .resizable(true)
+        .default_width(480.0)
+        .open(&mut still_open)
+        .show(ctx, |ui| {
+            // -- Modèles enregistrés --------------------------------------
+            let recipe_names: Vec<String> = state
+                .import_state()
+                .map(|import| {
+                    import
+                        .store
+                        .recipes()
+                        .iter()
+                        .map(|r| r.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let current_name = state
+                .import_state()
+                .map(|import| import.recipe.name.clone())
+                .unwrap_or_default();
+            ui.horizontal(|ui| {
+                ui.label("Modèle :");
+                egui::ComboBox::new("plotyx_import_recipe_combo", "")
+                    .selected_text(current_name.clone())
+                    .show_ui(ui, |ui| {
+                        for name in &recipe_names {
+                            if ui.selectable_label(*name == current_name, name).clicked() {
+                                state.select_import_recipe(name);
+                            }
+                        }
+                    });
+                if ui.button("Nouveau modèle").clicked() {
+                    state.new_import_recipe();
+                }
+                let can_delete =
+                    !current_name.is_empty() && recipe_names.iter().any(|n| n == &current_name);
+                if can_delete && ui.button("Supprimer ce modèle").clicked() {
+                    state.delete_import_recipe(&current_name);
+                }
+            });
+            ui.separator();
+
+            // -- Champs de la recette, choix des fichiers -----------------
+            // Emprunt `&mut` scopé à ce seul bloc : rien ici n'appelle
+            // d'autre méthode de `state` que des mutations directes de
+            // `import` — voir la note en tête de fonction.
+            let Some(import) = state.import_state_mut() else {
+                return;
+            };
+            ui.horizontal(|ui| {
+                ui.label("Séparateur :");
+                egui::ComboBox::new("plotyx_import_separator_combo", "")
+                    .selected_text(separator_label(import.recipe.separator))
+                    .show_ui(ui, |ui| {
+                        for sep in [
+                            Separator::Comma,
+                            Separator::Semicolon,
+                            Separator::Tab,
+                            Separator::Whitespace,
+                            Separator::Auto,
+                        ] {
+                            if ui
+                                .selectable_label(
+                                    import.recipe.separator == sep,
+                                    separator_label(sep),
+                                )
+                                .clicked()
+                            {
+                                import.recipe.separator = sep;
+                            }
+                        }
+                    });
+                ui.label("Décimal :");
+                egui::ComboBox::new("plotyx_import_decimal_combo", "")
+                    .selected_text(decimal_label(import.recipe.decimal))
+                    .show_ui(ui, |ui| {
+                        for dec in [DecimalStyle::Dot, DecimalStyle::Comma] {
+                            if ui
+                                .selectable_label(import.recipe.decimal == dec, decimal_label(dec))
+                                .clicked()
+                            {
+                                import.recipe.decimal = dec;
+                            }
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("En-tête :");
+                let mut is_none = matches!(import.recipe.header, HeaderSkip::None);
+                let mut is_lines = matches!(import.recipe.header, HeaderSkip::Lines(_));
+                let mut is_marker = matches!(import.recipe.header, HeaderSkip::UntilMarker(_));
+                if ui.radio_value(&mut is_none, true, "Aucun").clicked() {
+                    import.recipe.header = HeaderSkip::None;
+                }
+                if ui.radio_value(&mut is_lines, true, "N lignes").clicked() {
+                    import.recipe.header = HeaderSkip::Lines(1);
+                }
+                if ui
+                    .radio_value(&mut is_marker, true, "Jusqu'à un marqueur")
+                    .clicked()
+                {
+                    import.recipe.header = HeaderSkip::UntilMarker(String::new());
+                }
+            });
+            match &mut import.recipe.header {
+                HeaderSkip::Lines(n) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Lignes à ignorer :");
+                        let mut value = *n as i64;
+                        if ui
+                            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+                            .changed()
+                        {
+                            *n = value.max(0) as usize;
+                        }
+                    });
+                }
+                HeaderSkip::UntilMarker(marker) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Marqueur :");
+                        ui.text_edit_singleline(marker);
+                    });
+                }
+                HeaderSkip::None => {}
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Pied de page (lignes à ignorer) :");
+                let mut value = import.recipe.footer_skip_lines as i64;
+                if ui
+                    .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+                    .changed()
+                {
+                    import.recipe.footer_skip_lines = value.max(0) as usize;
+                }
+            });
+
+            ui.checkbox(
+                &mut import.recipe.has_column_header_row,
+                "La première ligne restante donne les noms de colonnes",
+            );
+
+            ui.horizontal(|ui| {
+                ui.label("Nom des séries :");
+                let mut is_filename = matches!(import.recipe.name_source, NameSource::Filename);
+                let mut is_header_key =
+                    matches!(import.recipe.name_source, NameSource::HeaderKey(_));
+                if ui
+                    .radio_value(&mut is_filename, true, "Nom de fichier")
+                    .clicked()
+                {
+                    import.recipe.name_source = NameSource::Filename;
+                }
+                if ui
+                    .radio_value(&mut is_header_key, true, "Clé d'en-tête")
+                    .clicked()
+                {
+                    import.recipe.name_source = NameSource::HeaderKey(String::new());
+                }
+            });
+            if let NameSource::HeaderKey(key) = &mut import.recipe.name_source {
+                ui.horizontal(|ui| {
+                    ui.label("Clé :");
+                    ui.text_edit_singleline(key);
+                });
+            }
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("Nom du modèle :");
+                ui.text_edit_singleline(&mut import.save_as_name);
+                if ui.button("Enregistrer le modèle").clicked() {
+                    want_save = true;
+                }
+            });
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("Choisir des fichiers…").clicked() {
+                    if let Some(paths) = rfd::FileDialog::new()
+                        .set_title("Choisir des fichiers à importer")
+                        .pick_files()
+                    {
+                        import.paths = paths;
+                    }
+                }
+                ui.weak(if import.paths.is_empty() {
+                    "Aucun fichier choisi".to_string()
+                } else {
+                    import
+                        .paths
+                        .iter()
+                        .filter_map(|p| p.file_name().and_then(|n| n.to_str()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                });
+            });
+            // Fin du bloc emprûntant `import` : nécessaire pour que
+            // `state.import_preview()` ci-dessous (qui reprend `&AppState`)
+            // et le second bloc plus bas (qui reprend `import` pour lire
+            // seulement, voir sa note) ne se heurtent pas à l'emprunt
+            // encore actif ici.
+
+            ui.separator();
+            ui.label("Aperçu (premier fichier choisi) :");
+            match state.import_preview() {
+                None => {
+                    ui.weak("Choisis un fichier pour voir un aperçu.");
+                }
+                Some(Err(message)) => {
+                    ui.colored_label(egui::Color32::RED, message);
+                }
+                Some(Ok(table)) => {
+                    if !table.warnings.is_empty() {
+                        for warning in &table.warnings {
+                            ui.colored_label(ui.visuals().warn_fg_color, warning);
+                        }
+                    }
+                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                        egui::Grid::new("plotyx_import_preview_grid")
+                            .striped(true)
+                            .show(ui, |ui| {
+                                for column in &table.columns {
+                                    ui.label(column.name.as_deref().unwrap_or("(sans nom)"));
+                                }
+                                ui.end_row();
+                                let preview_rows = table.row_count().min(10);
+                                for row in 0..preview_rows {
+                                    for column in &table.columns {
+                                        let text = column
+                                            .values
+                                            .get(row)
+                                            .map(|v| {
+                                                if v.is_nan() {
+                                                    String::new()
+                                                } else {
+                                                    format!("{v}")
+                                                }
+                                            })
+                                            .unwrap_or_default();
+                                        ui.label(text);
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+                    });
+                }
+            }
+
+            ui.separator();
+            // Second bloc, emprunt en lecture seule cette fois : juste
+            // besoin de lire `book`/`recipe`/`paths` pour composer
+            // l'`Action`, jamais de les muter.
+            let Some(import) = state.import_state() else {
+                return;
+            };
+            let has_files = !import.paths.is_empty();
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(has_files, egui::Button::new("Importer"))
+                    .clicked()
+                {
+                    pending_import =
+                        Some((import.book, import.recipe.clone(), import.paths.clone()));
+                }
+                if ui.button("Annuler").clicked() {
+                    want_cancel = true;
+                }
+            });
+        });
+
+    // Tout ce qui devait modifier `state` en entier (pas seulement
+    // `import`) est appliqué ici, une fois `.show` terminé et son emprunt
+    // relâché — voir la note en tête de fonction.
+    if want_save {
+        state.save_import_recipe();
+    }
+    if let Some((book, recipe, paths)) = pending_import {
+        actions.push(Action::ImportFiles {
+            book,
+            recipe,
+            paths,
+        });
+        state.cancel_import();
+    } else if want_cancel || !still_open {
+        state.cancel_import();
+    }
 }
 
 /// La grille, en lignes **virtualisées** : seules les lignes visibles sont
