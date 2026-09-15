@@ -1029,6 +1029,63 @@ fn editing_a_note_commits_on_dispatch_and_is_undoable() {
     assert_eq!(state.note_text(note), Some("avant".to_string()));
 }
 
+// -- 15. Suppr sur une sélection de cellules --
+
+#[test]
+fn deleting_a_single_selected_row_shifts_the_rest_up_instead_of_truncating() {
+    // Régression : sélectionner la 3e ligne (index 2, 0-indexée) d'une
+    // colonne et appuyer sur Suppr doit retirer *cette seule ligne* et faire
+    // remonter les suivantes d'une position — pas tronquer tout ce qui suit
+    // la ligne sélectionnée.
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    // "Temps" = [0.0, 0.5, 1.0, 1.5, 2.0] avant suppression.
+    assert_eq!(state.row_count(sheet1), 5);
+
+    state.select_cell(sheet1, temps, 2);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+
+    // Seule la ligne d'index 2 (valeur 1.0) a disparu de la colonne
+    // sélectionnée ; les lignes 3 et 4 (1.5, 2.0) sont remontées aux index 2
+    // et 3 — la colonne perd exactement une valeur, elle n'est pas tronquée
+    // à sa fin. `state.row_count` ne convient pas ici : c'est le maximum des
+    // longueurs de colonnes de la feuille, et "Signal" (non sélectionnée)
+    // garde ses 5 lignes.
+    let temps_len = state
+        .tree()
+        .get(temps)
+        .expect("colonne Temps présente")
+        .as_column()
+        .expect("nœud colonne")
+        .len();
+    assert_eq!(temps_len, 4);
+    let values: Vec<Cell> = (0..4).map(|row| cell(&state, temps, row)).collect();
+    assert_eq!(
+        values,
+        vec![
+            Cell::Float(0.0),
+            Cell::Float(0.5),
+            Cell::Float(1.5),
+            Cell::Float(2.0),
+        ]
+    );
+
+    assert!(state.can_undo());
+    state.dispatch(Action::Undo);
+    let temps_len_after_undo = state
+        .tree()
+        .get(temps)
+        .expect("colonne Temps présente")
+        .as_column()
+        .expect("nœud colonne")
+        .len();
+    assert_eq!(temps_len_after_undo, 5);
+    assert_eq!(cell(&state, temps, 2), Cell::Float(1.0));
+}
+
 #[test]
 fn committing_a_note_without_typing_writes_nothing() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");

@@ -152,19 +152,28 @@ impl Selection {
     /// `(colonnes, début, nombre)` pour Suppr (vide et remonte) :
     /// `Command::DeleteCells` applique `at`/`count` indépendamment par
     /// colonne (une colonne plus courte que `at + count` n'est retirée que
-    /// jusqu'à sa propre fin) — `count` est donc calculé sur la colonne
-    /// sélectionnée la plus longue, pour qu'une colonne entière sélectionnée
-    /// soit intégralement compactée même si une autre colonne du rectangle
-    /// est plus courte.
+    /// jusqu'à sa propre fin). Pour un rectangle de cellules, `count` est la
+    /// taille de la plage sélectionnée (`hi - lo + 1`) — retirer *exactement*
+    /// les lignes sélectionnées, ni plus ni moins, sinon Suppr sur une seule
+    /// ligne tronquerait tout ce qui suit au lieu de ne faire remonter que
+    /// cette ligne. Pour une colonne entière sélectionnée (pas de plage de
+    /// lignes), `count` reste calculé sur la colonne sélectionnée la plus
+    /// longue, pour qu'elle soit intégralement compactée même si une autre
+    /// colonne du rectangle est plus courte.
     pub fn delete_at_count(&self, tree: &Tree, sheet: NodeId) -> (Vec<NodeId>, usize, usize) {
         let columns = self.columns(tree, sheet);
-        let start = self.row_range().map_or(0, |(lo, _)| lo);
-        let count = columns
-            .iter()
-            .filter_map(|&column| tree.node(column).and_then(plotyx_core::Node::as_column))
-            .map(|column| column.len().saturating_sub(start))
-            .max()
-            .unwrap_or(0);
+        let (start, count) = match self.row_range() {
+            Some((lo, hi)) => (lo, hi.saturating_sub(lo) + 1),
+            None => {
+                let count = columns
+                    .iter()
+                    .filter_map(|&column| tree.node(column).and_then(plotyx_core::Node::as_column))
+                    .map(plotyx_core::Column::len)
+                    .max()
+                    .unwrap_or(0);
+                (0, count)
+            }
+        };
         (columns, start, count)
     }
 
