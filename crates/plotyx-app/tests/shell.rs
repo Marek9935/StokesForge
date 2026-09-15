@@ -24,9 +24,11 @@
 //! compter sur une sélection implicite.
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use plotyx_app::state::{Action, AppState};
 use plotyx_core::{Cell, Column, ColumnType, NodeId, Project, Tree};
+use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
 use plotyx_session::{Session, SessionHandle};
 
 /// Projet de démonstration des tests : un classeur `Book1` avec `Sheet1`
@@ -163,6 +165,52 @@ fn book_named(tree: &Tree, name: &str) -> NodeId {
 /// tests qui n'en ont pas besoin.
 #[allow(dead_code)]
 fn unused(_: &SessionHandle) {}
+
+/// Protège les tests qui isolent le dossier de config des recettes d'import
+/// (voir [`isolate_recipe_store`]) contre d'autres tests de ce même binaire
+/// qui feraient la même chose en parallèle : `std::env::set_var` est un état
+/// global du *processus*, jamais scopé à un thread — `cargo test` fait
+/// tourner les tests de ce fichier sur plusieurs threads par défaut.
+static IMPORT_RECIPES_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// Redirige `XDG_CONFIG_HOME` vers un répertoire temporaire propre à l'appel,
+/// pour la durée de vie de la valeur rendue : `plotyx_import::RecipeStore::
+/// load`/`save` (donc `AppState::open_import`/`save_import_recipe`/
+/// `delete_import_recipe`) passent par `directories::ProjectDirs`, qui
+/// respecte cette variable sur Linux. Sans ceci, ces méthodes liraient et
+/// écriraient le vrai dossier de config de la machine qui exécute les
+/// tests — non hermétique, et potentiellement pollué par un modèle laissé
+/// par une session interactive antérieure.
+///
+/// Garde le verrou et le répertoire temporaire vivants jusqu'à ce que la
+/// valeur rendue soit abandonnée (fin du test, y compris en cas de panique :
+/// `Drop` restaure `XDG_CONFIG_HOME` à sa valeur d'avant).
+fn isolate_recipe_store() -> impl Drop {
+    struct Guard {
+        previous: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+        _dir: tempfile::TempDir,
+    }
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+        }
+    }
+    let lock = IMPORT_RECIPES_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let dir = tempfile::tempdir().expect("répertoire temporaire pour les recettes d'import");
+    let previous = std::env::var_os("XDG_CONFIG_HOME");
+    std::env::set_var("XDG_CONFIG_HOME", dir.path());
+    Guard {
+        previous,
+        _lock: lock,
+        _dir: dir,
+    }
+}
 
 // -- 1. État initial --
 
@@ -1289,6 +1337,433 @@ fn a_file_read_failure_does_not_abort_the_rest_of_the_batch() {
     assert!(state.can_undo());
     state.dispatch(Action::Undo);
     assert_eq!(state.worksheets_of(book).len(), sheets_before);
+}
+
+/// `AppState::open_import` démarre sur le premier modèle enregistré s'il y
+/// en a, sinon sur une recette permissive — les deux branches de sa doc.
+#[test]
+fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+
+    // Rien d'enregistré : recette permissive par défaut.
+    state.open_import(book);
+    {
+        let import = state.import_state().expect("fenêtre d'import ouverte");
+        assert_eq!(import.recipe.separator, Separator::Auto);
+        assert_eq!(import.recipe.decimal, DecimalStyle::Dot);
+        assert_eq!(import.recipe.header, HeaderSkip::None);
+        assert_eq!(import.recipe.footer_skip_lines, 0);
+        assert!(!import.recipe.has_column_header_row);
+        assert_eq!(import.recipe.name_source, NameSource::Filename);
+    }
+    state.cancel_import();
+
+    // Un modèle déjà enregistré sur disque (écrit directement, sans passer
+    // par la fenêtre) : `open_import` doit le proposer d'entrée.
+    let mut store = RecipeStore::default();
+    let mut jasco = ImportRecipe::new("Jasco UV-Vis");
+    jasco.separator = Separator::Semicolon;
+    jasco.decimal = DecimalStyle::Comma;
+    store.upsert(jasco);
+    store.save().expect("écrit le modèle isolé sur disque");
+
+    state.open_import(book);
+    let import = state.import_state().expect("fenêtre d'import ouverte");
+    assert_eq!(import.recipe.name, "Jasco UV-Vis");
+    assert_eq!(import.recipe.separator, Separator::Semicolon);
+    assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
+}
+
+/// « Nouveau modèle » repart d'une recette permissive, même après avoir
+/// chargé/modifié un modèle existant.
+#[test]
+fn new_import_recipe_resets_to_a_permissive_default() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+
+    state.open_import(book);
+    {
+        let import = state.import_state_mut().expect("fenêtre d'import ouverte");
+        import.recipe.separator = Separator::Tab;
+        import.recipe.decimal = DecimalStyle::Comma;
+        import.recipe.footer_skip_lines = 5;
+        import.recipe.has_column_header_row = true;
+        import.recipe.name = "Autre chose".to_string();
+    }
+
+    state.new_import_recipe();
+    let import = state.import_state().expect("fenêtre d'import ouverte");
+    assert_eq!(import.recipe.name, "Sans titre");
+    assert_eq!(import.recipe.separator, Separator::Auto);
+    assert_eq!(import.recipe.decimal, DecimalStyle::Dot);
+    assert_eq!(import.recipe.header, HeaderSkip::None);
+    assert_eq!(import.recipe.footer_skip_lines, 0);
+    assert!(!import.recipe.has_column_header_row);
+    assert_eq!(import.recipe.name_source, NameSource::Filename);
+}
+
+/// La liste déroulante des modèles charge le modèle choisi dans la recette
+/// en cours d'édition ; un nom inconnu est sans effet (pas de panique, pas de
+/// recette à moitié remplacée).
+#[test]
+fn select_import_recipe_loads_a_saved_model_and_ignores_unknown_names() {
+    // `select_import_recipe` lui-même ne fait que chercher dans le `Vec` en
+    // mémoire, mais `open_import` juste en dessous appelle bien
+    // `RecipeStore::load()` pour de vrai : sans isolation, il lirait
+    // `XDG_CONFIG_HOME` tel qu'un *autre* test de ce fichier, tournant en
+    // parallèle et isolé dans son propre répertoire temporaire, l'aurait
+    // laissé à cet instant précis — et chargerait son modèle au lieu de
+    // rien, avant que la ligne suivante n'écrase `store` de toute façon.
+    // Théorie confirmée à la dure : un run sur ~7 a bien fait échouer un
+    // autre test de ce fichier de cette façon avant que cette isolation ne
+    // soit ajoutée ici.
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+
+    state.open_import(book);
+    let mut store = RecipeStore::default();
+    store.upsert(ImportRecipe::new("Jasco"));
+    let mut fluo = ImportRecipe::new("Fluo");
+    fluo.separator = Separator::Tab;
+    store.upsert(fluo);
+    state.import_state_mut().expect("fenêtre ouverte").store = store;
+
+    state.select_import_recipe("Fluo");
+    assert_eq!(
+        state.import_state().unwrap().recipe.name,
+        "Fluo",
+        "le modèle choisi remplace la recette en cours"
+    );
+    assert_eq!(
+        state.import_state().unwrap().recipe.separator,
+        Separator::Tab
+    );
+
+    state.select_import_recipe("N'existe pas");
+    assert_eq!(
+        state.import_state().unwrap().recipe.name,
+        "Fluo",
+        "un nom inconnu ne remplace rien"
+    );
+}
+
+/// Enregistrer un modèle sans nom (ou un nom blanc) est refusé, sans
+/// modifier le store — condition explicitement documentée par
+/// `AppState::save_import_recipe`.
+#[test]
+fn save_import_recipe_requires_a_non_empty_name() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+
+    state.open_import(book);
+    state.import_state_mut().unwrap().save_as_name = "   ".to_string();
+    state.save_import_recipe();
+
+    let status = state.status().expect("un message de statut");
+    assert!(status.is_error, "un nom blanc doit être refusé");
+    assert!(
+        state.import_state().unwrap().store.recipes().is_empty(),
+        "rien n'a été ajouté au store"
+    );
+}
+
+/// Un modèle enregistré survit à la fermeture de la fenêtre : le rouvrir
+/// (nouvelle session de fenêtre, mais même disque) le retrouve tel quel —
+/// l'aller-retour complet à travers `RecipeStore::save`/`load`, jamais
+/// exercé avant que ce test n'existe (les tests de `plotyx-import` ne
+/// couvraient que la désérialisation, jamais l'écriture réelle).
+#[test]
+fn save_import_recipe_persists_to_disk_and_is_visible_after_reopening() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+
+    state.open_import(book);
+    {
+        let import = state.import_state_mut().unwrap();
+        import.recipe.separator = Separator::Semicolon;
+        import.recipe.decimal = DecimalStyle::Comma;
+        import.recipe.footer_skip_lines = 2;
+        import.recipe.has_column_header_row = true;
+        import.recipe.name_source = NameSource::HeaderKey("TITRE".to_string());
+        import.save_as_name = "Jasco UV".to_string();
+    }
+    state.save_import_recipe();
+    let status = state.status().expect("un message de statut");
+    assert!(
+        !status.is_error,
+        "l'enregistrement a réussi : {}",
+        status.text
+    );
+
+    state.cancel_import();
+    state.open_import(book);
+    let import = state.import_state().expect("fenêtre d'import ouverte");
+    assert_eq!(import.recipe.name, "Jasco UV");
+    assert_eq!(import.recipe.separator, Separator::Semicolon);
+    assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
+    assert_eq!(import.recipe.footer_skip_lines, 2);
+    assert!(import.recipe.has_column_header_row);
+    assert_eq!(
+        import.recipe.name_source,
+        NameSource::HeaderKey("TITRE".to_string())
+    );
+}
+
+/// Supprimer un modèle le retire du disque, pas seulement de la liste en
+/// mémoire de la fenêtre courante.
+#[test]
+fn delete_import_recipe_removes_it_from_the_store_on_disk() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+
+    let mut store = RecipeStore::default();
+    store.upsert(ImportRecipe::new("Jasco"));
+    store.upsert(ImportRecipe::new("Fluo"));
+    store
+        .save()
+        .expect("écrit les deux modèles isolés sur disque");
+
+    state.open_import(book);
+    state.delete_import_recipe("Jasco");
+    let status = state.status().expect("un message de statut");
+    assert!(
+        !status.is_error,
+        "la suppression a réussi : {}",
+        status.text
+    );
+
+    state.cancel_import();
+    state.open_import(book);
+    let names: Vec<&str> = state
+        .import_state()
+        .unwrap()
+        .store
+        .recipes()
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["Fluo"],
+        "« Jasco » a bien disparu du fichier sur disque, « Fluo » reste"
+    );
+}
+
+/// L'aperçu suit les réglages courants image par image (pas de mise en
+/// cache) : sans « la première ligne donne les noms de colonnes », la ligne
+/// d'en-tête est lue comme une donnée illisible (valeurs manquantes) ; en
+/// l'activant, elle nomme les colonnes et la première vraie donnée apparaît.
+/// Couvre aussi les deux cas où l'aperçu ne porte pas de table : aucun
+/// fichier choisi, et un chemin qui n'existe pas.
+#[test]
+fn import_preview_reflects_current_recipe_settings_and_reports_parse_errors() {
+    // `open_import` appelle `RecipeStore::load()` pour de vrai — isolé pour
+    // la même raison que `select_import_recipe_loads_a_saved_model_and_
+    // ignores_unknown_names`, ci-dessus.
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("mesure.csv");
+    std::fs::write(&file, "Time,Signal\n1,10\n2,20\n").expect("écrit mesure.csv");
+
+    state.open_import(book);
+    assert!(
+        state.import_preview().is_none(),
+        "aucun fichier choisi : pas d'aperçu"
+    );
+
+    state.set_import_paths(vec![file.clone()]);
+    let table = state
+        .import_preview()
+        .expect("un aperçu, un fichier est choisi")
+        .expect("le fichier se parse");
+    assert!(
+        table.columns[0].values[0].is_nan(),
+        "sans has_column_header_row, « Time » est lu comme une donnée illisible"
+    );
+
+    state
+        .import_state_mut()
+        .unwrap()
+        .recipe
+        .has_column_header_row = true;
+    let table = state.import_preview().unwrap().unwrap();
+    assert_eq!(table.columns[0].name.as_deref(), Some("Time"));
+    assert_eq!(table.columns[1].name.as_deref(), Some("Signal"));
+    assert_eq!(table.columns[0].values[0], 1.0);
+
+    state.import_state_mut().unwrap().paths = vec![dir.path().join("n_existe_pas.csv")];
+    assert!(
+        state.import_preview().unwrap().is_err(),
+        "un chemin introuvable est signalé, pas paniqué"
+    );
+}
+
+/// `NameSource::HeaderKey` retrouve le nom de la série dans les lignes
+/// d'en-tête ignorées (motif « CLÉ<séparateur>VALEUR »), pour une colonne
+/// qui n'a par ailleurs aucun nom propre (pas de ligne d'en-tête de
+/// colonnes) — le cas d'usage central de la fonctionnalité, un fichier
+/// Jasco-like à une seule série.
+#[test]
+fn importing_resolves_series_name_from_a_header_key_when_the_column_has_no_name_of_its_own() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("spectre.csv");
+    std::fs::write(&file, "TITLE;MonEchantillon\nXYDATA\n1;10\n2;20\n").expect("écrit spectre.csv");
+
+    let mut recipe = ImportRecipe::new("Sans titre");
+    recipe.separator = Separator::Semicolon;
+    recipe.header = HeaderSkip::UntilMarker("XYDATA".to_string());
+    recipe.name_source = NameSource::HeaderKey("TITLE".to_string());
+    state.dispatch(Action::ImportFiles {
+        book,
+        recipe,
+        paths: vec![file],
+    });
+
+    let tree = state.tree();
+    let sheet = sheet_named(tree, "spectre");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(state.column_meta(columns[0].0).long_name, "X");
+    assert_eq!(
+        state.column_meta(columns[1].0).long_name,
+        "MonEchantillon",
+        "la deuxième colonne prend le nom lu sur la ligne TITLE, pas le nom de fichier"
+    );
+}
+
+/// `has_column_header_row` nomme **chaque** colonne d'après la ligne
+/// d'en-tête restante, pas seulement la première — le cas d'un fichier «
+/// matrice » avec plusieurs séries Y, chacune sous son propre nom.
+#[test]
+fn importing_a_file_with_a_column_header_row_names_every_series_from_it() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("matrice.txt");
+    std::fs::write(&file, "wavelength\tA\tB\n1\t10\t100\n2\t20\t200\n").expect("écrit matrice.txt");
+
+    let mut recipe = ImportRecipe::new("Sans titre");
+    recipe.separator = Separator::Tab;
+    recipe.has_column_header_row = true;
+    state.dispatch(Action::ImportFiles {
+        book,
+        recipe,
+        paths: vec![file],
+    });
+
+    let tree = state.tree();
+    let sheet = sheet_named(tree, "matrice");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(columns.len(), 3);
+    assert_eq!(state.column_meta(columns[0].0).long_name, "wavelength");
+    assert_eq!(state.column_meta(columns[1].0).long_name, "A");
+    assert_eq!(state.column_meta(columns[2].0).long_name, "B");
+    assert_eq!(cell_f64(&state, columns[1].0, 1), 20.0);
+    assert_eq!(cell_f64(&state, columns[2].0, 0), 100.0);
+}
+
+/// Importer un seul fichier ne compte lui aussi que pour une seule entrée
+/// d'annulation — le lot à un seul élément n'est pas un cas particulier.
+#[test]
+fn undoing_a_single_file_import_removes_exactly_that_sheet() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+    let file = dir.path().join("seul.csv");
+    std::fs::write(&file, "1,10\n2,20\n").expect("écrit seul.csv");
+
+    state.dispatch(Action::ImportFiles {
+        book,
+        recipe: ImportRecipe::new("Sans titre"),
+        paths: vec![file],
+    });
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.worksheets_of(book).len(), sheets_before);
+    assert!(!state.can_undo());
+}
+
+/// Un fichier qui se lit mais ne s'analyse pas (marqueur d'en-tête jamais
+/// trouvé) n'interrompt pas non plus le lot, et le message final signale un
+/// échec — pas un simple décompte muet, voir la doc d'`AppState::
+/// import_files` (§ correctif) : `self.fail`/`self.notice` remplacent
+/// `self.status`, un `self.fail` par fichier en échec se serait sinon fait
+/// écraser par le message récapitulatif final.
+#[test]
+fn a_parse_failure_amid_a_batch_is_surfaced_as_an_error_not_silently_swallowed() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+
+    let bad = dir.path().join("incomplet.csv");
+    std::fs::write(&bad, "TITLE;Incomplet\n").expect("écrit incomplet.csv (jamais XYDATA)");
+    let good = dir.path().join("complet.csv");
+    std::fs::write(&good, "TITLE;Complet\nXYDATA\n1;10\n").expect("écrit complet.csv");
+
+    let mut recipe = ImportRecipe::new("Sans titre");
+    recipe.separator = Separator::Semicolon;
+    recipe.header = HeaderSkip::UntilMarker("XYDATA".to_string());
+    state.dispatch(Action::ImportFiles {
+        book,
+        recipe,
+        paths: vec![bad.clone(), good],
+    });
+
+    assert_eq!(
+        state.worksheets_of(book).len(),
+        sheets_before + 1,
+        "seul le fichier qui s'analyse a produit une feuille"
+    );
+    let status = state.status().expect("un message de statut");
+    assert!(
+        status.is_error,
+        "un fichier en échec doit se voir, pas disparaître derrière un décompte : {}",
+        status.text
+    );
+    assert!(
+        status.text.contains("incomplet.csv"),
+        "le message nomme le fichier fautif : {}",
+        status.text
+    );
+}
+
+/// Importer dans un classeur qui n'existe pas (identifiant invalide) échoue
+/// proprement — signalé, jamais de panique, aucune feuille fantôme.
+#[test]
+fn importing_into_a_nonexistent_book_fails_gracefully() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("mesure.csv");
+    std::fs::write(&file, "1,10\n").expect("écrit mesure.csv");
+
+    state.dispatch(Action::ImportFiles {
+        book: NodeId::from_raw(999_999),
+        recipe: ImportRecipe::new("Sans titre"),
+        paths: vec![file],
+    });
+
+    let status = state.status().expect("un message de statut");
+    assert!(status.is_error, "un classeur inexistant doit être signalé");
+    assert!(!state.can_undo(), "rien n'a été créé, rien à annuler");
 }
 
 /// Lit une cellule numérique brute, pour les assertions sur le contenu

@@ -2045,6 +2045,16 @@ impl AppState {
             return;
         }
         let mut imported = 0usize;
+        // Accumulées plutôt que passées à `self.fail` au fil de la boucle :
+        // `self.fail`/`self.notice` remplacent `self.status` sans le
+        // combiner à ce qu'il portait déjà (voir leur doc), donc un
+        // `self.fail` par fichier en échec se serait fait écraser par le
+        // suivant, puis par le message récapitulatif final — l'utilisateur
+        // n'aurait jamais vu **pourquoi** un fichier a échoué, seulement un
+        // décompte muet. Ici, tout finit dans un seul message, en échec
+        // (`self.fail`) dès qu'au moins un fichier a échoué, pour que ça se
+        // voie.
+        let mut failures: Vec<String> = Vec::new();
         for path in &paths {
             let file_stem = path
                 .file_stem()
@@ -2053,14 +2063,14 @@ impl AppState {
             let bytes = match std::fs::read(path) {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    self.fail(format!("{}: {err}", path.display()));
+                    failures.push(format!("{}: {err}", path.display()));
                     continue;
                 }
             };
             let table = match plotyx_import::parse(&bytes, &recipe) {
                 Ok(table) => table,
                 Err(err) => {
-                    self.fail(format!("{}: {err}", path.display()));
+                    failures.push(format!("{}: {err}", path.display()));
                     continue;
                 }
             };
@@ -2081,7 +2091,7 @@ impl AppState {
                 .node(book)
                 .and_then(|node| node.children().last().copied())
             else {
-                self.fail(format!(
+                failures.push(format!(
                     "{}: échec de la création de la feuille",
                     path.display()
                 ));
@@ -2089,9 +2099,11 @@ impl AppState {
             };
             // Nomme la feuille d'après le fichier plutôt que de garder le nom
             // automatique « SheetN » — best-effort : si le nom est déjà pris,
-            // `Rename` échoue et `self.execute` le rapporte via `self.fail`
-            // (qui écrase alors ce message avec le suivant), la feuille
-            // garde son nom automatique. Ce n'est pas bloquant.
+            // `Rename` échoue (`self.execute` l'écrit dans `self.status`,
+            // écrasé par le message final ci-dessous de toute façon), la
+            // feuille garde son nom automatique. Ce n'est pas un échec
+            // d'import — les données sont bien là — donc ça ne compte pas
+            // dans `failures`.
             self.execute(Command::Rename {
                 id: sheet,
                 name: file_stem.to_string(),
@@ -2117,7 +2129,7 @@ impl AppState {
             imported += 1;
         }
         if self.handle.end_macro().is_err() {
-            self.fail("Échec de la clôture de l'entrée d'historique d'import".to_string());
+            failures.push("échec de la clôture de l'entrée d'historique d'import".to_string());
         }
         // `self.execute` (appelé dans la boucle ci-dessus) rafraîchit déjà
         // l'instantané à chaque commande, mais toujours **pendant** que la
@@ -2127,10 +2139,12 @@ impl AppState {
         // cet appel, `AppState::can_undo` resterait sur l'état d'avant la
         // clôture jusqu'au prochain rafraîchissement fortuit.
         self.refresh();
-        self.notice(format!(
-            "{imported} fichier(s) importé(s) sur {}",
-            paths.len()
-        ));
+        let summary = format!("{imported} fichier(s) importé(s) sur {}", paths.len());
+        if failures.is_empty() {
+            self.notice(summary);
+        } else {
+            self.fail(format!("{summary} — {}", failures.join(" ; ")));
+        }
     }
 
     /// Remplace le texte d'une note, sauf s'il est déjà exactement celui-là —

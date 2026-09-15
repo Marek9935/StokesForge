@@ -111,4 +111,46 @@ mod tests {
         let store = result.unwrap_or_default();
         assert!(store.recipes().is_empty());
     }
+
+    /// Protège les tests qui redirigent `XDG_CONFIG_HOME` contre ceux qui en
+    /// feraient autant en parallèle dans ce même binaire de test —
+    /// `std::env::set_var` est un état du *processus*, jamais scopé à un
+    /// thread.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// `save` puis `load`, en aller-retour réel sur disque — jamais exercé
+    /// avant ce test (les autres testent la logique en mémoire, ou la
+    /// tolérance de `load` à un fichier absent/corrompu, jamais l'écriture
+    /// elle-même). `recipes_path` suit `directories::ProjectDirs`, qui
+    /// respecte `XDG_CONFIG_HOME` sur Linux : la rediriger vers un
+    /// répertoire temporaire isole ce test du vrai dossier de config de la
+    /// machine qui l'exécute.
+    #[test]
+    fn save_puis_load_realise_un_aller_retour_fidele_sur_disque() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let previous = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("XDG_CONFIG_HOME", dir.path());
+
+        let mut store = RecipeStore::default();
+        let mut jasco = ImportRecipe::new("Jasco UV-Vis");
+        jasco.footer_skip_lines = 2;
+        store.upsert(jasco);
+        store.upsert(ImportRecipe::new("Fluo"));
+
+        let save_result = store.save();
+        let reloaded = RecipeStore::load();
+
+        match previous {
+            Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+
+        save_result.expect("l'écriture sur le répertoire temporaire doit réussir");
+        assert_eq!(
+            reloaded.recipes(),
+            store.recipes(),
+            "ce qui est relu après `save` doit être bit à bit ce qui a été écrit"
+        );
+    }
 }
