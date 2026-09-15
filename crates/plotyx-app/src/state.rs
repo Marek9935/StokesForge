@@ -919,8 +919,13 @@ impl AppState {
     }
 
     /// Ouvre la saisie d'un champ d'en-tête, tampon initialisé à sa valeur
-    /// actuelle. Remplace sans valider une éventuelle saisie précédente.
+    /// actuelle. Remplace sans valider une éventuelle saisie précédente, et
+    /// annule au passage une saisie de cellule en cours — une seule chose
+    /// éditable à la fois dans la fenêtre (sans quoi une cellule et un champ
+    /// d'en-tête peuvent se retrouver simultanément en édition, chacun
+    /// réclamant le focus clavier pour lui-même).
     pub fn begin_header_edit(&mut self, column: NodeId, field: HeaderField) {
+        self.editing = None;
         let meta = self.column_meta(column);
         let buffer = match field {
             HeaderField::LongName => meta.long_name,
@@ -981,8 +986,11 @@ impl AppState {
 
     /// Ouvre la saisie d'une cellule, tampon initialisé au texte affiché.
     /// Remplace sans valider une éventuelle saisie précédente : c'est à
-    /// l'appelant de valider avant, s'il le souhaite.
+    /// l'appelant de valider avant, s'il le souhaite. Annule au passage une
+    /// saisie d'en-tête en cours — voir la même remarque sur
+    /// [`AppState::begin_header_edit`].
     pub fn begin_edit(&mut self, column: NodeId, row: usize) {
+        self.header_editing = None;
         let buffer = self.cell_text(column, row);
         self.editing = Some(CellEdit {
             column,

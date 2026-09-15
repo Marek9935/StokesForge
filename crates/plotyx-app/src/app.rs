@@ -2277,15 +2277,27 @@ fn cell_widget(
                     .frame(egui::Frame::NONE)
                     .desired_width(f32::INFINITY),
             );
+            // `Response::has_focus`/`lost_focus` sont recalculés à chaque
+            // appel à partir de l'état *courant* du focus (pas un instantané
+            // figé) : il faut donc lire `lost_focus()` **avant** de
+            // potentiellement redemander le focus, sous peine de se
+            // redonner nous-mêmes le focus qu'on vient de perdre (Entrée
+            // fait perdre le focus au `TextEdit` en interne) et de faire
+            // rentrer `lost_focus()` à `false` — plus aucune validation
+            // n'aurait alors lieu, la cellule restant bloquée en édition et,
+            // avec elle, `AppState::editing()` bloquant à son tour tous les
+            // raccourcis clavier de la grille (voir la garde en tête de
+            // `grid_contents`).
+            let lost_focus = response.lost_focus();
             // Sans ceci, un `TextEdit` qui vient d'apparaître (édition
             // ouverte par double-clic ou, depuis le bug 1, par une frappe
             // sur une cellule sélectionnée) ne reçoit le focus clavier
             // qu'après un clic dessus — egui ne le lui donne pas
             // automatiquement à l'apparition.
-            if !response.has_focus() {
+            if !response.has_focus() && !lost_focus {
                 response.request_focus();
             }
-            if !response.lost_focus() {
+            if !lost_focus {
                 return;
             }
             // Échap referme la saisie sans rien écrire ; toute autre perte
