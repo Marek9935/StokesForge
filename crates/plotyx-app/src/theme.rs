@@ -26,6 +26,16 @@ use eframe::egui::{self, Color32, Context, CornerRadius, Theme};
 /// actifs — assez sombre pour rester lisible en texte sur fond clair.
 const ACCENT: Color32 = Color32::from_rgb(0x1B, 0x6C, 0x7A);
 
+/// Fond de la rangée des lettres de colonnes (A/B/C…, avec leur type) de
+/// l'en-tête empilée de la grille — la distingue visuellement des quatre
+/// rangées de champs qui la suivent (nom long/unité/commentaire/formule).
+/// Dérivé de [`ACCENT`] comme le reste de la palette de sélection, plutôt
+/// qu'une teinte ad hoc — un bleu-gris clair proche de la référence visuelle
+/// Qt de PlotYx.
+pub fn header_letter_row_fill() -> Color32 {
+    ACCENT.gamma_multiply(0.18)
+}
+
 /// Pose le thème PlotYx sur `ctx` : verrouille la préférence sur
 /// [`Theme::Light`] (empêche egui de re-suivre le système à la moindre
 /// notification `winit`), puis applique la palette maison par-dessus
