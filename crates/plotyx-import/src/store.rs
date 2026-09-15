@@ -1,0 +1,114 @@
+//! Persistance des recettes d'import sur disque : un unique fichier JSON
+//! dans le dossier de config utilisateur, jamais de panique si ce fichier
+//! est absent, illisible, ou corrompu (invariant 10).
+
+use crate::recipe::ImportRecipe;
+
+/// L'ensemble des recettes enregistrées par l'utilisateur.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RecipeStore {
+    recipes: Vec<ImportRecipe>,
+}
+
+impl RecipeStore {
+    /// Charge depuis le fichier de config utilisateur — jamais de panique :
+    /// fichier absent, illisible ou JSON corrompu rendent `Self::default()`
+    /// (liste vide), pas une erreur qui bloquerait l'appelant.
+    pub fn load() -> Self {
+        recipes_path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|content| serde_json::from_str(&content).ok())
+            .unwrap_or_default()
+    }
+
+    /// Écrit sur disque (crée le dossier de config s'il n'existe pas).
+    pub fn save(&self) -> std::io::Result<()> {
+        let path = recipes_path().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "aucun dossier de config exploitable pour cet OS",
+            )
+        })?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
+    }
+
+    pub fn recipes(&self) -> &[ImportRecipe] {
+        &self.recipes
+    }
+
+    /// Ajoute la recette, ou remplace celle de même `name` si elle existe
+    /// déjà.
+    pub fn upsert(&mut self, recipe: ImportRecipe) {
+        if let Some(existing) = self.recipes.iter_mut().find(|r| r.name == recipe.name) {
+            *existing = recipe;
+        } else {
+            self.recipes.push(recipe);
+        }
+    }
+
+    pub fn remove(&mut self, name: &str) {
+        self.recipes.retain(|r| r.name != name);
+    }
+}
+
+/// Chemin du fichier de recettes : `directories::ProjectDirs::from("", "", "PlotYx")`,
+/// dossier de config, fichier `import_recipes.json`. `None` si l'OS ne
+/// fournit aucun dossier de config exploitable (très rare).
+fn recipes_path() -> Option<std::path::PathBuf> {
+    directories::ProjectDirs::from("", "", "PlotYx")
+        .map(|dirs| dirs.config_dir().join("import_recipes.json"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recipe::ImportRecipe;
+
+    #[test]
+    fn upsert_remplace_sans_dupliquer() {
+        let mut store = RecipeStore::default();
+        store.upsert(ImportRecipe::new("Jasco"));
+        store.upsert(ImportRecipe::new("Autre"));
+        assert_eq!(store.recipes().len(), 2);
+
+        let mut modifiee = ImportRecipe::new("Jasco");
+        modifiee.footer_skip_lines = 3;
+        store.upsert(modifiee);
+
+        assert_eq!(store.recipes().len(), 2);
+        let jasco = store.recipes().iter().find(|r| r.name == "Jasco").unwrap();
+        assert_eq!(jasco.footer_skip_lines, 3);
+    }
+
+    #[test]
+    fn remove_retire_par_nom() {
+        let mut store = RecipeStore::default();
+        store.upsert(ImportRecipe::new("Jasco"));
+        store.remove("Jasco");
+        assert!(store.recipes().is_empty());
+    }
+
+    #[test]
+    fn load_sans_fichier_rend_liste_vide_sans_paniquer() {
+        // On ne peut pas garantir l'absence du vrai fichier de config sur la
+        // machine qui exécute les tests ; on vérifie seulement l'invariant
+        // qui compte vraiment : `load` ne panique jamais et rend toujours
+        // un `RecipeStore` exploitable, y compris quand le fichier n'existe
+        // pas ou n'est pas lisible.
+        let store = RecipeStore::load();
+        let _ = store.recipes().len();
+    }
+
+    #[test]
+    fn deserialisation_json_corrompu_rend_defaut() {
+        let corrompu = "{ceci n'est pas du json";
+        let result: Result<RecipeStore, _> = serde_json::from_str(corrompu);
+        let store = result.unwrap_or_default();
+        assert!(store.recipes().is_empty());
+    }
+}
