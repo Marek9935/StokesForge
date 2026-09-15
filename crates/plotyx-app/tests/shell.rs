@@ -1200,7 +1200,11 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
     let file_b = dir.path().join("mesure_b.csv");
     std::fs::write(&file_b, "X,Y\n3,30\n4,40\n").expect("écrit mesure_b.csv");
 
-    let recipe = plotyx_import::ImportRecipe::new("Sans titre");
+    let mut recipe = plotyx_import::ImportRecipe::new("Sans titre");
+    // Les deux fichiers ont une ligne d'en-tête "X,Y" : sans ceci, elle est
+    // lue comme une ligne de données (deux valeurs manquantes) et les noms
+    // de colonnes retombent sur le nom de fichier plutôt que "X"/"Y".
+    recipe.has_column_header_row = true;
     state.dispatch(Action::ImportFiles {
         book,
         recipe,
