@@ -10,6 +10,7 @@ members = [
     "crates/plotyx-render-egui",
     "crates/plotyx-render-svg",
     "crates/plotyx-persistence",
+    "crates/plotyx-import",
     "crates/plotyx-python",
     "crates/plotyx-script",
     "crates/plotyx-cli",
