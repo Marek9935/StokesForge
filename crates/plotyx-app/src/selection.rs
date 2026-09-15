@@ -58,6 +58,23 @@ impl Selection {
         }
     }
 
+    /// `Some((column, row))` si la sélection est réduite à une seule
+    /// cellule (un rectangle de cellules dont l'ancre et le curseur
+    /// coïncident — un simple clic, jamais étendu depuis), `None` pour un
+    /// rectangle plus grand ou une colonne entière.
+    ///
+    /// Sert à démarrer l'édition par simple frappe au clavier (taper sur une
+    /// cellule sélectionnée remplace tout son contenu, comme dans un
+    /// tableur) : ce geste n'a de sens que pour une cellule unique, jamais
+    /// pour une plage — taper sur une plage sélectionnée ne doit pas écraser
+    /// silencieusement plusieurs cellules à la fois.
+    pub fn single_cell(&self) -> Option<(NodeId, usize)> {
+        match &self.kind {
+            SelectionKind::Cells { anchor, cursor } if anchor == cursor => Some(*anchor),
+            _ => None,
+        }
+    }
+
     /// Colonnes couvertes, dans l'ordre de la feuille. Vide si l'ancre ou le
     /// curseur ne désignent plus une colonne de `sheet` (colonne supprimée
     /// entre-temps).
@@ -178,5 +195,48 @@ impl Selection {
             SelectionKind::Cells { anchor, .. } => *anchor,
             SelectionKind::Column(column) => (*column, 0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [`Selection::single_cell`] — verrou du bug 1 (taper sur une cellule
+    /// sélectionnée démarre l'édition) : un simple clic reste réduit à une
+    /// seule cellule, mais l'étendre — même jusqu'à elle-même via un
+    /// Shift-clic ou un glisser sans mouvement réel — ne doit plus jamais
+    /// être traité comme une cellule unique une fois `extend_to` appelé,
+    /// puisque le geste qui a produit la sélection n'est alors plus « un
+    /// simple clic sur une cellule ».
+    #[test]
+    fn single_cell_is_some_only_for_a_plain_click() {
+        let column = NodeId::from_raw(1);
+        let other_column = NodeId::from_raw(2);
+
+        let selection = Selection::cell(column, 3);
+        assert_eq!(selection.single_cell(), Some((column, 3)));
+
+        let mut extended = Selection::cell(column, 3);
+        extended.extend_to(column, 4);
+        assert_eq!(
+            extended.single_cell(),
+            None,
+            "un rectangle de plusieurs lignes n'est pas une cellule unique"
+        );
+
+        let mut extended_columns = Selection::cell(column, 3);
+        extended_columns.extend_to(other_column, 3);
+        assert_eq!(
+            extended_columns.single_cell(),
+            None,
+            "un rectangle de plusieurs colonnes n'est pas une cellule unique"
+        );
+
+        assert_eq!(
+            Selection::column(column).single_cell(),
+            None,
+            "une colonne entière n'est jamais une cellule unique"
+        );
     }
 }
