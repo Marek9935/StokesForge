@@ -111,6 +111,19 @@ impl Selection {
         }
     }
 
+    /// Cellule courante d'un rectangle de cellules — la dernière visée
+    /// (`cursor`, pas `anchor`) : point de départ de la navigation clavier
+    /// (flèches/Tab/Entrée). `None` pour une colonne entière ou un champ
+    /// d'en-tête : il faut re-cliquer une cellule pour reprendre la
+    /// navigation, la lettre de colonne ou un champ d'en-tête n'ayant pas de
+    /// « case suivante » qui ait un sens évident.
+    pub fn cursor(&self) -> Option<(NodeId, usize)> {
+        match &self.kind {
+            SelectionKind::Cells { cursor, .. } => Some(*cursor),
+            SelectionKind::Column(_) | SelectionKind::HeaderField { .. } => None,
+        }
+    }
+
     /// Colonnes couvertes, dans l'ordre de la feuille. Vide si l'ancre ou le
     /// curseur ne désignent plus une colonne de `sheet` (colonne supprimée
     /// entre-temps) — vide aussi pour un champ d'en-tête, qui ne désigne

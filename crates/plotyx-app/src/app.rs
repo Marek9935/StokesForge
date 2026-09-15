@@ -315,7 +315,7 @@ use plotyx_session::Snapshot;
 use crate::selection::Selection;
 use crate::state::{
     cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
-    Action, AppState, CellEdit, HeaderField, NoteEdit, ProjectTreeNode, WindowKind,
+    Action, AppState, CellEdit, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
 };
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
@@ -1971,6 +1971,51 @@ fn grid_contents(
                 }
             }
         }
+        // Déplacement clavier d'une cellule déjà sélectionnée, sans
+        // édition en cours (pendant l'édition, ces mêmes touches sont
+        // gérées par `cell_widget`, qui valide *puis* déplace : voir sa
+        // doc). Flèches directionnelles + Maj pour étendre le rectangle ;
+        // Tab/Maj+Tab avec retour à la ligne aux bords ; Entrée/Maj+Entrée
+        // comme équivalents non-éditants de Bas/Haut. Sans effet si la
+        // sélection courante n'est pas un rectangle de cellules (colonne
+        // entière ou champ d'en-tête) — voir `Selection::cursor`.
+        let shift = ui.input(|i| i.modifiers.shift);
+        let (up, down, left, right, tab, enter) = ui.input(|input| {
+            (
+                input.key_pressed(egui::Key::ArrowUp),
+                input.key_pressed(egui::Key::ArrowDown),
+                input.key_pressed(egui::Key::ArrowLeft),
+                input.key_pressed(egui::Key::ArrowRight),
+                input.key_pressed(egui::Key::Tab),
+                input.key_pressed(egui::Key::Enter),
+            )
+        });
+        if up {
+            state.move_selection(sheet, MoveDirection::Up, shift);
+        }
+        if down {
+            state.move_selection(sheet, MoveDirection::Down, shift);
+        }
+        if left {
+            state.move_selection(sheet, MoveDirection::Left, shift);
+        }
+        if right {
+            state.move_selection(sheet, MoveDirection::Right, shift);
+        }
+        if tab {
+            state.move_selection_tab(sheet, shift);
+        }
+        if enter {
+            state.move_selection(
+                sheet,
+                if shift {
+                    MoveDirection::Up
+                } else {
+                    MoveDirection::Down
+                },
+                false,
+            );
+        }
         // Ctrl+C/X/V n'apparaissent **jamais** comme un `egui::Event::Key`
         // ordinaire (donc jamais via `consume_key`) : `egui-winit` les
         // intercepte lui-même à la traduction des événements de la
@@ -2405,27 +2450,49 @@ fn cell_widget(
                 return;
             }
             // Échap referme la saisie sans rien écrire ; toute autre perte
-            // de focus (clic ailleurs, Tab, Entrée) valide.
+            // de focus (clic ailleurs, Tab, Entrée) valide — et, pour
+            // Entrée/Maj+Entrée/Tab/Maj+Tab, déplace aussi la sélection vers
+            // la cellule suivante, comme dans tout tableur (déplacement
+            // clavier complet : voir le bloc de raccourcis hors édition dans
+            // `grid_contents` pour les flèches directionnelles, qui ne
+            // s'appliquent qu'à une cellule déjà sélectionnée mais pas en
+            // édition — `TextEdit` capture lui-même les flèches pour
+            // déplacer le curseur de texte pendant la saisie).
             if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                 state.cancel_edit();
                 return;
             }
+            let shift = ui.input(|i| i.modifiers.shift);
             let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let tab = ui.input(|input| input.key_pressed(egui::Key::Tab));
             let pending = state
                 .editing()
                 .filter(|edit| edit.column == column && edit.row == row)
                 .map(|edit| edit.buffer.clone());
             if let Some(text) = pending {
                 state.cancel_edit();
-                if enter {
+                if enter && !shift {
+                    // `CommitCellAndAdvance` ajoute déjà une ligne quand
+                    // `row` était la dernière de la colonne ; sélectionner
+                    // `row + 1` sans attendre que cette commande (appliquée
+                    // après le rendu de cette image) ait créé la ligne est
+                    // sûr : soit elle existait déjà, soit elle est sur le
+                    // point de l'être.
                     actions.push(Action::CommitCellAndAdvance {
                         column,
                         row,
                         text,
                         sheet,
                     });
+                    state.select_cell(sheet, column, row + 1);
                 } else {
                     actions.push(Action::CommitCell { column, row, text });
+                    if enter {
+                        // Maj+Entrée : remonte d'une ligne, jamais d'ajout.
+                        state.move_selection(sheet, MoveDirection::Up, false);
+                    } else if tab {
+                        state.move_selection_tab(sheet, shift);
+                    }
                 }
             }
             return;

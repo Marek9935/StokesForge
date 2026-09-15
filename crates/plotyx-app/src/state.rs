@@ -460,6 +460,16 @@ pub enum HeaderField {
     Formula,
 }
 
+/// Direction d'un déplacement clavier d'une cellule dans la grille (flèches
+/// directionnelles) — voir [`AppState::move_selection`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 /// Saisie en cours dans un champ d'en-tête (nom long, unité, commentaire,
 /// formule). Le pendant exact de [`CellEdit`] pour l'en-tête empilé d'une
 /// colonne — un seul champ éditable à la fois, y compris entre colonnes
@@ -862,6 +872,92 @@ impl AppState {
     /// Efface la sélection de `sheet` (sans effet sur le modèle).
     pub fn deselect_all(&mut self, sheet: NodeId) {
         self.selection.remove(&sheet);
+    }
+
+    /// Colonnes visibles de `sheet`, dans l'ordre — juste les identifiants,
+    /// pour la navigation clavier ([`AppState::move_selection`]/
+    /// [`AppState::move_selection_tab`]) comme pour [`AppState::paste_tsv`].
+    fn column_order(&self, sheet: NodeId) -> Vec<NodeId> {
+        self.visible_columns(sheet)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect()
+    }
+
+    /// Déplace la sélection de `sheet` d'une cellule dans `direction`
+    /// (flèches directionnelles), en gardant l'ancre déjà posée si
+    /// `extend` (Maj+flèche étend le rectangle plutôt que déplacer la
+    /// cellule sélectionnée). Clampé aux bords de la grille — jamais de
+    /// retour à la ligne (voir [`AppState::move_selection_tab`] pour ça) ni
+    /// d'ajout de ligne (réservé à [`AppState::commit_cell_and_advance`],
+    /// déclenché par la validation d'une saisie, pas par la navigation
+    /// seule). Sans effet si `sheet` n'a pas de sélection de cellules
+    /// (colonne entière ou champ d'en-tête sélectionné, ou aucune sélection)
+    /// — mutation transitoire, comme [`AppState::select_cell`].
+    pub fn move_selection(&mut self, sheet: NodeId, direction: MoveDirection, extend: bool) {
+        let Some((from_column, from_row)) = self.selection.get(&sheet).and_then(Selection::cursor)
+        else {
+            return;
+        };
+        let order = self.column_order(sheet);
+        let Some(index) = order.iter().position(|&id| id == from_column) else {
+            return;
+        };
+        let last_row = self.row_count(sheet).saturating_sub(1);
+        let (to_index, to_row) = match direction {
+            MoveDirection::Up => (index, from_row.saturating_sub(1)),
+            MoveDirection::Down => (index, (from_row + 1).min(last_row)),
+            MoveDirection::Left => (index.saturating_sub(1), from_row),
+            MoveDirection::Right => ((index + 1).min(order.len().saturating_sub(1)), from_row),
+        };
+        let Some(&to_column) = order.get(to_index) else {
+            return;
+        };
+        if extend {
+            self.extend_selection(sheet, to_column, to_row);
+        } else {
+            self.select_cell(sheet, to_column, to_row);
+        }
+    }
+
+    /// Déplace la sélection de `sheet` d'une cellule vers la colonne
+    /// suivante (`backward: false`) ou précédente (`true`), avec retour à
+    /// la ligne aux bords — Tab/Maj+Tab, comme dans tout tableur : Tab en
+    /// fin de ligne repart au début de la ligne suivante, Maj+Tab en début
+    /// de ligne revient à la fin de la précédente. Jamais d'extension de
+    /// sélection (Tab n'étend pas, contrairement aux flèches sous Maj) ; les
+    /// mêmes gardes que [`AppState::move_selection`] sinon.
+    pub fn move_selection_tab(&mut self, sheet: NodeId, backward: bool) {
+        let Some((from_column, from_row)) = self.selection.get(&sheet).and_then(Selection::cursor)
+        else {
+            return;
+        };
+        let order = self.column_order(sheet);
+        let Some(index) = order.iter().position(|&id| id == from_column) else {
+            return;
+        };
+        let row_count = self.row_count(sheet);
+        if order.is_empty() || row_count == 0 {
+            return;
+        }
+        let mut column_index = index as isize;
+        let mut row = from_row as isize;
+        if backward {
+            column_index -= 1;
+            if column_index < 0 {
+                column_index = order.len() as isize - 1;
+                row -= 1;
+            }
+        } else {
+            column_index += 1;
+            if column_index >= order.len() as isize {
+                column_index = 0;
+                row += 1;
+            }
+        }
+        let row = row.clamp(0, row_count as isize - 1) as usize;
+        let column_index = column_index.clamp(0, order.len() as isize - 1) as usize;
+        self.select_cell(sheet, order[column_index], row);
     }
 
     /// Vrai si `(column, row)` fait partie de la sélection de `sheet`.
