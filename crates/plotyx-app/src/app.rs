@@ -312,6 +312,7 @@ use plotyx_core::{ColumnType, NodeId, Tree};
 use plotyx_render_egui::{DrawnPlot, GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::Snapshot;
 
+use crate::selection::Selection;
 use crate::state::{
     cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
     Action, AppState, CellEdit, HeaderField, NoteEdit, ProjectTreeNode, WindowKind,
@@ -1883,6 +1884,33 @@ fn grid_contents(
     // Raccourcis clavier de la grille — voir la doc de tête de cette
     // fonction pour la garde d'édition.
     if state.editing().is_none() && state.header_editing().is_none() {
+        // Taper sur une cellule sélectionnée (simple clic, pas encore en
+        // édition) démarre l'édition en remplaçant tout son contenu par ce
+        // qui est tapé — comportement standard de tableur. Ne se déclenche
+        // que pour une sélection réduite à une seule cellule
+        // ([`Selection::single_cell`]) : taper sur une plage ne doit jamais
+        // écraser plusieurs cellules à la fois. `egui::Event::Text` ne
+        // porte que du texte imprimable — jamais une touche de contrôle ou
+        // de navigation, qui n'apparaît que dans `events` comme un
+        // `Event::Key` — donc pas de filtrage supplémentaire à faire ici.
+        if let Some((column, row)) = state.selection(sheet).and_then(Selection::single_cell) {
+            let typed: String = ui.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .filter_map(|event| match event {
+                        egui::Event::Text(text) => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            if !typed.is_empty() {
+                state.begin_edit(column, row);
+                if let Some(edit) = state.editing_mut() {
+                    edit.buffer = typed;
+                }
+            }
+        }
         let (copy, cut, paste, delete, backspace) = ui.input_mut(|input| {
             (
                 input.consume_key(egui::Modifiers::COMMAND, egui::Key::C),
@@ -2249,6 +2277,14 @@ fn cell_widget(
                     .frame(egui::Frame::NONE)
                     .desired_width(f32::INFINITY),
             );
+            // Sans ceci, un `TextEdit` qui vient d'apparaître (édition
+            // ouverte par double-clic ou, depuis le bug 1, par une frappe
+            // sur une cellule sélectionnée) ne reçoit le focus clavier
+            // qu'après un clic dessus — egui ne le lui donne pas
+            // automatiquement à l'apparition.
+            if !response.has_focus() {
+                response.request_focus();
+            }
             if !response.lost_focus() {
                 return;
             }
@@ -2301,7 +2337,7 @@ fn cell_widget(
             state.select_cell(sheet, column, row);
         } else if response.clicked() && shift {
             state.extend_selection(sheet, column, row);
-        } else if response.hovered()
+        } else if response.contains_pointer()
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some()
         {
@@ -2309,6 +2345,17 @@ fn cell_widget(
             // *commencé* le glisser — jamais sur les cellules simplement
             // survolées ensuite —, d'où ce test manuel plutôt que
             // `dragged()` pour étendre la sélection pendant qu'on glisse.
+            //
+            // `response.hovered()` ne convient pas non plus : tant qu'un
+            // glisser est en cours *ailleurs* (sur la cellule de départ),
+            // egui ne considère plus que ce widget d'origine comme
+            // « survolé » — aucune autre cellule ne redevient `hovered()`
+            // pendant tout le glisser, même sous le curseur (`egui::
+            // Context::interact`, doc de `InteractionSnapshot::hovered` :
+            // « While dragging or clicking something, nothing else is
+            // hovered »). `contains_pointer()` reste vrai indépendamment de
+            // ce qui est en train d'être glissé ailleurs — c'est le test
+            // qu'il faut ici.
             state.extend_selection(sheet, column, row);
         }
     });

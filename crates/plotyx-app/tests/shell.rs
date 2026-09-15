@@ -803,6 +803,84 @@ fn cancelling_an_edit_discards_the_buffer() {
     assert_eq!(state.snapshot().revision, revision);
 }
 
+// -- Divers : la sélection de la grille (souris + Ctrl+C/X/V) --
+//
+// `crate::app` (egui) traduit clic/glisser en `AppState::select_cell`/
+// `extend_selection`, puis Ctrl+C/X/V en `AppState::selected_cells_tsv`/
+// `Action::ClearSelectedCells`/`Action::PasteTsv` — tout ce qui suit ce
+// point de traduction est testable ici, sans fenêtre. Bug « le copier/
+// couper/coller ne marche pas avec une sélection d'une seule cellule » :
+// une sélection posée par un simple clic ([`AppState::select_cell`]) est un
+// rectangle 1×1 comme un autre pour `Selection` (voir
+// `crate::selection::Selection::single_cell` et ses tests unitaires) — les
+// trois tests qui suivent le vérifient au niveau où `crate::app` s'arrête.
+
+#[test]
+fn a_single_cell_selection_copies_exactly_that_cell() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 2);
+    assert!(state.is_selected(sheet1, temps, 2));
+
+    let signal = column_id(&state, sheet1, "Signal");
+    assert!(
+        !state.is_selected(sheet1, signal, 2),
+        "une seule cellule est sélectionnée, pas toute la ligne"
+    );
+
+    assert_eq!(
+        state.selected_cells_tsv(sheet1),
+        Some("1\n".to_string()),
+        "Ctrl+C sur une sélection d'une seule cellule copie exactement son texte"
+    );
+}
+
+#[test]
+fn clearing_a_single_cell_selection_empties_only_that_cell() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 2);
+    state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
+
+    assert_eq!(cell(&state, temps, 2), Cell::Float(f64::NAN));
+    assert_eq!(
+        cell(&state, temps, 0),
+        Cell::Float(0.0),
+        "Ctrl+X/Retour arrière sur une seule cellule ne touche pas les autres"
+    );
+    assert_eq!(cell(&state, temps, 1), Cell::Float(0.5));
+}
+
+#[test]
+fn pasting_onto_a_single_cell_selection_writes_from_its_anchor() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    // Sélection d'une seule cellule sur `Temps`, ligne 1 — le collage doit
+    // s'étirer depuis cette ancre, sur autant de colonnes que le TSV collé
+    // en porte (ici deux : `Temps` et `Signal`), pas seulement la cellule
+    // sélectionnée.
+    state.select_cell(sheet1, temps, 1);
+    state.dispatch(Action::PasteTsv {
+        sheet: sheet1,
+        text: "9\t99\n".to_string(),
+    });
+
+    assert_eq!(cell(&state, temps, 1), Cell::Float(9.0));
+    assert_eq!(cell(&state, signal, 1), Cell::Float(99.0));
+    // Le reste de la colonne n'a pas bougé.
+    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+}
+
 // -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --
 //
 // Ce qui exige un interpréteur (exécution, sortie, annulation d'une écriture
