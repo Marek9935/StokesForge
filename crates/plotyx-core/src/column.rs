@@ -10,6 +10,39 @@
 //! une vue numpy sans copie tant qu'il détient un clone de l'`Arc` ; et
 //! chaque colonne porte un **compteur de modification** ([`Column::version`])
 //! qui permet de savoir qu'elle a changé sans relire ses valeurs.
+//!
+//! # Colonnes à types mixtes
+//!
+//! [`ColumnType::Mixed`] est le quatrième type, et le seul dont le type
+//! **n'est pas celui de la colonne mais celui de la cellule** : son buffer
+//! est un `Vec<`[`MixedCell`]`>`, où chaque ligne est indépendamment vide, un
+//! nombre ou un texte. C'est ce qui permet à une colonne d'un import réel de
+//! porter `1,2  1,3  n/a  1,5` sans choisir entre « tout en nombres » (le
+//! `n/a` devient une valeur manquante et l'information est perdue) et « tout
+//! en texte » (plus rien n'est traçable).
+//!
+//! Trois décisions à connaître avant d'y toucher :
+//!
+//! - **Les trois types homogènes restent des chemins rapides, pas des cas
+//!   particuliers d'un cas général.** Faire de *toute* colonne un
+//!   `Vec<MixedCell>` coûterait 32 octets par ligne au lieu de 8 (la taille
+//!   d'un `MixedCell` est celle d'une `String` plus son discriminant) et,
+//!   surtout, retirerait le buffer `Arc<Vec<f64>>` contigu sur lequel
+//!   reposent la vue numpy sans copie du pont Python et la résolution
+//!   zéro-copie d'une série (`crate::resolve`). `Mixed` est donc un type de
+//!   plus, que l'on paie quand on s'en sert, jamais une refonte des trois
+//!   autres.
+//! - **La valeur manquante d'une colonne mixte est [`MixedCell::Empty`]**,
+//!   distincte de `MixedCell::Number(f64::NAN)` (un `NaN` délibérément écrit)
+//!   comme de `MixedCell::Text(String::new())` (une chaîne vide délibérée) —
+//!   même distinction que `None` contre `Some("")` pour une colonne texte.
+//!   Les trois comptent pour « manquante » à l'affichage ([`Cell::
+//!   is_missing`]), pas au stockage.
+//! - **Une colonne mixte n'est pas une colonne texte.** Elle est traçable :
+//!   [`Column::numeric_view`] en tire une vue `f64` où les cellules texte et
+//!   vides valent `NaN`, donc où seules les cellules numériques sont tracées
+//!   (le renderer ignore déjà les points non finis). Cette vue est la seule
+//!   de tout le module qui **copie** — voir sa documentation.
 
 use std::sync::Arc;
 
@@ -17,7 +50,8 @@ use crate::error::{CoreError, CoreResult};
 
 /// Type de données stocké. `Numeric` et `DateTime` partagent la représentation
 /// `f64` (pour `DateTime`, un timestamp POSIX en secondes) ; `Text` stocke des
-/// chaînes optionnelles dont la valeur manquante est `None`.
+/// chaînes optionnelles dont la valeur manquante est `None` ; `Mixed` porte le
+/// type **par cellule** (voir la doc de tête du module).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColumnType {
     /// Valeurs numériques (`f64`), manquante = `NaN`.
@@ -26,6 +60,119 @@ pub enum ColumnType {
     DateTime,
     /// Chaînes optionnelles, manquante = `None`.
     Text,
+    /// Types mixtes : chaque ligne est indépendamment vide, un nombre ou un
+    /// texte ([`MixedCell`]). Manquante = [`MixedCell::Empty`].
+    Mixed,
+}
+
+impl ColumnType {
+    /// Vrai si le buffer sous-jacent est un `Vec<f64>` contigu — donc si la
+    /// colonne a une [`Column::float_values`] et peut alimenter une vue numpy
+    /// sans copie. Faux pour `Text` **et** pour `Mixed`.
+    pub fn is_float_backed(self) -> bool {
+        matches!(self, ColumnType::Numeric | ColumnType::DateTime)
+    }
+}
+
+/// Une cellule d'une colonne à types mixtes ([`ColumnType::Mixed`]) : le type
+/// y est porté par la ligne, pas par la colonne.
+///
+/// `Empty` est la valeur manquante de ce type de colonne, **distincte** de
+/// `Number(f64::NAN)` et de `Text(String::new())` : les trois s'affichent
+/// comme une cellule vide ([`Cell::is_missing`]), mais seules `Number` et
+/// `Text` gardent en mémoire la trace d'une saisie délibérée — c'est la même
+/// distinction que `None` contre `Some("")` pour une colonne texte.
+#[derive(Debug, Clone, Default)]
+pub enum MixedCell {
+    /// Cellule vide : la valeur manquante d'une colonne mixte.
+    #[default]
+    Empty,
+    /// Un nombre (ou un timestamp POSIX, comme pour `DateTime`).
+    Number(f64),
+    /// Un texte. `Text(String::new())` est une chaîne vide délibérée,
+    /// distincte de [`MixedCell::Empty`].
+    Text(String),
+}
+
+impl PartialEq for MixedCell {
+    /// Égalité de contenu stocké, pas égalité IEEE : les `f64` sont comparés
+    /// par motif binaire (`to_bits`), donc `NaN == NaN` et `0.0 != -0.0` —
+    /// même règle que [`Cell`], [`ValueBlock`] et [`ColumnValues`].
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (MixedCell::Empty, MixedCell::Empty) => true,
+            (MixedCell::Number(a), MixedCell::Number(b)) => a.to_bits() == b.to_bits(),
+            (MixedCell::Text(a), MixedCell::Text(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for MixedCell {}
+
+impl MixedCell {
+    /// La valeur numérique de la cellule, ou `NaN` si elle n'en porte pas.
+    ///
+    /// Un texte **n'est pas réanalysé** ici : c'est la lecture d'une valeur
+    /// déjà stockée, pas une conversion. La promotion d'un texte numérique en
+    /// nombre a lieu une fois pour toutes à l'écriture
+    /// ([`MixedCell::from_text`]) ou au changement de type
+    /// ([`Column::set_column_type`]).
+    pub fn as_number(&self) -> f64 {
+        match self {
+            MixedCell::Number(value) => *value,
+            MixedCell::Empty | MixedCell::Text(_) => f64::NAN,
+        }
+    }
+
+    /// Vrai si la cellule compte comme manquante à l'affichage : vide, `NaN`,
+    /// ou chaîne vide — même règle que [`Cell::is_missing`].
+    pub fn is_missing(&self) -> bool {
+        match self {
+            MixedCell::Empty => true,
+            MixedCell::Number(value) => value.is_nan(),
+            MixedCell::Text(text) => text.is_empty(),
+        }
+    }
+
+    /// La cellule d'un texte saisi : `None` (cellule effacée) donne `Empty`,
+    /// un texte qui s'analyse en nombre fini donne `Number`, tout le reste
+    /// donne `Text`.
+    ///
+    /// L'analyse est celle de [`parse_f64_text`] — la **seule** du module,
+    /// partagée avec `Text → Numeric` : les deux chemins ne peuvent donc pas
+    /// diverger sur « ce texte est-il un nombre ? ».
+    pub fn from_text(text: Option<String>) -> Self {
+        match text {
+            None => MixedCell::Empty,
+            Some(text) => match parse_f64_text(&text) {
+                Some(value) => MixedCell::Number(value),
+                None => MixedCell::Text(text),
+            },
+        }
+    }
+
+    /// La cellule d'une valeur numérique : `NaN` — la valeur manquante des
+    /// colonnes `f64` — devient `Empty`, tout le reste devient `Number`.
+    pub fn from_f64(value: f64) -> Self {
+        if value.is_nan() {
+            MixedCell::Empty
+        } else {
+            MixedCell::Number(value)
+        }
+    }
+
+    /// La forme écrite de la cellule, pour `Mixed → Text` : `None` pour une
+    /// cellule vide, le texte tel quel pour un texte, et la forme retenue par
+    /// [`format_f64_for_display`] pour un nombre.
+    pub fn into_text(self) -> Option<String> {
+        match self {
+            MixedCell::Empty => None,
+            MixedCell::Number(value) if value.is_nan() => None,
+            MixedCell::Number(value) => Some(format_f64_for_display(value)),
+            MixedCell::Text(text) => Some(text),
+        }
+    }
 }
 
 /// Rôle de la colonne dans un tracé, façon Origin.
@@ -80,6 +227,8 @@ pub enum ValueBlock {
     Float(Vec<f64>),
     /// Valeurs texte, `None` pour une cellule manquante.
     Text(Vec<Option<String>>),
+    /// Valeurs à types mixtes, une [`MixedCell`] par ligne.
+    Mixed(Vec<MixedCell>),
 }
 
 impl PartialEq for ValueBlock {
@@ -91,6 +240,7 @@ impl PartialEq for ValueBlock {
                 a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits())
             }
             (ValueBlock::Text(a), ValueBlock::Text(b)) => a == b,
+            (ValueBlock::Mixed(a), ValueBlock::Mixed(b)) => a == b,
             _ => false,
         }
     }
@@ -104,6 +254,7 @@ impl ValueBlock {
         match self {
             ValueBlock::Float(values) => values.len(),
             ValueBlock::Text(values) => values.len(),
+            ValueBlock::Mixed(values) => values.len(),
         }
     }
 
@@ -117,6 +268,7 @@ impl ValueBlock {
         match column_type {
             ColumnType::Numeric | ColumnType::DateTime => ValueBlock::Float(Vec::new()),
             ColumnType::Text => ValueBlock::Text(Vec::new()),
+            ColumnType::Mixed => ValueBlock::Mixed(Vec::new()),
         }
     }
 
@@ -125,6 +277,45 @@ impl ValueBlock {
         match column_type {
             ColumnType::Numeric | ColumnType::DateTime => ValueBlock::Float(vec![f64::NAN; count]),
             ColumnType::Text => ValueBlock::Text(vec![None; count]),
+            ColumnType::Mixed => ValueBlock::Mixed(vec![MixedCell::Empty; count]),
+        }
+    }
+
+    /// Le type de colonne que ce bloc peut alimenter directement, ou `None`
+    /// pour un bloc `Float` — qui en alimente deux (`Numeric` et `DateTime`)
+    /// et ne désigne donc pas un type à lui seul. Utilisé par
+    /// [`ValueBlock::fits`].
+    fn sole_column_type(&self) -> Option<ColumnType> {
+        match self {
+            ValueBlock::Float(_) => None,
+            ValueBlock::Text(_) => Some(ColumnType::Text),
+            ValueBlock::Mixed(_) => Some(ColumnType::Mixed),
+        }
+    }
+
+    /// Vrai si ce bloc peut s'écrire tel quel dans une colonne de type
+    /// `column_type` — la condition exacte que [`Column::set_values`] vérifie
+    /// avant de refuser par `CoreError::TypeMismatch`. `pub` parce qu'un
+    /// appelant qui sait d'avance qu'un bloc ne convient pas peut choisir de
+    /// convertir plutôt que d'essuyer un refus (c'est ce que fait
+    /// `Command::SetCellsPromoting`, dans `plotyx-commands`).
+    pub fn fits(&self, column_type: ColumnType) -> bool {
+        match self.sole_column_type() {
+            Some(sole) => sole == column_type,
+            None => column_type.is_float_backed(),
+        }
+    }
+
+    /// Le même bloc, exprimé en cellules mixtes — sans perte pour `Mixed`
+    /// (aucune conversion), et selon les mêmes règles que
+    /// [`Column::set_column_type`] pour les deux autres : `NaN` et `None`
+    /// deviennent [`MixedCell::Empty`], et un texte qui s'analyse en nombre
+    /// **est promu en nombre** ([`MixedCell::from_text`]).
+    pub fn into_mixed(self) -> Vec<MixedCell> {
+        match self {
+            ValueBlock::Float(values) => values.into_iter().map(MixedCell::from_f64).collect(),
+            ValueBlock::Text(values) => values.into_iter().map(MixedCell::from_text).collect(),
+            ValueBlock::Mixed(values) => values,
         }
     }
 }
@@ -165,6 +356,26 @@ impl Cell {
     }
 }
 
+impl From<MixedCell> for Cell {
+    /// La lecture d'une cellule mixte dans le vocabulaire commun à tous les
+    /// types de colonne : un nombre est un `Float`, un texte un
+    /// `Text(Some(_))`, et une cellule vide un `Text(None)` — la forme que
+    /// tous les lecteurs de [`Cell`] traitent déjà comme manquante.
+    ///
+    /// La conversion **perd** la distinction entre `Empty` et une colonne
+    /// texte sans valeur, parce qu'aucun lecteur de `Cell` n'en a besoin :
+    /// les deux se lisent « cellule sans valeur ». Un appelant qui veut la
+    /// cellule telle qu'elle est stockée lit [`Column::cell`], pas
+    /// [`Column::get`].
+    fn from(cell: MixedCell) -> Self {
+        match cell {
+            MixedCell::Empty => Cell::Text(None),
+            MixedCell::Number(value) => Cell::Float(value),
+            MixedCell::Text(text) => Cell::Text(Some(text)),
+        }
+    }
+}
+
 /// Buffer sous-jacent, partagé par `Arc`. C'est cet `Arc` que le pont Python
 /// clonera pour tenir une vue numpy vivante.
 #[derive(Debug, Clone)]
@@ -173,6 +384,8 @@ pub enum ColumnValues {
     Float(Arc<Vec<f64>>),
     /// Buffer texte partagé.
     Text(Arc<Vec<Option<String>>>),
+    /// Buffer à types mixtes partagé, une [`MixedCell`] par ligne.
+    Mixed(Arc<Vec<MixedCell>>),
 }
 
 impl PartialEq for ColumnValues {
@@ -187,6 +400,7 @@ impl PartialEq for ColumnValues {
                         .all(|(x, y)| x.to_bits() == y.to_bits())
             }
             (ColumnValues::Text(a), ColumnValues::Text(b)) => a == b,
+            (ColumnValues::Mixed(a), ColumnValues::Mixed(b)) => a == b,
             _ => false,
         }
     }
@@ -200,6 +414,7 @@ impl ColumnValues {
         match self {
             ColumnValues::Float(values) => values.len(),
             ColumnValues::Text(values) => values.len(),
+            ColumnValues::Mixed(values) => values.len(),
         }
     }
 
@@ -215,6 +430,39 @@ impl ColumnValues {
                 Cell::Float(values.get(row).copied().unwrap_or(f64::NAN))
             }
             ColumnValues::Text(values) => Cell::Text(values.get(row).cloned().unwrap_or(None)),
+            ColumnValues::Mixed(values) => Cell::from(values.get(row).cloned().unwrap_or_default()),
+        }
+    }
+
+    /// Cellule à la ligne `row`, **telle qu'elle est stockée** — la lecture
+    /// qui ne perd pas la distinction entre une cellule vide et une cellule
+    /// texte sans valeur (voir `impl From<MixedCell> for Cell`).
+    /// [`MixedCell::Empty`] au-delà de la longueur, jamais une erreur.
+    pub fn cell(&self, row: usize) -> MixedCell {
+        match self {
+            ColumnValues::Float(values) => values
+                .get(row)
+                .copied()
+                .map_or(MixedCell::Empty, MixedCell::from_f64),
+            ColumnValues::Text(values) => match values.get(row) {
+                Some(Some(text)) => MixedCell::Text(text.clone()),
+                Some(None) | None => MixedCell::Empty,
+            },
+            ColumnValues::Mixed(values) => values.get(row).cloned().unwrap_or_default(),
+        }
+    }
+
+    /// La valeur numérique à la ligne `row`, ou `NaN` — sans allocation,
+    /// quel que soit le type de colonne.
+    ///
+    /// C'est la lecture des **calculs** (`crate::formula`), là où [`Cell`]
+    /// ferait cloner une `String` par ligne pour la jeter aussitôt. Un texte
+    /// n'est jamais réanalysé : voir [`MixedCell::as_number`].
+    pub fn number_at(&self, row: usize) -> f64 {
+        match self {
+            ColumnValues::Float(values) => values.get(row).copied().unwrap_or(f64::NAN),
+            ColumnValues::Text(_) => f64::NAN,
+            ColumnValues::Mixed(values) => values.get(row).map_or(f64::NAN, MixedCell::as_number),
         }
     }
 }
@@ -333,6 +581,24 @@ fn write_block<T: Clone>(
     Ok((previous, previous_length))
 }
 
+/// Tronque ou complète `vec` à `length`, en remplissant l'extension
+/// éventuelle avec `missing`. Rend la queue retirée (vide si extension ou
+/// longueur inchangée) et la longueur précédente — le corps commun aux trois
+/// branches de [`Column::set_length`], une par type de buffer.
+///
+/// N'applique pas [`MAX_COLUMN_ROWS`] : c'est l'appelant qui borne `length`
+/// avant d'appeler (voir la doc de `set_length`, qui doit rester infaillible).
+fn resize_block<T: Clone>(vec: &mut Vec<T>, length: usize, missing: T) -> (Vec<T>, usize) {
+    let previous_length = vec.len();
+    if length < previous_length {
+        return (vec.split_off(length), previous_length);
+    }
+    if length > previous_length {
+        vec.resize(length, missing);
+    }
+    (Vec::new(), previous_length)
+}
+
 /// Analyse un texte en valeur `f64` pour `Column::set_column_type`
 /// (`Text → Numeric`/`DateTime`). Rend `None` — même traitement que la valeur
 /// manquante du modèle — dans deux cas que ce parseur distingue
@@ -411,6 +677,7 @@ impl Column {
         let values = match column_type {
             ColumnType::Numeric | ColumnType::DateTime => ColumnValues::Float(Arc::new(Vec::new())),
             ColumnType::Text => ColumnValues::Text(Arc::new(Vec::new())),
+            ColumnType::Mixed => ColumnValues::Mixed(Arc::new(Vec::new())),
         };
         Self {
             column_type,
@@ -440,6 +707,18 @@ impl Column {
         }
     }
 
+    /// Colonne à types mixtes initialisée (copie). Les cellules sont prises
+    /// **telles quelles** : contrairement à [`ValueBlock::into_mixed`], rien
+    /// n'est promu ni analysé ici, l'appelant a déjà décidé de chaque ligne.
+    pub fn from_mixed(values: &[MixedCell]) -> Self {
+        Self {
+            column_type: ColumnType::Mixed,
+            values: ColumnValues::Mixed(Arc::new(values.to_vec())),
+            meta: ColumnMeta::default(),
+            version: 0,
+        }
+    }
+
     /// Colonne depuis un bloc typé et des métadonnées. `Err(TypeMismatch)` si le bloc ne
     /// correspond pas au type (`Float` pour `Numeric`/`DateTime`, `Text` pour `Text`).
     pub fn from_block(
@@ -452,6 +731,7 @@ impl Column {
                 ColumnValues::Float(Arc::new(values))
             }
             (ColumnType::Text, ValueBlock::Text(values)) => ColumnValues::Text(Arc::new(values)),
+            (ColumnType::Mixed, ValueBlock::Mixed(values)) => ColumnValues::Mixed(Arc::new(values)),
             _ => {
                 return Err(CoreError::TypeMismatch(
                     "le bloc de valeurs ne correspond pas au type de la colonne".to_string(),
@@ -547,17 +827,55 @@ impl Column {
         self.values.get(row)
     }
 
+    /// Cellule à `row` **telle qu'elle est stockée** — voir
+    /// [`ColumnValues::cell`]. C'est la lecture à préférer dès qu'une colonne
+    /// mixte est possible : [`Column::get`] confond une cellule vide et une
+    /// cellule texte sans valeur.
+    pub fn cell(&self, row: usize) -> MixedCell {
+        self.values.cell(row)
+    }
+
     /// Vrai si la cellule à `row` est manquante (voir `Cell::is_missing`).
     pub fn is_missing(&self, row: usize) -> bool {
         self.get(row).is_missing()
     }
 
-    /// Le buffer `f64` partagé, ou `None` pour une colonne texte. C'est l'`Arc` que le pont
-    /// Python clone pour tenir une vue sans copie.
+    /// Le buffer `f64` partagé, ou `None` pour une colonne texte **ou mixte**.
+    /// C'est l'`Arc` que le pont Python clone pour tenir une vue sans copie —
+    /// une colonne mixte n'a pas de buffer `f64` contigu, donc pas de vue
+    /// numpy sans copie (voir [`Column::numeric_view`]).
     pub fn float_values(&self) -> Option<&Arc<Vec<f64>>> {
         match &self.values {
             ColumnValues::Float(values) => Some(values),
+            ColumnValues::Text(_) | ColumnValues::Mixed(_) => None,
+        }
+    }
+
+    /// Une vue `f64` de la colonne pour le tracé, ou `None` si la colonne
+    /// n'est pas traçable (texte).
+    ///
+    /// - `Numeric`/`DateTime` : l'`Arc` du buffer, **sans copie** — c'est la
+    ///   propriété « zéro copie » de `crate::resolve`.
+    /// - `Text` : `None`. Une colonne texte n'est pas traçable, et ce n'est
+    ///   pas une erreur mais un choix de colonne inadapté.
+    /// - `Mixed` : un buffer **neuf**, où chaque cellule numérique donne sa
+    ///   valeur et où tout le reste (texte, cellule vide) donne `NaN`. Le
+    ///   renderer écarte déjà les points non finis : le résultat est qu'une
+    ///   colonne mixte trace exactement ses cellules numériques, sans qu'un
+    ///   seul backend ait à le savoir (invariant 5).
+    ///
+    /// **C'est la seule lecture du module qui copie**, et c'est le prix de la
+    /// représentation par cellule : un `Vec<MixedCell>` n'est pas un
+    /// `Vec<f64>` contigu, il n'y a rien à partager. Le coût est `O(n)` par
+    /// résolution et par colonne mixte **référencée par une série** — pas par
+    /// colonne du projet — et il ne concerne aucune colonne homogène.
+    pub fn numeric_view(&self) -> Option<Arc<Vec<f64>>> {
+        match &self.values {
+            ColumnValues::Float(values) => Some(Arc::clone(values)),
             ColumnValues::Text(_) => None,
+            ColumnValues::Mixed(values) => {
+                Some(Arc::new(values.iter().map(MixedCell::as_number).collect()))
+            }
         }
     }
 
@@ -589,6 +907,17 @@ impl Column {
                     previous_length,
                 })
             }
+            (ColumnValues::Mixed(arc), ValueBlock::Mixed(new_values)) => {
+                let vec = Arc::make_mut(arc);
+                let (previous, previous_length) =
+                    write_block(vec, start, new_values, || MixedCell::Empty)?;
+                self.version = self.version.wrapping_add(1);
+                Ok(ValuesDelta {
+                    start,
+                    previous: ValueBlock::Mixed(previous),
+                    previous_length,
+                })
+            }
             _ => Err(CoreError::TypeMismatch(format!(
                 "bloc de valeurs incompatible avec le type de la colonne ({:?})",
                 self.column_type
@@ -615,16 +944,8 @@ impl Column {
         self.version = self.version.wrapping_add(1);
         match &mut self.values {
             ColumnValues::Float(arc) => {
-                let vec = Arc::make_mut(arc);
-                let previous_length = vec.len();
-                let previous = if length < previous_length {
-                    vec.split_off(length)
-                } else {
-                    if length > previous_length {
-                        vec.resize(length, f64::NAN);
-                    }
-                    Vec::new()
-                };
+                let (previous, previous_length) =
+                    resize_block(Arc::make_mut(arc), length, f64::NAN);
                 ValuesDelta {
                     start: length,
                     previous: ValueBlock::Float(previous),
@@ -632,19 +953,19 @@ impl Column {
                 }
             }
             ColumnValues::Text(arc) => {
-                let vec = Arc::make_mut(arc);
-                let previous_length = vec.len();
-                let previous = if length < previous_length {
-                    vec.split_off(length)
-                } else {
-                    if length > previous_length {
-                        vec.resize(length, None);
-                    }
-                    Vec::new()
-                };
+                let (previous, previous_length) = resize_block(Arc::make_mut(arc), length, None);
                 ValuesDelta {
                     start: length,
                     previous: ValueBlock::Text(previous),
+                    previous_length,
+                }
+            }
+            ColumnValues::Mixed(arc) => {
+                let (previous, previous_length) =
+                    resize_block(Arc::make_mut(arc), length, MixedCell::Empty);
+                ValuesDelta {
+                    start: length,
+                    previous: ValueBlock::Mixed(previous),
                     previous_length,
                 }
             }
@@ -682,6 +1003,10 @@ impl Column {
                 let vec = Arc::make_mut(arc);
                 vec.splice(at..at, std::iter::repeat_n(None, count));
             }
+            ColumnValues::Mixed(arc) => {
+                let vec = Arc::make_mut(arc);
+                vec.splice(at..at, std::iter::repeat_n(MixedCell::Empty, count));
+            }
         }
         Ok(())
     }
@@ -707,6 +1032,10 @@ impl Column {
                 let vec = Arc::make_mut(arc);
                 Ok(ValueBlock::Text(vec.drain(at..stop).collect()))
             }
+            ColumnValues::Mixed(arc) => {
+                let vec = Arc::make_mut(arc);
+                Ok(ValueBlock::Mixed(vec.drain(at..stop).collect()))
+            }
         }
     }
 
@@ -725,6 +1054,20 @@ impl Column {
     /// `+inf` — et retombe sur la valeur manquante, sauf s'il demandait explicitement une
     /// non-finitude, `"inf"`/`"NaN"`, auquel cas il l'obtient). Même type → aucun changement,
     /// rend quand même `(type, clone des valeurs)`.
+    ///
+    /// # Vers et depuis `Mixed`
+    ///
+    /// - `Float → Mixed` : `NaN → Empty`, sinon `Number(v)`. **Sans perte** —
+    ///   c'est la conversion que fait une promotion de colonne.
+    /// - `Text → Mixed` : `None → Empty` ; un texte qui s'analyse en nombre
+    ///   (même analyse que `Text → Float`) devient `Number`, les autres
+    ///   restent `Text`. C'est ce qui donne son intérêt au type : la colonne
+    ///   `1,2 / 1,3 / n/a / 1,5` devient trois nombres et un texte, au lieu
+    ///   d'un `NaN` qui aurait effacé le `n/a`.
+    /// - `Mixed → Float` : `Number(v) → v`, `Empty → NaN`, et un texte est
+    ///   analysé comme dans `Text → Float`.
+    /// - `Mixed → Text` : [`MixedCell::into_text`] — les nombres s'écrivent
+    ///   avec la même forme que `Float → Text`.
     pub fn set_column_type(&mut self, column_type: ColumnType) -> (ColumnType, ColumnValues) {
         let old_type = self.column_type;
         let old_values = self.values.clone();
@@ -751,6 +1094,9 @@ impl Column {
                     .collect();
                 ColumnValues::Text(Arc::new(converted))
             }
+            (ColumnValues::Float(values), ColumnType::Mixed) => ColumnValues::Mixed(Arc::new(
+                values.iter().copied().map(MixedCell::from_f64).collect(),
+            )),
             (ColumnValues::Text(values), ColumnType::Numeric | ColumnType::DateTime) => {
                 let converted = values
                     .iter()
@@ -763,6 +1109,34 @@ impl Column {
             }
             (ColumnValues::Text(values), ColumnType::Text) => {
                 ColumnValues::Text(Arc::clone(values))
+            }
+            (ColumnValues::Text(values), ColumnType::Mixed) => ColumnValues::Mixed(Arc::new(
+                values
+                    .iter()
+                    .cloned()
+                    .map(MixedCell::from_text)
+                    .collect::<Vec<_>>(),
+            )),
+            (ColumnValues::Mixed(values), ColumnType::Numeric | ColumnType::DateTime) => {
+                let converted = values
+                    .iter()
+                    .map(|cell| match cell {
+                        MixedCell::Empty => f64::NAN,
+                        MixedCell::Number(value) => *value,
+                        MixedCell::Text(text) => parse_f64_text(text).unwrap_or(f64::NAN),
+                    })
+                    .collect();
+                ColumnValues::Float(Arc::new(converted))
+            }
+            (ColumnValues::Mixed(values), ColumnType::Text) => ColumnValues::Text(Arc::new(
+                values
+                    .iter()
+                    .cloned()
+                    .map(MixedCell::into_text)
+                    .collect::<Vec<_>>(),
+            )),
+            (ColumnValues::Mixed(values), ColumnType::Mixed) => {
+                ColumnValues::Mixed(Arc::clone(values))
             }
         };
 
@@ -781,6 +1155,7 @@ impl Column {
                 ColumnType::Numeric | ColumnType::DateTime,
                 ColumnValues::Float(_)
             ) | (ColumnType::Text, ColumnValues::Text(_))
+                | (ColumnType::Mixed, ColumnValues::Mixed(_))
         );
         if !matches_type {
             return Err(CoreError::TypeMismatch(format!(
@@ -997,7 +1372,7 @@ mod tests {
                 assert_eq!(values.len(), 2);
                 assert!(values.iter().all(|value| value.is_nan()));
             }
-            ValueBlock::Text(_) => panic!("bloc attendu de type Float"),
+            ValueBlock::Text(_) | ValueBlock::Mixed(_) => panic!("bloc attendu de type Float"),
         }
         assert_eq!(values_of(&column), vec![1.0, 2.0, 3.0]);
     }
@@ -1253,6 +1628,315 @@ mod tests {
         );
     }
 
+    // -- colonnes à types mixtes -----------------------------------------
+
+    fn mixed_cells(column: &Column) -> Vec<MixedCell> {
+        (0..column.len()).map(|row| column.cell(row)).collect()
+    }
+
+    #[test]
+    fn a_mixed_column_holds_a_different_type_on_every_row() {
+        let column = Column::from_mixed(&[
+            MixedCell::Number(1.2),
+            MixedCell::Text("n/a".to_string()),
+            MixedCell::Empty,
+            MixedCell::Number(1.5),
+        ]);
+        assert_eq!(column.column_type(), ColumnType::Mixed);
+        assert_eq!(column.len(), 4);
+        assert_eq!(column.cell(0), MixedCell::Number(1.2));
+        assert_eq!(column.cell(1), MixedCell::Text("n/a".to_string()));
+        assert_eq!(column.cell(2), MixedCell::Empty);
+        // Hors bornes : vide, jamais une erreur.
+        assert_eq!(column.cell(99), MixedCell::Empty);
+    }
+
+    #[test]
+    fn a_mixed_column_has_no_contiguous_float_buffer_but_a_numeric_view() {
+        let column = Column::from_mixed(&[
+            MixedCell::Number(1.2),
+            MixedCell::Text("n/a".to_string()),
+            MixedCell::Empty,
+        ]);
+        assert!(
+            column.float_values().is_none(),
+            "pas de buffer f64 contigu, donc pas de vue numpy sans copie"
+        );
+        let view = column
+            .numeric_view()
+            .expect("une colonne mixte est traçable");
+        assert_eq!(view[0], 1.2);
+        assert!(view[1].is_nan(), "le texte ne se trace pas");
+        assert!(view[2].is_nan(), "la cellule vide ne se trace pas");
+    }
+
+    #[test]
+    fn numeric_view_is_zero_copy_for_homogeneous_columns_only() {
+        let numeric = Column::from_f64(&[1.0, 2.0]);
+        let shared = numeric.numeric_view().expect("colonne numérique traçable");
+        assert!(
+            Arc::ptr_eq(&shared, numeric.float_values().expect("buffer f64")),
+            "aucune copie pour une colonne numérique"
+        );
+        assert!(
+            Column::from_text(&[Some("a".to_string())])
+                .numeric_view()
+                .is_none(),
+            "une colonne texte n'est pas traçable"
+        );
+    }
+
+    #[test]
+    fn mixed_cells_distinguish_empty_from_an_empty_string_and_from_nan() {
+        let column = Column::from_mixed(&[
+            MixedCell::Empty,
+            MixedCell::Text(String::new()),
+            MixedCell::Number(f64::NAN),
+        ]);
+        // Stockées distinctement...
+        assert_ne!(column.cell(0), column.cell(1));
+        assert_ne!(column.cell(0), column.cell(2));
+        // ... mais toutes les trois « manquantes » à l'affichage.
+        assert!((0..3).all(|row| column.cell(row).is_missing()));
+        assert!((0..3).all(|row| column.is_missing(row)));
+    }
+
+    #[test]
+    fn writing_a_mixed_block_reports_a_replayable_delta() {
+        let mut column = Column::from_mixed(&[
+            MixedCell::Number(1.0),
+            MixedCell::Number(2.0),
+            MixedCell::Number(3.0),
+        ]);
+        let delta = column
+            .set_values(
+                1,
+                ValueBlock::Mixed(vec![MixedCell::Text("oups".to_string()), MixedCell::Empty]),
+            )
+            .expect("écriture valide");
+        assert_eq!(
+            mixed_cells(&column),
+            vec![
+                MixedCell::Number(1.0),
+                MixedCell::Text("oups".to_string()),
+                MixedCell::Empty,
+            ]
+        );
+        assert_eq!(
+            delta.previous,
+            ValueBlock::Mixed(vec![MixedCell::Number(2.0), MixedCell::Number(3.0)])
+        );
+
+        column
+            .set_values(delta.start, delta.previous.clone())
+            .expect("rejeu valide");
+        column.set_length(delta.previous_length);
+        assert_eq!(
+            mixed_cells(&column),
+            vec![
+                MixedCell::Number(1.0),
+                MixedCell::Number(2.0),
+                MixedCell::Number(3.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_mixed_column_refuses_a_float_or_text_block() {
+        let mut column = Column::from_mixed(&[MixedCell::Number(1.0)]);
+        assert!(matches!(
+            column.set_values(0, ValueBlock::Float(vec![2.0])),
+            Err(CoreError::TypeMismatch(_))
+        ));
+        assert!(matches!(
+            column.set_values(0, ValueBlock::Text(vec![None])),
+            Err(CoreError::TypeMismatch(_))
+        ));
+        assert_eq!(column.version(), 0, "un appel refusé n'écrit rien");
+    }
+
+    #[test]
+    fn mixed_rows_insert_and_delete_with_empty_as_the_missing_value() {
+        let mut column =
+            Column::from_mixed(&[MixedCell::Number(1.0), MixedCell::Text("a".to_string())]);
+        column.insert_rows(1, 1).expect("insertion valide");
+        assert_eq!(column.cell(1), MixedCell::Empty);
+        assert_eq!(column.len(), 3);
+
+        let removed = column.delete_rows(0, 2).expect("suppression valide");
+        assert_eq!(
+            removed,
+            ValueBlock::Mixed(vec![MixedCell::Number(1.0), MixedCell::Empty])
+        );
+        assert_eq!(mixed_cells(&column), vec![MixedCell::Text("a".to_string())]);
+    }
+
+    #[test]
+    fn set_length_extends_a_mixed_column_with_empty_cells() {
+        let mut column = Column::from_mixed(&[MixedCell::Number(1.0)]);
+        let delta = column.set_length(3);
+        assert_eq!(column.len(), 3);
+        assert_eq!(column.cell(2), MixedCell::Empty);
+        assert_eq!(delta.previous, ValueBlock::Mixed(Vec::new()));
+
+        let delta = column.set_length(1);
+        assert_eq!(
+            delta.previous,
+            ValueBlock::Mixed(vec![MixedCell::Empty, MixedCell::Empty])
+        );
+    }
+
+    #[test]
+    fn text_to_mixed_promotes_what_parses_and_keeps_the_rest() {
+        let mut column = Column::from_text(&[
+            Some("1.2".to_string()),
+            Some("n/a".to_string()),
+            None,
+            Some(String::new()),
+        ]);
+        column.set_column_type(ColumnType::Mixed);
+        assert_eq!(column.cell(0), MixedCell::Number(1.2));
+        assert_eq!(column.cell(1), MixedCell::Text("n/a".to_string()));
+        assert_eq!(column.cell(2), MixedCell::Empty);
+        assert_eq!(
+            column.cell(3),
+            MixedCell::Text(String::new()),
+            "une chaîne vide délibérée reste un texte, pas une cellule vide"
+        );
+    }
+
+    #[test]
+    fn numeric_to_mixed_is_lossless_and_maps_nan_to_empty() {
+        let mut column = Column::from_f64(&[1.0, f64::NAN, -0.0]);
+        column.set_column_type(ColumnType::Mixed);
+        assert_eq!(column.cell(0), MixedCell::Number(1.0));
+        assert_eq!(column.cell(1), MixedCell::Empty);
+        assert_eq!(column.cell(2), MixedCell::Number(-0.0));
+
+        // Et retour : la valeur manquante refait un `NaN`.
+        column.set_column_type(ColumnType::Numeric);
+        assert_eq!(column.get(0), Cell::Float(1.0));
+        assert!(column.get(1).is_missing());
+        assert_eq!(column.get(2), Cell::Float(-0.0));
+    }
+
+    #[test]
+    fn mixed_to_numeric_parses_text_cells_like_a_text_column_would() {
+        let mut column = Column::from_mixed(&[
+            MixedCell::Number(1.5),
+            MixedCell::Text("3".to_string()),
+            MixedCell::Text("abc".to_string()),
+            MixedCell::Empty,
+        ]);
+        column.set_column_type(ColumnType::Numeric);
+        assert_eq!(column.column_type(), ColumnType::Numeric);
+        assert_eq!(column.get(0), Cell::Float(1.5));
+        assert_eq!(column.get(1), Cell::Float(3.0));
+        assert!(column.get(2).is_missing());
+        assert!(column.get(3).is_missing());
+    }
+
+    #[test]
+    fn mixed_to_text_writes_numbers_with_the_display_form() {
+        let mut column = Column::from_mixed(&[
+            MixedCell::Number(1.0),
+            MixedCell::Text("n/a".to_string()),
+            MixedCell::Empty,
+        ]);
+        column.set_column_type(ColumnType::Text);
+        assert_eq!(column.get(0), Cell::Text(Some("1".to_string())));
+        assert_eq!(column.get(1), Cell::Text(Some("n/a".to_string())));
+        assert_eq!(column.get(2), Cell::Text(None));
+    }
+
+    #[test]
+    fn restore_undoes_a_conversion_to_mixed_exactly() {
+        let original = Column::from_text(&[Some("1.2".to_string()), Some("n/a".to_string())]);
+        let mut column = original.clone();
+        let (old_type, old_values) = column.set_column_type(ColumnType::Mixed);
+        assert_ne!(column, original);
+        column
+            .restore(old_type, old_values)
+            .expect("restauration valide");
+        assert_eq!(column, original);
+
+        // Et le refus symétrique : un type qui ne correspond pas aux valeurs.
+        assert!(matches!(
+            column.restore(ColumnType::Mixed, ColumnValues::Text(Arc::new(vec![None]))),
+            Err(CoreError::TypeMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn a_block_knows_which_column_type_it_fits() {
+        assert!(ValueBlock::Float(vec![1.0]).fits(ColumnType::Numeric));
+        assert!(ValueBlock::Float(vec![1.0]).fits(ColumnType::DateTime));
+        assert!(!ValueBlock::Float(vec![1.0]).fits(ColumnType::Text));
+        assert!(!ValueBlock::Float(vec![1.0]).fits(ColumnType::Mixed));
+        assert!(ValueBlock::Text(vec![None]).fits(ColumnType::Text));
+        assert!(!ValueBlock::Text(vec![None]).fits(ColumnType::Numeric));
+        assert!(ValueBlock::Mixed(vec![MixedCell::Empty]).fits(ColumnType::Mixed));
+        assert!(!ValueBlock::Mixed(vec![MixedCell::Empty]).fits(ColumnType::Numeric));
+    }
+
+    #[test]
+    fn into_mixed_follows_the_same_rules_as_the_type_conversion() {
+        assert_eq!(
+            ValueBlock::Float(vec![1.0, f64::NAN]).into_mixed(),
+            vec![MixedCell::Number(1.0), MixedCell::Empty]
+        );
+        assert_eq!(
+            ValueBlock::Text(vec![Some("2".to_string()), Some("x".to_string()), None]).into_mixed(),
+            vec![
+                MixedCell::Number(2.0),
+                MixedCell::Text("x".to_string()),
+                MixedCell::Empty,
+            ]
+        );
+        // Un bloc déjà mixte traverse tel quel, sans réanalyse : un texte
+        // numérique délibérément stocké comme texte le reste.
+        assert_eq!(
+            ValueBlock::Mixed(vec![MixedCell::Text("2".to_string())]).into_mixed(),
+            vec![MixedCell::Text("2".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_mixed_cell_never_reparses_the_text_it_stores() {
+        assert!(MixedCell::Text("42".to_string()).as_number().is_nan());
+        assert_eq!(MixedCell::Number(42.0).as_number(), 42.0);
+        assert!(MixedCell::Empty.as_number().is_nan());
+    }
+
+    #[test]
+    fn reading_a_mixed_cell_through_the_common_cell_vocabulary() {
+        let column = Column::from_mixed(&[
+            MixedCell::Number(1.5),
+            MixedCell::Text("a".to_string()),
+            MixedCell::Empty,
+        ]);
+        assert_eq!(column.get(0), Cell::Float(1.5));
+        assert_eq!(column.get(1), Cell::Text(Some("a".to_string())));
+        assert_eq!(
+            column.get(2),
+            Cell::Text(None),
+            "une cellule vide se lit comme une valeur absente"
+        );
+    }
+
+    #[test]
+    fn number_at_reads_without_allocating_for_every_column_type() {
+        let mixed = Column::from_mixed(&[MixedCell::Number(7.0), MixedCell::Text("x".to_string())]);
+        assert_eq!(mixed.values().number_at(0), 7.0);
+        assert!(mixed.values().number_at(1).is_nan());
+        assert!(mixed.values().number_at(99).is_nan());
+        assert_eq!(Column::from_f64(&[3.0]).values().number_at(0), 3.0);
+        assert!(Column::from_text(&[Some("3".to_string())])
+            .values()
+            .number_at(0)
+            .is_nan());
+    }
+
     #[test]
     fn value_block_helpers_build_missing_and_empty_blocks() {
         assert_eq!(
@@ -1264,9 +1948,14 @@ mod tests {
                 assert_eq!(values.len(), 2);
                 assert!(values.iter().all(|value| value.is_nan()));
             }
-            ValueBlock::Text(_) => panic!("bloc attendu de type Float"),
+            ValueBlock::Text(_) | ValueBlock::Mixed(_) => panic!("bloc attendu de type Float"),
         }
+        assert_eq!(
+            ValueBlock::missing_for(ColumnType::Mixed, 2),
+            ValueBlock::Mixed(vec![MixedCell::Empty, MixedCell::Empty])
+        );
         assert!(ValueBlock::empty_for(ColumnType::Numeric).is_empty());
         assert!(ValueBlock::empty_for(ColumnType::Text).is_empty());
+        assert!(ValueBlock::empty_for(ColumnType::Mixed).is_empty());
     }
 }
