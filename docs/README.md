@@ -35,6 +35,12 @@ page qui contredit le code a tort.
 `.claude/rules.md` complète ce tableau côté **chargement de contexte** : quels
 crates ouvrir, et surtout lesquels ne pas ouvrir, pour chaque domaine.
 
+Une exception à la règle « ces pages ne planifient rien » :
+[`chantier-colonnes-mixtes.md`](chantier-colonnes-mixtes.md) est une **note de
+passation**, pas une page de référence — ce qu'un chantier a trouvé en chemin
+et ce qu'il laisse ouvert, surtout côté test. Elle rejoindra `docs/archive/`
+quand sa colonne « reste à faire » sera vide.
+
 ## Commandes
 
 ```sh
