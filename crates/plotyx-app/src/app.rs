@@ -369,6 +369,15 @@ const DEFAULT_COLUMN_WIDTH: f32 = 54.0;
 /// Sous l'ancien plancher (56px) pour ne pas empêcher un retour à
 /// [`DEFAULT_COLUMN_WIDTH`] une fois qu'on l'a élargie puis rétrécie.
 const MIN_COLUMN_WIDTH: f32 = 28.0;
+/// Largeur par défaut de la gouttière des numéros de ligne dans la grille
+/// docquée — élargie (l'ancienne valeur, 56px, coupait déjà les libellés
+/// d'en-tête « Long Name »/« Comments ») et redimensionnable comme les
+/// colonnes de données plutôt que figée (`TableColumn::exact`).
+const ROW_NUMBER_COLUMN_WIDTH: f32 = 90.0;
+/// Largeur minimale de la gouttière des numéros de ligne après
+/// redimensionnement manuel — assez pour garder `#` et quelques chiffres
+/// lisibles.
+const MIN_ROW_NUMBER_COLUMN_WIDTH: f32 = 32.0;
 /// Hauteur d'une rangée secondaire de l'en-tête empilé (lettre, unité,
 /// commentaire, formule).
 const HEADER_SUBROW_HEIGHT: f32 = 18.0;
@@ -1698,7 +1707,9 @@ fn header_field_widget(
         let response = ui.interact(rect, id, egui::Sense::click());
         ui.put(
             rect,
-            egui::Label::new(egui::RichText::new(text).weak()).selectable(false),
+            egui::Label::new(egui::RichText::new(text).weak())
+                .selectable(false)
+                .truncate(),
         );
         if response.double_clicked() {
             state.begin_header_edit(column, field);
@@ -1843,7 +1854,7 @@ fn grid_contents(
         .striped(true)
         .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(TableColumn::exact(56.0))
+        .column(TableColumn::initial(ROW_NUMBER_COLUMN_WIDTH).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH))
         .columns(
             TableColumn::initial(DEFAULT_COLUMN_WIDTH).at_least(MIN_COLUMN_WIDTH),
             columns.len(),
@@ -2348,7 +2359,11 @@ fn cell_widget(
                 ui.visuals().selection.bg_fill.linear_multiply(0.35),
             );
         }
-        ui.put(rect, egui::Label::new(text).selectable(false));
+        // `.truncate()` plutôt que le retour à la ligne par défaut d'un
+        // `Label` : une valeur trop large pour sa colonne est coupée à
+        // droite (avec un léger fondu), jamais renvoyée sur une seconde
+        // ligne qui casserait la hauteur uniforme des rangées de la table.
+        ui.put(rect, egui::Label::new(text).selectable(false).truncate());
 
         if response.double_clicked() {
             state.begin_edit(column, row);
