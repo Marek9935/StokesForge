@@ -1577,6 +1577,14 @@ fn column_letter(mut index: usize) -> String {
 /// champs de [`plotyx_core::ColumnMeta`], jusqu'ici stockés sans jamais être
 /// montrés côté UI. Chacun bascule affichage/édition au double-clic, comme
 /// [`cell_widget`].
+///
+/// La rangée des lettres porte un fond distinct
+/// ([`crate::theme::header_letter_row_fill`]) — elle seule sélectionne la
+/// colonne au clic, les quatre rangées de champs qui suivent n'affichent
+/// plus qu'un libellé grisé répété par colonne (leur nom de champ vit une
+/// seule fois dans la gouttière des numéros de ligne, voir
+/// [`row_number_header_widget`]) : elles n'affichent que la **valeur** du
+/// champ, vide si le champ ne l'est pas.
 fn column_header_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1592,6 +1600,9 @@ fn column_header_widget(
         ui.scope(|ui| {
             ui.set_min_height(HEADER_SUBROW_HEIGHT);
             ui.set_max_height(HEADER_SUBROW_HEIGHT);
+            let rect = ui.available_rect_before_wrap();
+            ui.painter()
+                .rect_filled(rect, 0.0, crate::theme::header_letter_row_fill());
             ui.horizontal(|ui| {
                 if ui
                     .selectable_label(is_column_selected, format!("{letter}  "))
@@ -1609,7 +1620,6 @@ fn column_header_widget(
             column,
             HeaderField::LongName,
             HEADER_LONGNAME_HEIGHT,
-            "(nom)",
         );
         header_field_widget(
             ui,
@@ -1618,7 +1628,6 @@ fn column_header_widget(
             column,
             HeaderField::Unit,
             HEADER_SUBROW_HEIGHT,
-            "(unité)",
         );
         header_field_widget(
             ui,
@@ -1627,7 +1636,6 @@ fn column_header_widget(
             column,
             HeaderField::Comment,
             HEADER_SUBROW_HEIGHT,
-            "(commentaire)",
         );
         header_field_widget(
             ui,
@@ -1636,7 +1644,6 @@ fn column_header_widget(
             column,
             HeaderField::Formula,
             HEADER_SUBROW_HEIGHT,
-            "(formule)",
         );
     });
 }
@@ -1646,6 +1653,11 @@ fn column_header_widget(
 /// [`cell_widget`] (double-clic pour éditer, sinon un simple `Label`
 /// n'accaparant jamais le focus clavier), piloté par [`AppState::
 /// header_editing`] plutôt que par [`AppState::editing`].
+///
+/// N'affiche que la **valeur** du champ, vide si le champ l'est — pas de
+/// placeholder répété par colonne : le libellé du champ (« Long Name »,
+/// « Units », « Comments », « F(x)= ») vit une seule fois dans la gouttière
+/// des numéros de ligne, voir [`row_number_header_widget`].
 fn header_field_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1653,7 +1665,6 @@ fn header_field_widget(
     column: NodeId,
     field: HeaderField,
     height: f32,
-    placeholder: &str,
 ) {
     let _ = actions; // la validation passe par `AppState::commit_header_edit`, appelé directement (mutation transitoire, comme `commit_edit`).
     ui.scope(|ui| {
@@ -1684,18 +1695,49 @@ fn header_field_widget(
         let rect = ui.available_rect_before_wrap();
         let id = ui.id().with((column.raw(), field as u8));
         let response = ui.interact(rect, id, egui::Sense::click());
-        let shown = if text.is_empty() {
-            placeholder.to_string()
-        } else {
-            text
-        };
         ui.put(
             rect,
-            egui::Label::new(egui::RichText::new(shown).weak()).selectable(false),
+            egui::Label::new(egui::RichText::new(text).weak()).selectable(false),
         );
         if response.double_clicked() {
             state.begin_header_edit(column, field);
         }
+    });
+}
+
+/// Gouttière des numéros de ligne, côté en-tête empilée : la lettre `#`
+/// habituelle sur la rangée des lettres (inchangée, seule la lettre de
+/// colonne y sélectionne quoi que ce soit), puis — aligné avec chacune des
+/// quatre rangées de champs de [`column_header_widget`] — le **libellé** du
+/// champ concerné (« Long Name », « Units », « Comments », « F(x)= »,
+/// repris de l'ancienne UI Qt), une seule fois plutôt que répété en grisé
+/// dans chaque colonne. Les cellules par colonne n'affichent plus que la
+/// valeur (voir [`header_field_widget`]).
+fn row_number_header_widget(ui: &mut egui::Ui) {
+    ui.vertical(|ui| {
+        ui.scope(|ui| {
+            ui.set_min_height(HEADER_SUBROW_HEIGHT);
+            ui.set_max_height(HEADER_SUBROW_HEIGHT);
+            let rect = ui.available_rect_before_wrap();
+            ui.painter()
+                .rect_filled(rect, 0.0, crate::theme::header_letter_row_fill());
+            ui.strong("#");
+        });
+        row_number_header_label(ui, HEADER_LONGNAME_HEIGHT, "Long Name");
+        row_number_header_label(ui, HEADER_SUBROW_HEIGHT, "Units");
+        row_number_header_label(ui, HEADER_SUBROW_HEIGHT, "Comments");
+        row_number_header_label(ui, HEADER_SUBROW_HEIGHT, "F(x)=");
+    });
+}
+
+/// Une rangée de la gouttière (voir [`row_number_header_widget`]) : le
+/// libellé d'un champ, à la hauteur exacte de la rangée de
+/// [`column_header_widget`] qu'elle longe.
+fn row_number_header_label(ui: &mut egui::Ui, height: f32, label: &str) {
+    ui.scope(|ui| {
+        ui.set_min_height(height);
+        ui.set_max_height(height);
+        ui.strong(label);
     });
 }
 
@@ -1806,9 +1848,17 @@ fn grid_contents(
             columns.len(),
         )
         .min_scrolled_height(0.0)
+        // B3 — la grille doit occuper tout l'espace vertical réservé par
+        // [`book_contents`] (`grid_height`), pas seulement celui que son
+        // contenu requiert : sans quoi `Ui::allocate_ui` (qui n'alloue au
+        // parent que l'espace réellement utilisé par l'enfant) laisse un
+        // vide entre la grille et le bas du panneau, et les onglets de
+        // feuille se retrouvent collés sous une grille trop courte plutôt
+        // que plaqués en bas de la fenêtre.
+        .auto_shrink([false, false])
         .header(HEADER_HEIGHT_STACKED, |mut header| {
             header.col(|ui| {
-                ui.strong("#");
+                row_number_header_widget(ui);
             });
             for (index, (id, _, column_type)) in columns.iter().enumerate() {
                 header.col(|ui| {
