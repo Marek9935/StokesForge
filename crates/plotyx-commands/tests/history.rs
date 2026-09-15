@@ -2066,6 +2066,64 @@ fn set_column_meta_round_trip() {
     assert_eq!(**f.project.tree(), *after);
 }
 
+/// Colonnes calculées (v1) — poser une formule sur une colonne qui portait
+/// déjà des valeurs, puis annuler, doit restaurer **ces valeurs**, pas
+/// seulement retirer la formule. `plotyx-commands` ne recalcule jamais
+/// lui-même (c'est `plotyx-session::actor::recalc_formulas`, hors
+/// historique — voir `crates/plotyx-session/tests/formula.rs` pour le test
+/// de bout en bout via l'acteur réel) : ce test simule ici, par un
+/// `project.set_values` direct après l'exécution de `SetColumnMeta`, l'effet
+/// de ce recalcul, pour vérifier que `DataDelta::ColumnMeta::values_before`
+/// (capturé par `History::execute` avant que ce recalcul n'ait eu lieu) est
+/// bien ce qui permet à `undo` de restaurer les valeurs d'origine — c'était
+/// le bug : sans cette capture, `undo` ne retirait que la formule et
+/// laissait les valeurs recalculées en place.
+#[test]
+fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
+    let mut f = fixture();
+    let mut history = History::new();
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetColumnMeta {
+                column: f.a,
+                meta: ColumnMeta {
+                    formula: Some("B*2".to_string()),
+                    ..Default::default()
+                },
+            },
+        )
+        .expect("poser une formule sur A, qui portait déjà [1,2,3]");
+    // Simule le recalcul immédiat que `plotyx-session::actor` ferait ici,
+    // hors historique : écrase les valeurs de A par des valeurs qui n'ont
+    // rien à voir avec [1,2,3].
+    f.project
+        .set_values(f.a, 0, ValueBlock::Float(vec![20.0, 40.0]))
+        .expect("simule le recalcul (hors historique, comme le ferait l'acteur)");
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+
+    let column = f
+        .project
+        .tree()
+        .get(f.a)
+        .expect("colonne A")
+        .as_column()
+        .expect("le nœud est une colonne");
+    assert_eq!(column.meta().formula, None, "la formule doit être retirée");
+    assert_eq!(
+        (0..column.len())
+            .map(|row| match column.get(row) {
+                Cell::Float(value) => value,
+                Cell::Text(_) => unreachable!("A est numérique"),
+            })
+            .collect::<Vec<_>>(),
+        vec![1.0, 2.0, 3.0],
+        "les valeurs d'avant la formule doivent être restaurées"
+    );
+}
+
 /// Colonnes calculées (v1) — `SetCells` direct sur une colonne dont
 /// `ColumnMeta.formula` est renseignée est refusé avant toute mutation, et
 /// ne pousse rien sur l'historique (ni de nouvelle entrée à annuler, ni de

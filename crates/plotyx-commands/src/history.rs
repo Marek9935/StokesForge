@@ -134,8 +134,24 @@ pub enum DataDelta {
     },
     /// Remplacement des métadonnées d'une colonne (rôle, unité, nom long,
     /// commentaire, format d'affichage) — distinct de `ColumnType` : ce
-    /// delta ne touche jamais aux valeurs de la colonne, seulement à ce petit
-    /// enregistrement d'affichage.
+    /// delta ne touche en général jamais aux valeurs de la colonne, seulement
+    /// à ce petit enregistrement d'affichage.
+    ///
+    /// Exception : `values_before`. Quand cette commande fait passer
+    /// `formula` de `None` à `Some(_)`, la colonne cesse d'être une source de
+    /// vérité et devient, dans l'instant qui suit (`plotyx-session::actor::
+    /// recalc_formulas`, hors historique — voir sa doc de tête), une colonne
+    /// recalculée dont le contenu précédent est **écrasé sans qu'aucune
+    /// commande ne le rejoue**. Sans capturer ce contenu ici, annuler cette
+    /// entrée retire bien la formule (`before`) mais laisse les valeurs
+    /// calculées en place : `recalc_formulas` ne recalcule que les colonnes
+    /// qui *portent encore* une formule, elle ignore silencieusement une
+    /// colonne qui vient d'en perdre une — c'était le bug. `None` dans tous
+    /// les autres cas (formule déjà active avant cette commande, formule
+    /// retirée, ou aucun changement de formule) : ces transitions n'ont
+    /// besoin de rien de plus, le recalcul se rechargeant de lui-même sur la
+    /// base de la formule — encore active de part et d'autre de
+    /// l'annulation/rétablissement — sans jamais perdre de donnée utilisateur.
     ColumnMeta {
         /// Colonne visée.
         column: NodeId,
@@ -143,6 +159,10 @@ pub enum DataDelta {
         before: ColumnMeta,
         /// Métadonnées d'après.
         after: ColumnMeta,
+        /// Type et valeurs de la colonne juste avant cette commande,
+        /// seulement quand `before.formula` était `None` et
+        /// `after.formula` devient `Some(_)` — voir la doc ci-dessus.
+        values_before: Option<(ColumnType, ColumnValues)>,
     },
     /// Remplacement du `PlotSpec` d'un graphe. Un spec ne porte que des
     /// identités et du style, jamais de donnée (voir la tête de
@@ -1222,11 +1242,25 @@ impl History {
             }
             Command::SetColumnMeta { column, meta } => {
                 let before = project.set_column_meta(column, meta.clone())?;
+                // Voir la doc de `DataDelta::ColumnMeta::values_before` :
+                // capturé seulement à la transition « pas de formule avant,
+                // formule après » — c'est la colonne qui perd, dans
+                // l'instant, sa qualité de source de vérité au profit du
+                // recalcul (`plotyx-session::actor::recalc_formulas`, hors
+                // historique). Lu **après** `set_column_meta` : cet appel ne
+                // touche jamais aux valeurs, seulement à `meta`, donc l'ordre
+                // ne change rien à ce qui est capturé ici.
+                let values_before = if before.formula.is_none() && meta.formula.is_some() {
+                    Some(column_state(project, column)?)
+                } else {
+                    None
+                };
                 Ok(Entry::Data {
                     delta: Box::new(DataDelta::ColumnMeta {
                         column,
                         before,
                         after: meta,
+                        values_before,
                     }),
                     label,
                 })
@@ -1352,8 +1386,22 @@ impl History {
                 project.set_note_text(*id, before)?;
                 Ok(())
             }
-            DataDelta::ColumnMeta { column, before, .. } => {
+            DataDelta::ColumnMeta {
+                column,
+                before,
+                values_before,
+                ..
+            } => {
                 project.set_column_meta(*column, before.clone())?;
+                // Voir la doc de `DataDelta::ColumnMeta::values_before` : la
+                // colonne redevient une source de vérité ordinaire, ses
+                // valeurs d'avant la formule doivent revenir avec elle — sans
+                // quoi le recalcul qui suit (`plotyx-session::actor::
+                // recalc_formulas`) ignore une colonne qui n'a plus de
+                // formule et laisse les valeurs calculées en place.
+                if let Some((column_type, values)) = values_before {
+                    project.restore_column(*column, *column_type, values.clone())?;
+                }
                 Ok(())
             }
             DataDelta::PlotSpec { graph, before, .. } => {
@@ -1693,15 +1741,20 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
             insert_column_footprint(&mut out, &before.1);
             insert_column_footprint(&mut out, &after.1);
         }
-        // Métadonnées de fenêtre/note/colonne et spec de graphe : aucun
-        // buffer partagé avec l'arbre à comptabiliser, contrairement à
+        // Métadonnées de fenêtre/note et spec de graphe : aucun buffer
+        // partagé avec l'arbre à comptabiliser, contrairement à
         // `ColumnType` — juste quelques chaînes ou identités, jamais le
         // volume qui justifie ce mécanisme (colonnes de données). Même
         // choix que `InsertRows` ci-dessus.
-        DataDelta::WindowMeta { .. }
-        | DataDelta::NoteText { .. }
-        | DataDelta::ColumnMeta { .. }
-        | DataDelta::PlotSpec { .. } => {}
+        DataDelta::WindowMeta { .. } | DataDelta::NoteText { .. } | DataDelta::PlotSpec { .. } => {}
+        // `ColumnMeta` rejoint `ColumnType` dès qu'elle porte `values_before`
+        // (voir sa doc) : c'est alors, elle aussi, un `ColumnValues`
+        // potentiellement partagé avec l'arbre courant.
+        DataDelta::ColumnMeta { values_before, .. } => {
+            if let Some((_, values)) = values_before {
+                insert_column_footprint(&mut out, values);
+            }
+        }
     }
     out
 }

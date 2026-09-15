@@ -176,6 +176,60 @@ fn a_dependency_cycle_degrades_to_nan_without_hanging() {
     assert!(read_floats(&snapshot, d).iter().all(|v| v.is_nan()));
 }
 
+/// Poser une formule sur une colonne qui portait déjà des valeurs (données
+/// utilisateur, pas encore une colonne calculée) écrase ces valeurs par le
+/// recalcul immédiat (`setting_a_formula_recalculates_immediately` ci-dessus
+/// le vérifie déjà) — mais un seul `undo` doit alors restaurer **et** la
+/// formule (retirée) **et** les valeurs d'origine, pas seulement la formule :
+/// c'était le bug (`DataDelta::ColumnMeta::values_before`, `plotyx-commands`).
+#[test]
+fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
+    let (project, _a, _b, c) = fixture();
+    let session = Session::spawn(project, None).expect("thread de l'acteur démarré");
+    let handle = session.handle();
+
+    // C porte déjà des données utilisateur avant la moindre formule.
+    handle
+        .execute(Command::SetCells {
+            column: c,
+            start: 0,
+            values: ValueBlock::Float(vec![7.0, 8.0, 9.0]),
+            expected_version: None,
+        })
+        .expect("valeurs initiales de C");
+    let undo_label_before_formula = handle.snapshot().expect("snapshot").history.undo_label;
+
+    handle
+        .execute(set_formula(c, "A+B"))
+        .expect("poser C = A+B");
+    let snapshot = handle.snapshot().expect("snapshot");
+    assert_eq!(
+        read_floats(&snapshot, c),
+        vec![11.0, 22.0, 33.0],
+        "recalculée immédiatement, écrasant les valeurs saisies"
+    );
+
+    handle.undo().expect("annuler la pose de la formule");
+    let snapshot = handle.snapshot().expect("snapshot");
+    let meta = snapshot
+        .tree
+        .node(c)
+        .expect("colonne C")
+        .as_column()
+        .expect("le nœud est une colonne")
+        .meta();
+    assert_eq!(meta.formula, None, "la formule doit être retirée");
+    assert_eq!(
+        read_floats(&snapshot, c),
+        vec![7.0, 8.0, 9.0],
+        "les valeurs d'avant la formule doivent être restaurées, pas rester à 11/22/33"
+    );
+    assert_eq!(
+        snapshot.history.undo_label, undo_label_before_formula,
+        "un seul undo a suffi"
+    );
+}
+
 /// Un `load` recalcule systématiquement les colonnes-formule plutôt que de
 /// faire confiance aux valeurs lues du disque (voir la doc de
 /// `schema::KindRecord::Column::formula`) : une valeur volontairement fausse
