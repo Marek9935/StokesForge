@@ -1182,3 +1182,116 @@ fn committing_a_note_without_typing_writes_nothing() {
     assert_eq!(state.snapshot().revision, revision, "rien n'a été écrit");
     assert!(!state.can_undo());
 }
+
+/// Importer plusieurs fichiers crée une feuille par fichier, chacune nommée
+/// d'après son fichier (`file_stem`) et porteuse des colonnes du fichier —
+/// et tout le lot tient dans **une seule** entrée d'historique : un unique
+/// Ctrl+Z (`AppState::dispatch(Action::Undo)`) retire les deux feuilles
+/// d'un coup, pas une à la fois.
+#[test]
+fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+
+    let file_a = dir.path().join("mesure_a.csv");
+    std::fs::write(&file_a, "X,Y\n1,10\n2,20\n").expect("écrit mesure_a.csv");
+    let file_b = dir.path().join("mesure_b.csv");
+    std::fs::write(&file_b, "X,Y\n3,30\n4,40\n").expect("écrit mesure_b.csv");
+
+    let recipe = plotyx_import::ImportRecipe::new("Sans titre");
+    state.dispatch(Action::ImportFiles {
+        book,
+        recipe,
+        paths: vec![file_a.clone(), file_b.clone()],
+    });
+
+    let status = state.status().expect("un message de statut");
+    assert!(
+        !status.is_error,
+        "l'import ne doit pas être signalé en échec"
+    );
+    assert!(
+        status.text.contains("2"),
+        "le message récapitule le nombre de fichiers importés : {}",
+        status.text
+    );
+
+    let tree = state.tree();
+    assert_eq!(
+        state.worksheets_of(book).len(),
+        sheets_before + 2,
+        "une feuille par fichier importé"
+    );
+    let sheet_a = sheet_named(tree, "mesure_a");
+    let sheet_b = sheet_named(tree, "mesure_b");
+    let columns_a = state.visible_columns(sheet_a);
+    assert_eq!(columns_a.len(), 2, "deux colonnes lues dans mesure_a.csv");
+    assert_eq!(state.column_meta(columns_a[0].0).long_name, "X");
+    assert_eq!(state.column_meta(columns_a[1].0).long_name, "Y");
+    assert_eq!(cell_f64(&state, columns_a[0].0, 0), 1.0);
+    assert_eq!(cell_f64(&state, columns_a[1].0, 1), 20.0);
+    let columns_b = state.visible_columns(sheet_b);
+    assert_eq!(cell_f64(&state, columns_b[0].0, 0), 3.0);
+
+    // Une seule entrée d'historique pour tout le lot : un unique `Undo`
+    // retire les deux feuilles d'un coup.
+    assert!(state.can_undo());
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        state.worksheets_of(book).len(),
+        sheets_before,
+        "un seul Ctrl+Z retire tout l'import, feuilles des deux fichiers comprises"
+    );
+    assert!(
+        !state.can_undo(),
+        "l'import entier n'a compté que pour une seule entrée d'historique"
+    );
+}
+
+/// Un fichier illisible n'interrompt pas le lot : les fichiers suivants sont
+/// importés quand même, et le message final récapitule combien ont
+/// réellement réussi.
+#[test]
+fn a_file_read_failure_does_not_abort_the_rest_of_the_batch() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+
+    let missing = dir.path().join("absent.csv");
+    let file_ok = dir.path().join("mesure.csv");
+    std::fs::write(&file_ok, "X,Y\n1,10\n").expect("écrit mesure.csv");
+
+    let recipe = plotyx_import::ImportRecipe::new("Sans titre");
+    state.dispatch(Action::ImportFiles {
+        book,
+        recipe,
+        paths: vec![missing, file_ok],
+    });
+
+    assert_eq!(
+        state.worksheets_of(book).len(),
+        sheets_before + 1,
+        "seul le fichier lisible a produit une feuille"
+    );
+    let status = state.status().expect("un message de statut récapitulatif");
+    assert!(
+        status.text.contains('1'),
+        "le récapitulatif final compte 1 fichier réellement importé : {}",
+        status.text
+    );
+    assert!(state.can_undo());
+    state.dispatch(Action::Undo);
+    assert_eq!(state.worksheets_of(book).len(), sheets_before);
+}
+
+/// Lit une cellule numérique brute, pour les assertions sur le contenu
+/// importé (au-delà de ce que `cell_text` laisse voir — voir [`cell`]).
+fn cell_f64(state: &AppState, column: NodeId, row: usize) -> f64 {
+    match cell(state, column, row) {
+        Cell::Float(value) => value,
+        Cell::Text(_) => panic!("{column} n'est pas une colonne numérique"),
+    }
+}
