@@ -1911,11 +1911,28 @@ fn grid_contents(
                 }
             }
         }
-        let (copy, cut, paste, delete, backspace) = ui.input_mut(|input| {
+        // Ctrl+C/X/V n'apparaissent **jamais** comme un `egui::Event::Key`
+        // ordinaire (donc jamais via `consume_key`) : `egui-winit` les
+        // intercepte lui-même à la traduction des événements de la
+        // fenêtre et pousse à la place un `Event::Copy`/`Event::Cut`, ou un
+        // `Event::Paste(String)` qui porte déjà le contenu du presse-papier
+        // système (lu par `egui-winit`, via `arboard` en interne — inutile
+        // de le relire nous-mêmes). Retour arrière/Suppr, eux, n'ont pas de
+        // modificateur et restent des `Event::Key` ordinaires, capturés via
+        // `consume_key` comme avant.
+        let (mut copy, mut cut, mut paste_text) = (false, false, None);
+        ui.input(|input| {
+            for event in &input.events {
+                match event {
+                    egui::Event::Copy => copy = true,
+                    egui::Event::Cut => cut = true,
+                    egui::Event::Paste(text) => paste_text = Some(text.clone()),
+                    _ => {}
+                }
+            }
+        });
+        let (delete, backspace) = ui.input_mut(|input| {
             (
-                input.consume_key(egui::Modifiers::COMMAND, egui::Key::C),
-                input.consume_key(egui::Modifiers::COMMAND, egui::Key::X),
-                input.consume_key(egui::Modifiers::COMMAND, egui::Key::V),
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
             )
@@ -1928,15 +1945,8 @@ fn grid_contents(
         if cut || backspace {
             actions.push(Action::ClearSelectedCells { sheet });
         }
-        // Presse-papier système indisponible (pas de serveur d'affichage,
-        // sandbox…) : ni panique ni blocage, un simple silence — Ctrl+V n'a
-        // alors rien à coller.
-        if paste {
-            if let Ok(text) =
-                arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text())
-            {
-                actions.push(Action::PasteTsv { sheet, text });
-            }
+        if let Some(text) = paste_text {
+            actions.push(Action::PasteTsv { sheet, text });
         }
         if delete {
             actions.push(Action::DeleteSelectedCells { sheet });

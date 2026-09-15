@@ -43,12 +43,6 @@ egui_dock = "0.21.1"
 # système présent.
 rfd = "0.17.2"
 anyhow = "1"
-# Lecture du presse-papier système pour Ctrl+V dans la grille de worksheet :
-# `egui::Context::copy_text` écrit dans le presse-papier système (Ctrl+C/X)
-# mais n'offre aucune lecture symétrique — déjà présent en dépendance
-# transitive d'`eframe`/`egui-winit` (voir `Cargo.lock`), fixé ici en
-# dépendance directe pour pouvoir l'appeler depuis `plotyx-app`.
-arboard = "3"
 
 [dev-dependencies]
 tempfile = "3"
