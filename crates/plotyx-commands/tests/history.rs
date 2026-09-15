@@ -782,6 +782,71 @@ fn delete_rows_round_trip_even_when_a_column_is_emptied_to_its_end() {
     assert_eq!(**f.project.tree(), *after);
 }
 
+// -- 12b. DeleteCells -------------------------------------------------------
+
+#[test]
+fn delete_cells_removes_independently_per_column_ignoring_duplicates() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    // `f.a` en double : ignoré (une seule suppression par colonne). `f.b`
+    // (longueur 2) ne peut perdre qu'une seule ligne à partir de `at: 1`,
+    // même si `count: 5` en demande davantage — chaque colonne s'arrête à
+    // sa propre fin, indépendamment des autres. `f.t` n'est pas listée :
+    // intacte.
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteCells {
+                columns: vec![f.a, f.b, f.a],
+                at: 1,
+                count: 5,
+            },
+        )
+        .expect("suppression de cellules");
+    let after = snapshot(&f.project);
+    assert_eq!(history.undo_label(), Some("Supprimer et remonter 5 lignes"));
+    assert_eq!(floats(&f.project, f.a), vec![1.0]);
+    assert_eq!(floats(&f.project, f.b), vec![10.0]);
+    assert_eq!(
+        texts(&f.project, f.t),
+        vec![Some("a".to_string()), None, Some("c".to_string())]
+    );
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn delete_cells_beyond_every_targeted_column_is_not_an_entry() {
+    // Même politique que `an_insert_that_changes_nothing_is_not_an_entry`
+    // (B5) : `at` au-delà de la fin de toutes les colonnes visées ne change
+    // rien, donc n'occupe pas de cran d'annulation.
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteCells {
+                columns: vec![f.a, f.b],
+                at: 10,
+                count: 1,
+            },
+        )
+        .expect("suppression sans effet");
+    assert!(history.is_empty());
+    assert_eq!(history.undo_label(), None);
+    assert_eq!(**f.project.tree(), *before);
+
+    assert_eq!(history.undo(&mut f.project), Ok(false));
+    assert_eq!(**f.project.tree(), *before);
+}
+
 // -- 13-14. macros --------------------------------------------------------
 
 #[test]

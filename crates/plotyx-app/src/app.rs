@@ -314,7 +314,7 @@ use plotyx_session::Snapshot;
 
 use crate::state::{
     cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
-    Action, AppState, CellEdit, NoteEdit, ProjectTreeNode, WindowKind,
+    Action, AppState, CellEdit, HeaderField, NoteEdit, ProjectTreeNode, WindowKind,
 };
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
@@ -355,8 +355,30 @@ pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
 
 /// Hauteur d'une ligne de la grille, en points.
 const ROW_HEIGHT: f32 = 20.0;
-/// Hauteur de la ligne d'en-tête, en points.
+/// Hauteur de la ligne d'en-tête, en points — fenêtres détachées et grille
+/// docquée d'avant l'en-tête empilé (voir [`HEADER_HEIGHT_STACKED`] pour
+/// cette dernière).
 const HEADER_HEIGHT: f32 = 22.0;
+/// Largeur par défaut d'une colonne de données dans la grille docquée. 54px
+/// (plutôt que les 110px historiques) : demande explicite, pour loger
+/// davantage de colonnes à l'écran — l'utilisateur peut toujours
+/// redimensionner à la souris (`.resizable(true)`).
+const DEFAULT_COLUMN_WIDTH: f32 = 54.0;
+/// Largeur minimale d'une colonne de données après redimensionnement manuel.
+/// Sous l'ancien plancher (56px) pour ne pas empêcher un retour à
+/// [`DEFAULT_COLUMN_WIDTH`] une fois qu'on l'a élargie puis rétrécie.
+const MIN_COLUMN_WIDTH: f32 = 28.0;
+/// Hauteur d'une rangée secondaire de l'en-tête empilé (lettre, unité,
+/// commentaire, formule).
+const HEADER_SUBROW_HEIGHT: f32 = 18.0;
+/// Hauteur de la rangée du nom long, légèrement plus haute — c'est le nom
+/// principal de la colonne.
+const HEADER_LONGNAME_HEIGHT: f32 = 20.0;
+/// Hauteur totale de l'en-tête empilé de la grille docquée (lettre, nom
+/// long, unité, commentaire, formule).
+const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 4.0 * HEADER_SUBROW_HEIGHT;
+/// Hauteur de la bande d'onglets de sheet, sous la grille docquée.
+const SHEET_TABS_HEIGHT: f32 = 24.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
 /// Hauteur par défaut du panneau fixe de la console de script — point de
@@ -1534,13 +1556,169 @@ fn type_suffix(column_type: ColumnType) -> &'static str {
     }
 }
 
-/// Contenu d'un [`Tab::Book`] : la sous-navigation entre les feuilles du
-/// classeur (`egui_dock` n'a pas besoin d'être imbriqué pour ça — de simples
-/// `selectable_label` scopés à `book` suffisent), les actions de structure
-/// qui vivaient avant dans la barre d'outils globale, et la grille elle-même
-/// — [`grid_contents`], inchangée dans son principe (virtualisation, une
-/// seule cellule éditable à la fois), désormais scopée à la feuille choisie
-/// *dans ce classeur* plutôt qu'à une sélection globale.
+/// Lettre de colonne façon tableur, en base 26 : `0 → "A"`, `25 → "Z"`,
+/// `26 → "AA"`, `701 → "ZZ"`… — l'ordre de la feuille, pas un nom stocké
+/// dans le modèle (aucune notion de lettre n'existe côté `plotyx-core`, voir
+/// la doc de tête de [`crate::selection`]).
+fn column_letter(mut index: usize) -> String {
+    let mut letters = Vec::new();
+    loop {
+        letters.push((b'A' + (index % 26) as u8) as char);
+        if index < 26 {
+            break;
+        }
+        index = index / 26 - 1;
+    }
+    letters.iter().rev().collect()
+}
+
+/// En-tête empilée d'une colonne : lettre (clic → sélectionne la colonne
+/// entière), puis nom long, unité, commentaire et formule — les quatre
+/// champs de [`plotyx_core::ColumnMeta`], jusqu'ici stockés sans jamais être
+/// montrés côté UI. Chacun bascule affichage/édition au double-clic, comme
+/// [`cell_widget`].
+fn column_header_widget(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    column: NodeId,
+    column_index: usize,
+    column_type: ColumnType,
+) {
+    ui.vertical(|ui| {
+        let letter = column_letter(column_index);
+        let is_column_selected = state.is_column_selected(sheet, column);
+        ui.scope(|ui| {
+            ui.set_min_height(HEADER_SUBROW_HEIGHT);
+            ui.set_max_height(HEADER_SUBROW_HEIGHT);
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(is_column_selected, format!("{letter}  "))
+                    .clicked()
+                {
+                    state.select_column(sheet, column);
+                }
+                ui.weak(type_suffix(column_type));
+            });
+        });
+        header_field_widget(
+            ui,
+            state,
+            actions,
+            column,
+            HeaderField::LongName,
+            HEADER_LONGNAME_HEIGHT,
+            "(nom)",
+        );
+        header_field_widget(
+            ui,
+            state,
+            actions,
+            column,
+            HeaderField::Unit,
+            HEADER_SUBROW_HEIGHT,
+            "(unité)",
+        );
+        header_field_widget(
+            ui,
+            state,
+            actions,
+            column,
+            HeaderField::Comment,
+            HEADER_SUBROW_HEIGHT,
+            "(commentaire)",
+        );
+        header_field_widget(
+            ui,
+            state,
+            actions,
+            column,
+            HeaderField::Formula,
+            HEADER_SUBROW_HEIGHT,
+            "(formule)",
+        );
+    });
+}
+
+/// Une rangée éditable de l'en-tête empilé, pour un seul champ de
+/// [`plotyx_core::ColumnMeta`] — le même schéma affichage/édition que
+/// [`cell_widget`] (double-clic pour éditer, sinon un simple `Label`
+/// n'accaparant jamais le focus clavier), piloté par [`AppState::
+/// header_editing`] plutôt que par [`AppState::editing`].
+fn header_field_widget(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    column: NodeId,
+    field: HeaderField,
+    height: f32,
+    placeholder: &str,
+) {
+    let _ = actions; // la validation passe par `AppState::commit_header_edit`, appelé directement (mutation transitoire, comme `commit_edit`).
+    ui.scope(|ui| {
+        ui.set_min_height(height);
+        ui.set_max_height(height);
+        let editing_here = state
+            .header_editing()
+            .is_some_and(|edit| edit.column == column && edit.field == field);
+        if editing_here {
+            let Some(edit) = state.header_editing_mut() else {
+                return;
+            };
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut edit.buffer)
+                    .frame(egui::Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+            if response.lost_focus() {
+                if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                    state.cancel_header_edit();
+                } else {
+                    state.commit_header_edit();
+                }
+            }
+            return;
+        }
+        let text = header_field_text(state, column, field);
+        let rect = ui.available_rect_before_wrap();
+        let id = ui.id().with((column.raw(), field as u8));
+        let response = ui.interact(rect, id, egui::Sense::click());
+        let shown = if text.is_empty() {
+            placeholder.to_string()
+        } else {
+            text
+        };
+        ui.put(
+            rect,
+            egui::Label::new(egui::RichText::new(shown).weak()).selectable(false),
+        );
+        if response.double_clicked() {
+            state.begin_header_edit(column, field);
+        }
+    });
+}
+
+/// Valeur actuelle d'un champ d'en-tête, telle qu'affichée hors édition.
+fn header_field_text(state: &AppState, column: NodeId, field: HeaderField) -> String {
+    let meta = state.column_meta(column);
+    match field {
+        HeaderField::LongName => meta.long_name,
+        HeaderField::Unit => meta.unit,
+        HeaderField::Comment => meta.comment,
+        HeaderField::Formula => meta.formula.unwrap_or_default(),
+    }
+}
+
+/// Contenu d'un [`Tab::Book`] : la barre d'actions de structure, la grille
+/// ([`grid_contents`]) scopée à la feuille choisie *dans ce classeur*, et
+/// la sous-navigation entre les feuilles — des onglets compacts en **bas**
+/// de la grille (choix assumé, pas une convention préexistante du crate :
+/// aucun autre onglet de sheet de ce genre n'existait à imiter). Les
+/// boutons « Insérer/Supprimer 1 ligne » ont disparu : l'ajout de ligne se
+/// fait désormais en pressant Entrée sur la dernière cellule d'une colonne
+/// ([`Action::CommitCellAndAdvance`]), la suppression par la touche Suppr
+/// sur la sélection ([`Action::DeleteSelectedCells`]).
 fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>, book: NodeId) {
     let sheets = state.worksheets_of(book);
     if sheets.is_empty() {
@@ -1555,35 +1733,8 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     let selected = state.selected_sheet_in(book).unwrap_or(sheets[0].0);
 
     ui.horizontal(|ui| {
-        for (id, name) in &sheets {
-            if ui.selectable_label(selected == *id, name).clicked() {
-                actions.push(Action::SelectSheet(*id));
-            }
-        }
-    });
-    ui.separator();
-    ui.horizontal(|ui| {
         if ui.button("Ajouter une colonne").clicked() {
             actions.push(Action::AddColumn { sheet: selected });
-        }
-        if ui.button("Insérer 1 ligne").clicked() {
-            // B5 (`guide-de-correction-robustesse.md` §F5) — insérer en fin
-            // de feuille (`at == row_count`) est le geste que le bouton
-            // promet ; `at: 0` en dur n'insérait jamais rien sur une feuille
-            // neuve (`Project::insert_rows` exige `at < len`, une colonne
-            // fraîche a `len == 0`).
-            actions.push(Action::InsertRows {
-                sheet: selected,
-                at: state.row_count(selected),
-                count: 1,
-            });
-        }
-        if ui.button("Supprimer 1 ligne").clicked() {
-            actions.push(Action::DeleteRows {
-                sheet: selected,
-                at: 0,
-                count: 1,
-            });
         }
         ui.separator();
         ui.weak(format!(
@@ -1593,13 +1744,44 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
         ));
     });
     ui.separator();
-    grid_contents(ui, state, actions, selected);
+
+    // La grille prend tout l'espace restant sauf la bande d'onglets du bas,
+    // réservée manuellement : on n'est pas au niveau du `Context` ici (un
+    // sous-`Ui` scopé à cet onglet de classeur), `egui::TopBottomPanel`
+    // n'est donc pas utilisable.
+    let grid_height = (ui.available_height() - SHEET_TABS_HEIGHT).max(0.0);
+    ui.allocate_ui(egui::vec2(ui.available_width(), grid_height), |ui| {
+        grid_contents(ui, state, actions, selected);
+    });
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (id, name) in &sheets {
+            let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
+                .small()
+                .fill(if selected == *id {
+                    ui.visuals().selection.bg_fill
+                } else {
+                    egui::Color32::TRANSPARENT
+                });
+            if ui.add(tab).clicked() {
+                actions.push(Action::SelectSheet(*id));
+            }
+        }
+    });
 }
 
 /// La grille, en lignes **virtualisées** : seules les lignes visibles sont
 /// construites, sans quoi une feuille d'un million de lignes bloquerait
 /// chaque image. Scopée à `sheet` — voir [`book_contents`], son seul
 /// appelant.
+///
+/// En-tête empilée (lettre A/B/C, nom long, unité, commentaire, formule —
+/// voir [`column_header_widget`]), sélection de cellules/colonnes à la
+/// souris (voir [`cell_widget`]), et raccourcis Ctrl+C/X/V/Suppr/Retour
+/// arrière scopés à cette grille : ils ne sont consommés que si aucune
+/// cellule ni aucun champ d'en-tête n'est en édition, pour ne jamais voler
+/// le copier/coller natif d'un `TextEdit` en cours de saisie.
 fn grid_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1619,16 +1801,18 @@ fn grid_contents(
         .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(TableColumn::exact(56.0))
-        .columns(TableColumn::initial(110.0).at_least(56.0), columns.len())
+        .columns(
+            TableColumn::initial(DEFAULT_COLUMN_WIDTH).at_least(MIN_COLUMN_WIDTH),
+            columns.len(),
+        )
         .min_scrolled_height(0.0)
-        .header(HEADER_HEIGHT, |mut header| {
+        .header(HEADER_HEIGHT_STACKED, |mut header| {
             header.col(|ui| {
                 ui.strong("#");
             });
-            for (_, name, column_type) in &columns {
+            for (index, (id, _, column_type)) in columns.iter().enumerate() {
                 header.col(|ui| {
-                    ui.strong(name);
-                    ui.weak(type_suffix(*column_type));
+                    column_header_widget(ui, state, actions, sheet, *id, index, *column_type);
                 });
             }
         })
@@ -1640,11 +1824,46 @@ fn grid_contents(
                 });
                 for (id, _, _) in &columns {
                     row.col(|ui| {
-                        cell_widget(ui, state, actions, *id, index);
+                        cell_widget(ui, state, actions, sheet, *id, index);
                     });
                 }
             });
         });
+
+    // Raccourcis clavier de la grille — voir la doc de tête de cette
+    // fonction pour la garde d'édition.
+    if state.editing().is_none() && state.header_editing().is_none() {
+        let (copy, cut, paste, delete, backspace) = ui.input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::COMMAND, egui::Key::C),
+                input.consume_key(egui::Modifiers::COMMAND, egui::Key::X),
+                input.consume_key(egui::Modifiers::COMMAND, egui::Key::V),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+            )
+        });
+        if copy || cut {
+            if let Some(tsv) = state.selected_cells_tsv(sheet) {
+                ui.ctx().copy_text(tsv);
+            }
+        }
+        if cut || backspace {
+            actions.push(Action::ClearSelectedCells { sheet });
+        }
+        // Presse-papier système indisponible (pas de serveur d'affichage,
+        // sandbox…) : ni panique ni blocage, un simple silence — Ctrl+V n'a
+        // alors rien à coller.
+        if paste {
+            if let Ok(text) =
+                arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text())
+            {
+                actions.push(Action::PasteTsv { sheet, text });
+            }
+        }
+        if delete {
+            actions.push(Action::DeleteSelectedCells { sheet });
+        }
+    }
 }
 
 /// Console de script : zone de saisie, boutons « Exécuter »/« Arrêter »,
@@ -1938,86 +2157,111 @@ fn figure_summary(drawn: &DrawnPlot) -> String {
 /// Peint une cellule et récolte les actions qu'elle produit.
 ///
 /// Une seule cellule à la fois porte un vrai tampon (celui de
-/// [`AppState::editing`]) ; toutes les autres sont peintes sur une chaîne
-/// jetable, ce qui garde le coût mémoire de la grille indépendant du nombre
-/// de lignes.
+/// [`AppState::editing`]) ; toutes les autres sont peintes comme un `Label`
+/// surligné si sélectionné, sans jamais accaparer le focus clavier — ce qui
+/// garde le coût mémoire de la grille indépendant du nombre de lignes, et
+/// laisse le clic simple à la sélection plutôt qu'à l'édition.
 ///
-/// Le contenu n'est envoyé au modèle qu'à la **perte de focus** — ce que
-/// provoque aussi la touche Entrée — jamais à chaque frappe : sinon
-/// l'historique compterait une entrée par caractère.
+/// - Simple clic (ou glisser à partir d'ici) : sélectionne cette cellule,
+///   ancre d'un futur rectangle.
+/// - Shift-clic, ou survol pendant qu'un glisser est en cours ailleurs dans
+///   la grille : étend la sélection jusqu'ici.
+/// - Double-clic : ouvre l'édition.
+///
+/// Le contenu n'est envoyé au modèle qu'à la **perte de focus** de l'édition
+/// — ce que provoque aussi la touche Entrée — jamais à chaque frappe : sinon
+/// l'historique compterait une entrée par caractère. Perdre le focus par
+/// Entrée pousse [`Action::CommitCellAndAdvance`] plutôt que [`Action::
+/// CommitCell`] : c'est elle qui ajoute une ligne quand on était sur la
+/// dernière de la colonne.
 fn cell_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
     actions: &mut Vec<Action>,
+    sheet: NodeId,
     column: NodeId,
     row: usize,
 ) {
     // L'identifiant est ancré sur (colonne, ligne) et non sur la position à
     // l'écran : avec des lignes virtualisées, faire défiler déplacerait sinon
     // le focus d'une cellule à l'autre.
-    let inner = ui.push_id((column.raw(), row), |ui| {
+    ui.push_id((column.raw(), row), |ui| {
         let editing_here = state
             .editing()
             .is_some_and(|edit| edit.column == column && edit.row == row);
 
         if editing_here {
-            let edit = state.editing_mut()?;
+            let Some(edit) = state.editing_mut() else {
+                return;
+            };
             let response = ui.add(
                 egui::TextEdit::singleline(&mut edit.buffer)
                     .frame(egui::Frame::NONE)
                     .desired_width(f32::INFINITY),
             );
-            Some((response, None))
-        } else {
-            let original = state.cell_text(column, row);
-            let mut shown = original.clone();
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut shown)
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY),
-            );
-            Some((response, Some((original, shown))))
-        }
-    });
-
-    let Some((response, typed)) = inner.inner else {
-        return;
-    };
-
-    if response.gained_focus() {
-        state.begin_edit(column, row);
-        // Si l'image qui a donné le focus portait déjà une frappe, elle a
-        // atterri dans la chaîne jetable : on la reprend, sinon le premier
-        // caractère serait perdu.
-        if let Some((original, shown)) = typed {
-            if shown != original {
-                if let Some(edit) = state.editing_mut() {
-                    edit.buffer = shown;
+            if !response.lost_focus() {
+                return;
+            }
+            // Échap referme la saisie sans rien écrire ; toute autre perte
+            // de focus (clic ailleurs, Tab, Entrée) valide.
+            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                state.cancel_edit();
+                return;
+            }
+            let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let pending = state
+                .editing()
+                .filter(|edit| edit.column == column && edit.row == row)
+                .map(|edit| edit.buffer.clone());
+            if let Some(text) = pending {
+                state.cancel_edit();
+                if enter {
+                    actions.push(Action::CommitCellAndAdvance {
+                        column,
+                        row,
+                        text,
+                        sheet,
+                    });
+                } else {
+                    actions.push(Action::CommitCell { column, row, text });
                 }
             }
+            return;
         }
-        return;
-    }
 
-    if !response.lost_focus() {
-        return;
-    }
+        let text = state.cell_text(column, row);
+        let selected = state.is_selected(sheet, column, row);
+        let rect = ui.available_rect_before_wrap();
+        let response = ui.interact(rect, ui.id().with("cell"), egui::Sense::click_and_drag());
+        if selected {
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                ui.visuals().selection.bg_fill.linear_multiply(0.35),
+            );
+        }
+        ui.put(rect, egui::Label::new(text).selectable(false));
 
-    // Échap referme la saisie sans rien écrire ; toute autre perte de focus
-    // (clic ailleurs, Tab, Entrée) valide.
-    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-        state.cancel_edit();
-        return;
-    }
-
-    let pending = state
-        .editing()
-        .filter(|edit| edit.column == column && edit.row == row)
-        .map(|edit| edit.buffer.clone());
-    if let Some(text) = pending {
-        state.cancel_edit();
-        actions.push(Action::CommitCell { column, row, text });
-    }
+        if response.double_clicked() {
+            state.begin_edit(column, row);
+            return;
+        }
+        let shift = ui.input(|i| i.modifiers.shift);
+        if response.drag_started() || (response.clicked() && !shift) {
+            state.select_cell(sheet, column, row);
+        } else if response.clicked() && shift {
+            state.extend_selection(sheet, column, row);
+        } else if response.hovered()
+            && ui.input(|i| i.pointer.primary_down())
+            && state.selection(sheet).is_some()
+        {
+            // `response.dragged()` ne se déclenche que sur le widget qui a
+            // *commencé* le glisser — jamais sur les cellules simplement
+            // survolées ensuite —, d'où ce test manuel plutôt que
+            // `dragged()` pour étendre la sélection pendant qu'on glisse.
+            state.extend_selection(sheet, column, row);
+        }
+    });
 }
 
 /// Contenu d'un `Tab::Book` **détaché** : le pendant de [`book_contents`],

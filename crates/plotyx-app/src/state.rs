@@ -53,12 +53,14 @@ use std::thread;
 
 use plotyx_commands::Command;
 use plotyx_core::node::NodeKind;
-use plotyx_core::{Cell, Column, ColumnType, Node, NodeId, Tree, ValueBlock};
+use plotyx_core::{Cell, Column, ColumnMeta, ColumnType, Node, NodeId, Tree, ValueBlock};
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
 #[cfg(feature = "python")]
 use plotyx_script::{ScriptEngine, ScriptOutcome};
 use plotyx_session::{SessionHandle, SessionResult, Snapshot};
+
+use crate::selection::Selection;
 
 /// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
 /// ces valeurs ; elle ne touche jamais l'acteur directement.
@@ -130,6 +132,76 @@ pub enum Action {
     /// Demande l'arrêt du script en cours. Sans effet s'il n'y en a pas.
     /// Ne bloque pas.
     InterruptScript,
+    /// Valide la saisie d'une cellule (comme [`Action::CommitCell`]) puis,
+    /// si `row` était la dernière ligne de `column` et que la validation a
+    /// réussi, ajoute une ligne à `sheet` — Entrée sur la dernière cellule
+    /// d'une colonne.
+    CommitCellAndAdvance {
+        /// Colonne visée.
+        column: NodeId,
+        /// Ligne visée.
+        row: usize,
+        /// Texte saisi, non converti.
+        text: String,
+        /// Feuille à laquelle ajouter une ligne si besoin.
+        sheet: NodeId,
+    },
+    /// Vide le contenu des cellules actuellement sélectionnées dans `sheet`,
+    /// sans décaler ce qui suit — Retour arrière ou Ctrl+X.
+    ClearSelectedCells {
+        /// Feuille visée.
+        sheet: NodeId,
+    },
+    /// Vide le contenu des cellules actuellement sélectionnées dans `sheet`
+    /// **et** fait remonter les cellules suivantes de chaque colonne
+    /// touchée, indépendamment — touche Suppr.
+    DeleteSelectedCells {
+        /// Feuille visée.
+        sheet: NodeId,
+    },
+    /// Colle `text` (TSV) à partir de l'ancre de la sélection courante de
+    /// `sheet`.
+    PasteTsv {
+        /// Feuille visée.
+        sheet: NodeId,
+        /// Texte collé, au format TSV (`\t` entre colonnes, `\n` entre
+        /// lignes).
+        text: String,
+    },
+    /// Remplace le nom long affiché d'une colonne
+    /// ([`plotyx_core::ColumnMeta::long_name`]).
+    SetColumnLongName {
+        /// Colonne visée.
+        column: NodeId,
+        /// Nouveau nom long.
+        text: String,
+    },
+    /// Remplace l'unité affichée d'une colonne
+    /// ([`plotyx_core::ColumnMeta::unit`]).
+    SetColumnUnit {
+        /// Colonne visée.
+        column: NodeId,
+        /// Nouvelle unité.
+        text: String,
+    },
+    /// Remplace le commentaire affiché d'une colonne
+    /// ([`plotyx_core::ColumnMeta::comment`]).
+    SetColumnComment {
+        /// Colonne visée.
+        column: NodeId,
+        /// Nouveau commentaire.
+        text: String,
+    },
+    /// Remplace la formule affichée d'une colonne
+    /// ([`plotyx_core::ColumnMeta::formula`]) — stockage/affichage
+    /// seulement, l'évaluation reste celle de `plotyx_core::formula` /
+    /// `plotyx-session::actor`, hors du périmètre de cette action.
+    SetColumnFormula {
+        /// Colonne visée.
+        column: NodeId,
+        /// Nouvelle formule, ou `None` pour une colonne non calculée.
+        formula: Option<String>,
+    },
 }
 
 /// Un message à afficher à l'utilisateur, avec sa gravité.
@@ -250,6 +322,42 @@ fn format_f64_for_display(value: f64) -> String {
     }
 }
 
+/// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
+/// colonne d'indice `col_index` de chaque ligne de `rows`, convertie selon
+/// `kind` avec la même tolérance que [`AppState::commit_cell`] — mais sans
+/// jamais refuser (invariant 10, « un défaut de donnée dégrade, il ne
+/// plante pas ») : un texte numérique inanalysable devient `NaN`, jamais une
+/// erreur qui bloquerait tout le collage. Une ligne plus courte que
+/// `col_index` fournit une valeur manquante pour cette colonne.
+fn value_block_from_tsv_column(
+    kind: ColumnType,
+    rows: &[Vec<&str>],
+    col_index: usize,
+) -> ValueBlock {
+    match kind {
+        ColumnType::Numeric | ColumnType::DateTime => ValueBlock::Float(
+            rows.iter()
+                .map(|row| {
+                    let text = row.get(col_index).copied().unwrap_or("").trim();
+                    if text.is_empty() {
+                        f64::NAN
+                    } else {
+                        text.parse::<f64>().unwrap_or(f64::NAN)
+                    }
+                })
+                .collect(),
+        ),
+        ColumnType::Text => ValueBlock::Text(
+            rows.iter()
+                .map(|row| {
+                    let text = row.get(col_index).copied().unwrap_or("");
+                    (!text.is_empty()).then(|| text.to_string())
+                })
+                .collect(),
+        ),
+    }
+}
+
 /// Corps de [`AppState::cell_text`], factorisé sur un `&Tree` plutôt que sur
 /// `&self` : c'est ce qui permet à une fenêtre détachée
 /// ([`crate::app::PlotyxApp::show_detached_tabs`], qui ne porte qu'un clone
@@ -338,6 +446,34 @@ pub struct CellEdit {
     pub buffer: String,
 }
 
+/// Champ de [`plotyx_core::ColumnMeta`] éditable dans l'en-tête empilé d'une
+/// colonne — voir [`HeaderEdit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeaderField {
+    /// Nom long ([`plotyx_core::ColumnMeta::long_name`]).
+    LongName,
+    /// Unité ([`plotyx_core::ColumnMeta::unit`]).
+    Unit,
+    /// Commentaire ([`plotyx_core::ColumnMeta::comment`]).
+    Comment,
+    /// Formule ([`plotyx_core::ColumnMeta::formula`]).
+    Formula,
+}
+
+/// Saisie en cours dans un champ d'en-tête (nom long, unité, commentaire,
+/// formule). Le pendant exact de [`CellEdit`] pour l'en-tête empilé d'une
+/// colonne — un seul champ éditable à la fois, y compris entre colonnes
+/// différentes, envoyé au modèle seulement à la validation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeaderEdit {
+    /// Colonne en cours de saisie.
+    pub column: NodeId,
+    /// Champ en cours de saisie.
+    pub field: HeaderField,
+    /// Texte tapé jusqu'ici.
+    pub buffer: String,
+}
+
 /// Saisie en cours dans une note. Le pendant exact de [`CellEdit`] pour
 /// [`Tab::Note`](crate::app) : un seul tampon à la fois (voir la doc de
 /// [`AppState::note_editing`]), envoyé au modèle seulement à la validation.
@@ -417,6 +553,13 @@ pub struct AppState {
     editing: Option<CellEdit>,
     /// Saisie de note en cours, s'il y en a une (voir [`NoteEdit`]).
     note_editing: Option<NoteEdit>,
+    /// Sélection courante de la grille de chaque feuille affichée — état UI
+    /// pur, jamais dans l'historique (voir la doc de tête de
+    /// [`crate::selection`]). Clé absente = pas de sélection dans cette
+    /// feuille.
+    selection: std::collections::HashMap<NodeId, Selection>,
+    /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
+    header_editing: Option<HeaderEdit>,
     /// Texte de la zone de script.
     script_source: String,
     /// Sortie de la dernière exécution de script, s'il y en a eu une.
@@ -467,6 +610,8 @@ impl AppState {
             status: None,
             editing: None,
             note_editing: None,
+            selection: std::collections::HashMap::new(),
+            header_editing: None,
             script_source: String::new(),
             script_output: None,
             #[cfg(feature = "python")]
@@ -664,6 +809,162 @@ impl AppState {
     /// `ColumnMeta::display_format`, que cette phase ne lit pas.
     pub fn cell_text(&self, column: NodeId, row: usize) -> String {
         cell_text_in(&self.snapshot.tree, column, row)
+    }
+
+    /// Métadonnées d'affichage d'une colonne (rôle, unité, nom long,
+    /// commentaire, formule) — [`plotyx_core::ColumnMeta::default`] si
+    /// `column` n'est pas (ou plus) une colonne de ce projet.
+    pub fn column_meta(&self, column: NodeId) -> ColumnMeta {
+        self.snapshot
+            .tree
+            .node(column)
+            .and_then(Node::as_column)
+            .map(|c| c.meta().clone())
+            .unwrap_or_default()
+    }
+
+    /// Sélection courante de la grille de `sheet`, s'il y en a une.
+    pub fn selection(&self, sheet: NodeId) -> Option<&Selection> {
+        self.selection.get(&sheet)
+    }
+
+    /// Pose une sélection d'une seule cellule (l'ancre d'un futur
+    /// rectangle) — simple clic. Mutation transitoire (comme
+    /// [`AppState::begin_edit`]) : sans effet sur le modèle, donc sûre à
+    /// appeler directement pendant le rendu plutôt que via [`Action`].
+    pub fn select_cell(&mut self, sheet: NodeId, column: NodeId, row: usize) {
+        self.selection.insert(sheet, Selection::cell(column, row));
+    }
+
+    /// Étend la sélection courante de `sheet` jusqu'à `(column, row)`, en
+    /// gardant l'ancre déjà posée — glisser ou Shift-clic. Pose une
+    /// sélection d'une seule cellule si `sheet` n'en avait pas encore.
+    pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) => selection.extend_to(column, row),
+            None => self.select_cell(sheet, column, row),
+        }
+    }
+
+    /// Sélectionne `column` dans son entier — clic sur sa lettre d'en-tête.
+    pub fn select_column(&mut self, sheet: NodeId, column: NodeId) {
+        self.selection.insert(sheet, Selection::column(column));
+    }
+
+    /// Efface la sélection de `sheet` (sans effet sur le modèle).
+    pub fn deselect_all(&mut self, sheet: NodeId) {
+        self.selection.remove(&sheet);
+    }
+
+    /// Vrai si `(column, row)` fait partie de la sélection de `sheet`.
+    pub fn is_selected(&self, sheet: NodeId, column: NodeId, row: usize) -> bool {
+        self.selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.contains(&self.snapshot.tree, sheet, column, row))
+    }
+
+    /// Vrai si `column` est sélectionnée dans son entier (clic sur sa lettre
+    /// d'en-tête).
+    pub fn is_column_selected(&self, sheet: NodeId, column: NodeId) -> bool {
+        self.selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.is_column_selected(column))
+    }
+
+    /// Sérialise la sélection courante de `sheet` en TSV (`\t` entre
+    /// colonnes, `\n` entre lignes) — pour Ctrl+C/Ctrl+X. `None` si `sheet`
+    /// n'a pas de sélection ou si elle ne désigne plus de colonne valide.
+    /// Une valeur manquante s'y écrit comme une chaîne vide (jamais
+    /// [`MISSING_TEXT_DISPLAY`], qui n'a de sens que pour l'écran, pas pour
+    /// un échange avec un tableur externe).
+    pub fn selected_cells_tsv(&self, sheet: NodeId) -> Option<String> {
+        let selection = self.selection.get(&sheet)?;
+        let tree = &self.snapshot.tree;
+        let columns = selection.columns(tree, sheet);
+        if columns.is_empty() {
+            return None;
+        }
+        let (row_start, row_end) = match selection.row_range() {
+            Some(range) => range,
+            None => {
+                let len = columns
+                    .iter()
+                    .filter_map(|&column| tree.node(column).and_then(Node::as_column))
+                    .map(Column::len)
+                    .max()
+                    .unwrap_or(0);
+                (0, len.saturating_sub(1))
+            }
+        };
+        let mut out = String::new();
+        for row in row_start..=row_end {
+            let line: Vec<String> = columns
+                .iter()
+                .map(|&column| cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, ""))
+                .collect();
+            out.push_str(&line.join("\t"));
+            out.push('\n');
+        }
+        Some(out)
+    }
+
+    /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
+    pub fn header_editing(&self) -> Option<&HeaderEdit> {
+        self.header_editing.as_ref()
+    }
+
+    /// Saisie en cours dans un champ d'en-tête, modifiable.
+    pub fn header_editing_mut(&mut self) -> Option<&mut HeaderEdit> {
+        self.header_editing.as_mut()
+    }
+
+    /// Ouvre la saisie d'un champ d'en-tête, tampon initialisé à sa valeur
+    /// actuelle. Remplace sans valider une éventuelle saisie précédente.
+    pub fn begin_header_edit(&mut self, column: NodeId, field: HeaderField) {
+        let meta = self.column_meta(column);
+        let buffer = match field {
+            HeaderField::LongName => meta.long_name,
+            HeaderField::Unit => meta.unit,
+            HeaderField::Comment => meta.comment,
+            HeaderField::Formula => meta.formula.unwrap_or_default(),
+        };
+        self.header_editing = Some(HeaderEdit {
+            column,
+            field,
+            buffer,
+        });
+    }
+
+    /// Abandonne la saisie d'en-tête en cours sans rien écrire.
+    pub fn cancel_header_edit(&mut self) {
+        self.header_editing = None;
+    }
+
+    /// Valide la saisie d'en-tête en cours. Sans effet s'il n'y a pas de
+    /// saisie ouverte.
+    pub fn commit_header_edit(&mut self) {
+        let Some(edit) = self.header_editing.take() else {
+            return;
+        };
+        let action = match edit.field {
+            HeaderField::LongName => Action::SetColumnLongName {
+                column: edit.column,
+                text: edit.buffer,
+            },
+            HeaderField::Unit => Action::SetColumnUnit {
+                column: edit.column,
+                text: edit.buffer,
+            },
+            HeaderField::Comment => Action::SetColumnComment {
+                column: edit.column,
+                text: edit.buffer,
+            },
+            HeaderField::Formula => Action::SetColumnFormula {
+                column: edit.column,
+                formula: (!edit.buffer.trim().is_empty()).then_some(edit.buffer),
+            },
+        };
+        self.dispatch(action);
     }
 
     /// Saisie de cellule en cours, s'il y en a une.
@@ -907,13 +1208,36 @@ impl AppState {
             Action::Save => self.save(),
             Action::Load => self.load(),
             Action::SelectSheet(id) => self.select_sheet(id),
-            Action::CommitCell { column, row, text } => self.commit_cell(column, row, text),
+            Action::CommitCell { column, row, text } => {
+                self.commit_cell(column, row, text);
+            }
             Action::AddColumn { sheet } => self.add_column(sheet),
             Action::InsertRows { sheet, at, count } => self.rows(sheet, at, count, true),
             Action::DeleteRows { sheet, at, count } => self.rows(sheet, at, count, false),
             Action::SetNoteText { note, text } => self.set_note_text(note, text),
             Action::RunScript => self.run_script(),
             Action::InterruptScript => self.interrupt_script(),
+            Action::CommitCellAndAdvance {
+                column,
+                row,
+                text,
+                sheet,
+            } => self.commit_cell_and_advance(column, row, text, sheet),
+            Action::ClearSelectedCells { sheet } => self.clear_selected_cells(sheet),
+            Action::DeleteSelectedCells { sheet } => self.delete_selected_cells(sheet),
+            Action::PasteTsv { sheet, text } => self.paste_tsv(sheet, text),
+            Action::SetColumnLongName { column, text } => {
+                self.set_column_meta_field(column, |meta| meta.long_name = text);
+            }
+            Action::SetColumnUnit { column, text } => {
+                self.set_column_meta_field(column, |meta| meta.unit = text);
+            }
+            Action::SetColumnComment { column, text } => {
+                self.set_column_meta_field(column, |meta| meta.comment = text);
+            }
+            Action::SetColumnFormula { column, formula } => {
+                self.set_column_meta_field(column, |meta| meta.formula = formula);
+            }
         }
     }
 
@@ -1015,6 +1339,16 @@ impl AppState {
                 Some(NodeKind::Note { .. })
             ) {
                 self.note_editing = None;
+            }
+        }
+        // Une sélection dont plus aucune colonne n'existe (feuille ou
+        // colonnes supprimées) n'a plus de sens — voir `Selection::columns`,
+        // qui rend justement une liste vide dans ce cas.
+        self.selection
+            .retain(|&sheet, selection| !selection.columns(tree, sheet).is_empty());
+        if let Some(edit) = &self.header_editing {
+            if tree.node(edit.column).and_then(Node::as_column).is_none() {
+                self.header_editing = None;
             }
         }
     }
@@ -1122,7 +1456,12 @@ impl AppState {
         self.status = None;
     }
 
-    fn commit_cell(&mut self, column: NodeId, row: usize, text: String) {
+    /// Rend `true` si la saisie a été acceptée (y compris un no-op parce que
+    /// le texte n'a pas changé), `false` seulement sur un échec de
+    /// validation (colonne inconnue, texte numérique inanalysable) — c'est
+    /// ce que [`AppState::commit_cell_and_advance`] utilise pour décider si
+    /// Entrée doit ajouter une ligne.
+    fn commit_cell(&mut self, column: NodeId, row: usize, text: String) -> bool {
         // B6 + A9 (option 1, `guide-de-correction-robustesse.md` §F5) — un
         // seul correctif pour deux anomalies : si le texte validé est
         // exactement celui déjà affiché, rien n'a été saisi, et on ne
@@ -1136,7 +1475,7 @@ impl AppState {
         // évite les deux sans introduire de convention nouvelle : le cas où
         // l'utilisateur retape à l'identique n'a jamais besoin d'écrire.
         if text == self.cell_text(column, row) {
-            return;
+            return true;
         }
         let Some(kind) = self
             .snapshot
@@ -1146,7 +1485,7 @@ impl AppState {
             .map(Column::column_type)
         else {
             self.fail(format!("{column} n'est pas une colonne de ce projet"));
-            return;
+            return false;
         };
         let values = match kind {
             ColumnType::Numeric | ColumnType::DateTime => {
@@ -1160,7 +1499,7 @@ impl AppState {
                         Ok(value) => ValueBlock::Float(vec![value]),
                         Err(_) => {
                             self.fail(format!("« {trimmed} » n'est pas un nombre"));
-                            return;
+                            return false;
                         }
                     }
                 }
@@ -1182,6 +1521,173 @@ impl AppState {
             values,
             expected_version: None,
         });
+        true
+    }
+
+    /// Valide la saisie d'une cellule puis, si `row` était la dernière ligne
+    /// de `column` et que la validation a réussi, ajoute une ligne à
+    /// `sheet` (`at == len` est une cible valide pour `InsertRows`) — Entrée
+    /// sur la dernière cellule d'une colonne.
+    fn commit_cell_and_advance(&mut self, column: NodeId, row: usize, text: String, sheet: NodeId) {
+        let was_last_row = self
+            .snapshot
+            .tree
+            .node(column)
+            .and_then(Node::as_column)
+            .is_some_and(|c| row + 1 >= c.len());
+        let accepted = self.commit_cell(column, row, text);
+        if accepted && was_last_row {
+            self.rows(sheet, row + 1, 1, true);
+        }
+    }
+
+    /// Vide le contenu des cellules sélectionnées de `sheet`, sans décaler
+    /// ce qui suit (Retour arrière/Ctrl+X) — une seule `Command::SetCells`
+    /// par colonne touchée, groupées en une seule entrée d'historique dès
+    /// que plus d'une colonne est concernée (`History::begin_macro`/
+    /// `end_macro`).
+    fn clear_selected_cells(&mut self, sheet: NodeId) {
+        let Some(selection) = self.selection.get(&sheet) else {
+            return;
+        };
+        let ranges = selection.clear_ranges(&self.snapshot.tree, sheet);
+        if ranges.is_empty() {
+            return;
+        }
+        let grouped = ranges.len() > 1;
+        if grouped && self.handle.begin_macro("Effacer la sélection").is_err() {
+            self.fail("Impossible de grouper l'effacement de la sélection".to_string());
+            return;
+        }
+        for (column, start, count) in ranges {
+            let Some(kind) = self
+                .snapshot
+                .tree
+                .node(column)
+                .and_then(Node::as_column)
+                .map(Column::column_type)
+            else {
+                continue;
+            };
+            self.execute(Command::SetCells {
+                column,
+                start,
+                values: ValueBlock::missing_for(kind, count),
+                expected_version: None,
+            });
+        }
+        if grouped {
+            let _ = self.handle.end_macro();
+        }
+    }
+
+    /// Vide le contenu des cellules sélectionnées de `sheet` **et** fait
+    /// remonter les cellules suivantes de chaque colonne touchée,
+    /// indépendamment (touche Suppr) — une seule `Command::DeleteCells`,
+    /// déjà multi-colonnes.
+    fn delete_selected_cells(&mut self, sheet: NodeId) {
+        let Some(selection) = self.selection.get(&sheet) else {
+            return;
+        };
+        let (columns, at, count) = selection.delete_at_count(&self.snapshot.tree, sheet);
+        if columns.is_empty() || count == 0 {
+            return;
+        }
+        self.execute(Command::DeleteCells { columns, at, count });
+    }
+
+    /// Colle `text` (TSV) à partir de l'ancre de la sélection courante de
+    /// `sheet` : les colonnes cibles sont les `n` colonnes suivant l'ancre
+    /// dans l'ordre de la feuille (`n` = nombre de colonnes du TSV collé),
+    /// **pas** la sélection active — comme tout tableur de référence, coller
+    /// étire depuis l'ancre indépendamment de la taille de la sélection.
+    /// Une colonne formule refuse naturellement l'écriture
+    /// (`CoreError::FormulaColumnReadOnly`) : signalée par le statut, sans
+    /// bloquer les autres colonnes déjà collées.
+    fn paste_tsv(&mut self, sheet: NodeId, text: String) {
+        let Some(selection) = self.selection.get(&sheet) else {
+            self.fail("Aucune cellule sélectionnée pour coller".to_string());
+            return;
+        };
+        let (anchor_column, anchor_row) = selection.anchor();
+        let mut rows: Vec<Vec<&str>> = text
+            .split('\n')
+            .map(|line| line.trim_end_matches('\r').split('\t').collect())
+            .collect();
+        // La plupart des presse-papiers terminent par un `\n` : la ligne
+        // vide qui en résulte ne doit pas devenir une ligne collée de plus.
+        if matches!(rows.last(), Some(row) if row.len() == 1 && row[0].is_empty()) {
+            rows.pop();
+        }
+        if rows.is_empty() {
+            return;
+        }
+        let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let order: Vec<NodeId> = self
+            .visible_columns(sheet)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        let Some(anchor_index) = order.iter().position(|&id| id == anchor_column) else {
+            self.fail(format!(
+                "{anchor_column} n'est pas une colonne de cette feuille"
+            ));
+            return;
+        };
+        let targets: Vec<NodeId> = order
+            .iter()
+            .copied()
+            .skip(anchor_index)
+            .take(column_count)
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        let grouped = targets.len() > 1;
+        if grouped && self.handle.begin_macro("Coller").is_err() {
+            self.fail("Impossible de grouper le collage".to_string());
+            return;
+        }
+        for (index, &column) in targets.iter().enumerate() {
+            let Some(kind) = self
+                .snapshot
+                .tree
+                .node(column)
+                .and_then(Node::as_column)
+                .map(Column::column_type)
+            else {
+                continue;
+            };
+            let values = value_block_from_tsv_column(kind, &rows, index);
+            self.execute(Command::SetCells {
+                column,
+                start: anchor_row,
+                values,
+                expected_version: None,
+            });
+        }
+        if grouped {
+            let _ = self.handle.end_macro();
+        }
+    }
+
+    /// Relit les métadonnées actuelles de `column`, laisse `update` en
+    /// modifier un seul champ, puis les remplace en bloc
+    /// (`Command::SetColumnMeta` — doctrine « remplacement en bloc, jamais
+    /// par sous-champ » du crate `plotyx-commands`, voir sa doc de tête).
+    fn set_column_meta_field(&mut self, column: NodeId, update: impl FnOnce(&mut ColumnMeta)) {
+        let Some(mut meta) = self
+            .snapshot
+            .tree
+            .node(column)
+            .and_then(Node::as_column)
+            .map(|c| c.meta().clone())
+        else {
+            self.fail(format!("{column} n'est pas une colonne de ce projet"));
+            return;
+        };
+        update(&mut meta);
+        self.execute(Command::SetColumnMeta { column, meta });
     }
 
     fn add_column(&mut self, sheet: NodeId) {

@@ -86,6 +86,21 @@ pub enum DataDelta {
         /// Valeurs retirées, par colonne touchée, dans l'ordre de la feuille.
         removed: Vec<(NodeId, ValueBlock)>,
     },
+    /// Suppression de cellules par colonnes explicites, indépendamment les
+    /// unes des autres (touche Suppr sur une sélection qui ne couvre pas
+    /// nécessairement toute la feuille) — le pendant de `DeleteRows` pour
+    /// `Command::DeleteCells`. Mêmes règles d'annulation que `DeleteRows` :
+    /// colonne par colonne, jamais au niveau feuille.
+    DeleteCells {
+        /// Première ligne supprimée.
+        at: usize,
+        /// Nombre de lignes demandé (l'annulation utilise la taille
+        /// réellement retirée par colonne, comme pour `DeleteRows`).
+        count: usize,
+        /// Valeurs retirées, par colonne effectivement touchée, dans l'ordre
+        /// où `Command::DeleteCells::columns` les présentait.
+        removed: Vec<(NodeId, ValueBlock)>,
+    },
     /// Seul cas de snapshot de données assumé : la conversion de type est
     /// destructrice dans les deux sens (« 3,5 » → 3.5 → « 3.5 »), donc ni
     /// l'ancien ni le nouveau contenu ne se recalculent depuis l'autre.
@@ -1022,6 +1037,7 @@ impl History {
             | Command::SetColumnType { .. }
             | Command::InsertRows { .. }
             | Command::DeleteRows { .. }
+            | Command::DeleteCells { .. }
             | Command::SetWindowMeta { .. }
             | Command::SetNoteText { .. }
             | Command::SetColumnMeta { .. }
@@ -1149,6 +1165,36 @@ impl History {
                         count,
                         removed,
                     }),
+                    label,
+                })
+            }
+            Command::DeleteCells { columns, at, count } => {
+                // Colonne par colonne, indépendamment — contrairement à
+                // `DeleteRows`, `columns` n'est pas nécessairement "toutes
+                // les colonnes de la feuille" : c'est la sélection explicite
+                // de l'appelant (une colonne sans ligne `at`, ou listée en
+                // double, est ignorée silencieusement, comme `row_targets`
+                // le fait déjà pour `DeleteRows`).
+                let mut removed = Vec::new();
+                let mut seen = HashSet::new();
+                for column in columns {
+                    if !seen.insert(column) {
+                        continue;
+                    }
+                    let has_row = project
+                        .tree()
+                        .get(column)
+                        .ok()
+                        .and_then(|node| node.as_column())
+                        .is_some_and(|c| at < c.len());
+                    if count == 0 || !has_row {
+                        continue;
+                    }
+                    let block = project.delete_column_rows(column, at, count)?;
+                    removed.push((column, block));
+                }
+                Ok(Entry::Data {
+                    delta: Box::new(DataDelta::DeleteCells { at, count, removed }),
                     label,
                 })
             }
@@ -1287,6 +1333,13 @@ impl History {
                 }
                 Ok(())
             }
+            DataDelta::DeleteCells { at, removed, .. } => {
+                for (column, block) in removed {
+                    project.insert_column_rows(*column, *at, block.len())?;
+                    project.set_values(*column, *at, block.clone())?;
+                }
+                Ok(())
+            }
             DataDelta::ColumnType { column, before, .. } => {
                 project.restore_column(*column, before.0, before.1.clone())?;
                 Ok(())
@@ -1333,6 +1386,15 @@ impl History {
                 // Colonne par colonne, et non `delete_rows` au niveau feuille :
                 // seules les colonnes réellement touchées la première fois
                 // doivent l'être à nouveau.
+                for (column, block) in removed {
+                    project.delete_column_rows(*column, *at, block.len())?;
+                }
+                Ok(())
+            }
+            DataDelta::DeleteCells { at, removed, .. } => {
+                // Colonne par colonne, comme pour `DeleteRows` : seules les
+                // colonnes réellement touchées la première fois le sont à
+                // nouveau.
                 for (column, block) in removed {
                     project.delete_column_rows(*column, *at, block.len())?;
                 }
@@ -1402,6 +1464,7 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
         Entry::Data { delta, .. } => match delta.as_ref() {
             DataDelta::InsertRows { columns, .. } => columns.is_empty(),
             DataDelta::DeleteRows { removed, .. } => removed.is_empty(),
+            DataDelta::DeleteCells { removed, .. } => removed.is_empty(),
             // Comme `Cells`/`ColumnType` : dès qu'`apply` les a acceptées,
             // ces quatre commandes ont toujours remplacé quelque chose (un
             // remplacement par une valeur égale reste un remplacement, pas
@@ -1616,7 +1679,7 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
             // touchées, la ligne et le compte — aucune valeur stockée (les
             // lignes insérées sont manquantes par construction).
         }
-        DataDelta::DeleteRows { removed, .. } => {
+        DataDelta::DeleteRows { removed, .. } | DataDelta::DeleteCells { removed, .. } => {
             for (_, block) in removed {
                 insert_block_footprint(&mut out, block);
             }
@@ -1679,6 +1742,11 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
                 }
             }
         }
+        Command::DeleteCells { columns, .. } => {
+            for &id in columns {
+                record(id);
+            }
+        }
         // Aucune de ces commandes ne cible une colonne dont il faudrait
         // relever le buffer avant application : les huit structurelles
         // n'atteignent jamais cette fonction (voir la doc ci-dessus), et les
@@ -1732,7 +1800,7 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
                 previous_buffer_of(&mut out, column);
             }
         }
-        DataDelta::DeleteRows { removed, .. } => {
+        DataDelta::DeleteRows { removed, .. } | DataDelta::DeleteCells { removed, .. } => {
             for (column, _) in removed {
                 previous_buffer_of(&mut out, *column);
             }

@@ -116,6 +116,22 @@ pub enum Command {
         /// Nombre de lignes supprimées.
         count: usize,
     },
+    /// Supprime `count` lignes à partir de `at`, colonne par colonne et
+    /// **indépendamment**, dans les colonnes listées par `columns` — le
+    /// pendant de `DeleteRows` pour une sélection qui ne couvre pas
+    /// nécessairement toutes les colonnes d'une feuille (touche Suppr sur un
+    /// rectangle de cellules). Une colonne telle que `at >= len` est ignorée
+    /// silencieusement, exactement comme `DeleteRows` le fait déjà via
+    /// `Project::row_targets` ; les doublons de `columns` sont ignorés.
+    DeleteCells {
+        /// Colonnes visées.
+        columns: Vec<NodeId>,
+        /// Première ligne supprimée dans chaque colonne touchée.
+        at: usize,
+        /// Nombre de lignes demandé (l'annulation utilise la quantité
+        /// réellement retirée par colonne, comme pour `DeleteRows`).
+        count: usize,
+    },
 
     /// Ajoute un dossier en fin de `parent`. Contrairement aux fenêtres, un
     /// dossier n'a pas de nom automatique dans `plotyx-core`
@@ -266,6 +282,9 @@ impl Command {
             }
             Command::DeleteRows { count, .. } => {
                 format!("Supprimer {count} {}", rows_word(*count))
+            }
+            Command::DeleteCells { count, .. } => {
+                format!("Supprimer et remonter {count} {}", rows_word(*count))
             }
             Command::AddFolder { name, .. } => format!("Ajouter le dossier {name}"),
             Command::AddWorkbook { .. } => "Ajouter un classeur".to_string(),
