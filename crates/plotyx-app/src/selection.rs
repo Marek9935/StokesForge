@@ -7,10 +7,13 @@
 
 use plotyx_core::{NodeId, Tree};
 
-use crate::state::visible_columns_in;
+use crate::state::{visible_columns_in, HeaderField};
 
-/// Sélection courante dans la grille d'une feuille : soit un rectangle de
-/// cellules, soit une colonne entière (clic sur sa lettre d'en-tête).
+/// Sélection courante dans la grille d'une feuille : un rectangle de
+/// cellules, une colonne entière (clic sur sa lettre d'en-tête), ou un champ
+/// d'en-tête (clic sur une des quatre rangées nom long/unité/commentaire/
+/// formule) — même comportement clic-sélectionne/double-clic-édite que les
+/// cellules de données, voir [`crate::app::header_field_widget`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selection {
     kind: SelectionKind,
@@ -28,6 +31,14 @@ enum SelectionKind {
     },
     /// Colonne entière.
     Column(NodeId),
+    /// Un champ d'en-tête précis d'une colonne (nom long/unité/commentaire/
+    /// formule) — jamais une plage, une seule cellule d'en-tête à la fois.
+    /// N'intervient dans aucune des méthodes pensées pour les données de
+    /// colonne ([`Selection::columns`]/[`Selection::clear_ranges`]/
+    /// [`Selection::delete_at_count`], qui y voient toutes une sélection
+    /// vide) : Ctrl+C/Suppr sur un champ d'en-tête sont câblés séparément par
+    /// l'appelant via [`Selection::header_field`].
+    HeaderField { column: NodeId, field: HeaderField },
 }
 
 impl Selection {
@@ -46,6 +57,31 @@ impl Selection {
         Self {
             kind: SelectionKind::Column(column),
         }
+    }
+
+    /// Sélection d'un champ d'en-tête précis.
+    pub fn header_field(column: NodeId, field: HeaderField) -> Self {
+        Self {
+            kind: SelectionKind::HeaderField { column, field },
+        }
+    }
+
+    /// `Some((column, field))` si la sélection est un champ d'en-tête —
+    /// jamais une plage de cellules ni une colonne entière.
+    pub fn selected_header_field(&self) -> Option<(NodeId, HeaderField)> {
+        match self.kind {
+            SelectionKind::HeaderField { column, field } => Some((column, field)),
+            _ => None,
+        }
+    }
+
+    /// Vrai si `(column, field)` est le champ d'en-tête actuellement
+    /// sélectionné.
+    pub fn is_header_field_selected(&self, column: NodeId, field: HeaderField) -> bool {
+        matches!(
+            self.kind,
+            SelectionKind::HeaderField { column: c, field: f } if c == column && f == field
+        )
     }
 
     /// Étend un rectangle de cellules jusqu'à `(column, row)`, en gardant
@@ -77,7 +113,8 @@ impl Selection {
 
     /// Colonnes couvertes, dans l'ordre de la feuille. Vide si l'ancre ou le
     /// curseur ne désignent plus une colonne de `sheet` (colonne supprimée
-    /// entre-temps).
+    /// entre-temps) — vide aussi pour un champ d'en-tête, qui ne désigne
+    /// aucune donnée de colonne (voir [`SelectionKind::HeaderField`]).
     pub fn columns(&self, tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
         match &self.kind {
             SelectionKind::Column(column) => {
@@ -106,6 +143,7 @@ impl Selection {
                     _ => Vec::new(),
                 }
             }
+            SelectionKind::HeaderField { .. } => Vec::new(),
         }
     }
 
@@ -118,7 +156,7 @@ impl Selection {
             SelectionKind::Cells { anchor, cursor } => {
                 Some((anchor.1.min(cursor.1), anchor.1.max(cursor.1)))
             }
-            SelectionKind::Column(_) => None,
+            SelectionKind::Column(_) | SelectionKind::HeaderField { .. } => None,
         }
     }
 
@@ -126,6 +164,7 @@ impl Selection {
     pub fn contains(&self, tree: &Tree, sheet: NodeId, column: NodeId, row: usize) -> bool {
         match &self.kind {
             SelectionKind::Column(selected) => *selected == column,
+            SelectionKind::HeaderField { .. } => false,
             SelectionKind::Cells { .. } => match self.row_range() {
                 Some((lo, hi)) if row >= lo && row <= hi => {
                     self.columns(tree, sheet).contains(&column)
@@ -202,7 +241,9 @@ impl Selection {
     pub fn anchor(&self) -> (NodeId, usize) {
         match &self.kind {
             SelectionKind::Cells { anchor, .. } => *anchor,
-            SelectionKind::Column(column) => (*column, 0),
+            SelectionKind::Column(column) | SelectionKind::HeaderField { column, .. } => {
+                (*column, 0)
+            }
         }
     }
 }

@@ -1613,6 +1613,7 @@ fn column_header_widget(
             let rect = ui.available_rect_before_wrap();
             ui.painter()
                 .rect_filled(rect, 0.0, crate::theme::header_letter_row_fill());
+            header_row_separator(ui, rect);
             ui.horizontal(|ui| {
                 if ui
                     .selectable_label(is_column_selected, format!("{letter}  "))
@@ -1627,6 +1628,7 @@ fn column_header_widget(
             ui,
             state,
             actions,
+            sheet,
             column,
             HeaderField::LongName,
             HEADER_LONGNAME_HEIGHT,
@@ -1635,6 +1637,7 @@ fn column_header_widget(
             ui,
             state,
             actions,
+            sheet,
             column,
             HeaderField::Unit,
             HEADER_SUBROW_HEIGHT,
@@ -1643,6 +1646,7 @@ fn column_header_widget(
             ui,
             state,
             actions,
+            sheet,
             column,
             HeaderField::Comment,
             HEADER_SUBROW_HEIGHT,
@@ -1651,6 +1655,7 @@ fn column_header_widget(
             ui,
             state,
             actions,
+            sheet,
             column,
             HeaderField::Formula,
             HEADER_SUBROW_HEIGHT,
@@ -1658,11 +1663,25 @@ fn column_header_widget(
     });
 }
 
+/// Ligne de séparation fine sous une rangée de l'en-tête empilé (lettre, ou
+/// l'un des quatre champs) : sans elle, les quatre rangées de champs
+/// n'avaient aucun remplissage propre et se confondaient visuellement les
+/// unes dans les autres (contrairement aux lignes de données, zébrées par
+/// `TableBuilder::striped`).
+fn header_row_separator(ui: &egui::Ui, rect: egui::Rect) {
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
+}
+
 /// Une rangée éditable de l'en-tête empilé, pour un seul champ de
-/// [`plotyx_core::ColumnMeta`] — le même schéma affichage/édition que
-/// [`cell_widget`] (double-clic pour éditer, sinon un simple `Label`
-/// n'accaparant jamais le focus clavier), piloté par [`AppState::
-/// header_editing`] plutôt que par [`AppState::editing`].
+/// [`plotyx_core::ColumnMeta`] — le même schéma sélection/édition que
+/// [`cell_widget`] pour une cellule de données : simple clic sélectionne
+/// (surlignage identique), double-clic édite ; piloté par [`AppState::
+/// header_editing`]/[`AppState::select_header_field`] plutôt que par
+/// [`AppState::editing`]/[`AppState::select_cell`].
 ///
 /// N'affiche que la **valeur** du champ, vide si le champ l'est — pas de
 /// placeholder répété par colonne : le libellé du champ (« Long Name »,
@@ -1672,6 +1691,7 @@ fn header_field_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
     actions: &mut Vec<Action>,
+    sheet: NodeId,
     column: NodeId,
     field: HeaderField,
     height: f32,
@@ -1680,6 +1700,8 @@ fn header_field_widget(
     ui.scope(|ui| {
         ui.set_min_height(height);
         ui.set_max_height(height);
+        let rect = ui.available_rect_before_wrap();
+        header_row_separator(ui, rect);
         let editing_here = state
             .header_editing()
             .is_some_and(|edit| edit.column == column && edit.field == field);
@@ -1692,7 +1714,15 @@ fn header_field_widget(
                     .frame(egui::Frame::NONE)
                     .desired_width(f32::INFINITY),
             );
-            if response.lost_focus() {
+            // Même piège que [`cell_widget`] : lire `lost_focus()` avant de
+            // décider de redemander le focus, sous peine de se le redonner
+            // à soi-même juste après qu'Entrée l'ait fait perdre en interne
+            // au `TextEdit`, et de ne plus jamais valider.
+            let lost_focus = response.lost_focus();
+            if !response.has_focus() && !lost_focus {
+                response.request_focus();
+            }
+            if lost_focus {
                 if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                     state.cancel_header_edit();
                 } else {
@@ -1702,9 +1732,16 @@ fn header_field_widget(
             return;
         }
         let text = header_field_text(state, column, field);
-        let rect = ui.available_rect_before_wrap();
         let id = ui.id().with((column.raw(), field as u8));
         let response = ui.interact(rect, id, egui::Sense::click());
+        let selected = state.is_header_field_selected(sheet, column, field);
+        if selected {
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                ui.visuals().selection.bg_fill.linear_multiply(0.35),
+            );
+        }
         ui.put(
             rect,
             egui::Label::new(egui::RichText::new(text).weak())
@@ -1713,6 +1750,8 @@ fn header_field_widget(
         );
         if response.double_clicked() {
             state.begin_header_edit(column, field);
+        } else if response.clicked() {
+            state.select_header_field(sheet, column, field);
         }
     });
 }
@@ -1733,6 +1772,7 @@ fn row_number_header_widget(ui: &mut egui::Ui) {
             let rect = ui.available_rect_before_wrap();
             ui.painter()
                 .rect_filled(rect, 0.0, crate::theme::header_letter_row_fill());
+            header_row_separator(ui, rect);
             ui.strong("#");
         });
         row_number_header_label(ui, HEADER_LONGNAME_HEIGHT, "Long Name");
@@ -1749,6 +1789,8 @@ fn row_number_header_label(ui: &mut egui::Ui, height: f32, label: &str) {
     ui.scope(|ui| {
         ui.set_min_height(height);
         ui.set_max_height(height);
+        let rect = ui.available_rect_before_wrap();
+        header_row_separator(ui, rect);
         ui.strong(label);
     });
 }
@@ -1895,29 +1937,36 @@ fn grid_contents(
     // Raccourcis clavier de la grille — voir la doc de tête de cette
     // fonction pour la garde d'édition.
     if state.editing().is_none() && state.header_editing().is_none() {
-        // Taper sur une cellule sélectionnée (simple clic, pas encore en
-        // édition) démarre l'édition en remplaçant tout son contenu par ce
-        // qui est tapé — comportement standard de tableur. Ne se déclenche
-        // que pour une sélection réduite à une seule cellule
-        // ([`Selection::single_cell`]) : taper sur une plage ne doit jamais
-        // écraser plusieurs cellules à la fois. `egui::Event::Text` ne
-        // porte que du texte imprimable — jamais une touche de contrôle ou
-        // de navigation, qui n'apparaît que dans `events` comme un
-        // `Event::Key` — donc pas de filtrage supplémentaire à faire ici.
-        if let Some((column, row)) = state.selection(sheet).and_then(Selection::single_cell) {
-            let typed: String = ui.input(|input| {
-                input
-                    .events
-                    .iter()
-                    .filter_map(|event| match event {
-                        egui::Event::Text(text) => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect()
-            });
-            if !typed.is_empty() {
+        // Taper sur une cellule ou un champ d'en-tête sélectionné (simple
+        // clic, pas encore en édition) démarre l'édition en remplaçant tout
+        // son contenu par ce qui est tapé — comportement standard de
+        // tableur, le même pour les deux. Ne se déclenche que pour une
+        // sélection réduite à une seule cellule ([`Selection::single_cell`])
+        // côté données : taper sur une plage ne doit jamais écraser
+        // plusieurs cellules à la fois — un champ d'en-tête, lui, n'est
+        // jamais une plage. `egui::Event::Text` ne porte que du texte
+        // imprimable — jamais une touche de contrôle ou de navigation, qui
+        // n'apparaît que dans `events` comme un `Event::Key` — donc pas de
+        // filtrage supplémentaire à faire ici.
+        let typed: String = ui.input(|input| {
+            input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Text(text) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect()
+        });
+        if !typed.is_empty() {
+            if let Some((column, row)) = state.selection(sheet).and_then(Selection::single_cell) {
                 state.begin_edit(column, row);
                 if let Some(edit) = state.editing_mut() {
+                    edit.buffer = typed;
+                }
+            } else if let Some((column, field)) = state.selected_header_field(sheet) {
+                state.begin_header_edit(column, field);
+                if let Some(edit) = state.header_editing_mut() {
                     edit.buffer = typed;
                 }
             }
@@ -1948,20 +1997,54 @@ fn grid_contents(
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
             )
         });
-        if copy || cut {
-            if let Some(tsv) = state.selected_cells_tsv(sheet) {
-                ui.ctx().copy_text(tsv);
+        if let Some((column, field)) = state.selected_header_field(sheet) {
+            // Un champ d'en-tête sélectionné détourne les mêmes raccourcis
+            // vers lui plutôt que vers la sélection de cellules — les deux
+            // sont mutuellement exclusives (une seule `Selection` par
+            // feuille).
+            if copy || cut {
+                ui.ctx().copy_text(header_field_text(state, column, field));
+            }
+            if cut || delete || backspace {
+                actions.push(header_field_action(column, field, String::new()));
+            }
+            if let Some(text) = paste_text {
+                actions.push(header_field_action(column, field, text));
+            }
+        } else {
+            if copy || cut {
+                if let Some(tsv) = state.selected_cells_tsv(sheet) {
+                    ui.ctx().copy_text(tsv);
+                }
+            }
+            if cut || backspace {
+                actions.push(Action::ClearSelectedCells { sheet });
+            }
+            if let Some(text) = paste_text {
+                actions.push(Action::PasteTsv { sheet, text });
+            }
+            if delete {
+                actions.push(Action::DeleteSelectedCells { sheet });
             }
         }
-        if cut || backspace {
-            actions.push(Action::ClearSelectedCells { sheet });
-        }
-        if let Some(text) = paste_text {
-            actions.push(Action::PasteTsv { sheet, text });
-        }
-        if delete {
-            actions.push(Action::DeleteSelectedCells { sheet });
-        }
+    }
+}
+
+/// Traduit une valeur de champ d'en-tête en l'[`Action`] qui l'écrit —
+/// partagé par le raccourci clavier (Ctrl+X/Suppr/Retour arrière effacent
+/// via `text: String::new()`, Ctrl+V colle le texte du presse-papier tel
+/// quel) et, indirectement, par [`AppState::commit_header_edit`] côté
+/// double-clic. Une formule vide (après `trim`) redevient `None` plutôt
+/// qu'une chaîne vide, comme `commit_header_edit`.
+fn header_field_action(column: NodeId, field: HeaderField, text: String) -> Action {
+    match field {
+        HeaderField::LongName => Action::SetColumnLongName { column, text },
+        HeaderField::Unit => Action::SetColumnUnit { column, text },
+        HeaderField::Comment => Action::SetColumnComment { column, text },
+        HeaderField::Formula => Action::SetColumnFormula {
+            column,
+            formula: (!text.trim().is_empty()).then_some(text),
+        },
     }
 }
 

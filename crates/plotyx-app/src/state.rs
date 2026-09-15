@@ -851,6 +851,14 @@ impl AppState {
         self.selection.insert(sheet, Selection::column(column));
     }
 
+    /// Sélectionne un champ d'en-tête précis (nom long/unité/commentaire/
+    /// formule) — simple clic, même comportement que [`AppState::
+    /// select_cell`] pour une cellule de données.
+    pub fn select_header_field(&mut self, sheet: NodeId, column: NodeId, field: HeaderField) {
+        self.selection
+            .insert(sheet, Selection::header_field(column, field));
+    }
+
     /// Efface la sélection de `sheet` (sans effet sur le modèle).
     pub fn deselect_all(&mut self, sheet: NodeId) {
         self.selection.remove(&sheet);
@@ -869,6 +877,25 @@ impl AppState {
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.is_column_selected(column))
+    }
+
+    /// Vrai si `(column, field)` est le champ d'en-tête actuellement
+    /// sélectionné dans `sheet`.
+    pub fn is_header_field_selected(
+        &self,
+        sheet: NodeId,
+        column: NodeId,
+        field: HeaderField,
+    ) -> bool {
+        self.selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.is_header_field_selected(column, field))
+    }
+
+    /// Champ d'en-tête sélectionné dans `sheet`, s'il y en a un — pour les
+    /// raccourcis clavier (Ctrl+C/Suppr) scopés à la grille.
+    pub fn selected_header_field(&self, sheet: NodeId) -> Option<(NodeId, HeaderField)> {
+        self.selection.get(&sheet)?.selected_header_field()
     }
 
     /// Sérialise la sélection courante de `sheet` en TSV (`\t` entre
@@ -1351,9 +1378,15 @@ impl AppState {
         }
         // Une sélection dont plus aucune colonne n'existe (feuille ou
         // colonnes supprimées) n'a plus de sens — voir `Selection::columns`,
-        // qui rend justement une liste vide dans ce cas.
-        self.selection
-            .retain(|&sheet, selection| !selection.columns(tree, sheet).is_empty());
+        // qui rend justement une liste vide dans ce cas. Un champ d'en-tête
+        // sélectionné n'a en revanche *jamais* de colonne via `columns()`
+        // (voir sa doc) : sa colonne se vérifie directement.
+        self.selection.retain(
+            |&sheet, selection| match selection.selected_header_field() {
+                Some((column, _)) => tree.node(column).and_then(Node::as_column).is_some(),
+                None => !selection.columns(tree, sheet).is_empty(),
+            },
+        );
         if let Some(edit) = &self.header_editing {
             if tree.node(edit.column).and_then(Node::as_column).is_none() {
                 self.header_editing = None;
