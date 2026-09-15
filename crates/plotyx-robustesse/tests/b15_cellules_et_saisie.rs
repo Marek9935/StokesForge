@@ -96,18 +96,51 @@ fn b15_une_cellule_numerique_vidée_devient_manquante_pas_zero() {
     assert_eq!(cellule(&state, nombres, 0), Cell::Float(f64::NAN));
 }
 
+/// Un texte qui n'est pas un nombre, tapé dans une colonne numérique, ne se
+/// perd plus : il élargit la colonne en [`ColumnType::Mixed`] et devient une
+/// cellule texte, les voisines gardant leurs nombres. **Ce qui doit tenir
+/// ici, c'est qu'aucune donnée ne disparaît** — ni la saisie (qui était
+/// refusée avant les colonnes à types mixtes), ni les valeurs déjà présentes
+/// (qu'une conversion de toute la colonne en texte aurait rendues
+/// intraçables).
 #[test]
-fn b15_un_texte_qui_nest_pas_un_nombre_est_refuse_sans_ecrire() {
+fn b15_un_texte_qui_nest_pas_un_nombre_elargit_la_colonne_sans_rien_perdre() {
     let (_session, handle, _texte, nombres) = banc();
     let mut state = AppState::new(handle, "x.plx".to_string()).expect("état");
-    let avant = cellule(&state, nombres, 0);
+    let voisine = cellule(&state, nombres, 1);
     state.begin_edit(nombres, 0);
     if let Some(edit) = state.editing_mut() {
         edit.buffer = "pas un nombre".to_string();
     }
     state.commit_edit();
-    assert_eq!(cellule(&state, nombres, 0), avant);
-    assert!(state.status().is_some_and(|s| s.is_error));
+
+    assert!(
+        state.status().is_none_or(|s| !s.is_error),
+        "ce n'est plus une erreur"
+    );
+    assert_eq!(
+        state
+            .tree()
+            .node(nombres)
+            .and_then(plotyx_core::Node::as_column)
+            .expect("colonne")
+            .column_type(),
+        ColumnType::Mixed
+    );
+    assert_eq!(state.cell_text(nombres, 0), "pas un nombre");
+    assert_eq!(
+        cellule(&state, nombres, 1),
+        voisine,
+        "la ligne voisine garde son nombre, bit à bit"
+    );
+
+    // Et l'aller-retour d'affichage tient toujours sur les lignes numériques
+    // d'une colonne devenue mixte : retaper ce qui est affiché n'écrit rien
+    // qui change la valeur.
+    let attendu = cellule(&state, nombres, 1);
+    state.begin_edit(nombres, 1);
+    state.commit_edit();
+    assert_eq!(cellule(&state, nombres, 1), attendu);
 }
 
 // -- reproductions --------------------------------------------------------
@@ -298,7 +331,9 @@ fn b15_convertir_en_texte_multiplie_la_memoire_par_un_facteur_borne_et_stable() 
                 .iter()
                 .map(|s| std::mem::size_of::<Option<String>>() + s.as_deref().map_or(0, str::len))
                 .sum(),
-            ColumnValues::Float(_) => 0,
+            // Ce test mesure la seule conversion `Numeric -> Text` : les
+            // deux autres variantes n'arrivent jamais ici.
+            ColumnValues::Float(_) | ColumnValues::Mixed(_) => 0,
         };
         apres as f64 / avant as f64
     }

@@ -4,8 +4,8 @@
 //! endroit où les deux mondes se rencontrent.
 
 use plotyx_core::{
-    Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError, Node, NodeId, NodeKind,
-    ValueBlock, WindowMeta,
+    Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError, MixedCell, Node, NodeId,
+    NodeKind, ValueBlock, WindowMeta,
 };
 use plotyx_plot::{
     AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec,
@@ -16,7 +16,7 @@ use crate::schema::{
     AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord, LegendSpecRecord,
     LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord,
     RoleRecord, SeriesAxisRecord, SeriesSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
-    TypeRecord, ValuesRecord,
+    TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -45,6 +45,21 @@ pub(crate) enum ConvertError {
     /// Le buffer `Float` d'une colonne n'a pas une longueur multiple de 8
     /// (un `f64` fait 8 octets).
     BadFloatLength(usize),
+    /// Une étiquette de `ValuesRecord::Mixed` n'est ni `0` (vide), ni `1`
+    /// (nombre), ni `2` (texte) : rien ne dit alors dans lequel des deux
+    /// tableaux de valeurs chercher les lignes suivantes.
+    BadMixedTag(u8),
+    /// Les trois tableaux de `ValuesRecord::Mixed` ne s'accordent pas : les
+    /// étiquettes annoncent plus (ou moins) de nombres ou de textes que les
+    /// tableaux n'en portent.
+    BadMixedLength {
+        /// Ce que les étiquettes annoncent.
+        expected: usize,
+        /// Ce que le tableau correspondant porte.
+        found: usize,
+        /// `"nombre(s)"` ou `"texte(s)"`, pour le message.
+        what: &'static str,
+    },
     /// `Column::from_block` a refusé la paire (type, valeurs) reconstruite.
     Core(CoreError),
     /// `histogram_bins` d'une série vaut 0 dans le fichier. `plotyx-plot`
@@ -81,6 +96,7 @@ impl From<ColumnType> for TypeRecord {
             ColumnType::Numeric => TypeRecord::Numeric,
             ColumnType::DateTime => TypeRecord::DateTime,
             ColumnType::Text => TypeRecord::Text,
+            ColumnType::Mixed => TypeRecord::Mixed,
         }
     }
 }
@@ -91,6 +107,7 @@ impl From<TypeRecord> for ColumnType {
             TypeRecord::Numeric => ColumnType::Numeric,
             TypeRecord::DateTime => ColumnType::DateTime,
             TypeRecord::Text => ColumnType::Text,
+            TypeRecord::Mixed => ColumnType::Mixed,
         }
     }
 }
@@ -524,6 +541,78 @@ fn decode_floats(bytes: &[u8]) -> Result<Vec<f64>, ConvertError> {
     Ok(chunks.iter().copied().map(f64::from_le_bytes).collect())
 }
 
+/// Éclate un buffer à types mixtes en les trois tableaux parallèles de
+/// [`ValuesRecord::Mixed`] : une étiquette par ligne, puis les seules valeurs
+/// qui existent. Infaillible — le modèle en mémoire est toujours
+/// représentable.
+fn encode_mixed(values: &[MixedCell]) -> ValuesRecord {
+    let mut tags = Vec::with_capacity(values.len());
+    let mut numbers = Vec::new();
+    let mut texts = Vec::new();
+    for cell in values {
+        match cell {
+            MixedCell::Empty => tags.push(MIXED_TAG_EMPTY),
+            MixedCell::Number(value) => {
+                tags.push(MIXED_TAG_NUMBER);
+                numbers.extend_from_slice(&value.to_le_bytes());
+            }
+            MixedCell::Text(text) => {
+                tags.push(MIXED_TAG_TEXT);
+                texts.push(text.clone());
+            }
+        }
+    }
+    ValuesRecord::Mixed {
+        tags,
+        numbers,
+        texts,
+    }
+}
+
+/// Recompose un buffer à types mixtes depuis les trois tableaux parallèles.
+///
+/// `Err` sur toute incohérence entre eux — étiquette inconnue, ou tableau qui
+/// ne porte pas exactement ce que les étiquettes annoncent. Même politique
+/// que [`decode_floats`] : un fichier écrit par ce crate ne produit jamais
+/// ces cas, et il n'y a pas de réparation sensée à tenter (glisser d'une
+/// ligne décalerait toutes les suivantes, en silence).
+fn decode_mixed(
+    tags: &[u8],
+    numbers: &[u8],
+    texts: Vec<String>,
+) -> Result<Vec<MixedCell>, ConvertError> {
+    let numbers = decode_floats(numbers)?;
+    let expected_numbers = tags.iter().filter(|&&tag| tag == MIXED_TAG_NUMBER).count();
+    if expected_numbers != numbers.len() {
+        return Err(ConvertError::BadMixedLength {
+            expected: expected_numbers,
+            found: numbers.len(),
+            what: "nombre(s)",
+        });
+    }
+    let expected_texts = tags.iter().filter(|&&tag| tag == MIXED_TAG_TEXT).count();
+    if expected_texts != texts.len() {
+        return Err(ConvertError::BadMixedLength {
+            expected: expected_texts,
+            found: texts.len(),
+            what: "texte(s)",
+        });
+    }
+    let mut numbers = numbers.into_iter();
+    let mut texts = texts.into_iter();
+    tags.iter()
+        .map(|&tag| match tag {
+            MIXED_TAG_EMPTY => Ok(MixedCell::Empty),
+            // Les deux `unwrap_or` ne se produisent pas : les comptes
+            // ci-dessus viennent d'être vérifiés exacts. Garde défensive
+            // plutôt qu'un `expect` (invariant 10).
+            MIXED_TAG_NUMBER => Ok(numbers.next().map_or(MixedCell::Empty, MixedCell::Number)),
+            MIXED_TAG_TEXT => Ok(texts.next().map_or(MixedCell::Empty, MixedCell::Text)),
+            other => Err(ConvertError::BadMixedTag(other)),
+        })
+        .collect()
+}
+
 /// Nature d'un nœud → enregistrement de transport. Infaillible : le modèle
 /// en mémoire est toujours représentable.
 pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
@@ -544,6 +633,7 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
             let values = match column.values() {
                 ColumnValues::Float(values) => ValuesRecord::Float(encode_floats(values)),
                 ColumnValues::Text(values) => ValuesRecord::Text(values.as_ref().clone()),
+                ColumnValues::Mixed(values) => encode_mixed(values),
             };
             KindRecord::Column {
                 column_type: column.column_type().into(),
@@ -611,6 +701,11 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             let block = match values {
                 ValuesRecord::Float(bytes) => ValueBlock::Float(decode_floats(&bytes)?),
                 ValuesRecord::Text(values) => ValueBlock::Text(values),
+                ValuesRecord::Mixed {
+                    tags,
+                    numbers,
+                    texts,
+                } => ValueBlock::Mixed(decode_mixed(&tags, &numbers, texts)?),
             };
             let meta = ColumnMeta {
                 role: role.into(),

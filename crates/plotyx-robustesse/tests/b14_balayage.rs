@@ -247,6 +247,17 @@ fn empreintes(project: &Project) -> HashMap<NodeId, (u64, Vec<u64>)> {
                     .iter()
                     .map(|s| s.as_ref().map_or(0, |t| t.len() as u64 + 1))
                     .collect(),
+                // Une empreinte, pas une sérialisation : l'étiquette de la
+                // cellule suffit à distinguer les trois variantes, et le
+                // motif binaire du nombre est ce qui compte pour `NaN`.
+                ColumnValues::Mixed(v) => v
+                    .iter()
+                    .map(|c| match c {
+                        plotyx_core::MixedCell::Empty => 0,
+                        plotyx_core::MixedCell::Number(x) => x.to_bits(),
+                        plotyx_core::MixedCell::Text(t) => t.len() as u64 + 1,
+                    })
+                    .collect(),
             };
             Some((id, (colonne.version(), bits)))
         })

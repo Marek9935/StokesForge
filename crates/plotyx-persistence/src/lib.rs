@@ -447,6 +447,24 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
             path: path.to_path_buf(),
             detail: format!("buffer de colonne flottante de {len} octet(s), non multiple de 8"),
         },
+        ConvertError::BadMixedTag(tag) => PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: format!(
+                "étiquette de cellule mixte inconnue ({tag}) : attendu 0 (vide), \
+                 1 (nombre) ou 2 (texte)"
+            ),
+        },
+        ConvertError::BadMixedLength {
+            expected,
+            found,
+            what,
+        } => PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: format!(
+                "colonne mixte incohérente : les étiquettes annoncent {expected} {what}, \
+                 le tableau en porte {found}"
+            ),
+        },
         ConvertError::Core(source) => PersistenceError::Corrupt {
             path: path.to_path_buf(),
             detail: format!("colonne incohérente : {source}"),

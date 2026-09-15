@@ -536,3 +536,194 @@ fn b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees() {
         "le type de tracé inconnu doit survivre à deux sauvegardes identiques"
     );
 }
+
+// -- la compatibilité *descendante* des colonnes à types mixtes -------------
+
+/// Le schéma d'aujourd'hui, **plus un type de colonne** : ce que ce lecteur
+/// verrait d'un fichier écrit par une version plus récente.
+///
+/// Le cas réel qui motive ce test est l'inverse dans le temps — un lecteur
+/// d'**avant** les colonnes à types mixtes ouvrant un fichier qui en porte
+/// une, donc rencontrant le nom de variante `"Mixed"` qu'il ne connaît pas.
+/// C'est exactement le même mécanisme ; ce test l'exerce avec un nom
+/// qu'*aucune* version n'attribue, pour qu'il reste valable maintenant que
+/// `Mixed` est connu de ce lecteur-ci.
+#[derive(Serialize)]
+enum KindAvecTypeDeColonneNeuf {
+    Folder {
+        children: Vec<u64>,
+    },
+    Workbook {
+        sheets: Vec<u64>,
+        label: String,
+        comment: String,
+    },
+    Worksheet {
+        columns: Vec<u64>,
+    },
+    Column {
+        column_type: TypeRecordFutur,
+        role: RoleRecord,
+        unit: String,
+        long_name: String,
+        comment: String,
+        display_format: String,
+        values: ValuesRecordFutur,
+        version: u64,
+    },
+}
+
+#[derive(Serialize)]
+enum TypeRecordFutur {
+    #[allow(dead_code)]
+    Numeric,
+    /// Un type de colonne qu'aucune version n'a jamais écrit — il tient ici
+    /// le rôle que `Mixed` tiendrait pour un lecteur d'avant.
+    Complex,
+}
+
+#[derive(Serialize)]
+enum ValuesRecordFutur {
+    #[allow(dead_code)]
+    Float(#[serde(with = "serde_bytes")] Vec<u8>),
+    /// La forme de valeurs qui va avec : des tableaux parallèles, comme
+    /// `ValuesRecord::Mixed` dans le schéma d'aujourd'hui.
+    Complex {
+        #[serde(with = "serde_bytes")]
+        reels: Vec<u8>,
+        #[serde(with = "serde_bytes")]
+        imaginaires: Vec<u8>,
+    },
+}
+
+#[test]
+// Ce qui rend la stratégie de migration des colonnes à types mixtes tenable
+// **sans toucher au numéro de version du format** : un lecteur plus ancien
+// qui rencontre un type de colonne qu'il ne connaît pas ne perd que cette
+// colonne, jamais le fichier. C'est le mécanisme C5 (niveau 2) de
+// `unknown.rs`, déjà en place pour les natures de nœud — une colonne est un
+// `KindRecord::Column`, donc elle en bénéficie sans qu'une ligne lui soit
+// propre. Ce test le vérifie explicitement, parce que c'est sur lui que
+// repose la décision de ne pas incrémenter `FORMAT_VERSION`.
+fn b19_un_type_de_colonne_inconnu_ne_perd_que_cette_colonne() {
+    let dir = TempDir::new().expect("répertoire");
+    let mesures: Vec<u8> = (0..500u32)
+        .flat_map(|i| f64::from(i).to_le_bytes())
+        .collect();
+
+    let body = FileBody {
+        root: 1,
+        next_id_hint: 6,
+        nodes: vec![
+            NodeRecord {
+                id: 1,
+                name: "R".to_string(),
+                parent: None,
+                kind: KindAvecTypeDeColonneNeuf::Folder { children: vec![2] },
+            },
+            NodeRecord {
+                id: 2,
+                name: "Book1".to_string(),
+                parent: Some(1),
+                kind: KindAvecTypeDeColonneNeuf::Workbook {
+                    sheets: vec![3],
+                    label: String::new(),
+                    comment: String::new(),
+                },
+            },
+            NodeRecord {
+                id: 3,
+                name: "Sheet1".to_string(),
+                parent: Some(2),
+                kind: KindAvecTypeDeColonneNeuf::Worksheet {
+                    columns: vec![4, 5],
+                },
+            },
+            NodeRecord {
+                id: 4,
+                name: "Signal".to_string(),
+                parent: Some(3),
+                kind: KindAvecTypeDeColonneNeuf::Column {
+                    column_type: TypeRecordFutur::Numeric,
+                    role: RoleRecord::Y,
+                    unit: "V".to_string(),
+                    long_name: String::new(),
+                    comment: String::new(),
+                    display_format: String::new(),
+                    values: ValuesRecordFutur::Float(mesures),
+                    version: 3,
+                },
+            },
+            NodeRecord {
+                id: 5,
+                name: "Exotique".to_string(),
+                parent: Some(3),
+                kind: KindAvecTypeDeColonneNeuf::Column {
+                    column_type: TypeRecordFutur::Complex,
+                    role: RoleRecord::Y,
+                    unit: String::new(),
+                    long_name: String::new(),
+                    comment: String::new(),
+                    display_format: String::new(),
+                    values: ValuesRecordFutur::Complex {
+                        reels: 1.0f64.to_le_bytes().to_vec(),
+                        imaginaires: 2.0f64.to_le_bytes().to_vec(),
+                    },
+                    version: 9,
+                },
+            },
+        ],
+    };
+
+    let chemin = ecrire(&dir, "complexe.plx", 1, &body);
+    let project = load(&chemin).expect(
+        "un type de colonne inconnu ne doit pas emporter le fichier : c'est la \
+         condition pour qu'un nouveau type de colonne s'ajoute sans incrémenter \
+         FORMAT_VERSION",
+    );
+    assert_eq!(
+        project.tree().len(),
+        5,
+        "les quatre nœuds lisibles ET la colonne inconnue doivent survivre"
+    );
+
+    // La colonne voisine, parfaitement lisible, garde ses 500 mesures.
+    let signal = project
+        .tree()
+        .node(plotyx_core::NodeId::from_raw(4))
+        .expect("nœud « Signal » présent")
+        .as_column()
+        .expect("« Signal » est une colonne");
+    assert_eq!(
+        signal
+            .float_values()
+            .expect("colonne numérique")
+            .as_slice()
+            .len(),
+        500,
+        "les 500 mesures de la colonne voisine doivent survivre intactes"
+    );
+
+    // La colonne exotique, elle, devient un nœud opaque.
+    let exotique = project
+        .tree()
+        .node(plotyx_core::NodeId::from_raw(5))
+        .expect("nœud « Exotique » présent malgré son type de colonne inconnu");
+    match exotique.kind() {
+        NodeKind::Unknown(raw) => assert_eq!(raw.name, "Column"),
+        other => panic!("attendu NodeKind::Unknown, obtenu {other:?}"),
+    }
+
+    // Et la fidélité de ré-écriture (B20) : ce que ce lecteur ne comprend
+    // pas, il le rend tel quel — donc un aller-retour par une version plus
+    // ancienne ne détruit pas la colonne mixte d'une version plus récente.
+    let a = dir.path().join("complexe_a.plx");
+    let b = dir.path().join("complexe_b.plx");
+    save(&project, &a).expect("première sauvegarde");
+    save(&project, &b).expect("seconde sauvegarde");
+    assert_eq!(
+        std::fs::read(&a).expect("lecture a"),
+        std::fs::read(&b).expect("lecture b"),
+        "la colonne d'un type inconnu doit survivre à deux sauvegardes identiques"
+    );
+}
