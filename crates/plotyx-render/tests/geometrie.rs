@@ -94,25 +94,38 @@ fn geometrie(
     colonnes: &[(&str, Vec<f64>)],
     construire: impl Fn(&[NodeId]) -> PlotSpec,
 ) -> DrawnPlot {
+    let colonnes: Vec<(&str, Column)> = colonnes
+        .iter()
+        .map(|(nom, valeurs)| {
+            (
+                *nom,
+                Column::from_block(
+                    ColumnType::Numeric,
+                    ValueBlock::Float(valeurs.clone()),
+                    ColumnMeta::default(),
+                )
+                .expect("colonne"),
+            )
+        })
+        .collect();
+    geometrie_de_colonnes(&colonnes, construire)
+}
+
+/// Comme [`geometrie`], mais les colonnes sont fournies telles quelles — le
+/// seul moyen d'en tracer une qui ne soit pas numérique.
+fn geometrie_de_colonnes(
+    colonnes: &[(&str, Column)],
+    construire: impl Fn(&[NodeId]) -> PlotSpec,
+) -> DrawnPlot {
     let mut project = Project::new("Géométrie").expect("projet");
     let root = project.root();
     let book = project.add_empty_workbook(root, None).expect("classeur");
     let sheet = project.add_worksheet(book, None).expect("feuille");
     let ids: Vec<NodeId> = colonnes
         .iter()
-        .map(|(nom, valeurs)| {
+        .map(|(nom, colonne)| {
             project
-                .add_column(
-                    sheet,
-                    None,
-                    Some(nom),
-                    Column::from_block(
-                        ColumnType::Numeric,
-                        ValueBlock::Float(valeurs.clone()),
-                        ColumnMeta::default(),
-                    )
-                    .expect("colonne"),
-                )
+                .add_column(sheet, None, Some(nom), colonne.clone())
                 .expect("ajout")
         })
         .collect();
@@ -190,6 +203,67 @@ fn une_serie_entierement_non_finie_ne_fait_pas_echouer_le_trace() {
     // ça. Le rendu doit sortir une figure vide, pas une erreur.
     let drawn = geometrie(
         &[("Y", vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY])],
+        |ids| un_panneau(SeriesSpec::new(ids[0]), |_| {}),
+    );
+    assert_eq!(drawn.drawn_series, 0);
+    assert_eq!(drawn.y_range(), (0.0, 1.0));
+}
+
+/// Une colonne à types mixtes se trace **exactement comme** la colonne
+/// numérique obtenue en blanchissant ses cellules texte et vides.
+///
+/// C'est la propriété qui dit que la fonctionnalité n'est entrée dans aucun
+/// backend (invariant 5) : rien ici ne connaît `ColumnType::Mixed`. La
+/// traduction a lieu une fois, dans `plotyx_core::Column::numeric_view`, et
+/// le pipeline — donc les deux backends — n'a rien appris de nouveau : il
+/// écartait déjà les points non finis.
+#[test]
+fn une_colonne_mixte_ne_trace_que_ses_cellules_numeriques() {
+    use plotyx_core::MixedCell;
+
+    let mixte = Column::from_mixed(&[
+        MixedCell::Number(10.0),
+        MixedCell::Text("n/a".to_string()),
+        MixedCell::Empty,
+        MixedCell::Number(30.0),
+    ]);
+    let equivalent_numerique = Column::from_f64(&[10.0, f64::NAN, f64::NAN, 30.0]);
+
+    let dessine = |colonne: Column| {
+        geometrie_de_colonnes(&[("Y", colonne)], |ids| {
+            un_panneau(SeriesSpec::new(ids[0]), |_| {})
+        })
+    };
+    let a = dessine(mixte);
+    let b = dessine(equivalent_numerique);
+
+    assert_eq!(a.drawn_series, 1, "la série mixte est bien tracée");
+    assert_eq!(a.y_range(), b.y_range(), "même cadrage vertical");
+    assert_eq!(
+        a.x_range(),
+        b.x_range(),
+        "même abscisse implicite : les lignes non numériques comptent toujours \
+         comme des lignes, elles ne décalent pas l'indice des suivantes"
+    );
+    // Et le cadrage ne vient que des deux nombres : ni « n/a » ni la cellule
+    // vide n'ont produit de point (5 % de marge de part et d'autre de
+    // [10, 30]).
+    assert!((a.y_range().0 - 9.0).abs() < 1e-9, "{:?}", a.y_range());
+    assert!((a.y_range().1 - 31.0).abs() < 1e-9, "{:?}", a.y_range());
+}
+
+/// Une colonne mixte dont aucune cellule n'est un nombre est traçable sans
+/// rien tracer — comme une colonne numérique entièrement `NaN`, et
+/// contrairement à une colonne **texte**, qui est une référence rompue.
+#[test]
+fn une_colonne_mixte_sans_nombre_donne_une_figure_vide_pas_une_erreur() {
+    use plotyx_core::MixedCell;
+
+    let drawn = geometrie_de_colonnes(
+        &[(
+            "Y",
+            Column::from_mixed(&[MixedCell::Text("a".to_string()), MixedCell::Empty]),
+        )],
         |ids| un_panneau(SeriesSpec::new(ids[0]), |_| {}),
     );
     assert_eq!(drawn.drawn_series, 0);

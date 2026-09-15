@@ -72,6 +72,18 @@ impl ColumnType {
     pub fn is_float_backed(self) -> bool {
         matches!(self, ColumnType::Numeric | ColumnType::DateTime)
     }
+
+    /// Nom du type en français, pour les messages destinés à un humain —
+    /// pendant de [`crate::NodeKind::type_name`]. Un seul endroit, pour que
+    /// deux messages ne nomment pas le même type différemment.
+    pub fn type_name(self) -> &'static str {
+        match self {
+            ColumnType::Numeric => "numérique",
+            ColumnType::DateTime => "date-heure",
+            ColumnType::Text => "texte",
+            ColumnType::Mixed => "mixte",
+        }
+    }
 }
 
 /// Une cellule d'une colonne à types mixtes ([`ColumnType::Mixed`]) : le type

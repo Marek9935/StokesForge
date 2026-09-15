@@ -170,10 +170,17 @@ pub(crate) fn float_buffer(
             node.kind().with_article()
         ))
     })?;
+    // `float_values`, pas `numeric_view` : cette surface rend une vue sans
+    // copie sur le buffer de la colonne, ce qu'une colonne mixte n'a pas
+    // (voir `plotyx_core::Column::numeric_view`). Lui rendre une copie
+    // matérialisée serait une vue qui ne suit plus la colonne — un piège
+    // silencieux pour un script qui croirait tenir le buffer.
     column.float_values().cloned().ok_or_else(|| {
         HostError::InvalidValue(format!(
-            "la colonne « {} » est de type texte : pyx.column ne rend que des colonnes numériques",
-            node.name()
+            "la colonne « {} » est de type {} : pyx.column ne rend que des colonnes \
+             numériques",
+            node.name(),
+            column.column_type().type_name()
         ))
     })
 }
@@ -221,9 +228,10 @@ pub(crate) fn set_column(
         })?;
         if column.float_values().is_none() {
             return Err(HostError::InvalidValue(format!(
-                "la colonne « {} » est de type texte : pyx.set_column n'écrit que des valeurs \
+                "la colonne « {} » est de type {} : pyx.set_column n'écrit que des valeurs \
                  numériques",
-                node.name()
+                node.name(),
+                column.column_type().type_name()
             )));
         }
         if values.len() != column.len() {
