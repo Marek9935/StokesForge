@@ -38,7 +38,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use plotyx_core::{ColumnMeta, ColumnType, ColumnValues, WindowMeta};
+use plotyx_core::{ColumnMeta, ColumnType, ColumnValues, MixedCell, WindowMeta};
 use plotyx_core::{CoreError, CoreResult, NodeId, Project, Tree, ValueBlock};
 use plotyx_plot::PlotSpec;
 
@@ -1054,6 +1054,7 @@ impl History {
                 Ok(structural(before, project, label))
             }
             Command::SetCells { .. }
+            | Command::SetCellsPromoting { .. }
             | Command::SetColumnType { .. }
             | Command::InsertRows { .. }
             | Command::DeleteRows { .. }
@@ -1085,63 +1086,67 @@ impl History {
                 values,
                 expected_version,
             } => {
-                // A2 (`guide-de-correction-robustesse.md` §F6) — vérifié ICI,
-                // sur l'arbre courant au moment d'appliquer cette commande
-                // (pas un instantané que l'appelant a lu plus tôt), jamais
-                // avant l'envoi : c'est tout le sens du correctif. Une
-                // colonne absente ou d'un autre type n'est pas traitée ici —
-                // `project.set_values` ci-dessous rendra l'erreur naturelle
-                // (`UnknownNode`/`Structure`), qui ne doit pas se faire
-                // maquiller en désaccord de version.
-                if let Some(expected) = expected_version {
-                    if let Some(found) = project
-                        .tree()
-                        .get(column)
-                        .ok()
-                        .and_then(|node| node.as_column())
-                        .map(|column| column.version())
-                    {
-                        if found != expected {
-                            return Err(CoreError::ConcurrentModification {
-                                column,
-                                expected,
-                                found,
-                            }
-                            .into());
-                        }
-                    }
-                }
-                // Colonnes calculées (v1, `plotyx_core::formula`) — refusé
-                // **avant** tout appel à `project.set_values` (pas d'état
-                // partiel), sur l'arbre courant au moment d'appliquer (même
-                // discipline qu'A2 ci-dessus, pas sur un instantané que
-                // l'appelant a lu plus tôt) : une colonne-formule n'accepte
-                // une écriture directe de cellule d'aucun client, ses valeurs
-                // ne sont recalculées que par `plotyx-session::actor` après
-                // coup, en dehors de l'historique. Une colonne absente ou
-                // d'un autre type n'est pas traitée ici, comme pour A2 :
-                // `project.set_values` ci-dessous rendra l'erreur naturelle.
-                if project
+                check_writable_cells(project, column, expected_version)?;
+                Ok(Entry::Data {
+                    delta: Box::new(write_cells(project, column, start, values)?),
+                    label,
+                })
+            }
+            Command::SetCellsPromoting {
+                column,
+                start,
+                values,
+                expected_version,
+            } => {
+                check_writable_cells(project, column, expected_version)?;
+                let column_type = project
                     .tree()
                     .get(column)
                     .ok()
                     .and_then(|node| node.as_column())
-                    .is_some_and(|column| column.meta().formula.is_some())
-                {
-                    return Err(CoreError::FormulaColumnReadOnly { column }.into());
-                }
-                // Le bloc écrit est cloné avant application : c'est le `after`
-                // du delta, ce qu'il faudra réécrire pour rétablir.
-                let after = values.clone();
-                let delta = project.set_values(column, start, values)?;
-                Ok(Entry::Data {
-                    delta: Box::new(DataDelta::Cells {
+                    .map(plotyx_core::Column::column_type);
+                let delta = match column_type {
+                    // Chemin 1 — le bloc convient déjà, ou la colonne n'en
+                    // est pas une (laisser `set_values` rendre l'erreur
+                    // naturelle plutôt que d'en inventer une ici, même
+                    // discipline que pour A2 ci-dessus).
+                    None => write_cells(project, column, start, values)?,
+                    Some(current) if values.fits(current) => {
+                        write_cells(project, column, start, values)?
+                    }
+                    // Chemin 2 — la colonne est déjà mixte : seul le bloc se
+                    // convertit, et l'écriture reste un delta de cellules,
+                    // proportionnel à ce qui est écrit.
+                    Some(ColumnType::Mixed) => write_cells(
+                        project,
                         column,
                         start,
-                        before: delta.previous,
-                        before_length: delta.previous_length,
-                        after,
-                    }),
+                        ValueBlock::Mixed(values.into_mixed()),
+                    )?,
+                    // Chemin 3 — promotion. Le delta est celui de
+                    // `SetColumnType` : deux instantanés de colonne, parce
+                    // que la conversion n'est pas réversible par recalcul
+                    // (voir `DataDelta::ColumnType`). L'écriture qui suit est
+                    // **dans** le même instantané `after`, donc dans la même
+                    // entrée d'historique : une seule annulation ramène à la
+                    // fois le type et les valeurs d'avant.
+                    Some(_) => {
+                        let before = project.set_column_type(column, ColumnType::Mixed)?;
+                        project.set_values(
+                            column,
+                            start,
+                            ValueBlock::Mixed(values.into_mixed()),
+                        )?;
+                        let after = column_state(project, column)?;
+                        DataDelta::ColumnType {
+                            column,
+                            before,
+                            after,
+                        }
+                    }
+                };
+                Ok(Entry::Data {
+                    delta: Box::new(delta),
                     label,
                 })
             }
@@ -1528,6 +1533,71 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
     }
 }
 
+/// Les deux refus que toute écriture de cellules — `SetCells` comme
+/// `SetCellsPromoting` — doit opposer **avant** de toucher au modèle, pour
+/// qu'un échec ne laisse aucun état partiel.
+///
+/// 1. **A2** (`guide-de-correction-robustesse.md` §F6) — la condition
+///    optimiste `expected_version`, vérifiée ICI, sur l'arbre courant au
+///    moment d'appliquer cette commande (pas un instantané que l'appelant a
+///    lu plus tôt), jamais avant l'envoi : c'est tout le sens du correctif.
+/// 2. **Colonnes calculées** (v1, `plotyx_core::formula`) — une
+///    colonne-formule n'accepte l'écriture directe de cellules d'aucun
+///    client : ses valeurs ne sont recalculées que par
+///    `plotyx-session::actor` après coup, en dehors de l'historique.
+///
+/// Une colonne absente ou d'un autre type n'est traitée ni par l'un ni par
+/// l'autre : c'est `Project::set_values`, ensuite, qui rendra l'erreur
+/// naturelle (`UnknownNode`/`Structure`) — laquelle ne doit pas se faire
+/// maquiller en désaccord de version.
+fn check_writable_cells(
+    project: &Project,
+    column: NodeId,
+    expected_version: Option<u64>,
+) -> CommandResult<()> {
+    let target = project
+        .tree()
+        .get(column)
+        .ok()
+        .and_then(|node| node.as_column());
+    if let (Some(expected), Some(found)) =
+        (expected_version, target.map(plotyx_core::Column::version))
+    {
+        if found != expected {
+            return Err(CoreError::ConcurrentModification {
+                column,
+                expected,
+                found,
+            }
+            .into());
+        }
+    }
+    if target.is_some_and(|column| column.meta().formula.is_some()) {
+        return Err(CoreError::FormulaColumnReadOnly { column }.into());
+    }
+    Ok(())
+}
+
+/// Écrit `values` et construit le [`DataDelta::Cells`] correspondant. Le bloc
+/// est cloné avant application : c'est le `after` du delta, ce qu'il faudra
+/// réécrire pour rétablir.
+fn write_cells(
+    project: &mut Project,
+    column: NodeId,
+    start: usize,
+    values: ValueBlock,
+) -> CommandResult<DataDelta> {
+    let after = values.clone();
+    let delta = project.set_values(column, start, values)?;
+    Ok(DataDelta::Cells {
+        column,
+        start,
+        before: delta.previous,
+        before_length: delta.previous_length,
+        after,
+    })
+}
+
 /// Type et valeurs actuels d'une colonne (snapshot d'un changement de type).
 fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, ColumnValues)> {
     let node = project.tree().get(column)?;
@@ -1697,6 +1767,7 @@ fn column_footprint(values: &ColumnValues) -> (usize, usize) {
             arc.len() * std::mem::size_of::<f64>(),
         ),
         ColumnValues::Text(arc) => (Arc::as_ptr(arc) as usize, text_buffer_bytes(arc)),
+        ColumnValues::Mixed(arc) => (Arc::as_ptr(arc) as usize, mixed_buffer_bytes(arc)),
     }
 }
 
@@ -1785,7 +1856,9 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         }
     };
     match command {
-        Command::SetCells { column, .. } | Command::SetColumnType { column, .. } => {
+        Command::SetCells { column, .. }
+        | Command::SetCellsPromoting { column, .. }
+        | Command::SetColumnType { column, .. } => {
             record(*column);
         }
         Command::InsertRows { sheet, .. } | Command::DeleteRows { sheet, .. } => {
@@ -1885,6 +1958,7 @@ fn block_footprint(block: &ValueBlock) -> (usize, usize) {
             values.len() * std::mem::size_of::<f64>(),
         ),
         ValueBlock::Text(values) => (values.as_ptr() as usize, text_buffer_bytes(values)),
+        ValueBlock::Mixed(values) => (values.as_ptr() as usize, mixed_buffer_bytes(values)),
     }
 }
 
@@ -1903,5 +1977,26 @@ const TEXT_ELEMENT_OVERHEAD: usize = std::mem::size_of::<Option<String>>();
 fn text_buffer_bytes(values: &[Option<String>]) -> usize {
     values.iter().fold(0usize, |total, value| {
         total + TEXT_ELEMENT_OVERHEAD + value.as_deref().map_or(0, str::len)
+    })
+}
+
+/// Coût fixe par élément d'un buffer à types mixtes : la taille d'une
+/// [`MixedCell`] dans le `Vec`, soit celle de sa plus grosse variante
+/// (`String`, `{ptr, len, cap}`) plus le discriminant — un `f64` n'ouvre
+/// aucune niche exploitable, contrairement au pointeur d'une `String`, donc
+/// ce n'est pas la taille d'un `Option<String>`.
+const MIXED_ELEMENT_OVERHEAD: usize = std::mem::size_of::<MixedCell>();
+
+/// Estimation de la taille d'un buffer à types mixtes, sur le même modèle
+/// que [`text_buffer_bytes`] : somme des octets UTF-8 des textes présents,
+/// plus [`MIXED_ELEMENT_OVERHEAD`] par cellule, quelle que soit sa variante.
+fn mixed_buffer_bytes(values: &[MixedCell]) -> usize {
+    values.iter().fold(0usize, |total, cell| {
+        total
+            + MIXED_ELEMENT_OVERHEAD
+            + match cell {
+                MixedCell::Text(text) => text.len(),
+                MixedCell::Empty | MixedCell::Number(_) => 0,
+            }
     })
 }

@@ -58,6 +58,42 @@ pub enum Command {
         /// et la commande qu'il envoie.
         expected_version: Option<u64>,
     },
+    /// Écrit `values` dans `column` comme [`Command::SetCells`], mais
+    /// **élargit le type de la colonne** au lieu de refuser un bloc qui ne
+    /// lui correspond pas.
+    ///
+    /// C'est la commande de la saisie *tolérante* : taper « n/a » dans une
+    /// colonne numérique n'est plus une erreur ni un `NaN` silencieux, c'est
+    /// une colonne qui devient [`ColumnType::Mixed`] et une cellule qui porte
+    /// un texte, les autres gardant leurs nombres. `SetCells` reste la
+    /// commande de la saisie *stricte*, celle d'un appelant qui sait ce qu'il
+    /// écrit et veut être refusé s'il se trompe (le pont Python, un script).
+    ///
+    /// Trois chemins, du moins cher au plus cher :
+    ///
+    /// 1. le bloc correspond déjà au type de la colonne → strictement
+    ///    `SetCells`, même delta, même coût ;
+    /// 2. la colonne est **déjà** mixte et le bloc ne l'est pas → le bloc est
+    ///    converti ([`ValueBlock::into_mixed`]) et écrit ; toujours un delta
+    ///    de cellules, donc toujours proportionnel à ce qui est écrit, pas à
+    ///    la taille de la colonne ;
+    /// 3. la colonne n'est pas mixte et le bloc ne lui correspond pas → la
+    ///    colonne est promue en `Mixed` **puis** écrite. C'est le seul chemin
+    ///    qui coûte un instantané de colonne dans l'historique, exactement
+    ///    comme `SetColumnType` qu'il contient ; il n'a lieu qu'une fois par
+    ///    colonne, la deuxième saisie tolérante empruntant le chemin 2.
+    SetCellsPromoting {
+        /// Colonne visée.
+        column: NodeId,
+        /// Première ligne écrite.
+        start: usize,
+        /// Bloc écrit ; sa variante n'a **pas** à correspondre au type de la
+        /// colonne.
+        values: ValueBlock,
+        /// Même condition optimiste que [`Command::SetCells`], vérifiée au
+        /// même moment et avec le même effet en cas de désaccord.
+        expected_version: Option<u64>,
+    },
     /// Ajoute une colonne à `sheet`. `index: None` → en fin ;
     /// `name: None` → premier nom libre façon tableur.
     AddColumn {
@@ -256,10 +292,12 @@ impl Command {
     /// libellé n'est pas l'endroit où signaler un problème.
     pub fn label(&self, tree: &Tree) -> String {
         match self {
-            Command::SetCells { column, .. } => match name_of(tree, *column) {
-                Some(name) => format!("Saisie dans {name}"),
-                None => "Saisie".to_string(),
-            },
+            Command::SetCells { column, .. } | Command::SetCellsPromoting { column, .. } => {
+                match name_of(tree, *column) {
+                    Some(name) => format!("Saisie dans {name}"),
+                    None => "Saisie".to_string(),
+                }
+            }
             Command::AddColumn { .. } => "Ajouter une colonne".to_string(),
             Command::DeleteColumn { column } => match name_of(tree, *column) {
                 Some(name) => format!("Supprimer la colonne {name}"),
@@ -336,6 +374,11 @@ impl Command {
     /// déjà en place, sans toucher à sa position ni à celle d'aucun autre —
     /// même nature que `SetColumnType`, qui reste côté données bien qu'il
     /// remplace, lui aussi, tout un contenu en bloc.
+    ///
+    /// `SetCellsPromoting` non plus, bien qu'elle puisse changer le **type**
+    /// d'une colonne : changer le type d'un nœud n'est pas changer la forme
+    /// de l'arbre, et son delta est exactement celui de `SetColumnType` —
+    /// un instantané de colonne, jamais un instantané d'arbre.
     pub fn is_structural(&self) -> bool {
         matches!(
             self,
