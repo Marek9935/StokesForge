@@ -97,10 +97,56 @@ sauvegardes successives à l'identique** (batterie `b20`). `RawVariant` ne
 connaît ni `serde` ni MessagePack : il ne porte que des octets opaques, déjà
 encodés tels que lus, et seul ce crate sait les réinterpréter.
 
+Un détail qui ne se voit pas d'ici mais sans lequel rien de tout cela ne
+tient : le nœud dégradé doit ensuite **passer la validation d'arbre**. Une
+nature non reconnue compte comme fenêtre, donc un dossier l'acceptait ; un
+classeur et une feuille, non — et une colonne dégradée sous sa feuille faisait
+donc échouer tout le fichier, exactement là où la dégradation devait servir.
+Les trois conteneurs l'acceptent depuis (`plotyx_core::NodeKind::accepts_child`,
+batterie `b19`).
+
 Le compromis est assumé et documenté : le détour par `rmpv::Value` copie les
 octets d'une colonne une ou deux fois de plus qu'un décodage direct. Rien ne
 mesure aujourd'hui le coût de `load`/`save` ; c'est un coût à surveiller si le
 format finit par porter des colonnes bien plus grandes.
+
+## Les colonnes à types mixtes : ajout additif, aucune migration
+
+`ColumnType::Mixed` ([`modele-de-donnees.md`](modele-de-donnees.md)) a ajouté
+une variante à `TypeRecord` et une à `ValuesRecord`. **`FORMAT_VERSION` n'a pas
+bougé, et il n'y a aucune fonction de migration.** Les deux sens s'appuient sur
+des mécanismes déjà en place :
+
+| Sens | Ce qui se passe |
+|---|---|
+| ancien fichier, lecteur d'aujourd'hui | rien n'a changé pour lui — les trois variantes historiques et leurs encodages sont intacts, les colonnes homogènes s'écrivent octet pour octet comme avant |
+| fichier d'aujourd'hui, lecteur d'hier | le nom de variante `Mixed` lui est inconnu, son décodage strict de la colonne échoue, `unknown.rs` la range en `KindRecord::Unknown` : il perd **cette colonne**, pas le fichier, et une ré-écriture la restitue à l'identique |
+
+La seconde ligne est ce qui rend le choix de ne pas incrémenter
+`FORMAT_VERSION` défendable, et c'est pour cela qu'elle est **testée**
+(`b19_un_type_de_colonne_inconnu_ne_perd_que_cette_colonne`) plutôt que
+supposée. Incrémenter aurait eu un coût sans contrepartie : *tous* les
+fichiers écrits ensuite, colonne mixte ou pas, seraient devenus illisibles par
+les lecteurs antérieurs.
+
+### Pourquoi trois tableaux parallèles et pas un tableau d'énumérations
+
+`ValuesRecord::Mixed` porte `{ tags, numbers, texts }` : un octet d'étiquette
+par ligne (`0` vide, `1` nombre, `2` texte), puis les seules valeurs qui
+existent — les nombres en little-endian brut comme `Float`, les textes à la
+suite.
+
+La raison est la même que celle qui fait écrire les colonnes numériques en
+octets bruts : `to_vec_named` sérialise une énumération par le **nom** de sa
+variante. Un `Vec<MixedCellRecord>` aurait écrit la chaîne `"Number"` — sept
+octets — devant chacun des huit octets d'une valeur. Avec les tableaux
+parallèles, une colonne d'un million de points majoritairement numérique pèse
+9 Mo au lieu de 16, et les `NaN` comme les `-0.0` traversent bit à bit.
+
+Le prix est une cohérence à vérifier à la lecture : les étiquettes doivent
+annoncer exactement ce que les deux tableaux portent. Toute incohérence —
+étiquette inconnue comprise — est un `Corrupt`, jamais un décalage silencieux
+de toutes les lignes suivantes. Même politique que `BadFloatLength`.
 
 ## Bornes de lecture
 

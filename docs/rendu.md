@@ -48,6 +48,16 @@ appris.
 6. **la légende** en dernier, par-dessus, et mesurée par le même chemin que les
    axes.
 
+Rien de tout cela ne connaît le type des colonnes tracées : le pipeline reçoit
+des `ResolvedValues`, c'est-à-dire des `f64`, et il écarte déjà les points non
+finis. C'est ce qui a permis aux **colonnes à types mixtes** d'entrer sans
+qu'une ligne de rendu bouge : `plotyx_core::Column::numeric_view` donne `NaN`
+pour une cellule texte ou vide, et une colonne mixte trace donc exactement ses
+cellules numériques (`plotyx-render/tests/geometrie.rs`,
+`une_colonne_mixte_ne_trace_que_ses_cellules_numeriques`). L'endroit correct
+pour ce genre de traduction est toujours celui-là — en amont, une fois — et
+jamais un backend (invariant 5).
+
 ### Deux pièges Plotters, à connaître avant de toucher au rendu
 
 `plotters` est pris **sans ses fonts** (`default-features = false`).

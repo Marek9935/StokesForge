@@ -441,6 +441,27 @@ aurait été une réponse légitime à « qu'est-ce qu'un utilisateur pourrait v
 taper ici ? » ; un espace insécable n'est accessible à la frappe sur aucun
 clavier usuel.
 
+Il ne vaut que pour les colonnes **texte**, où une chaîne vide présente existe
+et doit rester indiscernable à l'œil. Une colonne **mixte** porte
+l'information dans le type de sa cellule : `cell_text_in` la lit par
+`Column::cell` (et non `Column::get`, qui confondrait les deux cas) et affiche
+une cellule vide comme une cellule numérique vide, `""`.
+
+### Taper ce qui n'est pas un nombre
+
+Une saisie non numérique dans une colonne numérique **élargit la colonne**
+plutôt que d'être refusée : `commit_cell` envoie `Command::SetCellsPromoting`,
+la colonne devient `ColumnType::Mixed`, la cellule porte le texte, les autres
+gardent leurs nombres ([`commandes-et-historique.md`](commandes-et-historique.md)).
+Conversion et écriture tiennent dans une seule entrée d'historique : un
+`Ctrl+Z` ramène le type *et* la valeur d'avant.
+
+Avant les colonnes à types mixtes, la saisie était refusée avec un message
+d'erreur, et noter un « n/a » sur une ligne obligeait à convertir toute la
+colonne en texte — donc à rendre tout le reste intraçable. Sur une colonne
+déjà mixte, plus rien n'est promu : chaque cellule décide pour elle-même, et
+un nombre tapé y reste un nombre.
+
 ### Binaire
 
 `plotyx-app [chemin]`. Si `chemin` existe, le projet est chargé depuis ce
