@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::column::ColumnValues;
+use crate::column::{ColumnValues, NumericStatus};
 
 /// Pourquoi une formule ne produit pas les valeurs qu'elle décrit. Jamais un
 /// panic (invariant 10) : chaque variante est un état de première classe,
@@ -390,6 +390,15 @@ impl Formula {
 pub struct FormulaEvaluation {
     /// Valeurs calculées, ou `NaN` partout si `error.is_some()`.
     pub values: Vec<f64>,
+    /// Statut ligne à ligne, parallèle à `values` (même longueur), qui
+    /// distingue une case sans rien à calculer
+    /// ([`NumericStatus::Missing`]) d'un vrai échec de calcul dû à un texte
+    /// non numérique dans une colonne référencée ([`NumericStatus::Failed`])
+    /// — voir [`ColumnValues::status_at`]. Toujours `Missing` partout si
+    /// `error.is_some()` : une erreur de formule (colonne inconnue,
+    /// auto-référence, cycle, ...) dégrade tout en bloc, sans qu'il y ait de
+    /// distinction ligne à ligne à faire.
+    pub statuses: Vec<NumericStatus>,
     /// `None` si l'évaluation a réussi.
     pub error: Option<FormulaError>,
 }
@@ -398,6 +407,7 @@ impl FormulaEvaluation {
     fn degraded(target_len: usize, error: FormulaError) -> Self {
         Self {
             values: vec![f64::NAN; target_len],
+            statuses: vec![NumericStatus::Missing; target_len],
             error: Some(error),
         }
     }
@@ -455,30 +465,59 @@ pub fn evaluate(
             Some(ColumnValues::Float(_)) | Some(ColumnValues::Mixed(_)) => {}
         }
     }
-    let values = (0..target_len)
+    let (values, statuses) = (0..target_len)
         .map(|row| eval_expr(&formula.expr, row, columns))
-        .collect();
+        .unzip();
     FormulaEvaluation {
         values,
+        statuses,
         error: None,
     }
 }
 
-fn eval_expr(expr: &Expr, row: usize, columns: &[ColumnValues]) -> f64 {
+/// Évalue `expr` à la ligne `row`, en rendant à la fois la valeur flottante
+/// (arithmétique IEEE ordinaire, inchangée) et le [`NumericStatus`] combiné
+/// de ses opérandes — **`Failed` l'emporte toujours sur `Missing`**
+/// ([`NumericStatus::combine`]) : un texte non numérique quelque part dans
+/// l'expression doit se voir, même noyé dans une addition avec une case
+/// vide.
+fn eval_expr(expr: &Expr, row: usize, columns: &[ColumnValues]) -> (f64, NumericStatus) {
     match expr {
-        Expr::Number(value) => *value,
-        // `number_at` plutôt que `get` : la lecture sans allocation, qui rend
-        // déjà `NaN` pour tout ce qui n'est pas un nombre (colonne texte
-        // référencée — `evaluate` l'a de toute façon déjà refusée —, cellule
-        // texte ou vide d'une colonne mixte, ligne hors bornes). `get`
-        // clonerait une `String` par ligne pour la jeter aussitôt.
-        Expr::Column(index) => columns[*index].number_at(row),
-        Expr::Neg(inner) => -eval_expr(inner, row, columns),
-        Expr::Add(a, b) => eval_expr(a, row, columns) + eval_expr(b, row, columns),
-        Expr::Sub(a, b) => eval_expr(a, row, columns) - eval_expr(b, row, columns),
-        Expr::Mul(a, b) => eval_expr(a, row, columns) * eval_expr(b, row, columns),
-        Expr::Div(a, b) => eval_expr(a, row, columns) / eval_expr(b, row, columns),
+        Expr::Number(value) => (*value, NumericStatus::Ok),
+        // `number_at`/`status_at` plutôt que `get` : la lecture sans
+        // allocation, qui rend déjà `NaN` pour tout ce qui n'est pas un
+        // nombre (colonne texte référencée — `evaluate` l'a de toute façon
+        // déjà refusée —, cellule texte ou vide d'une colonne mixte, ligne
+        // hors bornes). `get` clonerait une `String` par ligne pour la jeter
+        // aussitôt.
+        Expr::Column(index) => (
+            columns[*index].number_at(row),
+            columns[*index].status_at(row),
+        ),
+        Expr::Neg(inner) => {
+            let (value, status) = eval_expr(inner, row, columns);
+            (-value, status)
+        }
+        Expr::Add(a, b) => combine(a, b, row, columns, |x, y| x + y),
+        Expr::Sub(a, b) => combine(a, b, row, columns, |x, y| x - y),
+        Expr::Mul(a, b) => combine(a, b, row, columns, |x, y| x * y),
+        Expr::Div(a, b) => combine(a, b, row, columns, |x, y| x / y),
     }
+}
+
+/// Facteur commun aux quatre opérateurs binaires : calcule chaque opérande
+/// (valeur et statut), combine les valeurs par `op` (arithmétique IEEE
+/// inchangée) et les statuts par [`NumericStatus::combine`].
+fn combine(
+    a: &Expr,
+    b: &Expr,
+    row: usize,
+    columns: &[ColumnValues],
+    op: impl Fn(f64, f64) -> f64,
+) -> (f64, NumericStatus) {
+    let (av, astatus) = eval_expr(a, row, columns);
+    let (bv, bstatus) = eval_expr(b, row, columns);
+    (op(av, bv), astatus.combine(bstatus))
 }
 
 /// Ordonne un ensemble de nœuds par dépendance (tri topologique de Kahn),
@@ -556,6 +595,22 @@ mod tests {
     fn text_column(values: &[Option<&str>]) -> ColumnValues {
         ColumnValues::Text(Arc::new(
             values.iter().map(|v| v.map(str::to_string)).collect(),
+        ))
+    }
+
+    /// Colonne mixte de test : `None` = vide, `Some(Ok(n))` = nombre,
+    /// `Some(Err(texte))` = texte non numérique.
+    fn mixed_column(cells: &[Option<Result<f64, &str>>]) -> ColumnValues {
+        use crate::column::MixedCell;
+        ColumnValues::Mixed(Arc::new(
+            cells
+                .iter()
+                .map(|cell| match cell {
+                    None => MixedCell::Empty,
+                    Some(Ok(value)) => MixedCell::Number(*value),
+                    Some(Err(text)) => MixedCell::Text((*text).to_string()),
+                })
+                .collect(),
         ))
     }
 
@@ -717,6 +772,110 @@ mod tests {
         assert_eq!(result.error, None);
         assert!(result.values[0].is_infinite());
         assert!(result.values[1].is_nan());
+    }
+
+    // -- statut ligne à ligne (Ok / Missing / Failed) --
+
+    #[test]
+    fn numeric_status_combine_failed_always_wins() {
+        assert_eq!(
+            NumericStatus::Failed.combine(NumericStatus::Missing),
+            NumericStatus::Failed
+        );
+        assert_eq!(
+            NumericStatus::Missing.combine(NumericStatus::Failed),
+            NumericStatus::Failed
+        );
+        assert_eq!(
+            NumericStatus::Failed.combine(NumericStatus::Ok),
+            NumericStatus::Failed
+        );
+        assert_eq!(
+            NumericStatus::Missing.combine(NumericStatus::Ok),
+            NumericStatus::Missing
+        );
+        assert_eq!(
+            NumericStatus::Ok.combine(NumericStatus::Ok),
+            NumericStatus::Ok
+        );
+    }
+
+    #[test]
+    fn evaluate_tags_failed_and_missing_row_by_row() {
+        // L'exemple de la tâche : A = [1,2,3,4,""], B = [1,1,"zut",1,1],
+        // C = A+B doit rendre, ligne à ligne : Ok(2), Ok(3), Failed, Ok(5),
+        // Missing (A vide, B présent : la case résultat existe quand même
+        // avec la valeur de B, comme aujourd'hui — seul le statut est
+        // nouveau, pas la valeur).
+        let formula = Formula::parse("A+B").expect("parse");
+        let a = float_column(&[1.0, 2.0, 3.0, 4.0, f64::NAN]);
+        let b = mixed_column(&[
+            Some(Ok(1.0)),
+            Some(Ok(1.0)),
+            Some(Err("zut")),
+            Some(Ok(1.0)),
+            Some(Ok(1.0)),
+        ]);
+        let columns = [a, b];
+        let result = evaluate(&formula, 5, &columns, 5);
+        assert_eq!(result.error, None);
+
+        assert_eq!(result.values[0], 2.0);
+        assert_eq!(result.statuses[0], NumericStatus::Ok);
+
+        assert_eq!(result.values[1], 3.0);
+        assert_eq!(result.statuses[1], NumericStatus::Ok);
+
+        assert!(result.values[2].is_nan());
+        assert_eq!(result.statuses[2], NumericStatus::Failed);
+
+        assert_eq!(result.values[3], 5.0);
+        assert_eq!(result.statuses[3], NumericStatus::Ok);
+
+        // A manquant (NaN), B = 1.0 : la valeur suit la convention de
+        // propagation déjà en place (NaN + 1.0 = NaN), et le statut est
+        // Missing (pas Failed : rien n'a échoué, il manque juste une
+        // opérande).
+        assert!(result.values[4].is_nan());
+        assert_eq!(result.statuses[4], NumericStatus::Missing);
+    }
+
+    #[test]
+    fn evaluate_status_is_ok_for_plain_arithmetic() {
+        let formula = Formula::parse("A*B").expect("parse");
+        let columns = [float_column(&[2.0]), float_column(&[3.0])];
+        let result = evaluate(&formula, 5, &columns, 1);
+        assert_eq!(result.values, vec![6.0]);
+        assert_eq!(result.statuses, vec![NumericStatus::Ok]);
+    }
+
+    #[test]
+    fn evaluate_status_is_missing_when_both_operands_are_missing() {
+        let formula = Formula::parse("A+B").expect("parse");
+        let columns = [mixed_column(&[None]), mixed_column(&[None])];
+        let result = evaluate(&formula, 5, &columns, 1);
+        assert!(result.values[0].is_nan());
+        assert_eq!(result.statuses[0], NumericStatus::Missing);
+    }
+
+    #[test]
+    fn evaluate_status_failed_wins_over_missing() {
+        // A vide, B texte non numérique : Failed doit l'emporter sur
+        // Missing (jamais un vrai échec caché derrière une case vide).
+        let formula = Formula::parse("A+B").expect("parse");
+        let columns = [mixed_column(&[None]), mixed_column(&[Some(Err("x"))])];
+        let result = evaluate(&formula, 5, &columns, 1);
+        assert!(result.values[0].is_nan());
+        assert_eq!(result.statuses[0], NumericStatus::Failed);
+    }
+
+    #[test]
+    fn degraded_evaluation_reports_missing_status_everywhere() {
+        let formula = Formula::parse("A+C").expect("parse");
+        let columns = [float_column(&[1.0]), float_column(&[2.0])];
+        let result = evaluate(&formula, 5, &columns, 3);
+        assert!(result.error.is_some());
+        assert_eq!(result.statuses, vec![NumericStatus::Missing; 3]);
     }
 
     // -- lettres --

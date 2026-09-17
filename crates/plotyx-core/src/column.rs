@@ -477,6 +477,69 @@ impl ColumnValues {
             ColumnValues::Mixed(values) => values.get(row).map_or(f64::NAN, MixedCell::as_number),
         }
     }
+
+    /// Statut numérique de la cellule à la ligne `row` — pendant de
+    /// [`ColumnValues::number_at`], mais qui distingue **pourquoi** une
+    /// cellule ne porte pas de nombre : [`NumericStatus::Missing`] (rien à
+    /// calculer : cellule vide, ou hors bornes du buffer) contre
+    /// [`NumericStatus::Failed`] (un texte non vide, non numérique, est
+    /// présent — un vrai échec de calcul, pas une absence). Sert à
+    /// `crate::formula` pour distinguer, ligne à ligne, une formule qui n'a
+    /// simplement rien à faire d'une formule qui échoue vraiment (affichée
+    /// `---` côté UI, contre une cellule laissée vide).
+    ///
+    /// Une colonne `Text` n'atteint jamais ce code en pratique : `evaluate`
+    /// refuse toute référence à une colonne `Text` en bloc, avant même
+    /// d'appeler ceci ligne à ligne. Le cas est néanmoins couvert (`Failed`,
+    /// un texte non vide étant par définition non numérique), par cohérence
+    /// plutôt que par nécessité.
+    pub fn status_at(&self, row: usize) -> NumericStatus {
+        match self {
+            ColumnValues::Float(values) => match values.get(row) {
+                Some(value) if value.is_nan() => NumericStatus::Missing,
+                Some(_) => NumericStatus::Ok,
+                None => NumericStatus::Missing,
+            },
+            ColumnValues::Text(values) => match values.get(row) {
+                Some(Some(text)) if !text.is_empty() => NumericStatus::Failed,
+                Some(Some(_)) | Some(None) | None => NumericStatus::Missing,
+            },
+            ColumnValues::Mixed(values) => match values.get(row) {
+                None | Some(MixedCell::Empty) => NumericStatus::Missing,
+                Some(MixedCell::Number(value)) if value.is_nan() => NumericStatus::Missing,
+                Some(MixedCell::Number(_)) => NumericStatus::Ok,
+                Some(MixedCell::Text(text)) if text.is_empty() => NumericStatus::Missing,
+                Some(MixedCell::Text(_)) => NumericStatus::Failed,
+            },
+        }
+    }
+}
+
+/// Statut d'une cellule vis-à-vis d'un calcul numérique — voir
+/// [`ColumnValues::status_at`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericStatus {
+    /// Une valeur numérique finie est présente.
+    Ok,
+    /// Rien à cette ligne : cellule vide, ou ligne au-delà de la longueur de
+    /// la colonne.
+    Missing,
+    /// Un texte non vide, non numérique, occupe la cellule : le calcul ne
+    /// peut pas se faire, ce n'est pas une simple absence.
+    Failed,
+}
+
+impl NumericStatus {
+    /// Combine deux statuts d'opérandes d'un même opérateur binaire :
+    /// `Failed` l'emporte toujours (un vrai échec ne doit jamais se cacher
+    /// derrière une case vide), sinon `Missing` l'emporte sur `Ok`.
+    pub fn combine(self, other: NumericStatus) -> NumericStatus {
+        match (self, other) {
+            (NumericStatus::Failed, _) | (_, NumericStatus::Failed) => NumericStatus::Failed,
+            (NumericStatus::Missing, _) | (_, NumericStatus::Missing) => NumericStatus::Missing,
+            (NumericStatus::Ok, NumericStatus::Ok) => NumericStatus::Ok,
+        }
+    }
 }
 
 /// Ce qu'il faut pour annuler un `set_values` sans copier la colonne : les

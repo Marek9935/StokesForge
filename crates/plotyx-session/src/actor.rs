@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError, CommandResult, History};
 use plotyx_core::{
-    evaluate_formula, topological_order, ColumnType, Formula, NodeId, Project, ValueBlock,
+    evaluate_formula, topological_order, ColumnType, Formula, NodeId, NumericStatus, Project,
+    ValueBlock,
 };
 
 use crate::error::{SessionError, SessionResult};
@@ -506,7 +507,37 @@ fn recalc_sheet(project: &mut Project, sheet: NodeId) {
             Ok(formula) => {
                 parsed.insert(id, formula);
             }
-            Err(_error) => write_formula_column(project, id, vec![f64::NAN; target_len]),
+            Err(_error) => write_formula_column(
+                project,
+                id,
+                vec![f64::NAN; target_len],
+                &vec![NumericStatus::Missing; target_len],
+            ),
+        }
+    }
+
+    // Type de sortie d'une colonne-formule : `Numeric` si toutes les
+    // colonnes qu'elle référence sont `Numeric`/`DateTime` (l'échec est alors
+    // impossible, seules des cases manquantes peuvent apparaître), `Mixed`
+    // dès qu'une seule est `Mixed` (l'échec devient possible — voir
+    // `write_formula_column`, qui a besoin de ce type pour savoir où écrire
+    // `"---"`). Recalculé à chaque passe plutôt que figé à la création : une
+    // formule référence potentiellement une colonne dont le type change
+    // ensuite (conversion manuelle). Appliqué directement au modèle plutôt
+    // que par une commande annulable, comme `write_formula_column`
+    // ci-dessous : c'est la même dérivation « hors historique » que le
+    // recalcul des valeurs (voir la doc de tête de `recalc_sheet`), pas une
+    // saisie utilisateur à elle seule annulable.
+    for (&id, formula) in &parsed {
+        if let Some(desired) = desired_formula_column_type(formula, &columns, project) {
+            let current = project
+                .tree()
+                .node(id)
+                .and_then(|node| node.as_column())
+                .map(plotyx_core::Column::column_type);
+            if current != Some(desired) {
+                let _ = project.set_column_type(id, desired);
+            }
         }
     }
 
@@ -529,7 +560,12 @@ fn recalc_sheet(project: &mut Project, sheet: NodeId) {
     let (order, blocked) = topological_order(&edges);
 
     for id in blocked {
-        write_formula_column(project, id, vec![f64::NAN; target_len]);
+        write_formula_column(
+            project,
+            id,
+            vec![f64::NAN; target_len],
+            &vec![NumericStatus::Missing; target_len],
+        );
     }
     for id in order {
         let Some(formula) = parsed.get(&id) else {
@@ -560,22 +596,72 @@ fn recalc_sheet(project: &mut Project, sheet: NodeId) {
         }
         let values: Vec<_> = values.into_iter().flatten().collect();
         let evaluation = evaluate_formula(formula, self_index, &values, target_len);
-        write_formula_column(project, id, evaluation.values);
+        write_formula_column(project, id, evaluation.values, &evaluation.statuses);
     }
 }
 
-/// Écrit `values` dans `column`, en le tronquant/étendant d'abord à sa
-/// longueur (`Project::set_length`) puisque `Project::set_values` n'écrase
-/// jamais une queue de colonne plus longue que le bloc écrit. Ignore
-/// silencieusement un échec (`column` disparu entre-temps, ce que rien dans
-/// cette fonction ne provoque) plutôt que de paniquer — invariant 10.
-fn write_formula_column(project: &mut Project, column: NodeId, values: Vec<f64>) {
+/// Type que devrait porter la colonne-résultat de `formula` d'après les
+/// colonnes qu'elle référence, ou `None` quand ça ne peut pas se décider
+/// (référence hors bornes, ou vers une colonne dont le type n'est de toute
+/// façon pas exploitable ici) — dans ce cas, l'appelant laisse le type de la
+/// colonne inchangé plutôt que de choisir au hasard. `Mixed` dès qu'une
+/// référence est `Mixed` (l'échec de calcul devient possible), sinon
+/// `Numeric` (y compris pour une formule sans référence, une constante pure).
+fn desired_formula_column_type(
+    formula: &Formula,
+    columns: &[NodeId],
+    project: &Project,
+) -> Option<ColumnType> {
+    let mut any_mixed = false;
+    for index in formula.referenced_columns() {
+        let &column_id = columns.get(index)?;
+        let column_type = project
+            .tree()
+            .node(column_id)
+            .and_then(|node| node.as_column())
+            .map(plotyx_core::Column::column_type)?;
+        match column_type {
+            ColumnType::Mixed => any_mixed = true,
+            ColumnType::Numeric | ColumnType::DateTime => {}
+            #[allow(unreachable_patterns)]
+            _ => return None,
+        }
+    }
+    Some(if any_mixed {
+        ColumnType::Mixed
+    } else {
+        ColumnType::Numeric
+    })
+}
+
+/// Écrit `values`/`statuses` dans `column`, en le tronquant/étendant d'abord
+/// à sa longueur (`Project::set_length`) puisque `Project::set_values`
+/// n'écrase jamais une queue de colonne plus longue que le bloc écrit.
+/// Ignore silencieusement un échec (`column` disparu entre-temps, ce que
+/// rien dans cette fonction ne provoque) plutôt que de paniquer — invariant
+/// 10.
+///
+/// Pour une colonne-formule **mixte**, une ligne au statut
+/// [`NumericStatus::Failed`] s'écrit `MixedCell::Text("---")` plutôt que
+/// `MixedCell::Empty` : un vrai échec de calcul (texte non numérique dans
+/// une colonne référencée) ne doit jamais se confondre avec une case qui n'a
+/// simplement rien à calculer ([`NumericStatus::Missing`], qui reste
+/// `Empty` comme aujourd'hui). `statuses` doit avoir la même longueur que
+/// `values` ; sinon ce sont les valeurs seules qui gouvernent (aucune ligne
+/// n'est marquée `Failed`), comme avant l'ajout de ce paramètre.
+fn write_formula_column(
+    project: &mut Project,
+    column: NodeId,
+    values: Vec<f64>,
+    statuses: &[NumericStatus],
+) {
     // Le bloc doit correspondre au type de la colonne, sans quoi
     // `set_values` refuse et le recalcul serait silencieusement perdu. Une
     // colonne-formule est presque toujours numérique, mais rien n'interdit
     // de poser une formule sur une colonne mixte : `ValueBlock::into_mixed`
     // fait alors des `NaN` des cellules vides, ce que la formule voulait
-    // dire (invariant 10 — dégrader, pas avaler).
+    // dire (invariant 10 — dégrader, pas avaler) ; une ligne `Failed` s'y
+    // écrit `"---"` plutôt qu'une case vide, voir la doc ci-dessus.
     let is_mixed = project
         .tree()
         .node(column)
@@ -583,7 +669,15 @@ fn write_formula_column(project: &mut Project, column: NodeId, values: Vec<f64>)
         .is_some_and(|target| target.column_type() == ColumnType::Mixed);
     let length = values.len();
     let block = if is_mixed {
-        ValueBlock::Mixed(ValueBlock::Float(values).into_mixed())
+        let mut cells = ValueBlock::Float(values).into_mixed();
+        if statuses.len() == cells.len() {
+            for (cell, status) in cells.iter_mut().zip(statuses) {
+                if *status == NumericStatus::Failed {
+                    *cell = plotyx_core::MixedCell::Text("---".to_string());
+                }
+            }
+        }
+        ValueBlock::Mixed(cells)
     } else {
         ValueBlock::Float(values)
     };

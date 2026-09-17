@@ -4,7 +4,7 @@
 //! déclenchement que ces tests vérifient depuis l'extérieur.
 
 use plotyx_commands::Command;
-use plotyx_core::{Cell, Column, ColumnMeta, ColumnType, NodeId, Project, ValueBlock};
+use plotyx_core::{Cell, Column, ColumnMeta, ColumnType, MixedCell, NodeId, Project, ValueBlock};
 use plotyx_session::{Session, Snapshot};
 
 /// `Book1 → Sheet1` avec `A [1,2,3]`, `B [10,20,30]` et une colonne `C`
@@ -269,4 +269,97 @@ fn load_recalculates_rather_than_trusting_the_saved_values() {
         vec![11.0, 22.0, 33.0],
         "recalculé au chargement, pas les -1.0 lus du fichier"
     );
+}
+
+/// Une colonne-formule qui référence une colonne mixte se retype
+/// automatiquement en `Mixed` (l'échec de calcul devient possible), et une
+/// ligne dont l'échec vient d'un texte non numérique s'affiche `"---"`
+/// (`MixedCell::Text`) plutôt qu'une case vide — distincte d'une ligne
+/// réellement vide, qui reste `MixedCell::Empty`. Reprend l'exemple de la
+/// tâche : A = [1,2,3,4,""] (numérique, la 5ᵉ case est hors longueur → vide),
+/// B = [1,1,"zut",1,1] (mixte), C = A+B.
+#[test]
+fn mixed_reference_retypes_the_formula_column_and_shows_dashes_on_failure() {
+    let mut project = Project::new("Demo").expect("projet valide");
+    let root = project.root();
+    project
+        .add_workbook(root, Some("Book1"))
+        .expect("classeur créé");
+    let sheet = project
+        .resolve_path("[Book1]Sheet1")
+        .expect("feuille résolue");
+    let _a = project
+        .add_column(
+            sheet,
+            None,
+            Some("A"),
+            Column::from_f64(&[1.0, 2.0, 3.0, 4.0]),
+        )
+        .expect("colonne A");
+    let _b = project
+        .add_column(
+            sheet,
+            None,
+            Some("B"),
+            Column::from_mixed(&[
+                MixedCell::Number(1.0),
+                MixedCell::Number(1.0),
+                MixedCell::Text("zut".to_string()),
+                MixedCell::Number(1.0),
+                MixedCell::Number(1.0),
+            ]),
+        )
+        .expect("colonne B");
+    // C créée numérique au départ : la pose de la formule doit la retyper.
+    let c = project
+        .add_column(sheet, None, Some("C"), Column::new(ColumnType::Numeric))
+        .expect("colonne C");
+
+    let session = Session::spawn(project, None).expect("thread de l'acteur démarré");
+    let handle = session.handle();
+    handle
+        .execute(set_formula(c, "A+B"))
+        .expect("poser C = A+B");
+
+    let snapshot = handle.snapshot().expect("snapshot");
+    let node = snapshot.tree.node(c).expect("colonne C");
+    let column = node.as_column().expect("le nœud est une colonne");
+    assert_eq!(
+        column.column_type(),
+        ColumnType::Mixed,
+        "B est mixte : C doit se retyper automatiquement en Mixed"
+    );
+
+    // Ligne 0 : 1+1 = 2 (Ok).
+    assert_eq!(column.cell(0), MixedCell::Number(2.0));
+    // Ligne 1 : 2+1 = 3 (Ok).
+    assert_eq!(column.cell(1), MixedCell::Number(3.0));
+    // Ligne 2 : 3+"zut" échoue (texte non numérique) : "---", pas une case
+    // vide.
+    assert_eq!(column.cell(2), MixedCell::Text("---".to_string()));
+    // Ligne 3 : 4+1 = 5 (Ok).
+    assert_eq!(column.cell(3), MixedCell::Number(5.0));
+    // Ligne 4 : A hors bornes (longueur 4) donc manquante, B = 1 : la case
+    // reste vide (Missing), pas "---" — rien n'a échoué, il manque juste une
+    // opérande.
+    assert_eq!(column.cell(4), MixedCell::Empty);
+}
+
+/// Tant que toutes les colonnes référencées restent `Numeric`/`DateTime`,
+/// une colonne-formule reste `Numeric` (l'échec est impossible, seules des
+/// absences peuvent apparaître) — pas de retype superflu vers `Mixed`.
+#[test]
+fn all_numeric_references_keep_the_formula_column_numeric() {
+    let (project, _a, _b, c) = fixture();
+    let session = Session::spawn(project, None).expect("thread de l'acteur démarré");
+    let handle = session.handle();
+
+    handle
+        .execute(set_formula(c, "A+B"))
+        .expect("poser C = A+B");
+
+    let snapshot = handle.snapshot().expect("snapshot");
+    let node = snapshot.tree.node(c).expect("colonne C");
+    let column = node.as_column().expect("le nœud est une colonne");
+    assert_eq!(column.column_type(), ColumnType::Numeric);
 }
