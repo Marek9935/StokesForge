@@ -26,7 +26,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use plotyx_app::state::{Action, AppState};
+use plotyx_app::state::{Action, AppState, HeaderField, MoveDirection};
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
 use plotyx_session::{Session, SessionHandle};
@@ -2058,4 +2058,104 @@ fn set_column_role_action_writes_the_column_meta_role() {
     });
 
     assert_eq!(state.column_meta(temps).role, ColumnRole::X);
+}
+
+// -- 16. Multi-sélection de colonnes et de champs d'en-tête --
+
+/// Glisser/Maj-clic sur la rangée des lettres (`extend_column_selection`)
+/// sélectionne une plage de colonnes entières, pas une seule.
+#[test]
+fn extending_a_column_selection_covers_the_whole_range() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_column(sheet1, temps);
+    state.extend_column_selection(sheet1, note);
+
+    assert!(state.is_column_selected(sheet1, temps));
+    assert!(
+        state.is_column_selected(sheet1, signal),
+        "colonne intermédiaire incluse"
+    );
+    assert!(state.is_column_selected(sheet1, note));
+}
+
+/// Glisser/Maj-clic sur les rangées de champs d'en-tête
+/// (`extend_header_field_selection`) sélectionne un rectangle de champs sur
+/// plusieurs colonnes et plusieurs champs, pas un seul.
+#[test]
+fn extending_a_header_field_selection_covers_the_whole_rectangle() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    state.extend_header_field_selection(sheet1, signal, HeaderField::Formula);
+
+    for field in [
+        HeaderField::Unit,
+        HeaderField::Comment,
+        HeaderField::Formula,
+    ] {
+        assert!(
+            state.is_header_field_selected(sheet1, temps, field),
+            "{field:?} de Temps dans le rectangle"
+        );
+        assert!(
+            state.is_header_field_selected(sheet1, signal, field),
+            "{field:?} de Signal dans le rectangle"
+        );
+    }
+    assert!(
+        !state.is_header_field_selected(sheet1, temps, HeaderField::LongName),
+        "Nom long est au-dessus de l'ancre (Unité) : hors du rectangle"
+    );
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        None,
+        "un rectangle de plusieurs champs n'est jamais un champ unique"
+    );
+}
+
+/// Flèche Haut depuis la première ligne de données rejoint le champ Formule
+/// (le plus bas des 4 champs d'en-tête) ; Bas depuis Formule revient à la
+/// première ligne de données — la frontière entre l'en-tête et les données
+/// se traverse maintenant au clavier.
+#[test]
+fn arrow_up_from_the_first_data_row_enters_the_header_fields() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 0);
+    state.move_selection(sheet1, MoveDirection::Up, false);
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        Some((temps, HeaderField::Formula))
+    );
+
+    state.move_selection(sheet1, MoveDirection::Up, false);
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        Some((temps, HeaderField::Comment))
+    );
+
+    state.move_selection(sheet1, MoveDirection::Down, false);
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        Some((temps, HeaderField::Formula))
+    );
+
+    state.move_selection(sheet1, MoveDirection::Down, false);
+    assert!(
+        state.is_selected(sheet1, temps, 0),
+        "Bas depuis Formule redescend en première ligne de données"
+    );
 }

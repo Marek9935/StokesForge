@@ -62,7 +62,7 @@ use plotyx_python::interpreter::EmbeddedPython;
 use plotyx_script::{ScriptEngine, ScriptOutcome};
 use plotyx_session::{SessionHandle, SessionResult, Snapshot};
 
-use crate::selection::Selection;
+use crate::selection::{GridCursor, Selection};
 
 /// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
 /// ces valeurs ; elle ne touche jamais l'acteur directement.
@@ -525,6 +525,22 @@ pub enum HeaderField {
     Formula,
 }
 
+impl HeaderField {
+    /// Position parmi les 4 champs, dans l'ordre où ils sont empilés à
+    /// l'écran (de haut en bas, 0 = `LongName`) — sert à comparer deux
+    /// champs pour savoir si l'un est « au-dessus » de l'autre, en
+    /// particulier pour la plage de champs d'en-tête sélectionnée (voir
+    /// [`crate::selection::Selection::is_header_field_selected`]).
+    pub(crate) fn index(self) -> usize {
+        match self {
+            HeaderField::LongName => 0,
+            HeaderField::Unit => 1,
+            HeaderField::Comment => 2,
+            HeaderField::Formula => 3,
+        }
+    }
+}
+
 /// Direction d'un déplacement clavier d'une cellule dans la grille (flèches
 /// directionnelles) — voir [`AppState::move_selection`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -953,12 +969,39 @@ impl AppState {
         self.selection.insert(sheet, Selection::column(column));
     }
 
+    /// Étend la plage de colonnes courante de `sheet` jusqu'à `column`, en
+    /// gardant l'ancre déjà posée — glisser ou Maj-clic sur la rangée des
+    /// lettres. Pose une sélection d'une seule colonne si `sheet` n'en avait
+    /// pas encore.
+    pub fn extend_column_selection(&mut self, sheet: NodeId, column: NodeId) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) => selection.extend_columns_to(column),
+            None => self.select_column(sheet, column),
+        }
+    }
+
     /// Sélectionne un champ d'en-tête précis (nom long/unité/commentaire/
     /// formule) — simple clic, même comportement que [`AppState::
     /// select_cell`] pour une cellule de données.
     pub fn select_header_field(&mut self, sheet: NodeId, column: NodeId, field: HeaderField) {
         self.selection
             .insert(sheet, Selection::header_field(column, field));
+    }
+
+    /// Étend la plage de champs d'en-tête courante de `sheet` jusqu'à
+    /// `(column, field)`, en gardant l'ancre déjà posée — glisser ou
+    /// Maj-clic sur une des 4 rangées de champs. Pose une sélection d'un
+    /// seul champ si `sheet` n'en avait pas encore.
+    pub fn extend_header_field_selection(
+        &mut self,
+        sheet: NodeId,
+        column: NodeId,
+        field: HeaderField,
+    ) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) => selection.extend_header_field_to(column, field),
+            None => self.select_header_field(sheet, column, field),
+        }
     }
 
     /// Efface la sélection de `sheet` (sans effet sur le modèle).
@@ -976,39 +1019,110 @@ impl AppState {
             .collect()
     }
 
-    /// Déplace la sélection de `sheet` d'une cellule dans `direction`
-    /// (flèches directionnelles), en gardant l'ancre déjà posée si
-    /// `extend` (Maj+flèche étend le rectangle plutôt que déplacer la
-    /// cellule sélectionnée). Clampé aux bords de la grille — jamais de
-    /// retour à la ligne (voir [`AppState::move_selection_tab`] pour ça) ni
-    /// d'ajout de ligne (réservé à [`AppState::commit_cell_and_advance`],
-    /// déclenché par la validation d'une saisie, pas par la navigation
-    /// seule). Sans effet si `sheet` n'a pas de sélection de cellules
-    /// (colonne entière ou champ d'en-tête sélectionné, ou aucune sélection)
-    /// — mutation transitoire, comme [`AppState::select_cell`].
+    /// Déplace la sélection de `sheet` d'une case dans `direction` (flèches
+    /// directionnelles), en gardant l'ancre déjà posée si `extend`
+    /// (Maj+flèche étend le rectangle plutôt que déplacer la case
+    /// sélectionnée). Haut/Bas traversent la frontière entre l'en-tête (les
+    /// 4 champs, voir [`HeaderField::ALL`]) et les données : Haut depuis la
+    /// première ligne de données rejoint le champ Formule (le plus bas des
+    /// 4), Bas depuis le champ Formule rejoint la première ligne de
+    /// données, Haut depuis le champ Nom long (le plus haut) ne fait rien —
+    /// la rangée des lettres n'entre pas dans cette navigation, il faut la
+    /// cliquer pour la sélectionner (voir [`Selection::grid_cursor`]).
+    /// Franchir cette frontière repose toujours une sélection d'une seule
+    /// case, même sous Maj : une plage ne peut pas mélanger cellules de
+    /// données et champs d'en-tête. Gauche/Droite, eux, ne changent jamais
+    /// de rangée. Clampé aux bords de la grille — jamais de retour à la
+    /// ligne (voir [`AppState::move_selection_tab`] pour ça) ni d'ajout de
+    /// ligne (réservé à [`AppState::commit_cell_and_advance`], déclenché par
+    /// la validation d'une saisie, pas par la navigation seule). Sans effet
+    /// si `sheet` a une plage de colonnes sélectionnée (rangée des lettres)
+    /// ou aucune sélection — mutation transitoire, comme [`AppState::
+    /// select_cell`].
     pub fn move_selection(&mut self, sheet: NodeId, direction: MoveDirection, extend: bool) {
-        let Some((from_column, from_row)) = self.selection.get(&sheet).and_then(Selection::cursor)
-        else {
+        /// Rangée traversée par la navigation aux flèches : soit un des 4
+        /// champs d'en-tête, soit une ligne de données — voir la doc de
+        /// [`AppState::move_selection`].
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum Row {
+            Header(HeaderField),
+            Data(usize),
+        }
+        impl Row {
+            fn up(self) -> (Self, bool) {
+                use HeaderField::{Comment, Formula, LongName, Unit};
+                match self {
+                    Row::Data(0) => (Row::Header(Formula), true),
+                    Row::Data(row) => (Row::Data(row - 1), false),
+                    Row::Header(LongName) => (self, false),
+                    Row::Header(Unit) => (Row::Header(LongName), false),
+                    Row::Header(Comment) => (Row::Header(Unit), false),
+                    Row::Header(Formula) => (Row::Header(Comment), false),
+                }
+            }
+            fn down(self, last_row: usize) -> (Self, bool) {
+                use HeaderField::{Comment, Formula, LongName, Unit};
+                match self {
+                    Row::Header(Formula) => (Row::Data(0), true),
+                    Row::Header(LongName) => (Row::Header(Unit), false),
+                    Row::Header(Unit) => (Row::Header(Comment), false),
+                    Row::Header(Comment) => (Row::Header(Formula), false),
+                    Row::Data(row) => (Row::Data((row + 1).min(last_row)), false),
+                }
+            }
+        }
+
+        let Some(from) = self.selection.get(&sheet).and_then(Selection::grid_cursor) else {
             return;
+        };
+        let (from_column, from_row) = match from {
+            GridCursor::Data(column, row) => (column, Row::Data(row)),
+            GridCursor::Header(column, field) => (column, Row::Header(field)),
         };
         let order = self.column_order(sheet);
         let Some(index) = order.iter().position(|&id| id == from_column) else {
             return;
         };
         let last_row = self.row_count(sheet).saturating_sub(1);
-        let (to_index, to_row) = match direction {
-            MoveDirection::Up => (index, from_row.saturating_sub(1)),
-            MoveDirection::Down => (index, (from_row + 1).min(last_row)),
-            MoveDirection::Left => (index.saturating_sub(1), from_row),
-            MoveDirection::Right => ((index + 1).min(order.len().saturating_sub(1)), from_row),
+        let (to_index, to_row, crossed) = match direction {
+            MoveDirection::Up => {
+                let (row, crossed) = from_row.up();
+                (index, row, crossed)
+            }
+            MoveDirection::Down => {
+                let (row, crossed) = from_row.down(last_row);
+                (index, row, crossed)
+            }
+            MoveDirection::Left => (index.saturating_sub(1), from_row, false),
+            MoveDirection::Right => (
+                (index + 1).min(order.len().saturating_sub(1)),
+                from_row,
+                false,
+            ),
         };
         let Some(&to_column) = order.get(to_index) else {
             return;
         };
-        if extend {
-            self.extend_selection(sheet, to_column, to_row);
-        } else {
-            self.select_cell(sheet, to_column, to_row);
+        // Franchir la frontière en-tête/données repose toujours une
+        // sélection réduite à une seule case, même sous Maj — mélanger
+        // cellules de données et champs d'en-tête dans une même plage
+        // n'aurait pas de sens (voir la doc de tête de cette méthode).
+        let extend = extend && !crossed;
+        match to_row {
+            Row::Data(row) => {
+                if extend {
+                    self.extend_selection(sheet, to_column, row);
+                } else {
+                    self.select_cell(sheet, to_column, row);
+                }
+            }
+            Row::Header(field) => {
+                if extend {
+                    self.extend_header_field_selection(sheet, to_column, field);
+                } else {
+                    self.select_header_field(sheet, to_column, field);
+                }
+            }
         }
     }
 
@@ -1062,22 +1176,22 @@ impl AppState {
     /// Vrai si `column` est sélectionnée dans son entier (clic sur sa lettre
     /// d'en-tête).
     pub fn is_column_selected(&self, sheet: NodeId, column: NodeId) -> bool {
-        self.selection
-            .get(&sheet)
-            .is_some_and(|selection| selection.is_column_selected(column))
+        self.selection.get(&sheet).is_some_and(|selection| {
+            selection.is_column_selected(&self.snapshot.tree, sheet, column)
+        })
     }
 
-    /// Vrai si `(column, field)` est le champ d'en-tête actuellement
-    /// sélectionné dans `sheet`.
+    /// Vrai si `(column, field)` fait partie de la plage de champs d'en-tête
+    /// actuellement sélectionnée dans `sheet`.
     pub fn is_header_field_selected(
         &self,
         sheet: NodeId,
         column: NodeId,
         field: HeaderField,
     ) -> bool {
-        self.selection
-            .get(&sheet)
-            .is_some_and(|selection| selection.is_header_field_selected(column, field))
+        self.selection.get(&sheet).is_some_and(|selection| {
+            selection.is_header_field_selected(&self.snapshot.tree, sheet, column, field)
+        })
     }
 
     /// Champ d'en-tête sélectionné dans `sheet`, s'il y en a un — pour les

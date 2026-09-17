@@ -1650,26 +1650,47 @@ fn column_header_widget(
             ui.painter().rect_filled(rect, 0.0, fill);
             header_row_separator(ui, rect);
             // Toute la largeur de la rangée sélectionne la colonne — pas
-            // seulement la lettre — au clic principal comme au clic
-            // secondaire (`response.clicked()`/`secondary_clicked()`
-            // couvrent tous deux `Sense::click()`) : le clic droit doit
-            // pouvoir sélectionner *et* ouvrir le menu contextuel en un
-            // seul geste, sans exiger que la colonne soit déjà
-            // sélectionnée au préalable.
+            // seulement la lettre —, glisser ou Maj-clic étend à plusieurs
+            // colonnes (même logique que la multi-sélection de cellules de
+            // données, voir `cell_widget`), au clic principal comme au clic
+            // secondaire (`response.secondary_clicked()` couvre aussi
+            // `Sense::click_and_drag()`) : le clic droit doit pouvoir
+            // sélectionner *et* ouvrir le menu contextuel en un seul geste,
+            // sans exiger que la colonne soit déjà sélectionnée au
+            // préalable.
             let id = ui.id().with(("plotyx_column_letter_row", column.raw()));
-            let response = ui.interact(rect, id, egui::Sense::click());
+            let response = ui.interact(rect, id, egui::Sense::click_and_drag());
             ui.put(
                 rect,
-                egui::Label::new(format!(
-                    "{letter}({})  {}",
-                    role_suffix(role),
-                    type_suffix(column_type)
-                ))
-                .selectable(false),
+                egui::Label::new(format!("{letter}({})", role_suffix(role).to_uppercase()))
+                    .selectable(false),
             );
-            if response.clicked() || response.secondary_clicked() {
+            let shift = ui.input(|i| i.modifiers.shift);
+            if response.drag_started() || (response.clicked() && !shift) {
                 state.select_column(sheet, column);
+            } else if response.clicked() && shift {
+                state.extend_column_selection(sheet, column);
+            } else if response.secondary_clicked() {
+                state.select_column(sheet, column);
+            } else if response.contains_pointer()
+                && ui.input(|i| i.pointer.primary_down())
+                && state.selection(sheet).is_some()
+            {
+                // Même geste que pour les cellules de données : étendre
+                // pendant le glisser, pas seulement au clic de départ (voir
+                // le commentaire détaillé de `cell_widget`).
+                state.extend_column_selection(sheet, column);
             }
+            // Colonnes visées par le menu contextuel : toute la plage
+            // sélectionnée si `column` en fait partie (menu ouvert sur une
+            // sélection multiple déjà posée), sinon `column` seule — un
+            // clic droit hors de la plage sélectionnée l'a déjà réduite à
+            // elle-même ci-dessus.
+            let target_columns: Vec<NodeId> = state
+                .selection(sheet)
+                .map(|selection| selection.columns(state.tree(), sheet))
+                .filter(|columns| columns.contains(&column))
+                .unwrap_or_else(|| vec![column]);
             response.context_menu(|ui| {
                 // Choix manuel du type de colonne — conversion destructrice
                 // assumée (`Action::SetColumnType`/`Command::
@@ -1682,10 +1703,12 @@ fn column_header_widget(
                         .clicked()
                     {
                         if candidate != column_type {
-                            actions.push(Action::SetColumnType {
-                                column,
-                                column_type: candidate,
-                            });
+                            for &target in &target_columns {
+                                actions.push(Action::SetColumnType {
+                                    column: target,
+                                    column_type: candidate,
+                                });
+                            }
                         }
                         ui.close();
                     }
@@ -1709,10 +1732,12 @@ fn column_header_widget(
                             .clicked()
                         {
                             if candidate != role {
-                                actions.push(Action::SetColumnRole {
-                                    column,
-                                    role: candidate,
-                                });
+                                for &target in &target_columns {
+                                    actions.push(Action::SetColumnRole {
+                                        column: target,
+                                        role: candidate,
+                                    });
+                                }
                             }
                             ui.close();
                         }
@@ -1835,7 +1860,7 @@ fn header_field_widget(
         }
         let text = header_field_text(state, column, field);
         let id = ui.id().with((column.raw(), field as u8));
-        let response = ui.interact(rect, id, egui::Sense::click());
+        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
         // Surlignée si ce champ précis est sélectionné, ou si c'est toute la
         // colonne qui l'est (sélection faite depuis la rangée des lettres,
         // voir `column_header_widget`) : la sélection d'une colonne doit se
@@ -1857,8 +1882,19 @@ fn header_field_widget(
         );
         if response.double_clicked() {
             state.begin_header_edit(column, field);
-        } else if response.clicked() {
+            return;
+        }
+        // Même logique de multi-sélection à la souris que pour les
+        // cellules de données (clic/glisser/Maj-clic) — voir le
+        // commentaire détaillé de `cell_widget`.
+        let shift = ui.input(|i| i.modifiers.shift);
+        let dragging = response.contains_pointer()
+            && ui.input(|i| i.pointer.primary_down())
+            && state.selection(sheet).is_some();
+        if response.drag_started() || (response.clicked() && !shift) {
             state.select_header_field(sheet, column, field);
+        } else if (response.clicked() && shift) || dragging {
+            state.extend_header_field_selection(sheet, column, field);
         }
     });
 }
