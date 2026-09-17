@@ -1909,3 +1909,134 @@ fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
     assert_eq!(meta1.unit, "bar");
     assert_eq!(meta1.comment, "mesure rapide");
 }
+
+// -- 14. Entrée sur la dernière ligne : ajout de ligne borné à la feuille --
+
+/// Reproduit le bug rapporté : dans `demo_project`, `Note` (colonne texte,
+/// 3 valeurs stockées) est plus courte que `Temps`/`Signal` (5 valeurs) sur
+/// la même feuille — un cas que le modèle autorise explicitement (voir la
+/// doc de [`demo_project`]). Valider par Entrée la ligne 2 de `Note`
+/// (`Some("")`, la dernière valeur *stockée* de la colonne, mais pas la
+/// dernière ligne *affichée* de la feuille) ne doit pas ajouter de ligne :
+/// avant le correctif, `commit_cell_and_advance` comparait `row + 1` à la
+/// longueur du buffer de la seule colonne éditée plutôt qu'à la hauteur
+/// réelle de la feuille, et ajoutait une ligne fantôme en bas de toute la
+/// feuille.
+#[test]
+fn committing_the_last_stored_value_of_a_short_column_mid_sheet_does_not_add_a_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(state.row_count(sheet1), 5, "Temps/Signal font 5 lignes");
+
+    state.dispatch(Action::CommitCellAndAdvance {
+        column: note,
+        row: 2,
+        text: "milieu".to_string(),
+        sheet: sheet1,
+    });
+
+    assert_eq!(
+        state.row_count(sheet1),
+        5,
+        "éditer une ligne au milieu de la feuille n'ajoute pas de ligne, \
+         même si c'était la dernière valeur stockée de cette colonne"
+    );
+    assert_eq!(state.cell_text(note, 2), "milieu");
+}
+
+/// À l'inverse, valider par Entrée la vraie dernière ligne de la feuille
+/// ajoute bien une ligne — comportement voulu, inchangé par le correctif.
+#[test]
+fn committing_the_last_row_of_the_sheet_adds_a_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    assert_eq!(state.row_count(sheet1), 5);
+
+    state.dispatch(Action::CommitCellAndAdvance {
+        column: temps,
+        row: 4,
+        text: "2.5".to_string(),
+        sheet: sheet1,
+    });
+
+    assert_eq!(
+        state.row_count(sheet1),
+        6,
+        "dernière ligne : une ligne ajoutée"
+    );
+    assert_eq!(cell(&state, temps, 4), Cell::Float(2.5));
+}
+
+// -- 15. Conversion de type de colonne --
+
+/// Choix manuel du type d'une colonne (`Action::SetColumnType`) : une
+/// colonne texte contenant du texte non numérique perd ce texte en passant
+/// en numérique (`NaN`), conversion destructrice assumée — même politique
+/// que `Column::set_column_type` côté `plotyx-core`.
+#[test]
+fn set_column_type_action_converts_and_can_lose_non_numeric_text() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(column_type(&state, note), ColumnType::Text);
+
+    state.dispatch(Action::SetColumnType {
+        column: note,
+        column_type: ColumnType::Numeric,
+    });
+
+    assert_eq!(column_type(&state, note), ColumnType::Numeric);
+    match cell(&state, note, 0) {
+        Cell::Float(value) => assert!(value.is_nan(), "« a » n'est pas un nombre : disparaît"),
+        other => panic!("cellule numérique attendue, reçu {other:?}"),
+    }
+}
+
+/// Une colonne texte dont toutes les valeurs présentes s'analysent comme
+/// des nombres se convertit seule en numérique dès qu'on valide une cellule
+/// — pendant du sens inverse déjà couvert par
+/// `non_numeric_input_promotes_the_column_to_mixed` (colonne numérique qui
+/// reçoit du texte).
+#[test]
+fn a_text_column_left_with_only_numeric_values_auto_promotes_to_numeric() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(column_type(&state, note), ColumnType::Text);
+
+    // `Note` = [Some("a"), None, Some("")] : remplacer « a » par un nombre
+    // laisse la ligne 2 (`Some("")`, présente mais non numérique) en
+    // travers — la colonne ne bascule pas tant qu'une valeur *présente*
+    // reste non numérique (`None`, lui, est ignoré : c'est une valeur
+    // absente, pas un texte qui refuse de s'analyser).
+    state.dispatch(Action::CommitCell {
+        column: note,
+        row: 0,
+        text: "1".to_string(),
+    });
+    assert_eq!(
+        column_type(&state, note),
+        ColumnType::Text,
+        "la ligne 2 (chaîne vide présente) n'est pas un nombre : pas de conversion"
+    );
+
+    state.dispatch(Action::CommitCell {
+        column: note,
+        row: 2,
+        text: "2.5".to_string(),
+    });
+
+    assert_eq!(
+        column_type(&state, note),
+        ColumnType::Numeric,
+        "toutes les valeurs présentes sont des nombres : conversion automatique"
+    );
+    assert_eq!(cell(&state, note, 0), Cell::Float(1.0));
+    assert_eq!(cell(&state, note, 2), Cell::Float(2.5));
+}

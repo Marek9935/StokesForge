@@ -1632,7 +1632,28 @@ fn column_header_widget(
                 {
                     state.select_column(sheet, column);
                 }
-                ui.weak(type_suffix(column_type));
+                // Choix manuel du type de colonne — conversion destructrice
+                // assumée (`Action::SetColumnType`/`Command::
+                // SetColumnType`, `plotyx-core::Column::set_column_type`) :
+                // texte non numérique effacé en passant en `Numeric`, comme
+                // pour toute saisie directe dans une colonne numérique.
+                egui::ComboBox::new(("plotyx_column_type_combo", column.raw()), "")
+                    .selected_text(type_suffix(column_type))
+                    .show_ui(ui, |ui| {
+                        for candidate in [ColumnType::Numeric, ColumnType::Text, ColumnType::Mixed]
+                        {
+                            if ui
+                                .selectable_label(column_type == candidate, type_suffix(candidate))
+                                .clicked()
+                                && candidate != column_type
+                            {
+                                actions.push(Action::SetColumnType {
+                                    column,
+                                    column_type: candidate,
+                                });
+                            }
+                        }
+                    });
             });
         });
         header_field_widget(
@@ -2557,16 +2578,32 @@ fn grid_contents(
         if tab {
             state.move_selection_tab(sheet, shift);
         }
-        if enter {
-            state.move_selection(
-                sheet,
-                if shift {
-                    MoveDirection::Up
-                } else {
-                    MoveDirection::Down
-                },
-                false,
-            );
+        if enter && shift {
+            state.move_selection(sheet, MoveDirection::Up, false);
+        } else if enter {
+            // Entrée sur la dernière ligne de la feuille, cellule déjà
+            // vide et jamais éditée dans cette frappe : `move_selection`
+            // seul ne ferait rien (`Down` est borné à `row_count - 1`,
+            // voir sa doc). Même geste que `CommitCellAndAdvance` sur une
+            // cellule qu'on vient de remplir — ajoute la ligne, puis
+            // sélectionne tout de suite la cellule qui y correspondra
+            // (elle sera créée avant le prochain rendu, voir `cell_widget`).
+            let at_last_row = state
+                .selection(sheet)
+                .and_then(Selection::cursor)
+                .is_some_and(|(_, row)| row + 1 >= state.row_count(sheet));
+            if at_last_row {
+                if let Some((column, row)) = state.selection(sheet).and_then(Selection::cursor) {
+                    actions.push(Action::InsertRows {
+                        sheet,
+                        at: row + 1,
+                        count: 1,
+                    });
+                    state.select_cell(sheet, column, row + 1);
+                }
+            } else {
+                state.move_selection(sheet, MoveDirection::Down, false);
+            }
         }
         // Ctrl+C/X/V n'apparaissent **jamais** comme un `egui::Event::Key`
         // ordinaire (donc jamais via `consume_key`) : `egui-winit` les

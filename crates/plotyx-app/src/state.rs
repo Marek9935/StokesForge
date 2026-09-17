@@ -98,6 +98,17 @@ pub enum Action {
         /// être affichés simultanément, chacun dans son propre onglet.
         sheet: NodeId,
     },
+    /// Change le type d'une colonne — choix explicite de l'utilisateur
+    /// depuis l'en-tête, conversion destructrice assumée (`Column::
+    /// set_column_type`, `plotyx-core`) : un texte non numérique dans une
+    /// colonne qui devient `Numeric` disparaît (`NaN`), comme le reste déjà
+    /// pour une saisie directe.
+    SetColumnType {
+        /// Colonne visée.
+        column: NodeId,
+        /// Type demandé.
+        column_type: ColumnType,
+    },
     /// Insère `count` lignes à `at` dans `sheet`.
     InsertRows {
         /// Feuille visée.
@@ -1413,6 +1424,13 @@ impl AppState {
                 self.commit_cell(column, row, text);
             }
             Action::AddColumn { sheet } => self.add_column(sheet),
+            Action::SetColumnType {
+                column,
+                column_type,
+            } => self.execute(Command::SetColumnType {
+                column,
+                column_type,
+            }),
             Action::InsertRows { sheet, at, count } => self.rows(sheet, at, count, true),
             Action::DeleteRows { sheet, at, count } => self.rows(sheet, at, count, false),
             Action::SetNoteText { note, text } => self.set_note_text(note, text),
@@ -1933,20 +1951,67 @@ impl AppState {
                 expected_version: None,
             }
         });
+        // Une colonne texte dont toutes les valeurs présentes s'analysent
+        // comme des nombres se convertit seule en numérique — pendant du
+        // sens inverse déjà géré ci-dessus (`SetCellsPromoting` : une
+        // colonne numérique qui reçoit du texte s'élargit en `Mixed`).
+        // `MixedCell::from_text` porte la même analyse que `Column::
+        // set_column_type` (`Text → Numeric`, `parse_f64_text`) : ne pas la
+        // dupliquer ici évite qu'elle ne diverge de ce que la conversion
+        // manuelle ferait. Aucun effet si la colonne n'a aucune valeur
+        // présente (colonne encore vide) ou si `kind` n'était pas `Text`.
+        if kind == ColumnType::Text {
+            self.auto_promote_text_column_if_all_numeric(column);
+        }
         true
     }
 
+    /// Convertit `column` (supposée `Text`) en `Numeric` si toutes ses
+    /// valeurs présentes s'analysent comme des nombres finis — voir l'appel
+    /// dans [`AppState::commit_cell`].
+    fn auto_promote_text_column_if_all_numeric(&mut self, column: NodeId) {
+        let Some(col) = self.snapshot.tree.node(column).and_then(Node::as_column) else {
+            return;
+        };
+        let mut any_present = false;
+        for row in 0..col.len() {
+            let Cell::Text(text) = col.get(row) else {
+                return;
+            };
+            match text {
+                None => {}
+                Some(text) => {
+                    any_present = true;
+                    if !matches!(MixedCell::from_text(Some(text)), MixedCell::Number(_)) {
+                        return;
+                    }
+                }
+            }
+        }
+        if any_present {
+            self.execute(Command::SetColumnType {
+                column,
+                column_type: ColumnType::Numeric,
+            });
+        }
+    }
+
     /// Valide la saisie d'une cellule puis, si `row` était la dernière ligne
-    /// de `column` et que la validation a réussi, ajoute une ligne à
-    /// `sheet` (`at == len` est une cible valide pour `InsertRows`) — Entrée
-    /// sur la dernière cellule d'une colonne.
+    /// *affichée* de `sheet` et que la validation a réussi, ajoute une ligne
+    /// à `sheet` (`at == len` est une cible valide pour `InsertRows`) —
+    /// Entrée sur la dernière cellule d'une colonne.
+    ///
+    /// Comparer à `row_count(sheet)` (le max des longueurs de **toutes**
+    /// les colonnes de la feuille, `Tree::row_count_in`) plutôt qu'à la
+    /// longueur du buffer interne de `column` seule est essentiel : une
+    /// colonne texte jamais remplie jusqu'au bas de la feuille a un buffer
+    /// plus court que les autres colonnes (buffers sparses, voir
+    /// `Column::len`/`ColumnValues::get`), donc `row + 1 >= column.len()`
+    /// pouvait devenir vrai au *milieu* du tableau — une ligne fantôme
+    /// était alors insérée en bas de toute la feuille dès qu'on validait
+    /// une cellule d'une ligne jamais écrite plus bas dans cette colonne.
     fn commit_cell_and_advance(&mut self, column: NodeId, row: usize, text: String, sheet: NodeId) {
-        let was_last_row = self
-            .snapshot
-            .tree
-            .node(column)
-            .and_then(Node::as_column)
-            .is_some_and(|c| row + 1 >= c.len());
+        let was_last_row = row + 1 >= self.row_count(sheet);
         let accepted = self.commit_cell(column, row, text);
         if accepted && was_last_row {
             self.rows(sheet, row + 1, 1, true);
