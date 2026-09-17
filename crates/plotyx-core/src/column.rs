@@ -474,21 +474,12 @@ impl ColumnValues {
     /// simplement rien à faire d'une formule qui échoue vraiment (affichée
     /// `---` côté UI, contre une cellule laissée vide).
     ///
-    /// Une colonne `Text` n'atteint jamais ce code en pratique : `evaluate`
-    /// refuse toute référence à une colonne `Text` en bloc, avant même
-    /// d'appeler ceci ligne à ligne. Le cas est néanmoins couvert (`Failed`,
-    /// un texte non vide étant par définition non numérique), par cohérence
-    /// plutôt que par nécessité.
     pub fn status_at(&self, row: usize) -> NumericStatus {
         match self {
             ColumnValues::Float(values) => match values.get(row) {
                 Some(value) if value.is_nan() => NumericStatus::Missing,
                 Some(_) => NumericStatus::Ok,
                 None => NumericStatus::Missing,
-            },
-            ColumnValues::Text(values) => match values.get(row) {
-                Some(Some(text)) if !text.is_empty() => NumericStatus::Failed,
-                Some(Some(_)) | Some(None) | None => NumericStatus::Missing,
             },
             ColumnValues::Mixed(values) => match values.get(row) {
                 None | Some(MixedCell::Empty) => NumericStatus::Missing,
