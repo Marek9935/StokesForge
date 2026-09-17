@@ -12,7 +12,7 @@
 //! `column.rs` couvrent déjà la colonne seule, et ils passent).
 
 use plotyx_commands::{Command, History};
-use plotyx_core::{Column, ColumnMeta, ColumnType, NodeId, Project, ValueBlock};
+use plotyx_core::{Column, ColumnMeta, ColumnType, MixedCell, NodeId, Project, ValueBlock};
 
 /// `[Book1]Sheet1` avec `A` = [1, 2, 3] et `B` = [10].
 fn projet() -> (Project, NodeId, NodeId, NodeId) {
@@ -147,6 +147,55 @@ fn b10_le_compteur_traverse_un_changement_de_type() {
     assert!(
         version(&project, a) > avant,
         "une conversion est une écriture"
+    );
+}
+
+#[test]
+fn b10_la_saisie_tolerante_qui_promeut_une_colonne_est_une_ecriture() {
+    // `Command::SetCellsPromoting` sur une colonne numérique qui reçoit un
+    // texte : la colonne est promue en `Mixed` (chemin 3, voir `command.rs`)
+    // *et* la cellule est écrite dans la même entrée d'historique. Les deux
+    // effets doivent avancer le compteur, comme n'importe quelle écriture.
+    let (mut project, _sheet, a, _b) = projet();
+    let mut history = History::with_limit(0);
+    let avant = version(&project, a);
+    history
+        .execute(
+            &mut project,
+            Command::SetCellsPromoting {
+                column: a,
+                start: 0,
+                values: ValueBlock::Mixed(vec![MixedCell::Text("n/a".to_string())]),
+                expected_version: None,
+            },
+        )
+        .expect("saisie tolérante acceptée");
+    let apres_promotion = version(&project, a);
+    assert!(
+        apres_promotion > avant,
+        "promouvoir une colonne en Mixed et y écrire est une écriture : {avant} puis \
+         {apres_promotion}"
+    );
+
+    // Une deuxième saisie tolérante, sur une colonne déjà mixte (chemin 1/2,
+    // pas de promotion) : elle aussi doit avancer le compteur, et ne jamais
+    // revenir à une version déjà vue.
+    history
+        .execute(
+            &mut project,
+            Command::SetCellsPromoting {
+                column: a,
+                start: 1,
+                values: ValueBlock::Mixed(vec![MixedCell::Text("hs".to_string())]),
+                expected_version: None,
+            },
+        )
+        .expect("deuxième saisie tolérante acceptée");
+    let apres_deuxieme = version(&project, a);
+    assert!(
+        apres_deuxieme > apres_promotion,
+        "la saisie tolérante sur une colonne déjà mixte doit aussi avancer le compteur : \
+         {apres_promotion} puis {apres_deuxieme}"
     );
 }
 

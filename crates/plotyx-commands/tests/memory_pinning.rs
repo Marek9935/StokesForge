@@ -81,7 +81,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use plotyx_commands::{Command, History};
-use plotyx_core::{Column, Node, NodeId, Project, ValueBlock};
+use plotyx_core::{Column, MixedCell, Node, NodeId, Project, ValueBlock};
 
 // ===========================================================================
 // Allocateur compteur — mesure 2
@@ -1036,6 +1036,106 @@ fn scenario_7_byte_bounded_history() -> Row {
         pinned_bytes,
         allocator_bytes: after.saturating_sub(before),
     }
+}
+
+// ===========================================================================
+// Scénario 8 — colonne mixte : l'empreinte suit `mixed_buffer_bytes`
+// ===========================================================================
+
+/// Coût par élément d'un buffer à types mixtes, tel que documenté par
+/// `mixed_buffer_bytes` (`history.rs`, privée au crate) : la taille d'une
+/// `MixedCell` dans le `Vec`, plus les octets UTF-8 des textes présents,
+/// quelle que soit la variante des autres cellules. Répliqué ici pour
+/// vérifier **indépendamment** le chiffre que `History::retained_bytes()`
+/// rapporte — jamais en appelant la fonction du crate, ce ne serait plus une
+/// vérification.
+fn expected_mixed_buffer_bytes(cells: &[MixedCell]) -> usize {
+    let overhead = std::mem::size_of::<MixedCell>();
+    cells.iter().fold(0usize, |total, cell| {
+        total
+            + overhead
+            + match cell {
+                MixedCell::Text(text) => text.len(),
+                MixedCell::Empty | MixedCell::Number(_) => 0,
+            }
+    })
+}
+
+/// Aucun des sept scénarios ci-dessus ne construit de colonne mixte :
+/// `mixed_buffer_bytes` (l'estimation que `column_footprint` utilise pour une
+/// colonne `Mixed`, calquée sur `text_buffer_bytes`) n'était donc jamais
+/// exercée. Même schéma que le scénario 6 (suppression, le témoin) : une
+/// colonne mixte supprimée reste retenue tant que son entrée est sur la pile
+/// (nécessaire à l'annulation), puis libérée dès qu'elle est évincée — mais
+/// ici on vérifie en plus que le chiffre **rapporté**
+/// (`History::retained_bytes()`) correspond à l'estimation documentée,
+/// calculée indépendamment.
+#[test]
+fn scenario_8_mixed_column_deletion_matches_mixed_buffer_bytes_estimate() {
+    let _guard = measure_lock();
+
+    let mut project = Project::new("MesureMixte").expect("projet de mesure");
+    let root = project.root();
+    project
+        .add_workbook(root, Some("Book1"))
+        .expect("classeur Book1");
+    let sheet = project
+        .resolve_path("[Book1]Sheet1")
+        .expect("feuille Sheet1");
+
+    // Un mélange de nombres, de cellules vides et de textes de longueurs
+    // variées : de quoi voir un écart si l'estimation ne comptait, par
+    // exemple, que les textes non vides, ou oubliait le coût fixe par cellule.
+    let cells: Vec<MixedCell> = (0..10_000)
+        .map(|i| match i % 3 {
+            0 => MixedCell::Number(i as f64),
+            1 => MixedCell::Empty,
+            _ => MixedCell::Text(format!("valeur-{i}")),
+        })
+        .collect();
+    let expected = expected_mixed_buffer_bytes(&cells);
+
+    let mut history = History::with_limit(1);
+    let victim = project
+        .add_column(sheet, None, Some("Victim"), Column::from_mixed(&cells))
+        .expect("colonne mixte à supprimer");
+
+    history
+        .execute(&mut project, Command::DeleteColumn { column: victim })
+        .expect("suppression acceptée");
+
+    let retained_after_delete = history.retained_bytes();
+    println!(
+        "colonne mixte de {} cellules : mixed_buffer_bytes attendu = {expected} octets, \
+         History::retained_bytes() rapporté = {retained_after_delete} octets",
+        cells.len()
+    );
+    assert_eq!(
+        retained_after_delete, expected,
+        "l'empreinte retenue par `History` pour la colonne mixte supprimée \
+         ({retained_after_delete} octets) ne correspond pas à l'estimation documentée de \
+         `mixed_buffer_bytes` ({expected} octets)"
+    );
+
+    // Une commande de plus, avec une limite de 1 entrée : évince l'entrée de
+    // suppression (la plus ancienne) — plus rien ne doit rester retenu.
+    history
+        .execute(
+            &mut project,
+            Command::Rename {
+                id: sheet,
+                name: "Sheet1bis".to_string(),
+            },
+        )
+        .expect("renommage accepté");
+    let retained_after_eviction = history.retained_bytes();
+    println!(
+        "après éviction de l'entrée de suppression : {retained_after_eviction} octets retenus"
+    );
+    assert_eq!(
+        retained_after_eviction, 0,
+        "après éviction de l'entrée de suppression, plus rien ne devrait être retenu"
+    );
 }
 
 // ===========================================================================

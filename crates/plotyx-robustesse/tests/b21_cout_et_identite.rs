@@ -9,7 +9,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use plotyx_commands::{Command, History};
-use plotyx_core::{Column, ColumnType, CoreError, NodeId, Project, ValueBlock};
+use plotyx_core::{Column, ColumnType, CoreError, MixedCell, NodeId, Project, ValueBlock};
 
 // -- allocateur compteur (même schéma que b17) ----------------------------
 
@@ -111,7 +111,121 @@ fn cout_dune_ecriture(colonnes: usize, entrees: usize) -> usize {
     octets / 10
 }
 
+/// Une feuille d'une seule colonne numérique de `taille` valeurs, prête pour
+/// une saisie tolérante (`Command::SetCellsPromoting`).
+fn banc_promotion(taille: usize) -> (Project, History, NodeId) {
+    let mut project = Project::new("D").expect("projet valide");
+    let root = project.root();
+    project.add_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+    let valeurs: Vec<f64> = (0..taille).map(|i| i as f64).collect();
+    let cible = project
+        .add_column(sheet, None, Some("cible"), Column::from_f64(&valeurs))
+        .expect("colonne cible");
+    (project, History::new(), cible)
+}
+
+/// Octets alloués par la **première** saisie tolérante d'un texte dans une
+/// colonne numérique de `taille` valeurs : chemin 3 de `SetCellsPromoting`
+/// (la colonne n'est pas encore mixte) — celui qui promeut la colonne, donc
+/// qui prend un instantané complet de son buffer, comme `SetColumnType`.
+fn cout_dune_premiere_promotion(taille: usize) -> usize {
+    let (mut project, mut history, cible) = banc_promotion(taille);
+    let ((), octets) = octets_de(|| {
+        history
+            .execute(
+                &mut project,
+                Command::SetCellsPromoting {
+                    column: cible,
+                    start: 0,
+                    values: ValueBlock::Mixed(vec![MixedCell::Text("n/a".to_string())]),
+                    expected_version: None,
+                },
+            )
+            .expect("saisie tolérante acceptée")
+    });
+    octets
+}
+
+/// Octets alloués par une saisie tolérante dans une colonne de `taille`
+/// cellules **déjà** mixte dès sa création — chemin 1/2 de
+/// `SetCellsPromoting` (aucune promotion à faire), sur une colonne dont le
+/// buffer n'est encore partagé avec aucune entrée d'historique. Isolé du
+/// scénario « promotion puis nouvelle saisie » : y enchaîner deux
+/// `SetCellsPromoting` sous le même `History` mesurerait un **autre** coût,
+/// bien réel mais non pertinent ici — la copie-à-l'écriture que
+/// `Arc::make_mut` déclenche parce que l'entrée de la promotion retient
+/// encore le buffer courant (voir la doc de `History::apply_data`, chemin
+/// 3) ; ce coût-là existe pour n'importe quelle colonne réécrite juste après
+/// une entrée qui capture son buffer, mixte ou pas, et ce n'est pas la
+/// propriété que ce test vérifie.
+fn cout_dune_saisie_sur_colonne_deja_mixte(taille: usize) -> usize {
+    let mut project = Project::new("D").expect("projet valide");
+    let root = project.root();
+    project.add_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+    let cellules: Vec<MixedCell> = (0..taille).map(|i| MixedCell::Number(i as f64)).collect();
+    let cible = project
+        .add_column(sheet, None, Some("cible"), Column::from_mixed(&cellules))
+        .expect("colonne déjà mixte");
+    let mut history = History::new();
+    let ((), octets) = octets_de(|| {
+        history
+            .execute(
+                &mut project,
+                Command::SetCellsPromoting {
+                    column: cible,
+                    start: 0,
+                    values: ValueBlock::Mixed(vec![MixedCell::Text("n/a".to_string())]),
+                    expected_version: None,
+                },
+            )
+            .expect("saisie tolérante acceptée sur colonne déjà mixte")
+    });
+    octets
+}
+
 // -- garde-fous -----------------------------------------------------------
+
+#[test]
+fn b21_promouvoir_une_colonne_deja_mixte_ne_paie_plus_linstantane() {
+    // Doc de `Command::SetCellsPromoting` (`command.rs`) : le chemin qui
+    // promeut une colonne (instantané complet, comme `SetColumnType`) « n'a
+    // lieu qu'une fois par colonne, la deuxième saisie tolérante empruntant
+    // le chemin 2 » — jusqu'ici affirmé seulement par un test fonctionnel de
+    // `shell.rs` (undo restaure type et valeur), jamais mesuré. Ce test
+    // mesure le coût de la promotion (chemin 3) sur une grande colonne, et
+    // le compare à celui d'une saisie tolérante sur une colonne de la même
+    // taille mais **déjà** mixte (chemins 1/2, pas de promotion à faire) :
+    // le premier doit dépendre de la taille de la colonne, le second non.
+    const TAILLE: usize = 200_000;
+
+    let promotion = cout_dune_premiere_promotion(TAILLE);
+    let deja_mixte = cout_dune_saisie_sur_colonne_deja_mixte(TAILLE);
+    println!(
+        "colonne de {TAILLE} valeurs : promotion (chemin 3) = {promotion} octets, saisie sur \
+         colonne déjà mixte (chemins 1/2) = {deja_mixte} octets"
+    );
+
+    // Le chemin 3 (promotion) prend un instantané du buffer : de l'ordre de
+    // `taille` octets, pas de quelques dizaines.
+    assert!(
+        promotion >= TAILLE,
+        "la première saisie tolérante (chemin 3, promotion) devrait coûter au moins un \
+         instantané du buffer ({TAILLE} valeurs) : {promotion} octets vus — si ce n'est plus \
+         vrai, `SetCellsPromoting` a peut-être cessé de prendre l'instantané attendu par \
+         `SetColumnType`, à vérifier avant de considérer ce chiffre comme une amélioration"
+    );
+    // Une colonne déjà mixte ne paie jamais l'instantané : quelques centaines
+    // d'octets pour une cellule texte, pas 200 000, quelle que soit sa taille.
+    assert!(
+        deja_mixte < TAILLE / 10,
+        "la saisie tolérante sur une colonne déjà mixte a coûté {deja_mixte} octets pour une \
+         colonne de {TAILLE} valeurs : elle ne devrait pas dépendre de la taille de la colonne \
+         — sans quoi le chemin coûteux de la promotion aurait lieu à chaque saisie, pas une \
+         fois par colonne"
+    );
+}
 
 #[test]
 fn b21_les_noms_reserves_par_la_grammaire_restent_refuses() {

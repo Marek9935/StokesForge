@@ -1,6 +1,6 @@
 //! Batterie 2 — désérialisation de structures malformées et aller-retour disque.
 
-use plotyx_core::{Column, ColumnMeta, ColumnRole, ColumnType, Project, ValueBlock};
+use plotyx_core::{Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Project, ValueBlock};
 use plotyx_persistence::{load, save};
 use std::io::Write;
 use std::path::PathBuf;
@@ -174,6 +174,18 @@ fn b2_aller_retour_preserve_tout() {
             },
         )
         .unwrap();
+
+    // Colonne à types mixtes : nombre, texte, cellule vide, NaN écrit comme
+    // un nombre délibéré (distinct de la cellule vide), texte unicode.
+    let mixte = Column::from_mixed(&[
+        MixedCell::Number(1.5),
+        MixedCell::Text("n/a".to_string()),
+        MixedCell::Empty,
+        MixedCell::Number(f64::NAN),
+        MixedCell::Text(String::new()),
+        MixedCell::Text("é ü 日本".to_string()),
+    ]);
+    project.add_column(sheet, None, Some("C"), mixte).unwrap();
 
     let path = dir.path().join("ar.plx");
     save(&project, &path).unwrap();

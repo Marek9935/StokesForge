@@ -20,7 +20,9 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use plotyx_core::{Column, ColumnType, NodeId, Project};
+use plotyx_core::resolve::resolve_series;
+use plotyx_core::{Column, ColumnType, MixedCell, Node, NodeId, Project};
+use plotyx_plot::{PlotType, SeriesSpec};
 
 // -- allocateur compteur --------------------------------------------------
 
@@ -147,6 +149,84 @@ fn b17_ecrire_dans_une_colonne_ne_depend_pas_de_la_taille_du_projet() {
         b <= a * 4,
         "écrire dans une colonne coûte {b} octets sur un grand projet contre {a} sur un \
          petit : l'écriture doit dépendre du bloc écrit, pas de la taille du projet"
+    );
+}
+
+#[test]
+fn b17_numeric_view_dune_colonne_mixte_ne_coute_quune_fois_par_resolution() {
+    // `Column::numeric_view` est documentée comme « la seule lecture du
+    // modèle qui copie » (`column.rs`) : une colonne mixte n'a pas de buffer
+    // `f64` contigu, donc `resolve_series` en matérialise un, une fois par
+    // colonne mixte référencée. Le garde-fou : une résolution complète d'une
+    // série dont le Y est mixte ne coûte pas plus qu'un unique appel à
+    // `numeric_view` sur cette même colonne — si un jour `resolve_series` (ou
+    // un renderer en aval) se mettait à la rappeler par point tracé plutôt
+    // qu'une fois par résolution, ce test grossirait avec le nombre de
+    // rappels, pas avec la taille de la colonne.
+    const POINTS: usize = 20_000;
+
+    let mut project = Project::new("D").expect("projet valide");
+    let root = project.root();
+    project.add_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+    let cellules: Vec<MixedCell> = (0..POINTS)
+        .map(|i| {
+            if i % 7 == 0 {
+                MixedCell::Text("n/a".to_string())
+            } else {
+                MixedCell::Number(i as f64)
+            }
+        })
+        .collect();
+    let y = project
+        .add_column(sheet, None, Some("Y"), Column::from_mixed(&cellules))
+        .expect("colonne mixte");
+    let serie = SeriesSpec {
+        plot_type: PlotType::Histogram, // needs_x() == false : une seule colonne mixte en jeu
+        ..SeriesSpec::new(y)
+    };
+
+    // Coût d'une résolution complète (un appel implicite à `numeric_view`).
+    let (_, cout_dune_resolution) = octets_de(|| resolve_series(project.tree(), &serie));
+
+    // Coût de référence : un unique appel direct à `numeric_view`, hors de
+    // toute résolution — ce que `resolve_series` doit approcher.
+    let colonne = project
+        .tree()
+        .node(y)
+        .and_then(Node::as_column)
+        .expect("colonne mixte");
+    let (_, cout_dun_appel) = octets_de(|| colonne.numeric_view());
+
+    // Le contre-exemple utile : ce qu'un vrai régression — rappeler
+    // `numeric_view` à chaque point tracé plutôt qu'une fois — coûterait.
+    // 50 rappels est un budget de points affichés très conservateur (un
+    // graphe réduit à quelques dizaines de pixels de large).
+    const RAPPELS_SIMULES: usize = 50;
+    let (_, cout_de_rappels_par_point) = octets_de(|| {
+        for _ in 0..RAPPELS_SIMULES {
+            let _ = colonne.numeric_view();
+        }
+    });
+
+    println!(
+        "colonne mixte de {POINTS} cellules : résolution complète = {cout_dune_resolution} octets, \
+         un appel direct à numeric_view = {cout_dun_appel} octets, {RAPPELS_SIMULES} rappels \
+         (régression simulée) = {cout_de_rappels_par_point} octets"
+    );
+
+    assert!(
+        cout_dune_resolution <= cout_dun_appel * 2,
+        "résoudre la série a coûté {cout_dune_resolution} octets contre {cout_dun_appel} pour un \
+         unique appel à `numeric_view` : `resolve_series` rappelle `numeric_view` plus d'une fois \
+         pour cette colonne"
+    );
+    assert!(
+        cout_de_rappels_par_point >= cout_dun_appel * (RAPPELS_SIMULES / 2),
+        "le contre-exemple ({RAPPELS_SIMULES} appels directs) devrait coûter environ \
+         {RAPPELS_SIMULES}× un appel — {cout_de_rappels_par_point} octets vus contre \
+         {cout_dun_appel} pour un seul : si ce n'est plus vrai, le contre-exemple ne prouve \
+         plus rien et ce test doit être revu"
     );
 }
 
