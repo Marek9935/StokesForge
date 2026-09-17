@@ -195,6 +195,29 @@ impl Selection {
         }
     }
 
+    /// Vrai si la sélection est un rectangle de cellules de données —
+    /// permet à [`crate::state::AppState::extend_selection`] de distinguer
+    /// une extension normale (au sein des données) d'un franchissement de
+    /// frontière (vers l'en-tête), qui doit reposer une sélection simple
+    /// plutôt que d'étendre silencieusement sans effet.
+    pub fn is_cells(&self) -> bool {
+        matches!(self.kind, SelectionKind::Cells { .. })
+    }
+
+    /// Vrai si la sélection est une plage de colonnes entières (rangée des
+    /// lettres) — même rôle que [`Selection::is_cells`] pour
+    /// [`crate::state::AppState::extend_column_selection`].
+    pub fn is_columns(&self) -> bool {
+        matches!(self.kind, SelectionKind::Columns { .. })
+    }
+
+    /// Vrai si la sélection est un rectangle de champs d'en-tête — même rôle
+    /// que [`Selection::is_cells`] pour [`crate::state::AppState::
+    /// extend_header_field_selection`].
+    pub fn is_header_fields(&self) -> bool {
+        matches!(self.kind, SelectionKind::HeaderFields { .. })
+    }
+
     /// `Some((column, row))` si la sélection est réduite à une seule
     /// cellule (un rectangle de cellules dont l'ancre et le curseur
     /// coïncident — un simple clic, jamais étendu depuis), `None` pour un

@@ -956,11 +956,15 @@ impl AppState {
 
     /// Étend la sélection courante de `sheet` jusqu'à `(column, row)`, en
     /// gardant l'ancre déjà posée — glisser ou Shift-clic. Pose une
-    /// sélection d'une seule cellule si `sheet` n'en avait pas encore.
+    /// sélection d'une seule cellule si `sheet` n'en avait pas encore, ou si
+    /// la sélection en cours n'est pas déjà un rectangle de cellules — un
+    /// glisser qui franchit la frontière depuis l'en-tête (champs ou rangée
+    /// des lettres) vers les données ne produit jamais de rectangle mixte,
+    /// même politique qu'au clavier (voir [`AppState::move_selection`]).
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) => selection.extend_to(column, row),
-            None => self.select_cell(sheet, column, row),
+            Some(selection) if selection.is_cells() => selection.extend_to(column, row),
+            _ => self.select_cell(sheet, column, row),
         }
     }
 
@@ -972,11 +976,15 @@ impl AppState {
     /// Étend la plage de colonnes courante de `sheet` jusqu'à `column`, en
     /// gardant l'ancre déjà posée — glisser ou Maj-clic sur la rangée des
     /// lettres. Pose une sélection d'une seule colonne si `sheet` n'en avait
-    /// pas encore.
+    /// pas encore, ou si la sélection en cours n'est pas déjà une plage de
+    /// colonnes — un glisser qui franchit la frontière depuis les données ou
+    /// les champs d'en-tête vers la rangée des lettres ne produit jamais de
+    /// rectangle mixte, même politique qu'au clavier (voir [`AppState::
+    /// move_selection`]).
     pub fn extend_column_selection(&mut self, sheet: NodeId, column: NodeId) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) => selection.extend_columns_to(column),
-            None => self.select_column(sheet, column),
+            Some(selection) if selection.is_columns() => selection.extend_columns_to(column),
+            _ => self.select_column(sheet, column),
         }
     }
 
@@ -991,7 +999,11 @@ impl AppState {
     /// Étend la plage de champs d'en-tête courante de `sheet` jusqu'à
     /// `(column, field)`, en gardant l'ancre déjà posée — glisser ou
     /// Maj-clic sur une des 4 rangées de champs. Pose une sélection d'un
-    /// seul champ si `sheet` n'en avait pas encore.
+    /// seul champ si `sheet` n'en avait pas encore, ou si la sélection en
+    /// cours n'est pas déjà une plage de champs d'en-tête — un glisser qui
+    /// franchit la frontière depuis les données ou la rangée des lettres
+    /// vers les champs d'en-tête ne produit jamais de rectangle mixte, même
+    /// politique qu'au clavier (voir [`AppState::move_selection`]).
     pub fn extend_header_field_selection(
         &mut self,
         sheet: NodeId,
@@ -999,8 +1011,10 @@ impl AppState {
         field: HeaderField,
     ) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) => selection.extend_header_field_to(column, field),
-            None => self.select_header_field(sheet, column, field),
+            Some(selection) if selection.is_header_fields() => {
+                selection.extend_header_field_to(column, field)
+            }
+            _ => self.select_header_field(sheet, column, field),
         }
     }
 

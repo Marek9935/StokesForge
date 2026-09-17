@@ -2123,6 +2123,85 @@ fn extending_a_header_field_selection_covers_the_whole_rectangle() {
     );
 }
 
+/// Glisser depuis un champ d'en-tête vers une cellule de données
+/// (`extend_selection`, la méthode *cellule de données*, appelée alors que
+/// la sélection en cours est une plage de champs) ne produit pas de
+/// rectangle mixte silencieusement ignoré : elle repose une sélection d'une
+/// seule cellule à la cible, comme un simple clic — même politique qu'au
+/// clavier (voir [`AppState::move_selection`]).
+#[test]
+fn dragging_a_cell_extension_across_the_header_boundary_reselects_a_single_cell() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    state.extend_selection(sheet1, signal, 2);
+
+    assert!(
+        state.is_selected(sheet1, signal, 2),
+        "la cellule visée devient la nouvelle sélection"
+    );
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        None,
+        "plus aucun champ d'en-tête sélectionné après le franchissement"
+    );
+}
+
+/// Glisser depuis une cellule de données vers la rangée des lettres
+/// (`extend_column_selection` appelée alors que la sélection en cours est un
+/// rectangle de cellules) repose une sélection d'une seule colonne à la
+/// cible plutôt que d'être ignorée.
+#[test]
+fn dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 0);
+    state.extend_column_selection(sheet1, signal);
+
+    assert!(
+        state.is_column_selected(sheet1, signal),
+        "la colonne visée devient la nouvelle sélection"
+    );
+    assert!(
+        !state.is_selected(sheet1, temps, 0),
+        "l'ancienne sélection de cellule n'a plus cours"
+    );
+}
+
+/// Glisser depuis la rangée des lettres vers une rangée de champs d'en-tête
+/// (`extend_header_field_selection` appelée alors que la sélection en cours
+/// est une plage de colonnes) repose une sélection d'un seul champ à la
+/// cible plutôt que d'être ignorée.
+#[test]
+fn dragging_a_header_field_extension_across_the_column_boundary_reselects_a_single_field() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_column(sheet1, temps);
+    state.extend_header_field_selection(sheet1, signal, HeaderField::Comment);
+
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        Some((signal, HeaderField::Comment)),
+        "le champ visé devient la nouvelle sélection"
+    );
+    assert!(
+        !state.is_column_selected(sheet1, temps),
+        "l'ancienne plage de colonnes n'a plus cours"
+    );
+}
+
 /// Flèche Haut depuis la première ligne de données rejoint le champ Formule
 /// (le plus bas des 4 champs d'en-tête) ; Bas depuis Formule revient à la
 /// première ligne de données — la frontière entre l'en-tête et les données
