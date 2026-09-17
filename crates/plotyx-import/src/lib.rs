@@ -11,11 +11,20 @@
 //! le vocabulaire de sortie du parseur (`f64`, `NaN` pour une valeur
 //! manquante) est le plus simple qui existe, pour rester indépendant.
 //! `plotyx-app` fait la conversion vers `plotyx_core::Column` de son côté.
+//!
+//! [`preview`] classe chaque ligne d'un fichier en rôle (en-tête principal,
+//! sous-en-tête et son rôle éventuel, donnée, pied de page), façon
+//! l'assistant d'import ASCII d'OriginLab, pour que la fenêtre d'import
+//! montre en direct comment un fichier va être découpé pendant que
+//! l'utilisateur règle la recette — voir sa doc de tête pour le budget de
+//! coût sur un gros fichier.
 
 pub mod parse;
+pub mod preview;
 pub mod recipe;
 pub mod store;
 
 pub use parse::*;
+pub use preview::*;
 pub use recipe::*;
 pub use store::*;
