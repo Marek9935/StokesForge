@@ -2125,12 +2125,13 @@ fn extending_a_header_field_selection_covers_the_whole_rectangle() {
 
 /// Glisser depuis un champ d'en-tête vers une cellule de données
 /// (`extend_selection`, la méthode *cellule de données*, appelée alors que
-/// la sélection en cours est une plage de champs) ne produit pas de
-/// rectangle mixte silencieusement ignoré : elle repose une sélection d'une
-/// seule cellule à la cible, comme un simple clic — même politique qu'au
-/// clavier (voir [`AppState::move_selection`]).
+/// la sélection en cours est déjà une plage de champs) forme désormais un
+/// seul rectangle **mixte** continu, plutôt que de reposer une sélection
+/// d'une seule cellule : franchir la frontière en-tête/données à la souris
+/// ne réinitialise plus rien (seule la rangée des lettres — `Columns` —
+/// garde cette politique, voir [`dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column`]).
 #[test]
-fn dragging_a_cell_extension_across_the_header_boundary_reselects_a_single_cell() {
+fn dragging_a_cell_extension_across_the_header_boundary_forms_one_continuous_rectangle() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -2142,12 +2143,61 @@ fn dragging_a_cell_extension_across_the_header_boundary_reselects_a_single_cell(
 
     assert!(
         state.is_selected(sheet1, signal, 2),
-        "la cellule visée devient la nouvelle sélection"
+        "la cellule visée fait partie du rectangle"
+    );
+    assert!(
+        state.is_header_field_selected(sheet1, temps, HeaderField::Unit),
+        "le champ d'ancrage reste sélectionné, le rectangle continue plutôt que de se déplacer"
+    );
+    assert!(
+        state.is_header_field_selected(sheet1, temps, HeaderField::Comment),
+        "champ intermédiaire entre l'ancre et la cible inclus"
+    );
+    assert!(
+        state.is_selected(sheet1, temps, 0),
+        "donnée de la colonne d'ancrage, dans la portion données du rectangle, incluse"
     );
     assert_eq!(
         state.selected_header_field(sheet1),
         None,
-        "plus aucun champ d'en-tête sélectionné après le franchissement"
+        "un rectangle de plusieurs cases n'est jamais réduit à un seul champ"
+    );
+}
+
+/// Une sélection démarrée sur le champ Commentaire et étendue jusqu'à une
+/// ligne de données de la même colonne couvre tout ce qui est entre les
+/// deux (Commentaire, Formule, puis les lignes de données jusqu'à la
+/// cible) — le cas d'usage central du rectangle mixte.
+#[test]
+fn extending_from_a_header_field_into_data_selects_everything_in_between() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_header_field(sheet1, temps, HeaderField::Comment);
+    state.extend_selection(sheet1, temps, 4);
+
+    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Comment));
+    assert!(
+        state.is_header_field_selected(sheet1, temps, HeaderField::Formula),
+        "Formule, entre Commentaire et les données, incluse"
+    );
+    assert!(
+        !state.is_header_field_selected(sheet1, temps, HeaderField::Unit),
+        "Unité est au-dessus de l'ancre : hors du rectangle"
+    );
+    for row in 0..=4 {
+        assert!(state.is_selected(sheet1, temps, row), "ligne {row} incluse");
+    }
+
+    let tsv = state
+        .selected_cells_tsv(sheet1)
+        .expect("sélection non vide");
+    assert_eq!(
+        tsv.lines().count(),
+        7,
+        "2 champs d'en-tête (Commentaire, Formule) + 5 lignes de données"
     );
 }
 
@@ -2236,5 +2286,67 @@ fn arrow_up_from_the_first_data_row_enters_the_header_fields() {
     assert!(
         state.is_selected(sheet1, temps, 0),
         "Bas depuis Formule redescend en première ligne de données"
+    );
+}
+
+/// Tab depuis le champ Formule de la **dernière** colonne visible entre
+/// dans les données, à `Data(0)` de la **première** colonne — le pendant de
+/// Tab pour la frontière en-tête/données, symétrique de Maj+Tab depuis
+/// `Data(0)` de la première colonne (voir le test suivant).
+#[test]
+fn tab_from_the_last_column_formula_field_enters_the_data() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_header_field(sheet1, note, HeaderField::Formula);
+    state.move_selection_tab(sheet1, false);
+
+    assert!(
+        state.is_selected(sheet1, temps, 0),
+        "Tab depuis Formule de la dernière colonne rejoint Data(0) de la première"
+    );
+}
+
+/// Maj+Tab depuis `Data(0)` de la première colonne visible rejoint le champ
+/// Formule de la **dernière** colonne — le point d'entrée symétrique dans
+/// l'en-tête.
+#[test]
+fn shift_tab_from_the_first_cell_reaches_the_last_column_formula_field() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_cell(sheet1, temps, 0);
+    state.move_selection_tab(sheet1, true);
+
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        Some((note, HeaderField::Formula)),
+    );
+}
+
+/// Tab circule normalement au sein de l'en-tête, colonne par colonne, puis
+/// champ par champ une fois toutes les colonnes parcourues pour un champ
+/// donné — sans jamais entrer dans les données tant que ce n'est pas la
+/// dernière colonne au dernier champ.
+#[test]
+fn tab_cycles_through_header_fields_before_reaching_data() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.move_selection_tab(sheet1, false);
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        Some((signal, HeaderField::LongName)),
+        "Tab avance d'abord de colonne en colonne pour un même champ"
     );
 }

@@ -312,7 +312,7 @@ use plotyx_core::{ColumnRole, ColumnType, NodeId, Tree};
 use plotyx_render_egui::{DrawnPlot, GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::Snapshot;
 
-use crate::selection::Selection;
+use crate::selection::{GridCursor, Selection};
 use crate::state::{
     cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
     Action, AppState, CellEdit, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
@@ -1940,13 +1940,7 @@ fn row_number_header_label(ui: &mut egui::Ui, height: f32, label: &str) {
 
 /// Valeur actuelle d'un champ d'en-tête, telle qu'affichée hors édition.
 fn header_field_text(state: &AppState, column: NodeId, field: HeaderField) -> String {
-    let meta = state.column_meta(column);
-    match field {
-        HeaderField::LongName => meta.long_name,
-        HeaderField::Unit => meta.unit,
-        HeaderField::Comment => meta.comment,
-        HeaderField::Formula => meta.formula.unwrap_or_default(),
-    }
+    state.header_field_display_text(column, field)
 }
 
 /// Contenu d'un [`Tab::Book`] : la barre d'actions de structure, la grille
@@ -2699,12 +2693,16 @@ fn grid_contents(
             // cellule qu'on vient de remplir — ajoute la ligne, puis
             // sélectionne tout de suite la cellule qui y correspondra
             // (elle sera créée avant le prochain rendu, voir `cell_widget`).
-            let at_last_row = state
+            let data_cursor = state
                 .selection(sheet)
-                .and_then(Selection::cursor)
-                .is_some_and(|(_, row)| row + 1 >= state.row_count(sheet));
+                .and_then(Selection::grid_cursor)
+                .and_then(|cursor| match cursor {
+                    GridCursor::Data(column, row) => Some((column, row)),
+                    GridCursor::Header(..) => None,
+                });
+            let at_last_row = data_cursor.is_some_and(|(_, row)| row + 1 >= state.row_count(sheet));
             if at_last_row {
-                if let Some((column, row)) = state.selection(sheet).and_then(Selection::cursor) {
+                if let Some((column, row)) = data_cursor {
                     actions.push(Action::InsertRows {
                         sheet,
                         at: row + 1,

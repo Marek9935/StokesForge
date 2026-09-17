@@ -539,6 +539,20 @@ impl HeaderField {
             HeaderField::Formula => 3,
         }
     }
+
+    /// Inverse de [`HeaderField::index`] — `index` au-delà de 3 vaut
+    /// `Formula`, jamais de panique : les appelants ([`crate::selection::
+    /// Selection::cleared_header_fields`]/[`AppState::selected_cells_tsv`])
+    /// ne passent que des rangs déjà bornés à `-4..=-1`, mais une saturation
+    /// silencieuse est plus sûre qu'un `match` incomplet si ça changeait.
+    pub(crate) fn from_index(index: usize) -> Self {
+        match index {
+            0 => HeaderField::LongName,
+            1 => HeaderField::Unit,
+            2 => HeaderField::Comment,
+            _ => HeaderField::Formula,
+        }
+    }
 }
 
 /// Direction d'un déplacement clavier d'une cellule dans la grille (flèches
@@ -955,15 +969,18 @@ impl AppState {
     }
 
     /// Étend la sélection courante de `sheet` jusqu'à `(column, row)`, en
-    /// gardant l'ancre déjà posée — glisser ou Shift-clic. Pose une
-    /// sélection d'une seule cellule si `sheet` n'en avait pas encore, ou si
-    /// la sélection en cours n'est pas déjà un rectangle de cellules — un
-    /// glisser qui franchit la frontière depuis l'en-tête (champs ou rangée
-    /// des lettres) vers les données ne produit jamais de rectangle mixte,
-    /// même politique qu'au clavier (voir [`AppState::move_selection`]).
+    /// gardant l'ancre déjà posée — glisser ou Maj-clic. Continue un
+    /// rectangle déjà commencé sur un champ d'en-tête (franchir la frontière
+    /// en-tête/données forme un seul rectangle mixte continu, voir la doc de
+    /// tête de [`crate::selection`]) ; pose une sélection d'une seule
+    /// cellule si `sheet` n'en avait pas encore, ou si la sélection en cours
+    /// est une plage de colonnes (rangée des lettres) — ce glisser-là reste
+    /// un geste distinct, voir [`AppState::extend_column_selection`].
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) if selection.is_cells() => selection.extend_to(column, row),
+            Some(selection) if !selection.is_columns() => {
+                selection.extend_row_to(GridCursor::Data(column, row))
+            }
             _ => self.select_cell(sheet, column, row),
         }
     }
@@ -996,14 +1013,15 @@ impl AppState {
             .insert(sheet, Selection::header_field(column, field));
     }
 
-    /// Étend la plage de champs d'en-tête courante de `sheet` jusqu'à
-    /// `(column, field)`, en gardant l'ancre déjà posée — glisser ou
-    /// Maj-clic sur une des 4 rangées de champs. Pose une sélection d'un
-    /// seul champ si `sheet` n'en avait pas encore, ou si la sélection en
-    /// cours n'est pas déjà une plage de champs d'en-tête — un glisser qui
-    /// franchit la frontière depuis les données ou la rangée des lettres
-    /// vers les champs d'en-tête ne produit jamais de rectangle mixte, même
-    /// politique qu'au clavier (voir [`AppState::move_selection`]).
+    /// Étend la plage courante de `sheet` jusqu'au champ `(column, field)`,
+    /// en gardant l'ancre déjà posée — glisser ou Maj-clic sur une des 4
+    /// rangées de champs. Continue un rectangle déjà commencé dans les
+    /// données (franchir la frontière en-tête/données forme un seul
+    /// rectangle mixte continu, voir la doc de tête de [`crate::
+    /// selection`]) ; pose une sélection d'un seul champ si `sheet` n'en
+    /// avait pas encore, ou si la sélection en cours est une plage de
+    /// colonnes (rangée des lettres) — ce glisser-là reste un geste
+    /// distinct, voir [`AppState::extend_column_selection`].
     pub fn extend_header_field_selection(
         &mut self,
         sheet: NodeId,
@@ -1011,8 +1029,8 @@ impl AppState {
         field: HeaderField,
     ) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) if selection.is_header_fields() => {
-                selection.extend_header_field_to(column, field)
+            Some(selection) if !selection.is_columns() => {
+                selection.extend_row_to(GridCursor::Header(column, field))
             }
             _ => self.select_header_field(sheet, column, field),
         }
@@ -1140,44 +1158,102 @@ impl AppState {
         }
     }
 
-    /// Déplace la sélection de `sheet` d'une cellule vers la colonne
-    /// suivante (`backward: false`) ou précédente (`true`), avec retour à
-    /// la ligne aux bords — Tab/Maj+Tab, comme dans tout tableur : Tab en
-    /// fin de ligne repart au début de la ligne suivante, Maj+Tab en début
-    /// de ligne revient à la fin de la précédente. Jamais d'extension de
+    /// Déplace la sélection de `sheet` d'une case vers la colonne suivante
+    /// (`backward: false`) ou précédente (`true`), avec retour à la ligne
+    /// aux bords — Tab/Maj+Tab, comme dans tout tableur : Tab en fin de
+    /// ligne repart au début de la ligne suivante, Maj+Tab en début de ligne
+    /// revient à la fin de la précédente. Traverse aussi la frontière entre
+    /// l'en-tête (les 4 champs) et les données, contrairement aux flèches
+    /// directionnelles (voir [`AppState::move_selection`]) qui la
+    /// traversent mais sans jamais entrer en jeu avec Tab : Tab depuis
+    /// Formule (le plus bas des 4 champs) de la **dernière** colonne entre
+    /// dans les données à `Data(0)` de la **première** colonne ; Maj+Tab
+    /// depuis `Data(0)` de la première colonne fait le chemin inverse et
+    /// rejoint Formule de la dernière colonne — le point d'entrée symétrique
+    /// dans l'en-tête. Au sein de l'en-tête ou des données seules, Tab
+    /// circule normalement (colonne suivante/précédente, champ suivant/
+    /// précédent ou ligne suivante/précédente aux bords de colonne),
+    /// clampé sans autre franchissement de frontière. Jamais d'extension de
     /// sélection (Tab n'étend pas, contrairement aux flèches sous Maj) ; les
-    /// mêmes gardes que [`AppState::move_selection`] sinon.
+    /// mêmes gardes que [`AppState::move_selection`] sinon (sans effet si
+    /// `sheet` a une plage de colonnes sélectionnée ou aucune sélection).
     pub fn move_selection_tab(&mut self, sheet: NodeId, backward: bool) {
-        let Some((from_column, from_row)) = self.selection.get(&sheet).and_then(Selection::cursor)
-        else {
+        let Some(from) = self.selection.get(&sheet).and_then(Selection::grid_cursor) else {
             return;
         };
         let order = self.column_order(sheet);
-        let Some(index) = order.iter().position(|&id| id == from_column) else {
-            return;
-        };
         let row_count = self.row_count(sheet);
         if order.is_empty() || row_count == 0 {
             return;
         }
-        let mut column_index = index as isize;
-        let mut row = from_row as isize;
-        if backward {
-            column_index -= 1;
-            if column_index < 0 {
-                column_index = order.len() as isize - 1;
-                row -= 1;
-            }
-        } else {
-            column_index += 1;
-            if column_index >= order.len() as isize {
-                column_index = 0;
-                row += 1;
+        let from_column = match from {
+            GridCursor::Data(column, _) | GridCursor::Header(column, _) => column,
+        };
+        let Some(index) = order.iter().position(|&id| id == from_column) else {
+            return;
+        };
+        let last_index = order.len() - 1;
+
+        /// Champ suivant/précédent une fois toutes les colonnes parcourues
+        /// pour le champ courant, `None` aux bornes (Formule en avançant,
+        /// Nom long en reculant) — Tab parcourt d'abord les colonnes à champ
+        /// fixe, voir la doc de [`AppState::move_selection_tab`].
+        fn step_field(field: HeaderField, backward: bool) -> Option<HeaderField> {
+            use HeaderField::{Comment, Formula, LongName, Unit};
+            match (field, backward) {
+                (LongName, false) => Some(Unit),
+                (Unit, false) => Some(Comment),
+                (Comment, false) => Some(Formula),
+                (Formula, false) => None,
+                (Unit, true) => Some(LongName),
+                (Comment, true) => Some(Unit),
+                (Formula, true) => Some(Comment),
+                (LongName, true) => None,
             }
         }
-        let row = row.clamp(0, row_count as isize - 1) as usize;
-        let column_index = column_index.clamp(0, order.len() as isize - 1) as usize;
-        self.select_cell(sheet, order[column_index], row);
+
+        let to = if backward {
+            match from {
+                GridCursor::Header(_, field) if index > 0 => {
+                    GridCursor::Header(order[index - 1], field)
+                }
+                GridCursor::Header(_, field) => match step_field(field, true) {
+                    Some(prev) => GridCursor::Header(order[last_index], prev),
+                    None => GridCursor::Header(from_column, HeaderField::LongName),
+                },
+                GridCursor::Data(_, 0) if index == 0 => {
+                    GridCursor::Header(order[last_index], HeaderField::Formula)
+                }
+                GridCursor::Data(_, row) => {
+                    if index > 0 {
+                        GridCursor::Data(order[index - 1], row)
+                    } else {
+                        GridCursor::Data(order[last_index], row.saturating_sub(1))
+                    }
+                }
+            }
+        } else {
+            match from {
+                GridCursor::Header(_, field) if index < last_index => {
+                    GridCursor::Header(order[index + 1], field)
+                }
+                GridCursor::Header(_, field) => match step_field(field, false) {
+                    Some(next) => GridCursor::Header(order[0], next),
+                    None => GridCursor::Data(order[0], 0),
+                },
+                GridCursor::Data(_, row) => {
+                    if index < last_index {
+                        GridCursor::Data(order[index + 1], row)
+                    } else {
+                        GridCursor::Data(order[0], (row + 1).min(row_count - 1))
+                    }
+                }
+            }
+        };
+        match to {
+            GridCursor::Data(column, row) => self.select_cell(sheet, column, row),
+            GridCursor::Header(column, field) => self.select_header_field(sheet, column, field),
+        }
     }
 
     /// Vrai si `(column, row)` fait partie de la sélection de `sheet`.
@@ -1219,7 +1295,11 @@ impl AppState {
     /// n'a pas de sélection ou si elle ne désigne plus de colonne valide.
     /// Une valeur manquante s'y écrit comme une chaîne vide (jamais
     /// [`MISSING_TEXT_DISPLAY`], qui n'a de sens que pour l'écran, pas pour
-    /// un échange avec un tableur externe).
+    /// un échange avec un tableur externe). Un rectangle mixte (voir la doc
+    /// de tête de [`crate::selection`]) rend une ligne par champ d'en-tête
+    /// touché (dans l'ordre où ils sont empilés à l'écran) **puis** une
+    /// ligne par ligne de données touchée — ex. Commentaire + Formule + 20
+    /// lignes de données sur 2 colonnes rend 22 lignes TSV.
     pub fn selected_cells_tsv(&self, sheet: NodeId) -> Option<String> {
         let selection = self.selection.get(&sheet)?;
         let tree = &self.snapshot.tree;
@@ -1227,7 +1307,7 @@ impl AppState {
         if columns.is_empty() {
             return None;
         }
-        let (row_start, row_end) = match selection.row_range() {
+        let (rank_start, rank_end) = match selection.full_rank_range() {
             Some(range) => range,
             None => {
                 let len = columns
@@ -1236,19 +1316,39 @@ impl AppState {
                     .map(Column::len)
                     .max()
                     .unwrap_or(0);
-                (0, len.saturating_sub(1))
+                (0, len.saturating_sub(1) as isize)
             }
         };
         let mut out = String::new();
-        for row in row_start..=row_end {
+        for rank in rank_start..=rank_end {
             let line: Vec<String> = columns
                 .iter()
-                .map(|&column| cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, ""))
+                .map(|&column| {
+                    if rank < 0 {
+                        let field = HeaderField::from_index((rank + 4) as usize);
+                        self.header_field_display_text(column, field)
+                    } else {
+                        cell_text_in(tree, column, rank as usize).replace(MISSING_TEXT_DISPLAY, "")
+                    }
+                })
                 .collect();
             out.push_str(&line.join("\t"));
             out.push('\n');
         }
         Some(out)
+    }
+
+    /// Texte affiché d'un champ d'en-tête (hors édition) — même détail que
+    /// [`crate::app::header_field_widget`], factorisé ici pour être partagé
+    /// avec [`AppState::selected_cells_tsv`].
+    pub(crate) fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
+        let meta = self.column_meta(column);
+        match field {
+            HeaderField::LongName => meta.long_name,
+            HeaderField::Unit => meta.unit,
+            HeaderField::Comment => meta.comment,
+            HeaderField::Formula => meta.formula.unwrap_or_default(),
+        }
     }
 
     /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
@@ -2160,20 +2260,27 @@ impl AppState {
         }
     }
 
-    /// Vide le contenu des cellules sélectionnées de `sheet`, sans décaler
-    /// ce qui suit (Retour arrière/Ctrl+X) — une seule `Command::SetCells`
-    /// par colonne touchée, groupées en une seule entrée d'historique dès
-    /// que plus d'une colonne est concernée (`History::begin_macro`/
-    /// `end_macro`).
+    /// Vide le contenu des cellules et champs d'en-tête sélectionnés de
+    /// `sheet`, sans décaler ce qui suit (Retour arrière/Ctrl+X) — une seule
+    /// `Command::SetCells` par colonne touchée pour la portion données, un
+    /// `Command::SetColumnMeta` (via [`AppState::set_column_meta_field`])
+    /// par champ d'en-tête touché pour la portion en-tête (voir
+    /// [`crate::selection::Selection::cleared_header_fields`] pour
+    /// comment un rectangle mixte, à cheval sur les deux, se décompose).
+    /// Tout est groupé en une seule entrée d'historique dès que plus d'une
+    /// opération est concernée (`History::begin_macro`/`end_macro`), pour
+    /// qu'annuler restaure tout d'un coup.
     fn clear_selected_cells(&mut self, sheet: NodeId) {
         let Some(selection) = self.selection.get(&sheet) else {
             return;
         };
-        let ranges = selection.clear_ranges(&self.snapshot.tree, sheet);
-        if ranges.is_empty() {
+        let tree = &self.snapshot.tree;
+        let ranges = selection.clear_ranges(tree, sheet);
+        let header_fields = selection.cleared_header_fields(tree, sheet);
+        if ranges.is_empty() && header_fields.is_empty() {
             return;
         }
-        let grouped = ranges.len() > 1;
+        let grouped = ranges.len() + header_fields.len() > 1;
         if grouped && self.handle.begin_macro("Effacer la sélection").is_err() {
             self.fail("Impossible de grouper l'effacement de la sélection".to_string());
             return;
@@ -2193,6 +2300,14 @@ impl AppState {
                 start,
                 values: ValueBlock::missing_for(kind, count),
                 expected_version: None,
+            });
+        }
+        for (column, field) in header_fields {
+            self.set_column_meta_field(column, |meta| match field {
+                HeaderField::LongName => meta.long_name = String::new(),
+                HeaderField::Unit => meta.unit = String::new(),
+                HeaderField::Comment => meta.comment = String::new(),
+                HeaderField::Formula => meta.formula = None,
             });
         }
         if grouped {
