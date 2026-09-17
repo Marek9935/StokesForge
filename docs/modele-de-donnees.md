@@ -73,7 +73,7 @@ Trois décisions structurent le module :
 
 - **Valeur manquante** — `f64::NAN` pour `Numeric` et `DateTime`, `None` pour
   `Text` (distinct de `Some(String::new())`, qui est une chaîne vide
-  délibérée).
+  délibérée), `MixedCell::Empty` pour `Mixed`.
 - **Buffers contigus, jamais chunkés**, partagés derrière un `Arc` et mutés
   par `Arc::make_mut`. C'est ce qui permet au pont Python de tenir une vue
   numpy **sans copie** tant qu'il détient un clone de l'`Arc`.
@@ -82,10 +82,53 @@ Trois décisions structurent le module :
   `Command::SetCells { expected_version }` vérifie, et qui ferme le TOCTOU
   entre l'instantané qu'un script a lu et la commande qu'il envoie.
 
-Types : `Numeric`, `DateTime`, `Text`. Rôles de tracé : `X`, `Y` (défaut),
-`Z`, `XError`, `YError`, `Label`, aucun.
+Types : `Numeric`, `DateTime`, `Text`, `Mixed`. Rôles de tracé : `X`, `Y`
+(défaut), `Z`, `XError`, `YError`, `Label`, aucun.
 
 **À lire** : `plotyx-core/src/column.rs`.
+
+### `Mixed` — le type porté par la cellule
+
+Les trois premiers types disent « toute la colonne est ainsi ». `Mixed` dit
+« chaque ligne décide » : son buffer est un `Vec<MixedCell>`, et un
+`MixedCell` est indépendamment `Empty`, `Number(f64)` ou `Text(String)`.
+
+Le besoin est celui d'un import réel. Une colonne de mesures qui porte
+`1,2 / 1,3 / n/a / 1,5` n'avait que deux issues, toutes deux mauvaises : tout
+en nombres, et le `n/a` devient une valeur manquante indiscernable d'une
+mesure absente ; tout en texte, et plus rien n'est traçable.
+
+Quatre choses à savoir avant d'y toucher.
+
+**Les trois types homogènes restent des chemins rapides.** Faire de *toute*
+colonne un `Vec<MixedCell>` coûterait 32 octets par ligne au lieu de 8 (un
+`MixedCell` a la taille d'une `String` plus son discriminant) et, surtout,
+retirerait le buffer `Arc<Vec<f64>>` contigu sur lequel reposent la vue numpy
+sans copie du pont Python et la résolution zéro-copie d'une série. `Mixed` est
+un type **de plus**, payé par qui s'en sert.
+
+**Trois « manquantes » distinctes au stockage, une seule à l'affichage.**
+`Empty`, `Number(f64::NAN)` et `Text("")` se stockent distinctement et se
+comparent distinctement ; les trois rendent `is_missing()` vrai. C'est la même
+asymétrie que `None` contre `Some("")` pour une colonne texte.
+
+**Une colonne mixte est traçable.** `Column::numeric_view` en tire une vue
+`f64` où les cellules texte et vides valent `NaN` — ce que le renderer écarte
+déjà. Le résultat est qu'une colonne mixte trace exactement ses cellules
+numériques, et qu'aucun backend n'a rien appris (invariant 5). C'est la
+**seule** lecture du module qui copie : un `Vec<MixedCell>` n'est pas un
+`Vec<f64>`, il n'y a rien à partager. Le coût est `O(n)` par résolution et par
+colonne mixte *référencée par une série*, jamais par colonne du projet.
+
+**Les conversions sont destructrices, comme les autres, et `Text → Mixed`
+promeut.** Un texte qui s'analyse en nombre devient `Number` — par
+`parse_f64_text`, la seule analyse du module, donc jamais en désaccord avec
+`Text → Numeric`. C'est ce qui donne son intérêt au changement de type : la
+colonne de l'exemple devient trois nombres et un texte.
+
+Côté calcul, une colonne mixte n'est **pas** « non numérique » : `formula`
+l'accepte et ses trous valent `NaN` ligne à ligne. Seule une colonne
+entièrement texte est refusée en bloc.
 
 ## `PlotSpec` — ce qu'il faut tracer
 
@@ -132,7 +175,9 @@ Deux propriétés à connaître avant d'y toucher :
   clone l'`Arc` — un incrément de compteur — jamais le buffer. Un
   `ResolvedValues` est une vue sur la même mémoire que la colonne,
   éventuellement tronquée au préfixe commun d'une série dont les colonnes ont
-  des longueurs différentes (batterie `b16`).
+  des longueurs différentes (batterie `b16`). **Une exception, et une
+  seule** : une colonne `Mixed` n'a pas de buffer `f64` à partager, sa vue est
+  matérialisée (voir plus haut).
 - **Une référence rompue est un état de première classe, pas une exception.**
   `ResolvedSeries` existe toujours, avec `missing` non vide et `ok()` faux.
   Rien ne plante, la série n'est pas retirée du spec, elle reste visible et

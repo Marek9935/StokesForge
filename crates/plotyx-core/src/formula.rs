@@ -20,12 +20,17 @@
 //! de la longueur demandée, accompagné d'un [`FormulaError`] que l'appelant
 //! peut afficher — jamais une `Result` avalée en silence, jamais un panic.
 //! Une colonne référencée plus courte que la feuille n'est, elle, pas une
-//! erreur : [`ColumnValues::get`] rend déjà `NaN`/`None` au-delà de sa
+//! erreur : [`ColumnValues::number_at`] rend déjà `NaN` au-delà de sa
 //! longueur, exactement le comportement voulu ici.
+//!
+//! Une colonne à types **mixtes** n'est pas « non numérique » : elle est
+//! acceptée, et ses cellules texte ou vides valent `NaN` ligne à ligne, comme
+//! une valeur manquante ordinaire. Seule une colonne entièrement texte est
+//! refusée en bloc.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::column::{Cell, ColumnValues};
+use crate::column::ColumnValues;
 
 /// Pourquoi une formule ne produit pas les valeurs qu'elle décrit. Jamais un
 /// panic (invariant 10) : chaque variante est un état de première classe,
@@ -440,7 +445,14 @@ pub fn evaluate(
                     FormulaError::NonNumericColumn(index_to_letters(index)),
                 )
             }
-            Some(ColumnValues::Float(_)) => {}
+            // Une colonne **mixte** est acceptée : elle porte des nombres,
+            // simplement pas à toutes les lignes. Ses cellules texte et vides
+            // valent `NaN` (`ColumnValues::number_at`), exactement comme une
+            // valeur manquante d'une colonne numérique — dégrader la ligne,
+            // pas toute la formule (invariant 10). Refuser la colonne
+            // entière, comme pour `Text`, reviendrait à dire qu'une colonne
+            // de mesures dont une ligne porte « n/a » n'est pas calculable.
+            Some(ColumnValues::Float(_)) | Some(ColumnValues::Mixed(_)) => {}
         }
     }
     let values = (0..target_len)
@@ -455,14 +467,12 @@ pub fn evaluate(
 fn eval_expr(expr: &Expr, row: usize, columns: &[ColumnValues]) -> f64 {
     match expr {
         Expr::Number(value) => *value,
-        Expr::Column(index) => match columns[*index].get(row) {
-            Cell::Float(value) => value,
-            // Ne se produit pas en pratique : `evaluate` a déjà refusé toute
-            // colonne `Text` référencée avant d'appeler `eval_expr`. Garde
-            // défensive plutôt qu'un `unreachable!` — invariant 10, jamais de
-            // panic même si cette fonction venait à être appelée autrement.
-            Cell::Text(_) => f64::NAN,
-        },
+        // `number_at` plutôt que `get` : la lecture sans allocation, qui rend
+        // déjà `NaN` pour tout ce qui n'est pas un nombre (colonne texte
+        // référencée — `evaluate` l'a de toute façon déjà refusée —, cellule
+        // texte ou vide d'une colonne mixte, ligne hors bornes). `get`
+        // clonerait une `String` par ligne pour la jeter aussitôt.
+        Expr::Column(index) => columns[*index].number_at(row),
         Expr::Neg(inner) => -eval_expr(inner, row, columns),
         Expr::Add(a, b) => eval_expr(a, row, columns) + eval_expr(b, row, columns),
         Expr::Sub(a, b) => eval_expr(a, row, columns) - eval_expr(b, row, columns),

@@ -19,6 +19,7 @@ Liste faisant foi : `plotyx-commands/src/command.rs` (`Command`,
 | Commande | Nature |
 |---|---|
 | `SetCells { column, start, values, expected_version }` | données |
+| `SetCellsPromoting { column, start, values, expected_version }` | données |
 | `AddColumn { sheet, index, name, column }` | structure |
 | `DeleteColumn { column }` | structure |
 | `Rename { id, name }` | structure |
@@ -44,6 +45,29 @@ Une commande de création par nature de nœud plutôt qu'un `AddNode` génériqu
 `Project::remove`. Les quatre commandes d'édition de contenu
 (`SetWindowMeta`/`SetNoteText`/`SetColumnMeta`/`SetPlotSpec`) remplacent leur
 cible **en bloc**, à l'image de `SetCells` — pas d'édition par sous-champ.
+
+### Deux écritures de cellules, stricte et tolérante
+
+`SetCells` refuse un bloc qui ne correspond pas au type de la colonne
+(`CoreError::TypeMismatch`), et c'est ce que veut un appelant qui sait ce
+qu'il écrit — le pont Python, un script. `SetCellsPromoting` **élargit la
+colonne** en `ColumnType::Mixed` plutôt que de refuser : c'est la commande de
+la saisie en grille, où taper « n/a » dans une colonne de mesures doit
+produire une cellule texte, pas une erreur
+([`modele-de-donnees.md`](modele-de-donnees.md)).
+
+Le choix du chemin se fait à l'**application**, jamais à l'appel :
+
+| Situation | Delta | Coût |
+|---|---|---|
+| le bloc convient déjà au type | `Cells` | celui de `SetCells`, à l'identique |
+| la colonne est déjà mixte, le bloc non | `Cells` | idem : seul le bloc est converti |
+| la colonne n'est pas mixte et le bloc ne lui convient pas | `ColumnType` | un instantané de colonne, comme `SetColumnType` qu'elle contient |
+
+Le troisième chemin n'a lieu qu'**une fois par colonne** : la saisie tolérante
+suivante trouve une colonne déjà mixte et retombe sur le deuxième. Et la
+conversion et l'écriture tiennent dans la **même** entrée d'historique, donc
+un seul `Ctrl+Z` ramène le type *et* la valeur d'avant.
 
 `expected_version` est la condition optimiste : `None` ne vérifie rien (le
 comportement de l'UI, qui n'a pas cette discipline) ; `Some(v)` exige que

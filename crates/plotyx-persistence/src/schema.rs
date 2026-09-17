@@ -436,6 +436,15 @@ impl Serialize for KindRecord {
 }
 
 /// Type de données d'une colonne, à plat.
+///
+/// `Mixed` n'existe que depuis les colonnes à types mixtes. Un fichier qui en
+/// porte une reste lisible par un lecteur **plus ancien**, mais pas
+/// intégralement : ce lecteur-là ne connaît pas le nom de variante, son
+/// décodage strict de `KindRecordKnown::Column` échoue, et `unknown.rs`
+/// range le nœud en [`KindRecord::Unknown`] — la perte est bornée à cette
+/// colonne, le reste du projet s'ouvre, et une ré-écriture la restitue à
+/// l'identique (b20). C'est exactement le mécanisme de dégradation décrit en
+/// tête de ce module, appliqué ici sans qu'aucun code lui soit propre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum TypeRecord {
     /// Numérique.
@@ -444,6 +453,8 @@ pub(crate) enum TypeRecord {
     DateTime,
     /// Texte.
     Text,
+    /// Types mixtes : le type est porté par la cellule.
+    Mixed,
 }
 
 /// Rôle de tracé d'une colonne, à plat.
@@ -476,7 +487,38 @@ pub(crate) enum ValuesRecord {
     /// Chaînes optionnelles, `None` = valeur manquante (distinct de
     /// `Some(String::new())`).
     Text(Vec<Option<String>>),
+    /// Colonne à types mixtes, en **trois tableaux parallèles** plutôt qu'un
+    /// tableau d'énumérations.
+    ///
+    /// La raison est la même que pour `Float` ci-dessus : `to_vec_named`
+    /// sérialise une énumération par le **nom** de sa variante, donc un
+    /// `Vec<MixedCellRecord>` écrirait la chaîne `"Number"` — sept octets —
+    /// devant chacun des huit octets d'une valeur. Un octet d'étiquette par
+    /// ligne, puis les seules valeurs qui existent, coûte moins qu'une
+    /// colonne texte d'aujourd'hui et garde les `NaN` bit à bit.
+    Mixed {
+        /// Une étiquette par ligne, dans l'ordre : `0` = cellule vide,
+        /// `1` = nombre, `2` = texte. Tout autre octet fait échouer la
+        /// lecture de la colonne (`ConvertError::BadMixedTag`) : les trois
+        /// tableaux ne se relisent pas si l'on ne sait pas dans lequel
+        /// chercher la ligne suivante.
+        #[serde(with = "serde_bytes")]
+        tags: Vec<u8>,
+        /// Les valeurs des lignes étiquetées `1`, dans l'ordre, huit octets
+        /// little-endian chacune — même encodage que `Float`.
+        #[serde(with = "serde_bytes")]
+        numbers: Vec<u8>,
+        /// Les valeurs des lignes étiquetées `2`, dans l'ordre.
+        texts: Vec<String>,
+    },
 }
+
+/// Étiquette d'une cellule vide dans [`ValuesRecord::Mixed`].
+pub(crate) const MIXED_TAG_EMPTY: u8 = 0;
+/// Étiquette d'une cellule numérique dans [`ValuesRecord::Mixed`].
+pub(crate) const MIXED_TAG_NUMBER: u8 = 1;
+/// Étiquette d'une cellule texte dans [`ValuesRecord::Mixed`].
+pub(crate) const MIXED_TAG_TEXT: u8 = 2;
 
 // -- PlotSpec (phase R3) ------------------------------------------------
 //

@@ -1573,6 +1573,7 @@ fn type_suffix(column_type: ColumnType) -> &'static str {
         ColumnType::Numeric => "num",
         ColumnType::DateTime => "date",
         ColumnType::Text => "texte",
+        ColumnType::Mixed => "mixte",
     }
 }
 

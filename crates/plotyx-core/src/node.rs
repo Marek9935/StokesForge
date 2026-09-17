@@ -156,7 +156,27 @@ impl NodeKind {
     /// Vrai si un nœud de cette nature peut contenir `child` :
     /// `Folder ⊃ {Folder, Workbook, Graph, Matrix, Note}` ; `Workbook ⊃ {Worksheet}` ;
     /// `Worksheet ⊃ {Column}` ; rien d'autre.
+    ///
+    /// **Plus [`NodeKind::Unknown`], que les trois conteneurs acceptent.**
+    /// Une nature non reconnue vient toujours d'un fichier écrit par une
+    /// version plus récente (C5, niveau 2) ; la refuser ici ne la répare pas,
+    /// elle fait échouer la validation d'arbre de `plotyx_persistence::load`,
+    /// donc perd **tout le fichier** au lieu de ce seul nœud — exactement ce
+    /// que la capture en `RawVariant` existe pour éviter (invariant 10).
+    /// `Folder` l'acceptait déjà, indirectement (`is_window` compte
+    /// `Unknown`) ; `Workbook` et `Worksheet` ne l'acceptaient pas, et c'est
+    /// par là qu'un type de colonne inconnu — une colonne mixte lue par un
+    /// lecteur d'avant, par exemple — emportait le fichier entier
+    /// (`plotyx-robustesse`, `b19_un_type_de_colonne_inconnu_ne_perd_que_cette_colonne`).
+    ///
+    /// Un nœud inconnu ainsi rangé n'est jamais confondu avec une colonne :
+    /// tout ce qui lit une feuille passe par `Node::as_column`, qui rend
+    /// `None` pour lui (`Project::row_targets`, `resolve`, la grille de
+    /// `plotyx-app`). Il occupe une place dans la feuille, et c'est tout.
     pub fn accepts_child(&self, child: &NodeKind) -> bool {
+        if child.is_unknown() {
+            return self.allowed_children().is_some();
+        }
         match self {
             NodeKind::Folder { .. } => child.is_folder() || child.is_window(),
             NodeKind::Workbook { .. } => child.is_worksheet(),
@@ -167,6 +187,12 @@ impl NodeKind {
             | NodeKind::Note { .. }
             | NodeKind::Unknown(_) => false,
         }
+    }
+
+    /// Vrai pour une nature qu'aucune variante de ce lecteur ne nomme, lue
+    /// d'un fichier écrit par une version plus récente (C5, niveau 2).
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, NodeKind::Unknown(_))
     }
 
     /// Nom du type précédé de son article indéfini, pour les messages :
@@ -510,6 +536,27 @@ mod tests {
         for leaf in [column(), graph(), matrix(), note()] {
             assert!(!leaf.accepts_child(&column()));
             assert!(!leaf.accepts_child(&folder()));
+        }
+    }
+
+    /// Une nature non reconnue (C5, niveau 2) est acceptée par les **trois**
+    /// conteneurs, et par eux seuls : la refuser ferait perdre tout le
+    /// fichier au lieu de ce seul nœud (voir la doc d'`accepts_child`).
+    #[test]
+    fn every_container_accepts_an_unknown_nature() {
+        let inconnu = NodeKind::Unknown(plotyx_plot::RawVariant {
+            name: "Image".to_string(),
+            payload: Vec::new(),
+        });
+        assert!(folder().accepts_child(&inconnu));
+        assert!(workbook().accepts_child(&inconnu));
+        assert!(worksheet().accepts_child(&inconnu));
+
+        for leaf in [column(), graph(), matrix(), note(), inconnu.clone()] {
+            assert!(
+                !leaf.accepts_child(&inconnu),
+                "une feuille de l'arbre n'accepte aucun enfant, inconnu compris"
+            );
         }
     }
 

@@ -62,7 +62,8 @@ pub mod resolve;
 pub mod tree;
 
 pub use column::{
-    Cell, Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, ValueBlock, ValuesDelta,
+    Cell, Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, MixedCell, ValueBlock,
+    ValuesDelta,
 };
 pub use error::{CoreError, CoreResult};
 pub use formula::{

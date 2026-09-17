@@ -32,6 +32,15 @@
 //! sur la même mémoire que la colonne, éventuellement tronquée au préfixe
 //! commun d'une série dont les colonnes ont des longueurs différentes.
 //!
+//! **Une exception, et une seule** : une colonne à types mixtes
+//! ([`plotyx_core::ColumnType::Mixed`](crate::ColumnType::Mixed)) n'a pas de
+//! buffer `f64` contigu — ses cellules sont un `Vec<MixedCell>` — et il n'y a
+//! donc rien à partager. [`Column::numeric_view`] en matérialise un, où les
+//! cellules texte et vides valent `NaN`, ce que le renderer écarte déjà :
+//! une colonne mixte trace exactement ses cellules numériques. Le coût est
+//! `O(n)` par résolution et **par colonne mixte référencée par une série**,
+//! jamais par colonne du projet, et il ne touche aucune colonne homogène.
+//!
 //! # Ce qui n'est pas porté, et pourquoi
 //!
 //! `prepare()` et `ComputeCancelled` de `resolve.py` sont **spécifiques à
@@ -232,14 +241,17 @@ fn label_for(series: &SeriesSpec, tree: &Tree) -> String {
     }
 }
 
-/// Vue `f64` zéro-copie d'une colonne référencée par `id`, ou `None` si la
-/// référence est rompue ou si la colonne n'est pas numérique (port de
-/// `_numeric`, `resolve.py` ligne 77 : une colonne texte n'est pas traçable,
-/// ce n'est pas une erreur mais un choix de colonne inadapté).
+/// Vue `f64` d'une colonne référencée par `id`, ou `None` si la référence est
+/// rompue ou si la colonne n'est pas traçable (port de `_numeric`,
+/// `resolve.py` ligne 77 : une colonne texte n'est pas traçable, ce n'est pas
+/// une erreur mais un choix de colonne inadapté).
+///
+/// Zéro copie pour une colonne numérique ou date-heure ; une copie pour une
+/// colonne **mixte**, qui n'a pas de buffer `f64` contigu à partager — voir
+/// [`Column::numeric_view`], qui porte le détail et le coût de cette seule
+/// exception à la propriété « zéro copie » de ce module.
 fn resolve_numeric(tree: &Tree, id: NodeId) -> Option<Arc<Vec<f64>>> {
-    resolve_column(tree, id)
-        .and_then(Column::float_values)
-        .cloned()
+    resolve_column(tree, id).and_then(Column::numeric_view)
 }
 
 /// Résout une série. Ne lève jamais : une référence rompue est un état
@@ -625,6 +637,48 @@ mod tests {
         let series = SeriesSpec::new(f.texte);
         let resolved = resolve_series(f.project.tree(), &series);
         assert_eq!(resolved.missing, vec![MissingRole::Y]);
+    }
+
+    /// Une colonne **mixte** est traçable, contrairement à une colonne texte :
+    /// la série se résout, et seules les cellules numériques portent une
+    /// valeur — les autres valent `NaN`, ce que le renderer écarte déjà.
+    #[test]
+    fn a_mixed_column_resolves_and_only_its_numbers_carry_a_value() {
+        use crate::column::MixedCell;
+
+        let mut project = Project::new("Demo").expect("projet valide");
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).expect("classeur");
+        let sheet = project.add_worksheet(book, None).expect("feuille");
+        let y = project
+            .add_column(
+                sheet,
+                None,
+                Some("Y"),
+                Column::from_mixed(&[
+                    MixedCell::Number(1.2),
+                    MixedCell::Text("n/a".to_string()),
+                    MixedCell::Empty,
+                    MixedCell::Number(1.5),
+                ]),
+            )
+            .expect("colonne mixte");
+
+        let series = SeriesSpec::new(y);
+        let resolved = resolve_series(project.tree(), &series);
+
+        assert!(
+            resolved.ok(),
+            "une colonne mixte n'est pas une référence rompue"
+        );
+        assert!(!resolved.broken());
+        assert_eq!(resolved.point_count(), 4);
+        let values = resolved.y.expect("ordonnées résolues");
+        let slice = values.as_slice();
+        assert_eq!(slice[0], 1.2);
+        assert!(slice[1].is_nan(), "la cellule texte ne se trace pas");
+        assert!(slice[2].is_nan(), "la cellule vide ne se trace pas");
+        assert_eq!(slice[3], 1.5);
     }
 
     #[test]

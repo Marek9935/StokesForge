@@ -53,7 +53,9 @@ use std::thread;
 
 use plotyx_commands::Command;
 use plotyx_core::node::NodeKind;
-use plotyx_core::{Cell, Column, ColumnMeta, ColumnType, Node, NodeId, Tree, ValueBlock};
+use plotyx_core::{
+    Cell, Column, ColumnMeta, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
+};
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
 #[cfg(feature = "python")]
@@ -367,6 +369,20 @@ fn value_block_from_tsv_column(
                 })
                 .collect(),
         ),
+        // Colonne mixte : chaque cellule décide pour elle-même, par la même
+        // règle que le cœur (`MixedCell::from_text`) — un jeton qui s'analyse
+        // devient un nombre, les autres restent du texte, et un jeton vide
+        // une cellule vide. C'est le collage qui se rapproche le plus de ce
+        // qu'un tableur fait : rien n'est perdu, et ce qui est un nombre est
+        // traçable.
+        ColumnType::Mixed => ValueBlock::Mixed(
+            rows.iter()
+                .map(|row| {
+                    let text = row.get(col_index).copied().unwrap_or("").trim();
+                    MixedCell::from_text((!text.is_empty()).then(|| text.to_string()))
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -381,6 +397,21 @@ pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
     let Some(column) = tree.node(column).and_then(Node::as_column) else {
         return String::new();
     };
+    // Une colonne **mixte** se lit par `Column::cell`, pas par `Column::get` :
+    // seul ce chemin distingue une cellule vide (`Empty`, qui s'affiche comme
+    // une cellule numérique vide, `""`) d'une cellule texte sans valeur — que
+    // `get` confond toutes deux en `Cell::Text(None)`. Le choix A9 de
+    // `MISSING_TEXT_DISPLAY` vaut pour une colonne *texte*, où une cellule
+    // vide **présente** existe et doit rester indiscernable à l'œil ; une
+    // colonne mixte, elle, porte l'information dans son type de cellule.
+    if column.column_type() == ColumnType::Mixed {
+        return match column.cell(row) {
+            MixedCell::Empty => String::new(),
+            MixedCell::Number(value) if value.is_nan() => String::new(),
+            MixedCell::Number(value) => format_f64_for_display(value),
+            MixedCell::Text(text) => text,
+        };
+    }
     match column.get(row) {
         Cell::Float(value) if value.is_nan() => String::new(),
         Cell::Float(value) => format_f64_for_display(value),
@@ -1799,20 +1830,26 @@ impl AppState {
             self.fail(format!("{column} n'est pas une colonne de ce projet"));
             return false;
         };
-        let values = match kind {
+        // Une saisie qui ne rentre pas dans le type de la colonne ne la fait
+        // plus échouer : elle **élargit** la colonne en `ColumnType::Mixed`,
+        // par `Command::SetCellsPromoting`, qui groupe la conversion et
+        // l'écriture dans une seule entrée d'historique. Taper « n/a » sous
+        // une colonne de mesures est le geste courant d'un cahier de manip ;
+        // le refuser obligeait à retaper la colonne entière en texte, donc à
+        // rendre tout le reste intraçable.
+        let (values, promoting) = match kind {
             ColumnType::Numeric | ColumnType::DateTime => {
                 let trimmed = text.trim();
                 if trimmed.is_empty() {
                     // Blanc = valeur manquante, pas zéro : c'est la façon
                     // d'effacer une cellule numérique.
-                    ValueBlock::Float(vec![f64::NAN])
+                    (ValueBlock::Float(vec![f64::NAN]), false)
                 } else {
                     match trimmed.parse::<f64>() {
-                        Ok(value) => ValueBlock::Float(vec![value]),
-                        Err(_) => {
-                            self.fail(format!("« {trimmed} » n'est pas un nombre"));
-                            return false;
-                        }
+                        Ok(value) => (ValueBlock::Float(vec![value]), false),
+                        // Le bloc est texte : `SetCellsPromoting` en fera
+                        // une cellule texte dans une colonne devenue mixte.
+                        Err(_) => (ValueBlock::Text(vec![Some(trimmed.to_string())]), true),
                     }
                 }
             }
@@ -1821,17 +1858,34 @@ impl AppState {
             // permet de taper l'un plutôt que l'autre. Le banc choisit `None`.
             ColumnType::Text => {
                 if text.is_empty() {
-                    ValueBlock::Text(vec![None])
+                    (ValueBlock::Text(vec![None]), false)
                 } else {
-                    ValueBlock::Text(vec![Some(text)])
+                    (ValueBlock::Text(vec![Some(text)]), false)
                 }
             }
+            // La colonne est déjà mixte : chaque cellule décide pour
+            // elle-même (`MixedCell::from_text`), il n'y a plus rien à
+            // promouvoir ni rien à refuser.
+            ColumnType::Mixed => {
+                let trimmed = text.trim();
+                let cell = MixedCell::from_text((!trimmed.is_empty()).then(|| trimmed.to_string()));
+                (ValueBlock::Mixed(vec![cell]), false)
+            }
         };
-        self.execute(Command::SetCells {
-            column,
-            start: row,
-            values,
-            expected_version: None,
+        self.execute(if promoting {
+            Command::SetCellsPromoting {
+                column,
+                start: row,
+                values,
+                expected_version: None,
+            }
+        } else {
+            Command::SetCells {
+                column,
+                start: row,
+                values,
+                expected_version: None,
+            }
         });
         true
     }

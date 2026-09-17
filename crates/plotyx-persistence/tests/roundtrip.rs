@@ -4,7 +4,8 @@
 use std::path::Path;
 
 use plotyx_core::{
-    Column, ColumnMeta, ColumnRole, ColumnType, NodeKind, Project, ValueBlock, WindowMeta,
+    Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, NodeKind, Project, ValueBlock,
+    WindowMeta,
 };
 use plotyx_persistence::{load, save, PersistenceError};
 use plotyx_plot::{
@@ -94,6 +95,35 @@ fn fixture_project() -> Project {
         project
             .add_column(sheet1, None, Some("D"), empty)
             .expect("colonne vide ajoutée");
+
+        // Colonne à types mixtes : les trois variantes de cellule, plus les
+        // trois « manquantes » qui doivent rester distinctes au disque
+        // (`Empty`, `Number(NaN)`, `Text("")`), plus un `-0.0` — dont le
+        // motif binaire ne survit qu'à un encodage brut.
+        let mixed = Column::from_block(
+            ColumnType::Mixed,
+            ValueBlock::Mixed(vec![
+                MixedCell::Number(1.5),
+                MixedCell::Text("n/a".to_string()),
+                MixedCell::Empty,
+                MixedCell::Number(f64::NAN),
+                MixedCell::Text(String::new()),
+                MixedCell::Number(-0.0),
+                MixedCell::Text("é ü 日本".to_string()),
+            ]),
+            ColumnMeta {
+                role: ColumnRole::Y,
+                unit: "V".to_string(),
+                long_name: "Tension mesurée".to_string(),
+                comment: "avec des n/a".to_string(),
+                display_format: String::new(),
+                formula: None,
+            },
+        )
+        .expect("colonne mixte valide");
+        project
+            .add_column(sheet1, None, Some("E"), mixed)
+            .expect("colonne mixte ajoutée");
 
         // `Sheet2` reste une feuille vide (aucune colonne).
         let _ = sheet1;
@@ -470,6 +500,177 @@ fn a_large_float_column_is_stored_as_raw_bytes_not_as_a_msgpack_array() {
         size < 100_000 * 8 + 4_096,
         "fichier de {size} octets : l'encodage ne doit pas dépasser les données brutes de plus de 4 Ko"
     );
+}
+
+/// Une colonne mixte majoritairement numérique coûte, sur disque, à peu près
+/// ce que coûterait la même colonne numérique — un octet d'étiquette par
+/// ligne en plus, et rien de plus.
+///
+/// C'est ce que les trois tableaux parallèles de `ValuesRecord::Mixed`
+/// achètent : `to_vec_named` sérialise les énumérations par le **nom** de
+/// leur variante, donc un `Vec<MixedCellRecord>` aurait écrit la chaîne
+/// `"Number"` devant chacune des 100 000 valeurs — près d'un méga-octet de
+/// noms de variante. Le test est le même que pour les colonnes numériques
+/// brutes, avec la marge d'un octet par ligne.
+#[test]
+fn a_large_mixed_column_costs_one_tag_byte_per_row_not_a_variant_name() {
+    let mut project = Project::new("Volume").expect("projet valide");
+    let root = project.root();
+    let book = project
+        .add_empty_workbook(root, Some("Book1"))
+        .expect("classeur créé");
+    let sheet = project
+        .add_worksheet(book, Some("Sheet1"))
+        .expect("feuille créée");
+    const ROWS: usize = 100_000;
+    // Une colonne de mesures dont une ligne sur mille est un « n/a » — le
+    // cas réel qui justifie le type.
+    let cells: Vec<MixedCell> = (0..ROWS)
+        .map(|i| {
+            if i % 1000 == 999 {
+                MixedCell::Text("n/a".to_string())
+            } else {
+                MixedCell::Number(i as f64 * 0.5)
+            }
+        })
+        .collect();
+    project
+        .add_column(sheet, None, Some("A"), Column::from_mixed(&cells))
+        .expect("colonne ajoutée");
+
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("volume.plyx");
+    save(&project, &path).expect("sauvegarde réussie");
+
+    let size = std::fs::metadata(&path)
+        .expect("métadonnées du fichier")
+        .len();
+    // 8 octets par nombre + 1 octet d'étiquette par ligne + les textes.
+    let plafond = (ROWS * 8 + ROWS + 4_096) as u64;
+    assert!(
+        size < plafond,
+        "fichier de {size} octets, au-delà du plafond de {plafond} : l'encodage \
+         mixte a cessé d'être compact"
+    );
+}
+
+/// La lecture refuse une colonne mixte dont les trois tableaux ne
+/// s'accordent pas, plutôt que de décaler silencieusement toutes les lignes
+/// suivantes. Même politique que `BadFloatLength` pour un buffer numérique
+/// tronqué : un fichier écrit par ce crate ne produit jamais ce cas, et il
+/// n'y a pas de réparation sensée à tenter.
+#[test]
+fn a_mixed_column_with_inconsistent_tags_is_reported_as_corrupt() {
+    use serde::Serialize;
+
+    // Schéma miroir, comme `b3`/`b19` : le format est auto-descriptif, deux
+    // déclarations d'accord sur les noms produisent les mêmes octets.
+    #[derive(Serialize)]
+    struct FileBody {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<NodeRecord>,
+    }
+    #[derive(Serialize)]
+    struct NodeRecord {
+        id: u64,
+        name: String,
+        parent: Option<u64>,
+        kind: KindRecord,
+    }
+    // `Box` sur la grosse variante : seuls les octets produits comptent
+    // ici (MessagePack ne voit pas l'indirection), et clippy refuse un enum
+    // dont les variantes ont des tailles très différentes.
+    #[derive(Serialize)]
+    enum KindRecord {
+        Folder { children: Vec<u64> },
+        Column(Box<ColumnRecord>),
+    }
+    #[derive(Serialize)]
+    struct ColumnRecord {
+        column_type: &'static str,
+        role: &'static str,
+        unit: String,
+        long_name: String,
+        comment: String,
+        display_format: String,
+        values: ValuesRecord,
+        version: u64,
+        formula: Option<String>,
+    }
+    #[derive(Serialize)]
+    enum ValuesRecord {
+        Mixed {
+            #[serde(with = "serde_bytes")]
+            tags: Vec<u8>,
+            #[serde(with = "serde_bytes")]
+            numbers: Vec<u8>,
+            texts: Vec<String>,
+        },
+    }
+
+    let colonne = |values: ValuesRecord| {
+        KindRecord::Column(Box::new(ColumnRecord {
+            column_type: "Mixed",
+            role: "Y",
+            unit: String::new(),
+            long_name: String::new(),
+            comment: String::new(),
+            display_format: String::new(),
+            values,
+            version: 0,
+            formula: None,
+        }))
+    };
+
+    // Deux étiquettes « nombre » mais un seul `f64` dans le tableau.
+    let desaccord = colonne(ValuesRecord::Mixed {
+        tags: vec![1, 1],
+        numbers: 1.0f64.to_le_bytes().to_vec(),
+        texts: Vec::new(),
+    });
+    // Une étiquette qu'aucune version n'attribue.
+    let etiquette_inconnue = colonne(ValuesRecord::Mixed {
+        tags: vec![7],
+        numbers: Vec::new(),
+        texts: Vec::new(),
+    });
+
+    for (cas, kind) in [
+        ("tableaux en désaccord", desaccord),
+        ("étiquette inconnue", etiquette_inconnue),
+    ] {
+        let body = FileBody {
+            root: 0,
+            next_id_hint: 2,
+            nodes: vec![
+                NodeRecord {
+                    id: 0,
+                    name: "Projet".to_string(),
+                    parent: None,
+                    kind: KindRecord::Folder { children: vec![1] },
+                },
+                NodeRecord {
+                    id: 1,
+                    name: "A".to_string(),
+                    parent: Some(0),
+                    kind,
+                },
+            ],
+        };
+        let mut bytes = b"PLYX".to_vec();
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&rmp_serde::to_vec_named(&body).expect("encodage"));
+
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = dir.path().join("hostile.plyx");
+        std::fs::write(&path, &bytes).expect("écriture");
+
+        match load(&path) {
+            Err(PersistenceError::Corrupt { .. }) => {}
+            other => panic!("{cas} : attendu Corrupt, obtenu {other:?}"),
+        }
+    }
 }
 
 /// Un `PlotSpec` non trivial : deux panneaux, plusieurs séries, des styles

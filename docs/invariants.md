@@ -198,9 +198,10 @@ quatre formes qui se ressemblent :
 | Situation | Ce qui se passe |
 |---|---|
 | une série référence une colonne supprimée | `ResolvedSeries` existe toujours, `broken()` vrai, tracée en gris et annotée dans la légende |
-| une variante d'énumération inconnue dans un `.plx` | capturée telle quelle dans un `RawVariant` ; la perte est bornée à ce nœud (ou cette série), pas au fichier |
+| une variante d'énumération inconnue dans un `.plx` | capturée telle quelle dans un `RawVariant` ; la perte est bornée à ce nœud (ou cette série), pas au fichier — **y compris sous une feuille ou un classeur**, que `accepts_child` accepte pour cette raison précise |
 | une formule Typst qui ne compile pas | le texte brut, `$…$` compris, s'affiche tel quel ; le graphe ne disparaît pas |
-| une valeur manquante | `f64::NAN` (numérique, date-heure) ou `None` (texte, distinct de `Some("")`) |
+| une valeur manquante | `f64::NAN` (numérique, date-heure), `None` (texte, distinct de `Some("")`) ou `MixedCell::Empty` (mixte, distinct de `Number(NaN)` et de `Text("")`) |
+| une cellule texte dans une colonne tracée | une colonne mixte trace ses seules cellules numériques, les autres valant `NaN` — jamais un refus de tracer la colonne |
 
 Le fil commun : **un défaut visible et localisé, jamais un panic qui remonte**,
 et jamais une série silencieusement vide. Renommer ou déplacer une colonne

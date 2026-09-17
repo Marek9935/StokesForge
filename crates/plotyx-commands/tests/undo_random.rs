@@ -20,7 +20,7 @@ use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestCaseError, TestRng, TestRunner};
 
 use plotyx_commands::{Command, History};
-use plotyx_core::{Column, ColumnType, Node, NodeId, Project, ValueBlock};
+use plotyx_core::{Column, ColumnType, MixedCell, Node, NodeId, Project, ValueBlock};
 
 // -- tirage ---------------------------------------------------------------
 
@@ -46,6 +46,17 @@ const SAMPLE_VALUES: &[f64] = &[
 #[derive(Debug, Clone)]
 enum Step {
     Cells {
+        column: usize,
+        start: usize,
+        values: Vec<f64>,
+    },
+    /// Saisie **tolérante** (`Command::SetCellsPromoting`) : le bloc est
+    /// toujours du texte, donc il ne convient à la colonne que si celle-ci
+    /// est déjà texte — les autres cas passent par la promotion en
+    /// `ColumnType::Mixed`, avec ou sans changement de type selon que la
+    /// colonne l'était déjà. C'est ce qui met les trois chemins de la
+    /// commande dans le même tirage que tout le reste.
+    CellsPromoting {
         column: usize,
         start: usize,
         values: Vec<f64>,
@@ -101,6 +112,13 @@ fn step() -> impl Strategy<Value = Step> {
                 values
             }
         ),
+        (0usize..8, 0usize..6, prop::collection::vec(value(), 0..4)).prop_map(
+            |(column, start, values)| Step::CellsPromoting {
+                column,
+                start,
+                values
+            }
+        ),
         (0usize..2, 0usize..6).prop_map(|(sheet, index)| Step::AddColumn { sheet, index }),
         (0usize..8).prop_map(|column| Step::DeleteColumn { column }),
         (0usize..8).prop_map(|column| Step::Rename { column }),
@@ -109,7 +127,7 @@ fn step() -> impl Strategy<Value = Step> {
             sheet,
             index
         }),
-        (0usize..8, 0usize..3).prop_map(|(column, kind)| Step::SetType { column, kind }),
+        (0usize..8, 0usize..4).prop_map(|(column, kind)| Step::SetType { column, kind }),
         (0usize..2, 0usize..6, 1usize..4).prop_map(|(sheet, at, count)| Step::InsertRows {
             sheet,
             at,
@@ -240,8 +258,39 @@ impl World {
                             .collect(),
                     ),
                     ColumnType::Numeric | ColumnType::DateTime => ValueBlock::Float(values.clone()),
+                    ColumnType::Mixed => {
+                        ValueBlock::Mixed(values.iter().copied().map(MixedCell::from_f64).collect())
+                    }
                 };
                 Some(Command::SetCells {
+                    column: target,
+                    start: start % 8,
+                    values: block,
+                    expected_version: None,
+                })
+            }
+            Step::CellsPromoting {
+                column,
+                start,
+                values,
+            } => {
+                let target = *columns.get(column % columns.len().max(1))?;
+                // Un bloc texte, quel que soit le type de la colonne : c'est
+                // précisément ce que `SetCells` refuserait et que cette
+                // commande accepte en élargissant la colonne.
+                let block = ValueBlock::Text(
+                    values
+                        .iter()
+                        .map(|v| {
+                            if v.is_nan() {
+                                None
+                            } else {
+                                Some(format!("v{v}"))
+                            }
+                        })
+                        .collect(),
+                );
+                Some(Command::SetCellsPromoting {
                     column: target,
                     start: start % 8,
                     values: block,
@@ -289,10 +338,11 @@ impl World {
             }
             Step::SetType { column, kind } => {
                 let target = *columns.get(column % columns.len().max(1))?;
-                let column_type = match kind % 3 {
+                let column_type = match kind % 4 {
                     0 => ColumnType::Numeric,
                     1 => ColumnType::DateTime,
-                    _ => ColumnType::Text,
+                    2 => ColumnType::Text,
+                    _ => ColumnType::Mixed,
                 };
                 Some(Command::SetColumnType {
                     column: target,
