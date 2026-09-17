@@ -103,21 +103,41 @@ générique), et rien n'a été « corrigé » qui n'était qu'un plafond docume
 
 ## Ce qui reste
 
-### Côté test — l'essentiel de ce qui reste
+### Côté test
 
-Ce qui suit n'est pas cassé ; c'est **non éprouvé**, ce qui n'est pas la même
-chose et se voit moins.
+Les trous de test recensés à la clôture du chantier sont comblés, sauf un —
+la feature `python`, restée **non vérifiée** (voir la note dédiée après le
+tableau, pas un problème de code mais d'accès réseau dans la sandbox qui a
+traité cette tâche). Le détail, gardé pour mémoire :
 
-| Où | Ce qui manque |
-|---|---|
-| `b16` (séries résolues) | aucun cas mixte : le préfixe commun, les colonnes d'erreur trop courtes et la troncature ne sont éprouvés que sur des colonnes homogènes |
-| `b17` (coût des opérations) | `numeric_view` est **la seule lecture du modèle qui copie**, et rien ne le mesure ni ne garde-fou contre une régression — par exemple quelqu'un qui l'appellerait par point de tracé au lieu d'une fois par résolution |
-| `b21` (coût et identité) | `SetCellsPromoting` absente. La propriété « le chemin coûteux n'a lieu qu'une fois par colonne » n'est aujourd'hui affirmée que par un test de `shell.rs`, jamais **mesurée** |
-| `memory_pinning` | aucun scénario avec une colonne mixte ; `mixed_buffer_bytes` est une estimation calquée sur `text_buffer_bytes`, non éprouvée |
-| `b10` (compteur de version) | pas de cas mixte |
-| `b2` (persistance) | le cas mixte vit dans `roundtrip.rs`, pas dans la batterie |
-| feature `python` | **non compilée par défaut, donc non vérifiée.** `float_values()` rend `None` pour une colonne mixte, ce qui *devrait* donner le refus attendu côté `pyx`, mais aucun test ne l'exerce. À lancer avec `scripts/python-test.sh` |
-| feature `typst` | non compilée non plus. Aucun code sous `typst` ne touche aux colonnes (vérifié), donc risque faible — mais non nul |
+| Où | Ce qui manquait | État |
+|---|---|---|
+| `b16` (séries résolues) | aucun cas mixte : le préfixe commun, les colonnes d'erreur trop courtes et la troncature ne sont éprouvés que sur des colonnes homogènes | **comblé** — trois cas ajoutés (colonne mixte complète, colonne mixte comme X plus courte que Y avec texte/vide au milieu, colonne d'erreur mixte trop courte, colonne d'erreur mixte vide) ; les deux anomalies déjà documentées (troncature du signal, série disparue) se reproduisent à l'identique une fois passées par `numeric_view` |
+| `b17` (coût des opérations) | `numeric_view` est **la seule lecture du modèle qui copie**, et rien ne le mesure ni ne garde-fou contre une régression — par exemple quelqu'un qui l'appellerait par point de tracé au lieu d'une fois par résolution | **comblé** — un garde-fou compare le coût d'une résolution complète à celui d'un unique appel à `numeric_view`, et à celui d'un contre-exemple simulant des rappels par point |
+| `b21` (coût et identité) | `SetCellsPromoting` absente. La propriété « le chemin coûteux n'a lieu qu'une fois par colonne » n'est aujourd'hui affirmée que par un test de `shell.rs`, jamais **mesurée** | **comblé** — mesure directement que le chemin 3 (promotion) coûte proportionnellement à la taille de la colonne, et que les chemins 1/2 (colonne déjà mixte) n'en dépendent pas |
+| `memory_pinning` | aucun scénario avec une colonne mixte ; `mixed_buffer_bytes` est une estimation calquée sur `text_buffer_bytes`, non éprouvée | **comblé** — scénario 8 : une colonne mixte supprimée reste retenue tant que son entrée est sur la pile puis libérée à l'éviction (même schéma que le scénario 6), et `History::retained_bytes()` correspond exactement à l'estimation de `mixed_buffer_bytes`, recalculée indépendamment dans le test |
+| `b10` (compteur de version) | pas de cas mixte | **comblé** — la saisie tolérante qui promeut une colonne, puis une seconde saisie sur une colonne déjà mixte, avancent toutes deux le compteur |
+| `b2` (persistance) | le cas mixte vit dans `roundtrip.rs`, pas dans la batterie | **comblé** — ajouté à `b2_aller_retour_preserve_tout`, qui compare déjà type/méta/version/cellules nœud par nœud |
+| feature `python` | **non compilée par défaut, donc non vérifiée.** `float_values()` rend `None` pour une colonne mixte, ce qui *devrait* donner le refus attendu côté `pyx`, mais aucun test ne l'exerce. À lancer avec `scripts/python-test.sh` | **toujours ouvert** — voir la note dédiée ci-dessous |
+| feature `typst` | non compilée non plus. Aucun code sous `typst` ne touche aux colonnes (vérifié), donc risque faible — mais non nul | **vérifié** — `cargo build`/`cargo test` avec `--features typst` sur `plotyx-render`, `plotyx-render-svg` et `plotyx-render-egui` passent tous, sans aucun changement de code requis : confirme que rien sous `typst` ne touche aux colonnes |
+
+**Note sur la feature `python`.** `scripts/python-test.sh` exige un
+interpréteur CPython embarqué que `scripts/python-vendor.sh` télécharge
+(`vendor/python/lock.env` : CPython 3.12.14, ~90 Mo, plus une roue numpy
+épinglée). La sandbox qui a traité cette tâche a un accès réseau vers
+`github.com` (vérifié par un simple `curl`), mais le débit vers
+`objects.githubusercontent.com` (où GitHub redirige le téléchargement de
+l'archive de release) était de l'ordre de 100 à 150 Ko/s — l'archive seule
+n'a pas fini de télécharger après plusieurs minutes, et le script échoue si
+interrompu à mi-chemin (pas de reprise : il réécrit `$ARCHIVE.part` depuis
+zéro). Le test qui manque (`float_values()` rend `None` pour une colonne
+mixte → `pyx.column`/`pyx.set_column` doivent le refuser en nommant le bon
+type, comme les deux autres refus déjà couverts pour `Text`) **n'a donc pas
+pu être écrit ni exécuté sous cette feature dans cette tâche.** Le code visé
+(`plotyx-python`/`plotyx-script`) n'a pas changé depuis la clôture du
+chantier ; rien n'indique un problème de correction, seulement une lacune de
+couverture qui reste à combler dès qu'un environnement avec un débit réseau
+suffisant (ou l'interpréteur déjà vendorisé) est disponible.
 
 ### Côté fonctionnalité
 
