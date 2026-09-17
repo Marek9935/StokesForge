@@ -1622,38 +1622,50 @@ fn column_header_widget(
             ui.set_min_height(HEADER_SUBROW_HEIGHT);
             ui.set_max_height(HEADER_SUBROW_HEIGHT);
             let rect = ui.available_rect_before_wrap();
-            ui.painter()
-                .rect_filled(rect, 0.0, crate::theme::header_letter_row_fill());
+            let fill = if is_column_selected {
+                ui.visuals().selection.bg_fill.linear_multiply(0.35)
+            } else {
+                crate::theme::header_letter_row_fill()
+            };
+            ui.painter().rect_filled(rect, 0.0, fill);
             header_row_separator(ui, rect);
-            ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(is_column_selected, format!("{letter}  "))
-                    .clicked()
-                {
-                    state.select_column(sheet, column);
-                }
-                // Choix manuel du type de colonne — conversion destructrice
-                // assumée (`Action::SetColumnType`/`Command::
-                // SetColumnType`, `plotyx-core::Column::set_column_type`) :
-                // texte non numérique effacé en passant en `Numeric`, comme
-                // pour toute saisie directe dans une colonne numérique.
-                egui::ComboBox::new(("plotyx_column_type_combo", column.raw()), "")
-                    .selected_text(type_suffix(column_type))
-                    .show_ui(ui, |ui| {
-                        for candidate in [ColumnType::Numeric, ColumnType::Text, ColumnType::Mixed]
-                        {
-                            if ui
-                                .selectable_label(column_type == candidate, type_suffix(candidate))
-                                .clicked()
-                                && candidate != column_type
-                            {
-                                actions.push(Action::SetColumnType {
-                                    column,
-                                    column_type: candidate,
-                                });
-                            }
+            // Toute la largeur de la rangée sélectionne la colonne — pas
+            // seulement la lettre — au clic principal comme au clic
+            // secondaire (`response.clicked()`/`secondary_clicked()`
+            // couvrent tous deux `Sense::click()`) : le clic droit doit
+            // pouvoir sélectionner *et* ouvrir le menu contextuel en un
+            // seul geste, sans exiger que la colonne soit déjà
+            // sélectionnée au préalable.
+            let id = ui.id().with(("plotyx_column_letter_row", column.raw()));
+            let response = ui.interact(rect, id, egui::Sense::click());
+            ui.put(
+                rect,
+                egui::Label::new(format!("{letter}  {}", type_suffix(column_type)))
+                    .selectable(false),
+            );
+            if response.clicked() || response.secondary_clicked() {
+                state.select_column(sheet, column);
+            }
+            // Choix manuel du type de colonne, au clic droit — conversion
+            // destructrice assumée (`Action::SetColumnType`/`Command::
+            // SetColumnType`, `plotyx-core::Column::set_column_type`) :
+            // texte non numérique effacé en passant en `Numeric`, comme
+            // pour toute saisie directe dans une colonne numérique.
+            response.context_menu(|ui| {
+                for candidate in [ColumnType::Numeric, ColumnType::Text, ColumnType::Mixed] {
+                    if ui
+                        .selectable_label(column_type == candidate, type_suffix(candidate))
+                        .clicked()
+                    {
+                        if candidate != column_type {
+                            actions.push(Action::SetColumnType {
+                                column,
+                                column_type: candidate,
+                            });
                         }
-                    });
+                        ui.close();
+                    }
+                }
             });
         });
         header_field_widget(
@@ -1664,6 +1676,7 @@ fn column_header_widget(
             column,
             HeaderField::LongName,
             HEADER_LONGNAME_HEIGHT,
+            is_column_selected,
         );
         header_field_widget(
             ui,
@@ -1673,6 +1686,7 @@ fn column_header_widget(
             column,
             HeaderField::Unit,
             HEADER_SUBROW_HEIGHT,
+            is_column_selected,
         );
         header_field_widget(
             ui,
@@ -1682,6 +1696,7 @@ fn column_header_widget(
             column,
             HeaderField::Comment,
             HEADER_SUBROW_HEIGHT,
+            is_column_selected,
         );
         header_field_widget(
             ui,
@@ -1691,6 +1706,7 @@ fn column_header_widget(
             column,
             HeaderField::Formula,
             HEADER_SUBROW_HEIGHT,
+            is_column_selected,
         );
     });
 }
@@ -1719,6 +1735,7 @@ fn header_row_separator(ui: &egui::Ui, rect: egui::Rect) {
 /// placeholder répété par colonne : le libellé du champ (« Long Name »,
 /// « Units », « Comments », « F(x)= ») vit une seule fois dans la gouttière
 /// des numéros de ligne, voir [`row_number_header_widget`].
+#[allow(clippy::too_many_arguments)]
 fn header_field_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1727,6 +1744,7 @@ fn header_field_widget(
     column: NodeId,
     field: HeaderField,
     height: f32,
+    column_selected: bool,
 ) {
     let _ = actions; // la validation passe par `AppState::commit_header_edit`, appelé directement (mutation transitoire, comme `commit_edit`).
     ui.scope(|ui| {
@@ -1766,7 +1784,12 @@ fn header_field_widget(
         let text = header_field_text(state, column, field);
         let id = ui.id().with((column.raw(), field as u8));
         let response = ui.interact(rect, id, egui::Sense::click());
-        let selected = state.is_header_field_selected(sheet, column, field);
+        // Surlignée si ce champ précis est sélectionné, ou si c'est toute la
+        // colonne qui l'est (sélection faite depuis la rangée des lettres,
+        // voir `column_header_widget`) : la sélection d'une colonne doit se
+        // voir sur ses 5 rangées d'en-tête, pas seulement sur la rangée des
+        // lettres.
+        let selected = column_selected || state.is_header_field_selected(sheet, column, field);
         if selected {
             ui.painter().rect_filled(
                 rect,
@@ -3047,13 +3070,28 @@ fn cell_widget(
             // s'appliquent qu'à une cellule déjà sélectionnée mais pas en
             // édition — `TextEdit` capture lui-même les flèches pour
             // déplacer le curseur de texte pendant la saisie).
-            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 state.cancel_edit();
                 return;
             }
             let shift = ui.input(|i| i.modifiers.shift);
-            let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
-            let tab = ui.input(|input| input.key_pressed(egui::Key::Tab));
+            // `consume_key`, pas `key_pressed` : cette cellule valide *et*
+            // déplace la sélection tout de suite (`select_cell`/
+            // `move_selection*` ci-dessous), avant que le bloc de
+            // raccourcis clavier de `grid_contents` (qui tourne après, une
+            // fois `state.editing()` redevenu `None` par le `cancel_edit`
+            // ci-dessous) ne voie passer la même image. Sans consommer la
+            // touche ici, ce bloc plus tard dans la même image relisait le
+            // même Entrée/Tab (`key_pressed` ne retire rien des
+            // événements) et déplaçait la sélection une deuxième fois —
+            // Entrée sur la ligne 2 atterrissait sur la ligne 4, pas 3.
+            // `Modifiers::NONE` matche Entrée avec ou sans Maj
+            // (`Modifiers::matches_logically` ignore Maj/Alt en trop quand
+            // le motif ne les demande pas).
+            let enter =
+                ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            let tab =
+                ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
             let pending = state
                 .editing()
                 .filter(|edit| edit.column == column && edit.row == row)
