@@ -511,6 +511,15 @@ pub struct CellEdit {
     pub buffer: String,
 }
 
+/// Marque une ligne de TSV collée/copiée ([`AppState::selected_cells_tsv`]/
+/// [`AppState::paste_tsv`]) comme un champ d'en-tête plutôt qu'une ligne de
+/// données — en tête de ligne, suivi du chiffre de [`HeaderField::index`].
+/// Un caractère de contrôle jamais tapé au clavier ni produit par un
+/// tableur externe : une ligne de données collée depuis l'extérieur (ou une
+/// copie purement données de PlotYx lui-même) n'en porte jamais, donc ne
+/// peut jamais être prise pour un champ d'en-tête.
+const HEADER_LINE_MARKER: char = '\u{1}';
+
 /// Champ de [`plotyx_core::ColumnMeta`] éditable dans l'en-tête empilé d'une
 /// colonne — voir [`HeaderEdit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1299,7 +1308,12 @@ impl AppState {
     /// de tête de [`crate::selection`]) rend une ligne par champ d'en-tête
     /// touché (dans l'ordre où ils sont empilés à l'écran) **puis** une
     /// ligne par ligne de données touchée — ex. Commentaire + Formule + 20
-    /// lignes de données sur 2 colonnes rend 22 lignes TSV.
+    /// lignes de données sur 2 colonnes rend 22 lignes TSV. Une ligne de
+    /// champ d'en-tête est préfixée de [`HEADER_LINE_MARKER`] suivi du
+    /// chiffre de [`HeaderField::index`], pour que [`AppState::paste_tsv`]
+    /// puisse la distinguer sans ambiguïté d'une ligne de données (voir sa
+    /// doc) — une copie purement données n'en porte jamais, donc son format
+    /// reste identique à ce qu'il a toujours été.
     pub fn selected_cells_tsv(&self, sheet: NodeId) -> Option<String> {
         let selection = self.selection.get(&sheet)?;
         let tree = &self.snapshot.tree;
@@ -1332,6 +1346,11 @@ impl AppState {
                     }
                 })
                 .collect();
+            if rank < 0 {
+                let field = HeaderField::from_index((rank + 4) as usize);
+                out.push(HEADER_LINE_MARKER);
+                out.push_str(&field.index().to_string());
+            }
             out.push_str(&line.join("\t"));
             out.push('\n');
         }
@@ -2338,25 +2357,64 @@ impl AppState {
     /// Une colonne formule refuse naturellement l'écriture
     /// (`CoreError::FormulaColumnReadOnly`) : signalée par le statut, sans
     /// bloquer les autres colonnes déjà collées.
+    ///
+    /// Chaque ligne est d'abord triée en champ d'en-tête ou en donnée, selon
+    /// qu'elle porte ou non [`HEADER_LINE_MARKER`] (voir [`AppState::
+    /// selected_cells_tsv`], qui le pose exactement sur les lignes qu'elle a
+    /// rendues depuis un champ d'en-tête — jamais sur une ligne de données,
+    /// qu'elle vienne de PlotYx ou d'un tableur externe). Les lignes de
+    /// champ vont, une par colonne cible, dans le champ qu'elles indiquent
+    /// (`Command::SetColumnMeta`, jamais `Command::SetCells` — les champs
+    /// d'en-tête ne sont pas des cellules) ; les lignes de données restantes
+    /// gardent leur ordre relatif et vont à partir de la ligne d'ancre,
+    /// exactement comme un collage purement données d'aujourd'hui — c'est ce
+    /// qui fait qu'un rectangle mixte copié puis collé sur une cellule de
+    /// données reproduit la même forme (champs, puis données) ancrée à la
+    /// cible, plutôt que de déverser les lignes de champ dans les données.
     fn paste_tsv(&mut self, sheet: NodeId, text: String) {
         let Some(selection) = self.selection.get(&sheet) else {
             self.fail("Aucune cellule sélectionnée pour coller".to_string());
             return;
         };
         let (anchor_column, anchor_row) = selection.anchor();
-        let mut rows: Vec<Vec<&str>> = text
+        let mut lines: Vec<&str> = text
             .split('\n')
-            .map(|line| line.trim_end_matches('\r').split('\t').collect())
+            .map(|line| line.trim_end_matches('\r'))
             .collect();
         // La plupart des presse-papiers terminent par un `\n` : la ligne
         // vide qui en résulte ne doit pas devenir une ligne collée de plus.
-        if matches!(rows.last(), Some(row) if row.len() == 1 && row[0].is_empty()) {
-            rows.pop();
+        if matches!(lines.last(), Some(line) if line.is_empty()) {
+            lines.pop();
         }
-        if rows.is_empty() {
+        if lines.is_empty() {
             return;
         }
-        let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+        enum PastedLine<'a> {
+            Header(HeaderField, Vec<&'a str>),
+            Data(Vec<&'a str>),
+        }
+        let parsed: Vec<PastedLine> = lines
+            .into_iter()
+            .map(|line| match line.strip_prefix(HEADER_LINE_MARKER) {
+                Some(rest) => {
+                    let mut chars = rest.chars();
+                    let digit = chars.next().and_then(|c| c.to_digit(10)).unwrap_or(0);
+                    let rest = chars.as_str();
+                    PastedLine::Header(
+                        HeaderField::from_index(digit as usize),
+                        rest.split('\t').collect(),
+                    )
+                }
+                None => PastedLine::Data(line.split('\t').collect()),
+            })
+            .collect();
+        let column_count = parsed
+            .iter()
+            .map(|line| match line {
+                PastedLine::Header(_, cells) | PastedLine::Data(cells) => cells.len(),
+            })
+            .max()
+            .unwrap_or(0);
         let order: Vec<NodeId> = self
             .visible_columns(sheet)
             .into_iter()
@@ -2377,28 +2435,63 @@ impl AppState {
         if targets.is_empty() {
             return;
         }
-        let grouped = targets.len() > 1;
+        let header_lines: Vec<(HeaderField, &Vec<&str>)> = parsed
+            .iter()
+            .filter_map(|line| match line {
+                PastedLine::Header(field, cells) => Some((*field, cells)),
+                PastedLine::Data(_) => None,
+            })
+            .collect();
+        let data_rows: Vec<Vec<&str>> = parsed
+            .iter()
+            .filter_map(|line| match line {
+                PastedLine::Data(cells) => Some(cells.clone()),
+                PastedLine::Header(..) => None,
+            })
+            .collect();
+        let header_ops = header_lines.len() * targets.len();
+        let data_ops = if data_rows.is_empty() {
+            0
+        } else {
+            targets.len()
+        };
+        let grouped = header_ops + data_ops > 1;
         if grouped && self.handle.begin_macro("Coller").is_err() {
             self.fail("Impossible de grouper le collage".to_string());
             return;
         }
-        for (index, &column) in targets.iter().enumerate() {
-            let Some(kind) = self
-                .snapshot
-                .tree
-                .node(column)
-                .and_then(Node::as_column)
-                .map(Column::column_type)
-            else {
-                continue;
-            };
-            let values = value_block_from_tsv_column(kind, &rows, index);
-            self.execute(Command::SetCells {
-                column,
-                start: anchor_row,
-                values,
-                expected_version: None,
-            });
+        for &(field, cells) in &header_lines {
+            for (index, &column) in targets.iter().enumerate() {
+                let text = cells.get(index).copied().unwrap_or("").to_string();
+                self.set_column_meta_field(column, move |meta| match field {
+                    HeaderField::LongName => meta.long_name = text,
+                    HeaderField::Unit => meta.unit = text,
+                    HeaderField::Comment => meta.comment = text,
+                    HeaderField::Formula => {
+                        meta.formula = (!text.trim().is_empty()).then_some(text)
+                    }
+                });
+            }
+        }
+        if !data_rows.is_empty() {
+            for (index, &column) in targets.iter().enumerate() {
+                let Some(kind) = self
+                    .snapshot
+                    .tree
+                    .node(column)
+                    .and_then(Node::as_column)
+                    .map(Column::column_type)
+                else {
+                    continue;
+                };
+                let values = value_block_from_tsv_column(kind, &data_rows, index);
+                self.execute(Command::SetCells {
+                    column,
+                    start: anchor_row,
+                    values,
+                    expected_version: None,
+                });
+            }
         }
         if grouped {
             let _ = self.handle.end_macro();

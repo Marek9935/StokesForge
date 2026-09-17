@@ -973,6 +973,157 @@ fn pasting_onto_a_single_cell_selection_writes_from_its_anchor() {
     assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
 }
 
+/// Valide un champ d'en-tête via le même chemin que la saisie utilisateur
+/// (`begin_header_edit`/`commit_header_edit`), pour préparer une sélection
+/// de champ dans les tests de copier/coller mixte ci-dessous.
+fn set_header_field(state: &mut AppState, column: NodeId, field: HeaderField, text: &str) {
+    state.begin_header_edit(column, field);
+    if let Some(edit) = state.header_editing_mut() {
+        edit.buffer = text.to_string();
+    }
+    state.commit_header_edit();
+}
+
+/// Bug : coller une sélection copiée à cheval sur l'en-tête et les données
+/// (rectangle mixte, voir la doc de tête de `crate::selection`) dumpait les
+/// lignes de champ d'en-tête dans des lignes de données, décalant tout ce
+/// qui suit — `paste_tsv` traitait chaque ligne du TSV collé comme une
+/// donnée, sans distinguer d'où elle venait. Copie de Unité + Commentaire +
+/// Formule + 3 lignes de données de `Temps`, collée sur la cellule de
+/// donnée `Signal` ligne 1 : la forme relative au rang doit se reproduire
+/// ancrée sur la cible — les champs sur `Signal`, les données à ses lignes
+/// 1, 2, 3 — au lieu de tout verser en données à partir de la ligne 1.
+#[test]
+fn pasting_a_mixed_header_and_data_copy_reapplies_header_fields_and_offsets_data() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::Unit, "nm");
+    set_header_field(&mut state, temps, HeaderField::Comment, "a");
+    // Formule volontairement laissée vide, pour vérifier qu'une ligne de
+    // champ vide se recopie bien (et ne casse pas le format).
+
+    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    state.extend_selection(sheet1, temps, 2);
+    let tsv = state
+        .selected_cells_tsv(sheet1)
+        .expect("sélection non vide");
+    assert_eq!(
+        tsv, "\u{1}1nm\n\u{1}2a\n\u{1}3\n0\n0.5\n1\n",
+        "3 lignes de champ marquées, puis 3 lignes de données en clair"
+    );
+
+    // Collée sur une cellule de donnée de `Signal`, ligne 1 : les champs
+    // d'en-tête n'ont pas de « ligne », ils vont sur la colonne cible quel
+    // que soit le rang de l'ancre ; les données s'alignent à partir de
+    // cette ancre.
+    state.select_cell(sheet1, signal, 1);
+    state.dispatch(Action::PasteTsv {
+        sheet: sheet1,
+        text: tsv,
+    });
+
+    let meta = state.column_meta(signal);
+    assert_eq!(meta.unit, "nm");
+    assert_eq!(meta.comment, "a");
+    assert_eq!(meta.formula, None);
+
+    assert_eq!(cell(&state, signal, 1), Cell::Float(0.0));
+    assert_eq!(cell(&state, signal, 2), Cell::Float(0.5));
+    assert_eq!(cell(&state, signal, 3), Cell::Float(1.0));
+    // Le reste de la colonne, hors de la plage collée, n'a pas bougé.
+    assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
+    assert_eq!(cell(&state, signal, 4), Cell::Float(50.0));
+
+    // La colonne source n'est pas affectée par son propre collage ailleurs.
+    let temps_meta = state.column_meta(temps);
+    assert_eq!(temps_meta.unit, "nm");
+    assert_eq!(temps_meta.comment, "a");
+}
+
+/// Régression : un copier/coller purement données (aucun champ d'en-tête
+/// dans la sélection) garde le format TSV historique — aucune ligne ne porte
+/// le marqueur de champ — et continue de coller exactement comme avant ce
+/// correctif.
+#[test]
+fn pure_data_copy_paste_keeps_working_without_header_markers() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 0);
+    state.extend_selection(sheet1, signal, 1);
+    let tsv = state
+        .selected_cells_tsv(sheet1)
+        .expect("sélection non vide");
+    assert_eq!(
+        tsv, "0\t10\n0.5\t\n",
+        "aucun marqueur de champ d'en-tête dans une copie purement données"
+    );
+    assert!(!tsv.contains('\u{1}'));
+
+    state.select_cell(sheet1, temps, 3);
+    state.dispatch(Action::PasteTsv {
+        sheet: sheet1,
+        text: tsv,
+    });
+
+    assert_eq!(cell(&state, temps, 3), Cell::Float(0.0));
+    assert_eq!(cell(&state, signal, 3), Cell::Float(10.0));
+    assert_eq!(cell(&state, temps, 4), Cell::Float(0.5));
+    assert!(matches!(cell(&state, signal, 4), Cell::Float(v) if v.is_nan()));
+}
+
+/// Régression : un copier/coller purement champs d'en-tête (sélection
+/// entièrement dans l'en-tête, sans toucher la moindre ligne de donnée) va
+/// bien sur les champs de la colonne cible — pas sur ses données, comme
+/// avant ce correctif où `paste_tsv` n'avait qu'un seul chemin, celui des
+/// données, même pour un tel collage.
+#[test]
+fn pure_header_field_copy_paste_writes_header_fields_not_data() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
+
+    let tsv = state
+        .selected_cells_tsv(sheet1)
+        .expect("sélection non vide");
+    assert_eq!(tsv, "\u{1}0T\n\u{1}1s\n");
+
+    let signal_data_before = [
+        cell(&state, signal, 0),
+        cell(&state, signal, 1),
+        cell(&state, signal, 2),
+    ];
+
+    state.select_cell(sheet1, signal, 0);
+    state.dispatch(Action::PasteTsv {
+        sheet: sheet1,
+        text: tsv,
+    });
+
+    let meta = state.column_meta(signal);
+    assert_eq!(meta.long_name, "T");
+    assert_eq!(meta.unit, "s");
+    // Aucune donnée touchée : le collage était entièrement dans l'en-tête.
+    assert_eq!(cell(&state, signal, 0), signal_data_before[0]);
+    assert_eq!(cell(&state, signal, 1), signal_data_before[1]);
+    assert_eq!(cell(&state, signal, 2), signal_data_before[2]);
+}
+
 // -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --
 //
 // Ce qui exige un interpréteur (exécution, sortie, annulation d'une écriture
