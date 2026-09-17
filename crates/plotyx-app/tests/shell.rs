@@ -1818,3 +1818,94 @@ fn cell_f64(state: &AppState, column: NodeId, row: usize) -> f64 {
         Cell::Text(_) => panic!("{column} n'est pas une colonne numérique"),
     }
 }
+
+/// Une cellule qui ne s'analyse pas en nombre, au milieu d'une colonne par
+/// ailleurs numérique, ne devient plus un `NaN` muet : la colonne importée
+/// devient `Mixed` et garde le jeton d'origine — c'est le cas d'usage
+/// motivant du chantier « prévisualisation d'import », qui consomme enfin
+/// côté import le chantier « colonnes à types mixtes »
+/// (`ParsedColumn::texts`, voir `docs/chantier-import-previsualisation.md`).
+/// Une colonne entièrement numérique, elle, continue de produire une
+/// colonne `Numeric` à l'identique d'avant ce chantier — vérifié par
+/// ailleurs (toutes les autres assertions de ce fichier sur des imports
+/// numériques n'ont pas changé de résultat).
+#[test]
+fn importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("mesure.csv");
+    std::fs::write(&file, "1,2\nn/a,4\n5,6\n").expect("écrit mesure.csv");
+
+    state.dispatch(Action::ImportFiles {
+        book,
+        recipe: ImportRecipe::new("Sans titre"),
+        paths: vec![file],
+    });
+
+    let tree = state.tree();
+    let sheet = sheet_named(tree, "mesure");
+    let columns = state.visible_columns(sheet);
+    let first = columns[0].0;
+    assert_eq!(column_type(&state, first), ColumnType::Mixed);
+    assert_eq!(cell_f64(&state, first, 0), 1.0);
+    match cell(&state, first, 1) {
+        Cell::Text(Some(text)) => assert_eq!(text, "n/a"),
+        other => panic!("cellule 1 devrait être un texte conservé, trouvé {other:?}"),
+    }
+    assert_eq!(cell_f64(&state, first, 2), 5.0);
+
+    let second = columns[1].0;
+    assert_eq!(
+        column_type(&state, second),
+        ColumnType::Numeric,
+        "une colonne entièrement numérique n'est pas promue en Mixed"
+    );
+}
+
+/// Les rôles de sous-en-tête (`long_name`/`unit`/`comment`) assignés dans la
+/// recette peuplent `ColumnMeta` — la fonctionnalité centrale du chantier
+/// « prévisualisation d'import » côté modèle, au-delà de l'aperçu lui-même
+/// (testé côté `plotyx-import`, voir `preview::tests`).
+#[test]
+fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("instrument.csv");
+    std::fs::write(
+        &file,
+        "Temperature,Pressure\ndegC,bar\nmesure lente,mesure rapide\n1,2\n3,4\n",
+    )
+    .expect("écrit instrument.csv");
+
+    let mut recipe = ImportRecipe::new("Sans titre");
+    recipe.header_layout = plotyx_import::HeaderLayout {
+        main_header_lines: 0,
+        subheader_lines: 3,
+        auto_detect: false,
+    };
+    recipe.subheader_roles = plotyx_import::SubheaderRoles {
+        long_name: Some(plotyx_import::SubheaderLineRange::single(1)),
+        unit: Some(plotyx_import::SubheaderLineRange::single(2)),
+        comment: Some(plotyx_import::SubheaderLineRange::single(3)),
+        same_line_name_unit: false,
+    };
+    state.dispatch(Action::ImportFiles {
+        book,
+        recipe,
+        paths: vec![file],
+    });
+
+    let tree = state.tree();
+    let sheet = sheet_named(tree, "instrument");
+    let columns = state.visible_columns(sheet);
+    let meta0 = state.column_meta(columns[0].0);
+    assert_eq!(meta0.long_name, "Temperature");
+    assert_eq!(meta0.unit, "degC");
+    assert_eq!(meta0.comment, "mesure lente");
+    let meta1 = state.column_meta(columns[1].0);
+    assert_eq!(meta1.long_name, "Pressure");
+    assert_eq!(meta1.unit, "bar");
+    assert_eq!(meta1.comment, "mesure rapide");
+}
