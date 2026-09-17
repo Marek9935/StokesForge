@@ -152,9 +152,11 @@ fn b16_une_colonne_mixte_avec_du_texte_se_resout_au_prefixe_commun_avec_des_nan(
 }
 
 #[test]
-fn b16_une_colonne_derreur_de_type_texte_est_une_reference_rompue() {
-    // Une colonne texte n'est pas traçable : le module l'assimile à une
-    // référence rompue plutôt qu'à une série vide. C'est le bon réflexe.
+fn b16_une_colonne_derreur_entierement_textuelle_resout_sans_le_moindre_point() {
+    // Il n'y a plus de type de colonne non traçable (`Text` a disparu au
+    // profit de `Mixed`, voir `plotyx_core::resolve`) : une colonne
+    // entièrement textuelle résout sa série normalement, simplement sans
+    // aucun point numérique — ce n'est plus une référence rompue.
     let mut banc = Banc::new(1000);
     let texte = banc
         .project
@@ -167,8 +169,10 @@ fn b16_une_colonne_derreur_de_type_texte_est_une_reference_rompue() {
         .expect("colonne texte");
     let serie = banc.serie_avec_erreur(texte);
     let resolue = resolve_series(banc.project.tree(), &serie);
-    assert!(resolue.broken());
-    assert_eq!(resolue.missing, vec![MissingRole::YError]);
+    assert!(!resolue.broken());
+    assert!(resolue.missing.is_empty());
+    let y_error = resolue.y_error.expect("ordonnées d'erreur résolues");
+    assert!(y_error.as_slice().iter().all(|value| value.is_nan()));
 }
 
 // -- reproductions --------------------------------------------------------

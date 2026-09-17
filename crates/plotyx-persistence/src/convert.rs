@@ -95,18 +95,23 @@ impl From<ColumnType> for TypeRecord {
         match value {
             ColumnType::Numeric => TypeRecord::Numeric,
             ColumnType::DateTime => TypeRecord::DateTime,
-            ColumnType::Text => TypeRecord::Text,
             ColumnType::Mixed => TypeRecord::Mixed,
         }
     }
 }
 
+/// `TypeRecord::Text` — l'ancienne étiquette d'un type de colonne texte
+/// homogène, retiré du modèle en mémoire au profit de `Mixed` — se relit en
+/// [`ColumnType::Mixed`] : un fichier écrit avant ce changement reste
+/// lisible, voir la doc de tête de [`record_to_kind`] pour la migration des
+/// **valeurs** qui l'accompagne nécessairement (`ValuesRecord::Text` n'a pas
+/// de pendant direct en `ColumnValues`).
 impl From<TypeRecord> for ColumnType {
     fn from(value: TypeRecord) -> Self {
         match value {
             TypeRecord::Numeric => ColumnType::Numeric,
             TypeRecord::DateTime => ColumnType::DateTime,
-            TypeRecord::Text => ColumnType::Text,
+            TypeRecord::Text => ColumnType::Mixed,
             TypeRecord::Mixed => ColumnType::Mixed,
         }
     }
@@ -632,7 +637,6 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
             let meta = column.meta();
             let values = match column.values() {
                 ColumnValues::Float(values) => ValuesRecord::Float(encode_floats(values)),
-                ColumnValues::Text(values) => ValuesRecord::Text(values.as_ref().clone()),
                 ColumnValues::Mixed(values) => encode_mixed(values),
             };
             KindRecord::Column {
@@ -700,7 +704,23 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             let column_type: ColumnType = column_type.into();
             let block = match values {
                 ValuesRecord::Float(bytes) => ValueBlock::Float(decode_floats(&bytes)?),
-                ValuesRecord::Text(values) => ValueBlock::Text(values),
+                // Migration de compatibilité : un fichier écrit avant le
+                // retrait du type `Text` homogène porte encore cette
+                // étiquette. `TypeRecord::Text` s'est déjà relu en
+                // `ColumnType::Mixed` ci-dessus ; ici, chaque `Option<String>`
+                // devient la cellule mixte équivalente **telle quelle**, sans
+                // réanalyse numérique (`None → Empty`, `Some(s) → Text(s)`)
+                // — une colonne texte d'hier est, cellule pour cellule, une
+                // colonne mixte entièrement textuelle aujourd'hui.
+                ValuesRecord::Text(values) => ValueBlock::Mixed(
+                    values
+                        .into_iter()
+                        .map(|value| match value {
+                            None => MixedCell::Empty,
+                            Some(text) => MixedCell::Text(text),
+                        })
+                        .collect(),
+                ),
                 ValuesRecord::Mixed {
                     tags,
                     numbers,

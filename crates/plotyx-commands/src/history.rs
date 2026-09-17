@@ -1757,8 +1757,8 @@ fn insert_column_footprint(out: &mut Footprint, values: &ColumnValues) {
 
 /// Adresse (identité — jamais déréférencée) et taille en octets du buffer
 /// d'une colonne. `8 × longueur` pour un buffer de flottants ; pour une
-/// colonne texte, une estimation (voir [`text_buffer_bytes`]), le coût exact
-/// d'allocation par `String` n'étant pas modélisable indépendamment de
+/// colonne mixte, une estimation (voir [`mixed_buffer_bytes`]), le coût
+/// exact d'allocation par `String` n'étant pas modélisable indépendamment de
 /// l'allocateur.
 fn column_footprint(values: &ColumnValues) -> (usize, usize) {
     match values {
@@ -1766,7 +1766,6 @@ fn column_footprint(values: &ColumnValues) -> (usize, usize) {
             Arc::as_ptr(arc) as usize,
             arc.len() * std::mem::size_of::<f64>(),
         ),
-        ColumnValues::Text(arc) => (Arc::as_ptr(arc) as usize, text_buffer_bytes(arc)),
         ColumnValues::Mixed(arc) => (Arc::as_ptr(arc) as usize, mixed_buffer_bytes(arc)),
     }
 }
@@ -1957,27 +1956,8 @@ fn block_footprint(block: &ValueBlock) -> (usize, usize) {
             values.as_ptr() as usize,
             values.len() * std::mem::size_of::<f64>(),
         ),
-        ValueBlock::Text(values) => (values.as_ptr() as usize, text_buffer_bytes(values)),
         ValueBlock::Mixed(values) => (values.as_ptr() as usize, mixed_buffer_bytes(values)),
     }
-}
-
-/// Coût fixe estimé par élément d'un buffer texte : approxime le stockage
-/// d'un `Option<String>` dans le `Vec` (24 octets sur une plateforme 64
-/// bits — `String` est `{ptr, len, cap}`, et `Option` s'y loge sans octet
-/// supplémentaire grâce à la niche du pointeur). Le surcoût propre de
-/// l'allocateur pour chaque `String` individuelle, variable d'un allocateur
-/// à l'autre, n'est pas modélisé : c'est une estimation raisonnable, pas une
-/// mesure exacte.
-const TEXT_ELEMENT_OVERHEAD: usize = std::mem::size_of::<Option<String>>();
-
-/// Estimation de la taille d'un buffer texte : somme des octets UTF-8 des
-/// chaînes présentes, plus [`TEXT_ELEMENT_OVERHEAD`] par élément (présent ou
-/// manquant).
-fn text_buffer_bytes(values: &[Option<String>]) -> usize {
-    values.iter().fold(0usize, |total, value| {
-        total + TEXT_ELEMENT_OVERHEAD + value.as_deref().map_or(0, str::len)
-    })
 }
 
 /// Coût fixe par élément d'un buffer à types mixtes : la taille d'une
@@ -1987,9 +1967,9 @@ fn text_buffer_bytes(values: &[Option<String>]) -> usize {
 /// ce n'est pas la taille d'un `Option<String>`.
 const MIXED_ELEMENT_OVERHEAD: usize = std::mem::size_of::<MixedCell>();
 
-/// Estimation de la taille d'un buffer à types mixtes, sur le même modèle
-/// que [`text_buffer_bytes`] : somme des octets UTF-8 des textes présents,
-/// plus [`MIXED_ELEMENT_OVERHEAD`] par cellule, quelle que soit sa variante.
+/// Estimation de la taille d'un buffer à types mixtes : somme des octets
+/// UTF-8 des textes présents, plus [`MIXED_ELEMENT_OVERHEAD`] par cellule,
+/// quelle que soit sa variante.
 fn mixed_buffer_bytes(values: &[MixedCell]) -> usize {
     values.iter().fold(0usize, |total, cell| {
         total

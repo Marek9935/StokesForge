@@ -478,7 +478,7 @@ fn b6_type_incompatible_entre_deux_clients() {
     let b = s.handle();
     a.execute(Command::SetColumnType {
         column: cols[0],
-        column_type: ColumnType::Text,
+        column_type: ColumnType::Mixed,
     })
     .unwrap();
     let r = b.execute(Command::SetCells {
@@ -489,7 +489,7 @@ fn b6_type_incompatible_entre_deux_clients() {
     });
     assert!(
         r.is_err(),
-        "un bloc numérique a été écrit dans une colonne devenue texte"
+        "un bloc numérique a été écrit dans une colonne devenue mixte"
     );
     s.shutdown().unwrap();
 }

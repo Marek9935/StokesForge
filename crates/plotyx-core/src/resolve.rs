@@ -242,9 +242,10 @@ fn label_for(series: &SeriesSpec, tree: &Tree) -> String {
 }
 
 /// Vue `f64` d'une colonne référencée par `id`, ou `None` si la référence est
-/// rompue ou si la colonne n'est pas traçable (port de `_numeric`,
-/// `resolve.py` ligne 77 : une colonne texte n'est pas traçable, ce n'est pas
-/// une erreur mais un choix de colonne inadapté).
+/// rompue (port de `_numeric`, `resolve.py` ligne 77). Il n'y a plus de type
+/// de colonne non traçable : une colonne `Mixed` — y compris une colonne
+/// entièrement textuelle — trace ses cellules numériques et vaut `NaN`
+/// ailleurs (voir [`Column::numeric_view`]).
 ///
 /// Zéro copie pour une colonne numérique ou date-heure ; une copie pour une
 /// colonne **mixte**, qui n'a pas de buffer `f64` contigu à partager — voir
@@ -528,8 +529,8 @@ mod tests {
     }
 
     /// Fixture : un projet avec une feuille contenant les colonnes `x`, `y`
-    /// (deux points) et `texte` (colonne texte, non traçable), plus un
-    /// graphe.
+    /// (deux points) et `texte` (colonne mixte entièrement textuelle, sans
+    /// contenu numérique), plus un graphe.
     struct Fixture {
         project: Project,
         x: NodeId,
@@ -551,7 +552,12 @@ mod tests {
                 .add_column(sheet, None, Some("Y"), numeric_column(&[10.0, 20.0, 30.0]))
                 .expect("colonne Y");
             let texte = project
-                .add_column(sheet, None, Some("T"), Column::new(ColumnType::Text))
+                .add_column(
+                    sheet,
+                    None,
+                    Some("T"),
+                    Column::from_text(&[Some("a".to_string()), Some("b".to_string())]),
+                )
                 .expect("colonne texte");
             let graph = project
                 .add_graph(root, None, PlotSpec::default())
@@ -631,12 +637,22 @@ mod tests {
         assert_eq!(resolved.label, "(référence rompue)");
     }
 
+    /// Il n'y a plus de type de colonne non traçable (`Text` a disparu au
+    /// profit de `Mixed`) : une colonne entièrement textuelle résout sa
+    /// série normalement, simplement sans le moindre point numérique — ce
+    /// n'est pas une référence rompue.
     #[test]
-    fn a_text_column_is_not_numeric_and_counts_as_missing() {
+    fn a_fully_textual_column_resolves_with_no_numeric_points() {
         let f = Fixture::new();
         let series = SeriesSpec::new(f.texte);
         let resolved = resolve_series(f.project.tree(), &series);
-        assert_eq!(resolved.missing, vec![MissingRole::Y]);
+        assert!(
+            resolved.ok(),
+            "une colonne mixte n'est jamais une référence rompue"
+        );
+        assert!(resolved.missing.is_empty());
+        let slice = resolved.y.expect("ordonnées résolues");
+        assert!(slice.as_slice().iter().all(|value| value.is_nan()));
     }
 
     /// Une colonne **mixte** est traçable, contrairement à une colonne texte :
@@ -761,6 +777,13 @@ mod tests {
     #[test]
     fn resolve_spec_walks_every_panel_and_series() {
         let f = Fixture::new();
+        let mut project = f.project;
+        // Une référence rompue, pour la seconde série : supprimer la colonne
+        // qu'elle visait plutôt que passer par une colonne texte, qui résout
+        // désormais toujours (voir `a_fully_textual_column_resolves_with_no_numeric_points`).
+        project
+            .remove(f.texte)
+            .expect("suppression de la colonne texte");
         let spec = PlotSpec {
             panels: vec![
                 PanelSpec {
@@ -776,7 +799,7 @@ mod tests {
             ..PlotSpec::empty("Deux panneaux")
         };
 
-        let resolved = resolve_spec(f.project.tree(), &spec);
+        let resolved = resolve_spec(project.tree(), &spec);
 
         assert_eq!(resolved.panels.len(), 2);
         assert_eq!(resolved.point_count(), 3);

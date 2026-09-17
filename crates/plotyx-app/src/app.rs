@@ -1572,7 +1572,6 @@ fn type_suffix(column_type: ColumnType) -> &'static str {
     match column_type {
         ColumnType::Numeric => "num",
         ColumnType::DateTime => "date",
-        ColumnType::Text => "texte",
         ColumnType::Mixed => "mixte",
     }
 }
@@ -1697,7 +1696,7 @@ fn column_header_widget(
                 // SetColumnType`, `plotyx-core::Column::set_column_type`) :
                 // texte non numérique effacé en passant en `Numeric`, comme
                 // pour toute saisie directe dans une colonne numérique.
-                for candidate in [ColumnType::Numeric, ColumnType::Text, ColumnType::Mixed] {
+                for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
                     if ui
                         .selectable_label(column_type == candidate, type_suffix(candidate))
                         .clicked()

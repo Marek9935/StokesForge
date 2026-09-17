@@ -2,7 +2,7 @@
 //! C'est la partie de l'historique que `undo_random.rs` du dépôt ne tire pas.
 
 use plotyx_commands::{Command, History};
-use plotyx_core::{Column, ColumnType, NodeId, Project, Tree, ValueBlock};
+use plotyx_core::{Column, ColumnType, MixedCell, NodeId, Project, Tree, ValueBlock};
 use std::sync::Arc;
 
 fn projet() -> (Project, NodeId, Vec<NodeId>) {
@@ -321,7 +321,9 @@ fn b5_macro_puis_annulation_totale_ramene_larbre_initial() {
             .unwrap()
             .column_type()
         {
-            ColumnType::Text => ValueBlock::Text(vec![Some(format!("t{tour}")), None]),
+            ColumnType::Mixed => {
+                ValueBlock::Mixed(vec![MixedCell::Text(format!("t{tour}")), MixedCell::Empty])
+            }
             _ => ValueBlock::Float(vec![tour as f64, f64::NAN]),
         };
         h.execute(
@@ -353,7 +355,7 @@ fn b5_macro_puis_annulation_totale_ramene_larbre_initial() {
                 Command::SetColumnType {
                     column: cols[1],
                     column_type: if tour % 2 == 0 {
-                        ColumnType::Text
+                        ColumnType::Mixed
                     } else {
                         ColumnType::Numeric
                     },

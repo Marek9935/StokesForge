@@ -1,7 +1,7 @@
 //! Batterie 1 — valeurs limites de la logique métier (hors allocation géante,
 //! qui vit dans b6 pour ne pas tuer la machine de test).
 
-use plotyx_core::{Cell, Column, ColumnType, ColumnValues, Project, ValueBlock};
+use plotyx_core::{Cell, Column, ColumnType, ColumnValues, MixedCell, Project, ValueBlock};
 use plotyx_plot::{PanelSpec, PlotSpec};
 use std::num::NonZeroU32;
 
@@ -114,9 +114,17 @@ fn b1_conversion_texte_vers_numerique_puis_retour() {
         Some("inf".into()),
         Some("NaN".into()),
     ];
-    project.set_column_type(col, ColumnType::Text).unwrap();
+    project.set_column_type(col, ColumnType::Mixed).unwrap();
+    let cellules: Vec<MixedCell> = textes
+        .iter()
+        .cloned()
+        .map(|value| match value {
+            None => MixedCell::Empty,
+            Some(text) => MixedCell::Text(text),
+        })
+        .collect();
     project
-        .set_values(col, 0, ValueBlock::Text(textes.clone()))
+        .set_values(col, 0, ValueBlock::Mixed(cellules))
         .unwrap();
     project.set_column_type(col, ColumnType::Numeric).unwrap();
     let tree = project.tree();
@@ -146,50 +154,26 @@ fn b1_conversion_texte_vers_numerique_puis_retour() {
     assert!(vals[8].is_nan(), "« NaN » doit devenir la valeur manquante");
 }
 
-#[test]
-fn b1_aller_retour_numerique_texte_numerique_preserve_les_valeurs() {
-    let valeurs: Vec<f64> = vec![
-        0.0,
-        -0.0,
-        1.0,
-        -1.0,
-        f64::MIN_POSITIVE,
-        f64::MAX,
-        f64::MIN,
-        1e-320,    // dénormal
-        0.1 + 0.2, // non représentable exactement
-        f64::NAN,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    let (mut project, col) = projet_avec_colonne(&valeurs);
-    project.set_column_type(col, ColumnType::Text).unwrap();
-    project.set_column_type(col, ColumnType::Numeric).unwrap();
-    let tree = project.tree();
-    let column = tree.node(col).unwrap().as_column().unwrap();
-    let apres: Vec<f64> = match column.values() {
-        ColumnValues::Float(v) => v.as_ref().clone(),
-        _ => panic!(),
-    };
-    for (i, (avant, apres)) in valeurs.iter().zip(apres.iter()).enumerate() {
-        if avant.is_nan() {
-            assert!(apres.is_nan(), "ligne {i} : NaN devenu {apres}");
-        } else {
-            assert_eq!(
-                avant.to_bits(),
-                apres.to_bits(),
-                "ligne {i} : {avant} -> {apres} (aller-retour texte non fidèle)"
-            );
-        }
-    }
-}
+// `b1_aller_retour_numerique_texte_numerique_preserve_les_valeurs` a été
+// retiré : il vérifiait qu'un aller-retour `Numeric → Text → Numeric`
+// (formatage par `format_f64_for_display` puis reparsing par
+// `parse_f64_text`) était fidèle bit à bit. Il n'y a plus de conversion vers
+// une forme textuelle formatée : `Numeric → Mixed` est sans perte
+// (`MixedCell::Number`, jamais une chaîne), donc `Numeric → Mixed →
+// Numeric` préserve les valeurs *trivialement*, sans passer par un
+// formatage — l'invariant qui donnait son intérêt à ce test (la fidélité
+// d'un aller-retour texte) n'a plus de chemin de code à couvrir.
 
 #[test]
 fn b1_cellule_texte_vide_est_distincte_de_manquante() {
     let (mut project, col) = projet_avec_colonne(&[]);
-    project.set_column_type(col, ColumnType::Text).unwrap();
+    project.set_column_type(col, ColumnType::Mixed).unwrap();
     project
-        .set_values(col, 0, ValueBlock::Text(vec![Some(String::new()), None]))
+        .set_values(
+            col,
+            0,
+            ValueBlock::Mixed(vec![MixedCell::Text(String::new()), MixedCell::Empty]),
+        )
         .unwrap();
     let tree = project.tree();
     let column = tree.node(col).unwrap().as_column().unwrap();
@@ -267,7 +251,7 @@ fn b1_compteur_de_version_avance_a_chaque_ecriture() {
         .version();
     assert_ne!(v0, v1, "le compteur n'a pas bougé après une écriture");
     // Un refus ne doit pas l'incrémenter.
-    let _ = project.set_values(col, 0, ValueBlock::Text(vec![None]));
+    let _ = project.set_values(col, 0, ValueBlock::Mixed(vec![MixedCell::Empty]));
     let v2 = project
         .tree()
         .node(col)

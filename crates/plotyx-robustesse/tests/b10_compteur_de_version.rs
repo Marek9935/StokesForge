@@ -116,13 +116,13 @@ fn b10_une_commande_refusee_nincremente_rien() {
     let (mut project, _sheet, a, _b) = projet();
     let mut history = History::with_limit(0);
     let avant = version(&project, a);
-    // Bloc texte sur une colonne numérique : `Err(TypeMismatch)`.
+    // Bloc mixte sur une colonne numérique : `Err(TypeMismatch)`.
     let refus = history.execute(
         &mut project,
         Command::SetCells {
             column: a,
             start: 0,
-            values: ValueBlock::Text(vec![Some("x".to_string())]),
+            values: ValueBlock::Mixed(vec![MixedCell::Text("x".to_string())]),
             expected_version: None,
         },
     );
@@ -140,7 +140,7 @@ fn b10_le_compteur_traverse_un_changement_de_type() {
             &mut project,
             Command::SetColumnType {
                 column: a,
-                column_type: ColumnType::Text,
+                column_type: ColumnType::Mixed,
             },
         )
         .expect("conversion acceptée");

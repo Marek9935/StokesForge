@@ -43,8 +43,6 @@ pub enum FormulaError {
     /// La lettre de colonne référencée dépasse le nombre de colonnes de la
     /// feuille.
     UnknownColumn(String),
-    /// La colonne référencée existe mais n'est pas numérique (type `Text`).
-    NonNumericColumn(String),
     /// La formule référence la colonne qui la porte.
     SelfReference(String),
     /// Cycle de dépendance entre colonnes-formule (directement ou par une
@@ -60,9 +58,6 @@ impl std::fmt::Display for FormulaError {
             FormulaError::Parse(message) => write!(f, "formule invalide : {message}"),
             FormulaError::UnknownColumn(letter) => {
                 write!(f, "colonne {letter} inexistante dans la feuille")
-            }
-            FormulaError::NonNumericColumn(letter) => {
-                write!(f, "colonne {letter} non numérique")
             }
             FormulaError::SelfReference(letter) => {
                 write!(f, "la formule référence sa propre colonne ({letter})")
@@ -449,19 +444,13 @@ pub fn evaluate(
                     FormulaError::UnknownColumn(index_to_letters(index)),
                 )
             }
-            Some(ColumnValues::Text(_)) => {
-                return FormulaEvaluation::degraded(
-                    target_len,
-                    FormulaError::NonNumericColumn(index_to_letters(index)),
-                )
-            }
-            // Une colonne **mixte** est acceptée : elle porte des nombres,
-            // simplement pas à toutes les lignes. Ses cellules texte et vides
-            // valent `NaN` (`ColumnValues::number_at`), exactement comme une
-            // valeur manquante d'une colonne numérique — dégrader la ligne,
-            // pas toute la formule (invariant 10). Refuser la colonne
-            // entière, comme pour `Text`, reviendrait à dire qu'une colonne
-            // de mesures dont une ligne porte « n/a » n'est pas calculable.
+            // Une colonne **mixte** — y compris une colonne entièrement
+            // textuelle, il n'y a plus de type `Text` homogène à part — est
+            // acceptée : elle porte des nombres, simplement pas
+            // nécessairement à toutes les lignes. Ses cellules texte et
+            // vides valent `NaN` (`ColumnValues::number_at`), exactement
+            // comme une valeur manquante d'une colonne numérique — dégrader
+            // la ligne, pas toute la formule (invariant 10).
             Some(ColumnValues::Float(_)) | Some(ColumnValues::Mixed(_)) => {}
         }
     }
@@ -586,6 +575,7 @@ pub fn topological_order<K: Ord + Copy>(edges: &BTreeMap<K, BTreeSet<K>>) -> (Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::column::MixedCell;
     use std::sync::Arc;
 
     fn float_column(values: &[f64]) -> ColumnValues {
@@ -593,8 +583,14 @@ mod tests {
     }
 
     fn text_column(values: &[Option<&str>]) -> ColumnValues {
-        ColumnValues::Text(Arc::new(
-            values.iter().map(|v| v.map(str::to_string)).collect(),
+        ColumnValues::Mixed(Arc::new(
+            values
+                .iter()
+                .map(|v| match v {
+                    None => MixedCell::Empty,
+                    Some(text) => MixedCell::Text(text.to_string()),
+                })
+                .collect(),
         ))
     }
 
@@ -736,15 +732,24 @@ mod tests {
     }
 
     #[test]
-    fn non_numeric_column_degrades_to_nan() {
+    fn a_column_with_text_cells_degrades_only_the_affected_rows() {
+        // Il n'y a plus de type de colonne `Text` homogène à refuser d'un
+        // bloc : une colonne dont certaines cellules sont du texte est une
+        // colonne `Mixed`, acceptée par la formule — seules les lignes dont
+        // la cellule référencée ne vaut pas un nombre deviennent `NaN`, pas
+        // toute la formule (invariant 10).
         let formula = Formula::parse("A+B").expect("parse");
-        let columns = [float_column(&[1.0]), text_column(&[Some("x")])];
+        let columns = [
+            float_column(&[1.0, 2.0]),
+            text_column(&[Some("10"), Some("x")]),
+        ];
         let result = evaluate(&formula, 5, &columns, 2);
-        assert_eq!(
-            result.error,
-            Some(FormulaError::NonNumericColumn("B".to_string()))
+        assert_eq!(result.error, None);
+        assert!(
+            result.values[0].is_nan(),
+            "\"10\" en texte n'est jamais réanalysé en nombre"
         );
-        assert!(result.values.iter().all(|v| v.is_nan()));
+        assert!(result.values[1].is_nan());
     }
 
     #[test]

@@ -766,7 +766,7 @@ fn changement_de_type_et_restauration_d_une_colonne() {
     let (mut project, _, ids) = sheet_with(&[("A", &[1.0, 2.0])]);
     let column = ids[0];
     let (old_type, old_values) = project
-        .set_column_type(column, ColumnType::Text)
+        .set_column_type(column, ColumnType::Mixed)
         .expect("changement de type");
     assert_eq!(old_type, ColumnType::Numeric);
     assert_eq!(
@@ -777,7 +777,11 @@ fn changement_de_type_et_restauration_d_une_colonne() {
             .as_column()
             .expect("colonne")
             .get(0),
-        Cell::Text(Some("1".to_string()))
+        // `Numeric → Mixed` est sans perte (`Column::set_column_type`) :
+        // `1.0` devient `MixedCell::Number(1.0)`, lu à travers `Cell::Float`
+        // — pas reformaté en texte, contrairement à l'ancienne conversion
+        // vers `Text`.
+        Cell::Float(1.0)
     );
     project
         .restore_column(column, old_type, old_values)

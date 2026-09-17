@@ -273,26 +273,19 @@ fn b15_une_mesure_scientifique_tient_dans_une_cellule() {
 }
 
 /// C4 — plus une reproduction : un **choix d'architecture documenté**, pas
-/// un bug. `size_of::<Option<String>>()` vaut 24 octets sur une machine 64
-/// bits, contre 8 pour le `f64` qu'il remplace : un facteur 3,0 rien que
-/// pour la structure, avant le premier caractère de contenu — c'est le
-/// plancher mathématique de `Vec<Option<String>>` comme représentation
-/// d'une colonne texte, et aucun choix de format ne peut descendre en
-/// dessous. `Column::set_column_type` (Float→Text) utilise
-/// `format_f64_for_display` (notation scientifique quand elle est plus
-/// courte), qui atténue le coût mais ne peut pas effacer ce plancher ; pour
-/// des valeurs à haute précision comme ici (grandeurs physiques, une
-/// dizaine de chiffres significatifs), le contenu texte lui-même ajoute
-/// encore dessus — le facteur mesuré tourne autour de 5-6×, pas 3×, sur ce
-/// genre de données. Ce n'est toujours pas un problème : ×5-6 est un
-/// multiplicateur **constant**, pas une croissance non bornée — ce test
-/// vérifie justement que le facteur ne dérive pas avec la taille des
-/// données (voir `facteur_stable_avec_la_taille` ci-dessous). Descendre
-/// sous ce plancher demanderait de changer la représentation elle-même
-/// (une chaîne interned/packée plutôt qu'un `String` par cellule) — un
-/// chantier bien plus large que ce que C4 posait, non entrepris.
+/// un bug. Il n'y a plus de type `Text` homogène vers lequel convertir une
+/// colonne numérique (une telle conversion aurait reformaté chaque valeur en
+/// chaîne, via `format_f64_for_display` — coût variable avec le contenu).
+/// `Numeric → Mixed` est la conversion qui en tient lieu aujourd'hui, et elle
+/// est **sans perte** : chaque `f64` devient un `MixedCell::Number`, jamais
+/// une chaîne. `size_of::<MixedCell>()` vaut 24 octets sur une machine 64
+/// bits (même empreinte qu'un `Option<String>`, voir la doc de tête de
+/// `plotyx-core::column`), contre 8 pour le `f64` remplacé : le facteur est
+/// donc **exactement** 3,0, un nombre fixe indépendant du contenu ou de la
+/// taille de la colonne — contrairement à l'ancien `Numeric → Text`, il n'y a
+/// plus de contenu textuel dont la taille pourrait faire dériver ce facteur.
 #[test]
-fn b15_convertir_en_texte_multiplie_la_memoire_par_un_facteur_borne_et_stable() {
+fn b15_convertir_en_mixte_multiplie_la_memoire_par_un_facteur_fixe() {
     use plotyx_commands::{Command, History};
 
     fn facteur(lignes: usize) -> f64 {
@@ -315,7 +308,7 @@ fn b15_convertir_en_texte_multiplie_la_memoire_par_un_facteur_borne_et_stable() 
                 &mut project,
                 Command::SetColumnType {
                     column: colonne,
-                    column_type: ColumnType::Text,
+                    column_type: ColumnType::Mixed,
                 },
             )
             .expect("conversion acceptée");
@@ -327,38 +320,24 @@ fn b15_convertir_en_texte_multiplie_la_memoire_par_un_facteur_borne_et_stable() 
             .expect("colonne")
             .values()
         {
-            ColumnValues::Text(values) => values
-                .iter()
-                .map(|s| std::mem::size_of::<Option<String>>() + s.as_deref().map_or(0, str::len))
-                .sum(),
-            // Ce test mesure la seule conversion `Numeric -> Text` : les
-            // deux autres variantes n'arrivent jamais ici.
-            ColumnValues::Float(_) | ColumnValues::Mixed(_) => 0,
+            ColumnValues::Mixed(values) => {
+                values.len() * std::mem::size_of::<plotyx_core::MixedCell>()
+            }
+            // Ce test mesure la seule conversion `Numeric -> Mixed`.
+            ColumnValues::Float(_) => 0,
         };
         apres as f64 / avant as f64
     }
 
-    // Le plancher structurel ne bouge pas en dessous de 3,0 (voir la doc du
-    // test) ; on laisse une marge généreuse au-dessus pour le contenu
-    // réel sans pour autant tolérer une dérive qui indiquerait une
-    // régression (ex. `format_f64_for_display` qui cesserait de préférer
-    // la notation scientifique).
     let petit = facteur(5_000);
     let grand = facteur(50_000);
     println!("5 000 lignes : {petit:.2}× ; 50 000 lignes : {grand:.2}×");
     for (lignes, f) in [(5_000, petit), (50_000, grand)] {
         assert!(
-            (3.0..=8.0).contains(&f),
-            "{lignes} lignes : facteur {f:.2}×, hors de la plage attendue [3,0 ; 8,0] — \
-             en dessous de 3,0 serait suspect (le plancher structurel de \
-             `Option<String>` est infranchissable), au-dessus indiquerait une \
-             régression du choix de format"
+            (f - 3.0).abs() < 1e-9,
+            "{lignes} lignes : facteur {f:.2}×, attendu exactement 3,0 — `Numeric → \
+             Mixed` ne reformate rien, chaque cellule reste un `f64` porté par un \
+             `MixedCell::Number`"
         );
     }
-    assert!(
-        (petit - grand).abs() / petit <= 0.15,
-        "le facteur varie de {petit:.2}× à {grand:.2}× entre 5 000 et 50 000 lignes \
-         (plus de 15% d'écart) : il devrait rester stable, puisque c'est un coût par \
-         cellule, pas un effet qui s'aggrave avec la taille du projet"
-    );
 }

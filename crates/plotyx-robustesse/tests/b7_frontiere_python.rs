@@ -39,8 +39,8 @@ fn banc() -> &'static std::sync::Mutex<Banc> {
                     .unwrap(),
             );
         }
-        // Une colonne texte, pour les refus de type.
-        colonnes.push(p.add_column(sheet, None, Some("T"), Column::new(ColumnType::Text)).unwrap());
+        // Une colonne mixte (texte), pour les refus de type.
+        colonnes.push(p.add_column(sheet, None, Some("T"), Column::new(ColumnType::Mixed)).unwrap());
         let session = Session::spawn(p, None).unwrap();
         let handle = session.handle();
         let python = EmbeddedPython::locate().expect(

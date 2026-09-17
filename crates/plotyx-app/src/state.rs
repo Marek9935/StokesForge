@@ -383,14 +383,6 @@ fn value_block_from_tsv_column(
                 })
                 .collect(),
         ),
-        ColumnType::Text => ValueBlock::Text(
-            rows.iter()
-                .map(|row| {
-                    let text = row.get(col_index).copied().unwrap_or("");
-                    (!text.is_empty()).then(|| text.to_string())
-                })
-                .collect(),
-        ),
         // Colonne mixte : chaque cellule décide pour elle-même, par la même
         // règle que le cœur (`MixedCell::from_text`) — un jeton qui s'analyse
         // devient un nombre, les autres restent du texte, et un jeton vide
@@ -420,16 +412,20 @@ pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
         return String::new();
     };
     // Une colonne **mixte** se lit par `Column::cell`, pas par `Column::get` :
-    // seul ce chemin distingue une cellule vide (`Empty`, qui s'affiche comme
-    // une cellule numérique vide, `""`) d'une cellule texte sans valeur — que
-    // `get` confond toutes deux en `Cell::Text(None)`. Le choix A9 de
-    // `MISSING_TEXT_DISPLAY` vaut pour une colonne *texte*, où une cellule
-    // vide **présente** existe et doit rester indiscernable à l'œil ; une
-    // colonne mixte, elle, porte l'information dans son type de cellule.
+    // seul ce chemin distingue une cellule vide (`Empty`) d'une cellule texte
+    // sans valeur — que `get` confond toutes deux en `Cell::Text(None)`.
+    // `Empty` est la valeur manquante de `Mixed`, qu'elle prenne la place
+    // d'un `NaN` ou d'un `None` : il n'y a plus de type `Text` homogène pour
+    // qui trancherait entre « manquant numérique » (`""`) et « manquant
+    // texte » (`MISSING_TEXT_DISPLAY`). A9 tranche pour l'espace insécable —
+    // le même traitement que `Cell::Text(None)` ci-dessous — parce que la
+    // distinction qui compte à l'écran est entre « valeur manquante » et
+    // « chaîne vide présente » ([`MixedCell::Text(String::new())`]), pas
+    // entre les origines possibles d'une cellule manquante.
     if column.column_type() == ColumnType::Mixed {
         return match column.cell(row) {
-            MixedCell::Empty => String::new(),
-            MixedCell::Number(value) if value.is_nan() => String::new(),
+            MixedCell::Empty => MISSING_TEXT_DISPLAY.to_string(),
+            MixedCell::Number(value) if value.is_nan() => MISSING_TEXT_DISPLAY.to_string(),
             MixedCell::Number(value) => format_f64_for_display(value),
             MixedCell::Text(text) => text,
         };
@@ -2138,8 +2134,8 @@ impl AppState {
         // révision, version de colonne et entrée d'historique pour rien), et
         // une chaîne vide présente (`Text(Some(""))`, affichée « » comme
         // `Text(None)`) était réécrite en valeur absente à la moindre
-        // traversée (A9) — la branche `ColumnType::Text` ci-dessous ne
-        // distingue jamais les deux en entrée. Comparer au texte affiché
+        // traversée (A9) — une cellule de saisie ne distingue jamais les
+        // deux en entrée. Comparer au texte affiché
         // évite les deux sans introduire de convention nouvelle : le cas où
         // l'utilisateur retape à l'identique n'a jamais besoin d'écrire.
         if text == self.cell_text(column, row) {
@@ -2172,20 +2168,13 @@ impl AppState {
                 } else {
                     match trimmed.parse::<f64>() {
                         Ok(value) => (ValueBlock::Float(vec![value]), false),
-                        // Le bloc est texte : `SetCellsPromoting` en fera
-                        // une cellule texte dans une colonne devenue mixte.
-                        Err(_) => (ValueBlock::Text(vec![Some(trimmed.to_string())]), true),
+                        // Le bloc est texte : `SetCellsPromoting` élargira
+                        // la colonne en `Mixed` pour l'accueillir.
+                        Err(_) => (
+                            ValueBlock::Mixed(vec![MixedCell::Text(trimmed.to_string())]),
+                            true,
+                        ),
                     }
-                }
-            }
-            // En texte, `""` est la valeur manquante ; le modèle distingue
-            // `None` de `Some("")`, mais rien dans une cellule de saisie ne
-            // permet de taper l'un plutôt que l'autre. Le banc choisit `None`.
-            ColumnType::Text => {
-                if text.is_empty() {
-                    (ValueBlock::Text(vec![None]), false)
-                } else {
-                    (ValueBlock::Text(vec![Some(text)]), false)
                 }
             }
             // La colonne est déjà mixte : chaque cellule décide pour
@@ -2212,41 +2201,34 @@ impl AppState {
                 expected_version: None,
             }
         });
-        // Une colonne texte dont toutes les valeurs présentes s'analysent
-        // comme des nombres se convertit seule en numérique — pendant du
+        // Une colonne mixte dont toutes les valeurs présentes se sont
+        // révélées numériques se convertit seule en numérique — pendant du
         // sens inverse déjà géré ci-dessus (`SetCellsPromoting` : une
-        // colonne numérique qui reçoit du texte s'élargit en `Mixed`).
-        // `MixedCell::from_text` porte la même analyse que `Column::
-        // set_column_type` (`Text → Numeric`, `parse_f64_text`) : ne pas la
-        // dupliquer ici évite qu'elle ne diverge de ce que la conversion
-        // manuelle ferait. Aucun effet si la colonne n'a aucune valeur
-        // présente (colonne encore vide) ou si `kind` n'était pas `Text`.
-        if kind == ColumnType::Text {
-            self.auto_promote_text_column_if_all_numeric(column);
+        // colonne numérique qui reçoit du texte s'élargit en `Mixed`). Il
+        // n'y a plus de type `Text` homogène à promouvoir : c'est désormais
+        // une colonne mixte, saisie cellule après cellule, qui peut se
+        // retrouver entièrement numérique sans qu'aucune de ses cellules
+        // n'ait jamais été explicitement « nombre » — typiquement après
+        // correction d'un « n/a » resté seul non-numérique.
+        if kind == ColumnType::Mixed {
+            self.auto_promote_mixed_column_if_all_numeric(column);
         }
         true
     }
 
-    /// Convertit `column` (supposée `Text`) en `Numeric` si toutes ses
-    /// valeurs présentes s'analysent comme des nombres finis — voir l'appel
-    /// dans [`AppState::commit_cell`].
-    fn auto_promote_text_column_if_all_numeric(&mut self, column: NodeId) {
+    /// Convertit `column` (supposée `Mixed`) en `Numeric` si toutes ses
+    /// cellules présentes sont des nombres — voir l'appel dans
+    /// [`AppState::commit_cell`].
+    fn auto_promote_mixed_column_if_all_numeric(&mut self, column: NodeId) {
         let Some(col) = self.snapshot.tree.node(column).and_then(Node::as_column) else {
             return;
         };
         let mut any_present = false;
         for row in 0..col.len() {
-            let Cell::Text(text) = col.get(row) else {
-                return;
-            };
-            match text {
-                None => {}
-                Some(text) => {
-                    any_present = true;
-                    if !matches!(MixedCell::from_text(Some(text)), MixedCell::Number(_)) {
-                        return;
-                    }
-                }
+            match col.cell(row) {
+                MixedCell::Empty => {}
+                MixedCell::Number(_) => any_present = true,
+                MixedCell::Text(_) => return,
             }
         }
         if any_present {

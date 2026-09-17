@@ -203,7 +203,7 @@ impl Monde {
             Pas::ChangerDeType { colonne, type_ } => {
                 choisir(*colonne).map(|c| Command::SetColumnType {
                     column: c,
-                    column_type: [ColumnType::Numeric, ColumnType::Text, ColumnType::DateTime]
+                    column_type: [ColumnType::Numeric, ColumnType::Mixed, ColumnType::DateTime]
                         [*type_],
                 })
             }
@@ -243,10 +243,6 @@ fn empreintes(project: &Project) -> HashMap<NodeId, (u64, Vec<u64>)> {
             let colonne = node.as_column()?;
             let bits: Vec<u64> = match colonne.values() {
                 ColumnValues::Float(v) => v.iter().map(|x| x.to_bits()).collect(),
-                ColumnValues::Text(v) => v
-                    .iter()
-                    .map(|s| s.as_ref().map_or(0, |t| t.len() as u64 + 1))
-                    .collect(),
                 // Une empreinte, pas une sérialisation : l'étiquette de la
                 // cellule suffit à distinguer les trois variantes, et le
                 // motif binaire du nombre est ce qui compte pour `NaN`.

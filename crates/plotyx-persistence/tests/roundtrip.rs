@@ -78,11 +78,11 @@ fn fixture_project() -> Project {
             .expect("colonne ajoutée");
 
         let text = Column::from_block(
-            ColumnType::Text,
-            ValueBlock::Text(vec![
-                Some(String::new()),
-                None,
-                Some("é ü 日本".to_string()),
+            ColumnType::Mixed,
+            ValueBlock::Mixed(vec![
+                MixedCell::Text(String::new()),
+                MixedCell::Empty,
+                MixedCell::Text("é ü 日本".to_string()),
             ]),
             ColumnMeta::default(),
         )
@@ -285,8 +285,12 @@ fn empty_string_and_missing_text_survive_the_round_trip() {
         .add_worksheet(book, Some("Sheet1"))
         .expect("feuille créée");
     let column = Column::from_block(
-        ColumnType::Text,
-        ValueBlock::Text(vec![Some(String::new()), None, Some("x".to_string())]),
+        ColumnType::Mixed,
+        ValueBlock::Mixed(vec![
+            MixedCell::Text(String::new()),
+            MixedCell::Empty,
+            MixedCell::Text("x".to_string()),
+        ]),
         ColumnMeta::default(),
     )
     .expect("colonne texte valide");

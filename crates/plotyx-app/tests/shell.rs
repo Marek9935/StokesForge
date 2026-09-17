@@ -246,7 +246,7 @@ fn a_books_grid_defaults_to_its_first_sheet_and_describes_it() {
         vec![
             ("Temps", ColumnType::Numeric),
             ("Signal", ColumnType::Numeric),
-            ("Note", ColumnType::Text),
+            ("Note", ColumnType::Mixed),
         ]
     );
 
@@ -2134,7 +2134,7 @@ fn set_column_type_action_converts_and_can_lose_non_numeric_text() {
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
-    assert_eq!(column_type(&state, note), ColumnType::Text);
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
 
     state.dispatch(Action::SetColumnType {
         column: note,
@@ -2159,7 +2159,7 @@ fn a_text_column_left_with_only_numeric_values_auto_promotes_to_numeric() {
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
-    assert_eq!(column_type(&state, note), ColumnType::Text);
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
 
     // `Note` = [Some("a"), None, Some("")] : remplacer « a » par un nombre
     // laisse la ligne 2 (`Some("")`, présente mais non numérique) en
@@ -2173,7 +2173,7 @@ fn a_text_column_left_with_only_numeric_values_auto_promotes_to_numeric() {
     });
     assert_eq!(
         column_type(&state, note),
-        ColumnType::Text,
+        ColumnType::Mixed,
         "la ligne 2 (chaîne vide présente) n'est pas un nombre : pas de conversion"
     );
 

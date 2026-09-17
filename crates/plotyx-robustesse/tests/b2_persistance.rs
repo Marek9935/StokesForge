@@ -146,17 +146,18 @@ fn b2_aller_retour_preserve_tout() {
         .set_values(a, 0, ValueBlock::Float(vec![nan_signalant]))
         .unwrap();
 
-    // Colonne texte avec vide / None / unicode / caractère nul.
-    let mut textes = Column::new(ColumnType::Text);
+    // Colonne texte (mixte, entièrement textuelle) avec vide / None / unicode
+    // / caractère nul.
+    let mut textes = Column::new(ColumnType::Mixed);
     textes
         .set_values(
             0,
-            ValueBlock::Text(vec![
-                Some(String::new()),
-                None,
-                Some("é\u{0}à".into()),
-                Some("🦀".into()),
-                Some("  espaces  ".into()),
+            ValueBlock::Mixed(vec![
+                MixedCell::Text(String::new()),
+                MixedCell::Empty,
+                MixedCell::Text("é\u{0}à".into()),
+                MixedCell::Text("🦀".into()),
+                MixedCell::Text("  espaces  ".into()),
             ]),
         )
         .unwrap();

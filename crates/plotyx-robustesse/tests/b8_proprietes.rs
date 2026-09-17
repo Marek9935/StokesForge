@@ -151,7 +151,7 @@ proptest! {
         cible in 0usize..3,
     ) {
         use plotyx_commands::{Command, History};
-        let types = [ColumnType::Numeric, ColumnType::DateTime, ColumnType::Text];
+        let types = [ColumnType::Numeric, ColumnType::DateTime, ColumnType::Mixed];
         let mut p = Project::new("P").unwrap();
         let root = p.root();
         p.add_workbook(root, Some("Book1")).unwrap();

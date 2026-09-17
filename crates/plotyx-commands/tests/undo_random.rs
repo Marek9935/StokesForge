@@ -245,18 +245,6 @@ impl World {
             } => {
                 let target = *columns.get(column % columns.len().max(1))?;
                 let block = match self.column_type(target)? {
-                    ColumnType::Text => ValueBlock::Text(
-                        values
-                            .iter()
-                            .map(|v| {
-                                if v.is_nan() {
-                                    None
-                                } else {
-                                    Some(v.to_string())
-                                }
-                            })
-                            .collect(),
-                    ),
                     ColumnType::Numeric | ColumnType::DateTime => ValueBlock::Float(values.clone()),
                     ColumnType::Mixed => {
                         ValueBlock::Mixed(values.iter().copied().map(MixedCell::from_f64).collect())
@@ -275,17 +263,18 @@ impl World {
                 values,
             } => {
                 let target = *columns.get(column % columns.len().max(1))?;
-                // Un bloc texte, quel que soit le type de la colonne : c'est
-                // précisément ce que `SetCells` refuserait et que cette
-                // commande accepte en élargissant la colonne.
-                let block = ValueBlock::Text(
+                // Un bloc mixte à cellules texte, quel que soit le type de
+                // la colonne : c'est précisément ce que `SetCells`
+                // refuserait et que cette commande accepte en élargissant la
+                // colonne.
+                let block = ValueBlock::Mixed(
                     values
                         .iter()
                         .map(|v| {
                             if v.is_nan() {
-                                None
+                                MixedCell::Empty
                             } else {
-                                Some(format!("v{v}"))
+                                MixedCell::Text(format!("v{v}"))
                             }
                         })
                         .collect(),
@@ -338,10 +327,9 @@ impl World {
             }
             Step::SetType { column, kind } => {
                 let target = *columns.get(column % columns.len().max(1))?;
-                let column_type = match kind % 4 {
+                let column_type = match kind % 3 {
                     0 => ColumnType::Numeric,
                     1 => ColumnType::DateTime,
-                    2 => ColumnType::Text,
                     _ => ColumnType::Mixed,
                 };
                 Some(Command::SetColumnType {

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError, History, DEFAULT_BYTE_LIMIT, DEFAULT_LIMIT};
 use plotyx_core::{
-    Cell, Column, ColumnMeta, ColumnRole, ColumnType, CoreError, Node, NodeId, NodeKind, Project,
-    Tree, ValueBlock, WindowMeta,
+    Cell, Column, ColumnMeta, ColumnRole, ColumnType, CoreError, MixedCell, Node, NodeId, NodeKind,
+    Project, Tree, ValueBlock, WindowMeta,
 };
 use plotyx_plot::PlotSpec;
 
@@ -298,7 +298,7 @@ fn set_cells_beyond_the_end_restores_the_previous_length() {
 }
 
 #[test]
-fn set_cells_on_a_text_column() {
+fn set_cells_on_a_mixed_column() {
     let mut f = fixture();
     let mut history = History::new();
     let before = snapshot(&f.project);
@@ -309,7 +309,7 @@ fn set_cells_on_a_text_column() {
             Command::SetCells {
                 column: f.t,
                 start: 1,
-                values: ValueBlock::Text(vec![Some("b".to_string())]),
+                values: ValueBlock::Mixed(vec![MixedCell::Text("b".to_string())]),
                 expected_version: None,
             },
         )
@@ -342,11 +342,11 @@ fn set_cells_with_the_wrong_block_variant_is_refused() {
             Command::SetCells {
                 column: f.a,
                 start: 0,
-                values: ValueBlock::Text(vec![Some("x".to_string())]),
+                values: ValueBlock::Mixed(vec![MixedCell::Text("x".to_string())]),
                 expected_version: None,
             },
         )
-        .expect_err("bloc texte sur colonne numérique");
+        .expect_err("bloc mixte sur colonne numérique");
     assert!(matches!(
         err,
         CommandError::Core(CoreError::TypeMismatch(_))
@@ -608,7 +608,11 @@ fn a_circular_move_is_refused() {
 // -- 10. SetColumnType ----------------------------------------------------
 
 #[test]
-fn set_column_type_text_to_numeric_round_trip() {
+fn set_column_type_mixed_to_numeric_round_trip() {
+    // Ancien `set_column_type_text_to_numeric_round_trip` : `f.t` est
+    // construite par `Column::from_text`, qui produit désormais directement
+    // une colonne `Mixed` (il n'y a plus de type `Text` homogène) — même
+    // couverture, sur `Mixed → Numeric`.
     let mut f = fixture();
     let mut history = History::new();
     let before = snapshot(&f.project);
@@ -634,7 +638,7 @@ fn set_column_type_text_to_numeric_round_trip() {
     // La conversion est destructrice : seule la copie retenue permet de
     // retrouver le texte d'origine **exactement**.
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    assert_eq!(column_type(&f.project, f.t), ColumnType::Text);
+    assert_eq!(column_type(&f.project, f.t), ColumnType::Mixed);
     assert_eq!(
         texts(&f.project, f.t),
         vec![Some("a".to_string()), None, Some("c".to_string())]
@@ -646,37 +650,12 @@ fn set_column_type_text_to_numeric_round_trip() {
     assert_eq!(**f.project.tree(), *after);
 }
 
-#[test]
-fn set_column_type_numeric_to_text_round_trip() {
-    let mut f = fixture();
-    let mut history = History::new();
-    let before = snapshot(&f.project);
-
-    history
-        .execute(
-            &mut f.project,
-            Command::SetColumnType {
-                column: f.a,
-                column_type: ColumnType::Text,
-            },
-        )
-        .expect("conversion de A");
-    let after = snapshot(&f.project);
-    assert_eq!(
-        texts(&f.project, f.a),
-        vec![
-            Some("1".to_string()),
-            Some("2".to_string()),
-            Some("3".to_string())
-        ]
-    );
-
-    assert_eq!(history.undo(&mut f.project), Ok(true));
-    assert_eq!(floats(&f.project, f.a), vec![1.0, 2.0, 3.0]);
-    assert_eq!(**f.project.tree(), *before);
-    assert_eq!(history.redo(&mut f.project), Ok(true));
-    assert_eq!(**f.project.tree(), *after);
-}
+// `set_column_type_numeric_to_text_round_trip` a été retiré : il ciblait
+// `ColumnType::Text`, qui n'existe plus. `Numeric → Mixed` n'est pas son
+// équivalent — la conversion est sans perte (`MixedCell::Number`, pas une
+// reformulation en texte) — donc l'invariant qu'il vérifiait (le nombre
+// s'écrit sous sa forme d'affichage) n'a plus de prise ; il n'y a rien à
+// retargeter.
 
 // -- 11. InsertRows -------------------------------------------------------
 
