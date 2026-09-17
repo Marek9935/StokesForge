@@ -1636,6 +1636,52 @@ impl AppState {
         Some(result)
     }
 
+    /// Aperçu du découpage en lignes (en-tête/sous-en-tête/données/pied de
+    /// page) du **premier** fichier choisi, avec les réglages courants —
+    /// voir [`plotyx_import::preview::preview`] pour le budget de coût.
+    /// Recalculé à chaque appel, comme [`AppState::import_preview`] : ce
+    /// budget est précisément ce qui rend ce recalcul par image acceptable,
+    /// y compris sur un gros fichier (le travail cellule à cellule reste
+    /// borné à `recipe.preview_lines`, jamais à la taille du fichier). `None`
+    /// dans les mêmes conditions qu'`import_preview`.
+    pub fn import_line_preview(&self) -> Option<Result<plotyx_import::FilePreview, String>> {
+        let state = self.import_state.as_ref()?;
+        let path = state.paths.first()?;
+        let result = std::fs::read(path)
+            .map_err(|err| format!("{}: {err}", path.display()))
+            .and_then(|bytes| {
+                plotyx_import::preview(&bytes, &state.recipe).map_err(|err| err.to_string())
+            });
+        Some(result)
+    }
+
+    /// Réévalue `header_layout` (nombre de lignes d'en-tête principal et de
+    /// sous-en-tête) depuis le contenu du **premier** fichier choisi —
+    /// équivalent du bouton de réévaluation automatique d'OriginLab
+    /// ([`plotyx_import::preview::detect_header_layout`]) : une action
+    /// explicite, pas un recalcul à chaque image, pour ne jamais écraser une
+    /// valeur que l'utilisateur vient de saisir à la main. Sans effet si la
+    /// fenêtre n'est pas ouverte ou si aucun fichier n'a encore été choisi.
+    pub fn auto_detect_import_header(&mut self) {
+        let Some(import) = &self.import_state else {
+            return;
+        };
+        let Some(path) = import.paths.first().cloned() else {
+            self.fail("Choisis un fichier avant de détecter l'en-tête".to_string());
+            return;
+        };
+        let (separator, decimal) = (import.recipe.separator, import.recipe.decimal);
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                let layout = plotyx_import::detect_header_layout(&bytes, separator, decimal);
+                if let Some(import) = &mut self.import_state {
+                    import.recipe.header_layout = layout;
+                }
+            }
+            Err(err) => self.fail(format!("{}: {err}", path.display())),
+        }
+    }
+
     // -- détail interne ----------------------------------------------------
 
     /// Purge les sélections de feuille et les tampons de saisie devenus
@@ -2163,14 +2209,46 @@ impl AppState {
                 name: file_stem.to_string(),
             });
             for (index, parsed_column) in table.columns.iter().enumerate() {
-                let mut column = Column::from_f64(&parsed_column.values);
-                let long_name = match (index, &parsed_column.name) {
-                    (_, Some(name)) => name.clone(),
-                    (0, None) => "X".to_string(),
-                    (_, None) => plotyx_import::resolve_series_name(&recipe, &table, file_stem),
+                // Une colonne dont au moins une cellule porte un texte
+                // conservé (`n/a`, un code d'instrument…) devient une
+                // colonne à types mixtes plutôt qu'une colonne numérique qui
+                // aurait tout aplati en `NaN` — c'est le cas d'usage
+                // motivant du chantier « colonnes à types mixtes »,
+                // qu'`import` ne servait pas encore avant ce chantier-ci
+                // (voir docs/chantier-colonnes-mixtes.md, section « ce qui
+                // reste »). Une colonne entièrement numérique garde le
+                // chemin `Numeric` d'avant, à l'identique : minimiser la
+                // casse, même politique que le chantier précédent.
+                let mut column = if parsed_column.texts.iter().any(Option::is_some) {
+                    let cells: Vec<MixedCell> = parsed_column
+                        .values
+                        .iter()
+                        .zip(&parsed_column.texts)
+                        .map(|(value, text)| match text {
+                            Some(text) => MixedCell::Text(text.clone()),
+                            None => MixedCell::from_f64(*value),
+                        })
+                        .collect();
+                    Column::from_mixed(&cells)
+                } else {
+                    Column::from_f64(&parsed_column.values)
                 };
+                // Le nom long privilégie le rôle de sous-en-tête
+                // `long_name`, quand la recette en assigne un — sinon la
+                // même chaîne de repli qu'avant ce chantier (ligne d'en-tête
+                // de colonnes, puis nom de fichier/clé d'en-tête pour la
+                // première colonne).
+                let long_name = parsed_column.long_name.clone().unwrap_or_else(|| {
+                    match (index, &parsed_column.name) {
+                        (_, Some(name)) => name.clone(),
+                        (0, None) => "X".to_string(),
+                        (_, None) => plotyx_import::resolve_series_name(&recipe, &table, file_stem),
+                    }
+                });
                 column.set_meta(ColumnMeta {
                     long_name,
+                    unit: parsed_column.unit.clone().unwrap_or_default(),
+                    comment: parsed_column.comment.clone().unwrap_or_default(),
                     ..Default::default()
                 });
                 self.execute(Command::AddColumn {

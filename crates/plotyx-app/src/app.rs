@@ -1900,6 +1900,115 @@ fn decimal_label(decimal: DecimalStyle) -> &'static str {
     }
 }
 
+/// Une ligne « from … to … » d'assignation d'un rôle de sous-en-tête (voir
+/// [`import_window`]) : une case pour activer/désactiver le rôle (`None` vs
+/// `Some`), deux compteurs pour la plage. `id_source` distingue les trois
+/// rôles (`long_name`/`unit`/`comment`) qui, sans lui, partageraient le même
+/// id auto-généré (même position relative dans leurs branches `if`
+/// respectives) et se marcheraient dessus.
+fn subheader_role_row(
+    ui: &mut egui::Ui,
+    id_source: &str,
+    label: &str,
+    range: &mut Option<plotyx_import::SubheaderLineRange>,
+) {
+    ui.push_id(id_source, |ui| {
+        ui.horizontal(|ui| {
+            let mut enabled = range.is_some();
+            if ui.checkbox(&mut enabled, label).changed() {
+                *range = if enabled {
+                    Some(plotyx_import::SubheaderLineRange::single(1))
+                } else {
+                    None
+                };
+            }
+            if let Some(r) = range {
+                ui.label("de");
+                let mut from = r.from as i64;
+                if ui
+                    .add(egui::DragValue::new(&mut from).range(1..=i64::MAX))
+                    .changed()
+                {
+                    r.from = from.max(1) as usize;
+                }
+                ui.label("à");
+                let mut to = r.to as i64;
+                if ui
+                    .add(egui::DragValue::new(&mut to).range(1..=i64::MAX))
+                    .changed()
+                {
+                    r.to = to.max(1) as usize;
+                }
+            }
+        });
+    });
+}
+
+/// Couleur associée à un [`plotyx_import::LineRole`] dans l'aperçu — bleu
+/// pour un rôle d'en-tête reconnu, magenta pour un commentaire, orange pour
+/// le pied de page, couleur de texte par défaut pour une donnée : même
+/// esprit de code couleur que l'assistant d'import ASCII d'OriginLab
+/// (§ légende de l'aperçu), sans reprendre ses teintes exactes.
+fn line_role_color(ui: &egui::Ui, role: plotyx_import::LineRole) -> egui::Color32 {
+    use plotyx_import::LineRole;
+    match role {
+        LineRole::MainHeader
+        | LineRole::Subheader
+        | LineRole::SubheaderLongName
+        | LineRole::SubheaderUnit
+        | LineRole::ColumnHeaderRow => egui::Color32::from_rgb(80, 140, 220),
+        LineRole::SubheaderComment => egui::Color32::from_rgb(200, 80, 200),
+        LineRole::Footer => ui.visuals().warn_fg_color,
+        LineRole::Data | LineRole::Blank => ui.visuals().text_color(),
+    }
+}
+
+/// L'aperçu en direct du découpage d'un fichier, une ligne par ligne — voir
+/// [`import_window`] pour où il s'insère et `plotyx_import::preview` pour ce
+/// qui borne son coût. Cellule par cellule seulement pour les lignes de
+/// données (dans la fenêtre `preview_lines`) : une cellule qui deviendrait un
+/// texte conservé dans une colonne mixte plutôt qu'un `NaN` muet est
+/// annotée, pour que ce typage par cellule (chantier « colonnes à types
+/// mixtes ») se voie ici plutôt que de surprendre après coup.
+fn import_line_preview_widget(ui: &mut egui::Ui, preview: &plotyx_import::FilePreview) {
+    let shown = preview
+        .lines
+        .iter()
+        .filter(|l| l.role == plotyx_import::LineRole::Data)
+        .count();
+    if preview.total_data_lines > shown {
+        ui.weak(format!(
+            "{shown} ligne(s) de données montrée(s) sur {} au total.",
+            preview.total_data_lines
+        ));
+    }
+    egui::ScrollArea::vertical()
+        .max_height(320.0)
+        .show(ui, |ui| {
+            for line in &preview.lines {
+                ui.horizontal(|ui| {
+                    let color = line_role_color(ui, line.role);
+                    ui.colored_label(color, format!("{:>5} {:<2}", line.number, line.role.code()));
+                    match &line.cells {
+                        Some(cells) => {
+                            for cell in cells {
+                                let cell_color = if cell.is_text {
+                                    ui.visuals().warn_fg_color
+                                } else {
+                                    ui.visuals().text_color()
+                                };
+                                ui.colored_label(cell_color, &cell.text);
+                            }
+                        }
+                        None => {
+                            ui.colored_label(color, &line.text);
+                        }
+                    }
+                });
+            }
+        });
+}
+
 /// La fenêtre d'import (« Importer… », voir [`book_contents`]) : dialogue
 /// transitoire (`egui::Window`, pas un onglet dockable), peinte depuis
 /// [`PlotyxApp::ui`] tant que [`AppState::import_state`] est `Some`. Ferme sur
@@ -1917,6 +2026,7 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
     // ce que le compilateur refuse tant qu'`import` est encore emprunté.
     let mut want_save = false;
     let mut want_cancel = false;
+    let mut want_auto_detect = false;
     let mut pending_import: Option<(NodeId, plotyx_import::ImportRecipe, Vec<std::path::PathBuf>)> =
         None;
     egui::Window::new("Importer des fichiers")
@@ -2048,6 +2158,86 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
                 HeaderSkip::None => {}
             }
 
+            ui.separator();
+            // -- En-tête structuré (principal/sous-en-tête) + rôles -------
+            // façon assistant d'import ASCII d'OriginLab — voir la doc de
+            // tête de `plotyx_import::preview` et
+            // `docs/chantier-import-previsualisation.md`. N'entre en jeu que
+            // si l'utilisateur y touche (`main_header_lines`/
+            // `subheader_lines` > 0) : réglé à zéro, l'« En-tête » classique
+            // ci-dessus continue de tout piloter, sans régression pour une
+            // recette qui ne s'en sert pas.
+            ui.label("Découpage structuré (optionnel, façon assistant OriginLab) :");
+            ui.horizontal(|ui| {
+                ui.checkbox(
+                    &mut import.recipe.header_layout.auto_detect,
+                    "Détection automatique",
+                );
+                if ui
+                    .add_enabled(
+                        !import.paths.is_empty(),
+                        egui::Button::new("Réévaluer maintenant"),
+                    )
+                    .clicked()
+                {
+                    want_auto_detect = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Lignes d'en-tête principal :");
+                let mut value = import.recipe.header_layout.main_header_lines as i64;
+                if ui
+                    .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+                    .changed()
+                {
+                    import.recipe.header_layout.main_header_lines = value.max(0) as usize;
+                }
+                ui.label("Lignes de sous-en-tête :");
+                let mut value = import.recipe.header_layout.subheader_lines as i64;
+                if ui
+                    .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+                    .changed()
+                {
+                    import.recipe.header_layout.subheader_lines = value.max(0) as usize;
+                }
+            });
+            if import.recipe.header_layout.subheader_lines > 0 {
+                ui.checkbox(
+                    &mut import.recipe.subheader_roles.same_line_name_unit,
+                    "Extraire noms longs et unités de la même ligne",
+                );
+                subheader_role_row(
+                    ui,
+                    "plotyx_import_role_long_name",
+                    "Noms longs, lignes de sous-en-tête :",
+                    &mut import.recipe.subheader_roles.long_name,
+                );
+                if !import.recipe.subheader_roles.same_line_name_unit {
+                    subheader_role_row(
+                        ui,
+                        "plotyx_import_role_unit",
+                        "Unités, lignes de sous-en-tête :",
+                        &mut import.recipe.subheader_roles.unit,
+                    );
+                }
+                subheader_role_row(
+                    ui,
+                    "plotyx_import_role_comment",
+                    "Commentaires, lignes de sous-en-tête :",
+                    &mut import.recipe.subheader_roles.comment,
+                );
+            }
+            ui.horizontal(|ui| {
+                ui.label("Caractères à retirer en tête de chaque ligne de données :");
+                let mut value = import.recipe.skip_chars as i64;
+                if ui
+                    .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+                    .changed()
+                {
+                    import.recipe.skip_chars = value.max(0) as usize;
+                }
+            });
+
             ui.horizontal(|ui| {
                 ui.label("Pied de page (lignes à ignorer) :");
                 let mut value = import.recipe.footer_skip_lines as i64;
@@ -2126,48 +2316,42 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
             // encore actif ici.
 
             ui.separator();
-            ui.label("Aperçu (premier fichier choisi) :");
-            match state.import_preview() {
+            // -- Aperçu en direct du découpage (premier fichier choisi) ---
+            // Le point qui compte de ce chantier : chaque changement de
+            // réglage ci-dessus retexte cet aperçu immédiatement, sans étape
+            // de validation — voir la doc de tête de
+            // `plotyx_import::preview` pour ce qui garde ça praticable sur
+            // un gros fichier. Remplace l'ancien tableau de valeurs
+            // numériques (dix premières lignes, aucune indication de
+            // découpage) qui ne montrait jamais l'en-tête.
+            ui.horizontal(|ui| {
+                ui.label("Lignes d'aperçu :");
+                let mut value = import.recipe.preview_lines as i64;
+                if ui
+                    .add(egui::DragValue::new(&mut value).range(1..=10_000))
+                    .changed()
+                {
+                    import.recipe.preview_lines = value.max(1) as usize;
+                }
+            });
+            ui.weak(
+                "Codes : MH = en-tête principal, SH = sous-en-tête, \
+                 L = nom long, U = unité, C = commentaire, S = noms courts, \
+                 F = pied de page.",
+            );
+            // Fin du bloc emprûntant `import` : nécessaire pour que
+            // `state.import_line_preview()` ci-dessous (qui reprend
+            // `&AppState`) et le second bloc plus bas ne se heurtent pas à
+            // l'emprunt encore actif ici.
+            match state.import_line_preview() {
                 None => {
                     ui.weak("Choisis un fichier pour voir un aperçu.");
                 }
                 Some(Err(message)) => {
                     ui.colored_label(egui::Color32::RED, message);
                 }
-                Some(Ok(table)) => {
-                    if !table.warnings.is_empty() {
-                        for warning in &table.warnings {
-                            ui.colored_label(ui.visuals().warn_fg_color, warning);
-                        }
-                    }
-                    egui::ScrollArea::horizontal().show(ui, |ui| {
-                        egui::Grid::new("plotyx_import_preview_grid")
-                            .striped(true)
-                            .show(ui, |ui| {
-                                for column in &table.columns {
-                                    ui.label(column.name.as_deref().unwrap_or("(sans nom)"));
-                                }
-                                ui.end_row();
-                                let preview_rows = table.row_count().min(10);
-                                for row in 0..preview_rows {
-                                    for column in &table.columns {
-                                        let text = column
-                                            .values
-                                            .get(row)
-                                            .map(|v| {
-                                                if v.is_nan() {
-                                                    String::new()
-                                                } else {
-                                                    format!("{v}")
-                                                }
-                                            })
-                                            .unwrap_or_default();
-                                        ui.label(text);
-                                    }
-                                    ui.end_row();
-                                }
-                            });
-                    });
+                Some(Ok(file_preview)) => {
+                    import_line_preview_widget(ui, &file_preview);
                 }
             }
 
@@ -2199,6 +2383,9 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
     if want_save {
         state.save_import_recipe();
     }
+    if want_auto_detect {
+        state.auto_detect_import_header();
+    }
     if let Some((book, recipe, paths)) = pending_import {
         actions.push(Action::ImportFiles {
             book,
@@ -2220,8 +2407,11 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
 /// voir [`column_header_widget`]), sélection de cellules/colonnes à la
 /// souris (voir [`cell_widget`]), et raccourcis Ctrl+C/X/V/Suppr/Retour
 /// arrière scopés à cette grille : ils ne sont consommés que si aucune
-/// cellule ni aucun champ d'en-tête n'est en édition, pour ne jamais voler
-/// le copier/coller natif d'un `TextEdit` en cours de saisie.
+/// cellule ni aucun champ d'en-tête n'est en édition, **ni la fenêtre
+/// d'import ouverte**, pour ne jamais voler le copier/coller natif d'un
+/// `TextEdit` en cours de saisie — la fenêtre d'import est un `egui::Window`
+/// flottant peint par-dessus cette grille, toujours présente dessous tant
+/// qu'il est ouvert (voir la garde plus bas, dans le corps de la fonction).
 fn grid_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -2280,7 +2470,25 @@ fn grid_contents(
 
     // Raccourcis clavier de la grille — voir la doc de tête de cette
     // fonction pour la garde d'édition.
-    if state.editing().is_none() && state.header_editing().is_none() {
+    //
+    // `state.import_state().is_none()` est la troisième condition de cette
+    // garde, ajoutée avec la refonte de la fenêtre d'import : `consume_key`
+    // ci-dessous agit sur l'`InputState` du `Context` entier, pas sur celui
+    // d'une `Ui` — donc pas seulement sur cette grille. Tant que la fenêtre
+    // d'import (un `egui::Window` flottant, peint *après* le dock — voir
+    // `PlotyxApp::update`) est ouverte, cette grille continue d'être peinte
+    // dessous à chaque image ; sans cette condition, Retour arrière/Suppr
+    // tapés dans un champ texte de la fenêtre d'import étaient retirés d'ici
+    // avant même que ce champ ait pu les voir : plus aucune suppression de
+    // caractère possible sans passer par une sélection (qui, elle, remplace
+    // le texte sélectionné via l'insertion d'`Event::Text`, jamais
+    // consommée ici) — c'était le bug connu du champ de texte du module
+    // d'import, corrigé ici plutôt que dans la fenêtre elle-même parce que
+    // c'est ici qu'il naissait.
+    if state.editing().is_none()
+        && state.header_editing().is_none()
+        && state.import_state().is_none()
+    {
         // Taper sur une cellule ou un champ d'en-tête sélectionné (simple
         // clic, pas encore en édition) démarre l'édition en remplaçant tout
         // son contenu par ce qui est tapé — comportement standard de
