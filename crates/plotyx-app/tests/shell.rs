@@ -27,7 +27,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use plotyx_app::state::{Action, AppState};
-use plotyx_core::{Cell, Column, ColumnType, NodeId, Project, Tree};
+use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
 use plotyx_session::{Session, SessionHandle};
 
@@ -2039,4 +2039,23 @@ fn a_text_column_left_with_only_numeric_values_auto_promotes_to_numeric() {
     );
     assert_eq!(cell(&state, note, 0), Cell::Float(1.0));
     assert_eq!(cell(&state, note, 2), Cell::Float(2.5));
+}
+
+/// `Action::SetColumnRole` (sous-menu « Rôle » du menu contextuel d'en-tête,
+/// à côté du type) écrit `ColumnMeta::role` — rôle par défaut `Y` pour toute
+/// colonne, voir `Column::new` côté `plotyx-core`.
+#[test]
+fn set_column_role_action_writes_the_column_meta_role() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    assert_eq!(state.column_meta(temps).role, ColumnRole::Y);
+
+    state.dispatch(Action::SetColumnRole {
+        column: temps,
+        role: ColumnRole::X,
+    });
+
+    assert_eq!(state.column_meta(temps).role, ColumnRole::X);
 }

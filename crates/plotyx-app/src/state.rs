@@ -54,7 +54,7 @@ use std::thread;
 use plotyx_commands::Command;
 use plotyx_core::node::NodeKind;
 use plotyx_core::{
-    Cell, Column, ColumnMeta, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
+    Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
 };
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
@@ -108,6 +108,17 @@ pub enum Action {
         column: NodeId,
         /// Type demandé.
         column_type: ColumnType,
+    },
+    /// Change le rôle de tracé d'une colonne (`ColumnMeta::role`) — choix
+    /// explicite depuis le sous-menu « Rôle » du menu contextuel de
+    /// l'en-tête, à côté du type. N'affecte, pour l'instant, que
+    /// l'affichage (`A(x)`…) et la persistance : rien côté résolution de
+    /// série ne le lit encore.
+    SetColumnRole {
+        /// Colonne visée.
+        column: NodeId,
+        /// Rôle demandé.
+        role: ColumnRole,
     },
     /// Insère `count` lignes à `at` dans `sheet`.
     InsertRows {
@@ -1431,6 +1442,9 @@ impl AppState {
                 column,
                 column_type,
             }),
+            Action::SetColumnRole { column, role } => {
+                self.set_column_meta_field(column, |meta| meta.role = role);
+            }
             Action::InsertRows { sheet, at, count } => self.rows(sheet, at, count, true),
             Action::DeleteRows { sheet, at, count } => self.rows(sheet, at, count, false),
             Action::SetNoteText { note, text } => self.set_note_text(note, text),

@@ -308,7 +308,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use egui_dock::{DockArea, DockState, NodePath, Style, TabViewer};
 use egui_extras::{Column as TableColumn, TableBuilder};
-use plotyx_core::{ColumnType, NodeId, Tree};
+use plotyx_core::{ColumnRole, ColumnType, NodeId, Tree};
 use plotyx_render_egui::{DrawnPlot, GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::Snapshot;
 
@@ -1577,6 +1577,25 @@ fn type_suffix(column_type: ColumnType) -> &'static str {
     }
 }
 
+/// Suffixe affiché entre parenthèses après la lettre de colonne pour rappeler
+/// son rôle de tracé ([`plotyx_core::ColumnRole`]) — `A(x)`, `B(y)`… Ce rôle
+/// n'est pour l'instant lu par rien d'autre que la persistance
+/// (`plotyx-persistence`) : aucune résolution de série ne s'en sert encore
+/// (voir `plotyx_core::resolve`, qui détermine X/Y autrement) — l'afficher et
+/// le rendre modifiable ici n'a donc, pour l'instant, qu'une valeur
+/// informative, en avance sur son câblage au rendu.
+fn role_suffix(role: ColumnRole) -> &'static str {
+    match role {
+        ColumnRole::X => "x",
+        ColumnRole::Y => "y",
+        ColumnRole::Z => "z",
+        ColumnRole::XError => "xerr",
+        ColumnRole::YError => "yerr",
+        ColumnRole::Label => "label",
+        ColumnRole::None => "aucun",
+    }
+}
+
 /// Lettre de colonne façon tableur, en base 26 : `0 → "A"`, `25 → "Z"`,
 /// `26 → "AA"`, `701 → "ZZ"`… — l'ordre de la feuille, pas un nom stocké
 /// dans le modèle (aucune notion de lettre n'existe côté `plotyx-core`, voir
@@ -1618,6 +1637,7 @@ fn column_header_widget(
     ui.vertical(|ui| {
         let letter = column_letter(column_index);
         let is_column_selected = state.is_column_selected(sheet, column);
+        let role = state.column_meta(column).role;
         ui.scope(|ui| {
             ui.set_min_height(HEADER_SUBROW_HEIGHT);
             ui.set_max_height(HEADER_SUBROW_HEIGHT);
@@ -1640,18 +1660,22 @@ fn column_header_widget(
             let response = ui.interact(rect, id, egui::Sense::click());
             ui.put(
                 rect,
-                egui::Label::new(format!("{letter}  {}", type_suffix(column_type)))
-                    .selectable(false),
+                egui::Label::new(format!(
+                    "{letter}({})  {}",
+                    role_suffix(role),
+                    type_suffix(column_type)
+                ))
+                .selectable(false),
             );
             if response.clicked() || response.secondary_clicked() {
                 state.select_column(sheet, column);
             }
-            // Choix manuel du type de colonne, au clic droit — conversion
-            // destructrice assumée (`Action::SetColumnType`/`Command::
-            // SetColumnType`, `plotyx-core::Column::set_column_type`) :
-            // texte non numérique effacé en passant en `Numeric`, comme
-            // pour toute saisie directe dans une colonne numérique.
             response.context_menu(|ui| {
+                // Choix manuel du type de colonne — conversion destructrice
+                // assumée (`Action::SetColumnType`/`Command::
+                // SetColumnType`, `plotyx-core::Column::set_column_type`) :
+                // texte non numérique effacé en passant en `Numeric`, comme
+                // pour toute saisie directe dans une colonne numérique.
                 for candidate in [ColumnType::Numeric, ColumnType::Text, ColumnType::Mixed] {
                     if ui
                         .selectable_label(column_type == candidate, type_suffix(candidate))
@@ -1666,6 +1690,34 @@ fn column_header_widget(
                         ui.close();
                     }
                 }
+                // Rôle de tracé, dans un sous-menu séparé : encore sans
+                // effet sur la résolution de série (voir `role_suffix`),
+                // mais un seul et même endroit pour tout ce qui décrit une
+                // colonne à l'utilisateur.
+                ui.menu_button("Rôle", |ui| {
+                    for candidate in [
+                        ColumnRole::X,
+                        ColumnRole::Y,
+                        ColumnRole::Z,
+                        ColumnRole::XError,
+                        ColumnRole::YError,
+                        ColumnRole::Label,
+                        ColumnRole::None,
+                    ] {
+                        if ui
+                            .selectable_label(role == candidate, role_suffix(candidate))
+                            .clicked()
+                        {
+                            if candidate != role {
+                                actions.push(Action::SetColumnRole {
+                                    column,
+                                    role: candidate,
+                                });
+                            }
+                            ui.close();
+                        }
+                    }
+                });
             });
         });
         header_field_widget(
