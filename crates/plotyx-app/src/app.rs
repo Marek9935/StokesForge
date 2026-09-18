@@ -314,7 +314,7 @@ use plotyx_session::Snapshot;
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    cell_text_in, header_field_paste_value, node_title_in, note_text_in, row_count_in,
+    cell_text_in, node_title_in, note_text_in, pasted_text_has_header_lines, row_count_in,
     visible_columns_in, worksheets_of_in, Action, AppState, CellEdit, HeaderField, MoveDirection,
     NoteEdit, ProjectTreeNode, WindowKind,
 };
@@ -2757,13 +2757,15 @@ fn grid_contents(
                 // ailleurs dans PlotYx, voir `AppState::selected_cells_tsv`)
                 // : coller ça tel quel dans le seul champ ciblé écrirait le
                 // texte brut, marqueurs de contrôle compris (bug : "Long
-                // Name" recevait `oups`/`z`/`C` empilés). `header_field_
-                // paste_value` ne retient que la ligne dont le champ
-                // correspond à `field` (première colonne copiée) — `None`
-                // si le presse-papier a des lignes d'en-tête mais aucune
-                // pour ce champ : rien à coller, une case ne peut pas
-                // recevoir les autres champs copiés.
-                if let Some(text) = header_field_paste_value(&text, field) {
+                // Name" recevait `oups`/`z`/`C` empilés). Un rectangle
+                // structuré passe donc par `Action::PasteTsv`, qui décale
+                // ses lignes de champ pour ancrer la première sur `field`
+                // (voir `AppState::paste_tsv`) ; un texte externe/plat (pas
+                // de marqueur) reste un simple remplacement de `field`,
+                // comme avant l'ajout du rectangle mixte.
+                if pasted_text_has_header_lines(&text) {
+                    actions.push(Action::PasteTsv { sheet, text });
+                } else {
                     actions.push(header_field_action(column, field, text));
                 }
             }

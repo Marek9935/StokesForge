@@ -1124,6 +1124,59 @@ fn pure_header_field_copy_paste_writes_header_fields_not_data() {
     assert_eq!(cell(&state, signal, 2), signal_data_before[2]);
 }
 
+/// Bug signalé : coller un rectangle de plusieurs champs d'en-tête (copié
+/// via `AppState::selected_cells_tsv`) sur un seul champ sélectionné doit
+/// étirer le rectangle depuis cette ancre — comme un tableur de référence —
+/// pas retomber sur les champs d'origine (ce qui laissait tous les champs
+/// sauf le premier vides) ni empiler les lignes marquées telles quelles
+/// dans le seul champ ciblé (le bug d'origine).
+#[test]
+fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fields() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "a");
+    set_header_field(&mut state, temps, HeaderField::Unit, "b");
+    set_header_field(&mut state, temps, HeaderField::Comment, "c");
+
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
+    let tsv = state
+        .selected_cells_tsv(sheet1)
+        .expect("sélection non vide");
+    assert_eq!(tsv, "\u{1}0a\n\u{1}1b\n\u{1}2c\n");
+
+    // Ancré sur le champ Nom long de `Signal` (le même rang que le premier
+    // champ copié) : les trois champs s'appliquent, décalage nul.
+    state.select_header_field(sheet1, signal, HeaderField::LongName);
+    state.dispatch(Action::PasteTsv {
+        sheet: sheet1,
+        text: tsv.clone(),
+    });
+    let meta = state.column_meta(signal);
+    assert_eq!(meta.long_name, "a");
+    assert_eq!(meta.unit, "b");
+    assert_eq!(meta.comment, "c");
+
+    // Ancré sur Unité cette fois (un rang plus bas) : le rectangle se
+    // décale d'autant — Unité reçoit la première ligne copiée, Commentaire
+    // la deuxième, et la troisième (qui débordait sur Formule) s'y écrit
+    // aussi puisqu'elle reste dans les 4 champs.
+    let note = column_id(&state, sheet1, "Note");
+    state.select_header_field(sheet1, note, HeaderField::Unit);
+    state.dispatch(Action::PasteTsv {
+        sheet: sheet1,
+        text: tsv,
+    });
+    let meta = state.column_meta(note);
+    assert_eq!(meta.unit, "a");
+    assert_eq!(meta.comment, "b");
+    assert_eq!(meta.formula, Some("c".to_string()));
+}
+
 // -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --
 //
 // Ce qui exige un interpréteur (exécution, sortie, annulation d'une écriture

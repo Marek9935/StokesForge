@@ -560,39 +560,19 @@ impl HeaderField {
     }
 }
 
-/// Valeur à écrire dans un champ d'en-tête ciblé par Ctrl+V, déduite du
-/// texte brut du presse-papier — utilisée quand la sélection est un seul
-/// champ d'en-tête (voir [`crate::app::header_field_paste_value`] dans
-/// `app.rs`, seul appelant). Si `text` ne porte aucune ligne balisée
-/// [`HEADER_LINE_MARKER`] (paste externe, ou champ unique copié via
-/// `header_field_text`), il est retourné tel quel, comme avant l'ajout du
-/// rectangle mixte. S'il porte des lignes d'en-tête (rectangle copié
-/// ailleurs dans PlotYx, voir [`AppState::selected_cells_tsv`]), seule
-/// celle dont le champ correspond à `field` est retenue (sa première
-/// colonne copiée) — les autres champs copiés n'ont nulle part où aller
-/// dans une cible à une seule case, donc `None` si aucune ligne ne
-/// correspond à `field`.
-pub(crate) fn header_field_paste_value(text: &str, field: HeaderField) -> Option<String> {
-    let mut lines: Vec<&str> = text
-        .split('\n')
+/// Vrai si `text` porte au moins une ligne de champ d'en-tête marquée
+/// [`HEADER_LINE_MARKER`] (rectangle structuré copié ailleurs dans PlotYx,
+/// voir [`AppState::selected_cells_tsv`]) — sert à [`crate::app::
+/// grid_contents`] à décider, quand un seul champ d'en-tête est
+/// sélectionné, si le texte collé doit passer par [`AppState::paste_tsv`]
+/// (rectangle structuré, à répartir par champ) ou s'écrire tel quel dans le
+/// champ ciblé (texte externe/plat, comme avant l'ajout du rectangle
+/// mixte) — sans quoi un paste externe atterrirait en données à la ligne 0
+/// plutôt que dans le champ visé.
+pub(crate) fn pasted_text_has_header_lines(text: &str) -> bool {
+    text.split('\n')
         .map(|line| line.trim_end_matches('\r'))
-        .collect();
-    if matches!(lines.last(), Some(line) if line.is_empty()) {
-        lines.pop();
-    }
-    if !lines
-        .iter()
         .any(|line| line.starts_with(HEADER_LINE_MARKER))
-    {
-        return Some(text.to_string());
-    }
-    lines.into_iter().find_map(|line| {
-        let rest = line.strip_prefix(HEADER_LINE_MARKER)?;
-        let mut chars = rest.chars();
-        let digit = chars.next().and_then(|c| c.to_digit(10)).unwrap_or(0);
-        (HeaderField::from_index(digit as usize) == field)
-            .then(|| chars.as_str().split('\t').next().unwrap_or("").to_string())
-    })
 }
 
 /// Direction d'un déplacement clavier d'une cellule dans la grille (flèches
@@ -2459,6 +2439,36 @@ impl AppState {
                 PastedLine::Data(_) => None,
             })
             .collect();
+        // Quand l'ancre elle-même est un champ d'en-tête (un seul champ
+        // sélectionné, voir `Selection::selected_header_field`), les lignes
+        // de champ collées se décalent pour que la première (le champ le
+        // plus haut du rectangle copié) atterrisse sur l'ancre — comme un
+        // tableur de référence, qui étire toujours depuis l'ancre plutôt
+        // que de retomber sur le champ d'origine. Une ligne qui déborderait
+        // au-delà de `Formula` (rang 3) est ignorée plutôt que d'aller se
+        // perdre en données. Quand l'ancre est une cellule de donnée, en
+        // revanche, il n'y a pas de rang à décaler : chaque champ retombe
+        // sur lui-même (`shift == 0`), doctrine « réapplique les champs »
+        // déjà en place avant ce correctif.
+        let shift = self
+            .selected_header_field(sheet)
+            .and_then(|(_, anchor_field)| {
+                header_lines
+                    .iter()
+                    .map(|(field, _)| field.index() as isize)
+                    .min()
+                    .map(|top| anchor_field.index() as isize - top)
+            })
+            .unwrap_or(0);
+        let header_writes: Vec<(HeaderField, &Vec<&str>)> = header_lines
+            .iter()
+            .filter_map(|&(field, cells)| {
+                let shifted = field.index() as isize + shift;
+                (0..=3)
+                    .contains(&shifted)
+                    .then(|| (HeaderField::from_index(shifted as usize), cells))
+            })
+            .collect();
         let data_rows: Vec<Vec<&str>> = parsed
             .iter()
             .filter_map(|line| match line {
@@ -2466,7 +2476,7 @@ impl AppState {
                 PastedLine::Header(..) => None,
             })
             .collect();
-        let header_ops = header_lines.len() * targets.len();
+        let header_ops = header_writes.len() * targets.len();
         let data_ops = if data_rows.is_empty() {
             0
         } else {
@@ -2477,7 +2487,7 @@ impl AppState {
             self.fail("Impossible de grouper le collage".to_string());
             return;
         }
-        for &(field, cells) in &header_lines {
+        for &(field, cells) in &header_writes {
             for (index, &column) in targets.iter().enumerate() {
                 let text = cells.get(index).copied().unwrap_or("").to_string();
                 self.set_column_meta_field(column, move |meta| match field {
@@ -2859,9 +2869,7 @@ mod tests {
     //! `tests/shell.rs` et par le banc `plotyx-robustesse` (batterie 15), qui
     //! ont besoin d'une session réelle.
 
-    use super::{
-        format_f64_for_display, header_field_paste_value, HeaderField, MISSING_TEXT_DISPLAY,
-    };
+    use super::{format_f64_for_display, pasted_text_has_header_lines, MISSING_TEXT_DISPLAY};
 
     /// A9 (option 2) — la convention d'affichage à elle seule : une valeur
     /// absente ne doit jamais s'afficher comme la chaîne vide qui représente
@@ -2938,47 +2946,22 @@ mod tests {
         assert_eq!(format_f64_for_display(1.0), "1");
     }
 
-    /// Verrou du bug signalé : coller un rectangle mixte (plusieurs lignes
-    /// d'en-tête, copié via `AppState::selected_cells_tsv`) sur un seul
-    /// champ sélectionné ne doit retenir que la ligne de ce champ — jamais
-    /// empiler les lignes marquées telles quelles dans la valeur.
+    /// Un rectangle copié depuis l'en-tête (voir `AppState::
+    /// selected_cells_tsv`) porte le marqueur, quelle que soit la ligne où
+    /// il apparaît.
     #[test]
-    fn header_field_paste_value_ne_retient_que_le_champ_cible() {
-        let presse_papier = "\u{1}0oups\t0oups...\n\u{1}1z\tz\n\u{1}2C\tC\n";
-        assert_eq!(
-            header_field_paste_value(presse_papier, HeaderField::LongName).as_deref(),
-            Some("oups")
-        );
-        assert_eq!(
-            header_field_paste_value(presse_papier, HeaderField::Unit).as_deref(),
-            Some("z")
-        );
-        assert_eq!(
-            header_field_paste_value(presse_papier, HeaderField::Comment).as_deref(),
-            Some("C")
-        );
+    fn pasted_text_has_header_lines_detecte_le_marqueur() {
+        assert!(pasted_text_has_header_lines(
+            "\u{1}0oups\t0oups...\n\u{1}1z\tz\n\u{1}2C\tC\n"
+        ));
+        assert!(pasted_text_has_header_lines("0\t10\n\u{1}1z\tz\n"));
     }
 
-    /// Aucune ligne du presse-papier ne correspond au champ ciblé (ex. :
-    /// rectangle Unité+Commentaire collé sur Nom long) : rien à coller,
-    /// plutôt que de choisir arbitrairement une autre ligne.
+    /// Texte externe ou champ unique copié via `header_field_text` : aucune
+    /// ligne n'est balisée.
     #[test]
-    fn header_field_paste_value_aucune_ligne_ne_correspond() {
-        let presse_papier = "\u{1}1z\tz\n\u{1}2C\tC\n";
-        assert_eq!(
-            header_field_paste_value(presse_papier, HeaderField::LongName),
-            None
-        );
-    }
-
-    /// Presse-papier sans aucun marqueur d'en-tête (paste externe, ou champ
-    /// unique copié via `header_field_text`) : le texte est utilisé tel
-    /// quel, comme avant l'ajout du rectangle mixte.
-    #[test]
-    fn header_field_paste_value_texte_brut_sans_marqueur() {
-        assert_eq!(
-            header_field_paste_value("Capteur 1", HeaderField::LongName).as_deref(),
-            Some("Capteur 1")
-        );
+    fn pasted_text_has_header_lines_texte_brut() {
+        assert!(!pasted_text_has_header_lines("Capteur 1"));
+        assert!(!pasted_text_has_header_lines("0\t10\n0.5\t\n"));
     }
 }
