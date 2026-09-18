@@ -560,6 +560,41 @@ impl HeaderField {
     }
 }
 
+/// Valeur à écrire dans un champ d'en-tête ciblé par Ctrl+V, déduite du
+/// texte brut du presse-papier — utilisée quand la sélection est un seul
+/// champ d'en-tête (voir [`crate::app::header_field_paste_value`] dans
+/// `app.rs`, seul appelant). Si `text` ne porte aucune ligne balisée
+/// [`HEADER_LINE_MARKER`] (paste externe, ou champ unique copié via
+/// `header_field_text`), il est retourné tel quel, comme avant l'ajout du
+/// rectangle mixte. S'il porte des lignes d'en-tête (rectangle copié
+/// ailleurs dans PlotYx, voir [`AppState::selected_cells_tsv`]), seule
+/// celle dont le champ correspond à `field` est retenue (sa première
+/// colonne copiée) — les autres champs copiés n'ont nulle part où aller
+/// dans une cible à une seule case, donc `None` si aucune ligne ne
+/// correspond à `field`.
+pub(crate) fn header_field_paste_value(text: &str, field: HeaderField) -> Option<String> {
+    let mut lines: Vec<&str> = text
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r'))
+        .collect();
+    if matches!(lines.last(), Some(line) if line.is_empty()) {
+        lines.pop();
+    }
+    if !lines
+        .iter()
+        .any(|line| line.starts_with(HEADER_LINE_MARKER))
+    {
+        return Some(text.to_string());
+    }
+    lines.into_iter().find_map(|line| {
+        let rest = line.strip_prefix(HEADER_LINE_MARKER)?;
+        let mut chars = rest.chars();
+        let digit = chars.next().and_then(|c| c.to_digit(10)).unwrap_or(0);
+        (HeaderField::from_index(digit as usize) == field)
+            .then(|| chars.as_str().split('\t').next().unwrap_or("").to_string())
+    })
+}
+
 /// Direction d'un déplacement clavier d'une cellule dans la grille (flèches
 /// directionnelles) — voir [`AppState::move_selection`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2824,7 +2859,9 @@ mod tests {
     //! `tests/shell.rs` et par le banc `plotyx-robustesse` (batterie 15), qui
     //! ont besoin d'une session réelle.
 
-    use super::{format_f64_for_display, MISSING_TEXT_DISPLAY};
+    use super::{
+        format_f64_for_display, header_field_paste_value, HeaderField, MISSING_TEXT_DISPLAY,
+    };
 
     /// A9 (option 2) — la convention d'affichage à elle seule : une valeur
     /// absente ne doit jamais s'afficher comme la chaîne vide qui représente
@@ -2899,5 +2936,49 @@ mod tests {
         assert_eq!(format_f64_for_display(42.5), "42.5");
         assert_eq!(format_f64_for_display(0.0), "0");
         assert_eq!(format_f64_for_display(1.0), "1");
+    }
+
+    /// Verrou du bug signalé : coller un rectangle mixte (plusieurs lignes
+    /// d'en-tête, copié via `AppState::selected_cells_tsv`) sur un seul
+    /// champ sélectionné ne doit retenir que la ligne de ce champ — jamais
+    /// empiler les lignes marquées telles quelles dans la valeur.
+    #[test]
+    fn header_field_paste_value_ne_retient_que_le_champ_cible() {
+        let presse_papier = "\u{1}0oups\t0oups...\n\u{1}1z\tz\n\u{1}2C\tC\n";
+        assert_eq!(
+            header_field_paste_value(presse_papier, HeaderField::LongName).as_deref(),
+            Some("oups")
+        );
+        assert_eq!(
+            header_field_paste_value(presse_papier, HeaderField::Unit).as_deref(),
+            Some("z")
+        );
+        assert_eq!(
+            header_field_paste_value(presse_papier, HeaderField::Comment).as_deref(),
+            Some("C")
+        );
+    }
+
+    /// Aucune ligne du presse-papier ne correspond au champ ciblé (ex. :
+    /// rectangle Unité+Commentaire collé sur Nom long) : rien à coller,
+    /// plutôt que de choisir arbitrairement une autre ligne.
+    #[test]
+    fn header_field_paste_value_aucune_ligne_ne_correspond() {
+        let presse_papier = "\u{1}1z\tz\n\u{1}2C\tC\n";
+        assert_eq!(
+            header_field_paste_value(presse_papier, HeaderField::LongName),
+            None
+        );
+    }
+
+    /// Presse-papier sans aucun marqueur d'en-tête (paste externe, ou champ
+    /// unique copié via `header_field_text`) : le texte est utilisé tel
+    /// quel, comme avant l'ajout du rectangle mixte.
+    #[test]
+    fn header_field_paste_value_texte_brut_sans_marqueur() {
+        assert_eq!(
+            header_field_paste_value("Capteur 1", HeaderField::LongName).as_deref(),
+            Some("Capteur 1")
+        );
     }
 }
