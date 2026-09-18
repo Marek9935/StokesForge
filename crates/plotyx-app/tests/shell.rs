@@ -898,14 +898,16 @@ fn cancelling_an_edit_discards_the_buffer() {
 // -- Divers : la sélection de la grille (souris + Ctrl+C/X/V) --
 //
 // `crate::app` (egui) traduit clic/glisser en `AppState::select_cell`/
-// `extend_selection`, puis Ctrl+C/X/V en `AppState::selected_cells_tsv`/
-// `Action::ClearSelectedCells`/`Action::PasteTsv` — tout ce qui suit ce
-// point de traduction est testable ici, sans fenêtre. Bug « le copier/
-// couper/coller ne marche pas avec une sélection d'une seule cellule » :
-// une sélection posée par un simple clic ([`AppState::select_cell`]) est un
-// rectangle 1×1 comme un autre pour `Selection` (voir
-// `crate::selection::Selection::single_cell` et ses tests unitaires) — les
-// trois tests qui suivent le vérifient au niveau où `crate::app` s'arrête.
+// `extend_selection`, puis Ctrl+C/Ctrl+Maj+C/X/V/Ctrl+Maj+V en
+// `AppState::copy_selection`/`AppState::copy_full_columns`/
+// `Action::ClearSelectedCells`/`Action::Paste`/`Action::PasteAbsolute` —
+// tout ce qui suit ce point de traduction est testable ici, sans fenêtre.
+// Bug « le copier/couper/coller ne marche pas avec une sélection d'une
+// seule cellule » : une sélection posée par un simple clic
+// ([`AppState::select_cell`]) est un rectangle 1×1 comme un autre pour
+// `Selection` (voir `crate::selection::Selection::single_cell` et ses tests
+// unitaires) — les trois tests qui suivent le vérifient au niveau où
+// `crate::app` s'arrête.
 
 #[test]
 fn a_single_cell_selection_copies_exactly_that_cell() {
@@ -924,9 +926,9 @@ fn a_single_cell_selection_copies_exactly_that_cell() {
     );
 
     assert_eq!(
-        state.selected_cells_tsv(sheet1),
-        Some("1\n".to_string()),
-        "Ctrl+C sur une sélection d'une seule cellule copie exactement son texte"
+        state.copy_selection(sheet1),
+        Some("1".to_string()),
+        "Ctrl+C sur une sélection d'une seule cellule copie exactement son texte, rien d'autre"
     );
 }
 
@@ -962,7 +964,7 @@ fn pasting_onto_a_single_cell_selection_writes_from_its_anchor() {
     // en porte (ici deux : `Temps` et `Signal`), pas seulement la cellule
     // sélectionnée.
     state.select_cell(sheet1, temps, 1);
-    state.dispatch(Action::PasteTsv {
+    state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "9\t99\n".to_string(),
     });
@@ -984,17 +986,19 @@ fn set_header_field(state: &mut AppState, column: NodeId, field: HeaderField, te
     state.commit_header_edit();
 }
 
-/// Bug : coller une sélection copiée à cheval sur l'en-tête et les données
-/// (rectangle mixte, voir la doc de tête de `crate::selection`) dumpait les
-/// lignes de champ d'en-tête dans des lignes de données, décalant tout ce
-/// qui suit — `paste_tsv` traitait chaque ligne du TSV collé comme une
-/// donnée, sans distinguer d'où elle venait. Copie de Unité + Commentaire +
-/// Formule + 3 lignes de données de `Temps`, collée sur la cellule de
-/// donnée `Signal` ligne 1 : la forme relative au rang doit se reproduire
-/// ancrée sur la cible — les champs sur `Signal`, les données à ses lignes
-/// 1, 2, 3 — au lieu de tout verser en données à partir de la ligne 1.
+/// Bug historique (trois correctifs successifs) : une sélection copiée à
+/// cheval sur l'en-tête et les données (« rectangle mixte »,
+/// `paste_tsv` d'alors) dumpait les lignes de champ d'en-tête dans des
+/// lignes de données, décalant tout ce qui suit. Le nouveau modèle rend ce
+/// scénario **structurellement impossible** plutôt que de le corriger au
+/// coup par coup : un glisser parti d'un champ d'en-tête qui atteint une
+/// cellule de donnée s'arrête au champ Formule (voir `crate::selection`),
+/// donc ne peut plus jamais produire une copie mixte. Ce test le vérifie au
+/// niveau où `crate::app` s'arrête : la sélection clampée ne copie que des
+/// champs, et coller ce résultat sur une cellule de donnée (sortes
+/// différentes) ne colle rien plutôt que de mal se répartir.
 #[test]
-fn pasting_a_mixed_header_and_data_copy_reapplies_header_fields_and_offsets_data() {
+fn extending_a_header_selection_into_data_clamps_instead_of_mixing_a_copy() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -1003,51 +1007,54 @@ fn pasting_a_mixed_header_and_data_copy_reapplies_header_fields_and_offsets_data
 
     set_header_field(&mut state, temps, HeaderField::Unit, "nm");
     set_header_field(&mut state, temps, HeaderField::Comment, "a");
-    // Formule volontairement laissée vide, pour vérifier qu'une ligne de
-    // champ vide se recopie bien (et ne casse pas le format).
+    // Formule volontairement laissée vide, pour vérifier qu'un champ vide se
+    // copie bien (et ne casse pas le format).
 
+    // Glisser parti du champ Unité vers une cellule de donnée : la
+    // sélection s'arrête à Formule, elle ne touche jamais la ligne 2.
     state.select_header_field(sheet1, temps, HeaderField::Unit);
     state.extend_selection(sheet1, temps, 2);
-    let tsv = state
-        .selected_cells_tsv(sheet1)
-        .expect("sélection non vide");
-    assert_eq!(
-        tsv, "\u{1}1nm\n\u{1}2a\n\u{1}3\n0\n0.5\n1\n",
-        "3 lignes de champ marquées, puis 3 lignes de données en clair"
+    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Unit));
+    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Comment));
+    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Formula));
+    assert!(
+        !state.is_selected(sheet1, temps, 2),
+        "le glisser ne traverse plus la frontière en-tête/données"
     );
 
-    // Collée sur une cellule de donnée de `Signal`, ligne 1 : les champs
-    // d'en-tête n'ont pas de « ligne », ils vont sur la colonne cible quel
-    // que soit le rang de l'ancre ; les données s'alignent à partir de
-    // cette ancre.
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    assert_eq!(
+        text, "nm\na\n\n",
+        "3 lignes de champ en clair, rien de plus : la copie ne porte plus \
+         de ligne de donnée"
+    );
+
+    let signal_data_before = [
+        cell(&state, signal, 0),
+        cell(&state, signal, 1),
+        cell(&state, signal, 2),
+    ];
+
+    // Collée sur une cellule de donnée de `Signal` : sortes différentes
+    // (champs copiés, ancre sur une donnée), rien ne se colle (règle 2 de
+    // la matrice de comportement, voir `plotyx_app::state`).
     state.select_cell(sheet1, signal, 1);
-    state.dispatch(Action::PasteTsv {
+    state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: tsv,
+        text,
     });
 
     let meta = state.column_meta(signal);
-    assert_eq!(meta.unit, "nm");
-    assert_eq!(meta.comment, "a");
-    assert_eq!(meta.formula, None);
-
-    assert_eq!(cell(&state, signal, 1), Cell::Float(0.0));
-    assert_eq!(cell(&state, signal, 2), Cell::Float(0.5));
-    assert_eq!(cell(&state, signal, 3), Cell::Float(1.0));
-    // Le reste de la colonne, hors de la plage collée, n'a pas bougé.
-    assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
-    assert_eq!(cell(&state, signal, 4), Cell::Float(50.0));
-
-    // La colonne source n'est pas affectée par son propre collage ailleurs.
-    let temps_meta = state.column_meta(temps);
-    assert_eq!(temps_meta.unit, "nm");
-    assert_eq!(temps_meta.comment, "a");
+    assert_eq!(meta.unit, "");
+    assert_eq!(meta.comment, "");
+    assert_eq!(cell(&state, signal, 0), signal_data_before[0]);
+    assert_eq!(cell(&state, signal, 1), signal_data_before[1]);
+    assert_eq!(cell(&state, signal, 2), signal_data_before[2]);
 }
 
-/// Régression : un copier/coller purement données (aucun champ d'en-tête
-/// dans la sélection) garde le format TSV historique — aucune ligne ne porte
-/// le marqueur de champ — et continue de coller exactement comme avant ce
-/// correctif.
+/// Un copier/coller purement données (aucun champ d'en-tête dans la
+/// sélection) colle exactement comme un tableur de référence : décalé sur
+/// l'ancre, rien d'autre touché.
 #[test]
 fn pure_data_copy_paste_keeps_working_without_header_markers() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -1058,19 +1065,13 @@ fn pure_data_copy_paste_keeps_working_without_header_markers() {
 
     state.select_cell(sheet1, temps, 0);
     state.extend_selection(sheet1, signal, 1);
-    let tsv = state
-        .selected_cells_tsv(sheet1)
-        .expect("sélection non vide");
-    assert_eq!(
-        tsv, "0\t10\n0.5\t\n",
-        "aucun marqueur de champ d'en-tête dans une copie purement données"
-    );
-    assert!(!tsv.contains('\u{1}'));
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    assert_eq!(text, "0\t10\n0.5\t\n");
 
     state.select_cell(sheet1, temps, 3);
-    state.dispatch(Action::PasteTsv {
+    state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: tsv,
+        text,
     });
 
     assert_eq!(cell(&state, temps, 3), Cell::Float(0.0));
@@ -1079,11 +1080,9 @@ fn pure_data_copy_paste_keeps_working_without_header_markers() {
     assert!(matches!(cell(&state, signal, 4), Cell::Float(v) if v.is_nan()));
 }
 
-/// Régression : un copier/coller purement champs d'en-tête (sélection
-/// entièrement dans l'en-tête, sans toucher la moindre ligne de donnée) va
-/// bien sur les champs de la colonne cible — pas sur ses données, comme
-/// avant ce correctif où `paste_tsv` n'avait qu'un seul chemin, celui des
-/// données, même pour un tel collage.
+/// Un copier/coller purement champs d'en-tête (sélection entièrement dans
+/// l'en-tête, sans toucher la moindre ligne de donnée) va bien sur les
+/// champs de la colonne cible — jamais sur ses données.
 #[test]
 fn pure_header_field_copy_paste_writes_header_fields_not_data() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -1098,10 +1097,8 @@ fn pure_header_field_copy_paste_writes_header_fields_not_data() {
     state.select_header_field(sheet1, temps, HeaderField::LongName);
     state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
 
-    let tsv = state
-        .selected_cells_tsv(sheet1)
-        .expect("sélection non vide");
-    assert_eq!(tsv, "\u{1}0T\n\u{1}1s\n");
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    assert_eq!(text, "T\ns\n");
 
     let signal_data_before = [
         cell(&state, signal, 0),
@@ -1109,27 +1106,60 @@ fn pure_header_field_copy_paste_writes_header_fields_not_data() {
         cell(&state, signal, 2),
     ];
 
-    state.select_cell(sheet1, signal, 0);
-    state.dispatch(Action::PasteTsv {
+    // Ancré sur un champ d'en-tête de `Signal` (même sorte que la copie) :
+    // les champs s'appliquent, les données ne bougent pas.
+    state.select_header_field(sheet1, signal, HeaderField::LongName);
+    state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: tsv,
+        text,
     });
 
     let meta = state.column_meta(signal);
     assert_eq!(meta.long_name, "T");
     assert_eq!(meta.unit, "s");
-    // Aucune donnée touchée : le collage était entièrement dans l'en-tête.
     assert_eq!(cell(&state, signal, 0), signal_data_before[0]);
     assert_eq!(cell(&state, signal, 1), signal_data_before[1]);
     assert_eq!(cell(&state, signal, 2), signal_data_before[2]);
 }
 
-/// Bug signalé : coller un rectangle de plusieurs champs d'en-tête (copié
-/// via `AppState::selected_cells_tsv`) sur un seul champ sélectionné doit
-/// étirer le rectangle depuis cette ancre — comme un tableur de référence —
-/// pas retomber sur les champs d'origine (ce qui laissait tous les champs
-/// sauf le premier vides) ni empiler les lignes marquées telles quelles
-/// dans le seul champ ciblé (le bug d'origine).
+/// Un copier de champs d'en-tête collé sur une cellule de donnée ne colle
+/// rien : les deux sortes ne se mélangent jamais (règle 2 de la matrice de
+/// comportement, voir `plotyx_app::state`) — le pendant de
+/// [`pure_header_field_copy_paste_writes_header_fields_not_data`] côté
+/// ancre de l'autre sorte.
+#[test]
+fn header_field_copy_pasted_onto_a_data_cell_anchor_pastes_nothing() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+
+    let signal_data_before = [cell(&state, signal, 0), cell(&state, signal, 1)];
+
+    state.select_cell(sheet1, signal, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+
+    let meta = state.column_meta(signal);
+    assert_eq!(meta.long_name, "", "rien ne se colle : sortes différentes");
+    assert_eq!(meta.unit, "");
+    assert_eq!(cell(&state, signal, 0), signal_data_before[0]);
+    assert_eq!(cell(&state, signal, 1), signal_data_before[1]);
+}
+
+/// Bug signalé : coller un rectangle de plusieurs champs d'en-tête sur un
+/// seul champ sélectionné doit étirer le rectangle depuis cette ancre —
+/// comme un tableur de référence — pas retomber sur les champs d'origine
+/// (ce qui laissait tous les champs sauf le premier vides).
 #[test]
 fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fields() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -1144,17 +1174,15 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
 
     state.select_header_field(sheet1, temps, HeaderField::LongName);
     state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
-    let tsv = state
-        .selected_cells_tsv(sheet1)
-        .expect("sélection non vide");
-    assert_eq!(tsv, "\u{1}0a\n\u{1}1b\n\u{1}2c\n");
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    assert_eq!(text, "a\nb\nc\n");
 
     // Ancré sur le champ Nom long de `Signal` (le même rang que le premier
     // champ copié) : les trois champs s'appliquent, décalage nul.
     state.select_header_field(sheet1, signal, HeaderField::LongName);
-    state.dispatch(Action::PasteTsv {
+    state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: tsv.clone(),
+        text: text.clone(),
     });
     let meta = state.column_meta(signal);
     assert_eq!(meta.long_name, "a");
@@ -1167,14 +1195,304 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
     // aussi puisqu'elle reste dans les 4 champs.
     let note = column_id(&state, sheet1, "Note");
     state.select_header_field(sheet1, note, HeaderField::Unit);
-    state.dispatch(Action::PasteTsv {
+    state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: tsv,
+        text,
     });
     let meta = state.column_meta(note);
     assert_eq!(meta.unit, "a");
     assert_eq!(meta.comment, "b");
     assert_eq!(meta.formula, Some("c".to_string()));
+}
+
+// -- Matrice de comportement copier/coller (§3, voir la doc de tête de
+// `plotyx_app::state`) --
+//
+// Les tests plus haut couvrent déjà plusieurs lignes de la matrice (case
+// unique → `Text`, rectangle relatif de données ou de champs, débordement
+// en colonnes, croisement en-tête/données qui ne colle rien). Ceux qui
+// suivent couvrent le reste : `Text` externe sur n'importe quelle ancre,
+// `Ctrl+Maj+C` (`AppState::copy_full_columns`), l'autre sens du croisement
+// en-tête/données, et `Ctrl+Maj+V` (`Action::PasteAbsolute`) pour un
+// rectangle relatif comme pour des colonnes entières.
+
+/// Une seule case copiée — ici un champ d'en-tête — devient `Text` : son
+/// texte seul. C'est ce qui permet de copier la formule d'une colonne dans
+/// le champ Formule d'une autre, l'exemple qui motive la règle (voir la doc
+/// de tête de `plotyx_app::state`).
+#[test]
+fn copying_a_single_formula_field_can_paste_it_into_another_columns_formula_field() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::Formula, "A*2");
+    state.select_header_field(sheet1, temps, HeaderField::Formula);
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    assert_eq!(
+        text, "A*2",
+        "une seule case copiée : son texte, rien d'autre"
+    );
+
+    state.select_header_field(sheet1, signal, HeaderField::Formula);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+
+    assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
+}
+
+/// Règle 1 : un texte externe sans tabulation ni retour à la ligne (jamais
+/// passé par `copy_selection`, donc jamais reconnu comme notre presse-
+/// papier) s'écrit dans la case ancrée, quelle qu'elle soit — champ
+/// d'en-tête comme cellule de donnée.
+#[test]
+fn external_plain_text_writes_into_whichever_anchor_is_selected() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "Capteur 1".to_string(),
+    });
+    assert_eq!(state.column_meta(temps).long_name, "Capteur 1");
+
+    state.select_cell(sheet1, temps, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "42".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 0), Cell::Float(42.0));
+}
+
+/// Ctrl+Maj+C promeut en colonne entière (en-tête + corps) la colonne
+/// touchée par une sélection d'une seule cellule.
+#[test]
+fn copy_full_columns_promotes_the_touched_columns_from_a_single_cell_selection() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    state.select_cell(sheet1, temps, 2);
+
+    let text = state.copy_full_columns(sheet1).expect("sélection non vide");
+    // 4 lignes d'en-tête (Nom long, Unité, Commentaire, Formule) puis tout
+    // le corps de `Temps`, indépendamment de la cellule sélectionnée.
+    assert_eq!(text, "\ns\n\n\n0\n0.5\n1\n1.5\n2\n");
+}
+
+/// Symétrique de [`header_field_copy_pasted_onto_a_data_cell_anchor_pastes_nothing`] :
+/// des lignes de données copiées, collées sur un champ d'en-tête (sortes
+/// différentes), ne collent rien non plus.
+#[test]
+fn relative_data_rows_pasted_onto_a_header_field_anchor_pastes_nothing() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 0);
+    state.extend_selection(sheet1, signal, 1);
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+
+    let unit_before = state.column_meta(temps).unit;
+    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+
+    assert_eq!(state.column_meta(temps).unit, unit_before);
+}
+
+/// Ctrl+Maj+V sur un rectangle relatif de champs d'en-tête ignore l'ancre :
+/// chaque champ retombe sur son rang d'origine plutôt que de se décaler.
+#[test]
+fn paste_absolute_replays_relative_header_fields_on_their_original_rank() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    set_header_field(&mut state, temps, HeaderField::Comment, "x");
+    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
+    state.copy_selection(sheet1).expect("sélection non vide");
+
+    // Ancré sur Nom long (au-dessus du rang d'origine) : en relatif ça
+    // décalerait tout vers le haut ; Ctrl+Maj+V ignore l'ancre.
+    state.select_header_field(sheet1, signal, HeaderField::LongName);
+    state.dispatch(Action::PasteAbsolute { sheet: sheet1 });
+
+    let meta = state.column_meta(signal);
+    assert_eq!(meta.long_name, "", "Nom long n'était pas dans la copie");
+    assert_eq!(meta.unit, "s");
+    assert_eq!(meta.comment, "x");
+}
+
+/// Ctrl+Maj+V sur un rectangle relatif de données ignore l'ancre : chaque
+/// ligne retombe sur sa ligne d'origine plutôt que de se décaler — même
+/// avec une ancre choisie ailleurs.
+#[test]
+fn paste_absolute_replays_relative_data_rows_on_their_original_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    // Copie les lignes 2 et 3, puis les modifie : Ctrl+Maj+V doit les
+    // restaurer à leur rang d'origine, pas à partir de l'ancre choisie plus
+    // bas (la ligne 0).
+    state.select_cell(sheet1, temps, 2);
+    state.extend_selection(sheet1, temps, 3);
+    state.copy_selection(sheet1).expect("sélection non vide");
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 2,
+        text: "99".to_string(),
+    });
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 3,
+        text: "98".to_string(),
+    });
+
+    state.select_cell(sheet1, temps, 0);
+    state.dispatch(Action::PasteAbsolute { sheet: sheet1 });
+
+    assert_eq!(
+        cell(&state, temps, 0),
+        Cell::Float(0.0),
+        "l'ancre (ligne 0) n'a pas reçu la première ligne copiée"
+    );
+    assert_eq!(
+        cell(&state, temps, 2),
+        Cell::Float(1.0),
+        "restaurée à son rang d'origine"
+    );
+    assert_eq!(cell(&state, temps, 3), Cell::Float(1.5));
+}
+
+/// Ctrl+V d'une copie de colonnes entières, ancrée sur un champ d'en-tête :
+/// les champs à partir de l'ancre (incluse) s'appliquent identité, ceux
+/// au-dessus sont jetés ; le corps se colle sans décalage.
+#[test]
+fn full_columns_pasted_onto_a_header_field_anchor_applies_from_that_field_down_with_an_unshifted_body(
+) {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    set_header_field(&mut state, temps, HeaderField::Comment, "x");
+    state.select_cell(sheet1, temps, 0);
+    let text = state.copy_full_columns(sheet1).expect("sélection non vide");
+
+    state.select_header_field(sheet1, signal, HeaderField::Unit);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+
+    let meta = state.column_meta(signal);
+    assert_eq!(meta.long_name, "", "au-dessus de l'ancre (Unité) : jeté");
+    assert_eq!(meta.unit, "s");
+    assert_eq!(meta.comment, "x");
+    assert_eq!(
+        cell(&state, signal, 0),
+        Cell::Float(0.0),
+        "corps collé sans décalage"
+    );
+    assert_eq!(cell(&state, signal, 1), Cell::Float(0.5));
+}
+
+/// Ctrl+V d'une copie de colonnes entières, ancrée sur une cellule de
+/// donnée : l'en-tête est entièrement jeté, le corps se décale sur l'ancre.
+#[test]
+fn full_columns_pasted_onto_a_data_cell_anchor_discards_header_and_shifts_the_body() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    state.select_cell(sheet1, temps, 0);
+    let text = state.copy_full_columns(sheet1).expect("sélection non vide");
+
+    let signal_long_name_before = state.column_meta(signal).long_name;
+    state.select_cell(sheet1, signal, 2);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+
+    assert_eq!(
+        state.column_meta(signal).long_name,
+        signal_long_name_before,
+        "l'en-tête est entièrement jeté quand l'ancre est une cellule de donnée"
+    );
+    assert_eq!(
+        cell(&state, signal, 2),
+        Cell::Float(0.0),
+        "1re ligne copiée -> ligne d'ancrage"
+    );
+    assert_eq!(cell(&state, signal, 3), Cell::Float(0.5));
+    assert_eq!(
+        cell(&state, signal, 0),
+        Cell::Float(10.0),
+        "avant l'ancre : inchangé"
+    );
+}
+
+/// Ctrl+Maj+V d'une copie de colonnes entières ignore l'ancre dans les deux
+/// dimensions à la fois : l'en-tête s'applique quand même (contrairement à
+/// Ctrl+V sur une ancre de donnée) et le corps ne se décale pas
+/// (contrairement à Ctrl+V sur une ancre de donnée non plus).
+#[test]
+fn paste_absolute_of_full_columns_applies_everything_at_its_origin_regardless_of_anchor() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    state.select_cell(sheet1, temps, 0);
+    state.copy_full_columns(sheet1).expect("sélection non vide");
+
+    state.select_cell(sheet1, signal, 2);
+    state.dispatch(Action::PasteAbsolute { sheet: sheet1 });
+
+    assert_eq!(
+        state.column_meta(signal).long_name,
+        "T",
+        "l'en-tête s'applique même avec une ancre de donnée"
+    );
+    assert_eq!(
+        cell(&state, signal, 0),
+        Cell::Float(0.0),
+        "corps à son rang d'origine"
+    );
+    assert_eq!(
+        cell(&state, signal, 2),
+        Cell::Float(1.0),
+        "pas décalé sur l'ancre (ligne 2) : reçoit Temps[2], pas Temps[0]"
+    );
 }
 
 // -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --
@@ -2329,13 +2647,15 @@ fn extending_a_header_field_selection_covers_the_whole_rectangle() {
 
 /// Glisser depuis un champ d'en-tête vers une cellule de données
 /// (`extend_selection`, la méthode *cellule de données*, appelée alors que
-/// la sélection en cours est déjà une plage de champs) forme désormais un
-/// seul rectangle **mixte** continu, plutôt que de reposer une sélection
-/// d'une seule cellule : franchir la frontière en-tête/données à la souris
-/// ne réinitialise plus rien (seule la rangée des lettres — `Columns` —
-/// garde cette politique, voir [`dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column`]).
+/// la sélection en cours est déjà une plage de champs) s'arrête à la
+/// frontière plutôt que de la traverser : le rectangle couvre les champs
+/// entre l'ancre et Formule (le dernier champ d'en-tête), sur la colonne
+/// visée comme sur celle de l'ancre, mais ne touche jamais une donnée.
+/// Trois correctifs successifs avaient fait vivre un rectangle mixte qui
+/// traversait cette frontière ; voir la doc de tête de `crate::selection`
+/// pour pourquoi il a été retiré.
 #[test]
-fn dragging_a_cell_extension_across_the_header_boundary_forms_one_continuous_rectangle() {
+fn dragging_a_cell_extension_across_the_header_boundary_stops_at_the_formula_field() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -2346,20 +2666,24 @@ fn dragging_a_cell_extension_across_the_header_boundary_forms_one_continuous_rec
     state.extend_selection(sheet1, signal, 2);
 
     assert!(
-        state.is_selected(sheet1, signal, 2),
-        "la cellule visée fait partie du rectangle"
+        !state.is_selected(sheet1, signal, 2),
+        "la cellule visée n'est plus jamais incluse : le glisser s'arrête à la frontière"
     );
     assert!(
         state.is_header_field_selected(sheet1, temps, HeaderField::Unit),
-        "le champ d'ancrage reste sélectionné, le rectangle continue plutôt que de se déplacer"
+        "le champ d'ancrage reste sélectionné"
     );
     assert!(
         state.is_header_field_selected(sheet1, temps, HeaderField::Comment),
-        "champ intermédiaire entre l'ancre et la cible inclus"
+        "champ intermédiaire entre l'ancre et Formule inclus"
     );
     assert!(
-        state.is_selected(sheet1, temps, 0),
-        "donnée de la colonne d'ancrage, dans la portion données du rectangle, incluse"
+        state.is_header_field_selected(sheet1, signal, HeaderField::Formula),
+        "le rectangle s'étend jusqu'à Formule sur la colonne visée"
+    );
+    assert!(
+        !state.is_selected(sheet1, temps, 0),
+        "aucune donnée de la colonne d'ancrage n'est incluse"
     );
     assert_eq!(
         state.selected_header_field(sheet1),
@@ -2368,12 +2692,34 @@ fn dragging_a_cell_extension_across_the_header_boundary_forms_one_continuous_rec
     );
 }
 
-/// Une sélection démarrée sur le champ Commentaire et étendue jusqu'à une
-/// ligne de données de la même colonne couvre tout ce qui est entre les
-/// deux (Commentaire, Formule, puis les lignes de données jusqu'à la
-/// cible) — le cas d'usage central du rectangle mixte.
+/// Symétrique : glisser depuis une cellule de donnée vers un champ d'en-tête
+/// s'arrête à la ligne 0, ne remonte jamais dans l'en-tête.
 #[test]
-fn extending_from_a_header_field_into_data_selects_everything_in_between() {
+fn dragging_a_header_field_extension_across_the_data_boundary_stops_at_row_zero() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 3);
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
+
+    assert!(
+        !state.is_header_field_selected(sheet1, temps, HeaderField::Comment),
+        "le champ visé n'est jamais inclus : le glisser s'arrête à la frontière"
+    );
+    for row in 0..=3 {
+        assert!(state.is_selected(sheet1, temps, row), "ligne {row} incluse");
+    }
+}
+
+/// Une sélection démarrée sur le champ Commentaire et étendue jusqu'à une
+/// ligne de données de la même colonne s'arrête à Formule (le dernier
+/// champ d'en-tête) : elle ne touche jamais la moindre ligne de données.
+/// Régression du bug historique (trois correctifs successifs) du
+/// « rectangle mixte », voir la doc de tête de `crate::selection`.
+#[test]
+fn extending_from_a_header_field_into_data_stops_before_any_data_row() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -2385,23 +2731,24 @@ fn extending_from_a_header_field_into_data_selects_everything_in_between() {
     assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Comment));
     assert!(
         state.is_header_field_selected(sheet1, temps, HeaderField::Formula),
-        "Formule, entre Commentaire et les données, incluse"
+        "Formule, dernier champ d'en-tête, atteinte"
     );
     assert!(
         !state.is_header_field_selected(sheet1, temps, HeaderField::Unit),
         "Unité est au-dessus de l'ancre : hors du rectangle"
     );
     for row in 0..=4 {
-        assert!(state.is_selected(sheet1, temps, row), "ligne {row} incluse");
+        assert!(
+            !state.is_selected(sheet1, temps, row),
+            "ligne {row} jamais incluse : le glisser s'est arrêté à Formule"
+        );
     }
 
-    let tsv = state
-        .selected_cells_tsv(sheet1)
-        .expect("sélection non vide");
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
     assert_eq!(
-        tsv.lines().count(),
-        7,
-        "2 champs d'en-tête (Commentaire, Formule) + 5 lignes de données"
+        text.lines().count(),
+        2,
+        "2 champs d'en-tête (Commentaire, Formule), aucune ligne de donnée"
     );
 }
 

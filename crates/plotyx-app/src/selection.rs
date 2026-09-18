@@ -13,33 +13,40 @@
 //! ([`crate::state::HeaderField`]) — chacun une rangée de sa propre valeur,
 //! répétée par colonne.
 //!
-//! # Un seul axe unifié pour les champs et les données
+//! # Un seul axe, jamais traversé par une sélection
 //!
 //! Les 4 champs d'en-tête et les lignes de données d'une même colonne
 //! forment un seul axe ordonné (voir [`GridCursor::rank`]) : Nom long <
-//! Unité < Commentaire < Formule < ligne 0 < ligne 1 < … Un rectangle de
-//! sélection ([`SelectionKind::Rows`]) est donc soit entièrement dans
-//! l'en-tête, soit entièrement dans les données, soit — depuis ce fichier —
-//! **à cheval sur les deux**, produit d'un glisser ou d'un Maj-clic qui
-//! commence sur un champ et continue dans la grille (ou l'inverse). La
-//! plage de colonnes entières ([`SelectionKind::Columns`], glisser/Maj-clic
-//! sur la rangée des lettres) reste un geste distinct, jamais mélangé au
-//! reste : un glisser qui la croise repose toujours une sélection simple
-//! (voir [`crate::state::AppState::extend_selection`]/[`crate::state::
-//! AppState::extend_header_field_selection`]/[`crate::state::AppState::
+//! Unité < Commentaire < Formule < ligne 0 < ligne 1 < … mais un rectangle de
+//! sélection ([`SelectionKind::Rows`]) reste toujours entièrement d'un seul
+//! côté de la frontière (rang -1/0) : soit entièrement dans l'en-tête, soit
+//! entièrement dans les données — **jamais à cheval sur les deux**. Un
+//! glisser ou un Maj-clic qui commence d'un côté et vise l'autre s'arrête à
+//! la frontière plutôt que de la traverser ([`Selection::extend_row_to`]) :
+//! la case visée est ramenée à la dernière case du côté de l'ancre (le champ
+//! Formule si l'ancre est dans l'en-tête, la ligne 0 si elle est dans les
+//! données). Trois correctifs successifs ont fait vivre puis grossir un
+//! « rectangle mixte » qui traversait cette frontière ; il rendait le
+//! copier/coller incompréhensible et a été retiré au profit de cette règle
+//! plus simple, décidée avec l'utilisateur. La plage de colonnes entières
+//! ([`SelectionKind::Columns`], glisser/Maj-clic sur la rangée des lettres)
+//! reste un geste distinct, jamais mélangé au reste : un glisser qui la
+//! croise repose toujours une sélection simple (voir [`crate::state::
+//! AppState::extend_selection`]/[`crate::state::AppState::
+//! extend_header_field_selection`]/[`crate::state::AppState::
 //! extend_column_selection`]).
 
 use plotyx_core::{NodeId, Tree};
 
 use crate::state::{visible_columns_in, HeaderField};
 
-/// Sélection courante dans la grille d'une feuille : un rectangle mixte
-/// champs d'en-tête/cellules de données ([`SelectionKind::Rows`]) ou une
-/// plage de colonnes entières ([`SelectionKind::Columns`], glisser/Maj-clic
-/// sur la rangée des lettres) — même comportement clic-sélectionne/
-/// glisser-étende/double-clic-édite pour les deux, voir
-/// [`crate::app::header_field_widget`], [`crate::app::cell_widget`] et
-/// [`crate::app::column_header_widget`].
+/// Sélection courante dans la grille d'une feuille : un rectangle borné à
+/// l'en-tête ou aux données ([`SelectionKind::Rows`], jamais les deux à la
+/// fois — voir la doc de tête du module) ou une plage de colonnes entières
+/// ([`SelectionKind::Columns`], glisser/Maj-clic sur la rangée des lettres)
+/// — même comportement clic-sélectionne/glisser-étende/double-clic-édite
+/// pour les deux, voir [`crate::app::header_field_widget`],
+/// [`crate::app::cell_widget`] et [`crate::app::column_header_widget`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selection {
     kind: SelectionKind,
@@ -47,13 +54,15 @@ pub struct Selection {
 
 #[derive(Debug, Clone, PartialEq)]
 enum SelectionKind {
-    /// Rectangle unifié champs d'en-tête/cellules de données, entre
-    /// `anchor` (posée au premier clic, jamais déplacée par la suite) et
-    /// `cursor` (la dernière case visée — un simple clic pose
+    /// Rectangle de champs d'en-tête ou de cellules de données (jamais les
+    /// deux), entre `anchor` (posée au premier clic, jamais déplacée par la
+    /// suite) et `cursor` (la dernière case visée — un simple clic pose
     /// `cursor == anchor`, un glisser ou un Maj-clic ne déplace que
-    /// `cursor`). Les deux extrémités peuvent être de sortes différentes
-    /// (l'une un champ, l'autre une cellule) : c'est exactement ce qui rend
-    /// le rectangle mixte possible, voir la doc de tête du module.
+    /// `cursor`). `anchor` et `cursor` sont toujours de la même sorte
+    /// (toutes deux un champ, ou toutes deux une cellule) :
+    /// [`Selection::extend_row_to`] ramène systématiquement `cursor` à la
+    /// frontière plutôt que de la laisser changer de sorte, voir la doc de
+    /// tête du module.
     Rows {
         anchor: GridCursor,
         cursor: GridCursor,
@@ -109,6 +118,20 @@ fn rank_range(a: GridCursor, b: GridCursor) -> (isize, isize) {
         (ra, rb)
     } else {
         (rb, ra)
+    }
+}
+
+/// Ramène `target` à la frontière de la zone de `anchor` s'il n'est pas de
+/// la même sorte qu'elle — voir la doc de tête du module. La colonne visée
+/// par `target` n'est, elle, jamais bornée : un glisser peut couvrir
+/// plusieurs colonnes même en butant sur la frontière de rang.
+fn clamp_to_anchor_zone(anchor: GridCursor, target: GridCursor) -> GridCursor {
+    match (anchor, target) {
+        (GridCursor::Header(..), GridCursor::Data(column, _)) => {
+            GridCursor::Header(column, HeaderField::Formula)
+        }
+        (GridCursor::Data(..), GridCursor::Header(column, _)) => GridCursor::Data(column, 0),
+        _ => target,
     }
 }
 
@@ -206,16 +229,21 @@ impl Selection {
 
     /// Étend le rectangle en cours jusqu'à `target`, en gardant l'ancre déjà
     /// posée — glisser ou Maj-clic, aussi bien depuis une cellule de données
-    /// que depuis un champ d'en-tête, `target` pouvant être l'un ou l'autre :
-    /// c'est ce qui rend le rectangle mixte possible (voir la doc de tête du
-    /// module). Sans effet si la sélection courante n'est pas déjà un
-    /// rectangle de ce genre (c'est le cas d'une plage de colonnes : il faut
-    /// re-cliquer une cellule ou un champ pour repartir en rectangle, voir
-    /// [`crate::state::AppState::extend_selection`]/[`crate::state::
-    /// AppState::extend_header_field_selection`]).
+    /// que depuis un champ d'en-tête. `target` est ramené à la frontière de
+    /// la zone de l'ancre s'il n'est pas de la même sorte qu'elle (voir
+    /// [`clamp_to_anchor_zone`] et la doc de tête du module) : un glisser
+    /// qui part de l'en-tête et vise une cellule de données s'arrête au
+    /// champ Formule (le dernier champ d'en-tête) de la colonne visée ; un
+    /// glisser qui part des données et vise un champ d'en-tête s'arrête à la
+    /// ligne 0 de la colonne visée — jamais de bascule d'une zone à l'autre
+    /// en cours de glisser. Sans effet si la sélection courante n'est pas
+    /// déjà un rectangle de ce genre (c'est le cas d'une plage de colonnes :
+    /// il faut re-cliquer une cellule ou un champ pour repartir en
+    /// rectangle, voir [`crate::state::AppState::extend_selection`]/
+    /// [`crate::state::AppState::extend_header_field_selection`]).
     pub fn extend_row_to(&mut self, target: GridCursor) {
-        if let SelectionKind::Rows { cursor, .. } = &mut self.kind {
-            *cursor = target;
+        if let SelectionKind::Rows { anchor, cursor } = &mut self.kind {
+            *cursor = clamp_to_anchor_zone(*anchor, target);
         }
     }
 
@@ -232,11 +260,12 @@ impl Selection {
     /// Vrai si la sélection est une plage de colonnes entières (rangée des
     /// lettres) — permet à [`crate::state::AppState::extend_selection`]/
     /// [`crate::state::AppState::extend_header_field_selection`] de
-    /// distinguer une extension normale (au sein du rectangle mixte) d'un
-    /// franchissement de frontière depuis la rangée des lettres, qui doit
-    /// reposer une sélection simple plutôt que d'étendre silencieusement
-    /// sans effet ; et à [`crate::state::AppState::extend_column_selection`]
-    /// de faire l'inverse.
+    /// distinguer une extension normale (au sein du rectangle en cours,
+    /// borné à l'en-tête ou aux données) d'un franchissement de frontière
+    /// depuis la rangée des lettres, qui doit reposer une sélection simple
+    /// plutôt que d'étendre silencieusement sans effet ; et à
+    /// [`crate::state::AppState::extend_column_selection`] de faire
+    /// l'inverse.
     pub fn is_columns(&self) -> bool {
         matches!(self.kind, SelectionKind::Columns { .. })
     }
@@ -294,16 +323,15 @@ impl Selection {
     /// Portion **données** de la plage sélectionnée, en lignes inclusives
     /// `(min, max)` — `None` si la sélection est une plage de colonnes
     /// entières, ou si elle est un rectangle entièrement contenu dans
-    /// l'en-tête (aucune ligne de données touchée). Un rectangle mixte qui
-    /// commence dans l'en-tête et continue dans les données (ex. Commentaire
-    /// → ligne 19) rend la portion données seule, bornée à 0 : la plage de
-    /// rangs `[-2, 19]` (Commentaire, rang -2, à la ligne 19) devient
-    /// `Some((0, 19))`, les 20 premières lignes.
+    /// l'en-tête (aucune ligne de données touchée : depuis que
+    /// [`Selection::extend_row_to`] borne la cible à la frontière, un
+    /// rectangle est toujours entièrement dans l'en-tête ou entièrement dans
+    /// les données, jamais les deux).
     ///
     /// Réservé aux opérations propres aux données de colonne
     /// ([`Selection::clear_ranges`]/[`Selection::delete_at_count`]/
-    /// [`crate::state::AppState::selected_cells_tsv`]) — un champ d'en-tête
-    /// n'a pas de « ligne » au même sens. Voir [`Selection::full_rank_range`]
+    /// [`crate::state::AppState::copy_selection`]) — un champ d'en-tête n'a
+    /// pas de « ligne » au même sens. Voir [`Selection::full_rank_range`]
     /// pour la plage complète, en-tête compris.
     pub fn row_range(&self) -> Option<(usize, usize)> {
         match &self.kind {
@@ -320,10 +348,12 @@ impl Selection {
     }
 
     /// Plage complète `[lo, hi]` de rangs (voir [`GridCursor::rank`])
-    /// couverte par un rectangle mixte, en-tête compris (contrairement à
+    /// couverte par le rectangle, en-tête compris (contrairement à
     /// [`Selection::row_range`], qui n'en rend que la portion données) —
+    /// toujours entièrement négative (en-tête) ou entièrement positive ou
+    /// nulle (données), jamais à cheval (voir la doc de tête du module) —
     /// `None` pour une plage de colonnes entières. Sert à
-    /// [`crate::state::AppState::selected_cells_tsv`] (une ligne de TSV par
+    /// [`crate::state::AppState::copy_selection`] (une rangée copiée par
     /// rang couvert) et à [`Selection::cleared_header_fields`].
     pub fn full_rank_range(&self) -> Option<(isize, isize)> {
         match &self.kind {
@@ -333,12 +363,12 @@ impl Selection {
     }
 
     /// Champs d'en-tête `(colonne, champ)` touchés par la sélection, un par
-    /// colonne et par champ de la portion en-tête de la plage — vide si la
-    /// sélection ne touche aucun champ (plage de colonnes, ou rectangle
-    /// entièrement dans les données). Sert à [`crate::state::AppState::
-    /// clear_selected_cells`] : Retour arrière/Ctrl+X sur un rectangle mixte
-    /// vide aussi les champs d'en-tête touchés, pas seulement la portion
-    /// données.
+    /// colonne et par champ — vide si la sélection ne touche aucun champ
+    /// (plage de colonnes, ou rectangle entièrement dans les données ; un
+    /// rectangle est toujours entièrement dans l'un ou dans l'autre, voir la
+    /// doc de tête du module). Sert à [`crate::state::AppState::
+    /// clear_selected_cells`] : Retour arrière/Ctrl+X sur une sélection de
+    /// champs d'en-tête les vide tous.
     pub fn cleared_header_fields(&self, tree: &Tree, sheet: NodeId) -> Vec<(NodeId, HeaderField)> {
         let SelectionKind::Rows { anchor, cursor } = &self.kind else {
             return Vec::new();
@@ -384,7 +414,7 @@ impl Selection {
     /// une par colonne touchée, bornées à sa longueur réelle — vider
     /// au-delà de la fin d'une colonne courte ne doit jamais l'allonger.
     /// Ne couvre que la portion **données** ; voir [`Selection::
-    /// cleared_header_fields`] pour la portion en-tête d'un rectangle mixte.
+    /// cleared_header_fields`] pour un rectangle de champs d'en-tête.
     pub fn clear_ranges(&self, tree: &Tree, sheet: NodeId) -> Vec<(NodeId, usize, usize)> {
         self.columns(tree, sheet)
             .into_iter()
@@ -441,21 +471,20 @@ impl Selection {
         (columns, start, count)
     }
 
-    /// Cellule d'ancrage — coin haut-gauche logique du rectangle en données,
-    /// ou la première colonne de la plage à la ligne 0 pour une plage de
-    /// colonnes ou une ancre posée sur un champ d'en-tête. Sert de point de
-    /// départ au collage (Ctrl+V colle à partir de l'ancre, indépendamment
-    /// de la taille de la sélection active, comme dans tout tableur de
-    /// référence) : coller ne touche jamais les champs d'en-tête eux-mêmes,
-    /// seulement les données, d'où ce repli sur la ligne 0 quand l'ancre est
-    /// un champ.
-    pub fn anchor(&self) -> (NodeId, usize) {
+    /// Ancre de la sélection — la case posée au premier clic, jamais
+    /// déplacée par la suite ; la première colonne de la plage à la ligne 0
+    /// pour une plage de colonnes entières, qui n'a pas d'ancre au sens
+    /// d'une case précise. Sert de point de départ au collage
+    /// ([`crate::state::AppState::paste`]/[`crate::state::AppState::
+    /// paste_absolute`] collent à partir de l'ancre, indépendamment de la
+    /// taille de la sélection active, comme dans tout tableur de référence)
+    /// : coller sur un champ d'en-tête écrit dans l'en-tête, coller sur une
+    /// cellule écrit dans les données — voir la matrice de comportement en
+    /// tête de [`crate::state`].
+    pub fn anchor(&self) -> GridCursor {
         match &self.kind {
-            SelectionKind::Rows { anchor, .. } => match anchor {
-                GridCursor::Data(column, row) => (*column, *row),
-                GridCursor::Header(column, _) => (*column, 0),
-            },
-            SelectionKind::Columns { anchor, .. } => (*anchor, 0),
+            SelectionKind::Rows { anchor, .. } => *anchor,
+            SelectionKind::Columns { anchor, .. } => GridCursor::Data(*anchor, 0),
         }
     }
 }
@@ -507,6 +536,43 @@ mod tests {
             Selection::header_field(column, HeaderField::Comment).single_cell(),
             None,
             "un champ d'en-tête unique n'est pas une cellule unique"
+        );
+    }
+
+    /// [`Selection::extend_row_to`] — un glisser parti d'un champ d'en-tête
+    /// qui vise une cellule de données s'arrête au champ Formule de la
+    /// colonne visée, jamais dans les données elles-mêmes : voir la doc de
+    /// tête du module.
+    #[test]
+    fn extending_from_a_header_field_into_data_stops_at_the_formula_field() {
+        let column = NodeId::from_raw(1);
+        let other_column = NodeId::from_raw(2);
+
+        let mut selection = Selection::header_field(column, HeaderField::Unit);
+        selection.extend_row_to(GridCursor::Data(other_column, 5));
+
+        assert_eq!(
+            selection.grid_cursor(),
+            Some(GridCursor::Header(other_column, HeaderField::Formula)),
+            "le glisser s'arrête au dernier champ d'en-tête de la colonne visée"
+        );
+    }
+
+    /// Symétrique : un glisser parti d'une cellule de données qui vise un
+    /// champ d'en-tête s'arrête à la ligne 0 de la colonne visée, jamais
+    /// dans l'en-tête lui-même.
+    #[test]
+    fn extending_from_data_into_a_header_field_stops_at_row_zero() {
+        let column = NodeId::from_raw(1);
+        let other_column = NodeId::from_raw(2);
+
+        let mut selection = Selection::cell(column, 5);
+        selection.extend_row_to(GridCursor::Header(other_column, HeaderField::Comment));
+
+        assert_eq!(
+            selection.grid_cursor(),
+            Some(GridCursor::Data(other_column, 0)),
+            "le glisser s'arrête à la ligne 0 de la colonne visée"
         );
     }
 }

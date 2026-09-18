@@ -314,9 +314,8 @@ use plotyx_session::Snapshot;
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    cell_text_in, node_title_in, note_text_in, pasted_text_has_header_lines, row_count_in,
-    visible_columns_in, worksheets_of_in, Action, AppState, CellEdit, HeaderField, MoveDirection,
-    NoteEdit, ProjectTreeNode, WindowKind,
+    cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
+    Action, AppState, CellEdit, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
 };
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
@@ -355,6 +354,23 @@ pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
 /// Ctrl+Entrée — exécuter le script de la console.
 pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
+/// Ctrl+Maj+C — copier les colonnes touchées par la sélection en entier
+/// (en-tête et corps). `egui-winit` ne traduit en `egui::Event::Copy` que
+/// Ctrl+C seul (voir la doc de tête de [`grid_contents`]) : ce raccourci-ci
+/// arrive comme un `egui::Event::Key` ordinaire, capturé par
+/// `consume_shortcut` comme les autres raccourcis à modificateur.
+pub const SHORTCUT_COPY_FULL_COLUMNS: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::C,
+);
+/// Ctrl+Maj+V — coller en position absolue depuis le presse-papier interne
+/// de la grille ([`Action::PasteAbsolute`]). Même remarque que
+/// [`SHORTCUT_COPY_FULL_COLUMNS`] : jamais poussé comme `egui::Event::
+/// Paste`, toujours capturé par `consume_shortcut`.
+pub const SHORTCUT_PASTE_ABSOLUTE: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::V,
+);
 
 /// Hauteur d'une ligne de la grille, en points.
 const ROW_HEIGHT: f32 = 20.0;
@@ -2714,15 +2730,20 @@ fn grid_contents(
                 state.move_selection(sheet, MoveDirection::Down, false);
             }
         }
-        // Ctrl+C/X/V n'apparaissent **jamais** comme un `egui::Event::Key`
+        // Ctrl+C/X n'apparaissent **jamais** comme un `egui::Event::Key`
         // ordinaire (donc jamais via `consume_key`) : `egui-winit` les
-        // intercepte lui-même à la traduction des événements de la
-        // fenêtre et pousse à la place un `Event::Copy`/`Event::Cut`, ou un
+        // intercepte lui-même à la traduction des événements de la fenêtre
+        // et pousse à la place un `Event::Copy`/`Event::Cut`, ou un
         // `Event::Paste(String)` qui porte déjà le contenu du presse-papier
         // système (lu par `egui-winit`, via `arboard` en interne — inutile
-        // de le relire nous-mêmes). Retour arrière/Suppr, eux, n'ont pas de
-        // modificateur et restent des `Event::Key` ordinaires, capturés via
-        // `consume_key` comme avant.
+        // de le relire nous-mêmes). Ctrl+Maj+C/Ctrl+Maj+V ([`
+        // SHORTCUT_COPY_FULL_COLUMNS`]/[`SHORTCUT_PASTE_ABSOLUTE`]), eux, ne
+        // sont **jamais** traduits ainsi (`egui-winit` ne reconnaît que
+        // Ctrl+C/Ctrl+V seuls comme ces événements) : capturés comme
+        // n'importe quel autre raccourci à modificateur, via
+        // `consume_shortcut`. Retour arrière/Suppr, eux non plus, n'ont pas
+        // de modificateur et restent des `Event::Key` ordinaires, capturés
+        // via `consume_key` comme avant.
         let (mut copy, mut cut, mut paste_text) = (false, false, None);
         ui.input(|input| {
             for event in &input.events {
@@ -2734,75 +2755,44 @@ fn grid_contents(
                 }
             }
         });
-        let (delete, backspace) = ui.input_mut(|input| {
+        let (delete, backspace, copy_full_columns, paste_absolute) = ui.input_mut(|input| {
             (
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+                input.consume_shortcut(&SHORTCUT_COPY_FULL_COLUMNS),
+                input.consume_shortcut(&SHORTCUT_PASTE_ABSOLUTE),
             )
         });
-        if let Some((column, field)) = state.selected_header_field(sheet) {
-            // Un champ d'en-tête sélectionné détourne les mêmes raccourcis
-            // vers lui plutôt que vers la sélection de cellules — les deux
-            // sont mutuellement exclusives (une seule `Selection` par
-            // feuille).
-            if copy || cut {
-                ui.ctx().copy_text(header_field_text(state, column, field));
+        // Toute la matrice de comportement (une seule case copiée devient du
+        // texte brut, un rectangle devient relatif, Ctrl+Maj+C promeut les
+        // colonnes touchées en entier, un collage se décale sur l'ancre ou
+        // rejoue ses rangs d'origine…) vit dans `AppState` — voir sa doc de
+        // tête, section copier/coller. Cette couche ne fait que traduire
+        // clavier/souris en appels, la même façon quelle que soit la sorte
+        // de sélection courante : plus de branche séparée pour un champ
+        // d'en-tête sélectionné, `AppState::copy_selection`/`AppState::
+        // paste`/`Action::ClearSelectedCells`/`Action::DeleteSelectedCells`
+        // savent déjà tous distinguer en-tête et données par eux-mêmes.
+        if copy_full_columns {
+            if let Some(text) = state.copy_full_columns(sheet) {
+                ui.ctx().copy_text(text);
             }
-            if cut || delete || backspace {
-                actions.push(header_field_action(column, field, String::new()));
-            }
-            if let Some(text) = paste_text {
-                // Le texte collé peut porter plusieurs lignes d'en-tête
-                // marquées `HEADER_LINE_MARKER` (rectangle mixte copié
-                // ailleurs dans PlotYx, voir `AppState::selected_cells_tsv`)
-                // : coller ça tel quel dans le seul champ ciblé écrirait le
-                // texte brut, marqueurs de contrôle compris (bug : "Long
-                // Name" recevait `oups`/`z`/`C` empilés). Un rectangle
-                // structuré passe donc par `Action::PasteTsv`, qui décale
-                // ses lignes de champ pour ancrer la première sur `field`
-                // (voir `AppState::paste_tsv`) ; un texte externe/plat (pas
-                // de marqueur) reste un simple remplacement de `field`,
-                // comme avant l'ajout du rectangle mixte.
-                if pasted_text_has_header_lines(&text) {
-                    actions.push(Action::PasteTsv { sheet, text });
-                } else {
-                    actions.push(header_field_action(column, field, text));
-                }
-            }
-        } else {
-            if copy || cut {
-                if let Some(tsv) = state.selected_cells_tsv(sheet) {
-                    ui.ctx().copy_text(tsv);
-                }
-            }
-            if cut || backspace {
-                actions.push(Action::ClearSelectedCells { sheet });
-            }
-            if let Some(text) = paste_text {
-                actions.push(Action::PasteTsv { sheet, text });
-            }
-            if delete {
-                actions.push(Action::DeleteSelectedCells { sheet });
+        } else if copy || cut {
+            if let Some(text) = state.copy_selection(sheet) {
+                ui.ctx().copy_text(text);
             }
         }
-    }
-}
-
-/// Traduit une valeur de champ d'en-tête en l'[`Action`] qui l'écrit —
-/// partagé par le raccourci clavier (Ctrl+X/Suppr/Retour arrière effacent
-/// via `text: String::new()`, Ctrl+V colle le texte du presse-papier tel
-/// quel) et, indirectement, par [`AppState::commit_header_edit`] côté
-/// double-clic. Une formule vide (après `trim`) redevient `None` plutôt
-/// qu'une chaîne vide, comme `commit_header_edit`.
-fn header_field_action(column: NodeId, field: HeaderField, text: String) -> Action {
-    match field {
-        HeaderField::LongName => Action::SetColumnLongName { column, text },
-        HeaderField::Unit => Action::SetColumnUnit { column, text },
-        HeaderField::Comment => Action::SetColumnComment { column, text },
-        HeaderField::Formula => Action::SetColumnFormula {
-            column,
-            formula: (!text.trim().is_empty()).then_some(text),
-        },
+        if cut || backspace {
+            actions.push(Action::ClearSelectedCells { sheet });
+        }
+        if delete {
+            actions.push(Action::DeleteSelectedCells { sheet });
+        }
+        if paste_absolute {
+            actions.push(Action::PasteAbsolute { sheet });
+        } else if let Some(text) = paste_text {
+            actions.push(Action::Paste { sheet, text });
+        }
     }
 }
 

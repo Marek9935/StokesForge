@@ -183,14 +183,30 @@ pub enum Action {
         /// Feuille visée.
         sheet: NodeId,
     },
-    /// Colle `text` (TSV) à partir de l'ancre de la sélection courante de
-    /// `sheet`.
-    PasteTsv {
+    /// Colle `text` à partir de l'ancre de la sélection courante de `sheet`
+    /// — Ctrl+V. `text` est le texte reçu d'egui (`egui::Event::Paste`),
+    /// c'est-à-dire le contenu du presse-papier **système** : [`AppState::
+    /// paste`] compare `text` à ce qu'il a lui-même poussé au presse-papier
+    /// ([`AppState::copy_selection`]/[`AppState::copy_full_columns`]) pour
+    /// décider de rejouer sa structure interne ou de traiter `text` comme un
+    /// texte externe — voir la matrice de comportement en tête de ce
+    /// module.
+    Paste {
         /// Feuille visée.
         sheet: NodeId,
-        /// Texte collé, au format TSV (`\t` entre colonnes, `\n` entre
-        /// lignes).
+        /// Texte reçu du presse-papier système.
         text: String,
+    },
+    /// Colle en position absolue depuis le presse-papier interne — Ctrl+Maj+
+    /// V, qui n'apparaît **jamais** comme un `egui::Event::Paste` (egui-winit
+    /// ne traduit ainsi que Ctrl+V seul) : capturé côté `crate::app` par
+    /// `consume_key` plutôt que par l'événement, il ne porte donc aucun
+    /// texte — tout vient du dernier [`AppState::copy_selection`]/
+    /// [`AppState::copy_full_columns`] de cette session. Sans effet si rien
+    /// n'a encore été copié.
+    PasteAbsolute {
+        /// Feuille visée.
+        sheet: NodeId,
     },
     /// Remplace le nom long affiché d'une colonne
     /// ([`plotyx_core::ColumnMeta::long_name`]).
@@ -367,14 +383,14 @@ fn format_f64_for_display(value: f64) -> String {
 /// `col_index` fournit une valeur manquante pour cette colonne.
 fn value_block_from_tsv_column(
     kind: ColumnType,
-    rows: &[Vec<&str>],
+    rows: &[Vec<String>],
     col_index: usize,
 ) -> ValueBlock {
     match kind {
         ColumnType::Numeric | ColumnType::DateTime => ValueBlock::Float(
             rows.iter()
                 .map(|row| {
-                    let text = row.get(col_index).copied().unwrap_or("").trim();
+                    let text = row.get(col_index).map(String::as_str).unwrap_or("").trim();
                     if text.is_empty() {
                         f64::NAN
                     } else {
@@ -392,7 +408,7 @@ fn value_block_from_tsv_column(
         ColumnType::Mixed => ValueBlock::Mixed(
             rows.iter()
                 .map(|row| {
-                    let text = row.get(col_index).copied().unwrap_or("").trim();
+                    let text = row.get(col_index).map(String::as_str).unwrap_or("").trim();
                     MixedCell::from_text((!text.is_empty()).then(|| text.to_string()))
                 })
                 .collect(),
@@ -507,15 +523,6 @@ pub struct CellEdit {
     pub buffer: String,
 }
 
-/// Marque une ligne de TSV collée/copiée ([`AppState::selected_cells_tsv`]/
-/// [`AppState::paste_tsv`]) comme un champ d'en-tête plutôt qu'une ligne de
-/// données — en tête de ligne, suivi du chiffre de [`HeaderField::index`].
-/// Un caractère de contrôle jamais tapé au clavier ni produit par un
-/// tableur externe : une ligne de données collée depuis l'extérieur (ou une
-/// copie purement données de PlotYx lui-même) n'en porte jamais, donc ne
-/// peut jamais être prise pour un champ d'en-tête.
-const HEADER_LINE_MARKER: char = '\u{1}';
-
 /// Champ de [`plotyx_core::ColumnMeta`] éditable dans l'en-tête empilé d'une
 /// colonne — voir [`HeaderEdit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -547,8 +554,8 @@ impl HeaderField {
 
     /// Inverse de [`HeaderField::index`] — `index` au-delà de 3 vaut
     /// `Formula`, jamais de panique : les appelants ([`crate::selection::
-    /// Selection::cleared_header_fields`]/[`AppState::selected_cells_tsv`])
-    /// ne passent que des rangs déjà bornés à `-4..=-1`, mais une saturation
+    /// Selection::cleared_header_fields`]/[`AppState::copy_selection`]) ne
+    /// passent que des rangs déjà bornés à `-4..=-1`, mais une saturation
     /// silencieuse est plus sûre qu'un `match` incomplet si ça changeait.
     pub(crate) fn from_index(index: usize) -> Self {
         match index {
@@ -560,19 +567,157 @@ impl HeaderField {
     }
 }
 
-/// Vrai si `text` porte au moins une ligne de champ d'en-tête marquée
-/// [`HEADER_LINE_MARKER`] (rectangle structuré copié ailleurs dans PlotYx,
-/// voir [`AppState::selected_cells_tsv`]) — sert à [`crate::app::
-/// grid_contents`] à décider, quand un seul champ d'en-tête est
-/// sélectionné, si le texte collé doit passer par [`AppState::paste_tsv`]
-/// (rectangle structuré, à répartir par champ) ou s'écrire tel quel dans le
-/// champ ciblé (texte externe/plat, comme avant l'ajout du rectangle
-/// mixte) — sans quoi un paste externe atterrirait en données à la ligne 0
-/// plutôt que dans le champ visé.
-pub(crate) fn pasted_text_has_header_lines(text: &str) -> bool {
-    text.split('\n')
+/// Ce qui a été copié dans la grille depuis le dernier [`AppState::
+/// copy_selection`]/[`AppState::copy_full_columns`], tel que
+/// [`AppState::paste`]/[`AppState::paste_absolute`] en ont besoin — voir la
+/// matrice de comportement en tête de ce module (section copier/coller).
+///
+/// Remplace l'ancien marqueur de contrôle (`HEADER_LINE_MARKER`, retiré) qui
+/// polluait le presse-papier système d'un caractère de contrôle collé tel
+/// quel dans un tableur externe : le presse-papier **système** ne reçoit
+/// plus qu'un texte TSV propre ([`grid_clipboard_to_text`]) ; cette
+/// structure-ci vit uniquement dans [`AppState::grid_clipboard`] et n'est
+/// rejouée au collage que si le texte reçu est identique à celui qu'on a
+/// nous-même poussé au presse-papier ([`AppState::clipboard_text`]) — sans
+/// quoi une copie externe entre-temps (un autre programme, ou même un
+/// Ctrl+C hors de PlotYx) rejouerait silencieusement une structure qui ne
+/// correspond plus à ce que porte réellement le presse-papier.
+#[derive(Debug, Clone, PartialEq)]
+enum GridClipboard {
+    /// Une seule case copiée (cellule de donnée ou champ d'en-tête) : son
+    /// texte seul, rien d'autre — permet par exemple de copier la formule
+    /// d'une colonne dans le champ Formule d'une autre.
+    Text(String),
+    /// Rectangle de plusieurs cases copié par Ctrl+C : se colle en se
+    /// décalant sur l'ancre (voir [`AppState::paste`]).
+    Relative(RelativeCopy),
+    /// Colonne(s) entières copiées par Ctrl+Maj+C (en-tête et corps) : se
+    /// colle à ses rangs d'origine (voir [`AppState::paste`]).
+    FullColumns(Vec<FullColumnCopy>),
+}
+
+/// Rectangle relatif copié par Ctrl+C ([`GridClipboard::Relative`]) : soit
+/// des champs d'en-tête, soit des lignes de données, jamais les deux — une
+/// sélection ne traverse plus la frontière en-tête/données (voir la doc de
+/// tête de [`crate::selection`]). `start` porte le rang d'origine de la
+/// première rangée copiée, pour qu'[`AppState::paste_absolute`] puisse
+/// rejouer chaque rangée sur son rang d'origine plutôt que décalée sur
+/// l'ancre.
+#[derive(Debug, Clone, PartialEq)]
+enum RelativeCopy {
+    HeaderFields {
+        /// Champ d'origine de la première rangée de `rows`.
+        start: HeaderField,
+        /// Une rangée par champ copié, dans l'ordre où ils sont empilés à
+        /// l'écran ; une valeur par colonne touchée.
+        rows: Vec<Vec<String>>,
+    },
+    DataRows {
+        /// Ligne d'origine de la première rangée de `rows`.
+        start: usize,
+        /// Une rangée par ligne copiée ; une valeur par colonne touchée.
+        rows: Vec<Vec<String>>,
+    },
+}
+
+/// Une colonne copiée en entier par Ctrl+Maj+C — voir
+/// [`GridClipboard::FullColumns`].
+#[derive(Debug, Clone, PartialEq)]
+struct FullColumnCopy {
+    long_name: String,
+    unit: String,
+    comment: String,
+    formula: Option<String>,
+    /// Corps de la colonne, ligne 0 en premier — la longueur propre de
+    /// cette colonne, indépendante des autres colonnes touchées par la même
+    /// copie (une feuille autorise des colonnes de longueurs différentes,
+    /// voir `demo_project` dans `tests/shell.rs`).
+    data: Vec<String>,
+}
+
+/// Texte propre (TSV, sans caractère de contrôle) pour le presse-papier
+/// **système** — ce que colle un tableur externe qui reçoit `clipboard`. Un
+/// [`GridClipboard::Text`] n'a pas de forme tabulaire, il se rend tel quel.
+fn grid_clipboard_to_text(clipboard: &GridClipboard) -> String {
+    match clipboard {
+        GridClipboard::Text(text) => text.clone(),
+        GridClipboard::Relative(RelativeCopy::HeaderFields { rows, .. })
+        | GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => rows_to_tsv(rows),
+        GridClipboard::FullColumns(columns) => {
+            let mut rows: Vec<Vec<String>> = vec![
+                columns.iter().map(|c| c.long_name.clone()).collect(),
+                columns.iter().map(|c| c.unit.clone()).collect(),
+                columns.iter().map(|c| c.comment.clone()).collect(),
+                columns
+                    .iter()
+                    .map(|c| c.formula.clone().unwrap_or_default())
+                    .collect(),
+            ];
+            let len = columns.iter().map(|c| c.data.len()).max().unwrap_or(0);
+            for row in 0..len {
+                rows.push(
+                    columns
+                        .iter()
+                        .map(|c| c.data.get(row).cloned().unwrap_or_default())
+                        .collect(),
+                );
+            }
+            rows_to_tsv(&rows)
+        }
+    }
+}
+
+/// Sérialise `rows` en TSV (`\t` entre colonnes, `\n` après chaque ligne,
+/// y compris la dernière) — partagé par [`grid_clipboard_to_text`].
+fn rows_to_tsv(rows: &[Vec<String>]) -> String {
+    let mut out = String::new();
+    for row in rows {
+        out.push_str(&row.join("\t"));
+        out.push('\n');
+    }
+    out
+}
+
+/// Reconstruit un [`GridClipboard`] depuis un texte externe (pas le nôtre :
+/// voir [`GridClipboard`]) — un tableur ou un éditeur de texte tiers n'a
+/// aucune notion de champ d'en-tête, donc jamais de
+/// [`GridClipboard::FullColumns`] ni de [`RelativeCopy::HeaderFields`] par
+/// ce chemin. Sans tabulation ni retour à la ligne, `text` devient un
+/// [`GridClipboard::Text`] (règle 1 de la matrice : s'écrit dans la case
+/// ancrée, quelle qu'elle soit) ; sinon un [`RelativeCopy::DataRows`] parti
+/// de la ligne 0 (règle 1 aussi : un rectangle tabulé ou multi-lignes est
+/// traité comme un rectangle relatif de corps).
+fn external_clipboard_from_text(text: &str) -> GridClipboard {
+    let mut lines: Vec<&str> = text
+        .split('\n')
         .map(|line| line.trim_end_matches('\r'))
-        .any(|line| line.starts_with(HEADER_LINE_MARKER))
+        .collect();
+    // La plupart des presse-papiers terminent par un `\n` : la ligne vide
+    // qui en résulte ne doit pas devenir une ligne collée de plus.
+    if matches!(lines.last(), Some(line) if line.is_empty()) {
+        lines.pop();
+    }
+    let single_line_without_tab =
+        lines.len() <= 1 && !lines.first().is_some_and(|l| l.contains('\t'));
+    if single_line_without_tab {
+        return GridClipboard::Text(lines.first().copied().unwrap_or("").to_string());
+    }
+    let rows: Vec<Vec<String>> = lines
+        .iter()
+        .map(|line| line.split('\t').map(str::to_string).collect())
+        .collect();
+    GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
+}
+
+/// Colonne visée par `cursor`, quelle que soit sa sorte — [`GridCursor`]
+/// n'expose pas cet accesseur hors de [`crate::selection`] ; ses appelants
+/// dans ce module (le collage, voir [`AppState::apply_paste`]) le
+/// reconstruisent par ce filtrage plutôt que par une méthode publique
+/// supplémentaire sur un type dont l'API reste par ailleurs minimale.
+fn grid_cursor_column(cursor: GridCursor) -> NodeId {
+    match cursor {
+        GridCursor::Data(column, _) | GridCursor::Header(column, _) => column,
+    }
 }
 
 /// Direction d'un déplacement clavier d'une cellule dans la grille (flèches
@@ -708,6 +853,19 @@ pub struct AppState {
     selection: std::collections::HashMap<NodeId, Selection>,
     /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
     header_editing: Option<HeaderEdit>,
+    /// Dernier presse-papier de grille structuré, posé par [`AppState::
+    /// copy_selection`]/[`AppState::copy_full_columns`] — état UI pur, comme
+    /// [`AppState::selection`] : jamais dans l'historique, jamais envoyé à
+    /// l'acteur. `None` tant que rien n'a encore été copié dans cette
+    /// session (ou après un collage qui l'a laissé intact : copier ne le
+    /// vide jamais, seul un nouveau `copy_selection`/`copy_full_columns` le
+    /// remplace).
+    grid_clipboard: Option<GridClipboard>,
+    /// Texte exact poussé au presse-papier **système** en même temps que
+    /// [`AppState::grid_clipboard`] — sert à [`AppState::paste`] à décider
+    /// si le texte reçu d'egui est notre propre copie (rejoue la structure)
+    /// ou un texte externe (voir [`external_clipboard_from_text`]).
+    clipboard_text: Option<String>,
     /// État de la fenêtre d'import, tant qu'elle est ouverte — voir
     /// [`ImportState`].
     import_state: Option<ImportState>,
@@ -763,6 +921,8 @@ impl AppState {
             note_editing: None,
             selection: std::collections::HashMap::new(),
             header_editing: None,
+            grid_clipboard: None,
+            clipboard_text: None,
             import_state: None,
             script_source: String::new(),
             script_output: None,
@@ -990,12 +1150,13 @@ impl AppState {
 
     /// Étend la sélection courante de `sheet` jusqu'à `(column, row)`, en
     /// gardant l'ancre déjà posée — glisser ou Maj-clic. Continue un
-    /// rectangle déjà commencé sur un champ d'en-tête (franchir la frontière
-    /// en-tête/données forme un seul rectangle mixte continu, voir la doc de
-    /// tête de [`crate::selection`]) ; pose une sélection d'une seule
-    /// cellule si `sheet` n'en avait pas encore, ou si la sélection en cours
-    /// est une plage de colonnes (rangée des lettres) — ce glisser-là reste
-    /// un geste distinct, voir [`AppState::extend_column_selection`].
+    /// rectangle déjà commencé sur un champ d'en-tête, mais s'arrête à la
+    /// frontière plutôt que de la traverser (voir [`Selection::
+    /// extend_row_to`] et la doc de tête de [`crate::selection`]) ; pose une
+    /// sélection d'une seule cellule si `sheet` n'en avait pas encore, ou si
+    /// la sélection en cours est une plage de colonnes (rangée des lettres)
+    /// — ce glisser-là reste un geste distinct, voir [`AppState::
+    /// extend_column_selection`].
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         match self.selection.get_mut(&sheet) {
             Some(selection) if !selection.is_columns() => {
@@ -1015,8 +1176,8 @@ impl AppState {
     /// lettres. Pose une sélection d'une seule colonne si `sheet` n'en avait
     /// pas encore, ou si la sélection en cours n'est pas déjà une plage de
     /// colonnes — un glisser qui franchit la frontière depuis les données ou
-    /// les champs d'en-tête vers la rangée des lettres ne produit jamais de
-    /// rectangle mixte, même politique qu'au clavier (voir [`AppState::
+    /// les champs d'en-tête vers la rangée des lettres repose toujours une
+    /// sélection simple, même politique qu'au clavier (voir [`AppState::
     /// move_selection`]).
     pub fn extend_column_selection(&mut self, sheet: NodeId, column: NodeId) {
         match self.selection.get_mut(&sheet) {
@@ -1036,8 +1197,8 @@ impl AppState {
     /// Étend la plage courante de `sheet` jusqu'au champ `(column, field)`,
     /// en gardant l'ancre déjà posée — glisser ou Maj-clic sur une des 4
     /// rangées de champs. Continue un rectangle déjà commencé dans les
-    /// données (franchir la frontière en-tête/données forme un seul
-    /// rectangle mixte continu, voir la doc de tête de [`crate::
+    /// données, mais s'arrête à la frontière plutôt que de la traverser
+    /// (voir [`Selection::extend_row_to`] et la doc de tête de [`crate::
     /// selection`]) ; pose une sélection d'un seul champ si `sheet` n'en
     /// avait pas encore, ou si la sélection en cours est une plage de
     /// colonnes (rangée des lettres) — ce glisser-là reste un geste
@@ -1310,67 +1471,149 @@ impl AppState {
         self.selection.get(&sheet)?.selected_header_field()
     }
 
-    /// Sérialise la sélection courante de `sheet` en TSV (`\t` entre
-    /// colonnes, `\n` entre lignes) — pour Ctrl+C/Ctrl+X. `None` si `sheet`
-    /// n'a pas de sélection ou si elle ne désigne plus de colonne valide.
-    /// Une valeur manquante s'y écrit comme une chaîne vide (jamais
+    /// Copie la sélection courante de `sheet` — Ctrl+C (et la première
+    /// moitié de Ctrl+X, voir [`crate::app`]). `None` si `sheet` n'a pas de
+    /// sélection ou si elle ne désigne plus de colonne valide (rien à
+    /// pousser au presse-papier).
+    ///
+    /// Pose à la fois [`AppState::grid_clipboard`] (rejoué par
+    /// [`AppState::paste`]/[`AppState::paste_absolute`]) et
+    /// [`AppState::clipboard_text`] (pour reconnaître cette copie au
+    /// collage), et rend le texte à pousser au presse-papier **système** —
+    /// voir la matrice de comportement en tête de ce module :
+    ///
+    /// - une seule case sélectionnée (cellule ou champ d'en-tête) →
+    ///   [`GridClipboard::Text`], son texte seul ;
+    /// - plusieurs cases, toutes dans l'en-tête ou toutes dans les données
+    ///   (jamais les deux, voir la doc de tête de [`crate::selection`]) →
+    ///   [`GridClipboard::Relative`] ;
+    /// - une plage de colonnes entières (rangée des lettres) →
+    ///   [`GridClipboard::Relative`] aussi, sur tout le corps de chaque
+    ///   colonne (pas d'en-tête : une plage de colonnes n'est pas un
+    ///   rectangle de champs).
+    ///
+    /// Une valeur manquante s'écrit comme une chaîne vide (jamais
     /// [`MISSING_TEXT_DISPLAY`], qui n'a de sens que pour l'écran, pas pour
-    /// un échange avec un tableur externe). Un rectangle mixte (voir la doc
-    /// de tête de [`crate::selection`]) rend une ligne par champ d'en-tête
-    /// touché (dans l'ordre où ils sont empilés à l'écran) **puis** une
-    /// ligne par ligne de données touchée — ex. Commentaire + Formule + 20
-    /// lignes de données sur 2 colonnes rend 22 lignes TSV. Une ligne de
-    /// champ d'en-tête est préfixée de [`HEADER_LINE_MARKER`] suivi du
-    /// chiffre de [`HeaderField::index`], pour que [`AppState::paste_tsv`]
-    /// puisse la distinguer sans ambiguïté d'une ligne de données (voir sa
-    /// doc) — une copie purement données n'en porte jamais, donc son format
-    /// reste identique à ce qu'il a toujours été.
-    pub fn selected_cells_tsv(&self, sheet: NodeId) -> Option<String> {
+    /// un échange avec un tableur externe).
+    pub fn copy_selection(&mut self, sheet: NodeId) -> Option<String> {
         let selection = self.selection.get(&sheet)?;
         let tree = &self.snapshot.tree;
         let columns = selection.columns(tree, sheet);
         if columns.is_empty() {
             return None;
         }
-        let (rank_start, rank_end) = match selection.full_rank_range() {
-            Some(range) => range,
-            None => {
-                let len = columns
-                    .iter()
-                    .filter_map(|&column| tree.node(column).and_then(Node::as_column))
-                    .map(Column::len)
-                    .max()
-                    .unwrap_or(0);
-                (0, len.saturating_sub(1) as isize)
-            }
-        };
-        let mut out = String::new();
-        for rank in rank_start..=rank_end {
-            let line: Vec<String> = columns
-                .iter()
-                .map(|&column| {
-                    if rank < 0 {
+        let clipboard = if let Some((column, field)) = selection.selected_header_field() {
+            GridClipboard::Text(self.header_field_display_text(column, field))
+        } else if let Some((column, row)) = selection.single_cell() {
+            GridClipboard::Text(cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, ""))
+        } else if let Some((lo, hi)) = selection.full_rank_range() {
+            if hi < 0 {
+                let start = HeaderField::from_index((lo + 4) as usize);
+                let rows = (lo..=hi)
+                    .map(|rank| {
                         let field = HeaderField::from_index((rank + 4) as usize);
-                        self.header_field_display_text(column, field)
-                    } else {
-                        cell_text_in(tree, column, rank as usize).replace(MISSING_TEXT_DISPLAY, "")
-                    }
+                        columns
+                            .iter()
+                            .map(|&column| self.header_field_display_text(column, field))
+                            .collect()
+                    })
+                    .collect();
+                GridClipboard::Relative(RelativeCopy::HeaderFields { start, rows })
+            } else {
+                let rows = (lo..=hi)
+                    .map(|rank| {
+                        columns
+                            .iter()
+                            .map(|&column| {
+                                cell_text_in(tree, column, rank as usize)
+                                    .replace(MISSING_TEXT_DISPLAY, "")
+                            })
+                            .collect()
+                    })
+                    .collect();
+                GridClipboard::Relative(RelativeCopy::DataRows {
+                    start: lo as usize,
+                    rows,
+                })
+            }
+        } else {
+            // Plage de colonnes entières (rangée des lettres) :
+            // `full_rank_range` n'a pas de sens, il n'y a pas de rang unique
+            // à couvrir — on copie tout le corps de chaque colonne touchée,
+            // à partir de sa propre longueur (des colonnes de longueurs
+            // différentes sont autorisées).
+            let len = columns
+                .iter()
+                .filter_map(|&column| tree.node(column).and_then(Node::as_column))
+                .map(Column::len)
+                .max()
+                .unwrap_or(0);
+            if len == 0 {
+                return None;
+            }
+            let rows = (0..len)
+                .map(|row| {
+                    columns
+                        .iter()
+                        .map(|&column| {
+                            cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, "")
+                        })
+                        .collect()
                 })
                 .collect();
-            if rank < 0 {
-                let field = HeaderField::from_index((rank + 4) as usize);
-                out.push(HEADER_LINE_MARKER);
-                out.push_str(&field.index().to_string());
-            }
-            out.push_str(&line.join("\t"));
-            out.push('\n');
+            GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
+        };
+        let text = grid_clipboard_to_text(&clipboard);
+        self.grid_clipboard = Some(clipboard);
+        self.clipboard_text = Some(text.clone());
+        Some(text)
+    }
+
+    /// Copie en entier (en-tête + corps) les colonnes touchées par la
+    /// sélection courante de `sheet` — Ctrl+Maj+C, quelle que soit la forme
+    /// de la sélection (une seule case, un rectangle, une plage de
+    /// colonnes) : c'est toujours la ou les colonnes qu'elle touche qui sont
+    /// promues en entier. `None` si `sheet` n'a pas de sélection ou si elle
+    /// ne désigne plus de colonne valide. Voir la matrice de comportement en
+    /// tête de ce module.
+    pub fn copy_full_columns(&mut self, sheet: NodeId) -> Option<String> {
+        let selection = self.selection.get(&sheet)?;
+        let tree = &self.snapshot.tree;
+        let columns = selection.columns(tree, sheet);
+        if columns.is_empty() {
+            return None;
         }
-        Some(out)
+        let full: Vec<FullColumnCopy> = columns
+            .iter()
+            .map(|&column| {
+                let meta = self.column_meta(column);
+                let len = tree
+                    .node(column)
+                    .and_then(Node::as_column)
+                    .map(Column::len)
+                    .unwrap_or(0);
+                let data = (0..len)
+                    .map(|row| cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, ""))
+                    .collect();
+                FullColumnCopy {
+                    long_name: meta.long_name,
+                    unit: meta.unit,
+                    comment: meta.comment,
+                    formula: meta.formula,
+                    data,
+                }
+            })
+            .collect();
+        let clipboard = GridClipboard::FullColumns(full);
+        let text = grid_clipboard_to_text(&clipboard);
+        self.grid_clipboard = Some(clipboard);
+        self.clipboard_text = Some(text.clone());
+        Some(text)
     }
 
     /// Texte affiché d'un champ d'en-tête (hors édition) — même détail que
     /// [`crate::app::header_field_widget`], factorisé ici pour être partagé
-    /// avec [`AppState::selected_cells_tsv`].
+    /// avec [`AppState::copy_selection`]/[`AppState::copy_full_columns`].
     pub(crate) fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
         let meta = self.column_meta(column);
         match field {
@@ -1716,7 +1959,8 @@ impl AppState {
             } => self.commit_cell_and_advance(column, row, text, sheet),
             Action::ClearSelectedCells { sheet } => self.clear_selected_cells(sheet),
             Action::DeleteSelectedCells { sheet } => self.delete_selected_cells(sheet),
-            Action::PasteTsv { sheet, text } => self.paste_tsv(sheet, text),
+            Action::Paste { sheet, text } => self.paste(sheet, text),
+            Action::PasteAbsolute { sheet } => self.paste_absolute(sheet),
             Action::SetColumnLongName { column, text } => {
                 self.set_column_meta_field(column, |meta| meta.long_name = text);
             }
@@ -2276,16 +2520,17 @@ impl AppState {
         }
     }
 
-    /// Vide le contenu des cellules et champs d'en-tête sélectionnés de
-    /// `sheet`, sans décaler ce qui suit (Retour arrière/Ctrl+X) — une seule
-    /// `Command::SetCells` par colonne touchée pour la portion données, un
+    /// Vide le contenu des cellules ou des champs d'en-tête sélectionnés de
+    /// `sheet` (jamais les deux à la fois, une sélection ne mélange plus les
+    /// deux — voir la doc de tête de [`crate::selection`]), sans décaler ce
+    /// qui suit (Retour arrière/Ctrl+X) — une seule `Command::SetCells` par
+    /// colonne touchée pour une sélection de données, un
     /// `Command::SetColumnMeta` (via [`AppState::set_column_meta_field`])
-    /// par champ d'en-tête touché pour la portion en-tête (voir
-    /// [`crate::selection::Selection::cleared_header_fields`] pour
-    /// comment un rectangle mixte, à cheval sur les deux, se décompose).
-    /// Tout est groupé en une seule entrée d'historique dès que plus d'une
-    /// opération est concernée (`History::begin_macro`/`end_macro`), pour
-    /// qu'annuler restaure tout d'un coup.
+    /// par champ touché pour une sélection d'en-tête (voir
+    /// [`crate::selection::Selection::cleared_header_fields`]). Tout est
+    /// groupé en une seule entrée d'historique dès que plus d'une opération
+    /// est concernée (`History::begin_macro`/`end_macro`), pour qu'annuler
+    /// restaure tout d'un coup.
     fn clear_selected_cells(&mut self, sheet: NodeId) {
         let Some(selection) = self.selection.get(&sheet) else {
             return;
@@ -2346,150 +2591,103 @@ impl AppState {
         self.execute(Command::DeleteCells { columns, at, count });
     }
 
-    /// Colle `text` (TSV) à partir de l'ancre de la sélection courante de
-    /// `sheet` : les colonnes cibles sont les `n` colonnes suivant l'ancre
-    /// dans l'ordre de la feuille (`n` = nombre de colonnes du TSV collé),
-    /// **pas** la sélection active — comme tout tableur de référence, coller
-    /// étire depuis l'ancre indépendamment de la taille de la sélection.
-    /// Une colonne formule refuse naturellement l'écriture
-    /// (`CoreError::FormulaColumnReadOnly`) : signalée par le statut, sans
-    /// bloquer les autres colonnes déjà collées.
-    ///
-    /// Chaque ligne est d'abord triée en champ d'en-tête ou en donnée, selon
-    /// qu'elle porte ou non [`HEADER_LINE_MARKER`] (voir [`AppState::
-    /// selected_cells_tsv`], qui le pose exactement sur les lignes qu'elle a
-    /// rendues depuis un champ d'en-tête — jamais sur une ligne de données,
-    /// qu'elle vienne de PlotYx ou d'un tableur externe). Les lignes de
-    /// champ vont, une par colonne cible, dans le champ qu'elles indiquent
-    /// (`Command::SetColumnMeta`, jamais `Command::SetCells` — les champs
-    /// d'en-tête ne sont pas des cellules) ; les lignes de données restantes
-    /// gardent leur ordre relatif et vont à partir de la ligne d'ancre,
-    /// exactement comme un collage purement données d'aujourd'hui — c'est ce
-    /// qui fait qu'un rectangle mixte copié puis collé sur une cellule de
-    /// données reproduit la même forme (champs, puis données) ancrée à la
-    /// cible, plutôt que de déverser les lignes de champ dans les données.
-    fn paste_tsv(&mut self, sheet: NodeId, text: String) {
+    /// Colle `text` à partir de l'ancre de la sélection courante de `sheet`
+    /// — Ctrl+V ([`Action::Paste`]). Rejoue [`AppState::grid_clipboard`] si
+    /// `text` est exactement ce qu'[`AppState::copy_selection`]/
+    /// [`AppState::copy_full_columns`] a poussé au presse-papier système en
+    /// dernier ([`AppState::clipboard_text`]) ; sinon `text` est un texte
+    /// externe, reconstruit en [`GridClipboard`] par
+    /// [`external_clipboard_from_text`]. Voir [`AppState::apply_paste`] pour
+    /// la matrice de comportement complète.
+    fn paste(&mut self, sheet: NodeId, text: String) {
         let Some(selection) = self.selection.get(&sheet) else {
             self.fail("Aucune cellule sélectionnée pour coller".to_string());
             return;
         };
-        let (anchor_column, anchor_row) = selection.anchor();
-        let mut lines: Vec<&str> = text
-            .split('\n')
-            .map(|line| line.trim_end_matches('\r'))
-            .collect();
-        // La plupart des presse-papiers terminent par un `\n` : la ligne
-        // vide qui en résulte ne doit pas devenir une ligne collée de plus.
-        if matches!(lines.last(), Some(line) if line.is_empty()) {
-            lines.pop();
+        let anchor = selection.anchor();
+        let clipboard = if self.clipboard_text.as_deref() == Some(text.as_str()) {
+            self.grid_clipboard.clone()
+        } else {
+            None
         }
-        if lines.is_empty() {
+        .unwrap_or_else(|| external_clipboard_from_text(&text));
+        self.apply_paste(sheet, anchor, &clipboard, false);
+    }
+
+    /// Colle en position absolue depuis [`AppState::grid_clipboard`] —
+    /// Ctrl+Maj+V ([`Action::PasteAbsolute`]), qui n'a jamais de texte à lui
+    /// (voir la doc de l'action). Sans effet si rien n'a encore été copié
+    /// dans cette session : un texte externe n'a pas de rang d'origine à
+    /// rejouer.
+    fn paste_absolute(&mut self, sheet: NodeId) {
+        let Some(selection) = self.selection.get(&sheet) else {
+            self.fail("Aucune cellule sélectionnée pour coller".to_string());
             return;
-        }
-        enum PastedLine<'a> {
-            Header(HeaderField, Vec<&'a str>),
-            Data(Vec<&'a str>),
-        }
-        let parsed: Vec<PastedLine> = lines
-            .into_iter()
-            .map(|line| match line.strip_prefix(HEADER_LINE_MARKER) {
-                Some(rest) => {
-                    let mut chars = rest.chars();
-                    let digit = chars.next().and_then(|c| c.to_digit(10)).unwrap_or(0);
-                    let rest = chars.as_str();
-                    PastedLine::Header(
-                        HeaderField::from_index(digit as usize),
-                        rest.split('\t').collect(),
-                    )
-                }
-                None => PastedLine::Data(line.split('\t').collect()),
-            })
-            .collect();
-        let column_count = parsed
-            .iter()
-            .map(|line| match line {
-                PastedLine::Header(_, cells) | PastedLine::Data(cells) => cells.len(),
-            })
-            .max()
-            .unwrap_or(0);
-        let order: Vec<NodeId> = self
-            .visible_columns(sheet)
-            .into_iter()
-            .map(|(id, _, _)| id)
-            .collect();
+        };
+        let anchor = selection.anchor();
+        let Some(clipboard) = self.grid_clipboard.clone() else {
+            self.notice("Rien à coller en absolu : copiez d'abord depuis la grille".to_string());
+            return;
+        };
+        self.apply_paste(sheet, anchor, &clipboard, true);
+    }
+
+    /// Cœur du collage, partagé par [`AppState::paste`] (`absolute: false`)
+    /// et [`AppState::paste_absolute`] (`absolute: true`) — la matrice de
+    /// comportement complète (section copier/coller en tête de ce module) :
+    ///
+    /// - [`GridClipboard::Text`] s'écrit dans la case ancrée, quelle qu'elle
+    ///   soit (champ d'en-tête ou cellule de donnée) — `absolute` n'a pas de
+    ///   sens pour une case unique, ignoré ;
+    /// - [`GridClipboard::Relative`] se décale sur l'ancre si elle est de la
+    ///   même sorte (champs sur un champ, données sur une cellule) ; rien ne
+    ///   se colle si l'ancre est de l'autre sorte ; en absolu, chaque rangée
+    ///   retombe sur son rang d'origine plutôt que sur l'ancre ;
+    /// - [`GridClipboard::FullColumns`] colle l'en-tête à partir du champ
+    ///   ancré (rien au-dessus) et le corps sans décalage si l'ancre est un
+    ///   champ ; jette l'en-tête et décale le corps sur l'ancre si elle est
+    ///   une cellule ; en absolu, tout retombe sur son rang d'origine quelle
+    ///   que soit l'ancre.
+    ///
+    /// Une colonne formule refuse naturellement l'écriture de données
+    /// (`CoreError::FormulaColumnReadOnly`) : signalée par le statut, sans
+    /// bloquer les autres colonnes déjà collées. Un collage qui touche
+    /// plusieurs colonnes ou plusieurs champs reste groupé dans une seule
+    /// entrée d'historique.
+    fn apply_paste(
+        &mut self,
+        sheet: NodeId,
+        anchor: GridCursor,
+        clipboard: &GridClipboard,
+        absolute: bool,
+    ) {
+        let order = self.column_order(sheet);
+        let anchor_column = grid_cursor_column(anchor);
         let Some(anchor_index) = order.iter().position(|&id| id == anchor_column) else {
             self.fail(format!(
                 "{anchor_column} n'est pas une colonne de cette feuille"
             ));
             return;
         };
-        let targets: Vec<NodeId> = order
-            .iter()
-            .copied()
-            .skip(anchor_index)
-            .take(column_count)
-            .collect();
-        if targets.is_empty() {
-            return;
+        let order_from_anchor = &order[anchor_index..];
+        match clipboard {
+            GridClipboard::Text(text) => self.paste_single_value(anchor, text),
+            GridClipboard::Relative(relative) => {
+                self.paste_relative(anchor, order_from_anchor, relative, absolute)
+            }
+            GridClipboard::FullColumns(columns) => {
+                self.paste_full_columns(anchor, order_from_anchor, columns, absolute)
+            }
         }
-        let header_lines: Vec<(HeaderField, &Vec<&str>)> = parsed
-            .iter()
-            .filter_map(|line| match line {
-                PastedLine::Header(field, cells) => Some((*field, cells)),
-                PastedLine::Data(_) => None,
-            })
-            .collect();
-        // Quand l'ancre elle-même est un champ d'en-tête (un seul champ
-        // sélectionné, voir `Selection::selected_header_field`), les lignes
-        // de champ collées se décalent pour que la première (le champ le
-        // plus haut du rectangle copié) atterrisse sur l'ancre — comme un
-        // tableur de référence, qui étire toujours depuis l'ancre plutôt
-        // que de retomber sur le champ d'origine. Une ligne qui déborderait
-        // au-delà de `Formula` (rang 3) est ignorée plutôt que d'aller se
-        // perdre en données. Quand l'ancre est une cellule de donnée, en
-        // revanche, il n'y a pas de rang à décaler : chaque champ retombe
-        // sur lui-même (`shift == 0`), doctrine « réapplique les champs »
-        // déjà en place avant ce correctif.
-        let shift = self
-            .selected_header_field(sheet)
-            .and_then(|(_, anchor_field)| {
-                header_lines
-                    .iter()
-                    .map(|(field, _)| field.index() as isize)
-                    .min()
-                    .map(|top| anchor_field.index() as isize - top)
-            })
-            .unwrap_or(0);
-        let header_writes: Vec<(HeaderField, &Vec<&str>)> = header_lines
-            .iter()
-            .filter_map(|&(field, cells)| {
-                let shifted = field.index() as isize + shift;
-                (0..=3)
-                    .contains(&shifted)
-                    .then(|| (HeaderField::from_index(shifted as usize), cells))
-            })
-            .collect();
-        let data_rows: Vec<Vec<&str>> = parsed
-            .iter()
-            .filter_map(|line| match line {
-                PastedLine::Data(cells) => Some(cells.clone()),
-                PastedLine::Header(..) => None,
-            })
-            .collect();
-        let header_ops = header_writes.len() * targets.len();
-        let data_ops = if data_rows.is_empty() {
-            0
-        } else {
-            targets.len()
-        };
-        let grouped = header_ops + data_ops > 1;
-        if grouped && self.handle.begin_macro("Coller").is_err() {
-            self.fail("Impossible de grouper le collage".to_string());
-            return;
-        }
-        for &(field, cells) in &header_writes {
-            for (index, &column) in targets.iter().enumerate() {
-                let text = cells.get(index).copied().unwrap_or("").to_string();
+    }
+
+    /// [`GridClipboard::Text`] : écrit `text` dans la case ancrée, champ
+    /// d'en-tête ou cellule de donnée selon `anchor` — une seule commande,
+    /// jamais groupée (un seul champ/une seule cellule touché).
+    fn paste_single_value(&mut self, anchor: GridCursor, text: &str) {
+        match anchor {
+            GridCursor::Header(column, field) => {
+                let text = text.to_string();
                 self.set_column_meta_field(column, move |meta| match field {
                     HeaderField::LongName => meta.long_name = text,
                     HeaderField::Unit => meta.unit = text,
@@ -2499,9 +2697,7 @@ impl AppState {
                     }
                 });
             }
-        }
-        if !data_rows.is_empty() {
-            for (index, &column) in targets.iter().enumerate() {
+            GridCursor::Data(column, row) => {
                 let Some(kind) = self
                     .snapshot
                     .tree
@@ -2509,16 +2705,211 @@ impl AppState {
                     .and_then(Node::as_column)
                     .map(Column::column_type)
                 else {
-                    continue;
+                    return;
                 };
-                let values = value_block_from_tsv_column(kind, &data_rows, index);
+                let values = value_block_from_tsv_column(kind, &[vec![text.to_string()]], 0);
                 self.execute(Command::SetCells {
                     column,
-                    start: anchor_row,
+                    start: row,
                     values,
                     expected_version: None,
                 });
             }
+        }
+    }
+
+    /// [`GridClipboard::Relative`] : voir [`AppState::apply_paste`] pour la
+    /// règle. Rien ne se colle si `anchor` n'est pas de la même sorte que
+    /// `relative` (champs contre cellule de donnée, ou l'inverse).
+    fn paste_relative(
+        &mut self,
+        anchor: GridCursor,
+        order_from_anchor: &[NodeId],
+        relative: &RelativeCopy,
+        absolute: bool,
+    ) {
+        match (anchor, relative) {
+            (GridCursor::Header(_, anchor_field), RelativeCopy::HeaderFields { start, rows }) => {
+                let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+                let targets: Vec<NodeId> = order_from_anchor
+                    .iter()
+                    .copied()
+                    .take(column_count)
+                    .collect();
+                if targets.is_empty() {
+                    return;
+                }
+                let shift = if absolute {
+                    0
+                } else {
+                    anchor_field.index() as isize - start.index() as isize
+                };
+                let writes: Vec<(HeaderField, &Vec<String>)> = rows
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, cells)| {
+                        let origin = start.index() as isize + i as isize;
+                        let target = origin + shift;
+                        (0..=3)
+                            .contains(&target)
+                            .then(|| (HeaderField::from_index(target as usize), cells))
+                    })
+                    .collect();
+                let grouped = writes.len() * targets.len() > 1;
+                if grouped && self.handle.begin_macro("Coller").is_err() {
+                    self.fail("Impossible de grouper le collage".to_string());
+                    return;
+                }
+                for &(field, cells) in &writes {
+                    for (index, &column) in targets.iter().enumerate() {
+                        let text = cells.get(index).cloned().unwrap_or_default();
+                        self.set_column_meta_field(column, move |meta| match field {
+                            HeaderField::LongName => meta.long_name = text,
+                            HeaderField::Unit => meta.unit = text,
+                            HeaderField::Comment => meta.comment = text,
+                            HeaderField::Formula => {
+                                meta.formula = (!text.trim().is_empty()).then_some(text)
+                            }
+                        });
+                    }
+                }
+                if grouped {
+                    let _ = self.handle.end_macro();
+                }
+            }
+            (GridCursor::Data(_, anchor_row), RelativeCopy::DataRows { start, rows }) => {
+                let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+                let targets: Vec<NodeId> = order_from_anchor
+                    .iter()
+                    .copied()
+                    .take(column_count)
+                    .collect();
+                if targets.is_empty() || rows.is_empty() {
+                    return;
+                }
+                let paste_row = if absolute { *start } else { anchor_row };
+                let grouped = targets.len() > 1;
+                if grouped && self.handle.begin_macro("Coller").is_err() {
+                    self.fail("Impossible de grouper le collage".to_string());
+                    return;
+                }
+                for (index, &column) in targets.iter().enumerate() {
+                    let Some(kind) = self
+                        .snapshot
+                        .tree
+                        .node(column)
+                        .and_then(Node::as_column)
+                        .map(Column::column_type)
+                    else {
+                        continue;
+                    };
+                    let values = value_block_from_tsv_column(kind, rows, index);
+                    self.execute(Command::SetCells {
+                        column,
+                        start: paste_row,
+                        values,
+                        expected_version: None,
+                    });
+                }
+                if grouped {
+                    let _ = self.handle.end_macro();
+                }
+            }
+            // Champs copiés + ancre sur une cellule de donnée, ou lignes de
+            // données copiées + ancre sur un champ d'en-tête : sortes
+            // différentes, rien ne se colle (voir la matrice de
+            // comportement en tête de ce module).
+            _ => {}
+        }
+    }
+
+    /// [`GridClipboard::FullColumns`] : voir [`AppState::apply_paste`] pour
+    /// la règle — dépend de `anchor` (champ ou cellule) et de `absolute`.
+    fn paste_full_columns(
+        &mut self,
+        anchor: GridCursor,
+        order_from_anchor: &[NodeId],
+        columns: &[FullColumnCopy],
+        absolute: bool,
+    ) {
+        let targets: Vec<NodeId> = order_from_anchor
+            .iter()
+            .copied()
+            .take(columns.len())
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        // Champ de départ de l'en-tête à écrire : tous en absolu, à partir
+        // du champ ancré (rien au-dessus) en relatif si l'ancre est un
+        // champ, aucun (en-tête jeté) en relatif si l'ancre est une cellule.
+        let header_from: Option<usize> = if absolute {
+            Some(0)
+        } else {
+            match anchor {
+                GridCursor::Header(_, field) => Some(field.index()),
+                GridCursor::Data(..) => None,
+            }
+        };
+        // Ligne de départ du corps : jamais décalé, sauf en relatif ancré
+        // sur une cellule de donnée (décalage sur l'ancre).
+        let body_start = match (absolute, anchor) {
+            (false, GridCursor::Data(_, row)) => row,
+            _ => 0,
+        };
+        let header_ops = header_from.map(|from| 4 - from).unwrap_or(0) * targets.len();
+        let body_ops = targets
+            .iter()
+            .zip(columns)
+            .filter(|(_, c)| !c.data.is_empty())
+            .count();
+        let grouped = header_ops + body_ops > 1;
+        if grouped && self.handle.begin_macro("Coller").is_err() {
+            self.fail("Impossible de grouper le collage".to_string());
+            return;
+        }
+        if let Some(from) = header_from {
+            for field_index in from..=3 {
+                let field = HeaderField::from_index(field_index);
+                for (&column, source) in targets.iter().zip(columns) {
+                    let value = match field {
+                        HeaderField::LongName => source.long_name.clone(),
+                        HeaderField::Unit => source.unit.clone(),
+                        HeaderField::Comment => source.comment.clone(),
+                        HeaderField::Formula => source.formula.clone().unwrap_or_default(),
+                    };
+                    self.set_column_meta_field(column, move |meta| match field {
+                        HeaderField::LongName => meta.long_name = value,
+                        HeaderField::Unit => meta.unit = value,
+                        HeaderField::Comment => meta.comment = value,
+                        HeaderField::Formula => {
+                            meta.formula = (!value.trim().is_empty()).then_some(value)
+                        }
+                    });
+                }
+            }
+        }
+        for (&column, source) in targets.iter().zip(columns) {
+            if source.data.is_empty() {
+                continue;
+            }
+            let Some(kind) = self
+                .snapshot
+                .tree
+                .node(column)
+                .and_then(Node::as_column)
+                .map(Column::column_type)
+            else {
+                continue;
+            };
+            let rows: Vec<Vec<String>> = source.data.iter().map(|v| vec![v.clone()]).collect();
+            let values = value_block_from_tsv_column(kind, &rows, 0);
+            self.execute(Command::SetCells {
+                column,
+                start: body_start,
+                values,
+                expected_version: None,
+            });
         }
         if grouped {
             let _ = self.handle.end_macro();
@@ -2869,7 +3260,10 @@ mod tests {
     //! `tests/shell.rs` et par le banc `plotyx-robustesse` (batterie 15), qui
     //! ont besoin d'une session réelle.
 
-    use super::{format_f64_for_display, pasted_text_has_header_lines, MISSING_TEXT_DISPLAY};
+    use super::{
+        external_clipboard_from_text, format_f64_for_display, grid_clipboard_to_text,
+        GridClipboard, HeaderField, RelativeCopy, MISSING_TEXT_DISPLAY,
+    };
 
     /// A9 (option 2) — la convention d'affichage à elle seule : une valeur
     /// absente ne doit jamais s'afficher comme la chaîne vide qui représente
@@ -2946,22 +3340,58 @@ mod tests {
         assert_eq!(format_f64_for_display(1.0), "1");
     }
 
-    /// Un rectangle copié depuis l'en-tête (voir `AppState::
-    /// selected_cells_tsv`) porte le marqueur, quelle que soit la ligne où
-    /// il apparaît.
+    /// [`external_clipboard_from_text`] — règle 1 de la matrice de
+    /// comportement : un texte externe sans tabulation ni retour à la ligne
+    /// devient un [`GridClipboard::Text`], quel que soit son contenu (y
+    /// compris vide).
     #[test]
-    fn pasted_text_has_header_lines_detecte_le_marqueur() {
-        assert!(pasted_text_has_header_lines(
-            "\u{1}0oups\t0oups...\n\u{1}1z\tz\n\u{1}2C\tC\n"
-        ));
-        assert!(pasted_text_has_header_lines("0\t10\n\u{1}1z\tz\n"));
+    fn external_clipboard_from_text_texte_simple_devient_text() {
+        assert_eq!(
+            external_clipboard_from_text("Capteur 1"),
+            GridClipboard::Text("Capteur 1".to_string())
+        );
+        assert_eq!(
+            external_clipboard_from_text(""),
+            GridClipboard::Text(String::new())
+        );
     }
 
-    /// Texte externe ou champ unique copié via `header_field_text` : aucune
-    /// ligne n'est balisée.
+    /// Un texte externe tabulé (même sans retour à la ligne) ou multi-lignes
+    /// devient un rectangle relatif de données, parti de la ligne 0 — jamais
+    /// de champ d'en-tête depuis un texte externe.
     #[test]
-    fn pasted_text_has_header_lines_texte_brut() {
-        assert!(!pasted_text_has_header_lines("Capteur 1"));
-        assert!(!pasted_text_has_header_lines("0\t10\n0.5\t\n"));
+    fn external_clipboard_from_text_texte_tabule_ou_multiligne_devient_des_donnees() {
+        assert_eq!(
+            external_clipboard_from_text("0\t10\n0.5\t\n"),
+            GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: vec![
+                    vec!["0".to_string(), "10".to_string()],
+                    vec!["0.5".to_string(), String::new()],
+                ],
+            })
+        );
+        assert_eq!(
+            external_clipboard_from_text("a\tb"),
+            GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: vec![vec!["a".to_string(), "b".to_string()]],
+            })
+        );
+    }
+
+    /// [`grid_clipboard_to_text`] — le texte poussé au presse-papier système
+    /// ne porte plus jamais de caractère de contrôle (contrairement à
+    /// l'ancien `HEADER_LINE_MARKER`) : une copie de champs d'en-tête se lit
+    /// comme un TSV ordinaire.
+    #[test]
+    fn grid_clipboard_to_text_ne_contient_aucun_caractere_de_controle() {
+        let clipboard = GridClipboard::Relative(RelativeCopy::HeaderFields {
+            start: HeaderField::Unit,
+            rows: vec![vec!["nm".to_string()], vec!["un commentaire".to_string()]],
+        });
+        let text = grid_clipboard_to_text(&clipboard);
+        assert_eq!(text, "nm\nun commentaire\n");
+        assert!(text.chars().all(|c| !c.is_control() || c == '\n'));
     }
 }
