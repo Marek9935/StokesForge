@@ -1495,6 +1495,174 @@ fn paste_absolute_of_full_columns_applies_everything_at_its_origin_regardless_of
     );
 }
 
+/// Un rectangle de champs décalé sur l'ancre peut déborder après Formule,
+/// le dernier des 4 champs : ce qui dépasse est **jeté** silencieusement,
+/// jamais replié sur les données ni écrasé sur Formule. Chemin de perte de
+/// données discrète, donc verrouillé ici.
+#[test]
+fn pasting_relative_header_fields_drops_what_overflows_past_the_formula_field() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "a");
+    set_header_field(&mut state, temps, HeaderField::Unit, "b");
+    set_header_field(&mut state, temps, HeaderField::Comment, "c");
+    set_header_field(&mut state, signal, HeaderField::LongName, "intact");
+    set_header_field(&mut state, signal, HeaderField::Unit, "intact aussi");
+
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+
+    // Ancré sur Commentaire : « a » y tombe, « b » sur Formule, « c »
+    // déborderait après Formule.
+    state.select_header_field(sheet1, signal, HeaderField::Comment);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+
+    let meta = state.column_meta(signal);
+    assert_eq!(meta.comment, "a");
+    assert_eq!(meta.formula, Some("b".to_string()));
+    assert_eq!(
+        meta.long_name, "intact",
+        "les champs au-dessus de l'ancre ne sont pas touchés"
+    );
+    assert_eq!(meta.unit, "intact aussi");
+    // « c » n'a atterri nulle part : ni dans un champ, ni dans la colonne
+    // voisine (le rectangle copié ne fait qu'une colonne de large).
+    assert!(
+        [&meta.long_name, &meta.unit, &meta.comment]
+            .iter()
+            .all(|value| *value != "c")
+            && meta.formula.as_deref() != Some("c"),
+        "« c » débordait après Formule : il est jeté, pas replié ailleurs"
+    );
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(
+        state.column_meta(note).long_name,
+        "",
+        "la colonne voisine n'est pas touchée non plus"
+    );
+}
+
+/// Un collage qui touche plusieurs colonnes et plusieurs champs ne compte
+/// que pour **une** entrée d'historique : une seule annulation doit tout
+/// remettre en place, pas une par champ écrit.
+#[test]
+fn pasting_full_columns_counts_as_a_single_history_entry() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+
+    // Deux colonnes copiées en entier (en-tête + corps).
+    state.select_cell(sheet1, temps, 0);
+    state.extend_selection(sheet1, signal, 0);
+    let text = state.copy_full_columns(sheet1).expect("sélection non vide");
+
+    let signal_before = state.column_meta(signal).clone();
+    let note_before = state.column_meta(note).clone();
+    let signal_data_before = cell(&state, signal, 0);
+    let note_data_before = cell(&state, note, 0);
+
+    // Collé à partir de `Signal` : déborde sur `Note`, et écrit les 4
+    // champs de chacune — largement plus d'une opération.
+    state.select_header_field(sheet1, signal, HeaderField::LongName);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    // `Signal` reçoit les champs de `Temps`, et le débordement donne à
+    // `Note` ceux de `Signal` : plusieurs colonnes, plusieurs champs, plus
+    // les deux corps — bien plus d'une opération.
+    assert_eq!(state.column_meta(signal).long_name, "T");
+    assert_eq!(state.column_meta(signal).unit, "s");
+    assert_eq!(cell(&state, signal, 0), Cell::Float(0.0));
+
+    state.dispatch(Action::Undo);
+
+    assert_eq!(
+        state.column_meta(signal).long_name,
+        signal_before.long_name,
+        "une seule annulation doit défaire tout le collage"
+    );
+    assert_eq!(state.column_meta(signal).unit, signal_before.unit);
+    assert_eq!(state.column_meta(note).long_name, note_before.long_name);
+    assert_eq!(cell(&state, signal, 0), signal_data_before);
+    assert_eq!(cell(&state, note, 0), note_data_before);
+}
+
+/// Ctrl+Maj+V rejoue le presse-papier **interne** : sans copie préalable
+/// dans cette session, il n'a aucun rang d'origine à rejouer. C'est un
+/// avertissement, pas une erreur ni une panique.
+#[test]
+fn paste_absolute_without_a_prior_copy_is_a_notice_not_an_error() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let before = state.snapshot().revision;
+
+    state.select_cell(sheet1, temps, 0);
+    state.dispatch(Action::PasteAbsolute { sheet: sheet1 });
+
+    let status = state.status().expect("un message");
+    assert!(
+        !status.is_error,
+        "« rien à coller » est un état normal, pas une erreur"
+    );
+    assert_eq!(state.snapshot().revision, before, "le modèle n'a pas bougé");
+}
+
+/// Régression : Suppr vide un champ d'en-tête, comme Retour arrière. Un
+/// champ n'est pas répété par ligne, donc « vider et faire remonter » n'y a
+/// pas d'autre sens que « vider » — et la touche ne doit pas rester sans
+/// effet dans l'en-tête.
+#[test]
+fn delete_on_a_header_field_selection_clears_it_like_backspace() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+
+    // Un seul champ sélectionné.
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+    assert_eq!(state.column_meta(temps).long_name, "");
+    assert_eq!(
+        state.column_meta(temps).unit,
+        "s",
+        "seul le champ sélectionné est vidé"
+    );
+    assert_eq!(
+        cell(&state, temps, 0),
+        Cell::Float(0.0),
+        "aucune donnée n'a remonté"
+    );
+
+    // Plage de champs : même règle.
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+    assert_eq!(state.column_meta(temps).long_name, "");
+    assert_eq!(state.column_meta(temps).unit, "");
+    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+}
+
 // -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --
 //
 // Ce qui exige un interpréteur (exécution, sortie, annulation d'une écriture

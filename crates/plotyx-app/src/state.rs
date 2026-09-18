@@ -2580,12 +2580,20 @@ impl AppState {
     /// remonter les cellules suivantes de chaque colonne touchée,
     /// indépendamment (touche Suppr) — une seule `Command::DeleteCells`,
     /// déjà multi-colonnes.
+    ///
+    /// Sur une sélection entièrement dans l'en-tête, il n'y a rien à faire
+    /// remonter (un champ n'est pas répété par ligne, voir
+    /// [`crate::selection::Selection::delete_at_count`]) : Suppr y vide les
+    /// champs, comme Retour arrière. Sans ça la touche resterait sans effet
+    /// dans l'en-tête, alors qu'elle y vidait le champ avant l'unification
+    /// du bloc clavier.
     fn delete_selected_cells(&mut self, sheet: NodeId) {
         let Some(selection) = self.selection.get(&sheet) else {
             return;
         };
         let (columns, at, count) = selection.delete_at_count(&self.snapshot.tree, sheet);
         if columns.is_empty() || count == 0 {
+            self.clear_selected_cells(sheet);
             return;
         }
         self.execute(Command::DeleteCells { columns, at, count });
