@@ -315,10 +315,11 @@ use plotyx_session::Snapshot;
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
-    Action, AppState, CellEdit, GridMenu, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode,
-    WindowKind,
+    cell_text_in, drop_payload_action, node_title_in, note_text_in, row_count_in,
+    visible_columns_in, worksheets_of_in, Action, AppState, CellEdit, ColumnDragPayload, GridMenu,
+    HeaderField, MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
 };
+use crate::theme;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
@@ -448,6 +449,49 @@ const SCRIPT_PANEL_HEIGHT: f32 = 220.0;
 /// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
 /// séparée quand il est détaché.
 const PROJECT_MANAGER_WIDTH: f32 = 260.0;
+/// Largeur, en points, de la zone de prise du glisser-déposer de colonnes
+/// vers un graphe — une bande le long du bord extérieur gauche ou droit de
+/// la grille (voir [`grid_grip_side`], et [`grid_contents`] pour le geste
+/// complet).
+const COLUMN_GRIP_WIDTH: f32 = 10.0;
+
+/// Bord de la grille sur lequel se trouve `pointer`, si `pointer` est à
+/// `margin` points ou moins de son bord gauche ou droit et dans ses bornes
+/// verticales — la zone de prise du glisser-déposer de colonnes vers un
+/// graphe.
+///
+/// Fonction pure sur des coordonnées brutes (`(gauche, haut, droite, bas)`,
+/// `(x, y)`), pas sur `egui::Rect`/`egui::Pos2` : testable dans
+/// `tests/shell.rs` sans dépendre d'une fenêtre ni d'une passe de rendu —
+/// même esprit que le reste de ce module, où la décision est toujours
+/// séparée du code de peinture qui l'utilise ([`grid_contents`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GripSide {
+    /// Bord gauche de la grille.
+    Left,
+    /// Bord droit de la grille.
+    Right,
+}
+
+/// Voir [`GripSide`].
+pub fn grid_grip_side(
+    grid: (f32, f32, f32, f32),
+    pointer: (f32, f32),
+    margin: f32,
+) -> Option<GripSide> {
+    let (left, top, right, bottom) = grid;
+    let (x, y) = pointer;
+    if y < top || y > bottom {
+        return None;
+    }
+    if x >= left && x <= left + margin {
+        Some(GripSide::Left)
+    } else if x <= right && x >= right - margin {
+        Some(GripSide::Right)
+    } else {
+        None
+    }
+}
 
 /// Un onglet du plan de disposition.
 ///
@@ -1585,9 +1629,54 @@ fn tab_contents(
 ) {
     match tab {
         Tab::Book(id) => book_contents(ui, state, actions, id),
-        Tab::Graph(id) => graph_contents(ui, state, graph_views, id),
+        Tab::Graph(id) => graph_drop_target(ui, state, actions, graph_views, id),
         Tab::Matrix(id) => matrix_contents(ui, state, id),
         Tab::Note(id) => note_contents(ui, state, actions, id),
+    }
+}
+
+/// Enrobe [`graph_contents`] d'une zone de dépôt pour le glisser d'une
+/// sélection de colonnes de classeur — pendant, côté cible, de la zone de
+/// prise posée par [`grid_contents`] en bord de grille. Appelée par
+/// [`tab_contents`], donc identiquement pour un onglet docké et pour un
+/// onglet détaché ([`PlotyxApp::show_detached_tabs`]) : c'est le seul point
+/// d'entrée que les deux utilisent, voir la doc de tête de ce dernier — pas
+/// de code de dépôt séparé à maintenir pour le cas détaché.
+///
+/// Un survol avec une [`ColumnDragPayload`] active dessine un contour sobre
+/// autour du graphe (teinte de sélection de `theme`, pas de palette
+/// inventée) ; un relâchement au-dessus pousse
+/// [`crate::state::drop_payload_action`] dans `actions`, converti en
+/// [`Action::AddSeriesToGraph`]. Relâcher ailleurs qu'au-dessus d'un graphe
+/// ne pousse rien : `dnd_release_payload` ne répond que si le pointeur est
+/// contenu dans ce rectangle au moment du relâchement.
+fn graph_drop_target(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+    graph_views: &mut HashMap<NodeId, GraphView>,
+    graph_id: NodeId,
+) {
+    let tab_rect = ui.max_rect();
+    // `Sense::hover()` seulement : cette zone ne doit *rien* voler au
+    // rendu du graphe qui se peint par-dessus juste après (navigation R7 —
+    // molette, glissé, rectangle élastique — via son propre `ui.interact`
+    // dans `GraphView::paint`), seulement lire si un glisser de colonnes
+    // est en cours au-dessus d'elle.
+    let drop_id = ui.id().with(("graph_drop_zone", graph_id));
+    let zone = ui.interact(tab_rect, drop_id, egui::Sense::hover());
+    let hovering = zone.dnd_hover_payload::<ColumnDragPayload>().is_some();
+    if let Some(payload) = zone.dnd_release_payload::<ColumnDragPayload>() {
+        actions.push(drop_payload_action(&payload, graph_id));
+    }
+    graph_contents(ui, state, graph_views, graph_id);
+    if hovering {
+        ui.painter().rect_stroke(
+            tab_rect,
+            4.0,
+            egui::Stroke::new(2.5, theme::header_letter_row_selected_fill()),
+            egui::StrokeKind::Inside,
+        );
     }
 }
 
@@ -3053,6 +3142,10 @@ fn grid_contents(
     // texte). `item_spacing.x` reste intact : il porte l'espacement entre
     // colonnes, dont dépendent les poignées de redimensionnement.
     ui.spacing_mut().item_spacing.y = 0.0;
+    // Capturé *avant* la table, dont `.auto_shrink([false, false])` occupe
+    // justement tout cet espace disponible : sert de référence à la zone de
+    // prise du glisser-déposer de colonnes plus bas ([`grid_grip_side`]).
+    let grid_rect = ui.available_rect_before_wrap();
     TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
@@ -3094,6 +3187,65 @@ fn grid_contents(
                 }
             });
         });
+
+    // Glisser une sélection de colonnes vers un graphe ouvert (chantier
+    // « glisser une sélection vers un graphe », suite du menu contextuel
+    // « Tracer » — voir `docs/application.md`). La zone de prise est une
+    // mince bande sur le bord *extérieur* gauche ou droit de la grille
+    // entière (pas de chaque colonne) : `left_rect`/`right_rect` ci-dessous
+    // sont volontairement confinés à `COLUMN_GRIP_WIDTH` plutôt que de
+    // couvrir `grid_rect` en entier — un `ui.interact` sur tout `grid_rect`
+    // shadowerait le glisser d'extension de sélection de `cell_widget`
+    // partout dans la grille, pas seulement sur ses bords, ce que la tâche
+    // interdit explicitement. N'apparaît que si `sheet` a déjà une sélection
+    // couvrant au moins une colonne ([`AppState::column_drag_payload`]) :
+    // sans ça, pas de zone de prise à afficher ni de payload à glisser.
+    if let Some(payload) = state.column_drag_payload(sheet) {
+        let margin = COLUMN_GRIP_WIDTH;
+        let left_rect = egui::Rect::from_min_max(
+            grid_rect.left_top(),
+            egui::pos2(grid_rect.left() + margin, grid_rect.bottom()),
+        );
+        let right_rect = egui::Rect::from_min_max(
+            egui::pos2(grid_rect.right() - margin, grid_rect.top()),
+            grid_rect.right_bottom(),
+        );
+        let left_id = ui.id().with(("column_grip_left", sheet));
+        let right_id = ui.id().with(("column_grip_right", sheet));
+        let left_response = ui.interact(left_rect, left_id, egui::Sense::drag());
+        let right_response = ui.interact(right_rect, right_id, egui::Sense::drag());
+        // `grid_grip_side` reprend la même géométrie que `left_rect`/
+        // `right_rect` ci-dessus, mais en fonction pure testée hors d'egui
+        // (`tests/shell.rs`) — décision unique, pas refaite en filigrane via
+        // `.hovered()`. Le bord exact (gauche ou droite) ne change rien à
+        // l'icône affichée, seule sa présence compte ici.
+        let pointer = ui.ctx().pointer_hover_pos();
+        let grip = pointer.and_then(|pointer| {
+            grid_grip_side(
+                (
+                    grid_rect.left(),
+                    grid_rect.top(),
+                    grid_rect.right(),
+                    grid_rect.bottom(),
+                ),
+                (pointer.x, pointer.y),
+                margin,
+            )
+        });
+        if let (Some(_), Some(pointer)) = (grip, pointer) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            paint_drag_handle_icon(
+                ui.painter(),
+                pointer + egui::vec2(12.0, -12.0),
+                theme::gutter_text_color(),
+            );
+        }
+        if left_response.drag_started() {
+            left_response.dnd_set_drag_payload(payload.clone());
+        } else if right_response.drag_started() {
+            right_response.dnd_set_drag_payload(payload);
+        }
+    }
 
     // Raccourcis clavier de la grille — voir la doc de tête de cette
     // fonction pour la garde d'édition.
@@ -3432,6 +3584,24 @@ fn script_contents(
                 }
             }
         });
+}
+
+/// Peint l'icône « prise » du glisser-déposer de colonnes ([`grid_contents`])
+/// à côté du curseur — une petite grille de points plutôt qu'un glyphe de
+/// police : la mesure de texte de l'appli passe entièrement par
+/// `plotyx_render::text` pour le rendu de graphe (voir `CLAUDE.md`, § Pièges
+/// connus), et rien ne garantit qu'un glyphe « poignée » soit seulement
+/// présent dans la police par défaut d'egui — un pictogramme dessiné à la
+/// main évite la question.
+fn paint_drag_handle_icon(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
+    const DOT_RADIUS: f32 = 1.6;
+    const SPACING: f32 = 5.0;
+    for row in 0..3 {
+        for col in 0..2 {
+            let offset = egui::vec2(col as f32 * SPACING, row as f32 * SPACING);
+            painter.circle_filled(at + offset, DOT_RADIUS, color);
+        }
+    }
 }
 
 /// Un graphe ouvert — le **rendu visible** de la phase R4 (tâche 4.6).

@@ -482,8 +482,55 @@ que choisir le type de tracé et pousser `Action::PlotColumns`. Une seconde
 action, `Action::AddSeriesToGraph`, applique la même règle d'appariement mais
 relit le `PlotSpec` courant d'un graphe existant pour y **ajouter** des
 séries (`Command::SetPlotSpec`) sans toucher à celles déjà présentes — elle
-sert le glisser-déposer d'un classeur vers un graphe ouvert (chantier
-suivant) ; rien ne la pousse encore depuis l'UI, mais elle est déjà testée.
+sert le glisser-déposer d'un classeur vers un graphe ouvert, décrit
+ci-dessous.
+
+### Glisser une sélection de colonnes vers un graphe
+
+Second chemin vers `Action::AddSeriesToGraph`, complémentaire du sous-menu
+« Tracer » : glisser une sélection de colonnes depuis la grille jusqu'à un
+graphe déjà ouvert y ajoute des séries, en `PlotType::Line` toujours (le
+glisser ne propose pas de choisir le type — contrairement au sous-menu
+contextuel, qui lui le demande).
+
+**Zone de prise.** Le glisser ne part pas de n'importe où dans la grille —
+ça casserait le glisser d'extension de sélection existant
+(`cell_widget`/`extend_selection`), qui occupe déjà toute la surface des
+cellules. La zone de prise est une mince bande (`COLUMN_GRIP_WIDTH`, 10px) le
+long du bord *extérieur* gauche ou droit de la grille entière — pas de
+chaque colonne individuellement — et n'apparaît que si la feuille a déjà une
+sélection couvrant au moins une colonne (`AppState::column_drag_payload`).
+Le survol y affiche un curseur « attraper » et un petit pictogramme (une
+grille de points, peinte à la main plutôt qu'un glyphe de police — voir
+`app::paint_drag_handle_icon`) à côté du pointeur. `app::grid_grip_side` est
+la fonction pure qui décide si un point est dans cette bande, testée dans
+`tests/shell.rs` sans fenêtre ; `grid_contents` s'en sert pour peindre
+l'icône et interagit séparément sur deux rectangles confinés (gauche, droite)
+pour démarrer le glisser, afin de ne jamais intercepter le reste de la
+grille.
+
+**Charge utile.** `AppState::column_drag_payload` construit une
+`state::ColumnDragPayload { sheet, columns }` typée — pas une chaîne —
+portée par le mécanisme natif d'egui 0.36
+(`egui::Response::dnd_set_drag_payload`/`dnd_hover_payload`/
+`dnd_release_payload`, `Any + Send + Sync`).
+
+**Cible.** Chaque `Tab::Graph` est enrobé par `app::graph_drop_target`
+(appelée par `tab_contents`, seul point d'entrée commun au dock et aux
+onglets détachés — voir sa doc de tête) : un survol avec une
+`ColumnDragPayload` active dessine un contour sobre autour du graphe, à la
+teinte de sélection de `theme::header_letter_row_selected_fill` (aucune
+palette inventée) ; un relâchement au-dessus convertit la charge utile en
+`Action::AddSeriesToGraph` via `state::drop_payload_action`, une fonction
+pure elle aussi testée directement. Relâcher ailleurs qu'au-dessus d'un
+graphe ne fait rien — `dnd_release_payload` ne répond que si le pointeur est
+contenu dans le rectangle du graphe au moment du relâchement.
+
+**Onglet détaché.** Comme `graph_drop_target` opère via `tab_contents`,
+identique pour le dock et pour une fenêtre détachée (voir la doc de tête de
+`PlotyxApp::show_detached_tabs`), le dépôt marche dans les deux cas sans code
+séparé à maintenir — testé manuellement, `egui::DragAndDrop` étant un état
+global du `Context` plutôt que scopé à une fenêtre OS.
 
 ### Une colonne a deux identités, une seule est visible
 

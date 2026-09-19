@@ -26,8 +26,11 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use plotyx_app::app::{grid_grip_side, GripSide};
 use plotyx_app::selection::Selection;
-use plotyx_app::state::{Action, AppState, GridZone, HeaderField, MoveDirection};
+use plotyx_app::state::{
+    drop_payload_action, Action, AppState, ColumnDragPayload, GridZone, HeaderField, MoveDirection,
+};
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
 use plotyx_plot::PlotType;
@@ -4317,4 +4320,165 @@ fn add_series_to_graph_appends_without_overwriting_existing_series() {
     );
     assert_eq!(after.panels[0].series[1].y, note);
     assert_eq!(after.panels[0].series[1].plot_type, PlotType::Scatter);
+}
+
+// -- 23. Glisser une sélection de colonnes vers un graphe --
+
+/// La zone de prise du glisser-déposer de colonnes est une mince bande sur
+/// le bord *extérieur* gauche ou droit de la grille — [`grid_grip_side`] est
+/// la fonction pure qui en décide, hors de tout code de peinture. À
+/// l'intérieur des bornes verticales de la grille, un pointeur à `margin`
+/// points ou moins du bord gauche rend `Left`, du bord droit `Right`.
+#[test]
+fn grid_grip_side_detects_the_outer_edges_of_the_grid() {
+    let grid = (100.0, 50.0, 300.0, 250.0); // (gauche, haut, droite, bas)
+    let margin = 10.0;
+
+    assert_eq!(
+        grid_grip_side(grid, (100.0, 150.0), margin),
+        Some(GripSide::Left),
+        "tout contre le bord gauche"
+    );
+    assert_eq!(
+        grid_grip_side(grid, (108.0, 150.0), margin),
+        Some(GripSide::Left),
+        "à l'intérieur de la marge, encore le bord gauche"
+    );
+    assert_eq!(
+        grid_grip_side(grid, (300.0, 150.0), margin),
+        Some(GripSide::Right),
+        "tout contre le bord droit"
+    );
+    assert_eq!(
+        grid_grip_side(grid, (293.0, 150.0), margin),
+        Some(GripSide::Right),
+        "à l'intérieur de la marge, encore le bord droit"
+    );
+}
+
+/// Hors de la marge (au milieu de la grille) ou hors de ses bornes
+/// verticales, la zone de prise ne se déclenche pas — c'est ce qui garde le
+/// glisser d'extension de sélection de `cell_widget` intact ailleurs dans la
+/// grille.
+#[test]
+fn grid_grip_side_ignores_the_interior_and_outside_the_vertical_bounds() {
+    let grid = (100.0, 50.0, 300.0, 250.0);
+    let margin = 10.0;
+
+    assert_eq!(
+        grid_grip_side(grid, (200.0, 150.0), margin),
+        None,
+        "milieu de la grille : pas la zone de prise"
+    );
+    assert_eq!(
+        grid_grip_side(grid, (105.0, 30.0), margin),
+        None,
+        "au-dessus de la grille, même proche du bord gauche en x"
+    );
+    assert_eq!(
+        grid_grip_side(grid, (105.0, 260.0), margin),
+        None,
+        "en dessous de la grille"
+    );
+}
+
+/// [`AppState::column_drag_payload`] rend `None` tant que `sheet` n'a pas de
+/// sélection couvrant une colonne — pas de glisser possible sans colonne,
+/// même depuis la zone de prise.
+#[test]
+fn column_drag_payload_is_none_without_a_column_selection() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+
+    assert_eq!(state.column_drag_payload(sheet1), None);
+}
+
+/// Avec une sélection de cellules couvrant une colonne, la charge utile
+/// porte la feuille et exactement les colonnes couvertes par la sélection —
+/// c'est elle que `crate::app::grid_contents` glisse depuis la zone de
+/// prise, et que [`drop_payload_action`] relit au dépôt.
+#[test]
+fn column_drag_payload_carries_the_sheet_and_its_selected_columns() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    state.select_cell(sheet1, temps, 0);
+    state.extend_selection(sheet1, signal, 1);
+
+    let payload = state
+        .column_drag_payload(sheet1)
+        .expect("sélection couvrant Temps et Signal");
+
+    assert_eq!(payload.sheet, sheet1);
+    assert_eq!(payload.columns, vec![temps, signal]);
+}
+
+/// [`drop_payload_action`] convertit toujours la charge utile en
+/// `Action::AddSeriesToGraph` avec `PlotType::Line` par défaut — le seul
+/// type de tracé demandé par ce chantier pour le glisser-déposer, quel que
+/// soit l'outil qui avait servi à construire la sélection au départ.
+#[test]
+fn drop_payload_action_dispatches_add_series_to_graph_with_line_by_default() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let graph = NodeId::from_raw(999);
+    let payload = ColumnDragPayload {
+        sheet: sheet1,
+        columns: vec![signal],
+    };
+
+    let action = drop_payload_action(&payload, graph);
+
+    match action {
+        Action::AddSeriesToGraph {
+            graph: dropped_graph,
+            columns,
+            plot_type,
+        } => {
+            assert_eq!(dropped_graph, graph);
+            assert_eq!(columns, vec![signal]);
+            assert_eq!(plot_type, PlotType::Line);
+        }
+        other => panic!("attendu Action::AddSeriesToGraph, obtenu {other:?}"),
+    }
+}
+
+/// Bout en bout : dispatcher l'action produite par [`drop_payload_action`]
+/// ajoute effectivement la série au graphe visé — le même chemin que
+/// `crate::app::graph_drop_target` emprunte au relâchement du glisser.
+#[test]
+fn dispatching_drop_payload_action_adds_the_series_to_the_graph() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+    let root = state.tree().root();
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+
+    state.select_cell(sheet1, note, 0);
+    let payload = state
+        .column_drag_payload(sheet1)
+        .expect("Note sélectionnée");
+    state.dispatch(drop_payload_action(&payload, graph));
+
+    let spec = state.plot_spec(graph).expect("spec après dépôt");
+    assert_eq!(spec.panels[0].series.len(), 2);
+    assert_eq!(spec.panels[0].series[1].y, note);
+    assert_eq!(spec.panels[0].series[1].plot_type, PlotType::Line);
 }
