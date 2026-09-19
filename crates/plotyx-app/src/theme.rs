@@ -21,10 +21,10 @@
 
 use eframe::egui::{self, Color32, Context, CornerRadius, Theme};
 
-/// Teinte d'accent de la marque PlotYx : un bleu-pétrole plutôt que le bleu
+/// Teinte d'accent de la marque PlotYx : un vert forêt plutôt que le bleu
 /// par défaut d'egui, utilisé pour la sélection, les liens et les éléments
 /// actifs — assez sombre pour rester lisible en texte sur fond clair.
-const ACCENT: Color32 = Color32::from_rgb(0x1B, 0x6C, 0x7A);
+const ACCENT: Color32 = Color32::from_rgb(0x1E, 0x7A, 0x3C);
 
 /// Fond de la rangée des lettres de colonnes (A/B/C…, avec leur type) de
 /// l'en-tête empilée de la grille — la distingue visuellement des quatre

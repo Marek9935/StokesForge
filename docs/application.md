@@ -311,7 +311,7 @@ d'`eframe::run_native`, aux côtés du réglage des polices), une palette maison
 dérivée de `egui::Visuals::light()` — jamais du sombre. `Context::set_theme`
 verrouille la préférence sur `Theme::Light` (empêche egui de re-suivre le
 système à la moindre notification `winit`), puis `Context::set_visuals`
-applique la palette (`theme::visuals`) : accent bleu-pétrole (sélection,
+applique la palette (`theme::visuals`) : accent vert forêt (sélection,
 liens, contours des widgets actifs/survolés), coins légèrement moins arrondis
 que le défaut egui. Le reste (gris de fond, contrastes de texte) vient tel
 quel du thème clair d'egui, déjà calibré pour la lisibilité.
