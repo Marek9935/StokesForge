@@ -91,9 +91,9 @@ fn visuals() -> egui::Visuals {
     visuals.selection.bg_fill = ACCENT.gamma_multiply(0.35);
     visuals.selection.stroke.color = ACCENT;
 
-    // Contour des boutons/onglets actifs (dont l'onglet focalisé de
-    // `egui_dock`) : reprend l'accent plutôt que le bleu par défaut, pour que
-    // la disposition dockable ressemble au reste de l'appli.
+    // Contour des boutons/onglets actifs (dont la fenêtre flottante
+    // focalisée) : reprend l'accent plutôt que le bleu par défaut, pour que
+    // la disposition ressemble au reste de l'appli.
     visuals.widgets.active.bg_stroke.color = ACCENT;
     visuals.widgets.active.fg_stroke.color = ACCENT;
     visuals.widgets.hovered.bg_stroke.color = ACCENT;
