@@ -113,6 +113,17 @@ pub enum Action {
         /// Ligne à sélectionner dans la nouvelle colonne.
         row: usize,
     },
+    /// Ajoute une colonne en fin de `sheet` puis y sélectionne `field` —
+    /// pendant de [`Action::AddColumnAndSelect`] côté en-tête : Tab valide
+    /// sur le champ Formule (le dernier des quatre) de la dernière colonne,
+    /// même raison pour laquelle la sélection ne peut se poser qu'une fois
+    /// la colonne réellement créée.
+    AddColumnAndSelectHeaderField {
+        /// Feuille visée.
+        sheet: NodeId,
+        /// Champ d'en-tête à sélectionner dans la nouvelle colonne.
+        field: HeaderField,
+    },
     /// Change le type d'une colonne — choix explicite de l'utilisateur
     /// depuis l'en-tête, conversion destructrice assumée (`Column::
     /// set_column_type`, `plotyx-core`) : un texte non numérique dans une
@@ -2290,6 +2301,9 @@ impl AppState {
             }
             Action::AddColumn { sheet } => self.add_column(sheet),
             Action::AddColumnAndSelect { sheet, row } => self.add_column_and_select(sheet, row),
+            Action::AddColumnAndSelectHeaderField { sheet, field } => {
+                self.add_column_and_select_header_field(sheet, field)
+            }
             Action::SetColumnType {
                 column,
                 column_type,
@@ -3377,6 +3391,16 @@ impl AppState {
         self.add_column(sheet);
         if let Some((column, ..)) = self.visible_columns(sheet).into_iter().next_back() {
             self.select_cell(sheet, column, row);
+        }
+    }
+
+    /// Ajoute une colonne en fin de `sheet` puis y sélectionne `field` —
+    /// voir [`Action::AddColumnAndSelectHeaderField`], pendant de
+    /// [`AppState::add_column_and_select`] côté en-tête.
+    fn add_column_and_select_header_field(&mut self, sheet: NodeId, field: HeaderField) {
+        self.add_column(sheet);
+        if let Some((column, ..)) = self.visible_columns(sheet).into_iter().next_back() {
+            self.select_header_field(sheet, column, field);
         }
     }
 

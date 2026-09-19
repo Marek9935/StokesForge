@@ -2123,7 +2123,32 @@ fn header_field_widget(
                 if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                     state.cancel_header_edit();
                 } else {
+                    // `consume_key`, pas `key_pressed` : Tab valide *et*
+                    // déplace la sélection tout de suite (`move_selection_tab`/
+                    // `AddColumnAndSelectHeaderField` ci-dessous), avant que
+                    // le bloc de raccourcis clavier de `grid_contents` (qui
+                    // tourne après, une fois l'édition refermée par ce
+                    // `return`) ne revoie passer le même Tab — même piège
+                    // que `cell_widget`.
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    let tab = ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
+                    });
                     state.commit_header_edit();
+                    if tab
+                        && !shift
+                        && field == HeaderField::Formula
+                        && is_last_visible_column(state, sheet, column)
+                    {
+                        // Tab valide sur le champ Formule de la dernière
+                        // colonne : même geste que Tab en dernière colonne
+                        // d'une ligne de données — ajoute une colonne plutôt
+                        // que d'entrer dans les données (voir
+                        // `Action::AddColumnAndSelectHeaderField`).
+                        actions.push(Action::AddColumnAndSelectHeaderField { sheet, field });
+                    } else if tab {
+                        state.move_selection_tab(sheet, shift);
+                    }
                 }
             }
             return;
@@ -3096,24 +3121,36 @@ fn grid_contents(
             state.move_selection(sheet, MoveDirection::Right, shift);
         }
         if tab && !shift {
-            // Tab sur la dernière colonne d'une ligne de données : même
-            // geste qu'Entrée sur la dernière ligne ci-dessous — ajoute une
-            // colonne plutôt que de revenir en début de ligne suivante, puis
-            // sélectionne tout de suite la cellule qui y correspondra (voir
-            // `Action::AddColumnAndSelect`, qui ne peut la poser qu'une fois
-            // la colonne réellement créée, contrairement à une ligne).
-            let data_cursor = state
-                .selection(sheet)
-                .and_then(Selection::grid_cursor)
-                .and_then(|cursor| match cursor {
-                    GridCursor::Data(column, row) => Some((column, row)),
-                    GridCursor::Header(..) => None,
-                });
-            let at_last_column =
-                data_cursor.is_some_and(|(column, _)| is_last_visible_column(state, sheet, column));
-            if at_last_column {
-                if let Some((_, row)) = data_cursor {
-                    actions.push(Action::AddColumnAndSelect { sheet, row });
+            // Tab sur la dernière colonne d'une ligne de données, ou sur le
+            // champ Formule (le dernier des quatre) de la dernière colonne
+            // en en-tête : même geste — ajoute une colonne plutôt que de
+            // revenir en début de ligne suivante ou d'entrer dans les
+            // données, puis sélectionne tout de suite la case qui y
+            // correspondra (voir `Action::AddColumnAndSelect`/
+            // `Action::AddColumnAndSelectHeaderField`, qui ne peuvent la
+            // poser qu'une fois la colonne réellement créée, contrairement à
+            // une ligne). Les trois autres champs d'en-tête (Long Name,
+            // Units, Comments) restent inchangés : Tab y circule d'abord
+            // colonne par colonne pour un même champ, y compris sur la
+            // dernière colonne — seul Formule marque la vraie fin de
+            // l'en-tête.
+            let cursor = state.selection(sheet).and_then(Selection::grid_cursor);
+            let needs_new_column = match cursor {
+                Some(GridCursor::Data(column, _)) => is_last_visible_column(state, sheet, column),
+                Some(GridCursor::Header(column, HeaderField::Formula)) => {
+                    is_last_visible_column(state, sheet, column)
+                }
+                _ => false,
+            };
+            if needs_new_column {
+                match cursor {
+                    Some(GridCursor::Data(_, row)) => {
+                        actions.push(Action::AddColumnAndSelect { sheet, row });
+                    }
+                    Some(GridCursor::Header(_, field)) => {
+                        actions.push(Action::AddColumnAndSelectHeaderField { sheet, field });
+                    }
+                    None => {}
                 }
             } else {
                 state.move_selection_tab(sheet, false);
@@ -3751,17 +3788,26 @@ fn cell_widget(
         // les nombres à droite, le texte à gauche — `AppState::
         // cell_is_numeric` tranche par cellule, pas par colonne, pour
         // qu'une colonne `Mixed` aligne chaque ligne selon sa propre valeur.
-        let halign = if state.cell_is_numeric(column, row) {
-            egui::Align::RIGHT
+        //
+        // `Label::halign` seul ne suffit pas ici : `ui.put` place le widget
+        // dans un `Layout::centered_and_justified`, qui justifie le texte
+        // (l'étire pour remplir la largeur) avant que `halign` n'ait voix au
+        // chapitre — le résultat restait visuellement centré. Un vrai
+        // `Layout` directionnel (`right_to_left`/`left_to_right`), comme
+        // celui déjà posé sur toute la table (`cell_layout` du
+        // `TableBuilder`), aligne réellement le texte contre le bord voulu.
+        let layout = if state.cell_is_numeric(column, row) {
+            egui::Layout::right_to_left(egui::Align::Center)
         } else {
-            egui::Align::LEFT
+            egui::Layout::left_to_right(egui::Align::Center)
         };
-        ui.put(
-            rect,
-            egui::Label::new(text)
-                .selectable(false)
-                .truncate()
-                .halign(halign),
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(rect.shrink2(egui::vec2(4.0, 0.0)))
+                .layout(layout),
+            |ui| {
+                ui.add(egui::Label::new(text).selectable(false).truncate());
+            },
         );
 
         if response.double_clicked() {

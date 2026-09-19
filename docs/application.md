@@ -582,6 +582,17 @@ normal : le raccourci clavier direct de `grid_contents`, et la validation
 d'édition de `cell_widget` — `app::is_last_visible_column` factorise la
 condition commune aux deux.
 
+Câblé aussi **côté en-tête** (`Action::AddColumnAndSelectHeaderField`,
+`AppState::add_column_and_select_header_field`), mais seulement au champ
+Formule — le dernier des quatre — de la dernière colonne : c'est le seul
+point où Tab, jusqu'ici, quittait l'en-tête (`GridCursor::Header(_,
+Formula)` → `Data(première colonne, 0)`, voir `move_selection_tab`). Les
+trois autres champs (Long Name, Units, Comments) gardent leur circulation
+normale même sur la dernière colonne — Tab y avance d'abord colonne par
+colonne pour un même champ ; les intercepter aussi aurait empêché d'atteindre
+les champs suivants de cette colonne, en ajoutant une colonne à chaque
+pression plutôt que d'y circuler.
+
 ### Alignement du corps : nombres à droite, texte à gauche
 
 `cell_widget` aligne chaque cellule du **corps** de la grille comme un
@@ -592,9 +603,17 @@ différemment, l'une à droite (nombre saisi), l'autre à gauche (texte). Une
 valeur manquante (`NaN` ou texte vide/absent) compte comme non numérique et
 reste à gauche — un vide n'a pas de raison d'être poussé à droite, et ça
 évite qu'une colonne clairsemée ait l'air de sauter d'un bord à l'autre
-d'une ligne à l'autre. L'alignement se pose via `Label::halign`, explicite :
-`ui.put` place ce `Label` dans un `Layout::centered_and_justified`, qui
-centrerait sinon le texte par défaut.
+d'une ligne à l'autre.
+
+`Label::halign` seul ne suffit **pas** ici, malgré ce que sa doc laisse
+penser : `ui.put` place le `Label` dans un `Layout::centered_and_justified`,
+qui justifie le texte (l'étire pour remplir la largeur) avant que `halign`
+n'ait voix au chapitre — le résultat restait visuellement centré, quel que
+soit `halign`. Un vrai `Layout` directionnel (`right_to_left`/
+`left_to_right`, `Align::Center` pour l'axe vertical), posé via
+`ui.scope_builder` sur un `max_rect` légèrement rétréci — le même mécanisme
+que celui déjà posé sur toute la table (`cell_layout` du `TableBuilder`) —
+aligne réellement le texte contre le bord voulu.
 
 Un clic droit **hors** de la sélection la réduit d'abord à la case visée, un
 clic droit **dedans** la laisse intacte — pour que le menu agisse toujours sur

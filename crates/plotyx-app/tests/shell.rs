@@ -4054,6 +4054,32 @@ fn add_column_and_select_adds_a_column_and_selects_it_on_the_given_row() {
     );
 }
 
+/// `Action::AddColumnAndSelectHeaderField` — le pendant de
+/// [`add_column_and_select_adds_a_column_and_selects_it_on_the_given_row`]
+/// côté en-tête : Tab valide sur le champ Formule de la dernière colonne
+/// ajoute une colonne plutôt que d'entrer dans les données.
+#[test]
+fn add_column_and_select_header_field_adds_a_column_and_selects_the_field_in_it() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let columns_before = state.visible_columns(sheet1).len();
+
+    state.dispatch(Action::AddColumnAndSelectHeaderField {
+        sheet: sheet1,
+        field: HeaderField::Formula,
+    });
+
+    let columns_after = state.visible_columns(sheet1);
+    assert_eq!(columns_after.len(), columns_before + 1);
+    let new_column = columns_after.last().expect("colonne ajoutée").0;
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        Some((new_column, HeaderField::Formula)),
+        "le champ demandé est sélectionné dans la colonne neuve"
+    );
+}
+
 // -- 21. Alignement du corps de la grille : nombres à droite, texte à gauche --
 
 /// Une cellule numérique renseignée est numérique — `cell_is_numeric` pilote
