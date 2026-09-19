@@ -11,9 +11,10 @@
 //! l'intégration bout en bout tient, tant qu'une intégration ratée ne coûte
 //! qu'une réécriture de ce crate — et non celle de tout ce qu'on aurait bâti
 //! par-dessus. Deux fondations techniques y sont posées : la disposition est
-//! **dockable** (`egui_dock`, module [`app`]), et Save/Load passent par un
-//! sélecteur de fichiers natif (`rfd`) — voir `docs/application.md` pour le
-//! détail de ce qui est fait et de ce qui ne l'est pas encore.
+//! en **fenêtres flottantes confinées** (`egui::Window`, module [`app`]), et
+//! Save/Load passent par un sélecteur de fichiers natif (`rfd`) — voir
+//! `docs/application.md` pour le détail de ce qui est fait et de ce qui ne
+//! l'est pas encore.
 //!
 //! # Découpage
 //!

@@ -625,6 +625,34 @@ pub(crate) fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> 
     }
 }
 
+/// Charge utile du glisser-déposer d'une sélection de colonnes de classeur
+/// vers un graphe ouvert — chantier « glisser une sélection vers un graphe »
+/// (voir [`Action::AddSeriesToGraph`]). Typée plutôt qu'une chaîne : c'est ce
+/// qu'exigent `egui::Response::dnd_set_drag_payload`/`dnd_hover_payload`/
+/// `dnd_release_payload` (`Any + Send + Sync`), et ce que [`drop_payload_action`]
+/// relit au dépôt pour construire l'action. `Clone` : `crate::app` la clone
+/// une fois par bord de grille testé (gauche puis droite) avant de savoir
+/// lequel a effectivement démarré le glisser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnDragPayload {
+    /// Feuille d'où viennent les colonnes.
+    pub sheet: NodeId,
+    /// Colonnes glissées, dans l'ordre de [`AppState::column_drag_payload`].
+    pub columns: Vec<NodeId>,
+}
+
+/// L'[`Action`] produite par le dépôt de `payload` sur le graphe `graph` —
+/// toujours [`Action::AddSeriesToGraph`] avec [`PlotType::Line`] par défaut,
+/// comme demandé pour ce chantier. Fonction pure, séparée du code de peinture
+/// de `crate::app::graph_drop_target` pour être testable sans fenêtre.
+pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId) -> Action {
+    Action::AddSeriesToGraph {
+        graph,
+        columns: payload.columns.clone(),
+        plot_type: PlotType::Line,
+    }
+}
+
 /// Corps de [`AppState::row_count`], factorisé sur un `&Tree` — voir
 /// [`cell_text_in`].
 pub(crate) fn row_count_in(tree: &Tree, sheet: NodeId) -> usize {
@@ -1362,6 +1390,23 @@ impl AppState {
     /// plus) un graphe de ce projet.
     pub fn plot_spec(&self, graph: NodeId) -> Option<PlotSpec> {
         current_plot_spec(&self.snapshot.tree, graph)
+    }
+
+    /// Charge utile du glisser d'une sélection de colonnes de `sheet` vers un
+    /// graphe ouvert ([`ColumnDragPayload`]), ou `None` si `sheet` n'a
+    /// aucune sélection ou si sa sélection ne couvre aucune colonne
+    /// ([`Selection::columns`]) — pas de glisser possible sans colonne, même
+    /// depuis la zone de prise. `crate::app::grid_contents` l'appelle à
+    /// chaque image pour savoir s'il y a quoi que ce soit à proposer au
+    /// glisser ; ne rien avoir sélectionné y désactive la zone de prise tout
+    /// entière plutôt que de la laisser démarrer un glisser vide.
+    pub fn column_drag_payload(&self, sheet: NodeId) -> Option<ColumnDragPayload> {
+        let columns = self.selection(sheet)?.columns(&self.snapshot.tree, sheet);
+        if columns.is_empty() {
+            None
+        } else {
+            Some(ColumnDragPayload { sheet, columns })
+        }
     }
 
     /// Nombre de lignes de `sheet` — le **maximum** des longueurs de ses

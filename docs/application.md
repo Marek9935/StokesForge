@@ -12,37 +12,46 @@ l'intégration bout en bout tient — modèle → commande → annulation → sa
 → rechargement, dans une vraie fenêtre — **tant qu'une intégration ratée ne
 coûte qu'une réécriture de ce crate**, et non celle de tout ce qu'on aurait
 bâti par-dessus. Deux fondations techniques sont posées au-dessus de ce
-principe (voir plus bas) : la disposition est **dockable** (`egui_dock`), et
-Save/Load passent par un vrai sélecteur de fichiers natif (`rfd`) — ce ne sont
-que des charpentes, pas les panneaux définitifs qu'elles accueilleront.
+principe (voir plus bas) : la disposition est en **fenêtres flottantes
+confinées** (`egui::Window`), et Save/Load passent par un vrai sélecteur de
+fichiers natif (`rfd`) — ce ne sont que des charpentes, pas les panneaux
+définitifs qu'elles accueilleront.
 
-Toolkit : `eframe` / `egui`, `egui_dock` (disposition), `rfd` (sélecteur de
+Toolkit : `eframe` / `egui` (disposition et rendu), `rfd` (sélecteur de
 fichiers natif).
 
-### Disposition dockable
+### Fenêtres flottantes confinées
 
-Tous les contenus de ce banc sont des onglets d'un `egui_dock::DockState<Tab>`
-peint par une `DockArea`, dans `app.rs`. `Tab` a six variantes : le Project
-Manager, la console de script — tous deux structurels, jamais fermés — et
-quatre natures de fenêtre portant chacune un `NodeId` : `Book` (classeur),
-`Graph`, `Matrix`, `Note`. La disposition initiale (Project Manager au centre,
-script amarré en bas, premier classeur du projet puis premier graphe à droite
-s'ils existent) n'est qu'un point de départ : l'utilisateur redispose,
-redimensionne et referme les onglets de fenêtre librement, `egui_dock` retient
-la disposition d'une image à l'autre.
+Le Project Manager et la console de script sont deux panneaux fixes
+(`egui::Panel::left`/`egui::Panel::bottom`), jamais fermés. Les quatre autres
+natures de fenêtre de contenu — `Tab::Book` (classeur), `Tab::Graph`,
+`Tab::Matrix`, `Tab::Note`, chacune portant un `NodeId` — s'ouvrent par défaut
+en fenêtres flottantes (`egui::Window`) à l'intérieur du `CentralPanel`, une
+par `PlotyxApp::floating_tabs`, dans `app.rs`. Chacune reçoit
+`.constrain_to(workspace_rect)` — le rectangle que laissent les panneaux fixes
+une fois peints — ce qui l'empêche géométriquement de jamais chevaucher le
+Project Manager ou la console de script, quel que soit le glisser ou le
+redimensionnement. Une fenêtre nouvellement ouverte apparaît en cascade par
+rapport à la précédente plutôt que superposée à elle.
 
 Un onglet par fenêtre **ouverte**, quelle que soit sa nature : `PlotyxApp::
 open_tab` est le seul endroit qui décide « ouvrir » vs « focaliser » (cliquer
 une seconde fois la même entrée du Project Manager ne duplique jamais son
-onglet). Un onglet `Tab::Graph` par graphe ouvert garde son propre
-`plotyx_render_egui::GraphView` (donc son propre cache de formes —
-`PlotyxApp::graph_views` est une table indexée par `NodeId`).
+onglet, elle est ramenée au premier plan). Un onglet `Tab::Graph` par graphe
+ouvert garde son propre `plotyx_render_egui::GraphView` (donc son propre
+cache de formes — `PlotyxApp::graph_views` est une table indexée par
+`NodeId`).
+
+Chaque fenêtre flottante peut aussi être maximisée (plein cadre du
+`CentralPanel`, `PlotyxApp::maximized_tab`) ou détachée dans une vraie fenêtre
+OS séparée (`PlotyxApp::detach_tab`/`reattach_tab`, pour le multi-écran).
 
 Ce qui n'est **pas** fait : pas de bouton « nouveau panneau », pas de
-persistance de la disposition entre deux lancements, pas de panneau
-Properties ni de grille à délégués, pas d'éditeur de matrice — hors périmètre
-de cette fondation (voir « Project Manager et fenêtres par contenu »
-ci-dessous pour le détail de ce qui est, et n'est pas, câblé).
+persistance de la disposition (positions/tailles des fenêtres flottantes)
+entre deux lancements, pas de panneau Properties ni de grille à délégués, pas
+d'éditeur de matrice — hors périmètre de cette fondation (voir « Project
+Manager et fenêtres par contenu » ci-dessous pour le détail de ce qui est, et
+n'est pas, câblé).
 
 ### Project Manager et fenêtres par contenu
 
