@@ -29,11 +29,12 @@ use std::sync::Mutex;
 use plotyx_app::app::{grid_grip_side, GripSide};
 use plotyx_app::selection::Selection;
 use plotyx_app::state::{
-    drop_payload_action, Action, AppState, ColumnDragPayload, GridZone, HeaderField, MoveDirection,
+    drop_payload_action, plot_panel_graph, Action, ActiveTabKind, AppState, ColumnDragPayload,
+    GridZone, HeaderField, MoveDirection, PlotEdit,
 };
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
-use plotyx_plot::PlotType;
+use plotyx_plot::{AxisScale, PlotType, RawVariant};
 use plotyx_session::{Session, SessionHandle};
 
 /// Projet de démonstration des tests : un classeur `Book1` avec `Sheet1`
@@ -4481,4 +4482,291 @@ fn dispatching_drop_payload_action_adds_the_series_to_the_graph() {
     assert_eq!(spec.panels[0].series.len(), 2);
     assert_eq!(spec.panels[0].series[1].y, note);
     assert_eq!(spec.panels[0].series[1].plot_type, PlotType::Line);
+}
+
+// -- 24. Panneau de configuration des graphiques --
+
+/// [`plot_panel_graph`] décide la visibilité du panneau : seul
+/// `ActiveTabKind::Graph` rend `Some`, toutes les autres natures d'onglet
+/// (ou aucun onglet actif) rendent `None` — c'est cette fonction pure que
+/// `PlotyxApp::ui` interroge chaque image pour poser ou non le
+/// `egui::Panel::right`, sans qu'une fenêtre soit nécessaire pour le
+/// vérifier.
+#[test]
+fn plot_panel_graph_is_visible_only_for_a_graph_tab() {
+    let graph = NodeId::from_raw(7);
+    assert_eq!(plot_panel_graph(ActiveTabKind::Graph(graph)), Some(graph));
+    assert_eq!(plot_panel_graph(ActiveTabKind::Book(graph)), None);
+    assert_eq!(plot_panel_graph(ActiveTabKind::Matrix(graph)), None);
+    assert_eq!(plot_panel_graph(ActiveTabKind::Note(graph)), None);
+    assert_eq!(plot_panel_graph(ActiveTabKind::None), None);
+}
+
+/// `AppState::begin_plot_edit` ouvre un brouillon initialisé sur le spec
+/// courant du graphe, et `AppState::commit_plot_edit` l'envoie au modèle
+/// (`Action::SetPlotSpec`) — un aller-retour complet, comme le ferait le
+/// panneau en éditant le titre du graphe.
+#[test]
+fn begin_and_commit_plot_edit_round_trip_through_set_plot_spec() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+
+    state.begin_plot_edit(graph);
+    let edit = state.plot_edit().expect("brouillon ouvert").clone();
+    assert_eq!(edit.graph, graph);
+    assert_eq!(edit.spec, state.plot_spec(graph).expect("spec initiale"));
+
+    state.plot_edit_mut().expect("brouillon").spec.title = "Ma figure".to_string();
+    state.commit_plot_edit();
+
+    let after = state.plot_spec(graph).expect("spec après commit");
+    assert_eq!(after.title, "Ma figure");
+}
+
+/// Valider un brouillon qui n'a **pas** changé n'envoie aucune commande —
+/// sans quoi perdre le focus d'un champ texte non modifié, ou relâcher un
+/// curseur qui n'a pas bougé, empilerait une entrée d'historique inutile.
+#[test]
+fn committing_an_unchanged_plot_edit_sends_no_command() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+
+    state.begin_plot_edit(graph);
+    let undo_label_before = state.undo_label();
+
+    state.commit_plot_edit();
+
+    assert_eq!(
+        state.undo_label(),
+        undo_label_before,
+        "brouillon identique au spec courant : rien à valider"
+    );
+}
+
+/// Ctrl+Z après une validation du panneau restaure le spec d'avant, comme
+/// n'importe quelle autre commande annulable — le panneau n'a pas de chemin
+/// de mutation à lui, il passe par `Command::SetPlotSpec` comme les autres.
+#[test]
+fn undo_after_committing_a_plot_edit_restores_the_previous_spec() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+    let before = state.plot_spec(graph).expect("spec initial");
+
+    state.begin_plot_edit(graph);
+    state.plot_edit_mut().expect("brouillon").spec.title = "Titre modifié".to_string();
+    state.commit_plot_edit();
+    assert_ne!(state.plot_spec(graph).expect("spec après commit"), before);
+
+    state.dispatch(Action::Undo);
+
+    assert_eq!(
+        state.plot_spec(graph).expect("spec après annulation"),
+        before
+    );
+}
+
+/// Repeindre la même image sur le même graphe ne doit jamais effacer une
+/// saisie en cours : `begin_plot_edit` est un no-op tant que le graphe visé
+/// n'a pas changé, même appelé plusieurs fois de suite.
+#[test]
+fn begin_plot_edit_does_not_clobber_an_in_progress_draft() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+
+    state.begin_plot_edit(graph);
+    state.plot_edit_mut().expect("brouillon").spec.title = "En cours de saisie".to_string();
+
+    // Répète l'appel, comme le ferait `plot_config_panel` à chaque image.
+    state.begin_plot_edit(graph);
+    state.begin_plot_edit(graph);
+
+    assert_eq!(
+        state
+            .plot_edit()
+            .expect("brouillon toujours ouvert")
+            .spec
+            .title,
+        "En cours de saisie",
+        "le brouillon en cours de saisie n'a pas été effacé"
+    );
+}
+
+/// Changer de graphe réinitialise le brouillon sur le spec de l'autre
+/// graphe — pas de résidu de l'édition précédente affiché sur le mauvais
+/// graphe.
+#[test]
+fn begin_plot_edit_resets_the_draft_when_switching_graphs() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+    let root = state.tree().root();
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let first_graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("premier graphe créé");
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![note],
+        plot_type: PlotType::Scatter,
+    });
+    let second_graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("second graphe créé");
+    assert_ne!(first_graph, second_graph);
+
+    state.begin_plot_edit(first_graph);
+    state.plot_edit_mut().expect("brouillon").spec.title = "Résidu".to_string();
+
+    state.begin_plot_edit(second_graph);
+
+    let edit = state.plot_edit().expect("brouillon du second graphe");
+    assert_eq!(edit.graph, second_graph);
+    assert_ne!(
+        edit.spec.title, "Résidu",
+        "le brouillon du premier graphe ne doit pas fuiter sur le second"
+    );
+}
+
+/// Une série dont le type de tracé est [`PlotType::Unknown`] (C5, variante
+/// d'une version plus récente de PlotYx que ce lecteur ne connaît pas) doit
+/// pouvoir être ouverte dans le brouillon d'édition et affichée dans la
+/// liste des séries sans jamais paniquer — invariant 10 (« un défaut de
+/// donnée dégrade, il ne plante pas »), qui vaut aussi pour ce panneau.
+#[test]
+fn a_series_with_an_unknown_plot_type_can_be_opened_without_panicking() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+
+    state.begin_plot_edit(graph);
+    {
+        let edit = state.plot_edit_mut().expect("brouillon");
+        edit.spec.panels.get_mut(0).expect("panneau").series[0].plot_type =
+            PlotType::Unknown(RawVariant {
+                name: "FutureType".to_string(),
+                payload: vec![1, 2, 3],
+            });
+    }
+    state.commit_plot_edit();
+
+    let spec = state.plot_spec(graph).expect("spec après commit");
+    assert!(matches!(
+        spec.panels[0].series[0].plot_type,
+        PlotType::Unknown(_)
+    ));
+}
+
+/// L'échelle d'un axe se modifie bien à travers le brouillon : ce test tient
+/// lieu de garde-fou pour tout champ d'`AxisSpec` édité par le panneau — si
+/// un futur renommage de champ casse le binding direct des widgets, un test
+/// qui ne passe plus par `PlotEdit` du tout ne le verrait pas.
+#[test]
+fn editing_an_axis_scale_through_the_draft_is_visible_after_commit() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+
+    state.begin_plot_edit(graph);
+    {
+        let edit: &mut PlotEdit = state.plot_edit_mut().expect("brouillon");
+        let panel = edit.spec.panels.get_mut(0).expect("panneau");
+        panel.left.scale = AxisScale::Log;
+        panel.left.auto_range = false;
+        panel.left.range_min = Some(0.1);
+        panel.left.range_max = Some(100.0);
+    }
+    state.commit_plot_edit();
+
+    let spec = state.plot_spec(graph).expect("spec après commit");
+    assert_eq!(spec.panels[0].left.scale, AxisScale::Log);
+    assert!(spec.panels[0].left.has_explicit_range());
+    assert_eq!(spec.panels[0].left.range_min, Some(0.1));
+    assert_eq!(spec.panels[0].left.range_max, Some(100.0));
 }

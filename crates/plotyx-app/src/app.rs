@@ -309,15 +309,16 @@ use eframe::egui;
 use egui_dock::{DockArea, DockState, NodePath, Style, TabViewer};
 use egui_extras::{Column as TableColumn, TableBuilder};
 use plotyx_core::{ColumnRole, ColumnType, Node, NodeId, Tree};
-use plotyx_plot::PlotType;
+use plotyx_plot::{AxisSpec, LegendPosition, LineStyle, PlotType, SymbolShape};
 use plotyx_render_egui::{DrawnPlot, GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::Snapshot;
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    cell_text_in, drop_payload_action, node_title_in, note_text_in, row_count_in,
-    visible_columns_in, worksheets_of_in, Action, AppState, CellEdit, ColumnDragPayload, GridMenu,
-    HeaderField, MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
+    cell_text_in, drop_payload_action, node_title_in, note_text_in, plot_panel_graph, row_count_in,
+    series_list_label, visible_columns_in, worksheets_of_in, Action, ActiveTabKind, AppState,
+    CellEdit, ColumnDragPayload, GridMenu, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode,
+    WindowKind,
 };
 use crate::theme;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
@@ -449,6 +450,10 @@ const SCRIPT_PANEL_HEIGHT: f32 = 220.0;
 /// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
 /// séparée quand il est détaché.
 const PROJECT_MANAGER_WIDTH: f32 = 260.0;
+
+/// Largeur par défaut du panneau de configuration des graphiques
+/// ([`PlotyxApp::ui`], § panneau de configuration).
+const PLOT_CONFIG_PANEL_WIDTH: f32 = 300.0;
 /// Largeur, en points, de la zone de prise du glisser-déposer de colonnes
 /// vers un graphe — une bande le long du bord extérieur gauche ou droit de
 /// la grille (voir [`grid_grip_side`], et [`grid_contents`] pour le geste
@@ -1458,6 +1463,31 @@ impl eframe::App for PlotyxApp {
             maximized_tab,
             ..
         } = self;
+
+        // Panneau de configuration des graphiques : un `egui::SidePanel`
+        // posé *avant* le `CentralPanel`/la `DockArea` — comme le Project
+        // Manager plus haut — pour que le dock ne lui dispute jamais
+        // l'espace. Visible seulement quand l'onglet actif (au sens le plus
+        // large : l'onglet maximisé s'il y en a un, sinon celui que
+        // `egui_dock` considère focalisé) est un `Tab::Graph` — voir
+        // `plot_panel_graph`, testée sans fenêtre dans `tests/shell.rs`.
+        // Masqué sinon, y compris pendant l'édition d'un autre onglet : pas
+        // de panneau vide à regarder pour un classeur ou une note.
+        let active_tab =
+            maximized_tab.or_else(|| dock_state.find_active_focused().map(|(_, tab)| *tab));
+        match plot_panel_graph(active_tab_kind(active_tab)) {
+            Some(graph) => {
+                egui::Panel::right("plotyx_plot_config")
+                    .default_size(PLOT_CONFIG_PANEL_WIDTH)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            plot_config_panel(ui, state, graph);
+                        });
+                    });
+            }
+            None => state.close_plot_edit(),
+        }
+
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(tab) = *maximized_tab {
                 // § maximiser (doc de tête du module) : la `DockArea` normale
@@ -1601,6 +1631,20 @@ fn tab_title(state: &AppState, tab: Tab) -> String {
         Tab::Graph(id) => node_title(state, id, "Graphe"),
         Tab::Matrix(id) => node_title(state, id, "Matrice"),
         Tab::Note(id) => node_title(state, id, "Note"),
+    }
+}
+
+/// Traduit le `Tab` (privé à ce module) que voit `PlotyxApp::ui` vers
+/// [`ActiveTabKind`], le miroir public que `crate::state` peut lire sans
+/// connaître `Tab` — seul point de contact entre les deux, voir la doc de
+/// tête d'[`ActiveTabKind`].
+fn active_tab_kind(tab: Option<Tab>) -> ActiveTabKind {
+    match tab {
+        Some(Tab::Book(id)) => ActiveTabKind::Book(id),
+        Some(Tab::Graph(id)) => ActiveTabKind::Graph(id),
+        Some(Tab::Matrix(id)) => ActiveTabKind::Matrix(id),
+        Some(Tab::Note(id)) => ActiveTabKind::Note(id),
+        None => ActiveTabKind::None,
     }
 }
 
@@ -3683,6 +3727,427 @@ fn graph_view_contents(
         Err(err) => {
             ui.colored_label(egui::Color32::RED, format!("rendu : {err}"));
         }
+    }
+}
+
+/// Panneau de configuration des graphiques (chantier 3/3 de « tracer depuis
+/// un classeur », voir `docs/application.md`) : édite le [`plotyx_plot::
+/// PlotSpec`] du graphe actif au travers d'un brouillon transitoire
+/// ([`crate::state::PlotEdit`]), jamais directement — même famille que
+/// [`NoteEdit`]/`HeaderEdit`, généralisée à un objet entier plutôt qu'à un
+/// seul champ (voir la doc de tête de `PlotEdit`).
+///
+/// **Stratégie anti-inflation d'historique** : chaque widget met à jour le
+/// brouillon en direct (retour visuel immédiat), et `commit` — un simple
+/// booléen local, mis à `true` par n'importe quel widget qui vient de finir
+/// une interaction — ne déclenche [`AppState::commit_plot_edit`] qu'une
+/// seule fois, à la fin de la fonction. Trois familles de widgets, trois
+/// façons de finir une interaction :
+/// - **texte** (titres, libellés, couleurs en `#RRGGBB`) : `lost_focus()`,
+///   comme `note_contents`/`cell_widget` — jamais à chaque frappe ;
+/// - **glissé numérique** (épaisseur de trait, taille de marqueur, bornes
+///   d'axe) : `drag_stopped() || lost_focus()` — la valeur change à chaque
+///   pixel de glisser (retour visuel), mais ne s'envoie qu'au relâchement ou
+///   à la validation clavier ;
+/// - **case à cocher / menu déroulant** (échelle, visibilité, type de
+///   tracé, position de légende...) : un seul événement discret par clic,
+///   validé tout de suite — rien à débouncer.
+///
+/// **Un seul panneau, pas de multi-panneaux** : `plotyx-plot` autorise
+/// plusieurs [`plotyx_plot::PanelSpec`] par graphe (`row`/`column` dans une
+/// grille), mais aucune UI de ce chantier n'en crée encore un second —
+/// seul `PlotSpec::panels`[0] est donc éditable ici. Éditer le premier
+/// panneau revient, pour l'instant, à éditer *le* graphe.
+fn plot_config_panel(ui: &mut egui::Ui, state: &mut AppState, graph: NodeId) {
+    // Cloné avant d'emprunter `state` en écriture pour le brouillon : un
+    // `Arc<Tree>` cloné est un compteur de références, pas une copie de
+    // l'arbre — voir `AppState::tree`.
+    let tree = state.tree().clone();
+    let Some(node) = tree.node(graph) else {
+        state.close_plot_edit();
+        ui.weak("Le graphe a été supprimé.");
+        return;
+    };
+    let name = node.name().to_string();
+
+    state.begin_plot_edit(graph);
+    let Some(edit) = state.plot_edit_mut() else {
+        return;
+    };
+    if edit.graph != graph {
+        // Ne devrait pas arriver : `begin_plot_edit` vient de le garantir.
+        // Filet plutôt qu'un `unwrap` — un brouillon désaccordé ne doit pas
+        // faire paniquer le panneau (invariant 10).
+        return;
+    }
+
+    let mut commit = false;
+
+    ui.heading(&name);
+    ui.separator();
+
+    ui.strong("Graphe");
+    let title_response = ui.horizontal(|ui| {
+        ui.label("Titre");
+        ui.text_edit_singleline(&mut edit.spec.title)
+    });
+    commit |= title_response.inner.lost_focus();
+
+    ui.add_space(6.0);
+    ui.separator();
+
+    let Some(panel) = edit.spec.panels.get_mut(0) else {
+        // Ne peut pas arriver : `Panels` garantit au moins un panneau par
+        // construction (`plotyx-plot/src/spec.rs`). Filet, même raison.
+        return;
+    };
+
+    ui.strong("Panneau (le premier — pas de multi-panneaux dans ce chantier)");
+    let panel_title_response = ui.horizontal(|ui| {
+        ui.label("Titre");
+        ui.text_edit_singleline(&mut panel.title)
+    });
+    commit |= panel_title_response.inner.lost_focus();
+
+    ui.add_space(6.0);
+    ui.separator();
+    ui.strong("Axes");
+    commit |= axis_editor(ui, "axis-bottom", "Bas (X)", &mut panel.bottom);
+    commit |= axis_editor(ui, "axis-left", "Gauche (Y)", &mut panel.left);
+    if panel.uses_right_axis() {
+        commit |= axis_editor(ui, "axis-right", "Droite (Y secondaire)", &mut panel.right);
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+    ui.strong("Séries");
+    if panel.series.is_empty() {
+        ui.weak("Ce panneau ne trace aucune série.");
+    } else {
+        if edit.selected_series >= panel.series.len() {
+            edit.selected_series = panel.series.len() - 1;
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("plot_config_series_list")
+            .max_height(140.0)
+            .show(ui, |ui| {
+                for (index, series) in panel.series.iter().enumerate() {
+                    let label = series_list_label(&tree, series);
+                    if ui
+                        .selectable_label(edit.selected_series == index, label)
+                        .clicked()
+                    {
+                        edit.selected_series = index;
+                    }
+                }
+            });
+        ui.separator();
+        if let Some(series) = panel.series.get_mut(edit.selected_series) {
+            commit |= series_editor(ui, series);
+        }
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+    ui.strong("Légende");
+    commit |= legend_editor(ui, &mut panel.legend);
+
+    if commit {
+        state.commit_plot_edit();
+    }
+}
+
+/// Édite un [`AxisSpec`] : libellé, unité, échelle, visibilité, grille,
+/// inversion, bornes. `id_salt` distingue les widgets des quatre axes
+/// possibles d'un même panneau (`egui::ComboBox`/`CollapsingHeader` ont
+/// besoin d'un identifiant stable, faute de quoi deux axes dépliés en même
+/// temps se marcheraient dessus). Rend `true` si le brouillon doit être
+/// validé — voir la doc de tête de [`plot_config_panel`].
+fn axis_editor(ui: &mut egui::Ui, id_salt: &str, title: &str, axis: &mut AxisSpec) -> bool {
+    let mut commit = false;
+    egui::CollapsingHeader::new(title)
+        .id_salt(id_salt)
+        .default_open(false)
+        .show(ui, |ui| {
+            let label_response = ui.horizontal(|ui| {
+                ui.label("Libellé");
+                ui.text_edit_singleline(&mut axis.label)
+            });
+            commit |= label_response.inner.lost_focus();
+
+            let unit_response = ui.horizontal(|ui| {
+                ui.label("Unité");
+                ui.text_edit_singleline(&mut axis.unit)
+            });
+            commit |= unit_response.inner.lost_focus();
+
+            let mut log_scale = axis.scale == plotyx_plot::AxisScale::Log;
+            if ui
+                .checkbox(&mut log_scale, "Échelle logarithmique")
+                .changed()
+            {
+                axis.scale = if log_scale {
+                    plotyx_plot::AxisScale::Log
+                } else {
+                    plotyx_plot::AxisScale::Linear
+                };
+                commit = true;
+            }
+            commit |= ui.checkbox(&mut axis.visible, "Axe affiché").changed();
+            commit |= ui.checkbox(&mut axis.grid, "Grille").changed();
+            commit |= ui.checkbox(&mut axis.inverted, "Axe inversé").changed();
+            commit |= ui
+                .checkbox(&mut axis.auto_range, "Bornes automatiques")
+                .changed();
+
+            if !axis.auto_range {
+                let mut min = axis.range_min.unwrap_or(0.0);
+                let mut max = axis.range_max.unwrap_or(0.0);
+                let min_response = ui.horizontal(|ui| {
+                    ui.label("Min");
+                    ui.add(egui::DragValue::new(&mut min).speed(0.1))
+                });
+                let max_response = ui.horizontal(|ui| {
+                    ui.label("Max");
+                    ui.add(egui::DragValue::new(&mut max).speed(0.1))
+                });
+                axis.range_min = Some(min);
+                axis.range_max = Some(max);
+                let min_inner = min_response.inner;
+                let max_inner = max_response.inner;
+                commit |= min_inner.drag_stopped() || min_inner.lost_focus();
+                commit |= max_inner.drag_stopped() || max_inner.lost_focus();
+            }
+        });
+    commit
+}
+
+/// Édite la série sélectionnée : nom, type de tracé, visibilité, présence en
+/// légende, style de trait, style de marqueur. Rend `true` si le brouillon
+/// doit être validé — voir la doc de tête de [`plot_config_panel`].
+///
+/// [`PlotType::Unknown`] (C5, `guide-de-correction-robustesse.md` §F3) ne
+/// figure **jamais** dans la liste proposée : c'est le type de tracé d'une
+/// version plus récente de PlotYx, et le proposer laisserait croire qu'on
+/// peut y revenir alors que rien ne sait le reconstruire. Une série qui le
+/// porte s'affiche quand même, en lecture seule pour ce seul champ — le
+/// reste (nom, visibilité...) reste éditable normalement.
+fn series_editor(ui: &mut egui::Ui, series: &mut plotyx_plot::SeriesSpec) -> bool {
+    let mut commit = false;
+
+    let name_response = ui.horizontal(|ui| {
+        ui.label("Nom");
+        ui.text_edit_singleline(&mut series.name)
+    });
+    commit |= name_response.inner.lost_focus();
+    ui.weak("Nom vide = dérivé de la colonne tracée.");
+
+    ui.horizontal(|ui| {
+        ui.label("Type de tracé");
+        match &series.plot_type {
+            PlotType::Unknown(_) => {
+                ui.weak("(type inconnu de cette version, non modifiable)");
+            }
+            current => {
+                let mut selected = current.clone();
+                egui::ComboBox::new("plot_config_series_type", "")
+                    .selected_text(plot_type_label(&selected))
+                    .show_ui(ui, |ui| {
+                        for candidate in [
+                            PlotType::Scatter,
+                            PlotType::Line,
+                            PlotType::LineScatter,
+                            PlotType::Bar,
+                            PlotType::Histogram,
+                            PlotType::ErrorBar,
+                        ] {
+                            let text = plot_type_label(&candidate);
+                            let is_selected = candidate == selected;
+                            if ui.selectable_label(is_selected, text).clicked() {
+                                selected = candidate;
+                            }
+                        }
+                    });
+                if selected != series.plot_type {
+                    series.plot_type = selected;
+                    commit = true;
+                }
+            }
+        }
+    });
+
+    commit |= ui.checkbox(&mut series.visible, "Visible").changed();
+    commit |= ui
+        .checkbox(&mut series.show_in_legend, "Présente dans la légende")
+        .changed();
+
+    ui.separator();
+    ui.label("Trait");
+    let line_color_response = ui.horizontal(|ui| {
+        ui.label("Couleur (#RRGGBB)");
+        ui.text_edit_singleline(&mut series.line.color)
+    });
+    commit |= line_color_response.inner.lost_focus();
+
+    ui.horizontal(|ui| {
+        ui.label("Style");
+        let mut style = series.line.style;
+        egui::ComboBox::new("plot_config_line_style", "")
+            .selected_text(line_style_label(style))
+            .show_ui(ui, |ui| {
+                for candidate in [
+                    LineStyle::None,
+                    LineStyle::Solid,
+                    LineStyle::Dash,
+                    LineStyle::Dot,
+                    LineStyle::DashDot,
+                ] {
+                    ui.selectable_value(&mut style, candidate, line_style_label(candidate));
+                }
+            });
+        if style != series.line.style {
+            series.line.style = style;
+            commit = true;
+        }
+    });
+
+    let width_response = ui.horizontal(|ui| {
+        ui.label("Épaisseur (pt)");
+        ui.add(
+            egui::DragValue::new(&mut series.line.width)
+                .speed(0.1)
+                .range(0.0..=20.0),
+        )
+    });
+    let width_inner = width_response.inner;
+    commit |= width_inner.drag_stopped() || width_inner.lost_focus();
+
+    ui.separator();
+    ui.label("Marqueur");
+    ui.horizontal(|ui| {
+        ui.label("Forme");
+        let mut shape = series.symbol.shape;
+        egui::ComboBox::new("plot_config_symbol_shape", "")
+            .selected_text(symbol_shape_label(shape))
+            .show_ui(ui, |ui| {
+                for candidate in [
+                    SymbolShape::None,
+                    SymbolShape::Circle,
+                    SymbolShape::Square,
+                    SymbolShape::Triangle,
+                    SymbolShape::Diamond,
+                    SymbolShape::Plus,
+                    SymbolShape::Cross,
+                ] {
+                    ui.selectable_value(&mut shape, candidate, symbol_shape_label(candidate));
+                }
+            });
+        if shape != series.symbol.shape {
+            series.symbol.shape = shape;
+            commit = true;
+        }
+    });
+
+    let size_response = ui.horizontal(|ui| {
+        ui.label("Taille (pt)");
+        ui.add(
+            egui::DragValue::new(&mut series.symbol.size)
+                .speed(0.1)
+                .range(0.0..=40.0),
+        )
+    });
+    let size_inner = size_response.inner;
+    commit |= size_inner.drag_stopped() || size_inner.lost_focus();
+
+    let symbol_color_response = ui.horizontal(|ui| {
+        ui.label("Couleur (#RRGGBB, vide = celle du trait)");
+        ui.text_edit_singleline(&mut series.symbol.color)
+    });
+    commit |= symbol_color_response.inner.lost_focus();
+
+    commit
+}
+
+/// Édite un [`plotyx_plot::LegendSpec`] : visibilité, coin d'ancrage. Rend
+/// `true` si le brouillon doit être validé — voir la doc de tête de
+/// [`plot_config_panel`].
+fn legend_editor(ui: &mut egui::Ui, legend: &mut plotyx_plot::LegendSpec) -> bool {
+    let mut commit = false;
+    commit |= ui
+        .checkbox(&mut legend.visible, "Légende affichée")
+        .changed();
+
+    ui.horizontal(|ui| {
+        ui.label("Position");
+        let mut position = legend.position;
+        egui::ComboBox::new("plot_config_legend_position", "")
+            .selected_text(legend_position_label(position))
+            .show_ui(ui, |ui| {
+                for candidate in [
+                    LegendPosition::TopLeft,
+                    LegendPosition::TopRight,
+                    LegendPosition::BottomLeft,
+                    LegendPosition::BottomRight,
+                ] {
+                    ui.selectable_value(&mut position, candidate, legend_position_label(candidate));
+                }
+            });
+        if position != legend.position {
+            legend.position = position;
+            commit = true;
+        }
+    });
+
+    commit
+}
+
+/// Libellé français d'un [`PlotType`], y compris [`PlotType::Unknown`] (par
+/// prudence : ce bras existe pour que la fonction reste totale, mais
+/// `series_editor` ne l'affiche jamais — un type inconnu ne passe pas par le
+/// menu déroulant qui appelle cette fonction).
+fn plot_type_label(plot_type: &PlotType) -> String {
+    match plot_type {
+        PlotType::Scatter => "Points".to_string(),
+        PlotType::Line => "Ligne".to_string(),
+        PlotType::LineScatter => "Ligne + points".to_string(),
+        PlotType::Bar => "Barres".to_string(),
+        PlotType::Histogram => "Histogramme".to_string(),
+        PlotType::ErrorBar => "Ligne + barres d'erreur".to_string(),
+        PlotType::Unknown(_) => "Type inconnu".to_string(),
+    }
+}
+
+/// Libellé français d'un [`LineStyle`].
+fn line_style_label(style: LineStyle) -> &'static str {
+    match style {
+        LineStyle::None => "Aucun",
+        LineStyle::Solid => "Plein",
+        LineStyle::Dash => "Tirets",
+        LineStyle::Dot => "Pointillés",
+        LineStyle::DashDot => "Tiret-point",
+    }
+}
+
+/// Libellé français d'un [`SymbolShape`].
+fn symbol_shape_label(shape: SymbolShape) -> &'static str {
+    match shape {
+        SymbolShape::None => "Aucun",
+        SymbolShape::Circle => "Disque",
+        SymbolShape::Square => "Carré",
+        SymbolShape::Triangle => "Triangle",
+        SymbolShape::Diamond => "Losange",
+        SymbolShape::Plus => "Croix droite",
+        SymbolShape::Cross => "Croix oblique",
+    }
+}
+
+/// Libellé français d'une [`LegendPosition`].
+fn legend_position_label(position: LegendPosition) -> &'static str {
+    match position {
+        LegendPosition::TopLeft => "Haut gauche",
+        LegendPosition::TopRight => "Haut droite",
+        LegendPosition::BottomLeft => "Bas gauche",
+        LegendPosition::BottomRight => "Bas droite",
     }
 }
 

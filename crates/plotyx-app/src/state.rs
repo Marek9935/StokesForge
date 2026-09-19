@@ -313,6 +313,17 @@ pub enum Action {
         /// Type de tracé demandé pour chaque nouvelle série.
         plot_type: PlotType,
     },
+    /// Remplace en bloc le [`PlotSpec`] d'un graphe — panneau de
+    /// configuration des graphiques ([`Command::SetPlotSpec`]). Poussée à la
+    /// validation d'un brouillon ([`AppState::commit_plot_edit`]), jamais à
+    /// chaque frappe ou chaque pixel de glisser : voir la doc de tête de
+    /// [`PlotEdit`].
+    SetPlotSpec {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Nouvelle description du graphe.
+        spec: PlotSpec,
+    },
 }
 
 /// Un message à afficher à l'utilisateur, avec sa gravité.
@@ -622,6 +633,31 @@ pub(crate) fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> 
     match tree.node(graph)?.kind() {
         NodeKind::Graph { spec, .. } => Some(spec.clone()),
         _ => None,
+    }
+}
+
+/// Nom affiché d'une série dans la liste du panneau de configuration : le
+/// même calcul que `label_for` (`plotyx-core/src/resolve.rs`, privée à ce
+/// crate) — `SeriesSpec::name` s'il est renseigné, sinon le nom long de la
+/// colonne Y, sinon son nom de nœud, sinon « (référence rompue) » si la
+/// colonne n'existe plus. Dupliqué plutôt que rendu public côté
+/// `plotyx-core` : c'est une règle d'affichage, pas une règle de résolution,
+/// et la fonction est petite.
+pub(crate) fn series_list_label(tree: &Tree, series: &plotyx_plot::SeriesSpec) -> String {
+    if !series.name.is_empty() {
+        return series.name.clone();
+    }
+    let Some(y_node) = tree.node(series.y).filter(|node| node.kind().is_column()) else {
+        return "(référence rompue)".to_string();
+    };
+    let long_name = y_node
+        .as_column()
+        .map(|column| column.meta().long_name.as_str())
+        .unwrap_or_default();
+    if long_name.is_empty() {
+        y_node.name().to_string()
+    } else {
+        long_name.to_string()
     }
 }
 
@@ -1048,6 +1084,63 @@ pub struct NoteEdit {
     pub buffer: String,
 }
 
+/// Nature d'onglet actif, vue par [`AppState`] — un miroir minimal de
+/// l'énumération privée `Tab` de [`crate::app`], juste assez pour que la
+/// question « le panneau de configuration des graphiques doit-il
+/// s'afficher ? » ([`plot_panel_graph`]) se pose sans fenêtre, dans
+/// `tests/shell.rs`. `crate::app` traduit son `Tab` vers celui-ci au seul
+/// point de contact (`PlotyxApp::ui`), rien d'autre ne le lit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ActiveTabKind {
+    /// Aucun onglet actif (dock vide, ou rien de focalisé cette image-ci).
+    #[default]
+    None,
+    /// Un classeur.
+    Book(NodeId),
+    /// Un graphe.
+    Graph(NodeId),
+    /// Une matrice.
+    Matrix(NodeId),
+    /// Une note.
+    Note(NodeId),
+}
+
+/// Le graphe dont le panneau de configuration doit s'afficher, d'après la
+/// nature de l'onglet actif — `None` sauf pour [`ActiveTabKind::Graph`].
+/// Fonction pure, séparée du code de peinture de `crate::app` pour être
+/// testable sans fenêtre.
+pub fn plot_panel_graph(active: ActiveTabKind) -> Option<NodeId> {
+    match active {
+        ActiveTabKind::Graph(id) => Some(id),
+        _ => None,
+    }
+}
+
+/// Brouillon d'édition du panneau de configuration des graphiques : un
+/// [`PlotSpec`] entier tenu hors de l'historique jusqu'à validation, sur le
+/// même principe que [`NoteEdit`]/[`HeaderEdit`] — sauf qu'ici l'objet édité
+/// est un graphe entier plutôt qu'un seul champ. La raison : le panneau
+/// mélange une douzaine de petits widgets (titre, axes, style de chaque
+/// série, légende) qui doivent tous voir et modifier le **même** brouillon
+/// pour que « annuler un aller-retour dans le panneau » ait un sens — un
+/// tampon par champ serait autant de mécanismes de va-et-vient avec le
+/// modèle à maintenir séparément.
+///
+/// [`AppState::commit_plot_edit`] n'envoie [`Command::SetPlotSpec`] que si
+/// `spec` diverge effectivement du spec courant du modèle : relâcher un
+/// curseur qui n'a pas bougé, ou perdre le focus d'un champ texte non
+/// modifié, ne doit pas empiler une entrée d'historique inutile.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlotEdit {
+    /// Graphe en cours d'édition.
+    pub graph: NodeId,
+    /// Description en cours de saisie, pas encore validée.
+    pub spec: PlotSpec,
+    /// Série actuellement choisie dans la liste, pour l'édition détaillée —
+    /// état d'UI pur, jamais envoyé au modèle.
+    pub selected_series: usize,
+}
+
 /// État transitoire de la fenêtre d'import (voir [`crate::app`] pour son
 /// rendu) : jamais dans l'historique, jamais envoyé à l'acteur — même
 /// famille que [`HeaderEdit`]/[`CellEdit`]/[`NoteEdit`]. Porte tout ce que la
@@ -1139,6 +1232,9 @@ pub struct AppState {
     editing: Option<CellEdit>,
     /// Saisie de note en cours, s'il y en a une (voir [`NoteEdit`]).
     note_editing: Option<NoteEdit>,
+    /// Brouillon en cours du panneau de configuration des graphiques, s'il y
+    /// en a un (voir [`PlotEdit`]).
+    plot_edit: Option<PlotEdit>,
     /// Sélection courante de la grille de chaque feuille affichée — état UI
     /// pur, jamais dans l'historique (voir la doc de tête de
     /// [`crate::selection`]). Clé absente = pas de sélection dans cette
@@ -1224,6 +1320,7 @@ impl AppState {
             status: None,
             editing: None,
             note_editing: None,
+            plot_edit: None,
             selection: std::collections::HashMap::new(),
             header_editing: None,
             grid_clipboard: None,
@@ -2284,6 +2381,68 @@ impl AppState {
         });
     }
 
+    /// Brouillon courant du panneau de configuration des graphiques, s'il y
+    /// en a un.
+    pub fn plot_edit(&self) -> Option<&PlotEdit> {
+        self.plot_edit.as_ref()
+    }
+
+    /// Brouillon courant, modifiable — c'est là que les widgets du panneau
+    /// écrivent, sans passer par une commande.
+    pub fn plot_edit_mut(&mut self) -> Option<&mut PlotEdit> {
+        self.plot_edit.as_mut()
+    }
+
+    /// Ouvre (ou conserve) le brouillon d'édition du graphe `graph`. À
+    /// appeler à chaque image par le panneau, *avant* de peindre quoi que ce
+    /// soit : ne réinitialise le brouillon que s'il n'y en a pas encore, ou
+    /// s'il portait sur un autre graphe — repeindre la même image sur le
+    /// même graphe ne doit jamais effacer une saisie en cours. `graph` sans
+    /// spec (nœud supprimé, ou pas un graphe) laisse le brouillon inchangé :
+    /// c'est à l'appelant de vérifier `self.tree().node(graph)` avant
+    /// d'afficher le panneau (voir `node_title` dans `crate::app`).
+    pub fn begin_plot_edit(&mut self, graph: NodeId) {
+        if self
+            .plot_edit
+            .as_ref()
+            .is_some_and(|edit| edit.graph == graph)
+        {
+            return;
+        }
+        let Some(spec) = self.plot_spec(graph) else {
+            return;
+        };
+        self.plot_edit = Some(PlotEdit {
+            graph,
+            spec,
+            selected_series: 0,
+        });
+    }
+
+    /// Ferme le brouillon d'édition courant sans rien valider — appelé quand
+    /// le panneau se masque (plus d'onglet graphe actif).
+    pub fn close_plot_edit(&mut self) {
+        self.plot_edit = None;
+    }
+
+    /// Valide le brouillon courant ([`Action::SetPlotSpec`]) — mais
+    /// seulement s'il diverge du spec actuellement dans le modèle. Sans
+    /// cette garde, relâcher un curseur qui n'a pas bougé ou perdre le focus
+    /// d'un champ texte non modifié empilerait une entrée d'historique
+    /// identique à la précédente ; voir la doc de tête de [`PlotEdit`].
+    pub fn commit_plot_edit(&mut self) {
+        let Some(edit) = self.plot_edit.clone() else {
+            return;
+        };
+        if self.plot_spec(edit.graph).as_ref() == Some(&edit.spec) {
+            return;
+        }
+        self.dispatch(Action::SetPlotSpec {
+            graph: edit.graph,
+            spec: edit.spec,
+        });
+    }
+
     /// Les feuilles de `book`, dans l'ordre des onglets internes
     /// [`crate::app::Tab::Book`] : `(NodeId, nom)`. Vide si `book` n'existe
     /// plus ou n'est pas un classeur.
@@ -2504,6 +2663,9 @@ impl AppState {
                 columns,
                 plot_type,
             } => self.add_series_to_graph(graph, columns, plot_type),
+            Action::SetPlotSpec { graph, spec } => {
+                self.execute(Command::SetPlotSpec { graph, spec })
+            }
         }
     }
 

@@ -532,6 +532,121 @@ identique pour le dock et pour une fenêtre détachée (voir la doc de tête de
 séparé à maintenir — testé manuellement, `egui::DragAndDrop` étant un état
 global du `Context` plutôt que scopé à une fenêtre OS.
 
+### Panneau de configuration des graphiques
+
+Chantier 3/3 de « tracer depuis un classeur ». Un `egui::Panel::right`,
+peint dans `PlotyxApp::ui` *avant* le `CentralPanel`/la `DockArea` — comme le
+Project Manager à gauche — pour que le dock ne lui dispute jamais l'espace.
+Visible seulement quand l'onglet actif est un `Tab::Graph` : « actif » au
+sens le plus large (l'onglet maximisé s'il y en a un, sinon celui
+qu'`egui_dock::DockState::find_active_focused` considère focalisé), traduit
+vers `state::ActiveTabKind` — un miroir minimal et public de `Tab` (privé à
+`app.rs`) — au seul point de contact (`app::active_tab_kind`). C'est
+`state::plot_panel_graph(ActiveTabKind) -> Option<NodeId>` qui tranche la
+visibilité, fonction pure testée sans fenêtre dans `tests/shell.rs` :
+`Tab::Book`/`Matrix`/`Note`, ou aucun onglet actif, la masquent.
+
+**Édite le `PlotSpec` au travers d'un brouillon, jamais directement.**
+`state::PlotEdit { graph, spec, selected_series }` est un `PlotSpec` entier
+tenu hors de l'historique jusqu'à validation — le même principe que
+`NoteEdit`/`HeaderEdit` (saisie différée, tampon local, commande envoyée
+seulement à la validation), généralisé à un objet entier plutôt qu'à un seul
+champ : le panneau mélange une douzaine de petits widgets (titre, axes,
+style de chaque série, légende) qui doivent tous voir et modifier le **même**
+brouillon. `AppState::begin_plot_edit(graph)`, appelée à chaque image par
+`app::plot_config_panel` avant de peindre quoi que ce soit, n'écrase le
+brouillon que s'il n'y en a pas encore ou qu'il portait sur un autre graphe
+— repeindre la même image sur le même graphe ne doit jamais effacer une
+saisie en cours, et changer de graphe ne doit jamais laisser fuiter le
+brouillon du précédent. `AppState::commit_plot_edit` envoie
+`Action::SetPlotSpec { graph, spec }` → `Command::SetPlotSpec` — mais
+seulement si le brouillon diverge du spec courant du modèle (comparaison
+`PartialEq` sur `PlotSpec`, qui dérive proprement jusqu'aux feuilles) :
+sans cette garde, relâcher un curseur qui n'a pas bougé ou perdre le focus
+d'un champ texte non modifié empilerait une entrée d'historique identique à
+la précédente.
+
+**Stratégie anti-inflation d'historique**, trois familles de widgets liées
+chacune à un déclencheur de validation différent, plutôt qu'un commit à
+chaque frappe/pixel :
+
+- **texte** (titres, libellés d'axe, couleurs en `#RRGGBB`) : `lost_focus()`
+  — le champ est modifié en direct dans le brouillon à chaque frappe (retour
+  visuel immédiat), mais `commit_plot_edit` n'est appelé qu'à la perte de
+  focus, exactement comme `note_contents`/`cell_widget` ;
+- **glissé numérique** (épaisseur de trait, taille de marqueur, bornes
+  d'axe manuelles, `egui::DragValue`) : `drag_stopped() || lost_focus()` —
+  la valeur change à chaque pixel de glisser dans le brouillon, mais ne
+  s'envoie qu'au relâchement de la souris ou à la validation clavier ;
+- **case à cocher / menu déroulant** (échelle, visibilité, grille, type de
+  tracé, position de légende...) : un seul événement discret par clic,
+  validé tout de suite — rien à débouncer, il n'y a par construction jamais
+  de rafale d'événements `changed()` pour ces widgets-là.
+
+Chaque widget de `app::plot_config_panel` (et de ses fonctions auxiliaires
+`axis_editor`/`series_editor`/`legend_editor`) accumule dans un simple
+booléen local `commit`, mis à `true` par n'importe quel widget qui vient de
+finir une interaction ; `commit_plot_edit` n'est appelé qu'une seule fois, à
+la toute fin de la fonction, jamais widget par widget.
+
+**Ce qu'édite le panneau**, en ne touchant que des champs qui existent
+réellement dans `plotyx-plot` (lu avant d'écrire, comme demandé) :
+
+- **Graphe** : `PlotSpec::title` ;
+- **Panneau** — `PlotSpec::panels`[0] seulement, voir plus bas — : `PanelSpec::title`,
+  et pour l'axe du bas, celui de gauche, et celui de droite si
+  `PanelSpec::uses_right_axis()` (l'axe du haut, masqué par défaut et sans
+  UI dans ce banc pour l'activer, n'a pas de section) : `AxisSpec::label`,
+  `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`,
+  `inverted`, `auto_range`, et `range_min`/`range_max` quand `auto_range`
+  est décoché ;
+- **Séries** — une liste (`egui::ScrollArea` bornée en hauteur,
+  `selectable_label` par série, libellé `state::series_list_label` : le nom
+  de la série s'il est renseigné, sinon le nom long de la colonne Y, sinon
+  son nom de nœud, sinon « (référence rompue) » — le même calcul que
+  `label_for` en privé dans `plotyx-core/src/resolve.rs`, dupliqué plutôt
+  que rendu public parce que c'est une règle d'affichage, pas une règle de
+  résolution) — puis, pour la série choisie : `SeriesSpec::name`,
+  `plot_type` (`PlotType`, toutes les variantes sauf `Unknown`, voir plus
+  bas), `visible`, `show_in_legend`, `line` (`LineSpec::color`, `style`,
+  `width`) et `symbol` (`SymbolSpec::shape`, `size`, `color`) ;
+- **Légende** : `LegendSpec::visible`, `position`.
+
+**`PlotType::Unknown` ne figure jamais dans le menu déroulant**, mais une
+série qui le porte s'affiche quand même — le champ type de tracé devient un
+texte en lecture seule (« type inconnu de cette version, non modifiable »),
+le reste (nom, visibilité, style...) reste éditable normalement. C'est
+l'invariant 10 (« un défaut de donnée dégrade, il ne plante pas ») appliqué
+à ce panneau : proposer `Unknown` dans la liste laisserait croire qu'on peut
+y revenir, alors que rien ne sait reconstruire une variante dont ce lecteur
+ne connaît que le nom et des octets bruts (C5, niveau 2,
+`guide-de-correction-robustesse.md` §F3).
+
+**Ce qui n'est pas fait**, explicitement hors périmètre de ce chantier :
+
+- **pas de multi-panneaux** — `plotyx-plot` autorise plusieurs `PanelSpec`
+  par graphe (`row`/`column` dans une grille), mais aucune UI de ce banc
+  n'en crée encore un second ; le panneau n'édite donc que
+  `PlotSpec::panels`[0], ce qui revient, pour l'instant, à éditer *le*
+  graphe ;
+- **pas de sélecteur de couleur graphique** — trait et marqueur s'éditent
+  comme un texte `#RRGGBB`, pas comme une roue de couleurs : plus simple,
+  et ça réutilise la même convention de validation (`lost_focus()`) que
+  tous les autres champs texte du panneau plutôt que d'introduire un
+  quatrième mécanisme de débounce pour un widget qui déclenche `changed()`
+  en continu pendant qu'on le glisse ;
+- **pas de largeur de barre ni de nombre de classes d'histogramme** —
+  `SeriesSpec::bar_width`/`histogram_bins` existent dans `plotyx-plot` mais
+  n'ont pas de widget ici, laissé à une itération suivante ;
+- **pas d'ajout/suppression de série ou de panneau depuis le panneau** —
+  ça reste le rôle du sous-menu « Tracer » et du glisser-déposer déjà
+  décrits plus haut ;
+- **zoom/pan n'y entrent pas, et ne doivent jamais y entrer** —
+  `plotyx_render_egui::ViewState` vit sur `GraphView`, hors du `PlotSpec`
+  (`docs/invariants.md`, `.claude/rules.md`) : ce panneau n'a et n'aura
+  aucun champ de navigation, une confusion entre les deux romprait la
+  frontière rendu/modèle que tout le reste du chantier de rendu tient.
+
 ### Une colonne a deux identités, une seule est visible
 
 Son **nom de nœud** (`Node::name` — « Temps », « Signal », ou le « A »/« B »
