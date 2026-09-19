@@ -30,11 +30,17 @@
 //! copier/coller incompréhensible et a été retiré au profit de cette règle
 //! plus simple, décidée avec l'utilisateur. La plage de colonnes entières
 //! ([`SelectionKind::Columns`], glisser/Maj-clic sur la rangée des lettres)
-//! reste un geste distinct, jamais mélangé au reste : un glisser qui la
-//! croise repose toujours une sélection simple (voir [`crate::state::
-//! AppState::extend_selection`]/[`crate::state::AppState::
+//! et la plage de lignes entières ([`SelectionKind::FullRows`], glisser/
+//! Maj-clic sur la gouttière des numéros de ligne) restent chacune un geste
+//! distinct, jamais mélangé au reste ni l'un à l'autre : un glisser qui
+//! croise l'une ou l'autre repose toujours une sélection simple plutôt que
+//! d'étendre silencieusement sans effet (voir [`crate::state::AppState::
+//! extend_selection`]/[`crate::state::AppState::
 //! extend_header_field_selection`]/[`crate::state::AppState::
-//! extend_column_selection`]).
+//! extend_column_selection`]/[`crate::state::AppState::
+//! extend_row_selection`]). Une plage de lignes entières ne touche par
+//! ailleurs jamais l'en-tête : c'est une sélection de données pures, comme
+//! une plage de colonnes.
 
 use plotyx_core::{NodeId, Tree};
 
@@ -42,11 +48,13 @@ use crate::state::{visible_columns_in, HeaderField};
 
 /// Sélection courante dans la grille d'une feuille : un rectangle borné à
 /// l'en-tête ou aux données ([`SelectionKind::Rows`], jamais les deux à la
-/// fois — voir la doc de tête du module) ou une plage de colonnes entières
+/// fois — voir la doc de tête du module), une plage de colonnes entières
 /// ([`SelectionKind::Columns`], glisser/Maj-clic sur la rangée des lettres)
-/// — même comportement clic-sélectionne/glisser-étende/double-clic-édite
-/// pour les deux, voir [`crate::app::header_field_widget`],
-/// [`crate::app::cell_widget`] et [`crate::app::column_header_widget`].
+/// ou une plage de lignes entières ([`SelectionKind::FullRows`], glisser/
+/// Maj-clic sur la gouttière des numéros de ligne) — même comportement
+/// clic-sélectionne/glisser-étende/double-clic-édite pour les trois, voir
+/// [`crate::app::header_field_widget`], [`crate::app::cell_widget`],
+/// [`crate::app::column_header_widget`] et [`crate::app::row_number_widget`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selection {
     kind: SelectionKind,
@@ -71,6 +79,14 @@ enum SelectionKind {
     /// que `Rows::anchor`/`cursor`, mais en colonnes plutôt qu'en cases) —
     /// glisser ou Maj-clic sur la rangée des lettres.
     Columns { anchor: NodeId, cursor: NodeId },
+    /// Plage de lignes entières, entre `anchor` et `cursor` (mêmes règles que
+    /// `Columns::anchor`/`cursor`, mais en indices de ligne plutôt qu'en
+    /// identifiants de colonne) — glisser ou Maj-clic sur la gouttière des
+    /// numéros de ligne ([`crate::app::row_number_widget`]). Symétrique de
+    /// `Columns` : elle touche toutes les colonnes visibles de la feuille et,
+    /// comme elle, ne touche jamais l'en-tête (une ligne entière est une
+    /// sélection de données pures, voir la doc de tête du module).
+    FullRows { anchor: usize, cursor: usize },
 }
 
 /// Point de départ unifié de la navigation clavier (flèches, Tab) et de la
@@ -178,6 +194,16 @@ impl Selection {
         }
     }
 
+    /// Sélection d'une seule ligne entière — l'ancre d'une future plage.
+    pub fn row(row: usize) -> Self {
+        Self {
+            kind: SelectionKind::FullRows {
+                anchor: row,
+                cursor: row,
+            },
+        }
+    }
+
     /// Sélection d'un seul champ d'en-tête — l'ancre d'une future plage.
     pub fn header_field(column: NodeId, field: HeaderField) -> Self {
         let cursor = GridCursor::Header(column, field);
@@ -223,7 +249,7 @@ impl Selection {
                 let rank = field.index() as isize - 4;
                 rank >= lo && rank <= hi
             }
-            SelectionKind::Columns { .. } => false,
+            SelectionKind::Columns { .. } | SelectionKind::FullRows { .. } => false,
         }
     }
 
@@ -257,6 +283,16 @@ impl Selection {
         }
     }
 
+    /// Étend une plage de lignes jusqu'à `row`, en gardant l'ancre posée par
+    /// [`Selection::row`] — glisser ou Maj-clic sur la gouttière des numéros
+    /// de ligne. Sans effet si la sélection courante n'est pas déjà une plage
+    /// de lignes.
+    pub fn extend_full_rows_to(&mut self, row: usize) {
+        if let SelectionKind::FullRows { cursor, .. } = &mut self.kind {
+            *cursor = row;
+        }
+    }
+
     /// Vrai si la sélection est une plage de colonnes entières (rangée des
     /// lettres) — permet à [`crate::state::AppState::extend_selection`]/
     /// [`crate::state::AppState::extend_header_field_selection`] de
@@ -268,6 +304,18 @@ impl Selection {
     /// l'inverse.
     pub fn is_columns(&self) -> bool {
         matches!(self.kind, SelectionKind::Columns { .. })
+    }
+
+    /// Vrai si la sélection est une plage de lignes entières (gouttière des
+    /// numéros de ligne) — même rôle que [`Selection::is_columns`], mais
+    /// pour la frontière symétrique : permet à [`crate::state::AppState::
+    /// extend_selection`]/[`crate::state::AppState::
+    /// extend_header_field_selection`] de reposer une sélection simple
+    /// plutôt que d'étendre silencieusement sans effet quand un glisser part
+    /// de la gouttière, et à [`crate::state::AppState::
+    /// extend_row_selection`] de faire l'inverse.
+    pub fn is_full_rows(&self) -> bool {
+        matches!(self.kind, SelectionKind::FullRows { .. })
     }
 
     /// `Some((column, row))` si la sélection est réduite à une seule
@@ -297,26 +345,35 @@ impl Selection {
     /// visée, cellule de données ou champ d'en-tête. `None` pour une plage
     /// de colonnes : la rangée des lettres n'a pas de « case suivante » qui
     /// ait un sens évident, il faut re-cliquer une cellule ou un champ pour
-    /// reprendre la navigation. Utilisé aussi bien par [`crate::state::
+    /// reprendre la navigation. Même chose pour une plage de lignes
+    /// entières : la gouttière n'a pas de colonne à proposer comme case
+    /// suivante non plus. Utilisé aussi bien par [`crate::state::
     /// AppState::move_selection`] (flèches) que par [`crate::state::
     /// AppState::move_selection_tab`] (Tab/Maj+Tab), qui traversent tous
     /// deux la frontière en-tête/données.
     pub fn grid_cursor(&self) -> Option<GridCursor> {
         match &self.kind {
             SelectionKind::Rows { cursor, .. } => Some(*cursor),
-            SelectionKind::Columns { .. } => None,
+            SelectionKind::Columns { .. } | SelectionKind::FullRows { .. } => None,
         }
     }
 
     /// Colonnes couvertes, dans l'ordre de la feuille. Vide si l'ancre ou le
     /// curseur ne désignent plus une colonne de `sheet` (colonne supprimée
-    /// entre-temps).
+    /// entre-temps). Pour une plage de lignes entières, ce sont **toutes**
+    /// les colonnes visibles de la feuille : une ligne entière touche chaque
+    /// colonne, il n'y a pas de sous-plage à résoudre comme pour `Columns`/
+    /// `Rows`.
     pub fn columns(&self, tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
         match &self.kind {
             SelectionKind::Columns { anchor, cursor } => order_range(tree, sheet, *anchor, *cursor),
             SelectionKind::Rows { anchor, cursor } => {
                 order_range(tree, sheet, anchor.column(), cursor.column())
             }
+            SelectionKind::FullRows { .. } => visible_columns_in(tree, sheet)
+                .into_iter()
+                .map(|(id, _, _)| id)
+                .collect(),
         }
     }
 
@@ -333,6 +390,12 @@ impl Selection {
     /// [`crate::state::AppState::copy_selection`]) — un champ d'en-tête n'a
     /// pas de « ligne » au même sens. Voir [`Selection::full_rank_range`]
     /// pour la plage complète, en-tête compris.
+    ///
+    /// Une plage de lignes entières ([`SelectionKind::FullRows`]) a, elle,
+    /// toujours un rang au sens de cette méthode — contrairement à un
+    /// rectangle de cases, elle ne peut jamais tomber entièrement dans
+    /// l'en-tête (voir la doc de tête du module : une ligne entière est une
+    /// sélection de données pures).
     pub fn row_range(&self) -> Option<(usize, usize)> {
         match &self.kind {
             SelectionKind::Rows { anchor, cursor } => {
@@ -343,6 +406,14 @@ impl Selection {
                     Some((lo.max(0) as usize, hi as usize))
                 }
             }
+            SelectionKind::FullRows { anchor, cursor } => {
+                let (lo, hi) = if anchor <= cursor {
+                    (*anchor, *cursor)
+                } else {
+                    (*cursor, *anchor)
+                };
+                Some((lo, hi))
+            }
             SelectionKind::Columns { .. } => None,
         }
     }
@@ -352,12 +423,18 @@ impl Selection {
     /// [`Selection::row_range`], qui n'en rend que la portion données) —
     /// toujours entièrement négative (en-tête) ou entièrement positive ou
     /// nulle (données), jamais à cheval (voir la doc de tête du module) —
-    /// `None` pour une plage de colonnes entières. Sert à
-    /// [`crate::state::AppState::copy_selection`] (une rangée copiée par
-    /// rang couvert) et à [`Selection::cleared_header_fields`].
+    /// `None` pour une plage de colonnes entières. Pour une plage de lignes
+    /// entières, identique à [`Selection::row_range`] (converti en `isize`) :
+    /// une ligne entière ne touche jamais l'en-tête, les deux méthodes
+    /// coïncident toujours. Sert à [`crate::state::AppState::
+    /// copy_selection`] (une rangée copiée par rang couvert) et à
+    /// [`Selection::cleared_header_fields`].
     pub fn full_rank_range(&self) -> Option<(isize, isize)> {
         match &self.kind {
             SelectionKind::Rows { anchor, cursor } => Some(rank_range(*anchor, *cursor)),
+            SelectionKind::FullRows { .. } => {
+                self.row_range().map(|(lo, hi)| (lo as isize, hi as isize))
+            }
             SelectionKind::Columns { .. } => None,
         }
     }
@@ -391,7 +468,12 @@ impl Selection {
     pub fn contains(&self, tree: &Tree, sheet: NodeId, column: NodeId, row: usize) -> bool {
         match &self.kind {
             SelectionKind::Columns { .. } => self.columns(tree, sheet).contains(&column),
-            SelectionKind::Rows { .. } => match self.row_range() {
+            // Un rectangle de cases et une plage de lignes entières se
+            // testent de la même façon une fois `row_range`/`columns`
+            // résolus pour chacun : la ligne visée doit être dans la plage,
+            // la colonne visée dans les colonnes couvertes (toutes, pour une
+            // plage de lignes entières).
+            SelectionKind::Rows { .. } | SelectionKind::FullRows { .. } => match self.row_range() {
                 Some((lo, hi)) if row >= lo && row <= hi => {
                     self.columns(tree, sheet).contains(&column)
                 }
@@ -402,10 +484,28 @@ impl Selection {
 
     /// Vrai si `column` fait partie de la plage de colonnes sélectionnée
     /// (clic, glisser ou Maj-clic sur la rangée des lettres) — distinct de
-    /// [`Selection::contains`], qui teste une cellule précise.
+    /// [`Selection::contains`], qui teste une cellule précise. Faux pour une
+    /// plage de lignes entières : ce n'est pas la même sélection, même si
+    /// elle finit par toucher les mêmes colonnes (voir [`Selection::
+    /// is_row_selected`] pour son pendant).
     pub fn is_column_selected(&self, tree: &Tree, sheet: NodeId, column: NodeId) -> bool {
         match &self.kind {
             SelectionKind::Columns { .. } => self.columns(tree, sheet).contains(&column),
+            _ => false,
+        }
+    }
+
+    /// Vrai si `row` fait partie de la plage de lignes sélectionnée (clic,
+    /// glisser ou Maj-clic sur la gouttière des numéros de ligne) — pendant
+    /// de [`Selection::is_column_selected`], pour la surbrillance de
+    /// [`crate::app::row_number_widget`]. Ne prend ni `tree` ni `sheet` :
+    /// contrairement à une colonne, une ligne n'a pas besoin de l'arbre pour
+    /// savoir si elle est dans la plage.
+    pub fn is_row_selected(&self, row: usize) -> bool {
+        match &self.kind {
+            SelectionKind::FullRows { .. } => self
+                .row_range()
+                .is_some_and(|(lo, hi)| row >= lo && row <= hi),
             _ => false,
         }
     }
@@ -450,7 +550,12 @@ impl Selection {
     /// intégralement compactée même si une autre colonne de la plage est
     /// plus courte. Un rectangle entièrement dans l'en-tête (aucune donnée
     /// touchée) rend `count == 0` : Suppr n'a pas d'équivalent sur un champ
-    /// d'en-tête, qui n'est pas répété par ligne.
+    /// d'en-tête, qui n'est pas répété par ligne. Une plage de lignes
+    /// entières suit exactement la même règle qu'un rectangle de cellules
+    /// (`count = hi - lo + 1`, les lignes sélectionnées et rien de plus) :
+    /// elle ne peut jamais tomber dans l'en-tête, donc jamais dans le cas
+    /// « colonne la plus longue » propre à `Columns`, qui compacte par
+    /// colonne plutôt que par ligne.
     pub fn delete_at_count(&self, tree: &Tree, sheet: NodeId) -> (Vec<NodeId>, usize, usize) {
         let columns = self.columns(tree, sheet);
         let (start, count) = match &self.kind {
@@ -463,7 +568,7 @@ impl Selection {
                     .unwrap_or(0);
                 (0, count)
             }
-            SelectionKind::Rows { .. } => match self.row_range() {
+            SelectionKind::Rows { .. } | SelectionKind::FullRows { .. } => match self.row_range() {
                 Some((lo, hi)) => (lo, hi.saturating_sub(lo) + 1),
                 None => (0, 0),
             },
@@ -474,17 +579,28 @@ impl Selection {
     /// Ancre de la sélection — la case posée au premier clic, jamais
     /// déplacée par la suite ; la première colonne de la plage à la ligne 0
     /// pour une plage de colonnes entières, qui n'a pas d'ancre au sens
-    /// d'une case précise. Sert de point de départ au collage
-    /// ([`crate::state::AppState::paste`]/[`crate::state::AppState::
-    /// paste_absolute`] collent à partir de l'ancre, indépendamment de la
-    /// taille de la sélection active, comme dans tout tableur de référence)
-    /// : coller sur un champ d'en-tête écrit dans l'en-tête, coller sur une
-    /// cellule écrit dans les données — voir la matrice de comportement en
-    /// tête de [`crate::state`].
-    pub fn anchor(&self) -> GridCursor {
+    /// d'une case précise ; la première colonne *visible de la feuille* à la
+    /// ligne ancrée pour une plage de lignes entières, par symétrie — une
+    /// ligne entière n'a pas de colonne propre, contrairement à une plage de
+    /// colonnes qui, elle, mémorise directement la colonne cliquée. `None`
+    /// seulement si `sheet` n'a plus aucune colonne visible, ce qui ne
+    /// devrait jamais arriver en pratique tant qu'une plage de lignes est
+    /// affichée ([`crate::app::grid_contents`] n'affiche pas de grille sans
+    /// colonne) — traité proprement plutôt que par un identifiant arbitraire.
+    /// Sert de point de départ au collage ([`crate::state::AppState::
+    /// paste`]/[`crate::state::AppState::paste_absolute`] collent à partir
+    /// de l'ancre, indépendamment de la taille de la sélection active, comme
+    /// dans tout tableur de référence) : coller sur un champ d'en-tête écrit
+    /// dans l'en-tête, coller sur une cellule écrit dans les données — voir
+    /// la matrice de comportement en tête de [`crate::state`].
+    pub fn anchor(&self, tree: &Tree, sheet: NodeId) -> Option<GridCursor> {
         match &self.kind {
-            SelectionKind::Rows { anchor, .. } => *anchor,
-            SelectionKind::Columns { anchor, .. } => GridCursor::Data(*anchor, 0),
+            SelectionKind::Rows { anchor, .. } => Some(*anchor),
+            SelectionKind::Columns { anchor, .. } => Some(GridCursor::Data(*anchor, 0)),
+            SelectionKind::FullRows { anchor, .. } => {
+                let first_column = visible_columns_in(tree, sheet).into_iter().next()?.0;
+                Some(GridCursor::Data(first_column, *anchor))
+            }
         }
     }
 }
@@ -574,5 +690,84 @@ mod tests {
             Some(GridCursor::Data(other_column, 0)),
             "le glisser s'arrête à la ligne 0 de la colonne visée"
         );
+    }
+
+    /// [`Selection::extend_row_to`] ne fait rien sur une plage de lignes
+    /// entières : elle n'est pas un rectangle de ce genre. Verrou du
+    /// non-franchissement de frontière symétrique à [`Selection::
+    /// extend_columns_to`] (déjà verrouillé côté colonnes par les tests de
+    /// `AppState` dans `tests/shell.rs`) — un glisser qui, parti de la
+    /// gouttière, croiserait une cellule ne doit jamais faire glisser un
+    /// `FullRows` vers un rectangle de cases.
+    #[test]
+    fn extend_row_to_has_no_effect_on_a_full_rows_selection() {
+        let column = NodeId::from_raw(1);
+        let mut selection = Selection::row(2);
+
+        selection.extend_row_to(GridCursor::Data(column, 5));
+
+        assert!(
+            selection.is_full_rows(),
+            "la sélection reste une plage de lignes entières"
+        );
+        assert_eq!(
+            selection.row_range(),
+            Some((2, 2)),
+            "le curseur n'a pas bougé"
+        );
+    }
+
+    /// Symétrique : [`Selection::extend_full_rows_to`] ne fait rien sur un
+    /// rectangle de cases ou une plage de colonnes — il faut re-cliquer la
+    /// gouttière pour repartir en plage de lignes.
+    #[test]
+    fn extend_full_rows_to_has_no_effect_outside_a_full_rows_selection() {
+        let column = NodeId::from_raw(1);
+
+        let mut cell_selection = Selection::cell(column, 3);
+        cell_selection.extend_full_rows_to(7);
+        assert_eq!(
+            cell_selection.single_cell(),
+            Some((column, 3)),
+            "la sélection de cellule n'a pas bougé"
+        );
+
+        let mut column_selection = Selection::column(column);
+        column_selection.extend_full_rows_to(7);
+        assert!(
+            column_selection.is_columns(),
+            "la plage de colonnes n'a pas basculé en plage de lignes"
+        );
+    }
+
+    /// Une plage de lignes entières n'est jamais une cellule unique ni un
+    /// champ d'en-tête sélectionné — c'est une sélection de données pures,
+    /// distincte des deux (voir la doc de tête du module).
+    #[test]
+    fn a_full_rows_selection_is_neither_a_single_cell_nor_a_header_field() {
+        let selection = Selection::row(4);
+
+        assert_eq!(selection.single_cell(), None);
+        assert_eq!(selection.selected_header_field(), None);
+        assert_eq!(
+            selection.grid_cursor(),
+            None,
+            "pas de « case suivante » pour une plage de lignes, comme pour une plage de colonnes"
+        );
+    }
+
+    /// [`Selection::row_range`]/[`Selection::is_row_selected`] couvrent la
+    /// plage quel que soit le sens du glisser (ancre après le curseur).
+    #[test]
+    fn full_rows_range_is_order_independent() {
+        let mut selection = Selection::row(5);
+        selection.extend_full_rows_to(2);
+
+        assert_eq!(selection.row_range(), Some((2, 5)));
+        assert!(selection.is_row_selected(2));
+        assert!(selection.is_row_selected(4));
+        assert!(selection.is_row_selected(5));
+        assert!(!selection.is_row_selected(1));
+        assert!(!selection.is_row_selected(6));
     }
 }

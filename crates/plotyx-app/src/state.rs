@@ -609,6 +609,8 @@ pub enum GridZone {
     Data,
     /// Plage de colonnes entières (rangée des lettres).
     Columns,
+    /// Plage de lignes entières (gouttière des numéros de ligne).
+    Rows,
 }
 
 /// Ce qu'un menu contextuel de la grille doit proposer pour la sélection
@@ -630,6 +632,11 @@ pub struct GridMenu {
     pub zone: GridZone,
     /// Vrai si la sélection couvre plus d'une case (plusieurs colonnes,
     /// plusieurs rangs, ou les deux) — décide du pluriel des libellés.
+    /// Exception pour [`GridZone::Rows`] : ses libellés (« la ligne »/« les
+    /// lignes ») parlent de lignes, pas de cases, donc `plural` n'y compte
+    /// que le nombre de lignes couvertes — une seule ligne sélectionnée sur
+    /// une feuille à plusieurs colonnes touche déjà plusieurs cases mais
+    /// reste « la ligne » au singulier.
     pub plural: bool,
     /// Vrai si la sélection touche plus d'une colonne. Distinct de
     /// [`GridMenu::plural`], qui compte les *cases* : trois cellules
@@ -661,6 +668,8 @@ impl GridMenu {
             (GridZone::Data, true) => "les cellules",
             (GridZone::Columns, false) => "la colonne",
             (GridZone::Columns, true) => "les colonnes",
+            (GridZone::Rows, false) => "la ligne",
+            (GridZone::Rows, true) => "les lignes",
         }
     }
 
@@ -1277,11 +1286,12 @@ impl AppState {
     /// extend_row_to`] et la doc de tête de [`crate::selection`]) ; pose une
     /// sélection d'une seule cellule si `sheet` n'en avait pas encore, ou si
     /// la sélection en cours est une plage de colonnes (rangée des lettres)
-    /// — ce glisser-là reste un geste distinct, voir [`AppState::
-    /// extend_column_selection`].
+    /// ou une plage de lignes (gouttière des numéros de ligne) — ces
+    /// glissers-là restent des gestes distincts, voir [`AppState::
+    /// extend_column_selection`]/[`AppState::extend_row_selection`].
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) if !selection.is_columns() => {
+            Some(selection) if !selection.is_columns() && !selection.is_full_rows() => {
                 selection.extend_row_to(GridCursor::Data(column, row))
             }
             _ => self.select_cell(sheet, column, row),
@@ -1297,14 +1307,36 @@ impl AppState {
     /// gardant l'ancre déjà posée — glisser ou Maj-clic sur la rangée des
     /// lettres. Pose une sélection d'une seule colonne si `sheet` n'en avait
     /// pas encore, ou si la sélection en cours n'est pas déjà une plage de
-    /// colonnes — un glisser qui franchit la frontière depuis les données ou
-    /// les champs d'en-tête vers la rangée des lettres repose toujours une
-    /// sélection simple, même politique qu'au clavier (voir [`AppState::
-    /// move_selection`]).
+    /// colonnes — un glisser qui franchit la frontière depuis les données,
+    /// les champs d'en-tête ou la gouttière des numéros de ligne vers la
+    /// rangée des lettres repose toujours une sélection simple, même
+    /// politique qu'au clavier (voir [`AppState::move_selection`]).
     pub fn extend_column_selection(&mut self, sheet: NodeId, column: NodeId) {
         match self.selection.get_mut(&sheet) {
             Some(selection) if selection.is_columns() => selection.extend_columns_to(column),
             _ => self.select_column(sheet, column),
+        }
+    }
+
+    /// Sélectionne `row` dans son entier (toutes les colonnes visibles de
+    /// `sheet`) — clic sur son numéro dans la gouttière. Pendant de
+    /// [`AppState::select_column`].
+    pub fn select_row(&mut self, sheet: NodeId, row: usize) {
+        self.selection.insert(sheet, Selection::row(row));
+    }
+
+    /// Étend la plage de lignes courante de `sheet` jusqu'à `row`, en
+    /// gardant l'ancre déjà posée — glisser ou Maj-clic sur la gouttière des
+    /// numéros de ligne. Pose une sélection d'une seule ligne si `sheet`
+    /// n'en avait pas encore, ou si la sélection en cours n'est pas déjà une
+    /// plage de lignes — un glisser qui franchit la frontière depuis les
+    /// données, les champs d'en-tête ou la rangée des lettres vers la
+    /// gouttière repose toujours une sélection simple, pendant de
+    /// [`AppState::extend_column_selection`].
+    pub fn extend_row_selection(&mut self, sheet: NodeId, row: usize) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) if selection.is_full_rows() => selection.extend_full_rows_to(row),
+            _ => self.select_row(sheet, row),
         }
     }
 
@@ -1323,8 +1355,10 @@ impl AppState {
     /// (voir [`Selection::extend_row_to`] et la doc de tête de [`crate::
     /// selection`]) ; pose une sélection d'un seul champ si `sheet` n'en
     /// avait pas encore, ou si la sélection en cours est une plage de
-    /// colonnes (rangée des lettres) — ce glisser-là reste un geste
-    /// distinct, voir [`AppState::extend_column_selection`].
+    /// colonnes (rangée des lettres) ou une plage de lignes (gouttière des
+    /// numéros de ligne) — ces glissers-là restent des gestes distincts,
+    /// voir [`AppState::extend_column_selection`]/[`AppState::
+    /// extend_row_selection`].
     pub fn extend_header_field_selection(
         &mut self,
         sheet: NodeId,
@@ -1332,7 +1366,7 @@ impl AppState {
         field: HeaderField,
     ) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) if !selection.is_columns() => {
+            Some(selection) if !selection.is_columns() && !selection.is_full_rows() => {
                 selection.extend_row_to(GridCursor::Header(column, field))
             }
             _ => self.select_header_field(sheet, column, field),
@@ -1574,6 +1608,14 @@ impl AppState {
         })
     }
 
+    /// Vrai si `row` est sélectionnée dans son entier (clic sur son numéro
+    /// dans la gouttière) — pendant de [`AppState::is_column_selected`].
+    pub fn is_row_selected(&self, sheet: NodeId, row: usize) -> bool {
+        self.selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.is_row_selected(row))
+    }
+
     /// Vrai si `(column, field)` fait partie de la plage de champs d'en-tête
     /// actuellement sélectionnée dans `sheet`.
     pub fn is_header_field_selected(
@@ -1610,19 +1652,34 @@ impl AppState {
         if columns.is_empty() {
             return None;
         }
-        // `full_rank_range` distingue les deux zones d'un rectangle par le
-        // signe de ses rangs (négatifs = en-tête, voir
-        // `crate::selection::GridCursor::rank`) ; `None` ne reste que pour
-        // une plage de colonnes entières, qui n'a pas de rang unique.
-        let (zone, rank_span) = match selection.full_rank_range() {
-            Some((lo, hi)) if hi < 0 => (GridZone::Header, hi - lo),
-            Some((lo, hi)) => (GridZone::Data, hi - lo),
-            None => (GridZone::Columns, 0),
-        };
         let multi_column = columns.len() > 1;
+        let (zone, plural) = if selection.is_full_rows() {
+            // Une plage de lignes entières touche par construction toutes
+            // les colonnes de la feuille : `multi_column` n'a donc rien à
+            // voir avec le pluriel ici, contrairement aux autres zones (voir
+            // la doc de `GridMenu::plural`) — seul le nombre de *lignes*
+            // couvertes décide de « la ligne » vs « les lignes ».
+            let rows_span = selection
+                .row_range()
+                .map(|(lo, hi)| hi.saturating_sub(lo))
+                .unwrap_or(0);
+            (GridZone::Rows, rows_span > 0)
+        } else {
+            // `full_rank_range` distingue les deux zones d'un rectangle par
+            // le signe de ses rangs (négatifs = en-tête, voir
+            // `crate::selection::GridCursor::rank`) ; `None` ne reste que
+            // pour une plage de colonnes entières, qui n'a pas de rang
+            // unique.
+            let (zone, rank_span) = match selection.full_rank_range() {
+                Some((lo, hi)) if hi < 0 => (GridZone::Header, hi - lo),
+                Some((lo, hi)) => (GridZone::Data, hi - lo),
+                None => (GridZone::Columns, 0),
+            };
+            (zone, multi_column || rank_span > 0)
+        };
         Some(GridMenu {
             zone,
-            plural: multi_column || rank_span > 0,
+            plural,
             multi_column,
             offers_delete_shift: zone != GridZone::Header,
             paste_absolute_enabled: self.grid_clipboard.is_some(),
@@ -2810,7 +2867,10 @@ impl AppState {
             self.fail("Aucune cellule sélectionnée pour coller".to_string());
             return;
         };
-        let anchor = selection.anchor();
+        let Some(anchor) = selection.anchor(&self.snapshot.tree, sheet) else {
+            self.fail("Aucune cellule sélectionnée pour coller".to_string());
+            return;
+        };
         let clipboard = if self.clipboard_text.as_deref() == Some(text.as_str()) {
             self.grid_clipboard.clone()
         } else {
@@ -2830,7 +2890,10 @@ impl AppState {
             self.fail("Aucune cellule sélectionnée pour coller".to_string());
             return;
         };
-        let anchor = selection.anchor();
+        let Some(anchor) = selection.anchor(&self.snapshot.tree, sheet) else {
+            self.fail("Aucune cellule sélectionnée pour coller".to_string());
+            return;
+        };
         let Some(clipboard) = self.grid_clipboard.clone() else {
             self.notice("Rien à coller en absolu : copiez d'abord depuis la grille".to_string());
             return;

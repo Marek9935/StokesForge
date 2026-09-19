@@ -409,14 +409,14 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
 
 ### Menus contextuels de la grille
 
-Les trois zones de la grille — cellule de données, champ d'en-tête, rangée des
-lettres — portent le **même** bloc d'édition au clic droit
-(`app::grid_edit_menu`) : Couper, Copier, Copier avec l'en-tête, Coller,
-Coller à l'identique, Vider, Supprimer et décaler, Annuler, Rétablir. Aucun
-n'offre d'action qui n'ait pas d'équivalent au clavier : ce bloc est le miroir
-exact du bloc de raccourcis de `grid_contents`. La rangée des lettres y ajoute
-ensuite ce qui lui est propre (type et rôle de colonne), qui décrit la colonne
-plutôt qu'il n'agit sur son contenu.
+Les quatre zones de la grille — cellule de données, champ d'en-tête, rangée
+des lettres, gouttière des numéros de ligne — portent le **même** bloc
+d'édition au clic droit (`app::grid_edit_menu`) : Couper, Copier, Copier avec
+l'en-tête, Coller, Coller à l'identique, Vider, Supprimer et décaler, Annuler,
+Rétablir. Aucun n'offre d'action qui n'ait pas d'équivalent au clavier : ce
+bloc est le miroir exact du bloc de raccourcis de `grid_contents`. La rangée
+des lettres y ajoute ensuite ce qui lui est propre (type et rôle de colonne),
+qui décrit la colonne plutôt qu'il n'agit sur son contenu.
 
 La **décision** (quels gestes ont un sens ici, comment les nommer, lesquels
 griser) vit dans `AppState::grid_menu` → `GridMenu`, pas dans le code egui :
@@ -424,17 +424,42 @@ c'est ce qui la rend vérifiable sans fenêtre dans `tests/shell.rs`, comme le
 reste de la matrice copier/coller. Deux contextualisations s'y jouent :
 
 - l'accord en nombre des libellés (« Vider la cellule » / « Vider les
-  champs » / « Vider les colonnes »), avec deux pluriels distincts — celui des
-  **cases** (`GridMenu::plural`) et celui des **colonnes**
-  (`GridMenu::multi_column`) : trois cellules empilées sont plurielles sans que
-  « Copier la colonne entière » doive passer au pluriel ;
+  champs » / « Vider les colonnes » / « Vider les lignes »), avec deux
+  pluriels distincts — celui des **cases** (`GridMenu::plural`) et celui des
+  **colonnes** (`GridMenu::multi_column`) : trois cellules empilées sont
+  plurielles sans que « Copier la colonne entière » doive passer au pluriel.
+  `GridZone::Rows` (la gouttière) fait exception à `plural` : ses libellés
+  parlent de **lignes**, pas de cases, donc une seule ligne sélectionnée reste
+  « la ligne » même sur une feuille à plusieurs colonnes — `plural` n'y compte
+  que le nombre de lignes couvertes, jamais `multi_column` ;
 - « Supprimer et décaler » **n'apparaît pas dans l'en-tête** : un champ n'est
   pas répété par ligne, Suppr s'y contente de vider, et l'offrir ferait deux
-  entrées pour un seul effet.
+  entrées pour un seul effet. Il apparaît en revanche pour une plage de lignes
+  entières : supprimer une ligne fait remonter ce qui suit dans toutes les
+  colonnes, exactement comme un rectangle de cellules.
+
+La gouttière (`app::row_number_widget`) est le miroir exact de la rangée des
+lettres (`app::column_header_widget`) : toute sa largeur sélectionne, au clic,
+**toute la ligne** — les colonnes visibles de la feuille, à cette ligne, quelle
+que soit leur longueur propre (une colonne plus courte que la ligne visée
+reste touchée par la sélection, seule sa portion réellement écrite est
+affectée par Vider/Supprimer). `AppState::select_row`/`extend_row_selection`/
+`is_row_selected` en sont les pendants de `select_column`/
+`extend_column_selection`/`is_column_selected`, et `SelectionKind::FullRows`
+(`crate::selection`) le pendant de `SelectionKind::Columns` — même règle de
+non-franchissement de frontière : un glisser qui part de la gouttière et croise
+une cellule ou la rangée des lettres repose une sélection simple plutôt que
+d'étendre silencieusement sans effet, et réciproquement.
 
 Un clic droit **hors** de la sélection la réduit d'abord à la case visée, un
 clic droit **dedans** la laisse intacte — pour que le menu agisse toujours sur
-ce qu'on vient de désigner.
+ce qu'on vient de désigner — même garde (`response.secondary_clicked() &&
+!selected`) dans les quatre zones. `column_header_widget` ne l'avait pas :
+son clic droit réduisait **toujours** la plage à la lettre visée, ce qui
+rendait impossible de changer d'un coup le type ou le rôle de plusieurs
+colonnes sélectionnées, alors même que le commentaire de son `target_columns`
+supposait déjà l'inverse. Corrigé en même temps que l'arrivée de la
+gouttière, qui a rendu l'écart visible.
 
 Deux écarts délibérés entre le menu et le clavier :
 

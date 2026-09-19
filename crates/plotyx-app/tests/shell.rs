@@ -26,6 +26,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use plotyx_app::selection::Selection;
 use plotyx_app::state::{Action, AppState, GridZone, HeaderField, MoveDirection};
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
@@ -3353,4 +3354,315 @@ fn tab_cycles_through_header_fields_before_reaching_data() {
         Some((signal, HeaderField::LongName)),
         "Tab avance d'abord de colonne en colonne pour un même champ"
     );
+}
+
+// -- 17. Sélection de lignes entières (gouttière des numéros de ligne) --
+
+/// Un clic sur la gouttière (`select_row`) sélectionne toute la ligne :
+/// toutes les colonnes visibles de la feuille, à cette ligne — miroir de
+/// [`extending_a_column_selection_covers_the_whole_range`] mais pour une
+/// seule ligne.
+#[test]
+fn clicking_the_row_gutter_selects_the_whole_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_row(sheet1, 1);
+
+    assert!(state.is_row_selected(sheet1, 1));
+    assert!(!state.is_row_selected(sheet1, 0), "ligne 0 non touchée");
+    assert!(state.is_selected(sheet1, temps, 1));
+    assert!(state.is_selected(sheet1, signal, 1));
+    assert!(
+        state.is_selected(sheet1, note, 1),
+        "Note est plus courte que les deux autres colonnes, mais reste \
+         touchée par la sélection de ligne : une ligne entière couvre \
+         toutes les colonnes visibles, pas seulement celles assez longues"
+    );
+    assert!(
+        !state.is_selected(sheet1, temps, 0),
+        "seule la ligne 1 est sélectionnée"
+    );
+}
+
+/// Maj-clic ou glisser sur la gouttière (`extend_row_selection`) étend la
+/// plage à plusieurs lignes — miroir de
+/// [`extending_a_column_selection_covers_the_whole_range`].
+#[test]
+fn extending_a_row_selection_covers_the_whole_range() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_row(sheet1, 1);
+    state.extend_row_selection(sheet1, 3);
+
+    for row in 1..=3 {
+        assert!(state.is_row_selected(sheet1, row), "ligne {row} incluse");
+        assert!(state.is_selected(sheet1, temps, row));
+    }
+    assert!(!state.is_row_selected(sheet1, 0));
+    assert!(!state.is_row_selected(sheet1, 4));
+
+    // Le sens du glisser ne compte pas : reglisser vers le haut couvre la
+    // même plage.
+    state.select_row(sheet1, 3);
+    state.extend_row_selection(sheet1, 1);
+    for row in 1..=3 {
+        assert!(state.is_row_selected(sheet1, row));
+    }
+}
+
+/// Retour arrière (`Action::ClearSelectedCells`) sur une plage de lignes
+/// vide toutes les colonnes touchées à cette ligne, sans rien décaler —
+/// même règle que pour un rectangle de cellules.
+#[test]
+fn backspace_on_a_full_row_selection_clears_it_without_shifting() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    // "Temps" = [0.0, 0.5, 1.0, 1.5, 2.0].
+    state.select_row(sheet1, 1);
+    state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
+
+    assert!(
+        matches!(cell(&state, temps, 1), Cell::Float(v) if v.is_nan()),
+        "la ligne 1 est vide"
+    );
+    assert_eq!(
+        cell(&state, temps, 2),
+        Cell::Float(1.0),
+        "rien n'a été décalé"
+    );
+    assert_eq!(state.row_count(sheet1), 5, "aucune ligne retirée");
+}
+
+/// Suppr (`Action::DeleteSelectedCells`) sur une plage de lignes supprime la
+/// ligne et fait remonter ce qui suit, dans **toutes** les colonnes
+/// touchées, indépendamment de leur longueur propre.
+#[test]
+fn delete_on_a_full_row_selection_shifts_every_column_up() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    // "Temps" = [0.0, 0.5, 1.0, 1.5, 2.0], "Signal" = [10, NaN, 30, 40, 50],
+    // "Note" = [Some("a"), None, Some("")] (plus courte que les deux
+    // autres : ligne 1 est dans ses bornes).
+    state.select_row(sheet1, 1);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+
+    assert_eq!(state.row_count(sheet1), 4);
+    assert_eq!(
+        cell(&state, temps, 1),
+        Cell::Float(1.0),
+        "la ligne 2 d'origine (1.0) a pris la place de la ligne 1 supprimée"
+    );
+    assert_eq!(
+        cell(&state, temps, 3),
+        Cell::Float(2.0),
+        "dernière ligne inchangée, juste décalée"
+    );
+    assert!(matches!(cell(&state, signal, 1), Cell::Float(v) if (v - 30.0).abs() < f64::EPSILON));
+    assert_eq!(
+        state.cell_text(note, 1),
+        "",
+        "Note[2] (chaîne vide présente) a remonté en position 1"
+    );
+}
+
+/// Le cas limite explicitement visé par la tâche : supprimer une ligne
+/// *au-delà* de la fin d'une colonne plus courte que les autres (`Note`, 3
+/// valeurs sur une feuille de 5 lignes) ne doit ni paniquer ni toucher cette
+/// colonne — `Command::DeleteCells` applique `at`/`count` indépendamment par
+/// colonne, une colonne plus courte que `at` n'a rien à retirer.
+#[test]
+fn deleting_the_last_row_leaves_a_shorter_column_untouched() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    let note_before = [
+        state.cell_text(note, 0),
+        state.cell_text(note, 1),
+        state.cell_text(note, 2),
+    ];
+
+    // Ligne 4 (la dernière, 0-indexée) : hors des bornes de `Note` (longueur
+    // 3), mais bien dans celles de `Temps`/`Signal` (longueur 5).
+    state.select_row(sheet1, 4);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+
+    assert_eq!(
+        state.row_count(sheet1),
+        4,
+        "Temps/Signal ont perdu une ligne"
+    );
+    assert_eq!(
+        cell(&state, temps, 3),
+        Cell::Float(1.5),
+        "la dernière ligne restante est l'avant-dernière d'origine"
+    );
+    assert!(matches!(cell(&state, signal, 3), Cell::Float(v) if (v - 40.0).abs() < f64::EPSILON));
+    assert_eq!(
+        [
+            state.cell_text(note, 0),
+            state.cell_text(note, 1),
+            state.cell_text(note, 2),
+        ],
+        note_before,
+        "Note, plus courte que la ligne supprimée, n'a pas bougé"
+    );
+}
+
+/// [`AppState::grid_menu`] sur une plage de lignes rend la zone `Rows` et
+/// les bons libellés, singulier et pluriel — le pluriel n'y suit que le
+/// nombre de *lignes*, jamais le nombre de colonnes (voir la doc de
+/// [`GridMenu::plural`]) : une seule ligne sur une feuille à 3 colonnes
+/// reste « la ligne ».
+#[test]
+fn the_grid_menu_on_a_full_row_selection_names_rows() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+
+    state.select_row(sheet1, 1);
+    let menu = state.grid_menu(sheet1).expect("une ligne sélectionnée");
+    assert_eq!(menu.zone, GridZone::Rows);
+    assert!(
+        !menu.plural,
+        "une seule ligne reste singulière même si elle touche 3 colonnes"
+    );
+    assert_eq!(menu.target_label(), "la ligne");
+    assert!(
+        menu.offers_delete_shift,
+        "Suppr fait remonter ce qui suit dans toutes les colonnes"
+    );
+
+    state.extend_row_selection(sheet1, 3);
+    let menu = state.grid_menu(sheet1).expect("une plage de lignes");
+    assert!(menu.plural, "plusieurs lignes couvertes");
+    assert_eq!(menu.target_label(), "les lignes");
+}
+
+/// Copier une ligne entière (Ctrl+C sur la gouttière) puis la coller
+/// ailleurs colle chaque colonne à sa place, comme un rectangle de cellules
+/// — c'est la matrice `full_rank_range`/`DataRows` de [`AppState::
+/// copy_selection`]/[`AppState::paste`] qui s'applique, pas la branche
+/// « plage de colonnes entières » (qui n'a pas de sens pour une ligne).
+#[test]
+fn copying_a_full_row_and_pasting_elsewhere_pastes_the_whole_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_row(sheet1, 0);
+    let text = state.copy_selection(sheet1).expect("ligne non vide");
+    assert_eq!(text, "0\t10\ta\n");
+
+    state.select_row(sheet1, 1);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+
+    assert_eq!(cell(&state, temps, 1), Cell::Float(0.0));
+    assert!(matches!(cell(&state, signal, 1), Cell::Float(v) if (v - 10.0).abs() < f64::EPSILON));
+    assert_eq!(state.cell_text(note, 1), "a");
+    assert_eq!(
+        cell(&state, temps, 0),
+        Cell::Float(0.0),
+        "la ligne copiée elle-même n'a pas bougé"
+    );
+    assert_eq!(
+        cell(&state, temps, 2),
+        Cell::Float(1.0),
+        "les lignes qui n'ont pas reçu le collage n'ont pas bougé"
+    );
+}
+
+/// Glisser depuis une cellule de données vers la gouttière repose une
+/// sélection d'une seule ligne à la cible plutôt que d'être ignorée — pendant
+/// de [`dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column`].
+#[test]
+fn dragging_a_row_extension_across_the_data_boundary_reselects_a_single_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 0);
+    state.extend_row_selection(sheet1, 3);
+
+    assert!(
+        state.is_row_selected(sheet1, 3),
+        "la ligne visée devient la nouvelle sélection"
+    );
+    assert!(
+        !state.is_selected(sheet1, temps, 0),
+        "l'ancienne sélection de cellule n'a plus cours"
+    );
+}
+
+/// Glisser depuis la gouttière vers une cellule de données repose une
+/// sélection d'une seule cellule à la cible plutôt que d'étendre
+/// silencieusement la plage de lignes sans effet — pendant de
+/// [`dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column`]
+/// côté colonnes.
+#[test]
+fn dragging_a_cell_extension_across_the_row_gutter_boundary_reselects_a_single_cell() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_row(sheet1, 1);
+    state.extend_selection(sheet1, temps, 3);
+
+    assert_eq!(
+        state.selection(sheet1).and_then(Selection::single_cell),
+        Some((temps, 3)),
+        "la cellule visée devient la nouvelle sélection"
+    );
+    assert!(
+        !state.is_row_selected(sheet1, 1),
+        "l'ancienne plage de lignes n'a plus cours"
+    );
+}
+
+/// Glisser depuis la rangée des lettres vers la gouttière repose une
+/// sélection d'une seule ligne, et réciproquement — les deux plages
+/// entières ne se traversent jamais l'une l'autre non plus.
+#[test]
+fn dragging_between_the_letter_row_and_the_row_gutter_never_mixes_the_two_ranges() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_column(sheet1, temps);
+    state.extend_row_selection(sheet1, 2);
+    assert!(state.is_row_selected(sheet1, 2));
+    assert!(!state.is_column_selected(sheet1, temps));
+
+    state.select_row(sheet1, 2);
+    state.extend_column_selection(sheet1, temps);
+    assert!(state.is_column_selected(sheet1, temps));
+    assert!(!state.is_row_selected(sheet1, 2));
 }

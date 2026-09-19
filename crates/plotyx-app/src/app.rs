@@ -1893,7 +1893,17 @@ fn column_header_widget(
                 state.select_column(sheet, column);
             } else if response.clicked() && shift {
                 state.extend_column_selection(sheet, column);
-            } else if response.secondary_clicked() {
+            } else if response.secondary_clicked() && !is_column_selected {
+                // `&& !is_column_selected` : un clic droit *dans* une plage
+                // déjà posée doit la laisser intacte, seul un clic droit en
+                // dehors la réduit à cette colonne. Sans cette garde, le
+                // clic droit réduisait **toujours** la plage à une seule
+                // colonne — ce que le commentaire de `target_columns`
+                // ci-dessous supposait pourtant déjà faux : changer le type
+                // ou le rôle de trois colonnes sélectionnées d'un coup était
+                // donc impossible, la sélection s'étant effondrée entre le
+                // clic et l'ouverture du menu. Même règle que dans
+                // `cell_widget`/`header_field_widget`/`row_number_widget`.
                 state.select_column(sheet, column);
             } else if response.contains_pointer()
                 && ui.input(|i| i.pointer.primary_down())
@@ -2149,13 +2159,14 @@ fn header_field_widget(
 }
 
 /// Gouttière des numéros de ligne, côté en-tête empilée : la lettre `#`
-/// habituelle sur la rangée des lettres (inchangée, seule la lettre de
-/// colonne y sélectionne quoi que ce soit), puis — aligné avec chacune des
-/// quatre rangées de champs de [`column_header_widget`] — le **libellé** du
-/// champ concerné (« Long Name », « Units », « Comments », « F(x)= »,
-/// repris de l'ancienne UI Qt), une seule fois plutôt que répété en grisé
-/// dans chaque colonne. Les cellules par colonne n'affichent plus que la
-/// valeur (voir [`header_field_widget`]).
+/// habituelle sur la rangée des lettres (purement décorative ici, elle ne
+/// sélectionne rien — seuls les numéros du corps de la table, peints par
+/// [`row_number_widget`], sélectionnent toute la ligne), puis — aligné avec
+/// chacune des quatre rangées de champs de [`column_header_widget`] — le
+/// **libellé** du champ concerné (« Long Name », « Units », « Comments »,
+/// « F(x)= », repris de l'ancienne UI Qt), une seule fois plutôt que répété
+/// en grisé dans chaque colonne. Les cellules par colonne n'affichent plus
+/// que la valeur (voir [`header_field_widget`]).
 fn row_number_header_widget(ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         ui.scope(|ui| {
@@ -2833,7 +2844,7 @@ fn grid_contents(
             body.rows(ROW_HEIGHT, row_count, |mut row| {
                 let index = row.index();
                 row.col(|ui| {
-                    ui.weak(format!("{}", index + 1));
+                    row_number_widget(ui, state, actions, sheet, index);
                 });
                 for (id, _, _) in &columns {
                     row.col(|ui| {
@@ -3335,6 +3346,69 @@ fn figure_summary(drawn: &DrawnPlot) -> String {
         ligne.push_str(&format!(" — {} points décimés", drawn.decimated_points));
     }
     ligne
+}
+
+/// Case de la gouttière des numéros de ligne, dans le **corps** de la table
+/// — miroir exact de la rangée des lettres de colonne
+/// ([`column_header_widget`]) mais pour les lignes : toute la largeur de la
+/// case sélectionne **toute la ligne** (glisser/Maj-clic étend à plusieurs
+/// lignes, même logique de multi-sélection que [`cell_widget`]/
+/// [`column_header_widget`]) et ouvre le même menu contextuel d'édition
+/// ([`grid_edit_menu`]).
+///
+/// Fond distinct comme la rangée des lettres
+/// ([`crate::theme::header_letter_row_fill`]) hors sélection, pour que la
+/// gouttière se reconnaisse comme une zone de contrôle au premier coup
+/// d'œil — cohérent avec le choix déjà fait pour `column_header_widget` et
+/// pour le « # » de [`row_number_header_widget`] juste au-dessus.
+fn row_number_widget(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    row: usize,
+) {
+    let selected = state.is_row_selected(sheet, row);
+    let rect = ui.available_rect_before_wrap();
+    let fill = if selected {
+        ui.visuals().selection.bg_fill.linear_multiply(0.35)
+    } else {
+        crate::theme::header_letter_row_fill()
+    };
+    ui.painter().rect_filled(rect, 0.0, fill);
+    let id = ui.id().with(("plotyx_row_number", row));
+    let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+    ui.put(
+        rect,
+        egui::Label::new(format!("{}", row + 1)).selectable(false),
+    );
+    let shift = ui.input(|i| i.modifiers.shift);
+    if response.drag_started() || (response.clicked() && !shift) {
+        state.select_row(sheet, row);
+    } else if response.clicked() && shift {
+        state.extend_row_selection(sheet, row);
+    } else if response.contains_pointer()
+        && ui.input(|i| i.pointer.primary_down())
+        && state.selection(sheet).is_some()
+    {
+        // Même geste que pour les cellules de données et la rangée des
+        // lettres — étendre pendant le glisser, pas seulement au clic de
+        // départ (voir le commentaire détaillé de `cell_widget`).
+        state.extend_row_selection(sheet, row);
+    } else if response.secondary_clicked() && !selected {
+        // Clic droit hors de la sélection : la réduire à cette ligne avant
+        // d'ouvrir le menu — même règle que pour une cellule ou un champ
+        // d'en-tête (voir `cell_widget`/`header_field_widget`).
+        state.select_row(sheet, row);
+    }
+    // `grid_menu` **dans** la fermeture, jamais avant — même raison que dans
+    // `cell_widget` : calculée dehors, elle serait recalculée à chaque image
+    // pour chaque ligne visible.
+    response.context_menu(|ui| {
+        if let Some(menu) = state.grid_menu(sheet) {
+            grid_edit_menu(ui, state, actions, sheet, &menu);
+        }
+    });
 }
 
 /// Peint une cellule et récolte les actions qu'elle produit.
