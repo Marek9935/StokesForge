@@ -1299,13 +1299,19 @@ impl AppState {
     /// frontière plutôt que de la traverser (voir [`Selection::
     /// extend_row_to`] et la doc de tête de [`crate::selection`]) ; pose une
     /// sélection d'une seule cellule si `sheet` n'en avait pas encore, ou si
-    /// la sélection en cours est une plage de colonnes (rangée des lettres)
-    /// ou une plage de lignes (gouttière des numéros de ligne) — ces
+    /// la sélection en cours est une plage de colonnes (rangée des lettres),
+    /// une plage de lignes (gouttière des numéros de ligne) ou une plage de
+    /// champ d'en-tête entier (libellé de champ dans la gouttière) — ces
     /// glissers-là restent des gestes distincts, voir [`AppState::
-    /// extend_column_selection`]/[`AppState::extend_row_selection`].
+    /// extend_column_selection`]/[`AppState::extend_row_selection`]/
+    /// [`AppState::extend_header_row_selection`].
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) if !selection.is_columns() && !selection.is_full_rows() => {
+            Some(selection)
+                if !selection.is_columns()
+                    && !selection.is_full_rows()
+                    && !selection.is_header_rows() =>
+            {
                 selection.extend_row_to(GridCursor::Data(column, row))
             }
             _ => self.select_cell(sheet, column, row),
@@ -1369,10 +1375,11 @@ impl AppState {
     /// (voir [`Selection::extend_row_to`] et la doc de tête de [`crate::
     /// selection`]) ; pose une sélection d'un seul champ si `sheet` n'en
     /// avait pas encore, ou si la sélection en cours est une plage de
-    /// colonnes (rangée des lettres) ou une plage de lignes (gouttière des
-    /// numéros de ligne) — ces glissers-là restent des gestes distincts,
-    /// voir [`AppState::extend_column_selection`]/[`AppState::
-    /// extend_row_selection`].
+    /// colonnes (rangée des lettres), une plage de lignes (gouttière des
+    /// numéros de ligne) ou une plage de champ d'en-tête entier (libellé de
+    /// champ dans la gouttière) — ces glissers-là restent des gestes
+    /// distincts, voir [`AppState::extend_column_selection`]/[`AppState::
+    /// extend_row_selection`]/[`AppState::extend_header_row_selection`].
     pub fn extend_header_field_selection(
         &mut self,
         sheet: NodeId,
@@ -1380,10 +1387,37 @@ impl AppState {
         field: HeaderField,
     ) {
         match self.selection.get_mut(&sheet) {
-            Some(selection) if !selection.is_columns() && !selection.is_full_rows() => {
+            Some(selection)
+                if !selection.is_columns()
+                    && !selection.is_full_rows()
+                    && !selection.is_header_rows() =>
+            {
                 selection.extend_row_to(GridCursor::Header(column, field))
             }
             _ => self.select_header_field(sheet, column, field),
+        }
+    }
+
+    /// Sélectionne `field` dans son entier (toutes les colonnes visibles de
+    /// `sheet`) — clic sur son libellé dans la gouttière (« Long Name »,
+    /// « Units », « Comments », « F(x)= »). Pendant de [`AppState::
+    /// select_row`], côté en-tête.
+    pub fn select_header_row(&mut self, sheet: NodeId, field: HeaderField) {
+        self.selection.insert(sheet, Selection::header_row(field));
+    }
+
+    /// Étend la plage de champ d'en-tête entier courante de `sheet` jusqu'à
+    /// `field`, en gardant l'ancre déjà posée — glisser ou Maj-clic sur un
+    /// libellé de champ dans la gouttière. Pose une sélection d'un seul
+    /// champ entier si `sheet` n'en avait pas encore, ou si la sélection en
+    /// cours n'est pas déjà une plage de ce genre — un glisser qui franchit
+    /// la frontière depuis les données, les champs d'en-tête d'une seule
+    /// colonne ou la rangée des lettres vers la gouttière repose toujours
+    /// une sélection simple, pendant de [`AppState::extend_row_selection`].
+    pub fn extend_header_row_selection(&mut self, sheet: NodeId, field: HeaderField) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) if selection.is_header_rows() => selection.extend_header_rows_to(field),
+            _ => self.select_header_row(sheet, field),
         }
     }
 
@@ -1628,6 +1662,15 @@ impl AppState {
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.is_row_selected(row))
+    }
+
+    /// Vrai si `field` est sélectionné dans son entier (clic sur son
+    /// libellé dans la gouttière) — pendant de [`AppState::is_row_selected`],
+    /// côté en-tête.
+    pub fn is_header_row_selected(&self, sheet: NodeId, field: HeaderField) -> bool {
+        self.selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.is_header_row_selected(field))
     }
 
     /// Vrai si `(column, field)` fait partie de la plage de champs d'en-tête

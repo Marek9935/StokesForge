@@ -3672,3 +3672,258 @@ fn dragging_between_the_letter_row_and_the_row_gutter_never_mixes_the_two_ranges
     assert!(state.is_column_selected(sheet1, temps));
     assert!(!state.is_row_selected(sheet1, 2));
 }
+
+// -- 18. Sélection de champ d'en-tête entier (libellés de la gouttière) --
+
+/// Un clic sur un libellé de champ dans la gouttière (`select_header_row`)
+/// sélectionne ce champ pour **toutes** les colonnes visibles de la feuille
+/// — miroir de [`clicking_the_row_gutter_selects_the_whole_row`], côté
+/// en-tête.
+#[test]
+fn clicking_a_header_row_label_selects_the_field_in_every_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, signal, HeaderField::LongName, "S");
+
+    state.select_header_row(sheet1, HeaderField::LongName);
+
+    assert!(state.is_header_row_selected(sheet1, HeaderField::LongName));
+    assert!(!state.is_header_row_selected(sheet1, HeaderField::Unit));
+    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::LongName));
+    assert!(state.is_header_field_selected(sheet1, signal, HeaderField::LongName));
+    assert!(
+        state.is_header_field_selected(sheet1, note, HeaderField::LongName),
+        "Note est une colonne visible comme les autres, même sans nom long \
+         défini : un champ entier couvre toutes les colonnes visibles"
+    );
+    assert!(
+        !state.is_header_field_selected(sheet1, temps, HeaderField::Unit),
+        "seul Long Name est sélectionné"
+    );
+}
+
+/// Maj-clic ou glisser sur les libellés (`extend_header_row_selection`)
+/// étend la plage à plusieurs champs — miroir de
+/// [`extending_a_row_selection_covers_the_whole_range`].
+#[test]
+fn extending_a_header_row_selection_covers_the_whole_field_range() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_header_row(sheet1, HeaderField::Unit);
+    state.extend_header_row_selection(sheet1, HeaderField::Formula);
+
+    for field in [
+        HeaderField::Unit,
+        HeaderField::Comment,
+        HeaderField::Formula,
+    ] {
+        assert!(state.is_header_row_selected(sheet1, field));
+        assert!(state.is_header_field_selected(sheet1, temps, field));
+    }
+    assert!(!state.is_header_row_selected(sheet1, HeaderField::LongName));
+
+    // Le sens du glisser ne compte pas.
+    state.select_header_row(sheet1, HeaderField::Formula);
+    state.extend_header_row_selection(sheet1, HeaderField::Unit);
+    for field in [
+        HeaderField::Unit,
+        HeaderField::Comment,
+        HeaderField::Formula,
+    ] {
+        assert!(state.is_header_row_selected(sheet1, field));
+    }
+}
+
+/// Retour arrière sur une plage de champ d'en-tête entier vide ce champ dans
+/// **toutes** les colonnes — même mécanisme que
+/// [`delete_on_a_header_field_selection_clears_it_like_backspace`], mais sur
+/// toutes les colonnes d'un même geste plutôt qu'une seule.
+#[test]
+fn clearing_a_header_row_selection_empties_the_field_in_every_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    set_header_field(&mut state, signal, HeaderField::Unit, "V");
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+
+    state.select_header_row(sheet1, HeaderField::Unit);
+    state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
+
+    assert_eq!(state.column_meta(temps).unit, "");
+    assert_eq!(state.column_meta(signal).unit, "");
+    assert_eq!(
+        state.column_meta(temps).long_name,
+        "T",
+        "seul le champ Unit était sélectionné"
+    );
+}
+
+/// Suppr sur une plage de champ d'en-tête entier se contente de vider,
+/// exactement comme sur un champ d'une seule colonne : un champ n'est pas
+/// répété par ligne, il n'y a rien à faire remonter (voir
+/// [`Selection::delete_at_count`]).
+#[test]
+fn delete_on_a_header_row_selection_only_clears_it() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::Comment, "c1");
+    set_header_field(&mut state, signal, HeaderField::Comment, "c2");
+
+    state.select_header_row(sheet1, HeaderField::Comment);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+
+    assert_eq!(state.column_meta(temps).comment, "");
+    assert_eq!(state.column_meta(signal).comment, "");
+    assert_eq!(
+        cell(&state, temps, 0),
+        Cell::Float(0.0),
+        "aucune donnée n'a remonté"
+    );
+}
+
+/// [`AppState::grid_menu`] sur une plage de champ d'en-tête entier reste
+/// dans la zone `Header` (même terminologie qu'un rectangle de champs d'une
+/// seule colonne) et n'offre pas « Supprimer et décaler ».
+#[test]
+fn the_grid_menu_on_a_header_row_selection_stays_in_the_header_zone() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+
+    state.select_header_row(sheet1, HeaderField::LongName);
+    let menu = state
+        .grid_menu(sheet1)
+        .expect("un champ entier sélectionné");
+    assert_eq!(menu.zone, GridZone::Header);
+    assert!(
+        menu.plural,
+        "un champ entier touche plusieurs colonnes sur Sheet1"
+    );
+    assert_eq!(menu.target_label(), "les champs");
+    assert!(
+        !menu.offers_delete_shift,
+        "un champ n'est pas répété par ligne, Suppr n'a rien à décaler"
+    );
+}
+
+/// Copier une plage de champ d'en-tête entier (Ctrl+C sur un libellé) puis
+/// la coller ailleurs écrit chaque colonne à sa place, comme un rectangle de
+/// champs — c'est la matrice `full_rank_range`/`HeaderFields` de
+/// [`AppState::copy_selection`]/[`AppState::paste`] qui s'applique.
+#[test]
+fn copying_a_header_row_and_pasting_elsewhere_pastes_every_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, signal, HeaderField::LongName, "S");
+
+    state.select_header_row(sheet1, HeaderField::LongName);
+    let text = state.copy_selection(sheet1).expect("champ non vide");
+    assert_eq!(
+        text, "T\tS\t\n",
+        "Sheet1 a une troisième colonne (Note), sans nom long défini"
+    );
+
+    set_header_field(&mut state, temps, HeaderField::Unit, "existant");
+    state.select_header_row(sheet1, HeaderField::Unit);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+
+    assert_eq!(state.column_meta(temps).unit, "T");
+    assert_eq!(state.column_meta(signal).unit, "S");
+    assert_eq!(
+        state.column_meta(temps).long_name,
+        "T",
+        "le champ copié lui-même n'a pas bougé"
+    );
+}
+
+/// Étendre une sélection de cellule de données réinitialise une plage de
+/// champ d'en-tête entier en cours plutôt que d'étendre silencieusement sans
+/// effet — verrou du garde-fou ajouté à [`AppState::extend_selection`].
+#[test]
+fn extending_a_data_selection_resets_a_header_rows_selection() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_header_row(sheet1, HeaderField::LongName);
+    state.extend_selection(sheet1, temps, 2);
+
+    assert_eq!(
+        state.selection(sheet1).and_then(Selection::single_cell),
+        Some((temps, 2)),
+        "la cellule visée devient la nouvelle sélection"
+    );
+    assert!(!state.is_header_row_selected(sheet1, HeaderField::LongName));
+}
+
+/// Étendre un champ d'une seule colonne réinitialise une plage de champ
+/// entier en cours plutôt que de rester bloquée sur l'ancienne plage sans la
+/// changer — verrou du garde-fou ajouté à [`AppState::
+/// extend_header_field_selection`]. Sans ce garde-fou, l'appel n'aurait rien
+/// fait du tout : `extend_row_to` ne mute que `SelectionKind::Rows`, jamais
+/// `HeaderRows`, la sélection serait restée figée sur l'ancien champ entier.
+#[test]
+fn extending_a_single_column_header_field_resets_a_header_rows_selection() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_header_row(sheet1, HeaderField::Unit);
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
+
+    assert_eq!(
+        state.selected_header_field(sheet1),
+        Some((temps, HeaderField::Comment)),
+        "la sélection repart d'un seul champ, celui visé"
+    );
+    assert!(!state.is_header_row_selected(sheet1, HeaderField::Unit));
+}
+
+/// Glisser entre la rangée des lettres et un libellé de champ entier repose
+/// une sélection simple dans les deux sens — les deux plages « entières » ne
+/// se traversent jamais l'une l'autre, comme la rangée des lettres et la
+/// gouttière des numéros de ligne.
+#[test]
+fn dragging_between_the_letter_row_and_a_header_row_label_never_mixes_the_two_ranges() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_column(sheet1, temps);
+    state.extend_header_row_selection(sheet1, HeaderField::Unit);
+    assert!(state.is_header_row_selected(sheet1, HeaderField::Unit));
+    assert!(!state.is_column_selected(sheet1, temps));
+
+    state.select_header_row(sheet1, HeaderField::Unit);
+    state.extend_column_selection(sheet1, temps);
+    assert!(state.is_column_selected(sheet1, temps));
+    assert!(!state.is_header_row_selected(sheet1, HeaderField::Unit));
+}

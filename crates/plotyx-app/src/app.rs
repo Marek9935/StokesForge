@@ -2148,15 +2148,31 @@ fn header_field_widget(
 }
 
 /// Gouttière des numéros de ligne, côté en-tête empilée : la lettre `#`
-/// habituelle sur la rangée des lettres (purement décorative ici, elle ne
-/// sélectionne rien — seuls les numéros du corps de la table, peints par
-/// [`row_number_widget`], sélectionnent toute la ligne), puis — aligné avec
-/// chacune des quatre rangées de champs de [`column_header_widget`] — le
-/// **libellé** du champ concerné (« Long Name », « Units », « Comments »,
-/// « F(x)= », repris de l'ancienne UI Qt), une seule fois plutôt que répété
-/// en grisé dans chaque colonne. Les cellules par colonne n'affichent plus
-/// que la valeur (voir [`header_field_widget`]).
-fn row_number_header_widget(ui: &mut egui::Ui) {
+/// habituelle sur la rangée des lettres (purement décorative — il n'y a pas
+/// de « toutes les lignes et tout l'en-tête » à sélectionner d'un même
+/// geste, voir [`row_number_widget`] pour les numéros du corps), puis —
+/// aligné avec chacune des quatre rangées de champs de
+/// [`column_header_widget`] — le **libellé** du champ concerné (« Long
+/// Name », « Units », « Comments », « F(x)= », repris de l'ancienne UI Qt),
+/// une seule fois plutôt que répété en grisé dans chaque colonne. Les
+/// cellules par colonne n'affichent plus que la valeur (voir
+/// [`header_field_widget`]).
+///
+/// Homogène de haut en bas avec le reste de la gouttière : chaque rangée
+/// porte le même fond que le « # »
+/// ([`crate::theme::header_letter_row_fill`], ou le surlignage de sélection
+/// s'il y a lieu) — les quatre rangées de libellés restaient auparavant
+/// transparentes, seul le « # » du dessus rompant le fond de la colonne.
+/// Chaque libellé sélectionne désormais son champ pour **toutes** les
+/// colonnes visibles de la feuille (glisser/Maj-clic étend à plusieurs
+/// champs), symétrique de [`row_number_widget`] côté données — voir
+/// [`header_row_label_widget`].
+fn row_number_header_widget(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+) {
     ui.vertical(|ui| {
         ui.scope(|ui| {
             ui.set_min_height(HEADER_SUBROW_HEIGHT);
@@ -2167,23 +2183,107 @@ fn row_number_header_widget(ui: &mut egui::Ui) {
             header_row_separator(ui, rect);
             ui.strong("#");
         });
-        row_number_header_label(ui, HEADER_LONGNAME_HEIGHT, "Long Name");
-        row_number_header_label(ui, HEADER_SUBROW_HEIGHT, "Units");
-        row_number_header_label(ui, HEADER_SUBROW_HEIGHT, "Comments");
-        row_number_header_label(ui, HEADER_SUBROW_HEIGHT, "F(x)=");
+        header_row_label_widget(
+            ui,
+            state,
+            actions,
+            sheet,
+            HeaderField::LongName,
+            HEADER_LONGNAME_HEIGHT,
+            "Long Name",
+        );
+        header_row_label_widget(
+            ui,
+            state,
+            actions,
+            sheet,
+            HeaderField::Unit,
+            HEADER_SUBROW_HEIGHT,
+            "Units",
+        );
+        header_row_label_widget(
+            ui,
+            state,
+            actions,
+            sheet,
+            HeaderField::Comment,
+            HEADER_SUBROW_HEIGHT,
+            "Comments",
+        );
+        header_row_label_widget(
+            ui,
+            state,
+            actions,
+            sheet,
+            HeaderField::Formula,
+            HEADER_SUBROW_HEIGHT,
+            "F(x)=",
+        );
     });
 }
 
-/// Une rangée de la gouttière (voir [`row_number_header_widget`]) : le
-/// libellé d'un champ, à la hauteur exacte de la rangée de
-/// [`column_header_widget`] qu'elle longe.
-fn row_number_header_label(ui: &mut egui::Ui, height: f32, label: &str) {
+/// Une rangée de la gouttière côté en-tête (voir [`row_number_header_widget`]) :
+/// le libellé d'un champ, à la hauteur exacte de la rangée de
+/// [`column_header_widget`] qu'elle longe — et, depuis que la sélection de
+/// champ entier existe, un vrai geste de sélection, miroir exact de
+/// [`row_number_widget`] pour les lignes de données et de
+/// [`column_header_widget`] pour les colonnes : toute la largeur du libellé
+/// sélectionne le champ pour **toutes** les colonnes visibles de la feuille
+/// (glisser/Maj-clic étend à plusieurs champs), le clic droit ouvre le même
+/// menu contextuel d'édition ([`grid_edit_menu`]).
+fn header_row_label_widget(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    field: HeaderField,
+    height: f32,
+    label: &str,
+) {
     ui.scope(|ui| {
         ui.set_min_height(height);
         ui.set_max_height(height);
+        let selected = state.is_header_row_selected(sheet, field);
         let rect = ui.available_rect_before_wrap();
+        let fill = if selected {
+            ui.visuals().selection.bg_fill.linear_multiply(0.35)
+        } else {
+            crate::theme::header_letter_row_fill()
+        };
+        ui.painter().rect_filled(rect, 0.0, fill);
         header_row_separator(ui, rect);
-        ui.strong(label);
+        let id = ui.id().with(("plotyx_header_row_label", field as u8));
+        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+        ui.put(
+            rect,
+            egui::Label::new(egui::RichText::new(label).strong()).selectable(false),
+        );
+        let shift = ui.input(|i| i.modifiers.shift);
+        if response.drag_started() || (response.clicked() && !shift) {
+            state.select_header_row(sheet, field);
+        } else if response.clicked() && shift {
+            state.extend_header_row_selection(sheet, field);
+        } else if response.contains_pointer()
+            && ui.input(|i| i.pointer.primary_down())
+            && state.selection(sheet).is_some()
+        {
+            // Même geste que pour les cellules de données et la rangée des
+            // lettres — étendre pendant le glisser, pas seulement au clic de
+            // départ (voir le commentaire détaillé de `cell_widget`).
+            state.extend_header_row_selection(sheet, field);
+        } else if response.secondary_clicked() && !selected {
+            // Clic droit hors de la sélection : la réduire à ce champ avant
+            // d'ouvrir le menu — même règle que dans les trois autres zones.
+            state.select_header_row(sheet, field);
+        }
+        // `grid_menu` **dans** la fermeture, jamais avant — même raison que
+        // dans `cell_widget`/`row_number_widget` : calculée dehors, elle
+        // serait recalculée à chaque image pour chacune des 4 rangées.
+        response.context_menu(|ui| {
+            if let Some(menu) = state.grid_menu(sheet) {
+                grid_edit_menu(ui, state, actions, sheet, &menu);
+            }
+        });
     });
 }
 
@@ -2821,7 +2921,7 @@ fn grid_contents(
         .auto_shrink([false, false])
         .header(HEADER_HEIGHT_STACKED, |mut header| {
             header.col(|ui| {
-                row_number_header_widget(ui);
+                row_number_header_widget(ui, state, actions, sheet);
             });
             for (index, (id, _, column_type)) in columns.iter().enumerate() {
                 header.col(|ui| {

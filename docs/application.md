@@ -409,14 +409,15 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
 
 ### Menus contextuels de la grille
 
-Les quatre zones de la grille — cellule de données, champ d'en-tête, rangée
-des lettres, gouttière des numéros de ligne — portent le **même** bloc
-d'édition au clic droit (`app::grid_edit_menu`) : Couper, Copier, Copier avec
-l'en-tête, Coller, Coller à l'identique, Vider, Supprimer et décaler, Annuler,
-Rétablir. Aucun n'offre d'action qui n'ait pas d'équivalent au clavier : ce
-bloc est le miroir exact du bloc de raccourcis de `grid_contents`. La rangée
-des lettres y ajoute ensuite ce qui lui est propre (type et rôle de colonne),
-qui décrit la colonne plutôt qu'il n'agit sur son contenu.
+Les cinq zones de la grille — cellule de données, champ d'en-tête d'une seule
+colonne, rangée des lettres, gouttière des numéros de ligne, libellés de champ
+entier dans cette même gouttière — portent le **même** bloc d'édition au clic
+droit (`app::grid_edit_menu`) : Couper, Copier, Copier avec l'en-tête, Coller,
+Coller à l'identique, Vider, Supprimer et décaler, Annuler, Rétablir. Aucun
+n'offre d'action qui n'ait pas d'équivalent au clavier : ce bloc est le miroir
+exact du bloc de raccourcis de `grid_contents`. La rangée des lettres y ajoute
+ensuite ce qui lui est propre (type et rôle de colonne), qui décrit la colonne
+plutôt qu'il n'agit sur son contenu.
 
 Les entrées sont des verbes **nus** : « Copier », pas « Copier la cellule » ;
 « Annuler », pas « Annuler Saisie dans la colonne A ». Le clic droit vient de
@@ -445,9 +446,11 @@ Deux contextualisations s'y jouent :
   que le nombre de lignes couvertes, jamais `multi_column` ;
 - « Supprimer et décaler » **n'apparaît pas dans l'en-tête** : un champ n'est
   pas répété par ligne, Suppr s'y contente de vider, et l'offrir ferait deux
-  entrées pour un seul effet. Il apparaît en revanche pour une plage de lignes
-  entières : supprimer une ligne fait remonter ce qui suit dans toutes les
-  colonnes, exactement comme un rectangle de cellules.
+  entrées pour un seul effet — vrai aussi bien pour un champ d'une seule
+  colonne que pour un champ entier sur toutes les colonnes (`GridZone::
+  Header` couvre les deux, voir plus bas). Il apparaît en revanche pour une
+  plage de lignes entières : supprimer une ligne fait remonter ce qui suit
+  dans toutes les colonnes, exactement comme un rectangle de cellules.
 
 ### Une colonne a deux identités, une seule est visible
 
@@ -487,6 +490,39 @@ affectée par Vider/Supprimer). `AppState::select_row`/`extend_row_selection`/
 non-franchissement de frontière : un glisser qui part de la gouttière et croise
 une cellule ou la rangée des lettres repose une sélection simple plutôt que
 d'étendre silencieusement sans effet, et réciproquement.
+
+### La gouttière côté en-tête : homogène, et elle aussi sélectionnable
+
+Côté en-tête empilée (`app::row_number_header_widget`), la gouttière portait
+un « # » décoratif sur fond `header_letter_row_fill`, puis quatre rangées de
+libellés (« Long Name », « Units », « Comments », « F(x)= ») restées
+**transparentes** et inertes — la colonne de gauche n'était donc homogène ni
+visuellement (le fond s'arrêtait au « # ») ni fonctionnellement (rien n'y
+était cliquable). Les deux sont corrigés ensemble : chaque rangée de libellé
+porte désormais le même fond que le « # » (ou le surlignage de sélection),
+et un clic sur un libellé (`app::header_row_label_widget`) sélectionne ce
+champ pour **toutes** les colonnes visibles de la feuille — symétrique de
+`row_number_widget` côté données. `AppState::select_header_row`/
+`extend_header_row_selection`/`is_header_row_selected` en sont les pendants
+de `select_row`/`extend_row_selection`/`is_row_selected`, et
+`SelectionKind::HeaderRows` (`crate::selection`) le pendant de `FullRows`
+pour la zone d'en-tête : elle touche toutes les colonnes et, symétriquement,
+ne touche jamais les données (`row_range()` y vaut toujours `None`).
+
+Ce n'est **pas** la même chose qu'un champ sélectionné sur une seule colonne
+(`app::header_field_widget`, `Selection::header_field`) : celui-ci reste
+strictement à une colonne, glisser peut l'étendre à d'autres colonnes mais
+jamais d'un seul geste à *toutes* les colonnes de la feuille — les deux
+widgets, les deux constructeurs et les deux gestes restent distincts, même
+si les deux finissent dans la même zone de menu (`GridZone::Header`) une fois
+posés : `cleared_header_fields`/`copy_selection`/`paste` sont tous les trois
+écrits en termes de `full_rank_range()`/`columns()`, qui rendent déjà la
+bonne réponse pour les deux sortes de sélection sans code dédié
+supplémentaire.
+
+Le « # » lui-même reste décoratif : il n'y a pas de geste « sélectionner
+toute la feuille » demandé ni câblé, contrairement à la case en coin de
+certains tableurs.
 
 Un clic droit **hors** de la sélection la réduit d'abord à la case visée, un
 clic droit **dedans** la laisse intacte — pour que le menu agisse toujours sur
