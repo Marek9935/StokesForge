@@ -602,32 +602,36 @@ fn recalc_sheet(project: &mut Project, sheet: NodeId) {
 
 /// Type que devrait porter la colonne-résultat de `formula` d'après les
 /// colonnes qu'elle référence, ou `None` quand ça ne peut pas se décider
-/// (référence hors bornes, ou vers une colonne dont le type n'est de toute
-/// façon pas exploitable ici) — dans ce cas, l'appelant laisse le type de la
-/// colonne inchangé plutôt que de choisir au hasard. `Mixed` dès qu'une
-/// référence est `Mixed` (l'échec de calcul devient possible), sinon
-/// `Numeric` (y compris pour une formule sans référence, une constante pure).
+/// (référence hors bornes, ou vers une colonne qui a disparu) — dans ce cas,
+/// l'appelant laisse le type de la colonne inchangé plutôt que de choisir au
+/// hasard.
+///
+/// `Mixed` dès que la formule référence au moins une colonne — pas
+/// seulement si l'une d'elles est déjà `Mixed`. N'importe quelle colonne,
+/// même purement `Numeric`, peut avoir une case vide sur une ligne
+/// quelconque ; or une colonne `Numeric` ne peut stocker que des nombres,
+/// jamais le texte `"---"` qu'[`write_formula_column`] écrit désormais
+/// aussi bien pour [`NumericStatus::Failed`] que pour
+/// [`NumericStatus::Missing`] (case manquante, pas seulement en échec) —
+/// sans quoi une opérande manquante resterait une case muette plutôt qu'un
+/// résultat marqué comme non calculé. Seule une formule sans la moindre
+/// référence (une constante pure, qui ne peut jamais manquer ni échouer)
+/// reste `Numeric`.
 fn desired_formula_column_type(
     formula: &Formula,
     columns: &[NodeId],
     project: &Project,
 ) -> Option<ColumnType> {
-    let mut any_mixed = false;
+    let mut any_reference = false;
     for index in formula.referenced_columns() {
         let &column_id = columns.get(index)?;
-        let column_type = project
+        project
             .tree()
             .node(column_id)
-            .and_then(|node| node.as_column())
-            .map(plotyx_core::Column::column_type)?;
-        match column_type {
-            ColumnType::Mixed => any_mixed = true,
-            ColumnType::Numeric | ColumnType::DateTime => {}
-            #[allow(unreachable_patterns)]
-            _ => return None,
-        }
+            .and_then(|node| node.as_column())?;
+        any_reference = true;
     }
-    Some(if any_mixed {
+    Some(if any_reference {
         ColumnType::Mixed
     } else {
         ColumnType::Numeric
@@ -642,13 +646,15 @@ fn desired_formula_column_type(
 /// 10.
 ///
 /// Pour une colonne-formule **mixte**, une ligne au statut
-/// [`NumericStatus::Failed`] s'écrit `MixedCell::Text("---")` plutôt que
-/// `MixedCell::Empty` : un vrai échec de calcul (texte non numérique dans
-/// une colonne référencée) ne doit jamais se confondre avec une case qui n'a
-/// simplement rien à calculer ([`NumericStatus::Missing`], qui reste
-/// `Empty` comme aujourd'hui). `statuses` doit avoir la même longueur que
-/// `values` ; sinon ce sont les valeurs seules qui gouvernent (aucune ligne
-/// n'est marquée `Failed`), comme avant l'ajout de ce paramètre.
+/// [`NumericStatus::Failed`] **ou** [`NumericStatus::Missing`] s'écrit
+/// `MixedCell::Text("---")` plutôt que `MixedCell::Empty` : un résultat non
+/// calculé, que ce soit parce qu'une colonne référencée porte du texte non
+/// numérique (`Failed`) ou parce qu'une opérande manque tout simplement
+/// (`Missing`), se voit toujours signalé plutôt que de laisser une case
+/// muette qu'on confondrait avec une valeur pas encore saisie. `statuses`
+/// doit avoir la même longueur que `values` ; sinon ce sont les valeurs
+/// seules qui gouvernent (aucune ligne n'est marquée), comme avant l'ajout
+/// de ce paramètre.
 fn write_formula_column(
     project: &mut Project,
     column: NodeId,
@@ -657,11 +663,12 @@ fn write_formula_column(
 ) {
     // Le bloc doit correspondre au type de la colonne, sans quoi
     // `set_values` refuse et le recalcul serait silencieusement perdu. Une
-    // colonne-formule est presque toujours numérique, mais rien n'interdit
-    // de poser une formule sur une colonne mixte : `ValueBlock::into_mixed`
-    // fait alors des `NaN` des cellules vides, ce que la formule voulait
-    // dire (invariant 10 — dégrader, pas avaler) ; une ligne `Failed` s'y
-    // écrit `"---"` plutôt qu'une case vide, voir la doc ci-dessus.
+    // colonne-formule sans référence (constante pure) reste numérique, mais
+    // dès qu'elle référence une colonne, `desired_formula_column_type` l'a
+    // déjà retypée en mixte : `ValueBlock::into_mixed` fait alors des `NaN`
+    // des cellules vides, ce que la formule voulait dire (invariant 10 —
+    // dégrader, pas avaler) ; une ligne `Failed` ou `Missing` s'y écrit
+    // `"---"` plutôt qu'une case vide, voir la doc ci-dessus.
     let is_mixed = project
         .tree()
         .node(column)
@@ -672,7 +679,7 @@ fn write_formula_column(
         let mut cells = ValueBlock::Float(values).into_mixed();
         if statuses.len() == cells.len() {
             for (cell, status) in cells.iter_mut().zip(statuses) {
-                if *status == NumericStatus::Failed {
+                if matches!(status, NumericStatus::Failed | NumericStatus::Missing) {
                     *cell = plotyx_core::MixedCell::Text("---".to_string());
                 }
             }

@@ -127,8 +127,11 @@ fn editing_a_source_column_recalculates_the_formula_column() {
 
 /// Un cycle de dépendance entre deux colonnes-formule (`C = D+1`,
 /// `D = C+1`) ne boucle jamais indéfiniment : les deux colonnes reçoivent un
-/// bloc entièrement `NaN` plutôt qu'une valeur qui n'aurait de toute façon
-/// aucun sens à choisir (invariant 10).
+/// bloc entièrement manquant (`NumericStatus::Missing` partout) plutôt
+/// qu'une valeur qui n'aurait de toute façon aucun sens à choisir (invariant
+/// 10). Chacune référence une colonne, donc se retype en `Mixed`
+/// (`desired_formula_column_type`) et affiche `"---"` plutôt qu'une case
+/// vide — un cycle est un résultat non calculé comme un autre.
 #[test]
 fn a_dependency_cycle_degrades_to_nan_without_hanging() {
     let (project, _a, _b, c) = fixture();
@@ -172,8 +175,18 @@ fn a_dependency_cycle_degrades_to_nan_without_hanging() {
         .expect("poser D = C+1, ce qui referme le cycle");
 
     let snapshot = handle.snapshot().expect("snapshot");
-    assert!(read_floats(&snapshot, c).iter().all(|v| v.is_nan()));
-    assert!(read_floats(&snapshot, d).iter().all(|v| v.is_nan()));
+    for &column in &[c, d] {
+        let node = snapshot.tree.node(column).expect("colonne");
+        let col = node.as_column().expect("le nœud est une colonne");
+        assert_eq!(
+            col.column_type(),
+            ColumnType::Mixed,
+            "chacune référence l'autre, donc se retype"
+        );
+        for row in 0..col.len() {
+            assert_eq!(col.cell(row), MixedCell::Text("---".to_string()));
+        }
+    }
 }
 
 /// Poser une formule sur une colonne qui portait déjà des valeurs (données
@@ -273,11 +286,12 @@ fn load_recalculates_rather_than_trusting_the_saved_values() {
 
 /// Une colonne-formule qui référence une colonne mixte se retype
 /// automatiquement en `Mixed` (l'échec de calcul devient possible), et une
-/// ligne dont l'échec vient d'un texte non numérique s'affiche `"---"`
-/// (`MixedCell::Text`) plutôt qu'une case vide — distincte d'une ligne
-/// réellement vide, qui reste `MixedCell::Empty`. Reprend l'exemple de la
-/// tâche : A = [1,2,3,4,""] (numérique, la 5ᵉ case est hors longueur → vide),
-/// B = [1,1,"zut",1,1] (mixte), C = A+B.
+/// ligne qui n'a pas pu être calculée s'affiche `"---"` (`MixedCell::Text`)
+/// plutôt qu'une case vide — que ce soit un vrai échec (texte non numérique
+/// dans une colonne référencée) ou une opérande simplement manquante : les
+/// deux sont un résultat non calculé, pas une case qu'on n'a pas encore
+/// remplie. Reprend l'exemple de la tâche : A = [1,2,3,4,""] (numérique, la
+/// 5ᵉ case est hors longueur → vide), B = [1,1,"zut",1,1] (mixte), C = A+B.
 #[test]
 fn mixed_reference_retypes_the_formula_column_and_shows_dashes_on_failure() {
     let mut project = Project::new("Demo").expect("projet valide");
@@ -339,17 +353,23 @@ fn mixed_reference_retypes_the_formula_column_and_shows_dashes_on_failure() {
     assert_eq!(column.cell(2), MixedCell::Text("---".to_string()));
     // Ligne 3 : 4+1 = 5 (Ok).
     assert_eq!(column.cell(3), MixedCell::Number(5.0));
-    // Ligne 4 : A hors bornes (longueur 4) donc manquante, B = 1 : la case
-    // reste vide (Missing), pas "---" — rien n'a échoué, il manque juste une
-    // opérande.
-    assert_eq!(column.cell(4), MixedCell::Empty);
+    // Ligne 4 : A hors bornes (longueur 4) donc manquante, B = 1 : "---"
+    // aussi — Missing n'a plus droit à une case muette, exactement comme
+    // Failed (voir la doc de tête du test).
+    assert_eq!(column.cell(4), MixedCell::Text("---".to_string()));
 }
 
-/// Tant que toutes les colonnes référencées restent `Numeric`/`DateTime`,
-/// une colonne-formule reste `Numeric` (l'échec est impossible, seules des
-/// absences peuvent apparaître) — pas de retype superflu vers `Mixed`.
+/// Une colonne-formule référençant des colonnes `Numeric`/`DateTime` — donc
+/// où l'échec (texte non numérique) est impossible — se retype quand même en
+/// `Mixed` dès qu'elle référence au moins une colonne : n'importe quelle
+/// ligne de n'importe quelle colonne référencée peut être vide, et seule une
+/// colonne `Mixed` peut porter le `"---"` que ça affiche
+/// (`write_formula_column`). Les valeurs présentes restent des
+/// `MixedCell::Number` ordinaires, lisibles comme des `Cell::Float` par
+/// n'importe quel appelant — le retype ne change rien pour un résultat
+/// entièrement calculé.
 #[test]
-fn all_numeric_references_keep_the_formula_column_numeric() {
+fn formula_referencing_only_numeric_columns_still_becomes_mixed() {
     let (project, _a, _b, c) = fixture();
     let session = Session::spawn(project, None).expect("thread de l'acteur démarré");
     let handle = session.handle();
@@ -361,5 +381,32 @@ fn all_numeric_references_keep_the_formula_column_numeric() {
     let snapshot = handle.snapshot().expect("snapshot");
     let node = snapshot.tree.node(c).expect("colonne C");
     let column = node.as_column().expect("le nœud est une colonne");
+    assert_eq!(
+        column.column_type(),
+        ColumnType::Mixed,
+        "une référence à A/B suffit, même toutes deux Numeric"
+    );
+    assert_eq!(column.cell(0), MixedCell::Number(11.0));
+    assert_eq!(column.cell(1), MixedCell::Number(22.0));
+    assert_eq!(column.cell(2), MixedCell::Number(33.0));
+}
+
+/// Une formule sans la moindre référence de colonne (une constante pure) ne
+/// peut jamais ni manquer ni échouer : elle reste `Numeric`, pas de retype
+/// superflu vers `Mixed`.
+#[test]
+fn a_formula_with_no_column_reference_stays_numeric() {
+    let (project, _a, _b, c) = fixture();
+    let session = Session::spawn(project, None).expect("thread de l'acteur démarré");
+    let handle = session.handle();
+
+    handle
+        .execute(set_formula(c, "42"))
+        .expect("poser C = 42, une constante pure");
+
+    let snapshot = handle.snapshot().expect("snapshot");
+    let node = snapshot.tree.node(c).expect("colonne C");
+    let column = node.as_column().expect("le nœud est une colonne");
     assert_eq!(column.column_type(), ColumnType::Numeric);
+    assert_eq!(read_floats(&snapshot, c), vec![42.0, 42.0, 42.0]);
 }
