@@ -26,7 +26,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use plotyx_app::state::{Action, AppState, HeaderField, MoveDirection};
+use plotyx_app::state::{Action, AppState, GridZone, HeaderField, MoveDirection};
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
 use plotyx_session::{Session, SessionHandle};
@@ -1825,6 +1825,127 @@ fn another_grid_mutation_between_two_delete_presses_forgets_the_first() {
         Action::ClearSelectedCells { sheet: sheet1 },
         "la mutation intercalée a fait oublier la première pression"
     );
+}
+
+/// [`AppState::grid_menu`] — ce que le menu contextuel propose est décidé
+/// ici, sans egui : la zone touchée, l'accord en nombre des libellés, et le
+/// fait que « Supprimer et décaler » n'existe pas dans l'en-tête, où Suppr
+/// n'a rien à faire remonter (voir [`AppState::grid_menu`] et la doc de
+/// `GridMenu`).
+#[test]
+fn the_grid_menu_names_what_the_selection_actually_touches() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 1);
+    let menu = state.grid_menu(sheet1).expect("une cellule sélectionnée");
+    assert_eq!(menu.zone, GridZone::Data);
+    assert!(!menu.plural, "une seule cellule");
+    assert!(!menu.multi_column);
+    assert_eq!(menu.target_label(), "la cellule");
+    assert_eq!(menu.copy_full_columns_label(), "Copier la colonne entière");
+    assert!(
+        menu.offers_delete_shift,
+        "Suppr fait remonter ce qui suit dans les données"
+    );
+
+    // Plusieurs lignes d'une seule colonne : pluriel en cases, mais toujours
+    // une seule colonne entière à promouvoir.
+    state.extend_selection(sheet1, temps, 3);
+    let menu = state.grid_menu(sheet1).expect("un rectangle sélectionné");
+    assert!(menu.plural);
+    assert!(
+        !menu.multi_column,
+        "trois cases empilées ne touchent qu'une colonne"
+    );
+    assert_eq!(menu.target_label(), "les cellules");
+    assert_eq!(menu.copy_full_columns_label(), "Copier la colonne entière");
+
+    state.extend_selection(sheet1, signal, 3);
+    let menu = state.grid_menu(sheet1).expect("un rectangle sélectionné");
+    assert!(menu.multi_column);
+    assert_eq!(
+        menu.copy_full_columns_label(),
+        "Copier les colonnes entières"
+    );
+
+    // En-tête : un champ n'est pas répété par ligne, rien à faire remonter.
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    let menu = state.grid_menu(sheet1).expect("un champ sélectionné");
+    assert_eq!(menu.zone, GridZone::Header);
+    assert_eq!(menu.target_label(), "le champ");
+    assert!(
+        !menu.offers_delete_shift,
+        "dans l'en-tête, Suppr ne fait que vider : deux entrées pour un même effet n'auraient pas de sens"
+    );
+    state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
+    assert_eq!(
+        state
+            .grid_menu(sheet1)
+            .expect("une plage de champs")
+            .target_label(),
+        "les champs"
+    );
+
+    // Colonnes entières : une seule colonne reste au singulier.
+    state.select_column(sheet1, temps);
+    let menu = state.grid_menu(sheet1).expect("une colonne sélectionnée");
+    assert_eq!(menu.zone, GridZone::Columns);
+    assert_eq!(menu.target_label(), "la colonne");
+    assert!(menu.offers_delete_shift);
+    state.extend_column_selection(sheet1, signal);
+    assert_eq!(
+        state
+            .grid_menu(sheet1)
+            .expect("une plage de colonnes")
+            .target_label(),
+        "les colonnes"
+    );
+}
+
+/// « Coller à l'identique » (Ctrl+Maj+V) rejoue le presse-papier **interne** :
+/// le menu doit le griser tant que rien n'a été copié depuis la grille dans
+/// cette session, plutôt que d'offrir une entrée qui ne ferait que poser une
+/// notice (verrou du pendant menu de
+/// [`paste_absolute_without_a_prior_copy_is_a_notice_not_an_error`]).
+#[test]
+fn the_grid_menu_greys_out_paste_absolute_until_something_was_copied() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 0);
+    assert!(
+        !state
+            .grid_menu(sheet1)
+            .expect("une cellule sélectionnée")
+            .paste_absolute_enabled,
+        "rien n'a encore été copié depuis la grille"
+    );
+
+    state.copy_selection(sheet1).expect("copie d'une cellule");
+    assert!(
+        state
+            .grid_menu(sheet1)
+            .expect("une cellule sélectionnée")
+            .paste_absolute_enabled,
+        "une copie depuis la grille donne de quoi rejouer"
+    );
+}
+
+/// Sans sélection, pas de menu à ouvrir — l'appelant doit s'abstenir plutôt
+/// que de poser un menu dont chaque entrée serait sans effet.
+#[test]
+fn the_grid_menu_is_absent_without_a_selection() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+
+    assert!(state.grid_menu(sheet1).is_none());
 }
 
 // -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --

@@ -315,7 +315,8 @@ use plotyx_session::Snapshot;
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
     cell_text_in, node_title_in, note_text_in, row_count_in, visible_columns_in, worksheets_of_in,
-    Action, AppState, CellEdit, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
+    Action, AppState, CellEdit, GridMenu, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode,
+    WindowKind,
 };
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
@@ -354,6 +355,53 @@ pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
 /// Ctrl+Entrée — exécuter le script de la console.
 pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
+
+/// Ctrl+C — copier la sélection de la grille.
+///
+/// # Ces cinq raccourcis-ci ne sont **jamais** consommés
+///
+/// Contrairement à [`SHORTCUT_UNDO`] et compagnie, les cinq constantes qui
+/// suivent sont purement **décoratives** : elles n'existent que pour écrire
+/// le rappel de raccourci à droite d'une entrée de menu contextuel
+/// (`Context::format_shortcut`, qui rend « Ctrl+C » ou « ⌘C » selon la
+/// plateforme). Aucun appel à `consume_shortcut` ne les prend, et il ne faut
+/// pas essayer : `egui-winit` intercepte Ctrl+C/X/V à la traduction des
+/// événements de la fenêtre et n'en laisse jamais passer de `Event::Key`
+/// — un essai précédent, fondé sur l'hypothèse inverse, produisait des
+/// raccourcis qui ne se déclenchaient jamais. Le bloc clavier de
+/// [`grid_contents`] lit les `Event::Copy`/`Event::Cut`/`Event::Paste`
+/// correspondants, et c'est là que vit la vraie logique.
+pub const SHORTCUT_COPY: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
+/// Ctrl+Maj+C — copier en entier les colonnes touchées (décoratif, voir
+/// [`SHORTCUT_COPY`]).
+pub const SHORTCUT_COPY_FULL_COLUMNS: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::C,
+);
+/// Ctrl+X — couper (décoratif, voir [`SHORTCUT_COPY`]).
+pub const SHORTCUT_CUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::X);
+/// Ctrl+V — coller à partir de l'ancre (décoratif, voir [`SHORTCUT_COPY`]).
+pub const SHORTCUT_PASTE: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::V);
+/// Ctrl+Maj+V — coller à l'identique (décoratif, voir [`SHORTCUT_COPY`]).
+pub const SHORTCUT_PASTE_ABSOLUTE: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::V,
+);
+
+/// Rappel de raccourci pour Retour arrière, écrit en toutes lettres plutôt
+/// que via `Context::format_shortcut`.
+///
+/// egui nomme ses touches en anglais (« Backspace », « Delete ») : les
+/// passer par `format_shortcut` mettrait deux mots anglais au milieu d'un
+/// menu entièrement français. Les raccourcis à modificateur, eux, se rendent
+/// identiquement dans toutes les langues (« Ctrl+C ») et gagnent à passer
+/// par `format_shortcut`, qui sait les adapter à macOS.
+const SHORTCUT_TEXT_BACKSPACE: &str = "Retour arr.";
+/// Pendant de [`SHORTCUT_TEXT_BACKSPACE`] pour Suppr.
+const SHORTCUT_TEXT_DELETE: &str = "Suppr";
 
 /// Hauteur d'une ligne de la grille, en points.
 const ROW_HEIGHT: f32 = 20.0;
@@ -1611,6 +1659,182 @@ fn column_letter(mut index: usize) -> String {
     letters.iter().rev().collect()
 }
 
+/// Contenu du presse-papier **système**, lu à la demande — pour « Coller »
+/// pris dans un menu contextuel, qui n'a pas d'`egui::Event::Paste` à se
+/// mettre sous la dent.
+///
+/// Ctrl+V fonctionne sans ça parce qu'`egui-winit` lit lui-même le
+/// presse-papier et pousse le texte dans l'événement ; egui, lui, n'expose
+/// aucune API de **lecture** (seulement `Context::copy_text`, en écriture).
+/// D'où cette lecture directe par `arboard` — la bibliothèque qu'`egui-winit`
+/// utilise déjà en interne, donc déjà présente dans l'arbre de dépendances.
+///
+/// Une nouvelle poignée à chaque appel, plutôt qu'une gardée en vie : c'est
+/// l'**écriture** qui exige sous X11 de garder le processus propriétaire du
+/// presse-papier vivant, jamais la lecture, qui est un aller-retour unique.
+/// Et un menu s'ouvre trop rarement pour que ce coût compte — raison pour
+/// laquelle « Coller » n'est d'ailleurs jamais grisé : savoir s'il y a
+/// quelque chose à coller demanderait cette lecture à *chaque image* où le
+/// menu est ouvert. On tente, et on le dit si ça ne donne rien.
+///
+/// `None` si le presse-papier est inaccessible (pas de serveur d'affichage,
+/// portail refusé…) ou s'il ne contient pas de texte (une image, par
+/// exemple).
+fn system_clipboard_text() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
+/// Bloc d'édition commun à tous les menus contextuels de la grille : les
+/// raccourcis clavier de [`grid_contents`], contextualisés à ce que la
+/// sélection courante touche réellement (voir [`AppState::grid_menu`] et
+/// [`GridMenu`]).
+///
+/// Le même bloc, dans le même ordre, sur les trois zones — cellule de
+/// données, champ d'en-tête, rangée des lettres : seuls les libellés
+/// changent, et « Supprimer et décaler » disparaît dans l'en-tête, où Suppr
+/// n'a rien à faire remonter. Le menu de la rangée des lettres y ajoute
+/// ensuite ce qui lui est propre (type et rôle de colonne, voir
+/// [`column_header_widget`]).
+///
+/// N'ouvre rien si [`AppState::grid_menu`] rend `None` (plus de sélection
+/// valide) : l'appelant doit alors s'abstenir de poser un menu, plutôt que
+/// d'en poser un vide.
+fn grid_edit_menu(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    menu: &GridMenu,
+) {
+    let ctx = ui.ctx().clone();
+    let target = menu.target_label();
+
+    if ui
+        .add(
+            egui::Button::new(format!("Couper {target}"))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_CUT)),
+        )
+        .clicked()
+    {
+        // Couper = copier puis vider, exactement comme le bloc clavier :
+        // `copy_selection` pose le presse-papier interne *et* rend le texte
+        // à pousser au presse-papier système.
+        if let Some(text) = state.copy_selection(sheet) {
+            ctx.copy_text(text);
+        }
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::ClearSelectedCells { sheet });
+        ui.close();
+    }
+    if ui
+        .add(
+            egui::Button::new(format!("Copier {target}"))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY)),
+        )
+        .clicked()
+    {
+        if let Some(text) = state.copy_selection(sheet) {
+            ctx.copy_text(text);
+        }
+        ui.close();
+    }
+    if ui
+        .add(
+            egui::Button::new(menu.copy_full_columns_label())
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY_FULL_COLUMNS)),
+        )
+        .clicked()
+    {
+        if let Some(text) = state.copy_full_columns(sheet) {
+            ctx.copy_text(text);
+        }
+        ui.close();
+    }
+
+    ui.separator();
+
+    if ui
+        .add(egui::Button::new("Coller").shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE)))
+        .clicked()
+    {
+        state.forget_delete_repeat(sheet);
+        match system_clipboard_text() {
+            Some(text) => actions.push(Action::Paste { sheet, text }),
+            None => state.notice("Presse-papier vide ou illisible".to_string()),
+        }
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            menu.paste_absolute_enabled,
+            egui::Button::new("Coller à l'identique")
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE_ABSOLUTE)),
+        )
+        .on_disabled_hover_text("Copiez d'abord depuis la grille : un texte externe n'a pas de position d'origine à rejouer.")
+        .clicked()
+    {
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::PasteAbsolute { sheet });
+        ui.close();
+    }
+
+    ui.separator();
+
+    if ui
+        .add(egui::Button::new(format!("Vider {target}")).shortcut_text(SHORTCUT_TEXT_BACKSPACE))
+        .clicked()
+    {
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::ClearSelectedCells { sheet });
+        ui.close();
+    }
+    if menu.offers_delete_shift
+        && ui
+            .add(
+                egui::Button::new(format!("Supprimer {target} et décaler"))
+                    .shortcut_text(SHORTCUT_TEXT_DELETE),
+            )
+            .on_hover_text(
+                "Suppr vide à la première pression et ne supprime qu'à la seconde ; cette entrée supprime tout de suite.",
+            )
+            .clicked()
+    {
+        // Passer par l'action directement, sans `consume_delete_key` : un
+        // menu contextuel est un geste explicite et désigné, là où la
+        // double pression sur Suppr n'existe que pour protéger d'une frappe
+        // réflexe. Le compteur en cours est quand même oublié, pour qu'une
+        // pression sur Suppr juste après ne parte pas du mauvais temps.
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::DeleteSelectedCells { sheet });
+        ui.close();
+    }
+
+    ui.separator();
+
+    if ui
+        .add_enabled(
+            state.can_undo(),
+            egui::Button::new(state.undo_label().unwrap_or_else(|| "Annuler".to_string()))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
+        )
+        .clicked()
+    {
+        actions.push(Action::Undo);
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            state.can_redo(),
+            egui::Button::new(state.redo_label().unwrap_or_else(|| "Rétablir".to_string()))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
+        )
+        .clicked()
+    {
+        actions.push(Action::Redo);
+        ui.close();
+    }
+}
+
 /// En-tête empilée d'une colonne : lettre (clic → sélectionne la colonne
 /// entière), puis nom long, unité, commentaire et formule — les quatre
 /// champs de [`plotyx_core::ColumnMeta`], jusqu'ici stockés sans jamais être
@@ -1691,6 +1915,16 @@ fn column_header_widget(
                 .filter(|columns| columns.contains(&column))
                 .unwrap_or_else(|| vec![column]);
             response.context_menu(|ui| {
+                // Le bloc d'édition d'abord (les gestes du quotidien, les
+                // mêmes que sur une cellule ou un champ d'en-tête), puis ce
+                // qui n'existe que sur la rangée des lettres : type et rôle
+                // de colonne, qui décrivent la colonne plutôt qu'ils
+                // n'agissent sur son contenu. Calcul paresseux, pour la
+                // même raison que dans `cell_widget`.
+                if let Some(menu) = state.grid_menu(sheet) {
+                    grid_edit_menu(ui, state, actions, sheet, &menu);
+                    ui.separator();
+                }
                 // Choix manuel du type de colonne — conversion destructrice
                 // assumée (`Action::SetColumnType`/`Command::
                 // SetColumnType`, `plotyx-core::Column::set_column_type`) :
@@ -1822,7 +2056,10 @@ fn header_field_widget(
     height: f32,
     column_selected: bool,
 ) {
-    let _ = actions; // la validation passe par `AppState::commit_header_edit`, appelé directement (mutation transitoire, comme `commit_edit`).
+    // `actions` ne sert pas à la validation de la saisie — elle passe par
+    // `AppState::commit_header_edit`, appelé directement (mutation
+    // transitoire, comme `commit_edit`) — mais bien au menu contextuel
+    // ci-dessous, qui pousse des actions comme partout ailleurs.
     ui.scope(|ui| {
         ui.set_min_height(height);
         ui.set_max_height(height);
@@ -1894,7 +2131,20 @@ fn header_field_widget(
             state.select_header_field(sheet, column, field);
         } else if (response.clicked() && shift) || dragging {
             state.extend_header_field_selection(sheet, column, field);
+        } else if response.secondary_clicked() && !selected {
+            // Même règle que la rangée des lettres : un clic droit *dans*
+            // la sélection ouvre le menu sur elle sans la toucher ; un clic
+            // droit en dehors la réduit d'abord à la case visée, pour que
+            // le menu agisse sur ce qu'on vient de désigner et pas sur une
+            // sélection oubliée ailleurs.
+            state.select_header_field(sheet, column, field);
         }
+        // Calcul paresseux, pour la même raison que dans `cell_widget`.
+        response.context_menu(|ui| {
+            if let Some(menu) = state.grid_menu(sheet) {
+                grid_edit_menu(ui, state, actions, sheet, &menu);
+            }
+        });
     });
 }
 
@@ -3265,7 +3515,23 @@ fn cell_widget(
             // ce qui est en train d'être glissé ailleurs — c'est le test
             // qu'il faut ici.
             state.extend_selection(sheet, column, row);
+        } else if response.secondary_clicked() && !selected {
+            // Clic droit hors de la sélection : la réduire à cette cellule
+            // avant d'ouvrir le menu — même règle que dans l'en-tête et sur
+            // la rangée des lettres (voir `header_field_widget`).
+            state.select_cell(sheet, column, row);
         }
+        // `grid_menu` **dans** la fermeture, jamais avant : elle ne tourne
+        // que tant que le menu est ouvert. Calculée dehors, elle serait
+        // recalculée à chaque image pour *chaque cellule visible* — et elle
+        // parcourt l'arbre (`Selection::columns`), ce qui en ferait un coût
+        // quadratique en nombre de colonnes sur une grille qui ne fait que
+        // s'afficher.
+        response.context_menu(|ui| {
+            if let Some(menu) = state.grid_menu(sheet) {
+                grid_edit_menu(ui, state, actions, sheet, &menu);
+            }
+        });
     });
 }
 

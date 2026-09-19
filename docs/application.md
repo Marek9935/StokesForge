@@ -407,6 +407,60 @@ quatre sont séparés : le raccourci est déclaré et consommé à la main
 vient de `AppState::undo_label` — et **rien ne garantit leur cohérence sinon la
 relecture**. C'est le point à vérifier en premier quand une action est ajoutée.
 
+### Menus contextuels de la grille
+
+Les trois zones de la grille — cellule de données, champ d'en-tête, rangée des
+lettres — portent le **même** bloc d'édition au clic droit
+(`app::grid_edit_menu`) : Couper, Copier, Copier avec l'en-tête, Coller,
+Coller à l'identique, Vider, Supprimer et décaler, Annuler, Rétablir. Aucun
+n'offre d'action qui n'ait pas d'équivalent au clavier : ce bloc est le miroir
+exact du bloc de raccourcis de `grid_contents`. La rangée des lettres y ajoute
+ensuite ce qui lui est propre (type et rôle de colonne), qui décrit la colonne
+plutôt qu'il n'agit sur son contenu.
+
+La **décision** (quels gestes ont un sens ici, comment les nommer, lesquels
+griser) vit dans `AppState::grid_menu` → `GridMenu`, pas dans le code egui :
+c'est ce qui la rend vérifiable sans fenêtre dans `tests/shell.rs`, comme le
+reste de la matrice copier/coller. Deux contextualisations s'y jouent :
+
+- l'accord en nombre des libellés (« Vider la cellule » / « Vider les
+  champs » / « Vider les colonnes »), avec deux pluriels distincts — celui des
+  **cases** (`GridMenu::plural`) et celui des **colonnes**
+  (`GridMenu::multi_column`) : trois cellules empilées sont plurielles sans que
+  « Copier la colonne entière » doive passer au pluriel ;
+- « Supprimer et décaler » **n'apparaît pas dans l'en-tête** : un champ n'est
+  pas répété par ligne, Suppr s'y contente de vider, et l'offrir ferait deux
+  entrées pour un seul effet.
+
+Un clic droit **hors** de la sélection la réduit d'abord à la case visée, un
+clic droit **dedans** la laisse intacte — pour que le menu agisse toujours sur
+ce qu'on vient de désigner.
+
+Deux écarts délibérés entre le menu et le clavier :
+
+- **« Supprimer et décaler » supprime tout de suite**, là où la touche Suppr
+  vide à la première pression et ne supprime qu'à la seconde. La double
+  pression n'existe que pour protéger d'une frappe réflexe sur une touche
+  facile d'accès ; un menu contextuel est un geste explicite et désigné.
+- **« Coller » n'est jamais grisé.** egui n'expose aucune API de *lecture* du
+  presse-papier (Ctrl+V ne marche que parce qu'`egui-winit` lit lui-même le
+  presse-papier avant de pousser l'`Event::Paste`), donc `app::
+  system_clipboard_text` le lit directement via `arboard` — la bibliothèque
+  qu'`egui-winit` emploie déjà en interne. Savoir s'il y a quelque chose à
+  coller exigerait cette lecture à *chaque image* où le menu est ouvert : on
+  tente au clic, et on pose une notice si ça ne donne rien. « Coller à
+  l'identique », lui, est grisable sans coût — il rejoue le presse-papier
+  **interne**, dont on connaît l'état.
+
+Enfin, les cinq constantes `SHORTCUT_COPY`/`SHORTCUT_CUT`/`SHORTCUT_PASTE`/
+`SHORTCUT_COPY_FULL_COLUMNS`/`SHORTCUT_PASTE_ABSOLUTE` sont **purement
+décoratives** : elles n'existent que pour écrire le rappel de raccourci à
+droite d'une entrée de menu. Rien ne les consomme, et il ne faut pas essayer —
+`egui-winit` intercepte Ctrl+C/X/V à la traduction des événements de la
+fenêtre et n'en laisse jamais passer de `Event::Key` (un essai précédent,
+fondé sur l'hypothèse inverse, produisait des raccourcis qui ne se
+déclenchaient jamais).
+
 ### Limites assumées du banc
 
 - **Les raccourcis sont consommés au niveau du contexte**, donc *avant* les

@@ -43,6 +43,13 @@ egui_dock = "0.21.1"
 # sous Wayland, pas une dépendance de lien : ce crate compile sans portail
 # système présent.
 rfd = "0.17.2"
+# Lecture du presse-papier système pour « Coller » pris dans un menu
+# contextuel : egui n'expose que l'écriture (`Context::copy_text`), et Ctrl+V
+# ne marche que parce qu'`egui-winit` lit le presse-papier lui-même avant de
+# pousser l'`Event::Paste`. `arboard` est précisément la bibliothèque qu'il
+# emploie en interne — elle était déjà dans l'arbre de dépendances, la citer
+# ici n'ajoute rien à compiler. Voir `app::system_clipboard_text`.
+arboard = "3.6.1"
 anyhow = "1"
 
 [dev-dependencies]

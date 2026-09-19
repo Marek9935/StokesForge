@@ -198,10 +198,11 @@ pub enum Action {
         text: String,
     },
     /// Colle en position absolue depuis le presse-papier interne — Ctrl+Maj+
-    /// V, qui n'apparaît **jamais** comme un `egui::Event::Paste` (egui-winit
-    /// ne traduit ainsi que Ctrl+V seul) : capturé côté `crate::app` par
-    /// `consume_key` plutôt que par l'événement, il ne porte donc aucun
-    /// texte — tout vient du dernier [`AppState::copy_selection`]/
+    /// V. `egui-winit` le traduit en le **même** `egui::Event::Paste` que
+    /// Ctrl+V (`is_paste_command` ne teste jamais `shift`) : `crate::app`
+    /// les distingue en lisant `modifiers.shift` au moment de l'événement,
+    /// et jette le texte porté par l'événement — tout vient ici du dernier
+    /// [`AppState::copy_selection`]/
     /// [`AppState::copy_full_columns`] de cette session. Sans effet si rien
     /// n'a encore été copié.
     PasteAbsolute {
@@ -584,6 +585,93 @@ impl HeaderField {
             1 => HeaderField::Unit,
             2 => HeaderField::Comment,
             _ => HeaderField::Formula,
+        }
+    }
+}
+
+/// Zone de la grille que touche la sélection courante — l'en-tête, les
+/// données, ou des colonnes entières. Les trois sont mutuellement
+/// exclusives : un rectangle ne traverse jamais la frontière en-tête/données
+/// et une plage de colonnes est un geste à part (voir la doc de tête de
+/// [`crate::selection`]).
+///
+/// Sert à contextualiser les menus contextuels de la grille
+/// ([`AppState::grid_menu`]) : c'est la même liste de gestes partout, mais
+/// nommée selon ce qui est réellement sélectionné — « Vider le champ » sur
+/// un champ d'en-tête, « Vider les cellules » sur des données, « Vider les
+/// colonnes » sur une plage de colonnes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridZone {
+    /// Rectangle de champs d'en-tête (Nom long, Unité, Commentaire,
+    /// Formule).
+    Header,
+    /// Rectangle de cellules de données.
+    Data,
+    /// Plage de colonnes entières (rangée des lettres).
+    Columns,
+}
+
+/// Ce qu'un menu contextuel de la grille doit proposer pour la sélection
+/// courante — construit par [`AppState::grid_menu`], rendu par
+/// [`crate::app::grid_edit_menu`].
+///
+/// Ce type ne porte **que la décision** (quels gestes ont un sens ici,
+/// comment les nommer, lesquels sont grisés) et jamais de widget : c'est ce
+/// qui permet de le vérifier par les tests d'intégration sans UI de
+/// `tests/shell.rs`, comme tout le reste de la matrice copier/coller.
+///
+/// Les gestes listés sont exactement les raccourcis clavier de la grille
+/// (voir la doc de tête de ce module, section copier/coller, et le bloc
+/// clavier de [`crate::app::grid_contents`]) : aucun menu n'offre ici
+/// d'action qui n'aurait pas d'équivalent au clavier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridMenu {
+    /// Zone touchée par la sélection.
+    pub zone: GridZone,
+    /// Vrai si la sélection couvre plus d'une case (plusieurs colonnes,
+    /// plusieurs rangs, ou les deux) — décide du pluriel des libellés.
+    pub plural: bool,
+    /// Vrai si la sélection touche plus d'une colonne. Distinct de
+    /// [`GridMenu::plural`], qui compte les *cases* : trois cellules
+    /// empilées dans une seule colonne sont plurielles sans être
+    /// multi-colonnes, et « Copier avec l'en-tête » (qui raisonne en
+    /// colonnes entières, jamais en cases) doit rester au singulier.
+    pub multi_column: bool,
+    /// Vrai si « Supprimer et décaler » (Suppr, deuxième pression) a un sens
+    /// ici. Faux dans l'en-tête : un champ n'est pas répété par ligne, il
+    /// n'y a rien à faire remonter, et Suppr s'y contente de vider — voir
+    /// [`AppState::delete_selected_cells`]. L'offrir quand même y ferait
+    /// deux entrées de menu pour un seul et même effet.
+    pub offers_delete_shift: bool,
+    /// Vrai si « Coller à l'identique » (Ctrl+Maj+V) a de quoi travailler :
+    /// il rejoue le presse-papier **interne**, donc reste sans effet tant
+    /// que rien n'a été copié depuis la grille dans cette session (un texte
+    /// externe n'a pas de rang d'origine à rejouer).
+    pub paste_absolute_enabled: bool,
+}
+
+impl GridMenu {
+    /// Libellé de « Copier »/« Couper »/« Vider », contextualisé — le nom de
+    /// ce qui est sélectionné, accordé en nombre.
+    pub fn target_label(&self) -> &'static str {
+        match (self.zone, self.plural) {
+            (GridZone::Header, false) => "le champ",
+            (GridZone::Header, true) => "les champs",
+            (GridZone::Data, false) => "la cellule",
+            (GridZone::Data, true) => "les cellules",
+            (GridZone::Columns, false) => "la colonne",
+            (GridZone::Columns, true) => "les colonnes",
+        }
+    }
+
+    /// Libellé de « Copier avec l'en-tête » (Ctrl+Maj+C), qui promeut
+    /// toujours en entier la ou les colonnes touchées, quelle que soit la
+    /// forme de la sélection — voir [`AppState::copy_full_columns`].
+    pub fn copy_full_columns_label(&self) -> &'static str {
+        if self.multi_column {
+            "Copier les colonnes entières"
+        } else {
+            "Copier la colonne entière"
         }
     }
 }
@@ -1505,6 +1593,42 @@ impl AppState {
         self.selection.get(&sheet)?.selected_header_field()
     }
 
+    /// Ce que le menu contextuel de la grille doit proposer pour la
+    /// sélection courante de `sheet` — voir [`GridMenu`]. `None` si `sheet`
+    /// n'a pas de sélection ou si elle ne désigne plus de colonne valide
+    /// (colonne supprimée entre-temps) : il n'y a alors pas de menu à
+    /// ouvrir, plutôt qu'un menu dont chaque entrée serait sans effet.
+    ///
+    /// Un clic droit pose toujours une sélection avant d'arriver ici (voir
+    /// [`crate::app::cell_widget`]/[`crate::app::header_field_widget`]/
+    /// [`crate::app::column_header_widget`], qui réduisent la sélection à la
+    /// case visée si le clic droit tombe en dehors) : le `None` ne se
+    /// produit en pratique que sur une feuille vidée sous le curseur.
+    pub fn grid_menu(&self, sheet: NodeId) -> Option<GridMenu> {
+        let selection = self.selection.get(&sheet)?;
+        let columns = selection.columns(&self.snapshot.tree, sheet);
+        if columns.is_empty() {
+            return None;
+        }
+        // `full_rank_range` distingue les deux zones d'un rectangle par le
+        // signe de ses rangs (négatifs = en-tête, voir
+        // `crate::selection::GridCursor::rank`) ; `None` ne reste que pour
+        // une plage de colonnes entières, qui n'a pas de rang unique.
+        let (zone, rank_span) = match selection.full_rank_range() {
+            Some((lo, hi)) if hi < 0 => (GridZone::Header, hi - lo),
+            Some((lo, hi)) => (GridZone::Data, hi - lo),
+            None => (GridZone::Columns, 0),
+        };
+        let multi_column = columns.len() > 1;
+        Some(GridMenu {
+            zone,
+            plural: multi_column || rank_span > 0,
+            multi_column,
+            offers_delete_shift: zone != GridZone::Header,
+            paste_absolute_enabled: self.grid_clipboard.is_some(),
+        })
+    }
+
     /// Copie la sélection courante de `sheet` — Ctrl+C (et la première
     /// moitié de Ctrl+X, voir [`crate::app`]). `None` si `sheet` n'a pas de
     /// sélection ou si elle ne désigne plus de colonne valide (rien à
@@ -2310,8 +2434,12 @@ impl AppState {
         }
     }
 
-    /// Enregistre un message informatif.
-    fn notice(&mut self, text: String) {
+    /// Enregistre un message informatif. `pub(crate)` pour que la couche
+    /// fenêtre puisse signaler ce qu'elle seule sait — un presse-papier
+    /// système illisible au moment d'un « Coller » pris dans un menu
+    /// contextuel (voir [`crate::app::system_clipboard_text`]) : cet échec
+    /// naît côté plateforme, jamais dans le modèle.
+    pub(crate) fn notice(&mut self, text: String) {
         self.status = Some(StatusMessage {
             text,
             is_error: false,

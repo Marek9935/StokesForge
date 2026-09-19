@@ -3696,6 +3696,7 @@ name = "plotyx-app"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "eframe",
  "egui_dock",
  "egui_extras",
