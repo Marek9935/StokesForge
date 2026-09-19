@@ -1658,6 +1658,18 @@ fn column_letter(index: usize) -> String {
     plotyx_core::spreadsheet_name(index)
 }
 
+/// Vrai si `column` est la dernière colonne visible de `sheet` — condition
+/// commune aux deux endroits où Tab doit ajouter une colonne plutôt que
+/// revenir en début de ligne suivante (voir `Action::AddColumnAndSelect`) :
+/// le raccourci clavier global de `grid_contents` et la validation d'édition
+/// de `cell_widget`.
+fn is_last_visible_column(state: &AppState, sheet: NodeId, column: NodeId) -> bool {
+    state
+        .visible_columns(sheet)
+        .last()
+        .is_some_and(|(last, ..)| *last == column)
+}
+
 /// Contenu du presse-papier **système**, lu à la demande — pour « Coller »
 /// pris dans un menu contextuel, qui n'a pas d'`egui::Event::Paste` à se
 /// mettre sous la dent.
@@ -1847,19 +1859,21 @@ fn column_header_widget(
     column_type: ColumnType,
 ) {
     ui.vertical(|ui| {
+        // Sans ceci, l'espacement par défaut d'egui entre enfants d'un
+        // `vertical` (`Spacing::item_spacing.y`) laisse un mince filet blanc
+        // entre chaque rangée empilée — la couleur de fond ne remplit alors
+        // pas vraiment la case, elle y flotte.
+        ui.spacing_mut().item_spacing.y = 0.0;
         let letter = column_letter(column_index);
         let is_column_selected = state.is_column_selected(sheet, column);
+        let touched = state.column_touched_by_selection(sheet, column);
         let role = state.column_meta(column).role;
         ui.scope(|ui| {
             ui.set_min_height(HEADER_SUBROW_HEIGHT);
             ui.set_max_height(HEADER_SUBROW_HEIGHT);
             let rect = ui.available_rect_before_wrap();
-            let fill = if is_column_selected {
-                ui.visuals().selection.bg_fill.linear_multiply(0.35)
-            } else {
-                crate::theme::header_letter_row_fill()
-            };
-            ui.painter().rect_filled(rect, 0.0, fill);
+            ui.painter()
+                .rect_filled(rect, 0.0, gutter_fill(is_column_selected, touched));
             header_row_separator(ui, rect);
             // Toute la largeur de la rangée sélectionne la colonne — pas
             // seulement la lettre —, glisser ou Maj-clic étend à plusieurs
@@ -1874,8 +1888,11 @@ fn column_header_widget(
             let response = ui.interact(rect, id, egui::Sense::click_and_drag());
             ui.put(
                 rect,
-                egui::Label::new(format!("{letter}({})", role_suffix(role).to_uppercase()))
-                    .selectable(false),
+                egui::Label::new(
+                    egui::RichText::new(format!("{letter}({})", role_suffix(role).to_uppercase()))
+                        .color(crate::theme::gutter_text_color()),
+                )
+                .selectable(false),
             );
             let shift = ui.input(|i| i.modifiers.shift);
             if response.drag_started() || (response.clicked() && !shift) {
@@ -2033,6 +2050,24 @@ fn header_row_separator(ui: &egui::Ui, rect: egui::Rect) {
     );
 }
 
+/// Fond d'une case de la gouttière de la grille, à trois paliers — voir
+/// [`crate::theme::header_letter_row_fill`]/[`crate::theme::
+/// header_letter_row_touched_fill`]/[`crate::theme::
+/// header_letter_row_selected_fill`] : repos, concernée par la sélection en
+/// cours sans l'être directement, ou sélectionnée elle-même (le palier le
+/// plus fort l'emporte). Partagé par [`column_header_widget`], [`row_number_
+/// widget`], [`header_row_label_widget`] et le « # » de [`row_number_header_
+/// widget`].
+fn gutter_fill(selected: bool, touched: bool) -> egui::Color32 {
+    if selected {
+        crate::theme::header_letter_row_selected_fill()
+    } else if touched {
+        crate::theme::header_letter_row_touched_fill()
+    } else {
+        crate::theme::header_letter_row_fill()
+    }
+}
+
 /// Une rangée éditable de l'en-tête empilé, pour un seul champ de
 /// [`plotyx_core::ColumnMeta`] — le même schéma sélection/édition que
 /// [`cell_widget`] pour une cellule de données : simple clic sélectionne
@@ -2147,26 +2182,23 @@ fn header_field_widget(
     });
 }
 
-/// Gouttière des numéros de ligne, côté en-tête empilée : la lettre `#`
-/// habituelle sur la rangée des lettres (purement décorative — il n'y a pas
-/// de « toutes les lignes et tout l'en-tête » à sélectionner d'un même
-/// geste, voir [`row_number_widget`] pour les numéros du corps), puis —
-/// aligné avec chacune des quatre rangées de champs de
-/// [`column_header_widget`] — le **libellé** du champ concerné (« Long
-/// Name », « Units », « Comments », « F(x)= », repris de l'ancienne UI Qt),
-/// une seule fois plutôt que répété en grisé dans chaque colonne. Les
-/// cellules par colonne n'affichent plus que la valeur (voir
-/// [`header_field_widget`]).
+/// Gouttière des numéros de ligne, côté en-tête empilée : le « # » sur la
+/// rangée des lettres — un clic sélectionne tout le tableau (voir
+/// [`AppState::select_all`]), même geste qu'un clic sur une lettre de
+/// colonne ou un numéro de ligne mais pour l'ensemble — puis, aligné avec
+/// chacune des quatre rangées de champs de [`column_header_widget`], le
+/// **libellé** du champ concerné (« Long Name », « Units », « Comments »,
+/// « F(x)= », repris de l'ancienne UI Qt), une seule fois plutôt que répété
+/// en grisé dans chaque colonne. Les cellules par colonne n'affichent plus
+/// que la valeur (voir [`header_field_widget`]).
 ///
 /// Homogène de haut en bas avec le reste de la gouttière : chaque rangée
-/// porte le même fond que le « # »
-/// ([`crate::theme::header_letter_row_fill`], ou le surlignage de sélection
-/// s'il y a lieu) — les quatre rangées de libellés restaient auparavant
-/// transparentes, seul le « # » du dessus rompant le fond de la colonne.
-/// Chaque libellé sélectionne désormais son champ pour **toutes** les
-/// colonnes visibles de la feuille (glisser/Maj-clic étend à plusieurs
-/// champs), symétrique de [`row_number_widget`] côté données — voir
-/// [`header_row_label_widget`].
+/// porte le même fond que le « # » ([`gutter_fill`]) — les quatre rangées de
+/// libellés restaient auparavant transparentes, seul le « # » du dessus
+/// rompant le fond de la colonne. Chaque libellé sélectionne désormais son
+/// champ pour **toutes** les colonnes visibles de la feuille (glisser/
+/// Maj-clic étend à plusieurs champs), symétrique de [`row_number_widget`]
+/// côté données — voir [`header_row_label_widget`].
 fn row_number_header_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -2174,14 +2206,38 @@ fn row_number_header_widget(
     sheet: NodeId,
 ) {
     ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
         ui.scope(|ui| {
             ui.set_min_height(HEADER_SUBROW_HEIGHT);
             ui.set_max_height(HEADER_SUBROW_HEIGHT);
+            let selected = state.is_all_selected(sheet);
             let rect = ui.available_rect_before_wrap();
             ui.painter()
-                .rect_filled(rect, 0.0, crate::theme::header_letter_row_fill());
+                .rect_filled(rect, 0.0, gutter_fill(selected, false));
             header_row_separator(ui, rect);
-            ui.strong("#");
+            let id = ui.id().with("plotyx_select_all");
+            let response = ui.interact(rect, id, egui::Sense::click());
+            ui.put(
+                rect,
+                egui::Label::new(
+                    egui::RichText::new("#")
+                        .strong()
+                        .color(crate::theme::gutter_text_color()),
+                )
+                .selectable(false),
+            );
+            if response.clicked() || (response.secondary_clicked() && !selected) {
+                // `&& !selected` : un clic droit alors que tout est déjà
+                // sélectionné ouvre le menu sans y toucher — même règle que
+                // dans les autres cases de la gouttière (voir
+                // `column_header_widget`).
+                state.select_all(sheet);
+            }
+            response.context_menu(|ui| {
+                if let Some(menu) = state.grid_menu(sheet) {
+                    grid_edit_menu(ui, state, actions, sheet, &menu);
+                }
+            });
         });
         header_row_label_widget(
             ui,
@@ -2245,18 +2301,19 @@ fn header_row_label_widget(
         ui.set_max_height(height);
         let selected = state.is_header_row_selected(sheet, field);
         let rect = ui.available_rect_before_wrap();
-        let fill = if selected {
-            ui.visuals().selection.bg_fill.linear_multiply(0.35)
-        } else {
-            crate::theme::header_letter_row_fill()
-        };
-        ui.painter().rect_filled(rect, 0.0, fill);
+        ui.painter()
+            .rect_filled(rect, 0.0, gutter_fill(selected, false));
         header_row_separator(ui, rect);
         let id = ui.id().with(("plotyx_header_row_label", field as u8));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
         ui.put(
             rect,
-            egui::Label::new(egui::RichText::new(label).strong()).selectable(false),
+            egui::Label::new(
+                egui::RichText::new(label)
+                    .strong()
+                    .color(crate::theme::gutter_text_color()),
+            )
+            .selectable(false),
         );
         let shift = ui.input(|i| i.modifiers.shift);
         if response.drag_started() || (response.clicked() && !shift) {
@@ -2901,6 +2958,15 @@ fn grid_contents(
         });
         return;
     }
+    // Sans ceci, l'espacement vertical par défaut d'egui entre les rangées
+    // de la table (`Spacing::item_spacing.y`, dont `TableBuilder` se sert en
+    // interne pour séparer les lignes) laisse un mince filet blanc entre
+    // chacune — la couleur de fond de la gouttière ne remplit alors pas
+    // vraiment la case, elle y flotte (numéros de ligne notamment,
+    // sensibles à l'œil car peints d'un aplat plein plutôt qu'un simple
+    // texte). `item_spacing.x` reste intact : il porte l'espacement entre
+    // colonnes, dont dépendent les poignées de redimensionnement.
+    ui.spacing_mut().item_spacing.y = 0.0;
     TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
@@ -3029,8 +3095,31 @@ fn grid_contents(
         if right {
             state.move_selection(sheet, MoveDirection::Right, shift);
         }
-        if tab {
-            state.move_selection_tab(sheet, shift);
+        if tab && !shift {
+            // Tab sur la dernière colonne d'une ligne de données : même
+            // geste qu'Entrée sur la dernière ligne ci-dessous — ajoute une
+            // colonne plutôt que de revenir en début de ligne suivante, puis
+            // sélectionne tout de suite la cellule qui y correspondra (voir
+            // `Action::AddColumnAndSelect`, qui ne peut la poser qu'une fois
+            // la colonne réellement créée, contrairement à une ligne).
+            let data_cursor = state
+                .selection(sheet)
+                .and_then(Selection::grid_cursor)
+                .and_then(|cursor| match cursor {
+                    GridCursor::Data(column, row) => Some((column, row)),
+                    GridCursor::Header(..) => None,
+                });
+            let at_last_column =
+                data_cursor.is_some_and(|(column, _)| is_last_visible_column(state, sheet, column));
+            if at_last_column {
+                if let Some((_, row)) = data_cursor {
+                    actions.push(Action::AddColumnAndSelect { sheet, row });
+                }
+            } else {
+                state.move_selection_tab(sheet, false);
+            }
+        } else if tab {
+            state.move_selection_tab(sheet, true);
         }
         if enter && shift {
             state.move_selection(sheet, MoveDirection::Up, false);
@@ -3445,11 +3534,14 @@ fn figure_summary(drawn: &DrawnPlot) -> String {
 /// [`column_header_widget`]) et ouvre le même menu contextuel d'édition
 /// ([`grid_edit_menu`]).
 ///
-/// Fond distinct comme la rangée des lettres
-/// ([`crate::theme::header_letter_row_fill`]) hors sélection, pour que la
-/// gouttière se reconnaisse comme une zone de contrôle au premier coup
-/// d'œil — cohérent avec le choix déjà fait pour `column_header_widget` et
-/// pour le « # » de [`row_number_header_widget`] juste au-dessus.
+/// Fond à trois paliers comme la rangée des lettres ([`gutter_fill`]) —
+/// repos, touchée par une sélection de données sans l'être elle-même
+/// ([`AppState::row_touched_by_selection`]), ou directement sélectionnée —
+/// pour que la gouttière se reconnaisse comme une zone de contrôle au
+/// premier coup d'œil, et que la ligne d'une cellule sélectionnée se
+/// remarque même sans avoir cliqué la gouttière elle-même. Cohérent avec le
+/// choix déjà fait pour `column_header_widget` et pour le « # » de
+/// [`row_number_header_widget`] juste au-dessus.
 fn row_number_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -3458,18 +3550,18 @@ fn row_number_widget(
     row: usize,
 ) {
     let selected = state.is_row_selected(sheet, row);
+    let touched = state.row_touched_by_selection(sheet, row);
     let rect = ui.available_rect_before_wrap();
-    let fill = if selected {
-        ui.visuals().selection.bg_fill.linear_multiply(0.35)
-    } else {
-        crate::theme::header_letter_row_fill()
-    };
-    ui.painter().rect_filled(rect, 0.0, fill);
+    ui.painter()
+        .rect_filled(rect, 0.0, gutter_fill(selected, touched));
     let id = ui.id().with(("plotyx_row_number", row));
     let response = ui.interact(rect, id, egui::Sense::click_and_drag());
     ui.put(
         rect,
-        egui::Label::new(format!("{}", row + 1)).selectable(false),
+        egui::Label::new(
+            egui::RichText::new(format!("{}", row + 1)).color(crate::theme::gutter_text_color()),
+        )
+        .selectable(false),
     );
     let shift = ui.input(|i| i.modifiers.shift);
     if response.drag_started() || (response.clicked() && !shift) {
@@ -3624,6 +3716,12 @@ fn cell_widget(
                     if enter {
                         // Maj+Entrée : remonte d'une ligne, jamais d'ajout.
                         state.move_selection(sheet, MoveDirection::Up, false);
+                    } else if tab && !shift && is_last_visible_column(state, sheet, column) {
+                        // Même geste que dans le bloc de raccourcis hors
+                        // édition : Tab valide sur la dernière colonne ajoute
+                        // une colonne plutôt que de revenir en début de ligne
+                        // suivante (voir `Action::AddColumnAndSelect`).
+                        actions.push(Action::AddColumnAndSelect { sheet, row });
                     } else if tab {
                         state.move_selection_tab(sheet, shift);
                     }

@@ -233,6 +233,20 @@ impl Selection {
         }
     }
 
+    /// Sélection de **toutes** les lignes de données, `0..=last_row` —
+    /// clic sur le « # » de la gouttière. Une plage de lignes entières
+    /// couvre déjà toutes les colonnes visibles ([`Selection::columns`]),
+    /// donc `0..=last_row` suffit à désigner tout le tableau, sans qu'il
+    /// faille une sorte de sélection dédiée.
+    pub fn all_rows(last_row: usize) -> Self {
+        Self {
+            kind: SelectionKind::FullRows {
+                anchor: 0,
+                cursor: last_row,
+            },
+        }
+    }
+
     /// Sélection d'un champ d'en-tête entier (toutes les colonnes visibles
     /// de la feuille) — l'ancre d'une future plage, pendant de
     /// [`Selection::row`] pour la zone d'en-tête.
@@ -613,6 +627,18 @@ impl Selection {
         }
     }
 
+    /// Vrai si la sélection couvre **tout** le tableau — `0..=row_count - 1`
+    /// (voir [`Selection::all_rows`]), le geste posé par un clic sur le
+    /// « # » de la gouttière. `false` si `row_count` est nul : il n'y a
+    /// alors rien qui puisse être « tout sélectionné ».
+    pub fn is_all_rows(&self, row_count: usize) -> bool {
+        row_count > 0
+            && matches!(
+                self.kind,
+                SelectionKind::FullRows { anchor: 0, cursor } if cursor == row_count - 1
+            )
+    }
+
     /// Vrai si `field` fait partie de la plage de champ d'en-tête entier
     /// sélectionnée (clic, glisser ou Maj-clic sur le libellé du champ dans
     /// la gouttière) — pendant de [`Selection::is_row_selected`], côté
@@ -627,6 +653,29 @@ impl Selection {
             }),
             _ => false,
         }
+    }
+
+    /// Vrai si `column` est touchée par la sélection courante, **quelle que
+    /// soit sa sorte** — contrairement à [`Selection::is_column_selected`],
+    /// qui ne vaut que pour un clic direct sur la rangée des lettres, ceci
+    /// vaut aussi pour un simple rectangle de cellules de données dont
+    /// `column` fait partie. Sert à teinter la rangée des lettres d'une
+    /// intensité intermédiaire ([`crate::theme::
+    /// header_letter_row_touched_fill`]) quand une cellule de sa colonne est
+    /// sélectionnée sans que la colonne elle-même le soit — le repère « ta
+    /// colonne est concernée » d'un tableur.
+    pub fn touches_column(&self, tree: &Tree, sheet: NodeId, column: NodeId) -> bool {
+        self.columns(tree, sheet).contains(&column)
+    }
+
+    /// Vrai si `row` est touchée par la sélection courante, **quelle que
+    /// soit sa sorte** — pendant de [`Selection::touches_column`], pour la
+    /// gouttière des numéros de ligne. `None` pour toute sélection qui ne
+    /// touche pas les données (plage de colonnes, champ d'en-tête simple ou
+    /// entier) : [`Selection::row_range`] rend déjà `None` pour elles.
+    pub fn touches_row(&self, row: usize) -> bool {
+        self.row_range()
+            .is_some_and(|(lo, hi)| row >= lo && row <= hi)
     }
 
     /// Plages `(colonne, début, nombre)` à vider (Retour arrière/Ctrl+X),

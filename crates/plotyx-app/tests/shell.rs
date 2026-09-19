@@ -3927,3 +3927,129 @@ fn dragging_between_the_letter_row_and_a_header_row_label_never_mixes_the_two_ra
     assert!(state.is_column_selected(sheet1, temps));
     assert!(!state.is_header_row_selected(sheet1, HeaderField::Unit));
 }
+
+// -- 19. Sélectionner tout le tableau (« # »), et gouttière « touchée » --
+
+/// Un clic sur le « # » (`select_all`) sélectionne tout le tableau : toutes
+/// les lignes, donc toutes les colonnes visibles — `is_all_selected` le
+/// confirme, et le menu contextuel de la grille reste bien dans la zone
+/// données/lignes (pas d'en-tête) puisque le tableau entier en fait partie.
+#[test]
+fn clicking_the_hash_gutter_selects_the_whole_table() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_all(sheet1);
+
+    assert!(state.is_all_selected(sheet1));
+    for row in 0..state.row_count(sheet1) {
+        assert!(state.is_selected(sheet1, temps, row));
+        assert!(state.is_selected(sheet1, signal, row));
+        assert!(
+            state.is_selected(sheet1, note, row),
+            "Note est plus courte, mais une sélection de tout le tableau \
+             couvre toutes les colonnes visibles, pas seulement celles \
+             assez longues"
+        );
+    }
+}
+
+/// Une feuille sans ligne n'a rien à sélectionner : `select_all` n'y pose
+/// aucune sélection plutôt que d'en poser une vide et incohérente.
+#[test]
+fn select_all_on_a_sheet_without_rows_does_nothing() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    state.dispatch(Action::DeleteRows {
+        sheet: sheet1,
+        at: 0,
+        count: state.row_count(sheet1),
+    });
+    assert_eq!(state.row_count(sheet1), 0);
+
+    state.select_cell(sheet1, temps, 0);
+    state.select_all(sheet1);
+
+    assert!(
+        !state.is_all_selected(sheet1),
+        "rien à sélectionner sur une feuille vide"
+    );
+}
+
+/// Sélectionner une seule cellule de données « touche » sa colonne et sa
+/// ligne — le repère qui teinte la rangée des lettres et la gouttière des
+/// numéros de ligne d'une intensité intermédiaire, sans les sélectionner
+/// pour autant (`is_column_selected`/`is_row_selected` restent faux : ce
+/// n'est pas la rangée des lettres ni la gouttière qui ont été cliquées).
+#[test]
+fn selecting_a_data_cell_touches_its_column_and_row_but_does_not_select_them() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 2);
+
+    assert!(state.column_touched_by_selection(sheet1, temps));
+    assert!(state.row_touched_by_selection(sheet1, 2));
+    assert!(!state.column_touched_by_selection(sheet1, signal));
+    assert!(!state.row_touched_by_selection(sheet1, 0));
+    assert!(!state.is_column_selected(sheet1, temps));
+    assert!(!state.is_row_selected(sheet1, 2));
+}
+
+/// Une sélection de champ d'en-tête (colonne seule ou champ entier) ne
+/// touche jamais une ligne de données : `row_touched_by_selection` doit
+/// rester faux, la gouttière des numéros de ligne n'a pas à réagir à une
+/// sélection qui ne descend jamais dans les données.
+#[test]
+fn a_header_selection_never_touches_a_data_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    assert!(!state.row_touched_by_selection(sheet1, 0));
+
+    state.select_header_row(sheet1, HeaderField::Unit);
+    assert!(!state.row_touched_by_selection(sheet1, 0));
+    assert!(
+        state.column_touched_by_selection(sheet1, temps),
+        "un champ d'en-tête entier touche bien toutes les colonnes"
+    );
+}
+
+// -- 20. Tab en dernière colonne d'une ligne de données : ajout de colonne --
+
+/// `Action::AddColumnAndSelect` ajoute une colonne en fin de feuille puis y
+/// sélectionne la ligne demandée — le pendant de
+/// [`committing_the_last_row_of_the_sheet_adds_a_row`] mais pour l'axe des
+/// colonnes (Tab plutôt qu'Entrée).
+#[test]
+fn add_column_and_select_adds_a_column_and_selects_it_on_the_given_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let columns_before = state.visible_columns(sheet1).len();
+
+    state.dispatch(Action::AddColumnAndSelect {
+        sheet: sheet1,
+        row: 2,
+    });
+
+    let columns_after = state.visible_columns(sheet1);
+    assert_eq!(columns_after.len(), columns_before + 1);
+    let new_column = columns_after.last().expect("colonne ajoutée").0;
+    assert!(
+        state.is_selected(sheet1, new_column, 2),
+        "la ligne demandée est sélectionnée dans la colonne neuve"
+    );
+}

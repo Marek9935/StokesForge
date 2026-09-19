@@ -520,9 +520,67 @@ posés : `cleared_header_fields`/`copy_selection`/`paste` sont tous les trois
 bonne réponse pour les deux sortes de sélection sans code dédié
 supplémentaire.
 
-Le « # » lui-même reste décoratif : il n'y a pas de geste « sélectionner
-toute la feuille » demandé ni câblé, contrairement à la case en coin de
-certains tableurs.
+Le « # » lui-même sélectionne tout le tableau au clic (`AppState::
+select_all`), comme la case en coin de la plupart des tableurs : une
+sélection `SelectionKind::FullRows` couvrant `0..=row_count - 1` (`Selection::
+all_rows`), qui touche déjà toutes les colonnes visibles sans qu'il faille de
+sorte de sélection dédiée — `is_all_selected` en teste la couverture exacte
+pour teindre le « # » en retour.
+
+### Une palette à trois paliers pour la gouttière, et une teinte propre à son texte
+
+La gouttière (rangée des lettres, « # », numéros de ligne, libellés de champ)
+utilisait le même vert que le reste de l'accent de marque, à pleine
+saturation pour son texte (`Visuals::strong_text_color()`, qui vaut
+`widgets.active.fg_stroke.color`, donc littéralement `ACCENT`) — trop
+appuyé pour une zone censée rester en retrait des données. `theme::
+gutter_text_color` lui donne une teinte propre, nettement plus sombre,
+indépendante de la couleur globale des éléments « actifs » pour ne pas
+déteindre sur des boutons ou onglets sans rapport.
+
+Le fond, lui, gagne un troisième palier. `app::gutter_fill(selected,
+touched)` choisit entre `theme::header_letter_row_fill` (repos),
+`header_letter_row_touched_fill` (la colonne ou la ligne d'une cellule de
+données sélectionnée, sans être elle-même cliquée) et
+`header_letter_row_selected_fill` (sélectionnée directement) — le repère
+« ta ligne/colonne est concernée » d'un tableur, porté par `Selection::
+touches_column`/`touches_row` (`AppState::column_touched_by_selection`/
+`row_touched_by_selection`), écrites en termes de `columns()`/`row_range()`
+donc valables pour **toute** sorte de sélection sans code dédié
+supplémentaire. Les 3 rangées de la gouttière qui en profitent :
+`column_header_widget`, `row_number_widget`, et le « # » de
+`row_number_header_widget` (`touched` toujours faux pour lui — rien ne
+« touche » le tableau entier sans le sélectionner en entier).
+
+Enfin, `ui.spacing_mut().item_spacing.y = 0.0` avant de construire la table
+et dans les deux empilements verticaux de la gouttière côté en-tête
+(`column_header_widget`, `row_number_header_widget`) : sans ça, l'espacement
+par défaut d'egui entre rangées empilées laissait un mince filet blanc entre
+chaque case peinte d'un aplat, qui la faisait paraître flotter plutôt que
+remplir vraiment sa case.
+
+### Tab en dernière colonne : même geste qu'Entrée en dernière ligne
+
+Entrée sur la dernière ligne d'une feuille ajoute une ligne et y déplace la
+sélection (`Action::CommitCellAndAdvance` en édition, ou le raccourci
+clavier direct hors édition) — Tab sur la dernière colonne d'une ligne de
+données fait maintenant de même pour les colonnes plutôt que de revenir au
+début de la ligne suivante (l'ancien comportement de `move_selection_tab`
+aux bords).
+
+L'asymétrie entre les deux axes tient à l'identité de la cible : une ligne
+n'est qu'un indice, donc sélectionner `(colonne existante, row + 1)` *avant*
+que la commande d'ajout ne soit appliquée (elle ne l'est qu'après le rendu de
+l'image, voir `app::PlotyxApp::update`) est sûr — la ligne existera à temps.
+Une colonne neuve, elle, n'a pas encore de `NodeId` tant que `Command::
+AddColumn` n'a pas tourné : la sélectionner à l'avance n'a pas de sens.
+`Action::AddColumnAndSelect { sheet, row }` fait donc les deux d'un coup
+dans son propre traitement (`AppState::add_column_and_select`) : ajoute la
+colonne, *puis* — une fois `self.snapshot` rafraîchi par `execute` — sélectionne
+`row` dans la dernière colonne visible. Câblé aux deux mêmes endroits que Tab
+normal : le raccourci clavier direct de `grid_contents`, et la validation
+d'édition de `cell_widget` — `app::is_last_visible_column` factorise la
+condition commune aux deux.
 
 Un clic droit **hors** de la sélection la réduit d'abord à la case visée, un
 clic droit **dedans** la laisse intacte — pour que le menu agisse toujours sur

@@ -98,6 +98,21 @@ pub enum Action {
         /// être affichés simultanément, chacun dans son propre onglet.
         sheet: NodeId,
     },
+    /// Ajoute une colonne en fin de `sheet` puis y sélectionne `row` — Tab
+    /// sur la dernière colonne d'une ligne de données, symétrique de
+    /// [`Action::CommitCellAndAdvance`] (Entrée sur la dernière ligne d'une
+    /// colonne) mais pour l'axe des colonnes : la colonne visée n'existe pas
+    /// encore au moment où l'action est poussée (contrairement à une ligne,
+    /// qui n'est qu'un indice), la sélection ne peut donc se poser qu'une
+    /// fois la colonne réellement créée, dans le traitement de cette action
+    /// — jamais avant, comme `AppState::select_cell` le fait pour
+    /// `CommitCellAndAdvance`.
+    AddColumnAndSelect {
+        /// Feuille visée.
+        sheet: NodeId,
+        /// Ligne à sélectionner dans la nouvelle colonne.
+        row: usize,
+    },
     /// Change le type d'une colonne — choix explicite de l'utilisateur
     /// depuis l'en-tête, conversion destructrice assumée (`Column::
     /// set_column_type`, `plotyx-core`) : un texte non numérique dans une
@@ -1673,6 +1688,48 @@ impl AppState {
             .is_some_and(|selection| selection.is_header_row_selected(field))
     }
 
+    /// Vrai si `column` est touchée par la sélection courante de `sheet`,
+    /// quelle que soit sa sorte (une seule cellule de données de cette
+    /// colonne suffit) — voir [`Selection::touches_column`]. Distinct de
+    /// [`AppState::is_column_selected`], qui ne vaut que pour un clic direct
+    /// sur la rangée des lettres.
+    pub fn column_touched_by_selection(&self, sheet: NodeId, column: NodeId) -> bool {
+        self.selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.touches_column(&self.snapshot.tree, sheet, column))
+    }
+
+    /// Vrai si `row` est touchée par la sélection courante de `sheet` —
+    /// pendant de [`AppState::column_touched_by_selection`], côté lignes.
+    pub fn row_touched_by_selection(&self, sheet: NodeId, row: usize) -> bool {
+        self.selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.touches_row(row))
+    }
+
+    /// Vrai si `sheet` est actuellement sélectionnée dans son entier (clic
+    /// sur le « # » de la gouttière) — voir [`AppState::select_all`].
+    pub fn is_all_selected(&self, sheet: NodeId) -> bool {
+        let row_count = self.row_count(sheet);
+        self.selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.is_all_rows(row_count))
+    }
+
+    /// Sélectionne tout le tableau de `sheet` (toutes les lignes, donc
+    /// toutes les colonnes visibles) — clic sur le « # » de la gouttière,
+    /// pendant de [`AppState::select_row`] pour tout le tableau plutôt
+    /// qu'une seule ligne. Sans effet sur une feuille sans ligne : il n'y a
+    /// alors rien à sélectionner.
+    pub fn select_all(&mut self, sheet: NodeId) {
+        let row_count = self.row_count(sheet);
+        if row_count == 0 {
+            return;
+        }
+        self.selection
+            .insert(sheet, Selection::all_rows(row_count - 1));
+    }
+
     /// Vrai si `(column, field)` fait partie de la plage de champs d'en-tête
     /// actuellement sélectionnée dans `sheet`.
     pub fn is_header_field_selected(
@@ -2208,6 +2265,7 @@ impl AppState {
                 self.commit_cell(column, row, text);
             }
             Action::AddColumn { sheet } => self.add_column(sheet),
+            Action::AddColumnAndSelect { sheet, row } => self.add_column_and_select(sheet, row),
             Action::SetColumnType {
                 column,
                 column_type,
@@ -3285,6 +3343,17 @@ impl AppState {
             name: None,
             column: Column::new(ColumnType::Numeric),
         });
+    }
+
+    /// Ajoute une colonne en fin de `sheet` puis y sélectionne `row` — voir
+    /// [`Action::AddColumnAndSelect`]. `self.execute` a déjà rafraîchi
+    /// `self.snapshot` en retour : la nouvelle colonne, dernière des
+    /// colonnes visibles, existe donc déjà pour `select_cell`.
+    fn add_column_and_select(&mut self, sheet: NodeId, row: usize) {
+        self.add_column(sheet);
+        if let Some((column, ..)) = self.visible_columns(sheet).into_iter().next_back() {
+            self.select_cell(sheet, column, row);
+        }
     }
 
     /// Insertion (`insert`) ou suppression de lignes sur `sheet`.
