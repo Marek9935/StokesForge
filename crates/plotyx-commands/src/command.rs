@@ -293,14 +293,14 @@ impl Command {
     pub fn label(&self, tree: &Tree) -> String {
         match self {
             Command::SetCells { column, .. } | Command::SetCellsPromoting { column, .. } => {
-                match name_of(tree, *column) {
-                    Some(name) => format!("Saisie dans {name}"),
+                match column_label(tree, *column) {
+                    Some(label) => format!("Saisie dans {label}"),
                     None => "Saisie".to_string(),
                 }
             }
             Command::AddColumn { .. } => "Ajouter une colonne".to_string(),
-            Command::DeleteColumn { column } => match name_of(tree, *column) {
-                Some(name) => format!("Supprimer la colonne {name}"),
+            Command::DeleteColumn { column } => match column_label(tree, *column) {
+                Some(label) => format!("Supprimer {label}"),
                 None => "Supprimer la colonne".to_string(),
             },
             Command::Rename { id, name } => match name_of(tree, *id) {
@@ -311,8 +311,8 @@ impl Command {
                 Some(name) => format!("Déplacer {name}"),
                 None => "Déplacer".to_string(),
             },
-            Command::SetColumnType { column, .. } => match name_of(tree, *column) {
-                Some(name) => format!("Changer le type de {name}"),
+            Command::SetColumnType { column, .. } => match column_label(tree, *column) {
+                Some(label) => format!("Changer le type de {label}"),
                 None => "Changer le type".to_string(),
             },
             Command::InsertRows { count, .. } => {
@@ -343,8 +343,8 @@ impl Command {
                 Some(name) => format!("Modifier le texte de {name}"),
                 None => "Modifier le texte de la note".to_string(),
             },
-            Command::SetColumnMeta { column, .. } => match name_of(tree, *column) {
-                Some(name) => format!("Modifier les métadonnées de {name}"),
+            Command::SetColumnMeta { column, .. } => match column_label(tree, *column) {
+                Some(label) => format!("Modifier les métadonnées de {label}"),
                 None => "Modifier les métadonnées de la colonne".to_string(),
             },
             Command::SetPlotSpec { graph, .. } => match name_of(tree, *graph) {
@@ -401,6 +401,37 @@ impl Command {
 /// Nom d'un nœud s'il existe dans cet arbre.
 fn name_of(tree: &Tree, id: NodeId) -> Option<&str> {
     tree.node(id).map(plotyx_core::Node::name)
+}
+
+/// Désignation d'une **colonne** dans un libellé d'historique : « colonne A »,
+/// d'après sa position dans sa feuille — jamais son nom de nœud.
+///
+/// Une colonne porte deux identités, et une seule est visible. Son **nom de
+/// nœud** (« Temps », « A », « Signal »…) est une clé du modèle : il sert à
+/// la résoudre depuis un script (`pyx.resolve("[Book1]Sheet1!Temps")`), à
+/// l'adresser dans une spec de graphe et à la retrouver dans un `.plx`. La
+/// grille, elle, ne l'affiche **nulle part** : elle montre la lettre de
+/// position (A, B, C…) et les quatre champs de `ColumnMeta` (Nom long,
+/// Unité, Commentaire, Formule), qui sont autre chose encore. Un libellé
+/// bâti sur le nom de nœud annonçait donc « Saisie dans Temps » pour une
+/// colonne que l'utilisateur ne connaît que sous le nom de « A » — un mot
+/// introuvable à l'écran.
+///
+/// Passe par [`plotyx_core::spreadsheet_name`], la même fonction que la
+/// grille, pour que la lettre du libellé soit toujours celle de l'en-tête.
+/// `None` si la colonne n'est plus dans l'arbre ou n'a pas de feuille
+/// parente : l'appelant retombe alors sur un libellé générique.
+fn column_label(tree: &Tree, column: NodeId) -> Option<String> {
+    let sheet = tree.parent(column).ok().flatten()?;
+    let index = tree
+        .children(sheet)
+        .ok()?
+        .iter()
+        .position(|&child| child == column)?;
+    Some(format!(
+        "la colonne {}",
+        plotyx_core::spreadsheet_name(index)
+    ))
 }
 
 /// « ligne » ou « lignes » : en français, 0 et 1 restent au singulier.

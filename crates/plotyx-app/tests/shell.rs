@@ -279,9 +279,15 @@ fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
     assert_eq!(cell(&state, temps, 1), Cell::Float(42.5));
     assert_eq!(state.cell_text(temps, 1), "42.5");
     assert!(state.can_undo());
+    // « la colonne A », pas « Temps » : le libellé désigne la colonne comme
+    // la grille l'affiche (sa lettre de position), jamais par son nom de
+    // nœud, qui n'apparaît nulle part à l'écran — voir
+    // `plotyx_commands::command::column_label`. `Temps` reste le nom de nœud
+    // de cette colonne (c'est par lui que `column_id` la retrouve ici), il
+    // n'a simplement plus sa place dans un libellé destiné à l'utilisateur.
     assert_eq!(
         state.undo_label(),
-        Some("Annuler Saisie dans Temps".to_string())
+        Some("Annuler Saisie dans la colonne A".to_string())
     );
     assert!(state.snapshot().revision > before);
 }
@@ -433,7 +439,7 @@ fn undo_and_redo_walk_the_history_both_ways() {
     assert!(state.can_redo());
     assert_eq!(
         state.redo_label(),
-        Some("Rétablir Saisie dans Temps".to_string())
+        Some("Rétablir Saisie dans la colonne A".to_string())
     );
 
     state.dispatch(Action::Redo);

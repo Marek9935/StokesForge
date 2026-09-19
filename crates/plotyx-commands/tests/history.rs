@@ -156,13 +156,13 @@ fn execute_undo_redo_round_trip() {
     assert_eq!(history.len(), 1);
     assert!(history.can_undo());
     assert!(!history.can_redo());
-    assert_eq!(history.undo_label(), Some("Saisie dans A"));
+    assert_eq!(history.undo_label(), Some("Saisie dans la colonne A"));
     assert_eq!(floats(&f.project, f.a), vec![0.0, 2.0, 3.0]);
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(floats(&f.project, f.a), vec![1.0, 2.0, 3.0]);
     assert!(history.can_redo());
-    assert_eq!(history.redo_label(), Some("Saisie dans A"));
+    assert_eq!(history.redo_label(), Some("Saisie dans la colonne A"));
     assert_eq!(history.undo_label(), None);
 
     assert_eq!(history.redo(&mut f.project), Ok(true));
@@ -627,7 +627,15 @@ fn set_column_type_mixed_to_numeric_round_trip() {
         )
         .expect("conversion de T");
     let after = snapshot(&f.project);
-    assert_eq!(history.undo_label(), Some("Changer le type de T"));
+    // « la colonne C », pas « T » : le libellé désigne la colonne par sa
+    // **position** dans la feuille, comme la grille l'affiche, jamais par son
+    // nom de nœud. Ce cas-ci est précisément celui qui motive
+    // `column_label` — le nœud s'appelle `T` mais c'est la troisième colonne,
+    // donc « C » à l'écran, et « T » n'apparaît nulle part pour l'utilisateur.
+    assert_eq!(
+        history.undo_label(),
+        Some("Changer le type de la colonne C")
+    );
     let converted = floats(&f.project, f.t);
     assert_eq!(converted.len(), 3);
     assert!(
@@ -2016,7 +2024,10 @@ fn set_column_meta_round_trip() {
         )
         .expect("métadonnées de colonne");
     let after = snapshot(&f.project);
-    assert_eq!(history.undo_label(), Some("Modifier les métadonnées de A"));
+    assert_eq!(
+        history.undo_label(),
+        Some("Modifier les métadonnées de la colonne A")
+    );
     assert_eq!(
         f.project
             .tree()

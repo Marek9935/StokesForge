@@ -658,8 +658,20 @@ pub struct GridMenu {
 }
 
 impl GridMenu {
-    /// Libellé de « Copier »/« Couper »/« Vider », contextualisé — le nom de
-    /// ce qui est sélectionné, accordé en nombre.
+    /// Nom de ce qui est sélectionné, accordé en nombre (« la cellule »,
+    /// « les champs », « les lignes »…).
+    ///
+    /// # Délibérément **pas** utilisé par le menu contextuel
+    ///
+    /// Les entrées du menu contextuel disent « Copier », pas « Copier la
+    /// cellule » : le clic droit vient de se poser sur ce qui est
+    /// sélectionné, le répéter dans chaque entrée n'apprend rien et allonge
+    /// le menu. Cette méthode-ci (et [`GridMenu::copy_full_columns_label`])
+    /// est conservée pour les surfaces d'UI à venir où l'on ne voit **pas**
+    /// ce qu'on vise — une barre de menus, une info-bulle, une ligne de
+    /// statut, une confirmation — où nommer la cible redevient utile. Elle
+    /// reste verrouillée par les tests de `tests/shell.rs` pour qu'elle
+    /// suive la matrice de sélection en attendant.
     pub fn target_label(&self) -> &'static str {
         match (self.zone, self.plural) {
             (GridZone::Header, false) => "le champ",
@@ -673,9 +685,11 @@ impl GridMenu {
         }
     }
 
-    /// Libellé de « Copier avec l'en-tête » (Ctrl+Maj+C), qui promeut
-    /// toujours en entier la ou les colonnes touchées, quelle que soit la
-    /// forme de la sélection — voir [`AppState::copy_full_columns`].
+    /// Libellé développé de « Copier avec l'en-tête » (Ctrl+Maj+C), qui
+    /// promeut toujours en entier la ou les colonnes touchées, quelle que
+    /// soit la forme de la sélection — voir [`AppState::copy_full_columns`].
+    /// Comme [`GridMenu::target_label`], gardée pour une UI future : le menu
+    /// contextuel, lui, dit simplement « Copier avec l'en-tête ».
     pub fn copy_full_columns_label(&self) -> &'static str {
         if self.multi_column {
             "Copier les colonnes entières"
@@ -1168,7 +1182,7 @@ impl AppState {
         self.python = Some(python);
     }
 
-    /// Libellé de l'action « Annuler » : `Some("Annuler Saisie dans A")`, ou
+    /// Libellé de l'action « Annuler » : `Some("Annuler Saisie dans la colonne A")`, ou
     /// `None` si la pile est vide (l'entrée de menu est alors grisée).
     pub fn undo_label(&self) -> Option<String> {
         self.snapshot

@@ -69,7 +69,10 @@ fn round_trip_execute_undo_redo() {
     assert_eq!(snap1.revision, 1);
     assert_eq!(read_a(&snap1, a)[0], 42.0);
     assert!(snap1.history.can_undo);
-    assert_eq!(snap1.history.undo_label.as_deref(), Some("Saisie dans A"));
+    assert_eq!(
+        snap1.history.undo_label.as_deref(),
+        Some("Saisie dans la colonne A")
+    );
 
     let after_undo = handle.undo().expect("undo réussi");
     assert_eq!(after_undo, Some(2));
@@ -227,7 +230,7 @@ fn two_clients_share_one_history_stack() {
     let both_done = handle.snapshot().expect("snapshot");
     assert_eq!(
         both_done.history.undo_label.as_deref(),
-        Some("Saisie dans A")
+        Some("Saisie dans la colonne A")
     );
 
     // Le premier undo annule la dernière écriture arrivée, quelle qu'elle

@@ -107,7 +107,7 @@ fn editing_a_source_column_recalculates_the_formula_column() {
     assert_eq!(read_floats(&snapshot, c)[0], 110.0);
     assert_eq!(
         snapshot.history.undo_label.as_deref(),
-        Some("Saisie dans A"),
+        Some("Saisie dans la colonne A"),
         "le recalcul ne pousse pas sa propre entrée d'historique"
     );
 

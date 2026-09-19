@@ -1645,18 +1645,17 @@ fn role_suffix(role: ColumnRole) -> &'static str {
 
 /// Lettre de colonne façon tableur, en base 26 : `0 → "A"`, `25 → "Z"`,
 /// `26 → "AA"`, `701 → "ZZ"`… — l'ordre de la feuille, pas un nom stocké
-/// dans le modèle (aucune notion de lettre n'existe côté `plotyx-core`, voir
-/// la doc de tête de [`crate::selection`]).
-fn column_letter(mut index: usize) -> String {
-    let mut letters = Vec::new();
-    loop {
-        letters.push((b'A' + (index % 26) as u8) as char);
-        if index < 26 {
-            break;
-        }
-        index = index / 26 - 1;
-    }
-    letters.iter().rev().collect()
+/// dans le modèle.
+///
+/// Simple alias de [`plotyx_core::spreadsheet_name`], qui portait déjà cet
+/// algorithme (elle nomme les colonnes créées sans nom explicite). Ce module
+/// en avait sa propre copie, de sorte que la lettre affichée en en-tête et
+/// celle qui sert de nom par défaut à une colonne neuve venaient de deux
+/// implémentations distinctes — et, depuis que les libellés d'historique
+/// désignent eux aussi une colonne par sa lettre
+/// (`plotyx_commands::Command::label`), il en aurait fallu une troisième.
+fn column_letter(index: usize) -> String {
+    plotyx_core::spreadsheet_name(index)
 }
 
 /// Contenu du presse-papier **système**, lu à la demande — pour « Coller »
@@ -1707,13 +1706,9 @@ fn grid_edit_menu(
     menu: &GridMenu,
 ) {
     let ctx = ui.ctx().clone();
-    let target = menu.target_label();
 
     if ui
-        .add(
-            egui::Button::new(format!("Couper {target}"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_CUT)),
-        )
+        .add(egui::Button::new("Couper").shortcut_text(ctx.format_shortcut(&SHORTCUT_CUT)))
         .clicked()
     {
         // Couper = copier puis vider, exactement comme le bloc clavier :
@@ -1727,10 +1722,7 @@ fn grid_edit_menu(
         ui.close();
     }
     if ui
-        .add(
-            egui::Button::new(format!("Copier {target}"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY)),
-        )
+        .add(egui::Button::new("Copier").shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY)))
         .clicked()
     {
         if let Some(text) = state.copy_selection(sheet) {
@@ -1740,7 +1732,7 @@ fn grid_edit_menu(
     }
     if ui
         .add(
-            egui::Button::new(menu.copy_full_columns_label())
+            egui::Button::new("Copier avec l'en-tête")
                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY_FULL_COLUMNS)),
         )
         .clicked()
@@ -1781,7 +1773,7 @@ fn grid_edit_menu(
     ui.separator();
 
     if ui
-        .add(egui::Button::new(format!("Vider {target}")).shortcut_text(SHORTCUT_TEXT_BACKSPACE))
+        .add(egui::Button::new("Vider").shortcut_text(SHORTCUT_TEXT_BACKSPACE))
         .clicked()
     {
         state.forget_delete_repeat(sheet);
@@ -1791,8 +1783,7 @@ fn grid_edit_menu(
     if menu.offers_delete_shift
         && ui
             .add(
-                egui::Button::new(format!("Supprimer {target} et décaler"))
-                    .shortcut_text(SHORTCUT_TEXT_DELETE),
+                egui::Button::new("Supprimer et décaler").shortcut_text(SHORTCUT_TEXT_DELETE),
             )
             .on_hover_text(
                 "Suppr vide à la première pression et ne supprime qu'à la seconde ; cette entrée supprime tout de suite.",
@@ -1814,8 +1805,7 @@ fn grid_edit_menu(
     if ui
         .add_enabled(
             state.can_undo(),
-            egui::Button::new(state.undo_label().unwrap_or_else(|| "Annuler".to_string()))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
+            egui::Button::new("Annuler").shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
         )
         .clicked()
     {
@@ -1825,8 +1815,7 @@ fn grid_edit_menu(
     if ui
         .add_enabled(
             state.can_redo(),
-            egui::Button::new(state.redo_label().unwrap_or_else(|| "Rétablir".to_string()))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
+            egui::Button::new("Rétablir").shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
         )
         .clicked()
     {

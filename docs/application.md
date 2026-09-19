@@ -418,16 +418,27 @@ bloc est le miroir exact du bloc de raccourcis de `grid_contents`. La rangée
 des lettres y ajoute ensuite ce qui lui est propre (type et rôle de colonne),
 qui décrit la colonne plutôt qu'il n'agit sur son contenu.
 
-La **décision** (quels gestes ont un sens ici, comment les nommer, lesquels
-griser) vit dans `AppState::grid_menu` → `GridMenu`, pas dans le code egui :
-c'est ce qui la rend vérifiable sans fenêtre dans `tests/shell.rs`, comme le
-reste de la matrice copier/coller. Deux contextualisations s'y jouent :
+Les entrées sont des verbes **nus** : « Copier », pas « Copier la cellule » ;
+« Annuler », pas « Annuler Saisie dans la colonne A ». Le clic droit vient de
+se poser sur ce qu'il vise, et le raccourci est déjà rappelé à droite de
+l'entrée — nommer la cible en plus allongeait chaque ligne sans rien
+apprendre. `GridMenu::target_label`/`copy_full_columns_label` et
+`AppState::undo_label`/`redo_label` restent **disponibles et testés** pour les
+surfaces où l'on ne voit *pas* ce qu'on vise (la barre de menus les utilise
+déjà pour Annuler/Rétablir, et une ligne de statut ou une confirmation en
+auront besoin) ; ils ne sont simplement pas appelés par le menu contextuel.
 
-- l'accord en nombre des libellés (« Vider la cellule » / « Vider les
-  champs » / « Vider les colonnes » / « Vider les lignes »), avec deux
-  pluriels distincts — celui des **cases** (`GridMenu::plural`) et celui des
-  **colonnes** (`GridMenu::multi_column`) : trois cellules empilées sont
-  plurielles sans que « Copier la colonne entière » doive passer au pluriel.
+La **décision** (quels gestes ont un sens ici, lesquels griser, comment
+nommer la cible le jour où c'est utile) vit dans `AppState::grid_menu` →
+`GridMenu`, pas dans le code egui : c'est ce qui la rend vérifiable sans
+fenêtre dans `tests/shell.rs`, comme le reste de la matrice copier/coller.
+Deux contextualisations s'y jouent :
+
+- l'accord en nombre de `target_label` (« la cellule » / « les champs » /
+  « les colonnes » / « les lignes »), avec deux pluriels distincts — celui des
+  **cases** (`GridMenu::plural`) et celui des **colonnes**
+  (`GridMenu::multi_column`) : trois cellules empilées sont plurielles sans que
+  « Copier la colonne entière » doive passer au pluriel.
   `GridZone::Rows` (la gouttière) fait exception à `plural` : ses libellés
   parlent de **lignes**, pas de cases, donc une seule ligne sélectionnée reste
   « la ligne » même sur une feuille à plusieurs colonnes — `plural` n'y compte
@@ -437,6 +448,32 @@ reste de la matrice copier/coller. Deux contextualisations s'y jouent :
   entrées pour un seul effet. Il apparaît en revanche pour une plage de lignes
   entières : supprimer une ligne fait remonter ce qui suit dans toutes les
   colonnes, exactement comme un rectangle de cellules.
+
+### Une colonne a deux identités, une seule est visible
+
+Son **nom de nœud** (`Node::name` — « Temps », « Signal », ou le « A »/« B »
+automatique de `Project::next_column_name`) est une clé du modèle : il résout
+une colonne depuis un script (`pyx.resolve("[Book1]Sheet1!Temps")`), l'adresse
+dans une spec de graphe, la retrouve dans un `.plx`. La grille ne l'affiche
+**nulle part** : elle montre la lettre de **position** (A, B, C…) et les
+quatre champs de `ColumnMeta` (Nom long, Unité, Commentaire, Formule), qui
+sont encore autre chose.
+
+`plotyx_commands::Command::label` construisait ses libellés d'historique sur
+le nom de nœud, et annonçait donc « Saisie dans Temps » pour une colonne que
+l'utilisateur ne connaît que comme « A » — un mot introuvable à l'écran, et
+carrément trompeur quand les deux divergent (un nœud nommé `T` en troisième
+position s'affiche « C »). `command::column_label` les désigne désormais par
+leur position : « Saisie dans la colonne A ». Les autres natures de nœud
+(feuille, classeur, graphe, note) gardent leur nom réel — celui-là *est*
+affiché, dans le Project Manager.
+
+La correspondance position → lettre est `plotyx_core::spreadsheet_name`,
+rendue publique pour l'occasion : c'est la même fonction qui nomme les
+colonnes créées sans nom explicite, qui peint l'en-tête de la grille
+(`app::column_letter` n'en est plus qu'un alias) et qui écrit les libellés
+d'historique. Trois copies de cet algorithme valaient trois façons d'appeler
+la même colonne.
 
 La gouttière (`app::row_number_widget`) est le miroir exact de la rangée des
 lettres (`app::column_header_widget`) : toute sa largeur sélectionne, au clic,

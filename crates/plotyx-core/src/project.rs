@@ -22,7 +22,14 @@ use crate::path::{format_path, ObjectPath};
 use crate::tree::Tree;
 
 /// Nom d'un dossier ou d'une colonne « façon tableur » : A, B, …, Z, AA, AB, …
-fn spreadsheet_name(index: usize) -> String {
+///
+/// Publique parce que ce n'est pas qu'un générateur de noms par défaut :
+/// c'est **la** correspondance position → lettre du produit, et les couches
+/// au-dessus doivent y désigner une colonne de la même façon que la grille
+/// l'affiche — l'en-tête de `plotyx-app` comme les libellés d'historique de
+/// `plotyx-commands`. Trois implémentations divergentes de cet algorithme
+/// valaient trois façons d'appeler la même colonne.
+pub fn spreadsheet_name(index: usize) -> String {
     let mut name = String::new();
     let mut remaining = index as i64;
     loop {

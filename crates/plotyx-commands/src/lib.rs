@@ -58,7 +58,7 @@
 //!     values: ValueBlock::Float(vec![42.0]),
 //!     expected_version: None,
 //! })?;
-//! assert_eq!(history.undo_label(), Some("Saisie dans A"));
+//! assert_eq!(history.undo_label(), Some("Saisie dans la colonne A"));
 //! assert!(history.undo(&mut project)?);
 //! # Ok(())
 //! # }
