@@ -4053,3 +4053,72 @@ fn add_column_and_select_adds_a_column_and_selects_it_on_the_given_row() {
         "la ligne demandée est sélectionnée dans la colonne neuve"
     );
 }
+
+// -- 21. Alignement du corps de la grille : nombres à droite, texte à gauche --
+
+/// Une cellule numérique renseignée est numérique — `cell_is_numeric` pilote
+/// `app::cell_widget` pour l'aligner à droite, comme dans tout tableur.
+#[test]
+fn a_populated_numeric_cell_is_numeric() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    assert!(state.cell_is_numeric(temps, 1));
+}
+
+/// Une cellule numérique manquante (`NaN`) n'est pas numérique au sens de
+/// l'alignement : un vide n'a pas de raison d'être poussé à droite plutôt
+/// qu'à gauche.
+#[test]
+fn a_missing_numeric_cell_is_not_numeric() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 2,
+        text: "   ".to_string(),
+    });
+
+    assert!(!state.cell_is_numeric(temps, 2));
+}
+
+/// Une cellule texte n'est jamais numérique.
+#[test]
+fn a_text_cell_is_not_numeric() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+
+    assert!(!state.cell_is_numeric(note, 0), "Note, ligne 0 = \"a\"");
+}
+
+/// Sur une colonne `Mixed`, le type se lit par cellule, pas par colonne :
+/// deux lignes voisines de la même colonne peuvent s'aligner différemment.
+#[test]
+fn cell_is_numeric_reads_per_cell_on_a_mixed_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+
+    state.dispatch(Action::CommitCell {
+        column: note,
+        row: 1,
+        text: "3".to_string(),
+    });
+
+    assert!(
+        state.cell_is_numeric(note, 1),
+        "\"3\" saisi dans une colonne Mixed reste une valeur numérique"
+    );
+    assert!(
+        !state.cell_is_numeric(note, 0),
+        "la ligne voisine, restée texte (\"a\"), ne l'est pas"
+    );
+}

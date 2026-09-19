@@ -582,6 +582,20 @@ normal : le raccourci clavier direct de `grid_contents`, et la validation
 d'édition de `cell_widget` — `app::is_last_visible_column` factorise la
 condition commune aux deux.
 
+### Alignement du corps : nombres à droite, texte à gauche
+
+`cell_widget` aligne chaque cellule du **corps** de la grille comme un
+tableur — jamais la gouttière ni l'en-tête, qui n'affichent pas de valeur de
+colonne. `AppState::cell_is_numeric` tranche par cellule, pas par colonne :
+sur une colonne `Mixed`, deux lignes voisines peuvent s'aligner
+différemment, l'une à droite (nombre saisi), l'autre à gauche (texte). Une
+valeur manquante (`NaN` ou texte vide/absent) compte comme non numérique et
+reste à gauche — un vide n'a pas de raison d'être poussé à droite, et ça
+évite qu'une colonne clairsemée ait l'air de sauter d'un bord à l'autre
+d'une ligne à l'autre. L'alignement se pose via `Label::halign`, explicite :
+`ui.put` place ce `Label` dans un `Layout::centered_and_justified`, qui
+centrerait sinon le texte par défaut.
+
 Un clic droit **hors** de la sélection la réduit d'abord à la case visée, un
 clic droit **dedans** la laisse intacte — pour que le menu agisse toujours sur
 ce qu'on vient de désigner — même garde (`response.secondary_clicked() &&

@@ -3745,7 +3745,24 @@ fn cell_widget(
         // `Label` : une valeur trop large pour sa colonne est coupée à
         // droite (avec un léger fondu), jamais renvoyée sur une seconde
         // ligne qui casserait la hauteur uniforme des rangées de la table.
-        ui.put(rect, egui::Label::new(text).selectable(false).truncate());
+        //
+        // Alignement à la tableur, dans le **corps** seulement (jamais la
+        // gouttière ni l'en-tête, qui ne portent pas de valeur de colonne) :
+        // les nombres à droite, le texte à gauche — `AppState::
+        // cell_is_numeric` tranche par cellule, pas par colonne, pour
+        // qu'une colonne `Mixed` aligne chaque ligne selon sa propre valeur.
+        let halign = if state.cell_is_numeric(column, row) {
+            egui::Align::RIGHT
+        } else {
+            egui::Align::LEFT
+        };
+        ui.put(
+            rect,
+            egui::Label::new(text)
+                .selectable(false)
+                .truncate()
+                .halign(halign),
+        );
 
         if response.double_clicked() {
             state.begin_edit(column, row);

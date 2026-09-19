@@ -491,6 +491,24 @@ pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
     }
 }
 
+/// Vrai si la cellule `(column, row)` porte une valeur **numérique** — sert
+/// à aligner le corps de la grille comme un tableur (nombres à droite, texte
+/// à gauche, voir [`crate::app::cell_widget`]). Pour une colonne `Mixed`, le
+/// type se lit par cellule (`Column::cell`), pas par colonne : deux lignes
+/// voisines peuvent s'aligner différemment. `false` pour une cellule vide
+/// (numérique manquante ou texte manquant) : un vide n'a pas de sens à
+/// pousser à droite plutôt qu'à gauche, et le laisser à gauche évite qu'une
+/// colonne entièrement vide ait l'air random d'une ligne à l'autre.
+pub(crate) fn cell_is_numeric_in(tree: &Tree, column: NodeId, row: usize) -> bool {
+    let Some(column) = tree.node(column).and_then(Node::as_column) else {
+        return false;
+    };
+    if column.column_type() == ColumnType::Mixed {
+        return matches!(column.cell(row), MixedCell::Number(value) if !value.is_nan());
+    }
+    matches!(column.get(row), Cell::Float(value) if !value.is_nan())
+}
+
 /// Corps de [`AppState::visible_columns`], factorisé sur un `&Tree` — voir
 /// [`cell_text_in`].
 pub(crate) fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
@@ -1281,6 +1299,12 @@ impl AppState {
     /// `ColumnMeta::display_format`, que cette phase ne lit pas.
     pub fn cell_text(&self, column: NodeId, row: usize) -> String {
         cell_text_in(&self.snapshot.tree, column, row)
+    }
+
+    /// Vrai si `(column, row)` porte une valeur numérique — voir
+    /// [`cell_is_numeric_in`].
+    pub fn cell_is_numeric(&self, column: NodeId, row: usize) -> bool {
+        cell_is_numeric_in(&self.snapshot.tree, column, row)
     }
 
     /// Métadonnées d'affichage d'une colonne (rôle, unité, nom long,
