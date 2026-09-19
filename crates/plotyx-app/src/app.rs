@@ -2731,7 +2731,11 @@ fn grid_contents(
         // toujours à jour à ce point, `ModifiersChanged` précédant la
         // frappe de la touche elle-même. Retour arrière/Suppr, eux, n'ont
         // pas de modificateur et restent des `Event::Key` ordinaires,
-        // capturés via `consume_key` comme avant.
+        // capturés via `consume_key` comme avant. Suppr est le seul des
+        // deux à ne pas dispatcher une action fixe : `AppState::
+        // consume_delete_key` décide si c'est un vidage ou une suppression
+        // selon qu'il s'agit ou non de la deuxième pression consécutive sur
+        // la même sélection (voir sa doc).
         let (mut copy, mut cut, mut paste_text, mut copy_full_columns, mut paste_absolute) =
             (false, false, None, false, false);
         ui.input(|input| {
@@ -2773,14 +2777,23 @@ fn grid_contents(
             }
         }
         if cut || backspace {
+            // Une autre mutation de la grille s'intercale entre deux
+            // pressions sur Suppr : la deuxième doit repartir au premier
+            // temps (vider), pas supprimer par surprise — voir la doc de
+            // `AppState::consume_delete_key`.
+            state.forget_delete_repeat(sheet);
             actions.push(Action::ClearSelectedCells { sheet });
         }
         if delete {
-            actions.push(Action::DeleteSelectedCells { sheet });
+            if let Some(action) = state.consume_delete_key(sheet) {
+                actions.push(action);
+            }
         }
         if paste_absolute {
+            state.forget_delete_repeat(sheet);
             actions.push(Action::PasteAbsolute { sheet });
         } else if let Some(text) = paste_text {
+            state.forget_delete_repeat(sheet);
             actions.push(Action::Paste { sheet, text });
         }
     }

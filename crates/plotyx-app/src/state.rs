@@ -887,6 +887,18 @@ pub struct AppState {
     /// si le texte reçu d'egui est notre propre copie (rejoue la structure)
     /// ou un texte externe (voir [`external_clipboard_from_text`]).
     clipboard_text: Option<String>,
+    /// Sélection sur laquelle Suppr vient déjà de **vider** les cases (pas
+    /// encore supprimé) — voir [`AppState::consume_delete_key`]. `Some`
+    /// entre les deux temps d'une double pression sur Suppr : une deuxième
+    /// pression sur *exactement* la même sélection de la même feuille
+    /// supprime (décale ce qui suit) plutôt que de re-vider ce qui est déjà
+    /// vide. Réinitialisé dès que la sélection change (elle ne compare plus
+    /// égale à l'ancre mémorisée) ou explicitement par [`AppState::
+    /// forget_delete_repeat`] avant toute autre mutation de la grille sur la
+    /// même sélection, pour qu'un Suppr après un Couper/Retour arrière/
+    /// collage reparte au premier temps plutôt que de supprimer par
+    /// surprise.
+    delete_repeat: Option<(NodeId, Selection)>,
     /// État de la fenêtre d'import, tant qu'elle est ouverte — voir
     /// [`ImportState`].
     import_state: Option<ImportState>,
@@ -944,6 +956,7 @@ impl AppState {
             header_editing: None,
             grid_clipboard: None,
             clipboard_text: None,
+            delete_repeat: None,
             import_state: None,
             script_source: String::new(),
             script_output: None,
@@ -2594,6 +2607,42 @@ impl AppState {
         }
         if grouped {
             let _ = self.handle.end_macro();
+        }
+    }
+
+    /// Réagit à une pression sur Suppr en deux temps — voir [`AppState::
+    /// delete_repeat`] pour l'état qui porte la mémoire d'une pression
+    /// précédente. La première pression sur une sélection vide les cases
+    /// ([`Action::ClearSelectedCells`], comme Retour arrière) ; la
+    /// deuxième, *seulement* si elle vise exactement la même sélection de
+    /// la même feuille sans qu'aucune autre mutation de la grille ne se
+    /// soit glissée entre les deux (voir [`AppState::
+    /// forget_delete_repeat`]), supprime pour de bon
+    /// ([`Action::DeleteSelectedCells`]) et décale ce qui suit — jamais les
+    /// deux à la première pression, pour ne jamais décaler des données par
+    /// une simple habitude de tableur où Suppr vide sans décaler. `None` si
+    /// `sheet` n'a pas de sélection : rien à faire.
+    pub fn consume_delete_key(&mut self, sheet: NodeId) -> Option<Action> {
+        let selection = self.selection.get(&sheet)?.clone();
+        if self.delete_repeat.as_ref() == Some(&(sheet, selection.clone())) {
+            self.delete_repeat = None;
+            Some(Action::DeleteSelectedCells { sheet })
+        } else {
+            self.delete_repeat = Some((sheet, selection));
+            Some(Action::ClearSelectedCells { sheet })
+        }
+    }
+
+    /// Oublie une éventuelle double pression sur Suppr en cours pour
+    /// `sheet` — à appeler avant toute autre mutation de la grille qui
+    /// pourrait se glisser entre les deux temps de [`AppState::
+    /// consume_delete_key`] (Couper, Retour arrière, coller...), pour
+    /// qu'une pression sur Suppr qui suit reparte au premier temps (vider)
+    /// plutôt que de supprimer par surprise sur une sélection qui n'a pas
+    /// changé mais dont le contenu, lui, a bougé entre-temps.
+    pub fn forget_delete_repeat(&mut self, sheet: NodeId) {
+        if matches!(&self.delete_repeat, Some((s, _)) if *s == sheet) {
+            self.delete_repeat = None;
         }
     }
 

@@ -1724,6 +1724,109 @@ fn delete_on_a_header_field_selection_clears_it_like_backspace() {
     assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
 }
 
+/// Suppr en deux temps (`AppState::consume_delete_key`) : la première
+/// pression sur une sélection vide la case sans rien décaler, exactement
+/// comme Retour arrière ; la deuxième pression sur *cette même sélection*
+/// supprime pour de bon et décale ce qui suit.
+#[test]
+fn pressing_delete_twice_on_the_same_selection_clears_then_shifts() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    // "Temps" = [0.0, 0.5, 1.0, 1.5, 2.0].
+    state.select_cell(sheet1, temps, 2);
+
+    // Première pression : vide, ne décale rien.
+    let action = state
+        .consume_delete_key(sheet1)
+        .expect("une sélection est active");
+    assert_eq!(action, Action::ClearSelectedCells { sheet: sheet1 });
+    state.dispatch(action);
+    assert!(
+        matches!(cell(&state, temps, 2), Cell::Float(v) if v.is_nan()),
+        "la case est vide après la première pression"
+    );
+    let temps_len = state
+        .tree()
+        .get(temps)
+        .expect("colonne Temps présente")
+        .as_column()
+        .expect("nœud colonne")
+        .len();
+    assert_eq!(temps_len, 5, "rien n'a été décalé à la première pression");
+
+    // Deuxième pression, même sélection : supprime et décale.
+    let action = state
+        .consume_delete_key(sheet1)
+        .expect("la sélection n'a pas changé");
+    assert_eq!(action, Action::DeleteSelectedCells { sheet: sheet1 });
+    state.dispatch(action);
+    let temps_len = state
+        .tree()
+        .get(temps)
+        .expect("colonne Temps présente")
+        .as_column()
+        .expect("nœud colonne")
+        .len();
+    assert_eq!(temps_len, 4, "la deuxième pression décale bien ce qui suit");
+    assert_eq!(cell(&state, temps, 2), Cell::Float(1.5));
+}
+
+/// Changer la sélection entre les deux pressions repart au premier temps
+/// (vider) : la deuxième pression ne supprime que si elle vise *exactement*
+/// la même sélection que la précédente.
+#[test]
+fn changing_selection_between_two_delete_presses_restarts_at_clearing() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 1);
+    let action = state.consume_delete_key(sheet1).expect("sélection active");
+    assert_eq!(action, Action::ClearSelectedCells { sheet: sheet1 });
+    state.dispatch(action);
+
+    // La sélection bouge avant la deuxième pression.
+    state.select_cell(sheet1, temps, 3);
+    let action = state.consume_delete_key(sheet1).expect("sélection active");
+    assert_eq!(
+        action,
+        Action::ClearSelectedCells { sheet: sheet1 },
+        "sélection différente : on repart au premier temps, pas une suppression"
+    );
+}
+
+/// Une autre mutation de la grille (ici Retour arrière) entre les deux
+/// pressions oublie la première, même si la sélection n'a pas bougé : une
+/// pression sur Suppr qui suit ne doit pas supprimer par surprise.
+#[test]
+fn another_grid_mutation_between_two_delete_presses_forgets_the_first() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 1);
+    let action = state.consume_delete_key(sheet1).expect("sélection active");
+    state.dispatch(action);
+
+    // Une autre mutation de la grille se glisse entre les deux pressions,
+    // sur la même sélection — comme le ferait l'appelant (`app.rs`) avant
+    // de dispatcher `Action::ClearSelectedCells` pour Retour arrière.
+    state.forget_delete_repeat(sheet1);
+    state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
+
+    let action = state.consume_delete_key(sheet1).expect("sélection active");
+    assert_eq!(
+        action,
+        Action::ClearSelectedCells { sheet: sheet1 },
+        "la mutation intercalée a fait oublier la première pression"
+    );
+}
+
 // -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --
 //
 // Ce qui exige un interpréteur (exécution, sortie, annulation d'une écriture
