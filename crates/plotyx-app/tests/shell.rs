@@ -975,6 +975,67 @@ fn pasting_onto_a_single_cell_selection_writes_from_its_anchor() {
     assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
 }
 
+/// Régression : coller un texte non numérique dans une colonne `Numeric`
+/// écrivait silencieusement `NaN` (la case paraissait vidée) sans jamais
+/// élargir la colonne en `Mixed` — contrairement à la même saisie tapée au
+/// clavier (`non_numeric_input_promotes_the_column_to_mixed`). Le collage
+/// doit se comporter exactement pareil : c'est la même tolérance,
+/// `Command::SetCellsPromoting` plutôt qu'un `NaN` qui avale le texte collé.
+#[test]
+fn pasting_non_numeric_text_onto_a_numeric_cell_promotes_the_column_to_mixed() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let voisin = cell(&state, temps, 0);
+
+    state.select_cell(sheet1, temps, 1);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "n/a".to_string(),
+    });
+
+    assert_eq!(
+        column_type(&state, temps),
+        ColumnType::Mixed,
+        "le collage doit promouvoir la colonne comme le ferait une saisie clavier"
+    );
+    assert_eq!(state.cell_text(temps, 1), "n/a");
+    assert_eq!(
+        cell(&state, temps, 0),
+        voisin,
+        "les autres lignes gardent leur nombre"
+    );
+
+    // Une seule entrée d'historique pour la promotion **et** l'écriture.
+    state.dispatch(Action::Undo);
+    assert_eq!(column_type(&state, temps), ColumnType::Numeric);
+    assert_eq!(cell(&state, temps, 1), Cell::Float(0.5));
+}
+
+/// Même régression, pour un rectangle collé sur plusieurs lignes : une
+/// seule valeur non numérique parmi les lignes collées suffit à promouvoir
+/// toute l'écriture en `Mixed`, les valeurs numériques du même collage
+/// restant des nombres traçables.
+#[test]
+fn pasting_a_mixed_numeric_and_text_block_promotes_the_column_once() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "7\nn/a\n9\n".to_string(),
+    });
+
+    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
+    assert_eq!(cell(&state, temps, 0), Cell::Float(7.0));
+    assert_eq!(state.cell_text(temps, 1), "n/a");
+    assert_eq!(cell(&state, temps, 2), Cell::Float(9.0));
+}
+
 /// Valide un champ d'en-tête via le même chemin que la saisie utilisateur
 /// (`begin_header_edit`/`commit_header_edit`), pour préparer une sélection
 /// de champ dans les tests de copier/coller mixte ci-dessous.

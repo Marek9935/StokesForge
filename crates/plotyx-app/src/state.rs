@@ -376,43 +376,64 @@ fn format_f64_for_display(value: f64) -> String {
 
 /// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
 /// colonne d'indice `col_index` de chaque ligne de `rows`, convertie selon
-/// `kind` avec la même tolérance que [`AppState::commit_cell`] — mais sans
-/// jamais refuser (invariant 10, « un défaut de donnée dégrade, il ne
-/// plante pas ») : un texte numérique inanalysable devient `NaN`, jamais une
-/// erreur qui bloquerait tout le collage. Une ligne plus courte que
+/// `kind` avec la même tolérance que [`AppState::commit_cell`] — un texte qui
+/// ne rentre pas dans une colonne `Numeric`/`DateTime` ne devient plus un
+/// `NaN` silencieux (qui affichait la case comme vide au lieu du texte
+/// collé, sans que la colonne change de type) : le bloc rendu est alors
+/// `Mixed`, avec `true` pour demander à l'appelant d'écrire via
+/// `Command::SetCellsPromoting` plutôt que `Command::SetCells`, exactement
+/// comme une saisie tolérante au clavier. Une ligne plus courte que
 /// `col_index` fournit une valeur manquante pour cette colonne.
 fn value_block_from_tsv_column(
     kind: ColumnType,
     rows: &[Vec<String>],
     col_index: usize,
-) -> ValueBlock {
+) -> (ValueBlock, bool) {
     match kind {
-        ColumnType::Numeric | ColumnType::DateTime => ValueBlock::Float(
-            rows.iter()
-                .map(|row| {
-                    let text = row.get(col_index).map(String::as_str).unwrap_or("").trim();
-                    if text.is_empty() {
-                        f64::NAN
-                    } else {
-                        text.parse::<f64>().unwrap_or(f64::NAN)
-                    }
-                })
-                .collect(),
-        ),
+        ColumnType::Numeric | ColumnType::DateTime => {
+            let texts: Vec<&str> = rows
+                .iter()
+                .map(|row| row.get(col_index).map(String::as_str).unwrap_or("").trim())
+                .collect();
+            let promoting = texts
+                .iter()
+                .any(|text| !text.is_empty() && text.parse::<f64>().is_err());
+            if promoting {
+                let cells = texts
+                    .iter()
+                    .map(|text| MixedCell::from_text((!text.is_empty()).then(|| text.to_string())))
+                    .collect();
+                (ValueBlock::Mixed(cells), true)
+            } else {
+                let values = texts
+                    .iter()
+                    .map(|text| {
+                        if text.is_empty() {
+                            f64::NAN
+                        } else {
+                            text.parse::<f64>().unwrap_or(f64::NAN)
+                        }
+                    })
+                    .collect();
+                (ValueBlock::Float(values), false)
+            }
+        }
         // Colonne mixte : chaque cellule décide pour elle-même, par la même
         // règle que le cœur (`MixedCell::from_text`) — un jeton qui s'analyse
         // devient un nombre, les autres restent du texte, et un jeton vide
         // une cellule vide. C'est le collage qui se rapproche le plus de ce
         // qu'un tableur fait : rien n'est perdu, et ce qui est un nombre est
-        // traçable.
-        ColumnType::Mixed => ValueBlock::Mixed(
-            rows.iter()
+        // traçable. Déjà `Mixed`, jamais de promotion à demander.
+        ColumnType::Mixed => {
+            let cells = rows
+                .iter()
                 .map(|row| {
                     let text = row.get(col_index).map(String::as_str).unwrap_or("").trim();
                     MixedCell::from_text((!text.is_empty()).then(|| text.to_string()))
                 })
-                .collect(),
-        ),
+                .collect();
+            (ValueBlock::Mixed(cells), false)
+        }
     }
 }
 
@@ -2715,15 +2736,42 @@ impl AppState {
                 else {
                     return;
                 };
-                let values = value_block_from_tsv_column(kind, &[vec![text.to_string()]], 0);
-                self.execute(Command::SetCells {
-                    column,
-                    start: row,
-                    values,
-                    expected_version: None,
-                });
+                let (values, promoting) =
+                    value_block_from_tsv_column(kind, &[vec![text.to_string()]], 0);
+                self.execute_pasted_cells(column, row, values, promoting);
             }
         }
+    }
+
+    /// Écrit un bloc de cellules collées à partir de [`value_block_from_tsv_column`]
+    /// — `Command::SetCellsPromoting` plutôt que `Command::SetCells` quand
+    /// `promoting` demande d'élargir la colonne en `Mixed` (voir la doc de
+    /// [`value_block_from_tsv_column`]), sinon même commande stricte
+    /// qu'avant. Partagé par les trois points de collage en cellules de
+    /// données ([`AppState::paste_single_value`], [`AppState::
+    /// paste_relative`], [`AppState::paste_full_columns`]).
+    fn execute_pasted_cells(
+        &mut self,
+        column: NodeId,
+        start: usize,
+        values: ValueBlock,
+        promoting: bool,
+    ) {
+        self.execute(if promoting {
+            Command::SetCellsPromoting {
+                column,
+                start,
+                values,
+                expected_version: None,
+            }
+        } else {
+            Command::SetCells {
+                column,
+                start,
+                values,
+                expected_version: None,
+            }
+        });
     }
 
     /// [`GridClipboard::Relative`] : voir [`AppState::apply_paste`] pour la
@@ -2811,13 +2859,8 @@ impl AppState {
                     else {
                         continue;
                     };
-                    let values = value_block_from_tsv_column(kind, rows, index);
-                    self.execute(Command::SetCells {
-                        column,
-                        start: paste_row,
-                        values,
-                        expected_version: None,
-                    });
+                    let (values, promoting) = value_block_from_tsv_column(kind, rows, index);
+                    self.execute_pasted_cells(column, paste_row, values, promoting);
                 }
                 if grouped {
                     let _ = self.handle.end_macro();
@@ -2911,13 +2954,8 @@ impl AppState {
                 continue;
             };
             let rows: Vec<Vec<String>> = source.data.iter().map(|v| vec![v.clone()]).collect();
-            let values = value_block_from_tsv_column(kind, &rows, 0);
-            self.execute(Command::SetCells {
-                column,
-                start: body_start,
-                values,
-                expected_version: None,
-            });
+            let (values, promoting) = value_block_from_tsv_column(kind, &rows, 0);
+            self.execute_pasted_cells(column, body_start, values, promoting);
         }
         if grouped {
             let _ = self.handle.end_macro();

@@ -354,23 +354,6 @@ pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
 /// Ctrl+Entrée — exécuter le script de la console.
 pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
-/// Ctrl+Maj+C — copier les colonnes touchées par la sélection en entier
-/// (en-tête et corps). `egui-winit` ne traduit en `egui::Event::Copy` que
-/// Ctrl+C seul (voir la doc de tête de [`grid_contents`]) : ce raccourci-ci
-/// arrive comme un `egui::Event::Key` ordinaire, capturé par
-/// `consume_shortcut` comme les autres raccourcis à modificateur.
-pub const SHORTCUT_COPY_FULL_COLUMNS: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::C,
-);
-/// Ctrl+Maj+V — coller en position absolue depuis le presse-papier interne
-/// de la grille ([`Action::PasteAbsolute`]). Même remarque que
-/// [`SHORTCUT_COPY_FULL_COLUMNS`] : jamais poussé comme `egui::Event::
-/// Paste`, toujours capturé par `consume_shortcut`.
-pub const SHORTCUT_PASTE_ABSOLUTE: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::V,
-);
 
 /// Hauteur d'une ligne de la grille, en points.
 const ROW_HEIGHT: f32 = 20.0;
@@ -2730,37 +2713,44 @@ fn grid_contents(
                 state.move_selection(sheet, MoveDirection::Down, false);
             }
         }
-        // Ctrl+C/X n'apparaissent **jamais** comme un `egui::Event::Key`
-        // ordinaire (donc jamais via `consume_key`) : `egui-winit` les
-        // intercepte lui-même à la traduction des événements de la fenêtre
-        // et pousse à la place un `Event::Copy`/`Event::Cut`, ou un
-        // `Event::Paste(String)` qui porte déjà le contenu du presse-papier
-        // système (lu par `egui-winit`, via `arboard` en interne — inutile
-        // de le relire nous-mêmes). Ctrl+Maj+C/Ctrl+Maj+V ([`
-        // SHORTCUT_COPY_FULL_COLUMNS`]/[`SHORTCUT_PASTE_ABSOLUTE`]), eux, ne
-        // sont **jamais** traduits ainsi (`egui-winit` ne reconnaît que
-        // Ctrl+C/Ctrl+V seuls comme ces événements) : capturés comme
-        // n'importe quel autre raccourci à modificateur, via
-        // `consume_shortcut`. Retour arrière/Suppr, eux non plus, n'ont pas
-        // de modificateur et restent des `Event::Key` ordinaires, capturés
-        // via `consume_key` comme avant.
-        let (mut copy, mut cut, mut paste_text) = (false, false, None);
+        // Ctrl+C/X/V n'apparaissent **jamais** comme un `egui::Event::Key`
+        // ordinaire (donc jamais via `consume_key`/`consume_shortcut`) :
+        // `egui-winit` les intercepte lui-même à la traduction des
+        // événements de la fenêtre et pousse à la place un `Event::Copy`/
+        // `Event::Cut`/`Event::Paste(String)` (ce dernier porte déjà le
+        // contenu du presse-papier système, lu par `egui-winit` via
+        // `arboard` en interne — inutile de le relire nous-mêmes). Ça vaut
+        // aussi pour Ctrl+Maj+C/Ctrl+Maj+V : `egui-winit::is_copy_command`/
+        // `is_paste_command` ne testent que `modifiers.command`, jamais
+        // `shift` (voir `egui-winit/src/lib.rs`), donc Maj enfoncée ou non
+        // produit le **même** `Event::Copy`/`Event::Paste` — jamais un
+        // `Event::Key` à capturer par un raccourci séparé (un essai
+        // précédent le supposait à tort : `consume_shortcut` sur un
+        // raccourci Ctrl+Maj+C/V ne matchait jamais). On distingue donc les
+        // deux en lisant `input.modifiers.shift` au moment de l'événement —
+        // toujours à jour à ce point, `ModifiersChanged` précédant la
+        // frappe de la touche elle-même. Retour arrière/Suppr, eux, n'ont
+        // pas de modificateur et restent des `Event::Key` ordinaires,
+        // capturés via `consume_key` comme avant.
+        let (mut copy, mut cut, mut paste_text, mut copy_full_columns, mut paste_absolute) =
+            (false, false, None, false, false);
         ui.input(|input| {
+            let shift = input.modifiers.shift;
             for event in &input.events {
                 match event {
+                    egui::Event::Copy if shift => copy_full_columns = true,
                     egui::Event::Copy => copy = true,
                     egui::Event::Cut => cut = true,
+                    egui::Event::Paste(_) if shift => paste_absolute = true,
                     egui::Event::Paste(text) => paste_text = Some(text.clone()),
                     _ => {}
                 }
             }
         });
-        let (delete, backspace, copy_full_columns, paste_absolute) = ui.input_mut(|input| {
+        let (delete, backspace) = ui.input_mut(|input| {
             (
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
-                input.consume_shortcut(&SHORTCUT_COPY_FULL_COLUMNS),
-                input.consume_shortcut(&SHORTCUT_PASTE_ABSOLUTE),
             )
         });
         // Toute la matrice de comportement (une seule case copiée devient du
