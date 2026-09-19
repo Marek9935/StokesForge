@@ -30,6 +30,7 @@ use plotyx_app::selection::Selection;
 use plotyx_app::state::{Action, AppState, GridZone, HeaderField, MoveDirection};
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
+use plotyx_plot::PlotType;
 use plotyx_session::{Session, SessionHandle};
 
 /// Projet de démonstration des tests : un classeur `Book1` avec `Sheet1`
@@ -4147,4 +4148,173 @@ fn cell_is_numeric_reads_per_cell_on_a_mixed_column() {
         !state.cell_is_numeric(note, 0),
         "la ligne voisine, restée texte (\"a\"), ne l'est pas"
     );
+}
+
+// -- 22. Tracer depuis un classeur (menu contextuel de l'en-tête) --
+
+/// `Action::PlotColumns` apparie chaque Y sélectionné à la colonne X la plus
+/// proche à sa **gauche** dans la feuille, façon OriginLab — `Temps` est
+/// mise en rôle `X`, `Signal` reste `Y` (rôle par défaut), la série créée
+/// doit donc tracer `Signal` contre `Temps`.
+#[test]
+fn plot_columns_pairs_each_y_with_the_nearest_x_to_its_left() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::SetColumnRole {
+        column: temps,
+        role: ColumnRole::X,
+    });
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![temps, signal],
+        plot_type: PlotType::Line,
+    });
+
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé dans le dossier du classeur");
+    let spec = state.plot_spec(graph).expect("spec du graphe créé");
+    assert_eq!(spec.panels.len(), 1);
+    let series = &spec.panels[0].series;
+    assert_eq!(
+        series.len(),
+        1,
+        "Temps est X, pas une série ; Signal en est une"
+    );
+    assert_eq!(series[0].y, signal);
+    assert_eq!(series[0].x, Some(temps));
+    assert_eq!(series[0].plot_type, PlotType::Line);
+}
+
+/// Sans colonne X à sa gauche (aucune colonne de rôle `X` dans la feuille),
+/// l'abscisse reste implicite — comportement d'Origin sans X désigné.
+#[test]
+fn plot_columns_without_an_x_to_the_left_uses_an_implicit_abscissa() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Scatter,
+    });
+
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+    let spec = state.plot_spec(graph).expect("spec du graphe créé");
+    let series = &spec.panels[0].series;
+    assert_eq!(series.len(), 1);
+    assert_eq!(series[0].y, signal);
+    assert_eq!(series[0].x, None, "aucune colonne X dans la feuille");
+}
+
+/// Une sélection sans aucune colonne de rôle Y ne crée aucun graphe — pas de
+/// commande envoyée, donc rien à annuler.
+#[test]
+fn plot_columns_without_any_y_column_is_a_no_op() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let root = state.tree().root();
+    state.dispatch(Action::SetColumnRole {
+        column: temps,
+        role: ColumnRole::X,
+    });
+    let children_before = state.tree().node(root).expect("racine").children().len();
+    let undo_label_before = state.undo_label();
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![temps],
+        plot_type: PlotType::Line,
+    });
+
+    let children_after = state.tree().node(root).expect("racine").children().len();
+    assert_eq!(
+        children_before, children_after,
+        "aucune colonne Y sélectionnée : pas de graphe créé"
+    );
+    assert_eq!(
+        state.undo_label(),
+        undo_label_before,
+        "aucune commande n'a été envoyée : l'entrée d'historique à annuler ne change pas"
+    );
+    assert!(state.status().is_some_and(|status| status.is_error));
+}
+
+/// Annuler après `Action::PlotColumns` restaure l'arbre bit pour bit — le
+/// graphe créé disparaît, comme toute autre création.
+#[test]
+fn undo_after_plot_columns_restores_the_tree_bit_for_bit() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let before = std::sync::Arc::clone(state.tree());
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    assert!(state.can_undo());
+
+    state.dispatch(Action::Undo);
+
+    assert_eq!(**state.tree(), *before);
+}
+
+/// `Action::AddSeriesToGraph` ajoute des séries à un `PlotSpec` existant sans
+/// écraser celles déjà présentes — c'est ce que le glisser-déposer du
+/// chantier 2 exigera, testé ici en pilotant `AppState` directement.
+#[test]
+fn add_series_to_graph_appends_without_overwriting_existing_series() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+    let root = state.tree().root();
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé");
+    let before = state.plot_spec(graph).expect("spec initiale");
+    assert_eq!(before.panels[0].series.len(), 1);
+
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        columns: vec![note],
+        plot_type: PlotType::Scatter,
+    });
+
+    let after = state.plot_spec(graph).expect("spec après ajout");
+    assert_eq!(after.panels[0].series.len(), 2);
+    assert_eq!(
+        after.panels[0].series[0].y, signal,
+        "la série déjà présente n'est pas écrasée"
+    );
+    assert_eq!(after.panels[0].series[1].y, note);
+    assert_eq!(after.panels[0].series[1].plot_type, PlotType::Scatter);
 }

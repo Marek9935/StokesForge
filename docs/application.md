@@ -452,6 +452,39 @@ Deux contextualisations s'y jouent :
   plage de lignes entières : supprimer une ligne fait remonter ce qui suit
   dans toutes les colonnes, exactement comme un rectangle de cellules.
 
+### Tracer depuis un classeur
+
+La rangée des lettres offre, en plus de « Type » et « Rôle », un sous-menu
+« Tracer » (Ligne, Points, Ligne + points, Barres) qui crée un graphe à
+partir de la sélection de colonnes courante — même cible que les deux autres
+sous-menus (`target_columns` : toute la plage sélectionnée si la colonne
+cliquée en fait partie, sinon cette colonne seule). Le graphe créé est
+ajouté dans le dossier qui contient le classeur (`Command::AddGraph`, pas
+d'entrée séparée pour la feuille) et s'ouvre aussitôt dans son propre onglet.
+
+L'appariement des colonnes en séries suit la convention Origin plutôt qu'un
+choix arbitraire : parmi les colonnes visées, chacune de rôle Y
+(`ColumnRole::Y`, `ColumnMeta::role`) devient une série, appariée à la
+colonne X la plus proche à sa **gauche** dans la feuille — en comptant aussi
+les colonnes X non sélectionnées, puisque l'abscisse commune à plusieurs
+courbes n'a généralement pas de raison d'être re-cliquée à chaque tracé. Une
+colonne Y sans X à sa gauche garde une abscisse implicite (l'indice de
+ligne) ; une colonne de tout autre rôle (X, Z, barre d'erreur, étiquette,
+aucun) n'engendre jamais de série à elle seule. Une sélection sans aucune
+colonne Y ne crée donc aucun graphe — un clic droit sur une plage de
+colonnes purement X, par exemple, ne fait rien plutôt que d'ouvrir un graphe
+vide. Chaque série prend la couleur de palette de son rang
+(`SeriesSpec::from_palette`).
+
+Cette règle vit dans `AppState::plot_columns`/`series_from_columns`
+(`plotyx-app/src/state.rs`), pas dans `app.rs` : le menu contextuel ne fait
+que choisir le type de tracé et pousser `Action::PlotColumns`. Une seconde
+action, `Action::AddSeriesToGraph`, applique la même règle d'appariement mais
+relit le `PlotSpec` courant d'un graphe existant pour y **ajouter** des
+séries (`Command::SetPlotSpec`) sans toucher à celles déjà présentes — elle
+sert le glisser-déposer d'un classeur vers un graphe ouvert (chantier
+suivant) ; rien ne la pousse encore depuis l'UI, mais elle est déjà testée.
+
 ### Une colonne a deux identités, une seule est visible
 
 Son **nom de nœud** (`Node::name` — « Temps », « Signal », ou le « A »/« B »

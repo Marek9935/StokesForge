@@ -308,7 +308,8 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use egui_dock::{DockArea, DockState, NodePath, Style, TabViewer};
 use egui_extras::{Column as TableColumn, TableBuilder};
-use plotyx_core::{ColumnRole, ColumnType, NodeId, Tree};
+use plotyx_core::{ColumnRole, ColumnType, Node, NodeId, Tree};
+use plotyx_plot::PlotType;
 use plotyx_render_egui::{DrawnPlot, GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::Snapshot;
 
@@ -1482,7 +1483,43 @@ impl eframe::App for PlotyxApp {
             self.detach_tab(tab);
         }
         for action in actions {
+            // `Action::PlotColumns` doit ouvrir le graphe qu'elle crée
+            // (chantier « tracer depuis un classeur »). `dispatch` ne rend
+            // jamais l'identifiant créé — même contrainte que l'import
+            // (`AppState::import_files`) — donc le dossier parent se
+            // calcule **avant** l'envoi de la commande, et le graphe se
+            // retrouve après coup comme le dernier enfant de ce dossier :
+            // `Project::add_graph` l'y insère en dernière position, et
+            // `AppState::dispatch` a déjà rafraîchi `self.state`
+            // (`AppState::refresh`) au retour de cet appel.
+            let plotted_from = if let Action::PlotColumns { sheet, .. } = &action {
+                self.state
+                    .tree()
+                    .node(*sheet)
+                    .and_then(Node::parent)
+                    .and_then(|book| self.state.tree().node(book).and_then(Node::parent))
+            } else {
+                None
+            };
+            let revision_before = self.state.revision();
             self.state.dispatch(action);
+            if let Some(parent) = plotted_from {
+                // `self.state.revision()` n'a bougé que si `AddGraph` a
+                // effectivement été envoyée (voir `AppState::plot_columns`) :
+                // sans ce garde, une sélection sans Y (no-op côté modèle)
+                // rouvrirait à tort le dernier enfant déjà présent dans
+                // `parent`, qui n'a rien à voir avec ce clic.
+                if self.state.revision() != revision_before {
+                    if let Some(graph) = self
+                        .state
+                        .tree()
+                        .node(parent)
+                        .and_then(|node| node.children().last().copied())
+                    {
+                        self.open_tab(Tab::Graph(graph));
+                    }
+                }
+            }
         }
 
         self.screenshot(&ctx);
@@ -1988,6 +2025,30 @@ fn column_header_widget(
                                     });
                                 }
                             }
+                            ui.close();
+                        }
+                    }
+                });
+                // Créer un graphe depuis les colonnes visées — chantier
+                // « tracer depuis un classeur ». La règle d'appariement X/Y
+                // (chaque Y prend la colonne X la plus proche à sa gauche)
+                // vit dans `AppState::plot_columns`/`series_from_columns` ;
+                // ce menu ne fait que choisir le type de tracé et pousser
+                // l'action sur `target_columns`, comme les deux sous-menus
+                // ci-dessus.
+                ui.menu_button("Tracer", |ui| {
+                    for (label, plot_type) in [
+                        ("Ligne", PlotType::Line),
+                        ("Points", PlotType::Scatter),
+                        ("Ligne + points", PlotType::LineScatter),
+                        ("Barres", PlotType::Bar),
+                    ] {
+                        if ui.button(label).clicked() {
+                            actions.push(Action::PlotColumns {
+                                sheet,
+                                columns: target_columns.clone(),
+                                plot_type,
+                            });
                             ui.close();
                         }
                     }

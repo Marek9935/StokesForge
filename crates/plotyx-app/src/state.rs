@@ -56,6 +56,7 @@ use plotyx_core::node::NodeKind;
 use plotyx_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
 };
+use plotyx_plot::{PanelSpec, Panels, PlotSpec, PlotType};
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
 #[cfg(feature = "python")]
@@ -280,6 +281,37 @@ pub enum Action {
         recipe: plotyx_import::ImportRecipe,
         /// Fichiers à importer, chacun dans sa propre feuille.
         paths: Vec<std::path::PathBuf>,
+    },
+    /// Crée un graphe à partir des colonnes sélectionnées d'une feuille de
+    /// classeur — menu contextuel de l'en-tête de colonne. Le nouveau graphe
+    /// est ajouté dans le même dossier parent que le classeur ([`Command::
+    /// AddGraph`]), avec une série par colonne de rôle
+    /// [`plotyx_core::ColumnRole::Y`] parmi `columns`, appariée à la colonne
+    /// X la plus proche à sa gauche dans la feuille (voir [`AppState::
+    /// plot_columns`] pour la règle complète). N'envoie aucune commande si
+    /// `columns` ne contient aucun Y : pas de graphe vide.
+    PlotColumns {
+        /// Feuille contenant les colonnes.
+        sheet: NodeId,
+        /// Colonnes sélectionnées au moment du geste.
+        columns: Vec<NodeId>,
+        /// Type de tracé demandé pour chaque série créée.
+        plot_type: PlotType,
+    },
+    /// Ajoute des séries à un graphe existant, construites depuis des
+    /// colonnes de classeur — même règle d'appariement X/Y que
+    /// [`Action::PlotColumns`], mais en relisant le [`plotyx_plot::PlotSpec`]
+    /// courant du graphe plutôt qu'en en créant un nouveau
+    /// ([`Command::SetPlotSpec`]). Sert le glisser-déposer du chantier 2 :
+    /// aucun appelant ne la pousse encore depuis l'UI, mais elle existe et
+    /// est testée dès ce chantier-ci.
+    AddSeriesToGraph {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Colonnes à ajouter en séries.
+        columns: Vec<NodeId>,
+        /// Type de tracé demandé pour chaque nouvelle série.
+        plot_type: PlotType,
     },
 }
 
@@ -534,6 +566,63 @@ pub(crate) fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, Str
             Some((*id, child.name().to_string(), column.column_type()))
         })
         .collect()
+}
+
+/// Construit les séries de [`Action::PlotColumns`]/[`Action::
+/// AddSeriesToGraph`] à partir des colonnes de rôle Y présentes dans
+/// `columns`, dans l'ordre où elles apparaissent dans `sheet`.
+///
+/// Règle d'appariement, façon OriginLab : chaque Y est apparié à la colonne
+/// X la plus proche à sa **gauche** dans la feuille (rôle
+/// [`ColumnRole::X`]), en incluant les colonnes X non sélectionnées — sans X
+/// à gauche, l'abscisse reste implicite ([`SeriesSpec::new`]). Chaque série
+/// prend la couleur de palette de son rang, `start_index` inclus : décalage
+/// utile à [`AppState::add_series_to_graph`], qui prolonge la palette après
+/// les séries déjà présentes dans le panneau visé plutôt que de la reprendre
+/// à zéro. Rend une liste vide si `columns` ne contient aucun Y — c'est ce
+/// que les deux appelants lisent pour refuser un graphe ou un ajout vide.
+pub(crate) fn series_from_columns(
+    tree: &Tree,
+    sheet: NodeId,
+    columns: &[NodeId],
+    plot_type: &PlotType,
+    start_index: usize,
+) -> Vec<plotyx_plot::SeriesSpec> {
+    let ordered = visible_columns_in(tree, sheet);
+    let role_of = |id: NodeId| {
+        tree.node(id)
+            .and_then(Node::as_column)
+            .map(|column| column.meta().role)
+    };
+    let mut series = Vec::new();
+    for (position, (column, _, _)) in ordered.iter().enumerate() {
+        if !columns.contains(column) || role_of(*column) != Some(ColumnRole::Y) {
+            continue;
+        }
+        let x = ordered[..position]
+            .iter()
+            .rev()
+            .find_map(|(id, _, _)| (role_of(*id) == Some(ColumnRole::X)).then_some(*id));
+        let mut spec = match x {
+            Some(x) => plotyx_plot::SeriesSpec::new_xy(x, *column),
+            None => plotyx_plot::SeriesSpec::new(*column),
+        };
+        let index = start_index + series.len();
+        spec.line = plotyx_plot::LineSpec::from_palette(index);
+        spec.symbol = plotyx_plot::SymbolSpec::from_palette(index);
+        spec.plot_type = plot_type.clone();
+        series.push(spec);
+    }
+    series
+}
+
+/// Le [`PlotSpec`] courant de `graph`, ou `None` si ce n'est pas un graphe de
+/// ce projet.
+pub(crate) fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> {
+    match tree.node(graph)?.kind() {
+        NodeKind::Graph { spec, .. } => Some(spec.clone()),
+        _ => None,
+    }
 }
 
 /// Corps de [`AppState::row_count`], factorisé sur un `&Tree` — voir
@@ -1250,6 +1339,14 @@ impl AppState {
         self.snapshot.history.can_undo
     }
 
+    /// Révision courante de l'instantané — sert à `crate::app` à détecter,
+    /// après un [`AppState::dispatch`], si l'action a réellement produit une
+    /// commande (`Action::PlotColumns` sur une sélection sans Y n'en envoie
+    /// aucune, la révision ne bouge pas).
+    pub fn revision(&self) -> plotyx_session::Revision {
+        self.snapshot.revision
+    }
+
     /// Vrai s'il y a quelque chose à rétablir.
     pub fn can_redo(&self) -> bool {
         self.snapshot.history.can_redo
@@ -1259,6 +1356,12 @@ impl AppState {
     /// Vide si `sheet` n'est pas (ou plus) une feuille de ce projet.
     pub fn visible_columns(&self, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
         visible_columns_in(&self.snapshot.tree, sheet)
+    }
+
+    /// Le [`PlotSpec`] courant de `graph`, ou `None` si ce n'est pas (ou
+    /// plus) un graphe de ce projet.
+    pub fn plot_spec(&self, graph: NodeId) -> Option<PlotSpec> {
+        current_plot_spec(&self.snapshot.tree, graph)
     }
 
     /// Nombre de lignes de `sheet` — le **maximum** des longueurs de ses
@@ -2346,6 +2449,16 @@ impl AppState {
                 recipe,
                 paths,
             } => self.import_files(book, recipe, paths),
+            Action::PlotColumns {
+                sheet,
+                columns,
+                plot_type,
+            } => self.plot_columns(sheet, columns, plot_type),
+            Action::AddSeriesToGraph {
+                graph,
+                columns,
+                plot_type,
+            } => self.add_series_to_graph(graph, columns, plot_type),
         }
     }
 
@@ -3570,6 +3683,84 @@ impl AppState {
         } else {
             self.fail(format!("{summary} — {}", failures.join(" ; ")));
         }
+    }
+
+    /// Crée un graphe à partir des colonnes sélectionnées de `sheet` — voir
+    /// [`Action::PlotColumns`]. Le graphe est ajouté dans le dossier qui
+    /// contient le classeur de `sheet` (le parent du classeur, pas de la
+    /// feuille). Pas de commande envoyée si aucune colonne Y n'est présente
+    /// dans `columns` : un graphe vide n'a pas de sens à créer, et n'a donc
+    /// pas d'entrée d'historique à annuler.
+    fn plot_columns(&mut self, sheet: NodeId, columns: Vec<NodeId>, plot_type: PlotType) {
+        let series = series_from_columns(&self.snapshot.tree, sheet, &columns, &plot_type, 0);
+        if series.is_empty() {
+            self.fail("Aucune colonne de rôle Y dans la sélection : rien à tracer".to_string());
+            return;
+        }
+        let Some(book) = self.snapshot.tree.node(sheet).and_then(Node::parent) else {
+            self.fail(format!("{sheet} n'est pas une feuille de ce projet"));
+            return;
+        };
+        let Some(parent) = self.snapshot.tree.node(book).and_then(Node::parent) else {
+            self.fail(format!("{book} n'a pas de dossier parent"));
+            return;
+        };
+        let panel = PanelSpec {
+            series,
+            ..PanelSpec::default()
+        };
+        let spec = PlotSpec {
+            panels: Panels::one(panel),
+            ..PlotSpec::default()
+        };
+        self.execute(Command::AddGraph {
+            parent,
+            name: None,
+            spec,
+        });
+    }
+
+    /// Ajoute des séries construites depuis `columns` au premier panneau du
+    /// `PlotSpec` courant de `graph` — voir [`Action::AddSeriesToGraph`].
+    /// Même règle d'appariement X/Y que [`AppState::plot_columns`], mais la
+    /// feuille d'où viennent les colonnes se déduit de leur propre parent
+    /// (le classeur ouvert n'est pas porté par cette action) : toutes les
+    /// colonnes de `columns` doivent donc appartenir à la même feuille. Les
+    /// nouvelles séries prolongent la palette après celles déjà présentes,
+    /// sans toucher aux séries existantes. Pas de commande envoyée si
+    /// `columns` est vide, si les colonnes n'ont pas de feuille commune, si
+    /// aucune n'est de rôle Y, ou si `graph` n'est pas un graphe de ce
+    /// projet.
+    fn add_series_to_graph(&mut self, graph: NodeId, columns: Vec<NodeId>, plot_type: PlotType) {
+        let Some(&first) = columns.first() else {
+            return;
+        };
+        let Some(sheet) = self.snapshot.tree.node(first).and_then(Node::parent) else {
+            self.fail(format!("{first} n'est pas une colonne de ce projet"));
+            return;
+        };
+        let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
+            self.fail(format!("{graph} n'est pas un graphe de ce projet"));
+            return;
+        };
+        let start_index = spec.panels.first().map_or(0, |panel| panel.series.len());
+        let new_series = series_from_columns(
+            &self.snapshot.tree,
+            sheet,
+            &columns,
+            &plot_type,
+            start_index,
+        );
+        if new_series.is_empty() {
+            self.fail("Aucune colonne de rôle Y dans la sélection : rien à ajouter".to_string());
+            return;
+        }
+        let Some(panel) = spec.panels.get_mut(0) else {
+            self.fail(format!("{graph} n'a aucun panneau"));
+            return;
+        };
+        panel.series.extend(new_series);
+        self.execute(Command::SetPlotSpec { graph, spec });
     }
 
     /// Remplace le texte d'une note, sauf s'il est déjà exactement celui-là —
