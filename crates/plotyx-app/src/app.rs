@@ -454,8 +454,24 @@ const HEADER_LONGNAME_HEIGHT: f32 = 20.0;
 /// Hauteur totale de l'en-tête empilé de la grille docquée (lettre, nom
 /// long, unité, commentaire, formule).
 const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 4.0 * HEADER_SUBROW_HEIGHT;
-/// Hauteur de la bande d'onglets de sheet, sous la grille docquée.
-const SHEET_TABS_HEIGHT: f32 = 24.0;
+/// Hauteur réservée sous la grille pour le séparateur final et la bande
+/// d'onglets de sheet dans [`book_contents`] — généreuse plutôt
+/// qu'ajustée au pixel près : [`book_contents`] la soustrait de
+/// `ui.available_height()` *avant* de peindre effectivement ce qui suit,
+/// donc toute sous-estimation ferait déborder le contenu réel de la
+/// hauteur allouée à la grille. À l'intérieur d'une fenêtre flottante
+/// (`egui::Window`, redimensionnable, § Fenêtres flottantes confinées de la
+/// doc de tête), déborder ainsi ne se contente pas de rogner un pixel :
+/// `egui::Resize` mémorise la taille du contenu débordant comme nouvelle
+/// taille « désirée » de la fenêtre et ne revient jamais en arrière (elle ne
+/// fait que grandir, jamais rétrécir, d'une image sur l'autre) — un
+/// débordement constant d'une image à l'autre s'accumule
+/// donc frame après frame jusqu'à buter sur `constrain_to` (la fenêtre
+/// « explose » en hauteur au premier mouvement de souris qui redessine).
+/// Une légère surestimation ici, à l'inverse, ne coûte qu'un mince espace
+/// vide au-dessus de la bande d'onglets — sans danger, contrairement à la
+/// sous-estimation.
+const SHEET_TABS_HEIGHT: f32 = 40.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
 /// Hauteur par défaut du panneau fixe de la console de script — point de
@@ -469,6 +485,10 @@ const PROJECT_MANAGER_WIDTH: f32 = 260.0;
 /// doc de tête du module, § Fenêtres flottantes confinées. Rognée à l'aire de
 /// travail disponible si elle est plus petite.
 const FLOATING_WINDOW_SIZE: egui::Vec2 = egui::vec2(560.0, 420.0);
+/// Largeur par défaut d'une fenêtre flottante [`Tab::Book`] — le tiers de
+/// moins que [`FLOATING_WINDOW_SIZE`] : une grille n'a pas besoin d'être
+/// aussi large qu'un graphe pour rester lisible, demande explicite.
+const BOOK_WINDOW_WIDTH: f32 = FLOATING_WINDOW_SIZE.x * 2.0 / 3.0;
 /// Décalage, en points, entre deux fenêtres flottantes ouvertes l'une après
 /// l'autre (cascade) — voir [`PlotyxApp::next_cascade`].
 const CASCADE_STEP: f32 = 24.0;
@@ -1590,7 +1610,11 @@ impl eframe::App for PlotyxApp {
                     });
                     let cascade = CASCADE_STEP * (*rank % CASCADE_WRAP) as f32;
                     let default_pos = workspace_rect.min + egui::vec2(cascade, cascade);
-                    let default_size = FLOATING_WINDOW_SIZE.min(workspace_rect.size());
+                    let natural_size = match tab {
+                        Tab::Book(_) => egui::vec2(BOOK_WINDOW_WIDTH, FLOATING_WINDOW_SIZE.y),
+                        _ => FLOATING_WINDOW_SIZE,
+                    };
+                    let default_size = natural_size.min(workspace_rect.size());
                     let mut open = true;
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
