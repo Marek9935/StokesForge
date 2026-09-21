@@ -1434,16 +1434,29 @@ impl PlotyxApp {
                     let mut model = view_model.lock().unwrap_or_else(|err| err.into_inner());
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                     egui::CentralPanel::default().show(ui, |ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .small_button("↩")
-                                .on_hover_text("Réattacher à la fenêtre principale")
-                                .clicked()
-                            {
-                                requests.reattach = true;
-                                root_context.request_repaint_of(egui::ViewportId::ROOT);
-                            }
-                        });
+                        // Hauteur bornée explicitement, comme
+                        // `window_header` (même piège) : sans elle,
+                        // `Layout::right_to_left(Align::Center)` demande à
+                        // sa `Ui` enfant toute la hauteur restante pour
+                        // pouvoir centrer verticalement dedans — un simple
+                        // bouton « ↩ » consommerait alors toute la fenêtre
+                        // détachée, laissant 0 pixel de hauteur disponible
+                        // au contenu qui suit (la figure d'un `Tab::Graph`,
+                        // entre autres) et le rendant invisible.
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), 28.0),
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if ui
+                                    .small_button("↩")
+                                    .on_hover_text("Réattacher à la fenêtre principale")
+                                    .clicked()
+                                {
+                                    requests.reattach = true;
+                                    root_context.request_repaint_of(egui::ViewportId::ROOT);
+                                }
+                            },
+                        );
                         ui.separator();
                         let Some(snapshot) = model.snapshot.clone() else {
                             // Ne devrait jamais arriver : `detach_tab` pose le
@@ -5499,6 +5512,17 @@ mod graph_layout_tests {
                 .iter()
                 .any(|painted| view.cache().shapes().contains(&painted.shape)),
             "le viewport détaché doit réellement recevoir les formes du graphe"
+        );
+        // Régression : le bouton « ↩ » de réattachement, non borné en
+        // hauteur, pouvait consommer toute la fenêtre détachée (voir la
+        // doc de tête de la ligne qui l'alloue) — la figure se retrouvait
+        // alors hors du rectangle visible, invisible bien que son cache
+        // fût rempli (ce que les deux assertions ci-dessus ne détectent
+        // pas : un `Shape` reste dans la liste même hors clip).
+        let figure_rect = view.cache().key().unwrap().rect;
+        assert!(
+            figure_rect.max.y <= GRAPH_WINDOW_SIZE.y,
+            "la figure doit rester dans la fenêtre détachée, pas {figure_rect:?} pour une fenêtre de {GRAPH_WINDOW_SIZE:?}"
         );
     }
 
