@@ -300,6 +300,20 @@ impl GraphView {
         self.view.reset();
     }
 
+    /// Oublie les formes et repères liés à la surface où la vue était peinte.
+    ///
+    /// Une même vue peut migrer entre une fenêtre flottante et un viewport OS
+    /// séparé. Même si leurs rectangles coïncident par hasard, leurs
+    /// coordonnées écran ne désignent pas la même surface : conserver les
+    /// formes ou les transformations précédentes décalerait le rendu et le
+    /// réticule.
+    pub fn invalidate_surface(&mut self) {
+        self.cache.invalidate();
+        self.last = None;
+        self.hover = None;
+        self.drag_box = None;
+    }
+
     /// Le point désigné par le curseur à la dernière image peinte, s'il y en
     /// a un à moins de [`HIT_RADIUS`] pixels — tâche R7.2.
     pub fn hovered_point(&self) -> Option<&PointHit> {

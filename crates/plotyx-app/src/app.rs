@@ -639,6 +639,10 @@ pub struct PlotyxApp {
     /// `floating_tabs` tant qu'il l'est (même invariant que `pm_detached`
     /// pour le Project Manager, généralisé à plusieurs onglets simultanés).
     detached_tabs: HashMap<Tab, DetachedTab>,
+    /// Position demandée par la barre de titre maison. `egui::Window` ne
+    /// permet pas d'ajouter des actions à sa barre native ; la position reste
+    /// donc explicite quand cette barre prend en charge le glisser.
+    window_positions: HashMap<Tab, egui::Pos2>,
     /// Dernière géométrie envoyée à l'acteur, pour ne pas lui adresser une
     /// requête à chaque image pendant qu'une fenêtre reste immobile.
     saved_window_geometries: HashMap<NodeId, WindowGeometry>,
@@ -808,6 +812,7 @@ impl PlotyxApp {
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
+            window_positions: HashMap::new(),
             saved_window_geometries: HashMap::new(),
             autoquit,
             first_frame: None,
@@ -1268,9 +1273,14 @@ impl PlotyxApp {
             self.maximized_tab = None;
         }
         let graph_view = match tab {
-            Tab::Graph(id) => Some(self.graph_views.remove(&id).unwrap_or_default()),
+            Tab::Graph(id) => {
+                let mut view = self.graph_views.remove(&id).unwrap_or_default();
+                view.invalidate_surface();
+                Some(view)
+            }
             _ => None,
         };
+        self.window_positions.remove(&tab);
         let selected_sheet = match tab {
             Tab::Book(id) => self.state.selected_sheet_in(id),
             _ => None,
@@ -1307,6 +1317,8 @@ impl PlotyxApp {
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
             if let (Tab::Graph(id), Some(view)) = (tab, model.graph_view.take()) {
+                let mut view = view;
+                view.invalidate_surface();
                 self.graph_views.insert(id, view);
             }
         }
@@ -1327,6 +1339,8 @@ impl PlotyxApp {
             .lock()
             .unwrap_or_else(|err| err.into_inner());
         if let (Tab::Graph(id), Some(view)) = (tab, model.graph_view.take()) {
+            let mut view = view;
+            view.invalidate_surface();
             self.graph_views.insert(id, view);
         }
     }
@@ -1649,6 +1663,7 @@ impl eframe::App for PlotyxApp {
             focus_next,
             graph_views,
             maximized_tab,
+            window_positions,
             ..
         } = self;
 
@@ -1730,22 +1745,34 @@ impl eframe::App for PlotyxApp {
                         .map(|geometry| egui::vec2(geometry.width as f32, geometry.height as f32))
                         .unwrap_or(default_size)
                         .min(workspace_rect.size());
+                    let current_pos = *window_positions.entry(tab).or_insert(saved_pos);
                     let mut open = true;
+                    let mut header_actions = WindowHeaderActions::default();
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
-                        .default_pos(saved_pos)
+                        .title_bar(false)
+                        .drag_area(egui::WindowDrag::Off)
+                        .current_pos(current_pos)
                         .default_size(saved_size)
                         .constrain_to(workspace_rect)
                         .open(&mut open)
                         .show(ui.ctx(), |ui| {
+                            header_actions = window_header(ui, id, &tab_title(state, tab), tab);
                             tab_contents(ui, state, &mut actions, graph_views, tab);
                         });
-                    let header_actions = window_header_actions(ui.ctx(), id, tab);
                     if header_actions.maximize {
                         *maximized_tab = Some(tab);
                     }
                     if header_actions.detach {
                         detach_requests.push(tab);
+                    }
+                    if header_actions.close {
+                        open = false;
+                    }
+                    if header_actions.drag_delta != egui::Vec2::ZERO {
+                        if let Some(position) = window_positions.get_mut(&tab) {
+                            *position += header_actions.drag_delta;
+                        }
                     }
                     if let Some(rect) = ui.ctx().memory(|memory| memory.area_rect(id)) {
                         geometry_updates.push((tab, rect));
@@ -1787,6 +1814,7 @@ impl eframe::App for PlotyxApp {
             if let Some(pos) = self.floating_tabs.iter().position(|t| *t == tab) {
                 self.floating_tabs.remove(pos);
                 self.cascade_rank.remove(&tab);
+                self.window_positions.remove(&tab);
             }
             if self.maximized_tab == Some(tab) {
                 // Garde de cohérence, comme dans `detach_tab` — ne devrait
@@ -1885,43 +1913,62 @@ fn tab_node(tab: Tab) -> NodeId {
 struct WindowHeaderActions {
     maximize: bool,
     detach: bool,
+    close: bool,
+    drag_delta: egui::Vec2,
 }
 
-/// Ajoute les actions de classeur et de graphe dans la barre de titre native
-/// d'egui, juste avant sa croix. `egui::Window` ne permet pas d'insérer des
-/// widgets dans cette barre : une petite `Area` superposée conserve donc sa
-/// croix et son glisser standard.
-fn window_header_actions(ctx: &egui::Context, id: egui::Id, tab: Tab) -> WindowHeaderActions {
-    if !matches!(tab, Tab::Book(_) | Tab::Graph(_)) {
-        return WindowHeaderActions::default();
-    }
-    let Some(rect) = ctx.memory(|memory| memory.area_rect(id)) else {
-        return WindowHeaderActions::default();
-    };
+/// Barre de titre des fenêtres de contenu. Les actions et la croix sont des
+/// boutons `egui` de même nature et forment un seul groupe visuel ; cela évite
+/// une `Area` superposée, qui se décale quand une fenêtre passe derrière une
+/// autre.
+fn window_header(ui: &mut egui::Ui, id: egui::Id, title: &str, tab: Tab) -> WindowHeaderActions {
     let mut actions = WindowHeaderActions::default();
-    egui::Area::new(id.with("header_actions"))
-        // Même ordre que `egui::Window` : l'icône d'une fenêtre derrière une
-        // autre est alors elle aussi masquée par celle qui est au premier plan.
-        .order(egui::Order::Middle)
-        .fixed_pos(egui::pos2(rect.right() - 68.0, rect.top() + 2.0))
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui
-                    .small_button("⛶")
-                    .on_hover_text("Maximiser la fenêtre")
-                    .clicked()
-                {
-                    actions.maximize = true;
-                }
-                if ui
-                    .small_button("↗")
-                    .on_hover_text("Détacher dans une fenêtre")
-                    .clicked()
-                {
-                    actions.detach = true;
-                }
-            });
-        });
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
+    let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    header.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if ui
+            .small_button("×")
+            .on_hover_text("Fermer la fenêtre")
+            .clicked()
+        {
+            actions.close = true;
+        }
+        if matches!(tab, Tab::Book(_) | Tab::Graph(_)) {
+            if ui
+                .small_button("↗")
+                .on_hover_text("Détacher dans une fenêtre")
+                .clicked()
+            {
+                actions.detach = true;
+            }
+            if ui
+                .small_button("⛶")
+                .on_hover_text("Maximiser la fenêtre")
+                .clicked()
+            {
+                actions.maximize = true;
+            }
+        }
+    });
+    header.put(
+        egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 90.0, rect.max.y)),
+        egui::Label::new(egui::RichText::new(title).heading()),
+    );
+    let drag_rect = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 90.0, rect.max.y));
+    let drag = ui.interact(
+        drag_rect,
+        id.with("content_title_drag"),
+        egui::Sense::drag(),
+    );
+    if drag.dragged() {
+        actions.drag_delta = ui.input(|input| input.pointer.delta());
+    }
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
     actions
 }
 
