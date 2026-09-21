@@ -386,7 +386,17 @@ impl GraphView {
         Ok(outcome.cached)
     }
 
-    /// Le panneau (et sa transformation pixel ↔ données) sous le pixel
+    /// Coordonnée de `pos` dans le repère local de la figure mise en cache.
+    ///
+    /// Le pipeline de rendu produit les [`DrawnPanel`] dans ce repère ; egui,
+    /// lui, livre les positions du pointeur dans le repère de la fenêtre.
+    /// Une figure peut être centrée dans une fenêtre flottante, donc les deux
+    /// origines ne coïncident pas en général.
+    fn figure_position(&self, pos: Pos2) -> Option<Pos2> {
+        self.cache.key().map(|key| pos - key.rect.min.to_vec2())
+    }
+
+    /// Le panneau (et sa transformation pixel ↔ données) sous le pixel egui
     /// `pos`, s'il y en a un — cherché dans la **dernière** figure tracée.
     ///
     /// Un cran de retard sur la figure du jour : la géométrie ne bouge
@@ -394,6 +404,7 @@ impl GraphView {
     /// imperceptible, et c'est le prix normal du mode immédiat (interpréter
     /// l'entrée de cette image avec la géométrie de la précédente).
     fn panel_at(&self, pos: Pos2) -> Option<(usize, PanelTransform)> {
+        let pos = self.figure_position(pos)?;
         let last = self.last.as_ref()?;
         last.panels.iter().enumerate().find_map(|(index, panel)| {
             let transform = PanelTransform::of(panel)?;
@@ -436,10 +447,14 @@ impl GraphView {
         }
 
         if response.hovered() {
-            if let Some(pos) = response.hover_pos() {
+            if let Some(pos) = response
+                .hover_pos()
+                .filter(|pos| response.interact_rect.contains(*pos))
+                .and_then(|pos| self.figure_position(pos).map(|position| (pos, position)))
+            {
                 let scroll = context.input(|input| input.smooth_scroll_delta.y);
                 if scroll != 0.0 {
-                    if let Some((panel_index, transform)) = self.panel_at(pos) {
+                    if let Some((panel_index, transform)) = self.panel_at(pos.0) {
                         // Un cran de molette classique vaut plusieurs
                         // dizaines d'unités de défilement ; 0,2 % par unité
                         // donne un zoom perceptible sans à-coups, et le
@@ -448,7 +463,7 @@ impl GraphView {
                         // coup.
                         let factor = (-scroll as f64 * 0.002).exp().clamp(0.5, 2.0);
                         if let Some((x_range, y_range)) =
-                            transform.zoom((pos.x as f64, pos.y as f64), factor)
+                            transform.zoom((pos.1.x as f64, pos.1.y as f64), factor)
                         {
                             self.commit_framing(panel_index, x_range, y_range);
                         }
@@ -508,11 +523,15 @@ impl GraphView {
                 // mais surprenant pour un geste qui se voulait un zoom.
                 if start.distance(end) > 4.0 {
                     if let Some((panel_index, transform)) = self.panel_at(start) {
-                        if let Some((x_range, y_range)) = transform.range_between(
-                            (start.x as f64, start.y as f64),
-                            (end.x as f64, end.y as f64),
-                        ) {
-                            self.commit_framing(panel_index, x_range, y_range);
+                        if let (Some(start), Some(end)) =
+                            (self.figure_position(start), self.figure_position(end))
+                        {
+                            if let Some((x_range, y_range)) = transform.range_between(
+                                (start.x as f64, start.y as f64),
+                                (end.x as f64, end.y as f64),
+                            ) {
+                                self.commit_framing(panel_index, x_range, y_range);
+                            }
                         }
                     }
                 }
@@ -543,13 +562,16 @@ impl GraphView {
         }
 
         let pos = response.hover_pos()?;
+        let figure_pos = self.figure_position(pos)?;
         let (panel_index, transform) = self.panel_at(pos)?;
         let last = self.last.as_ref()?;
         let panel = last.panels.get(panel_index)?;
+        let figure_rect = self.cache.key()?.rect;
         let panel_rect = Rect::from_min_size(
             Pos2::new(panel.pixel_origin.0 as f32, panel.pixel_origin.1 as f32),
             egui::vec2(panel.pixel_size.0 as f32, panel.pixel_size.1 as f32),
-        );
+        )
+        .translate(figure_rect.min.to_vec2());
         if !panel_rect.contains(pos) {
             return None;
         }
@@ -570,7 +592,8 @@ impl GraphView {
             stroke,
         );
 
-        let hit = nearest_point(tree, spec, panel_index, panel, &transform, pos)?;
+        let mut hit = nearest_point(tree, spec, panel_index, panel, &transform, figure_pos)?;
+        hit.pixel += figure_rect.min.to_vec2();
         painter.circle_stroke(
             hit.pixel,
             5.0,

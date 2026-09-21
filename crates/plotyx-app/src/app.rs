@@ -1807,8 +1807,16 @@ impl eframe::App for PlotyxApp {
         for tab in open_requests {
             self.open_tab(tab);
         }
+        let detached_this_frame = !detach_requests.is_empty();
         for tab in detach_requests {
             self.detach_tab(tab);
+        }
+        if detached_this_frame {
+            // `show_detached_tabs` a déjà publié les viewports de cette
+            // image avant que l'en-tête ne demande le détachement. Sans une
+            // seconde image de la racine, eframe peut donc rester au repos
+            // sans jamais créer le viewport différé et appeler son callback.
+            ctx.request_repaint();
         }
         for tab in close_requests {
             if let Some(pos) = self.floating_tabs.iter().position(|t| *t == tab) {
@@ -5253,6 +5261,82 @@ mod graph_layout_tests {
     }
 
     #[test]
+    fn un_graphe_detache_reconstruit_ses_formes_dans_son_viewport() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let mut app = PlotyxApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        assert!(app.floating_tabs.contains(&Tab::Graph(graph)));
+
+        // Peindre d'abord la vue flottante : le détachement doit transférer
+        // une `GraphView` déjà remplie, puis la reconstruire dans les
+        // coordonnées du viewport OS distinct.
+        let mut root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                graph_contents(ui, &app.state, &mut app.graph_views, graph);
+            });
+        });
+        output.textures_delta.clear();
+        assert!(
+            !app.graph_views[&graph].cache().shapes().is_empty(),
+            "la vue flottante de départ doit avoir construit sa figure"
+        );
+
+        app.detach_tab(Tab::Graph(graph));
+        let viewport_id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
+        output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output
+            .viewport_output
+            .get(&viewport_id)
+            .and_then(|viewport| viewport.viewport_ui_cb.clone());
+        output.textures_delta.clear();
+        let callback = callback.expect("le détachement doit publier un callback de viewport");
+
+        root_input.viewport_id = viewport_id;
+        root_input.viewports.insert(
+            viewport_id,
+            egui::ViewportInfo {
+                parent: Some(egui::ViewportId::ROOT),
+                ..Default::default()
+            },
+        );
+        root_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            GRAPH_WINDOW_SIZE,
+        ));
+        output = context.run_ui(root_input, |ui| callback(ui));
+        output.textures_delta.clear();
+
+        let model = app.detached_tabs[&Tab::Graph(graph)]
+            .view_model
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let view = model.graph_view.as_ref().unwrap();
+        assert!(
+            !view.cache().shapes().is_empty(),
+            "le viewport détaché ne doit pas servir le cache vidé du viewport racine"
+        );
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|painted| view.cache().shapes().contains(&painted.shape)),
+            "le viewport détaché doit réellement recevoir les formes du graphe"
+        );
+    }
+
+    #[test]
     fn le_pan_principal_atteint_la_figure_sous_la_zone_de_depot() {
         let (session, graph) = graphe();
         let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
@@ -5303,6 +5387,73 @@ mod graph_layout_tests {
         assert!(
             graph_views.get(&graph).unwrap().view().generation() > 0,
             "la cible de dépôt ne doit pas intercepter le pan de la figure"
+        );
+    }
+
+    #[test]
+    fn le_pan_principal_atteint_la_figure_dans_la_fenetre_flottante() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let mut graph_views = HashMap::new();
+        let mut actions = Vec::new();
+        let tab = Tab::Graph(graph);
+        let id = egui::Id::new(("content_window", tab));
+        let panel_center = std::cell::Cell::new(None);
+
+        let mut paint = |events: Vec<egui::Event>| {
+            let is_initial_frame = events.is_empty();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                egui::Window::new("Figure")
+                    .id(id)
+                    .title_bar(false)
+                    .drag_area(egui::WindowDrag::Off)
+                    .current_pos(egui::pos2(100.0, 100.0))
+                    .default_size(egui::vec2(560.0, 540.0))
+                    .show(ui.ctx(), |ui| {
+                        let _ = window_header(ui, id, "Figure", tab);
+                        graph_drop_target(ui, &state, &mut actions, &mut graph_views, graph);
+                    });
+            });
+            output.textures_delta.clear();
+            if is_initial_frame {
+                let view = graph_views.get(&graph).unwrap();
+                let panel = &view.last_drawn().unwrap().panels[0];
+                let figure = view.cache().key().unwrap().rect;
+                panel_center.set(Some(egui::pos2(
+                    figure.min.x + panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0,
+                    figure.min.y + panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0,
+                )));
+            }
+        };
+
+        paint(Vec::new());
+        let start = panel_center.get().unwrap();
+        paint(vec![egui::Event::PointerMoved(start)]);
+        let end = start + egui::vec2(30.0, -20.0);
+        paint(vec![egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        paint(vec![egui::Event::PointerMoved(end)]);
+        paint(vec![egui::Event::PointerMoved(
+            end + egui::vec2(20.0, -10.0),
+        )]);
+
+        assert!(
+            graph_views.get(&graph).unwrap().view().generation() > 0,
+            "la fenetre flottante ne doit pas intercepter le pan de la figure"
         );
     }
 }
