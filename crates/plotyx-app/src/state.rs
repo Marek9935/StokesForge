@@ -77,6 +77,11 @@ pub enum Action {
     Save,
     /// Recharge le projet depuis le fichier courant.
     Load,
+    /// Ajoute un classeur et sa feuille initiale à la racine du projet.
+    ///
+    /// Le menu Fichier ne porte pas de destination ambiguë : un nouveau
+    /// classeur appartient toujours au dossier racine du projet ouvert.
+    AddWorkbook,
     /// Sélectionne la feuille affichée dans la grille du classeur qui la
     /// contient (le classeur est déduit du parent de `id` dans l'arbre) — un
     /// classeur affiché dans son propre onglet [`crate::app`], la sélection
@@ -1384,6 +1389,19 @@ impl AppState {
         self.path = path;
     }
 
+    /// Enregistre la géométrie de la fenêtre de contenu `node` auprès de
+    /// l'acteur. Ce réglage de vue ne passe pas par l'historique : déplacer
+    /// une fenêtre ne doit pas ajouter une étape à annuler.
+    ///
+    /// Ne rafraîchit pas l'instantané après chaque déplacement : l'acteur
+    /// possède déjà la géométrie que sa prochaine sauvegarde sérialisera, et
+    /// un aller-retour par image rendrait le glisser inutilement coûteux.
+    pub fn set_window_geometry(&mut self, node: NodeId, geometry: plotyx_session::WindowGeometry) {
+        if let Err(err) = self.handle.set_window_geometry(node, geometry) {
+            self.fail(format!("Échec de la mise à jour de la géométrie : {err}"));
+        }
+    }
+
     /// Dernier message destiné à l'utilisateur.
     pub fn status(&self) -> Option<&StatusMessage> {
         self.status.as_ref()
@@ -2602,6 +2620,10 @@ impl AppState {
             Action::Redo => self.redo(),
             Action::Save => self.save(),
             Action::Load => self.load(),
+            Action::AddWorkbook => self.execute(Command::AddWorkbook {
+                parent: self.snapshot.tree.root(),
+                name: None,
+            }),
             Action::SelectSheet(id) => self.select_sheet(id),
             Action::CommitCell { column, row, text } => {
                 self.commit_cell(column, row, text);

@@ -719,6 +719,36 @@ fn adding_then_undoing_a_column_restores_the_tree_bit_for_bit() {
 }
 
 #[test]
+fn creating_a_workbook_is_undoable_and_redoable() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let before = std::sync::Arc::clone(state.tree());
+    let books_before = state.books();
+
+    state.dispatch(Action::AddWorkbook);
+
+    let after = std::sync::Arc::clone(state.tree());
+    let books_after = state.books();
+    assert_eq!(books_after.len(), books_before.len() + 1);
+    let (book, name) = books_after.last().expect("classeur créé");
+    assert!(!name.is_empty(), "un nom est généré");
+    assert!(
+        state.selected_sheet_in(*book).is_some(),
+        "un nouveau classeur contient sa feuille initiale"
+    );
+    assert_eq!(
+        state.undo_label().as_deref(),
+        Some("Annuler Ajouter un classeur")
+    );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(**state.tree(), *before);
+
+    state.dispatch(Action::Redo);
+    assert_eq!(**state.tree(), *after);
+}
+
+#[test]
 fn row_actions_on_something_that_is_not_a_sheet_are_refused() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     // Un nœud qui n'est pas une feuille : un graphe, par exemple.

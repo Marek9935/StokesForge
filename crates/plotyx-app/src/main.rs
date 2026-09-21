@@ -28,17 +28,7 @@ print(\"longueur :\", len(v), \"premier :\", v[0])\n";
 
 fn main() -> anyhow::Result<()> {
     let requested = std::env::args().nth(1).map(PathBuf::from);
-    let (project, path) = match requested {
-        Some(path) if path.exists() => {
-            let project = plotyx_persistence::load(&path)
-                .with_context(|| format!("chargement de {}", path.display()))?;
-            (project, path)
-        }
-        Some(path) => (demo_project()?, path),
-        None => (demo_project()?, PathBuf::from(DEFAULT_FILE)),
-    };
-
-    let session = Session::spawn(project, None).context("démarrage du thread de session")?;
+    let (session, path) = session_for_project(requested)?;
     let mut state = AppState::new(session.handle(), path.display().to_string())
         .context("premier instantané du projet")?;
     state.set_script_source(EXAMPLE_SCRIPT.to_string());
@@ -79,6 +69,26 @@ fn main() -> anyhow::Result<()> {
     outcome.map_err(|err| anyhow::anyhow!("échec de la fenêtre : {err}"))?;
     shutdown.map_err(|err| anyhow::anyhow!("arrêt de la session : {err}"))?;
     Ok(())
+}
+
+/// Le chargement passe par l'acteur pour restaurer aussi les géométries,
+/// conservées à côté du modèle. Charger seulement `Project` les perdrait.
+fn session_for_project(requested: Option<PathBuf>) -> anyhow::Result<(Session, PathBuf)> {
+    let load_existing = requested.as_ref().is_some_and(|path| path.exists());
+    let path = requested.unwrap_or_else(|| PathBuf::from(DEFAULT_FILE));
+    let project = if load_existing {
+        Project::new("Chargement")?
+    } else {
+        demo_project()?
+    };
+    let session = Session::spawn(project, None).context("démarrage du thread de session")?;
+    if load_existing {
+        session
+            .handle()
+            .load(&path)
+            .with_context(|| format!("chargement de {}", path.display()))?;
+    }
+    Ok((session, path))
 }
 
 /// Localise l'interpréteur embarqué et le pose sur `state`, **sans le
@@ -215,4 +225,38 @@ fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
         ..PlotSpec::empty("")
     }
     .with_panels(panel)
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+    use plotyx_session::WindowGeometry;
+
+    #[test]
+    fn le_demarrage_restaure_les_geometries_du_fichier() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("geometries.plotyx");
+        let mut project = Project::new("Disposition sauvegardée").unwrap();
+        let book = project.add_workbook(project.root(), None).unwrap();
+        let geometry = WindowGeometry {
+            x: 42.0,
+            y: 67.0,
+            width: 520.0,
+            height: 380.0,
+        };
+        let original = Session::spawn(project, None).unwrap();
+        original
+            .handle()
+            .set_window_geometry(book, geometry)
+            .unwrap();
+        original.handle().save(&path).unwrap();
+        original.shutdown().unwrap();
+
+        let (loaded, actual_path) = session_for_project(Some(path.clone())).unwrap();
+        let snapshot = loaded.handle().snapshot().unwrap();
+        assert_eq!(actual_path, path);
+        assert_eq!(snapshot.window_geometries.get(&book), Some(&geometry));
+        assert!(snapshot.tree.node(book).is_some());
+        loaded.shutdown().unwrap();
+    }
 }

@@ -277,15 +277,13 @@
 //!
 //! # Sélecteur de fichiers natif
 //!
-//! [`tool_bar`](PlotyxApp::tool_bar) n'a plus de champ de texte pour le
-//! chemin : les boutons « Enregistrer sous… » et « Ouvrir… » ouvrent un
-//! `rfd::FileDialog` natif (modal, comme tout sélecteur de fichiers de
-//! bureau — bloquer le rendu le temps que l'utilisateur choisisse un fichier
-//! est le comportement attendu, à ne pas confondre avec le blocage qu'évite
-//! `RunScript`, qui lui n'a pas de raison de durer). Ctrl+S et Ctrl+O
-//! (et les entrées de menu équivalentes) continuent d'agir directement sur
-//! le chemin déjà connu, sans dialogue : c'est le geste « enregistrer »/
-//! « recharger » rapide d'un tableur, distinct de « enregistrer sous ».
+//! Le menu « Fichier » ouvre le `rfd::FileDialog` natif pour « Ouvrir… » et
+//! « Enregistrer sous… » (modal, comme tout sélecteur de fichiers de bureau
+//! — bloquer le rendu le temps que l'utilisateur choisisse un fichier est le
+//! comportement attendu, à ne pas confondre avec le blocage qu'évite
+//! `RunScript`, qui lui n'a pas de raison de durer). Ctrl+O suit exactement
+//! « Ouvrir… », Ctrl+Maj+S « Enregistrer sous… », tandis que Ctrl+S conserve
+//! le geste rapide d'enregistrer dans le chemin déjà connu.
 //!
 //! # Limites assumées du banc
 //!
@@ -325,8 +323,8 @@ use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
 use plotyx_core::{ColumnRole, ColumnType, Node, NodeId, Tree};
 use plotyx_plot::{AxisSpec, LegendPosition, LineStyle, PlotType, SymbolShape};
-use plotyx_render_egui::{DrawnPlot, GraphView, DEFAULT_FIGURE_SIZE};
-use plotyx_session::Snapshot;
+use plotyx_render_egui::{GraphView, DEFAULT_FIGURE_SIZE};
+use plotyx_session::{Snapshot, WindowGeometry};
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
@@ -367,7 +365,12 @@ pub const SHORTCUT_REDO_Z: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
 /// Ctrl+S — enregistrer (dans le fichier déjà connu, sans dialogue).
 pub const SHORTCUT_SAVE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
-/// Ctrl+O — ouvrir (recharger depuis le chemin déjà connu, sans dialogue).
+/// Ctrl+Maj+S — choisir une destination et y enregistrer.
+pub const SHORTCUT_SAVE_AS: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::S,
+);
+/// Ctrl+O — choisir un projet à ouvrir.
 pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
 /// Ctrl+Entrée — exécuter le script de la console.
@@ -472,6 +475,11 @@ const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 4.0 * HEADER_SUBROW_
 /// vide au-dessus de la bande d'onglets — sans danger, contrairement à la
 /// sous-estimation.
 const SHEET_TABS_HEIGHT: f32 = 40.0;
+/// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
+/// initial. Réserver sa hauteur empêche `egui::Window` de mémoriser son
+/// dépassement comme une nouvelle taille désirée, ce qui ferait changer le
+/// rectangle de la figure et invaliderait le cache au moindre survol.
+const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
 /// Hauteur par défaut du panneau fixe de la console de script — point de
@@ -481,10 +489,14 @@ const SCRIPT_PANEL_HEIGHT: f32 = 220.0;
 /// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
 /// séparée quand il est détaché.
 const PROJECT_MANAGER_WIDTH: f32 = 260.0;
-/// Taille par défaut d'une fenêtre flottante nouvellement ouverte — voir la
-/// doc de tête du module, § Fenêtres flottantes confinées. Rognée à l'aire de
-/// travail disponible si elle est plus petite.
+/// Taille par défaut des fenêtres flottantes qui n'affichent pas un graphe —
+/// voir la doc de tête du module, § Fenêtres flottantes confinées. Rognée à
+/// l'aire de travail disponible si elle est plus petite.
 const FLOATING_WINDOW_SIZE: egui::Vec2 = egui::vec2(560.0, 420.0);
+/// Taille par défaut d'une fenêtre de graphe : la figure de référence
+/// (`480×360`), son retour au cadrage initial, l'en-tête et les marges y
+/// entrent tous dès l'ouverture.
+const GRAPH_WINDOW_SIZE: egui::Vec2 = egui::vec2(560.0, 460.0);
 /// Largeur par défaut d'une fenêtre flottante [`Tab::Book`] — le tiers de
 /// moins que [`FLOATING_WINDOW_SIZE`] : une grille n'a pas besoin d'être
 /// aussi large qu'un graphe pour rester lisible, demande explicite.
@@ -627,6 +639,9 @@ pub struct PlotyxApp {
     /// `floating_tabs` tant qu'il l'est (même invariant que `pm_detached`
     /// pour le Project Manager, généralisé à plusieurs onglets simultanés).
     detached_tabs: HashMap<Tab, DetachedTab>,
+    /// Dernière géométrie envoyée à l'acteur, pour ne pas lui adresser une
+    /// requête à chaque image pendant qu'une fenêtre reste immobile.
+    saved_window_geometries: HashMap<NodeId, WindowGeometry>,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
     /// (mécanisme de vérification, voir [`PlotyxApp::screenshot`]).
     screenshot: Option<std::path::PathBuf>,
@@ -723,9 +738,13 @@ struct DetachedTabRequests {
     /// chemin de commande annulable qu'une fenêtre flottante, voir la doc de
     /// tête du module.
     actions: Vec<Action>,
-    /// Vrai si « Réattacher à la fenêtre principale » ou la fermeture de la
-    /// fenêtre OS a été actionné depuis la dernière vidange.
+    /// Vrai si « Réattacher à la fenêtre principale » a été actionné depuis
+    /// la dernière vidange.
     reattach: bool,
+    /// La croix du système ferme la vue détachée sans la réattacher.
+    close: bool,
+    /// Géométrie rapportée par le viewport OS, en coordonnées écran.
+    geometry: Option<WindowGeometry>,
 }
 
 impl PlotyxApp {
@@ -789,6 +808,7 @@ impl PlotyxApp {
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
+            saved_window_geometries: HashMap::new(),
             autoquit,
             first_frame: None,
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
@@ -797,13 +817,19 @@ impl PlotyxApp {
     }
 
     /// Consomme les raccourcis au niveau du contexte et en fait des actions.
-    fn collect_shortcuts(&self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        let mut save_as = false;
+        let mut open = false;
         ctx.input_mut(|input| {
-            if input.consume_shortcut(&SHORTCUT_SAVE) {
+            // Ctrl+Maj+S doit être testé avant Ctrl+S : les modificateurs
+            // supplémentaires restent compatibles avec ce dernier.
+            if input.consume_shortcut(&SHORTCUT_SAVE_AS) {
+                save_as = true;
+            } else if input.consume_shortcut(&SHORTCUT_SAVE) {
                 actions.push(Action::Save);
             }
             if input.consume_shortcut(&SHORTCUT_OPEN) {
-                actions.push(Action::Load);
+                open = true;
             }
             if input.consume_shortcut(&SHORTCUT_RUN_SCRIPT) {
                 actions.push(Action::RunScript);
@@ -818,6 +844,12 @@ impl PlotyxApp {
                 actions.push(Action::Undo);
             }
         });
+        if save_as {
+            self.choose_save_path(actions);
+        }
+        if open {
+            self.choose_open_path(actions);
+        }
     }
 
     /// Barre de menu : « Fichier », « Édition » et « Fenêtre ».
@@ -830,14 +862,19 @@ impl PlotyxApp {
         egui::Panel::top("plotyx_menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Fichier", |ui| {
+                    if ui.button("Nouveau classeur").clicked() {
+                        actions.push(Action::AddWorkbook);
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui
                         .add(
-                            egui::Button::new("Ouvrir")
+                            egui::Button::new("Ouvrir…")
                                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_OPEN)),
                         )
                         .clicked()
                     {
-                        actions.push(Action::Load);
+                        self.choose_open_path(actions);
                         ui.close();
                     }
                     if ui
@@ -848,6 +885,16 @@ impl PlotyxApp {
                         .clicked()
                     {
                         actions.push(Action::Save);
+                        ui.close();
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new("Enregistrer sous…")
+                                .shortcut_text(ctx.format_shortcut(&SHORTCUT_SAVE_AS)),
+                        )
+                        .clicked()
+                    {
+                        self.choose_save_path(actions);
                         ui.close();
                     }
                     ui.separator();
@@ -943,50 +990,31 @@ impl PlotyxApp {
         });
     }
 
-    /// Bandeau du chemin de fichier (lecture seule) et des actions
-    /// globales. « Enregistrer sous… » et « Ouvrir… » passent par un
-    /// sélecteur de fichiers natif (`rfd`) ; voir la doc de tête du module.
-    ///
-    /// Les actions de structure (ajouter une colonne, insérer/supprimer des
-    /// lignes) ne vivent plus ici depuis que la grille est scopée par
-    /// classeur (`Tab::Book`) : il n'y a plus de « la » feuille affichée sur
-    /// laquelle un bouton global pourrait agir sans ambiguïté quand
-    /// plusieurs classeurs sont ouverts en même temps. Elles vivent
-    /// désormais dans [`book_contents`], à côté de la grille qu'elles
-    /// modifient.
-    fn tool_bar(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        egui::Panel::top("plotyx_tool_bar")
-            .resizable(false)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Fichier :");
-                    ui.weak(self.state.path());
-                    if ui.button("Enregistrer sous…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_title("Enregistrer le projet")
-                            .add_filter("Projet PlotYx", &["plx", "plotyx"])
-                            .set_file_name(suggested_file_name(self.state.path()))
-                            .save_file()
-                        {
-                            self.state.set_path(path.display().to_string());
-                            actions.push(Action::Save);
-                        }
-                    }
-                    if ui.button("Enregistrer").clicked() {
-                        actions.push(Action::Save);
-                    }
-                    if ui.button("Ouvrir…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_title("Ouvrir un projet")
-                            .add_filter("Projet PlotYx", &["plx", "plotyx"])
-                            .pick_file()
-                        {
-                            self.state.set_path(path.display().to_string());
-                            actions.push(Action::Load);
-                        }
-                    }
-                });
-            });
+    /// Demande le fichier à ouvrir, puis confie le chargement à
+    /// [`AppState::dispatch`] par l'action habituelle.
+    fn choose_open_path(&mut self, actions: &mut Vec<Action>) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Ouvrir un projet")
+            .add_filter("Projet PlotYx", &["plx", "plotyx"])
+            .pick_file()
+        {
+            self.state.set_path(path.display().to_string());
+            actions.push(Action::Load);
+        }
+    }
+
+    /// Demande la destination de sauvegarde, puis confie l'écriture à
+    /// [`AppState::dispatch`] par l'action habituelle.
+    fn choose_save_path(&mut self, actions: &mut Vec<Action>) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Enregistrer le projet")
+            .add_filter("Projet PlotYx", &["plx", "plotyx"])
+            .set_file_name(suggested_file_name(self.state.path()))
+            .save_file()
+        {
+            self.state.set_path(path.display().to_string());
+            actions.push(Action::Save);
+        }
     }
 
     /// Barre d'état : dernier message, révision.
@@ -1167,6 +1195,7 @@ impl PlotyxApp {
         }
         let view_model = Arc::clone(&self.pm_view_model);
         let requests = Arc::clone(&self.pm_requests);
+        let root_context = ctx.clone();
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of("plotyx_project_manager_window"),
             egui::ViewportBuilder::default()
@@ -1180,6 +1209,7 @@ impl PlotyxApp {
                             .lock()
                             .unwrap_or_else(|err| err.into_inner())
                             .reattach = true;
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
                     ui.separator();
                     // Lecture d'une copie plutôt que du verrou tenu pendant
@@ -1285,6 +1315,39 @@ impl PlotyxApp {
         }
     }
 
+    /// Ferme uniquement la vue détachée. Les données restent dans le projet
+    /// et le cache du graphe revient dans l'application, comme après la
+    /// fermeture d'une fenêtre flottante.
+    fn close_detached_tab(&mut self, tab: Tab) {
+        let Some(detached) = self.detached_tabs.remove(&tab) else {
+            return;
+        };
+        let mut model = detached
+            .view_model
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        if let (Tab::Graph(id), Some(view)) = (tab, model.graph_view.take()) {
+            self.graph_views.insert(id, view);
+        }
+    }
+
+    /// Envoie la géométrie réellement retenue par egui après un déplacement
+    /// ou redimensionnement. Cette information de vue est persistante mais
+    /// reste hors de l'historique métier.
+    fn remember_window_geometry(&mut self, tab: Tab, rect: egui::Rect) {
+        let node = tab_node(tab);
+        let geometry = WindowGeometry {
+            x: f64::from(rect.min.x),
+            y: f64::from(rect.min.y),
+            width: f64::from(rect.width()),
+            height: f64::from(rect.height()),
+        };
+        if self.saved_window_geometries.get(&node) != Some(&geometry) {
+            self.state.set_window_geometry(node, geometry);
+            self.saved_window_geometries.insert(node, geometry);
+        }
+    }
+
     /// Peint chaque onglet de [`PlotyxApp::detached_tabs`] dans sa propre
     /// fenêtre OS, via `show_viewport_deferred` — voir la doc de tête du
     /// module, § détachement générique, et [`PlotyxApp::
@@ -1310,10 +1373,12 @@ impl PlotyxApp {
             }
             let view_model = Arc::clone(&detached.view_model);
             let requests = Arc::clone(&detached.requests);
+            let root_context = ctx.clone();
             let tab = *tab;
             let title = format!("PlotYx — {}", tab_title(state, tab));
-            // `Tab::Graph` garde un ratio 4:3 (déjà celui de 800×600). Le
-            // reste (`Book`/`Matrix`/`Note`) partage une taille uniforme
+            // `Tab::Graph` part à une taille qui contient sa figure de
+            // référence et son retour au cadrage initial.
+            // Le reste (`Book`/`Matrix`/`Note`) partage une taille uniforme
             // montrant 3 colonnes de grille : `grid_contents`/`matrix_contents`
             // utilisent `TableColumn::exact(56.0)` pour la colonne de numéro
             // de ligne puis `TableColumn::initial(110.0)` par colonne de
@@ -1323,21 +1388,35 @@ impl PlotyxApp {
             // la même taille que « les autres » pour rester cohérente avec
             // eux — c'est explicitement voulu, pas un oubli.
             let size = match tab {
-                Tab::Graph(_) => [800.0, 600.0],
+                Tab::Graph(_) => [GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y],
                 _ => [420.0, 360.0],
+            };
+            let saved_geometry = state.snapshot().window_geometries.get(&tab_node(tab));
+            let viewport = if let Some(geometry) = saved_geometry {
+                egui::ViewportBuilder::default()
+                    .with_title(title)
+                    .with_inner_size([geometry.width as f32, geometry.height as f32])
+                    .with_position(egui::pos2(geometry.x as f32, geometry.y as f32))
+            } else {
+                egui::ViewportBuilder::default()
+                    .with_title(title)
+                    .with_inner_size(size)
             };
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of(tab),
-                egui::ViewportBuilder::default()
-                    .with_title(title)
-                    .with_inner_size(size),
+                viewport,
                 move |ui, _class| {
                     let mut model = view_model.lock().unwrap_or_else(|err| err.into_inner());
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                     egui::CentralPanel::default().show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if ui.button("Réattacher à la fenêtre principale").clicked() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .small_button("↩")
+                                .on_hover_text("Réattacher à la fenêtre principale")
+                                .clicked()
+                            {
                                 requests.reattach = true;
+                                root_context.request_repaint_of(egui::ViewportId::ROOT);
                             }
                         });
                         ui.separator();
@@ -1364,7 +1443,16 @@ impl PlotyxApp {
                         }
                     });
                     if ui.ctx().input(|input| input.viewport().close_requested()) {
-                        requests.reattach = true;
+                        requests.close = true;
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                    }
+                    if let Some(rect) = ui.ctx().input(|input| input.viewport().outer_rect) {
+                        requests.geometry = Some(WindowGeometry {
+                            x: f64::from(rect.min.x),
+                            y: f64::from(rect.min.y),
+                            width: f64::from(rect.width()),
+                            height: f64::from(rect.height()),
+                        });
                     }
                 },
             );
@@ -1465,6 +1553,7 @@ impl eframe::App for PlotyxApp {
         // Onglets dont la fenêtre flottante a été fermée (bouton natif de la
         // fenêtre) cette image-ci — appliqués après le rendu, même raison.
         let mut close_requests: Vec<Tab> = Vec::new();
+        let mut geometry_updates: Vec<(Tab, egui::Rect)> = Vec::new();
 
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
@@ -1474,7 +1563,6 @@ impl eframe::App for PlotyxApp {
 
         self.collect_shortcuts(&ctx, &mut actions);
         self.menu_bar(ui, &ctx, &mut actions);
-        self.tool_bar(ui, &mut actions);
         self.status_bar(ui);
         // Panneau fixe, peint *avant* `PlotyxApp::project_manager_panel` —
         // voir la doc de tête du module, § Console de script, et la doc de
@@ -1517,6 +1605,8 @@ impl eframe::App for PlotyxApp {
             // plusieurs onglets : chacun peut avoir accumulé des actions et/ou
             // demandé à être réattaché depuis la dernière image.
             let mut to_reattach: Vec<Tab> = Vec::new();
+            let mut to_close: Vec<Tab> = Vec::new();
+            let mut geometries: Vec<(Tab, WindowGeometry)> = Vec::new();
             for (tab, detached) in &self.detached_tabs {
                 let mut requests = detached
                     .requests
@@ -1526,9 +1616,25 @@ impl eframe::App for PlotyxApp {
                 if std::mem::take(&mut requests.reattach) {
                     to_reattach.push(*tab);
                 }
+                if std::mem::take(&mut requests.close) {
+                    to_close.push(*tab);
+                }
+                if let Some(geometry) = requests.geometry.take() {
+                    geometries.push((*tab, geometry));
+                }
+            }
+            for (tab, geometry) in geometries {
+                let node = tab_node(tab);
+                if self.saved_window_geometries.get(&node) != Some(&geometry) {
+                    self.state.set_window_geometry(node, geometry);
+                    self.saved_window_geometries.insert(node, geometry);
+                }
             }
             for tab in to_reattach {
                 self.reattach_tab(tab);
+            }
+            for tab in to_close {
+                self.close_detached_tab(tab);
             }
         }
 
@@ -1612,28 +1718,38 @@ impl eframe::App for PlotyxApp {
                     let default_pos = workspace_rect.min + egui::vec2(cascade, cascade);
                     let natural_size = match tab {
                         Tab::Book(_) => egui::vec2(BOOK_WINDOW_WIDTH, FLOATING_WINDOW_SIZE.y),
+                        Tab::Graph(_) => GRAPH_WINDOW_SIZE,
                         _ => FLOATING_WINDOW_SIZE,
                     };
                     let default_size = natural_size.min(workspace_rect.size());
+                    let saved_geometry = state.snapshot().window_geometries.get(&tab_node(tab));
+                    let saved_pos = saved_geometry
+                        .map(|geometry| egui::pos2(geometry.x as f32, geometry.y as f32))
+                        .unwrap_or(default_pos);
+                    let saved_size = saved_geometry
+                        .map(|geometry| egui::vec2(geometry.width as f32, geometry.height as f32))
+                        .unwrap_or(default_size)
+                        .min(workspace_rect.size());
                     let mut open = true;
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
-                        .default_pos(default_pos)
-                        .default_size(default_size)
+                        .default_pos(saved_pos)
+                        .default_size(saved_size)
                         .constrain_to(workspace_rect)
                         .open(&mut open)
                         .show(ui.ctx(), |ui| {
-                            ui.horizontal(|ui| {
-                                if ui.small_button("Maximiser").clicked() {
-                                    *maximized_tab = Some(tab);
-                                }
-                                if ui.small_button("Détacher dans une fenêtre").clicked() {
-                                    detach_requests.push(tab);
-                                }
-                            });
-                            ui.separator();
                             tab_contents(ui, state, &mut actions, graph_views, tab);
                         });
+                    let header_actions = window_header_actions(ui.ctx(), id, tab);
+                    if header_actions.maximize {
+                        *maximized_tab = Some(tab);
+                    }
+                    if header_actions.detach {
+                        detach_requests.push(tab);
+                    }
+                    if let Some(rect) = ui.ctx().memory(|memory| memory.area_rect(id)) {
+                        geometry_updates.push((tab, rect));
+                    }
                     if !open {
                         close_requests.push(tab);
                     }
@@ -1641,6 +1757,10 @@ impl eframe::App for PlotyxApp {
                 *focus_next = None;
             }
         });
+
+        for (tab, rect) in geometry_updates {
+            self.remember_window_geometry(tab, rect);
+        }
 
         // Fenêtre d'import (`Action::ImportFiles`, voir la doc de tête de
         // [`import_window`]) : un dialogue transitoire, peint tant que
@@ -1695,8 +1815,21 @@ impl eframe::App for PlotyxApp {
             } else {
                 None
             };
+            let creates_workbook = matches!(action, Action::AddWorkbook);
             let revision_before = self.state.revision();
             self.state.dispatch(action);
+            if creates_workbook && self.state.revision() != revision_before {
+                let root = self.state.tree().root();
+                if let Some(book) = self
+                    .state
+                    .tree()
+                    .node(root)
+                    .and_then(|node| node.children().last().copied())
+                    .filter(|id| self.state.worksheets_of(*id).len() == 1)
+                {
+                    self.open_tab(Tab::Book(book));
+                }
+            }
             if let Some(parent) = plotted_from {
                 // `self.state.revision()` n'a bougé que si `AddGraph` a
                 // effectivement été envoyée (voir `AppState::plot_columns`) :
@@ -1738,6 +1871,58 @@ fn tab_for_window(id: NodeId, kind: WindowKind) -> Tab {
         WindowKind::Matrix => Tab::Matrix(id),
         WindowKind::Note => Tab::Note(id),
     }
+}
+
+/// Chaque variante de [`Tab`] correspond à une fenêtre persistée identifiée
+/// par son nœud.
+fn tab_node(tab: Tab) -> NodeId {
+    match tab {
+        Tab::Book(id) | Tab::Graph(id) | Tab::Matrix(id) | Tab::Note(id) => id,
+    }
+}
+
+#[derive(Default)]
+struct WindowHeaderActions {
+    maximize: bool,
+    detach: bool,
+}
+
+/// Ajoute les actions de classeur et de graphe dans la barre de titre native
+/// d'egui, juste avant sa croix. `egui::Window` ne permet pas d'insérer des
+/// widgets dans cette barre : une petite `Area` superposée conserve donc sa
+/// croix et son glisser standard.
+fn window_header_actions(ctx: &egui::Context, id: egui::Id, tab: Tab) -> WindowHeaderActions {
+    if !matches!(tab, Tab::Book(_) | Tab::Graph(_)) {
+        return WindowHeaderActions::default();
+    }
+    let Some(rect) = ctx.memory(|memory| memory.area_rect(id)) else {
+        return WindowHeaderActions::default();
+    };
+    let mut actions = WindowHeaderActions::default();
+    egui::Area::new(id.with("header_actions"))
+        // Même ordre que `egui::Window` : l'icône d'une fenêtre derrière une
+        // autre est alors elle aussi masquée par celle qui est au premier plan.
+        .order(egui::Order::Middle)
+        .fixed_pos(egui::pos2(rect.right() - 68.0, rect.top() + 2.0))
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui
+                    .small_button("⛶")
+                    .on_hover_text("Maximiser la fenêtre")
+                    .clicked()
+                {
+                    actions.maximize = true;
+                }
+                if ui
+                    .small_button("↗")
+                    .on_hover_text("Détacher dans une fenêtre")
+                    .clicked()
+                {
+                    actions.detach = true;
+                }
+            });
+        });
+    actions
 }
 
 /// Titre d'un onglet : le nom du nœud qu'il porte, ou un texte « supprimé »
@@ -1823,16 +2008,19 @@ fn graph_drop_target(
     graph_id: NodeId,
 ) {
     let tab_rect = ui.max_rect();
-    // `Sense::hover()` seulement : cette zone ne doit *rien* voler au
-    // rendu du graphe qui se peint par-dessus juste après (navigation R7 —
-    // molette, glissé, rectangle élastique — via son propre `ui.interact`
-    // dans `GraphView::paint`), seulement lire si un glisser de colonnes
-    // est en cours au-dessus d'elle.
-    let drop_id = ui.id().with(("graph_drop_zone", graph_id));
-    let zone = ui.interact(tab_rect, drop_id, egui::Sense::hover());
-    let hovering = zone.dnd_hover_payload::<ColumnDragPayload>().is_some();
-    if let Some(payload) = zone.dnd_release_payload::<ColumnDragPayload>() {
-        actions.push(drop_payload_action(&payload, graph_id));
+    // Une `Response` couvrant tout l'onglet, même avec `Sense::hover()`,
+    // participe à la sélection de cible d'egui et gagne le glissé principal
+    // sur le `GraphView`. C'était la différence avec la fenêtre détachée,
+    // qui appelle directement `graph_view_contents`, et la cause du pan
+    // inopérant dans la fenêtre principale. La cible de dépôt n'a pas besoin
+    // d'être un widget : lire le pointeur et la charge d'egui suffit.
+    let pointer_in_tab = ui.rect_contains_pointer(tab_rect);
+    let hovering =
+        pointer_in_tab && egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx());
+    if pointer_in_tab && ui.input(|input| input.pointer.any_released()) {
+        if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
+            actions.push(drop_payload_action(&payload, graph_id));
+        }
     }
     graph_contents(ui, state, graph_views, graph_id);
     if hovering {
@@ -3778,11 +3966,8 @@ fn paint_drag_handle_icon(painter: &egui::Painter, at: egui::Pos2, color: egui::
 /// montre vraiment, et qu'aucun test ne montre :
 ///
 /// - la figure elle-même, avec ses vraies polices et son vrai HiDPI ;
-/// - le compteur de cache, qui rend visible la tâche R4.3. Au repos,
-///   `succès` monte et `calculs` ne bouge plus : une image sans changement
-///   ne rejoue pas le pipeline Plotters. Redimensionner l'onglet, ou
-///   modifier une cellule, fait repartir `calculs` d'un cran — c'est la clé
-///   `(revision, rect, pixels_per_point)` au travail.
+/// - le retour au cadrage initial, pour abandonner un zoom ou un pan sans
+///   modifier les données ni la description du graphe.
 fn graph_contents(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -3810,38 +3995,25 @@ fn graph_view_contents(
     graph_id: NodeId,
 ) {
     let available = ui.available_size_before_wrap();
-    // R7 : la navigation (molette, glissé, rectangle élastique) a besoin de
-    // bien plus que `hover()` — `GraphView::paint` fait sa propre
-    // `ui.interact` sur ce rectangle avec `click_and_drag()` ; le `Sense`
-    // posé ici doit au moins ne pas lui faire concurrence.
+    // La figure prend tout ce qui reste après ses contrôles. Réserver leur
+    // hauteur complète évite le même mécanisme d'auto-agrandissement qui a
+    // déjà touché les fenêtres de classeur : un dépassement ferait changer
+    // `rect` à chaque image, donc provoquerait un raté de cache au survol.
     let (outer, _) = ui.allocate_exact_size(
-        egui::vec2(available.x, (available.y - 24.0).max(120.0)),
-        egui::Sense::click_and_drag(),
+        egui::vec2(available.x, (available.y - GRAPH_CONTROLS_HEIGHT).max(0.0)),
+        egui::Sense::hover(),
     );
-    // Taille de figure fixe (`DEFAULT_FIGURE_SIZE`), centrée dans l'espace
-    // disponible plutôt qu'élastique à l'onglet : le graphe ne suit pas le
-    // redimensionnement de la fenêtre, voir la doc de tête de
-    // `plotyx_render::pipeline::DEFAULT_FIGURE_SIZE`.
+    // La géométrie scientifique reste fixe, même si la fenêtre est trop
+    // petite. Seule la partie visible est découpée. Le sous-Ui borne aussi
+    // les interactions : une partie masquée ne doit pas capter la souris
+    // sur les commandes voisines. Ne pas propager le rectangle de la figure
+    // à la disposition du parent, sous peine de faire grandir la fenêtre.
     let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
     let rect = egui::Rect::from_center_size(outer.center(), egui::vec2(fig_w as f32, fig_h as f32));
-    match view.paint(ui, rect, snapshot, graph_id) {
+    let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
+    figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
+    match view.paint(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
-            let cache = view.cache();
-            ui.weak(format!(
-                "cache : {} succès / {} calculs — {} formes",
-                cache.hits(),
-                cache.misses(),
-                cache.shapes().len()
-            ));
-            if let Some(drawn) = view.last_drawn() {
-                ui.weak(figure_summary(drawn));
-            }
-            if let Some(hit) = view.hovered_point() {
-                ui.weak(format!(
-                    "point désigné : panneau {}, série {}, indice {} — ({:.4}, {:.4}), à {:.1} px",
-                    hit.panel, hit.series, hit.point_index, hit.data.0, hit.data.1, hit.distance
-                ));
-            }
             if ui.small_button("réinitialiser le zoom").clicked() {
                 view.reset_view();
             }
@@ -4348,37 +4520,6 @@ fn note_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
             }
         }
     }
-}
-
-/// Ce que la figure a réellement tracé, en une ligne.
-///
-/// Ajouté en R5 : avec les panneaux multiples, les types de tracé et la
-/// décimation, « la figure s'affiche » ne dit plus grand-chose. Les quatre
-/// compteurs du `DrawnPlot` disent lesquels des chemins de la phase ont été
-/// empruntés — et c'est le seul endroit où on peut les lire sur des données
-/// réelles plutôt que sur une fixture de test.
-fn figure_summary(drawn: &DrawnPlot) -> String {
-    let mut ligne = format!(
-        "figure : {} panneau(x), {} série(s) tracée(s)",
-        drawn.panels.len(),
-        drawn.drawn_series
-    );
-    if drawn.broken_series > 0 {
-        ligne.push_str(&format!(
-            " — {} référence(s) brisée(s)",
-            drawn.broken_series
-        ));
-    }
-    if drawn.unknown_series > 0 {
-        ligne.push_str(&format!(
-            " — {} type(s) de tracé inconnu(s)",
-            drawn.unknown_series
-        ));
-    }
-    if drawn.decimated_points > 0 {
-        ligne.push_str(&format!(" — {} points décimés", drawn.decimated_points));
-    }
-    ligne
 }
 
 /// Case de la gouttière des numéros de ligne, dans le **corps** de la table
@@ -4966,5 +5107,155 @@ fn detached_note_contents(
                 requests.actions.push(Action::SetNoteText { note, text });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod graph_layout_tests {
+    use super::*;
+    use plotyx_core::{Column, Project};
+    use plotyx_plot::{PanelSpec, PlotSpec, SeriesSpec};
+    use plotyx_session::Session;
+
+    fn graphe() -> (Session, NodeId) {
+        let mut project = Project::new("Découpage").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        let x = project
+            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
+            .unwrap();
+        let y = project
+            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
+            .unwrap();
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new_xy(x, y));
+        let graph = project
+            .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
+            .unwrap();
+        (Session::spawn(project, None).unwrap(), graph)
+    }
+
+    #[test]
+    fn le_rendu_reste_fixe_et_decoupe_meme_dans_une_petite_zone() {
+        let (session, graph) = graphe();
+        let snapshot = session.handle().snapshot().unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let mut view = GraphView::new();
+
+        for size in [
+            GRAPH_WINDOW_SIZE,
+            egui::vec2(320.0, 260.0),
+            egui::vec2(200.0, 100.0),
+        ] {
+            let contents = egui::Rect::from_min_size(egui::pos2(300.0, 300.0), size);
+            let visible = egui::Rect::from_min_max(
+                contents.min,
+                contents.max - egui::vec2(0.0, GRAPH_CONTROLS_HEIGHT),
+            );
+            for frame in 0..3 {
+                // La molette se trouve sous la zone visible, sur une partie
+                // tronquée de la figure : elle ne doit pas zoomer celle-ci.
+                let pos = egui::pos2(visible.center().x, visible.bottom() + 10.0);
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 1200.0),
+                    )),
+                    events: vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, 4.0),
+                            modifiers: egui::Modifiers::NONE,
+                            phase: egui::TouchPhase::Move,
+                        },
+                    ],
+                    ..Default::default()
+                };
+                let misses = view.cache().misses();
+                let mut output = context.run_ui(input, |ui| {
+                    let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(contents));
+                    content_ui.set_clip_rect(contents);
+                    graph_view_contents(&mut content_ui, &mut view, &snapshot, graph);
+                });
+                output.textures_delta.clear();
+                let rect = view.cache().key().unwrap().rect;
+                assert_eq!(rect.size(), egui::vec2(480.0, 360.0));
+                assert_eq!(
+                    view.view().generation(),
+                    0,
+                    "interaction sur une partie masquée"
+                );
+                if frame > 0 {
+                    assert_eq!(view.cache().misses(), misses, "recalcul sans changement");
+                }
+                // Vérifier les formes réellement envoyées à egui, pas
+                // seulement le rectangle calculé avant le rendu.
+                assert!(!view.cache().shapes().is_empty());
+                for shape in view.cache().shapes() {
+                    assert!(
+                        output.shapes.iter().any(|painted| painted.shape == *shape
+                            && visible.contains_rect(painted.clip_rect)),
+                        "forme du graphe sans découpage"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn le_pan_principal_atteint_la_figure_sous_la_zone_de_depot() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let mut graph_views = HashMap::new();
+        let mut actions = Vec::new();
+        let contents =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(560.0, 540.0));
+
+        let mut paint = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(contents));
+                content_ui.set_clip_rect(contents);
+                graph_drop_target(
+                    &mut content_ui,
+                    &state,
+                    &mut actions,
+                    &mut graph_views,
+                    graph,
+                );
+            });
+            output.textures_delta.clear();
+        };
+
+        let start = egui::pos2(380.0, 322.0);
+        paint(vec![egui::Event::PointerMoved(start)]);
+        let end = start + egui::vec2(30.0, -20.0);
+        paint(vec![egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        paint(vec![egui::Event::PointerMoved(end)]);
+        paint(vec![egui::Event::PointerMoved(
+            end + egui::vec2(20.0, -10.0),
+        )]);
+
+        assert!(
+            graph_views.get(&graph).unwrap().view().generation() > 0,
+            "la cible de dépôt ne doit pas intercepter le pan de la figure"
+        );
     }
 }

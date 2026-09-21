@@ -15,6 +15,15 @@ Aucun appelant ne connaît le format sur disque. Il sera remplacé plus tard
 **intégral** : tout le projet tient en mémoire, il n'y a pas de chargement
 partiel ni différé.
 
+La session utilise les variantes `save_with_geometries` et
+`load_with_geometries`, qui transportent aussi une table
+`NodeId -> WindowGeometry` (position et taille en points logiques). Ce bloc
+`window_geometries` appartient au même fichier `.plx` ou `.plotyx`, mais reste
+séparé de l'arbre annulable. Un ancien fichier sans ce bloc se charge avec
+une table vide. L'application transmet les changements de géométrie à
+l'acteur et recharge cette table aussi bien depuis le menu Fichier qu'au
+démarrage avec un chemin de projet.
+
 ## Le format ne s'écrit pas dans le modèle
 
 `plotyx-core` ne dérive aucun `Serialize`/`Deserialize`. Ce crate définit ses

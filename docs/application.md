@@ -40,22 +40,36 @@ une seconde fois la même entrée du Project Manager ne duplique jamais son
 onglet, elle est ramenée au premier plan). Un onglet `Tab::Graph` par graphe
 ouvert garde son propre `plotyx_render_egui::GraphView` (donc son propre
 cache de formes — `PlotyxApp::graph_views` est une table indexée par
-`NodeId`).
+`NodeId`). Son contenu réserve la hauteur des commandes sous la figure : le
+rectangle rendu reste stable au survol, donc le
+cache ne se reconstruit pas et la fenêtre ne dérive pas en hauteur. Une
+nouvelle fenêtre de graphe part assez grande pour contenir la figure de
+référence (480×360), ces contrôles et son en-tête ; si l'utilisateur la
+rétrécit, la figure conserve sa taille et sa géométrie. Elle reste centrée,
+et ses parties hors de la zone allouée sont tronquées par le découpage
+d'egui, pour le dessin comme pour les interactions. Elle ne recouvre donc
+ni l'en-tête ni les commandes placées sous elle. Les compteurs de cache et
+le résumé technique de la figure ne sont plus affichés.
 
 Chaque fenêtre flottante peut aussi être maximisée (plein cadre du
 `CentralPanel`, `PlotyxApp::maximized_tab`) ou détachée dans une vraie fenêtre
 OS séparée (`PlotyxApp::detach_tab`/`reattach_tab`, pour le multi-écran).
 
-Ce qui n'est **pas** fait : pas de bouton « nouveau panneau », pas de
-persistance de la disposition (positions/tailles des fenêtres flottantes)
-entre deux lancements, pas de panneau Properties ni de grille à délégués, pas
-d'éditeur de matrice — hors périmètre de cette fondation (voir « Project
-Manager et fenêtres par contenu » ci-dessous pour le détail de ce qui est, et
-n'est pas, câblé).
+Le menu Fichier propose la création d'un nouveau classeur. La position et
+la taille des fenêtres de contenu sont enregistrées dans le projet (voir
+« Géométrie des fenêtres »). L'éditeur de matrice reste un espace réservé.
+
+### Géométrie des fenêtres
+
+Chaque déplacement ou redimensionnement est envoyé à la session et enregistré
+dans le fichier `.plotyx`. Au redémarrage, la première ouverture d'un contenu
+reprend cette position et cette taille. Une fenêtre détachée utilise aussi ces
+valeurs pour son viewport OS ; sous Wayland, le compositeur peut refuser la
+position demandée, mais conserve sa taille.
 
 ### Project Manager et fenêtres par contenu
 
-`Tab::ProjectManager` affiche l'arbre du projet **arrêté** à `Workbook`,
+Le Project Manager affiche l'arbre du projet **arrêté** à `Workbook`,
 `Graph`, `Matrix`, `Note` : ces quatre natures sont des feuilles cliquables de
 ce panneau, jamais développées davantage (pas de descente dans les feuilles
 d'un classeur, pas de descente dans le contenu d'un graphe) ; les dossiers
@@ -89,163 +103,41 @@ Cliquer une fenêtre l'ouvre ou la focalise, pour les quatre natures :
   l'éditeur de matrice complet est explicitement hors périmètre de cette
   tâche.
 
-### Maximiser un onglet
+### Maximiser et détacher une fenêtre
 
-`egui_dock` 0.21 n'expose aucune fonction « maximiser » native. Plutôt que de
-faire mentir le `DockState` lui-même, `PlotyxApp::maximized_tab` est un état
-**à côté** du plan de disposition, qui ne le touche jamais : quand il vaut
-`Some`, la `DockArea` normale n'est pas peinte du tout cette image-là — une
-zone séparée montre uniquement l'onglet maximisé, plein cadre, à côté d'un
-panneau fixe qui garde le Project Manager visible et accessible (le principe :
-l'utilisateur doit toujours pouvoir y naviguer, onglet maximisé ou non).
-Restaurer revient à repeindre la `DockArea` normalement : la disposition
-qu'elle retient n'a jamais bougé pendant la maximisation, donc « restaurer »
-est exactement la disposition d'avant, pas un recalcul. Un menu « Fenêtre »
-porte le bouton de bascule.
-
-Le Project Manager est maximisable comme n'importe quel autre onglet — plus
-d'exclusion particulière pour lui. Deux endroits proposent l'action : le
-menu « Fenêtre » (« Maximiser l'onglet actif », qui grise seulement quand
-aucun onglet n'est focalisé) et le clic droit sur l'onglet PM lui-même
-(« Maximiser »/« Restaurer », voir la section suivante). Un détail de mise en
-œuvre en découle : quand le PM *est* l'onglet maximisé, le panneau fixe qui
-garde d'ordinaire le PM visible à côté d'un autre onglet maximisé serait un
-doublon de lui-même — `PlotyxApp::ui` ne le peint donc que si l'onglet
-maximisé n'est pas le PM, et peint son arbre cliquable directement dans la
-zone de maximisation dans le cas contraire (`tab_contents`, la fonction
-partagée dock/maximisation, ne sait délibérément pas peindre
-`Tab::ProjectManager` — il lui manquerait `open_requests` — donc ce n'est pas
-elle qui est appelée dans ce cas précis).
-
-### Attacher le Project Manager à gauche ou à droite
-
-`PlotyxApp::pm_side` (`PmSide::Left` par défaut, comme la disposition
-initiale) mémorise le dernier côté choisi pour le PM **dans le dock** —
-orthogonal au détachement en fenêtre OS ci-dessous, qui est un troisième état
-combinable avec n'importe quel côté mémorisé. Deux actions explicites le font
-basculer, jamais une détection de bord pendant un glisser (délibérément
-rejeté) :
-
-- le menu « Fenêtre » du haut (« Attacher à gauche »/« Attacher à droite »,
-  grisées sur le côté déjà actif, et pendant un détachement en fenêtre OS —
-  rien à réordonner dans le dock tant qu'il n'y est pas) ;
-- le clic droit sur l'onglet PM lui-même (`AppTabViewer::context_menu`), même
-  grisage.
-
-`PlotyxApp::set_project_manager_side` retire l'onglet du `dock_state` (où
-qu'il soit) puis le réinsère par un split gauche/droite du nœud que
-`PlotyxApp::top_region_node` désigne comme « la région du haut » — celle qui
-contient les onglets de contenu, au-dessus de la console de script, qui garde
-toujours toute la largeur en bas. Ce nœud est retrouvé à chaque appel plutôt
-que mémorisé : les indices d'`egui_dock` 0.21 (`NodeIndex`) désignent une
-position dans un arbre binaire indexé par formule, pas un identifiant stable —
-`remove_tab` peut réindexer les nœuds restants (`Tree::remove_leaf`) quand un
-nœud se retrouve vide, silencieusement. `top_region_node` part à la place du
-nœud de `Tab::Script` (structurel, toujours présent) et remonte à son parent,
-dont l'autre enfant est par construction la région du haut telle que
-`PlotyxApp::new` l'a créée (`split_below` place l'ancien contenu à
-`parent.left()`, la nouvelle feuille Script à `parent.right()`) — un repère
-qui résiste aux redispositions habituelles à l'intérieur de cette région,
-tant que la console elle-même n'est pas déplacée hors de son propre nœud
-(aucune action de ce module ne le fait). `reattach_project_manager`
-(ci-dessous) utilise le même mécanisme pour revenir au côté mémorisé, plutôt
-que `push_to_focused_leaf` (au hasard) comme avant cette fonctionnalité.
-
-Ce mécanisme ne restreint jamais le glisser-déposer natif d'`egui_dock` :
-l'onglet PM reste `draggable` comme les autres (le désactiver casserait aussi
-son détachement en fenêtre OS, constaté pendant une bisection antérieure).
-Le rectangle/l'icône de survol qu'`egui_dock` peint pendant un glisser pour
-indiquer où l'onglet atterrirait (`egui_dock::style::OverlayStyle`) est en
-revanche rendu **entièrement transparent, globalement, pour tous les
-onglets** (`selection_color`, `button_color`, `button_border_stroke`,
-`hovered_leaf_highlight.color`/`.stroke`, tous mis à `Color32::TRANSPARENT`/
-`Stroke::NONE` sur un `Style` dérivé de `Style::from_egui` avant de le passer
-à `DockArea::style`) : cette version d'`egui_dock` n'offre aucun crochet par
-onglet pour ce réglage, et le laisser actif ferait doublon visuel avec les
-actions explicites ci-dessus tout en suggérant, à tort, qu'un « bon » endroit
-de dépôt serait détecté pendant le glisser. Le glisser-déposer lui-même
-continue de fonctionner à l'identique — seul son rendu de zone de dépôt
-disparaît.
+Les fenêtres de contenu proposent dans leur en-tête des icônes pour
+maximiser, détacher et fermer, accompagnées d'infobulles. Le classeur et le
+graphe utilisent les mêmes commandes. La maximisation remplit le
+`CentralPanel` ; le Project Manager et la console restent accessibles.
+Restaurer rend à la fenêtre sa disposition flottante. Le menu Fenêtre
+permet aussi de maximiser ou restaurer la fenêtre active.
 
 ### Détachement du Project Manager
 
-Deux mécanismes, tous deux disponibles :
+Le Project Manager est un panneau fixe à gauche. Le menu Fenêtre permet de
+le détacher dans une fenêtre OS puis de le réattacher. Sa fermeture OS le
+réattache, puisque ce panneau de navigation n'est jamais fermé.
 
-- **Flottant dans la fenêtre mère** : glisser l'onglet Project Manager hors du
-  dock le fait flotter en `egui::Window`, via le mécanisme natif d'`egui_dock`
-  (`Surface::Window`) — gratuit, aucune configuration ne le restreint pour cet
-  onglet (`TabViewer::allowed_in_windows` reste à sa valeur par défaut,
-  `true`).
-- **Vraie fenêtre OS séparée** : le menu « Fenêtre » du haut, **et** depuis
-  cette tâche le clic droit sur l'onglet PM lui-même (« Détacher en fenêtre
-  OS », utile pour un usage double-écran sans lâcher la souris pour la barre
-  de menu), ouvrent le contenu du Project Manager dans un vrai viewport natif
-  `eframe` (`egui::Context::show_viewport_deferred`), déplaçable sur un autre
-  écran — ce que le flottant `egui_dock` ne peut pas faire, lui qui reste
-  borné à la fenêtre OS principale. Dans ce mode, `Tab::ProjectManager` est
-  retiré du `DockState` (`PlotyxApp::pm_detached`) pour ne jamais être montré
-  à deux endroits à la fois ; fermer la fenêtre OS ou cliquer « Réattacher »
-  (menu du haut ou clic droit) le repousse proprement dans le dock, **au côté
-  mémorisé par `PlotyxApp::pm_side`** (voir la section précédente) plutôt
-  qu'au hasard.
-
-  **`show_viewport_deferred`, pas `_immediate`** : ce mécanisme utilisait
-  `show_viewport_immediate` jusqu'à ce que l'utilisateur constate,
-  interactivement sur Fedora/GNOME/Wayland (compositeur Mutter), que la
-  fenêtre détachée restait draggable mais visuellement **confinée au
-  rectangle de la fenêtre mère**, même celle-ci réduite — pas seulement
-  l'absence de positionnement absolu déjà connue pour Wayland (voir
-  ci-dessous), autre chose empêchait la fenêtre de sortir du cadre.
-  `show_viewport_immediate` documente lui-même un rendu couplé entre les
-  deux fenêtres (« pause the current viewport and render the child viewport
-  in its own window ») ; `egui` recommande explicitement
-  `show_viewport_deferred` pour une vraie fenêtre indépendante, repeinte
-  indépendamment de la fenêtre parente — un candidat plausible pour ce
-  symptôme, **pas une preuve**. Si le symptôme persiste malgré ce
-  changement, ce sera à documenter ici comme limite connue plutôt qu'à
-  retenter une autre bascule sans piste nouvelle.
-
-  Contrainte technique de cette forme : le callback est `Fn(&mut Ui,
-  ViewportClass) + Send + Sync + 'static`, donc sans capture de `&mut self`
-  ni d'emprunt classique de `AppState` (il peut être rappelé seul, à une
-  image où la fenêtre mère ne peint pas). Plutôt que de mettre `AppState`
-  entière derrière un verrou, `PlotyxApp` porte deux petites structures
-  dédiées derrière un `Arc<Mutex<_>>` chacune, décrites dans la doc de tête
-  de `PlotyxApp::show_detached_project_manager` (`crates/plotyx-app/src/
-  app.rs`) : `ProjectManagerViewModel` (une copie de l'arbre du projet,
-  resynchronisée depuis `self.state` à chaque image avant l'appel) pour ce
-  que la fenêtre détachée lit, et `DetachedProjectManagerRequests` (clics
-  d'ouverture, demande de réattachement) pour ce qu'elle écrit — drainée par
-  `PlotyxApp::ui` juste après, qui produit à partir de là les mêmes
-  `open_requests`/`Action` qu'avant, sans dupliquer `PlotyxApp::open_tab` ni
-  appeler `reattach_project_manager` depuis l'intérieur du callback.
-
-  **Réserve Wayland connue**, sur le même modèle que celle déjà documentée
-  pour `rfd`/`xdg-portal` : le compositeur peut ignorer une position de
-  fenêtre demandée par l'application. Cette tâche ne demande explicitement
-  aucune position pour la fenêtre détachée (elle laisse le compositeur la
-  placer), donc n'en souffre pas directement — la limite vaut néanmoins d'être
-  connue avant d'y ajouter un jour une position mémorisée entre deux
-  détachements.
+Les fenêtres séparées utilisent `show_viewport_deferred` : leur rendu est
+indépendant de celui de la fenêtre principale. Le callback échange un
+instantané de lecture et des requêtes avec celle-ci, via deux
+`Arc<Mutex<_>>`, sans déplacer `AppState` ni créer une seconde voie de
+mutation métier. Les requêtes réveillent explicitement la fenêtre
+principale pour être traitées même quand elle est inactive.
 
 ### Détachement générique des onglets de contenu
 
 `PlotyxApp::detach_tab`/`reattach_tab`/`show_detached_tabs` généralisent le
 mécanisme ci-dessus à `Tab::Book`, `Tab::Graph`, `Tab::Matrix` et `Tab::Note` :
-un clic droit sur l'onglet (`egui_dock::TabViewer::context_menu`, le seul
-point d'extension de ce genre en 0.21.1) propose « Détacher dans une
-fenêtre », symétrique du bouton « Réattacher au dock principal » côté fenêtre
-détachée. Plusieurs onglets peuvent être détachés en même temps — une entrée
-par onglet dans `PlotyxApp::detached_tabs`, chaque `Tab` portant déjà un
-`NodeId` donne un `ViewportId::from_hash_of(tab)` unique par construction,
-sans collision possible entre deux classeurs détachés simultanément par
-exemple. `Tab::ProjectManager` garde son propre menu contextuel, avec ses
-propres actions (voir les deux sections précédentes) plutôt que celui-ci ;
-`Tab::Script` n'a aucune entrée de menu contextuel, n'étant ni détachable en
-fenêtre de contenu ni le PM (voir plus bas).
+l'icône de détachement ouvre une fenêtre OS ; celle-ci propose une icône de
+réattachement. Fermer une fenêtre de contenu détachée ferme uniquement sa
+vue, sans la réattacher ni supprimer les données du projet. Elle reste
+réouvrable depuis le Project Manager. Plusieurs contenus peuvent être
+détachés simultanément, chacun dans son propre `ViewportId`.
 
 **Tailles par défaut des fenêtres détachées** (`show_detached_tabs`) :
-`Tab::Graph` garde un ratio 4:3 (800×600). Le reste (`Book`/`Matrix`/`Note`)
+`Tab::Graph` ouvre en 560×540, ce qui contient la figure de référence, ses
+commandes et son en-tête. Le reste (`Book`/`Matrix`/`Note`)
 partage une taille uniforme de 420×360, calculée pour montrer 3 colonnes de
 grille : `grid_contents`/`matrix_contents` utilisent
 `TableColumn::exact(56.0)` pour la colonne de numéro de ligne puis
@@ -266,7 +158,7 @@ onglets détachés — les champs inutilisés pour la nature du `Tab` servi
 restent à leur valeur par défaut.
 
 **La lecture du modèle est factorisée, l'édition transitoire ne l'est pas.**
-`tab_contents` (déjà partagée par le dock normal et la zone de maximisation)
+`tab_contents` (partagée par les fenêtres flottantes et la zone de maximisation)
 prend `&mut AppState`, que la fermeture `'static`, `Send + Sync` de
 `show_viewport_deferred` ne peut pas capturer — le même problème déjà résolu
 pour le PM (mettre `AppState` entière derrière un verrou déborderait le
@@ -300,7 +192,7 @@ détaché.
 `Tab::Graph` échappe à cette limite : `GraphView` n'a pas de verrou global à
 `AppState` à respecter (son cache de formes et sa navigation zoom/pan sont
 déjà scopés par graphe, dans `PlotyxApp::graph_views`) — `graph_view_contents`
-est donc **littéralement** la même fonction pour le dock et pour une fenêtre
+est donc **littéralement** la même fonction pour une fenêtre flottante et une fenêtre
 détachée ; la vue elle-même migre simplement hors de `graph_views` le temps
 du détachement pour rester capturable par la fermeture sans dupliquer le
 cache. `Tab::Matrix` n'a aucun état à faire voyager (espace réservé).
@@ -333,12 +225,11 @@ pas garantir en capture d'écran ni en support.
 
 ### Sélecteur de fichiers natif
 
-`tool_bar` n'a plus de champ de texte pour taper le chemin à la main : les
-boutons « Enregistrer sous… » et « Ouvrir… » ouvrent un `rfd::FileDialog`
-natif, modal. Ctrl+S/Ctrl+O (et les entrées de menu équivalentes) continuent
-d'agir directement sur le chemin déjà connu, sans dialogue — le geste
-« enregistrer »/« recharger » rapide d'un tableur, distinct de « enregistrer
-sous ».
+Le bandeau de fichier a été supprimé : Ouvrir, Enregistrer et Enregistrer
+sous sont réunis dans le menu Fichier. Les clics et leurs raccourcis
+partagent le même routage. Ouvrir (Ctrl+O) affiche un `rfd::FileDialog` ;
+Enregistrer sous (Ctrl+Maj+S) demande une destination ; Enregistrer
+(Ctrl+S) utilise la destination courante.
 
 `rfd` (feature par défaut `xdg-portal` + `wayland`) compile et se lie sans
 portail système présent : le portail (`xdg-desktop-portal`, D-Bus) n'est
@@ -359,7 +250,7 @@ Une fenêtre ne se teste pas en intégration continue. C'est toute la raison du
 découpage : **rien de ce que contient `app` n'est une décision de produit**.
 
 `Action` : `Undo`, `Redo`, `Save`, `Load`, `SelectSheet`, `CommitCell`,
-`AddColumn`, `InsertRows`, `DeleteRows`, `SetNoteText`, `RunScript`,
+`AddWorkbook`, `AddColumn`, `InsertRows`, `DeleteRows`, `SetNoteText`, `RunScript`,
 `InterruptScript`. `AddColumn`/`InsertRows`/`DeleteRows` portent désormais un
 `NodeId` de feuille explicite (`sheet`) : depuis que la grille est scopée par
 classeur (`Tab::Book`), il n'y a plus de « la » feuille affichée sur laquelle
@@ -873,12 +764,11 @@ déclenchaient jamais).
   détachés (voir « Détachement générique des onglets de contenu ») —
   contrainte technique de la fermeture `'static` de `show_viewport_deferred`,
   pas une extension délibérée de la limite.
-- **La disposition dockable ne persiste pas d'un lancement à l'autre** :
-  `PlotyxApp::new` la reconstruit à chaque démarrage (Project Manager, script,
-  premier classeur, premier graphe). Ce que l'utilisateur redispose en
-  session — y compris la maximisation et le détachement, du Project Manager
-  ou de tout autre onglet — tient jusqu'à la fermeture de la fenêtre, pas
-  au-delà.
+- **Les fenêtres ouvertes et leur mode ne sont pas restaurés** : le
+  démarrage ouvre le premier classeur et le premier graphe. Les positions
+  et tailles enregistrées sont réutilisées pour les contenus, mais la
+  maximisation et le détachement ne constituent pas un plan de disposition
+  persisté.
 
 ### Un détail qui a l'air d'un détail
 
