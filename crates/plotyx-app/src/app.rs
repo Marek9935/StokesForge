@@ -1977,6 +1977,7 @@ fn window_header(
 ) -> WindowHeaderActions {
     const ACTIONS_WIDTH: f32 = 90.0;
     const COLLAPSE_WIDTH: f32 = 24.0;
+    const ACTION_WIDTH: f32 = 24.0;
 
     let mut actions = WindowHeaderActions::default();
     let (rect, _) =
@@ -1995,39 +1996,54 @@ fn window_header(
         } else {
             ("v", "Masquer le contenu du graphe")
         };
+        header.painter().text(
+            collapse_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            egui::TextStyle::Button.resolve(header.style()),
+            header.visuals().text_color(),
+        );
         if header
-            .put(collapse_rect, egui::Button::new(icon).small())
+            .interact(
+                collapse_rect,
+                id.with("graph_collapse"),
+                egui::Sense::click(),
+            )
             .on_hover_text(tooltip)
             .clicked()
         {
             actions.toggle_collapse = true;
         }
     }
-    header.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui
-            .small_button("×")
-            .on_hover_text("Fermer la fenêtre")
+    let action_rect = |offset: f32| {
+        egui::Rect::from_min_size(
+            egui::pos2(rect.right() - offset - ACTION_WIDTH, rect.top() + 2.0),
+            egui::vec2(ACTION_WIDTH, rect.height() - 4.0),
+        )
+    };
+    if header
+        .put(action_rect(2.0), egui::Button::new("×").small())
+        .on_hover_text("Fermer la fenêtre")
+        .clicked()
+    {
+        actions.close = true;
+    }
+    if matches!(tab, Tab::Book(_) | Tab::Graph(_)) {
+        if header
+            .put(action_rect(28.0), egui::Button::new("↗").small())
+            .on_hover_text("Détacher dans une fenêtre")
             .clicked()
         {
-            actions.close = true;
+            actions.detach = true;
         }
-        if matches!(tab, Tab::Book(_) | Tab::Graph(_)) {
-            if ui
-                .small_button("↗")
-                .on_hover_text("Détacher dans une fenêtre")
-                .clicked()
-            {
-                actions.detach = true;
-            }
-            if ui
-                .small_button("⛶")
-                .on_hover_text("Maximiser la fenêtre")
-                .clicked()
-            {
-                actions.maximize = true;
-            }
+        if header
+            .put(action_rect(54.0), egui::Button::new("⛶").small())
+            .on_hover_text("Maximiser la fenêtre")
+            .clicked()
+        {
+            actions.maximize = true;
         }
-    });
+    }
     let title_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + collapse_width, rect.top()),
         egui::pos2(rect.right() - ACTIONS_WIDTH, rect.bottom()),
