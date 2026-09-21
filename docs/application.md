@@ -51,6 +51,11 @@ d'egui, pour le dessin comme pour les interactions. Elle ne recouvre donc
 ni l'en-tête ni les commandes placées sous elle. Les compteurs de cache et
 le résumé technique de la figure ne sont plus affichés.
 
+La barre de titre maison centre le nom du contenu. Celle d'un graphe garde à
+gauche la flèche de repli d'une fenêtre egui : elle masque ou réaffiche le
+seul contenu de ce graphe, sans modifier le projet, la géométrie enregistrée
+ni les autres fenêtres.
+
 Chaque fenêtre flottante peut aussi être maximisée (plein cadre du
 `CentralPanel`, `PlotyxApp::maximized_tab`) ou détachée dans une vraie fenêtre
 OS séparée (`PlotyxApp::detach_tab`/`reattach_tab`, pour le multi-écran).

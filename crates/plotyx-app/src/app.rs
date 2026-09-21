@@ -315,7 +315,7 @@
 //! tourne — sans quoi, egui ne redessinant que sur événement d'entrée, la fin
 //! du script n'apparaîtrait qu'au prochain mouvement de souris.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -610,6 +610,10 @@ pub struct PlotyxApp {
     /// règle (`plotyx_render_egui::GraphView`) ; avec plusieurs graphes
     /// affichables simultanément, une seule vue ne suffit plus.
     graph_views: HashMap<NodeId, GraphView>,
+    /// Onglets de graphe dont seul le contenu est replié. Cet état de
+    /// présentation reste local à l'application : il ne modifie ni le
+    /// graphe, ni sa géométrie enregistrée, ni les autres fenêtres.
+    collapsed_graph_tabs: HashSet<Tab>,
     /// Onglet actuellement maximisé, s'il y en a un — voir la doc de tête du
     /// module, § maximiser. Ne peut plus valoir le Project Manager depuis
     /// cette tâche : ce n'est plus un onglet, et un panneau fixe toujours
@@ -730,6 +734,11 @@ struct DetachedTabViewModel {
     /// [`PlotyxApp::graph_views`] le temps du détachement — voir
     /// [`PlotyxApp::detach_tab`]/[`PlotyxApp::reattach_tab`].
     graph_view: Option<GraphView>,
+    /// Le premier callback d'un viewport différé peut arriver avant que
+    /// Wayland/WGPU ait stabilisé sa taille. Une seule image supplémentaire
+    /// donne alors à la figure son rectangle réel, sans entretenir une boucle
+    /// de rendu quand la fenêtre reste inactive.
+    needs_initial_repaint: bool,
 }
 
 /// Ce qu'une fenêtre détachée écrit, pour que [`PlotyxApp::ui`] (seule à
@@ -807,6 +816,7 @@ impl PlotyxApp {
             next_cascade,
             focus_next: None,
             graph_views: HashMap::new(),
+            collapsed_graph_tabs: HashSet::new(),
             maximized_tab: None,
             pm_detached: false,
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
@@ -1291,6 +1301,7 @@ impl PlotyxApp {
             cell_edit: None,
             note_edit: None,
             graph_view,
+            needs_initial_repaint: true,
         };
         self.detached_tabs.insert(
             tab,
@@ -1456,6 +1467,14 @@ impl PlotyxApp {
                             }
                         }
                     });
+                    if std::mem::take(&mut model.needs_initial_repaint) {
+                        // `show_viewport_deferred` crée la fenêtre après
+                        // l'image racine. Sous Wayland, le premier callback
+                        // peut donc voir une surface encore sans taille
+                        // définitive ; redessiner une fois reconstruit la
+                        // figure avec le rectangle configuré par WGPU.
+                        ui.ctx().request_repaint();
+                    }
                     if ui.ctx().input(|input| input.viewport().close_requested()) {
                         requests.close = true;
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
@@ -1662,6 +1681,7 @@ impl eframe::App for PlotyxApp {
             next_cascade,
             focus_next,
             graph_views,
+            collapsed_graph_tabs,
             maximized_tab,
             window_positions,
             ..
@@ -1748,6 +1768,7 @@ impl eframe::App for PlotyxApp {
                     let current_pos = *window_positions.entry(tab).or_insert(saved_pos);
                     let mut open = true;
                     let mut header_actions = WindowHeaderActions::default();
+                    let was_collapsed = collapsed_graph_tabs.contains(&tab);
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
                         .title_bar(false)
@@ -1757,9 +1778,15 @@ impl eframe::App for PlotyxApp {
                         .constrain_to(workspace_rect)
                         .open(&mut open)
                         .show(ui.ctx(), |ui| {
-                            header_actions = window_header(ui, id, &tab_title(state, tab), tab);
-                            tab_contents(ui, state, &mut actions, graph_views, tab);
+                            header_actions =
+                                window_header(ui, id, &tab_title(state, tab), tab, was_collapsed);
+                            if !(was_collapsed ^ header_actions.toggle_collapse) {
+                                tab_contents(ui, state, &mut actions, graph_views, tab);
+                            }
                         });
+                    if header_actions.toggle_collapse {
+                        toggle_graph_collapse(collapsed_graph_tabs, tab);
+                    }
                     if header_actions.maximize {
                         *maximized_tab = Some(tab);
                     }
@@ -1917,11 +1944,23 @@ fn tab_node(tab: Tab) -> NodeId {
     }
 }
 
+/// Bascule le repli du contenu d'un graphe. Les autres types d'onglets n'ont
+/// pas ce contrôle et restent donc toujours affichés.
+fn toggle_graph_collapse(collapsed_graph_tabs: &mut HashSet<Tab>, tab: Tab) {
+    if !matches!(tab, Tab::Graph(_)) {
+        return;
+    }
+    if !collapsed_graph_tabs.insert(tab) {
+        collapsed_graph_tabs.remove(&tab);
+    }
+}
+
 #[derive(Default)]
 struct WindowHeaderActions {
     maximize: bool,
     detach: bool,
     close: bool,
+    toggle_collapse: bool,
     drag_delta: egui::Vec2,
 }
 
@@ -1929,11 +1968,41 @@ struct WindowHeaderActions {
 /// boutons `egui` de même nature et forment un seul groupe visuel ; cela évite
 /// une `Area` superposée, qui se décale quand une fenêtre passe derrière une
 /// autre.
-fn window_header(ui: &mut egui::Ui, id: egui::Id, title: &str, tab: Tab) -> WindowHeaderActions {
+fn window_header(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    title: &str,
+    tab: Tab,
+    collapsed: bool,
+) -> WindowHeaderActions {
+    const ACTIONS_WIDTH: f32 = 90.0;
+    const COLLAPSE_WIDTH: f32 = 24.0;
+
     let mut actions = WindowHeaderActions::default();
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    let collapse_width = if matches!(tab, Tab::Graph(_)) {
+        COLLAPSE_WIDTH
+    } else {
+        0.0
+    };
+    if collapse_width > 0.0 {
+        let collapse_rect =
+            egui::Rect::from_min_size(rect.min, egui::vec2(collapse_width, rect.height()));
+        let (icon, tooltip) = if collapsed {
+            (">", "Afficher le contenu du graphe")
+        } else {
+            ("v", "Masquer le contenu du graphe")
+        };
+        if header
+            .put(collapse_rect, egui::Button::new(icon).small())
+            .on_hover_text(tooltip)
+            .clicked()
+        {
+            actions.toggle_collapse = true;
+        }
+    }
     header.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
             .small_button("×")
@@ -1959,11 +2028,18 @@ fn window_header(ui: &mut egui::Ui, id: egui::Id, title: &str, tab: Tab) -> Wind
             }
         }
     });
-    header.put(
-        egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 90.0, rect.max.y)),
-        egui::Label::new(egui::RichText::new(title).heading()),
+    let title_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + collapse_width, rect.top()),
+        egui::pos2(rect.right() - ACTIONS_WIDTH, rect.bottom()),
     );
-    let drag_rect = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 90.0, rect.max.y));
+    header.painter().with_clip_rect(title_rect).text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        title,
+        egui::TextStyle::Heading.resolve(header.style()),
+        header.visuals().text_color(),
+    );
+    let drag_rect = title_rect;
     let drag = ui.interact(
         drag_rect,
         id.with("content_title_drag"),
@@ -5192,6 +5268,71 @@ mod graph_layout_tests {
     }
 
     #[test]
+    fn le_repli_ne_concerne_que_le_contenu_du_graphe_vise() {
+        let (_session, graph) = graphe();
+        let graph_tab = Tab::Graph(graph);
+        let mut collapsed = HashSet::new();
+
+        toggle_graph_collapse(&mut collapsed, graph_tab);
+        assert_eq!(collapsed, HashSet::from([graph_tab]));
+
+        // Un autre type de contenu ne peut pas être replié par la flèche du
+        // graphe, même si son identifiant de nœud coïncide dans ce test de
+        // présentation.
+        toggle_graph_collapse(&mut collapsed, Tab::Book(graph));
+        assert_eq!(collapsed, HashSet::from([graph_tab]));
+
+        toggle_graph_collapse(&mut collapsed, graph_tab);
+        assert!(collapsed.is_empty());
+    }
+
+    #[test]
+    fn len_tete_du_graphe_garde_son_titre_au_centre_et_sa_fleche_a_gauche() {
+        let (_session, graph) = graphe();
+        let context = egui::Context::default();
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 120.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let _ = window_header(
+                    ui,
+                    egui::Id::new("graph_header_centered_title"),
+                    "Graph1",
+                    Tab::Graph(graph),
+                    false,
+                );
+            },
+        );
+        output.textures_delta.clear();
+
+        let text_shape = |text: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == text => Some(shape),
+                    _ => None,
+                })
+        };
+        let title = text_shape("Graph1").expect("le titre doit être peint");
+        let title_center = title.pos.x + title.galley.rect.center().x;
+        assert!(
+            (title_center - 200.0).abs() < f32::EPSILON,
+            "le titre doit être centré dans l'en-tête, pas après la flèche"
+        );
+        let collapse = text_shape("v").expect("la flèche de repli doit être peinte");
+        assert!(
+            collapse.pos.x + collapse.galley.rect.center().x < 24.0,
+            "la flèche de repli doit rester dans le coin supérieur gauche"
+        );
+    }
+
+    #[test]
     fn le_rendu_reste_fixe_et_decoupe_meme_dans_une_petite_zone() {
         let (session, graph) = graphe();
         let snapshot = session.handle().snapshot().unwrap();
@@ -5317,11 +5458,20 @@ mod graph_layout_tests {
         ));
         output = context.run_ui(root_input, |ui| callback(ui));
         output.textures_delta.clear();
+        assert_eq!(
+            output.viewport_output[&viewport_id].repaint_delay,
+            Duration::ZERO,
+            "le premier callback doit programmer l'image de stabilisation du viewport"
+        );
 
         let model = app.detached_tabs[&Tab::Graph(graph)]
             .view_model
             .lock()
             .unwrap_or_else(|err| err.into_inner());
+        assert!(
+            !model.needs_initial_repaint,
+            "le premier callback doit demander une unique image de stabilisation"
+        );
         let view = model.graph_view.as_ref().unwrap();
         assert!(
             !view.cache().shapes().is_empty(),
@@ -5420,7 +5570,7 @@ mod graph_layout_tests {
                     .current_pos(egui::pos2(100.0, 100.0))
                     .default_size(egui::vec2(560.0, 540.0))
                     .show(ui.ctx(), |ui| {
-                        let _ = window_header(ui, id, "Figure", tab);
+                        let _ = window_header(ui, id, "Figure", tab, false);
                         graph_drop_target(ui, &state, &mut actions, &mut graph_views, graph);
                     });
             });
