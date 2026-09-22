@@ -22,6 +22,23 @@ pour tenir un bug ouvert — un test.
 3. Si une reproduction `#[ignore]` existe déjà dans `plotyx-robustesse`, c'est
    elle le point de départ : `cargo test -p plotyx-robustesse -- --ignored`.
 
+### Ce que « reproduire » veut dire pour un bug visuel
+
+Position, contour, alignement, troncature, surbrillance : les tests couvrent la
+géométrie, **pas l'apparence**. Reproduire, ici, c'est *regarder* — sinon on
+corrige une cause déduite d'une lecture de code, et une cause déduite peut être
+fausse tout en étant convaincante. `plotyx-app` sait se photographier :
+[`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md).
+Garder la capture d'avant : elle sert de preuve au moment de montrer l'après.
+
+### « Jamais câblé » ≠ « câblé et cassé »
+
+Avant de conclure qu'un comportement manque, chercher si le code porte déjà
+l'intention (`rg "Action::|Command::|fn <nom>" crates/plotyx-app/src/`). Si une
+`Action` ou une `Command` existe déjà pour ce geste, le bug est **une condition
+qui échoue**, pas du code à écrire — et on cherche alors pourquoi elle ne se
+déclenche pas. Les deux diagnostics envoient à des endroits opposés du fichier.
+
 ## 2. Corriger à la bonne couche
 
 Le réflexe coûteux est de réparer là où le symptôme se voit. Table de renvoi :
@@ -34,8 +51,16 @@ Le réflexe coûteux est de réparer là où le symptôme se voit. Table de renv
 | écran ≠ export SVG/PDF/PNG | mesure de texte (invariant 4) ou fonctionnalité écrite dans un seul backend (invariant 5) — voir **plotyx-rendu** |
 | figure qui ne se met pas à jour | clé de cache `(revision, rect, pixels_per_point, view_generation)` de `plotyx-render-egui` |
 | action grisée à tort, libellé faux, menu incohérent | `AppState` (`grid_menu`, `undo_label`…), jamais le code egui |
-| comportement présent dans le dock, absent en fenêtre détachée | deux chemins qui auraient dû être un : chercher la fonction partagée (`tab_contents`, `state::*_in`) |
+| comportement présent dans le dock, absent en fenêtre détachée | deux écritures là où il en faudrait une : `book_contents` (`app.rs:3653`) vs `detached_book_contents` (`app.rs:5592`). Corriger **les deux**, ou factoriser si la contrainte `'static` de `show_viewport_deferred` ne s'y oppose pas |
 | blocage de l'interface | quelque chose de bloquant appelé depuis la boucle de rendu (cf. `ScriptEngine::run`, résolu par un fil détaché + `poll_script`) |
+
+**Si le correctif demande un arbitrage, demander.** Un bug dont la correction
+casse un geste existant, ou dont le « bon » comportement se discute (que doit
+faire l'undo après ? le menu doit-il rester identique dans les deux zones ?),
+n'est pas une question technique : c'est une décision de produit.
+`AskUserQuestion`, avec des options formulées en **comportements observables**
+— l'utilisateur n'est pas développeur, il arbitre ce qu'il voit, pas une
+structure de code.
 
 Deux règles de conduite qui orientent la forme du correctif :
 
@@ -98,6 +123,9 @@ validé par un test vert : le dire.
 ## Checklist
 
 - [ ] faux positifs écartés (plafond / limite assumée / dégradation voulue)
+- [ ] bug visuel : **regardé** (capture avant), pas seulement lu dans le code
+- [ ] « câblé et cassé » vs « jamais câblé » tranché par un `rg` avant de coder
+- [ ] arbitrage renvoyé à l'utilisateur si le correctif casse un geste existant
 - [ ] test de reproduction écrit et **vu échouer** avant correction
 - [ ] correction posée à la couche de la cause, pas du symptôme
 - [ ] aucun test affaibli ; garde-fous d'architecture toujours verts

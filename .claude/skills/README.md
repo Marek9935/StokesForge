@@ -25,10 +25,28 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
 | [`plotyx-architecture`](plotyx-architecture/SKILL.md) | répondre sur l'architecture — **pour un chimiste**, par analogies Python | « comment ça marche », « pourquoi ce découpage », « où vit X » |
 | [`plotyx-fonctionnalites`](plotyx-fonctionnalites/SKILL.md) | répondre sur ce que le logiciel sait faire — **pour un chimiste** venu d'Origin | « est-ce que je peux… », « comment je fais pour… » |
 
-Ressource partagée par les deux skills de réponse :
-[`rust-pour-pythonistes.md`](plotyx-architecture/references/rust-pour-pythonistes.md)
-— table de traduction Rust → Python, avec pour chaque entrée **ce que
-l'analogie a de faux**.
+## Ressources partagées
+
+- [`rust-pour-pythonistes.md`](plotyx-architecture/references/rust-pour-pythonistes.md)
+  — table de traduction Rust → Python, avec pour chaque entrée **ce que
+  l'analogie a de faux**. Utilisée par les deux skills de réponse.
+- [`voir-l-interface.md`](plotyx-bug-report/references/voir-l-interface.md)
+  — comment *regarder* la fenêtre (`PLOTYX_APP_SCREENSHOT`, conversion
+  PPM → PNG) et ce que la capture ne peut pas montrer. Utilisée par
+  `plotyx-bug-report`, `plotyx-bug-fix`, `plotyx-feature` et
+  `plotyx-verification` : les tests couvrent la géométrie, **pas
+  l'apparence**.
+
+## Deux règles transversales, apprises à l'usage
+
+**Demander plutôt que trancher.** L'utilisateur n'est pas développeur : il
+arbitre des comportements observables, jamais des structures de code. Un
+commentaire disant « choix volontaire » ferme *une* alternative, pas toutes —
+si la demande diffère de l'option rejetée, c'est une question à poser, pas un
+classement à faire.
+
+**Regarder avant de conclure.** Un symptôme visuel diagnostiqué depuis le code
+seul produit une cause fausse et convaincante. C'est arrivé.
 
 ## Comment ils s'enchaînent
 

@@ -32,7 +32,8 @@ tester explicitement**, sinon elle valide du code mort.
 | `plotyx-python`, `plotyx-script`, la surface `pyx` | `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE`) |
 | les formules, `plotyx-render::formula` | `cargo test --workspace --all-features` |
 | une reproduction `#[ignore]` de robustesse | `cargo test -p plotyx-robustesse -- --ignored` |
-| une vraie fenêtre (Wayland, `rfd`, multi-écran) | rien : **aucun outil non interactif ne peut valider ça**. Le dire dans le compte rendu. |
+| l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `PLOTYX_APP_SCREENSHOT` + `PLOTYX_APP_AUTOQUIT_MS`, voir [`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence |
+| une vraie fenêtre (Wayland, `rfd`, multi-écran, glisser, fenêtre détachée) | rien : **aucun outil non interactif ne peut valider ça**. Le dire dans le compte rendu, ou demander une capture à l'utilisateur. |
 
 ## Où poser un test
 

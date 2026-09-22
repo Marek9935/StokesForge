@@ -25,7 +25,12 @@ Dans cet ordre, sans sauter d'étape :
    `MAX_NODE_ID`, `MAX_CELLS`, nombre de classes d'histogramme, limites
    d'historique : recensés dans `docs/archive/rustrewrite/questions-ouvertes.md`
    §11. Une « correction » qui les lève est une régression.
-5. Annoncer brièvement : ce qui sera réutilisé, la zone modifiée, les
+5. **Lever les imprécisions maintenant, pas à mi-parcours.** Une demande
+   arrivée par une todo ou un vrac de retours est rarement complète : elle dit
+   le geste voulu, pas son comportement aux bords. Poser les questions
+   ouvertes **avant** d'écrire (voir « Demander plutôt que supposer »), en une
+   seule fois.
+6. Annoncer brièvement : ce qui sera réutilisé, la zone modifiée, les
    vérifications prévues. Puis coder sans redemander confirmation pour les
    choix courants.
 
@@ -49,6 +54,34 @@ en CI (`tests/shell.rs`) ; `app` ne fait que traduire clavier et souris en
 `Action` et peindre. Une fenêtre ne se teste pas en intégration continue —
 c'est toute la raison du découpage. Si une règle métier se retrouve dans
 `app.rs`, elle devient invérifiable.
+
+## 2 bis. Le doublon docké / détaché — à vérifier avant de chiffrer
+
+Plusieurs contenus de `plotyx-app` existent **en deux écritures** : une pour la
+fenêtre dockée, une pour la fenêtre détachée. `book_contents`
+(`app.rs:3653`) et `detached_book_contents` (`app.rs:5592`) portent chacune
+leur bandeau, leurs boutons, leurs compteurs ; un commentaire du fichier dit
+déjà « *Même correctif B5 que `book_contents`* ».
+
+La cause est documentée dans `docs/application.md` : la fermeture `'static`,
+`Send + Sync` de `show_viewport_deferred` ne peut pas capturer `&mut AppState`.
+Ce qui **est** factorisé : `tab_contents` (point d'entrée commun),
+`graph_view_contents` (littéralement la même fonction des deux côtés), et
+toutes les lectures pures (`cell_text_in`, `visible_columns_in`,
+`worksheets_of_in`…). Ce qui reste dupliqué : les tampons de saisie
+transitoires, par contrainte technique réelle.
+
+Avant de toucher à une surface d'interface :
+
+```sh
+rg "fn <nom>|fn detached_<nom>" crates/plotyx-app/src/app.rs
+```
+
+Deux résultats → le changement se fait deux fois, ou mieux : **se factorise**.
+Une factorisation supplémentaire est légitime quand elle ne bute pas sur la
+contrainte `'static` ci-dessus — un bandeau de boutons qui ne fait que pousser
+des `Action` n'y bute pas. Le dire explicitement dans le compte rendu : « j'ai
+factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
 
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
 
@@ -111,10 +144,40 @@ menu alors que Suppr vide d'abord ; « Coller » n'est jamais grisé parce que
 sonder le presse-papier système à chaque image coûterait plus que de tenter au
 clic.
 
-## 4. Tests
+## 3 bis. Demander plutôt que supposer
+
+L'utilisateur de ce dépôt **n'est pas développeur**. Il décrit un geste et un
+résultat attendu, pas une implémentation — et c'est très bien ainsi : lui
+demander d'arbitrer entre deux structures de code est une perte de temps pour
+tout le monde. En revanche, il est le seul à pouvoir trancher entre deux
+**comportements observables**.
+
+Appeler `AskUserQuestion`, en une seule fois, dès qu'un de ces cas apparaît :
+
+| Situation | Pourquoi |
+|---|---|
+| la demande ne dit pas le comportement **aux bords** (dernière colonne, sélection vide, fenêtre détachée, colonne mixte) | c'est là que se cachent les trois quarts des allers-retours |
+| réaliser la demande **casse un geste existant** | il doit savoir ce qu'il perd avant, pas après |
+| un commentaire du code dit « choix volontaire » mais la demande **diffère de l'option rejetée** | un commentaire ferme *une* alternative, pas toutes — ne pas conclure seul, dans un sens ni dans l'autre |
+| la demande a plusieurs lectures plausibles et elles ne coûtent pas la même chose | chiffrer les options et laisser choisir |
+| le périmètre est flou (« revoir toute la logique de X ») | l'écart entre un correctif et une refonte se joue là |
+
+Poser la question avec ce qui est **déjà établi** et des options concrètes —
+coût, risque, ce que ça casse. Jamais une question ouverte qui renvoie le
+travail. Et ne pas demander ce qui a un défaut évident : là, choisir, le dire
+en une ligne, avancer.
+
+## 4. Tests — et, si c'est visuel, regarder
 
 Toute logique ajoutée dans `state.rs` se teste dans
 `crates/plotyx-app/tests/shell.rs` — sans fenêtre, sans serveur graphique.
+
+**Les tests couvrent la géométrie, pas l'apparence.** Un changement visuel
+(contour, alignement, largeur, troncature, surbrillance, icône) n'est pas
+vérifié par une suite verte : il se vérifie en regardant la fenêtre.
+`plotyx-app` sait se photographier — procédure dans
+[`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md).
+Une capture avant et une après valent mieux qu'une affirmation.
 Une fonction pure extraite exprès pour être testable (`app::grid_grip_side`,
 `state::plot_panel_graph`, `state::drop_payload_action`) est le motif idiomatique
 du dépôt quand une décision doit vivre près de l'UI : extraire, puis tester.
@@ -151,12 +214,15 @@ touche (`python`, `typst`), relecture du diff, message de commit en français.
 ## Checklist
 
 - [ ] domaine identifié, page `docs/` lue, `.claude/rules.md` respecté
+- [ ] imprécisions de la demande levées **avant** de coder, en une seule question
 - [ ] ce n'est pas un plafond déjà arbitré (`questions-ouvertes.md` §11)
+- [ ] doublon docké/détaché vérifié (`rg "fn <nom>|fn detached_<nom>"`)
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **plotyx-commande**)
 - [ ] logique dans `state.rs`, glu egui seulement dans `app.rs`
 - [ ] les quatre surfaces en accord : raccourci, menu, grisage, libellé
 - [ ] menu contextuel = miroir du clavier, décision dans `GridMenu`
 - [ ] test dans `tests/shell.rs` (ou le crate concerné)
+- [ ] changement visuel **regardé** (capture), pas seulement testé
 - [ ] `//!` du module mis à jour (le *pourquoi*) + page `docs/` (le *quoi*)
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts
