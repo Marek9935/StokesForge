@@ -40,6 +40,9 @@ htmlcov/
 *.h5
 *.hdf5
 *.pyx-project
+# Projets enregistrés par le banc (`plotyx-app [chemin]`) : des sauvegardes de
+# travail, pas des fixtures — les jeux d'essai versionnés vivent dans `test/`.
+*.plotyx
 
 # Interpréteur Python vendored (python-build-standalone, cf. cahier-des-charges-technique.md §8.6.1)
 /vendor/python/*.tar.gz
