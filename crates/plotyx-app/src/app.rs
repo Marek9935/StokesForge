@@ -647,9 +647,28 @@ pub struct PlotyxApp {
     /// permet pas d'ajouter des actions à sa barre native ; la position reste
     /// donc explicite quand cette barre prend en charge le glisser.
     window_positions: HashMap<Tab, egui::Pos2>,
+    /// Taille demandée par les poignées de redimensionnement maison (§3).
+    /// `.drag_area(WindowDrag::Off)` (nécessaire au glissé de la barre de
+    /// titre maison ci-dessus) force egui à couper `resize_left`/
+    /// `resize_top` en interne (ils dépendent tous les deux de
+    /// `Area::is_movable()`, qu'`Off` met à `false` sans exposer de moyen de
+    /// les garder actifs séparément) — les 4 côtés + 4 coins sont donc
+    /// gérés à la main ([`floating_resize_handles`]) plutôt que par le
+    /// redimensionnement natif d'`egui::Window`, forcé exact via
+    /// `.fixed_size(...)` comme `current_pos` force la position.
+    window_sizes: HashMap<Tab, egui::Vec2>,
     /// Dernière géométrie envoyée à l'acteur, pour ne pas lui adresser une
     /// requête à chaque image pendant qu'une fenêtre reste immobile.
     saved_window_geometries: HashMap<NodeId, WindowGeometry>,
+    /// Sélection courante dans l'arbre du Project Manager (§6) — Ctrl/Cmd-clic
+    /// en bascule l'appartenance ; consommée par « Afficher »/« Masquer ».
+    /// Indépendante de `selection.rs`, propre à la grille de données.
+    pm_selection: HashSet<Tab>,
+    /// Onglets masqués sans être fermés (§6) — même patron que
+    /// `collapsed_graph_tabs`, mais l'onglet entier n'est plus peint du tout
+    /// (au lieu de replier seulement son contenu). Reste dans
+    /// `floating_tabs` : cascade/position/géométrie survivent au masquage.
+    hidden_tabs: HashSet<Tab>,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
     /// (mécanisme de vérification, voir [`PlotyxApp::screenshot`]).
     screenshot: Option<std::path::PathBuf>,
@@ -672,6 +691,16 @@ struct ProjectManagerViewModel {
     /// `show_viewport_deferred` — `AppState` reste la seule source de
     /// vérité, ceci n'en est qu'un instantané pour le callback différé.
     tree: Vec<ProjectTreeNode>,
+    /// Copie de [`PlotyxApp::pm_selection`], même resynchronisation que
+    /// `tree` — nécessaire pour que la fenêtre détachée du Project Manager
+    /// affiche elle aussi la sélection courante et le fond « Masquer » à
+    /// jour (§6).
+    selected: HashSet<Tab>,
+    /// Copie de [`PlotyxApp::hidden_tabs`], même resynchronisation.
+    hidden: HashSet<Tab>,
+    /// Copie de l'onglet au premier plan, même resynchronisation — pour le
+    /// double-clic « fermer si déjà au premier plan » (§4).
+    active_tab: Option<Tab>,
 }
 
 /// Ce que la fenêtre OS détachée du Project Manager écrit, pour que la
@@ -687,9 +716,18 @@ struct DetachedProjectManagerRequests {
     /// vidange ; [`PlotyxApp::ui`] les transfère dans son propre
     /// `open_requests` puis les vide.
     open: Vec<Tab>,
+    /// Onglets fermés par un double-clic depuis la dernière vidange (§4) —
+    /// même schéma que `open`.
+    close: Vec<Tab>,
     /// Vrai si le bouton « Réattacher » ou la fermeture de la fenêtre OS a
     /// été actionné depuis la dernière vidange.
     reattach: bool,
+    /// Sélection/masquage tels qu'ils étaient à la fin de la dernière image
+    /// peinte par la fenêtre détachée — `None` tant qu'aucune image n'a
+    /// encore tourné depuis la dernière vidange. Remplacés en bloc plutôt
+    /// qu'en delta, comme `DetachedTabRequests::geometry` (§6).
+    selection: Option<HashSet<Tab>>,
+    hidden: Option<HashSet<Tab>>,
 }
 
 /// Un onglet de contenu détaché en fenêtre OS séparée — voir la doc de tête
@@ -734,6 +772,12 @@ struct DetachedTabViewModel {
     /// [`PlotyxApp::graph_views`] le temps du détachement — voir
     /// [`PlotyxApp::detach_tab`]/[`PlotyxApp::reattach_tab`].
     graph_view: Option<GraphView>,
+    /// `Tab::Graph` : repli du contenu, propre à cette fenêtre détachée —
+    /// initialisé depuis [`PlotyxApp::collapsed_graph_tabs`] par
+    /// `detach_tab`, basculé directement ici (pas de détour par
+    /// `DetachedTabRequests`, ce repli n'intéresse que cette fenêtre), et
+    /// reversé dans `collapsed_graph_tabs` par `reattach_tab`.
+    collapsed: bool,
     /// Le premier callback d'un viewport différé peut arriver avant que
     /// Wayland/WGPU ait stabilisé sa taille. Une seule image supplémentaire
     /// donne alors à la figure son rectangle réel, sans entretenir une boucle
@@ -823,7 +867,10 @@ impl PlotyxApp {
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
             window_positions: HashMap::new(),
+            window_sizes: HashMap::new(),
             saved_window_geometries: HashMap::new(),
+            pm_selection: HashSet::new(),
+            hidden_tabs: HashSet::new(),
             autoquit,
             first_frame: None,
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
@@ -1097,11 +1144,25 @@ impl PlotyxApp {
     /// position : pas de bascule vers la droite ni de repositionnement par
     /// glisser, voir la doc de tête du module, § attacher à gauche ou à
     /// droite.
-    fn project_manager_panel(&mut self, ui: &mut egui::Ui, open_requests: &mut Vec<Tab>) {
+    fn project_manager_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        open_requests: &mut Vec<Tab>,
+        close_requests: &mut Vec<Tab>,
+        active_tab: Option<Tab>,
+    ) {
         egui::Panel::left("plotyx_pm")
             .default_size(PROJECT_MANAGER_WIDTH)
             .show(ui, |ui| {
-                project_manager_contents(ui, &self.state, open_requests);
+                let tree = self.state.project_tree();
+                let mut interaction = PmInteraction {
+                    open_requests,
+                    close_requests,
+                    active_tab,
+                    selection: &mut self.pm_selection,
+                    hidden: &mut self.hidden_tabs,
+                };
+                project_manager_contents_from_tree(ui, &tree, &mut interaction);
             });
     }
 
@@ -1200,13 +1261,16 @@ impl PlotyxApp {
     ///   de [`PlotyxApp::open_tab`] ni appeler
     ///   [`PlotyxApp::reattach_project_manager`] depuis l'intérieur d'un
     ///   callback qui n'a pas accès à `&mut self`.
-    fn show_detached_project_manager(&mut self, ctx: &egui::Context) {
+    fn show_detached_project_manager(&mut self, ctx: &egui::Context, active_tab: Option<Tab>) {
         {
             let mut model = self
                 .pm_view_model
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
             model.tree = self.state.project_tree();
+            model.selected = self.pm_selection.clone();
+            model.hidden = self.hidden_tabs.clone();
+            model.active_tab = active_tab;
         }
         let view_model = Arc::clone(&self.pm_view_model);
         let requests = Arc::clone(&self.pm_requests);
@@ -1218,6 +1282,17 @@ impl PlotyxApp {
                 .with_inner_size([PROJECT_MANAGER_WIDTH + 40.0, 480.0]),
             move |ui, _class| {
                 let mut opened = Vec::new();
+                let mut closed = Vec::new();
+                // Lecture d'une copie plutôt que du verrou tenu pendant
+                // toute la peinture : `project_manager_contents_from_tree`
+                // ne doit pas retenir `view_model` verrouillé le temps
+                // d'un `ScrollArea` entier. La sélection/le masquage sont
+                // mutés sur ces copies puis renvoyés en bloc après coup
+                // (`selection`/`hidden` sur `DetachedProjectManagerRequests`).
+                let mut model = view_model
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner())
+                    .clone();
                 egui::CentralPanel::default().show(ui, |ui| {
                     if ui.button("Réattacher à la fenêtre principale").clicked() {
                         requests
@@ -1227,23 +1302,21 @@ impl PlotyxApp {
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
                     ui.separator();
-                    // Lecture d'une copie plutôt que du verrou tenu pendant
-                    // toute la peinture : `project_manager_contents_from_tree`
-                    // ne doit pas retenir `view_model` verrouillé le temps
-                    // d'un `ScrollArea` entier.
-                    let tree = view_model
-                        .lock()
-                        .unwrap_or_else(|err| err.into_inner())
-                        .tree
-                        .clone();
-                    project_manager_contents_from_tree(ui, &tree, &mut opened);
+                    let mut interaction = PmInteraction {
+                        open_requests: &mut opened,
+                        close_requests: &mut closed,
+                        active_tab: model.active_tab,
+                        selection: &mut model.selected,
+                        hidden: &mut model.hidden,
+                    };
+                    project_manager_contents_from_tree(ui, &model.tree, &mut interaction);
                 });
-                if !opened.is_empty() {
-                    requests
-                        .lock()
-                        .unwrap_or_else(|err| err.into_inner())
-                        .open
-                        .append(&mut opened);
+                {
+                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                    requests.open.append(&mut opened);
+                    requests.close.append(&mut closed);
+                    requests.selection = Some(model.selected);
+                    requests.hidden = Some(model.hidden);
                 }
                 // L'utilisateur a cliqué le bouton de fermeture de cette
                 // fenêtre OS : on la referme proprement en la réattachant au
@@ -1291,6 +1364,7 @@ impl PlotyxApp {
             _ => None,
         };
         self.window_positions.remove(&tab);
+        self.window_sizes.remove(&tab);
         let selected_sheet = match tab {
             Tab::Book(id) => self.state.selected_sheet_in(id),
             _ => None,
@@ -1302,6 +1376,7 @@ impl PlotyxApp {
             note_edit: None,
             graph_view,
             needs_initial_repaint: true,
+            collapsed: self.collapsed_graph_tabs.contains(&tab),
         };
         self.detached_tabs.insert(
             tab,
@@ -1332,6 +1407,7 @@ impl PlotyxApp {
                 view.invalidate_surface();
                 self.graph_views.insert(id, view);
             }
+            toggle_graph_collapse_to(&mut self.collapsed_graph_tabs, tab, model.collapsed);
         }
         if !self.floating_tabs.contains(&tab) {
             self.push_floating_tab(tab);
@@ -1417,52 +1493,49 @@ impl PlotyxApp {
                 _ => [420.0, 360.0],
             };
             let saved_geometry = state.snapshot().window_geometries.get(&tab_node(tab));
+            // Sans décoration native : la barre maison (`window_header`,
+            // placement `Detached`) est tout ce que l'utilisateur a pour
+            // déplacer/redimensionner/fermer cette fenêtre — voir la doc de
+            // tête du module, § détachement générique, et
+            // [`detached_resize_handles`] pour le redimensionnement.
             let viewport = if let Some(geometry) = saved_geometry {
                 egui::ViewportBuilder::default()
                     .with_title(title)
+                    .with_decorations(false)
                     .with_inner_size([geometry.width as f32, geometry.height as f32])
                     .with_position(egui::pos2(geometry.x as f32, geometry.y as f32))
             } else {
                 egui::ViewportBuilder::default()
                     .with_title(title)
+                    .with_decorations(false)
                     .with_inner_size(size)
             };
+            let id = egui::Id::new(tab);
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of(tab),
                 viewport,
                 move |ui, _class| {
                     let mut model = view_model.lock().unwrap_or_else(|err| err.into_inner());
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                    let was_collapsed = model.collapsed;
+                    let mut header_actions = WindowHeaderActions::default();
                     egui::CentralPanel::default().show(ui, |ui| {
-                        // Hauteur bornée explicitement, comme
-                        // `window_header` (même piège) : sans elle,
-                        // `Layout::right_to_left(Align::Center)` demande à
-                        // sa `Ui` enfant toute la hauteur restante pour
-                        // pouvoir centrer verticalement dedans — un simple
-                        // bouton « ↩ » consommerait alors toute la fenêtre
-                        // détachée, laissant 0 pixel de hauteur disponible
-                        // au contenu qui suit (la figure d'un `Tab::Graph`,
-                        // entre autres) et le rendant invisible.
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(ui.available_width(), 28.0),
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                if ui
-                                    .small_button("↩")
-                                    .on_hover_text("Réattacher à la fenêtre principale")
-                                    .clicked()
-                                {
-                                    requests.reattach = true;
-                                    root_context.request_repaint_of(egui::ViewportId::ROOT);
-                                }
-                            },
-                        );
-                        ui.separator();
                         let Some(snapshot) = model.snapshot.clone() else {
                             // Ne devrait jamais arriver : `detach_tab` pose le
                             // premier instantané avant toute image détachée.
                             return;
                         };
+                        header_actions = window_header(
+                            ui,
+                            id,
+                            &tab_title_from_tree(&snapshot.tree, tab),
+                            tab,
+                            was_collapsed,
+                            HeaderPlacement::Detached,
+                        );
+                        if was_collapsed ^ header_actions.toggle_collapse {
+                            return;
+                        }
                         let tree = &snapshot.tree;
                         match tab {
                             Tab::Book(id) => {
@@ -1480,6 +1553,29 @@ impl PlotyxApp {
                             }
                         }
                     });
+                    detached_resize_handles(ui);
+                    if header_actions.toggle_collapse {
+                        model.collapsed = !model.collapsed;
+                    }
+                    if header_actions.title_drag_started {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                    if header_actions.maximize {
+                        let is_maximized = ui
+                            .ctx()
+                            .input(|input| input.viewport().maximized)
+                            .unwrap_or(false);
+                        ui.ctx()
+                            .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
+                    }
+                    if header_actions.detach {
+                        requests.reattach = true;
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                    }
+                    if header_actions.close {
+                        requests.close = true;
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                    }
                     if std::mem::take(&mut model.needs_initial_repaint) {
                         // `show_viewport_deferred` crée la fenêtre après
                         // l'image racine. Sous Wayland, le premier callback
@@ -1600,6 +1696,14 @@ impl eframe::App for PlotyxApp {
         // fenêtre) cette image-ci — appliqués après le rendu, même raison.
         let mut close_requests: Vec<Tab> = Vec::new();
         let mut geometry_updates: Vec<(Tab, egui::Rect)> = Vec::new();
+        // L'onglet au premier plan — source de vérité pour le double-clic du
+        // Project Manager (§4) et le surlignage de la fenêtre active (§5) :
+        // calculé une fois ici, avant même le panneau fixe du Project
+        // Manager qui en a besoin, plutôt qu'à l'intérieur du `CentralPanel`
+        // (trop tard pour lui).
+        let active_tab = self
+            .maximized_tab
+            .or_else(|| self.floating_tabs.last().copied());
 
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
@@ -1619,20 +1723,31 @@ impl eframe::App for PlotyxApp {
         self.script_panel(ui, &ctx, &mut actions);
 
         if self.pm_detached {
-            self.show_detached_project_manager(&ctx);
+            self.show_detached_project_manager(&ctx, active_tab);
             // Vidange ce que la fenêtre OS détachée a écrit depuis la
             // dernière image (voir la doc de tête de
             // `show_detached_project_manager`) — même moment que le reste de
             // `open_requests`, avant de peindre le panneau fixe (qui ne sera
             // de toute façon pas peint cette image-ci) et le `CentralPanel`.
-            let should_reattach = {
+            let (should_reattach, new_selection, new_hidden) = {
                 let mut requests = self
                     .pm_requests
                     .lock()
                     .unwrap_or_else(|err| err.into_inner());
                 open_requests.append(&mut requests.open);
-                std::mem::take(&mut requests.reattach)
+                close_requests.append(&mut requests.close);
+                (
+                    std::mem::take(&mut requests.reattach),
+                    requests.selection.take(),
+                    requests.hidden.take(),
+                )
             };
+            if let Some(selection) = new_selection {
+                self.pm_selection = selection;
+            }
+            if let Some(hidden) = new_hidden {
+                self.hidden_tabs = hidden;
+            }
             if should_reattach {
                 self.reattach_project_manager();
             }
@@ -1642,7 +1757,7 @@ impl eframe::App for PlotyxApp {
             // construction qu'il n'est jamais recouvert par lui ni ne le
             // recouvre, comme la barre de menu (`egui::Panel::top`) peinte
             // plus haut.
-            self.project_manager_panel(ui, &mut open_requests);
+            self.project_manager_panel(ui, &mut open_requests, &mut close_requests, active_tab);
         }
 
         if !self.detached_tabs.is_empty() {
@@ -1697,6 +1812,8 @@ impl eframe::App for PlotyxApp {
             collapsed_graph_tabs,
             maximized_tab,
             window_positions,
+            window_sizes,
+            hidden_tabs,
             ..
         } = self;
 
@@ -1712,7 +1829,8 @@ impl eframe::App for PlotyxApp {
         // `plot_panel_graph`, testée sans fenêtre dans `tests/shell.rs`.
         // Masqué sinon, y compris pendant l'édition d'un autre onglet : pas
         // de panneau vide à regarder pour un classeur ou une note.
-        let active_tab = maximized_tab.or_else(|| floating_tabs.last().copied());
+        // `active_tab` est calculé plus haut dans `ui()`, avant même le
+        // Project Manager qui en a aussi besoin (§ double-clic).
         match plot_panel_graph(active_tab_kind(active_tab)) {
             Some(graph) => {
                 egui::Panel::right("plotyx_plot_config")
@@ -1752,6 +1870,12 @@ impl eframe::App for PlotyxApp {
                 // panneaux, quel que soit son déplacement/redimensionnement.
                 let workspace_rect = ui.max_rect();
                 for &tab in floating_tabs.iter() {
+                    if hidden_tabs.contains(&tab) {
+                        // Masqué depuis le Project Manager (§6) : l'onglet
+                        // reste dans `floating_tabs` (cascade/position/
+                        // géométrie conservées), seul son rendu est sauté.
+                        continue;
+                    }
                     let id = egui::Id::new(tab);
                     if *focus_next == Some(tab) {
                         ui.ctx()
@@ -1779,20 +1903,46 @@ impl eframe::App for PlotyxApp {
                         .unwrap_or(default_size)
                         .min(workspace_rect.size());
                     let current_pos = *window_positions.entry(tab).or_insert(saved_pos);
+                    let current_size = *window_sizes.entry(tab).or_insert(saved_size);
                     let mut open = true;
                     let mut header_actions = WindowHeaderActions::default();
                     let was_collapsed = collapsed_graph_tabs.contains(&tab);
+                    let is_active = Some(tab) == active_tab;
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
                         .title_bar(false)
                         .drag_area(egui::WindowDrag::Off)
                         .current_pos(current_pos)
-                        .default_size(saved_size)
+                        // Taille forcée, comme la position — voir la doc de
+                        // tête de `PlotyxApp::window_sizes` (§3) : le
+                        // redimensionnement natif d'`egui::Window` est
+                        // remplacé par [`floating_resize_handles`], posées
+                        // juste après `.show()`.
+                        .fixed_size(current_size)
                         .constrain_to(workspace_rect)
                         .open(&mut open)
                         .show(ui.ctx(), |ui| {
-                            header_actions =
-                                window_header(ui, id, &tab_title(state, tab), tab, was_collapsed);
+                            if is_active {
+                                // Surlignage de la fenêtre au premier plan
+                                // (§5) — `active_tab` est la même source de
+                                // vérité déjà utilisée pour le z-order
+                                // (`floating_tabs.last()`) et le double-clic
+                                // du Project Manager, pas un nouvel état.
+                                ui.painter().rect_stroke(
+                                    ui.max_rect(),
+                                    0.0,
+                                    ui.visuals().selection.stroke,
+                                    egui::StrokeKind::Outside,
+                                );
+                            }
+                            header_actions = window_header(
+                                ui,
+                                id,
+                                &tab_title(state, tab),
+                                tab,
+                                was_collapsed,
+                                HeaderPlacement::Floating,
+                            );
                             if !(was_collapsed ^ header_actions.toggle_collapse) {
                                 tab_contents(ui, state, &mut actions, graph_views, tab);
                             }
@@ -1813,6 +1963,19 @@ impl eframe::App for PlotyxApp {
                         if let Some(position) = window_positions.get_mut(&tab) {
                             *position += header_actions.drag_delta;
                         }
+                    }
+                    // Poignées de redimensionnement maison (§3) : posées sur
+                    // le rectangle qu'on vient de demander (position/taille
+                    // forcées ci-dessus, donc identique au rectangle
+                    // réellement peint cette image). Mutent
+                    // `window_positions`/`window_sizes` directement ; la
+                    // prochaine image les réinjectera via `.current_pos`/
+                    // `.fixed_size`.
+                    let requested_rect = egui::Rect::from_min_size(current_pos, current_size);
+                    if let (Some(position), Some(size)) =
+                        (window_positions.get_mut(&tab), window_sizes.get_mut(&tab))
+                    {
+                        floating_resize_handles(ui, tab, requested_rect, position, size);
                     }
                     if let Some(rect) = ui.ctx().memory(|memory| memory.area_rect(id)) {
                         geometry_updates.push((tab, rect));
@@ -1863,6 +2026,7 @@ impl eframe::App for PlotyxApp {
                 self.floating_tabs.remove(pos);
                 self.cascade_rank.remove(&tab);
                 self.window_positions.remove(&tab);
+                self.window_sizes.remove(&tab);
             }
             if self.maximized_tab == Some(tab) {
                 // Garde de cohérence, comme dans `detach_tab` — ne devrait
@@ -1968,25 +2132,345 @@ fn toggle_graph_collapse(collapsed_graph_tabs: &mut HashSet<Tab>, tab: Tab) {
     }
 }
 
+/// Pose le repli à une valeur précise plutôt que de le basculer — utilisé
+/// par [`PlotyxApp::reattach_tab`] pour reverser dans
+/// `collapsed_graph_tabs` l'état propre à la fenêtre détachée
+/// (`DetachedTabViewModel::collapsed`) plutôt que de le deviner.
+fn toggle_graph_collapse_to(collapsed_graph_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bool) {
+    if !matches!(tab, Tab::Graph(_)) {
+        return;
+    }
+    if collapsed {
+        collapsed_graph_tabs.insert(tab);
+    } else {
+        collapsed_graph_tabs.remove(&tab);
+    }
+}
+
 #[derive(Default)]
 struct WindowHeaderActions {
     maximize: bool,
+    /// Détacher (placement [`HeaderPlacement::Floating`]) ou réattacher
+    /// (placement [`HeaderPlacement::Detached`]) — le glyphe et l'info-bulle
+    /// changent avec `placement`, mais c'est toujours l'appelant qui
+    /// interprète ce booléen selon le contexte d'où il peint l'en-tête.
     detach: bool,
     close: bool,
     toggle_collapse: bool,
+    /// Delta de glissé du titre pendant l'image — utilisé tel quel par
+    /// l'appelant MDI (`window_positions`). Sans effet pratique pour
+    /// l'appelant détaché, qui préfère `title_drag_started`.
     drag_delta: egui::Vec2,
+    /// Vrai à l'image où le glissé du titre démarre — c'est celui que
+    /// l'appelant détaché utilise pour déclencher
+    /// `ViewportCommand::StartDrag` une seule fois, la fenêtre OS prenant
+    /// ensuite la main sur le geste (`drag_delta` ne serait plus fiable une
+    /// fois l'OS aux commandes du pointeur).
+    title_drag_started: bool,
 }
 
-/// Barre de titre des fenêtres de contenu. Les actions et la croix sont des
-/// boutons `egui` de même nature et forment un seul groupe visuel ; cela évite
-/// une `Area` superposée, qui se décale quand une fenêtre passe derrière une
-/// autre.
+/// D'où [`window_header`] est peint — pilote la couleur des icônes, le
+/// glyphe « détacher »/« réattacher » et quels boutons apparaissent. Deux
+/// contextes, une seule fonction : c'est la barre elle-même qui doit être
+/// identique, pas seulement son apparence générale (voir la doc de tête du
+/// module, § détachement générique).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeaderPlacement {
+    /// Fenêtre flottante dans le `CentralPanel` (MDI).
+    Floating,
+    /// Fenêtre OS séparée (`PlotyxApp::show_detached_tabs`), sans
+    /// décoration native — cette barre est tout ce que l'utilisateur a pour
+    /// la déplacer, la redimensionner par ses icônes de maximisation, ou la
+    /// fermer/réattacher.
+    Detached,
+}
+
+/// Une icône d'en-tête peinte au pixel près, comme le titre et le chevron de
+/// repli — jamais un `Button` (voir la doc de tête de [`window_header`] pour
+/// la raison précise). `rect` est déjà borné à la hauteur de la barre ; le
+/// fond arrondi au survol imite l'affordance d'un bouton sans réintroduire
+/// son padding natif.
+fn header_icon(
+    header: &mut egui::Ui,
+    base_id: egui::Id,
+    id_source: &str,
+    rect: egui::Rect,
+    glyph: &str,
+    tooltip: &str,
+    color: egui::Color32,
+) -> bool {
+    let response = header.interact(rect, base_id.with(id_source), egui::Sense::click());
+    if response.hovered() {
+        header
+            .painter()
+            .rect_filled(rect, 4.0, header.visuals().widgets.hovered.bg_fill);
+    }
+    header.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        egui::TextStyle::Button.resolve(header.style()),
+        color,
+    );
+    response.on_hover_text(tooltip).clicked()
+}
+
+/// Taille minimale d'une fenêtre de contenu, flottante ou détachée — assez
+/// pour garder l'en-tête (icônes + titre) et un fragment de contenu lisibles,
+/// pas une contrainte scientifique.
+const MIN_CONTENT_WINDOW_SIZE: egui::Vec2 = egui::vec2(220.0, 140.0);
+
+/// Huit zones fines de redimensionnement pour une fenêtre flottante MDI —
+/// voir la doc de tête de [`PlotyxApp::window_sizes`] pour pourquoi le
+/// redimensionnement natif d'`egui::Window` ne suffit pas ici (seuls
+/// droite/bas/coin restent possibles une fois le glissé natif désactivé, la
+/// barre de titre maison en ayant besoin). Posées entièrement à
+/// l'**extérieur** de `rect` plutôt qu'à cheval dessus (contrairement aux
+/// poignées natives, qui vivent dans le calque de la fenêtre et n'ont donc
+/// pas ce problème) : ces zones vivent dans le calque du `CentralPanel`, en
+/// dessous de celui de la fenêtre — un chevauchement se ferait donc
+/// disputer le survol par la fenêtre elle-même.
+fn floating_resize_handles(
+    ui: &egui::Ui,
+    tab: Tab,
+    rect: egui::Rect,
+    position: &mut egui::Pos2,
+    size: &mut egui::Vec2,
+) {
+    const BORDER: f32 = 6.0;
+    // (source, zone, curseur, ouest, est, nord, sud) — les quatre derniers
+    // indiquent quels côtés ce glissé affecte, combinés pour les coins.
+    let zones: [(&str, egui::Rect, egui::CursorIcon, bool, bool, bool, bool); 8] = [
+        (
+            "n",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left(), rect.top() - BORDER),
+                egui::pos2(rect.right(), rect.top()),
+            ),
+            egui::CursorIcon::ResizeNorth,
+            false,
+            false,
+            true,
+            false,
+        ),
+        (
+            "s",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left(), rect.bottom()),
+                egui::pos2(rect.right(), rect.bottom() + BORDER),
+            ),
+            egui::CursorIcon::ResizeSouth,
+            false,
+            false,
+            false,
+            true,
+        ),
+        (
+            "w",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() - BORDER, rect.top()),
+                egui::pos2(rect.left(), rect.bottom()),
+            ),
+            egui::CursorIcon::ResizeWest,
+            true,
+            false,
+            false,
+            false,
+        ),
+        (
+            "e",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.right(), rect.top()),
+                egui::pos2(rect.right() + BORDER, rect.bottom()),
+            ),
+            egui::CursorIcon::ResizeEast,
+            false,
+            true,
+            false,
+            false,
+        ),
+        (
+            "nw",
+            egui::Rect::from_min_size(
+                rect.left_top() - egui::vec2(BORDER, BORDER),
+                egui::vec2(BORDER, BORDER),
+            ),
+            egui::CursorIcon::ResizeNwSe,
+            true,
+            false,
+            true,
+            false,
+        ),
+        (
+            "ne",
+            egui::Rect::from_min_size(
+                egui::pos2(rect.right(), rect.top() - BORDER),
+                egui::vec2(BORDER, BORDER),
+            ),
+            egui::CursorIcon::ResizeNeSw,
+            false,
+            true,
+            true,
+            false,
+        ),
+        (
+            "sw",
+            egui::Rect::from_min_size(
+                egui::pos2(rect.left() - BORDER, rect.bottom()),
+                egui::vec2(BORDER, BORDER),
+            ),
+            egui::CursorIcon::ResizeNeSw,
+            true,
+            false,
+            false,
+            true,
+        ),
+        (
+            "se",
+            egui::Rect::from_min_size(rect.right_bottom(), egui::vec2(BORDER, BORDER)),
+            egui::CursorIcon::ResizeNwSe,
+            false,
+            true,
+            false,
+            true,
+        ),
+    ];
+    let base_id = egui::Id::new(("floating_resize_handle", tab));
+    for (source, zone, cursor, west, east, north, south) in zones {
+        let response = ui.interact(zone, base_id.with(source), egui::Sense::drag());
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(cursor);
+        }
+        let delta = response.drag_delta();
+        if delta == egui::Vec2::ZERO {
+            continue;
+        }
+        if west {
+            let new_width = (size.x - delta.x).max(MIN_CONTENT_WINDOW_SIZE.x);
+            position.x += size.x - new_width;
+            size.x = new_width;
+        }
+        if east {
+            size.x = (size.x + delta.x).max(MIN_CONTENT_WINDOW_SIZE.x);
+        }
+        if north {
+            let new_height = (size.y - delta.y).max(MIN_CONTENT_WINDOW_SIZE.y);
+            position.y += size.y - new_height;
+            size.y = new_height;
+        }
+        if south {
+            size.y = (size.y + delta.y).max(MIN_CONTENT_WINDOW_SIZE.y);
+        }
+    }
+}
+
+/// Bordure invisible de redimensionnement pour une fenêtre détachée sans
+/// décoration (`.with_decorations(false)`, voir la doc de tête de
+/// [`PlotyxApp::show_detached_tabs`]) : huit zones fines aux bords/coins du
+/// viewport, qui délèguent le redimensionnement à l'OS dès que le glissé
+/// démarre (`ViewportCommand::BeginResize`) — même principe que
+/// `ViewportCommand::StartDrag` pour le déplacement du titre : aucun calcul
+/// de delta à notre charge, l'OS/le gestionnaire de fenêtres prend la main.
+fn detached_resize_handles(ui: &egui::Ui) {
+    const BORDER: f32 = 6.0;
+    let rect = ui.ctx().input(|input| input.content_rect());
+    let zones: [(&str, egui::Rect, egui::CursorIcon, egui::ResizeDirection); 8] = [
+        (
+            "n",
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.right(), rect.top() + BORDER),
+            ),
+            egui::CursorIcon::ResizeNorth,
+            egui::ResizeDirection::North,
+        ),
+        (
+            "s",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left(), rect.bottom() - BORDER),
+                rect.right_bottom(),
+            ),
+            egui::CursorIcon::ResizeSouth,
+            egui::ResizeDirection::South,
+        ),
+        (
+            "w",
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + BORDER, rect.bottom()),
+            ),
+            egui::CursorIcon::ResizeWest,
+            egui::ResizeDirection::West,
+        ),
+        (
+            "e",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.right() - BORDER, rect.top()),
+                rect.right_bottom(),
+            ),
+            egui::CursorIcon::ResizeEast,
+            egui::ResizeDirection::East,
+        ),
+        (
+            "nw",
+            egui::Rect::from_min_size(rect.left_top(), egui::vec2(BORDER, BORDER)),
+            egui::CursorIcon::ResizeNwSe,
+            egui::ResizeDirection::NorthWest,
+        ),
+        (
+            "ne",
+            egui::Rect::from_min_size(
+                egui::pos2(rect.right() - BORDER, rect.top()),
+                egui::vec2(BORDER, BORDER),
+            ),
+            egui::CursorIcon::ResizeNeSw,
+            egui::ResizeDirection::NorthEast,
+        ),
+        (
+            "sw",
+            egui::Rect::from_min_size(
+                egui::pos2(rect.left(), rect.bottom() - BORDER),
+                egui::vec2(BORDER, BORDER),
+            ),
+            egui::CursorIcon::ResizeNeSw,
+            egui::ResizeDirection::SouthWest,
+        ),
+        (
+            "se",
+            egui::Rect::from_min_size(
+                egui::pos2(rect.right() - BORDER, rect.bottom() - BORDER),
+                egui::vec2(BORDER, BORDER),
+            ),
+            egui::CursorIcon::ResizeNwSe,
+            egui::ResizeDirection::SouthEast,
+        ),
+    ];
+    let base_id = egui::Id::new("detached_resize_handle");
+    for (source, zone, cursor, direction) in zones {
+        let response = ui.interact(zone, base_id.with(source), egui::Sense::drag());
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(cursor);
+        }
+        if response.drag_started() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+        }
+    }
+}
+
+/// Barre de titre des fenêtres de contenu — la même base de code pour les
+/// fenêtres flottantes MDI et les fenêtres OS détachées (`placement`, voir
+/// [`HeaderPlacement`]). Les actions et la croix sont peintes de la même
+/// façon que le titre (voir [`header_icon`]) et forment un seul groupe
+/// visuel ; cela évite aussi une `Area` superposée, qui se décale quand une
+/// fenêtre passe derrière une autre.
 fn window_header(
     ui: &mut egui::Ui,
     id: egui::Id,
     title: &str,
     tab: Tab,
     collapsed: bool,
+    placement: HeaderPlacement,
 ) -> WindowHeaderActions {
     const ACTIONS_WIDTH: f32 = 90.0;
     const COLLAPSE_WIDTH: f32 = 24.0;
@@ -1996,6 +2480,10 @@ fn window_header(
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    let icon_color = match placement {
+        HeaderPlacement::Floating => header.visuals().text_color(),
+        HeaderPlacement::Detached => theme::gutter_text_color(),
+    };
     let collapse_width = if matches!(tab, Tab::Graph(_)) {
         COLLAPSE_WIDTH
     } else {
@@ -2009,22 +2497,15 @@ fn window_header(
         } else {
             ("v", "Masquer le contenu du graphe")
         };
-        header.painter().text(
-            collapse_rect.center(),
-            egui::Align2::CENTER_CENTER,
+        if header_icon(
+            &mut header,
+            id,
+            "graph_collapse",
+            collapse_rect,
             icon,
-            egui::TextStyle::Button.resolve(header.style()),
-            header.visuals().text_color(),
-        );
-        if header
-            .interact(
-                collapse_rect,
-                id.with("graph_collapse"),
-                egui::Sense::click(),
-            )
-            .on_hover_text(tooltip)
-            .clicked()
-        {
+            tooltip,
+            icon_color,
+        ) {
             actions.toggle_collapse = true;
         }
     }
@@ -2034,26 +2515,53 @@ fn window_header(
             egui::vec2(ACTION_WIDTH, rect.height() - 4.0),
         )
     };
-    if header
-        .put(action_rect(2.0), egui::Button::new("×").small())
-        .on_hover_text("Fermer la fenêtre")
-        .clicked()
-    {
+    if header_icon(
+        &mut header,
+        id,
+        "close",
+        action_rect(2.0),
+        "×",
+        "Fermer la fenêtre",
+        icon_color,
+    ) {
         actions.close = true;
     }
-    if matches!(tab, Tab::Book(_) | Tab::Graph(_)) {
-        if header
-            .put(action_rect(28.0), egui::Button::new("↗").small())
-            .on_hover_text("Détacher dans une fenêtre")
-            .clicked()
-        {
+    // En MDI, détacher/maximiser restent réservés à Book/Graph (Matrix/Note
+    // n'ont pas ce chemin d'UI aujourd'hui, même si `show_detached_tabs` les
+    // gère déjà génériquement). En fenêtre détachée, les quatre natures
+    // gardent réattacher/maximiser en toutes circonstances — c'est ce qui
+    // remplace la barre de titre native de l'OS retirée avec elle
+    // (`.with_decorations(false)`), donc pas question d'en perdre une
+    // capacité pour certains onglets.
+    let show_detach_and_maximize = match placement {
+        HeaderPlacement::Floating => matches!(tab, Tab::Book(_) | Tab::Graph(_)),
+        HeaderPlacement::Detached => true,
+    };
+    if show_detach_and_maximize {
+        let (detach_glyph, detach_tooltip) = match placement {
+            HeaderPlacement::Floating => ("↗", "Détacher dans une fenêtre"),
+            HeaderPlacement::Detached => ("↩", "Réattacher à la fenêtre principale"),
+        };
+        if header_icon(
+            &mut header,
+            id,
+            "detach",
+            action_rect(28.0),
+            detach_glyph,
+            detach_tooltip,
+            icon_color,
+        ) {
             actions.detach = true;
         }
-        if header
-            .put(action_rect(54.0), egui::Button::new("⛶").small())
-            .on_hover_text("Maximiser la fenêtre")
-            .clicked()
-        {
+        if header_icon(
+            &mut header,
+            id,
+            "maximize",
+            action_rect(54.0),
+            "⛶",
+            "Maximiser la fenêtre",
+            icon_color,
+        ) {
             actions.maximize = true;
         }
     }
@@ -2074,6 +2582,9 @@ fn window_header(
         id.with("content_title_drag"),
         egui::Sense::drag(),
     );
+    if drag.drag_started() {
+        actions.title_drag_started = true;
+    }
     if drag.dragged() {
         actions.drag_delta = ui.input(|input| input.pointer.delta());
     }
@@ -2096,6 +2607,20 @@ fn tab_title(state: &AppState, tab: Tab) -> String {
         Tab::Graph(id) => node_title(state, id, "Graphe"),
         Tab::Matrix(id) => node_title(state, id, "Matrice"),
         Tab::Note(id) => node_title(state, id, "Note"),
+    }
+}
+
+/// [`tab_title`], à partir d'un `Tree` déjà en main plutôt que d'un
+/// `&AppState` vivant — pour l'en-tête peint par une fenêtre détachée, qui
+/// n'a que le [`Snapshot`] resynchronisé dans `DetachedTabViewModel`
+/// (voir la doc de tête du module, § « la lecture du modèle est
+/// factorisée »).
+fn tab_title_from_tree(tree: &Tree, tab: Tab) -> String {
+    match tab {
+        Tab::Book(id) => node_title_in(tree, id, "Classeur"),
+        Tab::Graph(id) => node_title_in(tree, id, "Graphe"),
+        Tab::Matrix(id) => node_title_in(tree, id, "Matrice"),
+        Tab::Note(id) => node_title_in(tree, id, "Note"),
     }
 }
 
@@ -2193,40 +2718,77 @@ fn graph_drop_target(
     }
 }
 
-/// Le panneau Project Manager lui-même : l'arbre du projet
-/// ([`AppState::project_tree`]), dossiers dépliables et fenêtres cliquables.
-/// Cliquer une fenêtre pousse l'onglet qui l'ouvre dans `open_requests` (une
-/// ouverture ou une focalisation, tranchée par [`PlotyxApp::open_tab`] après
-/// le rendu). Fonction libre plutôt que méthode : appelée à la fois depuis le
-/// panneau fixe, la zone de maximisation, et la fenêtre OS séparée — trois
-/// contextes, un seul rendu à tenir en accord.
-fn project_manager_contents(ui: &mut egui::Ui, state: &AppState, open_requests: &mut Vec<Tab>) {
-    let tree = state.project_tree();
-    project_manager_contents_from_tree(ui, &tree, open_requests);
+/// Ce que le rendu de l'arbre du Project Manager accumule ou lit, à travers
+/// [`project_manager_contents_from_tree`]/[`project_tree_node_ui`] — un seul
+/// paquet plutôt que cinq paramètres, pour les deux mêmes contextes que le
+/// reste du module (panneau fixe et fenêtre OS détachée, voir la doc de tête
+/// de [`PlotyxApp::show_detached_project_manager`]).
+struct PmInteraction<'a> {
+    /// Onglet ouvert ou focalisé par un simple clic — voir
+    /// [`PlotyxApp::open_tab`].
+    open_requests: &'a mut Vec<Tab>,
+    /// Onglet fermé par un double-clic sur une entrée déjà au premier plan,
+    /// ou par « Masquer » sur une entrée maximisée (garde de cohérence, même
+    /// esprit que celle de `detach_tab`).
+    close_requests: &'a mut Vec<Tab>,
+    /// L'onglet actuellement au premier plan — voir la doc de tête du
+    /// module, § z-order. `None` si aucune fenêtre flottante n'est ouverte.
+    active_tab: Option<Tab>,
+    /// Sélection courante dans l'arbre — Ctrl/Cmd-clic en bascule
+    /// l'appartenance sans ouvrir l'onglet.
+    selection: &'a mut HashSet<Tab>,
+    /// Onglets actuellement masqués (voir [`PlotyxApp::hidden_tabs`]) —
+    /// affichés atténués dans l'arbre, et ce que « Afficher »/« Masquer »
+    /// modifient pour la sélection courante.
+    hidden: &'a mut HashSet<Tab>,
 }
 
-/// Le corps de [`project_manager_contents`], à partir d'un arbre déjà
-/// construit plutôt que d'un `&AppState` vivant. Seul le callback
-/// `show_viewport_deferred` de
-/// [`PlotyxApp::show_detached_project_manager`] a besoin de cette forme :
+/// Le corps du Project Manager, à partir d'un arbre déjà construit plutôt
+/// que d'un `&AppState` vivant — seul le callback `show_viewport_deferred`
+/// de [`PlotyxApp::show_detached_project_manager`] a besoin de cette forme :
 /// il ne porte qu'une copie de l'arbre ([`ProjectManagerViewModel`]), jamais
-/// `AppState` elle-même — voir la doc de tête de cette méthode.
+/// `AppState` elle-même. Le panneau fixe ([`PlotyxApp::project_manager_panel`])
+/// passe directement `&self.state.project_tree()` — même fonction, deux
+/// sources d'arbre.
 fn project_manager_contents_from_tree(
     ui: &mut egui::Ui,
     tree: &[ProjectTreeNode],
-    open_requests: &mut Vec<Tab>,
+    interaction: &mut PmInteraction,
 ) {
     ui.heading("Project Manager");
     ui.separator();
+    if !interaction.selection.is_empty() {
+        // Barre d'actions groupées, seulement quand elle a un effet — pas de
+        // boutons désactivés à regarder tant que rien n'est sélectionné.
+        ui.horizontal(|ui| {
+            if ui.button("Afficher").clicked() {
+                for &tab in interaction.selection.iter() {
+                    interaction.hidden.remove(&tab);
+                    interaction.open_requests.push(tab);
+                }
+            }
+            if ui.button("Masquer").clicked() {
+                for &tab in interaction.selection.iter() {
+                    interaction.hidden.insert(tab);
+                }
+            }
+            ui.weak(format!("{} sélectionné(s)", interaction.selection.len()));
+        });
+        ui.separator();
+    }
     egui::ScrollArea::vertical().show(ui, |ui| {
         for node in tree {
-            project_tree_node_ui(ui, node, open_requests);
+            project_tree_node_ui(ui, node, interaction);
         }
     });
 }
 
 /// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants.
-fn project_tree_node_ui(ui: &mut egui::Ui, node: &ProjectTreeNode, open_requests: &mut Vec<Tab>) {
+fn project_tree_node_ui(
+    ui: &mut egui::Ui,
+    node: &ProjectTreeNode,
+    interaction: &mut PmInteraction,
+) {
     match node {
         ProjectTreeNode::Folder { name, children, .. } => {
             egui::CollapsingHeader::new(format!("📁 {name}"))
@@ -2236,7 +2798,7 @@ fn project_tree_node_ui(ui: &mut egui::Ui, node: &ProjectTreeNode, open_requests
                         ui.weak("(vide)");
                     }
                     for child in children {
-                        project_tree_node_ui(ui, child, open_requests);
+                        project_tree_node_ui(ui, child, interaction);
                     }
                 });
         }
@@ -2247,8 +2809,50 @@ fn project_tree_node_ui(ui: &mut egui::Ui, node: &ProjectTreeNode, open_requests
                 WindowKind::Matrix => "🔢",
                 WindowKind::Note => "📝",
             };
-            if ui.button(format!("{icon} {name}")).clicked() {
-                open_requests.push(tab_for_window(*id, *kind));
+            let tab = tab_for_window(*id, *kind);
+            let selected = interaction.selection.contains(&tab);
+            let is_hidden = interaction.hidden.contains(&tab);
+            let label = format!("{icon} {name}");
+            let fill = if selected {
+                ui.visuals().selection.bg_fill
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            // Le bouton reste un `egui::Button` normal (affordance de survol
+            // native) ; seul le fond du `Frame` qui l'entoure porte la
+            // teinte de sélection, posée derrière lui. `push_id(tab, ...)`
+            // est nécessaire : `Frame::show` fait naître son enfant avec un
+            // salt fixe ("child"), identique à chaque itération de cette
+            // boucle — sans un salt propre à `tab`, toutes les lignes de
+            // l'arbre partageraient le même `Id` de bouton, et un clic
+            // finirait attribué à la dernière ligne pressée plutôt qu'à
+            // celle réellement cliquée.
+            let response = ui
+                .push_id(tab, |ui| {
+                    egui::Frame::NONE
+                        .fill(fill)
+                        .inner_margin(2.0)
+                        .show(ui, |ui| {
+                            if is_hidden {
+                                ui.add(egui::Button::new(egui::RichText::new(&label).weak()))
+                            } else {
+                                ui.button(&label)
+                            }
+                        })
+                        .inner
+                })
+                .inner;
+            if response.clicked() {
+                if ui.input(|input| input.modifiers.command) {
+                    if !interaction.selection.remove(&tab) {
+                        interaction.selection.insert(tab);
+                    }
+                } else {
+                    interaction.open_requests.push(tab);
+                }
+            }
+            if response.double_clicked() && interaction.active_tab == Some(tab) {
+                interaction.close_requests.push(tab);
             }
         }
     }
@@ -5334,6 +5938,7 @@ mod graph_layout_tests {
                     "Graph1",
                     Tab::Graph(graph),
                     false,
+                    HeaderPlacement::Floating,
                 );
             },
         );
@@ -5358,6 +5963,23 @@ mod graph_layout_tests {
         assert!(
             collapse.pos.x + collapse.galley.rect.center().x < 24.0,
             "la flèche de repli doit rester dans le coin supérieur gauche"
+        );
+
+        // Régression : les icônes d'action étaient posées via `Button::
+        // small()`, un widget avec son propre cadre/padding qui ne
+        // s'aligne pas pixel pour pixel sur le titre peint brut — d'où un
+        // désalignement visible malgré des rects nominalement centrés sur
+        // la même ligne (voir la doc de tête de `window_header`).
+        // `header_icon` peint désormais tout de la même façon : les centres
+        // verticaux doivent coïncider exactement.
+        let title_center_y = title.pos.y + title.galley.rect.center().y;
+        let close_center_y = {
+            let close = text_shape("×").expect("le bouton fermer doit être peint");
+            close.pos.y + close.galley.rect.center().y
+        };
+        assert!(
+            (title_center_y - close_center_y).abs() < f32::EPSILON,
+            "le titre et les icônes d'action doivent partager le même centre vertical"
         );
     }
 
@@ -5610,7 +6232,8 @@ mod graph_layout_tests {
                     .current_pos(egui::pos2(100.0, 100.0))
                     .default_size(egui::vec2(560.0, 540.0))
                     .show(ui.ctx(), |ui| {
-                        let _ = window_header(ui, id, "Figure", tab, false);
+                        let _ =
+                            window_header(ui, id, "Figure", tab, false, HeaderPlacement::Floating);
                         graph_drop_target(ui, &state, &mut actions, &mut graph_views, graph);
                     });
             });
@@ -5644,6 +6267,340 @@ mod graph_layout_tests {
         assert!(
             graph_views.get(&graph).unwrap().view().generation() > 0,
             "la fenetre flottante ne doit pas intercepter le pan de la figure"
+        );
+    }
+
+    /// Régression (§3, redimensionnement par les 4 côtés) : `egui::Window`
+    /// coupe `resize_left`/`resize_top` en interne dès que
+    /// `.drag_area(WindowDrag::Off)` est posé (nécessaire au glissé de la
+    /// barre de titre maison) — les deux dépendent d'`Area::is_movable()`,
+    /// qu'`Off` force à `false`, sans moyen de les garder actifs séparément
+    /// (voir la doc de tête de `PlotyxApp::window_sizes`). D'où
+    /// [`floating_resize_handles`], qui remplace entièrement le
+    /// redimensionnement natif. Ce test glisse sa poignée ouest et vérifie
+    /// que la position *et* la taille suivent, sur deux images (la seconde
+    /// sans événement, pour vérifier l'absence de saut en arrière).
+    #[test]
+    fn le_redimensionnement_par_le_bord_gauche_deplace_et_retrecit() {
+        let tab = Tab::Graph(NodeId::from_raw(1));
+        let context = egui::Context::default();
+        let state = std::cell::Cell::new((egui::pos2(300.0, 300.0), egui::vec2(400.0, 300.0)));
+
+        let paint = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let (mut position, mut size) = state.get();
+            let rect = egui::Rect::from_min_size(position, size);
+            let mut output = context.run_ui(input, |ui| {
+                floating_resize_handles(ui, tab, rect, &mut position, &mut size);
+            });
+            output.textures_delta.clear();
+            state.set((position, size));
+        };
+
+        paint(Vec::new());
+        let (position, size) = state.get();
+        let west_handle = egui::pos2(position.x - 3.0, position.y + size.y / 2.0);
+        paint(vec![egui::Event::PointerMoved(west_handle)]);
+        paint(vec![egui::Event::PointerButton {
+            pos: west_handle,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let dragged_to = west_handle + egui::vec2(-40.0, 0.0);
+        paint(vec![egui::Event::PointerMoved(dragged_to)]);
+
+        let (position, size) = state.get();
+        assert!(
+            (position.x - 260.0).abs() < f32::EPSILON,
+            "le bord ouest doit déplacer le coin de la fenêtre de la même distance que le glissé, position={position:?}"
+        );
+        assert!(
+            (size.x - 440.0).abs() < f32::EPSILON,
+            "le bord ouest doit élargir la fenêtre d'autant que le coin recule, size={size:?}"
+        );
+
+        paint(vec![egui::Event::PointerButton {
+            pos: dragged_to,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+
+        let settled = state.get();
+        // Image suivante sans aucun événement : rien ne doit plus bouger —
+        // contrairement au bug natif, il n'y a ici aucun mécanisme qui
+        // pourrait faire sauter la fenêtre en arrière (`position`/`size`
+        // sont notre propre état, pas une mémoire interne qu'un autre
+        // appel pourrait écraser).
+        paint(Vec::new());
+        assert_eq!(state.get(), settled);
+    }
+
+    /// Trouve le centre du texte peint contenant `needle` dans `shapes` —
+    /// utilisé pour cliquer une entrée du Project Manager sans supposer sa
+    /// position exacte (mise en page auto). Même technique que
+    /// `len_tete_du_graphe_garde_son_titre_au_centre_et_sa_fleche_a_gauche`.
+    fn find_text_center(shapes: &[egui::epaint::ClippedShape], needle: &str) -> egui::Pos2 {
+        shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Text(shape) if shape.galley.job.text.contains(needle) => {
+                    Some(shape.pos + shape.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("aucun texte contenant {needle:?} n'a été peint"))
+    }
+
+    /// Un clic (glissé nul, pression puis relâchement au même endroit) sur
+    /// `pos`, réparti sur deux images comme le veut la détection de clic
+    /// d'egui — voir la doc de tête de
+    /// `le_pan_principal_atteint_la_figure_dans_la_fenetre_flottante` pour le
+    /// même schéma appliqué à un glissé.
+    fn click_at<R>(
+        context: &egui::Context,
+        pos: egui::Pos2,
+        modifiers: egui::Modifiers,
+        mut paint: impl FnMut(&egui::Context, Vec<egui::Event>) -> R,
+    ) {
+        // `PointerButton::modifiers` n'alimente pas `InputState::modifiers`
+        // (voir `InputState::begin_pass`, qui ne le lit que sur
+        // `Event::ModifiersChanged`/`Event::Key`) : sans cet événement
+        // explicite, `ui.input(|i| i.modifiers.command)` resterait toujours
+        // faux, quels que soient les `modifiers` posés sur les événements
+        // de pointeur eux-mêmes.
+        paint(
+            context,
+            vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::PointerMoved(pos),
+            ],
+        );
+        paint(
+            context,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers,
+            }],
+        );
+        paint(
+            context,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers,
+            }],
+        );
+        if modifiers != egui::Modifiers::NONE {
+            paint(
+                context,
+                vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+            );
+        }
+    }
+
+    /// Construit l'arbre d'un projet Book+Graph (le fixture [`graphe`],
+    /// resynchronisé sur `AppState`) — commun aux tests de double-clic et de
+    /// sélection multiple du Project Manager.
+    fn project_manager_fixture() -> (Session, Tab, Tab, Vec<ProjectTreeNode>) {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let tree = state.project_tree();
+        let book_id = tree
+            .iter()
+            .find_map(|node| match node {
+                ProjectTreeNode::Window {
+                    id,
+                    kind: WindowKind::Book,
+                    ..
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("le projet du fixture porte un classeur");
+        (session, Tab::Book(book_id), Tab::Graph(graph), tree)
+    }
+
+    #[test]
+    fn le_double_clic_ferme_lentree_deja_au_premier_plan_mais_pas_une_autre() {
+        let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
+        let context = egui::Context::default();
+        let open_requests = std::cell::RefCell::new(Vec::new());
+        let close_requests = std::cell::RefCell::new(Vec::new());
+        let selection = std::cell::RefCell::new(HashSet::new());
+        let hidden = std::cell::RefCell::new(HashSet::new());
+
+        let paint = |context: &egui::Context, events: Vec<egui::Event>| -> egui::FullOutput {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut interaction = PmInteraction {
+                open_requests: &mut open_requests.borrow_mut(),
+                close_requests: &mut close_requests.borrow_mut(),
+                active_tab: Some(graph_tab),
+                selection: &mut selection.borrow_mut(),
+                hidden: &mut hidden.borrow_mut(),
+            };
+            let mut output = context.run_ui(input, |ui| {
+                project_manager_contents_from_tree(ui, &tree, &mut interaction);
+            });
+            output.textures_delta.clear();
+            output
+        };
+
+        let first = paint(&context, Vec::new());
+        let graph_pos = find_text_center(&first.shapes, "Graph1");
+        let book_pos = find_text_center(&first.shapes, "Book");
+
+        // Double-clic sur l'entrée déjà au premier plan (`active_tab` =
+        // `graph_tab`) : doit fermer, pas seulement (re)focaliser.
+        click_at(&context, graph_pos, egui::Modifiers::NONE, &paint);
+        click_at(&context, graph_pos, egui::Modifiers::NONE, &paint);
+        assert!(
+            close_requests.borrow().contains(&graph_tab),
+            "le double-clic sur l'onglet déjà au premier plan doit le fermer, close_requests={:?}",
+            close_requests.borrow()
+        );
+
+        // Double-clic sur une entrée qui n'est *pas* au premier plan
+        // (`active_tab` reste `graph_tab`) : ouvre/focalise, ne ferme rien.
+        close_requests.borrow_mut().clear();
+        click_at(&context, book_pos, egui::Modifiers::NONE, &paint);
+        click_at(&context, book_pos, egui::Modifiers::NONE, &paint);
+        assert!(
+            !close_requests.borrow().contains(&book_tab),
+            "le double-clic sur une entrée qui n'est pas au premier plan ne doit pas la fermer"
+        );
+        assert!(
+            open_requests.borrow().contains(&book_tab),
+            "le double-clic doit tout de même ouvrir/focaliser l'entrée, open_requests={:?}",
+            open_requests.borrow()
+        );
+    }
+
+    #[test]
+    fn ctrl_clic_selectionne_sans_ouvrir() {
+        let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
+        let context = egui::Context::default();
+        let open_requests = std::cell::RefCell::new(Vec::new());
+        let close_requests = std::cell::RefCell::new(Vec::new());
+        let selection = std::cell::RefCell::new(HashSet::new());
+        let hidden = std::cell::RefCell::new(HashSet::new());
+
+        let paint = |context: &egui::Context, events: Vec<egui::Event>| -> egui::FullOutput {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut interaction = PmInteraction {
+                open_requests: &mut open_requests.borrow_mut(),
+                close_requests: &mut close_requests.borrow_mut(),
+                active_tab: None,
+                selection: &mut selection.borrow_mut(),
+                hidden: &mut hidden.borrow_mut(),
+            };
+            let mut output = context.run_ui(input, |ui| {
+                project_manager_contents_from_tree(ui, &tree, &mut interaction);
+            });
+            output.textures_delta.clear();
+            output
+        };
+
+        let first = paint(&context, Vec::new());
+        let graph_pos = find_text_center(&first.shapes, "Graph1");
+        click_at(&context, graph_pos, egui::Modifiers::COMMAND, &paint);
+
+        assert_eq!(
+            *selection.borrow(),
+            HashSet::from([graph_tab]),
+            "Ctrl/Cmd-clic doit ajouter l'entrée à la sélection"
+        );
+        assert!(
+            open_requests.borrow().is_empty(),
+            "Ctrl/Cmd-clic ne doit jamais ouvrir l'onglet, open_requests={:?}",
+            open_requests.borrow()
+        );
+    }
+
+    #[test]
+    fn masquer_et_afficher_agissent_sur_toute_la_selection() {
+        let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
+        let context = egui::Context::default();
+        let open_requests = std::cell::RefCell::new(Vec::new());
+        let close_requests = std::cell::RefCell::new(Vec::new());
+        // Sélection posée directement plutôt que reconstruite par deux
+        // Ctrl-clics successifs (voir `ctrl_clic_selectionne_sans_ouvrir`
+        // pour ce comportement-là, testé isolément) : ce test porte sur ce
+        // que « Masquer »/« Afficher » font d'une sélection déjà en place,
+        // pas sur la façon dont elle s'est constituée.
+        let selection = std::cell::RefCell::new(HashSet::from([graph_tab, book_tab]));
+        let hidden = std::cell::RefCell::new(HashSet::new());
+
+        let paint = |context: &egui::Context, events: Vec<egui::Event>| -> egui::FullOutput {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut interaction = PmInteraction {
+                open_requests: &mut open_requests.borrow_mut(),
+                close_requests: &mut close_requests.borrow_mut(),
+                active_tab: None,
+                selection: &mut selection.borrow_mut(),
+                hidden: &mut hidden.borrow_mut(),
+            };
+            let mut output = context.run_ui(input, |ui| {
+                project_manager_contents_from_tree(ui, &tree, &mut interaction);
+            });
+            output.textures_delta.clear();
+            output
+        };
+
+        let with_toolbar = paint(&context, Vec::new());
+        let hide_pos = find_text_center(&with_toolbar.shapes, "Masquer");
+        click_at(&context, hide_pos, egui::Modifiers::NONE, &paint);
+        assert_eq!(
+            *hidden.borrow(),
+            HashSet::from([graph_tab, book_tab]),
+            "« Masquer » doit s'appliquer à toute la sélection, hidden={:?}",
+            hidden.borrow()
+        );
+
+        let with_hidden_rows = paint(&context, Vec::new());
+        let show_pos = find_text_center(&with_hidden_rows.shapes, "Afficher");
+        click_at(&context, show_pos, egui::Modifiers::NONE, &paint);
+        assert!(
+            hidden.borrow().is_empty(),
+            "« Afficher » doit vider le masquage de toute la sélection, hidden={:?}",
+            hidden.borrow()
+        );
+        assert!(
+            open_requests.borrow().contains(&graph_tab)
+                && open_requests.borrow().contains(&book_tab),
+            "« Afficher » doit aussi garantir que chaque onglet est ouvert, open_requests={:?}",
+            open_requests.borrow()
         );
     }
 }
