@@ -33,6 +33,12 @@ Features hors `default` : `python` (pont PyO3, exige `PYO3_CONFIG_FILE` — voir
 
 Règles de chargement par domaine (quel crate/doc charger selon la tâche) : `.claude/rules.md`.
 
+Skills de projet : `.claude/skills/` — dix compétences par type de tâche
+(implémenter une fonctionnalité, signaler puis corriger un bug, ajouter une
+commande annulable, rendu, import, pont Python, vérifier avant de committer,
+répondre sur l'architecture ou sur les fonctionnalités). Index et
+enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
+
 ## Conventions
 
 - `rustfmt` + `clippy -D warnings` obligatoires (CI `.gitlab-ci.yml`).

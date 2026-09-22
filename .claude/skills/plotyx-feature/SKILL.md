@@ -1,0 +1,162 @@
+---
+name: plotyx-feature
+description: Implémenter une nouvelle fonctionnalité dans PlotYx (portage Rust, branche rewriterust) — du choix de la couche jusqu'au menu contextuel, au raccourci clavier, aux tests et à la mise à jour de la doc. À utiliser dès que la demande est « ajoute », « implémente », « je voudrais pouvoir… », « il manque… », « fais que… » sur l'application, la grille, les graphes, l'import, les scripts ou le modèle — y compris quand la demande a l'air d'une simple ligne de code, parce que le coût de PlotYx n'est jamais dans la ligne mais dans les quatre surfaces (raccourci, menu, grisage, libellé) et l'entrée d'historique qu'elle oblige à tenir en accord.
+---
+
+# Implémenter une fonctionnalité dans PlotYx
+
+PlotYx est un tableur/traceur scientifique façon OriginLab. Une fonctionnalité
+y touche presque toujours **plus d'une couche** : ce skill sert à ne pas en
+oublier une, et surtout à ne pas la câbler au mauvais endroit.
+
+## 1. Avant d'écrire une ligne
+
+Dans cet ordre, sans sauter d'étape :
+
+1. `git status --short` puis `git diff` sur les fichiers visés — l'utilisateur
+   a souvent du travail en cours qu'il ne faut ni écraser ni committer.
+2. Ouvrir la page `docs/` du domaine, **pas** le workspace entier.
+   `.claude/rules.md` dit exactement quoi charger et quoi ne pas ouvrir.
+   `docs/invariants.md` vaut pour tous les domaines.
+3. Chercher l'existant (`rg`) : une fonctionnalité voisine, un helper, un
+   `Action`, une `Command` qui fait déjà 80 % du travail. Réutiliser bat
+   écrire, et le dépôt a déjà payé pour ses abstractions.
+4. **Vérifier que ce n'est pas un plafond déjà arbitré.** Longueur de nom,
+   `MAX_NODE_ID`, `MAX_CELLS`, nombre de classes d'histogramme, limites
+   d'historique : recensés dans `docs/archive/rustrewrite/questions-ouvertes.md`
+   §11. Une « correction » qui les lève est une régression.
+5. Annoncer brièvement : ce qui sera réutilisé, la zone modifiée, les
+   vérifications prévues. Puis coder sans redemander confirmation pour les
+   choix courants.
+
+Une note de chantier (`docs/chantier-*.md`, `docs/chantiers/`) ne prouve ni
+qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
+
+## 2. Choisir la couche — la question qui coûte le plus cher
+
+| Ce que fait la fonctionnalité | Où elle vit | Piège |
+|---|---|---|
+| change le **modèle** (colonnes, arbre, `PlotSpec`, texte de note…) | une `Command` de `plotyx-commands` | jamais une primitive `plotyx-core` en direct (invariant 1) ; voir le skill **plotyx-commande** |
+| change le **cadrage de vue** (zoom, pan) | `ViewState` sur `GraphView` | ce n'est **pas** une mutation du modèle : personne ne veut annuler un zoom par Ctrl+Z |
+| est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `plotyx-app/src/state.rs` | doit rester testable sans fenêtre |
+| est du **dessin ou de l'événement** egui | `plotyx-app/src/app.rs` | rien de ce que contient `app.rs` n'est une décision de produit |
+| est une **fonctionnalité de tracé** | `plotyx-render` (générique sur le backend) | jamais dans un seul backend (invariant 5) ; voir le skill **plotyx-rendu** |
+| lit un **fichier de données** | `plotyx-import` | reste indépendant de l'UI, de `core`, des commandes et de la session |
+
+La ligne de partage `state.rs` / `app.rs` est la colonne vertébrale du crate
+UI : `state` porte toute la logique, pilotée par un enum `Action`, et se teste
+en CI (`tests/shell.rs`) ; `app` ne fait que traduire clavier et souris en
+`Action` et peindre. Une fenêtre ne se teste pas en intégration continue —
+c'est toute la raison du découpage. Si une règle métier se retrouve dans
+`app.rs`, elle devient invérifiable.
+
+## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
+
+Une `QAction` reliée à un `QUndoStack` portait d'un coup le raccourci, l'entrée
+de menu, son grisage et son libellé. Ici les quatre sont **séparés**, et rien
+ne garantit leur cohérence sinon la relecture. C'est le premier point à
+vérifier quand une action est ajoutée :
+
+1. **le raccourci** — une constante `SHORTCUT_*` dans `app.rs`, déclarée *et*
+   consommée à la main (`input.consume_shortcut`) ;
+2. **l'entrée de menu** (barre de menus et/ou menu contextuel), avec son
+   `shortcut_text` pour rappeler le raccourci à droite ;
+3. **le grisage** (`add_enabled`), calculé depuis `AppState` ;
+4. **le libellé**, qui vient de `state` (`AppState::undo_label`,
+   `GridMenu::target_label`…), jamais écrit en dur dans `app.rs` quand une
+   contextualisation existe déjà.
+
+### Ajouter un raccourci clavier
+
+- Vérifier d'abord les collisions : `rg "SHORTCUT_" crates/plotyx-app/src/app.rs`.
+- **Ctrl+C / Ctrl+X / Ctrl+V ne sont jamais reçus comme `Event::Key`** :
+  `egui-winit` les intercepte à la traduction des événements de fenêtre.
+  Les constantes `SHORTCUT_COPY`/`CUT`/`PASTE`/`COPY_FULL_COLUMNS`/
+  `PASTE_ABSOLUTE` sont **purement décoratives** — elles n'existent que pour
+  écrire le rappel à droite d'une entrée de menu. Rien ne les consomme, et un
+  essai antérieur fondé sur l'hypothèse inverse produisait des raccourcis qui
+  ne se déclenchaient jamais. Si le geste doit passer par le presse-papier
+  système, c'est `Event::Copy`/`Event::Paste` (ou `arboard` en lecture directe,
+  comme `app::system_clipboard_text`).
+- Les raccourcis sont consommés **au niveau du contexte**, donc avant les
+  widgets : Ctrl+Z pendant la saisie d'une cellule annule la dernière commande
+  du modèle, pas la dernière frappe. C'est voulu (comportement de tableur).
+
+### Ajouter une entrée de menu contextuel
+
+Le menu contextuel de la grille suit trois règles qu'il ne faut pas casser :
+
+- **Il est le miroir exact du clavier.** `app::grid_edit_menu` n'offre aucune
+  action qui n'ait pas d'équivalent en raccourci. Ajouter une entrée de menu
+  sans geste clavier équivalent, c'est créer une fonctionnalité que seul le
+  clic droit atteint — décider explicitement si c'est voulu.
+- **La décision vit dans `AppState::grid_menu` → `GridMenu`**, pas dans le code
+  egui. C'est ce qui la rend vérifiable sans fenêtre dans `tests/shell.rs` :
+  quels gestes ont un sens dans cette zone (`GridZone::Header`/`Data`/
+  `Columns`/`Rows`), lesquels griser, comment accorder les libellés en nombre.
+- **Les entrées sont des verbes nus** : « Copier », pas « Copier la cellule ».
+  Le clic droit vient de se poser sur ce qu'il vise et le raccourci est déjà
+  rappelé à droite ; nommer la cible allonge sans rien apprendre.
+  `target_label` reste disponible pour les surfaces où l'on ne voit *pas* ce
+  qu'on vise (barre de menus, ligne de statut, confirmation).
+
+Un clic droit **hors** de la sélection la réduit à la case visée ; **dedans**,
+il la laisse intacte — même garde (`response.secondary_clicked() && !selected`)
+dans toutes les zones, sinon on rend impossible une action sur plusieurs
+colonnes sélectionnées.
+
+Écarts délibérés entre menu et clavier déjà en place (les connaître avant d'en
+inventer un nouveau) : « Supprimer et décaler » supprime tout de suite dans le
+menu alors que Suppr vide d'abord ; « Coller » n'est jamais grisé parce que
+sonder le presse-papier système à chaque image coûterait plus que de tenter au
+clic.
+
+## 4. Tests
+
+Toute logique ajoutée dans `state.rs` se teste dans
+`crates/plotyx-app/tests/shell.rs` — sans fenêtre, sans serveur graphique.
+Une fonction pure extraite exprès pour être testable (`app::grid_grip_side`,
+`state::plot_panel_graph`, `state::drop_payload_action`) est le motif idiomatique
+du dépôt quand une décision doit vivre près de l'UI : extraire, puis tester.
+
+Détail des familles de tests, du principe du **témoin** et des garde-fous
+d'architecture : skill **plotyx-verification** et `docs/tests.md`.
+
+## 5. Mettre à jour la documentation
+
+Deux endroits, deux rôles distincts :
+
+- **Le commentaire de tête de module (`//!`)** porte le *pourquoi* : ce qui a
+  été essayé, ce qui a été écarté, la contrainte technique qui a imposé la
+  forme retenue. C'est là que va le raisonnement, au plus près du code qu'il
+  justifie. Le *quoi* se lit dans la signature juste en dessous.
+- **La page `docs/` du domaine** (`application.md`, `rendu.md`,
+  `modele-de-donnees.md`…) décrit le code **tel qu'il est** et oriente. Elle ne
+  planifie rien, ne spécifie rien, ne recopie pas le raisonnement des `//!` :
+  elle dit où le trouver, et porte ce qui traverse plusieurs modules.
+
+Mettre à jour aussi, **seulement si le changement les rend faux** :
+`docs/invariants.md` (une règle nouvelle qui traverse plusieurs crates),
+`.claude/rules.md` et `.codex/README.md` (si des chemins, scripts ou
+frontières ont bougé), `docs/tests.md` (un nouveau garde-fou d'architecture).
+
+Tout en **français**, comme le reste du dépôt.
+
+## 6. Finir
+
+Enchaîner sur le skill **plotyx-verification** : `fmt`, `clippy -D warnings`,
+`cargo test --workspace`, plus les features hors défaut si le changement les
+touche (`python`, `typst`), relecture du diff, message de commit en français.
+
+## Checklist
+
+- [ ] domaine identifié, page `docs/` lue, `.claude/rules.md` respecté
+- [ ] ce n'est pas un plafond déjà arbitré (`questions-ouvertes.md` §11)
+- [ ] existant réutilisé plutôt que dupliqué
+- [ ] mutation du modèle → `Command` annulable (skill **plotyx-commande**)
+- [ ] logique dans `state.rs`, glu egui seulement dans `app.rs`
+- [ ] les quatre surfaces en accord : raccourci, menu, grisage, libellé
+- [ ] menu contextuel = miroir du clavier, décision dans `GridMenu`
+- [ ] test dans `tests/shell.rs` (ou le crate concerné)
+- [ ] `//!` du module mis à jour (le *pourquoi*) + page `docs/` (le *quoi*)
+- [ ] `fmt` + `clippy` + `cargo test --workspace` verts
