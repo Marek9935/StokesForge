@@ -41,6 +41,18 @@ passation**, pas une page de référence — ce qu'un chantier a trouvé en chem
 et ce qu'il laisse ouvert, surtout côté test. Elle rejoindra `docs/archive/`
 quand sa colonne « reste à faire » sera vide.
 
+`docs/chantiers/` réunit les mêmes notes pour le travail **en attente** :
+
+| Note | Contenu |
+|---|---|
+| [`retours-2026-09-23-bugs.md`](chantiers/retours-2026-09-23-bugs.md) | six défauts localisés, dont quatre confirmés par capture (`chantiers/captures-2026-09-23/`) |
+| [`retours-2026-09-23-features.md`](chantiers/retours-2026-09-23-features.md) | neuf évolutions à développer, avec les arbitrages déjà rendus |
+| [`prevision-import.md`](chantiers/prevision-import.md) | prévisualisation d'import |
+
+Comme les autres notes de passation, elles **planifient** : le code n'y fait
+pas encore foi, et un « reste à faire » y demande d'être confronté au code
+avant d'être repris.
+
 ## Commandes
 
 ```sh
