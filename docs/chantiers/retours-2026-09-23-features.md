@@ -128,6 +128,24 @@ Vérifier l'effet sur B4 : des colonnes plus larges débordent plus tôt.
 - [ ] Mettre à jour le commentaire `app.rs:4308-4321`, qui justifie
       aujourd'hui la position au bord par un conflit que cette règle dissout.
 
+### F10 — Réduire la hauteur de la bande d'en-tête
+
+- [ ] La bande d'en-tête des fenêtres flottantes/détachées (`window_header`,
+      `WINDOW_HEADER_HEIGHT = 28.0`, `crates/plotyx-app/src/app.rs`) est
+      perçue comme plus haute que nécessaire — retour du 2026-09-23, en
+      référence à la zone grisée au survol du chevron de repli (« v »), qui
+      elle occupe déjà toute la hauteur de la bande (`header_icon`, le
+      rectangle de survol fait `rect.height()`, la même valeur).
+
+*À préciser avant de concevoir* : la gêne vient-elle de `WINDOW_HEADER_HEIGHT`
+lui-même, ou de l'espace ajouté autour (marge du `Frame`,
+`style.spacing.window_margin`, ou l'espacement par défaut entre la bande
+d'en-tête et la ligne d'outils qui suit, côté classeur) ? Une capture avec
+mesure de pixels y répondrait plus vite qu'une nouvelle question.
+
+**À faire dans la même zone que F6** (contour de fenêtre) : les deux
+retouchent l'apparence de la même bande, éviter deux passages séparés.
+
 ---
 
 ## Ordre suggéré
@@ -139,3 +157,5 @@ Vérifier l'effet sur B4 : des colonnes plus larges débordent plus tôt.
 4. **F6** avec B1/B3, **F7** quand on veut.
 5. **F8** après B4.
 6. **F9** — indépendant.
+7. **F10** avec F6 — même zone, et sa portée exacte reste à préciser (voir
+   ci-dessus).
