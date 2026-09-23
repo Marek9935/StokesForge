@@ -268,7 +268,7 @@ jointe de la conversation, pas de fichier local) — les descriptions
 ci-dessous en tiennent lieu, vérifiées à la relecture pixel par pixel des
 images.
 
-## B7 — Le contour de surbrillance suit l'étendue du contenu, pas la taille réelle de la fenêtre
+## B7 — Le contour de surbrillance suit l'étendue du contenu, pas la taille réelle de la fenêtre [corrigé]
 
 **Reproduction**
 1. Ouvrir un classeur en fenêtre flottante (ou en fenêtre détachée).
@@ -333,6 +333,44 @@ de contenu. Revenir à un `Frame` sans trait particulier
 laisser le trait par défaut d'egui gérer le cas inactif) et peindre le
 contour actif par-dessus, comme B1 à l'origine — en gardant cette fois la
 leçon de B1/B3 sur *où* lire le bon rectangle.
+
+**Correctif** : les deux `Frame` (`floating_window_frame` pour les fenêtres
+flottantes, celui du `CentralPanel` pour les fenêtres détachées) ne codent
+plus l'activité — ils gardent en permanence le trait par défaut d'egui
+(`style.visuals.window_stroke()`), qui n'a jamais souffert du défaut car il
+n'a jamais eu besoin d'être exact. Le contour actif est maintenant peint à
+part, juste après `.show()`, sur le rectangle **demandé** — jamais recalculé
+par egui depuis le contenu — via la nouvelle fonction
+`paint_active_window_outline` :
+- côté flottant, sur `requested_rect` (`current_pos` + `display_size`, le
+  même rectangle déjà utilisé par `floating_resize_handles`), peint sur
+  `ui.ctx().layer_painter(LayerId::new(Order::Foreground, id))` — la couche
+  qu'`egui::Window` utilise déjà pour cette fenêtre, pour rester au-dessus
+  des autres fenêtres flottantes sans avoir à choisir un ordre à la main ;
+- côté détaché, sur `ui.ctx().input(|input| input.content_rect())` (le même
+  rectangle déjà utilisé par `detached_resize_handles`), peint sur
+  `LayerId::background()` — la couche du `CentralPanel`, mais après lui, donc
+  par-dessus ; un seul viewport OS ici, pas d'ordre à disputer avec d'autres
+  fenêtres.
+
+Le second mécanisme évite aussi la disparition côté détaché : le contour
+n'est plus peint à l'intérieur du `Ui` du `CentralPanel` (rogné à
+`outer_rect` par `panel_ui.set_clip_rect(...)` avant que le `Frame` ne
+peigne), mais sur une couche dont le rectangle de découpe est
+`content_rect()` lui-même — exactement le rectangle sur lequel le contour est
+peint, donc jamais rogné.
+
+Tests de non-régression : `le_contour_actif_suit_le_rectangle_demande_meme_si_le_contenu_deborde`
+(fenêtre flottante, contenu débordant comme B4) et
+`la_fenetre_detachee_recolore_son_contour_selon_le_focus_os` (fenêtre
+détachée, adapté pour vérifier la géométrie du contour en plus de sa
+couleur) dans `crates/plotyx-app/src/app.rs`. Les tests
+`le_frame_de_la_fenetre_flottante_garde_toujours_le_trait_par_defaut` et
+`active_window_stroke_distingue_toujours_actif_et_inactif` remplacent
+l'ancien `le_frame_de_la_fenetre_recolore_son_trait_selon_lactivite`, qui
+verrouillait le mécanisme abandonné. `le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu`,
+qui documente déjà le piège `content_ui.min_rect()` vs rectangle demandé,
+reste inchangé et toujours pertinent.
 
 **Nature** : incohérence entre le rectangle utilisé pour le contour et celui
 réellement visible. **Gravité** : cosmétique côté flottant (débordement dans
