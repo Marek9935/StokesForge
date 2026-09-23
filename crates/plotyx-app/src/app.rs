@@ -51,8 +51,10 @@
 //! posé plus tôt réserve sa bande sur toute la largeur/hauteur restante, donc
 //! la console de script, postée avant le Project Manager, s'étend bien sous
 //! lui plutôt que d'être resserrée entre lui et le bord droit. C'est aussi
-//! cet ordre qui donne à `workspace_rect` (§ Fenêtres flottantes confinées)
-//! son étendue exacte : ce que ces panneaux fixes laissent, rien de plus.
+//! cet ordre qui donne à `viewport_rect` (§ Fenêtres flottantes confinées)
+//! son étendue exacte : ce que ces panneaux fixes laissent, rien de plus —
+//! la portion actuellement *visible* de l'espace de travail, à distinguer
+//! de sa taille logique fixe (`WORKSPACE_SIZE`).
 //!
 //! `egui::Panel::bottom` (comme `Panel::top`) **n'est pas redimensionnable
 //! par défaut**, à la différence de `left`/`right` — contrairement au Project
@@ -91,24 +93,54 @@
 //! sections précédentes : ce sont des panneaux fixes peints *avant* le
 //! `CentralPanel`.
 //!
-//! **Confinement** : chaque fenêtre reçoit `.constrain_to(workspace_rect)`,
-//! où `workspace_rect` est le rectangle que laisse le `CentralPanel` une fois
-//! les panneaux fixes peints (`ui.max_rect()` dans sa fermeture). `egui`
-//! applique cette borne à la position *et* à la taille, aussi bien à la
-//! création qu'à chaque glisser/redimensionnement : une fenêtre flottante ne
-//! peut donc **géométriquement pas** chevaucher le Project Manager ni la
-//! console de script, quel que soit l'ordre de peinture — pas une garantie
-//! de z-order (les fenêtres `egui::Window` peignent de toute façon sur la
-//! couche `Order::Foreground`, au-dessus de tout panneau), une garantie de
-//! rectangle : son cadre ne peut jamais s'étendre dans la zone que
-//! `workspace_rect` exclut.
+//! **Espace de travail défilable** : l'aire qui porte les fenêtres
+//! flottantes a une taille logique **fixe** (`WORKSPACE_SIZE`), indépendante
+//! de la fenêtre `eframe` — avant cette tâche, cette aire était `ui.max_rect()`
+//! du `CentralPanel`, donc rétrécissait avec la fenêtre principale et
+//! écrasait les fenêtres flottantes contre ses bords. `window_positions`/
+//! `window_sizes` (ci-dessous) et la géométrie persistée dans le projet sont
+//! exprimées dans ces coordonnées logiques ; [`PlotyxApp::ui`] les convertit
+//! en coordonnées écran juste avant chaque appel à `egui::Window`
+//! (`workspace_to_screen`), à partir de `viewport_rect` (ce que laissent les
+//! panneaux fixes, comme avant) et de [`PlotyxApp::workspace_scroll`] (0,0 au
+//! démarrage). Sous `WORKSPACE_SIZE`, `viewport_rect` ne montre donc qu'une
+//! portion de l'espace de travail — un `egui::ScrollArea` invisible (rien
+//! peint dans son contenu, seulement réservé à `WORKSPACE_SIZE`) donne
+//! gratuitement poignées de défilement/molette et alimente
+//! `workspace_scroll` ; les `egui::Window` elles-mêmes ne peuvent pas vivre
+//! à l'intérieur de cette zone de défilement (elles peignent sur leur propre
+//! calque `Order::Foreground`, indépendant de toute zone de défilement
+//! ambiante), d'où la conversion manuelle.
+//!
+//! **Confinement** : chaque fenêtre reçoit `.constrain_to(...)` sur le
+//! rectangle **écran** de l'espace de travail entier (`WORKSPACE_SIZE`,
+//! translaté par `viewport_rect.min` et `workspace_scroll`), pas seulement
+//! sur sa portion visible. `egui` applique cette borne à la position *et* à
+//! la taille, aussi bien à la création qu'à chaque glisser/redimensionnement :
+//! une fenêtre flottante ne peut donc **géométriquement pas** chevaucher le
+//! Project Manager ni la console de script, quel que soit l'ordre de
+//! peinture — pas une garantie de z-order (les fenêtres `egui::Window`
+//! peignent de toute façon sur la couche `Order::Foreground`, au-dessus de
+//! tout panneau), une garantie de rectangle : son cadre ne peut jamais
+//! s'étendre dans la zone que les panneaux fixes excluent. Une fenêtre peut
+//! en revanche sortir de la portion *visible* de l'espace de travail
+//! (l'utilisateur a défilé ailleurs) : elle n'est alors simplement pas peinte
+//! cette image-là (`requested_rect.intersects(viewport_rect)`) — cachée, pas
+//! tronquée ni écrasée ; redéfiler la fait réapparaître telle quelle, à la
+//! même position logique.
 //!
 //! **Cascade** : une fenêtre nouvellement ouverte (pas une simple
 //! refocalisation) reçoit une position par défaut décalée par rapport à la
 //! précédente ([`PlotyxApp::next_cascade`], remis à zéro tous les huit
-//! onglets pour ne pas dériver hors de `workspace_rect`) — l'utilisateur voit
+//! onglets pour ne pas dériver hors de `WORKSPACE_SIZE`) — l'utilisateur voit
 //! immédiatement qu'une nouvelle fenêtre est apparue plutôt que de la trouver
 //! exactement superposée à la précédente.
+//!
+//! **Refocaliser une fenêtre défilée hors vue** : rouvrir depuis le Project
+//! Manager une entrée déjà ouverte (§ z-order, juste en dessous) ajuste aussi
+//! `workspace_scroll` si besoin (`workspace_scroll_to_reveal`), pour que la
+//! fenêtre visée redevienne visible plutôt que de simplement remonter dans un
+//! calque qu'on ne voit pas.
 //!
 //! **Z-order** : `egui::Window` remonte déjà seule au premier plan au clic
 //! (`bring_to_front_on_click`, par défaut) — mais dans son propre ordre de
@@ -694,6 +726,15 @@ pub struct PlotyxApp {
     /// redimensionnement natif d'`egui::Window`, forcé exact via
     /// `.fixed_size(...)` comme `current_pos` force la position.
     window_sizes: HashMap<Tab, egui::Vec2>,
+    /// Défilement courant de l'espace de travail (zone MDI, taille fixe
+    /// [`WORKSPACE_SIZE`]) — voir sa doc. `window_positions`/`window_sizes`
+    /// ci-dessus, et la géométrie persistée dans le projet, sont exprimées
+    /// dans les coordonnées logiques de cet espace, pas en pixels écran ;
+    /// [`PlotyxApp::ui`] applique ce décalage à la peinture, dans les deux
+    /// sens (position demandée à `egui::Window`, position relue après un
+    /// glisser). Transitoire, comme la position de défilement d'un
+    /// `egui::ScrollArea` : jamais persisté.
+    workspace_scroll: egui::Vec2,
     /// Dernière géométrie envoyée à l'acteur, pour ne pas lui adresser une
     /// requête à chaque image pendant qu'une fenêtre reste immobile.
     saved_window_geometries: HashMap<NodeId, WindowGeometry>,
@@ -917,6 +958,7 @@ impl PlotyxApp {
             detached_tabs: HashMap::new(),
             window_positions: HashMap::new(),
             window_sizes: HashMap::new(),
+            workspace_scroll: egui::Vec2::ZERO,
             saved_window_geometries: HashMap::new(),
             pm_selection: HashSet::new(),
             hidden_tabs: HashSet::new(),
@@ -1986,6 +2028,7 @@ impl eframe::App for PlotyxApp {
             maximized_tab,
             window_positions,
             window_sizes,
+            workspace_scroll,
             hidden_tabs,
             ..
         } = self;
@@ -1994,7 +2037,7 @@ impl eframe::App for PlotyxApp {
         // posé *avant* le `CentralPanel` — comme le Project Manager plus
         // haut — pour que les fenêtres flottantes ne lui disputent jamais
         // l'espace (il fait partie des panneaux fixes qui bornent
-        // `workspace_rect`, voir la doc de tête du module, § Fenêtres
+        // `viewport_rect`, voir la doc de tête du module, § Fenêtres
         // flottantes confinées). Visible seulement quand l'onglet actif (au
         // sens le plus large : l'onglet maximisé s'il y en a un, sinon la
         // fenêtre flottante la plus récemment focalisée — dernier élément de
@@ -2037,11 +2080,67 @@ impl eframe::App for PlotyxApp {
             } else {
                 // Ce que les panneaux fixes peints plus haut (menu, outils,
                 // statut, script, Project Manager) laissent — voir la doc de
-                // tête du module, § Fenêtres flottantes confinées. Chaque
-                // fenêtre flottante reçoit `.constrain_to(workspace_rect)` :
-                // elle ne peut donc géométriquement jamais chevaucher ces
-                // panneaux, quel que soit son déplacement/redimensionnement.
-                let workspace_rect = ui.max_rect();
+                // tête du module, § Fenêtres flottantes confinées. L'espace
+                // de travail a une taille fixe (`WORKSPACE_SIZE`), indépendante
+                // de `viewport_rect` : sous cette taille, il défile
+                // (`workspace_scroll`) plutôt que d'écraser les fenêtres
+                // qu'il porte contre les bords du `CentralPanel`.
+                // `window_positions`/`window_sizes`, et la géométrie
+                // persistée dans le projet, sont donc en coordonnées
+                // logiques de cet espace — converties en coordonnées écran
+                // juste avant chaque appel à `egui` (`workspace_to_screen`),
+                // et reconverties en retour après un glisser
+                // (`screen_to_workspace`). Chaque fenêtre flottante reçoit
+                // `.constrain_to(...)` sur le rectangle écran de l'espace de
+                // travail entier (pas seulement sa portion visible) : elle ne
+                // peut donc géométriquement jamais chevaucher les panneaux
+                // fixes, quel que soit son déplacement/redimensionnement —
+                // seulement sortir de la portion actuellement visible, auquel
+                // cas elle n'est simplement plus peinte (voir plus bas,
+                // « caché, pas tronqué »).
+                let viewport_rect = ui.max_rect();
+
+                // Une fenêtre déjà ouverte mais actuellement défilée hors vue
+                // redevient visible au clic qui la refocalise (Project
+                // Manager, double-clic…) — lu avant le défilement de cette
+                // image pour que ça prenne effet dès maintenant, pas à la
+                // suivante.
+                if let Some(tab) = *focus_next {
+                    if let (Some(&position), Some(&size)) =
+                        (window_positions.get(&tab), window_sizes.get(&tab))
+                    {
+                        let target = egui::Rect::from_min_size(position, size);
+                        *workspace_scroll = workspace_scroll_to_reveal(
+                            *workspace_scroll,
+                            viewport_rect.size(),
+                            target,
+                        );
+                    }
+                }
+
+                // Un `egui::ScrollArea` invisible (rien n'est peint dans son
+                // contenu, juste réservé à `WORKSPACE_SIZE`) plutôt qu'un
+                // défilement maison : il donne gratuitement poignées de
+                // glissement, molette et bornage, avec le même style plein
+                // que [`show_horizontally_scrollable_grid`] pour rester
+                // visible et atteignable. Les fenêtres flottantes ne sont
+                // **pas** peintes à l'intérieur de sa fermeture : `egui::
+                // Window` peint de toute façon sur son propre calque
+                // (`Order::Foreground`), indépendant de toute zone de
+                // défilement ambiante — seul le décalage qui en résulte sert,
+                // appliqué à la main ci-dessous.
+                let previous_scroll_style = ui.style().spacing.scroll;
+                ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+                let workspace_scroll_output = egui::ScrollArea::both()
+                    .id_salt("plotyx_workspace")
+                    .auto_shrink([false, false])
+                    .scroll_offset(*workspace_scroll)
+                    .show(ui, |ui| {
+                        ui.allocate_exact_size(WORKSPACE_SIZE, egui::Sense::hover());
+                    });
+                ui.style_mut().spacing.scroll = previous_scroll_style;
+                *workspace_scroll = workspace_scroll_output.state.offset;
+
                 for &tab in floating_tabs.iter() {
                     if hidden_tabs.contains(&tab) {
                         // Masqué depuis le Project Manager (§6) : l'onglet
@@ -2060,13 +2159,15 @@ impl eframe::App for PlotyxApp {
                         rank
                     });
                     let cascade = CASCADE_STEP * (*rank % CASCADE_WRAP) as f32;
-                    let default_pos = workspace_rect.min + egui::vec2(cascade, cascade);
+                    // Coordonnées logiques de l'espace de travail, pas
+                    // coordonnées écran — voir la doc juste au-dessus.
+                    let default_pos = egui::pos2(cascade, cascade);
                     let natural_size = match tab {
                         Tab::Book(_) => egui::vec2(BOOK_WINDOW_WIDTH, FLOATING_WINDOW_SIZE.y),
                         Tab::Graph(_) => GRAPH_WINDOW_SIZE,
                         _ => FLOATING_WINDOW_SIZE,
                     };
-                    let default_size = natural_size.min(workspace_rect.size());
+                    let default_size = natural_size.min(WORKSPACE_SIZE);
                     let saved_geometry = state.snapshot().window_geometries.get(&tab_node(tab));
                     let saved_pos = saved_geometry
                         .map(|geometry| egui::pos2(geometry.x as f32, geometry.y as f32))
@@ -2075,8 +2176,8 @@ impl eframe::App for PlotyxApp {
                         .map(|geometry| egui::vec2(geometry.width as f32, geometry.height as f32))
                         .unwrap_or(default_size)
                         .max(MIN_CONTENT_WINDOW_SIZE)
-                        .min(workspace_rect.size());
-                    let current_pos = *window_positions.entry(tab).or_insert(saved_pos);
+                        .min(WORKSPACE_SIZE);
+                    let position_workspace = *window_positions.entry(tab).or_insert(saved_pos);
                     let current_size = *window_sizes.entry(tab).or_insert(saved_size);
                     let mut open = true;
                     let mut header_actions = WindowHeaderActions::default();
@@ -2096,6 +2197,11 @@ impl eframe::App for PlotyxApp {
                         WINDOW_HEADER_HEIGHT,
                         frame.inner_margin.sum(),
                     );
+                    let current_pos = workspace_to_screen(
+                        position_workspace,
+                        viewport_rect.min,
+                        *workspace_scroll,
+                    );
                     // Rectangle **demandé** à egui cette image — position et
                     // taille forcées ci-dessus, donc indépendant de ce
                     // qu'egui recalcule depuis le contenu réellement peint
@@ -2104,6 +2210,14 @@ impl eframe::App for PlotyxApp {
                     // contour actif peint juste après (`paint_active_window_outline`)
                     // et aux poignées de redimensionnement plus bas.
                     let requested_rect = egui::Rect::from_min_size(current_pos, display_size);
+                    // Hors de la portion actuellement visible de l'espace de
+                    // travail : ni peinte, ni interactive — « caché », pas
+                    // tronqué. Sa position/taille logiques restent inchangées
+                    // dans `window_positions`/`window_sizes` : redéfiler
+                    // l'espace de travail la fait réapparaître telle quelle.
+                    if !requested_rect.intersects(viewport_rect) {
+                        continue;
+                    }
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
                         .title_bar(false)
@@ -2115,7 +2229,14 @@ impl eframe::App for PlotyxApp {
                         // remplacé par [`floating_resize_handles`], posées
                         // juste après `.show()`.
                         .fixed_size(display_size)
-                        .constrain_to(workspace_rect)
+                        .constrain_to(egui::Rect::from_min_size(
+                            workspace_to_screen(
+                                egui::Pos2::ZERO,
+                                viewport_rect.min,
+                                *workspace_scroll,
+                            ),
+                            WORKSPACE_SIZE,
+                        ))
                         .frame(frame)
                         .open(&mut open)
                         .show(ui.ctx(), |ui| {
@@ -2194,8 +2315,18 @@ impl eframe::App for PlotyxApp {
                         floating_resize_handles(ui, tab, requested_rect, position, size);
                     }
                     if let Some(rect) = area_rect {
-                        geometry_updates
-                            .push((tab, floating_window_geometry_to_persist(rect, current_size)));
+                        // Reconverti en coordonnées logiques de l'espace de
+                        // travail avant persistance — voir la doc de tête du
+                        // bloc, `window_geometries` y est exprimée comme
+                        // `window_positions`, pas en pixels écran.
+                        let rect_workspace = egui::Rect::from_min_size(
+                            screen_to_workspace(rect.min, viewport_rect.min, *workspace_scroll),
+                            rect.size(),
+                        );
+                        geometry_updates.push((
+                            tab,
+                            floating_window_geometry_to_persist(rect_workspace, current_size),
+                        ));
                     }
                     if !open {
                         close_requests.push(tab);
@@ -2664,6 +2795,74 @@ fn header_icon(
 /// pour garder l'en-tête (icônes + titre) et un fragment de contenu lisibles,
 /// pas une contrainte scientifique.
 const MIN_CONTENT_WINDOW_SIZE: egui::Vec2 = egui::vec2(220.0, 140.0);
+
+/// Taille fixe de l'espace de travail (zone MDI qui porte les fenêtres
+/// flottantes), indépendante de la taille de la fenêtre principale — avant
+/// cette tâche, `workspace_rect` était `ui.max_rect()`, donc rétrécissait
+/// avec la fenêtre `eframe` et écrasait les fenêtres flottantes contre ses
+/// bords. Un banc « généreux » plutôt qu'ajusté à un écran précis ; devenir
+/// réellement réglable par l'utilisateur (persistance, UI de réglage) reste à
+/// faire — voir `docs/chantiers`. Sous cette taille, [`PlotyxApp::ui`] fait
+/// défiler l'espace de travail ([`PlotyxApp::workspace_scroll`]) plutôt que de
+/// rétrécir ou tronquer les fenêtres qu'il contient.
+const WORKSPACE_SIZE: egui::Vec2 = egui::vec2(1920.0, 1080.0);
+
+/// Défilement maximal (par axe) pour qu'une zone visible de taille
+/// `viewport_size` reste entièrement dans [`WORKSPACE_SIZE`] — nul sur un axe
+/// où l'espace de travail entre déjà en entier, rien n'y défile alors.
+fn workspace_max_scroll(viewport_size: egui::Vec2) -> egui::Vec2 {
+    (WORKSPACE_SIZE - viewport_size).max(egui::Vec2::ZERO)
+}
+
+/// Position écran d'un point de l'espace de travail (coordonnées logiques,
+/// indépendantes du défilement) — l'origine de la zone visible moins le
+/// défilement courant. Réciproque de [`screen_to_workspace`].
+fn workspace_to_screen(
+    pos: egui::Pos2,
+    viewport_min: egui::Pos2,
+    scroll: egui::Vec2,
+) -> egui::Pos2 {
+    viewport_min + (pos.to_vec2() - scroll)
+}
+
+/// Position dans l'espace de travail d'un point écran — réciproque de
+/// [`workspace_to_screen`], utilisée pour convertir en retour ce qu'`egui` a
+/// réellement peint (position/taille d'une fenêtre après glisser) vers la
+/// coordonnée logique à persister.
+fn screen_to_workspace(
+    pos: egui::Pos2,
+    viewport_min: egui::Pos2,
+    scroll: egui::Vec2,
+) -> egui::Pos2 {
+    (pos - viewport_min + scroll).to_pos2()
+}
+
+/// Défilement minimal à appliquer à `scroll` pour que `target` (rectangle
+/// dans l'espace de travail) redevienne entièrement visible dans une zone de
+/// taille `viewport_size` — inchangé si `target` l'est déjà. Utilisé pour
+/// ramener à l'écran une fenêtre déjà ouverte mais actuellement défilée hors
+/// vue (clic dans le Project Manager) : contrairement à
+/// [`Response::scroll_to_me`] côté grille/onglets de feuille, l'espace de
+/// travail n'est pas un `egui::ScrollArea` classique (les `egui::Window`
+/// qu'il porte peignent sur leur propre calque, indépendant de toute zone de
+/// défilement ambiante), donc pas de mécanisme natif à réutiliser ici.
+fn workspace_scroll_to_reveal(
+    scroll: egui::Vec2,
+    viewport_size: egui::Vec2,
+    target: egui::Rect,
+) -> egui::Vec2 {
+    let max_scroll = workspace_max_scroll(viewport_size);
+    let mut revealed = scroll;
+    for axis in 0..2 {
+        if target.min[axis] < revealed[axis] {
+            revealed[axis] = target.min[axis];
+        } else if target.max[axis] > revealed[axis] + viewport_size[axis] {
+            revealed[axis] = target.max[axis] - viewport_size[axis];
+        }
+        revealed[axis] = revealed[axis].clamp(0.0, max_scroll[axis]);
+    }
+    revealed
+}
 
 /// Huit zones fines de redimensionnement pour une fenêtre flottante MDI —
 /// voir la doc de tête de [`PlotyxApp::window_sizes`] pour pourquoi le
@@ -6476,6 +6675,98 @@ mod graph_layout_tests {
             replie.y < current_size.y,
             "la taille demandée doit être strictement plus petite que la taille dépliée"
         );
+    }
+
+    #[test]
+    fn workspace_to_screen_et_screen_to_workspace_sont_reciproques() {
+        let viewport_min = egui::pos2(40.0, 20.0);
+        let scroll = egui::vec2(300.0, 150.0);
+        for pos in [
+            egui::Pos2::ZERO,
+            egui::pos2(500.0, 400.0),
+            egui::pos2(1900.0, 1000.0),
+        ] {
+            let screen = workspace_to_screen(pos, viewport_min, scroll);
+            let back = screen_to_workspace(screen, viewport_min, scroll);
+            assert!(
+                (back - pos).length() < 0.01,
+                "aller-retour : {pos:?} -> {screen:?} -> {back:?}"
+            );
+        }
+        // Sans défilement, l'espace de travail et l'écran ne diffèrent que
+        // par l'origine de la zone visible — comportement identique à
+        // l'ancien `workspace_rect.min + position`.
+        assert_eq!(
+            workspace_to_screen(egui::pos2(10.0, 5.0), viewport_min, egui::Vec2::ZERO),
+            viewport_min + egui::vec2(10.0, 5.0)
+        );
+    }
+
+    #[test]
+    fn workspace_max_scroll_est_nul_quand_lespace_de_travail_tient_deja() {
+        assert_eq!(
+            workspace_max_scroll(WORKSPACE_SIZE),
+            egui::Vec2::ZERO,
+            "la zone visible fait déjà la taille de l'espace de travail : rien à défiler"
+        );
+        assert_eq!(
+            workspace_max_scroll(WORKSPACE_SIZE * 2.0),
+            egui::Vec2::ZERO,
+            "une zone visible plus grande que l'espace de travail ne doit jamais produire \
+             de défilement négatif"
+        );
+        let viewport = egui::vec2(800.0, 600.0);
+        assert_eq!(workspace_max_scroll(viewport), WORKSPACE_SIZE - viewport);
+    }
+
+    #[test]
+    fn workspace_scroll_to_reveal_ne_bouge_pas_si_deja_visible() {
+        let viewport_size = egui::vec2(800.0, 600.0);
+        let scroll = egui::vec2(100.0, 50.0);
+        let visible = egui::Rect::from_min_size(egui::pos2(200.0, 100.0), egui::vec2(300.0, 200.0));
+        assert_eq!(
+            workspace_scroll_to_reveal(scroll, viewport_size, visible),
+            scroll,
+            "une fenêtre déjà entièrement dans la zone visible ne doit pas faire défiler"
+        );
+    }
+
+    #[test]
+    fn workspace_scroll_to_reveal_ramene_une_fenetre_hors_vue_a_lecran() {
+        let viewport_size = egui::vec2(800.0, 600.0);
+        let scroll = egui::Vec2::ZERO;
+
+        // Hors vue à droite/en bas : défiler juste assez pour longer le bord
+        // le plus proche de la fenêtre visée, pas la centrer arbitrairement.
+        let apres_droite =
+            egui::Rect::from_min_size(egui::pos2(1200.0, 50.0), egui::vec2(100.0, 80.0));
+        let revealed = workspace_scroll_to_reveal(scroll, viewport_size, apres_droite);
+        assert_eq!(revealed.x, apres_droite.max.x - viewport_size.x);
+        assert_eq!(revealed.y, 0.0, "l'axe vertical était déjà visible");
+        let target_screen = egui::Rect::from_min_size(
+            apres_droite.min.to_vec2().to_pos2() - revealed,
+            apres_droite.size(),
+        );
+        assert!(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, viewport_size).contains_rect(target_screen),
+            "après défilement, la fenêtre doit tenir dans la zone visible : {target_screen:?}"
+        );
+
+        // Hors vue à gauche/en haut (défilement déjà avancé).
+        let scroll = egui::vec2(500.0, 400.0);
+        let avant_gauche =
+            egui::Rect::from_min_size(egui::pos2(50.0, 20.0), egui::vec2(100.0, 80.0));
+        let revealed = workspace_scroll_to_reveal(scroll, viewport_size, avant_gauche);
+        assert_eq!(revealed.x, avant_gauche.min.x);
+        assert_eq!(revealed.y, avant_gauche.min.y);
+
+        // Toujours borné à [0, max_scroll], même pour une cible qui déborde
+        // l'espace de travail (fenêtre plus grande que lui, cas dégénéré).
+        let max_scroll = workspace_max_scroll(viewport_size);
+        let hors_bornes =
+            egui::Rect::from_min_size(WORKSPACE_SIZE.to_pos2(), egui::vec2(50.0, 50.0));
+        let revealed = workspace_scroll_to_reveal(egui::Vec2::ZERO, viewport_size, hors_bornes);
+        assert!(revealed.x <= max_scroll.x && revealed.y <= max_scroll.y);
     }
 
     #[test]

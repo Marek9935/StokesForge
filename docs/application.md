@@ -27,12 +27,26 @@ Le Project Manager et la console de script sont deux panneaux fixes
 natures de fenêtre de contenu — `Tab::Book` (classeur), `Tab::Graph`,
 `Tab::Matrix`, `Tab::Note`, chacune portant un `NodeId` — s'ouvrent par défaut
 en fenêtres flottantes (`egui::Window`) à l'intérieur du `CentralPanel`, une
-par `PlotyxApp::floating_tabs`, dans `app.rs`. Chacune reçoit
-`.constrain_to(workspace_rect)` — le rectangle que laissent les panneaux fixes
-une fois peints — ce qui l'empêche géométriquement de jamais chevaucher le
-Project Manager ou la console de script, quel que soit le glisser ou le
-redimensionnement. Une fenêtre nouvellement ouverte apparaît en cascade par
-rapport à la précédente plutôt que superposée à elle.
+par `PlotyxApp::floating_tabs`, dans `app.rs`.
+
+L'aire qui les porte a une taille logique **fixe** (`WORKSPACE_SIZE`,
+1920×1080), indépendante de la taille de la fenêtre principale : en dessous,
+elle défile (`PlotyxApp::workspace_scroll`) plutôt que d'écraser les fenêtres
+qu'elle contient contre ses bords. `window_positions`/`window_sizes` et la
+géométrie persistée dans le projet sont exprimées dans ces coordonnées
+logiques, converties en coordonnées écran à la peinture. Chaque fenêtre
+reçoit `.constrain_to(...)` sur le rectangle écran de l'espace de travail
+entier (pas seulement sa portion visible), ce qui l'empêche géométriquement
+de jamais chevaucher le Project Manager ou la console de script, quel que
+soit le glisser ou le redimensionnement — mais elle peut sortir de la portion
+*visible* de l'espace de travail : elle n'est alors simplement pas peinte
+(cachée, pas tronquée), et redéfiler la fait réapparaître à sa position
+logique inchangée. Rouvrir depuis le Project Manager une entrée déjà ouverte
+mais défilée hors vue fait défiler l'espace de travail jusqu'à elle. Une
+fenêtre nouvellement ouverte apparaît en cascade par rapport à la précédente
+plutôt que superposée à elle. La taille fixe est pour l'instant une constante
+du code, pas encore réglable par l'utilisateur (persistance, UI de réglage) —
+à faire.
 
 Un onglet par fenêtre **ouverte**, quelle que soit sa nature : `PlotyxApp::
 open_tab` est le seul endroit qui décide « ouvrir » vs « focaliser » (cliquer
