@@ -1580,8 +1580,20 @@ impl PlotyxApp {
                     // ne le couvrent pas. `RawInput::focused` est déjà
                     // rapporté par le backend par viewport.
                     let is_active = ui.input(|input| input.focused);
+                    // Trait par défaut (inactif) uniquement — le contour actif
+                    // n'est plus recoloré ici (B7,
+                    // `docs/chantiers/retours-2026-09-23-bugs.md`) : la
+                    // géométrie de ce `Frame` suit `content_ui.min_rect()`
+                    // (`containers/frame.rs`), et `CentralPanel::show_inside_dyn`
+                    // rogne son affichage à `outer_rect` *avant* de le peindre
+                    // — le débordement logique de contenu (bande d'outils qui
+                    // ne s'enroule pas) faisait donc disparaître le contour
+                    // sur les bords qui débordent, au lieu de le montrer.
+                    // L'état actif est peint à part, après `.show()`, sur
+                    // `input.content_rect()` — le rectangle du viewport OS
+                    // réel, pas celui qu'egui recalcule.
                     let frame = egui::Frame::central_panel(ui.style())
-                        .stroke(active_window_stroke(ui.style(), is_active));
+                        .stroke(ui.style().visuals.window_stroke());
                     egui::CentralPanel::default().frame(frame).show(ui, |ui| {
                         let Some(snapshot) = model.snapshot.clone() else {
                             // Ne devrait jamais arriver : `detach_tab` pose le
@@ -1636,6 +1648,23 @@ impl PlotyxApp {
                     // des poignées de redimensionnement et à la géométrie
                     // persistée en fin de fermeture.
                     let collapsed_now = was_collapsed ^ header_actions.toggle_collapse;
+                    // Contour actif (B7) : peint sur le rectangle du
+                    // viewport OS réel (`input.content_rect()`, déjà utilisé
+                    // par `detached_resize_handles` juste en dessous), pas
+                    // sur celui qu'egui recalcule depuis le contenu — voir la
+                    // doc du `Frame` ci-dessus. `LayerId::background()` :
+                    // même couche que `CentralPanel`, peint après elle donc
+                    // par-dessus ; un seul viewport détaché ici, pas d'autre
+                    // fenêtre dont l'ordre serait à disputer.
+                    if is_active {
+                        let content_rect = ui.ctx().input(|input| input.content_rect());
+                        paint_active_window_outline(
+                            &ui.ctx().layer_painter(egui::LayerId::background()),
+                            content_rect,
+                            egui::CornerRadius::ZERO,
+                            ui.style(),
+                        );
+                    }
                     if header_actions.toggle_collapse {
                         model.collapsed = collapsed_now;
                     }
@@ -2055,7 +2084,15 @@ impl eframe::App for PlotyxApp {
                         WINDOW_HEADER_HEIGHT,
                         ui.style().spacing.window_margin.sum(),
                     );
-                    let frame = floating_window_frame(ui.style(), is_active);
+                    // Rectangle **demandé** à egui cette image — position et
+                    // taille forcées ci-dessus, donc indépendant de ce
+                    // qu'egui recalcule depuis le contenu réellement peint
+                    // (B7, `docs/chantiers/retours-2026-09-23-bugs.md`).
+                    // Calculé avant `.show()` pour servir à la fois au
+                    // contour actif peint juste après (`paint_active_window_outline`)
+                    // et aux poignées de redimensionnement plus bas.
+                    let requested_rect = egui::Rect::from_min_size(current_pos, display_size);
+                    let frame = floating_window_frame(ui.style());
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
                         .title_bar(false)
@@ -2096,6 +2133,24 @@ impl eframe::App for PlotyxApp {
                                 tab_contents(ui, state, &mut actions, graph_views, tab);
                             }
                         });
+                    // Contour de surbrillance (B7) : peint à part, sur
+                    // `requested_rect` — pas sur le trait du `Frame`
+                    // (`floating_window_frame`), dont la géométrie suit
+                    // `content_ui.min_rect()` et déborde si la bande
+                    // d'outils ne s'enroule pas. `Order::Foreground` à l'`Id`
+                    // de la fenêtre : la même couche qu'`egui::Window` peint
+                    // déjà, pour rester au-dessus des fenêtres flottantes
+                    // situées derrière celle-ci sans avoir à choisir un ordre
+                    // à la main.
+                    if is_active {
+                        paint_active_window_outline(
+                            &ui.ctx()
+                                .layer_painter(egui::LayerId::new(egui::Order::Foreground, id)),
+                            requested_rect,
+                            ui.style().visuals.window_corner_radius,
+                            ui.style(),
+                        );
+                    }
                     if header_actions.toggle_collapse {
                         toggle_collapse(collapsed_tabs, tab);
                     }
@@ -2121,6 +2176,7 @@ impl eframe::App for PlotyxApp {
                     // rétrécit pas non plus quand le contenu est replié).
                     let area_rect = ui.ctx().memory(|memory| memory.area_rect(id));
                     // Poignées de redimensionnement maison (§3) : posées sur
+                    // `requested_rect` (calculé plus haut, avant `.show()`),
                     // le rectangle qu'on vient de demander (position/taille
                     // forcées ci-dessus, donc identique au rectangle
                     // réellement peint cette image — `display_size`, pas
@@ -2128,7 +2184,6 @@ impl eframe::App for PlotyxApp {
                     // d'une fenêtre repliée). Mutent `window_positions`/
                     // `window_sizes` directement ; la prochaine image les
                     // réinjectera via `.current_pos`/`.fixed_size`.
-                    let requested_rect = egui::Rect::from_min_size(current_pos, display_size);
                     if let (Some(position), Some(size)) =
                         (window_positions.get_mut(&tab), window_sizes.get_mut(&tab))
                     {
@@ -2377,10 +2432,9 @@ fn floating_window_geometry_to_persist(
 
 /// Trait du contour de surbrillance — la couleur de sélection du thème pour
 /// la fenêtre active, le trait par défaut d'egui sinon. Partagé entre
-/// [`floating_window_frame`] (fenêtres flottantes internes, B1/B3) et le
-/// `Frame` du panneau central des fenêtres détachées (viewports OS séparés,
-/// B1/B3 suite) : même logique de surbrillance des deux côtés, seule la
-/// notion de « active » diffère (`is_active` calculé depuis `active_tab`
+/// [`paint_active_window_outline`] (fenêtres flottantes internes et fenêtres
+/// détachées, B1/B3, B7) : même logique de surbrillance des deux côtés, seule
+/// la notion de « active » diffère (`is_active` calculé depuis `active_tab`
 /// pour les unes, depuis le focus OS du viewport pour les autres).
 fn active_window_stroke(style: &egui::Style, is_active: bool) -> egui::Stroke {
     if is_active {
@@ -2390,16 +2444,44 @@ fn active_window_stroke(style: &egui::Style, is_active: bool) -> egui::Stroke {
     }
 }
 
-/// `Frame` d'une fenêtre flottante — le `Frame::window` habituel, dont le
-/// trait est recoloré pour la fenêtre active plutôt que de peindre un second
-/// contour de surbrillance par-dessus (B1/B3,
-/// `docs/chantiers/retours-2026-09-23-bugs.md`). Ce trait est déjà peint
-/// exactement sur le rectangle réel de la fenêtre — marge du `Frame` et
-/// repli compris — puisque c'est lui qui, en dernier ressort, détermine ce
-/// rectangle (`AreaState::rect()`) : une seule primitive suffit, sans calque
-/// à choisir à la main pour rester au-dessus des autres fenêtres.
-fn floating_window_frame(style: &egui::Style, is_active: bool) -> egui::Frame {
-    egui::Frame::window(style).stroke(active_window_stroke(style, is_active))
+/// `Frame` d'une fenêtre flottante — le `Frame::window` habituel, sans
+/// recoloration selon l'activité. Jusqu'à B7
+/// (`docs/chantiers/retours-2026-09-23-bugs.md`), ce trait était recoloré
+/// pour la fenêtre active afin d'éviter un second contour peint par-dessus —
+/// mais sa géométrie suit `content_ui.min_rect()`
+/// (`egui::Frame::paint`, via `Resize::end` avec `.with_stroke(false)`), pas
+/// la taille demandée par `.fixed_size(...)` : un `ui.horizontal(…)` (la
+/// bande d'outils) qui ne s'enroule pas continue d'étendre cette géométrie
+/// même quand B4 rogne le rendu, donc le contour débordait vers l'extérieur.
+/// Le trait par défaut d'egui reste ici pour l'état inactif ; l'état actif
+/// est peint à part par [`paint_active_window_outline`], sur le rectangle
+/// **demandé**, pas celui qu'egui recalcule depuis le contenu.
+fn floating_window_frame(style: &egui::Style) -> egui::Frame {
+    egui::Frame::window(style)
+}
+
+/// Peint le contour de surbrillance d'une fenêtre active, sur un rectangle
+/// **demandé** plutôt que sur celui qu'egui recalcule depuis le contenu
+/// réellement peint (B7, `docs/chantiers/retours-2026-09-23-bugs.md`) — la
+/// même cause que B1 (`content_ui.min_rect()`), mais que le `Frame` seul ne
+/// peut pas éviter puisque c'est justement lui qui souffre du défaut. Les
+/// appelants passent un `Painter` construit sur la bonne couche :
+/// `Order::Foreground` à l'`Id` de la fenêtre pour rester au-dessus des
+/// autres fenêtres flottantes côté MDI (même couche que celle qu'`egui`
+/// utilise déjà pour `egui::Window`), la couche de fond du viewport détaché
+/// côté fenêtre OS séparée (un seul viewport, pas d'ordre à disputer).
+fn paint_active_window_outline(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    corner_radius: egui::CornerRadius,
+    style: &egui::Style,
+) {
+    painter.rect_stroke(
+        rect,
+        corner_radius,
+        active_window_stroke(style, true),
+        egui::StrokeKind::Inside,
+    );
 }
 
 /// Ramène `top_layer_tab` en fin de `floating_tabs` (§ ordre de pile,
@@ -6226,28 +6308,50 @@ mod graph_layout_tests {
         );
     }
 
-    // B1/B3 : la surbrillance recolore le trait du `Frame` de la fenêtre
+    // B7 (`docs/chantiers/retours-2026-09-23-bugs.md`) : jusque-là, la
+    // surbrillance recolorait le trait du `Frame` de la fenêtre
     // (`floating_window_frame`) plutôt que de peindre un second contour par
-    // dessus — voir sa doc de tête pour pourquoi ce trait suit déjà, par
-    // construction, le rectangle réellement peint.
+    // dessus — mais ce trait suit `content_ui.min_rect()`, pas la taille
+    // demandée, et débordait donc quand le contenu dépassait (bande
+    // d'outils qui ne s'enroule pas). Le `Frame` ne code plus l'activité :
+    // il garde toujours le trait par défaut d'egui, quel que soit l'état.
     #[test]
-    fn le_frame_de_la_fenetre_recolore_son_trait_selon_lactivite() {
+    fn le_frame_de_la_fenetre_flottante_garde_toujours_le_trait_par_defaut() {
         let style = egui::Style::default();
 
-        let inactif = floating_window_frame(&style, false);
-        let actif = floating_window_frame(&style, true);
+        let frame = floating_window_frame(&style);
 
         assert_eq!(
-            inactif.stroke.color,
+            frame.stroke.color,
+            style.visuals.window_stroke().color,
+            "le Frame ne recolore plus selon l'activité (B7) : le contour actif est peint à \
+             part par `paint_active_window_outline`, sur le rectangle demandé plutôt que celui \
+             qu'egui recalcule depuis le contenu"
+        );
+    }
+
+    // Le trait recoloré vit maintenant dans `active_window_stroke`, utilisé
+    // par [`paint_active_window_outline`] plutôt que par le `Frame` — même
+    // logique de distinction active/inactive qu'avant B7, déplacée d'une
+    // fonction à l'autre.
+    #[test]
+    fn active_window_stroke_distingue_toujours_actif_et_inactif() {
+        let style = egui::Style::default();
+
+        let inactif = active_window_stroke(&style, false);
+        let actif = active_window_stroke(&style, true);
+
+        assert_eq!(
+            inactif.color,
             style.visuals.window_stroke().color,
             "une fenêtre inactive garde le trait par défaut d'egui"
         );
         assert_eq!(
-            actif.stroke.color, style.visuals.selection.stroke.color,
+            actif.color, style.visuals.selection.stroke.color,
             "une fenêtre active reprend la couleur de sélection du thème"
         );
         assert_ne!(
-            actif.stroke.color, inactif.stroke.color,
+            actif.color, inactif.color,
             "sans couleurs distinctes, rien ne montrerait quelle fenêtre est active"
         );
     }
@@ -6432,6 +6536,96 @@ mod graph_layout_tests {
                 painted.clip_rect,
             );
         }
+    }
+
+    // B7 (`docs/chantiers/retours-2026-09-23-bugs.md`) : reproduction directe
+    // du symptôme rapporté (« le contour déborde vers l'extérieur, bien
+    // au-delà des icônes d'en-tête »). Même contenu qui déborde que le test
+    // B4 ci-dessus (bande d'outils qui ne s'enroule pas), mais cette fois on
+    // vérifie le contour lui-même : peint sur `requested_rect`, pas sur
+    // `area_rect` (le rectangle qu'egui recalcule depuis ce contenu — plus
+    // grand, comme le verrouille aussi
+    // `le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu`).
+    #[test]
+    fn le_contour_actif_suit_le_rectangle_demande_meme_si_le_contenu_deborde() {
+        let context = egui::Context::default();
+        let id =
+            egui::Id::new("le_contour_actif_suit_le_rectangle_demande_meme_si_le_contenu_deborde");
+        let window_pos = egui::pos2(20.0, 20.0);
+        let display_size = egui::vec2(200.0, 150.0);
+        let requested_rect = egui::Rect::from_min_size(window_pos, display_size);
+        let style = egui::Style::default();
+
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let paint = |ui: &mut egui::Ui| {
+            egui::Window::new("test")
+                .id(id)
+                .title_bar(false)
+                .current_pos(window_pos)
+                .fixed_size(display_size)
+                .frame(floating_window_frame(ui.style()))
+                .show(ui.ctx(), |ui| {
+                    // Bande d'outils qui ne s'enroule pas — même mécanisme
+                    // que le bandeau « Ajouter une colonne / Importer… » d'un
+                    // classeur rétréci, et que le test B4 ci-dessus.
+                    ui.horizontal(|ui| {
+                        for i in 0..10 {
+                            ui.label(format!("colonne {i}"));
+                            ui.add_space(80.0);
+                        }
+                    });
+                });
+            // Contour actif peint après `.show()`, comme en production —
+            // sur `requested_rect`, jamais recalculé depuis le contenu.
+            paint_active_window_outline(
+                &ui.ctx()
+                    .layer_painter(egui::LayerId::new(egui::Order::Foreground, id)),
+                requested_rect,
+                style.visuals.window_corner_radius,
+                &style,
+            );
+        };
+        // Deux images : `area_rect` documente renvoyer la géométrie de
+        // l'image précédente (voir
+        // `le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu`).
+        context.run_ui(input(), paint).textures_delta.clear();
+        let mut output = context.run_ui(input(), paint);
+        output.textures_delta.clear();
+
+        let area_rect = context
+            .memory(|memory| memory.area_rect(id))
+            .expect("la fenêtre doit avoir enregistré sa géométrie réelle");
+        assert!(
+            area_rect.width() > requested_rect.width(),
+            "le contenu doit déborder du rectangle demandé ({requested_rect:?}) pour que ce \
+             test reproduise B7 — rectangle réel {area_rect:?}"
+        );
+
+        fn find_outline(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
+            shapes.iter().find_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect)
+                    if rect.stroke.color
+                        == egui::Style::default().visuals.selection.stroke.color =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+        }
+        let outline_rect =
+            find_outline(&output.shapes).expect("le contour actif doit avoir été peint");
+        assert_eq!(
+            outline_rect, requested_rect,
+            "le contour doit longer exactement le rectangle demandé ({requested_rect:?}), pas \
+             le rectangle recalculé par egui depuis le contenu débordant ({area_rect:?}) — B7 \
+             n'est pas corrigé"
+        );
     }
 
     // B2 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `sync_floating_tabs_order_to_top_layer`
@@ -7163,11 +7357,17 @@ mod graph_layout_tests {
         }
     }
 
-    // B1/B3 suite : les fenêtres détachées (viewports OS séparés) n'avaient
-    // aucun contour de surbrillance — `active_tab`/`floating_tabs` ne les
-    // couvrent pas, seul le focus OS du viewport a un sens pour elles. Même
-    // logique que les fenêtres flottantes (`active_window_stroke`), câblée
-    // sur `RawInput::focused` plutôt que sur `active_tab`.
+    // B1/B3 suite, puis B7 (`docs/chantiers/retours-2026-09-23-bugs.md`) :
+    // les fenêtres détachées (viewports OS séparés) n'avaient aucun contour
+    // de surbrillance — `active_tab`/`floating_tabs` ne les couvrent pas,
+    // seul le focus OS du viewport a un sens pour elles. Même logique que
+    // les fenêtres flottantes (`active_window_stroke`), câblée sur
+    // `RawInput::focused` plutôt que sur `active_tab`. B7 a changé *où* ce
+    // contour actif est peint : plus sur le trait du `Frame` (dont la
+    // géométrie suit le contenu et se faisait rogner par
+    // `CentralPanel::show_inside_dyn` sur les bords qui débordent), mais à
+    // part, sur `input.content_rect()` — ce test vérifie maintenant la
+    // couleur *et* la géométrie de ce contour.
     #[test]
     fn la_fenetre_detachee_recolore_son_contour_selon_le_focus_os() {
         let (session, graph) = graphe();
@@ -7204,22 +7404,28 @@ mod graph_layout_tests {
             .expect("le détachement doit publier un callback de viewport");
         output.textures_delta.clear();
 
-        // Le `Shape::Rect` du `Frame` du panneau central est le seul, dans
-        // cette fenêtre, dont le trait n'est pas de largeur nulle — les
-        // autres formes rectangulaires (icônes d'en-tête, etc.) n'ont pas de
-        // contour propre.
-        fn frame_stroke_color(shapes: &[egui::epaint::ClippedShape]) -> egui::Color32 {
-            fn find(shape: &egui::Shape) -> Option<egui::Color32> {
+        // Toutes les formes rectangulaires dont le trait n'est pas de
+        // largeur nulle — depuis B7, il peut y en avoir deux : le trait par
+        // défaut du `Frame` du panneau central, et le contour actif peint à
+        // part par-dessus (`paint_active_window_outline`) quand la fenêtre a
+        // le focus OS.
+        fn stroke_shapes(
+            shapes: &[egui::epaint::ClippedShape],
+        ) -> Vec<(egui::Color32, egui::Rect)> {
+            fn find(shape: &egui::Shape, out: &mut Vec<(egui::Color32, egui::Rect)>) {
                 match shape {
-                    egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => Some(rect.stroke.color),
-                    egui::Shape::Vec(shapes) => shapes.iter().find_map(find),
-                    _ => None,
+                    egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => {
+                        out.push((rect.stroke.color, rect.rect));
+                    }
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| find(s, out)),
+                    _ => {}
                 }
             }
+            let mut out = Vec::new();
             shapes
                 .iter()
-                .find_map(|painted| find(&painted.shape))
-                .expect("le Frame du panneau central doit peindre un contour")
+                .for_each(|painted| find(&painted.shape, &mut out));
+            out
         }
 
         let paint_focused = |focused: bool| {
@@ -7239,19 +7445,45 @@ mod graph_layout_tests {
             ));
             let mut output = context.run_ui(input, |ui| callback(ui));
             output.textures_delta.clear();
-            frame_stroke_color(&output.shapes)
+            stroke_shapes(&output.shapes)
         };
 
         let style = egui::Style::default();
-        assert_eq!(
-            paint_focused(false),
-            style.visuals.window_stroke().color,
-            "sans focus OS, la fenêtre détachée garde le trait par défaut d'egui"
+        let content_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, GRAPH_WINDOW_SIZE);
+
+        // D'autres formes de la fenêtre (bordure du graphe tracé, etc.) ont
+        // leur propre trait, sans rapport avec l'activité — on cherche donc
+        // la présence du bon contour plutôt que l'exclusivité de sa couleur.
+        let inactive_strokes = paint_focused(false);
+        assert!(
+            inactive_strokes.iter().any(|(color, rect)| *color
+                == style.visuals.window_stroke().color
+                && *rect == content_rect),
+            "sans focus OS, le Frame du panneau central doit peindre le trait par défaut \
+             d'egui sur {content_rect:?} : {inactive_strokes:?}"
         );
+        assert!(
+            !inactive_strokes
+                .iter()
+                .any(|(color, _)| *color == style.visuals.selection.stroke.color),
+            "sans focus OS, aucun contour ne doit reprendre la couleur de sélection du thème : \
+             {inactive_strokes:?}"
+        );
+
+        let active_strokes = paint_focused(true);
+        let active_outline = active_strokes
+            .iter()
+            .find(|(color, _)| *color == style.visuals.selection.stroke.color)
+            .expect(
+                "avec le focus OS, la fenêtre détachée doit peindre un contour reprenant la \
+                 couleur de sélection du thème",
+            );
         assert_eq!(
-            paint_focused(true),
-            style.visuals.selection.stroke.color,
-            "avec le focus OS, la fenêtre détachée reprend la couleur de sélection du thème"
+            active_outline.1, content_rect,
+            "le contour actif doit longer exactement le rectangle du viewport OS \
+             (`input.content_rect()`, {content_rect:?}), pas un rectangle recalculé par egui \
+             depuis le contenu — B7 n'est pas corrigé (trouvé {:?})",
+            active_outline.1,
         );
     }
 
