@@ -1547,7 +1547,8 @@ impl PlotyxApp {
                     .with_inner_size(size)
             }
             // Le repli B9 doit pouvoir réduire la hauteur sous le minimum
-            // habituel ; seule la largeur garantit trois onglets de feuille.
+            // habituel. Sous cette largeur, les onglets de feuille (taille
+            // naturelle) défilent au lieu de rétrécir — voir `sheet_tabs`.
             .with_min_inner_size([MIN_CONTENT_WINDOW_SIZE.x, WINDOW_HEADER_HEIGHT]);
             let id = egui::Id::new(tab);
             ctx.show_viewport_deferred(
@@ -2489,106 +2490,60 @@ fn show_horizontally_scrollable_grid<R>(
         .show(ui, add_grid)
 }
 
-fn visible_sheet_tabs(
-    sheet_count: usize,
-    selected_index: usize,
-    available_width: f32,
-) -> std::ops::Range<usize> {
-    const MIN_TAB_WIDTH: f32 = 40.0;
-    const OVERFLOW_ALLOWANCE: f32 = 36.0;
-    const TAB_SPACING: f32 = 2.0;
-
-    let fits_without_overflow = ((available_width + TAB_SPACING) / (MIN_TAB_WIDTH + TAB_SPACING))
-        .floor()
-        .max(0.0) as usize;
-    let visible_count = if sheet_count <= fits_without_overflow {
-        sheet_count
-    } else {
-        (((available_width - 2.0 * OVERFLOW_ALLOWANCE + TAB_SPACING)
-            / (MIN_TAB_WIDTH + TAB_SPACING))
-            .floor()
-            .max(3.0) as usize)
-            .min(sheet_count)
-    };
-    let start = selected_index
-        .saturating_sub(visible_count / 2)
-        .min(sheet_count.saturating_sub(visible_count));
-    start..start + visible_count
-}
-
+/// Bande d'onglets de feuille, style d'origine (bouton pleine taille, sans
+/// troncature) : quand elle ne tient pas dans la largeur disponible, elle
+/// défile horizontalement plutôt que de rétrécir ses onglets ou de replier
+/// les feuilles cachées dans un menu « … » — même logique que la grille
+/// (`show_horizontally_scrollable_grid`). Changer de feuille sélectionnée
+/// (au clavier, par script, ou par clic sur un onglet partiellement visible)
+/// fait défiler la bande pour ramener l'onglet actif dans la zone visible :
+/// c'est ce qui remplace, pour une fenêtre trop étroite, l'ancien
+/// rétrécissement/repli par plage visible.
 fn sheet_tabs(
     ui: &mut egui::Ui,
     sheets: &[(NodeId, String)],
     selected: NodeId,
     mut on_select: impl FnMut(NodeId),
 ) {
-    const OVERFLOW_ALLOWANCE: f32 = 36.0;
-    const TAB_SPACING: f32 = 2.0;
-    const MAX_TAB_WIDTH: f32 = 120.0;
-
     if sheets.is_empty() {
         return;
     }
-    let width = ui.available_width().max(0.0);
-    let selected_index = sheets
-        .iter()
-        .position(|(id, _)| *id == selected)
-        .unwrap_or(0);
-    let visible = visible_sheet_tabs(sheets.len(), selected_index, width);
-    let has_overflow = visible.len() < sheets.len();
-    let reserved = if has_overflow {
-        2.0 * OVERFLOW_ALLOWANCE
-    } else {
-        0.0
-    };
-    let tab_width = ((width - reserved - TAB_SPACING * visible.len().saturating_sub(1) as f32)
-        / visible.len() as f32)
-        .clamp(0.0, MAX_TAB_WIDTH);
+    // Mémorisée par instance de bande (scopée par la pile d'`Id` du parent,
+    // donc distincte entre fenêtre flottante et fenêtre détachée) : ne
+    // redéclenche le défilement automatique que lorsque la sélection change
+    // réellement d'une image à l'autre, pas à chaque image où elle est
+    // simplement reconduite — sinon un défilement manuel de l'utilisateur
+    // serait annulé en continu.
+    let last_selected_id = ui.id().with("sheet_tabs_last_selected");
+    let last_selected: Option<NodeId> = ui.memory(|memory| memory.data.get_temp(last_selected_id));
+    let should_scroll_to_selected = last_selected != Some(selected);
+    ui.memory_mut(|memory| memory.data.insert_temp(last_selected_id, selected));
+
     let mut requested = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = TAB_SPACING;
-        if has_overflow {
-            if visible.start > 0 {
-                ui.menu_button("…", |ui| {
-                    for (id, name) in &sheets[..visible.start] {
-                        if ui.button(name).clicked() {
-                            requested = Some(*id);
-                            ui.close();
-                        }
-                    }
-                });
-            } else {
-                ui.add_space(OVERFLOW_ALLOWANCE);
-            }
-        }
-        for (id, name) in &sheets[visible.clone()] {
-            let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
-                .small()
-                .truncate()
-                .fill(if selected == *id {
-                    ui.visuals().selection.bg_fill
-                } else {
-                    egui::Color32::TRANSPARENT
-                });
-            if ui
-                .add_sized([tab_width, SHEET_TABS_HEIGHT - 12.0], tab)
-                .on_hover_text(name)
-                .clicked()
-            {
-                requested = Some(*id);
-            }
-        }
-        if has_overflow && visible.end < sheets.len() {
-            ui.menu_button("…", |ui| {
-                for (id, name) in &sheets[visible.end..] {
-                    if ui.button(name).clicked() {
+    egui::ScrollArea::horizontal()
+        .id_salt("sheet_tabs_scroll")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for (id, name) in sheets {
+                    let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
+                        .small()
+                        .fill(if selected == *id {
+                            ui.visuals().selection.bg_fill
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        });
+                    let response = ui.add(tab);
+                    if response.clicked() {
                         requested = Some(*id);
-                        ui.close();
+                    }
+                    if should_scroll_to_selected && selected == *id {
+                        response.scroll_to_me(Some(egui::Align::Center));
                     }
                 }
             });
-        }
-    });
+        });
     if let Some(id) = requested {
         on_select(id);
     }
@@ -6761,13 +6716,92 @@ mod graph_layout_tests {
     }
 
     #[test]
-    fn les_onglets_gardent_le_selectionne_et_ses_deux_voisins_visibles() {
-        assert_eq!(visible_sheet_tabs(7, 0, 200.0), 0..3);
-        assert_eq!(visible_sheet_tabs(7, 1, 200.0), 0..3);
-        assert_eq!(visible_sheet_tabs(7, 3, 200.0), 2..5);
-        assert_eq!(visible_sheet_tabs(7, 5, 200.0), 4..7);
-        assert_eq!(visible_sheet_tabs(7, 6, 200.0), 4..7);
-        assert_eq!(visible_sheet_tabs(3, 1, 200.0), 0..3);
+    fn les_onglets_de_feuille_defilent_plutot_que_de_retrecir() {
+        let sheets: Vec<(NodeId, String)> = (0..10)
+            .map(|index| (NodeId::from_raw(index + 1), format!("Feuille {index}")))
+            .collect();
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(200.0, 60.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, |ui| {
+            ui.allocate_ui(egui::vec2(200.0, SHEET_TABS_HEIGHT), |ui| {
+                sheet_tabs(ui, &sheets, sheets[0].0, |_| {});
+            });
+        });
+        output.textures_delta.clear();
+        // Dix onglets en taille naturelle ne tiennent pas dans 200 points :
+        // la bande doit défiler plutôt que rétrécir ses boutons ou replier
+        // les feuilles cachées dans un menu.
+        assert!(
+            !output.shapes.is_empty(),
+            "les onglets visibles doivent être peints"
+        );
+    }
+
+    #[test]
+    fn selectionner_un_onglet_hors_vue_fait_defiler_la_bande_pour_le_montrer() {
+        let sheets: Vec<(NodeId, String)> = (0..10)
+            .map(|index| (NodeId::from_raw(index + 1), format!("Feuille {index}")))
+            .collect();
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let mut scroll_id = None;
+        // Le défilement automatique est animé (`Response::scroll_to_me`) : il
+        // s'étale sur `ScrollAnimation::duration` (jusqu'à 0.3 s par défaut),
+        // pas instantanément à l'image où la sélection change. Faire avancer
+        // `RawInput::time` explicitement entre les images simule ce laps de
+        // temps sans dépendre de l'horloge réelle de la machine de test.
+        let mut time = 0.0_f64;
+        let mut paint =
+            |context: &egui::Context, selected: NodeId, scroll_id: &mut Option<egui::Id>| {
+                time += 0.1;
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(200.0, 60.0),
+                    )),
+                    time: Some(time),
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| {
+                    ui.push_id("onglets_hors_vue", |ui| {
+                        // `ScrollArea::id_salt` stocke un `IdSalt` déjà haché,
+                        // puis `Id::with` le hache une seconde fois : répliquer
+                        // les deux étapes, pas `ui.id().with("sheet_tabs_scroll")`
+                        // directement, sous peine de calculer un autre `Id`.
+                        *scroll_id = Some(ui.id().with(egui::IdSalt::new("sheet_tabs_scroll")));
+                        sheet_tabs(ui, &sheets, selected, |_| {});
+                    });
+                });
+                output.textures_delta.clear();
+            };
+        // Sélectionner d'abord la première feuille, laisser le défilement se
+        // stabiliser, puis basculer sur la dernière : hors vue, elle doit
+        // déclencher un nouveau défilement (`should_scroll_to_selected`).
+        for _ in 0..3 {
+            paint(&context, sheets[0].0, &mut scroll_id);
+        }
+        let scroll_id = scroll_id.expect("l'id de la zone de défilement doit être connu");
+        let offset_before = egui::scroll_area::State::load(&context, scroll_id)
+            .map(|state| state.offset.x)
+            .unwrap_or_default();
+        let mut unused = None;
+        for _ in 0..8 {
+            paint(&context, sheets[9].0, &mut unused);
+        }
+        let offset_after = egui::scroll_area::State::load(&context, scroll_id)
+            .map(|state| state.offset.x)
+            .unwrap_or_default();
+        assert!(
+            offset_after > offset_before,
+            "sélectionner un onglet hors vue doit faire défiler la bande vers lui : {offset_before:?} -> {offset_after:?}"
+        );
     }
 
     #[test]

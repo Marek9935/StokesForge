@@ -115,12 +115,18 @@ Vérifier l'effet sur B4 : des colonnes plus larges débordent plus tôt.
 
 - [x] Glisseur horizontal dans la grille quand les colonnes dépassent.
 - [x] Maj+molette pilote ce glisseur via le comportement natif d'`egui::ScrollArea`.
+- [x] La bande d'onglets de feuille défile elle aussi horizontalement (sa
+      propre `egui::ScrollArea`, indépendante de celle de la grille) plutôt
+      que de rétrécir ses onglets ou de replier les feuilles cachées dans un
+      menu « … » (revu le 2026-09-23 : c'était l'approche initiale, abandonnée
+      pour garder le style d'onglet d'origine, taille naturelle).
 
-Le bandeau d'actions et les onglets de feuille restent hors de la zone
-défilable. La fenêtre flottante et la fenêtre détachée utilisent la même règle.
-Une largeur minimale de 220 points garde trois onglets de feuille visibles ;
-la plage affichée se déplace automatiquement autour de la feuille sélectionnée.
-Les menus « … » donnent accès aux feuilles cachées à gauche et à droite.
+Le bandeau d'actions reste hors de la zone défilable. La fenêtre flottante et
+la fenêtre détachée utilisent la même règle, et la même fonction
+(`sheet_tabs`, `crates/plotyx-app/src/app.rs`). Sélectionner une feuille dont
+l'onglet est hors vue (clic, clavier, script) fait défiler la bande pour
+l'y ramener (`Response::scroll_to_me`, déclenché uniquement quand la
+sélection change réellement, pas à chaque image).
 
 ### F9 — Poignée de glisser autour de la sélection
 

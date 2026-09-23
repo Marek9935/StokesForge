@@ -69,13 +69,14 @@ la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 Toutes les fenêtres de contenu flottantes et détachées partagent un rectangle
 extérieur unique : leur contenu est peint dans un sous-espace borné qui ne
 peut agrandir le cadre au-delà des poignées de redimensionnement. La règle
-intérieure dépend de la nature du contenu. Dans un classeur, la grille seule
-défile horizontalement lorsque ses colonnes dépassent ; le bandeau d'actions
-reste rogné. La fenêtre garde assez de largeur pour montrer trois onglets de
-feuille. Les onglets visibles suivent automatiquement la feuille sélectionnée
-et gardent une feuille voisine de chaque côté lorsqu'elle existe ; les menus
-« … » donnent accès aux feuilles masquées. Les notes et matrices restent
-bornées au rectangle commun. Dans un graphe (`graph_view_contents`,
+intérieure dépend de la nature du contenu. Dans un classeur, la grille et la
+bande d'onglets de feuille défilent chacune horizontalement, indépendamment,
+lorsqu'elles dépassent ; le bandeau d'actions reste rogné. Les onglets
+gardent leur taille naturelle (`sheet_tabs`, `crates/plotyx-app/src/app.rs`) —
+ils ne rétrécissent pas et ne se replient pas dans un menu « … » ; sélectionner
+un onglet hors vue (au clic, au clavier ou par script) fait défiler la bande
+vers lui. Les notes et matrices restent bornées au rectangle commun. Dans un
+graphe (`graph_view_contents`,
 `crates/plotyx-app/src/app.rs`), la figure garde le ratio de
 `DEFAULT_FIGURE_SIZE` (`plotyx-render::pipeline`, 4:3) mais se met à l'échelle
 « contain » dans l'espace disponible — maximisée en prenant la dimension
