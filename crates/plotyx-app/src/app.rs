@@ -5233,13 +5233,24 @@ fn graph_view_contents(
         egui::vec2(available.x, (available.y - GRAPH_CONTROLS_HEIGHT).max(0.0)),
         egui::Sense::hover(),
     );
-    // La géométrie scientifique reste fixe, même si la fenêtre est trop
-    // petite. Seule la partie visible est découpée. Le sous-Ui borne aussi
-    // les interactions : une partie masquée ne doit pas capter la souris
-    // sur les commandes voisines. Ne pas propager le rectangle de la figure
-    // à la disposition du parent, sous peine de faire grandir la fenêtre.
+    // La figure garde le ratio de `DEFAULT_FIGURE_SIZE` mais sa taille suit
+    // l'espace disponible (F11) : mise à l'échelle « contain », bornée par la
+    // dimension limitante (largeur ou hauteur), aussi bien en agrandissant
+    // qu'en rétrécissant. Le sous-Ui borne aussi les interactions. Ne pas
+    // propager le rectangle de la figure à la disposition du parent, sous
+    // peine de faire grandir la fenêtre.
     let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
-    let rect = egui::Rect::from_center_size(outer.center(), egui::vec2(fig_w as f32, fig_h as f32));
+    let scale = if fig_w > 0 && fig_h > 0 {
+        (outer.width() / fig_w as f32)
+            .min(outer.height() / fig_h as f32)
+            .max(0.0)
+    } else {
+        0.0
+    };
+    let rect = egui::Rect::from_center_size(
+        outer.center(),
+        egui::vec2(fig_w as f32 * scale, fig_h as f32 * scale),
+    );
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
     match view.paint(&figure_ui, rect, snapshot, graph_id) {
@@ -7057,12 +7068,17 @@ mod graph_layout_tests {
     }
 
     #[test]
-    fn le_rendu_reste_fixe_et_decoupe_meme_dans_une_petite_zone() {
+    fn le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible() {
+        // F11 : le graphe conserve le ratio de `DEFAULT_FIGURE_SIZE` mais est
+        // mis à l'échelle « contain » — maximisé dans la zone disponible, en
+        // prenant la dimension limitante (largeur ou hauteur) — plutôt que
+        // peint à taille fixe et rogné.
         let (session, graph) = graphe();
         let snapshot = session.handle().snapshot().unwrap();
         let context = egui::Context::default();
         context.set_fonts(plotyx_render_egui::font_definitions());
         let mut view = GraphView::new();
+        let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
 
         for size in [
             GRAPH_WINDOW_SIZE,
@@ -7074,9 +7090,11 @@ mod graph_layout_tests {
                 contents.min,
                 contents.max - egui::vec2(0.0, GRAPH_CONTROLS_HEIGHT),
             );
+            let scale = (visible.width() / fig_w as f32).min(visible.height() / fig_h as f32);
+            let expected_size = egui::vec2(fig_w as f32 * scale, fig_h as f32 * scale);
             for frame in 0..3 {
-                // La molette se trouve sous la zone visible, sur une partie
-                // tronquée de la figure : elle ne doit pas zoomer celle-ci.
+                // La molette se trouve sous la zone visible, hors de la
+                // figure et de ses contrôles : elle ne doit pas la zoomer.
                 let pos = egui::pos2(visible.center().x, visible.bottom() + 10.0);
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -7102,11 +7120,19 @@ mod graph_layout_tests {
                 });
                 output.textures_delta.clear();
                 let rect = view.cache().key().unwrap().rect;
-                assert_eq!(rect.size(), egui::vec2(480.0, 360.0));
+                assert!(
+                    (rect.size() - expected_size).length() < 0.1,
+                    "taille attendue pour une zone de {size:?} : {expected_size:?}, obtenu {:?}",
+                    rect.size()
+                );
+                assert!(
+                    visible.contains_rect(rect),
+                    "la figure mise à l'échelle doit tenir dans la zone visible"
+                );
                 assert_eq!(
                     view.view().generation(),
                     0,
-                    "interaction sur une partie masquée"
+                    "interaction hors de la figure et de ses contrôles"
                 );
                 if frame > 0 {
                     assert_eq!(view.cache().misses(), misses, "recalcul sans changement");
@@ -7118,7 +7144,7 @@ mod graph_layout_tests {
                     assert!(
                         output.shapes.iter().any(|painted| painted.shape == *shape
                             && visible.contains_rect(painted.clip_rect)),
-                        "forme du graphe sans découpage"
+                        "forme du graphe hors de la zone visible"
                     );
                 }
             }

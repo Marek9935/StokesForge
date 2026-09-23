@@ -111,12 +111,13 @@ pub const MIN_CELL: (u32, u32) = (48, 36);
 
 /// Taille par défaut d'une figure PlotYx, en pixels — `(largeur, hauteur)`.
 ///
-/// Le graphe est de taille fixe plutôt qu'élastique à l'onglet ou à la page
-/// d'export : c'est un choix délibéré, pas encore un réglage. 4/3, comme
-/// visé — mais provisoire (valeurs à revoir). Toute forme de configurabilité
-/// future (par graphe, par export) passe par ce point unique plutôt que par
-/// une constante recopiée dans chaque backend — `plotyx-app` (vue écran) et
-/// `plotyx-render-svg` (`DEFAULT_SIZE`, export) s'y réfèrent tous les deux.
+/// Choix délibéré, pas encore un réglage. 4/3, comme visé — mais provisoire
+/// (valeurs à revoir). Toute forme de configurabilité future (par graphe, par
+/// export) passe par ce point unique plutôt que par une constante recopiée
+/// dans chaque backend — `plotyx-render-svg` (`DEFAULT_SIZE`, export) l'utilise
+/// comme taille fixe de page ; `plotyx-app` (vue écran, F11) ne s'en sert que
+/// pour son ratio 4/3, la figure étant mise à l'échelle « contain » dans
+/// l'espace disponible de la fenêtre (`graph_view_contents`).
 pub const DEFAULT_FIGURE_SIZE: (u32, u32) = (480, 360);
 
 /// Ce qu'un panneau a fini par tracer — de quoi écrire un test sans relire

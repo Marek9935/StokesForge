@@ -152,11 +152,17 @@ retouchent l'apparence de la même bande, éviter deux passages séparés.
 
 ### F11 — Définir le comportement du graphe lors du redimensionnement
 
-- [ ] Demander à l'utilisateur quelles parties du graphe doivent rester
-      visibles, être rognées ou devenir défilables lorsque la fenêtre est trop
-      petite, en mode flottant comme en mode détaché.
-- [ ] Ne pas déduire cette règle du comportement actuel de la figure : le
-      choix du graphe est explicitement laissé à définir.
+- [x] Demandé à l'utilisateur (2026-09-23) : le graphe garde toujours le ratio
+      4:3 de `DEFAULT_FIGURE_SIZE` et se met à l'échelle « contain » —
+      maximisé dans l'espace disponible en prenant la dimension limitante
+      (largeur ou hauteur), en agrandissant comme en rétrécissant. Aucun
+      rognage, aucun défilement pour la figure elle-même. Règle identique en
+      mode flottant et détaché (une seule fonction, `graph_view_contents`,
+      couvre les deux).
+- [x] Implémenté dans `graph_view_contents`
+      (`crates/plotyx-app/src/app.rs`) ; test adapté
+      (`le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible`) ;
+      `docs/application.md` mis à jour.
 
 ---
 

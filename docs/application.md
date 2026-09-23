@@ -75,8 +75,14 @@ reste rogné. La fenêtre garde assez de largeur pour montrer trois onglets de
 feuille. Les onglets visibles suivent automatiquement la feuille sélectionnée
 et gardent une feuille voisine de chaque côté lorsqu'elle existe ; les menus
 « … » donnent accès aux feuilles masquées. Les notes et matrices restent
-bornées au rectangle commun. Le comportement intérieur du graphe au
-redimensionnement doit encore être défini avec l'utilisateur (F11).
+bornées au rectangle commun. Dans un graphe (`graph_view_contents`,
+`crates/plotyx-app/src/app.rs`), la figure garde le ratio de
+`DEFAULT_FIGURE_SIZE` (`plotyx-render::pipeline`, 4:3) mais se met à l'échelle
+« contain » dans l'espace disponible — maximisée en prenant la dimension
+limitante, largeur ou hauteur, aussi bien en agrandissant qu'en rétrécissant
+(F11). Aucun rognage ni défilement pour le graphe : la figure entière reste
+toujours visible. La règle est identique en fenêtre flottante et détachée,
+qui partagent la même fonction.
 
 Pour une nouvelle nature de fenêtre, conserver cette borne commune puis
 définir avec l'utilisateur quelles zones défilent et quelles zones sont
