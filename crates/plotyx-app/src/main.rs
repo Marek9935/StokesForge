@@ -166,6 +166,15 @@ fn demo_project() -> anyhow::Result<Project> {
     project
         .add_column(sheet2, None, Some("Court"), Column::from_f64(&[7.0, 8.0]))
         .context("colonne Court")?;
+    // Deux feuilles vides de plus — Book1 n'en montrait que trois, pas assez
+    // pour éprouver à l'œil le défilement de la bande d'onglets (F8) une
+    // fois qu'elle ne rétrécit plus ses onglets.
+    project
+        .add_worksheet(book, Some("Sheet3"))
+        .context("feuille Sheet3")?;
+    project
+        .add_worksheet(book, Some("Sheet4"))
+        .context("feuille Sheet4")?;
 
     // Le graphe de la phase R4. Ses colonnes sont **les siennes** et non
     // `Temps`/`Signal` : celles-là portent volontairement un `NaN` et des
