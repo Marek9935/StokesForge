@@ -415,7 +415,7 @@ viewport détaché (`show_viewport_deferred`) — voir la doc de tête de
 manuellement (l'apparence, pas la géométrie) reste donc non vérifié par un
 outil non interactif de ce dépôt.
 
-## B9 — Une fenêtre détachée repliée garde sa taille OS dépliée
+## B9 — Une fenêtre détachée repliée garde sa taille OS dépliée [corrigé]
 
 **Reproduction**
 1. Détacher un graphe (ou un classeur).
@@ -455,6 +455,41 @@ flottantes ne s'activent pas d'intérêt sur un repli).
 que B5 (comportement jamais porté d'un côté). **Gravité** : gênant.
 **Écarté** : ni plafond, ni limite assumée, ni dégradation volontaire.
 
+**Correctif** : `DetachedTabViewModel` porte désormais `expanded_size:
+Option<egui::Vec2>` — la dernière taille OS connue **hors repli**, mise à
+jour à chaque image tant que `collapsed` est faux et gelée pendant un repli
+(même rôle que `current_size`/`window_sizes` côté fenêtre flottante, B3,
+mais porté par le modèle puisqu'une fenêtre détachée n'a pas de table
+équivalente dans `PlotyxApp`). À l'image où `header_actions.toggle_collapse`
+bascule, `show_detached_tabs` envoie un `ViewportCommand::InnerSize` calculé
+par `floating_window_display_size` **réutilisée telle quelle** — largeur
+mémorisée et hauteur de la bande d'en-tête au repli, taille mémorisée
+intégrale au dépli. `detached_resize_handles` est sautée pendant un repli :
+contrairement aux poignées maison des fenêtres flottantes internes (qui ne
+mutent qu'une taille purement logique, sans conséquence tant que le repli
+dure), celles-ci pilotent le viewport OS réel via
+`ViewportCommand::BeginResize` — les laisser actives permettrait d'agrandir
+la fenêtre repliée en direct, une taille ni affichée ni mémorisée (donc
+perdue au dépli).
+
+Piège symétrique de B3 traité de la même façon : la géométrie persistée
+(`requests.geometry`, lue en fin de fermeture depuis
+`input.viewport().outer_rect`) passe par `floating_window_geometry_to_
+persist` **réutilisée telle quelle**, avec `expanded_size` en guise de
+taille logique — pendant un repli, `outer_rect` est le rectangle réduit que
+l'OS rapporte une fois l'`InnerSize` appliqué, et le persister tel quel
+aurait rouvert une fenêtre minuscule au prochain chargement du projet.
+
+Testé par pilotage direct du callback du viewport détaché (même schéma que
+`un_graphe_detache_reconstruit_ses_formes_dans_son_viewport`) :
+`une_fenetre_detachee_repliee_reduit_puis_restaure_son_viewport_os`
+(`crates/plotyx-app/src/app.rs`) clique le chevron de repli, vérifie la
+commande `ViewportCommand::InnerSize` envoyée (taille repliée puis taille
+restaurée à l'identique), et vérifie que la géométrie rapportée pendant le
+repli garde la hauteur d'avant repli plutôt que la hauteur réduite — géré à
+la main via `egui::ViewportInfo::outer_rect`, aucun mécanisme de capture
+d'écran ne montrant un repli interactif d'une fenêtre détachée.
+
 ---
 
 ## Ordre suggéré
@@ -474,11 +509,12 @@ que B5 (comportement jamais porté d'un côté). **Gravité** : gênant.
    juste livré, sur les deux surfaces (flottante et détachée). Indépendant de
    B8/B9 (cause différente), mais touche la même zone de code : à corriger
    avant ou avec eux pour éviter un troisième passage sur ce fichier.
+   **Corrigé**.
 7. **B8** — indépendant, porte le même correctif que B4 vers le chemin
    détaché ; vérifier au passage `detached_matrix_contents`/
-   `detached_note_contents`.
+   `detached_note_contents`. **Corrigé**.
 8. **B9** — indépendant, porte le même correctif que B3 vers le chemin
-   détaché (taille demandée, pas primitive de contour).
+   détaché (taille demandée, pas primitive de contour). **Corrigé**.
 
 Chaque correction commence par un test qui échoue (`plotyx-bug-fix`). Pour
 B1 à B4 et B7 à B9, le test ne peut pas porter sur l'apparence : **les tests
