@@ -25,7 +25,15 @@ les corriger par réflexe serait une régression :
 
 ---
 
-## B1 — Le contour de surbrillance ne suit pas le bord de la fenêtre
+## B1 — Le contour de surbrillance ne suit pas le bord de la fenêtre [corrigé]
+
+**Correctif** : le contour est désormais peint après `.show()`, sur le
+rectangle réellement enregistré par egui
+(`ctx.memory(|m| m.area_rect(id))`), plutôt que sur `ui.max_rect()` dans la
+fermeture — et sur le calque propre de la fenêtre (`LayerId::new(Order::
+Foreground, id)`), pas celui du panneau central, sinon le contour se
+retrouverait sous les fenêtres flottantes plutôt que dessus.
+Voir `crates/plotyx-app/src/app.rs`, boucle des fenêtres flottantes.
 
 **Capture** : [voir la capture](captures-2026-09-23/surbrillance-mal-placee.png)
 
@@ -70,18 +78,27 @@ pas (`rg "is_active"` ne montre aucune autre écriture).
 **Nature** : incohérence entre deux chemins de sélection (Project Manager vs
 clic direct). **Gravité** : gênant.
 
-## B3 — Surbrillance mal placée sur une fenêtre repliée
+## B3 — Surbrillance mal placée sur une fenêtre repliée [corrigé]
 
 **Capture** : [voir la capture](captures-2026-09-23/surbrillance-fenetre-repliee.png)
 
 Une fenêtre repliée (« Masquer le contenu de… ») garde un contour à sa taille
 **dépliée** : un grand cadre vert autour d'une zone vide.
 
-**Cause probable** : même origine que B1 — le contour suit un rectangle de
-contenu qui ne correspond plus à ce qui est peint une fois le contenu masqué.
-À traiter dans la même passe : **une seule primitive de contour** pour tous les
-cas (actif/inactif × déplié/replié × flottant/détaché), plutôt que quatre
-rustines.
+**Cause confirmée** : même origine que B1 — le contour suivait un rectangle
+de contenu qui ne correspond plus à ce qui est peint une fois le contenu
+masqué. Corrigé dans la même passe que B1, avec la même primitive de contour
+(le rectangle réellement enregistré par egui après `.show()`).
+
+**Correctif complémentaire** : la taille **demandée** à egui pendant un
+repli (`.fixed_size`) se réduit désormais à la hauteur de la bande
+d'en-tête — sinon le cadre du `Frame` et les poignées de redimensionnement
+maison restaient positionnés à la taille dépliée, même une fois le contour
+corrigé. La taille logique (`current_size`, persistée dans
+`window_geometries`/`.plx`) reste inchangée : seule la taille demandée cette
+image se réduit, pour que déplier une fenêtre après rechargement du projet
+retrouve sa taille d'avant repli. Voir `floating_window_display_size` et
+`floating_window_geometry_to_persist` dans `crates/plotyx-app/src/app.rs`.
 
 **Gravité** : cosmétique.
 
@@ -170,7 +187,8 @@ bien la nouvelle série. Cohérent avec le symptôme observé.
 
 1. **B1 + B3** ensemble — une seule primitive de contour, vérifiée sur les
    quatre combinaisons d'états. C'est la correction la moins risquée et elle
-   débloque la lecture des deux autres.
+   débloque la lecture des deux autres. **Corrigé** (voir les deux sections
+   ci-dessus).
 2. **B2** — dans la foulée, puisqu'il touche la même zone.
 3. **B4** — avant F8, dont il est le préalable.
 4. **B5** — indépendant, local.

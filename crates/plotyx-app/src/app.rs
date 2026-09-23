@@ -504,6 +504,12 @@ const BOOK_WINDOW_WIDTH: f32 = FLOATING_WINDOW_SIZE.x * 2.0 / 3.0;
 /// Décalage, en points, entre deux fenêtres flottantes ouvertes l'une après
 /// l'autre (cascade) — voir [`PlotyxApp::next_cascade`].
 const CASCADE_STEP: f32 = 24.0;
+/// Hauteur de la bande d'en-tête peinte par [`window_header`] — partagée
+/// avec le calcul de la taille repliée d'une fenêtre flottante (B3,
+/// `docs/chantiers/retours-2026-09-23-bugs.md`) : un contour ou une taille
+/// forcée qui ne reprend pas cette même valeur redevient trop grand dès que
+/// le contenu est masqué.
+const WINDOW_HEADER_HEIGHT: f32 = 28.0;
 /// Nombre de crans de cascade avant de reboucler à zéro, pour qu'une
 /// succession de fenêtres ne dérive jamais hors de l'aire de travail.
 const CASCADE_WRAP: u32 = 8;
@@ -1908,6 +1914,19 @@ impl eframe::App for PlotyxApp {
                     let mut header_actions = WindowHeaderActions::default();
                     let was_collapsed = collapsed_graph_tabs.contains(&tab);
                     let is_active = Some(tab) == active_tab;
+                    // Fenêtre repliée (B3) : `window_header` ne peint que sa
+                    // bande d'en-tête, `tab_contents` est sauté — forcer la
+                    // fenêtre à `current_size` peindrait quand même un cadre
+                    // (et un contour, voir plus bas) à la taille dépliée
+                    // autour d'une zone vide. `current_size` reste la taille
+                    // logique conservée dans `window_sizes`/persistée ; seule
+                    // la taille **demandée à egui cette image** se réduit.
+                    let display_size = floating_window_display_size(
+                        current_size,
+                        was_collapsed,
+                        WINDOW_HEADER_HEIGHT,
+                        ui.style().spacing.window_margin.sum(),
+                    );
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
                         .title_bar(false)
@@ -1918,23 +1937,10 @@ impl eframe::App for PlotyxApp {
                         // redimensionnement natif d'`egui::Window` est
                         // remplacé par [`floating_resize_handles`], posées
                         // juste après `.show()`.
-                        .fixed_size(current_size)
+                        .fixed_size(display_size)
                         .constrain_to(workspace_rect)
                         .open(&mut open)
                         .show(ui.ctx(), |ui| {
-                            if is_active {
-                                // Surlignage de la fenêtre au premier plan
-                                // (§5) — `active_tab` est la même source de
-                                // vérité déjà utilisée pour le z-order
-                                // (`floating_tabs.last()`) et le double-clic
-                                // du Project Manager, pas un nouvel état.
-                                ui.painter().rect_stroke(
-                                    ui.max_rect(),
-                                    0.0,
-                                    ui.visuals().selection.stroke,
-                                    egui::StrokeKind::Outside,
-                                );
-                            }
                             header_actions = window_header(
                                 ui,
                                 id,
@@ -1964,21 +1970,48 @@ impl eframe::App for PlotyxApp {
                             *position += header_actions.drag_delta;
                         }
                     }
+                    // Rectangle réellement peint cette image (frame compris) —
+                    // seule source fiable pour un contour qui doit longer le
+                    // bord de la fenêtre plutôt que son contenu (B1/B3 :
+                    // `ui.max_rect()` dans la fermeture `.show()` donne le
+                    // rectangle de contenu, déjà rétréci par la marge du
+                    // `Frame`, et ne rétrécit pas non plus quand le contenu
+                    // est replié).
+                    let area_rect = ui.ctx().memory(|memory| memory.area_rect(id));
+                    if is_active {
+                        if let Some(rect) = area_rect {
+                            // Peint sur le calque propre de la fenêtre
+                            // (celui déjà utilisé par sa fermeture `.show()`),
+                            // pas sur celui du panneau central : sinon le
+                            // contour se retrouverait sous les fenêtres
+                            // flottantes plutôt que dessus.
+                            ui.ctx()
+                                .layer_painter(egui::LayerId::new(egui::Order::Foreground, id))
+                                .rect_stroke(
+                                    rect,
+                                    0.0,
+                                    ui.visuals().selection.stroke,
+                                    egui::StrokeKind::Outside,
+                                );
+                        }
+                    }
                     // Poignées de redimensionnement maison (§3) : posées sur
                     // le rectangle qu'on vient de demander (position/taille
                     // forcées ci-dessus, donc identique au rectangle
-                    // réellement peint cette image). Mutent
-                    // `window_positions`/`window_sizes` directement ; la
-                    // prochaine image les réinjectera via `.current_pos`/
-                    // `.fixed_size`.
-                    let requested_rect = egui::Rect::from_min_size(current_pos, current_size);
+                    // réellement peint cette image — `display_size`, pas
+                    // `current_size`, pour rester sur les bords visibles
+                    // d'une fenêtre repliée). Mutent `window_positions`/
+                    // `window_sizes` directement ; la prochaine image les
+                    // réinjectera via `.current_pos`/`.fixed_size`.
+                    let requested_rect = egui::Rect::from_min_size(current_pos, display_size);
                     if let (Some(position), Some(size)) =
                         (window_positions.get_mut(&tab), window_sizes.get_mut(&tab))
                     {
                         floating_resize_handles(ui, tab, requested_rect, position, size);
                     }
-                    if let Some(rect) = ui.ctx().memory(|memory| memory.area_rect(id)) {
-                        geometry_updates.push((tab, rect));
+                    if let Some(rect) = area_rect {
+                        geometry_updates
+                            .push((tab, floating_window_geometry_to_persist(rect, current_size)));
                     }
                     if !open {
                         close_requests.push(tab);
@@ -2145,6 +2178,39 @@ fn toggle_graph_collapse_to(collapsed_graph_tabs: &mut HashSet<Tab>, tab: Tab, c
     } else {
         collapsed_graph_tabs.remove(&tab);
     }
+}
+
+/// Taille à demander à egui (`.fixed_size`) pour une fenêtre flottante cette
+/// image. La taille logique (`current_size`) telle quelle, sauf le temps
+/// d'un repli (B3, `docs/chantiers/retours-2026-09-23-bugs.md`) : le contenu
+/// n'est alors plus peint (seule [`window_header`] l'est), et forcer la
+/// taille dépliée peindrait un cadre — et un contour de surbrillance —
+/// autour d'une zone vide.
+fn floating_window_display_size(
+    current_size: egui::Vec2,
+    was_collapsed: bool,
+    header_height: f32,
+    window_margin: egui::Vec2,
+) -> egui::Vec2 {
+    if was_collapsed {
+        egui::vec2(current_size.x, header_height + window_margin.y)
+    } else {
+        current_size
+    }
+}
+
+/// Rectangle à retenir dans `window_geometries` (persisté en `.plx`) à
+/// partir du rectangle réellement peint cette image. La position vient de
+/// ce rectangle, mais la taille doit rester la taille **logique** de la
+/// fenêtre : pendant un repli (B3), le rectangle réellement peint est réduit
+/// à [`floating_window_display_size`], et le persister tel quel referait
+/// réapparaître la fenêtre repliée — y compris une fois dépliée à nouveau —
+/// à la prochaine ouverture du projet.
+fn floating_window_geometry_to_persist(
+    painted_rect: egui::Rect,
+    current_size: egui::Vec2,
+) -> egui::Rect {
+    egui::Rect::from_min_size(painted_rect.min, current_size)
 }
 
 #[derive(Default)]
@@ -2477,8 +2543,10 @@ fn window_header(
     const ACTION_WIDTH: f32 = 24.0;
 
     let mut actions = WindowHeaderActions::default();
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), WINDOW_HEADER_HEIGHT),
+        egui::Sense::hover(),
+    );
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     let icon_color = match placement {
         HeaderPlacement::Floating => header.visuals().text_color(),
@@ -5917,6 +5985,116 @@ mod graph_layout_tests {
 
         toggle_graph_collapse(&mut collapsed, graph_tab);
         assert!(collapsed.is_empty());
+    }
+
+    // B3 (`docs/chantiers/retours-2026-09-23-bugs.md`) : une fenêtre repliée
+    // gardait un contour à sa taille dépliée, un grand cadre vert autour
+    // d'une zone vide — parce que la fenêtre était forcée (`.fixed_size`) à
+    // sa taille dépliée même quand seule sa bande d'en-tête est peinte.
+
+    #[test]
+    fn la_taille_demandee_a_egui_se_reduit_a_len_tete_pendant_un_repli() {
+        let current_size = egui::vec2(400.0, 300.0);
+        let window_margin = egui::vec2(12.0, 12.0);
+
+        let deplie = floating_window_display_size(current_size, false, 28.0, window_margin);
+        assert_eq!(
+            deplie, current_size,
+            "dépliée, la fenêtre garde sa taille logique"
+        );
+
+        let replie = floating_window_display_size(current_size, true, 28.0, window_margin);
+        assert_eq!(
+            replie,
+            egui::vec2(400.0, 40.0),
+            "repliée, seule la bande d'en-tête (+ marges du Frame) doit être demandée à egui"
+        );
+        assert!(
+            replie.y < current_size.y,
+            "la taille demandée doit être strictement plus petite que la taille dépliée"
+        );
+    }
+
+    #[test]
+    fn la_geometrie_persistee_garde_la_taille_logique_meme_repliee() {
+        // Le rectangle réellement peint cette image (`area_rect`) est celui
+        // d'une fenêtre repliée — plus petit que sa taille logique.
+        let painted_rect =
+            egui::Rect::from_min_size(egui::pos2(50.0, 60.0), egui::vec2(400.0, 40.0));
+        let current_size = egui::vec2(400.0, 300.0);
+
+        let persisted = floating_window_geometry_to_persist(painted_rect, current_size);
+
+        assert_eq!(
+            persisted,
+            egui::Rect::from_min_size(painted_rect.min, current_size),
+            "la géométrie sauvegardée doit garder la taille dépliée, sinon un projet rechargé \
+             rouvrirait la fenêtre minuscule même après avoir cliqué sur « déplier »"
+        );
+    }
+
+    // B1 : le contour de surbrillance était peint sur `ui.max_rect()` dans
+    // la fermeture `.show()` de la fenêtre — le rectangle de *contenu*, déjà
+    // rétréci par la marge intérieure du `Frame` — plutôt que sur le
+    // rectangle réel de la fenêtre (`ctx.memory(|m| m.area_rect(id))`,
+    // celui qu'`egui` peint réellement, marge comprise). Ce test verrouille
+    // la différence entre les deux : si jamais elle disparaissait (marge à
+    // zéro), le correctif n'aurait plus rien à corriger.
+    #[test]
+    fn le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu() {
+        let context = egui::Context::default();
+        let id = egui::Id::new("le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu");
+        let mut content_rect = None;
+
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 300.0),
+            )),
+            ..Default::default()
+        };
+        let paint = |ui: &mut egui::Ui, content_rect: &mut Option<egui::Rect>| {
+            egui::Window::new("test")
+                .id(id)
+                .title_bar(false)
+                .current_pos(egui::pos2(20.0, 20.0))
+                .fixed_size(egui::vec2(200.0, 100.0))
+                .show(ui.ctx(), |ui| {
+                    // Comme `window_header` + `tab_contents` en production :
+                    // le contenu occupe tout l'espace offert, faute de quoi
+                    // `AreaState::rect()` (donc `area_rect`) se réduirait à
+                    // ce qui a été réellement dessiné plutôt qu'à ce que
+                    // `.fixed_size()` a demandé — pas ce que ce test veut
+                    // isoler.
+                    ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+                    *content_rect = Some(ui.max_rect());
+                });
+        };
+        // `Memory::area_rect` documente renvoyer le rectangle de l'image
+        // *précédente* — comme le fait déjà le code de production
+        // (`app.rs`, juste après `.show()`) pour la persistance de la
+        // géométrie. Deux images sont donc nécessaires pour l'observer.
+        context
+            .run_ui(input(), |ui| paint(ui, &mut content_rect))
+            .textures_delta
+            .clear();
+        let mut output = context.run_ui(input(), |ui| paint(ui, &mut content_rect));
+        output.textures_delta.clear();
+
+        let content_rect = content_rect.expect("la fermeture .show() doit avoir été appelée");
+        let area_rect = context
+            .memory(|memory| memory.area_rect(id))
+            .expect("la fenêtre doit avoir enregistré sa géométrie réelle");
+
+        assert!(
+            area_rect.width() > content_rect.width() && area_rect.height() > content_rect.height(),
+            "le rectangle réel ({area_rect:?}) doit être strictement plus grand que le \
+             rectangle de contenu ({content_rect:?}) : c'est la marge du Frame que B1 ignorait"
+        );
+        assert!(
+            area_rect.contains_rect(content_rect),
+            "le rectangle de contenu doit rester à l'intérieur du rectangle réel de la fenêtre"
+        );
     }
 
     #[test]
