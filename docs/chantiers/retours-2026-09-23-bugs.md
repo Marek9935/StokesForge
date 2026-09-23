@@ -58,7 +58,18 @@ contour là, ou styler le `Frame` de la fenêtre, plutôt que dans la fermeture.
 **Nature** : résultat visuel faux. **Gravité** : cosmétique.
 **Écarté** : ni plafond, ni limite documentée, ni dégradation volontaire.
 
-## B2 — Aucune surbrillance quand on sélectionne une fenêtre au clic
+## B2 — Aucune surbrillance quand on sélectionne une fenêtre au clic [corrigé]
+
+**Correctif** : `egui::Area` amène déjà la fenêtre cliquée au premier plan de
+son propre ordre de calques (`Sense::CLICK`, indépendamment de tout code
+applicatif), mais `floating_tabs` — seule source d'`active_tab`, donc de la
+surbrillance — ne le savait pas. Après la boucle des fenêtres flottantes (une
+fois sa mutation de nouveau sûre), `app.rs` relit `ctx.top_layer_id()`, y
+retrouve le tab correspondant, et l'appelle à
+`sync_floating_tabs_order_to_top_layer` pour ramener ce tab en fin de
+`floating_tabs` — même position que celle que produit déjà le double-clic du
+Project Manager. Voir `crates/plotyx-app/src/app.rs`, juste après la boucle
+des fenêtres flottantes, et la fonction `sync_floating_tabs_order_to_top_layer`.
 
 **Capture** : [voir la capture](captures-2026-09-23/pas-de-surbrillance-au-clic.png)
 
@@ -144,7 +155,7 @@ via egui). Test de non-régression :
 « N lignes × M colonnes » et le bouton « Importer… ») disparaissent avec F1 —
 une partie du symptôme s'éteindra d'elle-même, mais pas la cause.
 
-## B5 — Icône « Masquer le contenu de… » absente sur les classeurs
+## B5 — Icône « Masquer le contenu de… » absente sur les classeurs [corrigé]
 
 **Cause certaine**, `app.rs:2487-2492` :
 
@@ -167,10 +178,40 @@ pas un choix.
 été éprouvée que pour un graphe. Lever l'icône sans vérifier ce chemin
 donnerait un classeur replié à l'affichage douteux.
 
+**Correctif** : la condition dans `window_header` inclut désormais
+`Tab::Book` (restriction levée pour les classeurs, mais volontairement pas
+pour `Matrix`/`Note`, faute de raison de le faire). `toggle_graph_collapse`/
+`toggle_graph_collapse_to` et `collapsed_graph_tabs` renommés en
+`toggle_collapse`/`toggle_collapse_to`/`collapsed_tabs` puisqu'ils ne sont
+plus propres aux graphes. Vérifié avant de lever la restriction : la peinture
+du contenu replié (fenêtres flottantes et détachées) était déjà générique sur
+`tab`, rien de spécifique au graphe n'y était caché.
+
 **Nature** : incohérence entre surfaces (graphe vs classeur).
 **Gravité** : gênant.
 
-## B6 — Glisser-déposer colonne → graphe : la légende se met à jour, pas la courbe
+## B6 — Glisser-déposer colonne → graphe : la légende se met à jour, pas la courbe [investigué, non corrigé]
+
+**Investigation menée** : la piste ci-dessous (revision qui n'avance pas,
+cache périmé) a été **falsifiée** par un test reproduisant le chemin réel
+(dispatch → `AppState::add_series_to_graph` → `Command::SetPlotSpec` →
+`execute`) : la révision avance bien, le cache de `plotyx-render-egui` est
+bien invalidé, et la courbe est bien reconstruite avec la nouvelle série.
+Légende et courbe sont produites par le **même** calcul mis en cache
+(`GraphView::paint` → `collect_shapes` → `pipeline::draw` puis
+`legend::draw`) : il n'existe structurellement aucun second chemin qui
+dessinerait la légende séparément, donc les deux ne peuvent pas diverger par
+ce mécanisme.
+
+Aucune cause alternative n'a pu être démontrée aussi solidement — pas de
+correctif livré plutôt que de deviner. Pour trancher, il manque soit une
+capture d'écran prise **après** un vrai glisser-déposer (hors de portée du
+mécanisme de capture actuel, qui ne photographie que l'état initial), soit
+une clarification : la « légende » signalée est-elle celle dessinée dans le
+graphe, ou la liste « Séries » du panneau de configuration à droite (dont le
+brouillon `PlotEdit` est volontairement non rafraîchi tant qu'il porte sur le
+même graphe — comportement inverse de celui décrit, à vérifier auprès de
+l'utilisateur) ?
 
 **Reproduction**
 1. Ouvrir un classeur et un graphe.
@@ -201,11 +242,13 @@ bien la nouvelle série. Cohérent avec le symptôme observé.
    quatre combinaisons d'états. C'est la correction la moins risquée et elle
    débloque la lecture des deux autres. **Corrigé** (voir les deux sections
    ci-dessus).
-2. **B2** — dans la foulée, puisqu'il touche la même zone.
-3. **B4** — avant F8, dont il est le préalable.
-4. **B5** — indépendant, local.
+2. **B2** — dans la foulée, puisqu'il touche la même zone. **Corrigé**.
+3. **B4** — avant F8, dont il est le préalable. **Corrigé**.
+4. **B5** — indépendant, local. **Corrigé**.
 5. **B6** — à investiguer avant de chiffrer ; c'est le seul dont la cause
-   n'est pas établie.
+   n'est pas établie. **Investigué, non corrigé** — la piste s'est révélée
+   fausse, voir la section ci-dessus pour ce qu'il faut clarifier avant de
+   rouvrir ce chantier.
 
 Chaque correction commence par un test qui échoue (`plotyx-bug-fix`). Pour
 B1 à B4, le test ne peut pas porter sur l'apparence : **les tests couvrent la

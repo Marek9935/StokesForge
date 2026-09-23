@@ -111,12 +111,22 @@
 //! exactement superposée à la précédente.
 //!
 //! **Z-order** : `egui::Window` remonte déjà seule au premier plan au clic
-//! (`bring_to_front_on_click`, par défaut). Le seul cas que ce module doit
-//! encore gérer à la main est « rouvrir depuis le Project Manager une entrée
-//! déjà ouverte doit la ramener au premier plan sans qu'on ait cliqué
-//! dedans » : [`PlotyxApp::open_tab`] pose alors [`PlotyxApp::focus_next`],
-//! consommé au rendu suivant par un appel à `Context::move_to_top` sur la
-//! couche de la fenêtre concernée.
+//! (`bring_to_front_on_click`, par défaut) — mais dans son propre ordre de
+//! calques, indépendant de [`PlotyxApp::floating_tabs`], qui reste la seule
+//! source d'`active_tab` (donc du contour de surbrillance, § plus bas). Sans
+//! synchronisation, un clic direct dans une fenêtre la faisait passer au
+//! premier plan sans jamais la surligner (B2,
+//! `docs/chantiers/retours-2026-09-23-bugs.md`). [`PlotyxApp::ui`] relit donc
+//! `Context::top_layer_id` juste après avoir peint les fenêtres flottantes
+//! (une fois la mutation de `floating_tabs` de nouveau sûre) et ramène le tab
+//! trouvé en fin de `floating_tabs` via `sync_floating_tabs_order_to_top_layer`
+//! — un cadre de retard tout au plus, `egui` redemandant lui-même un repaint
+//! immédiat au clic. Le seul cas que ce module doit encore gérer *avant*
+//! qu'`egui` n'ait peint quoi que ce soit est « rouvrir depuis le Project
+//! Manager une entrée déjà ouverte doit la ramener au premier plan sans
+//! qu'on ait cliqué dedans » : [`PlotyxApp::open_tab`] pose alors
+//! [`PlotyxApp::focus_next`], consommé au rendu suivant par un appel à
+//! `Context::move_to_top` sur la couche de la fenêtre concernée.
 //!
 //! # Maximiser un onglet
 //!
@@ -2032,6 +2042,25 @@ impl eframe::App for PlotyxApp {
                     }
                 }
                 *focus_next = None;
+
+                // B2 (`docs/chantiers/retours-2026-09-23-bugs.md`) :
+                // `egui::Area` amène déjà la fenêtre cliquée au premier plan
+                // de son propre ordre de calques dès qu'on clique dedans
+                // (`Sense::CLICK`, indépendamment du Project Manager) — mais
+                // `floating_tabs`, seule source de `active_tab` (donc de
+                // `is_active`/la surbrillance, voir plus haut), ne le sait
+                // pas : un clic direct amenait la fenêtre au premier plan
+                // sans jamais la surligner. On resynchronise ici sur ce
+                // qu'egui vient d'établir, une fois la mutation de
+                // `floating_tabs` de nouveau sûre (la boucle qui l'itère est
+                // refermée).
+                let top_layer_tab = ui.ctx().top_layer_id().and_then(|top| {
+                    floating_tabs
+                        .iter()
+                        .copied()
+                        .find(|&tab| egui::Id::new(tab) == top.id)
+                });
+                sync_floating_tabs_order_to_top_layer(floating_tabs, top_layer_tab);
             }
         });
 
@@ -2230,6 +2259,25 @@ fn floating_window_geometry_to_persist(
     current_size: egui::Vec2,
 ) -> egui::Rect {
     egui::Rect::from_min_size(painted_rect.min, current_size)
+}
+
+/// Ramène `top_layer_tab` en fin de `floating_tabs` (§ ordre de pile,
+/// `active_tab = floating_tabs.last()`), sans rien faire s'il n'y est déjà,
+/// s'il n'existe pas, ou si aucune fenêtre flottante n'est au premier plan
+/// (B2, `docs/chantiers/retours-2026-09-23-bugs.md`). `egui` gère seul son
+/// propre ordre de calques (un clic direct dans une fenêtre l'amène déjà au
+/// premier plan visuellement) ; cette fonction ne fait que réaligner
+/// `floating_tabs`, seule source de `active_tab`, dessus.
+fn sync_floating_tabs_order_to_top_layer(floating_tabs: &mut Vec<Tab>, top_layer_tab: Option<Tab>) {
+    let Some(top_layer_tab) = top_layer_tab else {
+        return;
+    };
+    if let Some(pos) = floating_tabs.iter().position(|&t| t == top_layer_tab) {
+        if pos + 1 != floating_tabs.len() {
+            let tab = floating_tabs.remove(pos);
+            floating_tabs.push(tab);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -6214,6 +6262,138 @@ mod graph_layout_tests {
                 painted.clip_rect,
             );
         }
+    }
+
+    // B2 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `sync_floating_tabs_order_to_top_layer`
+    // teste la logique pure de réalignement.
+
+    #[test]
+    fn le_tab_au_premier_plan_est_ramene_en_fin_de_floating_tabs() {
+        let tab_a = Tab::Graph(NodeId::from_raw(1));
+        let tab_b = Tab::Graph(NodeId::from_raw(2));
+        let mut floating_tabs = vec![tab_a, tab_b];
+
+        // `tab_b` est déjà en fin de liste (donc déjà « actif ») : rien à
+        // faire.
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_b));
+        assert_eq!(floating_tabs, vec![tab_a, tab_b]);
+
+        // `tab_a` est au premier plan (clic direct) sans être en fin de
+        // liste : il doit passer en dernier.
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_a));
+        assert_eq!(floating_tabs, vec![tab_b, tab_a]);
+    }
+
+    #[test]
+    fn aucun_calque_au_premier_plan_ou_tab_inconnu_laisse_floating_tabs_intact() {
+        let tab_a = Tab::Graph(NodeId::from_raw(1));
+        let tab_b = Tab::Graph(NodeId::from_raw(2));
+        let tab_inconnu = Tab::Graph(NodeId::from_raw(3));
+        let mut floating_tabs = vec![tab_a, tab_b];
+
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, None);
+        assert_eq!(floating_tabs, vec![tab_a, tab_b]);
+
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_inconnu));
+        assert_eq!(
+            floating_tabs,
+            vec![tab_a, tab_b],
+            "un tab qui n'est plus dans floating_tabs (fermé entretemps) ne doit rien perturber"
+        );
+    }
+
+    // B2, bout à bout : un clic direct dans une fenêtre flottante qui n'est
+    // pas déjà en fin de `floating_tabs` amène egui à réordonner son propre
+    // calque (`Area`, `Sense::CLICK`) *avant* que `floating_tabs` ne le
+    // sache — c'est exactement l'écart que corrige
+    // `sync_floating_tabs_order_to_top_layer`. Ce test peint deux fenêtres
+    // avec les mêmes `egui::Id` que la production (`egui::Id::new(tab)`),
+    // simule un clic dans celle qui n'est pas en fin de liste, puis vérifie
+    // que la résolution utilisée en production (`ctx.top_layer_id()` +
+    // recherche du tab correspondant) place bien `tab_a` au premier plan —
+    // et que sans la resynchronisation, `floating_tabs.last()`
+    // (`active_tab`) resterait sur `tab_b`, périmé.
+    #[test]
+    fn un_clic_direct_dans_une_fenetre_en_arriere_plan_la_ramene_active() {
+        let tab_a = Tab::Graph(NodeId::from_raw(1));
+        let tab_b = Tab::Graph(NodeId::from_raw(2));
+        let mut floating_tabs = vec![tab_a, tab_b];
+        let context = egui::Context::default();
+
+        let rect_a = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(100.0, 100.0));
+        let rect_b = egui::Rect::from_min_size(egui::pos2(200.0, 20.0), egui::vec2(100.0, 100.0));
+
+        let paint = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            context.run_ui(input, |ui| {
+                for (tab, rect) in [(tab_a, rect_a), (tab_b, rect_b)] {
+                    egui::Window::new(format!("{tab:?}"))
+                        .id(egui::Id::new(tab))
+                        .title_bar(false)
+                        .current_pos(rect.min)
+                        .fixed_size(rect.size())
+                        .show(ui.ctx(), |ui| {
+                            ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+                        });
+                }
+            })
+        };
+
+        // Image de repos : `floating_tabs` place `tab_b` en dernier, comme
+        // s'il avait été ouvert (ou cliqué) en dernier légitimement.
+        paint(vec![]).textures_delta.clear();
+
+        // Clic dans `tab_a`, qui n'est pas en fin de `floating_tabs` — sur
+        // deux images distinctes, comme les autres tests d'interaction du
+        // fichier (déplacer la souris, puis presser) : `layer_id_at` doit
+        // pouvoir s'appuyer sur une position de pointeur déjà connue.
+        let click_pos = rect_a.center();
+        paint(vec![egui::Event::PointerMoved(click_pos)])
+            .textures_delta
+            .clear();
+        let mut output = paint(vec![egui::Event::PointerButton {
+            pos: click_pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::default(),
+        }]);
+        output.textures_delta.clear();
+
+        let top_layer_tab = context.top_layer_id().and_then(|top| {
+            floating_tabs
+                .iter()
+                .copied()
+                .find(|&tab| egui::Id::new(tab) == top.id)
+        });
+        assert_eq!(
+            top_layer_tab,
+            Some(tab_a),
+            "egui doit avoir amené la fenêtre cliquée au premier plan de son propre ordre \
+             de calques, indépendamment de floating_tabs"
+        );
+
+        // Sans la resynchronisation (B2), `active_tab` resterait périmé sur
+        // `tab_b` malgré le clic.
+        assert_eq!(
+            floating_tabs.last().copied(),
+            Some(tab_b),
+            "avant resynchronisation, floating_tabs (donc active_tab) ignore encore le clic"
+        );
+
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, top_layer_tab);
+        assert_eq!(
+            floating_tabs.last().copied(),
+            Some(tab_a),
+            "après resynchronisation, la fenêtre cliquée doit devenir active_tab \
+             (donc se surligner)"
+        );
     }
 
     #[test]
