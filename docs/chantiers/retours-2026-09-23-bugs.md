@@ -102,7 +102,7 @@ retrouve sa taille d'avant repli. Voir `floating_window_display_size` et
 
 **Gravité** : cosmétique.
 
-## B4 — Le contenu d'un classeur déborde hors de la fenêtre au rétrécissement
+## B4 — Le contenu d'un classeur déborde hors de la fenêtre au rétrécissement [corrigé]
 
 **Capture** : [voir la capture](captures-2026-09-23/debordement-resize.png) — le bandeau, les
 colonnes et la rangée d'onglets de feuille sont peints **au-delà** du bord
@@ -125,6 +125,18 @@ défilement horizontal.
 **Piste de correction** : rogner explicitement le contenu de la fenêtre au
 rectangle demandé, puis ajouter le défilement horizontal (voir F8 — sans
 rognage, le glisseur n'aurait rien à faire défiler).
+
+**Correctif** : dans la boucle des fenêtres flottantes (`app.rs`, juste après
+le calcul de `display_size`), le contenu de l'onglet
+(`tab_contents`/`book_contents` : bandeau, grille, onglets de feuille) est
+maintenant peint dans le rectangle de découpe (`ui.clip_rect().intersect(
+ui.max_rect())`) plutôt que sans aucune limite. Ce qui dépasse est rogné au
+bord de la fenêtre, sans défilement horizontal — F8 reste une évolution
+séparée. Non couvert par ce correctif : la fenêtre détachée (viewport OS
+natif, qui clippe déjà) et le mode maximisé (`CentralPanel`, qui clippe déjà
+via egui). Test de non-régression :
+`le_contenu_qui_deborde_est_rogne_au_rectangle_de_la_fenetre` dans
+`crates/plotyx-app/src/app.rs`.
 
 **Nature** : résultat visuel faux. **Gravité** : gênant.
 

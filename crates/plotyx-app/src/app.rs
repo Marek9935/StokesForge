@@ -1950,6 +1950,19 @@ impl eframe::App for PlotyxApp {
                                 HeaderPlacement::Floating,
                             );
                             if !(was_collapsed ^ header_actions.toggle_collapse) {
+                                // B4 : `display_size` force la taille de la
+                                // fenêtre demandée à egui, mais un `Ui` dont
+                                // les enfants dépassent son `max_rect` les
+                                // peint quand même — rien dans le chemin du
+                                // classeur (bandeau, colonnes, onglets de
+                                // feuille) ne réduit le rectangle de découpe.
+                                // Rogner explicitement au rectangle de
+                                // contenu restant de la fenêtre (préalable à
+                                // F8 — défilement horizontal — pas F8
+                                // elle-même : ici on tronque, sans offrir de
+                                // glisseur).
+                                let clip_rect = ui.clip_rect().intersect(ui.max_rect());
+                                ui.set_clip_rect(clip_rect);
                                 tab_contents(ui, state, &mut actions, graph_views, tab);
                             }
                         });
@@ -6095,6 +6108,75 @@ mod graph_layout_tests {
             area_rect.contains_rect(content_rect),
             "le rectangle de contenu doit rester à l'intérieur du rectangle réel de la fenêtre"
         );
+    }
+
+    // B4 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `.fixed_size(...)`
+    // force la taille *demandée* à egui, mais un `Ui` dont les enfants
+    // dépassent son `max_rect` les peint quand même — rien, dans le chemin
+    // du classeur, ne réduisait le rectangle de découpe. Ce test reproduit
+    // le mécanisme (contenu volontairement plus large que la fenêtre, comme
+    // un classeur à plusieurs colonnes) et verrouille le rognage explicite
+    // posé juste après `.show()` dans la boucle des fenêtres flottantes.
+    #[test]
+    fn le_contenu_qui_deborde_est_rogne_au_rectangle_de_la_fenetre() {
+        let context = egui::Context::default();
+        let window_pos = egui::pos2(20.0, 20.0);
+        let display_size = egui::vec2(200.0, 150.0);
+        let window_rect = egui::Rect::from_min_size(window_pos, display_size);
+
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, |ui| {
+            // `ui.new_child(...max_rect(window_rect))`, comme
+            // `figure_ui` dans `graph_view_contents` : un sous-`Ui` borné
+            // au rectangle de la fenêtre flottante, sans faire grandir le
+            // parent — même situation que le contenu de `.show()` d'une
+            // `egui::Window` posée avec `.fixed_size(display_size)`
+            // (`app.rs`, boucle des fenêtres flottantes).
+            let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(window_rect));
+            // Même geste que la production, juste après le calcul de
+            // `display_size` : rogner explicitement le contenu au
+            // rectangle réellement offert par la fenêtre.
+            let clip_rect = content_ui.clip_rect().intersect(content_ui.max_rect());
+            content_ui.set_clip_rect(clip_rect);
+            // Contenu bien plus large que la fenêtre — comme un classeur à
+            // plusieurs colonnes (bandeau + grille + onglets de feuille sur
+            // la capture du bug).
+            content_ui.horizontal(|ui| {
+                for i in 0..10 {
+                    ui.label(format!("colonne {i}"));
+                    ui.add_space(80.0);
+                }
+            });
+        });
+        output.textures_delta.clear();
+
+        let tolerance = window_rect.expand(1.0);
+        let label_shapes: Vec<_> = output
+            .shapes
+            .iter()
+            .filter(|painted| match &painted.shape {
+                egui::Shape::Text(shape) => shape.galley.job.text.starts_with("colonne"),
+                _ => false,
+            })
+            .collect();
+        assert!(
+            !label_shapes.is_empty(),
+            "le contenu de test doit avoir peint des libellés « colonne N »"
+        );
+        for painted in &label_shapes {
+            assert!(
+                tolerance.contains_rect(painted.clip_rect),
+                "un libellé du classeur a un rectangle de découpe ({:?}) qui déborde de la \
+                 fenêtre ({window_rect:?}) — B4 n'est pas corrigé",
+                painted.clip_rect,
+            );
+        }
     }
 
     #[test]
