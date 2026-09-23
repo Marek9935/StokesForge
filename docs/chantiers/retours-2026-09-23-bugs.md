@@ -27,13 +27,14 @@ les corriger par réflexe serait une régression :
 
 ## B1 — Le contour de surbrillance ne suit pas le bord de la fenêtre [corrigé]
 
-**Correctif** : le contour est désormais peint après `.show()`, sur le
-rectangle réellement enregistré par egui
-(`ctx.memory(|m| m.area_rect(id))`), plutôt que sur `ui.max_rect()` dans la
-fermeture — et sur le calque propre de la fenêtre (`LayerId::new(Order::
-Foreground, id)`), pas celui du panneau central, sinon le contour se
-retrouverait sous les fenêtres flottantes plutôt que dessus.
-Voir `crates/plotyx-app/src/app.rs`, boucle des fenêtres flottantes.
+**Correctif (révisé)** : la surbrillance ne peint plus un second contour —
+elle recolore le trait du `Frame` de la fenêtre lui-même
+(`floating_window_frame`, `crates/plotyx-app/src/app.rs`), qui suit déjà par
+construction le rectangle réellement peint (marge comprise, repli compris).
+Une première version avait peint un contour séparé après `.show()`, sur le
+rectangle lu via `ctx.memory(|m| m.area_rect(id))` plutôt que sur
+`ui.max_rect()` dans la fermeture — fonctionnel, mais une primitive de plus
+que nécessaire, écartée au profit de celle-ci.
 
 **Capture** : [voir la capture](captures-2026-09-23/surbrillance-mal-placee.png)
 
@@ -98,8 +99,8 @@ Une fenêtre repliée (« Masquer le contenu de… ») garde un contour à sa ta
 
 **Cause confirmée** : même origine que B1 — le contour suivait un rectangle
 de contenu qui ne correspond plus à ce qui est peint une fois le contenu
-masqué. Corrigé dans la même passe que B1, avec la même primitive de contour
-(le rectangle réellement enregistré par egui après `.show()`).
+masqué. Corrigé dans la même passe que B1, avec la même primitive
+(`floating_window_frame`, qui suit le rectangle réellement peint).
 
 **Correctif complémentaire** : la taille **demandée** à egui pendant un
 repli (`.fixed_size`) se réduit désormais à la hauteur de la bande

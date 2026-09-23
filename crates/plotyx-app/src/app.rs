@@ -1938,6 +1938,7 @@ impl eframe::App for PlotyxApp {
                         WINDOW_HEADER_HEIGHT,
                         ui.style().spacing.window_margin.sum(),
                     );
+                    let frame = floating_window_frame(ui.style(), is_active);
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
                         .title_bar(false)
@@ -1950,6 +1951,7 @@ impl eframe::App for PlotyxApp {
                         // juste après `.show()`.
                         .fixed_size(display_size)
                         .constrain_to(workspace_rect)
+                        .frame(frame)
                         .open(&mut open)
                         .show(ui.ctx(), |ui| {
                             header_actions = window_header(
@@ -1995,30 +1997,12 @@ impl eframe::App for PlotyxApp {
                         }
                     }
                     // Rectangle réellement peint cette image (frame compris) —
-                    // seule source fiable pour un contour qui doit longer le
-                    // bord de la fenêtre plutôt que son contenu (B1/B3 :
-                    // `ui.max_rect()` dans la fermeture `.show()` donne le
-                    // rectangle de contenu, déjà rétréci par la marge du
-                    // `Frame`, et ne rétrécit pas non plus quand le contenu
-                    // est replié).
+                    // seule source fiable pour la géométrie persistée et les
+                    // poignées de redimensionnement (B1/B3 : `ui.max_rect()`
+                    // dans la fermeture `.show()` donne le rectangle de
+                    // contenu, déjà rétréci par la marge du `Frame`, et ne
+                    // rétrécit pas non plus quand le contenu est replié).
                     let area_rect = ui.ctx().memory(|memory| memory.area_rect(id));
-                    if is_active {
-                        if let Some(rect) = area_rect {
-                            // Peint sur le calque propre de la fenêtre
-                            // (celui déjà utilisé par sa fermeture `.show()`),
-                            // pas sur celui du panneau central : sinon le
-                            // contour se retrouverait sous les fenêtres
-                            // flottantes plutôt que dessus.
-                            ui.ctx()
-                                .layer_painter(egui::LayerId::new(egui::Order::Foreground, id))
-                                .rect_stroke(
-                                    rect,
-                                    0.0,
-                                    ui.visuals().selection.stroke,
-                                    egui::StrokeKind::Outside,
-                                );
-                        }
-                    }
                     // Poignées de redimensionnement maison (§3) : posées sur
                     // le rectangle qu'on vient de demander (position/taille
                     // forcées ci-dessus, donc identique au rectangle
@@ -2259,6 +2243,22 @@ fn floating_window_geometry_to_persist(
     current_size: egui::Vec2,
 ) -> egui::Rect {
     egui::Rect::from_min_size(painted_rect.min, current_size)
+}
+
+/// `Frame` d'une fenêtre flottante — le `Frame::window` habituel, dont le
+/// trait est recoloré pour la fenêtre active plutôt que de peindre un second
+/// contour de surbrillance par-dessus (B1/B3,
+/// `docs/chantiers/retours-2026-09-23-bugs.md`). Ce trait est déjà peint
+/// exactement sur le rectangle réel de la fenêtre — marge du `Frame` et
+/// repli compris — puisque c'est lui qui, en dernier ressort, détermine ce
+/// rectangle (`AreaState::rect()`) : une seule primitive suffit, sans calque
+/// à choisir à la main pour rester au-dessus des autres fenêtres.
+fn floating_window_frame(style: &egui::Style, is_active: bool) -> egui::Frame {
+    egui::Frame::window(style).stroke(if is_active {
+        style.visuals.selection.stroke
+    } else {
+        style.visuals.window_stroke()
+    })
 }
 
 /// Ramène `top_layer_tab` en fin de `floating_tabs` (§ ordre de pile,
@@ -6085,6 +6085,32 @@ mod graph_layout_tests {
         );
     }
 
+    // B1/B3 : la surbrillance recolore le trait du `Frame` de la fenêtre
+    // (`floating_window_frame`) plutôt que de peindre un second contour par
+    // dessus — voir sa doc de tête pour pourquoi ce trait suit déjà, par
+    // construction, le rectangle réellement peint.
+    #[test]
+    fn le_frame_de_la_fenetre_recolore_son_trait_selon_lactivite() {
+        let style = egui::Style::default();
+
+        let inactif = floating_window_frame(&style, false);
+        let actif = floating_window_frame(&style, true);
+
+        assert_eq!(
+            inactif.stroke.color,
+            style.visuals.window_stroke().color,
+            "une fenêtre inactive garde le trait par défaut d'egui"
+        );
+        assert_eq!(
+            actif.stroke.color, style.visuals.selection.stroke.color,
+            "une fenêtre active reprend la couleur de sélection du thème"
+        );
+        assert_ne!(
+            actif.stroke.color, inactif.stroke.color,
+            "sans couleurs distinctes, rien ne montrerait quelle fenêtre est active"
+        );
+    }
+
     // B3 (`docs/chantiers/retours-2026-09-23-bugs.md`) : une fenêtre repliée
     // gardait un contour à sa taille dépliée, un grand cadre vert autour
     // d'une zone vide — parce que la fenêtre était forcée (`.fixed_size`) à
@@ -6131,13 +6157,16 @@ mod graph_layout_tests {
         );
     }
 
-    // B1 : le contour de surbrillance était peint sur `ui.max_rect()` dans
-    // la fermeture `.show()` de la fenêtre — le rectangle de *contenu*, déjà
-    // rétréci par la marge intérieure du `Frame` — plutôt que sur le
-    // rectangle réel de la fenêtre (`ctx.memory(|m| m.area_rect(id))`,
-    // celui qu'`egui` peint réellement, marge comprise). Ce test verrouille
-    // la différence entre les deux : si jamais elle disparaissait (marge à
-    // zéro), le correctif n'aurait plus rien à corriger.
+    // B1 (cause originelle) : le contour de surbrillance était peint sur
+    // `ui.max_rect()` dans la fermeture `.show()` de la fenêtre — le
+    // rectangle de *contenu*, déjà rétréci par la marge intérieure du
+    // `Frame` — plutôt que sur le rectangle réel de la fenêtre
+    // (`ctx.memory(|m| m.area_rect(id))`, celui qu'`egui` peint réellement,
+    // marge comprise). La surbrillance elle-même utilise maintenant le trait
+    // du `Frame` (voir `floating_window_frame`), mais `area_rect` reste la
+    // source de la géométrie persistée et des poignées de redimensionnement
+    // (plus bas dans la boucle des fenêtres flottantes) — ce test verrouille
+    // toujours la différence entre les deux rectangles pour cet usage-là.
     #[test]
     fn le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu() {
         let context = egui::Context::default();
