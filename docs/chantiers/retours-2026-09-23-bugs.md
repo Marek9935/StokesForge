@@ -58,7 +58,18 @@ contour là, ou styler le `Frame` de la fenêtre, plutôt que dans la fermeture.
 **Nature** : résultat visuel faux. **Gravité** : cosmétique.
 **Écarté** : ni plafond, ni limite documentée, ni dégradation volontaire.
 
-## B2 — Aucune surbrillance quand on sélectionne une fenêtre au clic
+## B2 — Aucune surbrillance quand on sélectionne une fenêtre au clic [corrigé]
+
+**Correctif** : `egui::Area` amène déjà la fenêtre cliquée au premier plan de
+son propre ordre de calques (`Sense::CLICK`, indépendamment de tout code
+applicatif), mais `floating_tabs` — seule source d'`active_tab`, donc de la
+surbrillance — ne le savait pas. Après la boucle des fenêtres flottantes (une
+fois sa mutation de nouveau sûre), `app.rs` relit `ctx.top_layer_id()`, y
+retrouve le tab correspondant, et l'appelle à
+`sync_floating_tabs_order_to_top_layer` pour ramener ce tab en fin de
+`floating_tabs` — même position que celle que produit déjà le double-clic du
+Project Manager. Voir `crates/plotyx-app/src/app.rs`, juste après la boucle
+des fenêtres flottantes, et la fonction `sync_floating_tabs_order_to_top_layer`.
 
 **Capture** : [voir la capture](captures-2026-09-23/pas-de-surbrillance-au-clic.png)
 
