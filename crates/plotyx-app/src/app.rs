@@ -800,6 +800,18 @@ struct DetachedTabViewModel {
     /// donne alors à la figure son rectangle réel, sans entretenir une boucle
     /// de rendu quand la fenêtre reste inactive.
     needs_initial_repaint: bool,
+    /// Dernière taille OS connue de la fenêtre **hors repli** (B9,
+    /// `docs/chantiers/retours-2026-09-23-bugs.md`) : mise à jour à chaque
+    /// image tant que `collapsed` est faux, gelée pendant un repli. Sert à
+    /// la fois de cible pour le `ViewportCommand::InnerSize` envoyé au
+    /// dépli et de taille à persister dans `window_geometries` pendant un
+    /// repli — même rôle que `current_size`/`window_sizes` côté fenêtre
+    /// flottante (B3), mais porté par le modèle plutôt que par une table de
+    /// l'app puisqu'une fenêtre détachée n'a pas d'équivalent. `None`
+    /// seulement avant la première image où le viewport rapporte une
+    /// taille (ou si la fenêtre a été détachée déjà repliée et jamais
+    /// dépliée depuis).
+    expanded_size: Option<egui::Vec2>,
 }
 
 /// Ce qu'une fenêtre détachée écrit, pour que [`PlotyxApp::ui`] (seule à
@@ -1394,6 +1406,7 @@ impl PlotyxApp {
             graph_view,
             needs_initial_repaint: true,
             collapsed: self.collapsed_tabs.contains(&tab),
+            expanded_size: None,
         };
         self.detached_tabs.insert(
             tab,
@@ -1535,6 +1548,23 @@ impl PlotyxApp {
                     let mut model = view_model.lock().unwrap_or_else(|err| err.into_inner());
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                     let was_collapsed = model.collapsed;
+                    // B9 (`docs/chantiers/retours-2026-09-23-bugs.md`) : la
+                    // taille OS « logique » (hors repli) se mémorise nous-
+                    // mêmes plutôt que de se déduire du rectangle rapporté
+                    // cette image — pendant un repli ce rectangle est
+                    // volontairement réduit (voir plus bas), et le geler ici
+                    // est ce qui permet à la fois de retrouver l'exacte
+                    // taille d'avant repli au dépli et de ne pas persister la
+                    // taille repliée (même piège que
+                    // `floating_window_geometry_to_persist`, B3). Lu avant
+                    // tout traitement du clic de cette image : `was_collapsed`
+                    // reflète l'état d'entrée, pas un éventuel bascule de
+                    // cette image même.
+                    if !was_collapsed {
+                        if let Some(rect) = ui.ctx().input(|input| input.viewport().outer_rect) {
+                            model.expanded_size = Some(rect.size());
+                        }
+                    }
                     let mut header_actions = WindowHeaderActions::default();
                     // Surbrillance (B1/B3 suite) : une fenêtre détachée est
                     // un viewport OS séparé, donc « active » n'a de sens
@@ -1578,9 +1608,54 @@ impl PlotyxApp {
                             }
                         }
                     });
-                    detached_resize_handles(ui);
+                    // État de repli qui s'applique à partir de cette image
+                    // (avant même l'affectation à `model.collapsed`
+                    // ci-dessous) — calculé une fois, servant à la fois à
+                    // la cible du `ViewportCommand::InnerSize`, à la garde
+                    // des poignées de redimensionnement et à la géométrie
+                    // persistée en fin de fermeture.
+                    let collapsed_now = was_collapsed ^ header_actions.toggle_collapse;
                     if header_actions.toggle_collapse {
-                        model.collapsed = !model.collapsed;
+                        model.collapsed = collapsed_now;
+                    }
+                    // B9 : contrairement aux poignées maison des fenêtres
+                    // flottantes internes (sans conséquence pendant un repli,
+                    // puisqu'elles ne mutent qu'une taille purement logique),
+                    // celles-ci pilotent le viewport OS réel via
+                    // `ViewportCommand::BeginResize` — les laisser actives
+                    // pendant un repli permettrait à l'utilisateur
+                    // d'agrandir la fenêtre repliée en direct, une taille
+                    // qui ne serait ni affichée (le contenu reste sauté) ni
+                    // mémorisée (`expanded_size` est gelée pendant un repli)
+                    // et donc perdue au premier dépli.
+                    if !collapsed_now {
+                        detached_resize_handles(ui);
+                    }
+                    // B9 : une fenêtre détachée est un viewport OS réel — à
+                    // la différence d'une fenêtre flottante interne, où
+                    // `.fixed_size(display_size)` (B3) suffit à réduire ce
+                    // qui est demandé à egui, rien ne réduit ici la taille
+                    // du viewport tant qu'on ne le demande pas explicitement
+                    // à l'OS. Réutilise le même calcul que
+                    // `floating_window_display_size` (même hauteur de
+                    // bande d'en-tête) : au repli, la largeur mémorisée et
+                    // la hauteur de l'en-tête ; au dépli, la taille
+                    // mémorisée telle quelle. Envoyé uniquement à l'image du
+                    // bascule (pas à chaque image : un `InnerSize` répété
+                    // pendant qu'un utilisateur redimensionne la fenêtre à
+                    // la main la ferait sauter en arrière).
+                    if header_actions.toggle_collapse {
+                        let expanded_size = model
+                            .expanded_size
+                            .unwrap_or_else(|| egui::vec2(size[0], size[1]));
+                        let target = floating_window_display_size(
+                            expanded_size,
+                            collapsed_now,
+                            WINDOW_HEADER_HEIGHT,
+                            frame.inner_margin.sum(),
+                        );
+                        ui.ctx()
+                            .send_viewport_cmd(egui::ViewportCommand::InnerSize(target));
                     }
                     if header_actions.title_drag_started {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
@@ -1614,11 +1689,24 @@ impl PlotyxApp {
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
                     if let Some(rect) = ui.ctx().input(|input| input.viewport().outer_rect) {
+                        // B9 : même piège que `floating_window_geometry_to_
+                        // persist` (B3) — pendant un repli, `rect` est le
+                        // rectangle **réduit** que l'OS rapporte une fois le
+                        // `ViewportCommand::InnerSize` ci-dessus appliqué ; le
+                        // persister tel quel referait réapparaître la fenêtre
+                        // repliée, y compris une fois dépliée à nouveau, à la
+                        // prochaine ouverture du projet. `expanded_size` est
+                        // justement gelée à la taille d'avant repli tant que
+                        // `collapsed_now` est vrai (voir plus haut).
+                        let persisted = floating_window_geometry_to_persist(
+                            rect,
+                            model.expanded_size.unwrap_or_else(|| rect.size()),
+                        );
                         requests.geometry = Some(WindowGeometry {
-                            x: f64::from(rect.min.x),
-                            y: f64::from(rect.min.y),
-                            width: f64::from(rect.width()),
-                            height: f64::from(rect.height()),
+                            x: f64::from(persisted.min.x),
+                            y: f64::from(persisted.min.y),
+                            width: f64::from(persisted.width()),
+                            height: f64::from(persisted.height()),
                         });
                     }
                 },
@@ -2226,6 +2314,12 @@ fn toggle_collapse_to(collapsed_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bo
 /// n'est alors plus peint (seule [`window_header`] l'est), et forcer la
 /// taille dépliée peindrait un cadre — et un contour de surbrillance —
 /// autour d'une zone vide.
+///
+/// Réutilisée telle quelle par [`PlotyxApp::show_detached_tabs`] (B9) pour
+/// calculer la taille à envoyer au viewport OS via
+/// `ViewportCommand::InnerSize` : même bande d'en-tête, même hauteur
+/// repliée — seul change ce qui porte cette taille (le `Frame` d'une
+/// `egui::Window` côté flottant, un viewport OS réel côté détaché).
 fn floating_window_display_size(
     current_size: egui::Vec2,
     was_collapsed: bool,
@@ -2246,6 +2340,13 @@ fn floating_window_display_size(
 /// à [`floating_window_display_size`], et le persister tel quel referait
 /// réapparaître la fenêtre repliée — y compris une fois dépliée à nouveau —
 /// à la prochaine ouverture du projet.
+///
+/// Réutilisée telle quelle par [`PlotyxApp::show_detached_tabs`] (B9,
+/// `docs/chantiers/retours-2026-09-23-bugs.md`) avec
+/// `DetachedTabViewModel::expanded_size` en guise de taille logique : le
+/// rectangle rapporté par le viewport OS pendant un repli est, là aussi,
+/// le rectangle réduit que l'`InnerSize` envoyé au bascule a produit, pas
+/// la taille à persister.
 fn floating_window_geometry_to_persist(
     painted_rect: egui::Rect,
     current_size: egui::Vec2,
@@ -6723,6 +6824,189 @@ mod graph_layout_tests {
             figure_rect.max.y <= GRAPH_WINDOW_SIZE.y,
             "la figure doit rester dans la fenêtre détachée, pas {figure_rect:?} pour une fenêtre de {GRAPH_WINDOW_SIZE:?}"
         );
+    }
+
+    // B9 (`docs/chantiers/retours-2026-09-23-bugs.md`) : le correctif B3
+    // réduit la taille demandée à egui pour une fenêtre flottante interne
+    // pendant un repli, mais une fenêtre détachée est un viewport OS réel —
+    // rien n'envoyait de `ViewportCommand::InnerSize` quand son chevron de
+    // repli bascule, donc l'OS gardait la grande taille dépliée. Ce test
+    // pilote le callback du viewport détaché (même schéma que
+    // `un_graphe_detache_reconstruit_ses_formes_dans_son_viewport`), clique
+    // le chevron de repli, et vérifie la géométrie/l'état — pas
+    // l'apparence : les tests de rendu ne couvrent pas ce mécanisme (voir
+    // le rapport, § « Dans ton rapport final »).
+    #[test]
+    fn une_fenetre_detachee_repliee_reduit_puis_restaure_son_viewport_os() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let mut app = PlotyxApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(plotyx_render_egui::font_definitions());
+
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        context
+            .run_ui(root_input.clone(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    graph_contents(ui, &app.state, &mut app.graph_views, graph);
+                });
+            })
+            .textures_delta
+            .clear();
+
+        app.detach_tab(Tab::Graph(graph));
+        let tab = Tab::Graph(graph);
+        let viewport_id = egui::ViewportId::from_hash_of(tab);
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output.viewport_output[&viewport_id]
+            .viewport_ui_cb
+            .clone()
+            .expect("le détachement doit publier un callback de viewport");
+        output.textures_delta.clear();
+
+        // Rectangle « OS » simulé : le test en a la main, comme le ferait
+        // le vrai backend en rapportant, image après image, la taille
+        // réellement appliquée par la fenêtre native.
+        let outer_rect = std::cell::Cell::new(egui::Rect::from_min_size(
+            egui::pos2(100.0, 80.0),
+            GRAPH_WINDOW_SIZE,
+        ));
+
+        let paint = |events: Vec<egui::Event>| -> egui::FullOutput {
+            let mut input = root_input.clone();
+            input.viewport_id = viewport_id;
+            input.viewports.insert(
+                viewport_id,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    outer_rect: Some(outer_rect.get()),
+                    ..Default::default()
+                },
+            );
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                outer_rect.get().size(),
+            ));
+            input.events = events;
+            let mut output = context.run_ui(input, |ui| callback(ui));
+            output.textures_delta.clear();
+            output
+        };
+
+        // Image de stabilisation (Wayland, voir `needs_initial_repaint`) :
+        // consomme le repaint initial et amorce `expanded_size` à la
+        // taille de départ.
+        let first = paint(Vec::new());
+        let icon_pos = find_text_center(&first.shapes, "v");
+
+        // Un clic (glissé nul, pression puis relâchement) sur le chevron de
+        // repli, réparti sur deux images comme le veut la détection de clic
+        // d'egui — voir `click_at`.
+        paint(vec![egui::Event::PointerMoved(icon_pos)]);
+        paint(vec![egui::Event::PointerButton {
+            pos: icon_pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let collapsed_output = paint(vec![egui::Event::PointerButton {
+            pos: icon_pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+
+        let expected_collapsed_height = WINDOW_HEADER_HEIGHT
+            + egui::Frame::central_panel(&egui::Style::default())
+                .inner_margin
+                .sum()
+                .y;
+        let commands = &collapsed_output.viewport_output[&viewport_id].commands;
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                egui::ViewportCommand::InnerSize(size)
+                    if (size.x - GRAPH_WINDOW_SIZE.x).abs() < f32::EPSILON
+                        && (size.y - expected_collapsed_height).abs() < f32::EPSILON
+            )),
+            "le repli doit réduire le viewport OS à la hauteur de sa bande d'en-tête, \
+             commandes={commands:?}"
+        );
+        {
+            let model = app.detached_tabs[&tab]
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            assert!(model.collapsed, "le repli doit être appliqué au modèle");
+        }
+
+        // L'OS applique la commande : l'image suivante rapporte le petit
+        // rectangle — piège symétrique de B3
+        // (`floating_window_geometry_to_persist`) : cette taille réduite ne
+        // doit pas s'écraser dans la géométrie persistée, sous peine de
+        // rouvrir une fenêtre minuscule au prochain chargement du projet.
+        outer_rect.set(egui::Rect::from_min_size(
+            outer_rect.get().min,
+            egui::vec2(GRAPH_WINDOW_SIZE.x, expected_collapsed_height),
+        ));
+        paint(Vec::new());
+        {
+            let requests = app.detached_tabs[&tab]
+                .requests
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            let geometry = requests
+                .geometry
+                .expect("la géométrie doit être rapportée même repliée");
+            assert!(
+                (geometry.height - f64::from(GRAPH_WINDOW_SIZE.y)).abs() < 0.01,
+                "la géométrie persistée ne doit pas retenir la hauteur repliée, \
+                 geometry={geometry:?}"
+            );
+        }
+
+        // Dépli : même chevron (glyphe différent, même rectangle), même
+        // schéma de clic — doit retrouver exactement la taille d'avant
+        // repli, pas une taille par défaut.
+        paint(vec![egui::Event::PointerMoved(icon_pos)]);
+        paint(vec![egui::Event::PointerButton {
+            pos: icon_pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let expanded_output = paint(vec![egui::Event::PointerButton {
+            pos: icon_pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let commands = &expanded_output.viewport_output[&viewport_id].commands;
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                egui::ViewportCommand::InnerSize(size)
+                    if (size.x - GRAPH_WINDOW_SIZE.x).abs() < f32::EPSILON
+                        && (size.y - GRAPH_WINDOW_SIZE.y).abs() < f32::EPSILON
+            )),
+            "le dépli doit restaurer exactement la taille d'avant repli, commandes={commands:?}"
+        );
+        {
+            let model = app.detached_tabs[&tab]
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            assert!(!model.collapsed, "le dépli doit être appliqué au modèle");
+        }
     }
 
     // B1/B3 suite : les fenêtres détachées (viewports OS séparés) n'avaient
