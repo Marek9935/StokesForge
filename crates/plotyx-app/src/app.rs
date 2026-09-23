@@ -210,10 +210,8 @@
 //! B8 (`docs/chantiers/retours-2026-09-23-bugs.md`) : comme pour une fenêtre
 //! flottante rétrécie (B4), un `Ui` dont les enfants dépassent son
 //! `max_rect` les peint quand même. [`PlotyxApp::show_detached_tabs`] pose
-//! donc le même rognage explicite (`ui.clip_rect().intersect(ui.max_rect())`
-//! puis `ui.set_clip_rect(...)`) juste avant le `match` qui aiguille vers le
-//! contenu propre à chaque nature d'onglet — un seul point d'insertion pour
-//! les quatre, puisqu'elles partagent ce même point d'aiguillage.
+//! donc le contenu des quatre natures dans un même sous-`Ui` borné et rogné,
+//! juste avant le `match` qui aiguille vers chacune d'elles.
 //!
 //! # Pourquoi pas un `ViewModel` par nature de contenu comme pour le PM
 //!
@@ -1547,7 +1545,10 @@ impl PlotyxApp {
                     .with_title(title)
                     .with_decorations(false)
                     .with_inner_size(size)
-            };
+            }
+            // Le repli B9 doit pouvoir réduire la hauteur sous le minimum
+            // habituel ; seule la largeur garantit trois onglets de feuille.
+            .with_min_inner_size([MIN_CONTENT_WINDOW_SIZE.x, WINDOW_HEADER_HEIGHT]);
             let id = egui::Id::new(tab);
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of(tab),
@@ -1611,35 +1612,28 @@ impl PlotyxApp {
                         if was_collapsed ^ header_actions.toggle_collapse {
                             return;
                         }
-                        // B8 (`docs/chantiers/retours-2026-09-23-bugs.md`) :
-                        // même angle mort que B4, jamais porté ici — un `Ui`
-                        // dont les enfants dépassent son `max_rect` les peint
-                        // quand même, et rien dans `detached_book_contents`/
-                        // `detached_matrix_contents`/`detached_note_contents`/
-                        // `graph_view_contents` ne réduisait le rectangle de
-                        // découpe. Rogner explicitement au rectangle de
-                        // contenu du `CentralPanel`, une fois sa taille (donc
-                        // celle du viewport OS) connue — un seul point
-                        // d'insertion suffit pour les quatre natures d'onglet,
-                        // qui partagent toutes ce `match`.
-                        let clip_rect = ui.clip_rect().intersect(ui.max_rect());
-                        ui.set_clip_rect(clip_rect);
-                        let tree = &snapshot.tree;
-                        match tab {
-                            Tab::Book(id) => {
-                                detached_book_contents(ui, tree, &mut model, &mut requests, id);
+                        // Même borne logique pour les quatre natures : leur
+                        // contenu peut déborder, mais il ne doit modifier ni
+                        // le Frame ni le rectangle de découpe du viewport.
+                        show_window_contents_bounded(ui, |ui| {
+                            let tree = &snapshot.tree;
+                            match tab {
+                                Tab::Book(id) => {
+                                    detached_book_contents(ui, tree, &mut model, &mut requests, id);
+                                }
+                                Tab::Graph(id) => {
+                                    let view =
+                                        model.graph_view.get_or_insert_with(GraphView::default);
+                                    graph_view_contents(ui, view, &snapshot, id);
+                                }
+                                Tab::Matrix(id) => {
+                                    detached_matrix_contents(ui, tree, id);
+                                }
+                                Tab::Note(id) => {
+                                    detached_note_contents(ui, tree, &mut model, &mut requests, id);
+                                }
                             }
-                            Tab::Graph(id) => {
-                                let view = model.graph_view.get_or_insert_with(GraphView::default);
-                                graph_view_contents(ui, view, &snapshot, id);
-                            }
-                            Tab::Matrix(id) => {
-                                detached_matrix_contents(ui, tree, id);
-                            }
-                            Tab::Note(id) => {
-                                detached_note_contents(ui, tree, &mut model, &mut requests, id);
-                            }
-                        }
+                        });
                     });
                     // État de repli qui s'applique à partir de cette image
                     // (avant même l'affectation à `model.collapsed`
@@ -2064,6 +2058,7 @@ impl eframe::App for PlotyxApp {
                     let saved_size = saved_geometry
                         .map(|geometry| egui::vec2(geometry.width as f32, geometry.height as f32))
                         .unwrap_or(default_size)
+                        .max(MIN_CONTENT_WINDOW_SIZE)
                         .min(workspace_rect.size());
                     let current_pos = *window_positions.entry(tab).or_insert(saved_pos);
                     let current_size = *window_sizes.entry(tab).or_insert(saved_size);
@@ -2117,20 +2112,13 @@ impl eframe::App for PlotyxApp {
                                 HeaderPlacement::Floating,
                             );
                             if !(was_collapsed ^ header_actions.toggle_collapse) {
-                                // B4 : `display_size` force la taille de la
-                                // fenêtre demandée à egui, mais un `Ui` dont
-                                // les enfants dépassent son `max_rect` les
-                                // peint quand même — rien dans le chemin du
-                                // classeur (bandeau, colonnes, onglets de
-                                // feuille) ne réduit le rectangle de découpe.
-                                // Rogner explicitement au rectangle de
-                                // contenu restant de la fenêtre (préalable à
-                                // F8 — défilement horizontal — pas F8
-                                // elle-même : ici on tronque, sans offrir de
-                                // glisseur).
-                                let clip_rect = ui.clip_rect().intersect(ui.max_rect());
-                                ui.set_clip_rect(clip_rect);
-                                tab_contents(ui, state, &mut actions, graph_views, tab);
+                                // Le sous-Ui borné empêche le contenu de
+                                // changer la taille réelle du Frame ou de
+                                // déborder de la fenêtre. La grille seule
+                                // reçoit un défilement horizontal (F8).
+                                show_window_contents_bounded(ui, |ui| {
+                                    tab_contents(ui, state, &mut actions, graph_views, tab);
+                                });
                             }
                         });
                     // Contour de surbrillance (B7) : peint à part, sur
@@ -2482,6 +2470,128 @@ fn paint_active_window_outline(
         active_window_stroke(style, true),
         egui::StrokeKind::Inside,
     );
+}
+
+fn show_window_contents_bounded(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    let rect = ui.available_rect_before_wrap();
+    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    content.set_clip_rect(ui.clip_rect().intersect(rect));
+    add_contents(&mut content);
+    ui.advance_cursor_after_rect(rect);
+}
+
+fn show_horizontally_scrollable_grid<R>(
+    ui: &mut egui::Ui,
+    add_grid: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::scroll_area::ScrollAreaOutput<R> {
+    egui::ScrollArea::horizontal()
+        .auto_shrink([false, true])
+        .show(ui, add_grid)
+}
+
+fn visible_sheet_tabs(
+    sheet_count: usize,
+    selected_index: usize,
+    available_width: f32,
+) -> std::ops::Range<usize> {
+    const MIN_TAB_WIDTH: f32 = 40.0;
+    const OVERFLOW_ALLOWANCE: f32 = 36.0;
+    const TAB_SPACING: f32 = 2.0;
+
+    let fits_without_overflow = ((available_width + TAB_SPACING) / (MIN_TAB_WIDTH + TAB_SPACING))
+        .floor()
+        .max(0.0) as usize;
+    let visible_count = if sheet_count <= fits_without_overflow {
+        sheet_count
+    } else {
+        (((available_width - 2.0 * OVERFLOW_ALLOWANCE + TAB_SPACING)
+            / (MIN_TAB_WIDTH + TAB_SPACING))
+            .floor()
+            .max(3.0) as usize)
+            .min(sheet_count)
+    };
+    let start = selected_index
+        .saturating_sub(visible_count / 2)
+        .min(sheet_count.saturating_sub(visible_count));
+    start..start + visible_count
+}
+
+fn sheet_tabs(
+    ui: &mut egui::Ui,
+    sheets: &[(NodeId, String)],
+    selected: NodeId,
+    mut on_select: impl FnMut(NodeId),
+) {
+    const OVERFLOW_ALLOWANCE: f32 = 36.0;
+    const TAB_SPACING: f32 = 2.0;
+    const MAX_TAB_WIDTH: f32 = 120.0;
+
+    if sheets.is_empty() {
+        return;
+    }
+    let width = ui.available_width().max(0.0);
+    let selected_index = sheets
+        .iter()
+        .position(|(id, _)| *id == selected)
+        .unwrap_or(0);
+    let visible = visible_sheet_tabs(sheets.len(), selected_index, width);
+    let has_overflow = visible.len() < sheets.len();
+    let reserved = if has_overflow {
+        2.0 * OVERFLOW_ALLOWANCE
+    } else {
+        0.0
+    };
+    let tab_width = ((width - reserved - TAB_SPACING * visible.len().saturating_sub(1) as f32)
+        / visible.len() as f32)
+        .clamp(0.0, MAX_TAB_WIDTH);
+    let mut requested = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = TAB_SPACING;
+        if has_overflow {
+            if visible.start > 0 {
+                ui.menu_button("…", |ui| {
+                    for (id, name) in &sheets[..visible.start] {
+                        if ui.button(name).clicked() {
+                            requested = Some(*id);
+                            ui.close();
+                        }
+                    }
+                });
+            } else {
+                ui.add_space(OVERFLOW_ALLOWANCE);
+            }
+        }
+        for (id, name) in &sheets[visible.clone()] {
+            let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
+                .small()
+                .truncate()
+                .fill(if selected == *id {
+                    ui.visuals().selection.bg_fill
+                } else {
+                    egui::Color32::TRANSPARENT
+                });
+            if ui
+                .add_sized([tab_width, SHEET_TABS_HEIGHT - 12.0], tab)
+                .on_hover_text(name)
+                .clicked()
+            {
+                requested = Some(*id);
+            }
+        }
+        if has_overflow && visible.end < sheets.len() {
+            ui.menu_button("…", |ui| {
+                for (id, name) in &sheets[visible.end..] {
+                    if ui.button(name).clicked() {
+                        requested = Some(*id);
+                        ui.close();
+                    }
+                }
+            });
+        }
+    });
+    if let Some(id) = requested {
+        on_select(id);
+    }
 }
 
 /// Ramène `top_layer_tab` en fin de `floating_tabs` (§ ordre de pile,
@@ -4051,23 +4161,13 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     // n'est donc pas utilisable.
     let grid_height = (ui.available_height() - SHEET_TABS_HEIGHT).max(0.0);
     ui.allocate_ui(egui::vec2(ui.available_width(), grid_height), |ui| {
-        grid_contents(ui, state, actions, selected);
+        show_horizontally_scrollable_grid(ui, |ui| {
+            grid_contents(ui, state, actions, selected);
+        });
     });
     ui.separator();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        for (id, name) in &sheets {
-            let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
-                .small()
-                .fill(if selected == *id {
-                    ui.visuals().selection.bg_fill
-                } else {
-                    egui::Color32::TRANSPARENT
-                });
-            if ui.add(tab).clicked() {
-                actions.push(Action::SelectSheet(*id));
-            }
-        }
+    sheet_tabs(ui, &sheets, selected, |id| {
+        actions.push(Action::SelectSheet(id));
     });
 }
 
@@ -5978,13 +6078,9 @@ fn detached_book_contents(
         .unwrap_or(sheets[0].0);
     model.selected_sheet = Some(selected);
 
-    ui.horizontal(|ui| {
-        for (id, name) in &sheets {
-            if ui.selectable_label(selected == *id, name).clicked() {
-                model.selected_sheet = Some(*id);
-                requests.actions.push(Action::SelectSheet(*id));
-            }
-        }
+    sheet_tabs(ui, &sheets, selected, |id| {
+        model.selected_sheet = Some(id);
+        requests.actions.push(Action::SelectSheet(id));
     });
     ui.separator();
     ui.horizontal(|ui| {
@@ -6016,7 +6112,9 @@ fn detached_book_contents(
         ));
     });
     ui.separator();
-    detached_grid_contents(ui, tree, model, requests, selected);
+    show_horizontally_scrollable_grid(ui, |ui| {
+        detached_grid_contents(ui, tree, model, requests, selected);
+    });
 }
 
 /// Pendant détaché de [`grid_contents`] — mêmes principes (virtualisation),
@@ -6538,14 +6636,9 @@ mod graph_layout_tests {
         }
     }
 
-    // B7 (`docs/chantiers/retours-2026-09-23-bugs.md`) : reproduction directe
-    // du symptôme rapporté (« le contour déborde vers l'extérieur, bien
-    // au-delà des icônes d'en-tête »). Même contenu qui déborde que le test
-    // B4 ci-dessus (bande d'outils qui ne s'enroule pas), mais cette fois on
-    // vérifie le contour lui-même : peint sur `requested_rect`, pas sur
-    // `area_rect` (le rectangle qu'egui recalcule depuis ce contenu — plus
-    // grand, comme le verrouille aussi
-    // `le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu`).
+    // B7 : le contenu débordant doit être découpé et ne doit pas agrandir le
+    // rectangle réel du Frame. Le contour actif et les poignées utilisent
+    // alors exactement ce même rectangle demandé.
     #[test]
     fn le_contour_actif_suit_le_rectangle_demande_meme_si_le_contenu_deborde() {
         let context = egui::Context::default();
@@ -6571,18 +6664,16 @@ mod graph_layout_tests {
                 .fixed_size(display_size)
                 .frame(floating_window_frame(ui.style()))
                 .show(ui.ctx(), |ui| {
-                    // Bande d'outils qui ne s'enroule pas — même mécanisme
-                    // que le bandeau « Ajouter une colonne / Importer… » d'un
-                    // classeur rétréci, et que le test B4 ci-dessus.
-                    ui.horizontal(|ui| {
-                        for i in 0..10 {
-                            ui.label(format!("colonne {i}"));
-                            ui.add_space(80.0);
-                        }
+                    show_window_contents_bounded(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            for i in 0..10 {
+                                ui.label(format!("colonne {i}"));
+                                ui.add_space(80.0);
+                            }
+                        });
                     });
                 });
-            // Contour actif peint après `.show()`, comme en production —
-            // sur `requested_rect`, jamais recalculé depuis le contenu.
+            // Même rectangle que le Frame, après `.show()`.
             paint_active_window_outline(
                 &ui.ctx()
                     .layer_painter(egui::LayerId::new(egui::Order::Foreground, id)),
@@ -6601,11 +6692,7 @@ mod graph_layout_tests {
         let area_rect = context
             .memory(|memory| memory.area_rect(id))
             .expect("la fenêtre doit avoir enregistré sa géométrie réelle");
-        assert!(
-            area_rect.width() > requested_rect.width(),
-            "le contenu doit déborder du rectangle demandé ({requested_rect:?}) pour que ce \
-             test reproduise B7 — rectangle réel {area_rect:?}"
-        );
+        assert_eq!(area_rect, requested_rect);
 
         fn find_outline(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
             shapes.iter().find_map(|painted| match &painted.shape {
@@ -6622,10 +6709,103 @@ mod graph_layout_tests {
             find_outline(&output.shapes).expect("le contour actif doit avoir été peint");
         assert_eq!(
             outline_rect, requested_rect,
-            "le contour doit longer exactement le rectangle demandé ({requested_rect:?}), pas \
-             le rectangle recalculé par egui depuis le contenu débordant ({area_rect:?}) — B7 \
-             n'est pas corrigé"
+            "le contour doit longer le même rectangle que le Frame ({area_rect:?})"
         );
+    }
+
+    #[test]
+    fn la_grille_deborde_horizontalement_dans_sa_zone_defilable() {
+        let context = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(220.0, 180.0),
+            )),
+            ..Default::default()
+        };
+        let mut scroll = None;
+        let mut output = context.run_ui(input, |ui| {
+            scroll = Some(show_horizontally_scrollable_grid(ui, |ui| {
+                TableBuilder::new(ui)
+                    .columns(TableColumn::initial(110.0).at_least(56.0), 5)
+                    .auto_shrink([false, false])
+                    .header(20.0, |mut header| {
+                        for _ in 0..5 {
+                            header.col(|ui| {
+                                ui.label("Colonne");
+                            });
+                        }
+                    })
+                    .body(|_| {});
+            }));
+        });
+        output.textures_delta.clear();
+        let scroll = scroll.expect("la grille doit être dessinée");
+        assert!(
+            scroll.content_size.x > scroll.inner_rect.width(),
+            "les colonnes doivent pouvoir défiler dans le rectangle visible : {:?} > {:?}",
+            scroll.content_size.x,
+            scroll.inner_rect.width()
+        );
+    }
+
+    #[test]
+    fn les_onglets_gardent_le_selectionne_et_ses_deux_voisins_visibles() {
+        assert_eq!(visible_sheet_tabs(7, 0, 200.0), 0..3);
+        assert_eq!(visible_sheet_tabs(7, 1, 200.0), 0..3);
+        assert_eq!(visible_sheet_tabs(7, 3, 200.0), 2..5);
+        assert_eq!(visible_sheet_tabs(7, 5, 200.0), 4..7);
+        assert_eq!(visible_sheet_tabs(7, 6, 200.0), 4..7);
+        assert_eq!(visible_sheet_tabs(3, 1, 200.0), 0..3);
+    }
+
+    #[test]
+    fn le_cadre_et_les_poignees_gardent_la_meme_taille_avec_un_contenu_court_ou_debordant() {
+        for deborde in [false, true] {
+            let context = egui::Context::default();
+            let id = egui::Id::new(("cadre_et_poignees", deborde));
+            let requested =
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(220.0, 180.0));
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 600.0),
+                )),
+                ..Default::default()
+            };
+            for _ in 0..2 {
+                context
+                    .run_ui(input.clone(), |ui| {
+                        egui::Window::new("test")
+                            .id(id)
+                            .title_bar(false)
+                            .current_pos(requested.min)
+                            .fixed_size(requested.size())
+                            .show(ui.ctx(), |ui| {
+                                show_window_contents_bounded(ui, |ui| {
+                                    if deborde {
+                                        ui.horizontal(|ui| {
+                                            for index in 0..10 {
+                                                ui.label(format!("Colonne {index}"));
+                                            }
+                                        });
+                                    } else {
+                                        ui.label("Contenu court");
+                                    }
+                                });
+                            });
+                    })
+                    .textures_delta
+                    .clear();
+            }
+            let actual = context
+                .memory(|memory| memory.area_rect(id))
+                .expect("la fenêtre doit avoir une géométrie mesurée");
+            assert_eq!(
+                actual, requested,
+                "le cadre doit rejoindre le liseré et les poignées, deborde={deborde}"
+            );
+        }
     }
 
     // B2 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `sync_floating_tabs_order_to_top_layer`

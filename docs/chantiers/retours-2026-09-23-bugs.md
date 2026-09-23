@@ -161,6 +161,9 @@ via egui). Test de non-régression :
 `le_contenu_qui_deborde_est_rogne_au_rectangle_de_la_fenetre` dans
 `crates/plotyx-app/src/app.rs`.
 
+**État actuel** : F8 ajoute depuis un défilement horizontal limité à la
+grille, aussi bien en fenêtre flottante que détachée.
+
 **Nature** : résultat visuel faux. **Gravité** : gênant.
 
 **Note** : deux des éléments qui débordent sur la capture (le compteur
@@ -377,6 +380,17 @@ réellement visible. **Gravité** : cosmétique côté flottant (débordement da
 le vide), plus gênant côté détaché (le contour, censé montrer que la
 fenêtre est active, disparaît justement quand elle est la plus étroite).
 
+**Suite après les nouvelles captures** : peindre le contour sur le rectangle
+demandé cachait l'écart sans supprimer sa cause : le `Frame` et la zone de
+redimensionnement pouvaient encore mesurer deux tailles différentes. Les
+quatre contenus passent maintenant par un sous-`Ui` borné qui réserve au
+parent exactement l'espace offert. Le rectangle réel d'egui, le contour et
+les poignées coïncident, même si le contenu est court ou déborde. Le test
+`le_contour_actif_suit_le_rectangle_demande_meme_si_le_contenu_deborde`
+vérifie désormais aussi le rectangle réel de la fenêtre ; le test
+`le_cadre_et_les_poignees_gardent_la_meme_taille_avec_un_contenu_court_ou_debordant`
+couvre les deux extrêmes.
+
 ## B8 — Le rognage du contenu (B4) n'a jamais été porté aux fenêtres détachées [corrigé]
 
 **Reproduction**
@@ -427,6 +441,7 @@ s'ajoute au niveau du panneau et couvre en plus ses contrôles (bouton
 
 Pas de défilement horizontal ajouté (ça reste F8, `retours-2026-09-23-
 features.md`) — ici, comme B4, on rogne, on ne fait pas défiler.
+F8 a depuis ajouté ce défilement à la seule grille du classeur détaché.
 
 Test de non-régression :
 `app::graph_layout_tests::le_classeur_detache_est_rogne_au_rectangle_du_viewport`

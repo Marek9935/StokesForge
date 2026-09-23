@@ -64,6 +64,24 @@ Le menu Fichier propose la création d'un nouveau classeur. La position et
 la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 « Géométrie des fenêtres »). L'éditeur de matrice reste un espace réservé.
 
+### Débordement des fenêtres de contenu
+
+Toutes les fenêtres de contenu flottantes et détachées partagent un rectangle
+extérieur unique : leur contenu est peint dans un sous-espace borné qui ne
+peut agrandir le cadre au-delà des poignées de redimensionnement. La règle
+intérieure dépend de la nature du contenu. Dans un classeur, la grille seule
+défile horizontalement lorsque ses colonnes dépassent ; le bandeau d'actions
+reste rogné. La fenêtre garde assez de largeur pour montrer trois onglets de
+feuille. Les onglets visibles suivent automatiquement la feuille sélectionnée
+et gardent une feuille voisine de chaque côté lorsqu'elle existe ; les menus
+« … » donnent accès aux feuilles masquées. Les notes et matrices restent
+bornées au rectangle commun. Le comportement intérieur du graphe au
+redimensionnement doit encore être défini avec l'utilisateur (F11).
+
+Pour une nouvelle nature de fenêtre, conserver cette borne commune puis
+définir avec l'utilisateur quelles zones défilent et quelles zones sont
+rognées avant de brancher son contenu.
+
 ### Géométrie des fenêtres
 
 Chaque déplacement ou redimensionnement est envoyé à la session et enregistré

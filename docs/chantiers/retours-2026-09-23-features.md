@@ -1,6 +1,6 @@
 # Évolutions à développer — retours du 2026-09-23
 
-Neuf chantiers, tirés d'un vrac de seize retours trié le 2026-09-23. Les
+Chantiers tirés des retours du 2026-09-23. Les
 défauts du même message vivent à côté, dans
 [`retours-2026-09-23-bugs.md`](retours-2026-09-23-bugs.md).
 
@@ -113,10 +113,14 @@ Vérifier l'effet sur B4 : des colonnes plus larges débordent plus tôt.
 
 ### F8 — Défilement horizontal du classeur
 
-- [ ] Glisseur horizontal une fois les colonnes rognées (B4).
-- [ ] Maj+molette pilote ce glisseur.
+- [x] Glisseur horizontal dans la grille quand les colonnes dépassent.
+- [x] Maj+molette pilote ce glisseur via le comportement natif d'`egui::ScrollArea`.
 
-**Préalable : B4.** Sans rognage, le glisseur n'a rien à faire défiler.
+Le bandeau d'actions et les onglets de feuille restent hors de la zone
+défilable. La fenêtre flottante et la fenêtre détachée utilisent la même règle.
+Une largeur minimale de 220 points garde trois onglets de feuille visibles ;
+la plage affichée se déplace automatiquement autour de la feuille sélectionnée.
+Les menus « … » donnent accès aux feuilles cachées à gauche et à droite.
 
 ### F9 — Poignée de glisser autour de la sélection
 
@@ -146,6 +150,14 @@ mesure de pixels y répondrait plus vite qu'une nouvelle question.
 **À faire dans la même zone que F6** (contour de fenêtre) : les deux
 retouchent l'apparence de la même bande, éviter deux passages séparés.
 
+### F11 — Définir le comportement du graphe lors du redimensionnement
+
+- [ ] Demander à l'utilisateur quelles parties du graphe doivent rester
+      visibles, être rognées ou devenir défilables lorsque la fenêtre est trop
+      petite, en mode flottant comme en mode détaché.
+- [ ] Ne pas déduire cette règle du comportement actuel de la figure : le
+      choix du graphe est explicitement laissé à définir.
+
 ---
 
 ## Ordre suggéré
@@ -159,3 +171,4 @@ retouchent l'apparence de la même bande, éviter deux passages séparés.
 6. **F9** — indépendant.
 7. **F10** avec F6 — même zone, et sa portée exacte reste à préciser (voir
    ci-dessus).
+8. **F11** après définition du comportement attendu avec l'utilisateur.
