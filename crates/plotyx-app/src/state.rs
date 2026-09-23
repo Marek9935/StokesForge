@@ -104,6 +104,13 @@ pub enum Action {
         /// être affichés simultanément, chacun dans son propre onglet.
         sheet: NodeId,
     },
+    /// Ajoute une feuille en fin de `book`, avec un nom généré par
+    /// `plotyx-core` (`Command::AddWorksheet { name: None, .. }`, même
+    /// convention que [`Action::AddWorkbook`] pour le nom du classeur).
+    AddWorksheet {
+        /// Classeur visé.
+        book: NodeId,
+    },
     /// Ajoute une colonne en fin de `sheet` puis y sélectionne `row` — Tab
     /// sur la dernière colonne d'une ligne de données, symétrique de
     /// [`Action::CommitCellAndAdvance`] (Entrée sur la dernière ligne d'une
@@ -2629,6 +2636,7 @@ impl AppState {
                 self.commit_cell(column, row, text);
             }
             Action::AddColumn { sheet } => self.add_column(sheet),
+            Action::AddWorksheet { book } => self.add_worksheet(book),
             Action::AddColumnAndSelect { sheet, row } => self.add_column_and_select(sheet, row),
             Action::AddColumnAndSelectHeaderField { sheet, field } => {
                 self.add_column_and_select_header_field(sheet, field)
@@ -3723,6 +3731,10 @@ impl AppState {
             name: None,
             column: Column::new(ColumnType::Numeric),
         });
+    }
+
+    fn add_worksheet(&mut self, book: NodeId) {
+        self.execute(Command::AddWorksheet { book, name: None });
     }
 
     /// Ajoute une colonne en fin de `sheet` puis y sélectionne `row` — voir

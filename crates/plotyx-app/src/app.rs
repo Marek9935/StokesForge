@@ -526,6 +526,20 @@ const CASCADE_STEP: f32 = 24.0;
 /// forcée qui ne reprend pas cette même valeur redevient trop grand dès que
 /// le contenu est masqué.
 const WINDOW_HEADER_HEIGHT: f32 = 28.0;
+/// Marge intérieure du `Frame` d'une fenêtre de contenu, flottante ou
+/// détachée — voir [`floating_window_frame`] et le `Frame` construit dans
+/// [`PlotyxApp::show_detached_tabs`]. Sans marge verticale : la bande
+/// d'en-tête (`WINDOW_HEADER_HEIGHT`) et les séparateurs du contenu
+/// fournissent déjà leur propre espacement, la marge par défaut d'egui
+/// (`Frame::window`/`Frame::central_panel`) n'ajoutait donc qu'un bandeau
+/// blanc mort au-dessus et en dessous, sans rôle. La marge horizontale reste
+/// pour ne pas coller le texte au bord.
+const WINDOW_CONTENT_MARGIN: egui::Margin = egui::Margin {
+    left: 6,
+    right: 6,
+    top: 0,
+    bottom: 0,
+};
 /// Nombre de crans de cascade avant de reboucler à zéro, pour qu'une
 /// succession de fenêtres ne dérive jamais hors de l'aire de travail.
 const CASCADE_WRAP: u32 = 8;
@@ -1595,6 +1609,7 @@ impl PlotyxApp {
                     // `input.content_rect()` — le rectangle du viewport OS
                     // réel, pas celui qu'egui recalcule.
                     let frame = egui::Frame::central_panel(ui.style())
+                        .inner_margin(WINDOW_CONTENT_MARGIN)
                         .stroke(ui.style().visuals.window_stroke());
                     egui::CentralPanel::default().frame(frame).show(ui, |ui| {
                         let Some(snapshot) = model.snapshot.clone() else {
@@ -2074,11 +2089,12 @@ impl eframe::App for PlotyxApp {
                     // autour d'une zone vide. `current_size` reste la taille
                     // logique conservée dans `window_sizes`/persistée ; seule
                     // la taille **demandée à egui cette image** se réduit.
+                    let frame = floating_window_frame(ui.style());
                     let display_size = floating_window_display_size(
                         current_size,
                         was_collapsed,
                         WINDOW_HEADER_HEIGHT,
-                        ui.style().spacing.window_margin.sum(),
+                        frame.inner_margin.sum(),
                     );
                     // Rectangle **demandé** à egui cette image — position et
                     // taille forcées ci-dessus, donc indépendant de ce
@@ -2088,7 +2104,6 @@ impl eframe::App for PlotyxApp {
                     // contour actif peint juste après (`paint_active_window_outline`)
                     // et aux poignées de redimensionnement plus bas.
                     let requested_rect = egui::Rect::from_min_size(current_pos, display_size);
-                    let frame = floating_window_frame(ui.style());
                     egui::Window::new(tab_title(state, tab))
                         .id(id)
                         .title_bar(false)
@@ -2446,7 +2461,7 @@ fn active_window_stroke(style: &egui::Style, is_active: bool) -> egui::Stroke {
 /// est peint à part par [`paint_active_window_outline`], sur le rectangle
 /// **demandé**, pas celui qu'egui recalcule depuis le contenu.
 fn floating_window_frame(style: &egui::Style) -> egui::Frame {
-    egui::Frame::window(style)
+    egui::Frame::window(style).inner_margin(WINDOW_CONTENT_MARGIN)
 }
 
 /// Peint le contour de surbrillance d'une fenêtre active, sur un rectangle
@@ -2485,6 +2500,15 @@ fn show_horizontally_scrollable_grid<R>(
     ui: &mut egui::Ui,
     add_grid: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::scroll_area::ScrollAreaOutput<R> {
+    // Barre pleine (espace réservé, opaque dès qu'elle est utile) plutôt que
+    // la barre flottante par défaut d'egui : celle-ci reste à opacité nulle
+    // tant qu'elle n'est pas survolée au pixel près, et n'occupe aucun espace
+    // réservé — dans une fenêtre de contenu déjà rognée à son rectangle
+    // (`show_window_contents_bounded`), elle n'était ni visible ni
+    // atteignable. `scroll_bar_visibility` reste au défaut
+    // (`VisibleWhenNeeded`) : la barre n'apparaît que si la grille déborde
+    // réellement.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
     egui::ScrollArea::horizontal()
         .auto_shrink([false, true])
         .show(ui, add_grid)
@@ -4097,6 +4121,9 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     ui.horizontal(|ui| {
         if ui.button("Ajouter une colonne").clicked() {
             actions.push(Action::AddColumn { sheet: selected });
+        }
+        if ui.button("Ajouter une feuille").clicked() {
+            actions.push(Action::AddWorksheet { book });
         }
         if ui.button("Importer…").clicked() {
             state.open_import(book);
@@ -6053,6 +6080,9 @@ fn detached_book_contents(
         if ui.button("Ajouter une colonne").clicked() {
             requests.actions.push(Action::AddColumn { sheet: selected });
         }
+        if ui.button("Ajouter une feuille").clicked() {
+            requests.actions.push(Action::AddWorksheet { book });
+        }
         if ui.button("Insérer 1 ligne").clicked() {
             // Même correctif B5 que `book_contents` : insérer en fin de
             // feuille, pas `at: 0` en dur (`Project::insert_rows` exige
@@ -7375,7 +7405,7 @@ mod graph_layout_tests {
         // strictement plus petit que `window_rect`, pas égal à lui.
         let content_labels = [
             "Ajouter une colonne",
-            "Insérer 1 ligne",
+            "Ajouter une feuille",
             "Colonne 0",
             "Colonne 1",
             "Sheet1",
@@ -7513,11 +7543,7 @@ mod graph_layout_tests {
             modifiers: egui::Modifiers::NONE,
         }]);
 
-        let expected_collapsed_height = WINDOW_HEADER_HEIGHT
-            + egui::Frame::central_panel(&egui::Style::default())
-                .inner_margin
-                .sum()
-                .y;
+        let expected_collapsed_height = WINDOW_HEADER_HEIGHT + WINDOW_CONTENT_MARGIN.sum().y;
         let commands = &collapsed_output.viewport_output[&viewport_id].commands;
         assert!(
             commands.iter().any(|command| matches!(

@@ -719,6 +719,30 @@ fn adding_then_undoing_a_column_restores_the_tree_bit_for_bit() {
 }
 
 #[test]
+fn adding_then_undoing_a_worksheet_restores_the_tree_bit_for_bit() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book1 = book_named(state.tree(), "Book1");
+    let before = std::sync::Arc::clone(state.tree());
+    let sheets_before = state.worksheets_of(book1);
+
+    state.dispatch(Action::AddWorksheet { book: book1 });
+
+    let sheets_after = state.worksheets_of(book1);
+    assert_eq!(sheets_after.len(), sheets_before.len() + 1);
+    let (new_sheet, new_name) = sheets_after.last().cloned().expect("la feuille ajoutée");
+    assert!(!new_name.is_empty(), "un nom a été généré");
+    assert!(
+        sheets_before.iter().all(|(id, _)| *id != new_sheet),
+        "nouvelle feuille"
+    );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(**state.tree(), *before);
+    assert_eq!(state.worksheets_of(book1).len(), sheets_before.len());
+}
+
+#[test]
 fn creating_a_workbook_is_undoable_and_redoable() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());

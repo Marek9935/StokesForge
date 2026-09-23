@@ -89,6 +89,17 @@ Pour une nouvelle nature de fenêtre, conserver cette borne commune puis
 définir avec l'utilisateur quelles zones défilent et quelles zones sont
 rognées avant de brancher son contenu.
 
+Le `Frame` de ces fenêtres n'a pas de marge verticale
+(`WINDOW_CONTENT_MARGIN`, `crates/plotyx-app/src/app.rs`) : la bande d'en-tête
+et les séparateurs du contenu fournissent déjà leur propre espacement, une
+marge par défaut n'ajoutait qu'un bandeau blanc mort au-dessus et en dessous.
+La marge horizontale reste. La barre de défilement horizontale de la grille
+(`show_horizontally_scrollable_grid`) utilise un style plein
+(`egui::style::ScrollStyle::solid()`) plutôt que la barre flottante par
+défaut d'egui, invisible tant qu'elle n'est pas survolée au pixel près —
+dans une fenêtre déjà rognée à son rectangle, elle n'était ni visible ni
+atteignable.
+
 ### Géométrie des fenêtres
 
 Chaque déplacement ou redimensionnement est envoyé à la session et enregistré
