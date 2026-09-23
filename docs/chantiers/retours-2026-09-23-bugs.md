@@ -36,6 +36,17 @@ rectangle lu via `ctx.memory(|m| m.area_rect(id))` plutôt que sur
 `ui.max_rect()` dans la fermeture — fonctionnel, mais une primitive de plus
 que nécessaire, écartée au profit de celle-ci.
 
+**Étendu aux fenêtres détachées** : les fenêtres détachées (viewports OS
+séparés, sans décoration) n'avaient elles-mêmes aucun contour du tout — pas
+un cas de B1/B3 à proprement parler (rien n'y était mal placé, l'absence
+était juste jamais comblée), mais la même correction logique s'y applique.
+`active_tab`/`floating_tabs` ne couvrent pas ces fenêtres (chacune est son
+propre viewport OS) : « active » y prend donc le sens du focus OS
+(`RawInput::focused`, rapporté par le backend par viewport) plutôt que du
+z-order interne. Le trait recoloré est partagé via `active_window_stroke`,
+appliqué au `Frame` du `CentralPanel` de `show_detached_tabs` plutôt qu'à
+celui d'`egui::Window`.
+
 **Capture** : [voir la capture](captures-2026-09-23/surbrillance-mal-placee.png)
 
 **Reproduction**

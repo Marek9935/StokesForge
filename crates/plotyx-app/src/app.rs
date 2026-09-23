@@ -1536,7 +1536,15 @@ impl PlotyxApp {
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                     let was_collapsed = model.collapsed;
                     let mut header_actions = WindowHeaderActions::default();
-                    egui::CentralPanel::default().show(ui, |ui| {
+                    // Surbrillance (B1/B3 suite) : une fenêtre détachée est
+                    // un viewport OS séparé, donc « active » n'a de sens
+                    // qu'au sens du focus OS — `active_tab`/`floating_tabs`
+                    // ne le couvrent pas. `RawInput::focused` est déjà
+                    // rapporté par le backend par viewport.
+                    let is_active = ui.input(|input| input.focused);
+                    let frame = egui::Frame::central_panel(ui.style())
+                        .stroke(active_window_stroke(ui.style(), is_active));
+                    egui::CentralPanel::default().frame(frame).show(ui, |ui| {
                         let Some(snapshot) = model.snapshot.clone() else {
                             // Ne devrait jamais arriver : `detach_tab` pose le
                             // premier instantané avant toute image détachée.
@@ -2245,6 +2253,21 @@ fn floating_window_geometry_to_persist(
     egui::Rect::from_min_size(painted_rect.min, current_size)
 }
 
+/// Trait du contour de surbrillance — la couleur de sélection du thème pour
+/// la fenêtre active, le trait par défaut d'egui sinon. Partagé entre
+/// [`floating_window_frame`] (fenêtres flottantes internes, B1/B3) et le
+/// `Frame` du panneau central des fenêtres détachées (viewports OS séparés,
+/// B1/B3 suite) : même logique de surbrillance des deux côtés, seule la
+/// notion de « active » diffère (`is_active` calculé depuis `active_tab`
+/// pour les unes, depuis le focus OS du viewport pour les autres).
+fn active_window_stroke(style: &egui::Style, is_active: bool) -> egui::Stroke {
+    if is_active {
+        style.visuals.selection.stroke
+    } else {
+        style.visuals.window_stroke()
+    }
+}
+
 /// `Frame` d'une fenêtre flottante — le `Frame::window` habituel, dont le
 /// trait est recoloré pour la fenêtre active plutôt que de peindre un second
 /// contour de surbrillance par-dessus (B1/B3,
@@ -2254,11 +2277,7 @@ fn floating_window_geometry_to_persist(
 /// rectangle (`AreaState::rect()`) : une seule primitive suffit, sans calque
 /// à choisir à la main pour rester au-dessus des autres fenêtres.
 fn floating_window_frame(style: &egui::Style, is_active: bool) -> egui::Frame {
-    egui::Frame::window(style).stroke(if is_active {
-        style.visuals.selection.stroke
-    } else {
-        style.visuals.window_stroke()
-    })
+    egui::Frame::window(style).stroke(active_window_stroke(style, is_active))
 }
 
 /// Ramène `top_layer_tab` en fin de `floating_tabs` (§ ordre de pile,
@@ -6703,6 +6722,98 @@ mod graph_layout_tests {
         assert!(
             figure_rect.max.y <= GRAPH_WINDOW_SIZE.y,
             "la figure doit rester dans la fenêtre détachée, pas {figure_rect:?} pour une fenêtre de {GRAPH_WINDOW_SIZE:?}"
+        );
+    }
+
+    // B1/B3 suite : les fenêtres détachées (viewports OS séparés) n'avaient
+    // aucun contour de surbrillance — `active_tab`/`floating_tabs` ne les
+    // couvrent pas, seul le focus OS du viewport a un sens pour elles. Même
+    // logique que les fenêtres flottantes (`active_window_stroke`), câblée
+    // sur `RawInput::focused` plutôt que sur `active_tab`.
+    #[test]
+    fn la_fenetre_detachee_recolore_son_contour_selon_le_focus_os() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let mut app = PlotyxApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(plotyx_render_egui::font_definitions());
+
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        context
+            .run_ui(root_input.clone(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    graph_contents(ui, &app.state, &mut app.graph_views, graph);
+                });
+            })
+            .textures_delta
+            .clear();
+
+        app.detach_tab(Tab::Graph(graph));
+        let viewport_id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output.viewport_output[&viewport_id]
+            .viewport_ui_cb
+            .clone()
+            .expect("le détachement doit publier un callback de viewport");
+        output.textures_delta.clear();
+
+        // Le `Shape::Rect` du `Frame` du panneau central est le seul, dans
+        // cette fenêtre, dont le trait n'est pas de largeur nulle — les
+        // autres formes rectangulaires (icônes d'en-tête, etc.) n'ont pas de
+        // contour propre.
+        fn frame_stroke_color(shapes: &[egui::epaint::ClippedShape]) -> egui::Color32 {
+            fn find(shape: &egui::Shape) -> Option<egui::Color32> {
+                match shape {
+                    egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => Some(rect.stroke.color),
+                    egui::Shape::Vec(shapes) => shapes.iter().find_map(find),
+                    _ => None,
+                }
+            }
+            shapes
+                .iter()
+                .find_map(|painted| find(&painted.shape))
+                .expect("le Frame du panneau central doit peindre un contour")
+        }
+
+        let paint_focused = |focused: bool| {
+            let mut input = root_input.clone();
+            input.viewport_id = viewport_id;
+            input.focused = focused;
+            input.viewports.insert(
+                viewport_id,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    ..Default::default()
+                },
+            );
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                GRAPH_WINDOW_SIZE,
+            ));
+            let mut output = context.run_ui(input, |ui| callback(ui));
+            output.textures_delta.clear();
+            frame_stroke_color(&output.shapes)
+        };
+
+        let style = egui::Style::default();
+        assert_eq!(
+            paint_focused(false),
+            style.visuals.window_stroke().color,
+            "sans focus OS, la fenêtre détachée garde le trait par défaut d'egui"
+        );
+        assert_eq!(
+            paint_focused(true),
+            style.visuals.selection.stroke.color,
+            "avec le focus OS, la fenêtre détachée reprend la couleur de sélection du thème"
         );
     }
 
