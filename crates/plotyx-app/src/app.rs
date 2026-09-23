@@ -616,10 +616,11 @@ pub struct PlotyxApp {
     /// règle (`plotyx_render_egui::GraphView`) ; avec plusieurs graphes
     /// affichables simultanément, une seule vue ne suffit plus.
     graph_views: HashMap<NodeId, GraphView>,
-    /// Onglets de graphe dont seul le contenu est replié. Cet état de
-    /// présentation reste local à l'application : il ne modifie ni le
-    /// graphe, ni sa géométrie enregistrée, ni les autres fenêtres.
-    collapsed_graph_tabs: HashSet<Tab>,
+    /// Onglets (`Graph` ou `Book`, B5 — `docs/chantiers/retours-2026-09-23-bugs.md`)
+    /// dont seul le contenu est replié. Cet état de présentation reste local
+    /// à l'application : il ne modifie ni le nœud, ni sa géométrie
+    /// enregistrée, ni les autres fenêtres.
+    collapsed_tabs: HashSet<Tab>,
     /// Onglet actuellement maximisé, s'il y en a un — voir la doc de tête du
     /// module, § maximiser. Ne peut plus valoir le Project Manager depuis
     /// cette tâche : ce n'est plus un onglet, et un panneau fixe toujours
@@ -671,7 +672,7 @@ pub struct PlotyxApp {
     /// Indépendante de `selection.rs`, propre à la grille de données.
     pm_selection: HashSet<Tab>,
     /// Onglets masqués sans être fermés (§6) — même patron que
-    /// `collapsed_graph_tabs`, mais l'onglet entier n'est plus peint du tout
+    /// `collapsed_tabs`, mais l'onglet entier n'est plus peint du tout
     /// (au lieu de replier seulement son contenu). Reste dans
     /// `floating_tabs` : cascade/position/géométrie survivent au masquage.
     hidden_tabs: HashSet<Tab>,
@@ -778,11 +779,11 @@ struct DetachedTabViewModel {
     /// [`PlotyxApp::graph_views`] le temps du détachement — voir
     /// [`PlotyxApp::detach_tab`]/[`PlotyxApp::reattach_tab`].
     graph_view: Option<GraphView>,
-    /// `Tab::Graph` : repli du contenu, propre à cette fenêtre détachée —
-    /// initialisé depuis [`PlotyxApp::collapsed_graph_tabs`] par
+    /// `Tab::Graph`/`Tab::Book` : repli du contenu, propre à cette fenêtre
+    /// détachée — initialisé depuis [`PlotyxApp::collapsed_tabs`] par
     /// `detach_tab`, basculé directement ici (pas de détour par
     /// `DetachedTabRequests`, ce repli n'intéresse que cette fenêtre), et
-    /// reversé dans `collapsed_graph_tabs` par `reattach_tab`.
+    /// reversé dans `collapsed_tabs` par `reattach_tab`.
     collapsed: bool,
     /// Le premier callback d'un viewport différé peut arriver avant que
     /// Wayland/WGPU ait stabilisé sa taille. Une seule image supplémentaire
@@ -866,7 +867,7 @@ impl PlotyxApp {
             next_cascade,
             focus_next: None,
             graph_views: HashMap::new(),
-            collapsed_graph_tabs: HashSet::new(),
+            collapsed_tabs: HashSet::new(),
             maximized_tab: None,
             pm_detached: false,
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
@@ -1382,7 +1383,7 @@ impl PlotyxApp {
             note_edit: None,
             graph_view,
             needs_initial_repaint: true,
-            collapsed: self.collapsed_graph_tabs.contains(&tab),
+            collapsed: self.collapsed_tabs.contains(&tab),
         };
         self.detached_tabs.insert(
             tab,
@@ -1413,7 +1414,7 @@ impl PlotyxApp {
                 view.invalidate_surface();
                 self.graph_views.insert(id, view);
             }
-            toggle_graph_collapse_to(&mut self.collapsed_graph_tabs, tab, model.collapsed);
+            toggle_collapse_to(&mut self.collapsed_tabs, tab, model.collapsed);
         }
         if !self.floating_tabs.contains(&tab) {
             self.push_floating_tab(tab);
@@ -1815,7 +1816,7 @@ impl eframe::App for PlotyxApp {
             next_cascade,
             focus_next,
             graph_views,
-            collapsed_graph_tabs,
+            collapsed_tabs,
             maximized_tab,
             window_positions,
             window_sizes,
@@ -1912,7 +1913,7 @@ impl eframe::App for PlotyxApp {
                     let current_size = *window_sizes.entry(tab).or_insert(saved_size);
                     let mut open = true;
                     let mut header_actions = WindowHeaderActions::default();
-                    let was_collapsed = collapsed_graph_tabs.contains(&tab);
+                    let was_collapsed = collapsed_tabs.contains(&tab);
                     let is_active = Some(tab) == active_tab;
                     // Fenêtre repliée (B3) : `window_header` ne peint que sa
                     // bande d'en-tête, `tab_contents` est sauté — forcer la
@@ -1954,7 +1955,7 @@ impl eframe::App for PlotyxApp {
                             }
                         });
                     if header_actions.toggle_collapse {
-                        toggle_graph_collapse(collapsed_graph_tabs, tab);
+                        toggle_collapse(collapsed_tabs, tab);
                     }
                     if header_actions.maximize {
                         *maximized_tab = Some(tab);
@@ -2154,29 +2155,34 @@ fn tab_node(tab: Tab) -> NodeId {
     }
 }
 
-/// Bascule le repli du contenu d'un graphe. Les autres types d'onglets n'ont
-/// pas ce contrôle et restent donc toujours affichés.
-fn toggle_graph_collapse(collapsed_graph_tabs: &mut HashSet<Tab>, tab: Tab) {
-    if !matches!(tab, Tab::Graph(_)) {
+/// Bascule le repli du contenu d'un onglet. Réservé à `Tab::Graph` et
+/// `Tab::Book` (B5, `docs/chantiers/retours-2026-09-23-bugs.md`) — `Matrix`
+/// et `Note` n'ont pas ce contrôle et restent donc toujours affichés ; rien
+/// dans la peinture du contenu replié (voir la boucle des fenêtres
+/// flottantes et détachées dans `PlotyxApp::ui`) ne dépend du type de `tab`,
+/// l'extension à ces deux natures n'est donc qu'une question d'icône visible,
+/// pas de comportement caché à revérifier.
+fn toggle_collapse(collapsed_tabs: &mut HashSet<Tab>, tab: Tab) {
+    if !matches!(tab, Tab::Graph(_) | Tab::Book(_)) {
         return;
     }
-    if !collapsed_graph_tabs.insert(tab) {
-        collapsed_graph_tabs.remove(&tab);
+    if !collapsed_tabs.insert(tab) {
+        collapsed_tabs.remove(&tab);
     }
 }
 
 /// Pose le repli à une valeur précise plutôt que de le basculer — utilisé
 /// par [`PlotyxApp::reattach_tab`] pour reverser dans
-/// `collapsed_graph_tabs` l'état propre à la fenêtre détachée
+/// `collapsed_tabs` l'état propre à la fenêtre détachée
 /// (`DetachedTabViewModel::collapsed`) plutôt que de le deviner.
-fn toggle_graph_collapse_to(collapsed_graph_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bool) {
-    if !matches!(tab, Tab::Graph(_)) {
+fn toggle_collapse_to(collapsed_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bool) {
+    if !matches!(tab, Tab::Graph(_) | Tab::Book(_)) {
         return;
     }
     if collapsed {
-        collapsed_graph_tabs.insert(tab);
+        collapsed_tabs.insert(tab);
     } else {
-        collapsed_graph_tabs.remove(&tab);
+        collapsed_tabs.remove(&tab);
     }
 }
 
@@ -2552,7 +2558,11 @@ fn window_header(
         HeaderPlacement::Floating => header.visuals().text_color(),
         HeaderPlacement::Detached => theme::gutter_text_color(),
     };
-    let collapse_width = if matches!(tab, Tab::Graph(_)) {
+    // B5 (`docs/chantiers/retours-2026-09-23-bugs.md`) : l'icône de repli
+    // était réservée à `Tab::Graph`, sans justification documentée — une
+    // extension jamais faite plutôt qu'un choix. `Matrix`/`Note` restent
+    // exclus faute de raison de les y ajouter.
+    let collapse_width = if matches!(tab, Tab::Graph(_) | Tab::Book(_)) {
         COLLAPSE_WIDTH
     } else {
         0.0
@@ -2560,18 +2570,22 @@ fn window_header(
     if collapse_width > 0.0 {
         let collapse_rect =
             egui::Rect::from_min_size(rect.min, egui::vec2(collapse_width, rect.height()));
+        let content_label = match tab {
+            Tab::Book(_) => "classeur",
+            _ => "graphe",
+        };
         let (icon, tooltip) = if collapsed {
-            (">", "Afficher le contenu du graphe")
+            (">", format!("Afficher le contenu du {content_label}"))
         } else {
-            ("v", "Masquer le contenu du graphe")
+            ("v", format!("Masquer le contenu du {content_label}"))
         };
         if header_icon(
             &mut header,
             id,
-            "graph_collapse",
+            "collapse",
             collapse_rect,
             icon,
-            tooltip,
+            &tooltip,
             icon_color,
         ) {
             actions.toggle_collapse = true;
@@ -5969,22 +5983,45 @@ mod graph_layout_tests {
     }
 
     #[test]
-    fn le_repli_ne_concerne_que_le_contenu_du_graphe_vise() {
+    fn le_repli_ne_concerne_que_longlet_vise() {
         let (_session, graph) = graphe();
         let graph_tab = Tab::Graph(graph);
         let mut collapsed = HashSet::new();
 
-        toggle_graph_collapse(&mut collapsed, graph_tab);
+        toggle_collapse(&mut collapsed, graph_tab);
         assert_eq!(collapsed, HashSet::from([graph_tab]));
 
-        // Un autre type de contenu ne peut pas être replié par la flèche du
-        // graphe, même si son identifiant de nœud coïncide dans ce test de
-        // présentation.
-        toggle_graph_collapse(&mut collapsed, Tab::Book(graph));
-        assert_eq!(collapsed, HashSet::from([graph_tab]));
+        // B5 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `Tab::Book` a
+        // aussi ce contrôle depuis ce correctif, suivi indépendamment du
+        // graphe même quand son identifiant de nœud coïncide (test de
+        // présentation).
+        let book_tab = Tab::Book(graph);
+        toggle_collapse(&mut collapsed, book_tab);
+        assert_eq!(collapsed, HashSet::from([graph_tab, book_tab]));
 
-        toggle_graph_collapse(&mut collapsed, graph_tab);
+        toggle_collapse(&mut collapsed, graph_tab);
+        assert_eq!(collapsed, HashSet::from([book_tab]));
+
+        toggle_collapse(&mut collapsed, book_tab);
         assert!(collapsed.is_empty());
+    }
+
+    #[test]
+    fn le_repli_reste_refuse_aux_matrices_et_aux_notes() {
+        let (_session, graph) = graphe();
+        let mut collapsed = HashSet::new();
+
+        toggle_collapse(&mut collapsed, Tab::Matrix(graph));
+        assert!(
+            collapsed.is_empty(),
+            "une matrice n'a pas ce contrôle : rien à replier"
+        );
+
+        toggle_collapse(&mut collapsed, Tab::Note(graph));
+        assert!(
+            collapsed.is_empty(),
+            "une note n'a pas ce contrôle : rien à replier"
+        );
     }
 
     // B3 (`docs/chantiers/retours-2026-09-23-bugs.md`) : une fenêtre repliée
@@ -6158,6 +6195,58 @@ mod graph_layout_tests {
         assert!(
             (title_center_y - close_center_y).abs() < f32::EPSILON,
             "le titre et les icônes d'action doivent partager le même centre vertical"
+        );
+    }
+
+    // B5 (`docs/chantiers/retours-2026-09-23-bugs.md`) : l'icône « Masquer le
+    // contenu de… » était réservée à `Tab::Graph` sans raison documentée —
+    // vérifie qu'elle est bien peinte pour `Tab::Book`, et toujours absente
+    // pour `Tab::Matrix`/`Tab::Note`, qui n'ont pas ce contrôle.
+    #[test]
+    fn licone_de_repli_est_peinte_pour_les_classeurs_mais_pas_les_matrices() {
+        let paint_and_find_collapse_arrow = |tab: Tab| -> bool {
+            let context = egui::Context::default();
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 120.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = window_header(
+                        ui,
+                        egui::Id::new("collapse_icon_presence"),
+                        "Titre",
+                        tab,
+                        false,
+                        HeaderPlacement::Floating,
+                    );
+                },
+            );
+            output.textures_delta.clear();
+            output.shapes.iter().any(|painted| {
+                matches!(&painted.shape, egui::Shape::Text(shape) if shape.galley.job.text == "v")
+            })
+        };
+
+        let node = NodeId::from_raw(1);
+        assert!(
+            paint_and_find_collapse_arrow(Tab::Book(node)),
+            "un classeur doit porter l'icône de repli"
+        );
+        assert!(
+            paint_and_find_collapse_arrow(Tab::Graph(node)),
+            "un graphe doit garder l'icône de repli"
+        );
+        assert!(
+            !paint_and_find_collapse_arrow(Tab::Matrix(node)),
+            "une matrice n'a pas ce contrôle"
+        );
+        assert!(
+            !paint_and_find_collapse_arrow(Tab::Note(node)),
+            "une note n'a pas ce contrôle"
         );
     }
 
