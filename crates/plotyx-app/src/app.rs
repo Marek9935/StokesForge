@@ -207,6 +207,14 @@
 //! unique par construction — pas de collision possible entre deux classeurs
 //! détachés simultanément, par exemple).
 //!
+//! B8 (`docs/chantiers/retours-2026-09-23-bugs.md`) : comme pour une fenêtre
+//! flottante rétrécie (B4), un `Ui` dont les enfants dépassent son
+//! `max_rect` les peint quand même. [`PlotyxApp::show_detached_tabs`] pose
+//! donc le même rognage explicite (`ui.clip_rect().intersect(ui.max_rect())`
+//! puis `ui.set_clip_rect(...)`) juste avant le `match` qui aiguille vers le
+//! contenu propre à chaque nature d'onglet — un seul point d'insertion pour
+//! les quatre, puisqu'elles partagent ce même point d'aiguillage.
+//!
 //! # Pourquoi pas un `ViewModel` par nature de contenu comme pour le PM
 //!
 //! Le PM n'a qu'une seule forme de contenu (un arbre en lecture seule) ; les
@@ -1561,6 +1569,19 @@ impl PlotyxApp {
                         if was_collapsed ^ header_actions.toggle_collapse {
                             return;
                         }
+                        // B8 (`docs/chantiers/retours-2026-09-23-bugs.md`) :
+                        // même angle mort que B4, jamais porté ici — un `Ui`
+                        // dont les enfants dépassent son `max_rect` les peint
+                        // quand même, et rien dans `detached_book_contents`/
+                        // `detached_matrix_contents`/`detached_note_contents`/
+                        // `graph_view_contents` ne réduisait le rectangle de
+                        // découpe. Rogner explicitement au rectangle de
+                        // contenu du `CentralPanel`, une fois sa taille (donc
+                        // celle du viewport OS) connue — un seul point
+                        // d'insertion suffit pour les quatre natures d'onglet,
+                        // qui partagent toutes ce `match`.
+                        let clip_rect = ui.clip_rect().intersect(ui.max_rect());
+                        ui.set_clip_rect(clip_rect);
                         let tree = &snapshot.tree;
                         match tab {
                             Tab::Book(id) => {
@@ -6722,6 +6743,139 @@ mod graph_layout_tests {
         assert!(
             figure_rect.max.y <= GRAPH_WINDOW_SIZE.y,
             "la figure doit rester dans la fenêtre détachée, pas {figure_rect:?} pour une fenêtre de {GRAPH_WINDOW_SIZE:?}"
+        );
+    }
+
+    // B8 (`docs/chantiers/retours-2026-09-23-bugs.md`) : même mécanisme que
+    // B4 (`le_contenu_qui_deborde_est_rogne_au_rectangle_de_la_fenetre`),
+    // jamais porté à `show_detached_tabs` — un classeur détaché à plusieurs
+    // colonnes déborde du viewport OS sans rognage contrôlé, tronqué au pixel
+    // par la fenêtre OS elle-même plutôt que par le code applicatif.
+    // Scaffolding calqué sur `un_graphe_detache_reconstruit_ses_formes_dans_
+    // son_viewport` : détacher pour de vrai, peindre le callback de viewport
+    // publié par `show_detached_tabs` dans un `screen_rect` volontairement
+    // plus petit que le contenu, puis vérifier le `clip_rect` réellement
+    // envoyé à egui pour chaque en-tête de colonne peint.
+    #[test]
+    fn le_classeur_detache_est_rogne_au_rectangle_du_viewport() {
+        let mut project = Project::new("Débordement").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        for i in 0..10 {
+            project
+                .add_column(
+                    sheet,
+                    None,
+                    Some(&format!("Colonne {i}")),
+                    Column::from_f64(&[0.0, 1.0]),
+                )
+                .unwrap();
+        }
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let mut app = PlotyxApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(plotyx_render_egui::font_definitions());
+
+        let book_tab = Tab::Book(book);
+        assert!(
+            app.floating_tabs.contains(&book_tab),
+            "PlotyxApp::new doit ouvrir le premier classeur en fenêtre flottante"
+        );
+        app.detach_tab(book_tab);
+
+        let viewport_id = egui::ViewportId::from_hash_of(book_tab);
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output
+            .viewport_output
+            .get(&viewport_id)
+            .and_then(|viewport| viewport.viewport_ui_cb.clone())
+            .expect("le détachement doit publier un callback de viewport");
+        output.textures_delta.clear();
+
+        // Fenêtre OS volontairement plus étroite que les dix colonnes
+        // nommées (bandeau + en-têtes) — comme le rétrécissement natif de la
+        // reproduction du rapport de bug.
+        let window_size = egui::vec2(200.0, 150.0);
+        let window_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, window_size);
+        let mut viewport_input = root_input;
+        viewport_input.viewport_id = viewport_id;
+        viewport_input.viewports.insert(
+            viewport_id,
+            egui::ViewportInfo {
+                parent: Some(egui::ViewportId::ROOT),
+                ..Default::default()
+            },
+        );
+        viewport_input.screen_rect = Some(window_rect);
+        let mut output = context.run_ui(viewport_input, |ui| callback(ui));
+        output.textures_delta.clear();
+
+        // La partie sur laquelle egui n'offre aucune garantie propre, c'est
+        // le rectangle de rognage *logique* : le backend borne de toute façon
+        // le tampon au viewport OS, donc même sans le correctif, aucune forme
+        // n'a un `clip_rect` qui déborde `window_rect`. La régression que B8
+        // corrige est plus fine mais tout aussi réelle : sans
+        // `ui.set_clip_rect(...)` posé sur le `Ui` du `CentralPanel`, tout le
+        // contenu (bandeau, en-têtes de colonne, grille) hérite du rognage
+        // *par défaut* du panneau — le rectangle plein du viewport, marge du
+        // `Frame` comprise — au lieu du rectangle de contenu réellement
+        // disponible une fois cette marge retirée. Un en-tête tout au bord
+        // droit se retrouve alors rogné pile au bord du viewport plutôt qu'au
+        // bord du panneau, ce qui le fait empiéter sur la bordure/marge du
+        // `Frame` — la même famille de symptôme que la capture du rapport de
+        // bug (troncature qui ignore la géométrie du contenu). Ce test
+        // verrouille donc : le rognage logique de tout contenu doit être
+        // strictement plus petit que `window_rect`, pas égal à lui.
+        let content_labels = [
+            "Ajouter une colonne",
+            "Insérer 1 ligne",
+            "Colonne 0",
+            "Colonne 1",
+            "Sheet1",
+        ];
+        let mut checked = 0;
+        for painted in &output.shapes {
+            let egui::Shape::Text(shape) = &painted.shape else {
+                continue;
+            };
+            if !content_labels.contains(&shape.galley.job.text.as_str()) {
+                continue;
+            }
+            checked += 1;
+            assert!(
+                window_rect.contains_rect(painted.clip_rect),
+                "« {} » a un rectangle de découpe ({:?}) qui déborde du viewport \
+                 ({window_rect:?}) — B8 n'est pas corrigé",
+                shape.galley.job.text,
+                painted.clip_rect,
+            );
+            assert!(
+                painted.clip_rect.width() < window_rect.width()
+                    && painted.clip_rect.height() < window_rect.height(),
+                "« {} » a un rectangle de découpe ({:?}) égal au viewport complet \
+                 ({window_rect:?}) — rien ne distingue ce rognage de son absence : \
+                 B8 n'est pas corrigé",
+                shape.galley.job.text,
+                painted.clip_rect,
+            );
+        }
+        assert_eq!(
+            checked,
+            content_labels.len(),
+            "le classeur détaché doit avoir peint tous les libellés attendus \
+             (bandeau, en-têtes de colonne, onglet de feuille)"
         );
     }
 

@@ -339,7 +339,7 @@ réellement visible. **Gravité** : cosmétique côté flottant (débordement da
 le vide), plus gênant côté détaché (le contour, censé montrer que la
 fenêtre est active, disparaît justement quand elle est la plus étroite).
 
-## B8 — Le rognage du contenu (B4) n'a jamais été porté aux fenêtres détachées
+## B8 — Le rognage du contenu (B4) n'a jamais été porté aux fenêtres détachées [corrigé]
 
 **Reproduction**
 1. Détacher un classeur d'au moins trois colonnes.
@@ -372,6 +372,48 @@ symptôme probable).
 que B1-B6. **Gravité** : gênant.
 **Écarté** : ni plafond, ni limite assumée du banc, ni dégradation
 volontaire — c'est un angle mort de B4, pas un choix.
+
+**Correctif** : un seul point d'insertion, dans `PlotyxApp::show_detached_tabs`
+(`crates/plotyx-app/src/app.rs`), juste après la vérification du repli et
+juste avant le `match tab { Tab::Book | Tab::Graph | Tab::Matrix | Tab::Note }`
+qui aiguille vers `detached_book_contents`/`graph_view_contents`/
+`detached_matrix_contents`/`detached_note_contents` — même geste que B4
+(`ui.clip_rect().intersect(ui.max_rect())` puis `ui.set_clip_rect(...)`), posé
+une fois la taille du `CentralPanel` (donc celle du viewport OS) connue.
+Couvre les **quatre natures d'onglet** : elles partagent toutes ce point
+d'aiguillage, donc un seul appel suffit — pas besoin d'un appel par fonction
+de contenu. `graph_view_contents` gardait déjà son propre sous-rognage
+(`figure_ui.set_clip_rect`, pour la figure elle-même) ; le nouveau rognage
+s'ajoute au niveau du panneau et couvre en plus ses contrôles (bouton
+« réinitialiser le zoom »).
+
+Pas de défilement horizontal ajouté (ça reste F8, `retours-2026-09-23-
+features.md`) — ici, comme B4, on rogne, on ne fait pas défiler.
+
+Test de non-régression :
+`app::graph_layout_tests::le_classeur_detache_est_rogne_au_rectangle_du_viewport`
+(`crates/plotyx-app/src/app.rs`), calqué sur le scaffolding de
+`un_graphe_detache_reconstruit_ses_formes_dans_son_viewport` (détachement réel
+d'un classeur à dix colonnes, callback de viewport publié par
+`show_detached_tabs`, rejoué dans un `screen_rect` volontairement plus étroit
+que le contenu). Nuance à noter : le backend borne de toute façon le tampon au
+viewport OS, donc même sans le correctif aucune forme n'a un `clip_rect` qui
+déborde `window_rect` — ce n'est pas ce que ce test mesure. Sans le correctif,
+tout le contenu (bandeau, en-têtes de colonne, onglet de feuille) hérite du
+rognage *par défaut* du `CentralPanel` : le rectangle plein du viewport, marge
+du `Frame` comprise. Avec le correctif, il hérite du rectangle de contenu
+réellement disponible, strictement plus petit. Le test verrouille cette
+différence (rognage strictement plus petit que `window_rect`, pas égal à lui)
+plutôt qu'un débordement au sens propre — géométriquement plus fin que la
+capture du rapport, mais c'est la même cause : l'absence de
+`ui.set_clip_rect(...)` sur ce chemin.
+
+**Non validé** : le mécanisme de capture (`PLOTYX_APP_SCREENSHOT`/
+`PLOTYX_APP_AUTOQUIT_MS`) ne photographie que la fenêtre principale, pas un
+viewport détaché (`show_viewport_deferred`) — voir la doc de tête de
+`PlotyxApp::screenshot`. Le rendu réel d'une fenêtre détachée rétrécie
+manuellement (l'apparence, pas la géométrie) reste donc non vérifié par un
+outil non interactif de ce dépôt.
 
 ## B9 — Une fenêtre détachée repliée garde sa taille OS dépliée
 
