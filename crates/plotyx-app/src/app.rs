@@ -2731,6 +2731,8 @@ struct SheetTabsOutput {
     offset: f32,
     overflow: SheetTabsOverflow,
     arrows: Option<[egui::Rect; 2]>,
+    /// Indices du premier et du dernier onglet entièrement visibles.
+    fully_visible: Option<(usize, usize)>,
 }
 
 /// Bande d'onglets de feuille, style d'origine (bouton pleine taille, sans
@@ -2740,8 +2742,8 @@ struct SheetTabsOutput {
 /// défilement : deux boutons « < » et « > », à gauche de la bande, font
 /// apparaître l'onglet caché suivant de ce côté — et n'apparaissent que si
 /// des onglets sont cachés. Changer de feuille sélectionnée (au clavier, par
-/// script, ou par clic sur un onglet partiellement visible) fait défiler la
-/// bande pour ramener l'onglet actif dans la zone visible.
+/// script, ou par clic) fait défiler la bande juste assez pour montrer
+/// l'onglet actif et ses voisins ([`scroll_sheet_tabs_to_selected`]).
 fn sheet_tabs(
     ui: &mut egui::Ui,
     sheets: &[(NodeId, String)],
@@ -2784,6 +2786,7 @@ fn sheet_tabs(
     let mut new_overflow = SheetTabsOverflow::default();
     let mut arrows = None;
     let mut offset = 0.0;
+    let mut fully_visible: Option<(usize, usize)> = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         if overflow.hidden_left || overflow.hidden_right {
@@ -2814,7 +2817,9 @@ fn sheet_tabs(
                     let visible = ui.clip_rect();
                     let mut last_hidden_left = None;
                     let mut first_hidden_right = None;
-                    for (id, name) in sheets {
+                    let mut tab_rects = Vec::with_capacity(sheets.len());
+                    let mut selected_index = None;
+                    for (index, (id, name)) in sheets.iter().enumerate() {
                         let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
                             .small()
                             .fill(if selected == *id {
@@ -2832,8 +2837,15 @@ fn sheet_tabs(
                         if response.clicked() {
                             requested = Some(*id);
                         }
-                        if should_scroll_to_selected && selected == *id {
-                            response.scroll_to_me(Some(egui::Align::Center));
+                        tab_rects.push(response.rect);
+                        if selected == *id {
+                            selected_index = Some(index);
+                        }
+                        if response.rect.left() >= visible.left() - 0.5
+                            && response.rect.right() <= visible.right() + 0.5
+                        {
+                            let first = fully_visible.map_or(index, |(first, _)| first);
+                            fully_visible = Some((first, index));
                         }
                         if response.rect.left() < visible.left() - 0.5 {
                             last_hidden_left = Some(response.clone());
@@ -2848,6 +2860,11 @@ fn sheet_tabs(
                         hidden_left: last_hidden_left.is_some(),
                         hidden_right: first_hidden_right.is_some(),
                     };
+                    if should_scroll_to_selected {
+                        if let Some(index) = selected_index {
+                            scroll_sheet_tabs_to_selected(ui, &tab_rects, index, visible);
+                        }
+                    }
                     match step {
                         -1 => {
                             if let Some(tab) = &last_hidden_left {
@@ -2892,6 +2909,36 @@ fn sheet_tabs(
         offset,
         overflow: new_overflow,
         arrows,
+        fully_visible,
+    }
+}
+
+/// Défilement automatique de la bande d'onglets quand la feuille
+/// sélectionnée change : **le plus petit décalage** qui rend entièrement
+/// visibles l'onglet sélectionné et ses deux voisins immédiats (pour qu'on
+/// voie toujours ce qui vient ensuite). Rien ne bouge s'ils le sont déjà ; sinon
+/// la bande s'aligne sur le bord dépassé. Si la bande est trop étroite pour
+/// ces trois onglets, l'onglet sélectionné est centré.
+///
+/// Issue #1 : la bande centrait auparavant l'onglet sélectionné à chaque
+/// changement — cliquer sur le dernier onglet visible décalait alors de deux
+/// onglets ou plus au lieu d'un.
+fn scroll_sheet_tabs_to_selected(
+    ui: &egui::Ui,
+    tab_rects: &[egui::Rect],
+    selected: usize,
+    visible: egui::Rect,
+) {
+    let current = tab_rects[selected];
+    let first = tab_rects[selected.saturating_sub(1)];
+    let last = tab_rects[(selected + 1).min(tab_rects.len() - 1)];
+    let target = first.union(last);
+    if target.width() > visible.width() {
+        ui.scroll_to_rect(current, Some(egui::Align::Center));
+    } else if target.right() > visible.right() + 0.5 {
+        ui.scroll_to_rect(target, Some(egui::Align::Max));
+    } else if target.left() < visible.left() - 0.5 {
+        ui.scroll_to_rect(target, Some(egui::Align::Min));
     }
 }
 
@@ -7360,7 +7407,8 @@ mod graph_layout_tests {
         );
     }
 
-    /// Peint une bande de dix onglets dans 200 points de large, à l'instant
+    /// Peint une bande d'onglets dans 400 points de large (cinq onglets
+    /// « Feuille N » environ, sur dix), à l'instant
     /// `*time + 0.1`, avec `events`. Le défilement automatique est animé
     /// (`Response::scroll_to_me`) : il s'étale sur `ScrollAnimation::duration`
     /// (jusqu'à 0.3 s par défaut) ; faire avancer `RawInput::time`
@@ -7376,7 +7424,7 @@ mod graph_layout_tests {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(200.0, 60.0),
+                egui::vec2(400.0, 60.0),
             )),
             time: Some(*time),
             events,
@@ -7421,6 +7469,57 @@ mod graph_layout_tests {
             offset_after > offset_before,
             "sélectionner un onglet hors vue doit faire défiler la bande vers lui : {offset_before:?} -> {offset_after:?}"
         );
+    }
+
+    /// Issue #1 : cliquer sur le dernier onglet entièrement visible décale la
+    /// bande juste assez pour montrer son voisin de droite — un onglet de
+    /// plus, pas deux (l'ancien comportement centrait l'onglet sélectionné).
+    /// Symétriquement vers la gauche.
+    #[test]
+    fn selectionner_le_dernier_onglet_visible_ne_decale_que_d_un_onglet() {
+        let (context, sheets) = dix_feuilles();
+        let mut time = 0.0;
+        let mut sortie = SheetTabsOutput::default();
+        for _ in 0..4 {
+            sortie = peindre_onglets(&context, &sheets, sheets[0].0, &mut time, Vec::new());
+        }
+        let (_, dernier) = sortie.fully_visible.expect("des onglets visibles");
+        assert!(
+            dernier + 2 < sheets.len(),
+            "il faut des onglets cachés à droite"
+        );
+        for _ in 0..8 {
+            sortie = peindre_onglets(&context, &sheets, sheets[dernier].0, &mut time, Vec::new());
+        }
+        let (premier_apres, dernier_apres) = sortie.fully_visible.unwrap();
+        assert_eq!(
+            dernier_apres,
+            dernier + 1,
+            "seul le voisin de droite de l'onglet sélectionné doit apparaître : {sortie:?}"
+        );
+
+        // Vers la gauche : sélectionner le premier onglet visible montre son
+        // voisin de gauche, et rien de plus.
+        for _ in 0..8 {
+            sortie = peindre_onglets(
+                &context,
+                &sheets,
+                sheets[premier_apres].0,
+                &mut time,
+                Vec::new(),
+            );
+        }
+        assert_eq!(
+            sortie.fully_visible.unwrap().0,
+            premier_apres - 1,
+            "seul le voisin de gauche doit apparaître : {sortie:?}"
+        );
+
+        // Un onglet sélectionné loin de la vue (par script) redevient visible.
+        for _ in 0..8 {
+            sortie = peindre_onglets(&context, &sheets, sheets[9].0, &mut time, Vec::new());
+        }
+        assert_eq!(sortie.fully_visible.unwrap().1, 9, "{sortie:?}");
     }
 
     /// Les boutons « < » et « > » n'apparaissent que si des onglets sont

@@ -104,8 +104,11 @@ ils ne rétrécissent pas et ne se replient pas dans un menu « … ». La bande
 **pas** de barre de défilement : quand des onglets sont cachés, deux boutons
 « < » et « > » apparaissent à sa gauche et font apparaître l'onglet caché
 suivant de ce côté (chacun grisé s'il n'y a rien à montrer de son côté) ; ils
-disparaissent quand tout tient. Sélectionner un onglet hors vue (au clic, au
-clavier ou par script) fait défiler la bande vers lui. Les notes et matrices restent bornées au rectangle commun. Dans un
+disparaissent quand tout tient. Changer de feuille (au clic, au clavier ou
+par script) fait défiler la bande **du plus petit décalage** qui montre
+entièrement l'onglet sélectionné et ses deux voisins — cliquer sur le dernier
+onglet visible ne révèle qu'un onglet de plus (`scroll_sheet_tabs_to_selected`,
+issue #1). Les notes et matrices restent bornées au rectangle commun. Dans un
 graphe (`graph_view_contents`,
 `crates/plotyx-app/src/app.rs`), la figure garde le ratio de
 `DEFAULT_FIGURE_SIZE` (`plotyx-render::pipeline`, 4:3) mais se met à l'échelle
