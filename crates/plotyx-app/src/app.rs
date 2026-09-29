@@ -510,8 +510,10 @@ const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 4.0 * HEADER_SUBROW_
 /// Hauteur fixe du panneau des onglets de feuille sous la grille.
 /// [`book_contents`] la réserve avant de construire la table : la hauteur
 /// intrinsèque de cette dernière ne peut plus repousser les onglets hors
-/// de la fenêtre.
-const SHEET_TABS_HEIGHT: f32 = 40.0;
+/// de la fenêtre. Juste la hauteur d'un onglet et un filet : la bande n'a
+/// plus de barre de défilement à loger (boutons « < » « > », voir
+/// [`sheet_tabs`]), et la barre horizontale de la grille est en dessous.
+const SHEET_TABS_HEIGHT: f32 = 24.0;
 /// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
 /// initial. Réserver sa hauteur garde le rectangle de la figure stable d'une
 /// image à l'autre — sans quoi le cache de formes serait invalidé au moindre
@@ -2127,15 +2129,12 @@ impl eframe::App for PlotyxApp {
                 // Un `egui::ScrollArea` invisible (rien n'est peint dans son
                 // contenu, juste réservé à `WORKSPACE_SIZE`) plutôt qu'un
                 // défilement maison : il donne gratuitement poignées de
-                // glissement, molette et bornage, avec le même style plein
-                // que [`show_horizontally_scrollable_grid`] pour rester
-                // visible et atteignable. Les fenêtres flottantes ne sont
+                // glissement, molette et bornage, au style commun des barres
+                // de défilement (`theme::scroll_style`, posé globalement). Les fenêtres flottantes ne sont
                 // **pas** peintes à l'intérieur de sa fermeture : chacune
                 // peint sur son propre calque (`show_floating_window`),
                 // indépendant de toute zone de défilement ambiante — seul le
                 // décalage qui en résulte sert, appliqué à la main ci-dessous.
-                let previous_scroll_style = ui.style().spacing.scroll;
-                ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
                 let workspace_scroll_output = egui::ScrollArea::both()
                     .id_salt("plotyx_workspace")
                     .auto_shrink([false, false])
@@ -2143,7 +2142,6 @@ impl eframe::App for PlotyxApp {
                     .show(ui, |ui| {
                         ui.allocate_exact_size(WORKSPACE_SIZE, egui::Sense::hover());
                     });
-                ui.style_mut().spacing.scroll = previous_scroll_style;
                 *workspace_scroll = workspace_scroll_output.state.offset;
                 // Ce qui reste visible une fois les barres de défilement
                 // posées : les fenêtres flottantes sont rognées à ce
@@ -2603,22 +2601,55 @@ fn show_window_contents_bounded(ui: &mut egui::Ui, add_contents: impl FnOnce(&mu
     ui.advance_cursor_after_rect(rect);
 }
 
+/// Zone de défilement horizontale de la grille. Sa propre barre est masquée :
+/// la barre visible est déportée **sous les onglets de feuille**
+/// ([`show_grid_horizontal_bar`]), comme dans un tableur. Le défilement
+/// (molette avec Maj, glisser) reste actif ; un décalage demandé par la barre
+/// déportée à l'image précédente (`pending_offset`) est appliqué ici.
 fn show_horizontally_scrollable_grid<R>(
     ui: &mut egui::Ui,
+    pending_offset: Option<f32>,
     add_grid: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::scroll_area::ScrollAreaOutput<R> {
-    // Barre pleine (espace réservé, opaque dès qu'elle est utile) plutôt que
-    // la barre flottante par défaut d'egui : celle-ci reste à opacité nulle
-    // tant qu'elle n'est pas survolée au pixel près, et n'occupe aucun espace
-    // réservé — dans une fenêtre de contenu déjà rognée à son rectangle
-    // (`show_window_contents_bounded`), elle n'était ni visible ni
-    // atteignable. `scroll_bar_visibility` reste au défaut
-    // (`VisibleWhenNeeded`) : la barre n'apparaît que si la grille déborde
-    // réellement.
-    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-    egui::ScrollArea::horizontal()
+    let mut area = egui::ScrollArea::horizontal()
         .auto_shrink([false, true])
-        .show(ui, add_grid)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+    if let Some(offset) = pending_offset {
+        area = area.horizontal_scroll_offset(offset);
+    }
+    area.show(ui, add_grid)
+}
+
+/// Barre de défilement horizontale de la grille, déportée dans la bande
+/// réservée **sous les onglets de feuille** (`strip`). Même principe que
+/// [`show_grid_vertical_bar`] : une `ScrollArea` horizontale vide, de la
+/// largeur de contenu de la grille, qui reflète son décalage ; un glisser sur
+/// cette barre est mis en attente (`pending_id`) et appliqué à la grille à
+/// l'image suivante ([`show_horizontally_scrollable_grid`]). La bande a la
+/// largeur de la grille : pas de mise à l'échelle.
+fn show_grid_horizontal_bar<R>(
+    ui: &mut egui::Ui,
+    pending_id: egui::Id,
+    strip: egui::Rect,
+    grid: &egui::scroll_area::ScrollAreaOutput<R>,
+) {
+    if !strip.is_positive() {
+        return;
+    }
+    let grid_offset = grid.state.offset.x;
+    let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
+    let bar = egui::ScrollArea::horizontal()
+        .id_salt(pending_id)
+        .auto_shrink([false, false])
+        .horizontal_scroll_offset(grid_offset)
+        .show(&mut bar_ui, |ui| {
+            ui.allocate_exact_size(egui::vec2(grid.content_size.x, 0.0), egui::Sense::hover());
+        });
+    let dragged_offset = bar.state.offset.x;
+    if (dragged_offset - grid_offset).abs() > 0.5 {
+        ui.memory_mut(|memory| memory.data.insert_temp(pending_id, dragged_offset));
+        ui.ctx().request_repaint();
+    }
 }
 
 /// Rapport d'échelle entre la barre verticale de la grille et le corps de
@@ -2663,7 +2694,6 @@ fn show_grid_vertical_bar(
     let scale = grid_vertical_bar_scale(strip.height(), table.inner_rect.height());
     let bar_offset = table.state.offset.y * scale;
     let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
-    bar_ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
     let bar = egui::ScrollArea::vertical()
         .id_salt(pending_id)
         .auto_shrink([false, false])
@@ -2682,22 +2712,43 @@ fn show_grid_vertical_bar(
     }
 }
 
+/// Mémoire d'une image à l'autre de la bande d'onglets de feuille : de quoi
+/// savoir, **avant** de la dessiner (donc avant de placer les boutons « < »
+/// et « > »), si des onglets sont cachés à gauche ou à droite — ce qui ne se
+/// constate qu'en dessinant les onglets.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct SheetTabsOverflow {
+    hidden_left: bool,
+    hidden_right: bool,
+}
+
+/// Ce que [`sheet_tabs`] a dessiné : décalage de la bande, onglets cachés,
+/// et rectangles des boutons « < » et « > » s'ils sont affichés. Seuls les
+/// tests le lisent ; l'interface n'en a pas besoin.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Default)]
+struct SheetTabsOutput {
+    offset: f32,
+    overflow: SheetTabsOverflow,
+    arrows: Option<[egui::Rect; 2]>,
+}
+
 /// Bande d'onglets de feuille, style d'origine (bouton pleine taille, sans
 /// troncature) : quand elle ne tient pas dans la largeur disponible, elle
 /// défile horizontalement plutôt que de rétrécir ses onglets ou de replier
-/// les feuilles cachées dans un menu « … » — même logique que la grille
-/// (`show_horizontally_scrollable_grid`). Changer de feuille sélectionnée
-/// (au clavier, par script, ou par clic sur un onglet partiellement visible)
-/// fait défiler la bande pour ramener l'onglet actif dans la zone visible :
-/// c'est ce qui remplace, pour une fenêtre trop étroite, l'ancien
-/// rétrécissement/repli par plage visible.
+/// les feuilles cachées dans un menu « … ». Elle n'a **pas** de barre de
+/// défilement : deux boutons « < » et « > », à gauche de la bande, font
+/// apparaître l'onglet caché suivant de ce côté — et n'apparaissent que si
+/// des onglets sont cachés. Changer de feuille sélectionnée (au clavier, par
+/// script, ou par clic sur un onglet partiellement visible) fait défiler la
+/// bande pour ramener l'onglet actif dans la zone visible.
 fn sheet_tabs(
     ui: &mut egui::Ui,
     sheets: &[(NodeId, String)],
     selected: NodeId,
     mut on_select: impl FnMut(NodeId),
     mut on_add: impl FnMut(),
-) {
+) -> SheetTabsOutput {
     if sheets.is_empty() {
         ui.allocate_response(
             egui::vec2(ui.available_width(), SHEET_TABS_HEIGHT),
@@ -2709,7 +2760,7 @@ fn sheet_tabs(
                 ui.close();
             }
         });
-        return;
+        return SheetTabsOutput::default();
     }
     // Mémorisée par instance de bande (scopée par la pile d'`Id` du parent,
     // donc distincte entre fenêtre flottante et fenêtre détachée) : ne
@@ -2721,56 +2772,126 @@ fn sheet_tabs(
     let last_selected: Option<NodeId> = ui.memory(|memory| memory.data.get_temp(last_selected_id));
     let should_scroll_to_selected = last_selected != Some(selected);
     ui.memory_mut(|memory| memory.data.insert_temp(last_selected_id, selected));
+    let overflow_id = ui.id().with("sheet_tabs_overflow");
+    let overflow: SheetTabsOverflow = ui
+        .memory(|memory| memory.data.get_temp(overflow_id))
+        .unwrap_or_default();
 
     let mut requested = None;
     let mut requested_add = false;
-    let band_width = ui.available_width();
-    egui::ScrollArea::horizontal()
-        .id_salt("sheet_tabs_scroll")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                for (id, name) in sheets {
-                    let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
-                        .small()
-                        .fill(if selected == *id {
-                            ui.visuals().selection.bg_fill
-                        } else {
-                            egui::Color32::TRANSPARENT
+    // -1 : faire apparaître l'onglet caché à gauche ; +1 : à droite.
+    let mut step: i8 = 0;
+    let mut new_overflow = SheetTabsOverflow::default();
+    let mut arrows = None;
+    let mut offset = 0.0;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        if overflow.hidden_left || overflow.hidden_right {
+            let arrow =
+                |label: &str| egui::Button::new(egui::RichText::new(label).size(12.0)).small();
+            let previous = ui
+                .add_enabled(overflow.hidden_left, arrow("<"))
+                .on_hover_text("Feuilles précédentes");
+            let next = ui
+                .add_enabled(overflow.hidden_right, arrow(">"))
+                .on_hover_text("Feuilles suivantes");
+            if previous.clicked() {
+                step = -1;
+            }
+            if next.clicked() {
+                step = 1;
+            }
+            arrows = Some([previous.rect, next.rect]);
+        }
+        let band_width = ui.available_width();
+        offset = egui::ScrollArea::horizontal()
+            .id_salt("sheet_tabs_scroll")
+            .auto_shrink([false, true])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    let visible = ui.clip_rect();
+                    let mut last_hidden_left = None;
+                    let mut first_hidden_right = None;
+                    for (id, name) in sheets {
+                        let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
+                            .small()
+                            .fill(if selected == *id {
+                                ui.visuals().selection.bg_fill
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            });
+                        let response = ui.add(tab);
+                        response.context_menu(|ui| {
+                            if ui.button("Ajouter une feuille").clicked() {
+                                requested_add = true;
+                                ui.close();
+                            }
                         });
-                    let response = ui.add(tab);
-                    response.context_menu(|ui| {
+                        if response.clicked() {
+                            requested = Some(*id);
+                        }
+                        if should_scroll_to_selected && selected == *id {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if response.rect.left() < visible.left() - 0.5 {
+                            last_hidden_left = Some(response.clone());
+                        }
+                        if first_hidden_right.is_none()
+                            && response.rect.right() > visible.right() + 0.5
+                        {
+                            first_hidden_right = Some(response.clone());
+                        }
+                    }
+                    new_overflow = SheetTabsOverflow {
+                        hidden_left: last_hidden_left.is_some(),
+                        hidden_right: first_hidden_right.is_some(),
+                    };
+                    match step {
+                        -1 => {
+                            if let Some(tab) = &last_hidden_left {
+                                tab.scroll_to_me(Some(egui::Align::Min));
+                            }
+                        }
+                        1 => {
+                            if let Some(tab) = &first_hidden_right {
+                                tab.scroll_to_me(Some(egui::Align::Max));
+                            }
+                        }
+                        _ => {}
+                    }
+                    let used = ui.cursor().left() - ui.min_rect().left();
+                    let empty = ui.allocate_response(
+                        egui::vec2((band_width - used).max(1.0), SHEET_TABS_HEIGHT),
+                        egui::Sense::click(),
+                    );
+                    empty.context_menu(|ui| {
                         if ui.button("Ajouter une feuille").clicked() {
                             requested_add = true;
                             ui.close();
                         }
                     });
-                    if response.clicked() {
-                        requested = Some(*id);
-                    }
-                    if should_scroll_to_selected && selected == *id {
-                        response.scroll_to_me(Some(egui::Align::Center));
-                    }
-                }
-                let used = ui.cursor().left() - ui.min_rect().left();
-                let empty = ui.allocate_response(
-                    egui::vec2((band_width - used).max(1.0), SHEET_TABS_HEIGHT),
-                    egui::Sense::click(),
-                );
-                empty.context_menu(|ui| {
-                    if ui.button("Ajouter une feuille").clicked() {
-                        requested_add = true;
-                        ui.close();
-                    }
                 });
-            });
-        });
+            })
+            .state
+            .offset
+            .x;
+    });
+    ui.memory_mut(|memory| memory.data.insert_temp(overflow_id, new_overflow));
+    if step != 0 {
+        ui.ctx().request_repaint();
+    }
     if let Some(id) = requested {
         on_select(id);
     }
     if requested_add {
         on_add();
+    }
+    SheetTabsOutput {
+        offset,
+        overflow: new_overflow,
+        arrows,
     }
 }
 
@@ -4479,13 +4600,17 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     // barre de défilement verticale (B10) : la zone de défilement
     // horizontale et les onglets de feuille ne portent que le reste, et la
     // barre reste plaquée au bord de la fenêtre quelle que soit la largeur
-    // des colonnes.
-    let bar_width = egui::style::ScrollStyle::solid()
-        .allocated_width()
-        .min(area.width());
-    let (main_area, vertical_bar_strip) = area.split_left_right_at_x(area.right() - bar_width);
-    let tabs_height = SHEET_TABS_HEIGHT.min(main_area.height());
-    let (grid_rect, tabs_rect) = main_area.split_top_bottom_at_y(main_area.bottom() - tabs_height);
+    // des colonnes. Le bas est réservé à la barre horizontale de la grille,
+    // **sous** les onglets de feuille, comme dans un tableur. Du haut vers le
+    // bas : grille, onglets, barre horizontale.
+    let bar_width = theme::scroll_bar_allocated_width();
+    let (main_area, vertical_bar_strip) =
+        area.split_left_right_at_x(area.right() - bar_width.min(area.width()));
+    let (upper_area, horizontal_bar_strip) =
+        main_area.split_top_bottom_at_y(main_area.bottom() - bar_width.min(main_area.height()));
+    let tabs_height = SHEET_TABS_HEIGHT.min(upper_area.height());
+    let (grid_rect, tabs_rect) =
+        upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height);
     let mut bounded = |rect: egui::Rect| {
         let mut child = ui.new_child(
             egui::UiBuilder::new()
@@ -4513,11 +4638,22 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
         });
     } else {
         let vertical_bar_id = grid_ui.id().with("grid_vertical_bar");
+        let horizontal_bar_id = grid_ui.id().with("grid_horizontal_bar");
         let pending_offset: Option<f32> =
             grid_ui.memory_mut(|memory| memory.data.remove_temp(vertical_bar_id));
-        let scroll = show_horizontally_scrollable_grid(&mut grid_ui, |ui| {
-            grid_contents(ui, state, actions, selected, pending_offset)
-        });
+        let pending_horizontal_offset: Option<f32> =
+            grid_ui.memory_mut(|memory| memory.data.remove_temp(horizontal_bar_id));
+        let scroll =
+            show_horizontally_scrollable_grid(&mut grid_ui, pending_horizontal_offset, |ui| {
+                grid_contents(ui, state, actions, selected, pending_offset)
+            });
+        let mut horizontal_bar_ui = bounded(horizontal_bar_strip);
+        show_grid_horizontal_bar(
+            &mut horizontal_bar_ui,
+            horizontal_bar_id,
+            horizontal_bar_strip,
+            &scroll,
+        );
         if let Some(table) = scroll.inner {
             let mut bar_ui = bounded(vertical_bar_strip);
             show_grid_vertical_bar(&mut bar_ui, vertical_bar_id, vertical_bar_strip, &table);
@@ -7020,6 +7156,7 @@ mod graph_layout_tests {
         let mut state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
         let context = egui::Context::default();
         context.set_fonts(plotyx_render_egui::font_definitions());
+        theme::install(&context);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 320.0));
         let mut actions = Vec::new();
         let mut derniere = None;
@@ -7048,7 +7185,7 @@ mod graph_layout_tests {
         screen: egui::Rect,
         rectangles: &[(egui::Rect, egui::Rect)],
     ) -> Vec<(egui::Rect, egui::Rect)> {
-        let largeur_barre = egui::style::ScrollStyle::solid().allocated_width();
+        let largeur_barre = theme::scroll_bar_allocated_width();
         rectangles
             .iter()
             .copied()
@@ -7120,7 +7257,7 @@ mod graph_layout_tests {
     #[test]
     fn la_barre_verticale_de_la_grille_couvre_toute_la_hauteur_de_la_fenetre() {
         let (screen, rectangles) = peindre_classeur_large(Vec::new());
-        let largeur_barre = egui::style::ScrollStyle::solid().allocated_width();
+        let largeur_barre = theme::scroll_bar_allocated_width();
         let pistes: Vec<_> = rectangles
             .iter()
             .filter(|(rect, _)| {
@@ -7132,6 +7269,28 @@ mod graph_layout_tests {
         assert!(
             !pistes.is_empty(),
             "une piste de barre verticale sur toute la hauteur de {screen:?} ; \
+             rectangles peints : {rectangles:?}"
+        );
+    }
+
+    /// La barre horizontale de la grille est déportée **sous** les onglets de
+    /// feuille : sa piste occupe le bas de la fenêtre, sur presque toute sa
+    /// largeur (moins la bande de la barre verticale).
+    #[test]
+    fn la_barre_horizontale_de_la_grille_est_sous_les_onglets() {
+        let (screen, rectangles) = peindre_classeur_large(Vec::new());
+        let hauteur_barre = theme::scroll_bar_allocated_width();
+        let pistes: Vec<_> = rectangles
+            .iter()
+            .filter(|(rect, _)| {
+                rect.height() <= hauteur_barre
+                    && rect.top() >= screen.bottom() - hauteur_barre - 0.5
+                    && rect.width() >= screen.width() - 2.0 * hauteur_barre
+            })
+            .collect();
+        assert!(
+            !pistes.is_empty(),
+            "une piste de barre horizontale en bas de {screen:?}, sous les onglets ; \
              rectangles peints : {rectangles:?}"
         );
     }
@@ -7148,7 +7307,7 @@ mod graph_layout_tests {
         };
         let mut scroll = None;
         let mut output = context.run_ui(input, |ui| {
-            scroll = Some(show_horizontally_scrollable_grid(ui, |ui| {
+            scroll = Some(show_horizontally_scrollable_grid(ui, None, |ui| {
                 TableBuilder::new(ui)
                     .columns(TableColumn::initial(110.0).at_least(56.0), 5)
                     .auto_shrink([false, false])
@@ -7201,63 +7360,139 @@ mod graph_layout_tests {
         );
     }
 
-    #[test]
-    fn selectionner_un_onglet_hors_vue_fait_defiler_la_bande_pour_le_montrer() {
-        let sheets: Vec<(NodeId, String)> = (0..10)
+    /// Peint une bande de dix onglets dans 200 points de large, à l'instant
+    /// `*time + 0.1`, avec `events`. Le défilement automatique est animé
+    /// (`Response::scroll_to_me`) : il s'étale sur `ScrollAnimation::duration`
+    /// (jusqu'à 0.3 s par défaut) ; faire avancer `RawInput::time`
+    /// explicitement simule ce laps de temps sans dépendre de l'horloge réelle.
+    fn peindre_onglets(
+        context: &egui::Context,
+        sheets: &[(NodeId, String)],
+        selected: NodeId,
+        time: &mut f64,
+        events: Vec<egui::Event>,
+    ) -> SheetTabsOutput {
+        *time += 0.1;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(200.0, 60.0),
+            )),
+            time: Some(*time),
+            events,
+            ..Default::default()
+        };
+        let mut sortie = SheetTabsOutput::default();
+        let mut output = context.run_ui(input, |ui| {
+            sortie = sheet_tabs(ui, sheets, selected, |_| {}, || {});
+        });
+        output.textures_delta.clear();
+        sortie
+    }
+
+    fn dix_feuilles() -> (egui::Context, Vec<(NodeId, String)>) {
+        let sheets = (0..10)
             .map(|index| (NodeId::from_raw(index + 1), format!("Feuille {index}")))
             .collect();
         let context = egui::Context::default();
         context.set_fonts(plotyx_render_egui::font_definitions());
-        let mut scroll_id = None;
-        // Le défilement automatique est animé (`Response::scroll_to_me`) : il
-        // s'étale sur `ScrollAnimation::duration` (jusqu'à 0.3 s par défaut),
-        // pas instantanément à l'image où la sélection change. Faire avancer
-        // `RawInput::time` explicitement entre les images simule ce laps de
-        // temps sans dépendre de l'horloge réelle de la machine de test.
-        let mut time = 0.0_f64;
-        let mut paint =
-            |context: &egui::Context, selected: NodeId, scroll_id: &mut Option<egui::Id>| {
-                time += 0.1;
-                let input = egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(200.0, 60.0),
-                    )),
-                    time: Some(time),
-                    ..Default::default()
-                };
-                let mut output = context.run_ui(input, |ui| {
-                    ui.push_id("onglets_hors_vue", |ui| {
-                        // `ScrollArea::id_salt` stocke un `IdSalt` déjà haché,
-                        // puis `Id::with` le hache une seconde fois : répliquer
-                        // les deux étapes, pas `ui.id().with("sheet_tabs_scroll")`
-                        // directement, sous peine de calculer un autre `Id`.
-                        *scroll_id = Some(ui.id().with(egui::IdSalt::new("sheet_tabs_scroll")));
-                        sheet_tabs(ui, &sheets, selected, |_| {}, || {});
-                    });
-                });
-                output.textures_delta.clear();
-            };
+        theme::install(&context);
+        (context, sheets)
+    }
+
+    #[test]
+    fn selectionner_un_onglet_hors_vue_fait_defiler_la_bande_pour_le_montrer() {
+        let (context, sheets) = dix_feuilles();
+        let mut time = 0.0;
         // Sélectionner d'abord la première feuille, laisser le défilement se
         // stabiliser, puis basculer sur la dernière : hors vue, elle doit
         // déclencher un nouveau défilement (`should_scroll_to_selected`).
+        let mut offset_before = 0.0;
         for _ in 0..3 {
-            paint(&context, sheets[0].0, &mut scroll_id);
+            offset_before =
+                peindre_onglets(&context, &sheets, sheets[0].0, &mut time, Vec::new()).offset;
         }
-        let scroll_id = scroll_id.expect("l'id de la zone de défilement doit être connu");
-        let offset_before = egui::scroll_area::State::load(&context, scroll_id)
-            .map(|state| state.offset.x)
-            .unwrap_or_default();
-        let mut unused = None;
+        let mut offset_after = 0.0;
         for _ in 0..8 {
-            paint(&context, sheets[9].0, &mut unused);
+            offset_after =
+                peindre_onglets(&context, &sheets, sheets[9].0, &mut time, Vec::new()).offset;
         }
-        let offset_after = egui::scroll_area::State::load(&context, scroll_id)
-            .map(|state| state.offset.x)
-            .unwrap_or_default();
         assert!(
             offset_after > offset_before,
             "sélectionner un onglet hors vue doit faire défiler la bande vers lui : {offset_before:?} -> {offset_after:?}"
+        );
+    }
+
+    /// Les boutons « < » et « > » n'apparaissent que si des onglets sont
+    /// cachés ; « > » fait défiler la bande vers la droite, puis « < »
+    /// devient actif.
+    #[test]
+    fn les_fleches_d_onglets_n_apparaissent_que_si_des_feuilles_sont_cachees() {
+        let (context, sheets) = dix_feuilles();
+        let mut time = 0.0;
+        let mut sortie = SheetTabsOutput::default();
+        for _ in 0..3 {
+            sortie = peindre_onglets(&context, &sheets, sheets[0].0, &mut time, Vec::new());
+        }
+        assert_eq!(
+            sortie.overflow,
+            SheetTabsOverflow {
+                hidden_left: false,
+                hidden_right: true
+            }
+        );
+        let [_, next] = sortie
+            .arrows
+            .expect("des feuilles cachées : flèches affichées");
+        let clic = next.center();
+        peindre_onglets(
+            &context,
+            &sheets,
+            sheets[0].0,
+            &mut time,
+            vec![
+                egui::Event::PointerMoved(clic),
+                egui::Event::PointerButton {
+                    pos: clic,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        peindre_onglets(
+            &context,
+            &sheets,
+            sheets[0].0,
+            &mut time,
+            vec![egui::Event::PointerButton {
+                pos: clic,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        for _ in 0..6 {
+            sortie = peindre_onglets(&context, &sheets, sheets[0].0, &mut time, Vec::new());
+        }
+        assert!(
+            sortie.offset > 0.0,
+            "« > » doit faire défiler la bande : {sortie:?}"
+        );
+        assert!(
+            sortie.overflow.hidden_left,
+            "« < » devient utile : {sortie:?}"
+        );
+
+        // Deux feuilles tiennent dans la bande : pas de flèches.
+        let (context, _) = dix_feuilles();
+        let deux = &sheets[..2];
+        for _ in 0..3 {
+            sortie = peindre_onglets(&context, deux, deux[0].0, &mut time, Vec::new());
+        }
+        assert!(
+            sortie.arrows.is_none(),
+            "aucune feuille cachée : pas de flèches"
         );
     }
 

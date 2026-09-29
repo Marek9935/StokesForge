@@ -57,19 +57,18 @@ c'est toute la raison du découpage. Si une règle métier se retrouve dans
 
 ## 2 bis. Le doublon docké / détaché — à vérifier avant de chiffrer
 
-Plusieurs contenus de `plotyx-app` existent **en deux écritures** : une pour la
-fenêtre dockée, une pour la fenêtre détachée. `book_contents`
-(`app.rs:3653`) et `detached_book_contents` (`app.rs:5592`) portent chacune
-leur bandeau, leurs boutons, leurs compteurs ; un commentaire du fichier dit
-déjà « *Même correctif B5 que `book_contents`* ».
+Les contenus de `plotyx-app` ont longtemps existé **en deux écritures** : une
+pour la fenêtre flottante, une pour la fenêtre détachée. Depuis le 2026-09-30,
+classeur, graphe, note et matrice n'en ont plus qu'une (`book_contents`,
+`graph_view_contents`, `note_contents`, `matrix_contents`) — **ne pas en
+réintroduire** : une nouvelle nature de fenêtre s'écrit une fois et s'appelle
+des deux côtés, sur le motif du classeur (vue `AppState` locale,
+`fork_for_detached_view`).
 
 La cause est documentée dans `docs/application.md` : la fermeture `'static`,
 `Send + Sync` de `show_viewport_deferred` ne peut pas capturer `&mut AppState`.
-Ce qui **est** factorisé : `tab_contents` (point d'entrée commun),
-`graph_view_contents` (littéralement la même fonction des deux côtés), et
-toutes les lectures pures (`cell_text_in`, `visible_columns_in`,
-`worksheets_of_in`…). Ce qui reste dupliqué : les tampons de saisie
-transitoires, par contrainte technique réelle.
+Elle est contournée par une vue `AppState` locale à la fenêtre détachée, qui
+renvoie ses actions à la racine.
 
 Avant de toucher à une surface d'interface :
 
@@ -82,6 +81,19 @@ Une factorisation supplémentaire est légitime quand elle ne bute pas sur la
 contrainte `'static` ci-dessus — un bandeau de boutons qui ne fait que pousser
 des `Action` n'y bute pas. Le dire explicitement dans le compte rendu : « j'ai
 factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
+
+## 2 ter. Barres de défilement : le standard du thème
+
+Toute `egui::ScrollArea` (ou `TableBuilder`) hérite du style global posé par
+`theme::install` (`theme::scroll_style`). Ne **jamais** écrire
+`ScrollStyle::solid()` ni `spacing_mut().scroll = …` ailleurs que dans
+`theme.rs` : le test `aucun_scroll_style_hors_du_theme` échoue. Pour réserver
+la place d'une barre (barre déportée, bande latérale), lire
+`theme::scroll_bar_allocated_width()`. Changer l'aspect de toutes les barres =
+changer les constantes `SCROLL_BAR_*` de `theme.rs`, et rien d'autre. Dans un
+test egui qui dépend de l'aspect ou de la place des barres, appeler
+`theme::install(&context)` : un `Context::default()` a le style d'egui, pas
+celui de PlotYx.
 
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
 
@@ -217,6 +229,7 @@ touche (`python`, `typst`), relecture du diff, message de commit en français.
 - [ ] imprécisions de la demande levées **avant** de coder, en une seule question
 - [ ] ce n'est pas un plafond déjà arbitré (`questions-ouvertes.md` §11)
 - [ ] doublon docké/détaché vérifié (`rg "fn <nom>|fn detached_<nom>"`)
+- [ ] barres de défilement : aucun style local, place lue via `theme::scroll_bar_allocated_width`
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **plotyx-commande**)
 - [ ] logique dans `state.rs`, glu egui seulement dans `app.rs`

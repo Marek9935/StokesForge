@@ -18,6 +18,23 @@
 //! fenêtre (`main.rs`, avant [`crate::app::PlotyxApp::new`]) — jamais depuis
 //! [`crate::app::PlotyxApp::ui`], qui tournerait sinon à chaque image pour
 //! rien.
+//!
+//! # Barres de défilement : un seul standard
+//!
+//! Toutes les barres de défilement de l'application ont le même aspect
+//! (largeur, couleur, contraste), fixé par [`scroll_style`] et posé une fois
+//! pour toutes par [`install`] sur le style global d'egui — donc hérité par
+//! chaque `egui::ScrollArea`, `TableBuilder` compris, dans toutes les
+//! fenêtres (flottantes et détachées). Pour changer l'aspect de toutes les
+//! barres d'un coup, on modifie les constantes `SCROLL_BAR_*` ci-dessous,
+//! et nulle part ailleurs.
+//!
+//! Règle pour le code futur : **ne jamais construire ni modifier un
+//! `ScrollStyle` hors de ce module** (`ScrollStyle::solid()`,
+//! `spacing_mut().scroll = …`). Une zone qui a besoin de connaître la place
+//! prise par une barre (bande réservée, barre déportée) la lit par
+//! [`scroll_bar_allocated_width`]. Le test
+//! `aucun_scroll_style_hors_du_theme` le verrouille.
 
 use eframe::egui::{self, Color32, Context, CornerRadius, Theme};
 
@@ -70,13 +87,73 @@ pub fn header_letter_row_selected_fill() -> Color32 {
     ACCENT.gamma_multiply(0.42)
 }
 
+/// Épaisseur de toutes les barres de défilement, en points. Le défaut
+/// d'egui (6 pt en barre pleine, 2 pt en barre flottante au repos) se
+/// visait mal et se voyait peu.
+const SCROLL_BAR_WIDTH: f32 = 10.0;
+
+/// Espace laissé entre le contenu et la barre, en points.
+const SCROLL_BAR_MARGIN: f32 = 2.0;
+
+/// Opacité de la poignée au repos : la poignée prend la couleur du texte
+/// des widgets (gris foncé, `widgets.inactive.fg_stroke`), atténuée — bien
+/// plus contrastée que le gris très clair (`widgets.inactive.bg_fill`) des
+/// barres pleines d'egui, sans être aussi lourde qu'un texte.
+const SCROLL_BAR_HANDLE_OPACITY: f32 = 0.45;
+
+/// Opacité de la poignée survolée ou saisie (elle prend alors la couleur de
+/// survol, puis l'[`ACCENT`] pendant le glisser).
+const SCROLL_BAR_HANDLE_INTERACT_OPACITY: f32 = 0.8;
+
+/// Opacité du fond de la piste (`extreme_bg_color`).
+const SCROLL_BAR_TRACK_OPACITY: f32 = 1.0;
+
+/// Le style de **toutes** les barres de défilement de PlotYx — voir la
+/// section « Barres de défilement » en tête de module.
+///
+/// Construit en mode « flottant » d'egui, mais figé : largeur constante
+/// (pas d'élargissement au survol), place réservée égale à la barre plus sa
+/// marge (elle ne recouvre donc jamais le contenu), et opacités non nulles
+/// au repos (elle reste visible sans survol). C'est le seul mode d'egui qui
+/// laisse régler l'opacité de la poignée ; en mode « plein », elle est
+/// toujours opaque et de la couleur de fond des boutons, qu'on ne peut pas
+/// foncer sans foncer aussi tous les boutons.
+pub fn scroll_style() -> egui::style::ScrollStyle {
+    egui::style::ScrollStyle {
+        floating: true,
+        bar_width: SCROLL_BAR_WIDTH,
+        floating_width: SCROLL_BAR_WIDTH,
+        floating_allocated_width: SCROLL_BAR_WIDTH + SCROLL_BAR_MARGIN,
+        bar_inner_margin: SCROLL_BAR_MARGIN,
+        bar_outer_margin: 0.0,
+        handle_min_length: 16.0,
+        foreground_color: true,
+        dormant_background_opacity: SCROLL_BAR_TRACK_OPACITY,
+        active_background_opacity: SCROLL_BAR_TRACK_OPACITY,
+        interact_background_opacity: SCROLL_BAR_TRACK_OPACITY,
+        dormant_handle_opacity: SCROLL_BAR_HANDLE_OPACITY,
+        active_handle_opacity: SCROLL_BAR_HANDLE_OPACITY,
+        interact_handle_opacity: SCROLL_BAR_HANDLE_INTERACT_OPACITY,
+        ..egui::style::ScrollStyle::floating()
+    }
+}
+
+/// Place qu'occupe une barre de défilement du standard [`scroll_style`],
+/// perpendiculairement à son sens (largeur d'une barre verticale, hauteur
+/// d'une barre horizontale), marge comprise.
+pub fn scroll_bar_allocated_width() -> f32 {
+    scroll_style().allocated_width()
+}
+
 /// Pose le thème PlotYx sur `ctx` : verrouille la préférence sur
 /// [`Theme::Light`] (empêche egui de re-suivre le système à la moindre
-/// notification `winit`), puis applique la palette maison par-dessus
-/// [`egui::Visuals::light`].
+/// notification `winit`), applique la palette maison par-dessus
+/// [`egui::Visuals::light`], puis le standard des barres de défilement
+/// ([`scroll_style`]).
 pub fn install(ctx: &Context) {
     ctx.set_theme(Theme::Light);
     ctx.set_visuals(visuals());
+    ctx.all_styles_mut(|style| style.spacing.scroll = scroll_style());
 }
 
 /// Construit la palette PlotYx : un `Visuals::light()` standard, avec juste
@@ -123,5 +200,43 @@ mod tests {
     #[test]
     fn base_theme_is_light() {
         assert!(!visuals().dark_mode, "le thème PlotYx doit rester clair");
+    }
+
+    #[test]
+    fn install_pose_le_standard_des_barres_de_defilement() {
+        let ctx = Context::default();
+        install(&ctx);
+        assert_eq!(ctx.style_of(Theme::Light).spacing.scroll, scroll_style());
+        assert_eq!(
+            scroll_bar_allocated_width(),
+            SCROLL_BAR_WIDTH + SCROLL_BAR_MARGIN
+        );
+    }
+
+    /// Garde-fou du standard : aucun fichier de `plotyx-app` hors de ce
+    /// module ne construit ni ne modifie un `ScrollStyle`. Une barre au style
+    /// local échapperait au réglage unique des constantes `SCROLL_BAR_*`.
+    #[test]
+    fn aucun_scroll_style_hors_du_theme() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut fautifs = Vec::new();
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|ext| ext != "rs") || path.ends_with("theme.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (index, line) in text.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                if code.contains("ScrollStyle") || code.contains(".scroll =") {
+                    fautifs.push(format!("{}:{}", path.display(), index + 1));
+                }
+            }
+        }
+        assert!(
+            fautifs.is_empty(),
+            "style de barre de défilement construit hors de theme.rs — passer par \
+             theme::scroll_style / theme::scroll_bar_allocated_width : {fautifs:?}"
+        );
     }
 }

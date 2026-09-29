@@ -92,15 +92,20 @@ extérieur unique : leur contenu est peint dans un sous-espace borné qui ne
 peut agrandir le cadre au-delà des poignées de redimensionnement. La règle
 intérieure dépend de la nature du contenu. Dans un classeur, la grille et la
 bande d'onglets de feuille défilent chacune horizontalement, indépendamment,
-lorsqu'elles dépassent. La bande d'onglets est retranchée du bas du classeur
+lorsqu'elles dépassent. Du haut vers le bas : grille, onglets de feuille,
+barre horizontale de la grille ; la barre verticale occupe le bord droit sur
+toute la hauteur. La bande d'onglets est retranchée du bas du classeur
 avant la construction de la grille, qui ne peut donc plus la repousser hors du
 cadre (`book_contents`) ; ce découpage n'utilise pas `egui::Panel`, qui
 remplace le rognage de son parent au lieu de le combiner et dessinait les
 onglets sous la vue d'une fenêtre coupée. Les onglets
 gardent leur taille naturelle (`sheet_tabs`, `crates/plotyx-app/src/app.rs`) —
-ils ne rétrécissent pas et ne se replient pas dans un menu « … » ; sélectionner
-un onglet hors vue (au clic, au clavier ou par script) fait défiler la bande
-vers lui. Les notes et matrices restent bornées au rectangle commun. Dans un
+ils ne rétrécissent pas et ne se replient pas dans un menu « … ». La bande n'a
+**pas** de barre de défilement : quand des onglets sont cachés, deux boutons
+« < » et « > » apparaissent à sa gauche et font apparaître l'onglet caché
+suivant de ce côté (chacun grisé s'il n'y a rien à montrer de son côté) ; ils
+disparaissent quand tout tient. Sélectionner un onglet hors vue (au clic, au
+clavier ou par script) fait défiler la bande vers lui. Les notes et matrices restent bornées au rectangle commun. Dans un
 graphe (`graph_view_contents`,
 `crates/plotyx-app/src/app.rs`), la figure garde le ratio de
 `DEFAULT_FIGURE_SIZE` (`plotyx-render::pipeline`, 4:3) mais se met à l'échelle
@@ -123,12 +128,15 @@ Le `Frame` de ces fenêtres n'a pas de marge verticale
 (`WINDOW_CONTENT_MARGIN`, `crates/plotyx-app/src/app.rs`) : la bande d'en-tête
 et les séparateurs du contenu fournissent déjà leur propre espacement, une
 marge par défaut n'ajoutait qu'un bandeau blanc mort au-dessus et en dessous.
-La marge horizontale reste. La barre de défilement horizontale de la grille
-(`show_horizontally_scrollable_grid`) utilise un style plein
-(`egui::style::ScrollStyle::solid()`) plutôt que la barre flottante par
-défaut d'egui, invisible tant qu'elle n'est pas survolée au pixel près —
-dans une fenêtre déjà rognée à son rectangle, elle n'était ni visible ni
-atteignable.
+La marge horizontale reste. Toutes les barres de défilement suivent le
+standard de `theme::scroll_style` (voir § Thème).
+
+La barre horizontale de la grille est **déportée sous les onglets de
+feuille**, comme dans un tableur : la zone de défilement de la grille
+(`show_horizontally_scrollable_grid`) masque sa propre barre, et
+`show_grid_horizontal_bar` pose dans la bande réservée en bas de la fenêtre
+une `ScrollArea` horizontale vide qui la reflète ; un glisser sur cette barre
+est appliqué à la grille à l'image suivante.
 
 La barre verticale de la grille est **déportée** : la table défile elle-même
 (ce qui fige son en-tête) mais sa barre est masquée, car dans la zone de
@@ -295,6 +303,18 @@ dessine les tracés sur un fond clair implicite (axes, grilles, texte noir) —
 un thème sombre romprait ce contraste sans qu'aucun code de rendu n'en soit
 informé ; et un thème qui change avec le système est un thème qu'on ne peut
 pas garantir en capture d'écran ni en support.
+
+**Barres de défilement : un seul standard.** Toutes les barres de
+l'application (espace de travail, grille, panneaux, fenêtres d'import et de
+script, fenêtres détachées) ont le même aspect : 10 points d'épaisseur,
+poignée gris foncé atténuée, qui passe à la couleur de survol puis à l'accent
+pendant le glisser. `theme::scroll_style` le définit, `theme::install` le pose
+une fois sur le style global d'egui ; changer les constantes `SCROLL_BAR_*` de
+`theme.rs` change toutes les barres d'un coup. Règle pour le code futur : ne
+jamais construire ni modifier un `ScrollStyle` hors de `theme.rs` ; une zone
+qui doit réserver la place d'une barre la lit par
+`theme::scroll_bar_allocated_width`. Le test `aucun_scroll_style_hors_du_theme`
+fait échouer la CI sinon.
 
 ### Sélecteur de fichiers natif
 

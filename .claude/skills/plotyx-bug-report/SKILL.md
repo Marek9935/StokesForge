@@ -124,8 +124,8 @@ au menu » est donc une `Action` + un `dispatch` + un test, pas une ligne d'UI.
 
 Piège structurel de `plotyx-app` : un contenu a longtemps existé **en deux
 écritures**, une pour la fenêtre flottante et une pour la fenêtre détachée
-(`book_contents` / `detached_book_contents`…). Le classeur et le graphe sont
-désormais unifiés ; ce qui reste dupliqué se trouve par
+(`book_contents` / `detached_book_contents`…). Classeur, graphe, note et matrice sont
+désormais unifiés ; un doublon réintroduit se trouve par
 `rg "fn detached_" crates/plotyx-app/src/`. Un rapport qui ne cite qu'une des
 deux écritures fait livrer un correctif à moitié.
 

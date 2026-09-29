@@ -46,6 +46,7 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 - `rustfmt` + `clippy -D warnings` obligatoires (CI `.gitlab-ci.yml`).
 - Commits et docs techniques en français.
 - Toute mutation du modèle passe par une commande annulable de `plotyx-commands`, jamais par une primitive `core` en direct.
+- `plotyx-app` : l'aspect des barres de défilement (largeur, couleur) vient **uniquement** de `theme::scroll_style`, posé globalement par `theme::install` ; jamais de `ScrollStyle` local (verrouillé par le test `aucun_scroll_style_hors_du_theme`). La place d'une barre se lit par `theme::scroll_bar_allocated_width`.
 
 ## Pièges connus
 
