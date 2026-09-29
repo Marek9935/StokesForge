@@ -575,6 +575,10 @@ const COLUMN_GRIP_WIDTH: f32 = 10.0;
 /// Largeur par défaut de la fenêtre des propriétés d'un graphe
 /// ([`plot_settings_window`]).
 const PLOT_SETTINGS_WIDTH: f32 = 380.0;
+/// Hauteur par défaut de la fenêtre des propriétés d'un graphe. La fenêtre
+/// se redimensionne ensuite librement, y compris plus haut que son contenu
+/// (voir [`plot_settings_contents`]).
+const PLOT_SETTINGS_HEIGHT: f32 = 460.0;
 
 /// Bord de la grille sur lequel se trouve `pointer`, si `pointer` est à
 /// `margin` points ou moins de son bord gauche ou droit et dans ses bornes
@@ -6012,6 +6016,7 @@ fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
         .collapsible(false)
         .resizable(true)
         .default_width(PLOT_SETTINGS_WIDTH)
+        .default_height(PLOT_SETTINGS_HEIGHT)
         .open(&mut open)
         .show(ctx, |ui| plot_settings_contents(ui, state, &tree, settings));
     if !open {
@@ -6047,88 +6052,95 @@ fn plot_settings_contents(
         .filter(|edit| edit.graph == settings.graph)
     {
         let spec = &mut edit.spec;
-        egui::ScrollArea::vertical().show(ui, |ui| match chosen_tab {
-            PlotSettingsTab::Graph => {
-                commit |= text_field(ui, "Titre", &mut spec.title);
-                commit |= text_field(ui, "Fond (#RRGGBB, vide = blanc)", &mut spec.background);
-            }
-            PlotSettingsTab::PlotArea => {
-                let Some(panel) = spec.panels.get_mut(0) else {
-                    return;
-                };
-                commit |= text_field(ui, "Titre du panneau", &mut panel.title);
-                ui.add_space(4.0);
-                ui.strong("Grille");
-                commit |= ui
-                    .checkbox(&mut panel.bottom.grid, "Lignes verticales (graduations X)")
-                    .changed();
-                commit |= ui
-                    .checkbox(&mut panel.left.grid, "Lignes horizontales (graduations Y)")
-                    .changed();
-            }
-            PlotSettingsTab::Axes => {
-                let Some(panel) = spec.panels.get_mut(0) else {
-                    return;
-                };
-                let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
-                if panel.uses_right_axis() || chosen_axis == PlotAxis::Right {
-                    axes.push(PlotAxis::Right);
+        // La page occupe toute la hauteur de la fenêtre, même quand son
+        // contenu est plus court : sans `auto_shrink(false)`, une
+        // `egui::Window` redimensionnable se recale sur la hauteur de son
+        // contenu, et on ne pouvait pas l'agrandir au-delà. Le même réglage
+        // la fait défiler quand la fenêtre est plus petite que la page.
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| match chosen_tab {
+                PlotSettingsTab::Graph => {
+                    commit |= text_field(ui, "Titre", &mut spec.title);
+                    commit |= text_field(ui, "Fond (#RRGGBB, vide = blanc)", &mut spec.background);
                 }
-                ui.horizontal(|ui| {
-                    for axis in axes {
-                        if ui
-                            .selectable_label(chosen_axis == axis, axis.label())
-                            .clicked()
-                        {
-                            chosen_axis = axis;
-                        }
+                PlotSettingsTab::PlotArea => {
+                    let Some(panel) = spec.panels.get_mut(0) else {
+                        return;
+                    };
+                    commit |= text_field(ui, "Titre du panneau", &mut panel.title);
+                    ui.add_space(4.0);
+                    ui.strong("Grille");
+                    commit |= ui
+                        .checkbox(&mut panel.bottom.grid, "Lignes verticales (graduations X)")
+                        .changed();
+                    commit |= ui
+                        .checkbox(&mut panel.left.grid, "Lignes horizontales (graduations Y)")
+                        .changed();
+                }
+                PlotSettingsTab::Axes => {
+                    let Some(panel) = spec.panels.get_mut(0) else {
+                        return;
+                    };
+                    let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
+                    if panel.uses_right_axis() || chosen_axis == PlotAxis::Right {
+                        axes.push(PlotAxis::Right);
                     }
-                });
-                ui.separator();
-                let axis = match chosen_axis {
-                    PlotAxis::Bottom => &mut panel.bottom,
-                    PlotAxis::Left => &mut panel.left,
-                    PlotAxis::Right => &mut panel.right,
-                };
-                commit |= axis_editor(ui, axis);
-            }
-            PlotSettingsTab::Series => {
-                let Some(panel) = spec.panels.get_mut(0) else {
-                    return;
-                };
-                if panel.series.is_empty() {
-                    ui.weak("Ce graphe ne trace aucune série.");
-                    return;
-                }
-                if edit.selected_series >= panel.series.len() {
-                    edit.selected_series = panel.series.len() - 1;
-                }
-                egui::ScrollArea::vertical()
-                    .id_salt("plot_settings_series_list")
-                    .max_height(140.0)
-                    .show(ui, |ui| {
-                        for (index, series) in panel.series.iter().enumerate() {
-                            let label = series_list_label(tree, series);
+                    ui.horizontal(|ui| {
+                        for axis in axes {
                             if ui
-                                .selectable_label(edit.selected_series == index, label)
+                                .selectable_label(chosen_axis == axis, axis.label())
                                 .clicked()
                             {
-                                edit.selected_series = index;
+                                chosen_axis = axis;
                             }
                         }
                     });
-                ui.separator();
-                if let Some(series) = panel.series.get_mut(edit.selected_series) {
-                    commit |= series_editor(ui, series);
+                    ui.separator();
+                    let axis = match chosen_axis {
+                        PlotAxis::Bottom => &mut panel.bottom,
+                        PlotAxis::Left => &mut panel.left,
+                        PlotAxis::Right => &mut panel.right,
+                    };
+                    commit |= axis_editor(ui, axis);
                 }
-            }
-            PlotSettingsTab::Legend => {
-                let Some(panel) = spec.panels.get_mut(0) else {
-                    return;
-                };
-                commit |= legend_editor(ui, &mut panel.legend);
-            }
-        });
+                PlotSettingsTab::Series => {
+                    let Some(panel) = spec.panels.get_mut(0) else {
+                        return;
+                    };
+                    if panel.series.is_empty() {
+                        ui.weak("Ce graphe ne trace aucune série.");
+                        return;
+                    }
+                    if edit.selected_series >= panel.series.len() {
+                        edit.selected_series = panel.series.len() - 1;
+                    }
+                    egui::ScrollArea::vertical()
+                        .id_salt("plot_settings_series_list")
+                        .max_height(140.0)
+                        .show(ui, |ui| {
+                            for (index, series) in panel.series.iter().enumerate() {
+                                let label = series_list_label(tree, series);
+                                if ui
+                                    .selectable_label(edit.selected_series == index, label)
+                                    .clicked()
+                                {
+                                    edit.selected_series = index;
+                                }
+                            }
+                        });
+                    ui.separator();
+                    if let Some(series) = panel.series.get_mut(edit.selected_series) {
+                        commit |= series_editor(ui, series);
+                    }
+                }
+                PlotSettingsTab::Legend => {
+                    let Some(panel) = spec.panels.get_mut(0) else {
+                        return;
+                    };
+                    commit |= legend_editor(ui, &mut panel.legend);
+                }
+            });
     }
     if commit {
         state.commit_plot_edit();
