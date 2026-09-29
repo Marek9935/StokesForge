@@ -133,10 +133,12 @@ atteignable.
 La barre verticale de la grille est **déportée** : la table défile elle-même
 (ce qui fige son en-tête) mais sa barre est masquée, car dans la zone de
 défilement horizontale elle suivrait la largeur des colonnes et sortirait de
-la vue. `book_contents` réserve une bande au bord droit de la fenêtre et
+la vue. `book_contents` réserve une bande au bord droit de la fenêtre, sur
+toute sa hauteur (en-tête et onglets de feuille compris), et
 `show_grid_vertical_bar` y pose une `ScrollArea` verticale vide qui reflète la
-table ; un glisser sur cette barre est appliqué à la table à l'image suivante
-(`grid_contents`, `pending_vertical_offset`).
+table, contenu et décalage mis à l'échelle de la barre
+(`grid_vertical_bar_scale`) ; un glisser sur cette barre est appliqué à la
+table à l'image suivante (`grid_contents`, `pending_vertical_offset`).
 
 ### Géométrie des fenêtres
 
@@ -256,8 +258,9 @@ motif : sa fenêtre détachée est une vue `AppState` locale (construite par
 `fork_for_detached_view`) et appelle `note_contents`, comme la fenêtre
 flottante ; seul le tampon de saisie (`note_editing`) est local à la fenêtre,
 et la validation part en `Action::SetNoteText`, donc en commande annulable.
-Il ne reste comme fonction de contenu propre au détaché que
-`detached_matrix_contents`, l'espace réservé de la matrice.
+L'espace réservé de la matrice, `matrix_contents`, ne lit que l'arbre et sert
+tel quel aux deux fenêtres : plus aucune fonction de contenu n'est propre au
+détaché.
 
 `Tab::Graph` échappe à cette limite : `GraphView` n'a pas de verrou global à
 `AppState` à respecter (son cache de formes et sa navigation zoom/pan sont

@@ -307,9 +307,9 @@
 //! reattach_tab`]) pour rester un `Arc<Mutex<_>>` capturable par la
 //! fermeture sans dupliquer le cache.
 //!
-//! [`Tab::Matrix`] n'a aucun état à faire voyager (espace réservé, voir
-//! [`matrix_contents`]) : [`detached_matrix_contents`] est un simple appel à
-//! [`node_title_in`].
+//! [`Tab::Matrix`] n'a aucun état à faire voyager (espace réservé) :
+//! [`matrix_contents`] ne lit que l'arbre et sert tel quel aux deux
+//! fenêtres.
 //!
 //! La console de script n'entre pour rien dans ce mécanisme : ce n'est pas
 //! une fenêtre de contenu (voir § Console de script ci-dessus), donc rien à
@@ -1674,7 +1674,7 @@ impl PlotyxApp {
                                     graph_view_contents(ui, view, &snapshot, id);
                                 }
                                 Tab::Matrix(id) => {
-                                    detached_matrix_contents(ui, tree, id);
+                                    matrix_contents(ui, tree, id);
                                 }
                                 Tab::Note(id) => {
                                     if let Some(view_state) = model.view_state.as_mut() {
@@ -2621,52 +2621,63 @@ fn show_horizontally_scrollable_grid<R>(
         .show(ui, add_grid)
 }
 
-/// Rectangle de la barre de défilement verticale de la grille : la bande
-/// réservée au bord droit de la fenêtre (`strip`), sur la hauteur visible du
-/// corps de la table (`body`), donc sous l'en-tête figé et au-dessus de la
-/// barre horizontale.
-fn grid_vertical_bar_rect(strip: egui::Rect, body: egui::Rect) -> egui::Rect {
-    egui::Rect::from_min_max(
-        egui::pos2(strip.left(), body.top()),
-        egui::pos2(strip.right(), body.bottom()),
-    )
+/// Rapport d'échelle entre la barre verticale de la grille et le corps de
+/// la table qu'elle pilote : la barre couvre toute la hauteur de la fenêtre
+/// (`bar_height`), le corps défilant seulement la sienne (`body_height`, sous
+/// l'en-tête figé). Contenu et décalage de la barre sont ceux de la table
+/// multipliés par ce rapport : la poignée garde ainsi la même proportion
+/// (visible / total) et la même position relative que si elle ne couvrait
+/// que le corps. `1.0` quand le corps n'a pas de hauteur.
+fn grid_vertical_bar_scale(bar_height: f32, body_height: f32) -> f32 {
+    if body_height > 0.0 {
+        bar_height / body_height
+    } else {
+        1.0
+    }
 }
 
 /// Barre de défilement verticale de la grille (B10), collée au bord droit de
-/// la fenêtre plutôt qu'au bord droit de la table.
+/// la fenêtre plutôt qu'au bord droit de la table, et sur toute la hauteur
+/// de la fenêtre (`strip`, en-tête et onglets de feuille compris).
 ///
 /// La table (`TableBuilder`) défile verticalement elle-même — c'est ce qui
 /// fige son en-tête — mais, dessinée dans la zone de défilement horizontale,
 /// sa propre barre suivrait la largeur de ses colonnes. Sa barre est donc
 /// masquée, et celle-ci en est le miroir : une `ScrollArea` verticale vide,
 /// posée dans la bande réservée, dont la hauteur de contenu est celle du
-/// corps de la table. Le décalage suit la table (molette, glisser dans la
-/// table) ; inversement, un glisser sur cette barre est mis en attente dans
-/// la mémoire (`pending_id`) et appliqué à la table à l'image suivante
-/// (`grid_contents`, `pending_vertical_offset`).
+/// corps de la table mise à l'échelle de la barre
+/// ([`grid_vertical_bar_scale`]). Le décalage suit la table (molette,
+/// glisser dans la table) ; inversement, un glisser sur cette barre est mis
+/// en attente dans la mémoire (`pending_id`), ramené à l'échelle de la table,
+/// et appliqué à celle-ci à l'image suivante (`grid_contents`,
+/// `pending_vertical_offset`).
 fn show_grid_vertical_bar(
     ui: &mut egui::Ui,
     pending_id: egui::Id,
     strip: egui::Rect,
     table: &egui::scroll_area::ScrollAreaOutput<()>,
 ) {
-    let rect = grid_vertical_bar_rect(strip, table.inner_rect);
-    if !rect.is_positive() {
+    if !strip.is_positive() {
         return;
     }
-    let table_offset = table.state.offset.y;
-    let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    let scale = grid_vertical_bar_scale(strip.height(), table.inner_rect.height());
+    let bar_offset = table.state.offset.y * scale;
+    let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
     bar_ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
     let bar = egui::ScrollArea::vertical()
         .id_salt(pending_id)
         .auto_shrink([false, false])
-        .vertical_scroll_offset(table_offset)
+        .vertical_scroll_offset(bar_offset)
         .show(&mut bar_ui, |ui| {
-            ui.allocate_exact_size(egui::vec2(0.0, table.content_size.y), egui::Sense::hover());
+            ui.allocate_exact_size(
+                egui::vec2(0.0, table.content_size.y * scale),
+                egui::Sense::hover(),
+            );
         });
     let dragged_offset = bar.state.offset.y;
-    if (dragged_offset - table_offset).abs() > 0.5 {
-        ui.memory_mut(|memory| memory.data.insert_temp(pending_id, dragged_offset));
+    if (dragged_offset - bar_offset).abs() > 0.5 {
+        let table_offset = dragged_offset / scale;
+        ui.memory_mut(|memory| memory.data.insert_temp(pending_id, table_offset));
         ui.ctx().request_repaint();
     }
 }
@@ -3464,7 +3475,7 @@ fn tab_contents(
     match tab {
         Tab::Book(id) => book_contents(ui, state, actions, id),
         Tab::Graph(id) => graph_drop_target(ui, state, actions, graph_views, id),
-        Tab::Matrix(id) => matrix_contents(ui, state, id),
+        Tab::Matrix(id) => matrix_contents(ui, state.tree(), id),
         Tab::Note(id) => note_contents(ui, state, actions, id),
     }
 }
@@ -4464,17 +4475,17 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     // fenêtre y était coupée (`show_floating_window`). Deux sous-`Ui` bornés,
     // chacun rogné à l'intersection de son rectangle et du rognage parent.
     let area = ui.available_rect_before_wrap();
-    let tabs_height = SHEET_TABS_HEIGHT.min(area.height());
-    let (grid_area, tabs_rect) = area.split_top_bottom_at_y(area.bottom() - tabs_height);
-    // Le bord droit de la grille est réservé à la barre de défilement
-    // verticale (B10) : la zone de défilement horizontale ne porte que le
-    // reste, et la barre reste plaquée au bord de la fenêtre quelle que soit
-    // la largeur des colonnes.
+    // Le bord droit de la fenêtre est réservé, sur toute sa hauteur, à la
+    // barre de défilement verticale (B10) : la zone de défilement
+    // horizontale et les onglets de feuille ne portent que le reste, et la
+    // barre reste plaquée au bord de la fenêtre quelle que soit la largeur
+    // des colonnes.
     let bar_width = egui::style::ScrollStyle::solid()
         .allocated_width()
-        .min(grid_area.width());
-    let (grid_rect, vertical_bar_strip) =
-        grid_area.split_left_right_at_x(grid_area.right() - bar_width);
+        .min(area.width());
+    let (main_area, vertical_bar_strip) = area.split_left_right_at_x(area.right() - bar_width);
+    let tabs_height = SHEET_TABS_HEIGHT.min(main_area.height());
+    let (grid_rect, tabs_rect) = main_area.split_top_bottom_at_y(main_area.bottom() - tabs_height);
     let mut bounded = |rect: egui::Rect| {
         let mut child = ui.new_child(
             egui::UiBuilder::new()
@@ -6111,8 +6122,12 @@ fn legend_position_label(position: LegendPosition) -> &'static str {
 /// éditeur. `plotyx-core::NodeKind::Matrix` n'a aujourd'hui aucun contenu
 /// (juste des métadonnées de fenêtre) — il n'y a donc littéralement rien
 /// d'autre à afficher tant que cette nature n'a pas de valeurs.
-fn matrix_contents(ui: &mut egui::Ui, state: &AppState, matrix: NodeId) {
-    let name = node_title(state, matrix, "Matrice");
+///
+/// Une seule écriture pour la fenêtre flottante et la fenêtre détachée : elle
+/// ne lit que l'arbre, que les deux ont sous la main (`state.tree()` d'un
+/// côté, l'instantané du viewport de l'autre).
+fn matrix_contents(ui: &mut egui::Ui, tree: &Tree, matrix: NodeId) {
+    let name = node_title_in(tree, matrix, "Matrice");
     ui.centered_and_justified(|ui| {
         ui.weak(format!(
             "« {name} » — édition de matrice non implémentée dans ce banc \
@@ -6474,19 +6489,6 @@ fn cell_widget(
                 grid_edit_menu(ui, state, actions, sheet, &menu);
             }
         });
-    });
-}
-
-/// Pendant détaché de [`matrix_contents`] — même espace réservé, sur `&Tree`
-/// plutôt que sur `&AppState`.
-fn detached_matrix_contents(ui: &mut egui::Ui, tree: &Tree, matrix: NodeId) {
-    let name = node_title_in(tree, matrix, "Matrice");
-    ui.centered_and_justified(|ui| {
-        ui.weak(format!(
-            "« {name} » — édition de matrice non implémentée dans ce banc \
-             (hors périmètre ; `plotyx-core` n'expose pas encore de contenu \
-             de matrice à éditer)."
-        ));
     });
 }
 
@@ -7059,7 +7061,7 @@ mod graph_layout_tests {
             .collect()
     }
 
-    /// B10 (`docs/chantiers/retours-2026-09-29-bugs.md`) : la barre de
+    /// B10 : la barre de
     /// défilement verticale de la grille est plaquée au bord droit de la
     /// fenêtre, même quand les colonnes débordent (elle suivait auparavant
     /// la largeur des colonnes et sortait de la vue).
@@ -7107,13 +7109,30 @@ mod graph_layout_tests {
     }
 
     #[test]
-    fn la_barre_verticale_de_la_grille_couvre_le_corps_de_la_table() {
-        let strip = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(300.0, 320.0));
-        let body = egui::Rect::from_min_max(egui::pos2(0.0, 130.0), egui::pos2(500.0, 300.0));
-        assert_eq!(
-            grid_vertical_bar_rect(strip, body),
-            egui::Rect::from_min_max(egui::pos2(290.0, 130.0), egui::pos2(300.0, 300.0)),
-            "bande du bord droit, sur la hauteur du corps (sous l'en-tête figé)"
+    fn la_barre_verticale_de_la_grille_est_a_lechelle_du_corps_de_la_table() {
+        assert_eq!(grid_vertical_bar_scale(320.0, 160.0), 2.0);
+        assert_eq!(grid_vertical_bar_scale(320.0, 0.0), 1.0);
+    }
+
+    /// La barre verticale couvre toute la hauteur de la fenêtre, pas
+    /// seulement le corps de la table : sa piste va du haut au bas de
+    /// l'écran, en-tête figé et onglets de feuille compris.
+    #[test]
+    fn la_barre_verticale_de_la_grille_couvre_toute_la_hauteur_de_la_fenetre() {
+        let (screen, rectangles) = peindre_classeur_large(Vec::new());
+        let largeur_barre = egui::style::ScrollStyle::solid().allocated_width();
+        let pistes: Vec<_> = rectangles
+            .iter()
+            .filter(|(rect, _)| {
+                rect.width() <= largeur_barre
+                    && rect.left() >= screen.right() - largeur_barre - 0.5
+                    && rect.height() >= screen.height() - largeur_barre
+            })
+            .collect();
+        assert!(
+            !pistes.is_empty(),
+            "une piste de barre verticale sur toute la hauteur de {screen:?} ; \
+             rectangles peints : {rectangles:?}"
         );
     }
 
