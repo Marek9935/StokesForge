@@ -2617,6 +2617,56 @@ fn show_horizontally_scrollable_grid<R>(
         .show(ui, add_grid)
 }
 
+/// Rectangle de la barre de défilement verticale de la grille : la bande
+/// réservée au bord droit de la fenêtre (`strip`), sur la hauteur visible du
+/// corps de la table (`body`), donc sous l'en-tête figé et au-dessus de la
+/// barre horizontale.
+fn grid_vertical_bar_rect(strip: egui::Rect, body: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(strip.left(), body.top()),
+        egui::pos2(strip.right(), body.bottom()),
+    )
+}
+
+/// Barre de défilement verticale de la grille (B10), collée au bord droit de
+/// la fenêtre plutôt qu'au bord droit de la table.
+///
+/// La table (`TableBuilder`) défile verticalement elle-même — c'est ce qui
+/// fige son en-tête — mais, dessinée dans la zone de défilement horizontale,
+/// sa propre barre suivrait la largeur de ses colonnes. Sa barre est donc
+/// masquée, et celle-ci en est le miroir : une `ScrollArea` verticale vide,
+/// posée dans la bande réservée, dont la hauteur de contenu est celle du
+/// corps de la table. Le décalage suit la table (molette, glisser dans la
+/// table) ; inversement, un glisser sur cette barre est mis en attente dans
+/// la mémoire (`pending_id`) et appliqué à la table à l'image suivante
+/// (`grid_contents`, `pending_vertical_offset`).
+fn show_grid_vertical_bar(
+    ui: &mut egui::Ui,
+    pending_id: egui::Id,
+    strip: egui::Rect,
+    table: &egui::scroll_area::ScrollAreaOutput<()>,
+) {
+    let rect = grid_vertical_bar_rect(strip, table.inner_rect);
+    if !rect.is_positive() {
+        return;
+    }
+    let table_offset = table.state.offset.y;
+    let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    bar_ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    let bar = egui::ScrollArea::vertical()
+        .id_salt(pending_id)
+        .auto_shrink([false, false])
+        .vertical_scroll_offset(table_offset)
+        .show(&mut bar_ui, |ui| {
+            ui.allocate_exact_size(egui::vec2(0.0, table.content_size.y), egui::Sense::hover());
+        });
+    let dragged_offset = bar.state.offset.y;
+    if (dragged_offset - table_offset).abs() > 0.5 {
+        ui.memory_mut(|memory| memory.data.insert_temp(pending_id, dragged_offset));
+        ui.ctx().request_repaint();
+    }
+}
+
 /// Bande d'onglets de feuille, style d'origine (bouton pleine taille, sans
 /// troncature) : quand elle ne tient pas dans la largeur disponible, elle
 /// défile horizontalement plutôt que de rétrécir ses onglets ou de replier
@@ -4411,7 +4461,16 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     // chacun rogné à l'intersection de son rectangle et du rognage parent.
     let area = ui.available_rect_before_wrap();
     let tabs_height = SHEET_TABS_HEIGHT.min(area.height());
-    let (grid_rect, tabs_rect) = area.split_top_bottom_at_y(area.bottom() - tabs_height);
+    let (grid_area, tabs_rect) = area.split_top_bottom_at_y(area.bottom() - tabs_height);
+    // Le bord droit de la grille est réservé à la barre de défilement
+    // verticale (B10) : la zone de défilement horizontale ne porte que le
+    // reste, et la barre reste plaquée au bord de la fenêtre quelle que soit
+    // la largeur des colonnes.
+    let bar_width = egui::style::ScrollStyle::solid()
+        .allocated_width()
+        .min(grid_area.width());
+    let (grid_rect, vertical_bar_strip) =
+        grid_area.split_left_right_at_x(grid_area.right() - bar_width);
     let mut bounded = |rect: egui::Rect| {
         let mut child = ui.new_child(
             egui::UiBuilder::new()
@@ -4438,9 +4497,16 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
             ));
         });
     } else {
-        show_horizontally_scrollable_grid(&mut grid_ui, |ui| {
-            grid_contents(ui, state, actions, selected);
+        let vertical_bar_id = grid_ui.id().with("grid_vertical_bar");
+        let pending_offset: Option<f32> =
+            grid_ui.memory_mut(|memory| memory.data.remove_temp(vertical_bar_id));
+        let scroll = show_horizontally_scrollable_grid(&mut grid_ui, |ui| {
+            grid_contents(ui, state, actions, selected, pending_offset)
         });
+        if let Some(table) = scroll.inner {
+            let mut bar_ui = bounded(vertical_bar_strip);
+            show_grid_vertical_bar(&mut bar_ui, vertical_bar_id, vertical_bar_strip, &table);
+        }
     }
     ui.advance_cursor_after_rect(area);
     if let Some(id) = chosen_sheet {
@@ -5017,7 +5083,8 @@ fn grid_contents(
     state: &mut AppState,
     actions: &mut Vec<Action>,
     sheet: NodeId,
-) {
+    pending_vertical_offset: Option<f32>,
+) -> Option<egui::scroll_area::ScrollAreaOutput<()>> {
     let columns = state.visible_columns(sheet);
     let row_count = state.row_count(sheet);
     if columns.is_empty() {
@@ -5030,7 +5097,7 @@ fn grid_contents(
                 ui.close();
             }
         });
-        return;
+        return None;
     }
     // Sans ceci, l'espacement vertical par défaut d'egui entre les rangées
     // de la table (`Spacing::item_spacing.y`, dont `TableBuilder` se sert en
@@ -5046,7 +5113,7 @@ fn grid_contents(
     // prise du glisser-déposer de colonnes plus bas ([`grid_grip_side`]).
     let grid_rect = ui.available_rect_before_wrap();
     let mut last_column_right = grid_rect.left();
-    TableBuilder::new(ui)
+    let mut table = TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -5060,6 +5127,16 @@ fn grid_contents(
         // quand sa feuille contient peu de lignes : la grille garde ainsi
         // sa hauteur et son défilement vertical.
         .auto_shrink([false, false])
+        // Sa barre verticale n'est pas dessinée ici : dans la zone de
+        // défilement horizontale, elle suivrait le bord droit de la table et
+        // sortirait de la vue sur une grille large (B10). Le défilement
+        // (molette, glisser) reste actif ; la barre visible est portée par
+        // [`show_grid_vertical_bar`], collée au bord droit de la fenêtre.
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+    if let Some(offset) = pending_vertical_offset {
+        table = table.vertical_scroll_offset(offset);
+    }
+    let table_output = table
         .header(HEADER_HEIGHT_STACKED, |mut header| {
             header.col(|ui| {
                 row_number_header_widget(ui, state, actions, sheet);
@@ -5405,6 +5482,7 @@ fn grid_contents(
             actions.push(Action::Paste { sheet, text });
         }
     }
+    Some(table_output)
 }
 
 /// Console de script : zone de saisie, boutons « Exécuter »/« Arrêter »,
@@ -6962,6 +7040,152 @@ mod graph_layout_tests {
             "sous le Project Manager, la partie cachée de la fenêtre ne doit capter aucun clic"
         );
         assert_eq!(context.layer_id_at(egui::pos2(500.0, 300.0)), Some(calque));
+    }
+
+    /// Rectangles pleins peints par `shapes`, à plat, avec leur rognage.
+    fn rectangles_et_rognages(
+        shapes: &[egui::epaint::ClippedShape],
+    ) -> Vec<(egui::Rect, egui::Rect)> {
+        fn visiter(
+            shape: &egui::Shape,
+            clip: egui::Rect,
+            sortie: &mut Vec<(egui::Rect, egui::Rect)>,
+        ) {
+            match shape {
+                egui::Shape::Rect(rect) => sortie.push((rect.rect, clip)),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        visiter(shape, clip, sortie);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut sortie = Vec::new();
+        for painted in shapes {
+            visiter(&painted.shape, painted.clip_rect, &mut sortie);
+        }
+        sortie
+    }
+
+    /// Écran de 300 x 320 : `book_contents` d'un classeur de 12 colonnes
+    /// (bien plus larges que l'écran) et 200 lignes, peint six images, la
+    /// cinquième (indice 4) recevant `events`. Renvoie l'écran et les
+    /// rectangles (avec rognage) de la dernière image.
+    fn peindre_classeur_large(
+        events: Vec<egui::Event>,
+    ) -> (egui::Rect, Vec<(egui::Rect, egui::Rect)>) {
+        let mut project = Project::new("Large").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        let valeurs: Vec<f64> = (0..200).map(f64::from).collect();
+        for _ in 0..12 {
+            project
+                .add_column(sheet, None, None, Column::from_f64(&valeurs))
+                .unwrap();
+        }
+        let session = Session::spawn(project, None).unwrap();
+        let mut state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 320.0));
+        let mut actions = Vec::new();
+        let mut derniere = None;
+        for frame_index in 0..6 {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events: if frame_index == 4 {
+                    events.clone()
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            };
+            let mut frame = context.run_ui(input, |ui| {
+                book_contents(ui, &mut state, &mut actions, book);
+            });
+            frame.textures_delta.clear();
+            derniere = Some(frame);
+        }
+        (screen, rectangles_et_rognages(&derniere.unwrap().shapes))
+    }
+
+    /// La poignée de la barre verticale (pas sa piste) : mince, courte, dans la bande de
+    /// droite de l'écran.
+    fn poignees_de_barre(
+        screen: egui::Rect,
+        rectangles: &[(egui::Rect, egui::Rect)],
+    ) -> Vec<(egui::Rect, egui::Rect)> {
+        let largeur_barre = egui::style::ScrollStyle::solid().allocated_width();
+        rectangles
+            .iter()
+            .copied()
+            .filter(|(rect, _)| {
+                rect.width() <= largeur_barre
+                    && rect.height() >= 11.9
+                    && rect.height() < 100.0
+                    && rect.left() >= screen.right() - largeur_barre - 0.5
+            })
+            .collect()
+    }
+
+    /// B10 (`docs/chantiers/retours-2026-09-29-bugs.md`) : la barre de
+    /// défilement verticale de la grille est plaquée au bord droit de la
+    /// fenêtre, même quand les colonnes débordent (elle suivait auparavant
+    /// la largeur des colonnes et sortait de la vue).
+    #[test]
+    fn la_barre_verticale_de_la_grille_reste_au_bord_droit_de_la_fenetre() {
+        let (screen, rectangles) = peindre_classeur_large(Vec::new());
+        let poignees = poignees_de_barre(screen, &rectangles);
+        assert!(
+            !poignees.is_empty(),
+            "la poignée de la barre verticale doit être dans la bande de droite de la fenêtre \
+             ({screen:?}) ; rectangles peints : {rectangles:?}",
+        );
+        for (rect, clip) in poignees {
+            assert!(
+                screen.contains_rect(rect) && clip.is_positive(),
+                "la poignée {rect:?} sort de la fenêtre {screen:?} (rognage {clip:?})"
+            );
+        }
+    }
+
+    /// La barre déportée au bord de la fenêtre suit le défilement de la
+    /// table (molette sur la table) : sa poignée descend.
+    #[test]
+    fn la_barre_verticale_de_la_grille_suit_la_molette_sur_la_table() {
+        let (screen, repos) = peindre_classeur_large(Vec::new());
+        let avant = poignees_de_barre(screen, &repos);
+        let (_, defile) = peindre_classeur_large(vec![
+            egui::Event::PointerMoved(egui::pos2(100.0, 150.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -120.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        let apres = poignees_de_barre(screen, &defile);
+        assert_eq!(avant.len(), 1, "une poignée au repos : {avant:?}");
+        assert_eq!(apres.len(), 1, "une poignée après défilement : {apres:?}");
+        assert!(
+            apres[0].0.top() > avant[0].0.top() + 1.0,
+            "la poignée doit descendre : {:?} -> {:?}",
+            avant[0].0,
+            apres[0].0
+        );
+    }
+
+    #[test]
+    fn la_barre_verticale_de_la_grille_couvre_le_corps_de_la_table() {
+        let strip = egui::Rect::from_min_max(egui::pos2(290.0, 0.0), egui::pos2(300.0, 320.0));
+        let body = egui::Rect::from_min_max(egui::pos2(0.0, 130.0), egui::pos2(500.0, 300.0));
+        assert_eq!(
+            grid_vertical_bar_rect(strip, body),
+            egui::Rect::from_min_max(egui::pos2(290.0, 130.0), egui::pos2(300.0, 300.0)),
+            "bande du bord droit, sur la hauteur du corps (sous l'en-tête figé)"
+        );
     }
 
     #[test]

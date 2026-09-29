@@ -130,6 +130,14 @@ défaut d'egui, invisible tant qu'elle n'est pas survolée au pixel près —
 dans une fenêtre déjà rognée à son rectangle, elle n'était ni visible ni
 atteignable.
 
+La barre verticale de la grille est **déportée** : la table défile elle-même
+(ce qui fige son en-tête) mais sa barre est masquée, car dans la zone de
+défilement horizontale elle suivrait la largeur des colonnes et sortirait de
+la vue. `book_contents` réserve une bande au bord droit de la fenêtre et
+`show_grid_vertical_bar` y pose une `ScrollArea` verticale vide qui reflète la
+table ; un glisser sur cette barre est appliqué à la table à l'image suivante
+(`grid_contents`, `pending_vertical_offset`).
+
 ### Géométrie des fenêtres
 
 Chaque déplacement ou redimensionnement est envoyé à la session et enregistré
