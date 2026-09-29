@@ -10,8 +10,10 @@
 //!   est périmé en comparant la `revision` »*). Le renderer devient un
 //!   client de plus du même protocole, au même titre que l'UI et le fil de
 //!   script ; il n'y avait rien à inventer ;
-//! - **`rect`** — redimensionner la fenêtre change la géométrie de la
-//!   figure, pas le modèle ;
+//! - **`rect`** — le rectangle logique donné au pipeline change sa géométrie,
+//!   pas le modèle. `GraphView::paint_scaled` garde ce rectangle à
+//!   `DEFAULT_FIGURE_SIZE` et transforme les formes mises en cache en sortie :
+//!   un simple redimensionnement de fenêtre ne le change plus ;
 //! - **`pixels_per_point`** — c'est l'exception qu'`epaint` documente
 //!   lui-même dans sa source : *« storing [shapes] should also be fine with
 //!   one exception: `Shape::Text` depends on the current `pixels_per_point`
@@ -56,7 +58,8 @@ use plotyx_session::Revision;
 pub struct CacheKey {
     /// Révision de l'instantané de session dont la figure est issue.
     pub revision: Revision,
-    /// Rectangle occupé à l'écran.
+    /// Rectangle logique utilisé par le pipeline (qui peut différer du
+    /// rectangle affiché après mise à l'échelle).
     pub rect: Rect,
     /// Échelle d'affichage au moment du calcul.
     pub pixels_per_point: f32,

@@ -102,8 +102,13 @@ graphe (`graph_view_contents`,
 « contain » dans l'espace disponible — maximisée en prenant la dimension
 limitante, largeur ou hauteur, aussi bien en agrandissant qu'en rétrécissant
 (F11). Aucun rognage ni défilement pour le graphe : la figure entière reste
-toujours visible. La règle est identique en fenêtre flottante et détachée,
-qui partagent la même fonction.
+toujours visible. C'est un **zoom** : la disposition (graduations, marges,
+légende, mesures de texte) est toujours calculée à la taille de référence
+`DEFAULT_FIGURE_SIZE` (480×360), puis le résultat entier, texte et épaisseurs
+compris, est agrandi ou réduit uniformément (`GraphView::paint_scaled`,
+`plotyx-render-egui`). Redimensionner la fenêtre ne redispose donc rien, et
+ne reconstruit pas le cache de formes. La règle est identique en fenêtre
+flottante et détachée, qui partagent la même fonction.
 
 Pour une nouvelle nature de fenêtre, conserver cette borne commune puis
 définir avec l'utilisateur quelles zones défilent et quelles zones sont

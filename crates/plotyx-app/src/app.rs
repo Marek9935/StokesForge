@@ -5425,12 +5425,13 @@ fn graph_view_contents(
         egui::vec2(available.x, (available.y - GRAPH_CONTROLS_HEIGHT).max(0.0)),
         egui::Sense::hover(),
     );
-    // La figure garde le ratio de `DEFAULT_FIGURE_SIZE` mais sa taille suit
-    // l'espace disponible (F11) : mise à l'échelle « contain », bornée par la
-    // dimension limitante (largeur ou hauteur), aussi bien en agrandissant
-    // qu'en rétrécissant. Le sous-Ui borne aussi les interactions. Ne pas
-    // propager le rectangle de la figure à la disposition du parent, sous
-    // peine de faire grandir la fenêtre.
+    // Le rectangle affiché suit l'espace disponible (F11) avec le ratio de
+    // `DEFAULT_FIGURE_SIZE` : mise à l'échelle « contain », bornée par la
+    // dimension limitante. `paint_scaled` garde la disposition à 480×360 et
+    // agrandit ou réduit ensuite les formes, texte compris : aucune
+    // graduation n'est recalculée pour la taille de la fenêtre (point 3 de
+    // `docs/chantiers/retours-2026-09-24-bugs.md`). Le sous-Ui borne les
+    // interactions sans faire grandir la fenêtre parente.
     let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
     let scale = if fig_w > 0 && fig_h > 0 {
         (outer.width() / fig_w as f32)
@@ -5445,7 +5446,7 @@ fn graph_view_contents(
     );
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
-    match view.paint(&figure_ui, rect, snapshot, graph_id) {
+    match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
             if ui.small_button("réinitialiser le zoom").clicked() {
                 view.reset_view();
@@ -7337,13 +7338,17 @@ mod graph_layout_tests {
         // F11 : le graphe conserve le ratio de `DEFAULT_FIGURE_SIZE` mais est
         // mis à l'échelle « contain » — maximisé dans la zone disponible, en
         // prenant la dimension limitante (largeur ou hauteur) — plutôt que
-        // peint à taille fixe et rogné.
+        // peint à taille fixe et rogné. Point 3 du rapport du 2026-09-24 :
+        // c'est un **zoom** du rendu de référence, jamais une nouvelle mise
+        // en page à la taille affichée — les formes mises en cache doivent
+        // être identiques quelle que soit la taille de la fenêtre.
         let (session, graph) = graphe();
         let snapshot = session.handle().snapshot().unwrap();
         let context = egui::Context::default();
         context.set_fonts(plotyx_render_egui::font_definitions());
         let mut view = GraphView::new();
         let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
+        let mut reference_shapes: Option<Vec<egui::Shape>> = None;
 
         for size in [
             GRAPH_WINDOW_SIZE,
@@ -7386,12 +7391,20 @@ mod graph_layout_tests {
                 output.textures_delta.clear();
                 let rect = view.cache().key().unwrap().rect;
                 assert!(
-                    (rect.size() - expected_size).length() < 0.1,
-                    "taille attendue pour une zone de {size:?} : {expected_size:?}, obtenu {:?}",
+                    (rect.size() - egui::vec2(fig_w as f32, fig_h as f32)).length() < 0.1,
+                    "la disposition doit rester à la taille de référence, obtenu {:?} pour une \
+                     zone de {size:?}",
                     rect.size()
                 );
+                let display = view.display_rect().unwrap();
                 assert!(
-                    visible.contains_rect(rect),
+                    (display.size() - expected_size).length() < 0.1,
+                    "taille affichée attendue pour une zone de {size:?} : {expected_size:?}, \
+                     obtenu {:?}",
+                    display.size()
+                );
+                assert!(
+                    visible.contains_rect(display),
                     "la figure mise à l'échelle doit tenir dans la zone visible"
                 );
                 assert_eq!(
@@ -7405,10 +7418,28 @@ mod graph_layout_tests {
                 // Vérifier les formes réellement envoyées à egui, pas
                 // seulement le rectangle calculé avant le rendu.
                 assert!(!view.cache().shapes().is_empty());
+                if let Some(reference) = &reference_shapes {
+                    assert_eq!(
+                        view.cache().shapes(),
+                        reference.as_slice(),
+                        "la taille affichée ne doit pas redisposer la figure (zone de {size:?})"
+                    );
+                } else {
+                    reference_shapes = Some(view.cache().shapes().to_vec());
+                }
+                let transform = egui::emath::TSTransform::new(
+                    display.min.to_vec2(),
+                    display.width() / fig_w as f32,
+                );
                 for shape in view.cache().shapes() {
+                    let mut displayed = shape.clone();
+                    displayed.transform(transform);
                     assert!(
-                        output.shapes.iter().any(|painted| painted.shape == *shape
-                            && visible.contains_rect(painted.clip_rect)),
+                        output
+                            .shapes
+                            .iter()
+                            .any(|painted| painted.shape == displayed
+                                && visible.contains_rect(painted.clip_rect)),
                         "forme du graphe hors de la zone visible"
                     );
                 }
@@ -7492,11 +7523,20 @@ mod graph_layout_tests {
             !view.cache().shapes().is_empty(),
             "le viewport détaché ne doit pas servir le cache vidé du viewport racine"
         );
+        let display = view.display_rect().unwrap();
+        let transform = egui::emath::TSTransform::new(
+            display.min.to_vec2(),
+            display.width() / DEFAULT_FIGURE_SIZE.0 as f32,
+        );
         assert!(
             output
                 .shapes
                 .iter()
-                .any(|painted| view.cache().shapes().contains(&painted.shape)),
+                .any(|painted| view.cache().shapes().iter().any(|shape| {
+                    let mut expected = shape.clone();
+                    expected.transform(transform);
+                    painted.shape == expected
+                })),
             "le viewport détaché doit réellement recevoir les formes du graphe"
         );
         // Régression : le bouton « ↩ » de réattachement, non borné en
@@ -7505,7 +7545,7 @@ mod graph_layout_tests {
         // alors hors du rectangle visible, invisible bien que son cache
         // fût rempli (ce que les deux assertions ci-dessus ne détectent
         // pas : un `Shape` reste dans la liste même hors clip).
-        let figure_rect = view.cache().key().unwrap().rect;
+        let figure_rect = display;
         assert!(
             figure_rect.max.y <= GRAPH_WINDOW_SIZE.y,
             "la figure doit rester dans la fenêtre détachée, pas {figure_rect:?} pour une fenêtre de {GRAPH_WINDOW_SIZE:?}"
@@ -8049,10 +8089,13 @@ mod graph_layout_tests {
             if is_initial_frame {
                 let view = graph_views.get(&graph).unwrap();
                 let panel = &view.last_drawn().unwrap().panels[0];
-                let figure = view.cache().key().unwrap().rect;
+                let figure = view.display_rect().unwrap();
+                let scale = figure.width() / DEFAULT_FIGURE_SIZE.0 as f32;
                 panel_center.set(Some(egui::pos2(
-                    figure.min.x + panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0,
-                    figure.min.y + panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0,
+                    figure.min.x
+                        + (panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0) * scale,
+                    figure.min.y
+                        + (panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0) * scale,
                 )));
             }
         };

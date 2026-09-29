@@ -12,7 +12,7 @@ point 5 est confirmé par comparaison des deux chemins de code et par une
 |---|---|---|---|
 | 1 | Contour vert décalé quand la fenêtre est bloquée contre le PM | **bug, corrigé** | fenêtres flottantes |
 | 2 | Le contenu d'une fenêtre flottante passe devant les panneaux fixes une fois l'espace de travail défilé | **bug, corrigé** | espace de travail défilable |
-| 3 | Le redimensionnement du graphe ne scale pas correctement (le texte des axes se chevauche en petit) | **bug, confirmé** | rendu du graphe (F11) |
+| 3 | Le redimensionnement du graphe ne scale pas correctement (le texte des axes se chevauche en petit) | **bug, corrigé** | rendu du graphe (F11) |
 | 4 | Bandeau d'actions du classeur → menus contextuels + menu Fichier, option classeur actif/nouveau à l'import | **évolution**, bien spécifiée par l'utilisateur | classeur / import |
 | 5 | Fenêtre de classeur détachée : disposition et grille différentes de la flottante | **bug, confirmé à l'écran et par le code** | duplication flottant/détaché |
 
@@ -134,7 +134,15 @@ chantier), pas juste cosmétique.
 
 ---
 
-## 3. Le graphe ne « scale » pas correctement au redimensionnement
+## 3. Le graphe ne « scale » pas correctement au redimensionnement [corrigé]
+
+**Correctif (2026-09-29)** : repris du commit `f8f0b9c` de la branche
+`codex/book-import-detached`, jamais fusionnée jusque-là, ce qui explique que
+le comportement ait semblé « réapparaître ». `GraphView::paint_scaled`
+(`plotyx-render-egui`) dispose toujours la figure à 480×360 puis transforme
+les formes mises en cache ; `graph_view_contents` l'appelle. Test :
+`le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible`
+exige des formes identiques pour trois tailles de fenêtre.
 
 **Reproduction**
 1. Graphe `Graph1` (une série `Y = X²`, 21 points), fenêtre flottante très

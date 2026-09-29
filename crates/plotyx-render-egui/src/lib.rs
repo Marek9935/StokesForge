@@ -4,7 +4,7 @@
 //!
 //! - [`backend`] : le `DrawingBackend` de Plotters qui collecte des
 //!   `egui::Shape` au lieu de peindre ;
-//! - [`cache`] : la clé `(revision, rect, pixels_per_point)` qui fait qu'une
+//! - [`cache`] : la clé `(revision, rect, pixels_per_point, view_generation)` qui fait qu'une
 //!   image sans changement ne rejoue pas le pipeline ;
 //! - [`feathering`] : le levier d'anticrénelage de la tâche R5.5 bis — le
 //!   seul morceau du rendu qui n'a pas d'équivalent côté export, parce que
@@ -227,8 +227,8 @@ pub struct PointHit {
 /// Un graphe affiché : son cache, son état de vue, et de quoi le repeindre.
 ///
 /// Un `GraphView` par vue, pas un par graphe : deux fenêtres sur le même
-/// graphe ont deux rectangles, donc deux caches — et, depuis R7, deux
-/// cadrages de zoom/pan indépendants, ce qui est le comportement attendu
+/// graphe ont chacune leur cache et, depuis R7, leur propre cadrage de
+/// zoom/pan, ce qui est le comportement attendu
 /// (zoomer dans une fenêtre ne doit pas zoomer l'autre).
 #[derive(Debug)]
 pub struct GraphView {
@@ -238,6 +238,9 @@ pub struct GraphView {
     view: ViewState,
     id: Id,
     hover: Option<PointHit>,
+    /// Rectangle visible du dernier rendu ; le cache garde, lui, le repère
+    /// logique de référence quand l'application agrandit ou réduit la figure.
+    display_rect: Option<Rect>,
     /// Coins du rectangle de zoom élastique en cours (tâche 7.4), en pixels
     /// d'écran. `None` hors glissé secondaire.
     drag_box: Option<(Pos2, Pos2)>,
@@ -275,6 +278,7 @@ impl GraphView {
                 NEXT_VIEW_ID.fetch_add(1, Ordering::Relaxed),
             )),
             hover: None,
+            display_rect: None,
             drag_box: None,
         }
     }
@@ -287,6 +291,11 @@ impl GraphView {
     /// La géométrie de la dernière figure construite.
     pub fn last_drawn(&self) -> Option<&DrawnPlot> {
         self.last.as_ref()
+    }
+
+    /// Rectangle réellement occupé à l'écran lors du dernier rendu.
+    pub fn display_rect(&self) -> Option<Rect> {
+        self.display_rect
     }
 
     /// L'état de vue (zoom/pan) de cette vue — tâche R7.1.
@@ -311,6 +320,7 @@ impl GraphView {
         self.cache.invalidate();
         self.last = None;
         self.hover = None;
+        self.display_rect = None;
         self.drag_box = None;
     }
 
@@ -336,9 +346,41 @@ impl GraphView {
         snapshot: &Snapshot,
         graph: NodeId,
     ) -> Result<bool, RenderError> {
+        self.paint_with_layout(ui, rect, rect, snapshot, graph)
+    }
+
+    /// Dispose toujours la figure à `DEFAULT_FIGURE_SIZE`, puis applique une
+    /// transformation uniforme à ses formes. La densité des graduations,
+    /// l'emplacement des légendes et les mesures de texte ne changent donc
+    /// pas avec la taille de la fenêtre ; seule leur taille affichée change.
+    pub fn paint_scaled(
+        &mut self,
+        ui: &egui::Ui,
+        display_rect: Rect,
+        snapshot: &Snapshot,
+        graph: NodeId,
+    ) -> Result<bool, RenderError> {
+        let (width, height) = DEFAULT_FIGURE_SIZE;
+        let logical_rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(width as f32, height as f32));
+        if display_rect.width() <= 0.0 || display_rect.height() <= 0.0 {
+            self.hover = None;
+            return Ok(true);
+        }
+        self.paint_with_layout(ui, logical_rect, display_rect, snapshot, graph)
+    }
+
+    fn paint_with_layout(
+        &mut self,
+        ui: &egui::Ui,
+        logical_rect: Rect,
+        display_rect: Rect,
+        snapshot: &Snapshot,
+        graph: NodeId,
+    ) -> Result<bool, RenderError> {
         let spec = graph_spec(&snapshot.tree, graph)?;
         let context = ui.ctx().clone();
-        let response = ui.interact(rect, self.id, egui::Sense::click_and_drag());
+        let response = ui.interact(display_rect, self.id, egui::Sense::click_and_drag());
+        self.display_rect = Some(display_rect);
 
         // Le câblage prévu par R5.5 bis, à l'appel près (`architecture-choisie.md`
         // §4.2, `feathering` R7.3) : coupé pendant tout glissé — pan ou
@@ -352,7 +394,7 @@ impl GraphView {
 
         let key = CacheKey {
             revision: snapshot.revision,
-            rect,
+            rect: logical_rect,
             pixels_per_point: context.pixels_per_point(),
             view_generation: self.view.generation(),
         };
@@ -366,7 +408,7 @@ impl GraphView {
             view.apply(&mut framed);
             let plot = resolve_spec(&tree, &framed);
             let text = ScreenText::new(&context, measurer);
-            collect_shapes(shapes, rect, &text, &plot)
+            collect_shapes(shapes, logical_rect, &text, &plot)
         })?;
         if let Some(drawn) = outcome.built {
             self.last = Some(drawn);
@@ -374,14 +416,26 @@ impl GraphView {
         // Le cœur de la tâche R4.3 : une image sans changement, c'est
         // exactement cette ligne — pas de résolution, pas de `ChartBuilder`,
         // pas de parcours de points.
-        let painter = ui.painter();
-        painter.extend(self.cache.shapes().iter().cloned());
+        let painter = ui.painter().with_clip_rect(display_rect);
+        let scale = display_rect.width() / logical_rect.width();
+        if logical_rect == display_rect {
+            painter.extend(self.cache.shapes().iter().cloned());
+        } else {
+            let transform = egui::emath::TSTransform::new(
+                display_rect.min.to_vec2() - logical_rect.min.to_vec2() * scale,
+                scale,
+            );
+            painter.extend(self.cache.shapes().iter().cloned().map(|mut shape| {
+                shape.transform(transform);
+                shape
+            }));
+        }
 
         // R7.2/7.3 : réticule, désignation de point et rectangle élastique,
         // peints **par-dessus** ce qui précède — jamais dans le `Vec<Shape>`
         // mis en cache ci-dessus, sous peine de rejouer tout le pipeline à
         // chaque mouvement de souris (`crate::cache`, tête de module).
-        self.hover = self.paint_overlay(painter, &response, &snapshot.tree, &spec);
+        self.hover = self.paint_overlay(&painter, &response, &snapshot.tree, &spec);
 
         Ok(outcome.cached)
     }
@@ -393,7 +447,14 @@ impl GraphView {
     /// Une figure peut être centrée dans une fenêtre flottante, donc les deux
     /// origines ne coïncident pas en général.
     fn figure_position(&self, pos: Pos2) -> Option<Pos2> {
-        self.cache.key().map(|key| pos - key.rect.min.to_vec2())
+        let display = self.display_rect?;
+        let logical = self.cache.key()?.rect;
+        let scale = display.width() / logical.width();
+        (scale > 0.0).then(|| Pos2::ZERO + (pos - display.min) / scale)
+    }
+
+    fn display_scale(&self) -> Option<f32> {
+        Some(self.display_rect?.width() / self.cache.key()?.rect.width())
     }
 
     /// Le panneau (et sa transformation pixel ↔ données) sous le pixel egui
@@ -483,7 +544,9 @@ impl GraphView {
                 if let Some((panel_index, transform)) =
                     self.panel_at(origin).or_else(|| self.panel_at(pos))
                 {
-                    if let Some((x_range, y_range)) = transform.pan(delta.x as f64, delta.y as f64)
+                    let scale = self.display_scale().unwrap_or(1.0);
+                    if let Some((x_range, y_range)) =
+                        transform.pan((delta.x / scale) as f64, (delta.y / scale) as f64)
                     {
                         self.commit_framing(panel_index, x_range, y_range);
                     }
@@ -566,12 +629,13 @@ impl GraphView {
         let (panel_index, transform) = self.panel_at(pos)?;
         let last = self.last.as_ref()?;
         let panel = last.panels.get(panel_index)?;
-        let figure_rect = self.cache.key()?.rect;
+        let figure_rect = self.display_rect?;
+        let scale = self.display_scale()?;
         let panel_rect = Rect::from_min_size(
-            Pos2::new(panel.pixel_origin.0 as f32, panel.pixel_origin.1 as f32),
-            egui::vec2(panel.pixel_size.0 as f32, panel.pixel_size.1 as f32),
-        )
-        .translate(figure_rect.min.to_vec2());
+            figure_rect.min
+                + egui::vec2(panel.pixel_origin.0 as f32, panel.pixel_origin.1 as f32) * scale,
+            egui::vec2(panel.pixel_size.0 as f32, panel.pixel_size.1 as f32) * scale,
+        );
         if !panel_rect.contains(pos) {
             return None;
         }
@@ -593,11 +657,12 @@ impl GraphView {
         );
 
         let mut hit = nearest_point(tree, spec, panel_index, panel, &transform, figure_pos)?;
-        hit.pixel += figure_rect.min.to_vec2();
+        hit.pixel = figure_rect.min + hit.pixel.to_vec2() * scale;
+        hit.distance *= scale;
         painter.circle_stroke(
             hit.pixel,
-            5.0,
-            Stroke::new(1.5, Color32::from_rgb(220, 90, 90)),
+            5.0 * scale,
+            Stroke::new(1.5 * scale, Color32::from_rgb(220, 90, 90)),
         );
         Some(hit)
     }

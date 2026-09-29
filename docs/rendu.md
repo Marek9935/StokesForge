@@ -174,7 +174,10 @@ résultat se met en cache et une image sans changement coûte un
 
 - **`revision`** — le compteur de `plotyx-session` ; le renderer devient un
   client de plus du même protocole, il n'y avait rien à inventer ;
-- **`rect`** — redimensionner la fenêtre change la géométrie, pas le modèle ;
+- **`rect`** — le rectangle logique passé au pipeline ; un appel direct peut
+  changer sa taille, alors que l'application garde `DEFAULT_FIGURE_SIZE` et
+  transforme les formes en sortie pour redimensionner la fenêtre sans
+  redisposer les axes et les textes ;
 - **`pixels_per_point`** — l'exception qu'`epaint` documente lui-même :
   `Shape::Text` en dépend et doit être reconstruit quand il change ;
 - **`view_generation`** — le compteur de `ViewState`, qui monte à chaque zoom,
