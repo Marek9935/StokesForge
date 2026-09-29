@@ -13,8 +13,8 @@ point 5 est confirmé par comparaison des deux chemins de code et par une
 | 1 | Contour vert décalé quand la fenêtre est bloquée contre le PM | **bug, corrigé** | fenêtres flottantes |
 | 2 | Le contenu d'une fenêtre flottante passe devant les panneaux fixes une fois l'espace de travail défilé | **bug, corrigé** | espace de travail défilable |
 | 3 | Le redimensionnement du graphe ne scale pas correctement (le texte des axes se chevauche en petit) | **bug, corrigé** | rendu du graphe (F11) |
-| 4 | Bandeau d'actions du classeur → menus contextuels + menu Fichier, option classeur actif/nouveau à l'import | **évolution**, bien spécifiée par l'utilisateur | classeur / import |
-| 5 | Fenêtre de classeur détachée : disposition et grille différentes de la flottante | **bug, confirmé à l'écran et par le code** | duplication flottant/détaché |
+| 4 | Bandeau d'actions du classeur → menus contextuels + menu Fichier, option classeur actif/nouveau à l'import | **évolution, faite** | classeur / import |
+| 5 | Fenêtre de classeur détachée : disposition et grille différentes de la flottante | **bug, corrigé** | duplication flottant/détaché |
 
 ---
 
@@ -201,7 +201,13 @@ de près (hors budget de cette session) :
 
 ---
 
-## 4. Bandeau d'actions du classeur → menus contextuels (évolution)
+## 4. Bandeau d'actions du classeur → menus contextuels (évolution) [fait]
+
+**Fait (2026-09-29)** : repris du commit `ec84128` de la branche
+`codex/book-import-detached`. Bandeau retiré ; « Ajouter une colonne » au clic
+droit à droite des colonnes, « Ajouter une feuille » au clic droit sur la bande
+d'onglets, « Importer… » dans le menu Fichier, avec les trois destinations
+(classeur actif, un classeur par fichier, un classeur pour tout le lot).
 
 Reformulation fidèle de la demande, **pas conçue ici** :
 
@@ -226,7 +232,15 @@ actuelle est figée à l'ouverture dans `AppState::open_import` (`state.rs:2781`
 
 ---
 
-## 5. Le classeur détaché ne reprend pas la disposition du classeur flottant
+## 5. Le classeur détaché ne reprend pas la disposition du classeur flottant [corrigé]
+
+**Correctif (2026-09-29)** : repris des commits `ec84128` et `f8f0b9c` de la
+branche `codex/book-import-detached`. `detached_book_contents`,
+`detached_grid_contents` et `detached_cell_widget` ont disparu : le classeur
+détaché appelle les mêmes `book_contents`/`grid_contents` que le flottant, sur
+un `AppState` de vue local (voir `docs/application.md`). La bande d'onglets
+n'utilise plus `egui::Panel`, qui débordait sous la vue d'une fenêtre coupée
+(test `un_classeur_coupe_par_le_bas_de_la_vue_ne_dessine_rien_dessous`).
 
 **Reproduction** (depuis un projet neuf)
 1. Ouvrir un classeur contenant une feuille d'au moins deux colonnes.

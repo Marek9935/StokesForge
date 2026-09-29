@@ -256,14 +256,14 @@
 //! éditable, espace réservé). Plutôt que quatre `ViewModel`/`Requests`
 //! disjoints à faire cohabiter dans [`PlotyxApp::detached_tabs`],
 //! [`DetachedTabViewModel`] est une seule structure portant un champ par
-//! nature de contenu (`selected_sheet`/`cell_edit` pour un classeur,
+//! nature de contenu (`book_state` pour un classeur,
 //! `note_edit` pour une note, `graph_view` pour un graphe) — les champs
 //! inutilisés pour la nature du `Tab` qu'elle sert restent simplement à leur
 //! valeur par défaut. Moins de types, un seul `Arc<Mutex<_>>` par onglet
 //! détaché à faire voyager dans la fermeture, au prix d'un typage un peu
 //! large ; le commentaire de tête de chaque champ dit à qui il appartient.
 //!
-//! # La lecture du modèle est factorisée, l'édition transitoire ne l'est pas
+//! # Le classeur partage son rendu entre les deux modes
 //!
 //! [`tab_contents`] (la fonction déjà partagée par les fenêtres flottantes et
 //! la zone de maximisation) prend `&mut AppState` — un onglet détaché ne peut
@@ -286,26 +286,15 @@
 //! une fenêtre détachée affichent donc littéralement la même règle, jamais
 //! deux versions à tenir en accord.
 //!
-//! Ce qui n'est en revanche **pas** partagé avec `AppState`, délibérément :
-//! le tampon de saisie transitoire d'une cellule ou d'une note
-//! ([`AppState::editing`]/[`AppState::note_editing`]) reste un **verrou
-//! unique par fenêtre**, pas un verrou unique pour toute l'application. La
-//! limite documentée en tête de crate (« une seule cellule éditable à la
-//! fois, toutes grilles confondues ») devient, pour un onglet détaché, « une
-//! seule cellule éditable à la fois **dans cette fenêtre détachée** » — une
-//! fenêtre OS séparée ne peut de toute façon pas partager le verrou
-//! `AppState` de la fenêtre mère sans le mettre lui-même derrière un
-//! `Arc<Mutex<_>>`, ce que ce module refuse déjà pour le PM et pour la même
-//! raison. `detached_cell_widget`/`detached_note_contents` réimplémentent
-//! donc la même petite machine à états (`gained_focus`/`lost_focus`/Échap)
-//! que [`cell_widget`]/[`note_contents`], sur `DetachedTabViewModel::
-//! cell_edit`/`note_edit` plutôt que sur le champ d'`AppState` — quelques
-//! lignes dupliquées, documentées ici plutôt qu'une abstraction
-//! supplémentaire (trait, générique) pour un couplage aussi mince. Valider
-//! une saisie produit la **même** [`Action::CommitCell`]/[`Action::
-//! SetNoteText`] qu'une fenêtre flottante, appliquée par [`AppState::
-//! dispatch`] : le chemin de commande annulable, lui, ne connaît aucune
-//! différence entre un onglet flottant et un onglet détaché.
+//! Le classeur détaché possède une vue [`AppState`] locale construite par
+//! [`AppState::fork_for_detached_book`]. Elle conserve sélection, presse-papier
+//! et tampons de saisie, mais lit le même instantané de session que la racine.
+//! Ainsi [`book_contents`] et [`grid_contents`] sont appelées à l'identique
+//! dans les deux modes : onglets, en-têtes, largeurs et gestes ne peuvent
+//! plus dériver dans deux implémentations. Les actions mutantes rejoignent
+//! la boucle principale après [`AppState::adopt_detached_book_view`] ; elles
+//! gardent donc l'unique voie de commande annulable. La note détachée garde
+//! son tampon local [`DetachedTabViewModel::note_edit`].
 //!
 //! [`Tab::Graph`] échappe à cette limite : [`plotyx_render_egui::GraphView`]
 //! n'a pas de verrou global à `AppState` à respecter (son cache de formes et
@@ -379,10 +368,9 @@ use plotyx_session::{Snapshot, WindowGeometry};
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    cell_text_in, drop_payload_action, node_title_in, note_text_in, plot_panel_graph, row_count_in,
-    series_list_label, visible_columns_in, worksheets_of_in, Action, ActiveTabKind, AppState,
-    CellEdit, ColumnDragPayload, GridMenu, HeaderField, MoveDirection, NoteEdit, ProjectTreeNode,
-    WindowKind,
+    drop_payload_action, node_title_in, note_text_in, plot_panel_graph, series_list_label, Action,
+    ActiveTabKind, AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination,
+    MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
 };
 use crate::theme;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
@@ -413,6 +401,20 @@ pub const SHORTCUT_REDO_Z: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::Z,
 );
+
+/// Annuler/rétablir dans le viewport actif, racine ou classeur détaché.
+fn collect_undo_redo_shortcuts(ctx: &egui::Context, actions: &mut Vec<Action>) {
+    ctx.input_mut(|input| {
+        // Le rétablissement se teste avant l'annulation : Ctrl+Maj+Z
+        // matcherait également Ctrl+Z avec les modificateurs en surplus.
+        if input.consume_shortcut(&SHORTCUT_REDO_Z) || input.consume_shortcut(&SHORTCUT_REDO_Y) {
+            actions.push(Action::Redo);
+        } else if input.consume_shortcut(&SHORTCUT_UNDO) {
+            actions.push(Action::Undo);
+        }
+    });
+}
+
 /// Ctrl+S — enregistrer (dans le fichier déjà connu, sans dialogue).
 pub const SHORTCUT_SAVE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
@@ -477,10 +479,6 @@ const SHORTCUT_TEXT_DELETE: &str = "Suppr";
 
 /// Hauteur d'une ligne de la grille, en points.
 const ROW_HEIGHT: f32 = 20.0;
-/// Hauteur de la ligne d'en-tête, en points — fenêtres détachées et grille
-/// docquée d'avant l'en-tête empilé (voir [`HEADER_HEIGHT_STACKED`] pour
-/// cette dernière).
-const HEADER_HEIGHT: f32 = 22.0;
 /// Largeur par défaut d'une colonne de données dans la grille docquée. 54px
 /// (plutôt que les 110px historiques) : demande explicite, pour loger
 /// davantage de colonnes à l'écran — l'utilisateur peut toujours
@@ -508,17 +506,10 @@ const HEADER_LONGNAME_HEIGHT: f32 = 20.0;
 /// Hauteur totale de l'en-tête empilé de la grille docquée (lettre, nom
 /// long, unité, commentaire, formule).
 const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 4.0 * HEADER_SUBROW_HEIGHT;
-/// Hauteur réservée sous la grille pour le séparateur final et la bande
-/// d'onglets de sheet dans [`book_contents`] — généreuse plutôt
-/// qu'ajustée au pixel près : [`book_contents`] la soustrait de
-/// `ui.available_height()` *avant* de peindre effectivement ce qui suit,
-/// donc toute sous-estimation ferait déborder le contenu réel de la
-/// hauteur allouée à la grille, et la bande d'onglets serait rognée au bas
-/// de la fenêtre (§ Fenêtres flottantes confinées de la doc de tête). Du
-/// temps des `egui::Window`, c'était pire : `egui::Resize` retenait ce
-/// débordement comme nouvelle taille désirée et la fenêtre « explosait » en
-/// hauteur image après image. Une légère surestimation ici, à l'inverse, ne
-/// coûte qu'un mince espace vide au-dessus de la bande d'onglets.
+/// Hauteur fixe du panneau des onglets de feuille sous la grille.
+/// [`book_contents`] la réserve avant de construire la table : la hauteur
+/// intrinsèque de cette dernière ne peut plus repousser les onglets hors
+/// de la fenêtre.
 const SHEET_TABS_HEIGHT: f32 = 40.0;
 /// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
 /// initial. Réserver sa hauteur garde le rectangle de la figure stable d'une
@@ -818,23 +809,16 @@ struct DetachedTab {
 /// voir la doc de tête du module pour le compromis. Chaque champ, hormis
 /// `snapshot`, n'a de sens que pour une nature de [`Tab`] particulière ; le
 /// commentaire le dit.
-#[derive(Debug, Default)]
 struct DetachedTabViewModel {
     /// Instantané du modèle, resynchronisé à chaque image — voir la doc de
     /// tête du module, § « la lecture du modèle est factorisée ». `None`
     /// seulement avant la toute première synchronisation (jamais observable
     /// depuis l'extérieur de [`PlotyxApp::detach_tab`], qui le pose aussitôt).
     snapshot: Option<Snapshot>,
-    /// `Tab::Book` : feuille actuellement choisie **dans cette fenêtre
-    /// détachée** — sa propre sous-navigation, indépendante de celle que le
-    /// classeur aurait en fenêtre flottante (il ne peut de toute façon pas
-    /// être dans les deux à la fois).
-    selected_sheet: Option<NodeId>,
-    /// `Tab::Book` : saisie de cellule en cours, propre à cette fenêtre — pas
-    /// le tampon global d'`AppState`, voir la doc de tête du module.
-    cell_edit: Option<CellEdit>,
-    /// `Tab::Note` : saisie de note en cours, propre à cette fenêtre — même
-    /// raison que `cell_edit`.
+    /// `Tab::Book` : état transitoire local qui rend la grille commune avec
+    /// le classeur flottant, tout en conservant sa sélection et ses saisies.
+    book_state: Option<AppState>,
+    /// `Tab::Note` : saisie de note en cours, propre à cette fenêtre.
     note_edit: Option<NoteEdit>,
     /// `Tab::Graph` : la vue (cache de formes, zoom/pan), déplacée hors de
     /// [`PlotyxApp::graph_views`] le temps du détachement — voir
@@ -977,16 +961,8 @@ impl PlotyxApp {
             if input.consume_shortcut(&SHORTCUT_RUN_SCRIPT) {
                 actions.push(Action::RunScript);
             }
-            // Le rétablissement se teste avant l'annulation : sans cela,
-            // Ctrl+Maj+Z serait avalé par le raccourci Ctrl+Z, dont les
-            // modificateurs sont compatibles.
-            if input.consume_shortcut(&SHORTCUT_REDO_Z) || input.consume_shortcut(&SHORTCUT_REDO_Y)
-            {
-                actions.push(Action::Redo);
-            } else if input.consume_shortcut(&SHORTCUT_UNDO) {
-                actions.push(Action::Undo);
-            }
         });
+        collect_undo_redo_shortcuts(ctx, actions);
         if save_as {
             self.choose_save_path(actions);
         }
@@ -1007,6 +983,26 @@ impl PlotyxApp {
                 ui.menu_button("Fichier", |ui| {
                     if ui.button("Nouveau classeur").clicked() {
                         actions.push(Action::AddWorkbook);
+                        ui.close();
+                    }
+                    if ui.button("Importer…").clicked() {
+                        let mut detached_books =
+                            self.detached_tabs.keys().filter_map(|tab| match tab {
+                                Tab::Book(book) => Some(*book),
+                                _ => None,
+                            });
+                        let only_detached_book = detached_books
+                            .next()
+                            .filter(|_| detached_books.next().is_none());
+                        let active_book = self
+                            .maximized_tab
+                            .or_else(|| self.floating_tabs.last().copied())
+                            .and_then(|tab| match tab {
+                                Tab::Book(book) => Some(book),
+                                _ => None,
+                            })
+                            .or(only_detached_book);
+                        self.state.open_import(active_book);
                         ui.close();
                     }
                     ui.separator();
@@ -1446,14 +1442,13 @@ impl PlotyxApp {
         };
         self.window_positions.remove(&tab);
         self.window_sizes.remove(&tab);
-        let selected_sheet = match tab {
-            Tab::Book(id) => self.state.selected_sheet_in(id),
+        let book_state = match tab {
+            Tab::Book(_) => self.state.fork_for_detached_book().ok(),
             _ => None,
         };
         let view_model = DetachedTabViewModel {
             snapshot: Some(self.state.snapshot().clone()),
-            selected_sheet,
-            cell_edit: None,
+            book_state,
             note_edit: None,
             graph_view,
             needs_initial_repaint: true,
@@ -1553,6 +1548,9 @@ impl PlotyxApp {
                     .lock()
                     .unwrap_or_else(|err| err.into_inner());
                 model.snapshot = Some(state.snapshot().clone());
+                if let Some(book_state) = model.book_state.as_mut() {
+                    book_state.sync_detached_snapshot(state.snapshot().clone());
+                }
             }
             let view_model = Arc::clone(&detached.view_model);
             let requests = Arc::clone(&detached.requests);
@@ -1561,12 +1559,9 @@ impl PlotyxApp {
             let title = format!("PlotYx — {}", tab_title(state, tab));
             // `Tab::Graph` part à une taille qui contient sa figure de
             // référence et son retour au cadrage initial.
-            // Le reste (`Book`/`Matrix`/`Note`) partage une taille uniforme
-            // montrant 3 colonnes de grille : `grid_contents`/`matrix_contents`
-            // utilisent `TableColumn::exact(56.0)` pour la colonne de numéro
-            // de ligne puis `TableColumn::initial(110.0)` par colonne de
-            // données, soit 56 + 3×110 = 386 ; 420 ajoute une marge pour les
-            // bordures et la scrollbar verticale de la `ScrollArea`.
+            // Le reste (`Book`/`Matrix`/`Note`) partage une taille uniforme.
+            // La grille du classeur emploie maintenant les mêmes largeurs
+            // et en-têtes que dans la fenêtre flottante.
             // `Tab::Note` n'a pas de grille à proprement parler mais reçoit
             // la même taille que « les autres » pour rester cohérente avec
             // eux — c'est explicitement voulu, pas un oubli.
@@ -1667,7 +1662,11 @@ impl PlotyxApp {
                             let tree = &snapshot.tree;
                             match tab {
                                 Tab::Book(id) => {
-                                    detached_book_contents(ui, tree, &mut model, &mut requests, id);
+                                    if let Some(book_state) = model.book_state.as_mut() {
+                                        book_contents(ui, book_state, &mut requests.actions, id);
+                                    } else {
+                                        ui.label("Session du classeur indisponible.");
+                                    }
                                 }
                                 Tab::Graph(id) => {
                                     let view =
@@ -1683,6 +1682,14 @@ impl PlotyxApp {
                             }
                         });
                     });
+                    // Les raccourcis de l'édition sont lus dans le contexte
+                    // du viewport qui a le focus, comme pour la racine.
+                    if matches!(tab, Tab::Book(_)) {
+                        collect_undo_redo_shortcuts(ui.ctx(), &mut requests.actions);
+                    }
+                    if !requests.actions.is_empty() {
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                    }
                     // État de repli qui s'applique à partir de cette image
                     // (avant même l'affectation à `model.collapsed`
                     // ci-dessous) — calculé une fois, servant à la fois à
@@ -1974,6 +1981,15 @@ impl eframe::App for PlotyxApp {
             let mut to_close: Vec<Tab> = Vec::new();
             let mut geometries: Vec<(Tab, WindowGeometry)> = Vec::new();
             for (tab, detached) in &self.detached_tabs {
+                if let Tab::Book(book) = tab {
+                    let mut model = detached
+                        .view_model
+                        .lock()
+                        .unwrap_or_else(|err| err.into_inner());
+                    if let Some(book_state) = model.book_state.as_mut() {
+                        self.state.adopt_detached_book_view(book_state, *book);
+                    }
+                }
                 let mut requests = detached
                     .requests
                     .lock()
@@ -2362,6 +2378,22 @@ impl eframe::App for PlotyxApp {
                 None
             };
             let creates_workbook = matches!(action, Action::AddWorkbook);
+            let new_import_books_after = if matches!(
+                action,
+                Action::ImportFiles {
+                    destination: ImportDestination::NewBookPerFile
+                        | ImportDestination::NewBookForAll,
+                    ..
+                }
+            ) {
+                let root = self.state.tree().root();
+                self.state
+                    .tree()
+                    .node(root)
+                    .map(|node| node.children().len())
+            } else {
+                None
+            };
             let revision_before = self.state.revision();
             self.state.dispatch(action);
             if creates_workbook && self.state.revision() != revision_before {
@@ -2374,6 +2406,22 @@ impl eframe::App for PlotyxApp {
                     .filter(|id| self.state.worksheets_of(*id).len() == 1)
                 {
                     self.open_tab(Tab::Book(book));
+                }
+            }
+            if let Some(before) = new_import_books_after {
+                let root = self.state.tree().root();
+                let new_books: Vec<NodeId> = self
+                    .state
+                    .tree()
+                    .node(root)
+                    .map(|node| node.children().iter().skip(before).copied().collect())
+                    .unwrap_or_default();
+                for book in new_books {
+                    if self.state.tree().node(book).is_some_and(|node| {
+                        matches!(node.kind(), plotyx_core::node::NodeKind::Workbook { .. })
+                    }) {
+                        self.open_tab(Tab::Book(book));
+                    }
                 }
             }
             if let Some(parent) = plotted_from {
@@ -2583,8 +2631,19 @@ fn sheet_tabs(
     sheets: &[(NodeId, String)],
     selected: NodeId,
     mut on_select: impl FnMut(NodeId),
+    mut on_add: impl FnMut(),
 ) {
     if sheets.is_empty() {
+        ui.allocate_response(
+            egui::vec2(ui.available_width(), SHEET_TABS_HEIGHT),
+            egui::Sense::click(),
+        )
+        .context_menu(|ui| {
+            if ui.button("Ajouter une feuille").clicked() {
+                on_add();
+                ui.close();
+            }
+        });
         return;
     }
     // Mémorisée par instance de bande (scopée par la pile d'`Id` du parent,
@@ -2599,6 +2658,8 @@ fn sheet_tabs(
     ui.memory_mut(|memory| memory.data.insert_temp(last_selected_id, selected));
 
     let mut requested = None;
+    let mut requested_add = false;
+    let band_width = ui.available_width();
     egui::ScrollArea::horizontal()
         .id_salt("sheet_tabs_scroll")
         .auto_shrink([false, true])
@@ -2614,6 +2675,12 @@ fn sheet_tabs(
                             egui::Color32::TRANSPARENT
                         });
                     let response = ui.add(tab);
+                    response.context_menu(|ui| {
+                        if ui.button("Ajouter une feuille").clicked() {
+                            requested_add = true;
+                            ui.close();
+                        }
+                    });
                     if response.clicked() {
                         requested = Some(*id);
                     }
@@ -2621,10 +2688,24 @@ fn sheet_tabs(
                         response.scroll_to_me(Some(egui::Align::Center));
                     }
                 }
+                let used = ui.cursor().left() - ui.min_rect().left();
+                let empty = ui.allocate_response(
+                    egui::vec2((band_width - used).max(1.0), SHEET_TABS_HEIGHT),
+                    egui::Sense::click(),
+                );
+                empty.context_menu(|ui| {
+                    if ui.button("Ajouter une feuille").clicked() {
+                        requested_add = true;
+                        ui.close();
+                    }
+                });
             });
         });
     if let Some(id) = requested {
         on_select(id);
+    }
+    if requested_add {
+        on_add();
     }
 }
 
@@ -4306,7 +4387,7 @@ fn header_field_text(state: &AppState, column: NodeId, field: HeaderField) -> St
     state.header_field_display_text(column, field)
 }
 
-/// Contenu d'un [`Tab::Book`] : la barre d'actions de structure, la grille
+/// Contenu commun d'un [`Tab::Book`] flottant ou détaché : la grille
 /// ([`grid_contents`]) scopée à la feuille choisie *dans ce classeur*, et
 /// la sous-navigation entre les feuilles — des onglets compacts en **bas**
 /// de la grille (choix assumé, pas une convention préexistante du crate :
@@ -4317,50 +4398,57 @@ fn header_field_text(state: &AppState, column: NodeId, field: HeaderField) -> St
 /// sur la sélection ([`Action::DeleteSelectedCells`]).
 fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>, book: NodeId) {
     let sheets = state.worksheets_of(book);
+    let selected = state.selected_sheet_in(book).unwrap_or(book);
+    let mut chosen_sheet = None;
+    let mut add_sheet = false;
+    // La bande d'onglets est retranchée du rectangle du classeur **avant**
+    // de construire la grille : réserver une hauteur dans `allocate_ui` ne
+    // suffisait pas, sa `ScrollArea` pouvait ensuite faire grandir la taille
+    // consommée et repousser les onglets hors du cadre. Pas d'`egui::Panel`
+    // pour ce découpage : il remplace le rognage de son parent par le sien
+    // au lieu de le combiner, et dessinait les onglets sous la vue quand la
+    // fenêtre y était coupée (`show_floating_window`). Deux sous-`Ui` bornés,
+    // chacun rogné à l'intersection de son rectangle et du rognage parent.
+    let area = ui.available_rect_before_wrap();
+    let tabs_height = SHEET_TABS_HEIGHT.min(area.height());
+    let (grid_rect, tabs_rect) = area.split_top_bottom_at_y(area.bottom() - tabs_height);
+    let mut bounded = |rect: egui::Rect| {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        child.set_clip_rect(ui.clip_rect().intersect(rect));
+        child
+    };
+    let mut tabs_ui = bounded(tabs_rect);
+    let mut grid_ui = bounded(grid_rect);
+    sheet_tabs(
+        &mut tabs_ui,
+        &sheets,
+        selected,
+        |id| chosen_sheet = Some(id),
+        || add_sheet = true,
+    );
     if sheets.is_empty() {
-        ui.centered_and_justified(|ui| {
+        grid_ui.centered_and_justified(|ui| {
             ui.weak(format!(
                 "« {} » n'a aucune feuille (ou a été supprimé).",
                 node_title(state, book, "Classeur")
             ));
         });
-        return;
-    }
-    let selected = state.selected_sheet_in(book).unwrap_or(sheets[0].0);
-
-    ui.horizontal(|ui| {
-        if ui.button("Ajouter une colonne").clicked() {
-            actions.push(Action::AddColumn { sheet: selected });
-        }
-        if ui.button("Ajouter une feuille").clicked() {
-            actions.push(Action::AddWorksheet { book });
-        }
-        if ui.button("Importer…").clicked() {
-            state.open_import(book);
-        }
-        ui.separator();
-        ui.weak(format!(
-            "{} lignes × {} colonnes",
-            state.row_count(selected),
-            state.visible_columns(selected).len()
-        ));
-    });
-    ui.separator();
-
-    // La grille prend tout l'espace restant sauf la bande d'onglets du bas,
-    // réservée manuellement : on n'est pas au niveau du `Context` ici (un
-    // sous-`Ui` scopé à cet onglet de classeur), `egui::TopBottomPanel`
-    // n'est donc pas utilisable.
-    let grid_height = (ui.available_height() - SHEET_TABS_HEIGHT).max(0.0);
-    ui.allocate_ui(egui::vec2(ui.available_width(), grid_height), |ui| {
-        show_horizontally_scrollable_grid(ui, |ui| {
+    } else {
+        show_horizontally_scrollable_grid(&mut grid_ui, |ui| {
             grid_contents(ui, state, actions, selected);
         });
-    });
-    ui.separator();
-    sheet_tabs(ui, &sheets, selected, |id| {
-        actions.push(Action::SelectSheet(id));
-    });
+    }
+    ui.advance_cursor_after_rect(area);
+    if let Some(id) = chosen_sheet {
+        state.dispatch(Action::SelectSheet(id));
+    }
+    if add_sheet {
+        actions.push(Action::AddWorksheet { book });
+    }
 }
 
 /// Libellé affiché pour un [`Separator`] dans la fenêtre d'import.
@@ -4491,7 +4579,7 @@ fn import_line_preview_widget(ui: &mut egui::Ui, preview: &plotyx_import::FilePr
         });
 }
 
-/// La fenêtre d'import (« Importer… », voir [`book_contents`]) : dialogue
+/// La fenêtre d'import (« Importer… », menu Fichier) : dialogue
 /// transitoire (`egui::Window`, pas un onglet dockable), peinte depuis
 /// [`PlotyxApp::ui`] tant que [`AppState::import_state`] est `Some`. Ferme sur
 /// la croix native de la fenêtre exactement comme sur « Annuler » — les deux
@@ -4509,8 +4597,11 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
     let mut want_save = false;
     let mut want_cancel = false;
     let mut want_auto_detect = false;
-    let mut pending_import: Option<(NodeId, plotyx_import::ImportRecipe, Vec<std::path::PathBuf>)> =
-        None;
+    let mut pending_import: Option<(
+        ImportDestination,
+        plotyx_import::ImportRecipe,
+        Vec<std::path::PathBuf>,
+    )> = None;
     egui::Window::new("Importer des fichiers")
         .collapsible(false)
         .resizable(true)
@@ -4562,6 +4653,30 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
             let Some(import) = state.import_state_mut() else {
                 return;
             };
+            ui.label("Destination :");
+            if let Some(book) = import.active_book {
+                ui.radio_value(
+                    &mut import.destination,
+                    ImportDestination::ActiveBook(book),
+                    "Classeur actif",
+                );
+            } else {
+                ui.add_enabled(
+                    false,
+                    egui::RadioButton::new(false, "Classeur actif (aucun classeur actif)"),
+                );
+            }
+            ui.radio_value(
+                &mut import.destination,
+                ImportDestination::NewBookPerFile,
+                "Un nouveau classeur par fichier",
+            );
+            ui.radio_value(
+                &mut import.destination,
+                ImportDestination::NewBookForAll,
+                "Un nouveau classeur pour tous les fichiers",
+            );
+            ui.separator();
             ui.horizontal(|ui| {
                 ui.label("Séparateur :");
                 egui::ComboBox::new("plotyx_import_separator_combo", "")
@@ -4850,8 +4965,11 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
                     .add_enabled(has_files, egui::Button::new("Importer"))
                     .clicked()
                 {
-                    pending_import =
-                        Some((import.book, import.recipe.clone(), import.paths.clone()));
+                    pending_import = Some((
+                        import.destination,
+                        import.recipe.clone(),
+                        import.paths.clone(),
+                    ));
                 }
                 if ui.button("Annuler").clicked() {
                     want_cancel = true;
@@ -4868,9 +4986,9 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
     if want_auto_detect {
         state.auto_detect_import_header();
     }
-    if let Some((book, recipe, paths)) = pending_import {
+    if let Some((destination, recipe, paths)) = pending_import {
         actions.push(Action::ImportFiles {
-            book,
+            destination,
             recipe,
             paths,
         });
@@ -4903,8 +5021,14 @@ fn grid_contents(
     let columns = state.visible_columns(sheet);
     let row_count = state.row_count(sheet);
     if columns.is_empty() {
-        ui.centered_and_justified(|ui| {
+        let empty = ui.centered_and_justified(|ui| {
             ui.weak("Aucune colonne dans cette feuille.");
+        });
+        empty.response.context_menu(|ui| {
+            if ui.button("Ajouter une colonne").clicked() {
+                actions.push(Action::AddColumn { sheet });
+                ui.close();
+            }
         });
         return;
     }
@@ -4921,6 +5045,7 @@ fn grid_contents(
     // justement tout cet espace disponible : sert de référence à la zone de
     // prise du glisser-déposer de colonnes plus bas ([`grid_grip_side`]).
     let grid_rect = ui.available_rect_before_wrap();
+    let mut last_column_right = grid_rect.left();
     TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
@@ -4931,13 +5056,9 @@ fn grid_contents(
             columns.len(),
         )
         .min_scrolled_height(0.0)
-        // B3 — la grille doit occuper tout l'espace vertical réservé par
-        // [`book_contents`] (`grid_height`), pas seulement celui que son
-        // contenu requiert : sans quoi `Ui::allocate_ui` (qui n'alloue au
-        // parent que l'espace réellement utilisé par l'enfant) laisse un
-        // vide entre la grille et le bas du panneau, et les onglets de
-        // feuille se retrouvent collés sous une grille trop courte plutôt
-        // que plaqués en bas de la fenêtre.
+        // La table occupe l'espace laissé par le panneau d'onglets, même
+        // quand sa feuille contient peu de lignes : la grille garde ainsi
+        // sa hauteur et son défilement vertical.
         .auto_shrink([false, false])
         .header(HEADER_HEIGHT_STACKED, |mut header| {
             header.col(|ui| {
@@ -4945,6 +5066,7 @@ fn grid_contents(
             });
             for (index, (id, _, column_type)) in columns.iter().enumerate() {
                 header.col(|ui| {
+                    last_column_right = ui.max_rect().right();
                     column_header_widget(ui, state, actions, sheet, *id, index, *column_type);
                 });
             }
@@ -4962,6 +5084,27 @@ fn grid_contents(
                 }
             });
         });
+
+    // La portion libre après la dernière colonne est une cible distincte
+    // des cellules et de leurs menus. La borne vient de l'en-tête réellement
+    // disposé (y compris les largeurs redimensionnées), pas des largeurs par défaut.
+    if last_column_right < grid_rect.right() {
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(last_column_right, grid_rect.top()),
+            grid_rect.right_bottom(),
+        );
+        let response = ui.interact(
+            rect,
+            ui.id().with(("add_column_blank", sheet)),
+            egui::Sense::click(),
+        );
+        response.context_menu(|ui| {
+            if ui.button("Ajouter une colonne").clicked() {
+                actions.push(Action::AddColumn { sheet });
+                ui.close();
+            }
+        });
+    }
 
     // Glisser une sélection de colonnes vers un graphe ouvert (chantier
     // « glisser une sélection vers un graphe », suite du menu contextuel
@@ -6252,211 +6395,6 @@ fn cell_widget(
     });
 }
 
-/// Contenu d'un `Tab::Book` **détaché** : le pendant de [`book_contents`],
-/// opérant sur un `&Tree` (venant de `DetachedTabViewModel::snapshot`) et sur
-/// `DetachedTabViewModel::selected_sheet`/`cell_edit` plutôt que sur
-/// `&mut AppState` — voir la doc de tête du module pour pourquoi ce n'est
-/// pas littéralement `book_contents`. Mêmes gestes, même
-/// `Action::AddColumn`/`InsertRows`/`DeleteRows`/`CommitCell` poussés dans
-/// `requests.actions` plutôt que dans un `&mut Vec<Action>` direct.
-fn detached_book_contents(
-    ui: &mut egui::Ui,
-    tree: &Tree,
-    model: &mut DetachedTabViewModel,
-    requests: &mut DetachedTabRequests,
-    book: NodeId,
-) {
-    let sheets = worksheets_of_in(tree, book);
-    if sheets.is_empty() {
-        ui.centered_and_justified(|ui| {
-            ui.weak(format!(
-                "« {} » n'a aucune feuille (ou a été supprimé).",
-                node_title_in(tree, book, "Classeur")
-            ));
-        });
-        return;
-    }
-    let selected = model
-        .selected_sheet
-        .filter(|id| sheets.iter().any(|(sheet_id, _)| sheet_id == id))
-        .unwrap_or(sheets[0].0);
-    model.selected_sheet = Some(selected);
-
-    sheet_tabs(ui, &sheets, selected, |id| {
-        model.selected_sheet = Some(id);
-        requests.actions.push(Action::SelectSheet(id));
-    });
-    ui.separator();
-    ui.horizontal(|ui| {
-        if ui.button("Ajouter une colonne").clicked() {
-            requests.actions.push(Action::AddColumn { sheet: selected });
-        }
-        if ui.button("Ajouter une feuille").clicked() {
-            requests.actions.push(Action::AddWorksheet { book });
-        }
-        if ui.button("Insérer 1 ligne").clicked() {
-            // Même correctif B5 que `book_contents` : insérer en fin de
-            // feuille, pas `at: 0` en dur (`Project::insert_rows` exige
-            // `at < len`, une colonne neuve a `len == 0`).
-            requests.actions.push(Action::InsertRows {
-                sheet: selected,
-                at: row_count_in(tree, selected),
-                count: 1,
-            });
-        }
-        if ui.button("Supprimer 1 ligne").clicked() {
-            requests.actions.push(Action::DeleteRows {
-                sheet: selected,
-                at: 0,
-                count: 1,
-            });
-        }
-        ui.separator();
-        ui.weak(format!(
-            "{} lignes × {} colonnes",
-            row_count_in(tree, selected),
-            visible_columns_in(tree, selected).len()
-        ));
-    });
-    ui.separator();
-    show_horizontally_scrollable_grid(ui, |ui| {
-        detached_grid_contents(ui, tree, model, requests, selected);
-    });
-}
-
-/// Pendant détaché de [`grid_contents`] — mêmes principes (virtualisation),
-/// sur `&Tree`/`DetachedTabViewModel` plutôt que `&mut AppState`.
-fn detached_grid_contents(
-    ui: &mut egui::Ui,
-    tree: &Tree,
-    model: &mut DetachedTabViewModel,
-    requests: &mut DetachedTabRequests,
-    sheet: NodeId,
-) {
-    let columns = visible_columns_in(tree, sheet);
-    let row_count = row_count_in(tree, sheet);
-    if columns.is_empty() {
-        ui.centered_and_justified(|ui| {
-            ui.weak("Aucune colonne dans cette feuille.");
-        });
-        return;
-    }
-    TableBuilder::new(ui)
-        .striped(true)
-        .resizable(true)
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(TableColumn::exact(56.0))
-        .columns(TableColumn::initial(110.0).at_least(56.0), columns.len())
-        .min_scrolled_height(0.0)
-        .header(HEADER_HEIGHT, |mut header| {
-            header.col(|ui| {
-                ui.strong("#");
-            });
-            for (_, name, column_type) in &columns {
-                header.col(|ui| {
-                    ui.strong(name);
-                    ui.weak(type_suffix(*column_type));
-                });
-            }
-        })
-        .body(|body| {
-            body.rows(ROW_HEIGHT, row_count, |mut row| {
-                let index = row.index();
-                row.col(|ui| {
-                    ui.weak(format!("{}", index + 1));
-                });
-                for (id, _, _) in &columns {
-                    row.col(|ui| {
-                        detached_cell_widget(ui, tree, &mut model.cell_edit, requests, *id, index);
-                    });
-                }
-            });
-        });
-}
-
-/// Pendant détaché de [`cell_widget`] — même machine à états
-/// (`gained_focus`/`lost_focus`/Échap), sur `cell_edit: &mut Option<CellEdit>`
-/// propre à cette fenêtre plutôt que sur `AppState::editing`. Voir la doc de
-/// tête du module, § « la lecture du modèle est factorisée, l'édition
-/// transitoire ne l'est pas », pour pourquoi ce doublon minime est assumé
-/// plutôt qu'abstrait.
-fn detached_cell_widget(
-    ui: &mut egui::Ui,
-    tree: &Tree,
-    cell_edit: &mut Option<CellEdit>,
-    requests: &mut DetachedTabRequests,
-    column: NodeId,
-    row: usize,
-) {
-    let inner = ui.push_id((column.raw(), row), |ui| {
-        let editing_here = cell_edit
-            .as_ref()
-            .is_some_and(|edit| edit.column == column && edit.row == row);
-
-        if editing_here {
-            let edit = cell_edit.as_mut()?;
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut edit.buffer)
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY),
-            );
-            Some((response, None))
-        } else {
-            let original = cell_text_in(tree, column, row);
-            let mut shown = original.clone();
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut shown)
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY),
-            );
-            Some((response, Some((original, shown))))
-        }
-    });
-
-    let Some((response, typed)) = inner.inner else {
-        return;
-    };
-
-    if response.gained_focus() {
-        *cell_edit = Some(CellEdit {
-            column,
-            row,
-            buffer: cell_text_in(tree, column, row),
-        });
-        // Reprend une frappe déjà atterrie dans la chaîne jetable de cette
-        // image, comme `cell_widget` — sinon le premier caractère serait
-        // perdu.
-        if let Some((original, shown)) = typed {
-            if shown != original {
-                if let Some(edit) = cell_edit.as_mut() {
-                    edit.buffer = shown;
-                }
-            }
-        }
-        return;
-    }
-
-    if !response.lost_focus() {
-        return;
-    }
-
-    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-        *cell_edit = None;
-        return;
-    }
-
-    let pending = cell_edit
-        .as_ref()
-        .filter(|edit| edit.column == column && edit.row == row)
-        .map(|edit| edit.buffer.clone());
-    if let Some(text) = pending {
-        *cell_edit = None;
-        requests
-            .actions
-            .push(Action::CommitCell { column, row, text });
-    }
-}
-
 /// Pendant détaché de [`matrix_contents`] — même espace réservé, sur `&Tree`
 /// plutôt que sur `&AppState`.
 fn detached_matrix_contents(ui: &mut egui::Ui, tree: &Tree, matrix: NodeId) {
@@ -6929,6 +6867,74 @@ mod graph_layout_tests {
     // Bug 2 (`docs/chantiers/retours-2026-09-24-bugs.md`) : une fenêtre à
     // cheval sur le bord de la vue (espace de travail défilé) peignait
     // par-dessus le Project Manager, et y captait les clics.
+    // Un classeur coupé par le bas de la vue : sa bande d'onglets de
+    // feuille, posée au bas de la fenêtre, ne doit pas être dessinée sous la
+    // vue (sur la barre de défilement ou la console). `egui::Panel` remplace
+    // le rognage de son parent au lieu de le combiner : c'est lui qui
+    // faisait déborder les onglets.
+    #[test]
+    fn un_classeur_coupe_par_le_bas_de_la_vue_ne_dessine_rien_dessous() {
+        let (session, _graph) = graphe();
+        let mut state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let book = state
+            .project_tree()
+            .iter()
+            .find_map(|node| match node {
+                ProjectTreeNode::Window {
+                    id,
+                    kind: WindowKind::Book,
+                    ..
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let id = egui::Id::new("classeur_coupe");
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1400.0, 400.0));
+        let window_rect =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(500.0, 400.0));
+        let mut actions = Vec::new();
+        let mut output = None;
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1000.0),
+                )),
+                ..Default::default()
+            };
+            let mut frame = context.run_ui(input, |ui| {
+                show_floating_window(
+                    ui.ctx(),
+                    id,
+                    window_rect,
+                    viewport,
+                    false,
+                    |ui| book_contents(ui, &mut state, &mut actions, book),
+                    |_, _| {},
+                );
+            });
+            frame.textures_delta.clear();
+            output = Some(frame);
+        }
+        let output = output.unwrap();
+        assert!(!output.shapes.is_empty());
+        // Une forme dont le rognage est vide (onglets entièrement sous la
+        // vue) ne dessine rien : seule compte une découpe non vide.
+        for painted in output
+            .shapes
+            .iter()
+            .filter(|painted| painted.clip_rect.is_positive())
+        {
+            assert!(
+                viewport.contains_rect(painted.clip_rect),
+                "une forme du classeur est découpée hors de la vue : {:?}",
+                painted.clip_rect,
+            );
+        }
+    }
+
     #[test]
     fn une_fenetre_a_cheval_sur_le_bord_de_la_vue_est_rognee_et_laisse_passer_les_clics() {
         let context = egui::Context::default();
@@ -7010,7 +7016,7 @@ mod graph_layout_tests {
         };
         let mut output = context.run_ui(input, |ui| {
             ui.allocate_ui(egui::vec2(200.0, SHEET_TABS_HEIGHT), |ui| {
-                sheet_tabs(ui, &sheets, sheets[0].0, |_| {});
+                sheet_tabs(ui, &sheets, sheets[0].0, |_| {}, || {});
             });
         });
         output.textures_delta.clear();
@@ -7055,7 +7061,7 @@ mod graph_layout_tests {
                         // les deux étapes, pas `ui.id().with("sheet_tabs_scroll")`
                         // directement, sous peine de calculer un autre `Id`.
                         *scroll_id = Some(ui.id().with(egui::IdSalt::new("sheet_tabs_scroll")));
-                        sheet_tabs(ui, &sheets, selected, |_| {});
+                        sheet_tabs(ui, &sheets, selected, |_| {}, || {});
                     });
                 });
                 output.textures_delta.clear();
@@ -7611,7 +7617,7 @@ mod graph_layout_tests {
         output.textures_delta.clear();
 
         // Fenêtre OS volontairement plus étroite que les dix colonnes
-        // nommées (bandeau + en-têtes) — comme le rétrécissement natif de la
+        // nommées et leurs en-têtes — comme le rétrécissement natif de la
         // reproduction du rapport de bug.
         let window_size = egui::vec2(200.0, 150.0);
         let window_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, window_size);
@@ -7634,7 +7640,7 @@ mod graph_layout_tests {
         // n'a un `clip_rect` qui déborde `window_rect`. La régression que B8
         // corrige est plus fine mais tout aussi réelle : sans
         // `ui.set_clip_rect(...)` posé sur le `Ui` du `CentralPanel`, tout le
-        // contenu (bandeau, en-têtes de colonne, grille) hérite du rognage
+        // contenu (en-têtes de colonne, grille, onglets) hérite du rognage
         // *par défaut* du panneau — le rectangle plein du viewport, marge du
         // `Frame` comprise — au lieu du rectangle de contenu réellement
         // disponible une fois cette marge retirée. Un en-tête tout au bord
@@ -7644,13 +7650,7 @@ mod graph_layout_tests {
         // bug (troncature qui ignore la géométrie du contenu). Ce test
         // verrouille donc : le rognage logique de tout contenu doit être
         // strictement plus petit que `window_rect`, pas égal à lui.
-        let content_labels = [
-            "Ajouter une colonne",
-            "Ajouter une feuille",
-            "Colonne 0",
-            "Colonne 1",
-            "Sheet1",
-        ];
+        let content_labels = ["#", "Long Name", "Units", "A(Y)", "Sheet1"];
         let mut checked = 0;
         for painted in &output.shapes {
             let egui::Shape::Text(shape) = &painted.shape else {
@@ -7681,8 +7681,143 @@ mod graph_layout_tests {
             checked,
             content_labels.len(),
             "le classeur détaché doit avoir peint tous les libellés attendus \
-             (bandeau, en-têtes de colonne, onglet de feuille)"
+             (en-tête empilé et onglet de feuille) : {:?}",
+            output
+                .shapes
+                .iter()
+                .filter_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) => Some(shape.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
         );
+        let position_of = |label: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == label => {
+                        let center = shape.pos + shape.galley.rect.center().to_vec2();
+                        painted.clip_rect.contains(center).then_some(center)
+                    }
+                    _ => None,
+                })
+        };
+        let tab_y = position_of("Sheet1")
+            .expect("l'onglet détaché doit être visible")
+            .y;
+        let header_y = position_of("A(Y)")
+            .expect("l'en-tête détaché doit être visible")
+            .y;
+        assert!(
+            tab_y > header_y,
+            "l'onglet doit rester sous la grille détachée"
+        );
+    }
+
+    #[test]
+    fn clic_droit_dans_le_vide_de_grille_et_sur_les_onglets_propose_les_ajouts() {
+        let mut project = Project::new("Menus").unwrap();
+        let book = project.add_workbook(project.root(), None).unwrap();
+        let sheet = project.tree().node(book).unwrap().children()[0];
+        project
+            .add_column(sheet, None, None, Column::from_f64(&[1.0]))
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+
+        for (on_tabs, label) in [
+            (false, "Ajouter une colonne"),
+            (true, "Ajouter une feuille"),
+        ] {
+            let context = egui::Context::default();
+            let mut state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+            let mut actions = Vec::new();
+            {
+                let mut paint = |events: Vec<egui::Event>| {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(600.0, 500.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    };
+                    let mut output = context.run_ui(input, |ui| {
+                        book_contents(ui, &mut state, &mut actions, book)
+                    });
+                    output.textures_delta.clear();
+                    output
+                };
+                let first = paint(Vec::new());
+                let tab_is_visible = first.shapes.iter().any(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == "Sheet1" => painted
+                        .clip_rect
+                        .contains(shape.pos + shape.galley.rect.center().to_vec2()),
+                    _ => false,
+                });
+                assert!(
+                    tab_is_visible,
+                    "la bande d'onglets doit rester dans la fenêtre"
+                );
+                let pos = if on_tabs {
+                    find_text_center(&first.shapes, "Sheet1")
+                } else {
+                    egui::pos2(450.0, 180.0)
+                };
+                paint(vec![egui::Event::PointerMoved(pos)]);
+                paint(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                paint(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                let output = paint(Vec::new());
+                assert!(
+                    output.shapes.iter().any(|painted| match &painted.shape {
+                        egui::Shape::Text(shape) => shape.galley.job.text == label,
+                        _ => false,
+                    }),
+                    "le menu contextuel doit proposer {label} : {:?}",
+                    output
+                        .shapes
+                        .iter()
+                        .filter_map(|painted| match &painted.shape {
+                            egui::Shape::Text(shape) => Some(shape.galley.job.text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                );
+                let menu_pos = find_text_center(&output.shapes, label);
+                paint(vec![egui::Event::PointerMoved(menu_pos)]);
+                paint(vec![egui::Event::PointerButton {
+                    pos: menu_pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                paint(vec![egui::Event::PointerButton {
+                    pos: menu_pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            if on_tabs {
+                assert!(
+                    matches!(actions.as_slice(), [Action::AddWorksheet { book: id }] if *id == book)
+                );
+            } else {
+                assert!(
+                    matches!(actions.as_slice(), [Action::AddColumn { sheet: id }] if *id == sheet)
+                );
+            }
+        }
     }
 
     // B9 (`docs/chantiers/retours-2026-09-23-bugs.md`) : le correctif B3

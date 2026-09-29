@@ -80,7 +80,8 @@ Chaque fenêtre flottante peut aussi être maximisée (plein cadre du
 `CentralPanel`, `PlotyxApp::maximized_tab`) ou détachée dans une vraie fenêtre
 OS séparée (`PlotyxApp::detach_tab`/`reattach_tab`, pour le multi-écran).
 
-Le menu Fichier propose la création d'un nouveau classeur. La position et
+Le menu Fichier propose la création d'un nouveau classeur et l'import de
+fichiers. La position et
 la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 « Géométrie des fenêtres »). L'éditeur de matrice reste un espace réservé.
 
@@ -91,7 +92,11 @@ extérieur unique : leur contenu est peint dans un sous-espace borné qui ne
 peut agrandir le cadre au-delà des poignées de redimensionnement. La règle
 intérieure dépend de la nature du contenu. Dans un classeur, la grille et la
 bande d'onglets de feuille défilent chacune horizontalement, indépendamment,
-lorsqu'elles dépassent ; le bandeau d'actions reste rogné. Les onglets
+lorsqu'elles dépassent. La bande d'onglets est retranchée du bas du classeur
+avant la construction de la grille, qui ne peut donc plus la repousser hors du
+cadre (`book_contents`) ; ce découpage n'utilise pas `egui::Panel`, qui
+remplace le rognage de son parent au lieu de le combiner et dessinait les
+onglets sous la vue d'une fenêtre coupée. Les onglets
 gardent leur taille naturelle (`sheet_tabs`, `crates/plotyx-app/src/app.rs`) —
 ils ne rétrécissent pas et ne se replient pas dans un menu « … » ; sélectionner
 un onglet hors vue (au clic, au clavier ou par script) fait défiler la bande
@@ -203,22 +208,18 @@ détachés simultanément, chacun dans son propre `ViewportId`.
 
 **Tailles par défaut des fenêtres détachées** (`show_detached_tabs`) :
 `Tab::Graph` ouvre en 560×540, ce qui contient la figure de référence, ses
-commandes et son en-tête. Le reste (`Book`/`Matrix`/`Note`)
-partage une taille uniforme de 420×360, calculée pour montrer 3 colonnes de
-grille : `grid_contents`/`matrix_contents` utilisent
-`TableColumn::exact(56.0)` pour la colonne de numéro de ligne puis
-`TableColumn::initial(110.0)` par colonne de données, soit 56 + 3×110 = 386 ;
-420 ajoute une marge pour les bordures et la scrollbar verticale de la
-`ScrollArea`. `Tab::Note` n'a pas de grille à proprement parler mais reçoit la
-même taille que « les autres » pour rester cohérente avec eux — voulu, pas un
-oubli.
+commandes et son en-tête. Le reste (`Book`/`Matrix`/`Note`) partage une taille
+uniforme de 420×360. La grille du classeur conserve les mêmes largeurs et
+en-têtes dans les fenêtres flottantes et détachées ; une fenêtre étroite
+défile horizontalement. La note et la matrice gardent la même taille par
+cohérence avec les autres contenus.
 
 **Une seule structure de `ViewModel`, pas une par nature de contenu.** Le PM
 n'a qu'une forme de contenu (un arbre en lecture seule) ; les quatre natures
 détachables ici sont franchement différentes (grille éditable virtualisée,
 graphe interactif avec cache de formes, texte éditable, espace réservé).
-`DetachedTabViewModel` porte un champ par nature (`selected_sheet`/
-`cell_edit` pour un classeur, `note_edit` pour une note, `graph_view` pour un
+`DetachedTabViewModel` porte un champ par nature (`book_state` pour un
+classeur, `note_edit` pour une note, `graph_view` pour un
 graphe) plutôt que quatre types disjoints à faire cohabiter dans la table des
 onglets détachés — les champs inutilisés pour la nature du `Tab` servi
 restent à leur valeur par défaut.
@@ -238,22 +239,13 @@ l'occasion (`cell_text_in`, `visible_columns_in`, `row_count_in`,
 méthode `AppState` correspondante, pas une réécriture — le dock et une
 fenêtre détachée affichent donc littéralement la même règle.
 
-Le tampon de saisie transitoire (`AppState::editing`/`note_editing`), en
-revanche, n'est **pas** partagé avec `AppState` : un onglet détaché a son
-propre tampon (`DetachedTabViewModel::cell_edit`/`note_edit`), pas le verrou
-unique app-wide du dock. La limite déjà documentée plus bas (« une seule
-cellule éditable à la fois, toutes grilles confondues ») devient, pour un
-onglet détaché, « une seule cellule éditable à la fois **dans cette fenêtre
-détachée** » — conséquence assumée de la même contrainte technique que pour
-le PM, pas une nécessité produit. `detached_cell_widget`/
-`detached_note_contents` réimplémentent donc la petite machine à états
-(`gained_focus`/`lost_focus`/Échap) de `cell_widget`/`note_contents` sur ce
-tampon local plutôt que sur celui d'`AppState` — quelques lignes dupliquées
-plutôt qu'une abstraction supplémentaire pour un couplage aussi mince.
-Valider une saisie produit la **même** `Action::CommitCell`/`Action::
-SetNoteText`, appliquée par `AppState::dispatch` : le chemin de commande
-annulable ne connaît aucune différence entre un onglet docké et un onglet
-détaché.
+Le classeur détaché a un `AppState` de vue local, synchronisé avec l'instantané
+de la racine. Il appelle les mêmes `book_contents`/`grid_contents` que le
+classeur flottant ; disposition, en-tête, sélection, menus et raccourcis de
+grille partagent ainsi le même code. Sa sélection et sa saisie restent locales
+à la fenêtre. Avant de traiter ses actions, la racine reprend leur contexte
+de grille, puis applique les mêmes commandes annulables. La note détachée
+conserve son propre `note_edit` et sa fonction de rendu dédiée.
 
 `Tab::Graph` échappe à cette limite : `GraphView` n'a pas de verrou global à
 `AppState` à respecter (son cache de formes et sa navigation zoom/pan sont
@@ -374,6 +366,16 @@ vient de `AppState::undo_label` — et **rien ne garantit leur cohérence sinon 
 relecture**. C'est le point à vérifier en premier quand une action est ajoutée.
 
 ### Menus contextuels de la grille
+
+Le classeur n'a plus de bandeau d'actions au-dessus de la grille. Un clic droit
+dans l'espace vide à droite de la dernière colonne propose « Ajouter une
+colonne » ; un clic droit sur un onglet de feuille ou sur la partie vide de sa
+bande propose « Ajouter une feuille ». La bande reste sous la grille dans les
+fenêtres flottantes et détachées. « Importer… » se trouve dans le menu Fichier.
+Son dialogue choisit entre le classeur actif, un nouveau classeur par fichier
+et un seul nouveau classeur pour tout le lot. Chaque fichier valide crée sa
+propre feuille ; les nouveaux classeurs ne sont créés qu'après analyse
+réussie. Le lot est une seule entrée d'historique annulable.
 
 Les cinq zones de la grille — cellule de données, champ d'en-tête d'une seule
 colonne, rangée des lettres, gouttière des numéros de ligne, libellés de champ

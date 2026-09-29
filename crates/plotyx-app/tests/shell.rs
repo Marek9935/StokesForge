@@ -30,7 +30,7 @@ use plotyx_app::app::{grid_grip_side, GripSide};
 use plotyx_app::selection::Selection;
 use plotyx_app::state::{
     drop_payload_action, plot_panel_graph, Action, ActiveTabKind, AppState, ColumnDragPayload,
-    GridZone, HeaderField, MoveDirection, PlotEdit,
+    GridZone, HeaderField, ImportDestination, MoveDirection, PlotEdit,
 };
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
@@ -2339,7 +2339,7 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
     // de colonnes retombent sur le nom de fichier plutôt que "X"/"Y".
     recipe.has_column_header_row = true;
     state.dispatch(Action::ImportFiles {
-        book,
+        destination: ImportDestination::ActiveBook(book),
         recipe,
         paths: vec![file_a.clone(), file_b.clone()],
     });
@@ -2387,6 +2387,118 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
     );
 }
 
+/// Les deux destinations qui créent des classeurs conservent la règle
+/// « une feuille par fichier » et le lot entier reste annulable d'un coup.
+#[test]
+fn importing_into_new_books_groups_files_as_requested() {
+    for destination in [
+        ImportDestination::NewBookPerFile,
+        ImportDestination::NewBookForAll,
+    ] {
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        let before = state.tree().node(root).expect("racine").children().len();
+        let a = dir.path().join("mesure_a.csv");
+        let b = dir.path().join("mesure_b.csv");
+        std::fs::write(&a, "1,10\n2,20\n").unwrap();
+        std::fs::write(&b, "3,30\n4,40\n").unwrap();
+        state.dispatch(Action::ImportFiles {
+            destination,
+            recipe: ImportRecipe::new("Sans titre"),
+            paths: vec![a, b],
+        });
+        let added = state.tree().node(root).expect("racine").children().len() - before;
+        let expected = if destination == ImportDestination::NewBookPerFile {
+            2
+        } else {
+            1
+        };
+        assert_eq!(added, expected);
+        let sheet_a = sheet_named(state.tree(), "mesure_a");
+        let sheet_b = sheet_named(state.tree(), "mesure_b");
+        let book_a = state.tree().node(sheet_a).unwrap().parent().unwrap();
+        let book_b = state.tree().node(sheet_b).unwrap().parent().unwrap();
+        assert_eq!(
+            book_a == book_b,
+            destination == ImportDestination::NewBookForAll
+        );
+        assert_eq!(
+            state.worksheets_of(book_a).len(),
+            if expected == 1 { 2 } else { 1 }
+        );
+        assert_eq!(
+            state.worksheets_of(book_b).len(),
+            if expected == 1 { 2 } else { 1 }
+        );
+        assert_eq!(
+            cell_f64(&state, state.visible_columns(sheet_b)[0].0, 0),
+            3.0
+        );
+        state.dispatch(Action::Undo);
+        assert_eq!(
+            state.tree().node(root).expect("racine").children().len(),
+            before
+        );
+    }
+}
+
+/// La vue détachée garde ses sélections et ses copies, puis fournit ce
+/// contexte à la voie de commande principale avant un collage différé.
+#[test]
+fn detached_book_view_reuses_the_grid_selection_and_clipboard() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet = sheet_named(state.tree(), "Sheet1");
+    let columns = state.visible_columns(sheet);
+    let source = columns[1].0;
+    let target = columns[0].0;
+    let mut detached = state.fork_for_detached_book().unwrap();
+    detached.select_cell(sheet, source, 0);
+    let copied = detached.copy_selection(sheet).unwrap();
+    state.adopt_detached_book_view(&mut detached, book);
+    assert_eq!(state.selection(sheet), detached.selection(sheet));
+    state.select_cell(sheet, target, 1);
+    state.dispatch(Action::Paste {
+        sheet,
+        text: copied,
+    });
+    assert_eq!(cell_f64(&state, target, 1), cell_f64(&state, source, 0));
+}
+
+/// Un fichier illisible ne produit pas de classeur vide ; un fichier valide
+/// ultérieur du même lot est quand même importé.
+#[test]
+fn new_book_import_creates_nothing_for_an_unreadable_file() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    let before = state.tree().node(root).unwrap().children().len();
+    let valid = dir.path().join("valide.csv");
+    std::fs::write(&valid, "1,2\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: ImportRecipe::new("Sans titre"),
+        paths: vec![dir.path().join("absent.csv"), valid],
+    });
+    assert_eq!(
+        state.tree().node(root).unwrap().children().len(),
+        before + 1
+    );
+    assert!(state.status().unwrap().is_error);
+}
+
+#[test]
+fn import_without_an_active_book_defaults_to_one_new_book_for_the_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    let import = state.import_state().unwrap();
+    assert_eq!(import.active_book, None);
+    assert_eq!(import.destination, ImportDestination::NewBookForAll);
+}
+
 /// Un fichier illisible n'interrompt pas le lot : les fichiers suivants sont
 /// importés quand même, et le message final récapitule combien ont
 /// réellement réussi.
@@ -2403,7 +2515,7 @@ fn a_file_read_failure_does_not_abort_the_rest_of_the_batch() {
 
     let recipe = plotyx_import::ImportRecipe::new("Sans titre");
     state.dispatch(Action::ImportFiles {
-        book,
+        destination: ImportDestination::ActiveBook(book),
         recipe,
         paths: vec![missing, file_ok],
     });
@@ -2716,7 +2828,7 @@ fn importing_resolves_series_name_from_a_header_key_when_the_column_has_no_name_
     recipe.header = HeaderSkip::UntilMarker("XYDATA".to_string());
     recipe.name_source = NameSource::HeaderKey("TITLE".to_string());
     state.dispatch(Action::ImportFiles {
-        book,
+        destination: ImportDestination::ActiveBook(book),
         recipe,
         paths: vec![file],
     });
@@ -2747,7 +2859,7 @@ fn importing_a_file_with_a_column_header_row_names_every_series_from_it() {
     recipe.separator = Separator::Tab;
     recipe.has_column_header_row = true;
     state.dispatch(Action::ImportFiles {
-        book,
+        destination: ImportDestination::ActiveBook(book),
         recipe,
         paths: vec![file],
     });
@@ -2775,7 +2887,7 @@ fn undoing_a_single_file_import_removes_exactly_that_sheet() {
     std::fs::write(&file, "1,10\n2,20\n").expect("écrit seul.csv");
 
     state.dispatch(Action::ImportFiles {
-        book,
+        destination: ImportDestination::ActiveBook(book),
         recipe: ImportRecipe::new("Sans titre"),
         paths: vec![file],
     });
@@ -2808,7 +2920,7 @@ fn a_parse_failure_amid_a_batch_is_surfaced_as_an_error_not_silently_swallowed()
     recipe.separator = Separator::Semicolon;
     recipe.header = HeaderSkip::UntilMarker("XYDATA".to_string());
     state.dispatch(Action::ImportFiles {
-        book,
+        destination: ImportDestination::ActiveBook(book),
         recipe,
         paths: vec![bad.clone(), good],
     });
@@ -2841,7 +2953,7 @@ fn importing_into_a_nonexistent_book_fails_gracefully() {
     std::fs::write(&file, "1,10\n").expect("écrit mesure.csv");
 
     state.dispatch(Action::ImportFiles {
-        book: NodeId::from_raw(999_999),
+        destination: ImportDestination::ActiveBook(NodeId::from_raw(999_999)),
         recipe: ImportRecipe::new("Sans titre"),
         paths: vec![file],
     });
@@ -2879,7 +2991,7 @@ fn importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text()
     std::fs::write(&file, "1,2\nn/a,4\n5,6\n").expect("écrit mesure.csv");
 
     state.dispatch(Action::ImportFiles {
-        book,
+        destination: ImportDestination::ActiveBook(book),
         recipe: ImportRecipe::new("Sans titre"),
         paths: vec![file],
     });
@@ -2933,7 +3045,7 @@ fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
         same_line_name_unit: false,
     };
     state.dispatch(Action::ImportFiles {
-        book,
+        destination: ImportDestination::ActiveBook(book),
         recipe,
         paths: vec![file],
     });

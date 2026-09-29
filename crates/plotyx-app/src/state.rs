@@ -282,13 +282,12 @@ pub enum Action {
         /// Nouvelle formule, ou `None` pour une colonne non calculée.
         formula: Option<String>,
     },
-    /// Importe chaque fichier de `paths` dans sa propre nouvelle feuille de
-    /// `book`, avec la recette `recipe` — voir [`AppState::import_files`].
+    /// Importe les fichiers vers la destination choisie dans le dialogue.
     /// Tout le lot (toutes les feuilles, toutes les colonnes) tient dans une
     /// seule entrée d'historique.
     ImportFiles {
-        /// Classeur d'accueil.
-        book: NodeId,
+        /// Destination des feuilles produites.
+        destination: ImportDestination,
         /// Réglages d'analyse à appliquer à chaque fichier.
         recipe: plotyx_import::ImportRecipe,
         /// Fichiers à importer, chacun dans sa propre feuille.
@@ -1153,6 +1152,15 @@ pub struct PlotEdit {
     pub selected_series: usize,
 }
 
+/// Destination d'un lot d'import. Chaque fichier produit une feuille ; les
+/// nouveaux classeurs ne sont créés qu'après analyse réussie d'un fichier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportDestination {
+    ActiveBook(NodeId),
+    NewBookPerFile,
+    NewBookForAll,
+}
+
 /// État transitoire de la fenêtre d'import (voir [`crate::app`] pour son
 /// rendu) : jamais dans l'historique, jamais envoyé à l'acteur — même
 /// famille que [`HeaderEdit`]/[`CellEdit`]/[`NoteEdit`]. Porte tout ce que la
@@ -1160,8 +1168,10 @@ pub struct PlotEdit {
 /// [`plotyx_import::store::RecipeStore`] chargé une seule fois à l'ouverture
 /// (pas rechargé à chaque image — `RecipeStore::load` touche le disque).
 pub struct ImportState {
-    /// Classeur cible, fixé à l'ouverture ([`AppState::open_import`]).
-    pub book: NodeId,
+    /// Classeur actif à l'ouverture, disponible même après un changement de destination.
+    pub active_book: Option<NodeId>,
+    /// Destination choisie ; le classeur actif est proposé s'il existe.
+    pub destination: ImportDestination,
     /// Recette en cours d'édition dans la fenêtre.
     pub recipe: plotyx_import::ImportRecipe,
     /// Fichiers choisis (« Choisir des fichiers… »), dans l'ordre du
@@ -1267,6 +1277,10 @@ pub struct AppState {
     /// si le texte reçu d'egui est notre propre copie (rejoue la structure)
     /// ou un texte externe (voir [`external_clipboard_from_text`]).
     clipboard_text: Option<String>,
+    /// Une copie locale du viewport détaché doit être transférée une fois à
+    /// la racine ; sans ce drapeau, sa vieille copie écraserait toute copie
+    /// plus récente faite dans une autre fenêtre à chaque image.
+    clipboard_dirty: bool,
     /// Sélection sur laquelle Suppr vient déjà de **vider** les cases (pas
     /// encore supprimé) — voir [`AppState::consume_delete_key`]. `Some`
     /// entre les deux temps d'une double pression sur Suppr : une deuxième
@@ -1337,6 +1351,7 @@ impl AppState {
             header_editing: None,
             grid_clipboard: None,
             clipboard_text: None,
+            clipboard_dirty: false,
             delete_repeat: None,
             import_state: None,
             script_source: String::new(),
@@ -1348,6 +1363,49 @@ impl AppState {
             #[cfg(feature = "python")]
             pending_script: None,
         })
+    }
+
+    /// Donne à un viewport détaché son propre état transitoire de grille,
+    /// adossé au même acteur. Il peut ainsi employer exactement les mêmes
+    /// widgets que le classeur flottant sans verrouiller l'état de la racine.
+    pub fn fork_for_detached_book(&self) -> SessionResult<Self> {
+        let mut view = Self::new(self.handle.clone(), self.path.clone())?;
+        view.snapshot = self.snapshot.clone();
+        view.selected_sheets = self.selected_sheets.clone();
+        view.selection = self.selection.clone();
+        view.editing = self.editing.clone();
+        view.header_editing = self.header_editing.clone();
+        view.grid_clipboard = self.grid_clipboard.clone();
+        view.clipboard_text = self.clipboard_text.clone();
+        view.clipboard_dirty = false;
+        Ok(view)
+    }
+
+    /// Rafraîchit la lecture d'un viewport sans toucher à sa sélection ni à
+    /// ses tampons de saisie. L'instantané vient de l'état principal.
+    pub fn sync_detached_snapshot(&mut self, snapshot: Snapshot) {
+        self.snapshot = snapshot;
+        self.revalidate_selection();
+    }
+
+    /// Réunit l'interaction d'un classeur détaché avec la voie de commande
+    /// principale avant que ses actions différées soient dispatchées.
+    pub fn adopt_detached_book_view(&mut self, source: &mut Self, book: NodeId) {
+        if let Some(sheet) = source.selected_sheet_in(book) {
+            self.selected_sheets.insert(book, sheet);
+        }
+        for (sheet, _) in source.worksheets_of(book) {
+            if let Some(selection) = source.selection.get(&sheet) {
+                self.selection.insert(sheet, selection.clone());
+            } else {
+                self.selection.remove(&sheet);
+            }
+        }
+        if source.clipboard_dirty {
+            self.grid_clipboard = source.grid_clipboard.clone();
+            self.clipboard_text = source.clipboard_text.clone();
+            source.clipboard_dirty = false;
+        }
     }
 
     /// Dernier instantané reçu.
@@ -2200,6 +2258,7 @@ impl AppState {
         let text = grid_clipboard_to_text(&clipboard);
         self.grid_clipboard = Some(clipboard);
         self.clipboard_text = Some(text.clone());
+        self.clipboard_dirty = true;
         Some(text)
     }
 
@@ -2242,6 +2301,7 @@ impl AppState {
         let text = grid_clipboard_to_text(&clipboard);
         self.grid_clipboard = Some(clipboard);
         self.clipboard_text = Some(text.clone());
+        self.clipboard_dirty = true;
         Some(text)
     }
 
@@ -2679,10 +2739,10 @@ impl AppState {
                 self.set_column_meta_field(column, |meta| meta.formula = formula);
             }
             Action::ImportFiles {
-                book,
+                destination,
                 recipe,
                 paths,
-            } => self.import_files(book, recipe, paths),
+            } => self.import_files(destination, recipe, paths),
             Action::PlotColumns {
                 sheet,
                 columns,
@@ -2778,7 +2838,8 @@ impl AppState {
     /// new`]). Remplace sans confirmation une fenêtre d'import déjà ouverte
     /// (même patron que [`AppState::begin_edit`] pour une saisie de
     /// cellule).
-    pub fn open_import(&mut self, book: NodeId) {
+    pub fn open_import(&mut self, book: impl Into<Option<NodeId>>) {
+        let active_book = book.into();
         let store = plotyx_import::RecipeStore::load();
         let recipe = store
             .recipes()
@@ -2787,7 +2848,11 @@ impl AppState {
             .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
         let save_as_name = recipe.name.clone();
         self.import_state = Some(ImportState {
-            book,
+            active_book,
+            destination: active_book.map_or(
+                ImportDestination::NewBookForAll,
+                ImportDestination::ActiveBook,
+            ),
             recipe,
             paths: Vec::new(),
             store,
@@ -3768,8 +3833,8 @@ impl AppState {
         self.execute(command);
     }
 
-    /// Importe chaque fichier de `paths` dans sa propre nouvelle feuille de
-    /// `book`, avec `recipe` — [`Action::ImportFiles`]. Un fichier illisible
+    /// Importe chaque fichier de `paths` dans sa propre nouvelle feuille,
+    /// selon `destination`, avec `recipe` — [`Action::ImportFiles`]. Un fichier illisible
     /// ou inanalysable devient un [`StatusMessage`] et fait passer au
     /// suivant, jamais un abandon complet du lot. Tout le lot tient dans une
     /// seule entrée d'historique : `self.handle.begin_macro`/`end_macro`
@@ -3778,7 +3843,7 @@ impl AppState {
     /// history.rs`) pour l'absorption d'une macro qui finirait vide.
     fn import_files(
         &mut self,
-        book: NodeId,
+        destination: ImportDestination,
         recipe: plotyx_import::ImportRecipe,
         paths: Vec<PathBuf>,
     ) {
@@ -3802,6 +3867,7 @@ impl AppState {
         // (`self.fail`) dès qu'au moins un fichier a échoué, pour que ça se
         // voie.
         let mut failures: Vec<String> = Vec::new();
+        let mut shared_book = None;
         for path in &paths {
             let file_stem = path
                 .file_stem()
@@ -3821,6 +3887,35 @@ impl AppState {
                     continue;
                 }
             };
+            let book = match destination {
+                ImportDestination::ActiveBook(book) => book,
+                ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll => {
+                    if destination == ImportDestination::NewBookForAll {
+                        if let Some(book) = shared_book {
+                            book
+                        } else {
+                            let Some(book) = self.create_import_book(None) else {
+                                failures.push(format!(
+                                    "{}: échec de la création du classeur",
+                                    path.display()
+                                ));
+                                continue;
+                            };
+                            shared_book = Some(book);
+                            book
+                        }
+                    } else {
+                        let Some(book) = self.create_import_book(Some(file_stem)) else {
+                            failures.push(format!(
+                                "{}: échec de la création du classeur",
+                                path.display()
+                            ));
+                            continue;
+                        };
+                        book
+                    }
+                }
+            };
             // `Command::AddWorksheet` ne rend que la `Revision`, jamais
             // l'identifiant de la feuille créée. `Project::add_worksheet`
             // (côté `plotyx-core`) insère toujours la nouvelle feuille en
@@ -3831,12 +3926,18 @@ impl AppState {
             // retrouver depuis ce banc, qui n'a qu'un `Arc<Tree>` figé, pas
             // le `Project` qui l'a construite. Piège à ne pas redécouvrir à
             // la dure : voir la tâche « feat/import-ui » §2.
+            let previous_sheet = self
+                .snapshot
+                .tree
+                .node(book)
+                .and_then(|node| node.children().last().copied());
             self.execute(Command::AddWorksheet { book, name: None });
             let Some(sheet) = self
                 .snapshot
                 .tree
                 .node(book)
                 .and_then(|node| node.children().last().copied())
+                .filter(|sheet| Some(*sheet) != previous_sheet)
             else {
                 failures.push(format!(
                     "{}: échec de la création de la feuille",
@@ -3924,6 +4025,28 @@ impl AppState {
         } else {
             self.fail(format!("{summary} — {}", failures.join(" ; ")));
         }
+    }
+
+    /// `AddEmptyWorkbook` évite la feuille « Sheet1 » que `AddWorkbook`
+    /// ajouterait en plus des feuilles importées.
+    fn create_import_book(&mut self, file_stem: Option<&str>) -> Option<NodeId> {
+        let root = self.snapshot.tree.root();
+        let previous = self.snapshot.tree.node(root)?.children().last().copied();
+        self.execute(Command::AddEmptyWorkbook {
+            parent: root,
+            name: None,
+        });
+        let book = self.snapshot.tree.node(root)?.children().last().copied()?;
+        if Some(book) == previous {
+            return None;
+        }
+        if let Some(stem) = file_stem {
+            self.execute(Command::Rename {
+                id: book,
+                name: stem.to_string(),
+            });
+        }
+        Some(book)
     }
 
     /// Crée un graphe à partir des colonnes sélectionnées de `sheet` — voir
