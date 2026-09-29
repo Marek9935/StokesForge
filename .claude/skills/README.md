@@ -4,6 +4,9 @@ Compétences de projet chargées automatiquement par Claude Code depuis
 `.claude/skills/`. Chacune est un `SKILL.md` : un en-tête (nom + quand la
 déclencher) et des instructions qui n'entrent en contexte que si la tâche la
 concerne.
+Codex charge les mêmes dossiers via les liens de `.agents/skills/` ;
+`.claude/skills/` reste leur source commune. Son parcours de lecture est dans
+[`../../.codex/README.md`](../../.codex/README.md).
 
 Elles ne remplacent pas la documentation — elles l'**utilisent**.
 `docs/README.md` route par domaine, `docs/invariants.md` dit ce qu'on ne casse
@@ -68,8 +71,9 @@ porte ce qu'un `cargo test --workspace` vert **ne prouve pas** (ni `python`, ni
 
 ## Les invoquer à la main
 
-Claude les déclenche seul quand la tâche correspond. Pour forcer :
-`/plotyx-feature`, `/plotyx-bug-fix`, etc.
+Claude et Codex les déclenchent quand la tâche correspond. Pour forcer :
+`/plotyx-feature` dans Claude, `$plotyx-feature` dans Codex, et de même pour
+les autres skills.
 
 ## En ajouter un
 

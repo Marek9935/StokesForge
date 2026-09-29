@@ -30,6 +30,39 @@ demandes de l'utilisateur définissent le changement attendu. Signaler et
 corriger les divergences documentaires pertinentes sans transformer la tâche
 en refonte générale.
 
+### Skills de projet repris de Claude
+
+Les dix skills maintenus dans [`.claude/skills/`](../.claude/skills/README.md)
+sont également disponibles pour Codex via les liens de `.agents/skills/`.
+Ce sont les mêmes fichiers : modifier le skill source dans `.claude/skills/`
+met à jour les deux assistants. Pour une tâche donnée, lire le `SKILL.md`
+concerné et ses seules références utiles, après le parcours de lecture
+ci-dessus ; ne pas charger les dix systématiquement.
+
+| Besoin | Skill à consulter |
+|---|---|
+| Ajouter une fonctionnalité | [`plotyx-feature`](../.agents/skills/plotyx-feature/SKILL.md) |
+| Diagnostiquer un symptôme, trier des retours | [`plotyx-bug-report`](../.agents/skills/plotyx-bug-report/SKILL.md) |
+| Corriger un bug reproduit | [`plotyx-bug-fix`](../.agents/skills/plotyx-bug-fix/SKILL.md) |
+| Modifier le modèle ou ajouter une action annulable | [`plotyx-commande`](../.agents/skills/plotyx-commande/SKILL.md) |
+| Tracé, axes, légendes et exports | [`plotyx-rendu`](../.agents/skills/plotyx-rendu/SKILL.md) |
+| Import CSV/TXT/ASC et prévisualisation | [`plotyx-import`](../.agents/skills/plotyx-import/SKILL.md) |
+| Pont PyO3, scripts et console Python | [`plotyx-python`](../.agents/skills/plotyx-python/SKILL.md) |
+| Tests, vérification finale et commit | [`plotyx-verification`](../.agents/skills/plotyx-verification/SKILL.md) |
+| Expliquer le découpage du logiciel | [`plotyx-architecture`](../.agents/skills/plotyx-architecture/SKILL.md) |
+| Expliquer ce que le logiciel sait faire | [`plotyx-fonctionnalites`](../.agents/skills/plotyx-fonctionnalites/SKILL.md) |
+
+Les skills s'enchaînent selon le besoin : `plotyx-feature` ou
+`plotyx-bug-report` → `plotyx-bug-fix` si une correction est demandée →
+`plotyx-verification` après une modification. Ajouter `plotyx-commande`,
+`plotyx-rendu`, `plotyx-import` ou `plotyx-python` seulement pour les domaines
+touchés. Dans Codex, on peut invoquer explicitement un skill avec
+`$plotyx-feature` (et non la syntaxe `/plotyx-feature` de Claude).
+Les mentions d'outils propres à Claude, comme `AskUserQuestion`, désignent
+l'intention du workflow : utiliser l'outil de question disponible dans Codex
+si un arbitrage utilisateur est réellement nécessaire. En cas de divergence,
+suivre la demande de l'utilisateur, `AGENTS.md`, ce guide et le code actuel.
+
 ## 2. Où chercher
 
 Les chemins de ce tableau sont relatifs à la racine du dépôt.

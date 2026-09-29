@@ -24,6 +24,9 @@ confirmation pour les choix courants couverts par la demande.
   préserver ; les commentaires de tête de module expliquent les décisions.
   Le code et les tests décrivent l'état implémenté. Une note de chantier ou
   `docs/archive/` ne prouve pas qu'une fonctionnalité existe ou reste à faire.
+- Les skills de projet dans `.agents/skills/` renvoient aux sources maintenues
+  dans `.claude/skills/`. Consulter le skill pertinent selon la table de
+  `.codex/README.md` et ses références utiles, sans charger toute la collection.
 - Les mutations métier passent par les commandes annulables et l'acteur de
   session. Respecter les exceptions documentées pour l'état de vue et la
   géométrie ; ne pas créer de voie d'écriture métier parallèle.
