@@ -1365,10 +1365,11 @@ impl AppState {
         })
     }
 
-    /// Donne à un viewport détaché son propre état transitoire de grille,
-    /// adossé au même acteur. Il peut ainsi employer exactement les mêmes
-    /// widgets que le classeur flottant sans verrouiller l'état de la racine.
-    pub fn fork_for_detached_book(&self) -> SessionResult<Self> {
+    /// Donne à un viewport détaché (classeur ou note) son propre état
+    /// transitoire — grille, saisie de cellule ou de note —, adossé au même
+    /// acteur. Il peut ainsi employer exactement les mêmes widgets que la
+    /// fenêtre flottante sans verrouiller l'état de la racine.
+    pub fn fork_for_detached_view(&self) -> SessionResult<Self> {
         let mut view = Self::new(self.handle.clone(), self.path.clone())?;
         view.snapshot = self.snapshot.clone();
         view.selected_sheets = self.selected_sheets.clone();

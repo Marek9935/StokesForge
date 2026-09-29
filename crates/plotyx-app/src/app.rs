@@ -256,8 +256,8 @@
 //! éditable, espace réservé). Plutôt que quatre `ViewModel`/`Requests`
 //! disjoints à faire cohabiter dans [`PlotyxApp::detached_tabs`],
 //! [`DetachedTabViewModel`] est une seule structure portant un champ par
-//! nature de contenu (`book_state` pour un classeur,
-//! `note_edit` pour une note, `graph_view` pour un graphe) — les champs
+//! nature de contenu (`view_state` pour un classeur ou une note,
+//! `graph_view` pour un graphe) — les champs
 //! inutilisés pour la nature du `Tab` qu'elle sert restent simplement à leur
 //! valeur par défaut. Moins de types, un seul `Arc<Mutex<_>>` par onglet
 //! détaché à faire voyager dans la fermeture, au prix d'un typage un peu
@@ -287,14 +287,15 @@
 //! deux versions à tenir en accord.
 //!
 //! Le classeur détaché possède une vue [`AppState`] locale construite par
-//! [`AppState::fork_for_detached_book`]. Elle conserve sélection, presse-papier
+//! [`AppState::fork_for_detached_view`]. Elle conserve sélection, presse-papier
 //! et tampons de saisie, mais lit le même instantané de session que la racine.
 //! Ainsi [`book_contents`] et [`grid_contents`] sont appelées à l'identique
 //! dans les deux modes : onglets, en-têtes, largeurs et gestes ne peuvent
 //! plus dériver dans deux implémentations. Les actions mutantes rejoignent
 //! la boucle principale après [`AppState::adopt_detached_book_view`] ; elles
-//! gardent donc l'unique voie de commande annulable. La note détachée garde
-//! son tampon local [`DetachedTabViewModel::note_edit`].
+//! gardent donc l'unique voie de commande annulable. La note suit le même
+//! motif : [`note_contents`] sur la vue locale, dont le tampon de saisie
+//! ([`AppState::note_editing`]) reste propre à la fenêtre.
 //!
 //! [`Tab::Graph`] échappe à cette limite : [`plotyx_render_egui::GraphView`]
 //! n'a pas de verrou global à `AppState` à respecter (son cache de formes et
@@ -368,9 +369,9 @@ use plotyx_session::{Snapshot, WindowGeometry};
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    drop_payload_action, node_title_in, note_text_in, plot_panel_graph, series_list_label, Action,
-    ActiveTabKind, AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination,
-    MoveDirection, NoteEdit, ProjectTreeNode, WindowKind,
+    drop_payload_action, node_title_in, plot_panel_graph, series_list_label, Action, ActiveTabKind,
+    AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination, MoveDirection,
+    ProjectTreeNode, WindowKind,
 };
 use crate::theme;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
@@ -815,11 +816,11 @@ struct DetachedTabViewModel {
     /// seulement avant la toute première synchronisation (jamais observable
     /// depuis l'extérieur de [`PlotyxApp::detach_tab`], qui le pose aussitôt).
     snapshot: Option<Snapshot>,
-    /// `Tab::Book` : état transitoire local qui rend la grille commune avec
-    /// le classeur flottant, tout en conservant sa sélection et ses saisies.
-    book_state: Option<AppState>,
-    /// `Tab::Note` : saisie de note en cours, propre à cette fenêtre.
-    note_edit: Option<NoteEdit>,
+    /// `Tab::Book`/`Tab::Note` : vue [`AppState`] locale à la fenêtre, qui
+    /// rend le contenu commun avec la fenêtre flottante (mêmes
+    /// `book_contents`/`note_contents`) tout en gardant sa sélection et ses
+    /// saisies en cours.
+    view_state: Option<AppState>,
     /// `Tab::Graph` : la vue (cache de formes, zoom/pan), déplacée hors de
     /// [`PlotyxApp::graph_views`] le temps du détachement — voir
     /// [`PlotyxApp::detach_tab`]/[`PlotyxApp::reattach_tab`].
@@ -1442,14 +1443,13 @@ impl PlotyxApp {
         };
         self.window_positions.remove(&tab);
         self.window_sizes.remove(&tab);
-        let book_state = match tab {
-            Tab::Book(_) => self.state.fork_for_detached_book().ok(),
+        let view_state = match tab {
+            Tab::Book(_) | Tab::Note(_) => self.state.fork_for_detached_view().ok(),
             _ => None,
         };
         let view_model = DetachedTabViewModel {
             snapshot: Some(self.state.snapshot().clone()),
-            book_state,
-            note_edit: None,
+            view_state,
             graph_view,
             needs_initial_repaint: true,
             collapsed: self.collapsed_tabs.contains(&tab),
@@ -1548,8 +1548,8 @@ impl PlotyxApp {
                     .lock()
                     .unwrap_or_else(|err| err.into_inner());
                 model.snapshot = Some(state.snapshot().clone());
-                if let Some(book_state) = model.book_state.as_mut() {
-                    book_state.sync_detached_snapshot(state.snapshot().clone());
+                if let Some(view_state) = model.view_state.as_mut() {
+                    view_state.sync_detached_snapshot(state.snapshot().clone());
                 }
             }
             let view_model = Arc::clone(&detached.view_model);
@@ -1662,8 +1662,8 @@ impl PlotyxApp {
                             let tree = &snapshot.tree;
                             match tab {
                                 Tab::Book(id) => {
-                                    if let Some(book_state) = model.book_state.as_mut() {
-                                        book_contents(ui, book_state, &mut requests.actions, id);
+                                    if let Some(view_state) = model.view_state.as_mut() {
+                                        book_contents(ui, view_state, &mut requests.actions, id);
                                     } else {
                                         ui.label("Session du classeur indisponible.");
                                     }
@@ -1677,7 +1677,11 @@ impl PlotyxApp {
                                     detached_matrix_contents(ui, tree, id);
                                 }
                                 Tab::Note(id) => {
-                                    detached_note_contents(ui, tree, &mut model, &mut requests, id);
+                                    if let Some(view_state) = model.view_state.as_mut() {
+                                        note_contents(ui, view_state, &mut requests.actions, id);
+                                    } else {
+                                        ui.label("Session de la note indisponible.");
+                                    }
                                 }
                             }
                         });
@@ -1986,8 +1990,8 @@ impl eframe::App for PlotyxApp {
                         .view_model
                         .lock()
                         .unwrap_or_else(|err| err.into_inner());
-                    if let Some(book_state) = model.book_state.as_mut() {
-                        self.state.adopt_detached_book_view(book_state, *book);
+                    if let Some(view_state) = model.view_state.as_mut() {
+                        self.state.adopt_detached_book_view(view_state, *book);
                     }
                 }
                 let mut requests = detached
@@ -6406,81 +6410,6 @@ fn detached_matrix_contents(ui: &mut egui::Ui, tree: &Tree, matrix: NodeId) {
              de matrice à éditer)."
         ));
     });
-}
-
-/// Pendant détaché de [`note_contents`] — même machine à états, sur
-/// `note_edit: &mut Option<NoteEdit>` propre à cette fenêtre plutôt que sur
-/// `AppState::note_editing`. Voir la doc de tête du module.
-fn detached_note_contents(
-    ui: &mut egui::Ui,
-    tree: &Tree,
-    model: &mut DetachedTabViewModel,
-    requests: &mut DetachedTabRequests,
-    note: NodeId,
-) {
-    let Some(current_name) = tree.node(note).map(|node| node.name().to_string()) else {
-        ui.centered_and_justified(|ui| {
-            ui.weak(format!(
-                "« {} » a été supprimée.",
-                node_title_in(tree, note, "Note")
-            ));
-        });
-        return;
-    };
-    ui.heading(current_name);
-    ui.separator();
-
-    let editing_here = model
-        .note_edit
-        .as_ref()
-        .is_some_and(|edit| edit.note == note);
-    let mut buffer = if editing_here {
-        model
-            .note_edit
-            .as_ref()
-            .map(|edit| edit.buffer.clone())
-            .unwrap_or_default()
-    } else {
-        note_text_in(tree, note).unwrap_or_default()
-    };
-
-    let response = ui.add(
-        egui::TextEdit::multiline(&mut buffer)
-            .desired_rows(20)
-            .desired_width(f32::INFINITY),
-    );
-
-    if response.gained_focus() && !editing_here {
-        model.note_edit = Some(NoteEdit {
-            note,
-            buffer: note_text_in(tree, note).unwrap_or_default(),
-        });
-    }
-    if model
-        .note_edit
-        .as_ref()
-        .is_some_and(|edit| edit.note == note)
-    {
-        if let Some(edit) = model.note_edit.as_mut() {
-            edit.buffer = buffer;
-        }
-    }
-
-    if response.lost_focus() {
-        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            model.note_edit = None;
-        } else {
-            let pending = model
-                .note_edit
-                .as_ref()
-                .filter(|edit| edit.note == note)
-                .map(|edit| edit.buffer.clone());
-            if let Some(text) = pending {
-                model.note_edit = None;
-                requests.actions.push(Action::SetNoteText { note, text });
-            }
-        }
-    }
 }
 
 #[cfg(test)]

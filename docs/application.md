@@ -218,9 +218,8 @@ cohérence avec les autres contenus.
 n'a qu'une forme de contenu (un arbre en lecture seule) ; les quatre natures
 détachables ici sont franchement différentes (grille éditable virtualisée,
 graphe interactif avec cache de formes, texte éditable, espace réservé).
-`DetachedTabViewModel` porte un champ par nature (`book_state` pour un
-classeur, `note_edit` pour une note, `graph_view` pour un
-graphe) plutôt que quatre types disjoints à faire cohabiter dans la table des
+`DetachedTabViewModel` porte un champ par nature (`view_state` pour un
+classeur ou une note, `graph_view` pour un graphe) plutôt que quatre types disjoints à faire cohabiter dans la table des
 onglets détachés — les champs inutilisés pour la nature du `Tab` servi
 restent à leur valeur par défaut.
 
@@ -244,8 +243,13 @@ de la racine. Il appelle les mêmes `book_contents`/`grid_contents` que le
 classeur flottant ; disposition, en-tête, sélection, menus et raccourcis de
 grille partagent ainsi le même code. Sa sélection et sa saisie restent locales
 à la fenêtre. Avant de traiter ses actions, la racine reprend leur contexte
-de grille, puis applique les mêmes commandes annulables. La note détachée
-conserve son propre `note_edit` et sa fonction de rendu dédiée.
+de grille, puis applique les mêmes commandes annulables. La note suit le même
+motif : sa fenêtre détachée est une vue `AppState` locale (construite par
+`fork_for_detached_view`) et appelle `note_contents`, comme la fenêtre
+flottante ; seul le tampon de saisie (`note_editing`) est local à la fenêtre,
+et la validation part en `Action::SetNoteText`, donc en commande annulable.
+Il ne reste comme fonction de contenu propre au détaché que
+`detached_matrix_contents`, l'espace réservé de la matrice.
 
 `Tab::Graph` échappe à cette limite : `GraphView` n'a pas de verrou global à
 `AppState` à respecter (son cache de formes et sa navigation zoom/pan sont

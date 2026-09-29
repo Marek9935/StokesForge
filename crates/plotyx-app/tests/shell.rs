@@ -2214,6 +2214,37 @@ fn project_tree_stops_at_windows_and_never_descends_into_a_book() {
 
 // -- Divers : l'édition de note --
 
+/// La note détachée édite sur une vue locale : sa saisie n'atteint pas l'état
+/// de la racine, et sa validation rejoint la voie de commande annulable.
+#[test]
+fn detached_note_view_keeps_its_buffer_local_and_commits_through_the_root() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let mut project = demo_project();
+    let root = project.root();
+    let note = project
+        .add_note(root, Some("Note1"), "avant")
+        .expect("note");
+    let (_session, mut state) = start(project, &dir.path().join("projet.plotyx"));
+
+    let mut detached = state.fork_for_detached_view().unwrap();
+    detached.begin_note_edit(note);
+    if let Some(edit) = detached.note_editing_mut() {
+        edit.buffer = "après".to_string();
+    }
+    assert!(state.note_editing().is_none());
+    assert_eq!(state.note_text(note), Some("avant".to_string()));
+
+    state.dispatch(Action::SetNoteText {
+        note,
+        text: "après".to_string(),
+    });
+    detached.sync_detached_snapshot(state.snapshot().clone());
+    assert_eq!(detached.note_text(note), Some("après".to_string()));
+    assert!(state.can_undo());
+    state.dispatch(Action::Undo);
+    assert_eq!(state.note_text(note), Some("avant".to_string()));
+}
+
 #[test]
 fn editing_a_note_commits_on_dispatch_and_is_undoable() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -2454,7 +2485,7 @@ fn detached_book_view_reuses_the_grid_selection_and_clipboard() {
     let columns = state.visible_columns(sheet);
     let source = columns[1].0;
     let target = columns[0].0;
-    let mut detached = state.fork_for_detached_book().unwrap();
+    let mut detached = state.fork_for_detached_view().unwrap();
     detached.select_cell(sheet, source, 0);
     let copied = detached.copy_selection(sheet).unwrap();
     state.adopt_detached_book_view(&mut detached, book);
