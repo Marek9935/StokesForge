@@ -10,6 +10,8 @@ Documentation du code : `docs/` — [`docs/README.md`](docs/README.md) est le po
 
 `docs/archive/` conserve les documents de conception antérieurs (cahier des charges technique, roadmaps 0-5 et R0-R8, rapports de robustesse, options explorées). Ils ne sont plus maintenus, mais **les commentaires du code les citent par leur nom de fichier** (`architecture-choisie.md` §4.3, `guide-de-correction-robustesse.md` §F6…) : toute citation de ce genre se résout dans `docs/archive/`. Là où ils divergent du code, c'est le code qui a raison.
 
+Exception : les rapports de bugs `retours-2026-09-23-bugs.md` et `retours-2026-09-24-bugs.md` (B1…B9, « Bug 1 »…), cités dans `crates/plotyx-app/src/app.rs`, ont été supprimés — tous leurs bugs sont corrigés. Ils se lisent par `git show a6fd933^:docs/chantiers/<fichier>`. Les bugs se suivent désormais en issues GitLab (`glab issue list --label bug`), plus en `.md`.
+
 ## Commandes
 
 ```sh

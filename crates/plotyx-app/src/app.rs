@@ -148,7 +148,7 @@
 //! source d'`active_tab` (donc du contour de surbrillance). Sans
 //! synchronisation, un clic direct dans une fenêtre la faisait passer au
 //! premier plan sans jamais la surligner (B2,
-//! `docs/chantiers/retours-2026-09-23-bugs.md`). [`PlotyxApp::ui`] relit donc
+//! `retours-2026-09-23-bugs.md`). [`PlotyxApp::ui`] relit donc
 //! `Context::top_layer_id` juste après avoir peint les fenêtres flottantes
 //! et ramène le tab trouvé en fin de `floating_tabs` via
 //! `sync_floating_tabs_order_to_top_layer` — un cadre de retard tout au plus,
@@ -242,7 +242,7 @@
 //! unique par construction — pas de collision possible entre deux classeurs
 //! détachés simultanément, par exemple).
 //!
-//! B8 (`docs/chantiers/retours-2026-09-23-bugs.md`) : comme pour une fenêtre
+//! B8 (`retours-2026-09-23-bugs.md`) : comme pour une fenêtre
 //! flottante rétrécie (B4), un `Ui` dont les enfants dépassent son
 //! `max_rect` les peint quand même. [`PlotyxApp::show_detached_tabs`] pose
 //! donc le contenu des quatre natures dans un même sous-`Ui` borné et rogné,
@@ -543,7 +543,7 @@ const BOOK_WINDOW_WIDTH: f32 = FLOATING_WINDOW_SIZE.x * 2.0 / 3.0;
 const CASCADE_STEP: f32 = 24.0;
 /// Hauteur de la bande d'en-tête peinte par [`window_header`] — partagée
 /// avec le calcul de la taille repliée d'une fenêtre flottante (B3,
-/// `docs/chantiers/retours-2026-09-23-bugs.md`) : un contour ou une taille
+/// `retours-2026-09-23-bugs.md`) : un contour ou une taille
 /// forcée qui ne reprend pas cette même valeur redevient trop grand dès que
 /// le contenu est masqué.
 const WINDOW_HEADER_HEIGHT: f32 = 28.0;
@@ -667,7 +667,7 @@ pub struct PlotyxApp {
     /// règle (`plotyx_render_egui::GraphView`) ; avec plusieurs graphes
     /// affichables simultanément, une seule vue ne suffit plus.
     graph_views: HashMap<NodeId, GraphView>,
-    /// Onglets (`Graph` ou `Book`, B5 — `docs/chantiers/retours-2026-09-23-bugs.md`)
+    /// Onglets (`Graph` ou `Book`, B5 — `retours-2026-09-23-bugs.md`)
     /// dont seul le contenu est replié. Cet état de présentation reste local
     /// à l'application : il ne modifie ni le nœud, ni sa géométrie
     /// enregistrée, ni les autres fenêtres.
@@ -837,7 +837,7 @@ struct DetachedTabViewModel {
     /// de rendu quand la fenêtre reste inactive.
     needs_initial_repaint: bool,
     /// Dernière taille OS connue de la fenêtre **hors repli** (B9,
-    /// `docs/chantiers/retours-2026-09-23-bugs.md`) : mise à jour à chaque
+    /// `retours-2026-09-23-bugs.md`) : mise à jour à chaque
     /// image tant que `collapsed` est faux, gelée pendant un repli. Sert à
     /// la fois de cible pour le `ViewportCommand::InnerSize` envoyé au
     /// dépli et de taille à persister dans `window_geometries` pendant un
@@ -1599,7 +1599,7 @@ impl PlotyxApp {
                     let mut model = view_model.lock().unwrap_or_else(|err| err.into_inner());
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                     let was_collapsed = model.collapsed;
-                    // B9 (`docs/chantiers/retours-2026-09-23-bugs.md`) : la
+                    // B9 (`retours-2026-09-23-bugs.md`) : la
                     // taille OS « logique » (hors repli) se mémorise nous-
                     // mêmes plutôt que de se déduire du rectangle rapporté
                     // cette image — pendant un repli ce rectangle est
@@ -1625,7 +1625,7 @@ impl PlotyxApp {
                     let is_active = ui.input(|input| input.focused);
                     // Trait par défaut (inactif) uniquement — le contour actif
                     // n'est plus recoloré ici (B7,
-                    // `docs/chantiers/retours-2026-09-23-bugs.md`) : la
+                    // `retours-2026-09-23-bugs.md`) : la
                     // géométrie de ce `Frame` suit `content_ui.min_rect()`
                     // (`containers/frame.rs`), et `CentralPanel::show_inside_dyn`
                     // rogne son affichage à `outer_rect` *avant* de le peindre
@@ -2196,7 +2196,7 @@ impl eframe::App for PlotyxApp {
                     // viennent tous du même rectangle — c'est l'écart entre
                     // un rectangle demandé et un rectangle recalé par egui
                     // qui produisait le bug 1 de
-                    // `docs/chantiers/retours-2026-09-24-bugs.md`.
+                    // `retours-2026-09-24-bugs.md`.
                     let logical_rect = clamp_to_workspace(egui::Rect::from_min_size(
                         window_positions[&tab],
                         current_size,
@@ -2293,7 +2293,7 @@ impl eframe::App for PlotyxApp {
                 }
                 *focus_next = None;
 
-                // B2 (`docs/chantiers/retours-2026-09-23-bugs.md`) :
+                // B2 (`retours-2026-09-23-bugs.md`) :
                 // `egui::Area` amène déjà la fenêtre cliquée au premier plan
                 // de son propre ordre de calques dès qu'on clique dedans
                 // (`Sense::CLICK`, indépendamment du Project Manager) — mais
@@ -2480,7 +2480,7 @@ fn tab_node(tab: Tab) -> NodeId {
 }
 
 /// Bascule le repli du contenu d'un onglet. Réservé à `Tab::Graph` et
-/// `Tab::Book` (B5, `docs/chantiers/retours-2026-09-23-bugs.md`) — `Matrix`
+/// `Tab::Book` (B5, `retours-2026-09-23-bugs.md`) — `Matrix`
 /// et `Note` n'ont pas ce contrôle et restent donc toujours affichés ; rien
 /// dans la peinture du contenu replié (voir la boucle des fenêtres
 /// flottantes et détachées dans `PlotyxApp::ui`) ne dépend du type de `tab`,
@@ -2511,7 +2511,7 @@ fn toggle_collapse_to(collapsed_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bo
 }
 
 /// Taille à peindre pour une fenêtre flottante cette image. La taille logique (`current_size`) telle quelle, sauf le temps
-/// d'un repli (B3, `docs/chantiers/retours-2026-09-23-bugs.md`) : le contenu
+/// d'un repli (B3, `retours-2026-09-23-bugs.md`) : le contenu
 /// n'est alors plus peint (seule [`window_header`] l'est), et forcer la
 /// taille dépliée peindrait un cadre — et un contour de surbrillance —
 /// autour d'une zone vide.
@@ -2543,7 +2543,7 @@ fn floating_window_display_size(
 /// à la prochaine ouverture du projet.
 ///
 /// Réutilisée telle quelle par [`PlotyxApp::show_detached_tabs`] (B9,
-/// `docs/chantiers/retours-2026-09-23-bugs.md`) avec
+/// `retours-2026-09-23-bugs.md`) avec
 /// `DetachedTabViewModel::expanded_size` en guise de taille logique : le
 /// rectangle rapporté par le viewport OS pendant un repli est, là aussi,
 /// le rectangle réduit que l'`InnerSize` envoyé au bascule a produit, pas
@@ -2766,7 +2766,7 @@ fn sheet_tabs(
 /// Ramène `top_layer_tab` en fin de `floating_tabs` (§ ordre de pile,
 /// `active_tab = floating_tabs.last()`), sans rien faire s'il n'y est déjà,
 /// s'il n'existe pas, ou si aucune fenêtre flottante n'est au premier plan
-/// (B2, `docs/chantiers/retours-2026-09-23-bugs.md`). `egui` gère seul son
+/// (B2, `retours-2026-09-23-bugs.md`). `egui` gère seul son
 /// propre ordre de calques (un clic direct dans une fenêtre l'amène déjà au
 /// premier plan visuellement) ; cette fonction ne fait que réaligner
 /// `floating_tabs`, seule source de `active_tab`, dessus.
@@ -2948,7 +2948,7 @@ fn clamp_to_workspace(rect: egui::Rect) -> egui::Rect {
 /// [`floating_resize_handles`], [`workspace_to_screen`]…), et chaque image
 /// devait accorder deux rectangles : celui qu'on demandait et celui
 /// qu'egui recalait. Les bugs 1 et 2 de
-/// `docs/chantiers/retours-2026-09-24-bugs.md` (contour décalé d'une
+/// `retours-2026-09-24-bugs.md` (contour décalé d'une
 /// fenêtre recalée, fenêtre peinte par-dessus les panneaux fixes) étaient
 /// deux formes de ce désaccord. `egui::Area` est la brique nue sous
 /// `Window` : un calque, une position, un ordre au clic — rien d'autre. Le
@@ -3276,7 +3276,7 @@ fn window_header(
         HeaderPlacement::Floating => header.visuals().text_color(),
         HeaderPlacement::Detached => theme::gutter_text_color(),
     };
-    // B5 (`docs/chantiers/retours-2026-09-23-bugs.md`) : l'icône de repli
+    // B5 (`retours-2026-09-23-bugs.md`) : l'icône de repli
     // était réservée à `Tab::Graph`, sans justification documentée — une
     // extension jamais faite plutôt qu'un choix. `Matrix`/`Note` restent
     // exclus faute de raison de les y ajouter.
@@ -5655,7 +5655,7 @@ fn graph_view_contents(
     // dimension limitante. `paint_scaled` garde la disposition à 480×360 et
     // agrandit ou réduit ensuite les formes, texte compris : aucune
     // graduation n'est recalculée pour la taille de la fenêtre (point 3 de
-    // `docs/chantiers/retours-2026-09-24-bugs.md`). Le sous-Ui borne les
+    // `retours-2026-09-24-bugs.md`). Le sous-Ui borne les
     // interactions sans faire grandir la fenêtre parente.
     let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
     let scale = if fig_w > 0 && fig_h > 0 {
@@ -6525,7 +6525,7 @@ mod graph_layout_tests {
         toggle_collapse(&mut collapsed, graph_tab);
         assert_eq!(collapsed, HashSet::from([graph_tab]));
 
-        // B5 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `Tab::Book` a
+        // B5 (`retours-2026-09-23-bugs.md`) : `Tab::Book` a
         // aussi ce contrôle depuis ce correctif, suivi indépendamment du
         // graphe même quand son identifiant de nœud coïncide (test de
         // présentation).
@@ -6558,7 +6558,7 @@ mod graph_layout_tests {
         );
     }
 
-    // B7 (`docs/chantiers/retours-2026-09-23-bugs.md`) : jusque-là, la
+    // B7 (`retours-2026-09-23-bugs.md`) : jusque-là, la
     // surbrillance recolorait le trait du `Frame` de la fenêtre
     // (`floating_window_frame`) plutôt que de peindre un second contour par
     // dessus — mais ce trait suit `content_ui.min_rect()`, pas la taille
@@ -6606,7 +6606,7 @@ mod graph_layout_tests {
         );
     }
 
-    // B3 (`docs/chantiers/retours-2026-09-23-bugs.md`) : une fenêtre repliée
+    // B3 (`retours-2026-09-23-bugs.md`) : une fenêtre repliée
     // gardait un contour à sa taille dépliée, un grand cadre vert autour
     // d'une zone vide — parce que la fenêtre était forcée (`.fixed_size`) à
     // sa taille dépliée même quand seule sa bande d'en-tête est peinte.
@@ -6795,7 +6795,7 @@ mod graph_layout_tests {
         out
     }
 
-    // Bug 1 (`docs/chantiers/retours-2026-09-24-bugs.md`), la cause : la
+    // Bug 1 (`retours-2026-09-24-bugs.md`), la cause : la
     // position était bornée deux fois, par egui (`constrain_to`) et pas par
     // nous, si bien que le contour suivait la position demandée et le cadre
     // la position recalée. Il n'y a plus qu'une borne, celle-ci.
@@ -6871,7 +6871,7 @@ mod graph_layout_tests {
         }
     }
 
-    // Bug 2 (`docs/chantiers/retours-2026-09-24-bugs.md`) : une fenêtre à
+    // Bug 2 (`retours-2026-09-24-bugs.md`) : une fenêtre à
     // cheval sur le bord de la vue (espace de travail défilé) peignait
     // par-dessus le Project Manager, et y captait les clics.
     // Un classeur coupé par le bas de la vue : sa bande d'onglets de
@@ -7242,7 +7242,7 @@ mod graph_layout_tests {
         );
     }
 
-    // B2 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `sync_floating_tabs_order_to_top_layer`
+    // B2 (`retours-2026-09-23-bugs.md`) : `sync_floating_tabs_order_to_top_layer`
     // teste la logique pure de réalignement.
 
     #[test]
@@ -7440,7 +7440,7 @@ mod graph_layout_tests {
         );
     }
 
-    // B5 (`docs/chantiers/retours-2026-09-23-bugs.md`) : l'icône « Masquer le
+    // B5 (`retours-2026-09-23-bugs.md`) : l'icône « Masquer le
     // contenu de… » était réservée à `Tab::Graph` sans raison documentée —
     // vérifie qu'elle est bien peinte pour `Tab::Book`, et toujours absente
     // pour `Tab::Matrix`/`Tab::Note`, qui n'ont pas ce contrôle.
@@ -7711,7 +7711,7 @@ mod graph_layout_tests {
         );
     }
 
-    // B8 (`docs/chantiers/retours-2026-09-23-bugs.md`) : même mécanisme que
+    // B8 (`retours-2026-09-23-bugs.md`) : même mécanisme que
     // B4 (`le_contenu_qui_deborde_est_rogne_au_rectangle_de_la_fenetre`),
     // jamais porté à `show_detached_tabs` — un classeur détaché à plusieurs
     // colonnes déborde du viewport OS sans rognage contrôlé, tronqué au pixel
@@ -7973,7 +7973,7 @@ mod graph_layout_tests {
         }
     }
 
-    // B9 (`docs/chantiers/retours-2026-09-23-bugs.md`) : le correctif B3
+    // B9 (`retours-2026-09-23-bugs.md`) : le correctif B3
     // réduit la taille demandée à egui pour une fenêtre flottante interne
     // pendant un repli, mais une fenêtre détachée est un viewport OS réel —
     // rien n'envoyait de `ViewportCommand::InnerSize` quand son chevron de
@@ -8152,7 +8152,7 @@ mod graph_layout_tests {
         }
     }
 
-    // B1/B3 suite, puis B7 (`docs/chantiers/retours-2026-09-23-bugs.md`) :
+    // B1/B3 suite, puis B7 (`retours-2026-09-23-bugs.md`) :
     // les fenêtres détachées (viewports OS séparés) n'avaient aucun contour
     // de surbrillance — `active_tab`/`floating_tabs` ne les couvrent pas,
     // seul le focus OS du viewport a un sens pour elles. Même logique que
