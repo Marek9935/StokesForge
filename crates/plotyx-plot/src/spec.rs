@@ -122,6 +122,10 @@ pub struct PlotSpec {
     /// Fond du graphe. Vide = laisser le renderer suivre le thème de
     /// l'application.
     pub background: String,
+    /// Couleur du titre du graphe (`#RRGGBB`). Vide = automatique : l'encre
+    /// qui contraste avec le fond (sombre sur fond clair, blanche sur fond
+    /// sombre), comme tout le texte et les axes laissés en automatique.
+    pub title_color: String,
     /// Version du format de ce spec.
     pub format_version: u32,
 }
@@ -226,6 +230,7 @@ impl Default for PlotSpec {
             title: String::new(),
             panels: Panels::default(),
             background: String::new(),
+            title_color: String::new(),
             format_version: SPEC_FORMAT_VERSION,
         }
     }

@@ -548,10 +548,23 @@ en permanence dès qu'un graphe était actif. Son état (quel graphe, quel
 onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
 par `Action::OpenPlotSettings { graph, tab, axis }`.
 
-**Onglets** (`state::PlotSettingsTab`) : « Graphe » (titre, fond), « Zone de
-tracé » (titre du panneau, grilles), « Axes » (un axe à la fois, choisi en
-tête de page : titre de l'axe, échelle, affichage), « Séries » et
-« Légende ».
+**Onglets** (`state::PlotSettingsTab`) : « Graphe » (titre et sa couleur,
+fond), « Zone de tracé » (titre du panneau, grilles), « Axes » (un axe à la
+fois, choisi en tête de page : titre de l'axe et sa couleur, échelle,
+affichage et couleur de l'échelle), « Séries » et « Légende ».
+
+**Sélecteur de couleur** (`crate::color_picker`) : toute couleur de la
+fenêtre se choisit par un bouton-échantillon (`color_field`/`color_button`)
+qui ouvre une fenêtre surgissante — palette, « Automatique » quand la
+couleur peut l'être, nuancier (carré saturation × luminosité, barre de
+teinte), saisie RVB, TSL et hexadécimale. **Trois palettes** selon ce qu'on
+colore (`PaletteKind`) : courbes (la palette d'attribution automatique des
+séries et ses nuances foncées/claires), texte (encres lisibles), fonds
+(clairs, et sombres — sur lesquels le texte automatique passe en blanc, voir
+`docs/rendu.md`). La couleur est validée à la fin du geste (clic sur un
+échantillon, fin de glisser, champ validé, fermeture), jamais pixel par
+pixel. Tout nouveau réglage de couleur passe par ce sélecteur, avec la
+palette qui correspond à son usage.
 
 **Trois façons de l'ouvrir** :
 

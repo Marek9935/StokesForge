@@ -549,6 +549,10 @@ pub(crate) struct PlotSpecRecord {
     pub(crate) title: String,
     pub(crate) panels: Vec<PanelSpecRecord>,
     pub(crate) background: String,
+    /// Ajouté après coup : absent des fichiers plus anciens, ramené à la
+    /// chaîne vide (couleur automatique) par `#[serde(default)]`.
+    #[serde(default)]
+    pub(crate) title_color: String,
     pub(crate) format_version: u32,
 }
 
@@ -558,6 +562,7 @@ impl Default for PlotSpecRecord {
             title: String::new(),
             panels: vec![PanelSpecRecord::default()],
             background: String::new(),
+            title_color: String::new(),
             format_version: 1, // plotyx_plot::SPEC_FORMAT_VERSION
         }
     }
@@ -605,6 +610,12 @@ pub(crate) struct AxisSpecRecord {
     pub(crate) grid: bool,
     pub(crate) visible: bool,
     pub(crate) inverted: bool,
+    /// Ajouté après coup, comme `PlotSpecRecord::title_color`.
+    #[serde(default)]
+    pub(crate) title_color: String,
+    /// Ajouté après coup, comme `PlotSpecRecord::title_color`.
+    #[serde(default)]
+    pub(crate) tick_color: String,
 }
 
 impl AxisSpecRecord {
@@ -630,6 +641,8 @@ impl Default for AxisSpecRecord {
             grid: false,
             visible: true,
             inverted: false,
+            title_color: String::new(),
+            tick_color: String::new(),
         }
     }
 }
@@ -812,4 +825,62 @@ pub(crate) enum LegendPositionRecord {
     TopRight,
     BottomLeft,
     BottomRight,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Un fichier écrit avant l'ajout des couleurs de texte (titre du
+    /// graphe, titre et échelle des axes) se relit : les champs absents
+    /// reviennent vides, c'est-à-dire en couleur automatique.
+    #[test]
+    fn un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique() {
+        #[derive(Serialize)]
+        struct AncienAxe {
+            label: String,
+            unit: String,
+            scale: AxisScaleRecord,
+            auto_range: bool,
+            range_min: Option<f64>,
+            range_max: Option<f64>,
+            grid: bool,
+            visible: bool,
+            inverted: bool,
+        }
+        #[derive(Serialize)]
+        struct AncienSpec {
+            title: String,
+            panels: Vec<PanelSpecRecord>,
+            background: String,
+            format_version: u32,
+        }
+        let axe = AncienAxe {
+            label: "Temps".to_string(),
+            unit: "s".to_string(),
+            scale: AxisScaleRecord::Linear,
+            auto_range: true,
+            range_min: None,
+            range_max: None,
+            grid: false,
+            visible: true,
+            inverted: false,
+        };
+        let octets = rmp_serde::to_vec_named(&axe).expect("encodage");
+        let relu: AxisSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");
+        assert_eq!(relu.label, "Temps");
+        assert_eq!(relu.title_color, "");
+        assert_eq!(relu.tick_color, "");
+
+        let spec = AncienSpec {
+            title: "Ancien".to_string(),
+            panels: vec![PanelSpecRecord::default()],
+            background: "#000000".to_string(),
+            format_version: 1,
+        };
+        let octets = rmp_serde::to_vec_named(&spec).expect("encodage");
+        let relu: PlotSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");
+        assert_eq!(relu.title, "Ancien");
+        assert_eq!(relu.title_color, "");
+    }
 }

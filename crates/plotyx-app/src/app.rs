@@ -367,6 +367,7 @@ use plotyx_plot::{AxisSpec, LegendPosition, LineStyle, PlotType, SymbolShape};
 use plotyx_render_egui::{GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::{Snapshot, WindowGeometry};
 
+use crate::color_picker::{color_field, PaletteKind};
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
     active_graph, drop_payload_action, node_title_in, series_list_label, Action, ActiveTabKind,
@@ -5984,7 +5985,7 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
 /// une interaction — ne déclenche [`AppState::commit_plot_edit`] qu'une
 /// seule fois, à la fin de la fonction. Trois familles de widgets, trois
 /// façons de finir une interaction :
-/// - **texte** (titres, libellés, couleurs en `#RRGGBB`) : `lost_focus()`,
+/// - **texte** (titres, libellés) : `lost_focus()`,
 ///   comme `note_contents`/`cell_widget` — jamais à chaque frappe ;
 /// - **glissé numérique** (épaisseur de trait, taille de marqueur, bornes
 ///   d'axe) : `drag_stopped() || lost_focus()` ;
@@ -6062,7 +6063,25 @@ fn plot_settings_contents(
             .show(ui, |ui| match chosen_tab {
                 PlotSettingsTab::Graph => {
                     commit |= text_field(ui, "Titre", &mut spec.title);
-                    commit |= text_field(ui, "Fond (#RRGGBB, vide = blanc)", &mut spec.background);
+                    commit |= color_field(
+                        ui,
+                        "Couleur du titre",
+                        &mut spec.title_color,
+                        PaletteKind::Text,
+                        Some("Automatique (contraste avec le fond)"),
+                    );
+                    ui.add_space(6.0);
+                    commit |= color_field(
+                        ui,
+                        "Fond",
+                        &mut spec.background,
+                        PaletteKind::Background,
+                        Some("Automatique (blanc)"),
+                    );
+                    ui.weak(
+                        "Sur un fond sombre, le texte, les axes et la légende en couleur \
+                         automatique passent en blanc.",
+                    );
                 }
                 PlotSettingsTab::PlotArea => {
                     let Some(panel) = spec.panels.get_mut(0) else {
@@ -6172,6 +6191,13 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
     ui.strong("Titre de l'axe");
     commit |= text_field(ui, "Libellé", &mut axis.label);
     commit |= text_field(ui, "Unité", &mut axis.unit);
+    commit |= color_field(
+        ui,
+        "Couleur du titre",
+        &mut axis.title_color,
+        PaletteKind::Text,
+        Some("Automatique (contraste avec le fond)"),
+    );
 
     ui.add_space(6.0);
     ui.strong("Échelle");
@@ -6214,6 +6240,14 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
     ui.strong("Affichage");
     commit |= ui.checkbox(&mut axis.visible, "Axe affiché").changed();
     commit |= ui.checkbox(&mut axis.grid, "Grille").changed();
+    commit |= color_field(
+        ui,
+        "Couleur de l'échelle",
+        &mut axis.tick_color,
+        PaletteKind::Text,
+        Some("Automatique (contraste avec le fond)"),
+    );
+    ui.weak("Ligne d'axe, graduations et leurs libellés ; la grille la reprend, atténuée.");
     commit
 }
 
@@ -6278,11 +6312,13 @@ fn series_editor(ui: &mut egui::Ui, series: &mut plotyx_plot::SeriesSpec) -> boo
 
     ui.separator();
     ui.label("Trait");
-    let line_color_response = ui.horizontal(|ui| {
-        ui.label("Couleur (#RRGGBB)");
-        ui.text_edit_singleline(&mut series.line.color)
-    });
-    commit |= line_color_response.inner.lost_focus();
+    commit |= color_field(
+        ui,
+        "Couleur",
+        &mut series.line.color,
+        PaletteKind::Curves,
+        None,
+    );
 
     ui.horizontal(|ui| {
         ui.label("Style");
@@ -6354,11 +6390,13 @@ fn series_editor(ui: &mut egui::Ui, series: &mut plotyx_plot::SeriesSpec) -> boo
     let size_inner = size_response.inner;
     commit |= size_inner.drag_stopped() || size_inner.lost_focus();
 
-    let symbol_color_response = ui.horizontal(|ui| {
-        ui.label("Couleur (#RRGGBB, vide = celle du trait)");
-        ui.text_edit_singleline(&mut series.symbol.color)
-    });
-    commit |= symbol_color_response.inner.lost_focus();
+    commit |= color_field(
+        ui,
+        "Couleur du marqueur",
+        &mut series.symbol.color,
+        PaletteKind::Curves,
+        Some("Comme le trait"),
+    );
 
     commit
 }

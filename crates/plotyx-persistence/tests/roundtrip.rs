@@ -726,6 +726,8 @@ fn non_trivial_spec(
             grid: true,
             visible: true,
             inverted: true,
+            title_color: "#aa3311".to_string(),
+            tick_color: "#fefefe".to_string(),
         },
         legend: LegendSpec {
             visible: true,
@@ -745,6 +747,7 @@ fn non_trivial_spec(
 
     PlotSpec {
         background: "#0a0a0a".to_string(),
+        title_color: "#ffcc00".to_string(),
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }

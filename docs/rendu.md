@@ -29,9 +29,27 @@ formules — est dans `plotyx-render`.
 | `decimate` | LTTB |
 | `interact` | correspondance pixel ↔ données d'un panneau tracé |
 | `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
-| `color` | lecture des couleurs `#RRGGBB` du spec |
+| `color` | lecture des couleurs `#RRGGBB` du spec, et l'encre automatique contrastée avec le fond (`auto_ink`) |
 | `formula` | Typst (feature `typst`) |
 | `sample` | deux graphes de démonstration |
+
+### Couleurs du texte et des échelles : l'encre automatique
+
+Le titre du graphe (`PlotSpec::title_color`), le titre de chaque axe
+(`AxisSpec::title_color`) et son échelle (`AxisSpec::tick_color` : ligne
+d'axe, graduations, libellés, et la grille reprise à 20 % / 10 % d'opacité)
+ont leur couleur. Une chaîne vide veut dire **automatique** :
+`color::auto_ink(fond)`, blanche sur un fond sombre, sombre sur un fond clair
+(le choix au meilleur rapport de contraste WCAG). La même encre sert au titre
+du panneau, au cadre et au texte de la légende, et au contour des barres. Un
+fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
+automatique — à l'écran comme à l'export, puisque le pipeline est commun
+(`plotyx-render-svg/tests/couleurs.rs`).
+
+`configure_mesh` de Plotters n'a qu'un style de titre d'axe et qu'un style de
+ligne d'axe pour les deux axes principaux : l'axe du bas et celui de gauche
+sont donc tracés en **deux passes**, chacune coupant l'autre axe
+(`pipeline::AxisColors`). La géométrie n'en dépend pas.
 
 ### L'ordre dans lequel un panneau se trace
 

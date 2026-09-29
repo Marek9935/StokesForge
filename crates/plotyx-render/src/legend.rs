@@ -39,7 +39,7 @@ use plotters::style::TextStyle;
 use plotters_backend::{BackendCoord, DrawingBackend};
 use plotyx_plot::{LegendPosition, LegendSpec, PlotType};
 
-use crate::paint::{self, BROKEN, INK, SERIES_FALLBACK};
+use crate::paint::{self, BROKEN, SERIES_FALLBACK};
 use crate::series::{Geometry, Prepared};
 
 /// Marge entre le cadre de la légende et le bord de la zone de tracé.
@@ -69,6 +69,17 @@ pub struct DrawnLegend {
     pub omitted: usize,
 }
 
+/// Couleurs de la légende : le fond de son cadre (celui du graphe) et
+/// l'encre de son contour et de ses vignettes (l'encre automatique du fond,
+/// `crate::color::auto_ink`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegendColors {
+    /// Fond du cadre.
+    pub background: (u8, u8, u8),
+    /// Contour du cadre et des vignettes de barres.
+    pub ink: (u8, u8, u8),
+}
+
 /// Trace la légende d'un panneau dans sa zone de tracé.
 ///
 /// `area` doit être la zone de tracé en coordonnées **écran**
@@ -82,8 +93,9 @@ pub fn draw<DB: DrawingBackend>(
     spec: &LegendSpec,
     entries: &[&Prepared<'_>],
     style: &TextStyle<'_>,
-    background: (u8, u8, u8),
+    colors: LegendColors,
 ) -> Result<DrawnLegend, DrawingAreaErrorKind<DB::ErrorType>> {
+    let LegendColors { background, ink } = colors;
     if !spec.visible || entries.is_empty() {
         return Ok(DrawnLegend::default());
     }
@@ -137,7 +149,7 @@ pub fn draw<DB: DrawingBackend>(
     area.draw(&Rectangle::new(
         frame,
         ShapeStyle {
-            color: paint::rgb(INK).into(),
+            color: paint::rgb(ink).into(),
             filled: false,
             stroke_width: 1,
         },
@@ -148,7 +160,7 @@ pub fn draw<DB: DrawingBackend>(
         let middle = row_top + row_height / 2;
         let key_left = x0 + PADDING;
         if let Some(entry) = shown.get(index) {
-            key(area, entry, (key_left, middle))?;
+            key(area, entry, (key_left, middle), ink)?;
         }
         area.draw(&Text::new(
             text.as_str(),
@@ -168,6 +180,7 @@ fn key<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     entry: &Prepared<'_>,
     (left, middle): BackendCoord,
+    ink: (u8, u8, u8),
 ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = entry.spec;
     if matches!(entry.geometry, Geometry::Bars(_)) {
@@ -188,7 +201,7 @@ fn key<DB: DrawingBackend>(
         return area.draw(&Rectangle::new(
             swatch,
             ShapeStyle {
-                color: paint::rgb(INK).into(),
+                color: paint::rgb(ink).into(),
                 filled: false,
                 stroke_width: 1,
             },

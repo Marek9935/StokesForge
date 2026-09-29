@@ -41,6 +41,7 @@
 )]
 
 pub mod app;
+pub mod color_picker;
 pub mod selection;
 pub mod state;
 pub mod theme;

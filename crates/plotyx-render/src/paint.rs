@@ -73,8 +73,9 @@ use crate::color::rgb_or;
 
 /// Couleur de repli d'un trait dont la chaîne du spec est illisible.
 pub const SERIES_FALLBACK: (u8, u8, u8) = (0x4c, 0x78, 0xa8);
-/// Couleur du texte, des axes et des contours.
-pub const INK: (u8, u8, u8) = (0x20, 0x20, 0x20);
+/// Couleur du texte, des axes et des contours sur un fond clair — l'encre
+/// automatique d'un fond clair ([`crate::color::auto_ink`]).
+pub const INK: (u8, u8, u8) = crate::color::DARK_INK;
 /// Fond de repli quand `PlotSpec::background` est vide ou illisible.
 pub const PAPER: (u8, u8, u8) = (0xff, 0xff, 0xff);
 /// Gris des séries à référence brisée : présentes, et visiblement inertes.
@@ -376,6 +377,7 @@ pub fn bars<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     rects: &[(BackendCoord, BackendCoord)],
     line: &LineSpec,
+    edge_color: (u8, u8, u8),
 ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
     let color = rgb_or(&line.color, SERIES_FALLBACK);
     let fill = ShapeStyle {
@@ -384,7 +386,7 @@ pub fn bars<DB: DrawingBackend>(
         stroke_width: 1,
     };
     let edge = ShapeStyle {
-        color: rgb(INK).into(),
+        color: rgb(edge_color).into(),
         filled: false,
         stroke_width: 1,
     };

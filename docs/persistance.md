@@ -170,6 +170,10 @@ puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
   au schéma : plusieurs options y sont déjà écartées avec leurs raisons.
 - Tout nouveau champ porte `#[serde(default)]`. Sans lui, le fichier de la
   veille devient illisible.
+  Exemple : les couleurs de texte (`PlotSpecRecord::title_color`,
+  `AxisSpecRecord::title_color`/`tick_color`) — un fichier plus ancien se
+  relit avec des chaînes vides, c'est-à-dire en couleur automatique (test
+  `un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique`).
 - `tests/roundtrip.rs` vérifie l'aller-retour ; côté robustesse, `b2`
   (persistance), `b3` (fichiers malformés puis sémantiquement hostiles), `b13`
   (bornes d'un `PlotSpec` venu du disque), `b19` (fichier écrit par une version

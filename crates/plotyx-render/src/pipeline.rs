@@ -62,10 +62,10 @@ use plotyx_core::resolve::{ResolvedPanel, ResolvedPlot};
 use plotyx_plot::{AxisScale, AxisSpec, PlotSpec, SeriesAxis};
 
 use crate::clip::{self, PixelBounds};
-use crate::color::rgb_or;
+use crate::color::{auto_ink, rgb_or};
 use crate::decimate;
 use crate::legend;
-use crate::paint::{self, rgb, INK, PAPER};
+use crate::paint::{self, rgb, PAPER};
 use crate::scale;
 use crate::series::{self, Geometry, Prepared};
 
@@ -256,6 +256,9 @@ pub fn draw_on<DB: DrawingBackend>(
 ) -> Result<DrawnPlot, DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = plot.spec;
     let background = rgb_or(&spec.background, PAPER);
+    // Encre automatique : celle de tout texte et de toute échelle dont la
+    // couleur est laissée vide — blanche sur un fond sombre, sombre sinon.
+    let ink = auto_ink(background);
     root.fill(&rgb(background))?;
 
     // `titled` mesure le titre et rabaisse d'autant le haut de la zone : le
@@ -264,7 +267,10 @@ pub fn draw_on<DB: DrawingBackend>(
     let area = if spec.title.is_empty() {
         root.clone()
     } else {
-        root.titled(&spec.title, text_style(TITLE_SIZE))?
+        root.titled(
+            &spec.title,
+            text_style(TITLE_SIZE, rgb_or(&spec.title_color, ink)),
+        )?
     };
     let title_height = (area.get_base_pixel().1 - root.get_base_pixel().1).max(0) as u32;
 
@@ -367,6 +373,8 @@ fn draw_panel<DB: DrawingBackend>(
     background: (u8, u8, u8),
 ) -> Result<DrawnPanel, DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
+    // Encre automatique du panneau, voir `draw_on`.
+    let ink = auto_ink(background);
     let x_scale = spec.bottom.scale;
     let y_scale = spec.left.scale;
     let y2_scale = spec.right.scale;
@@ -419,7 +427,7 @@ fn draw_panel<DB: DrawingBackend>(
     let area = if spec.title.is_empty() {
         cell.clone()
     } else {
-        cell.titled(&spec.title, text_style(PANEL_TITLE_SIZE))?
+        cell.titled(&spec.title, text_style(PANEL_TITLE_SIZE, ink))?
     };
     let (width, height) = area.dim_in_pixel();
     // Les aires de graduation sont plafonnées à un tiers de la cellule :
@@ -445,31 +453,45 @@ fn draw_panel<DB: DrawingBackend>(
     let secondary = y2_range.unwrap_or(y_range);
     let mut chart = chart.set_secondary_coord(x_range.0..x_range.1, secondary.0..secondary.1);
 
-    // 4 — les axes.
+    // 4 — les axes. Chaque axe a ses couleurs (titre, échelle), et le
+    // `configure_mesh` de Plotters n'a qu'un style de titre et qu'un style
+    // de ligne d'axe pour les deux : l'axe du bas et celui de gauche sont
+    // donc tracés en deux passes, chacune coupant l'autre axe. La géométrie
+    // n'en dépend pas — les aires de graduation sont fixées par le
+    // `ChartBuilder` plus haut.
     let format_x = |value: &f64| scale::format_tick(x_scale, *value);
     let format_y = |value: &f64| scale::format_tick(y_scale, *value);
     {
+        let colors = AxisColors::of(&spec.bottom, ink);
         let mut mesh = chart.configure_mesh();
-        mesh.label_style(text_style(LABEL_SIZE))
-            .axis_desc_style(text_style(AXIS_DESC_SIZE))
-            .axis_style(rgb(INK))
-            .x_desc(spec.bottom.display_label())
-            .y_desc(spec.left.display_label());
+        colors.apply(&mut mesh);
+        mesh.x_desc(spec.bottom.display_label())
+            .disable_y_mesh()
+            .disable_y_axis();
         if !spec.bottom.grid {
             mesh.disable_x_mesh();
-        }
-        if !spec.left.grid {
-            mesh.disable_y_mesh();
         }
         if !spec.bottom.visible {
             mesh.disable_x_axis();
         }
-        if !spec.left.visible {
-            mesh.disable_y_axis();
-        }
         if scale::needs_formatter(x_scale) {
             mesh.x_label_formatter(&format_x)
                 .x_labels(scale::decade_label_count(x_range));
+        }
+        mesh.draw()?;
+    }
+    {
+        let colors = AxisColors::of(&spec.left, ink);
+        let mut mesh = chart.configure_mesh();
+        colors.apply(&mut mesh);
+        mesh.y_desc(spec.left.display_label())
+            .disable_x_mesh()
+            .disable_x_axis();
+        if !spec.left.grid {
+            mesh.disable_y_mesh();
+        }
+        if !spec.left.visible {
+            mesh.disable_y_axis();
         }
         if scale::needs_formatter(y_scale) {
             mesh.y_label_formatter(&format_y)
@@ -480,10 +502,11 @@ fn draw_panel<DB: DrawingBackend>(
 
     let format_y2 = |value: &f64| scale::format_tick(y2_scale, *value);
     if let Some(range) = y2_range {
+        let colors = AxisColors::of(&spec.right, ink);
         let mut mesh = chart.configure_secondary_axes();
-        mesh.label_style(text_style(LABEL_SIZE))
-            .axis_desc_style(text_style(AXIS_DESC_SIZE))
-            .axis_style(rgb(INK))
+        mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+            .axis_desc_style(text_style(AXIS_DESC_SIZE, colors.title))
+            .axis_style(rgb(colors.ticks))
             .y_desc(spec.right.display_label());
         if scale::needs_formatter(y2_scale) {
             mesh.y_label_formatter(&format_y2)
@@ -562,6 +585,7 @@ fn draw_panel<DB: DrawingBackend>(
             threshold,
             if right { secondary } else { y_range },
             bounds,
+            ink,
         )?;
         series.decimated = removed;
         drawn.decimated_points += removed;
@@ -576,8 +600,8 @@ fn draw_panel<DB: DrawingBackend>(
         size,
         &spec.legend,
         &entries,
-        &text_style(LABEL_SIZE),
-        background,
+        &text_style(LABEL_SIZE, ink),
+        legend::LegendColors { background, ink },
     )?;
     drawn.legend_entries = inscribed.entries;
 
@@ -598,6 +622,7 @@ fn paint_series<DB: DrawingBackend>(
     threshold: usize,
     y_range: (f64, f64),
     bounds: Option<PixelBounds>,
+    ink: (u8, u8, u8),
 ) -> Result<usize, DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = series.spec;
     match &series.geometry {
@@ -611,7 +636,7 @@ fn paint_series<DB: DrawingBackend>(
                 .iter()
                 .map(|(left, right, top)| (map((*left, *top)), map((*right, baseline))))
                 .collect();
-            paint::bars(screen, &rects, &spec.line)?;
+            paint::bars(screen, &rects, &spec.line, ink)?;
             Ok(0)
         }
         Geometry::Curve { points, whiskers } => {
@@ -786,9 +811,50 @@ fn label_area(visible: bool, wanted: u32, available: u32) -> u32 {
     wanted.min(available / 3)
 }
 
-/// Le style de texte du projet, à la taille donnée.
-fn text_style(size: f64) -> TextStyle<'static> {
-    (FONT_FAMILY, size).into_font().color(&rgb(INK))
+/// Le style de texte du projet, à la taille et dans la couleur données.
+fn text_style(size: f64, color: (u8, u8, u8)) -> TextStyle<'static> {
+    (FONT_FAMILY, size).into_font().color(&rgb(color))
+}
+
+/// Opacité des lignes principales de la grille, dans la couleur de
+/// l'échelle — celle que Plotters donne par défaut sur du noir.
+const GRID_BOLD_OPACITY: f64 = 0.2;
+/// Opacité des lignes secondaires de la grille.
+const GRID_LIGHT_OPACITY: f64 = 0.1;
+
+/// Couleurs effectives d'un axe : celles du spec, ou l'encre automatique
+/// quand elles sont vides.
+struct AxisColors {
+    title: (u8, u8, u8),
+    ticks: (u8, u8, u8),
+}
+
+impl AxisColors {
+    fn of(axis: &AxisSpec, ink: (u8, u8, u8)) -> Self {
+        Self {
+            title: rgb_or(&axis.title_color, ink),
+            ticks: rgb_or(&axis.tick_color, ink),
+        }
+    }
+
+    /// Pose ces couleurs sur une passe de `configure_mesh` : libellés et
+    /// ligne d'axe dans la couleur de l'échelle, grille dans la même,
+    /// atténuée, titre de l'axe dans la sienne.
+    fn apply<X, Y, DB>(&self, mesh: &mut plotters::chart::MeshStyle<'_, '_, X, Y, DB>)
+    where
+        X: plotters::coord::ranged1d::Ranged<ValueType = f64>
+            + plotters::coord::ranged1d::ValueFormatter<f64>,
+        Y: plotters::coord::ranged1d::Ranged<ValueType = f64>
+            + plotters::coord::ranged1d::ValueFormatter<f64>,
+        DB: DrawingBackend,
+    {
+        let ticks = rgb(self.ticks);
+        mesh.label_style(text_style(LABEL_SIZE, self.ticks))
+            .axis_desc_style(text_style(AXIS_DESC_SIZE, self.title))
+            .axis_style(ticks)
+            .bold_line_style(ticks.mix(GRID_BOLD_OPACITY))
+            .light_line_style(ticks.mix(GRID_LIGHT_OPACITY));
+    }
 }
 
 #[cfg(test)]

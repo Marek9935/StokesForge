@@ -52,6 +52,12 @@ pub struct AxisSpec {
     pub visible: bool,
     /// Axe inversé (valeurs décroissantes).
     pub inverted: bool,
+    /// Couleur du titre de l'axe (`#RRGGBB`). Vide = automatique, voir
+    /// [`crate::PlotSpec::title_color`].
+    pub title_color: String,
+    /// Couleur de l'échelle — ligne d'axe, graduations et leurs libellés, et
+    /// la grille, atténuée (`#RRGGBB`). Vide = automatique.
+    pub tick_color: String,
 }
 
 impl AxisSpec {
@@ -92,6 +98,8 @@ impl Default for AxisSpec {
             grid: false,
             visible: true,
             inverted: false,
+            title_color: String::new(),
+            tick_color: String::new(),
         }
     }
 }

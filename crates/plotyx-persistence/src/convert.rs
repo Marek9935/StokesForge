@@ -343,6 +343,8 @@ impl From<&AxisSpec> for AxisSpecRecord {
             grid: value.grid,
             visible: value.visible,
             inverted: value.inverted,
+            title_color: value.title_color.clone(),
+            tick_color: value.tick_color.clone(),
         }
     }
 }
@@ -359,6 +361,8 @@ impl From<AxisSpecRecord> for AxisSpec {
             grid: value.grid,
             visible: value.visible,
             inverted: value.inverted,
+            title_color: value.title_color,
+            tick_color: value.tick_color,
         }
     }
 }
@@ -488,6 +492,7 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         title: spec.title.clone(),
         panels: spec.panels.iter().map(panel_spec_to_record).collect(),
         background: spec.background.clone(),
+        title_color: spec.title_color.clone(),
         format_version: spec.format_version,
     }
 }
@@ -521,6 +526,7 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         title: record.title,
         panels: panels.into(),
         background: record.background,
+        title_color: record.title_color,
         format_version: record.format_version,
     })
 }
