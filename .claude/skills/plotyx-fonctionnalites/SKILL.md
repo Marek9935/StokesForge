@@ -1,6 +1,6 @@
 ---
 name: plotyx-fonctionnalites
-description: Répondre aux questions sur ce que PlotYx sait faire aujourd'hui, côté utilisateur — grille et saisie, types de colonnes, sélection, copier/coller, menus contextuels, raccourcis, import CSV/TXT/ASC, tracé depuis un classeur, panneau de configuration des graphes, export, fenêtres, scripts Python, enregistrement `.plx`. À utiliser dès que la question est « est-ce que je peux… », « comment je fais pour… », « ça existe ? », « pourquoi ça ne marche pas comme dans Origin », « à quoi sert ce menu ». La réponse s'adresse à un **chimiste** venu d'OriginLab : Python correct, Rust nul — décrire des **gestes**, pas des fonctions, et vérifier dans le code avant d'affirmer qu'une fonctionnalité existe.
+description: Répondre aux questions sur ce que PlotYx sait faire aujourd'hui, côté utilisateur — grille et saisie, types de colonnes, sélection, copier/coller, menus contextuels, raccourcis, import CSV/TXT/ASC, tracé depuis un classeur, fenêtre des propriétés des graphes (clic droit, menu Graphique), export, fenêtres, scripts Python, enregistrement `.plx`. À utiliser dès que la question est « est-ce que je peux… », « comment je fais pour… », « ça existe ? », « pourquoi ça ne marche pas comme dans Origin », « à quoi sert ce menu ». La réponse s'adresse à un **chimiste** venu d'OriginLab : Python correct, Rust nul — décrire des **gestes**, pas des fonctions, et vérifier dans le code avant d'affirmer qu'une fonctionnalité existe.
 ---
 
 # Répondre sur les fonctionnalités de PlotYx
@@ -62,7 +62,7 @@ donc **voulus à ce stade**, pas des oublis. Les principaux, écrits dans
 
 - l'éditeur de matrice est un espace réservé ;
 - pas de sélecteur de couleur graphique (les couleurs se tapent en `#RRGGBB`) ;
-- pas de multi-panneaux dans le panneau de configuration des graphes ;
+- pas de multi-panneaux dans la fenêtre des propriétés des graphes ;
 - pas de largeur de barre ni de nombre de classes d'histogramme dans ce
   panneau ;
 - les fenêtres ouvertes et leur mode ne sont pas restaurés au démarrage (seules

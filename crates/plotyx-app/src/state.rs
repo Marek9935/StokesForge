@@ -324,8 +324,8 @@ pub enum Action {
         /// Type de tracé demandé pour chaque nouvelle série.
         plot_type: PlotType,
     },
-    /// Remplace en bloc le [`PlotSpec`] d'un graphe — panneau de
-    /// configuration des graphiques ([`Command::SetPlotSpec`]). Poussée à la
+    /// Remplace en bloc le [`PlotSpec`] d'un graphe — fenêtre des
+    /// propriétés d'un graphe ([`Command::SetPlotSpec`]). Poussée à la
     /// validation d'un brouillon ([`AppState::commit_plot_edit`]), jamais à
     /// chaque frappe ou chaque pixel de glisser : voir la doc de tête de
     /// [`PlotEdit`].
@@ -334,6 +334,18 @@ pub enum Action {
         graph: NodeId,
         /// Nouvelle description du graphe.
         spec: PlotSpec,
+    },
+    /// Ouvre (ou ramène sur l'onglet voulu) la fenêtre des propriétés du
+    /// graphe `graph` — clic droit sur un composant du graphe, ou menu
+    /// « Graphique ». `axis` choisit l'axe affiché par l'onglet « Axes »
+    /// (`None` : garder celui déjà choisi).
+    OpenPlotSettings {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Onglet à afficher.
+        tab: PlotSettingsTab,
+        /// Axe à afficher dans l'onglet « Axes ».
+        axis: Option<PlotAxis>,
     },
 }
 
@@ -647,7 +659,7 @@ pub(crate) fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> 
     }
 }
 
-/// Nom affiché d'une série dans la liste du panneau de configuration : le
+/// Nom affiché d'une série dans la liste de la fenêtre des propriétés : le
 /// même calcul que `label_for` (`plotyx-core/src/resolve.rs`, privée à ce
 /// crate) — `SeriesSpec::name` s'il est renseigné, sinon le nom long de la
 /// colonne Y, sinon son nom de nœud, sinon « (référence rompue) » si la
@@ -1097,8 +1109,8 @@ pub struct NoteEdit {
 
 /// Nature d'onglet actif, vue par [`AppState`] — un miroir minimal de
 /// l'énumération privée `Tab` de [`crate::app`], juste assez pour que la
-/// question « le panneau de configuration des graphiques doit-il
-/// s'afficher ? » ([`plot_panel_graph`]) se pose sans fenêtre, dans
+/// question « le menu « Graphique » doit-il s'afficher ? »
+/// ([`active_graph`]) se pose sans fenêtre, dans
 /// `tests/shell.rs`. `crate::app` traduit son `Tab` vers celui-ci au seul
 /// point de contact (`PlotyxApp::ui`), rien d'autre ne le lit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -1116,18 +1128,138 @@ pub enum ActiveTabKind {
     Note(NodeId),
 }
 
-/// Le graphe dont le panneau de configuration doit s'afficher, d'après la
-/// nature de l'onglet actif — `None` sauf pour [`ActiveTabKind::Graph`].
-/// Fonction pure, séparée du code de peinture de `crate::app` pour être
-/// testable sans fenêtre.
-pub fn plot_panel_graph(active: ActiveTabKind) -> Option<NodeId> {
+/// Le graphe sélectionné, d'après la nature de l'onglet actif — `None` sauf
+/// pour [`ActiveTabKind::Graph`]. Décide la présence du menu « Graphique »
+/// dans la barre de menus. Fonction pure, séparée du code de peinture de
+/// `crate::app` pour être testable sans fenêtre.
+pub fn active_graph(active: ActiveTabKind) -> Option<NodeId> {
     match active {
         ActiveTabKind::Graph(id) => Some(id),
         _ => None,
     }
 }
 
-/// Brouillon d'édition du panneau de configuration des graphiques : un
+/// Onglets thématiques de la fenêtre des propriétés d'un graphe, dans leur
+/// ordre d'affichage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlotSettingsTab {
+    /// Le graphe entier : titre, fond.
+    Graph,
+    /// La zone de tracé : titre du panneau, grilles.
+    PlotArea,
+    /// Un axe : titre, échelle, bornes, affichage.
+    Axes,
+    /// Les séries tracées.
+    Series,
+    /// La légende.
+    Legend,
+}
+
+impl PlotSettingsTab {
+    /// Tous les onglets, dans l'ordre d'affichage.
+    pub const ALL: [PlotSettingsTab; 5] = [
+        PlotSettingsTab::Graph,
+        PlotSettingsTab::PlotArea,
+        PlotSettingsTab::Axes,
+        PlotSettingsTab::Series,
+        PlotSettingsTab::Legend,
+    ];
+
+    /// Libellé de l'onglet.
+    pub fn label(self) -> &'static str {
+        match self {
+            PlotSettingsTab::Graph => "Graphe",
+            PlotSettingsTab::PlotArea => "Zone de tracé",
+            PlotSettingsTab::Axes => "Axes",
+            PlotSettingsTab::Series => "Séries",
+            PlotSettingsTab::Legend => "Légende",
+        }
+    }
+}
+
+/// Un axe éditable du (premier) panneau d'un graphe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlotAxis {
+    /// Abscisses, en bas.
+    Bottom,
+    /// Ordonnée principale, à gauche.
+    Left,
+    /// Ordonnée secondaire, à droite.
+    Right,
+}
+
+impl PlotAxis {
+    /// Libellé de l'axe.
+    pub fn label(self) -> &'static str {
+        match self {
+            PlotAxis::Bottom => "X (bas)",
+            PlotAxis::Left => "Y (gauche)",
+            PlotAxis::Right => "Y secondaire (droite)",
+        }
+    }
+}
+
+/// Un composant d'un graphe visé par un clic droit — traduit par
+/// `crate::app` depuis ce que le rendu désigne sous le pointeur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlotTarget {
+    /// Le fond de la figure, hors de tout composant.
+    Background,
+    /// Le titre du graphe.
+    Title,
+    /// La zone de tracé.
+    PlotArea,
+    /// Un axe (ligne et graduations).
+    Axis(PlotAxis),
+    /// Le titre d'un axe.
+    AxisTitle(PlotAxis),
+}
+
+impl PlotTarget {
+    /// Nom du composant, en tête du menu contextuel.
+    pub fn label(self) -> String {
+        match self {
+            PlotTarget::Background => "Graphe".to_string(),
+            PlotTarget::Title => "Titre du graphe".to_string(),
+            PlotTarget::PlotArea => "Zone de tracé".to_string(),
+            PlotTarget::Axis(axis) => format!("Axe {}", axis.label()),
+            PlotTarget::AxisTitle(axis) => format!("Titre de l'axe {}", axis.label()),
+        }
+    }
+
+    /// L'onglet (et l'axe) de la fenêtre des propriétés qui règle ce
+    /// composant.
+    pub fn settings_page(self) -> (PlotSettingsTab, Option<PlotAxis>) {
+        match self {
+            PlotTarget::Background | PlotTarget::Title => (PlotSettingsTab::Graph, None),
+            PlotTarget::PlotArea => (PlotSettingsTab::PlotArea, None),
+            PlotTarget::Axis(axis) | PlotTarget::AxisTitle(axis) => {
+                (PlotSettingsTab::Axes, Some(axis))
+            }
+        }
+    }
+
+    /// L'action qui ouvre les propriétés de ce composant sur `graph`.
+    pub fn open_settings(self, graph: NodeId) -> Action {
+        let (tab, axis) = self.settings_page();
+        Action::OpenPlotSettings { graph, tab, axis }
+    }
+}
+
+/// État de la fenêtre des propriétés d'un graphe : quel graphe, quel onglet,
+/// quel axe dans l'onglet « Axes ». État d'UI pur ; les valeurs éditées
+/// vivent dans le brouillon [`PlotEdit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlotSettings {
+    /// Graphe dont la fenêtre règle les propriétés.
+    pub graph: NodeId,
+    /// Onglet affiché.
+    pub tab: PlotSettingsTab,
+    /// Axe affiché dans l'onglet « Axes ».
+    pub axis: PlotAxis,
+}
+
+/// Brouillon d'édition de la fenêtre des propriétés d'un graphe : un
 /// [`PlotSpec`] entier tenu hors de l'historique jusqu'à validation, sur le
 /// même principe que [`NoteEdit`]/[`HeaderEdit`] — sauf qu'ici l'objet édité
 /// est un graphe entier plutôt qu'un seul champ. La raison : le panneau
@@ -1150,6 +1282,13 @@ pub struct PlotEdit {
     /// Série actuellement choisie dans la liste, pour l'édition détaillée —
     /// état d'UI pur, jamais envoyé au modèle.
     pub selected_series: usize,
+    /// Le spec du modèle sur lequel le brouillon est parti (ou qu'il vient
+    /// de valider). Tant que `spec` lui est égal, le brouillon n'a rien en
+    /// cours : si le modèle change sous lui (Annuler, Rétablir, script,
+    /// glisser-déposer d'une colonne), [`AppState::begin_plot_edit`] le
+    /// réaligne au lieu de montrer des valeurs périmées — qu'une validation
+    /// suivante réécrirait par-dessus l'annulation.
+    pub base: PlotSpec,
 }
 
 /// Destination d'un lot d'import. Chaque fichier produit une feuille ; les
@@ -1254,9 +1393,12 @@ pub struct AppState {
     editing: Option<CellEdit>,
     /// Saisie de note en cours, s'il y en a une (voir [`NoteEdit`]).
     note_editing: Option<NoteEdit>,
-    /// Brouillon en cours du panneau de configuration des graphiques, s'il y
+    /// Brouillon en cours de la fenêtre des propriétés d'un graphe, s'il y
     /// en a un (voir [`PlotEdit`]).
     plot_edit: Option<PlotEdit>,
+    /// Fenêtre des propriétés du graphe, si elle est ouverte (voir
+    /// [`PlotSettings`]).
+    plot_settings: Option<PlotSettings>,
     /// Sélection courante de la grille de chaque feuille affichée — état UI
     /// pur, jamais dans l'historique (voir la doc de tête de
     /// [`crate::selection`]). Clé absente = pas de sélection dans cette
@@ -1347,6 +1489,7 @@ impl AppState {
             editing: None,
             note_editing: None,
             plot_edit: None,
+            plot_settings: None,
             selection: std::collections::HashMap::new(),
             header_editing: None,
             grid_clipboard: None,
@@ -2467,7 +2610,7 @@ impl AppState {
         });
     }
 
-    /// Brouillon courant du panneau de configuration des graphiques, s'il y
+    /// Brouillon courant de la fenêtre des propriétés d'un graphe, s'il y
     /// en a un.
     pub fn plot_edit(&self) -> Option<&PlotEdit> {
         self.plot_edit.as_ref()
@@ -2480,34 +2623,55 @@ impl AppState {
     }
 
     /// Ouvre (ou conserve) le brouillon d'édition du graphe `graph`. À
-    /// appeler à chaque image par le panneau, *avant* de peindre quoi que ce
-    /// soit : ne réinitialise le brouillon que s'il n'y en a pas encore, ou
-    /// s'il portait sur un autre graphe — repeindre la même image sur le
-    /// même graphe ne doit jamais effacer une saisie en cours. `graph` sans
+    /// appeler à chaque image par la fenêtre des propriétés, *avant* de
+    /// peindre quoi que ce soit : ne réinitialise le brouillon que s'il n'y
+    /// en a pas encore, ou s'il portait sur un autre graphe — repeindre la
+    /// même image sur le même graphe ne doit jamais effacer une saisie en
+    /// cours. Un brouillon sans saisie en cours suit en revanche le modèle
+    /// (voir [`PlotEdit::base`]). `graph` sans
     /// spec (nœud supprimé, ou pas un graphe) laisse le brouillon inchangé :
     /// c'est à l'appelant de vérifier `self.tree().node(graph)` avant
     /// d'afficher le panneau (voir `node_title` dans `crate::app`).
     pub fn begin_plot_edit(&mut self, graph: NodeId) {
-        if self
-            .plot_edit
-            .as_ref()
-            .is_some_and(|edit| edit.graph == graph)
-        {
-            return;
-        }
-        let Some(spec) = self.plot_spec(graph) else {
+        let Some(model) = self.plot_spec(graph) else {
             return;
         };
+        if let Some(edit) = self.plot_edit.as_mut().filter(|edit| edit.graph == graph) {
+            if edit.spec == edit.base && edit.base != model {
+                edit.spec = model.clone();
+                edit.base = model;
+            }
+            return;
+        }
         self.plot_edit = Some(PlotEdit {
             graph,
-            spec,
+            spec: model.clone(),
             selected_series: 0,
+            base: model,
         });
     }
 
-    /// Ferme le brouillon d'édition courant sans rien valider — appelé quand
-    /// le panneau se masque (plus d'onglet graphe actif).
+    /// Ferme le brouillon d'édition courant sans rien valider.
     pub fn close_plot_edit(&mut self) {
+        self.plot_edit = None;
+    }
+
+    /// La fenêtre des propriétés du graphe, si elle est ouverte.
+    pub fn plot_settings(&self) -> Option<PlotSettings> {
+        self.plot_settings
+    }
+
+    /// Change l'onglet ou l'axe affiché par la fenêtre des propriétés.
+    pub fn plot_settings_mut(&mut self) -> Option<&mut PlotSettings> {
+        self.plot_settings.as_mut()
+    }
+
+    /// Ferme la fenêtre des propriétés : valide d'abord ce qui diverge
+    /// encore du modèle (une saisie dont le champ n'a pas perdu le focus),
+    /// puis abandonne le brouillon.
+    pub fn close_plot_settings(&mut self) {
+        self.commit_plot_edit();
+        self.plot_settings = None;
         self.plot_edit = None;
     }
 
@@ -2525,8 +2689,11 @@ impl AppState {
         }
         self.dispatch(Action::SetPlotSpec {
             graph: edit.graph,
-            spec: edit.spec,
+            spec: edit.spec.clone(),
         });
+        if let Some(current) = self.plot_edit.as_mut() {
+            current.base = edit.spec;
+        }
     }
 
     /// Les feuilles de `book`, dans l'ordre des onglets internes
@@ -2757,7 +2924,37 @@ impl AppState {
             Action::SetPlotSpec { graph, spec } => {
                 self.execute(Command::SetPlotSpec { graph, spec })
             }
+            Action::OpenPlotSettings { graph, tab, axis } => {
+                self.open_plot_settings(graph, tab, axis);
+            }
         }
+    }
+
+    /// Voir [`Action::OpenPlotSettings`]. Passer à un autre graphe valide
+    /// d'abord le brouillon du précédent ; un graphe qui n'existe plus (ou
+    /// n'est pas un graphe) laisse tout en l'état.
+    fn open_plot_settings(&mut self, graph: NodeId, tab: PlotSettingsTab, axis: Option<PlotAxis>) {
+        if self.plot_spec(graph).is_none() {
+            return;
+        }
+        if self
+            .plot_edit
+            .as_ref()
+            .is_some_and(|edit| edit.graph != graph)
+        {
+            self.commit_plot_edit();
+            self.plot_edit = None;
+        }
+        self.begin_plot_edit(graph);
+        let current_axis = self
+            .plot_settings
+            .filter(|settings| settings.graph == graph)
+            .map(|settings| settings.axis);
+        self.plot_settings = Some(PlotSettings {
+            graph,
+            tab,
+            axis: axis.or(current_axis).unwrap_or(PlotAxis::Bottom),
+        });
     }
 
     /// Rafraîchit l'instantané depuis l'acteur et revalide la sélection.

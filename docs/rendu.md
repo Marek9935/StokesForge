@@ -28,6 +28,7 @@ formules — est dans `plotyx-render`.
 | `legend` | la légende, mise en page à la main |
 | `decimate` | LTTB |
 | `interact` | correspondance pixel ↔ données d'un panneau tracé |
+| `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
 | `color` | lecture des couleurs `#RRGGBB` du spec |
 | `formula` | Typst (feature `typst`) |
 | `sample` | deux graphes de démonstration |

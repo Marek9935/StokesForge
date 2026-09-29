@@ -369,12 +369,13 @@ use plotyx_session::{Snapshot, WindowGeometry};
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    drop_payload_action, node_title_in, plot_panel_graph, series_list_label, Action, ActiveTabKind,
-    AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination, MoveDirection,
-    ProjectTreeNode, WindowKind,
+    active_graph, drop_payload_action, node_title_in, series_list_label, Action, ActiveTabKind,
+    AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination, MoveDirection, PlotAxis,
+    PlotSettings, PlotSettingsTab, PlotTarget, ProjectTreeNode, WindowKind,
 };
 use crate::theme;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
+use plotyx_render_egui::{AxisSide, PlotComponent};
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
 /// [`PlotyxApp::new`]).
@@ -571,9 +572,9 @@ const CASCADE_WRAP: u32 = 8;
 /// la grille (voir [`grid_grip_side`], et [`grid_contents`] pour le geste
 /// complet).
 const COLUMN_GRIP_WIDTH: f32 = 10.0;
-/// Largeur par défaut du panneau de configuration des graphiques
-/// ([`PlotyxApp::ui`], § panneau de configuration).
-const PLOT_CONFIG_PANEL_WIDTH: f32 = 300.0;
+/// Largeur par défaut de la fenêtre des propriétés d'un graphe
+/// ([`plot_settings_window`]).
+const PLOT_SETTINGS_WIDTH: f32 = 380.0;
 
 /// Bord de la grille sur lequel se trouve `pointer`, si `pointer` est à
 /// `margin` points ou moins de son bord gauche ou droit et dans ses bornes
@@ -974,13 +975,27 @@ impl PlotyxApp {
         }
     }
 
-    /// Barre de menu : « Fichier », « Édition » et « Fenêtre ».
+    /// Barre de menu : « Fichier », « Édition », « Graphique » (seulement
+    /// quand l'onglet actif est un graphe, voir [`active_graph`]) et
+    /// « Fenêtre ».
+    ///
+    /// « Graphique » ouvre la fenêtre des propriétés du graphe sur chacun de
+    /// ses onglets ([`plot_settings_window`]) — les mêmes pages que le clic
+    /// droit sur un composant du graphe ([`graph_view_contents`]), pour
+    /// qu'aucun réglage ne soit atteignable **seulement** au clic droit — et
+    /// réinitialise le zoom.
     ///
     /// « Fenêtre » porte les deux fonctionnalités qui touchent à la
     /// disposition elle-même plutôt qu'au modèle : maximiser/restaurer
     /// l'onglet actif, et détacher/réattacher le Project Manager en fenêtre
     /// OS séparée — voir la doc de tête du module.
-    fn menu_bar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    fn menu_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        actions: &mut Vec<Action>,
+        active_tab: Option<Tab>,
+    ) {
         egui::Panel::top("plotyx_menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Fichier", |ui| {
@@ -1080,6 +1095,33 @@ impl PlotyxApp {
                         ui.close();
                     }
                 });
+                if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+                    ui.menu_button("Graphique", |ui| {
+                        for (label, tab) in [
+                            ("Propriétés du graphe…", PlotSettingsTab::Graph),
+                            ("Zone de tracé…", PlotSettingsTab::PlotArea),
+                            ("Axes…", PlotSettingsTab::Axes),
+                            ("Séries…", PlotSettingsTab::Series),
+                            ("Légende…", PlotSettingsTab::Legend),
+                        ] {
+                            if ui.button(label).clicked() {
+                                actions.push(Action::OpenPlotSettings {
+                                    graph,
+                                    tab,
+                                    axis: None,
+                                });
+                                ui.close();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("Réinitialiser le zoom").clicked() {
+                            if let Some(view) = self.graph_views.get_mut(&graph) {
+                                view.reset_view();
+                            }
+                            ui.close();
+                        }
+                    });
+                }
                 ui.menu_button("Fenêtre", |ui| {
                     if let Some(tab) = self.maximized_tab {
                         if ui
@@ -1673,7 +1715,13 @@ impl PlotyxApp {
                                 Tab::Graph(id) => {
                                     let view =
                                         model.graph_view.get_or_insert_with(GraphView::default);
-                                    graph_view_contents(ui, view, &snapshot, id);
+                                    graph_view_contents(
+                                        ui,
+                                        view,
+                                        &snapshot,
+                                        id,
+                                        &mut requests.actions,
+                                    );
                                 }
                                 Tab::Matrix(id) => {
                                     matrix_contents(ui, tree, id);
@@ -1930,7 +1978,7 @@ impl eframe::App for PlotyxApp {
         self.state.poll_script();
 
         self.collect_shortcuts(&ctx, &mut actions);
-        self.menu_bar(ui, &ctx, &mut actions);
+        self.menu_bar(ui, &ctx, &mut actions, active_tab);
         self.status_bar(ui);
         // Panneau fixe, peint *avant* `PlotyxApp::project_manager_panel` —
         // voir la doc de tête du module, § Console de script, et la doc de
@@ -2044,33 +2092,6 @@ impl eframe::App for PlotyxApp {
             hidden_tabs,
             ..
         } = self;
-
-        // Panneau de configuration des graphiques : un `egui::Panel::right`
-        // posé *avant* le `CentralPanel` — comme le Project Manager plus
-        // haut — pour que les fenêtres flottantes ne lui disputent jamais
-        // l'espace (il fait partie des panneaux fixes qui bornent
-        // `viewport_rect`, voir la doc de tête du module, § Fenêtres
-        // flottantes confinées). Visible seulement quand l'onglet actif (au
-        // sens le plus large : l'onglet maximisé s'il y en a un, sinon la
-        // fenêtre flottante la plus récemment focalisée — dernier élément de
-        // `floating_tabs`, § z-order) est un `Tab::Graph` — voir
-        // `plot_panel_graph`, testée sans fenêtre dans `tests/shell.rs`.
-        // Masqué sinon, y compris pendant l'édition d'un autre onglet : pas
-        // de panneau vide à regarder pour un classeur ou une note.
-        // `active_tab` est calculé plus haut dans `ui()`, avant même le
-        // Project Manager qui en a aussi besoin (§ double-clic).
-        match plot_panel_graph(active_tab_kind(active_tab)) {
-            Some(graph) => {
-                egui::Panel::right("plotyx_plot_config")
-                    .default_size(PLOT_CONFIG_PANEL_WIDTH)
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            plot_config_panel(ui, state, graph);
-                        });
-                    });
-            }
-            None => state.close_plot_edit(),
-        }
 
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(tab) = *maximized_tab {
@@ -2324,6 +2345,10 @@ impl eframe::App for PlotyxApp {
         // pousse éventuellement soit dispatchée cette image-ci comme toute
         // autre action.
         import_window(&ctx, &mut self.state, &mut actions);
+        // Fenêtre des propriétés d'un graphe : même famille de dialogue
+        // transitoire que la fenêtre d'import, peinte tant que
+        // `self.state.plot_settings()` est `Some`.
+        plot_settings_window(&ctx, &mut self.state);
 
         // Les onglets demandés (Project Manager, panneau fixe ou détaché),
         // les détachements et fermetures demandés par l'en-tête d'une fenêtre
@@ -3686,7 +3711,7 @@ fn graph_drop_target(
             actions.push(drop_payload_action(&payload, graph_id));
         }
     }
-    graph_contents(ui, state, graph_views, graph_id);
+    graph_contents(ui, state, actions, graph_views, graph_id);
     if hovering {
         ui.painter().rect_stroke(
             tab_rect,
@@ -5812,11 +5837,12 @@ fn paint_drag_handle_icon(painter: &egui::Painter, at: egui::Pos2, color: egui::
 fn graph_contents(
     ui: &mut egui::Ui,
     state: &AppState,
+    actions: &mut Vec<Action>,
     graph_views: &mut HashMap<NodeId, GraphView>,
     graph_id: NodeId,
 ) {
     let view = graph_views.entry(graph_id).or_default();
-    graph_view_contents(ui, view, state.snapshot(), graph_id);
+    graph_view_contents(ui, view, state.snapshot(), graph_id, actions);
 }
 
 /// Corps de [`graph_contents`], factorisé sur une [`GraphView`] et un
@@ -5834,6 +5860,7 @@ fn graph_view_contents(
     view: &mut GraphView,
     snapshot: &Snapshot,
     graph_id: NodeId,
+    actions: &mut Vec<Action>,
 ) {
     let available = ui.available_size_before_wrap();
     // La figure prend tout ce qui reste après ses contrôles. Réserver leur
@@ -5867,6 +5894,7 @@ fn graph_view_contents(
     figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
+            graph_context_menu(ui, view, graph_id, actions);
             if ui.small_button("réinitialiser le zoom").clicked() {
                 view.reset_view();
             }
@@ -5877,12 +5905,74 @@ fn graph_view_contents(
     }
 }
 
-/// Panneau de configuration des graphiques (chantier 3/3 de « tracer depuis
-/// un classeur », voir `docs/application.md`) : édite le [`plotyx_plot::
-/// PlotSpec`] du graphe actif au travers d'un brouillon transitoire
-/// ([`crate::state::PlotEdit`]), jamais directement — même famille que
-/// [`NoteEdit`]/`HeaderEdit`, généralisée à un objet entier plutôt qu'à un
-/// seul champ (voir la doc de tête de `PlotEdit`).
+/// Menu contextuel de la figure : un clic droit (sans glisser — le glisser
+/// secondaire reste le zoom élastique de `plotyx-render-egui`) sur un
+/// composant du graphe propose ses propriétés, qui ouvrent la fenêtre des
+/// propriétés sur l'onglet de ce composant ([`PlotTarget::settings_page`]).
+/// Le composant est lu **au moment du clic** et mémorisé : le menu reste
+/// ouvert plusieurs images, pendant lesquelles le pointeur bouge.
+fn graph_context_menu(
+    ui: &egui::Ui,
+    view: &mut GraphView,
+    graph_id: NodeId,
+    actions: &mut Vec<Action>,
+) {
+    let Some(response) = view.response().cloned() else {
+        return;
+    };
+    let target_id = response.id.with("plot_target");
+    if response.secondary_clicked() {
+        let target = response
+            .interact_pointer_pos()
+            .map_or(PlotTarget::Background, |pos| {
+                plot_target(view.component_at(pos))
+            });
+        ui.memory_mut(|memory| memory.data.insert_temp(target_id, target));
+    }
+    response.context_menu(|ui| {
+        let target: PlotTarget = ui
+            .memory(|memory| memory.data.get_temp(target_id))
+            .unwrap_or(PlotTarget::Background);
+        ui.weak(target.label());
+        ui.separator();
+        if ui.button("Propriétés…").clicked() {
+            actions.push(target.open_settings(graph_id));
+            ui.close();
+        }
+        if ui.button("Réinitialiser le zoom").clicked() {
+            view.reset_view();
+            ui.close();
+        }
+    });
+}
+
+/// Traduit le composant désigné par le rendu en cible d'interface. Seul le
+/// premier panneau est éditable (pas de multi-panneaux), l'indice de
+/// panneau est donc ignoré.
+fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
+    let axis = |side| match side {
+        AxisSide::Bottom => PlotAxis::Bottom,
+        AxisSide::Left => PlotAxis::Left,
+        AxisSide::Right => PlotAxis::Right,
+    };
+    match component {
+        None => PlotTarget::Background,
+        Some(PlotComponent::Title) => PlotTarget::Title,
+        Some(PlotComponent::PlotArea { .. }) => PlotTarget::PlotArea,
+        Some(PlotComponent::Axis { side, .. }) => PlotTarget::Axis(axis(side)),
+        Some(PlotComponent::AxisTitle { side, .. }) => PlotTarget::AxisTitle(axis(side)),
+    }
+}
+
+/// Fenêtre des propriétés d'un graphe : un dialogue flottant (même famille
+/// que [`import_window`]), ouvert par le clic droit sur un composant du
+/// graphe ou par le menu « Graphique », et organisé en onglets thématiques
+/// ([`PlotSettingsTab`]). Elle remplace l'ancien panneau fixe à droite de
+/// l'espace de travail, qui prenait de la place en permanence dès qu'un
+/// graphe était actif.
+///
+/// Édite le [`plotyx_plot::PlotSpec`] au travers d'un brouillon transitoire
+/// ([`crate::state::PlotEdit`]), jamais directement.
 ///
 /// **Stratégie anti-inflation d'historique** : chaque widget met à jour le
 /// brouillon en direct (retour visuel immédiat), et `commit` — un simple
@@ -5893,185 +5983,231 @@ fn graph_view_contents(
 /// - **texte** (titres, libellés, couleurs en `#RRGGBB`) : `lost_focus()`,
 ///   comme `note_contents`/`cell_widget` — jamais à chaque frappe ;
 /// - **glissé numérique** (épaisseur de trait, taille de marqueur, bornes
-///   d'axe) : `drag_stopped() || lost_focus()` — la valeur change à chaque
-///   pixel de glisser (retour visuel), mais ne s'envoie qu'au relâchement ou
-///   à la validation clavier ;
-/// - **case à cocher / menu déroulant** (échelle, visibilité, type de
-///   tracé, position de légende...) : un seul événement discret par clic,
-///   validé tout de suite — rien à débouncer.
+///   d'axe) : `drag_stopped() || lost_focus()` ;
+/// - **case à cocher / menu déroulant** : un seul événement discret par
+///   clic, validé tout de suite.
 ///
-/// **Un seul panneau, pas de multi-panneaux** : `plotyx-plot` autorise
-/// plusieurs [`plotyx_plot::PanelSpec`] par graphe (`row`/`column` dans une
-/// grille), mais aucune UI de ce chantier n'en crée encore un second —
-/// seul `PlotSpec::panels`[0] est donc éditable ici. Éditer le premier
-/// panneau revient, pour l'instant, à éditer *le* graphe.
-fn plot_config_panel(ui: &mut egui::Ui, state: &mut AppState, graph: NodeId) {
+/// Fermer la fenêtre valide ce qui diverge encore du modèle
+/// ([`AppState::close_plot_settings`]).
+///
+/// **Un seul panneau, pas de multi-panneaux** : seul `PlotSpec::panels`[0]
+/// est éditable ici. Éditer le premier panneau revient, pour l'instant, à
+/// éditer *le* graphe.
+fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
+    let Some(settings) = state.plot_settings() else {
+        return;
+    };
     // Cloné avant d'emprunter `state` en écriture pour le brouillon : un
-    // `Arc<Tree>` cloné est un compteur de références, pas une copie de
-    // l'arbre — voir `AppState::tree`.
+    // `Arc<Tree>` cloné est un compteur de références, pas une copie.
     let tree = state.tree().clone();
-    let Some(node) = tree.node(graph) else {
-        state.close_plot_edit();
-        ui.weak("Le graphe a été supprimé.");
+    let Some(node) = tree.node(settings.graph) else {
+        state.close_plot_settings();
         return;
     };
-    let name = node.name().to_string();
-
-    state.begin_plot_edit(graph);
-    let Some(edit) = state.plot_edit_mut() else {
-        return;
-    };
-    if edit.graph != graph {
-        // Ne devrait pas arriver : `begin_plot_edit` vient de le garantir.
-        // Filet plutôt qu'un `unwrap` — un brouillon désaccordé ne doit pas
-        // faire paniquer le panneau (invariant 10).
-        return;
-    }
-
-    let mut commit = false;
-
-    ui.heading(&name);
-    ui.separator();
-
-    ui.strong("Graphe");
-    let title_response = ui.horizontal(|ui| {
-        ui.label("Titre");
-        ui.text_edit_singleline(&mut edit.spec.title)
-    });
-    commit |= title_response.inner.lost_focus();
-
-    ui.add_space(6.0);
-    ui.separator();
-
-    let Some(panel) = edit.spec.panels.get_mut(0) else {
-        // Ne peut pas arriver : `Panels` garantit au moins un panneau par
-        // construction (`plotyx-plot/src/spec.rs`). Filet, même raison.
-        return;
-    };
-
-    ui.strong("Panneau (le premier — pas de multi-panneaux dans ce chantier)");
-    let panel_title_response = ui.horizontal(|ui| {
-        ui.label("Titre");
-        ui.text_edit_singleline(&mut panel.title)
-    });
-    commit |= panel_title_response.inner.lost_focus();
-
-    ui.add_space(6.0);
-    ui.separator();
-    ui.strong("Axes");
-    commit |= axis_editor(ui, "axis-bottom", "Bas (X)", &mut panel.bottom);
-    commit |= axis_editor(ui, "axis-left", "Gauche (Y)", &mut panel.left);
-    if panel.uses_right_axis() {
-        commit |= axis_editor(ui, "axis-right", "Droite (Y secondaire)", &mut panel.right);
-    }
-
-    ui.add_space(6.0);
-    ui.separator();
-    ui.strong("Séries");
-    if panel.series.is_empty() {
-        ui.weak("Ce panneau ne trace aucune série.");
-    } else {
-        if edit.selected_series >= panel.series.len() {
-            edit.selected_series = panel.series.len() - 1;
-        }
-        egui::ScrollArea::vertical()
-            .id_salt("plot_config_series_list")
-            .max_height(140.0)
-            .show(ui, |ui| {
-                for (index, series) in panel.series.iter().enumerate() {
-                    let label = series_list_label(&tree, series);
-                    if ui
-                        .selectable_label(edit.selected_series == index, label)
-                        .clicked()
-                    {
-                        edit.selected_series = index;
-                    }
-                }
-            });
-        ui.separator();
-        if let Some(series) = panel.series.get_mut(edit.selected_series) {
-            commit |= series_editor(ui, series);
-        }
-    }
-
-    ui.add_space(6.0);
-    ui.separator();
-    ui.strong("Légende");
-    commit |= legend_editor(ui, &mut panel.legend);
-
-    if commit {
-        state.commit_plot_edit();
+    let title = format!("Propriétés — {}", node.name());
+    state.begin_plot_edit(settings.graph);
+    let mut open = true;
+    egui::Window::new(title)
+        .id(egui::Id::new("plotyx_plot_settings"))
+        .collapsible(false)
+        .resizable(true)
+        .default_width(PLOT_SETTINGS_WIDTH)
+        .open(&mut open)
+        .show(ctx, |ui| plot_settings_contents(ui, state, &tree, settings));
+    if !open {
+        state.close_plot_settings();
     }
 }
 
-/// Édite un [`AxisSpec`] : libellé, unité, échelle, visibilité, grille,
-/// inversion, bornes. `id_salt` distingue les widgets des quatre axes
-/// possibles d'un même panneau (`egui::ComboBox`/`CollapsingHeader` ont
-/// besoin d'un identifiant stable, faute de quoi deux axes dépliés en même
-/// temps se marcheraient dessus). Rend `true` si le brouillon doit être
-/// validé — voir la doc de tête de [`plot_config_panel`].
-fn axis_editor(ui: &mut egui::Ui, id_salt: &str, title: &str, axis: &mut AxisSpec) -> bool {
-    let mut commit = false;
-    egui::CollapsingHeader::new(title)
-        .id_salt(id_salt)
-        .default_open(false)
-        .show(ui, |ui| {
-            let label_response = ui.horizontal(|ui| {
-                ui.label("Libellé");
-                ui.text_edit_singleline(&mut axis.label)
-            });
-            commit |= label_response.inner.lost_focus();
-
-            let unit_response = ui.horizontal(|ui| {
-                ui.label("Unité");
-                ui.text_edit_singleline(&mut axis.unit)
-            });
-            commit |= unit_response.inner.lost_focus();
-
-            let mut log_scale = axis.scale == plotyx_plot::AxisScale::Log;
+/// Corps de [`plot_settings_window`] : la bande d'onglets, puis la page de
+/// l'onglet choisi.
+fn plot_settings_contents(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    tree: &Tree,
+    settings: PlotSettings,
+) {
+    let mut chosen_tab = settings.tab;
+    let mut chosen_axis = settings.axis;
+    ui.horizontal(|ui| {
+        for tab in PlotSettingsTab::ALL {
             if ui
-                .checkbox(&mut log_scale, "Échelle logarithmique")
-                .changed()
+                .selectable_label(chosen_tab == tab, tab.label())
+                .clicked()
             {
-                axis.scale = if log_scale {
-                    plotyx_plot::AxisScale::Log
-                } else {
-                    plotyx_plot::AxisScale::Linear
-                };
-                commit = true;
+                chosen_tab = tab;
             }
-            commit |= ui.checkbox(&mut axis.visible, "Axe affiché").changed();
-            commit |= ui.checkbox(&mut axis.grid, "Grille").changed();
-            commit |= ui.checkbox(&mut axis.inverted, "Axe inversé").changed();
-            commit |= ui
-                .checkbox(&mut axis.auto_range, "Bornes automatiques")
-                .changed();
+        }
+    });
+    ui.separator();
 
-            if !axis.auto_range {
-                let mut min = axis.range_min.unwrap_or(0.0);
-                let mut max = axis.range_max.unwrap_or(0.0);
-                let min_response = ui.horizontal(|ui| {
-                    ui.label("Min");
-                    ui.add(egui::DragValue::new(&mut min).speed(0.1))
+    let mut commit = false;
+    if let Some(edit) = state
+        .plot_edit_mut()
+        .filter(|edit| edit.graph == settings.graph)
+    {
+        let spec = &mut edit.spec;
+        egui::ScrollArea::vertical().show(ui, |ui| match chosen_tab {
+            PlotSettingsTab::Graph => {
+                commit |= text_field(ui, "Titre", &mut spec.title);
+                commit |= text_field(ui, "Fond (#RRGGBB, vide = blanc)", &mut spec.background);
+            }
+            PlotSettingsTab::PlotArea => {
+                let Some(panel) = spec.panels.get_mut(0) else {
+                    return;
+                };
+                commit |= text_field(ui, "Titre du panneau", &mut panel.title);
+                ui.add_space(4.0);
+                ui.strong("Grille");
+                commit |= ui
+                    .checkbox(&mut panel.bottom.grid, "Lignes verticales (graduations X)")
+                    .changed();
+                commit |= ui
+                    .checkbox(&mut panel.left.grid, "Lignes horizontales (graduations Y)")
+                    .changed();
+            }
+            PlotSettingsTab::Axes => {
+                let Some(panel) = spec.panels.get_mut(0) else {
+                    return;
+                };
+                let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
+                if panel.uses_right_axis() || chosen_axis == PlotAxis::Right {
+                    axes.push(PlotAxis::Right);
+                }
+                ui.horizontal(|ui| {
+                    for axis in axes {
+                        if ui
+                            .selectable_label(chosen_axis == axis, axis.label())
+                            .clicked()
+                        {
+                            chosen_axis = axis;
+                        }
+                    }
                 });
-                let max_response = ui.horizontal(|ui| {
-                    ui.label("Max");
-                    ui.add(egui::DragValue::new(&mut max).speed(0.1))
-                });
-                axis.range_min = Some(min);
-                axis.range_max = Some(max);
-                let min_inner = min_response.inner;
-                let max_inner = max_response.inner;
-                commit |= min_inner.drag_stopped() || min_inner.lost_focus();
-                commit |= max_inner.drag_stopped() || max_inner.lost_focus();
+                ui.separator();
+                let axis = match chosen_axis {
+                    PlotAxis::Bottom => &mut panel.bottom,
+                    PlotAxis::Left => &mut panel.left,
+                    PlotAxis::Right => &mut panel.right,
+                };
+                commit |= axis_editor(ui, axis);
+            }
+            PlotSettingsTab::Series => {
+                let Some(panel) = spec.panels.get_mut(0) else {
+                    return;
+                };
+                if panel.series.is_empty() {
+                    ui.weak("Ce graphe ne trace aucune série.");
+                    return;
+                }
+                if edit.selected_series >= panel.series.len() {
+                    edit.selected_series = panel.series.len() - 1;
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("plot_settings_series_list")
+                    .max_height(140.0)
+                    .show(ui, |ui| {
+                        for (index, series) in panel.series.iter().enumerate() {
+                            let label = series_list_label(tree, series);
+                            if ui
+                                .selectable_label(edit.selected_series == index, label)
+                                .clicked()
+                            {
+                                edit.selected_series = index;
+                            }
+                        }
+                    });
+                ui.separator();
+                if let Some(series) = panel.series.get_mut(edit.selected_series) {
+                    commit |= series_editor(ui, series);
+                }
+            }
+            PlotSettingsTab::Legend => {
+                let Some(panel) = spec.panels.get_mut(0) else {
+                    return;
+                };
+                commit |= legend_editor(ui, &mut panel.legend);
             }
         });
+    }
+    if commit {
+        state.commit_plot_edit();
+    }
+    if let Some(current) = state.plot_settings_mut() {
+        current.tab = chosen_tab;
+        current.axis = chosen_axis;
+    }
+}
+
+/// Un champ texte libellé, validé à la perte de focus. Rend `true` si le
+/// brouillon doit être validé — voir la doc de tête de
+/// [`plot_settings_window`].
+fn text_field(ui: &mut egui::Ui, label: &str, value: &mut String) -> bool {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.text_edit_singleline(value)
+    })
+    .inner
+    .lost_focus()
+}
+
+/// Édite un [`AxisSpec`], en trois groupes : le titre de l'axe (libellé,
+/// unité), son échelle (logarithmique, inversée, bornes) et son affichage
+/// (axe, grille). Rend `true` si le brouillon doit être validé — voir la doc
+/// de tête de [`plot_settings_window`].
+fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
+    let mut commit = false;
+    ui.strong("Titre de l'axe");
+    commit |= text_field(ui, "Libellé", &mut axis.label);
+    commit |= text_field(ui, "Unité", &mut axis.unit);
+
+    ui.add_space(6.0);
+    ui.strong("Échelle");
+    let mut log_scale = axis.scale == plotyx_plot::AxisScale::Log;
+    if ui
+        .checkbox(&mut log_scale, "Échelle logarithmique")
+        .changed()
+    {
+        axis.scale = if log_scale {
+            plotyx_plot::AxisScale::Log
+        } else {
+            plotyx_plot::AxisScale::Linear
+        };
+        commit = true;
+    }
+    commit |= ui.checkbox(&mut axis.inverted, "Axe inversé").changed();
+    commit |= ui
+        .checkbox(&mut axis.auto_range, "Bornes automatiques")
+        .changed();
+    if !axis.auto_range {
+        let mut min = axis.range_min.unwrap_or(0.0);
+        let mut max = axis.range_max.unwrap_or(0.0);
+        let min_response = ui.horizontal(|ui| {
+            ui.label("Min");
+            ui.add(egui::DragValue::new(&mut min).speed(0.1))
+        });
+        let max_response = ui.horizontal(|ui| {
+            ui.label("Max");
+            ui.add(egui::DragValue::new(&mut max).speed(0.1))
+        });
+        axis.range_min = Some(min);
+        axis.range_max = Some(max);
+        let min_inner = min_response.inner;
+        let max_inner = max_response.inner;
+        commit |= min_inner.drag_stopped() || min_inner.lost_focus();
+        commit |= max_inner.drag_stopped() || max_inner.lost_focus();
+    }
+
+    ui.add_space(6.0);
+    ui.strong("Affichage");
+    commit |= ui.checkbox(&mut axis.visible, "Axe affiché").changed();
+    commit |= ui.checkbox(&mut axis.grid, "Grille").changed();
     commit
 }
 
 /// Édite la série sélectionnée : nom, type de tracé, visibilité, présence en
 /// légende, style de trait, style de marqueur. Rend `true` si le brouillon
-/// doit être validé — voir la doc de tête de [`plot_config_panel`].
+/// doit être validé — voir la doc de tête de [`plot_settings_window`].
 ///
 /// [`PlotType::Unknown`] (C5, `guide-de-correction-robustesse.md` §F3) ne
 /// figure **jamais** dans la liste proposée : c'est le type de tracé d'une
@@ -6217,7 +6353,7 @@ fn series_editor(ui: &mut egui::Ui, series: &mut plotyx_plot::SeriesSpec) -> boo
 
 /// Édite un [`plotyx_plot::LegendSpec`] : visibilité, coin d'ancrage. Rend
 /// `true` si le brouillon doit être validé — voir la doc de tête de
-/// [`plot_config_panel`].
+/// [`plot_settings_window`].
 fn legend_editor(ui: &mut egui::Ui, legend: &mut plotyx_plot::LegendSpec) -> bool {
     let mut commit = false;
     commit |= ui
@@ -7898,7 +8034,13 @@ mod graph_layout_tests {
                 let mut output = context.run_ui(input, |ui| {
                     let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(contents));
                     content_ui.set_clip_rect(contents);
-                    graph_view_contents(&mut content_ui, &mut view, &snapshot, graph);
+                    graph_view_contents(
+                        &mut content_ui,
+                        &mut view,
+                        &snapshot,
+                        graph,
+                        &mut Vec::new(),
+                    );
                 });
                 output.textures_delta.clear();
                 let rect = view.cache().key().unwrap().rect;
@@ -7981,7 +8123,7 @@ mod graph_layout_tests {
         };
         let mut output = context.run_ui(root_input.clone(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                graph_contents(ui, &app.state, &mut app.graph_views, graph);
+                graph_contents(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
             });
         });
         output.textures_delta.clear();
@@ -8355,7 +8497,7 @@ mod graph_layout_tests {
         context
             .run_ui(root_input.clone(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    graph_contents(ui, &app.state, &mut app.graph_views, graph);
+                    graph_contents(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
                 });
             })
             .textures_delta
@@ -8535,7 +8677,7 @@ mod graph_layout_tests {
         context
             .run_ui(root_input.clone(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    graph_contents(ui, &app.state, &mut app.graph_views, graph);
+                    graph_contents(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
                 });
             })
             .textures_delta

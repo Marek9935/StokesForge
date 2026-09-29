@@ -95,6 +95,27 @@ test egui qui dépend de l'aspect ou de la place des barres, appeler
 `theme::install(&context)` : un `Context::default()` a le style d'egui, pas
 celui de PlotYx.
 
+## 2 quater. Sa place dans les menus — à étudier pour **toute** fonctionnalité
+
+Avant de coder, décider explicitement où l'utilisateur **trouvera** la
+fonctionnalité, et le dire dans le compte rendu. Deux familles de menus :
+
+- **la barre de menus** (`PlotyxApp::menu_bar`) : « Fichier », « Édition »,
+  « Graphique » (présent seulement quand un graphe est l'onglet actif,
+  `state::active_graph`) et « Fenêtre ». Une action qui porte sur l'objet
+  actif (le graphe, le classeur…) y a presque toujours sa place : c'est là
+  qu'un utilisateur d'Origin la cherche. Si aucun menu existant ne convient
+  (un menu « Classeur » quand un classeur est actif, par exemple), le créer
+  sur le modèle de « Graphique » plutôt que de ranger l'action ailleurs ;
+- **les menus contextuels** (clic droit sur la grille, les onglets de
+  feuille, un composant du graphe…).
+
+Règle : **rien ne doit être atteignable seulement au clic droit.** Une entrée
+de menu contextuel a son équivalent dans la barre de menus (ou un raccourci,
+pour la grille). Le clic droit est un raccourci vers ce que la barre de
+menus offre déjà, pas un chemin exclusif. Si la fonctionnalité n'a
+délibérément sa place dans aucun menu, l'écrire et dire pourquoi.
+
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
 
 Une `QAction` reliée à un `QUndoStack` portait d'un coup le raccourci, l'entrée
@@ -191,7 +212,7 @@ vérifié par une suite verte : il se vérifie en regardant la fenêtre.
 [`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md).
 Une capture avant et une après valent mieux qu'une affirmation.
 Une fonction pure extraite exprès pour être testable (`app::grid_grip_side`,
-`state::plot_panel_graph`, `state::drop_payload_action`) est le motif idiomatique
+`state::active_graph`, `state::drop_payload_action`) est le motif idiomatique
 du dépôt quand une décision doit vivre près de l'UI : extraire, puis tester.
 
 Détail des familles de tests, du principe du **témoin** et des garde-fous
@@ -233,6 +254,7 @@ touche (`python`, `typst`), relecture du diff, message de commit en français.
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **plotyx-commande**)
 - [ ] logique dans `state.rs`, glu egui seulement dans `app.rs`
+- [ ] place dans la barre de menus **et** les menus contextuels étudiée (§2 quater) ; rien n'est accessible seulement au clic droit
 - [ ] les quatre surfaces en accord : raccourci, menu, grisage, libellé
 - [ ] menu contextuel = miroir du clavier, décision dans `GridMenu`
 - [ ] test dans `tests/shell.rs` (ou le crate concerné)

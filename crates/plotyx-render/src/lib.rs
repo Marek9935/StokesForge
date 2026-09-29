@@ -77,6 +77,7 @@ pub mod decimate;
 pub mod fonts;
 #[cfg(feature = "typst")]
 pub mod formula;
+pub mod hit;
 pub mod interact;
 pub mod legend;
 pub mod paint;
@@ -89,7 +90,8 @@ pub mod text;
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{FontChoice, FontSet, FontSource, ResolvedFonts};
+pub use hit::{component_at, AxisSide, PlotComponent};
 pub use interact::{nearest_on_curve, PanelTransform};
-pub use pipeline::{draw, draw_on, DrawnPanel, DrawnPlot};
+pub use pipeline::{draw, draw_on, AxisArea, AxisAreas, DrawnPanel, DrawnPlot};
 pub use series::{Geometry, Prepared};
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};

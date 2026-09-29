@@ -29,8 +29,9 @@ use std::sync::Mutex;
 use plotyx_app::app::{grid_grip_side, GripSide};
 use plotyx_app::selection::Selection;
 use plotyx_app::state::{
-    drop_payload_action, plot_panel_graph, Action, ActiveTabKind, AppState, ColumnDragPayload,
-    GridZone, HeaderField, ImportDestination, MoveDirection, PlotEdit,
+    active_graph, drop_payload_action, Action, ActiveTabKind, AppState, ColumnDragPayload,
+    GridZone, HeaderField, ImportDestination, MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab,
+    PlotTarget,
 };
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
@@ -4681,22 +4682,168 @@ fn dispatching_drop_payload_action_adds_the_series_to_the_graph() {
     assert_eq!(spec.panels[0].series[1].plot_type, PlotType::Line);
 }
 
-// -- 24. Panneau de configuration des graphiques --
+// -- 24. Propriétés des graphiques --
 
-/// [`plot_panel_graph`] décide la visibilité du panneau : seul
+/// [`active_graph`] décide la présence du menu « Graphique » : seul
 /// `ActiveTabKind::Graph` rend `Some`, toutes les autres natures d'onglet
-/// (ou aucun onglet actif) rendent `None` — c'est cette fonction pure que
-/// `PlotyxApp::ui` interroge chaque image pour poser ou non le
-/// `egui::Panel::right`, sans qu'une fenêtre soit nécessaire pour le
-/// vérifier.
+/// (ou aucun onglet actif) rendent `None`.
 #[test]
-fn plot_panel_graph_is_visible_only_for_a_graph_tab() {
+fn active_graph_is_some_only_for_a_graph_tab() {
     let graph = NodeId::from_raw(7);
-    assert_eq!(plot_panel_graph(ActiveTabKind::Graph(graph)), Some(graph));
-    assert_eq!(plot_panel_graph(ActiveTabKind::Book(graph)), None);
-    assert_eq!(plot_panel_graph(ActiveTabKind::Matrix(graph)), None);
-    assert_eq!(plot_panel_graph(ActiveTabKind::Note(graph)), None);
-    assert_eq!(plot_panel_graph(ActiveTabKind::None), None);
+    assert_eq!(active_graph(ActiveTabKind::Graph(graph)), Some(graph));
+    assert_eq!(active_graph(ActiveTabKind::Book(graph)), None);
+    assert_eq!(active_graph(ActiveTabKind::Matrix(graph)), None);
+    assert_eq!(active_graph(ActiveTabKind::Note(graph)), None);
+    assert_eq!(active_graph(ActiveTabKind::None), None);
+}
+
+/// Trace `Signal` de `Sheet1` dans un nouveau graphe et le rend.
+fn plotted_graph(state: &mut AppState) -> NodeId {
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("le graphe a été créé")
+}
+
+/// Le clic droit sur un composant ouvre l'onglet qui le règle : titre →
+/// « Graphe », zone de tracé → « Zone de tracé », axe ou titre d'axe →
+/// « Axes » sur cet axe.
+#[test]
+fn a_right_clicked_component_opens_the_settings_page_that_sets_it() {
+    assert_eq!(
+        PlotTarget::Title.settings_page(),
+        (PlotSettingsTab::Graph, None)
+    );
+    assert_eq!(
+        PlotTarget::Background.settings_page(),
+        (PlotSettingsTab::Graph, None)
+    );
+    assert_eq!(
+        PlotTarget::PlotArea.settings_page(),
+        (PlotSettingsTab::PlotArea, None)
+    );
+    assert_eq!(
+        PlotTarget::Axis(PlotAxis::Left).settings_page(),
+        (PlotSettingsTab::Axes, Some(PlotAxis::Left))
+    );
+    assert_eq!(
+        PlotTarget::AxisTitle(PlotAxis::Bottom).settings_page(),
+        (PlotSettingsTab::Axes, Some(PlotAxis::Bottom))
+    );
+    assert_eq!(
+        PlotTarget::AxisTitle(PlotAxis::Bottom).label(),
+        "Titre de l'axe X (bas)"
+    );
+}
+
+/// `Action::OpenPlotSettings` ouvre la fenêtre sur l'onglet et l'axe
+/// demandés et un brouillon du graphe ; sans axe précisé (menu
+/// « Graphique »), l'axe déjà choisi est gardé.
+#[test]
+fn open_plot_settings_opens_the_requested_tab_and_keeps_the_chosen_axis() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    assert!(state.plot_settings().is_none());
+
+    state.dispatch(PlotTarget::Axis(PlotAxis::Left).open_settings(graph));
+    let settings = state.plot_settings().expect("fenêtre ouverte");
+    assert_eq!(settings.graph, graph);
+    assert_eq!(settings.tab, PlotSettingsTab::Axes);
+    assert_eq!(settings.axis, PlotAxis::Left);
+    assert_eq!(state.plot_edit().expect("brouillon").graph, graph);
+
+    state.dispatch(Action::OpenPlotSettings {
+        graph,
+        tab: PlotSettingsTab::Legend,
+        axis: None,
+    });
+    let settings = state.plot_settings().expect("fenêtre ouverte");
+    assert_eq!(settings.tab, PlotSettingsTab::Legend);
+    assert_eq!(settings.axis, PlotAxis::Left, "l'axe choisi est gardé");
+}
+
+/// Un nœud qui n'est pas un graphe n'ouvre rien.
+#[test]
+fn open_plot_settings_ignores_a_node_that_is_not_a_graph() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    state.dispatch(Action::OpenPlotSettings {
+        graph: sheet1,
+        tab: PlotSettingsTab::Graph,
+        axis: None,
+    });
+    assert!(state.plot_settings().is_none());
+    assert!(state.plot_edit().is_none());
+}
+
+/// Fermer la fenêtre valide une saisie encore en cours (champ qui n'a pas
+/// perdu le focus), puis abandonne le brouillon.
+#[test]
+fn closing_plot_settings_commits_a_pending_edit() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+    state.plot_edit_mut().expect("brouillon").spec.title = "Spectre".to_string();
+
+    state.close_plot_settings();
+
+    assert!(state.plot_settings().is_none());
+    assert!(state.plot_edit().is_none());
+    assert_eq!(state.plot_spec(graph).expect("spec").title, "Spectre");
+}
+
+/// Ouvrir les propriétés d'un autre graphe valide d'abord le brouillon du
+/// premier : rien n'est perdu en passant de l'un à l'autre.
+#[test]
+fn switching_plot_settings_to_another_graph_commits_the_first_draft() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let first = plotted_graph(&mut state);
+    let second = plotted_graph(&mut state);
+    assert_ne!(first, second);
+    state.dispatch(PlotTarget::Title.open_settings(first));
+    state.plot_edit_mut().expect("brouillon").spec.title = "Premier".to_string();
+
+    state.dispatch(PlotTarget::Title.open_settings(second));
+
+    assert_eq!(state.plot_spec(first).expect("spec").title, "Premier");
+    assert_eq!(state.plot_edit().expect("brouillon").graph, second);
+}
+
+/// Un brouillon sans saisie en cours suit le modèle : après Annuler, la
+/// fenêtre montre le spec rétabli, pas l'ancien — sinon la validation
+/// suivante réécrirait par-dessus l'annulation.
+#[test]
+fn an_idle_plot_draft_follows_undo() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let original = state.plot_spec(graph).expect("spec").title;
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+    state.plot_edit_mut().expect("brouillon").spec.title = "Modifié".to_string();
+    state.commit_plot_edit();
+
+    state.dispatch(Action::Undo);
+    state.begin_plot_edit(graph);
+
+    assert_eq!(state.plot_spec(graph).expect("spec").title, original);
+    assert_eq!(
+        state.plot_edit().expect("brouillon").spec.title,
+        original,
+        "le brouillon a suivi l'annulation"
+    );
 }
 
 /// `AppState::begin_plot_edit` ouvre un brouillon initialisé sur le spec
@@ -4825,7 +4972,7 @@ fn begin_plot_edit_does_not_clobber_an_in_progress_draft() {
     state.begin_plot_edit(graph);
     state.plot_edit_mut().expect("brouillon").spec.title = "En cours de saisie".to_string();
 
-    // Répète l'appel, comme le ferait `plot_config_panel` à chaque image.
+    // Répète l'appel, comme le ferait `plot_settings_window` à chaque image.
     state.begin_plot_edit(graph);
     state.begin_plot_edit(graph);
 

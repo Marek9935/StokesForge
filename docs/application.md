@@ -538,21 +538,43 @@ identique pour le dock et pour une fenêtre détachée (voir la doc de tête de
 séparé à maintenir — testé manuellement, `egui::DragAndDrop` étant un état
 global du `Context` plutôt que scopé à une fenêtre OS.
 
-### Panneau de configuration des graphiques
+### Propriétés des graphiques
 
-Chantier 3/3 de « tracer depuis un classeur ». Un `egui::Panel::right`,
-peint dans `PlotyxApp::ui` *avant* le `CentralPanel` — comme le
-Project Manager à gauche — pour que les fenêtres flottantes ne lui disputent
-jamais l'espace (voir § Fenêtres flottantes confinées).
-Visible seulement quand l'onglet actif est un `Tab::Graph` : « actif » au
-sens le plus large (l'onglet maximisé s'il y en a un, sinon la fenêtre
-flottante la plus récemment focalisée — dernier élément de
-`PlotyxApp::floating_tabs`), traduit
-vers `state::ActiveTabKind` — un miroir minimal et public de `Tab` (privé à
-`app.rs`) — au seul point de contact (`app::active_tab_kind`). C'est
-`state::plot_panel_graph(ActiveTabKind) -> Option<NodeId>` qui tranche la
-visibilité, fonction pure testée sans fenêtre dans `tests/shell.rs` :
-`Tab::Book`/`Matrix`/`Note`, ou aucun onglet actif, la masquent.
+Les réglages d'un graphe vivent dans une **fenêtre flottante à onglets**
+(`app::plot_settings_window`), un dialogue transitoire de la même famille que
+la fenêtre d'import : elle n'occupe aucune place tant qu'elle est fermée.
+Elle remplace l'ancien panneau fixe à droite de l'espace de travail, affiché
+en permanence dès qu'un graphe était actif. Son état (quel graphe, quel
+onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
+par `Action::OpenPlotSettings { graph, tab, axis }`.
+
+**Onglets** (`state::PlotSettingsTab`) : « Graphe » (titre, fond), « Zone de
+tracé » (titre du panneau, grilles), « Axes » (un axe à la fois, choisi en
+tête de page : titre de l'axe, échelle, affichage), « Séries » et
+« Légende ».
+
+**Trois façons de l'ouvrir** :
+
+- **clic droit sur un composant du graphe** (`app::graph_context_menu`) :
+  titre, zone de tracé, axe, titre d'axe. Le menu propose « Propriétés… »,
+  qui ouvre l'onglet qui règle ce composant (`state::PlotTarget::
+  settings_page`), et « Réinitialiser le zoom ». Le composant sous le
+  pointeur est trouvé par `plotyx_render::hit::component_at`, sur la
+  géométrie réellement allouée par Plotters (zone de tracé, aires de
+  graduation, bande du titre), pas sur une reconstitution. Le clic droit
+  **sans** glisser ouvre le menu ; le glisser secondaire reste le zoom
+  élastique. Même chemin en fenêtre flottante et détachée
+  (`graph_view_contents`) ;
+- **menu « Graphique »** de la barre de menus, présent seulement quand
+  l'onglet actif est un graphe (`state::active_graph`, testée sans fenêtre) :
+  une entrée par onglet, et « Réinitialiser le zoom ». Aucun réglage n'est
+  donc atteignable **seulement** au clic droit ;
+- rouvrir la fenêtre sur un autre graphe valide d'abord le brouillon du
+  précédent.
+
+Fermer la fenêtre valide ce qui diverge encore du modèle
+(`AppState::close_plot_settings`), par exemple un champ texte qui n'a pas
+encore perdu le focus.
 
 **Édite le `PlotSpec` au travers d'un brouillon, jamais directement.**
 `state::PlotEdit { graph, spec, selected_series }` est un `PlotSpec` entier
@@ -562,11 +584,15 @@ seulement à la validation), généralisé à un objet entier plutôt qu'à un s
 champ : le panneau mélange une douzaine de petits widgets (titre, axes,
 style de chaque série, légende) qui doivent tous voir et modifier le **même**
 brouillon. `AppState::begin_plot_edit(graph)`, appelée à chaque image par
-`app::plot_config_panel` avant de peindre quoi que ce soit, n'écrase le
+`app::plot_settings_window` avant de peindre quoi que ce soit, n'écrase le
 brouillon que s'il n'y en a pas encore ou qu'il portait sur un autre graphe
 — repeindre la même image sur le même graphe ne doit jamais effacer une
 saisie en cours, et changer de graphe ne doit jamais laisser fuiter le
-brouillon du précédent. `AppState::commit_plot_edit` envoie
+brouillon du précédent. Un brouillon **sans saisie en cours** (égal à
+`PlotEdit::base`, le spec du modèle dont il est parti) suit en revanche le
+modèle : après Annuler, Rétablir, un script ou un glisser-déposer de
+colonne, la fenêtre montre le spec à jour au lieu de valeurs périmées
+qu'une validation suivante réécrirait par-dessus l'annulation. `AppState::commit_plot_edit` envoie
 `Action::SetPlotSpec { graph, spec }` → `Command::SetPlotSpec` — mais
 seulement si le brouillon diverge du spec courant du modèle (comparaison
 `PartialEq` sur `PlotSpec`, qui dérive proprement jusqu'aux feuilles) :
@@ -591,18 +617,19 @@ chaque frappe/pixel :
   validé tout de suite — rien à débouncer, il n'y a par construction jamais
   de rafale d'événements `changed()` pour ces widgets-là.
 
-Chaque widget de `app::plot_config_panel` (et de ses fonctions auxiliaires
+Chaque widget de `app::plot_settings_contents` (et de ses fonctions auxiliaires
 `axis_editor`/`series_editor`/`legend_editor`) accumule dans un simple
 booléen local `commit`, mis à `true` par n'importe quel widget qui vient de
 finir une interaction ; `commit_plot_edit` n'est appelé qu'une seule fois, à
 la toute fin de la fonction, jamais widget par widget.
 
-**Ce qu'édite le panneau**, en ne touchant que des champs qui existent
+**Ce qu'édite la fenêtre**, en ne touchant que des champs qui existent
 réellement dans `plotyx-plot` (lu avant d'écrire, comme demandé) :
 
-- **Graphe** : `PlotSpec::title` ;
-- **Panneau** — `PlotSpec::panels`[0] seulement, voir plus bas — : `PanelSpec::title`,
-  et pour l'axe du bas, celui de gauche, et celui de droite si
+- **Graphe** : `PlotSpec::title`, `background` ;
+- **Zone de tracé** — `PlotSpec::panels`[0] seulement, voir plus bas — :
+  `PanelSpec::title`, grille des axes du bas et de gauche ;
+- **Axes** : pour l'axe du bas, celui de gauche, et celui de droite si
   `PanelSpec::uses_right_axis()` (l'axe du haut, masqué par défaut et sans
   UI dans ce banc pour l'activer, n'a pas de section) : `AxisSpec::label`,
   `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`,
@@ -625,7 +652,7 @@ série qui le porte s'affiche quand même — le champ type de tracé devient un
 texte en lecture seule (« type inconnu de cette version, non modifiable »),
 le reste (nom, visibilité, style...) reste éditable normalement. C'est
 l'invariant 10 (« un défaut de donnée dégrade, il ne plante pas ») appliqué
-à ce panneau : proposer `Unknown` dans la liste laisserait croire qu'on peut
+à cette fenêtre : proposer `Unknown` dans la liste laisserait croire qu'on peut
 y revenir, alors que rien ne sait reconstruire une variante dont ce lecteur
 ne connaît que le nom et des octets bruts (C5, niveau 2,
 `guide-de-correction-robustesse.md` §F3).
@@ -634,24 +661,24 @@ ne connaît que le nom et des octets bruts (C5, niveau 2,
 
 - **pas de multi-panneaux** — `plotyx-plot` autorise plusieurs `PanelSpec`
   par graphe (`row`/`column` dans une grille), mais aucune UI de ce banc
-  n'en crée encore un second ; le panneau n'édite donc que
+  n'en crée encore un second ; la fenêtre n'édite donc que
   `PlotSpec::panels`[0], ce qui revient, pour l'instant, à éditer *le*
   graphe ;
 - **pas de sélecteur de couleur graphique** — trait et marqueur s'éditent
   comme un texte `#RRGGBB`, pas comme une roue de couleurs : plus simple,
   et ça réutilise la même convention de validation (`lost_focus()`) que
-  tous les autres champs texte du panneau plutôt que d'introduire un
+  tous les autres champs texte de la fenêtre plutôt que d'introduire un
   quatrième mécanisme de débounce pour un widget qui déclenche `changed()`
   en continu pendant qu'on le glisse ;
 - **pas de largeur de barre ni de nombre de classes d'histogramme** —
   `SeriesSpec::bar_width`/`histogram_bins` existent dans `plotyx-plot` mais
   n'ont pas de widget ici, laissé à une itération suivante ;
-- **pas d'ajout/suppression de série ou de panneau depuis le panneau** —
+- **pas d'ajout/suppression de série ou de panneau depuis la fenêtre** —
   ça reste le rôle du sous-menu « Tracer » et du glisser-déposer déjà
   décrits plus haut ;
 - **zoom/pan n'y entrent pas, et ne doivent jamais y entrer** —
   `plotyx_render_egui::ViewState` vit sur `GraphView`, hors du `PlotSpec`
-  (`docs/invariants.md`, `.claude/rules.md`) : ce panneau n'a et n'aura
+  (`docs/invariants.md`, `.claude/rules.md`) : cette fenêtre n'a et n'aura
   aucun champ de navigation, une confusion entre les deux romprait la
   frontière rendu/modèle que tout le reste du chantier de rendu tient.
 

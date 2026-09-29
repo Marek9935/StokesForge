@@ -364,3 +364,61 @@ fn une_serie_invisible_ne_compte_ni_dans_le_trace_ni_dans_le_cadrage() {
         drawn.y_range()
     );
 }
+
+/// Sur un vrai tracé (titre « Test », axes titrés), le pixel désigne le bon
+/// composant : la géométrie de [`plotyx_render::hit`] est bien celle que
+/// Plotters a allouée, pas une reconstitution.
+#[test]
+fn un_pixel_designe_le_composant_du_graphe_qui_est_dessous() {
+    use plotyx_render::{component_at, AxisSide, PlotComponent};
+    let drawn = geometrie(
+        &[("X", vec![0.0, 1.0, 2.0]), ("Y", vec![10.0, 20.0, 30.0])],
+        |ids| {
+            un_panneau(SeriesSpec::new_xy(ids[0], ids[1]), |panel| {
+                panel.bottom.label = "Temps".to_string();
+                panel.left.label = "Signal".to_string();
+            })
+        },
+    );
+    assert!(drawn.title_height > 0, "le titre « Test » occupe une bande");
+    let panel = drawn.panel(0).expect("un panneau");
+    let (ox, oy) = (panel.pixel_origin.0 as f64, panel.pixel_origin.1 as f64);
+    let (w, h) = (panel.pixel_size.0 as f64, panel.pixel_size.1 as f64);
+    let bottom = panel.axis_areas.bottom.size as f64;
+    let left = panel.axis_areas.left.size as f64;
+    let cx = ox + w / 2.0;
+    let cy = oy + h / 2.0;
+    assert_eq!(component_at(&drawn, cx, 2.0), Some(PlotComponent::Title));
+    assert_eq!(
+        component_at(&drawn, cx, cy),
+        Some(PlotComponent::PlotArea { panel: 0 })
+    );
+    assert_eq!(
+        component_at(&drawn, cx, oy + h + 4.0),
+        Some(PlotComponent::Axis {
+            panel: 0,
+            side: AxisSide::Bottom
+        })
+    );
+    assert_eq!(
+        component_at(&drawn, cx, oy + h + bottom - 2.0),
+        Some(PlotComponent::AxisTitle {
+            panel: 0,
+            side: AxisSide::Bottom
+        })
+    );
+    assert_eq!(
+        component_at(&drawn, ox - 4.0, cy),
+        Some(PlotComponent::Axis {
+            panel: 0,
+            side: AxisSide::Left
+        })
+    );
+    assert_eq!(
+        component_at(&drawn, ox - left + 2.0, cy),
+        Some(PlotComponent::AxisTitle {
+            panel: 0,
+            side: AxisSide::Left
+        })
+    );
+}

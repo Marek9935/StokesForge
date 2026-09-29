@@ -46,7 +46,7 @@ tester explicitement**, sinon elle valide du code mort.
 Logique d'interface : `plotyx-app/tests/shell.rs`, sans fenêtre. Si une
 décision doit vivre près de l'UI, l'extraire en **fonction pure** puis la
 tester — c'est l'idiome du dépôt (`app::grid_grip_side`,
-`state::plot_panel_graph`, `state::drop_payload_action`).
+`state::active_graph`, `state::drop_payload_action`).
 
 ### Le témoin — sans lui, un test d'égalité ne prouve rien
 

@@ -103,7 +103,7 @@ pub use plotyx_render::{FontChoice, FontSet, FontSource, ResolvedFonts};
 // La correspondance pixel ↔ données (tâche R7) : `plotyx-render` la porte
 // (voir `plotyx_render::interact`, générique sur le backend), ce crate ne
 // fait que la consommer avec des types egui.
-pub use plotyx_render::{nearest_on_curve, PanelTransform};
+pub use plotyx_render::{component_at, nearest_on_curve, AxisSide, PanelTransform, PlotComponent};
 #[cfg(feature = "typst")]
 pub use typst_screen::{FormulaTexture, TypstScreen};
 pub use view::{Framing, ViewState};
@@ -244,6 +244,10 @@ pub struct GraphView {
     /// Coins du rectangle de zoom élastique en cours (tâche 7.4), en pixels
     /// d'écran. `None` hors glissé secondaire.
     drag_box: Option<(Pos2, Pos2)>,
+    /// Réponse d'interaction de la figure au dernier rendu : l'application
+    /// y accroche son menu contextuel (clic droit **sans** glisser — le
+    /// glisser secondaire reste le zoom élastique).
+    response: Option<egui::Response>,
 }
 
 impl Default for GraphView {
@@ -280,6 +284,7 @@ impl GraphView {
             hover: None,
             display_rect: None,
             drag_box: None,
+            response: None,
         }
     }
 
@@ -322,6 +327,23 @@ impl GraphView {
         self.hover = None;
         self.display_rect = None;
         self.drag_box = None;
+        self.response = None;
+    }
+
+    /// Réponse d'interaction de la figure au dernier rendu, pour y accrocher
+    /// un menu contextuel (`Response::context_menu`). Réutiliser celle-ci
+    /// plutôt qu'en créer une seconde sur le même rectangle : une autre
+    /// réponse superposée disputerait le glisser à la navigation.
+    pub fn response(&self) -> Option<&egui::Response> {
+        self.response.as_ref()
+    }
+
+    /// Le composant du graphe (titre, zone de tracé, axe, titre d'axe) sous
+    /// le pixel egui `pos`, cherché dans la **dernière** figure tracée — même
+    /// cran de retard, imperceptible, que [`Self::panel_at`].
+    pub fn component_at(&self, pos: Pos2) -> Option<PlotComponent> {
+        let pos = self.figure_position(pos)?;
+        component_at(self.last.as_ref()?, pos.x as f64, pos.y as f64)
     }
 
     /// Le point désigné par le curseur à la dernière image peinte, s'il y en
@@ -381,6 +403,7 @@ impl GraphView {
         let context = ui.ctx().clone();
         let response = ui.interact(display_rect, self.id, egui::Sense::click_and_drag());
         self.display_rect = Some(display_rect);
+        self.response = Some(response.clone());
 
         // Le câblage prévu par R5.5 bis, à l'appel près (`architecture-choisie.md`
         // §4.2, `feathering` R7.3) : coupé pendant tout glissé — pan ou

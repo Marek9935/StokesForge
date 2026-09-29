@@ -166,6 +166,33 @@ pub struct DrawnPanel {
     pub legend_entries: usize,
     /// Nombre de points retirés par la décimation LTTB.
     pub decimated_points: usize,
+    /// Aires de graduation réellement allouées autour de la zone de tracé —
+    /// de quoi retrouver, sans relire des pixels, quel axe (ou quel titre
+    /// d'axe) est sous un clic ([`crate::hit`]).
+    pub axis_areas: AxisAreas,
+}
+
+/// Une aire de graduation : son épaisseur en pixels (0 si l'axe est masqué
+/// ou absent), et si un titre d'axe y est écrit — Plotters le pose contre le
+/// bord **extérieur** de l'aire (en bas pour l'axe du bas, à gauche pour
+/// celui de gauche, à droite pour l'axe secondaire).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AxisArea {
+    /// Épaisseur, en pixels de backend, perpendiculairement à l'axe.
+    pub size: u32,
+    /// Vrai si l'axe porte un titre (libellé ou unité non vides).
+    pub titled: bool,
+}
+
+/// Les aires de graduation d'un panneau.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AxisAreas {
+    /// Sous la zone de tracé (abscisses).
+    pub bottom: AxisArea,
+    /// À gauche (ordonnée principale).
+    pub left: AxisArea,
+    /// À droite (ordonnée secondaire), si une série s'y rattache.
+    pub right: AxisArea,
 }
 
 /// Ce qu'un graphe a fini par tracer.
@@ -183,6 +210,9 @@ pub struct DrawnPlot {
     pub unknown_series: usize,
     /// Nombre total de points retirés par la décimation.
     pub decimated_points: usize,
+    /// Hauteur, en pixels de backend, de la bande du titre du graphe en haut
+    /// de la figure (0 sans titre).
+    pub title_height: u32,
 }
 
 impl DrawnPlot {
@@ -236,6 +266,7 @@ pub fn draw_on<DB: DrawingBackend>(
     } else {
         root.titled(&spec.title, text_style(TITLE_SIZE))?
     };
+    let title_height = (area.get_base_pixel().1 - root.get_base_pixel().1).max(0) as u32;
 
     let mut drawn = DrawnPlot {
         panels: Vec::with_capacity(plot.panels.len()),
@@ -244,6 +275,7 @@ pub fn draw_on<DB: DrawingBackend>(
         broken_series: 0,
         unknown_series: 0,
         decimated_points: 0,
+        title_height,
     };
 
     let layout = grid_of(spec, plot.panels.len());
@@ -482,6 +514,20 @@ fn draw_panel<DB: DrawingBackend>(
         unknown_series: 0,
         legend_entries: 0,
         decimated_points: 0,
+        axis_areas: AxisAreas {
+            bottom: AxisArea {
+                size: x_label_area,
+                titled: !spec.bottom.display_label().is_empty(),
+            },
+            left: AxisArea {
+                size: y_label_area,
+                titled: !spec.left.display_label().is_empty(),
+            },
+            right: AxisArea {
+                size: right_label_area,
+                titled: !spec.right.display_label().is_empty(),
+            },
+        },
     };
 
     // Le rectangle de tracé, en pixels : c'est contre lui que les segments
