@@ -4,8 +4,9 @@
 //! (« un défaut de donnée dégrade, il ne plante pas ») : les valeurs
 //! non-analysables deviennent `f64::NAN`, jamais une erreur.
 //!
-//! Seuls trois cas font échouer tout l'import : un fichier qui n'est pas de
-//! l'UTF-8, un fichier vide, ou un fichier dont on ne trouve aucune ligne de
+//! Seuls trois cas font échouer tout l'import : un fichier qui n'est pas du
+//! texte (binaire — voir [`crate::decode`] pour les encodages acceptés), un
+//! fichier vide, ou un fichier dont on ne trouve aucune ligne de
 //! donnée après application de la recette (marqueur d'en-tête introuvable,
 //! ou plus rien après en-tête/pied de page).
 
@@ -123,8 +124,8 @@ fn lookup_header_value(
 /// dégrade plutôt que d'échouer (invariant 10).
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ImportError {
-    #[error("le fichier n'est pas du texte lisible (encodage inconnu ou binaire)")]
-    NotUtf8,
+    #[error("le fichier n'est pas du texte lisible (fichier binaire)")]
+    NotText,
     #[error("le fichier est vide")]
     Empty,
     #[error("aucune ligne de données trouvée après l'en-tête")]
@@ -133,13 +134,14 @@ pub enum ImportError {
 
 use crate::recipe::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, Separator};
 
-/// Parse `bytes` selon `recipe`. `Err(ImportError::NotUtf8)` si `bytes`
-/// n'est pas de l'UTF-8 valide — jamais de panique sur un fichier binaire.
+/// Parse `bytes` selon `recipe`. `Err(ImportError::NotText)` si `bytes`
+/// n'est pas du texte ([`crate::decode::decode_text`] : UTF-8, UTF-16 avec
+/// marque, ou Windows-1252) — jamais de panique sur un fichier binaire.
 pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportError> {
     if bytes.is_empty() {
         return Err(ImportError::Empty);
     }
-    let text = std::str::from_utf8(bytes).map_err(|_| ImportError::NotUtf8)?;
+    let text = crate::decode::decode_text(bytes)?;
 
     // Découpe en lignes, tolère le CRLF, ne filtre les lignes vides qu'aux
     // deux extrémités — une ligne de données vide au milieu du fichier
@@ -450,10 +452,10 @@ mod tests {
     use crate::recipe::ImportRecipe;
 
     #[test]
-    fn fichier_binaire_rend_not_utf8_sans_paniquer() {
+    fn fichier_binaire_rend_not_text_sans_paniquer() {
         let bytes: &[u8] = &[0xff, 0xfe, 0x00, 0x01, 0x02];
         let recipe = ImportRecipe::new("défaut");
-        assert_eq!(parse(bytes, &recipe), Err(ImportError::NotUtf8));
+        assert_eq!(parse(bytes, &recipe), Err(ImportError::NotText));
     }
 
     #[test]

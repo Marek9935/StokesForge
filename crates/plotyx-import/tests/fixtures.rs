@@ -181,11 +181,41 @@ fn irradiation_wide_matrix() {
 }
 
 #[test]
-fn proprietary_binary_rend_not_utf8_sans_paniquer() {
+fn proprietary_binary_rend_not_text_sans_paniquer() {
     let bytes = fixture("proprietary_binary.dat");
     let recipe = ImportRecipe::new("N'importe quoi");
     assert_eq!(
         plotyx_import::parse(&bytes, &recipe),
-        Err(ImportError::NotUtf8)
+        Err(ImportError::NotText)
     );
+}
+
+#[test]
+fn jasco_uvvis_windows_1252_avec_pied_etendu() {
+    let bytes = fixture("JascoUV_vis.csv");
+    let mut recipe = ImportRecipe::new("Jasco UV-Vis");
+    recipe.separator = Separator::Semicolon;
+    recipe.decimal = DecimalStyle::Comma;
+    recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
+    recipe.has_column_header_row = false;
+    recipe.name_source = NameSource::HeaderKey("TITLE".into());
+
+    let table = plotyx_import::parse(&bytes, &recipe).expect("parsing réussi");
+    assert_eq!(table.columns.len(), 2);
+    // Les 551 points (NPOINTS) ; le pied « Extended Information » suit, et
+    // tombe encore dans les données tant que la fin automatique (issue #4)
+    // n'existe pas.
+    let (x, y) = (&table.columns[0].values, &table.columns[1].values);
+    assert_eq!((x[0], y[0]), (800.0, -0.000371463));
+    assert_eq!((x[550], y[550]), (250.0, 0.219912));
+    assert!(x[..551].iter().chain(&y[..551]).all(|v| v.is_finite()));
+    assert_eq!(
+        plotyx_import::resolve_series_name(&recipe, &table, "JascoUV_vis"),
+        "S13"
+    );
+    // L'octet 0xB0 du pied de page, lu en Windows-1252, redonne « °C ».
+    assert!(table.columns[1]
+        .texts
+        .iter()
+        .any(|t| t.as_deref() == Some("19.91 °C")));
 }

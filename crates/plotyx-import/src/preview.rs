@@ -124,7 +124,7 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     if bytes.is_empty() {
         return Err(ImportError::Empty);
     }
-    let text = std::str::from_utf8(bytes).map_err(|_| ImportError::NotUtf8)?;
+    let text = crate::decode::decode_text(bytes)?;
     let raw: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
 
     // Même règle de rognage que `parse` : lignes blanches aux deux
@@ -332,7 +332,7 @@ pub fn detect_header_layout(
     decimal: crate::recipe::DecimalStyle,
 ) -> crate::recipe::HeaderLayout {
     const SCAN_CAP: usize = 500;
-    let Ok(text) = std::str::from_utf8(bytes) else {
+    let Ok(text) = crate::decode::decode_text(bytes) else {
         return crate::recipe::HeaderLayout::default();
     };
     let lines: Vec<&str> = text

@@ -18,12 +18,18 @@
 //! montre en direct comment un fichier va être découpé pendant que
 //! l'utilisateur règle la recette — voir sa doc de tête pour le budget de
 //! coût sur un gros fichier.
+//!
+//! [`decode`] transforme les octets en texte avant tout découpage : UTF-8,
+//! UTF-16 avec marque d'ordre, et en repli Windows-1252, la page de code
+//! des logiciels d'appareil sous Windows.
 
+pub mod decode;
 pub mod parse;
 pub mod preview;
 pub mod recipe;
 pub mod store;
 
+pub use decode::*;
 pub use parse::*;
 pub use preview::*;
 pub use recipe::*;
