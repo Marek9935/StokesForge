@@ -85,13 +85,21 @@
 //! # Fenêtres flottantes confinées
 //!
 //! Les quatre natures de fenêtre ci-dessus s'ouvrent par défaut en fenêtres
-//! flottantes ([`egui::Window`]) à l'intérieur du [`egui::CentralPanel`],
-//! plutôt qu'amarrées en tuiles plein cadre — une par [`PlotyxApp::
-//! floating_tabs`], jamais dupliquée (même invariant que l'ancien dock :
-//! [`PlotyxApp::open_tab`] tranche « ouvrir » vs « focaliser »). Ni le
-//! Project Manager ni la console de script n'y participent, voir les deux
-//! sections précédentes : ce sont des panneaux fixes peints *avant* le
-//! `CentralPanel`.
+//! flottantes à l'intérieur du [`egui::CentralPanel`], plutôt qu'amarrées en
+//! tuiles plein cadre — une par [`PlotyxApp::floating_tabs`], jamais
+//! dupliquée (même invariant que l'ancien dock : [`PlotyxApp::open_tab`]
+//! tranche « ouvrir » vs « focaliser »). Ni le Project Manager ni la console
+//! de script n'y participent, voir les deux sections précédentes : ce sont
+//! des panneaux fixes peints *avant* le `CentralPanel`.
+//!
+//! **Une `egui::Area` par fenêtre, pas une `egui::Window`** : voir la doc de
+//! [`show_floating_window`]. `egui::Window` est une boîte de dialogue ; ses
+//! fonctions (barre de titre, glisser, redimensionnement, bornage) avaient
+//! toutes été coupées et refaites ici, et chaque image devait accorder le
+//! rectangle demandé avec celui qu'egui recalait — la source commune des
+//! bugs de contour et de débordement des rapports du 2026-09-23 et du
+//! 2026-09-24. Désormais ce module possède seul la géométrie : cadre, contour,
+//! rognage, poignées et géométrie persistée viennent du même rectangle.
 //!
 //! **Espace de travail défilable** : l'aire qui porte les fenêtres
 //! flottantes a une taille logique **fixe** (`WORKSPACE_SIZE`), indépendante
@@ -100,34 +108,26 @@
 //! écrasait les fenêtres flottantes contre ses bords. `window_positions`/
 //! `window_sizes` (ci-dessous) et la géométrie persistée dans le projet sont
 //! exprimées dans ces coordonnées logiques ; [`PlotyxApp::ui`] les convertit
-//! en coordonnées écran juste avant chaque appel à `egui::Window`
-//! (`workspace_to_screen`), à partir de `viewport_rect` (ce que laissent les
-//! panneaux fixes, comme avant) et de [`PlotyxApp::workspace_scroll`] (0,0 au
+//! en coordonnées écran juste avant la peinture (`workspace_to_screen`), à
+//! partir de `viewport_rect` (ce que laissent les panneaux fixes et les
+//! barres de défilement) et de [`PlotyxApp::workspace_scroll`] (0,0 au
 //! démarrage). Sous `WORKSPACE_SIZE`, `viewport_rect` ne montre donc qu'une
 //! portion de l'espace de travail — un `egui::ScrollArea` invisible (rien
 //! peint dans son contenu, seulement réservé à `WORKSPACE_SIZE`) donne
 //! gratuitement poignées de défilement/molette et alimente
-//! `workspace_scroll` ; les `egui::Window` elles-mêmes ne peuvent pas vivre
-//! à l'intérieur de cette zone de défilement (elles peignent sur leur propre
-//! calque `Order::Foreground`, indépendant de toute zone de défilement
-//! ambiante), d'où la conversion manuelle.
+//! `workspace_scroll` ; les fenêtres flottantes, elles, peignent chacune sur
+//! leur propre calque et ne peuvent pas vivre à l'intérieur de cette zone de
+//! défilement, d'où la conversion manuelle.
 //!
-//! **Confinement** : chaque fenêtre reçoit `.constrain_to(...)` sur le
-//! rectangle **écran** de l'espace de travail entier (`WORKSPACE_SIZE`,
-//! translaté par `viewport_rect.min` et `workspace_scroll`), pas seulement
-//! sur sa portion visible. `egui` applique cette borne à la position *et* à
-//! la taille, aussi bien à la création qu'à chaque glisser/redimensionnement :
-//! une fenêtre flottante ne peut donc **géométriquement pas** chevaucher le
-//! Project Manager ni la console de script, quel que soit l'ordre de
-//! peinture — pas une garantie de z-order (les fenêtres `egui::Window`
-//! peignent de toute façon sur la couche `Order::Foreground`, au-dessus de
-//! tout panneau), une garantie de rectangle : son cadre ne peut jamais
-//! s'étendre dans la zone que les panneaux fixes excluent. Une fenêtre peut
-//! en revanche sortir de la portion *visible* de l'espace de travail
-//! (l'utilisateur a défilé ailleurs) : elle n'est alors simplement pas peinte
-//! cette image-là (`requested_rect.intersects(viewport_rect)`) — cachée, pas
-//! tronquée ni écrasée ; redéfiler la fait réapparaître telle quelle, à la
-//! même position logique.
+//! **Confinement** : la position logique de chaque fenêtre est bornée à
+//! l'espace de travail par [`clamp_to_workspace`], et réécrite telle quelle —
+//! c'est la seule borne. Le rendu, lui, est rogné à `viewport_rect` par
+//! [`show_floating_window`], pour le dessin **et** pour les clics : une
+//! fenêtre ne peut donc ni peindre par-dessus le Project Manager, la console
+//! ou les barres de défilement, ni y capter un clic, même à cheval sur le
+//! bord de la vue. Entièrement hors de la portion visible (l'utilisateur a
+//! défilé ailleurs), elle n'est pas peinte du tout cette image-là ; redéfiler
+//! la fait réapparaître telle quelle, à la même position logique.
 //!
 //! **Cascade** : une fenêtre nouvellement ouverte (pas une simple
 //! refocalisation) reçoit une position par défaut décalée par rapport à la
@@ -142,23 +142,26 @@
 //! fenêtre visée redevienne visible plutôt que de simplement remonter dans un
 //! calque qu'on ne voit pas.
 //!
-//! **Z-order** : `egui::Window` remonte déjà seule au premier plan au clic
-//! (`bring_to_front_on_click`, par défaut) — mais dans son propre ordre de
+//! **Z-order** : l'`egui::Area` d'une fenêtre remonte déjà seule au premier
+//! plan au clic (`Sense::CLICK` par défaut) — mais dans son propre ordre de
 //! calques, indépendant de [`PlotyxApp::floating_tabs`], qui reste la seule
-//! source d'`active_tab` (donc du contour de surbrillance, § plus bas). Sans
+//! source d'`active_tab` (donc du contour de surbrillance). Sans
 //! synchronisation, un clic direct dans une fenêtre la faisait passer au
 //! premier plan sans jamais la surligner (B2,
 //! `docs/chantiers/retours-2026-09-23-bugs.md`). [`PlotyxApp::ui`] relit donc
 //! `Context::top_layer_id` juste après avoir peint les fenêtres flottantes
-//! (une fois la mutation de `floating_tabs` de nouveau sûre) et ramène le tab
-//! trouvé en fin de `floating_tabs` via `sync_floating_tabs_order_to_top_layer`
-//! — un cadre de retard tout au plus, `egui` redemandant lui-même un repaint
-//! immédiat au clic. Le seul cas que ce module doit encore gérer *avant*
-//! qu'`egui` n'ait peint quoi que ce soit est « rouvrir depuis le Project
-//! Manager une entrée déjà ouverte doit la ramener au premier plan sans
-//! qu'on ait cliqué dedans » : [`PlotyxApp::open_tab`] pose alors
-//! [`PlotyxApp::focus_next`], consommé au rendu suivant par un appel à
-//! `Context::move_to_top` sur la couche de la fenêtre concernée.
+//! et ramène le tab trouvé en fin de `floating_tabs` via
+//! `sync_floating_tabs_order_to_top_layer` — un cadre de retard tout au plus,
+//! `egui` redemandant lui-même un repaint immédiat au clic. Le seul cas que
+//! ce module doit encore gérer *avant* qu'`egui` n'ait peint quoi que ce soit
+//! est « rouvrir depuis le Project Manager une entrée déjà ouverte doit la
+//! ramener au premier plan sans qu'on ait cliqué dedans » :
+//! [`PlotyxApp::open_tab`] pose alors [`PlotyxApp::focus_next`], consommé au
+//! rendu suivant par un appel à `Context::move_to_top` sur le calque
+//! ([`FLOATING_WINDOW_ORDER`]) de la fenêtre concernée. Jusqu'au passage à
+//! `egui::Area`, cet appel visait `Order::Foreground` alors que les
+//! `egui::Window` vivaient sur `Order::Middle` : il remontait le calque du
+//! contour, pas la fenêtre elle-même.
 //!
 //! # Maximiser un onglet
 //!
@@ -510,23 +513,17 @@ const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 4.0 * HEADER_SUBROW_
 /// qu'ajustée au pixel près : [`book_contents`] la soustrait de
 /// `ui.available_height()` *avant* de peindre effectivement ce qui suit,
 /// donc toute sous-estimation ferait déborder le contenu réel de la
-/// hauteur allouée à la grille. À l'intérieur d'une fenêtre flottante
-/// (`egui::Window`, redimensionnable, § Fenêtres flottantes confinées de la
-/// doc de tête), déborder ainsi ne se contente pas de rogner un pixel :
-/// `egui::Resize` mémorise la taille du contenu débordant comme nouvelle
-/// taille « désirée » de la fenêtre et ne revient jamais en arrière (elle ne
-/// fait que grandir, jamais rétrécir, d'une image sur l'autre) — un
-/// débordement constant d'une image à l'autre s'accumule
-/// donc frame après frame jusqu'à buter sur `constrain_to` (la fenêtre
-/// « explose » en hauteur au premier mouvement de souris qui redessine).
-/// Une légère surestimation ici, à l'inverse, ne coûte qu'un mince espace
-/// vide au-dessus de la bande d'onglets — sans danger, contrairement à la
-/// sous-estimation.
+/// hauteur allouée à la grille, et la bande d'onglets serait rognée au bas
+/// de la fenêtre (§ Fenêtres flottantes confinées de la doc de tête). Du
+/// temps des `egui::Window`, c'était pire : `egui::Resize` retenait ce
+/// débordement comme nouvelle taille désirée et la fenêtre « explosait » en
+/// hauteur image après image. Une légère surestimation ici, à l'inverse, ne
+/// coûte qu'un mince espace vide au-dessus de la bande d'onglets.
 const SHEET_TABS_HEIGHT: f32 = 40.0;
 /// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
-/// initial. Réserver sa hauteur empêche `egui::Window` de mémoriser son
-/// dépassement comme une nouvelle taille désirée, ce qui ferait changer le
-/// rectangle de la figure et invaliderait le cache au moindre survol.
+/// initial. Réserver sa hauteur garde le rectangle de la figure stable d'une
+/// image à l'autre — sans quoi le cache de formes serait invalidé au moindre
+/// survol.
 const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
@@ -712,27 +709,20 @@ pub struct PlotyxApp {
     /// `floating_tabs` tant qu'il l'est (même invariant que `pm_detached`
     /// pour le Project Manager, généralisé à plusieurs onglets simultanés).
     detached_tabs: HashMap<Tab, DetachedTab>,
-    /// Position demandée par la barre de titre maison. `egui::Window` ne
-    /// permet pas d'ajouter des actions à sa barre native ; la position reste
-    /// donc explicite quand cette barre prend en charge le glisser.
+    /// Position de chaque fenêtre flottante, en coordonnées logiques de
+    /// l'espace de travail, déplacée par la barre de titre maison et bornée
+    /// par `clamp_to_workspace` — seule source de vérité de la position.
     window_positions: HashMap<Tab, egui::Pos2>,
-    /// Taille demandée par les poignées de redimensionnement maison (§3).
-    /// `.drag_area(WindowDrag::Off)` (nécessaire au glissé de la barre de
-    /// titre maison ci-dessus) force egui à couper `resize_left`/
-    /// `resize_top` en interne (ils dépendent tous les deux de
-    /// `Area::is_movable()`, qu'`Off` met à `false` sans exposer de moyen de
-    /// les garder actifs séparément) — les 4 côtés + 4 coins sont donc
-    /// gérés à la main ([`floating_resize_handles`]) plutôt que par le
-    /// redimensionnement natif d'`egui::Window`, forcé exact via
-    /// `.fixed_size(...)` comme `current_pos` force la position.
+    /// Taille logique de chaque fenêtre flottante, modifiée par les
+    /// poignées de redimensionnement maison ([`floating_resize_handles`],
+    /// 4 côtés + 4 coins) — seule source de vérité de la taille, comme
+    /// `window_positions` l'est de la position.
     window_sizes: HashMap<Tab, egui::Vec2>,
     /// Défilement courant de l'espace de travail (zone MDI, taille fixe
     /// [`WORKSPACE_SIZE`]) — voir sa doc. `window_positions`/`window_sizes`
     /// ci-dessus, et la géométrie persistée dans le projet, sont exprimées
     /// dans les coordonnées logiques de cet espace, pas en pixels écran ;
-    /// [`PlotyxApp::ui`] applique ce décalage à la peinture, dans les deux
-    /// sens (position demandée à `egui::Window`, position relue après un
-    /// glisser). Transitoire, comme la position de défilement d'un
+    /// [`PlotyxApp::ui`] applique ce décalage à la peinture. Transitoire, comme la position de défilement d'un
     /// `egui::ScrollArea` : jamais persisté.
     workspace_scroll: egui::Vec2,
     /// Dernière géométrie envoyée à l'acteur, pour ne pas lui adresser une
@@ -2087,17 +2077,13 @@ impl eframe::App for PlotyxApp {
                 // qu'il porte contre les bords du `CentralPanel`.
                 // `window_positions`/`window_sizes`, et la géométrie
                 // persistée dans le projet, sont donc en coordonnées
-                // logiques de cet espace — converties en coordonnées écran
-                // juste avant chaque appel à `egui` (`workspace_to_screen`),
-                // et reconverties en retour après un glisser
-                // (`screen_to_workspace`). Chaque fenêtre flottante reçoit
-                // `.constrain_to(...)` sur le rectangle écran de l'espace de
-                // travail entier (pas seulement sa portion visible) : elle ne
-                // peut donc géométriquement jamais chevaucher les panneaux
-                // fixes, quel que soit son déplacement/redimensionnement —
-                // seulement sortir de la portion actuellement visible, auquel
-                // cas elle n'est simplement plus peinte (voir plus bas,
-                // « caché, pas tronqué »).
+                // logiques de cet espace — bornées à lui par
+                // `clamp_to_workspace`, puis converties en coordonnées écran
+                // juste avant la peinture (`workspace_to_screen`). Une
+                // fenêtre ne sort donc jamais de l'espace de travail ; elle
+                // peut sortir de sa portion visible, auquel cas elle est
+                // rognée au bord de la vue, ou pas peinte du tout si elle
+                // en sort entièrement (`show_floating_window`).
                 let viewport_rect = ui.max_rect();
 
                 // Une fenêtre déjà ouverte mais actuellement défilée hors vue
@@ -2124,11 +2110,10 @@ impl eframe::App for PlotyxApp {
                 // glissement, molette et bornage, avec le même style plein
                 // que [`show_horizontally_scrollable_grid`] pour rester
                 // visible et atteignable. Les fenêtres flottantes ne sont
-                // **pas** peintes à l'intérieur de sa fermeture : `egui::
-                // Window` peint de toute façon sur son propre calque
-                // (`Order::Foreground`), indépendant de toute zone de
-                // défilement ambiante — seul le décalage qui en résulte sert,
-                // appliqué à la main ci-dessous.
+                // **pas** peintes à l'intérieur de sa fermeture : chacune
+                // peint sur son propre calque (`show_floating_window`),
+                // indépendant de toute zone de défilement ambiante — seul le
+                // décalage qui en résulte sert, appliqué à la main ci-dessous.
                 let previous_scroll_style = ui.style().spacing.scroll;
                 ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
                 let workspace_scroll_output = egui::ScrollArea::both()
@@ -2140,6 +2125,10 @@ impl eframe::App for PlotyxApp {
                     });
                 ui.style_mut().spacing.scroll = previous_scroll_style;
                 *workspace_scroll = workspace_scroll_output.state.offset;
+                // Ce qui reste visible une fois les barres de défilement
+                // posées : les fenêtres flottantes sont rognées à ce
+                // rectangle, pour ne jamais recouvrir ces barres.
+                let viewport_rect = workspace_scroll_output.inner_rect;
 
                 for &tab in floating_tabs.iter() {
                     if hidden_tabs.contains(&tab) {
@@ -2151,7 +2140,7 @@ impl eframe::App for PlotyxApp {
                     let id = egui::Id::new(tab);
                     if *focus_next == Some(tab) {
                         ui.ctx()
-                            .move_to_top(egui::LayerId::new(egui::Order::Foreground, id));
+                            .move_to_top(egui::LayerId::new(FLOATING_WINDOW_ORDER, id));
                     }
                     let rank = cascade_rank.entry(tab).or_insert_with(|| {
                         let rank = *next_cascade;
@@ -2177,19 +2166,32 @@ impl eframe::App for PlotyxApp {
                         .unwrap_or(default_size)
                         .max(MIN_CONTENT_WINDOW_SIZE)
                         .min(WORKSPACE_SIZE);
-                    let position_workspace = *window_positions.entry(tab).or_insert(saved_pos);
+                    window_positions.entry(tab).or_insert(saved_pos);
                     let current_size = *window_sizes.entry(tab).or_insert(saved_size);
-                    let mut open = true;
+                    // Seule source de vérité de la position : bornée ici, à
+                    // l'espace de travail, et réécrite telle quelle. egui ne
+                    // recale plus rien de son côté (plus de `constrain_to` sur
+                    // l'espace de travail), donc le rectangle peint, le
+                    // contour, les poignées et la géométrie persistée
+                    // viennent tous du même rectangle — c'est l'écart entre
+                    // un rectangle demandé et un rectangle recalé par egui
+                    // qui produisait le bug 1 de
+                    // `docs/chantiers/retours-2026-09-24-bugs.md`.
+                    let logical_rect = clamp_to_workspace(egui::Rect::from_min_size(
+                        window_positions[&tab],
+                        current_size,
+                    ));
+                    window_positions.insert(tab, logical_rect.min);
                     let mut header_actions = WindowHeaderActions::default();
                     let was_collapsed = collapsed_tabs.contains(&tab);
                     let is_active = Some(tab) == active_tab;
                     // Fenêtre repliée (B3) : `window_header` ne peint que sa
-                    // bande d'en-tête, `tab_contents` est sauté — forcer la
-                    // fenêtre à `current_size` peindrait quand même un cadre
-                    // (et un contour, voir plus bas) à la taille dépliée
-                    // autour d'une zone vide. `current_size` reste la taille
-                    // logique conservée dans `window_sizes`/persistée ; seule
-                    // la taille **demandée à egui cette image** se réduit.
+                    // bande d'en-tête, `tab_contents` est sauté — peindre la
+                    // fenêtre à `current_size` dessinerait un cadre (et un
+                    // contour) à la taille dépliée autour d'une zone vide.
+                    // `current_size` reste la taille logique conservée dans
+                    // `window_sizes`/persistée ; seul le rectangle peint
+                    // cette image se réduit.
                     let frame = floating_window_frame(ui.style());
                     let display_size = floating_window_display_size(
                         current_size,
@@ -2197,84 +2199,52 @@ impl eframe::App for PlotyxApp {
                         WINDOW_HEADER_HEIGHT,
                         frame.inner_margin.sum(),
                     );
-                    let current_pos = workspace_to_screen(
-                        position_workspace,
-                        viewport_rect.min,
-                        *workspace_scroll,
+                    let window_rect = egui::Rect::from_min_size(
+                        workspace_to_screen(logical_rect.min, viewport_rect.min, *workspace_scroll),
+                        display_size,
                     );
-                    // Rectangle **demandé** à egui cette image — position et
-                    // taille forcées ci-dessus, donc indépendant de ce
-                    // qu'egui recalcule depuis le contenu réellement peint
-                    // (B7, `docs/chantiers/retours-2026-09-23-bugs.md`).
-                    // Calculé avant `.show()` pour servir à la fois au
-                    // contour actif peint juste après (`paint_active_window_outline`)
-                    // et aux poignées de redimensionnement plus bas.
-                    let requested_rect = egui::Rect::from_min_size(current_pos, display_size);
-                    // Hors de la portion actuellement visible de l'espace de
-                    // travail : ni peinte, ni interactive — « caché », pas
-                    // tronqué. Sa position/taille logiques restent inchangées
-                    // dans `window_positions`/`window_sizes` : redéfiler
-                    // l'espace de travail la fait réapparaître telle quelle.
-                    if !requested_rect.intersects(viewport_rect) {
-                        continue;
-                    }
-                    egui::Window::new(tab_title(state, tab))
-                        .id(id)
-                        .title_bar(false)
-                        .drag_area(egui::WindowDrag::Off)
-                        .current_pos(current_pos)
-                        // Taille forcée, comme la position — voir la doc de
-                        // tête de `PlotyxApp::window_sizes` (§3) : le
-                        // redimensionnement natif d'`egui::Window` est
-                        // remplacé par [`floating_resize_handles`], posées
-                        // juste après `.show()`.
-                        .fixed_size(display_size)
-                        .constrain_to(egui::Rect::from_min_size(
-                            workspace_to_screen(
-                                egui::Pos2::ZERO,
-                                viewport_rect.min,
-                                *workspace_scroll,
-                            ),
-                            WORKSPACE_SIZE,
-                        ))
-                        .frame(frame)
-                        .open(&mut open)
-                        .show(ui.ctx(), |ui| {
+                    let title = tab_title(state, tab);
+                    // Hors de la portion visible : `None`, ni peinte ni
+                    // interactive — « cachée », pas écrasée. Partiellement
+                    // visible : rognée au bord de `viewport_rect`, pour le
+                    // dessin comme pour les clics (bug 2 du même rapport).
+                    let shown = show_floating_window(
+                        ui.ctx(),
+                        id,
+                        window_rect,
+                        viewport_rect,
+                        is_active,
+                        |ui| {
                             header_actions = window_header(
                                 ui,
                                 id,
-                                &tab_title(state, tab),
+                                &title,
                                 tab,
                                 was_collapsed,
                                 HeaderPlacement::Floating,
                             );
                             if !(was_collapsed ^ header_actions.toggle_collapse) {
                                 // Le sous-Ui borné empêche le contenu de
-                                // changer la taille réelle du Frame ou de
                                 // déborder de la fenêtre. La grille seule
                                 // reçoit un défilement horizontal (F8).
                                 show_window_contents_bounded(ui, |ui| {
                                     tab_contents(ui, state, &mut actions, graph_views, tab);
                                 });
                             }
-                        });
-                    // Contour de surbrillance (B7) : peint à part, sur
-                    // `requested_rect` — pas sur le trait du `Frame`
-                    // (`floating_window_frame`), dont la géométrie suit
-                    // `content_ui.min_rect()` et déborde si la bande
-                    // d'outils ne s'enroule pas. `Order::Foreground` à l'`Id`
-                    // de la fenêtre : la même couche qu'`egui::Window` peint
-                    // déjà, pour rester au-dessus des fenêtres flottantes
-                    // situées derrière celle-ci sans avoir à choisir un ordre
-                    // à la main.
-                    if is_active {
-                        paint_active_window_outline(
-                            &ui.ctx()
-                                .layer_painter(egui::LayerId::new(egui::Order::Foreground, id)),
-                            requested_rect,
-                            ui.style().visuals.window_corner_radius,
-                            ui.style(),
-                        );
+                        },
+                        |ui, rect| {
+                            // Poignées maison (§3) : mutent `window_positions`/
+                            // `window_sizes` directement ; la prochaine image
+                            // les bornera puis les peindra.
+                            if let (Some(position), Some(size)) =
+                                (window_positions.get_mut(&tab), window_sizes.get_mut(&tab))
+                            {
+                                floating_resize_handles(ui, tab, rect, position, size);
+                            }
+                        },
+                    );
+                    if shown.is_none() {
+                        continue;
                     }
                     if header_actions.toggle_collapse {
                         toggle_collapse(collapsed_tabs, tab);
@@ -2285,50 +2255,19 @@ impl eframe::App for PlotyxApp {
                     if header_actions.detach {
                         detach_requests.push(tab);
                     }
-                    if header_actions.close {
-                        open = false;
-                    }
                     if header_actions.drag_delta != egui::Vec2::ZERO {
                         if let Some(position) = window_positions.get_mut(&tab) {
                             *position += header_actions.drag_delta;
                         }
                     }
-                    // Rectangle réellement peint cette image (frame compris) —
-                    // seule source fiable pour la géométrie persistée et les
-                    // poignées de redimensionnement (B1/B3 : `ui.max_rect()`
-                    // dans la fermeture `.show()` donne le rectangle de
-                    // contenu, déjà rétréci par la marge du `Frame`, et ne
-                    // rétrécit pas non plus quand le contenu est replié).
-                    let area_rect = ui.ctx().memory(|memory| memory.area_rect(id));
-                    // Poignées de redimensionnement maison (§3) : posées sur
-                    // `requested_rect` (calculé plus haut, avant `.show()`),
-                    // le rectangle qu'on vient de demander (position/taille
-                    // forcées ci-dessus, donc identique au rectangle
-                    // réellement peint cette image — `display_size`, pas
-                    // `current_size`, pour rester sur les bords visibles
-                    // d'une fenêtre repliée). Mutent `window_positions`/
-                    // `window_sizes` directement ; la prochaine image les
-                    // réinjectera via `.current_pos`/`.fixed_size`.
-                    if let (Some(position), Some(size)) =
-                        (window_positions.get_mut(&tab), window_sizes.get_mut(&tab))
-                    {
-                        floating_resize_handles(ui, tab, requested_rect, position, size);
-                    }
-                    if let Some(rect) = area_rect {
-                        // Reconverti en coordonnées logiques de l'espace de
-                        // travail avant persistance — voir la doc de tête du
-                        // bloc, `window_geometries` y est exprimée comme
-                        // `window_positions`, pas en pixels écran.
-                        let rect_workspace = egui::Rect::from_min_size(
-                            screen_to_workspace(rect.min, viewport_rect.min, *workspace_scroll),
-                            rect.size(),
-                        );
-                        geometry_updates.push((
-                            tab,
-                            floating_window_geometry_to_persist(rect_workspace, current_size),
-                        ));
-                    }
-                    if !open {
+                    // Géométrie persistée : le rectangle logique borné de
+                    // cette image, taille logique comprise (pas la taille
+                    // repliée, voir `floating_window_geometry_to_persist`).
+                    geometry_updates.push((
+                        tab,
+                        floating_window_geometry_to_persist(logical_rect, current_size),
+                    ));
+                    if header_actions.close {
                         close_requests.push(tab);
                     }
                 }
@@ -2519,8 +2458,7 @@ fn toggle_collapse_to(collapsed_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bo
     }
 }
 
-/// Taille à demander à egui (`.fixed_size`) pour une fenêtre flottante cette
-/// image. La taille logique (`current_size`) telle quelle, sauf le temps
+/// Taille à peindre pour une fenêtre flottante cette image. La taille logique (`current_size`) telle quelle, sauf le temps
 /// d'un repli (B3, `docs/chantiers/retours-2026-09-23-bugs.md`) : le contenu
 /// n'est alors plus peint (seule [`window_header`] l'est), et forcer la
 /// taille dépliée peindrait un cadre — et un contour de surbrillance —
@@ -2529,8 +2467,8 @@ fn toggle_collapse_to(collapsed_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bo
 /// Réutilisée telle quelle par [`PlotyxApp::show_detached_tabs`] (B9) pour
 /// calculer la taille à envoyer au viewport OS via
 /// `ViewportCommand::InnerSize` : même bande d'en-tête, même hauteur
-/// repliée — seul change ce qui porte cette taille (le `Frame` d'une
-/// `egui::Window` côté flottant, un viewport OS réel côté détaché).
+/// repliée — seul change ce qui porte cette taille (le cadre peint par
+/// [`show_floating_window`] côté flottant, un viewport OS réel côté détaché).
 fn floating_window_display_size(
     current_size: egui::Vec2,
     was_collapsed: bool,
@@ -2580,31 +2518,17 @@ fn active_window_stroke(style: &egui::Style, is_active: bool) -> egui::Stroke {
 }
 
 /// `Frame` d'une fenêtre flottante — le `Frame::window` habituel, sans
-/// recoloration selon l'activité. Jusqu'à B7
-/// (`docs/chantiers/retours-2026-09-23-bugs.md`), ce trait était recoloré
-/// pour la fenêtre active afin d'éviter un second contour peint par-dessus —
-/// mais sa géométrie suit `content_ui.min_rect()`
-/// (`egui::Frame::paint`, via `Resize::end` avec `.with_stroke(false)`), pas
-/// la taille demandée par `.fixed_size(...)` : un `ui.horizontal(…)` (la
-/// bande d'outils) qui ne s'enroule pas continue d'étendre cette géométrie
-/// même quand B4 rogne le rendu, donc le contour débordait vers l'extérieur.
-/// Le trait par défaut d'egui reste ici pour l'état inactif ; l'état actif
-/// est peint à part par [`paint_active_window_outline`], sur le rectangle
-/// **demandé**, pas celui qu'egui recalcule depuis le contenu.
+/// recoloration selon l'activité. [`show_floating_window`] le peint sur le
+/// rectangle de la fenêtre ; l'état actif est peint par-dessus, sur ce même
+/// rectangle, par [`paint_active_window_outline`].
 fn floating_window_frame(style: &egui::Style) -> egui::Frame {
     egui::Frame::window(style).inner_margin(WINDOW_CONTENT_MARGIN)
 }
 
-/// Peint le contour de surbrillance d'une fenêtre active, sur un rectangle
-/// **demandé** plutôt que sur celui qu'egui recalcule depuis le contenu
-/// réellement peint (B7, `docs/chantiers/retours-2026-09-23-bugs.md`) — la
-/// même cause que B1 (`content_ui.min_rect()`), mais que le `Frame` seul ne
-/// peut pas éviter puisque c'est justement lui qui souffre du défaut. Les
-/// appelants passent un `Painter` construit sur la bonne couche :
-/// `Order::Foreground` à l'`Id` de la fenêtre pour rester au-dessus des
-/// autres fenêtres flottantes côté MDI (même couche que celle qu'`egui`
-/// utilise déjà pour `egui::Window`), la couche de fond du viewport détaché
-/// côté fenêtre OS séparée (un seul viewport, pas d'ordre à disputer).
+/// Peint le contour de surbrillance d'une fenêtre active sur `rect`, le
+/// rectangle même de la fenêtre. Les appelants passent un `Painter` de la
+/// bonne couche : celle de la fenêtre côté MDI ([`show_floating_window`]),
+/// la couche de fond du viewport côté fenêtre OS détachée.
 fn paint_active_window_outline(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -2816,7 +2740,7 @@ fn workspace_max_scroll(viewport_size: egui::Vec2) -> egui::Vec2 {
 
 /// Position écran d'un point de l'espace de travail (coordonnées logiques,
 /// indépendantes du défilement) — l'origine de la zone visible moins le
-/// défilement courant. Réciproque de [`screen_to_workspace`].
+/// défilement courant.
 fn workspace_to_screen(
     pos: egui::Pos2,
     viewport_min: egui::Pos2,
@@ -2825,26 +2749,14 @@ fn workspace_to_screen(
     viewport_min + (pos.to_vec2() - scroll)
 }
 
-/// Position dans l'espace de travail d'un point écran — réciproque de
-/// [`workspace_to_screen`], utilisée pour convertir en retour ce qu'`egui` a
-/// réellement peint (position/taille d'une fenêtre après glisser) vers la
-/// coordonnée logique à persister.
-fn screen_to_workspace(
-    pos: egui::Pos2,
-    viewport_min: egui::Pos2,
-    scroll: egui::Vec2,
-) -> egui::Pos2 {
-    (pos - viewport_min + scroll).to_pos2()
-}
-
 /// Défilement minimal à appliquer à `scroll` pour que `target` (rectangle
 /// dans l'espace de travail) redevienne entièrement visible dans une zone de
 /// taille `viewport_size` — inchangé si `target` l'est déjà. Utilisé pour
 /// ramener à l'écran une fenêtre déjà ouverte mais actuellement défilée hors
 /// vue (clic dans le Project Manager) : contrairement à
 /// [`Response::scroll_to_me`] côté grille/onglets de feuille, l'espace de
-/// travail n'est pas un `egui::ScrollArea` classique (les `egui::Window`
-/// qu'il porte peignent sur leur propre calque, indépendant de toute zone de
+/// travail n'est pas un `egui::ScrollArea` classique (les fenêtres qu'il
+/// porte peignent sur leur propre calque, indépendant de toute zone de
 /// défilement ambiante), donc pas de mécanisme natif à réutiliser ici.
 fn workspace_scroll_to_reveal(
     scroll: egui::Vec2,
@@ -2864,16 +2776,115 @@ fn workspace_scroll_to_reveal(
     revealed
 }
 
-/// Huit zones fines de redimensionnement pour une fenêtre flottante MDI —
-/// voir la doc de tête de [`PlotyxApp::window_sizes`] pour pourquoi le
-/// redimensionnement natif d'`egui::Window` ne suffit pas ici (seuls
-/// droite/bas/coin restent possibles une fois le glissé natif désactivé, la
-/// barre de titre maison en ayant besoin). Posées entièrement à
-/// l'**extérieur** de `rect` plutôt qu'à cheval dessus (contrairement aux
-/// poignées natives, qui vivent dans le calque de la fenêtre et n'ont donc
-/// pas ce problème) : ces zones vivent dans le calque du `CentralPanel`, en
-/// dessous de celui de la fenêtre — un chevauchement se ferait donc
-/// disputer le survol par la fenêtre elle-même.
+/// Calque des fenêtres flottantes : celui qu'egui réserve aux fenêtres
+/// qu'on réordonne au clic (`Order::Middle`), au-dessus des panneaux fixes
+/// (`Order::Background`) et **sous** les menus, listes déroulantes et
+/// infobulles (`Order::Foreground`) — un menu contextuel ouvert dans une
+/// fenêtre doit passer devant ses voisines.
+const FLOATING_WINDOW_ORDER: egui::Order = egui::Order::Middle;
+
+/// Épaisseur des poignées de redimensionnement, posées **hors** du cadre
+/// (voir [`floating_resize_handles`]) et comptées dans la zone cliquable de
+/// la fenêtre par [`show_floating_window`].
+const RESIZE_BORDER: f32 = 6.0;
+
+/// Borne un rectangle logique à l'espace de travail : taille ramenée à
+/// [`WORKSPACE_SIZE`] au plus, puis position glissée pour qu'il y tienne en
+/// entier. C'est la seule borne appliquée aux fenêtres flottantes — egui
+/// n'en ajoute pas d'autre (voir [`show_floating_window`]), donc ce que
+/// cette fonction rend est exactement ce qui est peint, entouré et persisté.
+fn clamp_to_workspace(rect: egui::Rect) -> egui::Rect {
+    let size = rect.size().min(WORKSPACE_SIZE);
+    let max_min = (WORKSPACE_SIZE - size).to_pos2();
+    egui::Rect::from_min_size(rect.min.clamp(egui::Pos2::ZERO, max_min), size)
+}
+
+/// Peint une fenêtre flottante de l'espace de travail, cadre compris, dans
+/// son propre calque. `window_rect` est le rectangle écran de la fenêtre,
+/// `viewport_rect` la portion visible de l'espace de travail (ce que les
+/// panneaux fixes laissent). Rend `None` quand la fenêtre est entièrement
+/// hors de la vue : rien n'est alors peint ni rendu cliquable.
+///
+/// # Pourquoi une `egui::Area` et pas une `egui::Window`
+///
+/// `egui::Window` est une boîte de dialogue : barre de titre, glisser,
+/// redimensionnement, repli et bornage à elle. Toutes ces fonctions avaient
+/// été coupées une à une puis refaites à la main ([`window_header`],
+/// [`floating_resize_handles`], [`workspace_to_screen`]…), et chaque image
+/// devait accorder deux rectangles : celui qu'on demandait et celui
+/// qu'egui recalait. Les bugs 1 et 2 de
+/// `docs/chantiers/retours-2026-09-24-bugs.md` (contour décalé d'une
+/// fenêtre recalée, fenêtre peinte par-dessus les panneaux fixes) étaient
+/// deux formes de ce désaccord. `egui::Area` est la brique nue sous
+/// `Window` : un calque, une position, un ordre au clic — rien d'autre. Le
+/// cadre, le contour et le rognage sont posés ici, sur le **même**
+/// rectangle.
+///
+/// # La zone cliquable est la partie visible
+///
+/// egui choisit la fenêtre sous le pointeur d'après le rectangle de son
+/// `Area` (`Memory::layer_id_at`), pas d'après ce qui est peint. L'`Area`
+/// est donc taillée à la seule partie visible de la fenêtre (poignées
+/// comprises) : une fenêtre à cheval sur le bord de la vue ne capte aucun
+/// clic destiné au Project Manager ou à la console, et son dessin est rogné
+/// au même bord (`constrain_to(viewport_rect)`, qui donne aussi à `Area` son
+/// rectangle de découpe).
+fn show_floating_window<R>(
+    ctx: &egui::Context,
+    id: egui::Id,
+    window_rect: egui::Rect,
+    viewport_rect: egui::Rect,
+    is_active: bool,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    add_resize_handles: impl FnOnce(&egui::Ui, egui::Rect),
+) -> Option<R> {
+    let area_rect = window_rect.expand(RESIZE_BORDER).intersect(viewport_rect);
+    if !window_rect.intersects(viewport_rect) || !area_rect.is_positive() {
+        return None;
+    }
+    let response = egui::Area::new(id)
+        .order(FLOATING_WINDOW_ORDER)
+        .movable(false)
+        .fade_in(false)
+        .fixed_pos(area_rect.min)
+        .constrain_to(viewport_rect)
+        .show(ctx, |ui| {
+            // La taille de l'`Area` est celle de son contenu : on la fixe à
+            // la partie visible, le contenu réel vivant dans un sous-`Ui` qui
+            // ne la fait pas grandir.
+            ui.set_min_size(area_rect.size());
+            let style = ui.style().clone();
+            let frame = floating_window_frame(&style);
+            let content_rect = window_rect - frame.total_margin();
+            ui.painter().add(frame.paint(content_rect));
+            let mut content = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(content_rect)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            content.set_clip_rect(content_rect.intersect(ui.clip_rect()));
+            let inner = add_contents(&mut content);
+            if is_active {
+                paint_active_window_outline(
+                    ui.painter(),
+                    window_rect,
+                    style.visuals.window_corner_radius,
+                    &style,
+                );
+            }
+            add_resize_handles(ui, window_rect);
+            inner
+        });
+    Some(response.inner)
+}
+
+/// Huit zones fines de redimensionnement pour une fenêtre flottante MDI,
+/// posées entièrement à l'**extérieur** de `rect` (sur [`RESIZE_BORDER`])
+/// pour ne pas disputer le survol au contenu — les barres de défilement de
+/// la grille longent le bord. Elles sont peintes dans le calque de la
+/// fenêtre ([`show_floating_window`] compte ce liseré dans sa zone
+/// cliquable) : la poignée d'une fenêtre ne passe donc jamais devant une
+/// autre fenêtre posée par-dessus.
 fn floating_resize_handles(
     ui: &egui::Ui,
     tab: Tab,
@@ -2881,7 +2892,7 @@ fn floating_resize_handles(
     position: &mut egui::Pos2,
     size: &mut egui::Vec2,
 ) {
-    const BORDER: f32 = 6.0;
+    const BORDER: f32 = RESIZE_BORDER;
     // (source, zone, curseur, ouest, est, nord, sud) — les quatre derniers
     // indiquent quels côtés ce glissé affecte, combinés pour les coins.
     let zones: [(&str, egui::Rect, egui::CursorIcon, bool, bool, bool, bool); 8] = [
@@ -6678,21 +6689,16 @@ mod graph_layout_tests {
     }
 
     #[test]
-    fn workspace_to_screen_et_screen_to_workspace_sont_reciproques() {
+    fn workspace_to_screen_decale_de_lorigine_de_la_vue_et_du_defilement() {
         let viewport_min = egui::pos2(40.0, 20.0);
-        let scroll = egui::vec2(300.0, 150.0);
-        for pos in [
-            egui::Pos2::ZERO,
-            egui::pos2(500.0, 400.0),
-            egui::pos2(1900.0, 1000.0),
-        ] {
-            let screen = workspace_to_screen(pos, viewport_min, scroll);
-            let back = screen_to_workspace(screen, viewport_min, scroll);
-            assert!(
-                (back - pos).length() < 0.01,
-                "aller-retour : {pos:?} -> {screen:?} -> {back:?}"
-            );
-        }
+        assert_eq!(
+            workspace_to_screen(
+                egui::pos2(500.0, 400.0),
+                viewport_min,
+                egui::vec2(300.0, 150.0)
+            ),
+            egui::pos2(240.0, 270.0)
+        );
         // Sans défilement, l'espace de travail et l'écran ne diffèrent que
         // par l'origine de la zone visible — comportement identique à
         // l'ancien `workspace_rect.min + position`.
@@ -6787,217 +6793,168 @@ mod graph_layout_tests {
         );
     }
 
-    // B1 (cause originelle) : le contour de surbrillance était peint sur
-    // `ui.max_rect()` dans la fermeture `.show()` de la fenêtre — le
-    // rectangle de *contenu*, déjà rétréci par la marge intérieure du
-    // `Frame` — plutôt que sur le rectangle réel de la fenêtre
-    // (`ctx.memory(|m| m.area_rect(id))`, celui qu'`egui` peint réellement,
-    // marge comprise). La surbrillance elle-même utilise maintenant le trait
-    // du `Frame` (voir `floating_window_frame`), mais `area_rect` reste la
-    // source de la géométrie persistée et des poignées de redimensionnement
-    // (plus bas dans la boucle des fenêtres flottantes) — ce test verrouille
-    // toujours la différence entre les deux rectangles pour cet usage-là.
-    #[test]
-    fn le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu() {
-        let context = egui::Context::default();
-        let id = egui::Id::new("le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu");
-        let mut content_rect = None;
-
-        let input = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(400.0, 300.0),
-            )),
-            ..Default::default()
-        };
-        let paint = |ui: &mut egui::Ui, content_rect: &mut Option<egui::Rect>| {
-            egui::Window::new("test")
-                .id(id)
-                .title_bar(false)
-                .current_pos(egui::pos2(20.0, 20.0))
-                .fixed_size(egui::vec2(200.0, 100.0))
-                .show(ui.ctx(), |ui| {
-                    // Comme `window_header` + `tab_contents` en production :
-                    // le contenu occupe tout l'espace offert, faute de quoi
-                    // `AreaState::rect()` (donc `area_rect`) se réduirait à
-                    // ce qui a été réellement dessiné plutôt qu'à ce que
-                    // `.fixed_size()` a demandé — pas ce que ce test veut
-                    // isoler.
-                    ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-                    *content_rect = Some(ui.max_rect());
-                });
-        };
-        // `Memory::area_rect` documente renvoyer le rectangle de l'image
-        // *précédente* — comme le fait déjà le code de production
-        // (`app.rs`, juste après `.show()`) pour la persistance de la
-        // géométrie. Deux images sont donc nécessaires pour l'observer.
-        context
-            .run_ui(input(), |ui| paint(ui, &mut content_rect))
-            .textures_delta
-            .clear();
-        let mut output = context.run_ui(input(), |ui| paint(ui, &mut content_rect));
-        output.textures_delta.clear();
-
-        let content_rect = content_rect.expect("la fermeture .show() doit avoir été appelée");
-        let area_rect = context
-            .memory(|memory| memory.area_rect(id))
-            .expect("la fenêtre doit avoir enregistré sa géométrie réelle");
-
-        assert!(
-            area_rect.width() > content_rect.width() && area_rect.height() > content_rect.height(),
-            "le rectangle réel ({area_rect:?}) doit être strictement plus grand que le \
-             rectangle de contenu ({content_rect:?}) : c'est la marge du Frame que B1 ignorait"
-        );
-        assert!(
-            area_rect.contains_rect(content_rect),
-            "le rectangle de contenu doit rester à l'intérieur du rectangle réel de la fenêtre"
-        );
-    }
-
-    // B4 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `.fixed_size(...)`
-    // force la taille *demandée* à egui, mais un `Ui` dont les enfants
-    // dépassent son `max_rect` les peint quand même — rien, dans le chemin
-    // du classeur, ne réduisait le rectangle de découpe. Ce test reproduit
-    // le mécanisme (contenu volontairement plus large que la fenêtre, comme
-    // un classeur à plusieurs colonnes) et verrouille le rognage explicite
-    // posé juste après `.show()` dans la boucle des fenêtres flottantes.
-    #[test]
-    fn le_contenu_qui_deborde_est_rogne_au_rectangle_de_la_fenetre() {
-        let context = egui::Context::default();
-        let window_pos = egui::pos2(20.0, 20.0);
-        let display_size = egui::vec2(200.0, 150.0);
-        let window_rect = egui::Rect::from_min_size(window_pos, display_size);
-
+    /// Peint des fenêtres flottantes par le chemin de production
+    /// ([`show_floating_window`]), sur une image, et rend la sortie d'egui.
+    /// Deux images au moins sont nécessaires : la première est la passe de
+    /// mesure d'une `Area` neuve, qui ne peint rien.
+    fn peindre_fenetres(
+        context: &egui::Context,
+        fenetres: &[(egui::Id, egui::Rect)],
+        viewport: egui::Rect,
+        events: Vec<egui::Event>,
+        contenu: impl Fn(&mut egui::Ui),
+    ) -> egui::FullOutput {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
+                egui::vec2(1400.0, 1000.0),
             )),
+            events,
             ..Default::default()
         };
         let mut output = context.run_ui(input, |ui| {
-            // `ui.new_child(...max_rect(window_rect))`, comme
-            // `figure_ui` dans `graph_view_contents` : un sous-`Ui` borné
-            // au rectangle de la fenêtre flottante, sans faire grandir le
-            // parent — même situation que le contenu de `.show()` d'une
-            // `egui::Window` posée avec `.fixed_size(display_size)`
-            // (`app.rs`, boucle des fenêtres flottantes).
-            let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(window_rect));
-            // Même geste que la production, juste après le calcul de
-            // `display_size` : rogner explicitement le contenu au
-            // rectangle réellement offert par la fenêtre.
-            let clip_rect = content_ui.clip_rect().intersect(content_ui.max_rect());
-            content_ui.set_clip_rect(clip_rect);
-            // Contenu bien plus large que la fenêtre — comme un classeur à
-            // plusieurs colonnes (bandeau + grille + onglets de feuille sur
-            // la capture du bug).
-            content_ui.horizontal(|ui| {
-                for i in 0..10 {
-                    ui.label(format!("colonne {i}"));
-                    ui.add_space(80.0);
-                }
-            });
+            for &(id, rect) in fenetres {
+                show_floating_window(ui.ctx(), id, rect, viewport, true, &contenu, |_, _| {});
+            }
         });
         output.textures_delta.clear();
+        output
+    }
 
-        let tolerance = window_rect.expand(1.0);
-        let label_shapes: Vec<_> = output
-            .shapes
-            .iter()
-            .filter(|painted| match &painted.shape {
-                egui::Shape::Text(shape) => shape.galley.job.text.starts_with("colonne"),
-                _ => false,
-            })
-            .collect();
-        assert!(
-            !label_shapes.is_empty(),
-            "le contenu de test doit avoir peint des libellés « colonne N »"
+    /// Contenu plus large que n'importe quelle fenêtre de test — comme un
+    /// classeur à plusieurs colonnes.
+    fn contenu_debordant(ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            for index in 0..10 {
+                ui.label(format!("colonne {index}"));
+                ui.add_space(80.0);
+            }
+        });
+    }
+
+    /// Tous les rectangles peints, `Shape::Vec` dépliés (le cadre d'egui
+    /// arrive en `Vec[ombre, rectangle]`).
+    fn rectangles_peints(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::RectShape> {
+        fn deplier(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+            match shape {
+                egui::Shape::Rect(rect) => out.push(rect.clone()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| deplier(shape, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for painted in shapes {
+            deplier(&painted.shape, &mut out);
+        }
+        out
+    }
+
+    // Bug 1 (`docs/chantiers/retours-2026-09-24-bugs.md`), la cause : la
+    // position était bornée deux fois, par egui (`constrain_to`) et pas par
+    // nous, si bien que le contour suivait la position demandée et le cadre
+    // la position recalée. Il n'y a plus qu'une borne, celle-ci.
+    #[test]
+    fn une_position_hors_de_lespace_de_travail_est_bornee_par_une_seule_fonction() {
+        let size = egui::vec2(500.0, 400.0);
+        assert_eq!(
+            clamp_to_workspace(egui::Rect::from_min_size(egui::pos2(-300.0, 80.0), size)),
+            egui::Rect::from_min_size(egui::pos2(0.0, 80.0), size),
         );
-        for painted in &label_shapes {
-            assert!(
-                tolerance.contains_rect(painted.clip_rect),
-                "un libellé du classeur a un rectangle de découpe ({:?}) qui déborde de la \
-                 fenêtre ({window_rect:?}) — B4 n'est pas corrigé",
-                painted.clip_rect,
+        assert_eq!(
+            clamp_to_workspace(egui::Rect::from_min_size(egui::pos2(1800.0, 1000.0), size)).max,
+            WORKSPACE_SIZE.to_pos2(),
+        );
+        assert_eq!(
+            clamp_to_workspace(egui::Rect::from_min_size(
+                egui::pos2(10.0, 10.0),
+                egui::vec2(5000.0, 5000.0),
+            )),
+            egui::Rect::from_min_size(egui::Pos2::ZERO, WORKSPACE_SIZE),
+        );
+    }
+
+    // Bug 1, la conséquence, et B1/B3/B4/B7 du rapport du 2026-09-23 : le
+    // cadre, le contour actif, la zone cliquable et le rognage du contenu
+    // suivent tous le même rectangle, que le contenu soit court ou déborde.
+    #[test]
+    fn le_cadre_le_contour_et_la_zone_cliquable_suivent_le_meme_rectangle() {
+        for deborde in [false, true] {
+            let context = egui::Context::default();
+            let id = egui::Id::new(("meme_rectangle", deborde));
+            let window_rect =
+                egui::Rect::from_min_size(egui::pos2(100.0, 80.0), egui::vec2(220.0, 180.0));
+            let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+            let contenu = |ui: &mut egui::Ui| {
+                if deborde {
+                    contenu_debordant(ui);
+                } else {
+                    ui.label("contenu court");
+                }
+            };
+            peindre_fenetres(&context, &[(id, window_rect)], viewport, vec![], contenu);
+            let output =
+                peindre_fenetres(&context, &[(id, window_rect)], viewport, vec![], contenu);
+
+            let style = egui::Style::default();
+            let rectangles = rectangles_peints(&output.shapes);
+            let cadre = rectangles
+                .iter()
+                .find(|rect| rect.fill == style.visuals.window_fill())
+                .expect("le cadre doit être peint");
+            let contour = rectangles
+                .iter()
+                .find(|rect| rect.stroke.color == style.visuals.selection.stroke.color)
+                .expect("le contour actif doit être peint");
+            assert_eq!(cadre.rect, window_rect, "deborde={deborde}");
+            assert_eq!(contour.rect, window_rect, "deborde={deborde}");
+            assert_eq!(
+                context.memory(|memory| memory.area_rect(id)),
+                Some(window_rect.expand(RESIZE_BORDER)),
+                "la zone cliquable est la fenêtre plus ses poignées, deborde={deborde}"
             );
+            for painted in &output.shapes {
+                if let egui::Shape::Text(text) = &painted.shape {
+                    assert!(
+                        window_rect.contains_rect(painted.clip_rect),
+                        "{:?} déborde de la fenêtre : découpe {:?}",
+                        text.galley.job.text,
+                        painted.clip_rect,
+                    );
+                }
+            }
         }
     }
 
-    // B7 : le contenu débordant doit être découpé et ne doit pas agrandir le
-    // rectangle réel du Frame. Le contour actif et les poignées utilisent
-    // alors exactement ce même rectangle demandé.
+    // Bug 2 (`docs/chantiers/retours-2026-09-24-bugs.md`) : une fenêtre à
+    // cheval sur le bord de la vue (espace de travail défilé) peignait
+    // par-dessus le Project Manager, et y captait les clics.
     #[test]
-    fn le_contour_actif_suit_le_rectangle_demande_meme_si_le_contenu_deborde() {
+    fn une_fenetre_a_cheval_sur_le_bord_de_la_vue_est_rognee_et_laisse_passer_les_clics() {
         let context = egui::Context::default();
-        let id =
-            egui::Id::new("le_contour_actif_suit_le_rectangle_demande_meme_si_le_contenu_deborde");
-        let window_pos = egui::pos2(20.0, 20.0);
-        let display_size = egui::vec2(200.0, 150.0);
-        let requested_rect = egui::Rect::from_min_size(window_pos, display_size);
-        let style = egui::Style::default();
+        let id = egui::Id::new("a_cheval");
+        // La vue commence à x = 400 (à gauche : le Project Manager).
+        let viewport = egui::Rect::from_min_max(egui::pos2(400.0, 0.0), egui::pos2(1400.0, 1000.0));
+        let window_rect =
+            egui::Rect::from_min_size(egui::pos2(250.0, 100.0), egui::vec2(500.0, 400.0));
+        let fenetres = [(id, window_rect)];
+        peindre_fenetres(&context, &fenetres, viewport, vec![], contenu_debordant);
+        let output = peindre_fenetres(&context, &fenetres, viewport, vec![], contenu_debordant);
 
-        let input = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
-            )),
-            ..Default::default()
-        };
-        let paint = |ui: &mut egui::Ui| {
-            egui::Window::new("test")
-                .id(id)
-                .title_bar(false)
-                .current_pos(window_pos)
-                .fixed_size(display_size)
-                .frame(floating_window_frame(ui.style()))
-                .show(ui.ctx(), |ui| {
-                    show_window_contents_bounded(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for i in 0..10 {
-                                ui.label(format!("colonne {i}"));
-                                ui.add_space(80.0);
-                            }
-                        });
-                    });
-                });
-            // Même rectangle que le Frame, après `.show()`.
-            paint_active_window_outline(
-                &ui.ctx()
-                    .layer_painter(egui::LayerId::new(egui::Order::Foreground, id)),
-                requested_rect,
-                style.visuals.window_corner_radius,
-                &style,
+        assert!(!output.shapes.is_empty());
+        for painted in &output.shapes {
+            assert!(
+                viewport.contains_rect(painted.clip_rect),
+                "une forme de la fenêtre est découpée hors de la vue : {:?}",
+                painted.clip_rect,
             );
-        };
-        // Deux images : `area_rect` documente renvoyer la géométrie de
-        // l'image précédente (voir
-        // `le_rectangle_reel_de_la_fenetre_deborde_le_rectangle_de_contenu`).
-        context.run_ui(input(), paint).textures_delta.clear();
-        let mut output = context.run_ui(input(), paint);
-        output.textures_delta.clear();
-
-        let area_rect = context
-            .memory(|memory| memory.area_rect(id))
-            .expect("la fenêtre doit avoir enregistré sa géométrie réelle");
-        assert_eq!(area_rect, requested_rect);
-
-        fn find_outline(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
-            shapes.iter().find_map(|painted| match &painted.shape {
-                egui::Shape::Rect(rect)
-                    if rect.stroke.color
-                        == egui::Style::default().visuals.selection.stroke.color =>
-                {
-                    Some(rect.rect)
-                }
-                _ => None,
-            })
         }
-        let outline_rect =
-            find_outline(&output.shapes).expect("le contour actif doit avoir été peint");
-        assert_eq!(
-            outline_rect, requested_rect,
-            "le contour doit longer le même rectangle que le Frame ({area_rect:?})"
+        let calque = egui::LayerId::new(FLOATING_WINDOW_ORDER, id);
+        assert_ne!(
+            context.layer_id_at(egui::pos2(300.0, 300.0)),
+            Some(calque),
+            "sous le Project Manager, la partie cachée de la fenêtre ne doit capter aucun clic"
         );
+        assert_eq!(context.layer_id_at(egui::pos2(500.0, 300.0)), Some(calque));
     }
 
     #[test]
@@ -7125,55 +7082,6 @@ mod graph_layout_tests {
         );
     }
 
-    #[test]
-    fn le_cadre_et_les_poignees_gardent_la_meme_taille_avec_un_contenu_court_ou_debordant() {
-        for deborde in [false, true] {
-            let context = egui::Context::default();
-            let id = egui::Id::new(("cadre_et_poignees", deborde));
-            let requested =
-                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(220.0, 180.0));
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(900.0, 600.0),
-                )),
-                ..Default::default()
-            };
-            for _ in 0..2 {
-                context
-                    .run_ui(input.clone(), |ui| {
-                        egui::Window::new("test")
-                            .id(id)
-                            .title_bar(false)
-                            .current_pos(requested.min)
-                            .fixed_size(requested.size())
-                            .show(ui.ctx(), |ui| {
-                                show_window_contents_bounded(ui, |ui| {
-                                    if deborde {
-                                        ui.horizontal(|ui| {
-                                            for index in 0..10 {
-                                                ui.label(format!("Colonne {index}"));
-                                            }
-                                        });
-                                    } else {
-                                        ui.label("Contenu court");
-                                    }
-                                });
-                            });
-                    })
-                    .textures_delta
-                    .clear();
-            }
-            let actual = context
-                .memory(|memory| memory.area_rect(id))
-                .expect("la fenêtre doit avoir une géométrie mesurée");
-            assert_eq!(
-                actual, requested,
-                "le cadre doit rejoindre le liseré et les poignées, deborde={deborde}"
-            );
-        }
-    }
-
     // B2 (`docs/chantiers/retours-2026-09-23-bugs.md`) : `sync_floating_tabs_order_to_top_layer`
     // teste la logique pure de réalignement.
 
@@ -7243,15 +7151,17 @@ mod graph_layout_tests {
                 ..Default::default()
             };
             context.run_ui(input, |ui| {
+                let viewport = ui.ctx().content_rect();
                 for (tab, rect) in [(tab_a, rect_a), (tab_b, rect_b)] {
-                    egui::Window::new(format!("{tab:?}"))
-                        .id(egui::Id::new(tab))
-                        .title_bar(false)
-                        .current_pos(rect.min)
-                        .fixed_size(rect.size())
-                        .show(ui.ctx(), |ui| {
-                            ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-                        });
+                    show_floating_window(
+                        ui.ctx(),
+                        egui::Id::new(tab),
+                        rect,
+                        viewport,
+                        false,
+                        |_| {},
+                        |_, _| {},
+                    );
                 }
             })
         };
@@ -8121,17 +8031,19 @@ mod graph_layout_tests {
                 ..Default::default()
             };
             let mut output = context.run_ui(input, |ui| {
-                egui::Window::new("Figure")
-                    .id(id)
-                    .title_bar(false)
-                    .drag_area(egui::WindowDrag::Off)
-                    .current_pos(egui::pos2(100.0, 100.0))
-                    .default_size(egui::vec2(560.0, 540.0))
-                    .show(ui.ctx(), |ui| {
+                show_floating_window(
+                    ui.ctx(),
+                    id,
+                    egui::Rect::from_min_size(egui::pos2(100.0, 100.0), GRAPH_WINDOW_SIZE),
+                    ui.ctx().content_rect(),
+                    true,
+                    |ui| {
                         let _ =
                             window_header(ui, id, "Figure", tab, false, HeaderPlacement::Floating);
                         graph_drop_target(ui, &state, &mut actions, &mut graph_views, graph);
-                    });
+                    },
+                    |_, _| {},
+                );
             });
             output.textures_delta.clear();
             if is_initial_frame {

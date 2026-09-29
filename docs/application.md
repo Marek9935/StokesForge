@@ -26,22 +26,28 @@ Le Project Manager et la console de script sont deux panneaux fixes
 (`egui::Panel::left`/`egui::Panel::bottom`), jamais fermés. Les quatre autres
 natures de fenêtre de contenu — `Tab::Book` (classeur), `Tab::Graph`,
 `Tab::Matrix`, `Tab::Note`, chacune portant un `NodeId` — s'ouvrent par défaut
-en fenêtres flottantes (`egui::Window`) à l'intérieur du `CentralPanel`, une
-par `PlotyxApp::floating_tabs`, dans `app.rs`.
+en fenêtres flottantes à l'intérieur du `CentralPanel`, une par
+`PlotyxApp::floating_tabs`, dans `app.rs`. Chacune est une `egui::Area` nue
+(`show_floating_window`), pas une `egui::Window` : l'application possède seule
+sa géométrie, et le cadre, le contour actif, le rognage, les poignées et la
+géométrie persistée viennent du même rectangle. Les `egui::Window` d'avant
+avaient toutes leurs fonctions coupées puis refaites à la main, et chaque
+image devait accorder le rectangle demandé avec celui qu'egui recalait —
+d'où les bugs de contour décalé et de débordement sur les panneaux
+(`docs/chantiers/retours-2026-09-24-bugs.md`, points 1 et 2).
 
 L'aire qui les porte a une taille logique **fixe** (`WORKSPACE_SIZE`,
 1920×1080), indépendante de la taille de la fenêtre principale : en dessous,
 elle défile (`PlotyxApp::workspace_scroll`) plutôt que d'écraser les fenêtres
 qu'elle contient contre ses bords. `window_positions`/`window_sizes` et la
 géométrie persistée dans le projet sont exprimées dans ces coordonnées
-logiques, converties en coordonnées écran à la peinture. Chaque fenêtre
-reçoit `.constrain_to(...)` sur le rectangle écran de l'espace de travail
-entier (pas seulement sa portion visible), ce qui l'empêche géométriquement
-de jamais chevaucher le Project Manager ou la console de script, quel que
-soit le glisser ou le redimensionnement — mais elle peut sortir de la portion
-*visible* de l'espace de travail : elle n'est alors simplement pas peinte
-(cachée, pas tronquée), et redéfiler la fait réapparaître à sa position
-logique inchangée. Rouvrir depuis le Project Manager une entrée déjà ouverte
+logiques, bornées à l'espace de travail par `clamp_to_workspace` (la seule
+borne), puis converties en coordonnées écran à la peinture. Le rendu est
+rogné à la portion visible de l'espace de travail (hors panneaux fixes et
+barres de défilement), pour le dessin comme pour les clics : une fenêtre à
+cheval sur le bord de la vue ne peint ni ne capte rien sous le Project
+Manager ou la console. Entièrement hors de la vue, elle n'est pas peinte du
+tout, et redéfiler la fait réapparaître à sa position logique inchangée. Rouvrir depuis le Project Manager une entrée déjà ouverte
 mais défilée hors vue fait défiler l'espace de travail jusqu'à elle. Une
 fenêtre nouvellement ouverte apparaît en cascade par rapport à la précédente
 plutôt que superposée à elle. La taille fixe est pour l'instant une constante

@@ -1,25 +1,32 @@
 # Retours bugs — 2026-09-24
 
-Rapport **temporaire, inachevé** : session interrompue faute de crédit. Repris
-partiellement (points 1-3 investigués et confirmés à l'écran, 4 est une
-évolution déjà bien spécifiée par l'utilisateur, 5 confirmé par lecture de
-code seulement, pas encore à l'écran). Ce fichier tient lieu de mémoire —
-à charger avant de reprendre, puis à basculer dans `docs/chantiers/` normal
-(ou `docs/archive/`) une fois traité.
+Rapport de tri terminé. Les points 1 à 3 ont été reproduits et confirmés à
+l'écran lors de l'enquête initiale ; leurs captures temporaires ne sont plus
+disponibles. Le point 4 consigne une évolution demandée, sans conception. Le
+point 5 est confirmé par comparaison des deux chemins de code et par une
+[capture de la fenêtre détachée](captures-2026-09-24/classeur-detache.png).
 
 ## Tableau de tri
 
 | # | Remarque (résumé utilisateur) | Classement | Lot |
 |---|---|---|---|
-| 1 | Contour vert décalé quand la fenêtre est bloquée contre le PM | **bug, confirmé** | fenêtres flottantes |
-| 2 | Le contenu d'une fenêtre flottante passe devant les panneaux fixes une fois l'espace de travail défilé | **bug, confirmé** | espace de travail défilable |
+| 1 | Contour vert décalé quand la fenêtre est bloquée contre le PM | **bug, corrigé** | fenêtres flottantes |
+| 2 | Le contenu d'une fenêtre flottante passe devant les panneaux fixes une fois l'espace de travail défilé | **bug, corrigé** | espace de travail défilable |
 | 3 | Le redimensionnement du graphe ne scale pas correctement (le texte des axes se chevauche en petit) | **bug, confirmé** | rendu du graphe (F11) |
 | 4 | Bandeau d'actions du classeur → menus contextuels + menu Fichier, option classeur actif/nouveau à l'import | **évolution**, bien spécifiée par l'utilisateur | classeur / import |
-| 5 | Fenêtre de classeur détachée : disposition différente de la flottante | **bug, confirmé par le code** (pas encore à l'écran) | duplication docké/détaché |
+| 5 | Fenêtre de classeur détachée : disposition et grille différentes de la flottante | **bug, confirmé à l'écran et par le code** | duplication flottant/détaché |
 
 ---
 
-## 1. Contour actif décalé du cadre réel quand la fenêtre est clampée
+## 1. Contour actif décalé du cadre réel quand la fenêtre est clampée [corrigé]
+
+**Correctif (2026-09-29)** : les fenêtres flottantes ne sont plus des
+`egui::Window` mais des `egui::Area` (`show_floating_window`,
+`crates/plotyx-app/src/app.rs`). La position n'est plus bornée que par
+`clamp_to_workspace`, et le cadre, le contour, les poignées et la géométrie
+persistée partent de ce seul rectangle. Tests :
+`une_position_hors_de_lespace_de_travail_est_bornee_par_une_seule_fonction`,
+`le_cadre_le_contour_et_la_zone_cliquable_suivent_le_meme_rectangle`.
 
 **Reproduction** (sans interaction — géométrie de fenêtre forcée dans un
 `.plotyx` construit ad hoc, cf. méthode ci-dessous)
@@ -63,7 +70,15 @@ peut être clampée en pratique (contre le PM, la console, ou les bords de
 
 ---
 
-## 2. Le contenu d'une fenêtre flottante passe devant les panneaux fixes
+## 2. Le contenu d'une fenêtre flottante passe devant les panneaux fixes [corrigé]
+
+**Correctif (2026-09-29)** : même changement que le point 1, direction (a)
+retenue. Le dessin est rogné à la portion visible de l'espace de travail (hors
+panneaux et barres de défilement), et la zone cliquable de la fenêtre est
+réduite à cette même portion. Un clic sur la partie cachée va donc au panneau
+du dessous. Le bug se produisait aussi **sans** défilement, en bas, sur la
+console de script : une fenêtre plus haute que la vue la recouvrait. Test :
+`une_fenetre_a_cheval_sur_le_bord_de_la_vue_est_rognee_et_laisse_passer_les_clics`.
 
 **Reproduction** — nécessite un défilement de l'espace de travail
 (`PlotyxApp::workspace_scroll ≠ 0`), donc une interaction (glisser la barre)
@@ -191,64 +206,78 @@ Reformulation fidèle de la demande, **pas conçue ici** :
 - « Ajouter une feuille » → nouvelle entrée de menu contextuel (à créer) au
   clic droit sur la bande des onglets de feuille (`sheet_tabs`).
 - « Importer… » → menu Fichier plutôt qu'un bouton du bandeau.
-- La fenêtre d'import gagne une option : importer chaque fichier dans le
-  classeur actif, ou créer un nouveau classeur (par fichier, ou un seul pour
-  tous les fichiers importés ensemble) — portée exacte de cette option à
-  préciser avec l'utilisateur avant de concevoir (`plotyx-feature`).
+- La fenêtre d'import gagne les trois destinations demandées : le classeur
+  actif, un nouveau classeur par fichier, ou un seul nouveau classeur pour
+  tous les fichiers importés ensemble. Le sélecteur actuel accepte déjà
+  plusieurs fichiers (`pick_files`, `app.rs:4767`).
 
-À faire dans le crate `plotyx-app`, potentiellement `plotyx-import` pour
-l'option de destination. Compter les **deux écritures** (dockée/détachée)
-partout où c'est pertinent.
-
----
-
-## 5. Fenêtre de classeur détachée : disposition différente de la flottante
-
-**Pas encore vérifié à l'écran** (un classeur détaché exige un clic sur
-l'icône ↗, une interaction qu'aucun outil du dépôt ne peut scripter ; l'état
-détaché n'est pas persisté dans le `.plotyx` donc pas reproductible par un
-fichier construit à la main non plus). **À demander à l'utilisateur** : une
-capture de la fenêtre détachée suffirait à confirmer/affiner ce qui suit.
-
-**Confirmé par lecture directe du code**, comparaison ligne à ligne :
-
-`book_contents` (`app.rs:4307`, flottant) :
-1. bandeau (Ajouter une colonne / Ajouter une feuille / Importer… + compteur)
-2. séparateur
-3. grille (défilement horizontal)
-4. séparateur
-5. **onglets de feuille en bas**
-
-`detached_book_contents` (`app.rs:6250`, détaché) :
-1. **onglets de feuille en haut**
-2. séparateur
-3. bandeau (Ajouter une colonne / Ajouter une feuille / **Insérer 1 ligne** /
-   **Supprimer 1 ligne** + compteur)
-4. séparateur
-5. grille (défilement horizontal)
-
-Deux divergences structurelles, pas juste une question de pixels :
-- **Ordre inversé** : les onglets de feuille sont en haut côté détaché, en
-  bas côté flottant.
-- **Bandeau différent** : la version détachée a deux boutons de plus
-  (« Insérer 1 ligne », « Supprimer 1 ligne ») absents du bandeau flottant.
-
-**Portée** : `crates/plotyx-app/src/app.rs:4307` et `:6250`.
-**Nature** : incohérence entre deux surfaces (dockée/détachée) — la famille
-de symptôme la plus révélatrice signalée par le skill de triage.
-**Écarté** : rien dans la doc ne documente cette différence comme voulue ;
-`docs/application.md` dit au contraire qu'il s'agit du « même contenu »,
-juste sur deux sources de données différentes (`&mut AppState` vs `&Tree`).
-**Gravité** : gênant — pas de perte de données, mais contredit l'attente
-explicite de l'utilisateur (disposition identique).
-
-À noter pour la suite : le lot 4 (bandeau → menus contextuels) va de toute
-façon réécrire ces deux fonctions — traiter 4 et 5 **ensemble** évite de
-resynchroniser deux fois la même paire dockée/détachée.
+À faire dans le crate `plotyx-app` (`app.rs` pour les menus et la fenêtre,
+`state.rs` pour la destination et les commandes d'import). Compter les **deux
+écritures** (flottante/détachée) partout où c'est pertinent. La destination
+actuelle est figée à l'ouverture dans `AppState::open_import` (`state.rs:2781`).
 
 ---
 
-## Notes pour la reprise
+## 5. Le classeur détaché ne reprend pas la disposition du classeur flottant
+
+**Reproduction** (depuis un projet neuf)
+1. Ouvrir un classeur contenant une feuille d'au moins deux colonnes.
+2. Observer la place des onglets de feuille, la bande d'actions, l'en-tête
+   des colonnes et leur largeur dans la fenêtre flottante.
+3. Cliquer sur ↗ dans son en-tête pour détacher ce même classeur. Comparer
+   ces zones à largeur de fenêtre comparable ; réattacher pour confirmer le
+   retour à la première disposition.
+
+**Attendu** : le contenu garde la même disposition dans les deux fenêtres ;
+seuls le cadre et les contrôles propres à la fenêtre OS changent.
+
+**Observé** : la [capture du viewport détaché](captures-2026-09-24/classeur-detache.png)
+montre les onglets au-dessus de la barre d'actions, puis une grille dont
+l'en-tête n'a qu'une ligne (`#`, `Temps num`, `Signal num`, `Note mixte`). Le
+bouton « Insérer 1 ligne » y apparaît, et le bouton de suppression déborde
+hors de la largeur utile. La capture montre cinq lignes suivies d'un grand
+espace vide ; le code détaché n'emploie pas la réservation de hauteur de la
+grille flottante. La comparaison des deux chemins de code précise ces écarts :
+
+| Zone | Fenêtre flottante | Fenêtre détachée |
+|---|---|---|
+| Onglets de feuille | Sous la grille, avec hauteur réservée en bas (`book_contents`, `app.rs:4339-4351`) | Au-dessus du bandeau et de la grille (`detached_book_contents`, `app.rs:6267-6271`) |
+| Bande d'actions | Ajouter colonne, ajouter feuille, importer (`app.rs:4320-4337`) | Ajouter colonne, ajouter feuille, insérer/supprimer une ligne ; pas d'import (`app.rs:6272-6309`) |
+| En-tête et gouttière | Cinq rangées : lettre/rôle, nom long, unité, commentaire, formule ; sélection et menus (`grid_contents`, `app.rs:4886-4943`) | Une seule rangée : `#`, nom et type de colonne (`detached_grid_contents`, `app.rs:6317-6353`) |
+| Largeurs initiales | Gouttière 90 points, colonnes 54 points, redimensionnables (`app.rs:481-495`, `:4908-4915`) | Gouttière fixe 56 points, colonnes 110 points (`app.rs:6334-6337`) |
+
+La grille détachée emploie aussi `detached_cell_widget` (`app.rs:6371`),
+alors que la flottante emploie `cell_widget` (`app.rs:6033`) : leurs gestes
+et styles ont évolué séparément. C'est une divergence de comportement à
+vérifier lors du correctif, au-delà du seul placement signalé ici.
+
+**Portée** : `crates/plotyx-app/src/app.rs:3311-3319` aiguille la fenêtre
+flottante vers `book_contents` puis `grid_contents` ; `app.rs:1668-1680`
+aiguille le viewport OS vers `detached_book_contents` puis
+`detached_grid_contents`. `sheet_tabs` (`app.rs:2657`) est déjà commun ; sa
+position diffère selon l'appelant. La sélection de feuille et le tampon de
+saisie locaux de `DetachedTabViewModel` ne sont pas, en eux-mêmes, la cause
+de la disposition : ce sont les chemins de rendu distincts.
+
+**Cause établie pour l'écart structurel** : la fenêtre détachée conserve une
+seconde implémentation du classeur et une grille simplifiée. Les quatre
+différences du tableau sont directement inscrites dans ces fonctions.
+**Nature** : incohérence entre deux surfaces.
+**Écarté** : `docs/application.md` (§ Détachement générique) justifie un
+instantané et un tampon de saisie propres au viewport détaché, pas une
+disposition différente. Aucun choix de produit n'établit cette divergence.
+**Gravité** : gênant ; aucune perte de données constatée.
+
+**Validation et limite** : la capture utilisateur confirme l'apparence du
+viewport détaché ; la disposition flottante décrite ci-dessus est vérifiée
+dans `book_contents`/`grid_contents` mais n'a pas été photographiée dans le
+même état. Un futur correctif demandera une comparaison visuelle avant/après
+et une vérification des gestes dans les deux modes ; un test de géométrie
+seul ne prouverait pas l'identité visuelle.
+
+---
+
+## Provenance des reproductions
 
 - Le mécanisme de capture (`PLOTYX_APP_SCREENSHOT` + `PLOTYX_APP_AUTOQUIT_MS`,
   voir `.claude/skills/plotyx-bug-report/references/voir-l-interface.md`)
@@ -264,9 +293,7 @@ resynchroniser deux fois la même paire dockée/détachée.
   méthode pour les reconstruire est dans les sections 1 et 3 ci-dessus
   (géométrie de fenêtre forcée via `Session::handle().set_window_geometry`
   puis `.save(...)`, sans avoir besoin d'interaction).
-- Un fichier de test scratch (`crates/plotyx-app/tests/_scratch_repro.rs`,
-  préfixé `_` pour signaler qu'il est temporaire) a servi à générer ces
-  `.plotyx` — **non committé**, à supprimer ou à garder pour la reprise selon
-  ce qui est utile.
-- Point 5 : demander une capture de la fenêtre détachée à l'utilisateur avant
-  de conclure davantage — le diagnostic ci-dessus vient uniquement du code.
+- Un fichier de test temporaire a servi à générer ces `.plotyx` pendant
+  l'enquête initiale ; il n'est plus présent dans le dépôt.
+- Point 5 : capture fournie par l'utilisateur et conservée dans
+  `captures-2026-09-24/classeur-detache.png`.
