@@ -51,7 +51,7 @@ Le réflexe coûteux est de réparer là où le symptôme se voit. Table de renv
 | écran ≠ export SVG/PDF/PNG | mesure de texte (invariant 4) ou fonctionnalité écrite dans un seul backend (invariant 5) — voir **plotyx-rendu** |
 | figure qui ne se met pas à jour | clé de cache `(revision, rect, pixels_per_point, view_generation)` de `plotyx-render-egui` |
 | action grisée à tort, libellé faux, menu incohérent | `AppState` (`grid_menu`, `undo_label`…), jamais le code egui |
-| comportement présent dans le dock, absent en fenêtre détachée | deux écritures là où il en faudrait une : `book_contents` (`app.rs:3653`) vs `detached_book_contents` (`app.rs:5592`). Corriger **les deux**, ou factoriser si la contrainte `'static` de `show_viewport_deferred` ne s'y oppose pas |
+| comportement présent en flottant, absent en fenêtre détachée | deux écritures là où il en faudrait une (`rg "fn detached_" crates/plotyx-app/src/`). Factoriser si la contrainte `'static` de `show_viewport_deferred` ne s'y oppose pas, sinon corriger **les deux** |
 | blocage de l'interface | quelque chose de bloquant appelé depuis la boucle de rendu (cf. `ScriptEngine::run`, résolu par un fil détaché + `poll_script`) |
 
 **Si le correctif demande un arbitrage, demander.** Un bug dont la correction
@@ -103,6 +103,18 @@ pas dans le diff du correctif.
   dock/détaché, menu/raccourci), le test le plus utile compare les deux plutôt
   que de vérifier chacune séparément.
 
+### Fermer le bug là où il est suivi
+
+Un bug corrigé dont le statut reste « ouvert » quelque part sera rapporté comme
+ouvert au prochain récap — c'est arrivé (B6). Donc, **dans le même geste que le
+commit du correctif** :
+
+- le message de commit porte `Closes #<n>` (l'issue GitLab se ferme au push sur
+  la branche par défaut) ; si le push n'est pas fait ou pas sur `main`, fermer
+  explicitement : `glab issue close <n>` avec un commentaire citant le commit ;
+- pas d'issue ? Rien à fermer — mais ne pas créer de `.md`
+  pour l'occasion.
+
 ## 5. Vérifier et rendre compte
 
 Enchaîner sur **plotyx-verification** : `cargo fmt --all -- --check`,
@@ -130,6 +142,7 @@ validé par un test vert : le dire.
 - [ ] correction posée à la couche de la cause, pas du symptôme
 - [ ] aucun test affaibli ; garde-fous d'architecture toujours verts
 - [ ] `#[ignore]` de reproduction retiré s'il y en avait un
+- [ ] issue GitLab fermée (`Closes #n` ou `glab issue close`)
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts (+ features touchées)
 - [ ] `//!` et page `docs/` à jour si le comportement décrit a changé
 - [ ] compte rendu : ce qui a changé, ce qui a été exécuté, ce qui reste non validé

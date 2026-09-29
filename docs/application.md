@@ -34,7 +34,7 @@ géométrie persistée viennent du même rectangle. Les `egui::Window` d'avant
 avaient toutes leurs fonctions coupées puis refaites à la main, et chaque
 image devait accorder le rectangle demandé avec celui qu'egui recalait —
 d'où les bugs de contour décalé et de débordement sur les panneaux
-(`docs/chantiers/retours-2026-09-24-bugs.md`, points 1 et 2).
+(retours du 2026-09-24, points 1 et 2 — rapport supprimé, dans l'historique git).
 
 L'aire qui les porte a une taille logique **fixe** (`WORKSPACE_SIZE`,
 1920×1080), indépendante de la taille de la fenêtre principale : en dessous,

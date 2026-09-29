@@ -45,9 +45,13 @@ quand sa colonne « reste à faire » sera vide.
 
 | Note | Contenu |
 |---|---|
-| [`retours-2026-09-23-bugs.md`](chantiers/retours-2026-09-23-bugs.md) | six défauts localisés, dont quatre confirmés par capture (`chantiers/captures-2026-09-23/`) |
 | [`retours-2026-09-23-features.md`](chantiers/retours-2026-09-23-features.md) | neuf évolutions à développer, avec les arbitrages déjà rendus |
 | [`prevision-import.md`](chantiers/prevision-import.md) | prévisualisation d'import |
+
+**Les bugs n'y vivent pas** : leur état est suivi dans les issues GitLab du
+projet (`glab issue list --label bug`). Les anciens rapports
+`retours-*-bugs.md` ont été supprimés une fois leurs bugs corrigés ; les
+commentaires du code qui les citent se résolvent dans l'historique git.
 
 Comme les autres notes de passation, elles **planifient** : le code n'y fait
 pas encore foi, et un « reste à faire » y demande d'être confronté au code

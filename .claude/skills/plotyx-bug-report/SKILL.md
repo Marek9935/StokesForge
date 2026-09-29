@@ -122,17 +122,12 @@ au menu » est donc une `Action` + un `dispatch` + un test, pas une ligne d'UI.
 
 ### Chercher le doublon docké / détaché
 
-Piège structurel de `plotyx-app` : plusieurs contenus existent **en deux
-écritures**, une pour la fenêtre dockée et une pour la fenêtre détachée —
-`book_contents` (`app.rs:3653`) et `detached_book_contents` (`app.rs:5592`), par
-exemple, chacune avec son bandeau. Un commentaire du fichier dit déjà « *Même
-correctif B5 que `book_contents`* » : la duplication est connue et oblige à
-corriger deux fois.
-
-Avant de localiser un symptôme d'interface ou de chiffrer un retrait d'UI :
-`rg "<nom_de_la_fonction>|detached_<nom>" crates/plotyx-app/src/app.rs`. Un
-rapport qui ne cite qu'une des deux écritures fait livrer un correctif à
-moitié.
+Piège structurel de `plotyx-app` : un contenu a longtemps existé **en deux
+écritures**, une pour la fenêtre flottante et une pour la fenêtre détachée
+(`book_contents` / `detached_book_contents`…). Le classeur et le graphe sont
+désormais unifiés ; ce qui reste dupliqué se trouve par
+`rg "fn detached_" crates/plotyx-app/src/`. Un rapport qui ne cite qu'une des
+deux écritures fait livrer un correctif à moitié.
 
 ### La famille de symptôme la plus révélatrice
 
@@ -188,12 +183,32 @@ avoir regardé la fenêtre** n'a pas sa place dans le rapport.
 
 Mentionner l'invariant potentiellement touché **seulement** s'il y en a un.
 
-## 6. Le test de reproduction — l'idiome du dépôt
+## 6. Où vit le bug : une issue GitLab, pas un `.md`
 
-PlotYx n'a pas de gestionnaire de tickets : **c'est un test qui tient un bug
-ouvert**. Une reproduction échoue délibérément et porte `#[ignore]`, motif écrit
-dans l'attribut. Quand elle se met à passer, on retire `#[ignore]` et le
-garde-fou prend le relais.
+**L'état d'un bug (ouvert / corrigé) vit à un seul endroit : les issues GitLab
+du projet** (`origin` = `gitlab.com:askrzypczak/plotyx`), via `glab`. Plus de
+nouveau rapport dans `docs/chantiers/*.md` : un fichier figé à sa date
+d'écriture ne sait pas qu'un commit l'a rendu faux — c'est arrivé, B6 était
+listé « non corrigé » alors qu'il l'était.
+
+- **Créer** : `glab issue create --title "<symptôme>" --label bug
+  --description "<gabarit §5>"` (label `évolution` pour une demande). Une
+  issue par bug ; un vrac se trie d'abord (§1), puis chaque ligne `bug`
+  devient une issue.
+- **Lister les bugs ouverts** (« fais-moi un récap ») : `glab issue list
+  --label bug`, jamais une note `.md`. Un bug qu'on croit ouvert sans issue se
+  vérifie (`git log --all --grep`, branches et worktrees non fusionnées,
+  question à l'utilisateur) avant d'être répété.
+- **Si `glab` n'est pas installé ou pas authentifié**, le dire et demander à
+  l'utilisateur de lancer `! glab auth login` ; ne pas retomber en silence sur
+  un `.md`.
+
+### Le test de reproduction — l'idiome du dépôt
+
+L'issue porte l'état ; **un test peut en plus tenir le bug ouvert** dans le
+code. Une reproduction échoue délibérément et porte `#[ignore]`, motif écrit
+dans l'attribut **avec le numéro de l'issue** (`#[ignore = "#12 : …"]`). Quand
+elle se met à passer, on retire `#[ignore]` et le garde-fou prend le relais.
 
 | Portée du bug | Où poser le test |
 |---|---|

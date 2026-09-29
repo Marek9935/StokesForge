@@ -1,8 +1,7 @@
 # Évolutions à développer — retours du 2026-09-23
 
-Chantiers tirés des retours du 2026-09-23. Les
-défauts du même message vivent à côté, dans
-[`retours-2026-09-23-bugs.md`](retours-2026-09-23-bugs.md).
+Chantiers tirés des retours du 2026-09-23. Les défauts du même message,
+tous corrigés, ne sont plus suivis ici (voir les issues GitLab).
 
 Note de passation : elle rejoindra `docs/archive/` quand sa dernière case sera
 cochée. Chaque chantier passe par le skill `plotyx-feature` — les quatre
