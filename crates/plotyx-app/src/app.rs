@@ -8714,7 +8714,13 @@ mod graph_layout_tests {
                 );
                 for shape in view.cache().shapes() {
                     let mut displayed = shape.clone();
-                    displayed.transform(transform);
+                    // Le texte est remis en page à la taille affichée (#18) :
+                    // même transformation que `GraphView::paint_scaled`.
+                    plotyx_render_egui::scaled::transform_shape(
+                        &context,
+                        &mut displayed,
+                        transform,
+                    );
                     assert!(
                         output
                             .shapes

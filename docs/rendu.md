@@ -335,3 +335,13 @@ rendu : le texte brut, `$…$` compris, s'affiche tel quel (invariant 10).
 - Les tests : `render/tests/{mesure,geometrie,frontiere}.rs`,
   `render-egui/tests/{accord,formes,cache_session,feathering,interaction,typst}.rs`,
   `render-svg/tests/{export,frontiere,pdf,typst}.rs`.
+
+### Agrandir un graphe sans flouter le texte
+
+`GraphView::paint_scaled` pose la figure à `DEFAULT_FIGURE_SIZE` puis la met à
+l'échelle de la fenêtre. `Shape::transform` d'epaint étire le maillage d'un
+texte déjà rastérisé à la taille logique : agrandi, il devient flou (issue
+#18). `plotyx_render_egui::scaled` remet donc chaque `Shape::Text` en page à la
+taille affichée (police × échelle) et garde le résultat par
+`(clé du cache, rectangle affiché)`. Les positions restent celles de la mise
+en page logique : la mesure du texte (invariant 4) n'est pas refaite.

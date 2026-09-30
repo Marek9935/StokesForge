@@ -70,6 +70,7 @@
 pub mod backend;
 pub mod cache;
 pub mod feathering;
+pub mod scaled;
 #[cfg(feature = "typst")]
 pub mod typst_screen;
 pub mod view;
@@ -233,6 +234,9 @@ pub struct PointHit {
 #[derive(Debug)]
 pub struct GraphView {
     cache: ShapeCache,
+    /// Les formes du cache mises à l'échelle d'affichage, texte compris
+    /// (issue #18) : voir [`scaled`].
+    scaled: scaled::ScaledShapes,
     last: Option<DrawnPlot>,
     measurer: TextMeasurer,
     view: ViewState,
@@ -274,6 +278,7 @@ impl GraphView {
     pub fn new() -> Self {
         Self {
             cache: ShapeCache::new(),
+            scaled: scaled::ScaledShapes::default(),
             last: None,
             measurer: TextMeasurer::default(),
             view: ViewState::new(),
@@ -448,10 +453,16 @@ impl GraphView {
                 display_rect.min.to_vec2() - logical_rect.min.to_vec2() * scale,
                 scale,
             );
-            painter.extend(self.cache.shapes().iter().cloned().map(|mut shape| {
-                shape.transform(transform);
-                shape
-            }));
+            let scaled_key = scaled::ScaledKey {
+                source: key,
+                display: display_rect,
+            };
+            painter.extend(
+                self.scaled
+                    .get(&context, scaled_key, self.cache.shapes(), transform)
+                    .iter()
+                    .cloned(),
+            );
         }
 
         // R7.2/7.3 : réticule, désignation de point et rectangle élastique,
