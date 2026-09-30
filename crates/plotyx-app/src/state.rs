@@ -1744,7 +1744,11 @@ impl AppState {
     /// acteur. Il peut ainsi employer exactement les mêmes widgets que la
     /// fenêtre flottante sans verrouiller l'état de la racine.
     pub fn fork_for_detached_view(&self) -> SessionResult<Self> {
-        let mut view = Self::new(self.handle.clone(), self.path.clone())?;
+        // Identité d'émetteur propre à la vue détachée : avec un simple `clone`,
+        // ses écritures seraient absorbées dans une macro ouverte par la
+        // racine (propriétés du graphe) puis emportées par son annulation
+        // (issue #21).
+        let mut view = Self::new(self.handle.with_new_identity(), self.path.clone())?;
         view.snapshot = self.snapshot.clone();
         view.selected_sheets = self.selected_sheets.clone();
         view.selection = self.selection.clone();
@@ -2942,6 +2946,16 @@ impl AppState {
         }
     }
 
+    /// Message affiché quand des actions d'une fenêtre détachée sont refusées
+    /// parce que la fenêtre modale des propriétés d'un graphe est ouverte.
+    pub fn reject_detached_actions(&mut self) {
+        self.fail(
+            "Fenêtre des propriétés du graphe ouverte : validez-la ou annulez-la \
+             avant de modifier une fenêtre détachée"
+                .to_string(),
+        );
+    }
+
     /// Ferme la macro de la fenêtre des propriétés (une entrée d'historique,
     /// aucune si rien n'a changé).
     fn end_plot_macro(&mut self) {
@@ -2949,13 +2963,7 @@ impl AppState {
             return;
         }
         self.plot_macro_open = false;
-        if let Err(err) = self.handle.end_macro() {
-            self.fail(format!(
-                "Clôture de l'entrée d'historique impossible : {err}"
-            ));
-        }
-        // `end_macro` ne rafraîchit pas l'instantané (voir l'import).
-        self.refresh();
+        self.end_grouped_macro();
     }
 
     /// Valide le brouillon courant ([`Action::SetPlotSpec`]) — mais
@@ -4202,7 +4210,7 @@ impl AppState {
             });
         }
         if grouped {
-            let _ = self.handle.end_macro();
+            self.end_grouped_macro();
         }
     }
 
@@ -4481,7 +4489,7 @@ impl AppState {
                     }
                 }
                 if grouped {
-                    let _ = self.handle.end_macro();
+                    self.end_grouped_macro();
                 }
             }
             (GridCursor::Data(_, anchor_row), RelativeCopy::DataRows { start, rows }) => {
@@ -4514,7 +4522,7 @@ impl AppState {
                     self.execute_pasted_cells(column, paste_row, values, promoting);
                 }
                 if grouped {
-                    let _ = self.handle.end_macro();
+                    self.end_grouped_macro();
                 }
             }
             // Champs copiés + ancre sur une cellule de donnée, ou lignes de
@@ -4609,7 +4617,7 @@ impl AppState {
             self.execute_pasted_cells(column, body_start, values, promoting);
         }
         if grouped {
-            let _ = self.handle.end_macro();
+            self.end_grouped_macro();
         }
     }
 
@@ -4708,8 +4716,20 @@ impl AppState {
     }
 
     fn end_creation_macro(&mut self) {
-        if self.handle.end_macro().is_err() {
-            self.fail("échec de la clôture de l'entrée d'historique".to_string());
+        self.end_grouped_macro();
+    }
+
+    /// Clôture **commune** de toute opération groupée (collage, effacement,
+    /// création, propriétés du graphe) : ferme la macro, remonte l'erreur en
+    /// [`StatusMessage`], puis rafraîchit l'instantané. `end_macro` ne
+    /// rafraîchit rien, et `execute` ne l'a fait que **pendant** la macro :
+    /// sans ce dernier `refresh`, `can_undo`/`undo_label` restent ceux d'avant
+    /// la clôture jusqu'à un rafraîchissement fortuit (issue #22).
+    fn end_grouped_macro(&mut self) {
+        if let Err(err) = self.handle.end_macro() {
+            self.fail(format!(
+                "Clôture de l'entrée d'historique impossible : {err}"
+            ));
         }
         self.refresh();
     }
@@ -5120,7 +5140,9 @@ impl AppState {
             return;
         };
         let existing_engine = self.engine.clone();
-        let handle = self.handle.clone();
+        // Identité propre au script : une macro ouverte par l'interface
+        // (propriétés du graphe) ne l'absorbe pas et ne l'annule pas (#21).
+        let handle = self.handle.with_new_identity();
         let source = self.script_source.clone();
         let (reply_tx, reply_rx) = mpsc::channel();
 

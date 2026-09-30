@@ -592,7 +592,11 @@ d'historique** ouverte à l'ouverture de la fenêtre : Valider la ferme — une
 seule entrée, un Ctrl+Z défait tout (`AppState::close_plot_settings`) ;
 Annuler l'avorte et restaure le graphe d'avant
 (`AppState::cancel_plot_settings`). Pendant la macro, annuler/rétablir et
-enregistrer sont refusés (`plotyx-commands`). Elle est construite
+enregistrer sont refusés (`plotyx-commands`), ainsi que les écritures d'une
+fenêtre détachée (autre identité d'émetteur : refusées par la session) et les
+actions qu'elle remonte à la racine (`reject_detached_actions`). Toute
+opération groupée se clôt par `AppState::end_grouped_macro`, qui rafraîchit
+l'instantané (sinon `can_undo`/libellé restent périmés, issue #22). Elle est construite
 par la même brique que les fenêtres de contenu (`show_window_in_layer`,
 `window_header`, `floating_resize_handles`) — même cadre, même barre de
 titre — et non par une `egui::Window` brute ; seuls l'ordre de calque et le

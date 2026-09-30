@@ -38,7 +38,7 @@ logiciel.
 |---|---|
 | `recipe` | le **modèle de recette** : description figée et sérialisable d'un format d'appareil. Ne connaît pas le moteur de parsing |
 | `parse` | applique une recette à un fichier |
-| `preview` | classe chaque ligne en rôle (en-tête principal, sous-en-tête et son rôle, donnée, pied) pour l'aperçu en direct |
+| `preview` | (même découpage que `parse` : séparateur résolu sur la même ligne, virgule exclue si décimale virgule — test `accord_apercu_import.rs`, issue #23) classe chaque ligne en rôle (en-tête principal, sous-en-tête et son rôle, donnée, pied) pour l'aperçu en direct |
 | `store` | enregistre et recharge les recettes (JSON) |
 
 `preview` existe pour que la fenêtre d'import montre **en direct** comment un

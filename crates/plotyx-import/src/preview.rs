@@ -194,6 +194,10 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
         return Err(ImportError::NoDataRows);
     }
 
+    // Première ligne restante après l'en-tête : c'est sur elle que `parse`
+    // résout le séparateur, ligne de noms de colonnes comprise.
+    let first_remaining = idx;
+
     if recipe.has_column_header_row {
         roles[idx] = LineRole::ColumnHeaderRow;
         idx += 1;
@@ -205,7 +209,8 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     let data_start = idx;
 
     // Le préfixe et le séparateur sont résolus comme `parse` le fait : sur
-    // la première ligne de données restante, une fois `skip_chars` retiré.
+    // la première ligne restante après l'en-tête, une fois `skip_chars`
+    // retiré (issue #23).
     let skip = |line: &str| -> String {
         if recipe.skip_chars == 0 {
             return line.to_string();
@@ -215,8 +220,11 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
             None => String::new(),
         }
     };
-    let first_data_line = skip(raw[data_start]);
-    let separator = resolve_separator(recipe.separator, &first_data_line);
+    let separator = resolve_separator(
+        recipe.separator,
+        skip_str(raw[first_remaining], recipe.skip_chars),
+        recipe.decimal,
+    );
 
     // Fin des données : la même règle que `parse` (`crate::data_end`). Les
     // lignes coupées rejoignent le pied de page.
@@ -373,7 +381,7 @@ pub fn detect_header_layout(
     if lines.is_empty() {
         return crate::recipe::HeaderLayout::default();
     }
-    let effective = resolve_separator(separator, lines[lines.len() - 1]);
+    let effective = resolve_separator(separator, lines[lines.len() - 1], decimal);
     let ref_count = effective.tokenize(lines[lines.len() - 1]).len();
 
     let mut i = 0usize;

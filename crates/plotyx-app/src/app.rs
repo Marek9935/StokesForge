@@ -2116,7 +2116,19 @@ impl eframe::App for PlotyxApp {
                     .requests
                     .lock()
                     .unwrap_or_else(|err| err.into_inner());
-                actions.append(&mut requests.actions);
+                // Pendant la fenêtre modale des propriétés du graphe, une
+                // macro d'historique est ouverte par la racine : y laisser
+                // entrer les actions d'une fenêtre détachée les ferait
+                // absorber, puis annuler avec le graphe (issue #21). Elles
+                // sont refusées, avec un message.
+                if self.state.plot_settings().is_some() {
+                    if !requests.actions.is_empty() {
+                        requests.actions.clear();
+                        self.state.reject_detached_actions();
+                    }
+                } else {
+                    actions.append(&mut requests.actions);
+                }
                 if std::mem::take(&mut requests.reattach) {
                     to_reattach.push(*tab);
                 }

@@ -5745,3 +5745,98 @@ fn dropping_files_while_the_wizard_is_open_adds_them_to_its_list() {
     });
     assert_eq!(state.import_state().unwrap().paths.len(), 1, "sans doublon");
 }
+
+// -- État Annuler après clôture d'une opération groupée (issue #22) --
+
+/// L'instantané de l'UI reflète la macro close dès la fin de l'action : même
+/// `can_undo` et même libellé que l'acteur.
+fn assert_undo_state_matches_actor(session: &Session, state: &AppState, label: &str) {
+    let actual = session.handle().snapshot().unwrap();
+    assert_eq!(state.can_undo(), actual.history.can_undo);
+    assert!(state.can_undo(), "{label} doit être annulable");
+    assert_eq!(actual.history.undo_label.as_deref(), Some(label));
+    assert_eq!(
+        state.undo_label().as_deref(),
+        Some(format!("Annuler {label}").as_str()),
+        "le libellé du menu vient de l'entrée close"
+    );
+}
+
+#[test]
+fn undo_state_is_fresh_right_after_a_grouped_paste() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet = state.selected_sheet_in(book).unwrap();
+    let columns = state.visible_columns(sheet);
+    state.select_cell(sheet, columns[0].0, 0);
+    // Séance neuve : rien d'annulable avant le collage.
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
+    state.dispatch(Action::Paste {
+        sheet,
+        text: "10\t20".into(),
+    });
+    assert_undo_state_matches_actor(&session, &state, "Coller");
+}
+
+#[test]
+fn undo_state_is_fresh_right_after_a_grouped_clear() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet = state.selected_sheet_in(book).unwrap();
+    let columns = state.visible_columns(sheet);
+    state.select_cell(sheet, columns[0].0, 0);
+    state.extend_selection(sheet, columns[1].0, 0);
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
+    state.dispatch(Action::ClearSelectedCells { sheet });
+    assert_undo_state_matches_actor(&session, &state, "Effacer la sélection");
+}
+
+// -- Annuler les propriétés d'un graphe n'annule pas une saisie détachée (#21) --
+
+/// Pendant que la fenêtre des propriétés d'un graphe tient une macro, une vue
+/// détachée (autre identité d'émetteur) ne peut pas y glisser une écriture :
+/// elle est refusée, et annuler les propriétés ne touche pas au classeur.
+#[test]
+fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut main) = start_demo(dir.path());
+    let graph = plotted_graph(&mut main);
+    let book = book_named(main.tree(), "Book1");
+    let sheet = main.selected_sheet_in(book).unwrap();
+    let column = main.visible_columns(sheet)[0].0;
+    let before = cell_f64(&main, column, 0);
+
+    let mut detached = main.fork_for_detached_view().expect("vue détachée");
+    main.dispatch(Action::OpenPlotSettings {
+        graph,
+        tab: PlotSettingsTab::Graph,
+        axis: None,
+    });
+    detached.dispatch(Action::CommitCell {
+        column,
+        row: 0,
+        text: "99".into(),
+    });
+    assert!(
+        detached.status().is_some_and(|status| status.is_error),
+        "la saisie étrangère est refusée pendant le dialogue"
+    );
+    main.cancel_plot_settings();
+    detached.refresh();
+    assert_eq!(cell_f64(&detached, column, 0), before);
+
+    // Le dialogue fermé, la même saisie passe et reste.
+    detached.dispatch(Action::CommitCell {
+        column,
+        row: 0,
+        text: "99".into(),
+    });
+    main.refresh();
+    assert_eq!(cell_f64(&main, column, 0), 99.0);
+}

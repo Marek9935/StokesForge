@@ -204,6 +204,20 @@ pub struct SessionHandle {
 }
 
 impl SessionHandle {
+    /// Poignée vers la même session, mais avec une identité d'émetteur
+    /// **neuve** (A4) : contrairement à `.clone()`, elle n'est pas le même
+    /// client. C'est ce qu'il faut à tout composant qui écrit en parallèle
+    /// d'une macro ouverte par un autre — fenêtre détachée, script : l'acteur
+    /// refuse alors ses écritures (`ForeignMacro`) au lieu de les absorber
+    /// dans la macro de l'autre, où l'annulation de celle-ci les emporterait
+    /// (issue #21).
+    pub fn with_new_identity(&self) -> SessionHandle {
+        SessionHandle {
+            tx: self.tx.clone(),
+            client: ClientId::fresh(),
+        }
+    }
+
     /// Envoie une requête construite par `build` (qui reçoit l'émetteur du
     /// canal de réponse à usage unique de cet appel) et bloque jusqu'à la
     /// réponse.

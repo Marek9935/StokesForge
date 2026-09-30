@@ -528,3 +528,48 @@ fn after_load_new_ids_stay_above_every_id_in_the_file() {
 
     session.shutdown().expect("arrêt propre");
 }
+
+/// `with_new_identity` (issue #21) : une poignée issue de `.clone()` reste le
+/// même émetteur et entre dans sa propre macro ; une poignée à identité neuve
+/// est refusée tant qu'une macro d'un autre est ouverte.
+#[test]
+fn a_handle_with_a_new_identity_cannot_write_into_anothers_macro() {
+    use plotyx_commands::{Command, CommandError};
+    use plotyx_core::{Column, Project, ValueBlock};
+    use plotyx_session::{Session, SessionError};
+
+    let mut project = Project::new("Demo").unwrap();
+    let root = project.root();
+    project.add_workbook(root, Some("Book1")).unwrap();
+    let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
+    let column = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
+        .unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let owner = session.handle();
+    let same = owner.clone();
+    let other = owner.with_new_identity();
+    let write = |value: f64| Command::SetCells {
+        column,
+        start: 0,
+        values: ValueBlock::Float(vec![value]),
+        expected_version: None,
+    };
+
+    owner.begin_macro("Propriétés").unwrap();
+    assert!(
+        same.execute(write(5.0)).is_ok(),
+        "le clone est le même émetteur"
+    );
+    let refused = other.execute(write(99.0));
+    assert!(
+        matches!(
+            refused,
+            Err(SessionError::Command(CommandError::ForeignMacro(_)))
+        ),
+        "{refused:?}"
+    );
+    owner.abort_macro().unwrap();
+    let snapshot = session.handle().snapshot().unwrap();
+    assert!(snapshot.history.undo_label.is_none(), "rien d'annulable");
+}

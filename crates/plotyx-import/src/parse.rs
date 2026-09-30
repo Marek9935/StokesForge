@@ -257,7 +257,7 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
     }
 
     // Résout le séparateur effectif sur la première ligne restante.
-    let separator = resolve_separator(recipe.separator, lines[0]);
+    let separator = resolve_separator(recipe.separator, lines[0], recipe.decimal);
 
     // Ligne d'en-tête de colonnes, le cas échéant.
     let column_names: Option<Vec<String>> = if recipe.has_column_header_row {
@@ -442,10 +442,19 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
 }
 
 /// Résout `Separator::Auto`/`Whitespace` en un séparateur concret, sur la
-/// base de la première ligne de données restante. `pub(crate)` : réutilisé
-/// par [`crate::preview`] pour que l'aperçu résolve le séparateur exactement
-/// comme [`parse`].
-pub(crate) fn resolve_separator(separator: Separator, first_line: &str) -> EffectiveSeparator {
+/// base de la première ligne restante après l'en-tête et le retrait des
+/// `skip_chars` — **ligne de noms de colonnes comprise**. `pub(crate)` :
+/// réutilisé par [`crate::preview`] avec la même ligne, pour que l'aperçu
+/// résolve le séparateur exactement comme [`parse`] (issue #23).
+///
+/// Avec la virgule pour décimale, la virgule n'est jamais candidate : elle
+/// ne peut pas être à la fois séparateur et décimale, et deux virgules
+/// décimales sur une ligne battraient sinon une seule tabulation.
+pub(crate) fn resolve_separator(
+    separator: Separator,
+    first_line: &str,
+    decimal: DecimalStyle,
+) -> EffectiveSeparator {
     match separator {
         Separator::Comma => EffectiveSeparator::Char(','),
         Separator::Semicolon => EffectiveSeparator::Char(';'),
@@ -455,7 +464,14 @@ pub(crate) fn resolve_separator(separator: Separator, first_line: &str) -> Effec
             let candidates = [
                 (';', first_line.matches(';').count()),
                 ('\t', first_line.matches('\t').count()),
-                (',', first_line.matches(',').count()),
+                (
+                    ',',
+                    if decimal == DecimalStyle::Comma {
+                        0
+                    } else {
+                        first_line.matches(',').count()
+                    },
+                ),
             ];
             match candidates.into_iter().max_by_key(|(_, count)| *count) {
                 Some((c, count)) if count > 0 => EffectiveSeparator::Char(c),
