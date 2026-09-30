@@ -5521,9 +5521,17 @@ fn grid_contents(
     // consommée ici) — c'était le bug connu du champ de texte du module
     // d'import, corrigé ici plutôt que dans la fenêtre elle-même parce que
     // c'est ici qu'il naissait.
+    //
+    // #17 : même vol, cette fois dans le dialogue des propriétés du graphe —
+    // la liste de conditions par fenêtre ne pouvait que rater la suivante.
+    // `wants_keyboard_input` (un champ texte a le focus, où que ce soit dans
+    // le `Context`) couvre d'un coup ce dialogue, l'import et tout futur
+    // dialogue ; `import_state` reste pour le cas d'un import ouvert sans
+    // champ focalisé.
     if state.editing().is_none()
         && state.header_editing().is_none()
         && state.import_state().is_none()
+        && !ui.ctx().egui_wants_keyboard_input()
     {
         // Taper sur une cellule ou un champ d'en-tête sélectionné (simple
         // clic, pas encore en édition) démarre l'édition en remplaçant tout
@@ -7181,6 +7189,65 @@ mod graph_layout_tests {
             .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
             .unwrap();
         (Session::spawn(project, None).unwrap(), graph)
+    }
+
+    /// #17 : la grille reste peinte sous un dialogue (Propriétés du graphe,
+    /// import…) ; tant qu'un champ texte y a le focus, Retour arrière et
+    /// Suppr lui appartiennent — la grille ne doit ni les consommer ni vider
+    /// la cellule sélectionnée.
+    #[test]
+    fn un_champ_texte_focalise_garde_retour_arriere_et_suppr() {
+        let mut project = Project::new("Clavier").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        let column = project
+            .add_column(sheet, None, None, Column::from_f64(&[1.0, 2.0]))
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let mut state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        state.select_cell(sheet, column, 0);
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let mut titre = String::from("Titre");
+        let mut actions = Vec::new();
+        for frame in 0..3 {
+            let mut input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..Default::default()
+            };
+            if frame == 2 {
+                for key in [egui::Key::Backspace, egui::Key::Delete] {
+                    input.events.push(egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                }
+            }
+            let mut output = context.run_ui(input, |ui| {
+                let field = egui::Id::new("champ_dialogue");
+                egui::Area::new(egui::Id::new("dialogue")).show(ui.ctx(), |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut titre).id(field));
+                });
+                ui.ctx().memory_mut(|memory| memory.request_focus(field));
+                actions.clear();
+                grid_contents(ui, &mut state, &mut actions, sheet, None);
+            });
+            output.textures_delta.clear();
+        }
+        assert!(
+            !actions.iter().any(|action| matches!(
+                action,
+                Action::ClearSelectedCells { .. } | Action::DeleteSelectedCells { .. }
+            )),
+            "la grille a volé Retour arrière/Suppr au champ texte : {actions:?}",
+        );
     }
 
     /// #14 : tant qu'un dialogue modal est ouvert, un clic sur le reste de
