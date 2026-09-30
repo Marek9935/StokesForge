@@ -11,4 +11,5 @@ workspace = true
 plotyx-id = { path = "../plotyx-id" }
 
 [dev-dependencies]
+plotyx-arch-guard = { path = "../plotyx-arch-guard" }
 toml = "0.8"

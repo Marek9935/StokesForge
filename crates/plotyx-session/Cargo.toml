@@ -14,5 +14,6 @@ thiserror = "2"
 plotyx-persistence = { version = "0.0.0", path = "../plotyx-persistence" }
 
 [dev-dependencies]
+plotyx-arch-guard = { path = "../plotyx-arch-guard" }
 tempfile = "3"
 toml = "0.8"

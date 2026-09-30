@@ -13,5 +13,6 @@ plotyx-plot = { path = "../plotyx-plot" }
 thiserror = "2"
 
 [dev-dependencies]
+plotyx-arch-guard = { path = "../plotyx-arch-guard" }
 proptest = "1"
 toml = "0.8"

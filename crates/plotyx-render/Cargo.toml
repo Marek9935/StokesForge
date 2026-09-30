@@ -55,6 +55,7 @@ typst = { version = "=0.15.1", optional = true }
 typst-layout = { version = "=0.15.1", optional = true }
 
 [dev-dependencies]
+plotyx-arch-guard = { path = "../plotyx-arch-guard" }
 toml = "0.8"
 # Vérifie, dans les tests de `fonts.rs`, que les fichiers embarqués sont bien
 # des polices et que leurs noms de famille correspondent à ce que le fichier

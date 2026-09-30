@@ -13,5 +13,6 @@ plotyx-id = { path = "../plotyx-id" }
 plotyx-plot = { path = "../plotyx-plot" }
 
 [dev-dependencies]
+plotyx-arch-guard = { path = "../plotyx-arch-guard" }
 proptest = "1"
 toml = "0.8"

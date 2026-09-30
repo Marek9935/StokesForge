@@ -1,32 +1,41 @@
 # Architecture
 
-Quatorze crates, une seule direction de dépendance, et deux features
+Seize crates, une seule direction de dépendance, et deux features
 optionnelles. Cette page donne la carte ; le détail de chaque étage est dans
 sa propre page.
 
 ## Le graphe, de bas en haut
 
+Flèche = « dépend de » (manifestes `Cargo.toml`, vérifiés par
+`cargo metadata --no-deps --format-version 1 --offline`).
+
 ```text
 plotyx-id            NodeId seul, zéro dépendance
-   ↑          ↑
-plotyx-plot   |      PlotSpec : quoi tracer, sans savoir comment
-   ↑          |
-plotyx-core ──┘      arbre de projet, colonnes, résolution d'un spec
    ↑
-plotyx-commands      les commandes annulables + la pile d'historique
+plotyx-plot          PlotSpec : quoi tracer, sans savoir comment
    ↑
-plotyx-persistence   format .plx (save / load)
-   ↑
-plotyx-session       l'acteur : le seul &mut Project du processus
-   ↑           ↑                    ↑
-plotyx-cli   plotyx-script   plotyx-render-egui
-             (+ plotyx-python)      ↑
-                     ↑        plotyx-render ← plotyx-render-svg
-                     └──────── plotyx-app ───┘
+plotyx-core          arbre de projet, colonnes, résolution d'un spec
+   ↑            ↑            ↑
+plotyx-commands  plotyx-persistence  plotyx-render ← plotyx-render-svg
+(core, plot)     (core, plot)        (core, plot)     (core, plot, render)
+   ↑       ↑
+plotyx-session       l'acteur : le &mut Project de la session
+(commands, persistence, core)
+   ↑            ↑
+plotyx-script   plotyx-render-egui (core, plot, render, session)
+(commands, core, python, session)
++ plotyx-python (aucune dépendance plotyx)
+
+plotyx-cli    (core, commands) — sans session : un `Project` et un `History`
+plotyx-import (aucune dépendance plotyx) — lecture des fichiers d'appareil
+plotyx-app    (commands, core, import, persistence, plot, python,
+               render-egui, script, session)
 ```
 
-`plotyx-robustesse` est à part : il dépend de tout le workspace et ne contient
-aucun code de production ([`tests.md`](tests.md)).
+`plotyx-robustesse` est à part : il dépend du socle et du pont Python, et ne
+contient aucun code de production ([`tests.md`](tests.md)). `plotyx-arch-guard`
+est un outil de test : la lecture commune des manifestes pour les garde-fous de
+dépendances.
 
 ## Ce que porte chaque crate
 
@@ -38,6 +47,7 @@ aucun code de production ([`tests.md`](tests.md)).
 | `plotyx-commands` | les commandes, la pile d'undo hybride, les macros | [commandes](commandes-et-historique.md) |
 | `plotyx-persistence` | `save`/`load`, schéma de transport, format `.plx` | [persistance](persistance.md) |
 | `plotyx-session` | l'acteur, les `Snapshot`, la `revision` | [session](session.md) |
+| `plotyx-import` | lecture des fichiers d'appareil (CSV/TXT/ASC), recettes, aperçu ; indépendant de core/UI | [application](application.md) |
 | `plotyx-render` | mesure de texte, pipeline Plotters, **tout le rendu** | [rendu](rendu.md) |
 | `plotyx-render-egui` | backend écran, cache de formes, zoom/pan, feathering | [rendu](rendu.md) |
 | `plotyx-render-svg` | export SVG, et par-dessus PDF et PNG | [rendu](rendu.md) |
@@ -46,6 +56,7 @@ aucun code de production ([`tests.md`](tests.md)).
 | `plotyx-app` | la coquille UI eframe (banc d'essai) | [application](application.md) |
 | `plotyx-cli` | binaire headless de vérification du lien | [application](application.md) |
 | `plotyx-robustesse` | 21 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
+| `plotyx-arch-guard` | lecture commune des `Cargo.toml` pour les garde-fous de dépendances (dev-dependency) | [tests](tests.md) |
 
 ## Les trois lignes de séparation
 
@@ -53,10 +64,15 @@ Le découpage n'est pas décoratif ; chacune de ces trois frontières est
 **vérifiée par un test** et non par la relecture.
 
 1. **Aucune dépendance UI sous `plotyx-session`.** `plotyx-core`,
-   `plotyx-plot`, `plotyx-commands`, `plotyx-persistence`, `plotyx-session` et
-   `plotyx-script` portent chacun un `tests/no_ui_dependency.rs` : une liste
-   blanche de dépendances, qui force une décision consciente à toute nouvelle
-   arête plutôt que de compter sur une relecture.
+   `plotyx-plot`, `plotyx-commands`, `plotyx-persistence`, `plotyx-session`,
+   `plotyx-script` et `plotyx-import` portent chacun un
+   `tests/no_ui_dependency.rs` : une liste blanche de dépendances, qui force
+   une décision consciente à toute nouvelle arête plutôt que de compter sur une
+   relecture. La lecture du manifeste est commune (`plotyx-arch-guard`) :
+   dépendances normales, de build, conditionnelles (`[target.…]`) et renommées
+   (`package = …`, jugées sur leur nom réel) comptent ; les `dev-dependencies`
+   non. `plotyx-render` a son propre `tests/frontiere.rs`, qui s'appuie sur la
+   même lecture.
 2. **Le `PlotSpec` ne connaît aucun moteur de rendu.** `plotyx-plot` ne
    dépend que de `plotyx-id` : ni `plotters`, ni `egui`, ni `typst`, ni même
    `serde`. C'est ce qui fait que changer de renderer ne touche pas la
@@ -96,15 +112,18 @@ entièrement sans elles.
 Sans la feature, le crate concerné compile vide ou retombe sur le chemin
 ordinaire — c'est la condition du droit d'abandonner Typst ou Python sans rien
 démonter. Conséquence pratique : `cargo build --workspace` **ne compile pas**
-ces chemins. Pour les exercer, `--all-features` (Typst) ou
-`scripts/python-test.sh` (Python, qui pose les variables d'environnement).
+ces chemins. Pour les exercer, `--features typst` sur les trois crates de rendu
+(Typst) ou `scripts/python-test.sh` (Python, qui pose les variables
+d'environnement). `--workspace --all-features` active **aussi Python** et exige
+son environnement : ce n'est pas un contrôle de Typst seul
+(commandes de référence : [`.codex/README.md`](../.codex/README.md)).
 
 ## Où sont les binaires
 
 | Binaire | Crate | À quoi il sert |
 |---|---|---|
 | `plotyx-app` | `plotyx-app` | la fenêtre — `plotyx-app [chemin]` |
-| `plotyx-cli` | `plotyx-cli` | vérifier que le workspace se lie de bout en bout, sans UI |
+| `plotyx-cli` | `plotyx-cli` | vérifier que le socle se lie (core + commands, **sans session**), sans UI |
 | `plotyx-selftest` | `plotyx-script` | rejouer le critère de fin du socle depuis une distribution empaquetée |
 | `plotyx-pyhello` | `plotyx-python` | prouver l'isolation de la pile Python empaquetée |
 | `plotyx-sonde-alloc`, `plotyx-sonde-pile` | `plotyx-robustesse` | deux sondes hors-processus (échec d'allocation, débordement de pile) |

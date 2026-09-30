@@ -16,7 +16,7 @@ par inadvertance, et ce sont eux qu'il faut comprendre avant de les modifier.
 
 | Test | Ce qu'il tient |
 |---|---|
-| `*/tests/no_ui_dependency.rs` | liste blanche de dépendances : toute addition au `Cargo.toml` doit y être ajoutée explicitement (invariant 2) |
+| `*/tests/no_ui_dependency.rs` | liste blanche de dépendances : toute addition au `Cargo.toml` doit y être ajoutée explicitement (invariant 2). Lecture commune `plotyx-arch-guard` : dépendances normales, de build, `target.*` et renommées (`package`) ; `dev-dependencies` exclues ; témoins négatifs dans `plotyx-arch-guard/src/lib.rs` |
 | `plotyx-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
 | `plotyx-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
 | `plotyx-render-egui/tests/accord.rs` | écran et export placent les mêmes primitives aux mêmes pixels |
@@ -97,7 +97,8 @@ pas croître avec X » et reste vraie sur n'importe quelle machine.
 cargo test --workspace                        # tout, sauf #[ignore]
 cargo test -p <crate> --test <fichier>        # un fichier de tests
 cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
-cargo test --workspace --all-features         # ajoute les chemins Typst
+cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --features typst   # chemins Typst
+# (`--workspace --all-features` active AUSSI Python : voir .codex/README.md)
 scripts/python-test.sh                        # tout ce qui est derrière la feature `python`
 scripts/python-test.sh -- --ignored           # + les reproductions de la frontière Python
 ```
@@ -127,7 +128,8 @@ couvre ce chemin, et il est manuel parce qu'il télécharge une centaine de
 mégaoctets à froid.
 
 Même remarque pour la feature `typst` : `cargo build --workspace` ne compile pas
-ses chemins. Pour les exercer, `--all-features`.
+ses chemins. Pour les exercer, `--features typst` sur les trois crates de rendu
+(`--workspace --all-features` activerait aussi Python).
 
 ## Ce qu'il faut savoir avant d'écrire un test
 

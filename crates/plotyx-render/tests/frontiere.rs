@@ -31,23 +31,10 @@ const AUTORISEES: &[&str] = &[
 
 #[test]
 fn seules_les_dependances_prevues_sont_declarees() {
-    let manifest: toml::Value =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
-            .expect("Cargo.toml lisible")
-            .parse()
-            .expect("Cargo.toml valide");
-    let deps = manifest
-        .get("dependencies")
-        .and_then(|d| d.as_table())
-        .expect("section [dependencies]");
-    for nom in deps.keys() {
-        assert!(
-            AUTORISEES.contains(&nom.as_str()),
-            "dépendance `{nom}` non listée : ce crate est la référence \
-             commune aux deux backends, il ne doit connaître ni egui ni \
-             plotters-svg"
-        );
-    }
+    // Ce crate est la référence commune aux deux backends : il ne doit
+    // connaître ni egui ni plotters-svg, sous aucune forme de dépendance
+    // (normale, conditionnelle, renommée) — lecture commune, issue #24.
+    plotyx_arch_guard::assert_only_allowed_dependencies(env!("CARGO_MANIFEST_DIR"), AUTORISEES);
 }
 
 #[test]

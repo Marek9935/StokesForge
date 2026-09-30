@@ -3693,6 +3693,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "plotyx-arch-guard"
+version = "0.0.0"
+dependencies = [
+ "toml",
+]
+
+[[package]]
 name = "plotyx-cli"
 version = "0.0.0"
 dependencies = [
@@ -3704,6 +3711,7 @@ dependencies = [
 name = "plotyx-commands"
 version = "0.0.0"
 dependencies = [
+ "plotyx-arch-guard",
  "plotyx-core",
  "plotyx-plot",
  "proptest",
@@ -3715,6 +3723,7 @@ dependencies = [
 name = "plotyx-core"
 version = "0.0.0"
 dependencies = [
+ "plotyx-arch-guard",
  "plotyx-id",
  "plotyx-plot",
  "proptest",
@@ -3731,6 +3740,7 @@ name = "plotyx-import"
 version = "0.0.0"
 dependencies = [
  "directories",
+ "plotyx-arch-guard",
  "serde",
  "serde_json",
  "tempfile",
@@ -3741,6 +3751,7 @@ dependencies = [
 name = "plotyx-persistence"
 version = "0.0.0"
 dependencies = [
+ "plotyx-arch-guard",
  "plotyx-core",
  "plotyx-plot",
  "rmp-serde",
@@ -3756,6 +3767,7 @@ dependencies = [
 name = "plotyx-plot"
 version = "0.0.0"
 dependencies = [
+ "plotyx-arch-guard",
  "plotyx-id",
  "toml",
 ]
@@ -3777,6 +3789,7 @@ dependencies = [
  "fontdb",
  "plotters",
  "plotters-backend",
+ "plotyx-arch-guard",
  "plotyx-core",
  "plotyx-plot",
  "skrifa 0.44.0",
@@ -3845,6 +3858,7 @@ name = "plotyx-script"
 version = "0.0.0"
 dependencies = [
  "numpy",
+ "plotyx-arch-guard",
  "plotyx-commands",
  "plotyx-core",
  "plotyx-python",
@@ -3858,6 +3872,7 @@ dependencies = [
 name = "plotyx-session"
 version = "0.0.0"
 dependencies = [
+ "plotyx-arch-guard",
  "plotyx-commands",
  "plotyx-core",
  "plotyx-persistence",

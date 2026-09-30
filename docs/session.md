@@ -3,9 +3,15 @@
 `plotyx-session` rend concrète la décision qui tient tout le socle : **le
 `Project` vit sur son propre thread**.
 
-L'acteur détient le **seul `&mut Project` du processus**. « Aucune mutation
-hors d'une commande » devient une propriété de propriété — vérifiable par le
-compilateur — plutôt qu'une convention à surveiller.
+L'acteur détient le `&mut Project` **de la session** : un client n'a qu'un
+`Arc<Tree>` figé et ne peut muter que par `SessionHandle::execute(Command)`.
+« Aucune mutation hors d'une commande » est donc une propriété de propriété
+**pour les clients d'une session**, pas une garantie du compilateur pour tout le
+code : les primitives publiques de `plotyx-core` servent aussi à *construire* un
+projet avant `Session::spawn`, aux tests, et au CLI (qui manipule un `Project`
+avec un `History`, sans session). Hors historique **par choix** : le recalcul des
+colonnes-formule (`Project::set_length`/`set_values` dans l'acteur), la
+géométrie et l'état des fenêtres, le cadrage de vue.
 
 ## Le protocole
 
@@ -43,8 +49,9 @@ jamais recopié, seulement partagé.**
 `epoch` est distinct de `revision` et répond à une question que `revision` ne
 peut pas trancher : **est-ce encore le même projet ?** C'est un compteur local
 à l'acteur, jamais persisté, incrémenté **uniquement** quand un `Load` réussit.
-Après un `Load`, `revision` recommence à une petite valeur et pourrait sembler
-« antérieure » sans rien prouver ; `epoch`, lui, a changé. `plotyx-script` s'en
+`Load` incrémente **aussi** `revision` : elle reste monotone sur toute la vie de
+la session. Ce qu'elle ne dit pas, c'est que le projet a été remplacé ; `epoch`,
+lui, a changé. `plotyx-script` s'en
 sert pour détecter qu'une poignée désigne un `NodeId` d'un projet qui n'est plus
 celui qui l'a produite — avant même de chercher ce `NodeId` dans l'arbre, où il
 pourrait, par coïncidence, désigner un autre objet.

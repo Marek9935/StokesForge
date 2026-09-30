@@ -16,6 +16,7 @@ members = [
     "crates/plotyx-cli",
     "crates/plotyx-app",
     "crates/plotyx-robustesse",
+    "crates/plotyx-arch-guard",
 ]
 
 [workspace.package]

@@ -23,20 +23,10 @@ const ALLOWED_DEPENDENCIES: &[&str] = &[
 
 #[test]
 fn only_allowed_dependencies_are_declared() {
-    let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
-        .expect("Cargo.toml lisible");
-    let parsed: toml::Value = manifest.parse().expect("Cargo.toml valide");
-
-    let Some(deps) = parsed.get("dependencies").and_then(|d| d.as_table()) else {
-        return; // pas de section [dependencies] du tout : rien à vérifier
-    };
-
-    for name in deps.keys() {
-        assert!(
-            ALLOWED_DEPENDENCIES.contains(&name.as_str()),
-            "dépendance `{name}` non listée dans ALLOWED_DEPENDENCIES : \
-             plotyx-plot décrit un graphe, il ne le dessine pas \
-             (voir roadmap-rendu phase R2)"
-        );
-    }
+    // Lecture commune (`plotyx-arch-guard`) : dépendances normales, de build,
+    // conditionnelles (`target`) et renommées (`package`) — issue #24.
+    plotyx_arch_guard::assert_only_allowed_dependencies(
+        env!("CARGO_MANIFEST_DIR"),
+        ALLOWED_DEPENDENCIES,
+    );
 }

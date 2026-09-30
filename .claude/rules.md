@@ -60,7 +60,7 @@ arbitrés, documentés à l'endroit de leur constante et recensés dans
 Ni `python` ni `typst` n'est dans `default`. Une tâche qui les touche doit
 compiler et tester **explicitement**, sinon elle valide du code mort :
 
-- `typst` → `cargo test --workspace --all-features` ;
+- `typst` → `cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --features typst` (et `cargo clippy` ciblé de même ; `--workspace --all-features` active **aussi Python** et exige son environnement — voir `.codex/README.md`) ;
 - `python` → `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE` et les autres
   variables ; sans lui, PyO3 ne compile pas). L'interpréteur est vendorisé dans
   `vendor/python/` et **n'est pas versionné**.

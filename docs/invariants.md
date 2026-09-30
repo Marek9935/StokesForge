@@ -10,7 +10,7 @@ tenue par la relecture se perd.
 
 | # | Règle | Ce qui la tient |
 |---|---|---|
-| 1 | Aucune mutation du modèle hors d'une commande | la propriété : l'acteur détient le seul `&mut Project` |
+| 1 | Aucune mutation du modèle hors d'une commande, pour les clients d'une session | la propriété : l'acteur détient le `&mut Project` de la session (la construction, les tests et le CLI passent par les primitives de `core`) ; `b21` |
 | 2 | Aucune dépendance UI sous `plotyx-session` | `tests/no_ui_dependency.rs`, une liste blanche par crate |
 | 3 | `plotyx-plot` ne connaît aucun moteur de rendu | sa seule dépendance est `plotyx-id` |
 | 4 | Une seule source de mesure de texte | `plotyx-render/tests/mesure.rs` + le test d'accord |
@@ -27,7 +27,7 @@ tenue par la relecture se perd.
 
 `plotyx-core::Project` est la seule façade publique de mutation du modèle, et
 toutes ses méthodes prennent `&mut self`. L'acteur de `plotyx-session` détient
-le **seul `&mut Project` du processus** : un client n'a qu'un `Arc<Tree>` figé.
+le `&mut Project` **de la session** : un client n'a qu'un `Arc<Tree>` figé.
 
 La règle n'est donc pas une convention à surveiller mais une propriété de
 propriété. Pour muter, il faut passer par `SessionHandle::execute(Command)`,
@@ -49,7 +49,11 @@ explicitement : la décision devient consciente au lieu de se glisser par un
 `use`.
 
 Crates gardés ainsi : `plotyx-core`, `plotyx-plot`, `plotyx-commands`,
-`plotyx-persistence`, `plotyx-session`, `plotyx-script`.
+`plotyx-persistence`, `plotyx-session`, `plotyx-script`, `plotyx-import`. La
+lecture du manifeste est **commune** (`plotyx-arch-guard`) : dépendances
+normales, de build, conditionnelles (`[target.…]`), optionnelles et renommées
+(`package = …`, jugées sur leur nom réel) ; les `dev-dependencies` sont hors
+périmètre (outillage de test). Ses témoins négatifs vivent dans ce crate.
 
 `plotyx-render-svg` porte l'équivalent sous un autre nom
 (`tests/frontiere.rs`) : il ne doit voir ni `egui`, ni `eframe`, ni `winit` —

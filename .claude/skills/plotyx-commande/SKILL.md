@@ -7,7 +7,7 @@ description: Ajouter ou modifier une commande annulable de PlotYx (`plotyx-comma
 
 **Invariant 1 : aucune mutation du modèle hors d'une commande.** Ce n'est pas
 une convention à surveiller mais une propriété de propriété : l'acteur de
-`plotyx-session` détient le **seul `&mut Project` du processus**, un client n'a
+`plotyx-session` détient le `&mut Project` **de la session** (construction d'un projet, tests et CLI passent par les primitives de `core`), un client n'a
 qu'un `Arc<Tree>` figé. Pour muter, il faut passer par
 `SessionHandle::execute(Command)` — donc par la pile d'historique, donc être
 annulable.
