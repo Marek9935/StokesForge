@@ -76,7 +76,7 @@ se recharger et produire le même découpage.
 | colonnes fusionnées en une seule | `Separator` de la recette (tabulation vs espaces multiples vs `;`) |
 | nombres lus comme du texte | `DecimalStyle` — un appareil européen écrit `1,234` |
 | premières lignes de données avalées | `HeaderSkip` / `HeaderLayout` |
-| dernières lignes parasites (sommes, mentions) | `footer_skip_lines` |
+| dernières lignes parasites (sommes, mentions) | `footer_skip_lines` (nombre fixe) ou `data_end` (`DataEnd`, défaut `Auto` : coupe au premier X non numérique une fois armée ; règle unique dans `data_end.rs`, partagée par `parse` et `preview`) |
 | noms de colonnes absents ou faux | `has_column_header_row`, `NameSource` |
 | nom long / unité / commentaire mal placés | `SubheaderRoles` |
 | préfixe parasite sur chaque ligne | le retrait de caractères en tête de ligne de données |

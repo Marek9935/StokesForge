@@ -23,6 +23,7 @@
 //! UTF-16 avec marque d'ordre, et en repli Windows-1252, la page de code
 //! des logiciels d'appareil sous Windows.
 
+mod data_end;
 pub mod decode;
 pub mod parse;
 pub mod preview;

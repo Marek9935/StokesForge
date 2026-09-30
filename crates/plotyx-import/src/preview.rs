@@ -203,11 +203,6 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     }
 
     let data_start = idx;
-    let total_data_lines = footer_start - data_start;
-    let shown_data_lines = total_data_lines.min(recipe.preview_lines);
-    for role in roles.iter_mut().take(footer_start).skip(data_start) {
-        *role = LineRole::Data;
-    }
 
     // Le préfixe et le séparateur sont résolus comme `parse` le fait : sur
     // la première ligne de données restante, une fois `skip_chars` retiré.
@@ -222,6 +217,29 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     };
     let first_data_line = skip(raw[data_start]);
     let separator = resolve_separator(recipe.separator, &first_data_line);
+
+    // Fin des données : la même règle que `parse` (`crate::data_end`). Les
+    // lignes coupées rejoignent le pied de page.
+    let candidates = footer_start - data_start;
+    let kept = crate::data_end::data_len(
+        (data_start..footer_start).map(|i| skip_str(raw[i], recipe.skip_chars)),
+        candidates,
+        &recipe.data_end,
+        separator,
+        recipe.decimal,
+    );
+    if kept == 0 {
+        return Err(ImportError::NoDataRows);
+    }
+    let footer_start = data_start + kept;
+    for role in roles.iter_mut().take(end).skip(footer_start) {
+        *role = LineRole::Footer;
+    }
+    let total_data_lines = kept;
+    let shown_data_lines = total_data_lines.min(recipe.preview_lines);
+    for role in roles.iter_mut().take(footer_start).skip(data_start) {
+        *role = LineRole::Data;
+    }
 
     // N'émet un `PreviewLine` possédé que pour les lignes réellement
     // montrées : en-tête/sous-en-tête/en-tête de colonnes/pied de
@@ -276,6 +294,17 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
         lines,
         total_data_lines,
     })
+}
+
+/// `line` privée de ses `skip_chars` premiers caractères (comme `parse`).
+fn skip_str(line: &str, skip_chars: usize) -> &str {
+    if skip_chars == 0 {
+        return line;
+    }
+    match line.char_indices().nth(skip_chars) {
+        Some((byte_idx, _)) => &line[byte_idx..],
+        None => "",
+    }
 }
 
 /// Rôle d'une ligne de sous-en-tête, 1-based **dans le bloc de

@@ -2570,6 +2570,56 @@ fn window_nodes(tree: &[crate::state::ProjectTreeNode]) -> Vec<(NodeId, WindowKi
     out
 }
 
+/// Réglage « Fin des données » de la recette d'import (issue #4) : coupure
+/// automatique par défaut, désactivable. Le texte ou le nombre associé à
+/// l'option choisie reste dans la recette tant qu'on en change.
+fn data_end_row(ui: &mut egui::Ui, end: &mut plotyx_import::DataEnd) {
+    use plotyx_import::DataEnd;
+    let label = |end: &DataEnd| match end {
+        DataEnd::Auto => "Automatique (premier X non numérique)",
+        DataEnd::None => "Aucune coupure",
+        DataEnd::FirstBlankLine => "Première ligne vide",
+        DataEnd::Marker(_) => "Marqueur de fin",
+        DataEnd::LinesAfterHeader(_) => "N lignes après l'en-tête",
+        DataEnd::LinesBeforeEnd(_) => "N lignes avant la fin",
+    };
+    ui.horizontal(|ui| {
+        ui.label("Fin des données :");
+        egui::ComboBox::from_id_salt("plotyx_import_data_end")
+            .selected_text(label(end))
+            .show_ui(ui, |ui| {
+                for candidate in [
+                    DataEnd::Auto,
+                    DataEnd::None,
+                    DataEnd::FirstBlankLine,
+                    DataEnd::Marker(String::new()),
+                    DataEnd::LinesAfterHeader(100),
+                    DataEnd::LinesBeforeEnd(1),
+                ] {
+                    let same = std::mem::discriminant(&*end) == std::mem::discriminant(&candidate);
+                    if ui.selectable_label(same, label(&candidate)).clicked() && !same {
+                        *end = candidate;
+                    }
+                }
+            });
+        match end {
+            DataEnd::Marker(text) => {
+                ui.text_edit_singleline(text);
+            }
+            DataEnd::LinesAfterHeader(n) | DataEnd::LinesBeforeEnd(n) => {
+                let mut value = *n as i64;
+                if ui
+                    .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+                    .changed()
+                {
+                    *n = value.max(0) as usize;
+                }
+            }
+            _ => {}
+        }
+    });
+}
+
 /// Emplacement (mémoire temporaire d'egui) des fichiers déposés cette image :
 /// `book` est renseigné par le classeur sous le curseur, s'il y en a un.
 #[derive(Clone)]
@@ -5392,6 +5442,8 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
                     import.recipe.footer_skip_lines = value.max(0) as usize;
                 }
             });
+
+            data_end_row(ui, &mut import.recipe.data_end);
 
             ui.checkbox(
                 &mut import.recipe.has_column_header_row,

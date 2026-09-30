@@ -3023,10 +3023,14 @@ fn importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text()
     let book = book_named(state.tree(), "Book1");
     let file = dir.path().join("mesure.csv");
     std::fs::write(&file, "1,2\nn/a,4\n5,6\n").expect("écrit mesure.csv");
+    // Le texte est dans la première colonne (le X) : la coupure automatique
+    // (issue #4) s'y arrêterait, d'où l'option « Aucune coupure ».
+    let mut recipe = ImportRecipe::new("Sans titre");
+    recipe.data_end = plotyx_import::DataEnd::None;
 
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),
-        recipe: ImportRecipe::new("Sans titre"),
+        recipe,
         paths: vec![file],
     });
 

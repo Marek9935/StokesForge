@@ -191,3 +191,18 @@ défaut plutôt que de faire échouer le chargement.
   ont été relus avant ce chantier ; aucun n'est concerné (`MAX_COLUMN_ROWS`
   continue de s'appliquer aux colonnes mixtes importées par la même
   fonction générique qu'avant, rien de nouveau à vérifier ici).
+
+
+## Fin des données (issue #4)
+
+`ImportRecipe::data_end` (`DataEnd`, `#[serde(default)]` = `Auto`) décide où
+s'arrêtent les données ; le reste est le pied de page (`LineRole::Footer`,
+`ParsedTable::footer_lines`). `Auto` s'arme à la première ligne dont la
+première colonne est un nombre, puis coupe à la première dont le X n'en est
+pas un (ligne vide comprise) ; un texte dans une autre colonne ne coupe pas.
+Autres options : aucune coupure, première ligne vide, marqueur, N lignes après
+l'en-tête, N lignes avant la fin. La règle vit dans `data_end.rs`, appelée par
+`parse` **et** `preview` pour qu'elles coupent au même endroit.
+`footer_skip_lines` s'applique d'abord. Non fait : conserver le pied dans les
+métadonnées des colonnes (dépend de #5), clic droit sur la ligne de coupure et
+étape « Colonnes » de l'assistant (#6).

@@ -37,6 +37,36 @@ pub struct ImportRecipe {
     /// indépendamment de la taille réelle du fichier.
     #[serde(default = "default_preview_lines")]
     pub preview_lines: usize,
+    /// Où s'arrêtent les données (le reste est le pied de page) — voir
+    /// [`DataEnd`]. S'applique **après** `footer_skip_lines`, qui continue de
+    /// retirer un nombre fixe de lignes en fin de fichier.
+    #[serde(default)]
+    pub data_end: DataEnd,
+}
+
+/// Fin de la zone de données d'un fichier. Les lignes qui suivent la coupure
+/// forment le pied de page : jamais importées, mais montrées par l'aperçu
+/// ([`crate::preview::LineRole::Footer`]) et gardées par
+/// [`crate::parse::ParsedTable::footer_lines`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum DataEnd {
+    /// Coupure automatique. Elle s'arme à la première ligne dont la première
+    /// colonne est un nombre ; une fois armée, elle coupe à la première ligne
+    /// dont la première colonne (le X) n'est pas un nombre — une ligne vide
+    /// coupe aussi. Une case texte dans une autre colonne ne coupe pas.
+    #[default]
+    Auto,
+    /// Aucune coupure : les données vont jusqu'à la fin du fichier.
+    None,
+    /// Coupe à la première ligne vide (ou blanche).
+    FirstBlankLine,
+    /// Coupe à la première ligne égale à ce marqueur (comparaison insensible
+    /// à la casse, bordures blanches retirées) ; cette ligne est exclue.
+    Marker(String),
+    /// Garde seulement les `n` premières lignes de données.
+    LinesAfterHeader(usize),
+    /// Retire les `n` dernières lignes (comme `footer_skip_lines`).
+    LinesBeforeEnd(usize),
 }
 
 fn default_preview_lines() -> usize {
@@ -165,6 +195,7 @@ impl ImportRecipe {
             subheader_roles: SubheaderRoles::default(),
             skip_chars: 0,
             preview_lines: default_preview_lines(),
+            data_end: DataEnd::default(),
         }
     }
 }
@@ -187,6 +218,7 @@ mod tests {
         assert_eq!(recipe.subheader_roles, SubheaderRoles::default());
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
+        assert_eq!(recipe.data_end, DataEnd::Auto);
     }
 
     #[test]
@@ -212,6 +244,7 @@ mod tests {
             },
             skip_chars: 5,
             preview_lines: 50,
+            data_end: DataEnd::Marker("##### Extended".into()),
         };
         let json = serde_json::to_string(&recipe).unwrap();
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();
@@ -240,5 +273,6 @@ mod tests {
         assert_eq!(recipe.subheader_roles, SubheaderRoles::default());
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
+        assert_eq!(recipe.data_end, DataEnd::Auto);
     }
 }

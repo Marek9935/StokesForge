@@ -202,20 +202,39 @@ fn jasco_uvvis_windows_1252_avec_pied_etendu() {
 
     let table = plotyx_import::parse(&bytes, &recipe).expect("parsing réussi");
     assert_eq!(table.columns.len(), 2);
-    // Les 551 points (NPOINTS) ; le pied « Extended Information » suit, et
-    // tombe encore dans les données tant que la fin automatique (issue #4)
-    // n'existe pas.
+    // Exactement les 551 points (NPOINTS) : la fin automatique (issue #4)
+    // coupe à la ligne vide qui suit le dernier point ; le bloc « Extended
+    // Information » devient le pied de page.
+    assert_eq!(table.row_count(), 551);
     let (x, y) = (&table.columns[0].values, &table.columns[1].values);
     assert_eq!((x[0], y[0]), (800.0, -0.000371463));
     assert_eq!((x[550], y[550]), (250.0, 0.219912));
-    assert!(x[..551].iter().chain(&y[..551]).all(|v| v.is_finite()));
+    assert!(x.iter().chain(y).all(|v| v.is_finite()));
+    assert!(table.columns[1].texts.iter().all(Option::is_none));
     assert_eq!(
         plotyx_import::resolve_series_name(&recipe, &table, "JascoUV_vis"),
         "S13"
     );
     // L'octet 0xB0 du pied de page, lu en Windows-1252, redonne « °C ».
-    assert!(table.columns[1]
-        .texts
+    assert!(table
+        .footer_lines()
         .iter()
-        .any(|t| t.as_deref() == Some("19.91 °C")));
+        .any(|line| line.contains("19.91 °C")));
+}
+
+/// Sans coupure, le pied de page retombe dans les données (colonne Y mixte) :
+/// l'ancien comportement reste disponible, et le réglage est explicite.
+#[test]
+fn jasco_uvvis_sans_coupure_garde_le_pied_dans_les_donnees() {
+    let bytes = fixture("JascoUV_vis.csv");
+    let mut recipe = ImportRecipe::new("Jasco UV-Vis");
+    recipe.separator = Separator::Semicolon;
+    recipe.decimal = DecimalStyle::Comma;
+    recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
+    recipe.data_end = plotyx_import::DataEnd::None;
+
+    let table = plotyx_import::parse(&bytes, &recipe).expect("parsing réussi");
+    assert!(table.row_count() > 551);
+    assert!(table.footer_lines().is_empty());
+    assert!(table.columns[1].texts.iter().any(Option::is_some));
 }

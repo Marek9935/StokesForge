@@ -83,6 +83,7 @@ pub struct ParsedTable {
     /// sont des avertissements sur un import qui a réussi.
     pub warnings: Vec<String>,
     header_lines: Vec<String>,
+    footer_lines: Vec<String>,
     separator: EffectiveSeparator,
 }
 
@@ -98,6 +99,13 @@ impl ParsedTable {
     /// (`trim`ée), ou `None` si absente. `<séparateur>` est celui
     /// effectivement résolu pour ce fichier (utile même quand la recette
     /// demandait `Separator::Auto`).
+    /// Lignes qui suivent la fin des données (pied de page), telles qu'elles
+    /// sont dans le fichier — jamais importées.
+    pub fn footer_lines(&self) -> &[String] {
+        &self.footer_lines
+    }
+
+    /// Voir [`ParsedTable::footer_lines`] ; ceci cherche une valeur d'en-tête.
     pub fn header_value(&self, key: &str) -> Option<String> {
         lookup_header_value(&self.header_lines, self.separator, key)
     }
@@ -215,6 +223,10 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
     let unit_line = role_line(recipe.subheader_roles.unit);
     let comment_line = role_line(recipe.subheader_roles.comment);
 
+    // Copie des lignes d'origine (avant pied de page et `skip_chars`), pour
+    // garder le pied de page tel quel.
+    let original_lines = lines.clone();
+
     // Retire le pied de page (jamais plus de lignes qu'il n'en reste).
     let footer_n = recipe.footer_skip_lines.min(lines.len());
     lines.truncate(lines.len() - footer_n);
@@ -257,6 +269,25 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
     if lines.is_empty() {
         return Err(ImportError::NoDataRows);
     }
+
+    // Fin des données : la même règle que l'aperçu (`crate::data_end`).
+    let header_row_offset = usize::from(recipe.has_column_header_row);
+    let kept = crate::data_end::data_len(
+        lines.iter().copied(),
+        lines.len(),
+        &recipe.data_end,
+        separator,
+        recipe.decimal,
+    );
+    if kept == 0 {
+        return Err(ImportError::NoDataRows);
+    }
+    lines.truncate(kept);
+    let footer_lines: Vec<String> = original_lines
+        .iter()
+        .skip(header_row_offset + kept)
+        .map(|line| (*line).to_string())
+        .collect();
 
     // Tokenise chaque ligne de sous-en-tête assignée à un rôle — une valeur
     // par colonne de données, dans le même ordre.
@@ -387,6 +418,7 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
         columns,
         warnings,
         header_lines,
+        footer_lines,
         separator,
     })
 }
