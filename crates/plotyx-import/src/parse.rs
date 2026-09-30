@@ -177,13 +177,36 @@ use crate::recipe::{DecimalStyle, ImportRecipe, NameSource, Separator};
 ///
 /// Le découpage en zones (en-tête, données, pied de page…) vient de
 /// [`crate::layout::analyze`], le même que celui de l'aperçu.
+///
+/// Un fichier à **plusieurs blocs** (`recipe.block_split`) rend ici son premier
+/// bloc ; [`parse_blocks`] les rend tous.
 pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportError> {
+    parse_blocks(bytes, recipe).map(|mut tables| tables.remove(0))
+}
+
+/// Comme [`parse`], mais rend **un tableau par bloc** de données
+/// (`recipe.block_split`) : un fichier qui enchaîne plusieurs spectres en donne
+/// plusieurs, chacun avec son propre en-tête. Sans découpage, un seul tableau.
+/// Un bloc qui n'a aucune donnée est écarté ; l'import n'échoue que si aucun
+/// bloc n'en a.
+pub fn parse_blocks(bytes: &[u8], recipe: &ImportRecipe) -> Result<Vec<ParsedTable>, ImportError> {
     if bytes.is_empty() {
         return Err(ImportError::Empty);
     }
     let text = crate::decode::decode_with(bytes, recipe.encoding)?;
-    let layout = crate::layout::analyze(&text, recipe)?;
-    Ok(table_from_layout(&layout, recipe))
+    let mut tables = Vec::new();
+    let mut last_error = ImportError::Empty;
+    for block in crate::layout::split_blocks(&text, &recipe.block_split) {
+        match crate::layout::analyze(block, recipe) {
+            Ok(layout) => tables.push(table_from_layout(&layout, recipe)),
+            Err(error) => last_error = error,
+        }
+    }
+    if tables.is_empty() {
+        Err(last_error)
+    } else {
+        Ok(tables)
+    }
 }
 
 /// Construit la table d'un [`crate::layout::Layout`] : colonnes, sous-en-têtes,

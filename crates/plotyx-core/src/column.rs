@@ -256,6 +256,9 @@ pub struct ImportSource {
     pub recipe_json: String,
     /// Index de la colonne dans le fichier (0 = la première).
     pub column: usize,
+    /// Rang du bloc de données dans le fichier (0 = le premier), pour un
+    /// fichier à plusieurs blocs.
+    pub block: usize,
 }
 
 /// Une ligne de métadonnées de fichier, découpée en clé / valeur

@@ -212,3 +212,101 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         numbers,
     })
 }
+
+/// Découpe `text` en blocs selon `split` : des tranches **contiguës** du texte,
+/// dans l'ordre. `BlockSplit::None` rend le texte entier. Un bloc qui n'a que
+/// des lignes blanches n'existe pas.
+pub(crate) fn split_blocks<'a>(text: &'a str, split: &crate::recipe::BlockSplit) -> Vec<&'a str> {
+    use crate::recipe::BlockSplit;
+    if matches!(split, BlockSplit::None) {
+        return vec![text];
+    }
+    // Début (octet) de chaque ligne, et texte de la ligne sans son `\r`/`\n`.
+    let mut lines: Vec<(usize, &str)> = Vec::new();
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        lines.push((offset, line.trim_end_matches(['\r', '\n'])));
+        offset += line.len();
+    }
+    let mut starts: Vec<usize> = vec![0];
+    match split {
+        BlockSplit::None => {}
+        BlockSplit::BeforeLine(marker) => {
+            let marker = marker.trim().to_lowercase();
+            // Le premier marqueur n'ouvre pas de bloc : ce qui le précède (une
+            // préface) reste avec le premier bloc. Chacun des suivants en ouvre un.
+            let mut seen_marker = false;
+            for (index, (_, line)) in lines.iter().enumerate() {
+                let is_marker =
+                    !marker.is_empty() && line.trim().to_lowercase().starts_with(&marker);
+                if is_marker {
+                    if seen_marker {
+                        starts.push(index);
+                    }
+                    seen_marker = true;
+                }
+            }
+        }
+        BlockSplit::BlankLines => {
+            let mut in_blank_run = false;
+            let mut seen_content = false;
+            for (index, (_, line)) in lines.iter().enumerate() {
+                if line.trim().is_empty() {
+                    if seen_content {
+                        in_blank_run = true;
+                    }
+                } else {
+                    if in_blank_run {
+                        starts.push(index);
+                        in_blank_run = false;
+                    }
+                    seen_content = true;
+                }
+            }
+        }
+    }
+    let mut blocks = Vec::new();
+    for (position, &first_line) in starts.iter().enumerate() {
+        let begin = lines
+            .get(first_line)
+            .map_or(text.len(), |(offset, _)| *offset);
+        let end = match starts.get(position + 1) {
+            Some(&next) => lines.get(next).map_or(text.len(), |(offset, _)| *offset),
+            None => text.len(),
+        };
+        let block = &text[begin..end];
+        if !block.trim().is_empty() {
+            blocks.push(block);
+        }
+    }
+    blocks
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::split_blocks;
+    use crate::recipe::BlockSplit;
+
+    #[test]
+    fn blocks_before_a_marker_line() {
+        let text = "TITLE;a\nX\n1;2\nTITLE;b\nX\n3;4\n";
+        let blocks = split_blocks(text, &BlockSplit::BeforeLine("title".into()));
+        assert_eq!(blocks, vec!["TITLE;a\nX\n1;2\n", "TITLE;b\nX\n3;4\n"]);
+        // Du texte avant le premier marqueur reste dans le premier bloc.
+        let text = "préface\nTITLE;a\n1;2\nTITLE;b\n3;4\n";
+        let blocks = split_blocks(text, &BlockSplit::BeforeLine("TITLE".into()));
+        assert_eq!(
+            blocks,
+            vec!["préface\nTITLE;a\n1;2\n", "TITLE;b\n3;4\n"],
+            "la préface reste avec le premier bloc"
+        );
+    }
+
+    #[test]
+    fn blocks_separated_by_blank_lines() {
+        let text = "1;2\n3;4\n\n\n5;6\n\n7;8\n";
+        let blocks = split_blocks(text, &BlockSplit::BlankLines);
+        assert_eq!(blocks, vec!["1;2\n3;4\n\n\n", "5;6\n\n", "7;8\n"]);
+        assert_eq!(split_blocks(text, &BlockSplit::None), vec![text]);
+    }
+}

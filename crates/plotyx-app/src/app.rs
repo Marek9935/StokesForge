@@ -5554,6 +5554,11 @@ fn import_preview_pane(
         if let Some(encoding) = state.import_encoding() {
             ui.weak(format!("encodage : {encoding}"));
         }
+        if let Some(Ok(preview)) = state.import_line_preview() {
+            if preview.block_count > 1 {
+                ui.weak(format!("{} blocs — aperçu du premier", preview.block_count));
+            }
+        }
     });
     if let Some(i) = picked {
         state.set_import_preview_index(i);
@@ -5863,6 +5868,36 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
             .on_hover_text(
                 "Les lignes de données qui commencent par ce préfixe sont ignorées (#, ;, //…)",
             );
+    });
+    ui.horizontal(|ui| {
+        use plotyx_import::BlockSplit;
+        ui.label("Plusieurs blocs dans le fichier :");
+        let current = match &recipe.block_split {
+            BlockSplit::None => "Non",
+            BlockSplit::BeforeLine(_) => "À chaque ligne commençant par…",
+            BlockSplit::BlankLines => "Séparés par des lignes vides",
+        };
+        egui::ComboBox::from_id_salt("plotyx_import_blocks_combo")
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                for (candidate, label) in [
+                    (BlockSplit::None, "Non"),
+                    (
+                        BlockSplit::BeforeLine("TITLE".into()),
+                        "À chaque ligne commençant par…",
+                    ),
+                    (BlockSplit::BlankLines, "Séparés par des lignes vides"),
+                ] {
+                    let same = std::mem::discriminant(&recipe.block_split)
+                        == std::mem::discriminant(&candidate);
+                    if ui.selectable_label(same, label).clicked() && !same {
+                        recipe.block_split = candidate;
+                    }
+                }
+            });
+        if let BlockSplit::BeforeLine(marker) = &mut recipe.block_split {
+            ui.add(egui::TextEdit::singleline(marker).desired_width(80.0));
+        }
     });
     ui.horizontal(|ui| {
         ui.label("Encodage :");

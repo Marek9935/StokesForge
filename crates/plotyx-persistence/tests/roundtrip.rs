@@ -929,6 +929,7 @@ fn column_import_source_survives_save_and_load() {
         path: "/data/mesure.csv".into(),
         recipe_json: "{\"name\":\"x\"}".into(),
         column: 3,
+        block: 2,
     };
     project
         .set_column_meta(

@@ -97,6 +97,25 @@ pub struct ImportRecipe {
     /// [`FilesLayout`].
     #[serde(default)]
     pub files_layout: FilesLayout,
+    /// Comment un fichier qui contient **plusieurs blocs de données** (un
+    /// spectre après l'autre) se découpe — voir [`BlockSplit`]. Chaque bloc est
+    /// analysé avec la même recette, son propre en-tête compris.
+    #[serde(default)]
+    pub block_split: BlockSplit,
+}
+
+/// Découpage d'un fichier en blocs de données indépendants.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum BlockSplit {
+    /// Un seul bloc : tout le fichier.
+    #[default]
+    None,
+    /// Un nouveau bloc commence à chaque ligne qui débute par ce texte (sans
+    /// casse, bordures blanches retirées) — par exemple `TITLE` pour un fichier
+    /// Jasco qui enchaîne plusieurs spectres, chacun avec son en-tête.
+    BeforeLine(String),
+    /// Les blocs sont séparés par une ou plusieurs lignes vides.
+    BlankLines,
 }
 
 /// Mode d'import dans le classeur actif, comme les options d'Origin.
@@ -423,6 +442,7 @@ impl ImportRecipe {
             column_kinds: Vec::new(),
             import_mode: ImportMode::NewSheet,
             files_layout: FilesLayout::SheetPerFile,
+            block_split: BlockSplit::None,
         }
     }
 }
@@ -522,6 +542,7 @@ mod tests {
             column_kinds: vec![ColumnKind::DateTime, ColumnKind::Text],
             import_mode: ImportMode::AddRows,
             files_layout: FilesLayout::SharedX,
+            block_split: BlockSplit::BeforeLine("TITLE".into()),
         };
         let json = serde_json::to_string(&recipe).unwrap();
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();

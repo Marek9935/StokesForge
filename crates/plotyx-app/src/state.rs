@@ -1418,11 +1418,14 @@ fn reads_well(path: &std::path::Path, recipe: &plotyx_import::ImportRecipe) -> b
 
 /// Un fichier à importer : son chemin, la recette qui le lit, et le résultat de
 /// l'analyse (ou son erreur).
-type ImportItem = (
-    PathBuf,
-    plotyx_import::ImportRecipe,
-    Result<plotyx_import::ParsedTable, String>,
-);
+struct ImportItem {
+    path: PathBuf,
+    recipe: plotyx_import::ImportRecipe,
+    table: Result<plotyx_import::ParsedTable, String>,
+    /// Rang du bloc quand le fichier en contient plusieurs
+    /// (`ImportRecipe::block_split`) ; `None` pour un fichier à un seul bloc.
+    block: Option<usize>,
+}
 
 /// Une colonne à créer : la colonne `column` du fichier `item`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1445,22 +1448,28 @@ struct ImportPlan {
 /// du premier fichier partagé. Les colonnes « Ignorer » sont exclues partout.
 fn plan_import(items: &[ImportItem], layout: plotyx_import::FilesLayout) -> Vec<ImportPlan> {
     use plotyx_import::{ColumnRoleChoice, FilesLayout};
+    // Nom de la feuille : le fichier, suivi du rang du bloc s'il y en a plusieurs.
     let stem = |item: usize| {
-        items[item]
-            .0
+        let base = items[item]
+            .path
             .file_stem()
             .and_then(|s| s.to_str())
-            .unwrap_or("fichier")
-            .to_string()
+            .unwrap_or("fichier");
+        match items[item].block {
+            Some(block) => format!("{base}_{}", block + 1),
+            None => base.to_string(),
+        }
     };
     let kept = |item: usize| -> Vec<usize> {
-        let (_, recipe, table) = &items[item];
+        let ImportItem { recipe, table, .. } = &items[item];
         let count = table.as_ref().map_or(0, |t| t.columns.len());
         (0..count)
             .filter(|&c| recipe.column_role(c) != ColumnRoleChoice::Ignore)
             .collect()
     };
-    let readable: Vec<usize> = (0..items.len()).filter(|&i| items[i].2.is_ok()).collect();
+    let readable: Vec<usize> = (0..items.len())
+        .filter(|&i| items[i].table.is_ok())
+        .collect();
     match layout {
         FilesLayout::SheetPerFile => readable
             .iter()
@@ -1482,7 +1491,7 @@ fn plan_import(items: &[ImportItem], layout: plotyx_import::FilesLayout) -> Vec<
                 for column in kept(item) {
                     // X partagé : celui du premier fichier ; les suivants n'en
                     // apportent pas.
-                    let is_x = items[item].1.column_role(column) == ColumnRoleChoice::X;
+                    let is_x = items[item].recipe.column_role(column) == ColumnRoleChoice::X;
                     if layout == FilesLayout::SharedX && item != first && is_x {
                         continue;
                     }
@@ -1498,13 +1507,38 @@ fn plan_import(items: &[ImportItem], layout: plotyx_import::FilesLayout) -> Vec<
     }
 }
 
-/// Lit et analyse un fichier avec `recipe` ; l'erreur porte le chemin.
-fn parse_import_file(
-    path: &std::path::Path,
-    recipe: &plotyx_import::ImportRecipe,
-) -> Result<plotyx_import::ParsedTable, String> {
-    let bytes = std::fs::read(path).map_err(|err| format!("{}: {err}", path.display()))?;
-    plotyx_import::parse(&bytes, recipe).map_err(|err| format!("{}: {err}", path.display()))
+/// Lit un fichier et rend **un élément par bloc** de données (un seul pour un
+/// fichier ordinaire) ; une erreur de lecture ou d'analyse donne un élément en
+/// erreur.
+fn import_items(path: &std::path::Path, recipe: &plotyx_import::ImportRecipe) -> Vec<ImportItem> {
+    let failed = |message: String| {
+        vec![ImportItem {
+            path: path.to_path_buf(),
+            recipe: recipe.clone(),
+            table: Err(message),
+            block: None,
+        }]
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(err) => return failed(format!("{}: {err}", path.display())),
+    };
+    match plotyx_import::parse_blocks(&bytes, recipe) {
+        Ok(tables) => {
+            let several = tables.len() > 1;
+            tables
+                .into_iter()
+                .enumerate()
+                .map(|(index, table)| ImportItem {
+                    path: path.to_path_buf(),
+                    recipe: recipe.clone(),
+                    table: Ok(table),
+                    block: several.then_some(index),
+                })
+                .collect()
+        }
+        Err(err) => failed(format!("{}: {err}", path.display())),
+    }
 }
 
 /// Dernier import réussi : de quoi le reprendre dans l'assistant pour le
@@ -3581,8 +3615,7 @@ impl AppState {
                 if !models.contains(&recipe.name) {
                     models.push(recipe.name.clone());
                 }
-                let table = parse_import_file(&path, &recipe);
-                items.push((path, recipe, table));
+                items.extend(import_items(&path, &recipe));
             } else {
                 bad.push(path);
             }
@@ -3634,14 +3667,11 @@ impl AppState {
         let spawned = thread::Builder::new()
             .name("plotyx-app-import".to_owned())
             .spawn(move || {
-                let parsed: Vec<ImportItem> = paths
-                    .into_iter()
-                    .map(|path| {
-                        let table = parse_import_file(&path, &worker_recipe);
-                        worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        (path, worker_recipe.clone(), table)
-                    })
-                    .collect();
+                let mut parsed: Vec<ImportItem> = Vec::new();
+                for path in paths {
+                    parsed.extend(import_items(&path, &worker_recipe));
+                    worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
                 let _ = reply_tx.send(parsed);
             });
         match spawned {
@@ -3733,36 +3763,35 @@ impl AppState {
         // colonnes.
         let mut items: Vec<ImportItem> = Vec::new();
         let mut failures: Vec<String> = Vec::new();
-        let mut item_of_path: Vec<(String, Option<usize>)> = Vec::new();
+        let mut read_paths: Vec<String> = Vec::new();
         for (_, source) in &sources {
-            if item_of_path.iter().any(|(path, _)| *path == source.path) {
+            if read_paths.contains(&source.path) {
                 continue;
             }
+            read_paths.push(source.path.clone());
             let recipe = match plotyx_import::ImportRecipe::from_json(&source.recipe_json) {
                 Ok(recipe) => recipe,
                 Err(message) => {
                     failures.push(format!("{}: {message}", source.path));
-                    item_of_path.push((source.path.clone(), None));
                     continue;
                 }
             };
-            let path = PathBuf::from(&source.path);
-            let table = parse_import_file(&path, &recipe);
-            if let Err(message) = &table {
-                failures.push(message.clone());
-                item_of_path.push((source.path.clone(), None));
-                continue;
+            for item in import_items(&PathBuf::from(&source.path), &recipe) {
+                if let Err(message) = &item.table {
+                    failures.push(message.clone());
+                } else {
+                    items.push(item);
+                }
             }
-            item_of_path.push((source.path.clone(), Some(items.len())));
-            items.push((path, recipe, table));
         }
+        // Chaque colonne retrouve son bloc (fichier, rang) puis sa colonne.
         let refreshed: Vec<(NodeId, PlannedColumn)> = sources
             .iter()
             .filter_map(|(column, source)| {
-                let item = item_of_path
-                    .iter()
-                    .find(|(path, _)| *path == source.path)
-                    .and_then(|(_, item)| *item)?;
+                let item = items.iter().position(|item| {
+                    item.path.display().to_string() == source.path
+                        && item.block.unwrap_or(0) == source.block
+                })?;
                 Some((
                     *column,
                     PlannedColumn {
@@ -5313,10 +5342,7 @@ impl AppState {
         }
         let items = paths
             .iter()
-            .map(|path| {
-                let table = parse_import_file(path, &recipe);
-                (path.clone(), recipe.clone(), table)
-            })
+            .flat_map(|path| import_items(path, &recipe))
             .collect();
         self.apply_import(destination, items);
     }
@@ -5331,7 +5357,13 @@ impl AppState {
     /// destination. Le plan (quelles colonnes de quels fichiers, sur quelle
     /// feuille) est calculé d'abord ([`plan_import`]), puis exécuté.
     fn apply_import(&mut self, destination: ImportDestination, items: Vec<ImportItem>) {
-        let paths: Vec<PathBuf> = items.iter().map(|(path, _, _)| path.clone()).collect();
+        // Fichiers distincts (un fichier à plusieurs blocs compte pour un seul).
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for item in &items {
+            if !paths.contains(&item.path) {
+                paths.push(item.path.clone());
+            }
+        }
         if self.handle.begin_macro("Importer").is_err() {
             self.fail(
                 "Impossible de grouper l'import dans une seule entrée d'historique".to_string(),
@@ -5344,14 +5376,18 @@ impl AppState {
         // serait fait écraser par le suivant. Tout finit dans un seul message,
         // en échec dès qu'au moins un fichier a échoué, pour que ça se voie.
         let mut failures: Vec<String> = Vec::new();
-        for (_, _, table) in &items {
-            if let Err(message) = table {
+        for item in &items {
+            if let Err(message) = &item.table {
                 failures.push(message.clone());
             }
         }
         let mut done_paths: Vec<PathBuf> = Vec::new();
-        let first_ok = items.iter().find(|(_, _, table)| table.is_ok());
-        if let Some((_, first_recipe, _)) = first_ok {
+        let first_ok = items.iter().find(|item| item.table.is_ok());
+        if let Some(ImportItem {
+            recipe: first_recipe,
+            ..
+        }) = first_ok
+        {
             let plans = plan_import(&items, first_recipe.files_layout);
             let merge_sheet = match (destination, first_recipe.import_mode) {
                 (_, plotyx_import::ImportMode::NewSheet) => None,
@@ -5369,7 +5405,9 @@ impl AppState {
                 self.fill_existing_sheet(sheet, first_recipe.import_mode, &items, &columns);
                 for plan in &plans {
                     for &item in &plan.items {
-                        done_paths.push(items[item].0.clone());
+                        if !done_paths.contains(&items[item].path) {
+                            done_paths.push(items[item].path.clone());
+                        }
                     }
                 }
             } else {
@@ -5394,7 +5432,9 @@ impl AppState {
                         }
                     }
                     for &item in &plan.items {
-                        done_paths.push(items[item].0.clone());
+                        if !done_paths.contains(&items[item].path) {
+                            done_paths.push(items[item].path.clone());
+                        }
                     }
                 }
             }
@@ -5406,7 +5446,11 @@ impl AppState {
         if imported > 0 {
             // De quoi « Régler le dernier import… » et les fichiers récents.
             self.recent_to_record.extend(done_paths.iter().cloned());
-            if let Some((_, first_recipe, _)) = first_ok {
+            if let Some(ImportItem {
+                recipe: first_recipe,
+                ..
+            }) = first_ok
+            {
                 self.last_import = Some(LastImport {
                     destination,
                     recipe: first_recipe.clone(),
@@ -5535,7 +5579,7 @@ impl AppState {
                 let added = columns
                     .iter()
                     .filter_map(|&planned| {
-                        items[planned.item].2.as_ref().ok().map(|table| {
+                        items[planned.item].table.as_ref().ok().map(|table| {
                             table
                                 .columns
                                 .get(planned.column)
@@ -5585,7 +5629,7 @@ impl AppState {
     /// nombres, ou des cellules mixtes dès qu'un texte est conservé (colonne
     /// forcée en texte comprise).
     fn import_block(&self, items: &[ImportItem], planned: PlannedColumn) -> Option<ValueBlock> {
-        let (_, recipe, table) = items.get(planned.item)?;
+        let ImportItem { recipe, table, .. } = items.get(planned.item)?;
         let parsed = table.as_ref().ok()?.columns.get(planned.column)?;
         let forced_text = recipe.column_kind(planned.column) == plotyx_import::ColumnKind::Text;
         Some(if forced_text || parsed.texts.iter().any(Option::is_some) {
@@ -5616,7 +5660,12 @@ impl AppState {
         planned: PlannedColumn,
         prefix: usize,
     ) -> Option<Column> {
-        let (path, recipe, table) = items.get(planned.item)?;
+        let ImportItem {
+            path,
+            recipe,
+            table,
+            block: item_block,
+        } = items.get(planned.item)?;
         let table = table.as_ref().ok()?;
         let index = planned.column;
         let parsed_column = table.columns.get(index)?;
@@ -5699,6 +5748,7 @@ impl AppState {
                 path: path.display().to_string(),
                 recipe_json: recipe.to_json(),
                 column: index,
+                block: item_block.unwrap_or(0),
             }),
             ..Default::default()
         });

@@ -685,6 +685,7 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                         source.path.clone(),
                         source.recipe_json.clone(),
                         source.column as u64,
+                        source.block as u64,
                     )
                 }),
             }
@@ -778,11 +779,12 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                     .into_iter()
                     .map(|(key, value)| plotyx_core::MetaLine { key, value })
                     .collect(),
-                import_source: import_source.map(|(path, recipe_json, column)| {
+                import_source: import_source.map(|(path, recipe_json, column, block)| {
                     plotyx_core::ImportSource {
                         path,
                         recipe_json,
                         column: usize::try_from(column).unwrap_or(usize::MAX),
+                        block: usize::try_from(block).unwrap_or(usize::MAX),
                     }
                 }),
             };

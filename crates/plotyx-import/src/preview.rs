@@ -120,6 +120,9 @@ pub struct PreviewLine {
 pub struct FilePreview {
     pub lines: Vec<PreviewLine>,
     pub total_data_lines: usize,
+    /// Nombre de blocs de données du fichier (`recipe.block_split`) ; l'aperçu
+    /// montre le premier.
+    pub block_count: usize,
 }
 
 /// Nombre maximal de lignes autres que des données (en-tête, pied de page,
@@ -137,7 +140,10 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
         return Err(ImportError::Empty);
     }
     let text = crate::decode::decode_with(bytes, recipe.encoding)?;
-    let layout = crate::layout::analyze(&text, recipe)?;
+    let blocks = crate::layout::split_blocks(&text, &recipe.block_split);
+    let block_count = blocks.len().max(1);
+    let first_block = blocks.first().copied().unwrap_or(&text);
+    let layout = crate::layout::analyze(first_block, recipe)?;
     let total_data_lines = layout.data.len();
     let shown_data_lines = total_data_lines.min(recipe.preview_lines);
 
@@ -188,6 +194,7 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     Ok(FilePreview {
         lines,
         total_data_lines,
+        block_count,
     })
 }
 

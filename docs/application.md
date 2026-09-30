@@ -134,6 +134,12 @@ feuille par fichier, une seule feuille côte à côte (X Y X Y…), ou une seule
 feuille avec le X du premier fichier partagé. Le plan (`plan_import`) est
 calculé puis exécuté dans la même macro « Importer ».
 
+**Plusieurs blocs.** `BlockSplit` découpe un fichier qui enchaîne plusieurs
+spectres (à chaque ligne commençant par un texte comme `TITLE`, ou aux lignes
+vides) : `parse_blocks` rend un tableau par bloc, chacun avec son en-tête, et
+l'import crée une feuille par bloc (`fichier_1`, `fichier_2`…) ou les répartit
+selon `FilesLayout`. L'aperçu montre le premier bloc et le nombre de blocs.
+
 **Actualiser.** Chaque colonne importée garde sa source
 (`ColumnMeta::import_source` : chemin, recette en JSON, index de colonne).
 « Fichier › Actualiser depuis le fichier source » (`Action::RefreshFromSource`)

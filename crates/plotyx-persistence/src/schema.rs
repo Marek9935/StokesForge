@@ -187,7 +187,7 @@ pub(crate) enum KindRecord {
         file_metadata: Vec<(String, String)>,
         /// Source d'import (`ColumnMeta::import_source`) : chemin, recette en
         /// JSON, index de colonne. Absente des fichiers antérieurs.
-        import_source: Option<(String, String, u64)>,
+        import_source: Option<(String, String, u64, u64)>,
     },
     /// Graphe.
     Graph {
@@ -257,7 +257,7 @@ enum KindRecordKnown {
         #[serde(default)]
         file_metadata: Vec<(String, String)>,
         #[serde(default)]
-        import_source: Option<(String, String, u64)>,
+        import_source: Option<(String, String, u64, u64)>,
     },
     Graph {
         label: String,
@@ -381,7 +381,7 @@ enum KindRecordRef<'a> {
         version: u64,
         formula: &'a Option<String>,
         file_metadata: &'a Vec<(String, String)>,
-        import_source: &'a Option<(String, String, u64)>,
+        import_source: &'a Option<(String, String, u64, u64)>,
     },
     Graph {
         label: &'a str,

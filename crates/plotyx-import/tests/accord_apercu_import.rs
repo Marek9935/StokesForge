@@ -229,3 +229,42 @@ fn colonnes_texte_et_date_heure() {
         ]
     );
 }
+
+/// Un fichier à plusieurs blocs (plusieurs spectres, chacun avec son en-tête)
+/// donne un tableau par bloc ; `parse` rend le premier, l'aperçu en compte le
+/// total (issue #7).
+#[test]
+fn fichier_a_plusieurs_blocs() {
+    use plotyx_import::{parse_blocks, BlockSplit, HeaderSkip};
+    let mut recipe = ImportRecipe::new("Multi");
+    recipe.separator = Separator::Semicolon;
+    recipe.decimal = DecimalStyle::Comma;
+    recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
+    recipe.name_source = plotyx_import::NameSource::HeaderKey("TITLE".into());
+    recipe.block_split = BlockSplit::BeforeLine("TITLE".into());
+    let bytes =
+        b"TITLE;premier\nXYDATA\n1,5;10\n2,5;20\nTITLE;second\nXYDATA\n3,5;30\n4,5;40\n5,5;50\n";
+
+    let tables = parse_blocks(bytes, &recipe).unwrap();
+    assert_eq!(tables.len(), 2);
+    assert_eq!(tables[0].columns[0].values, vec![1.5, 2.5]);
+    assert_eq!(tables[1].columns[0].values, vec![3.5, 4.5, 5.5]);
+    assert_eq!(
+        plotyx_import::resolve_series_name(&recipe, &tables[1], "f"),
+        "second"
+    );
+    assert_eq!(parse(bytes, &recipe).unwrap().row_count(), 2, "le premier");
+    let shown = preview(bytes, &recipe).unwrap();
+    assert_eq!(shown.block_count, 2);
+    assert_eq!(shown.total_data_lines, 2);
+
+    // Sans découpage : un seul bloc, les « TITLE » suivants sont des données
+    // illisibles coupées par la fin automatique.
+    recipe.block_split = BlockSplit::None;
+    assert_eq!(parse_blocks(bytes, &recipe).unwrap().len(), 1);
+    assert_eq!(preview(bytes, &recipe).unwrap().block_count, 1);
+
+    // Un bloc sans donnée est écarté, et sans aucune donnée l'import échoue.
+    recipe.block_split = BlockSplit::BlankLines;
+    assert!(parse_blocks(b"une\nautre\n", &recipe).is_err());
+}

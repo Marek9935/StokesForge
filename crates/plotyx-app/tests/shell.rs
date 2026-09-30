@@ -6340,3 +6340,59 @@ fn refreshing_from_the_source_file_updates_the_columns_in_place() {
     let demo_sheet = state.selected_sheet_in(book).unwrap();
     assert!(!state.can_refresh_from_source(demo_sheet));
 }
+
+/// Un fichier à plusieurs blocs donne une feuille par bloc (nommées d'après le
+/// fichier et le rang), ou une feuille commune selon la répartition choisie ;
+/// l'actualisation retrouve le bon bloc de chaque colonne (issue #7).
+#[test]
+fn a_multi_block_file_gives_one_sheet_per_block_and_refreshes_per_block() {
+    use plotyx_import::{BlockSplit, HeaderSkip};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let before = state.worksheets_of(book).len();
+    let file = write_csv(
+        dir.path(),
+        "spectres.csv",
+        "TITLE;a\nXYDATA\n1;10\n2;20\nTITLE;b\nXYDATA\n3;30\n4;40\n5;50\n",
+    );
+    let mut recipe = ImportRecipe::new("Blocs");
+    recipe.separator = Separator::Semicolon;
+    recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
+    recipe.block_split = BlockSplit::BeforeLine("TITLE".into());
+
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: vec![file.clone()],
+    });
+
+    assert_eq!(state.worksheets_of(book).len(), before + 2);
+    let first = sheet_named(state.tree(), "spectres_1");
+    let second = sheet_named(state.tree(), "spectres_2");
+    assert_eq!(column_values(&state, first, 1), vec![10.0, 20.0]);
+    assert_eq!(column_values(&state, second, 1), vec![30.0, 40.0, 50.0]);
+    assert!(state
+        .status()
+        .unwrap()
+        .text
+        .contains("1 fichier(s) importé(s) sur 1"));
+
+    // Le fichier change : chaque bloc se met à jour dans sa propre feuille.
+    write_csv(
+        dir.path(),
+        "spectres.csv",
+        "TITLE;a\nXYDATA\n1;11\n2;22\nTITLE;b\nXYDATA\n3;33\n4;44\n5;55\n",
+    );
+    state.dispatch(Action::RefreshFromSource { sheet: first });
+    state.dispatch(Action::RefreshFromSource { sheet: second });
+    assert_eq!(column_values(&state, first, 1), vec![11.0, 22.0]);
+    assert_eq!(column_values(&state, second, 1), vec![33.0, 44.0, 55.0]);
+
+    // Un seul Ctrl+Z pour l'import entier.
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
+    assert_eq!(state.worksheets_of(book).len(), before);
+}
