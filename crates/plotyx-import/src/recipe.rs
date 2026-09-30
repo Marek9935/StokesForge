@@ -81,6 +81,49 @@ pub struct ImportRecipe {
     /// Encodage du fichier ; `Auto` le détecte ([`crate::decode`]).
     #[serde(default)]
     pub encoding: Encoding,
+    /// Critères de choix automatique de ce modèle d'après un fichier — voir
+    /// [`crate::choose_recipe`]. Vide : jamais choisi automatiquement.
+    #[serde(default)]
+    pub auto_match: AutoMatch,
+}
+
+/// Critères auxquels un fichier doit **tous** répondre (les non vides) pour
+/// qu'un modèle soit proposé d'office : extension, morceau du nom, signature
+/// dans le début du contenu (comme `ORIGIN;JASCO`) — le principe des
+/// « Import Filters » d'Origin.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct AutoMatch {
+    /// Extensions acceptées, sans point, sans casse (`csv`, `txt`…).
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    /// Texte que le nom du fichier doit contenir (sans casse).
+    #[serde(default)]
+    pub name_contains: String,
+    /// Texte que le début du fichier doit contenir (sans casse).
+    #[serde(default)]
+    pub content_contains: String,
+}
+
+impl AutoMatch {
+    /// Aucun critère : le modèle n'est jamais choisi automatiquement.
+    pub fn is_empty(&self) -> bool {
+        self.extensions.is_empty()
+            && self.name_contains.trim().is_empty()
+            && self.content_contains.trim().is_empty()
+    }
+}
+
+impl ImportRecipe {
+    /// La recette en JSON lisible — le fichier qu'on passe à un collègue.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).unwrap_or_default()
+    }
+
+    /// Relit une recette exportée par [`ImportRecipe::to_json`]. `Err` avec un
+    /// message lisible si le texte n'est pas une recette.
+    pub fn from_json(text: &str) -> Result<Self, String> {
+        serde_json::from_str(text).map_err(|err| format!("recette illisible : {err}"))
+    }
 }
 
 /// Encodage forcé d'un fichier, quand la détection automatique se trompe.
@@ -317,6 +360,7 @@ impl ImportRecipe {
             comment_prefix: String::new(),
             skip_data_rows: 0,
             encoding: Encoding::Auto,
+            auto_match: AutoMatch::default(),
         }
     }
 }
@@ -401,6 +445,11 @@ mod tests {
             comment_prefix: "#".into(),
             skip_data_rows: 2,
             encoding: Encoding::Windows1252,
+            auto_match: AutoMatch {
+                extensions: vec!["csv".into()],
+                name_contains: "jasco".into(),
+                content_contains: "ORIGIN;JASCO".into(),
+            },
         };
         let json = serde_json::to_string(&recipe).unwrap();
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();

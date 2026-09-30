@@ -23,6 +23,8 @@
 //! UTF-16 avec marque d'ordre, et en repli Windows-1252, la page de code
 //! des logiciels d'appareil sous Windows.
 
+pub mod builtin;
+pub mod choose;
 mod data_end;
 pub mod decode;
 mod layout;
@@ -34,6 +36,8 @@ pub mod recent;
 pub mod recipe;
 pub mod store;
 
+pub use builtin::builtin_recipes;
+pub use choose::choose_recipe;
 pub use decode::*;
 pub use metadata::MetadataLine;
 pub use parse::*;

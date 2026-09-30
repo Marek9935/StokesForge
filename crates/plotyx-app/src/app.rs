@@ -5602,12 +5602,39 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
         if ui.button("Nouveau").clicked() {
             state.new_import_recipe();
         }
-        let can_delete = names.contains(&current_name);
+        // Un modèle fourni d'office ne se supprime pas (il reviendrait au
+        // lancement suivant) : on l'enregistre sous un autre nom pour le
+        // modifier.
+        let can_delete = names.contains(&current_name)
+            && !state
+                .import_state()
+                .is_some_and(|import| plotyx_import::RecipeStore::is_builtin(&import.recipe));
         if ui
             .add_enabled(can_delete, egui::Button::new("Supprimer…"))
             .clicked()
         {
             state.request_delete_import_recipe(&current_name);
+        }
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Exporter le modèle…").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Exporter le modèle d'import")
+                .add_filter("Modèle d'import", &["json"])
+                .set_file_name(format!("{current_name}.json"))
+                .save_file()
+            {
+                state.export_import_recipe(&path);
+            }
+        }
+        if ui.button("Importer un modèle…").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Importer un modèle d'import")
+                .add_filter("Modèle d'import", &["json"])
+                .pick_file()
+            {
+                state.import_import_recipe(&path);
+            }
         }
     });
     if modified {
@@ -6173,6 +6200,33 @@ fn import_step_destination(
         }
     });
     ui.weak("Le modèle enregistré est proposé à la prochaine importation.");
+    ui.separator();
+    ui.label("Choix automatique de ce modèle (tous les critères remplis doivent correspondre) :");
+    let auto = &mut import.recipe.auto_match;
+    ui.horizontal(|ui| {
+        ui.label("Extensions :");
+        let mut text = auto.extensions.join(", ");
+        if ui
+            .add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
+            .on_hover_text("csv, txt, asc…")
+            .changed()
+        {
+            auto.extensions = text
+                .split(',')
+                .map(|e| e.trim().trim_start_matches('.').to_string())
+                .filter(|e| !e.is_empty())
+                .collect();
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Le nom contient :");
+        ui.add(egui::TextEdit::singleline(&mut auto.name_contains).desired_width(120.0));
+    });
+    ui.horizontal(|ui| {
+        ui.label("Le début du fichier contient :");
+        ui.add(egui::TextEdit::singleline(&mut auto.content_contains).desired_width(160.0))
+            .on_hover_text("Une signature, comme ORIGIN;JASCO");
+    });
 }
 
 /// L'assistant d'import (« Importer… », menu Fichier) en six étapes façon

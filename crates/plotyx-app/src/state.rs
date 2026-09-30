@@ -1409,6 +1409,14 @@ fn reads_well(path: &std::path::Path, recipe: &plotyx_import::ImportRecipe) -> b
     })
 }
 
+/// Un fichier à importer : son chemin, la recette qui le lit, et le résultat de
+/// l'analyse (ou son erreur).
+type ImportItem = (
+    PathBuf,
+    plotyx_import::ImportRecipe,
+    Result<plotyx_import::ParsedTable, String>,
+);
+
 /// Lit et analyse un fichier avec `recipe` ; l'erreur porte le chemin.
 fn parse_import_file(
     path: &std::path::Path,
@@ -1432,10 +1440,9 @@ struct LastImport {
 /// [`AppState::poll_import`] quand tout est prêt.
 struct ImportJob {
     destination: ImportDestination,
-    recipe: plotyx_import::ImportRecipe,
     total: usize,
     done: Arc<std::sync::atomic::AtomicUsize>,
-    reply: mpsc::Receiver<Vec<(PathBuf, Result<plotyx_import::ParsedTable, String>)>>,
+    reply: mpsc::Receiver<Vec<ImportItem>>,
 }
 
 /// État transitoire de la fenêtre d'import (voir [`crate::app`] pour son
@@ -3419,10 +3426,13 @@ impl AppState {
     /// cellule).
     pub fn open_import(&mut self, book: impl Into<Option<NodeId>>) {
         let active_book = book.into();
-        let store = plotyx_import::RecipeStore::load();
+        // Les modèles fournis d'office sont proposés, mais on démarre sur le
+        // premier modèle **de l'utilisateur**, sinon sur la recette permissive.
+        let store = plotyx_import::RecipeStore::load_with_builtins();
         let recipe = store
             .recipes()
-            .first()
+            .iter()
+            .find(|recipe| !plotyx_import::RecipeStore::is_builtin(recipe))
             .cloned()
             .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
         let mut recipe = recipe;
@@ -3465,26 +3475,47 @@ impl AppState {
         if plan.data.is_empty() {
             return;
         }
-        let recipe = plotyx_import::RecipeStore::load()
+        // Un modèle par fichier : le choix automatique (extension, nom,
+        // signature de contenu), sinon le premier modèle de l'utilisateur,
+        // sinon la recette permissive.
+        let store = plotyx_import::RecipeStore::load_with_builtins();
+        let fallback = store
             .recipes()
-            .first()
+            .iter()
+            .find(|recipe| !plotyx_import::RecipeStore::is_builtin(recipe))
             .cloned()
             .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
-        let (good, bad): (Vec<PathBuf>, Vec<PathBuf>) = plan
-            .data
-            .into_iter()
-            .partition(|path| reads_well(path, &recipe));
-        if !good.is_empty() {
-            let model = recipe.name.clone();
-            self.import_files(plan.destination, recipe, good);
+        let mut items: Vec<ImportItem> = Vec::new();
+        let mut bad: Vec<PathBuf> = Vec::new();
+        let mut models: Vec<String> = Vec::new();
+        for path in plan.data {
+            let recipe = std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| {
+                    plotyx_import::choose_recipe(store.recipes(), &path, &bytes).cloned()
+                })
+                .unwrap_or_else(|| fallback.clone());
+            if reads_well(&path, &recipe) {
+                if !models.contains(&recipe.name) {
+                    models.push(recipe.name.clone());
+                }
+                let table = parse_import_file(&path, &recipe);
+                items.push((path, recipe, table));
+            } else {
+                bad.push(path);
+            }
+        }
+        if !items.is_empty() {
+            self.apply_import(plan.destination, items);
             let summary = self
                 .status
                 .as_ref()
                 .filter(|status| !status.is_error)
                 .map(|status| {
                     format!(
-                        "{} — modèle « {model} » (Fichier › Régler le dernier import… pour corriger)",
-                        status.text
+                        "{} — modèle « {} » (Fichier › Régler le dernier import… pour corriger)",
+                        status.text,
+                        models.join("», «")
                     )
                 });
             if let Some(summary) = summary {
@@ -3521,12 +3552,12 @@ impl AppState {
         let spawned = thread::Builder::new()
             .name("plotyx-app-import".to_owned())
             .spawn(move || {
-                let parsed: Vec<_> = paths
+                let parsed: Vec<ImportItem> = paths
                     .into_iter()
                     .map(|path| {
                         let table = parse_import_file(&path, &worker_recipe);
                         worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        (path, table)
+                        (path, worker_recipe.clone(), table)
                     })
                     .collect();
                 let _ = reply_tx.send(parsed);
@@ -3535,7 +3566,6 @@ impl AppState {
             Ok(_) => {
                 self.import_job = Some(ImportJob {
                     destination,
-                    recipe,
                     total,
                     done,
                     reply,
@@ -3567,7 +3597,7 @@ impl AppState {
                 let Some(job) = self.import_job.take() else {
                     return false;
                 };
-                self.apply_import(job.destination, job.recipe, parsed);
+                self.apply_import(job.destination, parsed);
                 true
             }
             Err(mpsc::TryRecvError::Empty) => {
@@ -3704,13 +3734,88 @@ impl AppState {
 
     /// Ajoute `paths` aux fichiers de l'assistant (dépôt pendant qu'il est
     /// ouvert, « Ajouter des fichiers… »), sans doublon.
+    ///
+    /// Au **premier** ajout, si le modèle courant n'a pas été modifié, le
+    /// choix automatique du modèle (extension, nom, signature de contenu)
+    /// peut le remplacer : le message dit lequel a été choisi.
     pub fn add_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
+        let was_empty = self
+            .import_state
+            .as_ref()
+            .is_some_and(|state| state.paths.is_empty());
         if let Some(state) = &mut self.import_state {
             for path in paths {
                 if !state.paths.contains(&path) {
                     state.paths.push(path);
                 }
             }
+        }
+        if was_empty && !self.import_recipe_modified() {
+            self.choose_import_recipe_automatically();
+        }
+    }
+
+    /// Choisit, d'après le fichier montré, le modèle qui lui correspond
+    /// (`plotyx_import::choose_recipe`) et le charge comme recette courante.
+    /// Sans effet si aucun modèle ne correspond.
+    fn choose_import_recipe_automatically(&mut self) {
+        let Some(path) = self.import_preview_path() else {
+            return;
+        };
+        let Ok(bytes) = self.import_bytes(&path) else {
+            return;
+        };
+        let Some(state) = &self.import_state else {
+            return;
+        };
+        let Some(chosen) =
+            plotyx_import::choose_recipe(state.store.recipes(), &path, &bytes).cloned()
+        else {
+            return;
+        };
+        let name = chosen.name.clone();
+        self.select_import_recipe(&name);
+        self.notice(format!("Modèle « {name} » choisi d'après le fichier"));
+    }
+
+    /// Écrit le modèle courant dans `path` (JSON) pour le partager.
+    pub fn export_import_recipe(&mut self, path: &std::path::Path) {
+        let Some(state) = &self.import_state else {
+            return;
+        };
+        let json = state.recipe.to_json();
+        match std::fs::write(path, json) {
+            Ok(()) => self.notice(format!("Modèle exporté dans {}", path.display())),
+            Err(err) => self.fail(format!("Export du modèle impossible : {err}")),
+        }
+    }
+
+    /// Lit un modèle exporté dans `path`, l'ajoute à la liste (en remplaçant
+    /// celui de même nom) et l'enregistre, puis en fait la recette courante.
+    pub fn import_import_recipe(&mut self, path: &std::path::Path) {
+        let recipe = std::fs::read_to_string(path)
+            .map_err(|err| format!("{}: {err}", path.display()))
+            .and_then(|text| plotyx_import::ImportRecipe::from_json(&text));
+        let mut recipe = match recipe {
+            Ok(recipe) => recipe,
+            Err(message) => {
+                self.fail(message);
+                return;
+            }
+        };
+        recipe.unify_header();
+        let Some(state) = &mut self.import_state else {
+            return;
+        };
+        let name = recipe.name.clone();
+        state.store.upsert(recipe.clone());
+        let saved = state.store.save();
+        state.baseline = recipe.clone();
+        state.recipe = recipe;
+        state.save_as_name = name.clone();
+        match saved {
+            Ok(()) => self.notice(format!("Modèle « {name} » importé")),
+            Err(err) => self.fail(format!("Modèle importé mais non enregistré : {err}")),
         }
     }
 
@@ -4975,23 +5080,21 @@ impl AppState {
         if paths.is_empty() {
             return;
         }
-        let parsed = paths
+        let items = paths
             .iter()
-            .map(|path| (path.clone(), parse_import_file(path, &recipe)))
+            .map(|path| {
+                let table = parse_import_file(path, &recipe);
+                (path.clone(), recipe.clone(), table)
+            })
             .collect();
-        self.apply_import(destination, recipe, parsed);
+        self.apply_import(destination, items);
     }
 
     /// Crée les feuilles et les colonnes d'un lot **déjà analysé** (par
     /// [`AppState::import_files`], ou en fond par [`AppState::start_import`]),
     /// en une seule entrée d'historique « Importer ».
-    fn apply_import(
-        &mut self,
-        destination: ImportDestination,
-        recipe: plotyx_import::ImportRecipe,
-        parsed: Vec<(PathBuf, Result<plotyx_import::ParsedTable, String>)>,
-    ) {
-        let paths: Vec<PathBuf> = parsed.iter().map(|(path, _)| path.clone()).collect();
+    fn apply_import(&mut self, destination: ImportDestination, items: Vec<ImportItem>) {
+        let paths: Vec<PathBuf> = items.iter().map(|(path, _, _)| path.clone()).collect();
         if self.handle.begin_macro("Importer").is_err() {
             self.fail(
                 "Impossible de grouper l'import dans une seule entrée d'historique".to_string(),
@@ -5011,7 +5114,7 @@ impl AppState {
         let mut failures: Vec<String> = Vec::new();
         let mut shared_book = None;
         let mut done_paths: Vec<PathBuf> = Vec::new();
-        for (path, table) in &parsed {
+        for (path, recipe, table) in &items {
             let file_stem = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
@@ -5137,7 +5240,7 @@ impl AppState {
                     match (index, &parsed_column.name) {
                         (_, Some(name)) => name.clone(),
                         (0, None) => "X".to_string(),
-                        (_, None) => plotyx_import::resolve_series_name(&recipe, table, file_stem),
+                        (_, None) => plotyx_import::resolve_series_name(recipe, table, file_stem),
                     }
                 });
                 column.set_meta(ColumnMeta {
@@ -5176,11 +5279,13 @@ impl AppState {
         if imported > 0 {
             // De quoi « Régler le dernier import… » et les fichiers récents.
             self.recent_to_record.extend(done_paths.iter().cloned());
-            self.last_import = Some(LastImport {
-                destination,
-                recipe: recipe.clone(),
-                paths: done_paths,
-            });
+            if let Some((_, first_recipe, _)) = items.first() {
+                self.last_import = Some(LastImport {
+                    destination,
+                    recipe: first_recipe.clone(),
+                    paths: done_paths,
+                });
+            }
         }
         // `self.execute` (appelé dans la boucle ci-dessus) rafraîchit déjà
         // l'instantané à chaque commande, mais toujours **pendant** que la

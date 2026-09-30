@@ -2701,8 +2701,10 @@ fn save_import_recipe_requires_a_non_empty_name() {
 
     let status = state.status().expect("un message de statut");
     assert!(status.is_error, "un nom blanc doit être refusé");
+    // Les modèles fournis d'office sont listés, mais rien de l'utilisateur
+    // n'a été ajouté ni écrit.
     assert!(
-        state.import_state().unwrap().store.recipes().is_empty(),
+        plotyx_import::RecipeStore::load().recipes().is_empty(),
         "rien n'a été ajouté au store"
     );
 }
@@ -2778,10 +2780,9 @@ fn delete_import_recipe_removes_it_from_the_store_on_disk() {
 
     state.cancel_import();
     state.open_import(book);
-    let names: Vec<&str> = state
-        .import_state()
-        .unwrap()
-        .store
+    // Les modèles de l'utilisateur (hors modèles fournis d'office).
+    let user_recipes = plotyx_import::RecipeStore::load();
+    let names: Vec<&str> = user_recipes
         .recipes()
         .iter()
         .map(|r| r.name.as_str())
@@ -5951,4 +5952,127 @@ fn reopening_the_last_import_leaves_later_work_alone() {
         "l'import reste en place"
     );
     assert!(state.import_state().is_some());
+}
+
+// -- Modèles fournis, choix automatique, partage (issue #7) --
+
+fn fixture_path(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test/import")
+        .join(name)
+}
+
+/// Un fichier Jasco déposé est lu avec le modèle fourni qui le reconnaît
+/// (signature `ORIGIN;JASCO`), sans qu'aucun modèle n'ait été enregistré — les
+/// nombres à virgule sont lus (décimale détectée).
+#[test]
+fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let before = state.worksheets_of(book).len();
+
+    state.dispatch(Action::DropFiles {
+        paths: vec![fixture_path("jasco_uvvis_semicolon.csv")],
+        target_book: Some(book),
+    });
+
+    assert_eq!(state.worksheets_of(book).len(), before + 1);
+    assert!(state.import_state().is_none(), "lu sans assistant");
+    let status = state.status().expect("message");
+    assert!(
+        status.text.contains("Jasco (point-virgule)"),
+        "{}",
+        status.text
+    );
+    let sheet = sheet_named(state.tree(), "jasco_uvvis_semicolon");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(cell_f64(&state, columns[0].0, 0), 800.0);
+    assert_eq!(column_type(&state, columns[0].0), ColumnType::Numeric);
+}
+
+/// Dans l'assistant, le premier fichier ajouté choisit le modèle d'après son
+/// contenu tant que le modèle courant n'a pas été modifié.
+#[test]
+fn the_wizard_chooses_the_model_from_the_first_file() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    assert_eq!(state.import_state().unwrap().recipe.name, "Sans titre");
+
+    state.add_import_paths(vec![fixture_path("jasco_fluo_tab.txt")]);
+
+    assert_eq!(
+        state.import_state().unwrap().recipe.name,
+        "Jasco (tabulation)"
+    );
+    assert!(!state.import_recipe_modified());
+    // Un modèle modifié à la main n'est pas écrasé par un second ajout.
+    state.import_state_mut().unwrap().recipe.skip_chars = 1;
+    state.add_import_paths(vec![fixture_path("rpe_nohead_tab.asc")]);
+    assert_eq!(
+        state.import_state().unwrap().recipe.name,
+        "Jasco (tabulation)"
+    );
+}
+
+/// Un modèle s'exporte dans un fichier et se réimporte (même nom : il
+/// remplace), et il est alors enregistré pour l'utilisateur.
+#[test]
+fn a_model_can_be_exported_and_imported_from_a_file() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    state.select_import_recipe("RPE (tabulation)");
+    state.import_state_mut().unwrap().recipe.skip_chars = 4;
+    let file = dir.path().join("rpe.json");
+    state.export_import_recipe(&file);
+    assert!(file.exists());
+
+    state.open_import(None::<NodeId>);
+    state.import_import_recipe(&file);
+
+    let recipe = &state.import_state().unwrap().recipe;
+    assert_eq!(recipe.name, "RPE (tabulation)");
+    assert_eq!(recipe.skip_chars, 4);
+    assert!(plotyx_import::RecipeStore::load()
+        .recipes()
+        .iter()
+        .any(|r| r.name == "RPE (tabulation)" && r.skip_chars == 4));
+
+    // Un fichier qui n'est pas un modèle : message d'erreur, rien ne change.
+    let bad = dir.path().join("pas_un_modele.json");
+    std::fs::write(&bad, "{ pas du json").unwrap();
+    state.import_import_recipe(&bad);
+    assert!(state.status().is_some_and(|s| s.is_error));
+    assert_eq!(state.import_state().unwrap().recipe.skip_chars, 4);
+}
+
+/// Plusieurs modèles dans un même dépôt : chaque fichier a le sien, le tout en
+/// une seule entrée d'historique.
+#[test]
+fn dropping_files_of_different_formats_uses_one_model_each_in_one_entry() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let before = state.worksheets_of(book).len();
+
+    state.dispatch(Action::DropFiles {
+        paths: vec![
+            fixture_path("jasco_uvvis_semicolon.csv"),
+            fixture_path("rpe_nohead_tab.asc"),
+        ],
+        target_book: Some(book),
+    });
+
+    assert_eq!(state.worksheets_of(book).len(), before + 2);
+    let status = state.status().unwrap();
+    assert!(status.text.contains("Jasco (point-virgule)"));
+    assert!(status.text.contains("RPE (tabulation)"));
+    state.dispatch(Action::Undo);
+    assert_eq!(state.worksheets_of(book).len(), before);
 }

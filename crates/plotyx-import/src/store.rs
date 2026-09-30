@@ -21,7 +21,27 @@ impl RecipeStore {
             .unwrap_or_default()
     }
 
-    /// Écrit sur disque (crée le dossier de config s'il n'existe pas).
+    /// Comme [`RecipeStore::load`], plus les modèles fournis d'office
+    /// ([`crate::builtin_recipes`]) que l'utilisateur n'a pas remplacés par un
+    /// modèle de même nom. Les siens passent en premier.
+    pub fn load_with_builtins() -> Self {
+        let mut store = Self::load();
+        for builtin in crate::builtin_recipes() {
+            if !store.recipes.iter().any(|r| r.name == builtin.name) {
+                store.recipes.push(builtin);
+            }
+        }
+        store
+    }
+
+    /// Ce modèle est-il un modèle fourni, tel quel (pas une version modifiée) ?
+    pub fn is_builtin(recipe: &ImportRecipe) -> bool {
+        crate::builtin_recipes().iter().any(|b| b == recipe)
+    }
+
+    /// Écrit sur disque (crée le dossier de config s'il n'existe pas). Les
+    /// modèles fournis, inchangés, ne sont pas écrits : ils viennent du
+    /// programme, pas du fichier de l'utilisateur.
     pub fn save(&self) -> std::io::Result<()> {
         let path = recipes_path().ok_or_else(|| {
             std::io::Error::new(
@@ -32,7 +52,15 @@ impl RecipeStore {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let json = serde_json::to_string_pretty(self)
+        let user = Self {
+            recipes: self
+                .recipes
+                .iter()
+                .filter(|recipe| !Self::is_builtin(recipe))
+                .cloned()
+                .collect(),
+        };
+        let json = serde_json::to_string_pretty(&user)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, json)
     }
