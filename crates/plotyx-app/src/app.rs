@@ -430,6 +430,22 @@ pub const SHORTCUT_SAVE_AS: egui::KeyboardShortcut = egui::KeyboardShortcut::new
 /// Ctrl+O — choisir un projet à ouvrir.
 pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
+/// Ctrl+" — ouvrir l'assistant d'import. Sur un clavier AZERTY, `"` est la
+/// touche du chiffre 3 **sans** Maj : egui ne connaît pas de touche `"` et
+/// retombe sur la touche physique, donc le raccourci se consomme comme
+/// Ctrl+3. Sur un clavier QWERTY, `"` est Maj+apostrophe
+/// ([`SHORTCUT_IMPORT_QWERTY`]).
+pub const SHORTCUT_IMPORT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num3);
+/// Ctrl+Maj+' — le même raccourci d'import sur un clavier QWERTY, où `"`
+/// s'obtient avec Maj.
+pub const SHORTCUT_IMPORT_QWERTY: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::Quote,
+);
+/// Rappel affiché dans le menu : le caractère, pas le nom de la touche
+/// physique.
+const SHORTCUT_IMPORT_TEXT: &str = "Ctrl+\"";
 /// Ctrl+Entrée — exécuter le script de la console.
 pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
@@ -510,6 +526,30 @@ const HEADER_LONGNAME_HEIGHT: f32 = 20.0;
 /// Hauteur totale de l'en-tête empilé de la grille docquée (lettre, nom
 /// long, unité, commentaire, formule, métadonnées).
 const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 5.0 * HEADER_SUBROW_HEIGHT;
+
+/// Hauteur de l'en-tête empilé selon que la ligne « Metadata » est affichée.
+fn stacked_header_height(show_metadata: bool) -> f32 {
+    if show_metadata {
+        HEADER_HEIGHT_STACKED
+    } else {
+        HEADER_HEIGHT_STACKED - HEADER_SUBROW_HEIGHT
+    }
+}
+
+/// La ligne « Metadata » de l'en-tête est-elle affichée ? Réglage de vue,
+/// gardé dans la mémoire d'egui (un seul `Context` pour tous les viewports :
+/// les classeurs flottants et détachés le suivent ensemble), jamais dans le
+/// modèle ni l'historique. Affichée par défaut.
+fn metadata_row_visible(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(egui::Id::new("plotyx_show_metadata_row")))
+        .unwrap_or(true)
+}
+
+fn set_metadata_row_visible(ctx: &egui::Context, visible: bool) {
+    ctx.data_mut(|data| {
+        data.insert_temp(egui::Id::new("plotyx_show_metadata_row"), visible);
+    });
+}
 /// Hauteur fixe du panneau des onglets de feuille sous la grille.
 /// [`book_contents`] la réserve avant de construire la table : la hauteur
 /// intrinsèque de cette dernière ne peut plus repousser les onglets hors
@@ -994,10 +1034,51 @@ impl PlotyxApp {
         }
     }
 
+    /// Ouvre en fenêtre les classeurs ajoutés à la racine depuis que celle-ci
+    /// avait `before` enfants (import dans de nouveaux classeurs).
+    fn open_new_workbooks_after(&mut self, before: usize) {
+        let root = self.state.tree().root();
+        let new_books: Vec<NodeId> = self
+            .state
+            .tree()
+            .node(root)
+            .map(|node| node.children().iter().skip(before).copied().collect())
+            .unwrap_or_default();
+        for book in new_books {
+            if self.state.tree().node(book).is_some_and(|node| {
+                matches!(node.kind(), plotyx_core::node::NodeKind::Workbook { .. })
+            }) {
+                self.open_tab(Tab::Book(book));
+            }
+        }
+    }
+
+    /// Ouvre l'assistant d'import sur le classeur actif (maximisé, ou au
+    /// premier plan, ou le seul classeur détaché) — menu Fichier et Ctrl+".
+    fn open_import_dialog(&mut self) {
+        let mut detached_books = self.detached_tabs.keys().filter_map(|tab| match tab {
+            Tab::Book(book) => Some(*book),
+            _ => None,
+        });
+        let only_detached_book = detached_books
+            .next()
+            .filter(|_| detached_books.next().is_none());
+        let active_book = self
+            .maximized_tab
+            .or_else(|| self.floating_tabs.last().copied())
+            .and_then(|tab| match tab {
+                Tab::Book(book) => Some(book),
+                _ => None,
+            })
+            .or(only_detached_book);
+        self.state.open_import(active_book);
+    }
+
     /// Consomme les raccourcis au niveau du contexte et en fait des actions.
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         let mut save_as = false;
         let mut open = false;
+        let mut import = false;
         ctx.input_mut(|input| {
             // Ctrl+Maj+S doit être testé avant Ctrl+S : les modificateurs
             // supplémentaires restent compatibles avec ce dernier.
@@ -1012,7 +1093,15 @@ impl PlotyxApp {
             if input.consume_shortcut(&SHORTCUT_RUN_SCRIPT) {
                 actions.push(Action::RunScript);
             }
+            if input.consume_shortcut(&SHORTCUT_IMPORT)
+                || input.consume_shortcut(&SHORTCUT_IMPORT_QWERTY)
+            {
+                import = true;
+            }
         });
+        if import && self.state.import_state().is_none() {
+            self.open_import_dialog();
+        }
         collect_undo_redo_shortcuts(ctx, actions);
         if save_as {
             self.choose_save_path(actions);
@@ -1050,24 +1139,24 @@ impl PlotyxApp {
                         actions.push(Action::AddWorkbook);
                         ui.close();
                     }
-                    if ui.button("Importer…").clicked() {
-                        let mut detached_books =
-                            self.detached_tabs.keys().filter_map(|tab| match tab {
-                                Tab::Book(book) => Some(*book),
-                                _ => None,
-                            });
-                        let only_detached_book = detached_books
-                            .next()
-                            .filter(|_| detached_books.next().is_none());
-                        let active_book = self
-                            .maximized_tab
-                            .or_else(|| self.floating_tabs.last().copied())
-                            .and_then(|tab| match tab {
-                                Tab::Book(book) => Some(book),
-                                _ => None,
-                            })
-                            .or(only_detached_book);
-                        self.state.open_import(active_book);
+                    if ui
+                        .add(egui::Button::new("Importer…").shortcut_text(SHORTCUT_IMPORT_TEXT))
+                        .clicked()
+                    {
+                        self.open_import_dialog();
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            self.state.can_reopen_last_import(),
+                            egui::Button::new("Régler le dernier import…"),
+                        )
+                        .on_hover_text(
+                            "Reprend les fichiers et le modèle du dernier import dans l'assistant",
+                        )
+                        .clicked()
+                    {
+                        actions.push(Action::ReopenLastImport);
                         ui.close();
                     }
                     ui.separator();
@@ -1171,6 +1260,17 @@ impl PlotyxApp {
                     });
                 }
                 ui.menu_button("Fenêtre", |ui| {
+                    let mut show_metadata = metadata_row_visible(ctx);
+                    if ui
+                        .checkbox(
+                            &mut show_metadata,
+                            "Afficher la ligne Metadata des colonnes",
+                        )
+                        .changed()
+                    {
+                        set_metadata_row_visible(ctx, show_metadata);
+                    }
+                    ui.separator();
                     if let Some(tab) = self.maximized_tab {
                         if ui
                             .button(format!("Restaurer « {} »", tab_title(&self.state, tab)))
@@ -2045,6 +2145,24 @@ impl eframe::App for PlotyxApp {
         // rafraîchit l'instantané après un script (voir la doc de tête de
         // `crate::state`). Ne bloque jamais, même sans script en cours.
         self.state.poll_script();
+        // Import en fond : avancement, et création des feuilles à la fin. Les
+        // classeurs créés s'ouvrent comme après un import immédiat.
+        if self.state.import_progress().is_some() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+            let root = self.state.tree().root();
+            let before = self
+                .state
+                .tree()
+                .node(root)
+                .map_or(0, |node| node.children().len());
+            if self.state.poll_import() {
+                self.open_new_workbooks_after(before);
+            }
+        }
+        let imported = self.state.take_imported_paths();
+        if !imported.is_empty() {
+            remember_recent_imports(&imported);
+        }
 
         self.collect_shortcuts(&ctx, &mut actions);
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
@@ -2522,20 +2640,7 @@ impl eframe::App for PlotyxApp {
                 }
             }
             if let Some(before) = new_import_books_after {
-                let root = self.state.tree().root();
-                let new_books: Vec<NodeId> = self
-                    .state
-                    .tree()
-                    .node(root)
-                    .map(|node| node.children().iter().skip(before).copied().collect())
-                    .unwrap_or_default();
-                for book in new_books {
-                    if self.state.tree().node(book).is_some_and(|node| {
-                        matches!(node.kind(), plotyx_core::node::NodeKind::Workbook { .. })
-                    }) {
-                        self.open_tab(Tab::Book(book));
-                    }
-                }
+                self.open_new_workbooks_after(before);
             }
             if let Some(parent) = plotted_from {
                 // `self.state.revision()` n'a bougé que si `AddGraph` a
@@ -2632,6 +2737,14 @@ fn data_end_row(ui: &mut egui::Ui, end: &mut plotyx_import::DataEnd) {
             _ => {}
         }
     });
+}
+
+/// Inscrit `paths` aux fichiers d'import récents (dossier de config). Un échec
+/// d'écriture est sans conséquence : la liste est un confort.
+fn remember_recent_imports(paths: &[std::path::PathBuf]) {
+    let mut recent = plotyx_import::RecentFiles::load();
+    recent.record(paths);
+    let _ = recent.save();
 }
 
 /// Emplacement (mémoire temporaire d'egui) des fichiers déposés cette image :
@@ -4626,7 +4739,9 @@ fn column_header_widget(
             HEADER_SUBROW_HEIGHT,
             is_column_selected,
         );
-        metadata_cell_widget(ui, state, actions, column);
+        if metadata_row_visible(ui.ctx()) {
+            metadata_cell_widget(ui, state, actions, column);
+        }
     });
 }
 
@@ -4933,23 +5048,34 @@ fn row_number_header_widget(
             HEADER_SUBROW_HEIGHT,
             "F(x)=",
         );
-        ui.scope(|ui| {
-            ui.set_min_height(HEADER_SUBROW_HEIGHT);
-            ui.set_max_height(HEADER_SUBROW_HEIGHT);
-            let rect = ui.available_rect_before_wrap();
-            ui.painter()
-                .rect_filled(rect, 0.0, gutter_fill(false, false));
-            header_row_separator(ui, rect);
-            ui.put(
-                rect,
-                egui::Label::new(
-                    egui::RichText::new("Metadata")
-                        .strong()
-                        .color(crate::theme::gutter_text_color()),
-                )
-                .selectable(false),
-            );
-        });
+        if metadata_row_visible(ui.ctx()) {
+            ui.scope(|ui| {
+                ui.set_min_height(HEADER_SUBROW_HEIGHT);
+                ui.set_max_height(HEADER_SUBROW_HEIGHT);
+                let rect = ui.available_rect_before_wrap();
+                ui.painter()
+                    .rect_filled(rect, 0.0, gutter_fill(false, false));
+                header_row_separator(ui, rect);
+                let response = ui.put(
+                    rect,
+                    egui::Label::new(
+                        egui::RichText::new("Metadata")
+                            .strong()
+                            .color(crate::theme::gutter_text_color()),
+                    )
+                    .selectable(false)
+                    .sense(egui::Sense::click()),
+                );
+                // Miroir du menu Fenêtre : rien n'est atteignable au seul
+                // clic droit.
+                response.context_menu(|ui| {
+                    if ui.button("Masquer la ligne Metadata").clicked() {
+                        set_metadata_row_visible(ui.ctx(), false);
+                        ui.close();
+                    }
+                });
+            });
+        }
     });
 }
 
@@ -5473,15 +5599,44 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
     ui.separator();
     ui.horizontal(|ui| {
         if ui.button("Ajouter des fichiers…").clicked() {
-            if let Some(paths) = rfd::FileDialog::new()
-                .set_title("Choisir des fichiers à importer")
-                .pick_files()
+            let mut dialog = rfd::FileDialog::new().set_title("Choisir des fichiers à importer");
+            // Le dossier du dernier fichier importé.
+            if let Some(dir) = state
+                .import_state()
+                .and_then(|import| import.recent.last_dir().map(std::path::Path::to_path_buf))
             {
+                dialog = dialog.set_directory(dir);
+            }
+            if let Some(paths) = dialog.pick_files() {
                 state.add_import_paths(paths);
             }
         }
         ui.weak("ou glissez-les dans l'application");
     });
+    let recent: Vec<std::path::PathBuf> = state
+        .import_state()
+        .map(|import| import.recent.files().to_vec())
+        .unwrap_or_default();
+    if !recent.is_empty() {
+        let mut picked = None;
+        egui::ComboBox::from_id_salt("plotyx_import_recent")
+            .selected_text("Fichiers récents…")
+            .show_ui(ui, |ui| {
+                for path in &recent {
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    if ui
+                        .selectable_label(false, name)
+                        .on_hover_text(path.display().to_string())
+                        .clicked()
+                    {
+                        picked = Some(path.clone());
+                    }
+                }
+            });
+        if let Some(path) = picked {
+            state.add_import_paths(vec![path]);
+        }
+    }
     let statuses = state.import_file_statuses();
     let preview_index = state
         .import_state()
@@ -5999,7 +6154,7 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
     }
     if requests.import {
         if let Some(import) = state.import_state() {
-            actions.push(Action::ImportFiles {
+            actions.push(Action::StartImport {
                 destination: import.destination,
                 recipe: import.recipe.clone(),
                 paths: import.paths.clone(),
@@ -6060,6 +6215,7 @@ fn grid_contents(
     // prise du glisser-déposer de colonnes plus bas ([`grid_grip_side`]).
     let grid_rect = ui.available_rect_before_wrap();
     let mut last_column_right = grid_rect.left();
+    let header_height = stacked_header_height(metadata_row_visible(ui.ctx()));
     let mut table = TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
@@ -6084,7 +6240,7 @@ fn grid_contents(
         table = table.vertical_scroll_offset(offset);
     }
     let table_output = table
-        .header(HEADER_HEIGHT_STACKED, |mut header| {
+        .header(header_height, |mut header| {
             header.col(|ui| {
                 row_number_header_widget(ui, state, actions, sheet);
             });
@@ -8099,6 +8255,9 @@ mod graph_layout_tests {
     /// droite, quelle que soit l'étape.
     #[test]
     fn chaque_etape_de_l_assistant_d_import_se_peint_avec_son_apercu() {
+        // Hermétique : ni les modèles ni les fichiers récents de la machine.
+        let config = tempfile::tempdir().unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", config.path());
         let (session, _graph) = graphe();
         let mut state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
         let directory = tempfile::tempdir().unwrap();
@@ -8144,6 +8303,134 @@ mod graph_layout_tests {
             state.import_step_forward();
         }
         assert!(state.import_state().is_some(), "l'assistant reste ouvert");
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    /// Issue #8 : un fichier lâché sur un classeur est réclamé par ce classeur
+    /// (et seulement lui), un fichier lâché ailleurs n'a pas de classeur, et un
+    /// survol sans dépôt n'émet aucune action. Sans fenêtre : les événements
+    /// `hovered_files`/`dropped_files` sont injectés dans l'entrée d'egui.
+    #[test]
+    fn un_depot_est_reclame_par_le_classeur_sous_le_curseur() {
+        let (session, _graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let book = state.books()[0].0;
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        #[derive(Debug)]
+        struct FakeFile(std::path::PathBuf);
+        impl egui::DroppedFile for FakeFile {
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                Ok(Vec::new())
+            }
+        }
+        let file: egui::DroppedFileHandle = std::sync::Arc::new(FakeFile("mesure.csv".into()));
+        // Un classeur occupe (100,100)-(400,400) ; le curseur est dedans ou dehors.
+        let frame = |pointer: egui::Pos2, dropped: bool| -> Option<Action> {
+            let mut input = egui::RawInput {
+                screen_rect: Some(screen),
+                events: vec![egui::Event::PointerMoved(pointer)],
+                ..Default::default()
+            };
+            if dropped {
+                input.dropped_files = vec![file.clone()];
+            }
+            let mut result = None;
+            let mut output = context.run_ui(input, |ui| {
+                let ctx = ui.ctx().clone();
+                begin_file_drop(&ctx);
+                egui::Area::new(egui::Id::new("faux_classeur"))
+                    .fixed_pos(egui::pos2(100.0, 100.0))
+                    .show(&ctx, |ui| {
+                        ui.allocate_ui(egui::vec2(300.0, 300.0), |ui| {
+                            ui.set_min_size(egui::vec2(300.0, 300.0));
+                            claim_file_drop(ui, book);
+                        });
+                    });
+                result = finish_file_drop(&ctx);
+            });
+            output.textures_delta.clear();
+            result
+        };
+        // Deux images de chauffe (l'Area n'est interactive qu'après la première).
+        frame(egui::pos2(200.0, 200.0), false);
+        frame(egui::pos2(200.0, 200.0), false);
+        assert_eq!(frame(egui::pos2(200.0, 200.0), false), None, "pas de dépôt");
+        let on_book = frame(egui::pos2(200.0, 200.0), true);
+        assert!(
+            matches!(&on_book, Some(Action::DropFiles { target_book: Some(b), paths }) if *b == book && paths.len() == 1),
+            "{on_book:?}"
+        );
+        let elsewhere = frame(egui::pos2(700.0, 500.0), true);
+        assert!(
+            matches!(
+                &elsewhere,
+                Some(Action::DropFiles {
+                    target_book: None,
+                    ..
+                })
+            ),
+            "{elsewhere:?}"
+        );
+    }
+
+    /// Ctrl+" ouvre l'assistant d'import, sur un clavier AZERTY (touche du 3
+    /// sans Maj) comme QWERTY (Maj+apostrophe), et pas pendant qu'il est déjà
+    /// ouvert.
+    #[test]
+    fn ctrl_guillemet_ouvre_l_assistant_d_import() {
+        let (session, _graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let mut app = PlotyxApp::new(state);
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let press = |key: egui::Key, modifiers: egui::Modifiers| egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        };
+        for (key, modifiers) in [
+            (egui::Key::Num3, egui::Modifiers::COMMAND),
+            (
+                egui::Key::Quote,
+                egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+            ),
+        ] {
+            assert!(app.state.import_state().is_none());
+            let mut actions = Vec::new();
+            let mut output = context.run_ui(press(key, modifiers), |ui| {
+                app.collect_shortcuts(ui.ctx(), &mut actions);
+            });
+            output.textures_delta.clear();
+            assert!(app.state.import_state().is_some(), "{key:?}");
+            app.state.cancel_import();
+        }
+    }
+
+    /// La ligne « Metadata » est affichée par défaut, se masque et se réaffiche
+    /// (réglage de vue partagé par tous les viewports), et l'en-tête empilé
+    /// perd exactement une sous-ligne quand elle est masquée.
+    #[test]
+    fn la_ligne_metadata_se_masque_et_se_reaffiche() {
+        let context = egui::Context::default();
+        assert!(metadata_row_visible(&context));
+        set_metadata_row_visible(&context, false);
+        assert!(!metadata_row_visible(&context));
+        assert_eq!(
+            stacked_header_height(true) - stacked_header_height(false),
+            HEADER_SUBROW_HEIGHT
+        );
+        set_metadata_row_visible(&context, true);
+        assert!(metadata_row_visible(&context));
     }
 
     /// #17 : la grille reste peinte sous un dialogue (Propriétés du graphe,

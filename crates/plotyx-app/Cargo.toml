@@ -30,6 +30,10 @@ plotyx-render-egui = { path = "../plotyx-render-egui" }
 plotyx-script = { path = "../plotyx-script", optional = true, features = ["python"] }
 plotyx-python = { path = "../plotyx-python", optional = true, features = ["python"] }
 eframe = "0.36.2"
+# Choix explicite du backend de fenêtre sous Linux : winit 0.30 n'implémente
+# PAS le glisser-déposer de fichiers sous Wayland (seulement X11, Windows et
+# macOS). Voir `main.rs` (`prefer_x11`). Même version que celle d'eframe.
+winit = { version = "0.30", default-features = false, features = ["x11", "wayland"] }
 egui_extras = "0.36.2"
 # Sélecteur de fichiers natif pour Save/Load (remplace le champ texte de
 # saisie manuelle du chemin, cf. `docs/application.md` § « Limites assumées

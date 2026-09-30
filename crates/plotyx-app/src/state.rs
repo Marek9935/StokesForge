@@ -45,10 +45,8 @@
 //!    (`is_error: false`), et l'état reste utilisable.
 
 use std::path::PathBuf;
-#[cfg(feature = "python")]
 use std::sync::mpsc;
 use std::sync::Arc;
-#[cfg(feature = "python")]
 use std::thread;
 
 use plotyx_commands::Command;
@@ -307,6 +305,20 @@ pub enum Action {
         /// Classeur sous le curseur au moment du dépôt, s'il y en avait un.
         target_book: Option<NodeId>,
     },
+    /// Comme [`Action::ImportFiles`], mais l'analyse des fichiers se fait sur
+    /// un fil de fond, avec progression : l'interface ne se fige pas. Les
+    /// feuilles sont créées à la fin ([`AppState::poll_import`]).
+    StartImport {
+        /// Destination des feuilles produites.
+        destination: ImportDestination,
+        /// Réglages d'analyse à appliquer à chaque fichier.
+        recipe: plotyx_import::ImportRecipe,
+        /// Fichiers à importer.
+        paths: Vec<std::path::PathBuf>,
+    },
+    /// Reprend le dernier import dans l'assistant, pour le corriger : s'il est
+    /// encore la dernière entrée de l'historique, il est d'abord annulé.
+    ReopenLastImport,
     /// Ouvre la fenêtre (lecture seule) des métadonnées de fichier de
     /// `column` — clic sur la ligne « Métadonnées » de l'en-tête.
     ViewColumnMetadata {
@@ -1397,6 +1409,35 @@ fn reads_well(path: &std::path::Path, recipe: &plotyx_import::ImportRecipe) -> b
     })
 }
 
+/// Lit et analyse un fichier avec `recipe` ; l'erreur porte le chemin.
+fn parse_import_file(
+    path: &std::path::Path,
+    recipe: &plotyx_import::ImportRecipe,
+) -> Result<plotyx_import::ParsedTable, String> {
+    let bytes = std::fs::read(path).map_err(|err| format!("{}: {err}", path.display()))?;
+    plotyx_import::parse(&bytes, recipe).map_err(|err| format!("{}: {err}", path.display()))
+}
+
+/// Dernier import réussi : de quoi le reprendre dans l'assistant pour le
+/// corriger (« Régler le dernier import… »).
+#[derive(Debug, Clone)]
+struct LastImport {
+    destination: ImportDestination,
+    recipe: plotyx_import::ImportRecipe,
+    paths: Vec<PathBuf>,
+}
+
+/// Import en cours sur un fil de fond : l'analyse des fichiers (la partie
+/// lente) ne bloque pas l'interface ; les feuilles sont créées par
+/// [`AppState::poll_import`] quand tout est prêt.
+struct ImportJob {
+    destination: ImportDestination,
+    recipe: plotyx_import::ImportRecipe,
+    total: usize,
+    done: Arc<std::sync::atomic::AtomicUsize>,
+    reply: mpsc::Receiver<Vec<(PathBuf, Result<plotyx_import::ParsedTable, String>)>>,
+}
+
 /// État transitoire de la fenêtre d'import (voir [`crate::app`] pour son
 /// rendu) : jamais dans l'historique, jamais envoyé à l'acteur — même
 /// famille que [`HeaderEdit`]/[`CellEdit`]/[`NoteEdit`]. Porte tout ce que la
@@ -1426,6 +1467,8 @@ pub struct ImportState {
     pub preview_index: usize,
     /// Modèle dont la suppression attend une confirmation.
     pub confirm_delete: Option<String>,
+    /// Fichiers importés récemment, chargés à l'ouverture.
+    pub recent: plotyx_import::RecentFiles,
     /// Recette telle qu'elle était au chargement du modèle : sert à dire
     /// qu'elle a été modifiée sans être enregistrée.
     baseline: plotyx_import::ImportRecipe,
@@ -1647,6 +1690,13 @@ pub struct AppState {
     /// Colonne dont la fenêtre des métadonnées de fichier est ouverte
     /// (lecture seule, transitoire : jamais dans l'historique).
     metadata_view: Option<NodeId>,
+    /// Import en cours sur un fil de fond.
+    import_job: Option<ImportJob>,
+    /// Dernier import réussi, pour le reprendre dans l'assistant.
+    last_import: Option<LastImport>,
+    /// Fichiers importés avec succès, à inscrire aux fichiers récents par la
+    /// couche fenêtre ([`AppState::take_imported_paths`]).
+    recent_to_record: Vec<PathBuf>,
     /// Texte de la zone de script.
     script_source: String,
     /// Sortie de la dernière exécution de script, s'il y en a eu une.
@@ -1710,6 +1760,9 @@ impl AppState {
             import_state: None,
             projects_to_open: Vec::new(),
             metadata_view: None,
+            import_job: None,
+            last_import: None,
+            recent_to_record: Vec::new(),
             script_source: String::new(),
             script_output: None,
             #[cfg(feature = "python")]
@@ -3182,6 +3235,12 @@ impl AppState {
                 paths,
             } => self.import_files(destination, recipe, paths),
             Action::DropFiles { paths, target_book } => self.drop_files(paths, target_book),
+            Action::StartImport {
+                destination,
+                recipe,
+                paths,
+            } => self.start_import(destination, recipe, paths),
+            Action::ReopenLastImport => self.reopen_last_import(),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
             Action::CloseColumnMetadata => self.metadata_view = None,
             Action::PlotColumns {
@@ -3381,6 +3440,7 @@ impl AppState {
             step: ImportStep::Files,
             preview_index: 0,
             confirm_delete: None,
+            recent: plotyx_import::RecentFiles::load(),
             baseline: recipe.clone(),
             recipe,
             bytes: Default::default(),
@@ -3421,7 +3481,12 @@ impl AppState {
                 .status
                 .as_ref()
                 .filter(|status| !status.is_error)
-                .map(|status| format!("{} — modèle « {model} »", status.text));
+                .map(|status| {
+                    format!(
+                        "{} — modèle « {model} » (Fichier › Régler le dernier import… pour corriger)",
+                        status.text
+                    )
+                });
             if let Some(summary) = summary {
                 self.notice(summary);
             }
@@ -3432,6 +3497,140 @@ impl AppState {
                 import.paths = bad;
             }
         }
+    }
+
+    /// Lance l'analyse des fichiers sur un fil de fond ([`Action::StartImport`]).
+    fn start_import(
+        &mut self,
+        destination: ImportDestination,
+        recipe: plotyx_import::ImportRecipe,
+        paths: Vec<PathBuf>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        if self.import_job.is_some() {
+            self.fail("Un import est déjà en cours".to_string());
+            return;
+        }
+        let total = paths.len();
+        let done = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (reply_tx, reply) = mpsc::channel();
+        let worker_done = Arc::clone(&done);
+        let worker_recipe = recipe.clone();
+        let spawned = thread::Builder::new()
+            .name("plotyx-app-import".to_owned())
+            .spawn(move || {
+                let parsed: Vec<_> = paths
+                    .into_iter()
+                    .map(|path| {
+                        let table = parse_import_file(&path, &worker_recipe);
+                        worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        (path, table)
+                    })
+                    .collect();
+                let _ = reply_tx.send(parsed);
+            });
+        match spawned {
+            Ok(_) => {
+                self.import_job = Some(ImportJob {
+                    destination,
+                    recipe,
+                    total,
+                    done,
+                    reply,
+                });
+                self.notice(format!("Import en cours… 0/{total} fichier(s)"));
+            }
+            Err(err) => self.fail(format!("Impossible de lancer l'import : {err}")),
+        }
+    }
+
+    /// Avancement de l'import en cours : `(fichiers analysés, total)`.
+    pub fn import_progress(&self) -> Option<(usize, usize)> {
+        let job = self.import_job.as_ref()?;
+        Some((
+            job.done.load(std::sync::atomic::Ordering::Relaxed),
+            job.total,
+        ))
+    }
+
+    /// À appeler à chaque image : met à jour la progression et, quand
+    /// l'analyse est finie, crée les feuilles. Rend vrai si l'import vient de
+    /// s'appliquer. Ne bloque jamais.
+    pub fn poll_import(&mut self) -> bool {
+        let Some(job) = &self.import_job else {
+            return false;
+        };
+        match job.reply.try_recv() {
+            Ok(parsed) => {
+                let Some(job) = self.import_job.take() else {
+                    return false;
+                };
+                self.apply_import(job.destination, job.recipe, parsed);
+                true
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                let (done, total) = (
+                    job.done.load(std::sync::atomic::Ordering::Relaxed),
+                    job.total,
+                );
+                self.notice(format!("Import en cours… {done}/{total} fichier(s)"));
+                false
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.import_job = None;
+                self.fail("L'import s'est interrompu avant la fin".to_string());
+                false
+            }
+        }
+    }
+
+    /// Fichiers importés avec succès depuis le dernier appel, pour les
+    /// fichiers récents (vidés : chaque fichier n'est inscrit qu'une fois).
+    pub fn take_imported_paths(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.recent_to_record)
+    }
+
+    /// Un dernier import existe et peut être repris dans l'assistant.
+    pub fn can_reopen_last_import(&self) -> bool {
+        self.last_import.is_some() && self.import_job.is_none()
+    }
+
+    /// [`Action::ReopenLastImport`] : annule le dernier import s'il est encore
+    /// au sommet de l'historique (sinon la correction s'ajouterait au lieu de
+    /// le remplacer), puis rouvre l'assistant sur ses fichiers et sa recette.
+    fn reopen_last_import(&mut self) {
+        let Some(last) = self.last_import.clone() else {
+            self.fail("Aucun import à reprendre".to_string());
+            return;
+        };
+        let undone = self.snapshot.history.undo_label.as_deref() == Some("Importer")
+            && !self.snapshot.history.in_macro;
+        if undone {
+            self.undo();
+        }
+        let book = match last.destination {
+            ImportDestination::ActiveBook(book) => Some(book),
+            _ => None,
+        };
+        self.open_import(book);
+        if let Some(import) = &mut self.import_state {
+            import.recipe = last.recipe.clone();
+            import.baseline = last.recipe;
+            import.save_as_name = import.recipe.name.clone();
+            if let ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll =
+                last.destination
+            {
+                import.destination = last.destination;
+            }
+            import.paths = last.paths;
+        }
+        self.notice(if undone {
+            "Dernier import annulé : réglez-le puis relancez-le".to_string()
+        } else {
+            "Réglez le dernier import puis relancez-le (l'ancien reste en place)".to_string()
+        });
     }
 
     /// Colonne dont la fenêtre des métadonnées est ouverte, s'il y en a une.
@@ -4776,6 +4975,23 @@ impl AppState {
         if paths.is_empty() {
             return;
         }
+        let parsed = paths
+            .iter()
+            .map(|path| (path.clone(), parse_import_file(path, &recipe)))
+            .collect();
+        self.apply_import(destination, recipe, parsed);
+    }
+
+    /// Crée les feuilles et les colonnes d'un lot **déjà analysé** (par
+    /// [`AppState::import_files`], ou en fond par [`AppState::start_import`]),
+    /// en une seule entrée d'historique « Importer ».
+    fn apply_import(
+        &mut self,
+        destination: ImportDestination,
+        recipe: plotyx_import::ImportRecipe,
+        parsed: Vec<(PathBuf, Result<plotyx_import::ParsedTable, String>)>,
+    ) {
+        let paths: Vec<PathBuf> = parsed.iter().map(|(path, _)| path.clone()).collect();
         if self.handle.begin_macro("Importer").is_err() {
             self.fail(
                 "Impossible de grouper l'import dans une seule entrée d'historique".to_string(),
@@ -4794,22 +5010,16 @@ impl AppState {
         // voie.
         let mut failures: Vec<String> = Vec::new();
         let mut shared_book = None;
-        for path in &paths {
+        let mut done_paths: Vec<PathBuf> = Vec::new();
+        for (path, table) in &parsed {
             let file_stem = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
                 .unwrap_or("fichier");
-            let bytes = match std::fs::read(path) {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    failures.push(format!("{}: {err}", path.display()));
-                    continue;
-                }
-            };
-            let table = match plotyx_import::parse(&bytes, &recipe) {
+            let table = match table {
                 Ok(table) => table,
-                Err(err) => {
-                    failures.push(format!("{}: {err}", path.display()));
+                Err(message) => {
+                    failures.push(message.clone());
                     continue;
                 }
             };
@@ -4927,7 +5137,7 @@ impl AppState {
                     match (index, &parsed_column.name) {
                         (_, Some(name)) => name.clone(),
                         (0, None) => "X".to_string(),
-                        (_, None) => plotyx_import::resolve_series_name(&recipe, &table, file_stem),
+                        (_, None) => plotyx_import::resolve_series_name(&recipe, table, file_stem),
                     }
                 });
                 column.set_meta(ColumnMeta {
@@ -4958,9 +5168,19 @@ impl AppState {
                 });
             }
             imported += 1;
+            done_paths.push(path.clone());
         }
         if self.handle.end_macro().is_err() {
             failures.push("échec de la clôture de l'entrée d'historique d'import".to_string());
+        }
+        if imported > 0 {
+            // De quoi « Régler le dernier import… » et les fichiers récents.
+            self.recent_to_record.extend(done_paths.iter().cloned());
+            self.last_import = Some(LastImport {
+                destination,
+                recipe: recipe.clone(),
+                paths: done_paths,
+            });
         }
         // `self.execute` (appelé dans la boucle ci-dessus) rafraîchit déjà
         // l'instantané à chaque commande, mais toujours **pendant** que la

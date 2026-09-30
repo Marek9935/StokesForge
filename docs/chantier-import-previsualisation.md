@@ -216,9 +216,8 @@ gardées telles quelles). `plotyx-app` les copie dans `ColumnMeta::file_metadata
 de chaque colonne importée — dans la macro « Importer », sans commande
 d'édition : lecture seule. Affichage : ligne « Metadata » de l'en-tête (« 📋 N
 clés »), clic → fenêtre modale de consultation (`column_metadata_window`).
-Non fait : masquer/afficher la ligne comme les autres lignes d'en-tête (il n'y
-a pas encore de mécanisme pour celles-ci), la sélection par clé dans l'étape
-« Métadonnées » de l'assistant (#6), aucun remplissage automatique des unités
+La ligne se masque (menu Fenêtre) ; la sélection par clé est dans l'étape
+« Métadonnées » de l'assistant ; aucun remplissage automatique des unités
 (décidé).
 
 ## Assistant en étapes (issue #6)

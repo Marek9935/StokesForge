@@ -111,9 +111,33 @@ modèle tel quel. Les octets des fichiers sont lus une fois (cache par chemin,
 son erreur. L'en-tête est un seul réglage (`ImportRecipe::unify_header` ramène
 `HeaderSkip::Lines` au découpage structuré) ; les rôles de colonne choisis à
 l'étape 4 vivent dans la recette (`column_roles`). Un dépôt de fichiers pendant
-que l'assistant est ouvert les ajoute à sa liste. Non fait : import en tâche de
-fond avec progression, raccourci clavier, fichiers récents et dossier
-mémorisé, lien « Régler l'import… » après un dépôt.
+que l'assistant est ouvert les ajoute à sa liste. « Terminer » lance
+`Action::StartImport` : l'analyse des fichiers tourne sur un fil de fond (avec
+progression « Import en cours… k/n », `AppState::poll_import` appelé à chaque
+image) et les feuilles se créent à la fin, en une seule entrée « Importer ».
+Raccourci : **Ctrl+"** (`SHORTCUT_IMPORT` : touche du 3 sans Maj sur AZERTY,
+`SHORTCUT_IMPORT_QWERTY` : Ctrl+Maj+' sur QWERTY). Fichiers récents et dossier
+mémorisé : `plotyx_import::RecentFiles` (`import_recent.json`, à côté des
+recettes). « Fichier › Régler le dernier import… » (`Action::ReopenLastImport`)
+rouvre l'assistant sur les fichiers et le modèle du dernier import — en
+l'annulant d'abord s'il est encore au sommet de l'historique, jamais un travail
+postérieur.
+
+### Glisser-déposer : le backend de fenêtre
+
+**winit 0.30 n'émet aucun dépôt de fichier sous Wayland** (seulement X11,
+Windows, macOS) : sous une session Wayland, rien ne se passait au lâcher.
+`main.rs` (`prefer_x11`) demande donc le backend X11 (XWayland) sous Linux dès
+que `DISPLAY` existe ; `PLOTYX_WAYLAND=1` garde le Wayland natif (sans dépôt de
+fichiers). La logique de dépôt elle-même est testée sans fenêtre
+(`un_depot_est_reclame_par_le_classeur_sous_le_curseur`) ; le geste réel depuis
+un gestionnaire de fichiers reste à valider à la main.
+
+### Ligne « Metadata » de l'en-tête
+
+Elle se masque et se réaffiche (Fenêtre › Afficher la ligne Metadata des
+colonnes, ou clic droit sur son libellé) : réglage de vue gardé dans la mémoire
+d'egui, partagé par les classeurs flottants et détachés, jamais dans le modèle.
 
 ### Débordement des fenêtres de contenu
 

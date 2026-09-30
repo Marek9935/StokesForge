@@ -5840,3 +5840,115 @@ fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
     main.refresh();
     assert_eq!(cell_f64(&main, column, 0), 99.0);
 }
+
+// -- Import en fond, reprise du dernier import, fichiers récents (issue #6) --
+
+/// L'analyse tourne sur un fil de fond : `start_import` rend la main, la
+/// progression se lit, et `poll_import` crée les feuilles une fois prêt —
+/// toujours en une seule entrée d'historique. Un second lancement est refusé
+/// pendant qu'un import est en cours.
+#[test]
+fn a_background_import_reports_progress_then_applies_in_one_entry() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+    let files: Vec<std::path::PathBuf> = (0..3)
+        .map(|i| {
+            let file = dir.path().join(format!("fond{i}.csv"));
+            std::fs::write(&file, "1,10\n2,20\n").unwrap();
+            file
+        })
+        .collect();
+
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: ImportRecipe::new("Fond"),
+        paths: files.clone(),
+    });
+    let (_, total) = state.import_progress().expect("un import est en cours");
+    assert_eq!(total, 3);
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: ImportRecipe::new("Fond"),
+        paths: files.clone(),
+    });
+    assert!(
+        state.status().is_some_and(|status| status.is_error),
+        "un second import est refusé"
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !state.poll_import() {
+        assert!(std::time::Instant::now() < deadline, "import trop long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(state.import_progress().is_none());
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 3);
+    assert_eq!(state.take_imported_paths().len(), 3);
+    assert!(state.take_imported_paths().is_empty(), "file vidée");
+    state.dispatch(Action::Undo);
+    assert_eq!(state.worksheets_of(book).len(), sheets_before);
+    assert!(!state.can_undo(), "une seule entrée pour tout le lot");
+}
+
+/// « Régler le dernier import » annule l'import s'il est encore au sommet de
+/// l'historique, puis rouvre l'assistant sur ses fichiers et sa recette.
+#[test]
+fn reopening_the_last_import_undoes_it_and_prefills_the_wizard() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    assert!(!state.can_reopen_last_import());
+    let file = dir.path().join("reprise.csv");
+    std::fs::write(&file, "1;10\n2;20\n").unwrap();
+    let mut recipe = ImportRecipe::new("Point-virgule");
+    recipe.separator = Separator::Semicolon;
+    let sheets_before = state.worksheets_of(book).len();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: recipe.clone(),
+        paths: vec![file.clone()],
+    });
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
+    assert!(state.can_reopen_last_import());
+
+    state.dispatch(Action::ReopenLastImport);
+
+    assert_eq!(state.worksheets_of(book).len(), sheets_before, "annulé");
+    let import = state.import_state().expect("assistant rouvert");
+    assert_eq!(import.paths, vec![file]);
+    assert_eq!(import.recipe.separator, Separator::Semicolon);
+    assert_eq!(import.destination, ImportDestination::ActiveBook(book));
+}
+
+/// Si autre chose a été fait depuis, l'ancien import n'est pas annulé : on ne
+/// défait jamais un travail étranger.
+#[test]
+fn reopening_the_last_import_leaves_later_work_alone() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("reprise.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: ImportRecipe::new("Sans titre"),
+        paths: vec![file],
+    });
+    state.dispatch(Action::AddWorkbook);
+    let root = state.tree().root();
+    let books = state.tree().node(root).unwrap().children().len();
+
+    state.dispatch(Action::ReopenLastImport);
+
+    assert_eq!(state.tree().node(root).unwrap().children().len(), books);
+    assert!(
+        state.worksheets_of(book).len() >= 2,
+        "l'import reste en place"
+    );
+    assert!(state.import_state().is_some());
+}

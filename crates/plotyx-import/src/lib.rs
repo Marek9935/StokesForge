@@ -28,6 +28,7 @@ pub mod decode;
 pub mod metadata;
 pub mod parse;
 pub mod preview;
+pub mod recent;
 pub mod recipe;
 pub mod store;
 
@@ -35,5 +36,6 @@ pub use decode::*;
 pub use metadata::MetadataLine;
 pub use parse::*;
 pub use preview::*;
+pub use recent::{RecentFiles, MAX_RECENT_FILES};
 pub use recipe::*;
 pub use store::*;

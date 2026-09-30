@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("PlotYx — banc d'essai")
             .with_inner_size([1100.0, 700.0]),
+        event_loop_builder: Some(Box::new(prefer_x11)),
         ..Default::default()
     };
     // `run_native` bloque jusqu'à la fermeture de la fenêtre ; `session` reste
@@ -70,6 +71,24 @@ fn main() -> anyhow::Result<()> {
     shutdown.map_err(|err| anyhow::anyhow!("arrêt de la session : {err}"))?;
     Ok(())
 }
+
+/// Sous Linux, fenêtre X11 (XWayland sous une session Wayland) plutôt que
+/// Wayland natif : **winit 0.30 n'implémente pas le glisser-déposer de fichiers
+/// sous Wayland** — aucun `DroppedFile`/`HoveredFile` n'y est émis, donc rien ne
+/// se passe quand on lâche un fichier sur la fenêtre (issue #8). Avec X11 il
+/// fonctionne. `PLOTYX_WAYLAND=1` garde le backend Wayland natif (rendu net sur
+/// écran à forte densité, mais sans dépôt de fichiers) ; sans `DISPLAY`, winit
+/// choisit seul.
+#[cfg(target_os = "linux")]
+fn prefer_x11(builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>) {
+    use winit::platform::x11::EventLoopBuilderExtX11;
+    if std::env::var_os("PLOTYX_WAYLAND").is_none() && std::env::var_os("DISPLAY").is_some() {
+        builder.with_x11();
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn prefer_x11(_builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>) {}
 
 /// Le chargement passe par l'acteur pour restaurer aussi les géométries,
 /// conservées à côté du modèle. Charger seulement `Project` les perdrait.
