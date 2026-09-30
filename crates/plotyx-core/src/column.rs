@@ -233,6 +233,31 @@ pub struct ColumnMeta {
     /// l'est. `#[serde(default)]` côté persistance (`plotyx-persistence`) :
     /// un fichier écrit avant ce champ n'a que des colonnes ordinaires.
     pub formula: Option<String>,
+    /// Métadonnées du fichier d'origine (en-tête, et pied de page si la
+    /// recette le demande), conservées à l'import — voir [`MetaLine`]. Vide
+    /// pour une colonne saisie à la main. Lecture seule côté interface : seule
+    /// l'écriture initiale (macro « Importer ») les pose, aucune commande
+    /// d'édition.
+    pub file_metadata: Vec<MetaLine>,
+}
+
+/// Une ligne de métadonnées de fichier, découpée en clé / valeur
+/// (`XUNITS;NANOMETERS` → `XUNITS` | `NANOMETERS`). Une ligne `[Section]` est
+/// une clé entre crochets sans valeur ; une ligne qui n'a pas la forme
+/// clé/valeur est gardée telle quelle, dans `value`, avec une clé vide.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MetaLine {
+    /// Clé (vide pour une ligne sans forme clé/valeur).
+    pub key: String,
+    /// Valeur, ou la ligne entière si la clé est vide.
+    pub value: String,
+}
+
+impl MetaLine {
+    /// Vrai pour un titre de section (`[Measurement Information]`).
+    pub fn is_section(&self) -> bool {
+        self.value.is_empty() && self.key.starts_with('[') && self.key.ends_with(']')
+    }
 }
 
 /// Bloc de valeurs typé, tel qu'on l'écrit dans une colonne ou qu'on le

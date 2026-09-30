@@ -172,6 +172,7 @@ fn b2_aller_retour_preserve_tout() {
                 comment: "".into(),
                 display_format: "%.3f".into(),
                 formula: None,
+                file_metadata: Vec::new(),
             },
         )
         .unwrap();

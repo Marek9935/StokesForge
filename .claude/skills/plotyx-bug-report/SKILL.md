@@ -1,6 +1,7 @@
 ---
 name: plotyx-bug-report
-description: Trier et documenter ce que l'utilisateur remonte sur PlotYx — un symptôme isolé comme un vrac de quinze remarques mêlant correctifs et demandes d'évolution. Produit une reproduction minimale, le classement bug/évolution, la localisation dans le bon crate, et les questions à trancher. À utiliser dès que l'utilisateur signale « ça plante », « ça ne marche pas », « c'est bizarre », « la valeur est fausse », « le cadre est mal placé », « il manque… », ou envoie une liste de retours en vrac — même vaguement, même sans demander de correction. Ce skill **diagnostique et documente, il ne corrige pas et ne conçoit pas** : pour corriger, plotyx-bug-fix ; pour implémenter, plotyx-feature.
+description: >-
+  Trier et documenter ce que l'utilisateur remonte sur PlotYx — un symptôme isolé comme un vrac de quinze remarques mêlant correctifs et demandes d'évolution. Produit une reproduction minimale, le classement bug/évolution, la localisation dans le bon crate, et les questions à trancher. À utiliser dès que l'utilisateur signale « ça plante », « ça ne marche pas », « c'est bizarre », « la valeur est fausse », « le cadre est mal placé », « il manque… », ou envoie une liste de retours en vrac — même vaguement, même sans demander de correction. Ce skill **diagnostique et documente, il ne corrige pas et ne conçoit pas** : pour corriger, plotyx-bug-fix ; pour implémenter, plotyx-feature.
 ---
 
 # Trier et documenter ce qui est remonté

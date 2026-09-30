@@ -60,6 +60,7 @@ fn fixture_project() -> Project {
                 comment: "colonne de temps".to_string(),
                 display_format: "0.000".to_string(),
                 formula: None,
+                file_metadata: Vec::new(),
             },
         )
         .expect("colonne numérique valide");
@@ -118,6 +119,7 @@ fn fixture_project() -> Project {
                 comment: "avec des n/a".to_string(),
                 display_format: String::new(),
                 formula: None,
+                file_metadata: Vec::new(),
             },
         )
         .expect("colonne mixte valide");
@@ -854,4 +856,52 @@ fn saved_colors_survive_save_and_load() {
     let loaded = load(&path).expect("chargement réussi");
     assert_eq!(loaded.tree().saved_colors(), project.tree().saved_colors());
     assert!(*loaded.tree() == *project.tree());
+}
+
+/// `ColumnMeta::file_metadata` (métadonnées de fichier importé, issue #5)
+/// survit à `save`/`load`, dans l'ordre, sections et lignes sans clé comprises.
+#[test]
+fn column_file_metadata_survives_save_and_load() {
+    use plotyx_core::MetaLine;
+    let mut project = Project::new("Demo").expect("projet valide");
+    let root = project.root();
+    let book = project
+        .add_empty_workbook(root, Some("Book1"))
+        .expect("classeur");
+    let sheet = project
+        .add_worksheet(book, Some("Sheet1"))
+        .expect("feuille");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
+        .expect("colonne A");
+    let lines = vec![
+        MetaLine {
+            key: "[Measurement Information]".into(),
+            value: String::new(),
+        },
+        MetaLine {
+            key: "XUNITS".into(),
+            value: "NANOMETERS".into(),
+        },
+        MetaLine {
+            key: String::new(),
+            value: "##### Extended Information".into(),
+        },
+    ];
+    project
+        .set_column_meta(
+            a,
+            ColumnMeta {
+                file_metadata: lines.clone(),
+                ..Default::default()
+            },
+        )
+        .expect("métadonnées posées");
+
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("meta.plyx");
+    save(&project, &path).expect("sauvegarde réussie");
+    let loaded = load(&path).expect("chargement réussi");
+    let column = loaded.tree().node(a).unwrap().as_column().unwrap();
+    assert_eq!(column.meta().file_metadata, lines);
 }

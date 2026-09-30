@@ -675,6 +675,11 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                 values,
                 version: column.version(),
                 formula: meta.formula.clone(),
+                file_metadata: meta
+                    .file_metadata
+                    .iter()
+                    .map(|line| (line.key.clone(), line.value.clone()))
+                    .collect(),
             }
         }
         NodeKind::Graph { meta, spec } => KindRecord::Graph {
@@ -726,6 +731,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             values,
             version,
             formula,
+            file_metadata,
         } => {
             let column_type: ColumnType = column_type.into();
             let block = match values {
@@ -760,6 +766,10 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 comment,
                 display_format,
                 formula,
+                file_metadata: file_metadata
+                    .into_iter()
+                    .map(|(key, value)| plotyx_core::MetaLine { key, value })
+                    .collect(),
             };
             // `from_block_with_version`, pas `from_block` : le compteur doit
             // traverser le disque, sinon il ment après un rechargement.

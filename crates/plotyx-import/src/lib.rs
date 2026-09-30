@@ -25,12 +25,14 @@
 
 mod data_end;
 pub mod decode;
+pub mod metadata;
 pub mod parse;
 pub mod preview;
 pub mod recipe;
 pub mod store;
 
 pub use decode::*;
+pub use metadata::MetadataLine;
 pub use parse::*;
 pub use preview::*;
 pub use recipe::*;

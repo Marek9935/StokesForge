@@ -817,6 +817,7 @@ mod tests {
                 values: schema::ValuesRecord::Float(vec![0, 1, 2]), // 3 octets, pas multiple de 8
                 version: 0,
                 formula: None,
+                file_metadata: Vec::new(),
             },
         };
         let body = FileBody {
@@ -880,6 +881,7 @@ mod tests {
                 ]),
                 version: 3,
                 formula: None,
+                file_metadata: Vec::new(),
             },
         };
         let body = FileBody {

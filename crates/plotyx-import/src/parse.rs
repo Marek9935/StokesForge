@@ -64,7 +64,7 @@ impl EffectiveSeparator {
 
     /// Coupe une ligne « CLÉ<séparateur>VALEUR » en `(clé, valeur)` à la
     /// première occurrence du séparateur.
-    fn split_key_value(self, line: &str) -> Option<(&str, &str)> {
+    pub(crate) fn split_key_value(self, line: &str) -> Option<(&str, &str)> {
         match self {
             EffectiveSeparator::Char(c) => line.split_once(c),
             EffectiveSeparator::Whitespace => line.split_once(char::is_whitespace),
@@ -84,6 +84,7 @@ pub struct ParsedTable {
     pub warnings: Vec<String>,
     header_lines: Vec<String>,
     footer_lines: Vec<String>,
+    metadata: Vec<crate::metadata::MetadataLine>,
     separator: EffectiveSeparator,
 }
 
@@ -99,6 +100,12 @@ impl ParsedTable {
     /// (`trim`ée), ou `None` si absente. `<séparateur>` est celui
     /// effectivement résolu pour ce fichier (utile même quand la recette
     /// demandait `Separator::Auto`).
+    /// Métadonnées à conserver, selon la recette (en-tête, pied de page,
+    /// exclusions) — voir [`crate::metadata`].
+    pub fn metadata(&self) -> &[crate::metadata::MetadataLine] {
+        &self.metadata
+    }
+
     /// Lignes qui suivent la fin des données (pied de page), telles qu'elles
     /// sont dans le fichier — jamais importées.
     pub fn footer_lines(&self) -> &[String] {
@@ -414,11 +421,22 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
         }
     }
 
+    let metadata = crate::metadata::split_lines(
+        header_lines
+            .iter()
+            .filter(|_| recipe.keep_header_metadata)
+            .chain(footer_lines.iter().filter(|_| recipe.keep_footer_metadata))
+            .map(String::as_str),
+        separator,
+        recipe,
+    );
+
     Ok(ParsedTable {
         columns,
         warnings,
         header_lines,
         footer_lines,
+        metadata,
         separator,
     })
 }

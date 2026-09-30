@@ -238,3 +238,44 @@ fn jasco_uvvis_sans_coupure_garde_le_pied_dans_les_donnees() {
     assert!(table.footer_lines().is_empty());
     assert!(table.columns[1].texts.iter().any(Option::is_some));
 }
+
+/// L'en-tête Jasco est conservé en clé / valeur ; le pied de page ne l'est que
+/// si la recette le demande (issue #5).
+#[test]
+fn jasco_uvvis_conserve_les_metadonnees() {
+    let bytes = fixture("JascoUV_vis.csv");
+    let mut recipe = ImportRecipe::new("Jasco UV-Vis");
+    recipe.separator = Separator::Semicolon;
+    recipe.decimal = DecimalStyle::Comma;
+    recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
+
+    let table = plotyx_import::parse(&bytes, &recipe).unwrap();
+    let find = |key: &str| {
+        table
+            .metadata()
+            .iter()
+            .find(|line| line.key == key)
+            .map(|line| line.value.clone())
+    };
+    assert_eq!(find("XUNITS").as_deref(), Some("NANOMETERS"));
+    assert_eq!(find("TITLE").as_deref(), Some("S13"));
+    assert!(table.metadata().len() > 15);
+    assert!(
+        !table
+            .metadata()
+            .iter()
+            .any(|l| l.value.contains("Extended")),
+        "le pied de page n'est pas conservé par défaut"
+    );
+
+    recipe.keep_footer_metadata = true;
+    let with_footer = plotyx_import::parse(&bytes, &recipe).unwrap();
+    assert!(with_footer.metadata().len() > table.metadata().len());
+
+    recipe.keep_header_metadata = false;
+    recipe.keep_footer_metadata = false;
+    assert!(plotyx_import::parse(&bytes, &recipe)
+        .unwrap()
+        .metadata()
+        .is_empty());
+}

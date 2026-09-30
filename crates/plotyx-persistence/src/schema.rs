@@ -181,6 +181,10 @@ pub(crate) enum KindRecord {
         /// fichier écrit par un tiers et ce que la formule recalculerait ne
         /// survit pas au premier `load`.
         formula: Option<String>,
+        /// Métadonnées du fichier d'origine (`ColumnMeta::file_metadata`),
+        /// paires clé / valeur dans l'ordre. Absentes des fichiers écrits
+        /// avant ce champ : `KindRecordKnown` les ramène à une liste vide.
+        file_metadata: Vec<(String, String)>,
     },
     /// Graphe.
     Graph {
@@ -247,6 +251,8 @@ enum KindRecordKnown {
         version: u64,
         #[serde(default)]
         formula: Option<String>,
+        #[serde(default)]
+        file_metadata: Vec<(String, String)>,
     },
     Graph {
         label: String,
@@ -289,6 +295,7 @@ impl From<KindRecordKnown> for KindRecord {
                 values,
                 version,
                 formula,
+                file_metadata,
             } => KindRecord::Column {
                 column_type,
                 role,
@@ -299,6 +306,7 @@ impl From<KindRecordKnown> for KindRecord {
                 values,
                 version,
                 formula,
+                file_metadata,
             },
             KindRecordKnown::Graph {
                 label,
@@ -365,6 +373,7 @@ enum KindRecordRef<'a> {
         values: &'a ValuesRecord,
         version: u64,
         formula: &'a Option<String>,
+        file_metadata: &'a Vec<(String, String)>,
     },
     Graph {
         label: &'a str,
@@ -414,6 +423,7 @@ impl Serialize for KindRecord {
                 values,
                 version,
                 formula,
+                file_metadata,
             } => KindRecordRef::Column {
                 column_type: *column_type,
                 role: *role,
@@ -424,6 +434,7 @@ impl Serialize for KindRecord {
                 values,
                 version: *version,
                 formula,
+                file_metadata,
             }
             .serialize(serializer),
             KindRecord::Graph {

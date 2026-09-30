@@ -42,6 +42,23 @@ pub struct ImportRecipe {
     /// retirer un nombre fixe de lignes en fin de fichier.
     #[serde(default)]
     pub data_end: DataEnd,
+    /// Conserver l'en-tête du fichier comme métadonnées de chaque colonne
+    /// (vrai par défaut : tout est conservé). Voir [`crate::metadata`].
+    #[serde(default = "default_true")]
+    pub keep_header_metadata: bool,
+    /// Conserver aussi le pied de page (les lignes après la fin des données,
+    /// [`DataEnd`]) comme métadonnées. Faux par défaut.
+    #[serde(default)]
+    pub keep_footer_metadata: bool,
+    /// Clés ou sections à ne **pas** conserver (nom de clé, ou titre de
+    /// section entre crochets : toute la section est alors écartée),
+    /// comparés sans casse ni bordures blanches.
+    #[serde(default)]
+    pub excluded_metadata: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Fin de la zone de données d'un fichier. Les lignes qui suivent la coupure
@@ -196,6 +213,9 @@ impl ImportRecipe {
             skip_chars: 0,
             preview_lines: default_preview_lines(),
             data_end: DataEnd::default(),
+            keep_header_metadata: true,
+            keep_footer_metadata: false,
+            excluded_metadata: Vec::new(),
         }
     }
 }
@@ -219,6 +239,9 @@ mod tests {
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
         assert_eq!(recipe.data_end, DataEnd::Auto);
+        assert!(recipe.keep_header_metadata);
+        assert!(!recipe.keep_footer_metadata);
+        assert!(recipe.excluded_metadata.is_empty());
     }
 
     #[test]
@@ -245,6 +268,9 @@ mod tests {
             skip_chars: 5,
             preview_lines: 50,
             data_end: DataEnd::Marker("##### Extended".into()),
+            keep_header_metadata: false,
+            keep_footer_metadata: true,
+            excluded_metadata: vec!["DATE".into()],
         };
         let json = serde_json::to_string(&recipe).unwrap();
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();
@@ -274,5 +300,6 @@ mod tests {
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
         assert_eq!(recipe.data_end, DataEnd::Auto);
+        assert!(recipe.keep_header_metadata, "tout est conservé par défaut");
     }
 }

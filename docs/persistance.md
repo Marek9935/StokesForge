@@ -31,6 +31,11 @@ ouvertes. `x`/`y`/`width`/`height` y restent toujours la géométrie
 est écrite `Open`) et la position d'une fenêtre OS détachée non plus. `view`
 absent = disposition initiale par défaut ; un mode inconnu se lit `Closed`.
 
+Les colonnes portent aussi `file_metadata` (issue #5) : les lignes clé / valeur
+de l'en-tête du fichier importé (et du pied de page si la recette le demande),
+dans l'ordre, sections comprises. Absent = liste vide ; aucune rétrocompatibilité
+n'est exigée en développement.
+
 ## Le format ne s'écrit pas dans le modèle
 
 `plotyx-core` ne dérive aucun `Serialize`/`Deserialize`. Ce crate définit ses

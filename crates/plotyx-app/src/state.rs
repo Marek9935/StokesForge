@@ -304,6 +304,14 @@ pub enum Action {
         /// Classeur sous le curseur au moment du dépôt, s'il y en avait un.
         target_book: Option<NodeId>,
     },
+    /// Ouvre la fenêtre (lecture seule) des métadonnées de fichier de
+    /// `column` — clic sur la ligne « Métadonnées » de l'en-tête.
+    ViewColumnMetadata {
+        /// Colonne dont on consulte les métadonnées.
+        column: NodeId,
+    },
+    /// Ferme la fenêtre des métadonnées.
+    CloseColumnMetadata,
     /// Crée un graphe à partir des colonnes sélectionnées d'une feuille de
     /// classeur — menu contextuel de l'en-tête de colonne. Le nouveau graphe
     /// est ajouté dans le même dossier parent que le classeur ([`Command::
@@ -1553,6 +1561,9 @@ pub struct AppState {
     /// PlotYx : l'état ne lance aucun processus (testable sans fenêtre), la
     /// couche fenêtre les vide par [`AppState::take_projects_to_open`].
     projects_to_open: Vec<PathBuf>,
+    /// Colonne dont la fenêtre des métadonnées de fichier est ouverte
+    /// (lecture seule, transitoire : jamais dans l'historique).
+    metadata_view: Option<NodeId>,
     /// Texte de la zone de script.
     script_source: String,
     /// Sortie de la dernière exécution de script, s'il y en a eu une.
@@ -1615,6 +1626,7 @@ impl AppState {
             delete_repeat: None,
             import_state: None,
             projects_to_open: Vec::new(),
+            metadata_view: None,
             script_source: String::new(),
             script_output: None,
             #[cfg(feature = "python")]
@@ -3079,6 +3091,8 @@ impl AppState {
                 paths,
             } => self.import_files(destination, recipe, paths),
             Action::DropFiles { paths, target_book } => self.drop_files(paths, target_book),
+            Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
+            Action::CloseColumnMetadata => self.metadata_view = None,
             Action::PlotColumns {
                 sheet,
                 columns,
@@ -3313,6 +3327,27 @@ impl AppState {
             if let Some(import) = &mut self.import_state {
                 import.paths = bad;
             }
+        }
+    }
+
+    /// Colonne dont la fenêtre des métadonnées est ouverte, s'il y en a une.
+    pub fn column_metadata_view(&self) -> Option<NodeId> {
+        self.metadata_view
+    }
+
+    /// Résumé de la case « Métadonnées » de l'en-tête (« 23 clés »), vide si
+    /// la colonne n'en porte pas. Les titres de section ne comptent pas.
+    pub fn file_metadata_summary(&self, column: NodeId) -> String {
+        let count = self
+            .column_meta(column)
+            .file_metadata
+            .iter()
+            .filter(|line| !line.is_section())
+            .count();
+        match count {
+            0 => String::new(),
+            1 => "1 clé".to_string(),
+            n => format!("{n} clés"),
         }
     }
 
@@ -4540,6 +4575,17 @@ impl AppState {
                     long_name,
                     unit: parsed_column.unit.clone().unwrap_or_default(),
                     comment: parsed_column.comment.clone().unwrap_or_default(),
+                    // Métadonnées du fichier, copiées sur chaque colonne :
+                    // plusieurs fichiers dans une même feuille gardent
+                    // chacun les leurs (issue #5).
+                    file_metadata: table
+                        .metadata()
+                        .iter()
+                        .map(|line| plotyx_core::MetaLine {
+                            key: line.key.clone(),
+                            value: line.value.clone(),
+                        })
+                        .collect(),
                     // La première colonne importée est l'abscisse ; la
                     // désignation fine relève de l'étape « Colonnes ».
                     role: if index == 0 {

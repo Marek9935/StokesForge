@@ -206,3 +206,17 @@ l'en-tête, N lignes avant la fin. La règle vit dans `data_end.rs`, appelée pa
 `footer_skip_lines` s'applique d'abord. Non fait : conserver le pied dans les
 métadonnées des colonnes (dépend de #5), clic droit sur la ligne de coupure et
 étape « Colonnes » de l'assistant (#6).
+
+## Métadonnées de fichier par colonne (issue #5)
+
+`ImportRecipe::keep_header_metadata` (vrai), `keep_footer_metadata` (faux) et
+`excluded_metadata` (clés ou sections écartées) pilotent `ParsedTable::metadata()`
+(`crate::metadata`, lignes clé / valeur, sections `[...]`, lignes sans clé
+gardées telles quelles). `plotyx-app` les copie dans `ColumnMeta::file_metadata`
+de chaque colonne importée — dans la macro « Importer », sans commande
+d'édition : lecture seule. Affichage : ligne « Metadata » de l'en-tête (« 📋 N
+clés »), clic → fenêtre modale de consultation (`column_metadata_window`).
+Non fait : masquer/afficher la ligne comme les autres lignes d'en-tête (il n'y
+a pas encore de mécanisme pour celles-ci), la sélection par clé dans l'étape
+« Métadonnées » de l'assistant (#6), aucun remplissage automatique des unités
+(décidé).

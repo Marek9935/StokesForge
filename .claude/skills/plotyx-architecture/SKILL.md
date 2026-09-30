@@ -1,6 +1,7 @@
 ---
 name: plotyx-architecture
-description: Répondre aux questions sur l'architecture globale de PlotYx — découpage en crates, rôle de chacun, acteur de session, commandes annulables, pipeline de rendu, pont Python, format `.plx`, invariants, et « où vit X ? ». À utiliser dès que la question est « comment ça marche », « pourquoi c'est découpé comme ça », « où se trouve… », « qu'est-ce que fait ce crate », « pourquoi ce choix plutôt qu'un autre », « c'est quoi un acteur / une commande / un invariant ». La réponse s'adresse à un **chimiste** : bonne connaissance de Python, aucune de Rust, bases de code limitées — expliquer par analogies Python, sans jargon Rust non traduit.
+description: >-
+  Répondre aux questions sur l'architecture globale de PlotYx — découpage en crates, rôle de chacun, acteur de session, commandes annulables, pipeline de rendu, pont Python, format `.plx`, invariants, et « où vit X ? ». À utiliser dès que la question est « comment ça marche », « pourquoi c'est découpé comme ça », « où se trouve… », « qu'est-ce que fait ce crate », « pourquoi ce choix plutôt qu'un autre », « c'est quoi un acteur / une commande / un invariant ». La réponse s'adresse à un **chimiste** : bonne connaissance de Python, aucune de Rust, bases de code limitées — expliquer par analogies Python, sans jargon Rust non traduit.
 ---
 
 # Répondre sur l'architecture de PlotYx

@@ -5439,3 +5439,82 @@ fn a_new_sheet_starts_with_an_x_and_a_y_column() {
     state.dispatch(Action::Undo);
     assert_eq!(state.worksheets_of(book).len(), before);
 }
+
+// -- Métadonnées de fichier par colonne (issue #5) --
+
+/// L'import garde l'en-tête du fichier, clé / valeur, sur chaque colonne ; la
+/// fenêtre de consultation s'ouvre et se ferme sans toucher à l'historique ;
+/// un seul Ctrl+Z retire l'import et ses métadonnées.
+#[test]
+fn import_keeps_file_metadata_on_every_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("jasco.csv");
+    std::fs::write(
+        &file,
+        "TITLE;S13\n[Measurement Information]\nXUNITS;NANOMETERS\nXYDATA\n800;1\n799;2\n",
+    )
+    .unwrap();
+    let mut recipe = ImportRecipe::new("Jasco");
+    recipe.separator = Separator::Semicolon;
+    recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
+
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: vec![file],
+    });
+
+    let sheet = sheet_named(state.tree(), "jasco");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(columns.len(), 2);
+    for (column, ..) in &columns {
+        let lines = state.column_meta(*column).file_metadata;
+        let keys: Vec<&str> = lines.iter().map(|l| l.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["TITLE", "[Measurement Information]", "XUNITS", ""]
+        );
+        assert_eq!(
+            lines[3].value, "XYDATA",
+            "ligne sans clé gardée telle quelle"
+        );
+        assert_eq!(lines[2].value, "NANOMETERS");
+        assert!(lines[1].is_section());
+    }
+    assert_eq!(state.file_metadata_summary(columns[0].0), "3 clés");
+
+    let revision = state.revision();
+    state.dispatch(Action::ViewColumnMetadata {
+        column: columns[0].0,
+    });
+    assert_eq!(state.column_metadata_view(), Some(columns[0].0));
+    state.dispatch(Action::CloseColumnMetadata);
+    assert_eq!(state.column_metadata_view(), None);
+    assert_eq!(
+        state.revision(),
+        revision,
+        "consulter ne change pas le modèle"
+    );
+
+    state.dispatch(Action::Undo);
+    assert!(state
+        .worksheets_of(book)
+        .iter()
+        .all(|(id, _)| state.tree().node(*id).unwrap().name() != "jasco"));
+}
+
+/// Une colonne saisie à la main n'a pas de métadonnées : case vide.
+#[test]
+fn a_hand_made_column_has_no_file_metadata() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddWorkbook);
+    let root = state.tree().root();
+    let book = *state.tree().node(root).unwrap().children().last().unwrap();
+    let sheet = state.worksheets_of(book)[0].0;
+    let column = state.visible_columns(sheet)[0].0;
+    assert!(state.column_meta(column).file_metadata.is_empty());
+    assert_eq!(state.file_metadata_summary(column), "");
+}

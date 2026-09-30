@@ -507,8 +507,8 @@ const HEADER_SUBROW_HEIGHT: f32 = 18.0;
 /// principal de la colonne.
 const HEADER_LONGNAME_HEIGHT: f32 = 20.0;
 /// Hauteur totale de l'en-tête empilé de la grille docquée (lettre, nom
-/// long, unité, commentaire, formule).
-const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 4.0 * HEADER_SUBROW_HEIGHT;
+/// long, unité, commentaire, formule, métadonnées).
+const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 5.0 * HEADER_SUBROW_HEIGHT;
 /// Hauteur fixe du panneau des onglets de feuille sous la grille.
 /// [`book_contents`] la réserve avant de construire la table : la hauteur
 /// intrinsèque de cette dernière ne peut plus repousser les onglets hors
@@ -2412,6 +2412,7 @@ impl eframe::App for PlotyxApp {
         // transitoire que la fenêtre d'import, peinte tant que
         // `self.state.plot_settings()` est `Some`.
         plot_settings_window(&ctx, &mut self.state);
+        column_metadata_window(&ctx, &self.state, &mut actions);
         if let Some(action) = finish_file_drop(&ctx) {
             actions.push(action);
         }
@@ -4612,6 +4613,47 @@ fn column_header_widget(
             HEADER_SUBROW_HEIGHT,
             is_column_selected,
         );
+        metadata_cell_widget(ui, state, actions, column);
+    });
+}
+
+/// Case « Métadonnées » de l'en-tête : le résumé des métadonnées du fichier
+/// d'origine (« 23 clés »), en lecture seule. Un clic ouvre la fenêtre qui les
+/// liste ([`column_metadata_window`]). Hors sélection de champ : il n'y a rien
+/// à copier, effacer ni éditer.
+fn metadata_cell_widget(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+    column: NodeId,
+) {
+    ui.scope(|ui| {
+        ui.set_min_height(HEADER_SUBROW_HEIGHT);
+        ui.set_max_height(HEADER_SUBROW_HEIGHT);
+        let rect = ui.available_rect_before_wrap();
+        header_row_separator(ui, rect);
+        let summary = state.file_metadata_summary(column);
+        if summary.is_empty() {
+            return;
+        }
+        let response = ui.interact(
+            rect,
+            ui.id().with(("plotyx_metadata_cell", column.raw())),
+            egui::Sense::click(),
+        );
+        ui.put(
+            rect,
+            egui::Label::new(
+                egui::RichText::new(format!("📋 {summary}"))
+                    .color(crate::theme::gutter_text_color()),
+            )
+            .selectable(false)
+            .truncate(),
+        );
+        if response.clicked() {
+            actions.push(Action::ViewColumnMetadata { column });
+        }
+        response.on_hover_text("Métadonnées du fichier importé — cliquer pour consulter");
     });
 }
 
@@ -4878,6 +4920,23 @@ fn row_number_header_widget(
             HEADER_SUBROW_HEIGHT,
             "F(x)=",
         );
+        ui.scope(|ui| {
+            ui.set_min_height(HEADER_SUBROW_HEIGHT);
+            ui.set_max_height(HEADER_SUBROW_HEIGHT);
+            let rect = ui.available_rect_before_wrap();
+            ui.painter()
+                .rect_filled(rect, 0.0, gutter_fill(false, false));
+            header_row_separator(ui, rect);
+            ui.put(
+                rect,
+                egui::Label::new(
+                    egui::RichText::new("Metadata")
+                        .strong()
+                        .color(crate::theme::gutter_text_color()),
+                )
+                .selectable(false),
+            );
+        });
     });
 }
 
@@ -6357,6 +6416,54 @@ fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
         DialogOutcome::Open => {}
         DialogOutcome::Accept => state.close_plot_settings(),
         DialogOutcome::Cancel => state.cancel_plot_settings(),
+    }
+}
+
+/// Fenêtre de consultation des métadonnées de fichier d'une colonne (issue
+/// #5) : les lignes clé / valeur, sections comprises, en lecture seule. Même
+/// brique modale que les propriétés du graphe ; « Valider » et « Annuler »
+/// la ferment sans rien changer.
+fn column_metadata_window(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
+    let Some(column) = state.column_metadata_view() else {
+        return;
+    };
+    let meta = state.column_meta(column);
+    let lines = meta.file_metadata;
+    let title = if meta.long_name.is_empty() {
+        "Métadonnées du fichier".to_string()
+    } else {
+        format!("Métadonnées — {}", meta.long_name)
+    };
+    let outcome = modal_dialog(
+        ctx,
+        egui::Id::new("plotyx_column_metadata"),
+        &title,
+        egui::vec2(520.0, 420.0),
+        |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::Grid::new("plotyx_column_metadata_grid")
+                    .num_columns(2)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for line in &lines {
+                            if line.is_section() {
+                                ui.label(egui::RichText::new(&line.key).strong());
+                                ui.label("");
+                            } else if line.key.is_empty() {
+                                ui.label("");
+                                ui.label(&line.value);
+                            } else {
+                                ui.label(&line.key);
+                                ui.label(&line.value);
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+        },
+    );
+    if outcome != DialogOutcome::Open {
+        actions.push(Action::CloseColumnMetadata);
     }
 }
 
