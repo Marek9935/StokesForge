@@ -5518,3 +5518,230 @@ fn a_hand_made_column_has_no_file_metadata() {
     assert!(state.column_meta(column).file_metadata.is_empty());
     assert_eq!(state.file_metadata_summary(column), "");
 }
+
+// -- Assistant d'import en étapes (issue #6) --
+
+fn jasco_like(dir: &std::path::Path) -> std::path::PathBuf {
+    let file = dir.join("jasco.csv");
+    std::fs::write(
+        &file,
+        "TITLE;S13\nXUNITS;NANOMETERS\nXYDATA\n800;1\n799;2\n798;3\n\nData points;3\n",
+    )
+    .unwrap();
+    file
+}
+
+/// Les étapes s'enchaînent dans l'ordre, bornées aux deux bouts.
+#[test]
+fn import_wizard_steps_go_forward_and_back_within_bounds() {
+    use plotyx_app::state::ImportStep;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    assert_eq!(state.import_state().unwrap().step, ImportStep::Files);
+    state.import_step_back();
+    assert_eq!(state.import_state().unwrap().step, ImportStep::Files);
+    for _ in 0..10 {
+        state.import_step_forward();
+    }
+    assert_eq!(state.import_state().unwrap().step, ImportStep::Destination);
+    state.import_step_back();
+    assert_eq!(state.import_state().unwrap().step, ImportStep::Metadata);
+}
+
+/// Le fichier n'est lu qu'une fois : après sa suppression du disque, l'aperçu
+/// reste servi par le cache (plus de relecture à chaque image).
+#[test]
+fn import_preview_reads_the_file_only_once() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let file = jasco_like(dir.path());
+    state.open_import(None::<NodeId>);
+    state.set_import_paths(vec![file.clone()]);
+    assert!(matches!(state.import_line_preview(), Some(Ok(_))));
+    std::fs::remove_file(&file).unwrap();
+    assert!(
+        matches!(state.import_line_preview(), Some(Ok(_))),
+        "l'aperçu vient du cache, pas du disque"
+    );
+    assert_eq!(state.import_encoding(), Some("UTF-8"));
+}
+
+/// Plusieurs fichiers : on en retire un, on choisit celui qu'on prévisualise,
+/// et chacun porte son propre état (lignes lues ou erreur) avant l'import.
+#[test]
+fn import_wizard_lists_files_with_their_status_and_previews_the_chosen_one() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let good = jasco_like(dir.path());
+    let missing = dir.path().join("absent.csv");
+    state.open_import(None::<NodeId>);
+    state.set_import_paths(vec![good.clone(), missing.clone()]);
+
+    let statuses = state.import_file_statuses();
+    assert!(statuses[0].1.is_ok());
+    assert!(
+        statuses[1].1.is_err(),
+        "l'erreur est connue avant d'importer"
+    );
+
+    state.set_import_preview_index(1);
+    assert!(matches!(state.import_line_preview(), Some(Err(_))));
+    state.remove_import_path(1);
+    assert_eq!(state.import_state().unwrap().paths, vec![good]);
+    assert!(matches!(state.import_line_preview(), Some(Ok(_))));
+}
+
+/// Les deux réglages d'en-tête sont ramenés à un seul à l'ouverture d'un
+/// modèle ; la suppression d'un modèle demande une confirmation.
+#[test]
+fn import_wizard_unifies_header_and_confirms_recipe_deletion() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    {
+        let import = state.import_state_mut().unwrap();
+        import.recipe.header = HeaderSkip::Lines(3);
+        import.save_as_name = "Trois lignes".into();
+    }
+    state.save_import_recipe();
+    state.open_import(None::<NodeId>);
+    state.select_import_recipe("Trois lignes");
+    let recipe = &state.import_state().unwrap().recipe;
+    assert_eq!(recipe.header, HeaderSkip::None);
+    assert_eq!(recipe.header_layout.main_header_lines, 3);
+    assert!(!state.import_recipe_modified());
+
+    state.import_state_mut().unwrap().recipe.skip_chars = 2;
+    assert!(
+        state.import_recipe_modified(),
+        "modifié sans être enregistré"
+    );
+
+    state.request_delete_import_recipe("Trois lignes");
+    state.cancel_delete_import_recipe();
+    assert!(state
+        .import_state()
+        .unwrap()
+        .store
+        .recipes()
+        .iter()
+        .any(|r| r.name == "Trois lignes"));
+    state.request_delete_import_recipe("Trois lignes");
+    state.confirm_delete_import_recipe();
+    assert!(state
+        .import_state()
+        .unwrap()
+        .store
+        .recipes()
+        .iter()
+        .all(|r| r.name != "Trois lignes"));
+}
+
+/// Le clic droit sur l'aperçu règle l'en-tête, la ligne des unités et la fin
+/// des données.
+#[test]
+fn import_preview_line_actions_adjust_the_recipe() {
+    use plotyx_app::state::ImportLineAction;
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let file = jasco_like(dir.path());
+    state.open_import(None::<NodeId>);
+    state.set_import_paths(vec![file]);
+    {
+        let recipe = &mut state.import_state_mut().unwrap().recipe;
+        recipe.separator = Separator::Semicolon;
+        recipe.header = HeaderSkip::None;
+        recipe.header_layout = Default::default();
+    }
+
+    // Les données commencent à la ligne 4 : trois lignes d'en-tête.
+    state.import_line_action(ImportLineAction::DataStartsHere, 4);
+    assert_eq!(
+        state
+            .import_state()
+            .unwrap()
+            .recipe
+            .header_layout
+            .main_header_lines,
+        3
+    );
+    assert_eq!(state.import_preview().unwrap().unwrap().row_count(), 3);
+
+    // Fin des données à la ligne 6 (la dernière donnée est la ligne 6).
+    state.import_line_action(ImportLineAction::DataEndsHere, 6);
+    assert_eq!(state.import_preview().unwrap().unwrap().row_count(), 2);
+
+    state.import_line_action(ImportLineAction::NoAutoCut, 6);
+    assert_eq!(
+        state.import_state().unwrap().recipe.data_end,
+        plotyx_import::DataEnd::None
+    );
+
+    // La ligne 2 donne les unités : elle ouvre le sous-en-tête.
+    state.import_line_action(ImportLineAction::UnitsLine, 2);
+    let recipe = &state.import_state().unwrap().recipe;
+    assert_eq!(recipe.header_layout.main_header_lines, 1);
+    assert_eq!(recipe.header_layout.subheader_lines, 2);
+    assert_eq!(
+        recipe.subheader_roles.unit,
+        Some(plotyx_import::SubheaderLineRange::single(1))
+    );
+}
+
+/// L'étape « Colonnes » : un rôle Ignorer retire la colonne, erreur Y est
+/// posée sur la colonne choisie.
+#[test]
+fn import_column_roles_from_the_wizard_are_applied() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("trois.csv");
+    std::fs::write(&file, "1,10,0.1,7\n2,20,0.2,8\n").unwrap();
+    let mut recipe = ImportRecipe::new("Colonnes");
+    recipe.column_roles = vec![
+        plotyx_import::ColumnRoleChoice::Auto,
+        plotyx_import::ColumnRoleChoice::Y,
+        plotyx_import::ColumnRoleChoice::YError,
+        plotyx_import::ColumnRoleChoice::Ignore,
+    ];
+
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: vec![file],
+    });
+
+    let sheet = sheet_named(state.tree(), "trois");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(columns.len(), 3, "la quatrième colonne est ignorée");
+    assert_eq!(state.column_meta(columns[0].0).role, ColumnRole::X);
+    assert_eq!(state.column_meta(columns[1].0).role, ColumnRole::Y);
+    assert_eq!(state.column_meta(columns[2].0).role, ColumnRole::YError);
+}
+
+/// Un dépôt pendant que l'assistant est ouvert ajoute les fichiers à sa liste.
+#[test]
+fn dropping_files_while_the_wizard_is_open_adds_them_to_its_list() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let file = jasco_like(dir.path());
+    state.open_import(None::<NodeId>);
+    state.dispatch(Action::DropFiles {
+        paths: vec![file.clone()],
+        target_book: None,
+    });
+    assert_eq!(state.import_state().unwrap().paths, vec![file.clone()]);
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: None,
+    });
+    assert_eq!(state.import_state().unwrap().paths.len(), 1, "sans doublon");
+}

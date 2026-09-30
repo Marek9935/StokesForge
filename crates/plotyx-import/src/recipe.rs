@@ -55,6 +55,29 @@ pub struct ImportRecipe {
     /// comparés sans casse ni bordures blanches.
     #[serde(default)]
     pub excluded_metadata: Vec<String>,
+    /// Rôle choisi pour chaque colonne du fichier, par position (étape
+    /// « Colonnes » de l'assistant). Plus court que le nombre de colonnes :
+    /// les colonnes suivantes sont en [`ColumnRoleChoice::Auto`].
+    #[serde(default)]
+    pub column_roles: Vec<ColumnRoleChoice>,
+}
+
+/// Rôle d'une colonne importée, tel que choisi dans l'assistant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum ColumnRoleChoice {
+    /// La première colonne est l'abscisse (X), les autres sont des Y.
+    #[default]
+    Auto,
+    /// Abscisse.
+    X,
+    /// Ordonnée.
+    Y,
+    /// Barre d'erreur en X.
+    XError,
+    /// Barre d'erreur en Y.
+    YError,
+    /// Colonne non importée.
+    Ignore,
 }
 
 fn default_true() -> bool {
@@ -198,6 +221,29 @@ pub struct SubheaderRoles {
 }
 
 impl ImportRecipe {
+    /// Rôle effectif de la colonne `index` : le choix explicite, sinon X pour
+    /// la première colonne et Y pour les suivantes.
+    pub fn column_role(&self, index: usize) -> ColumnRoleChoice {
+        match self.column_roles.get(index).copied().unwrap_or_default() {
+            ColumnRoleChoice::Auto if index == 0 => ColumnRoleChoice::X,
+            ColumnRoleChoice::Auto => ColumnRoleChoice::Y,
+            explicit => explicit,
+        }
+    }
+
+    /// Ramène les deux réglages d'en-tête concurrents (`header` et
+    /// `header_layout`) à un seul : `HeaderSkip::Lines(n)` devient `n` lignes
+    /// d'en-tête principal. `UntilMarker` reste tel quel. Sans effet si le
+    /// découpage structuré est déjà utilisé.
+    pub fn unify_header(&mut self) {
+        if self.header_layout == HeaderLayout::default() {
+            if let HeaderSkip::Lines(n) = self.header {
+                self.header_layout.main_header_lines = n;
+                self.header = HeaderSkip::None;
+            }
+        }
+    }
+
     /// Nouvelle recette aux réglages les plus permissifs.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
@@ -216,6 +262,7 @@ impl ImportRecipe {
             keep_header_metadata: true,
             keep_footer_metadata: false,
             excluded_metadata: Vec::new(),
+            column_roles: Vec::new(),
         }
     }
 }
@@ -245,6 +292,29 @@ mod tests {
     }
 
     #[test]
+    fn unify_header_turns_lines_into_a_main_header() {
+        let mut recipe = ImportRecipe::new("t");
+        recipe.header = HeaderSkip::Lines(3);
+        recipe.unify_header();
+        assert_eq!(recipe.header, HeaderSkip::None);
+        assert_eq!(recipe.header_layout.main_header_lines, 3);
+        // Déjà structuré, ou marqueur : rien ne bouge.
+        recipe.header = HeaderSkip::UntilMarker("X".into());
+        recipe.unify_header();
+        assert_eq!(recipe.header, HeaderSkip::UntilMarker("X".into()));
+    }
+
+    #[test]
+    fn column_roles_default_to_x_then_y() {
+        let mut recipe = ImportRecipe::new("t");
+        assert_eq!(recipe.column_role(0), ColumnRoleChoice::X);
+        assert_eq!(recipe.column_role(5), ColumnRoleChoice::Y);
+        recipe.column_roles = vec![ColumnRoleChoice::Ignore];
+        assert_eq!(recipe.column_role(0), ColumnRoleChoice::Ignore);
+        assert_eq!(recipe.column_role(1), ColumnRoleChoice::Y);
+    }
+
+    #[test]
     fn round_trip_json() {
         let recipe = ImportRecipe {
             name: "Jasco".into(),
@@ -271,6 +341,7 @@ mod tests {
             keep_header_metadata: false,
             keep_footer_metadata: true,
             excluded_metadata: vec!["DATE".into()],
+            column_roles: vec![ColumnRoleChoice::X, ColumnRoleChoice::Ignore],
         };
         let json = serde_json::to_string(&recipe).unwrap();
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();

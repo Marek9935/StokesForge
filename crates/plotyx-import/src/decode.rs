@@ -44,6 +44,24 @@ pub fn decode_text(bytes: &[u8]) -> Result<Cow<'_, str>, ImportError> {
     Ok(text)
 }
 
+/// Nom de l'encodage que [`decode_text`] retiendrait pour `bytes`, pour
+/// l'afficher dans l'assistant d'import ; `None` pour un fichier binaire.
+pub fn detect_encoding(bytes: &[u8]) -> Option<&'static str> {
+    decode_text(bytes).ok()?;
+    Some(if bytes.starts_with(&[0xFF, 0xFE]) {
+        "UTF-16 (petit-boutiste)"
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        "UTF-16 (gros-boutiste)"
+    } else {
+        let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+        if std::str::from_utf8(body).is_ok() {
+            "UTF-8"
+        } else {
+            "Windows-1252"
+        }
+    })
+}
+
 fn decode_utf16(bytes: &[u8], word: fn([u8; 2]) -> u16) -> Result<Cow<'_, str>, ImportError> {
     let (pairs, odd) = bytes.as_chunks::<2>();
     if !odd.is_empty() {
@@ -129,5 +147,21 @@ mod tests {
             decode_text(b"a\tb\r\n\x0Cc\x1A").unwrap(),
             "a\tb\r\n\x0Cc\x1A"
         );
+    }
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::detect_encoding;
+
+    #[test]
+    fn names_the_encoding() {
+        assert_eq!(detect_encoding(b"a;b\n"), Some("UTF-8"));
+        assert_eq!(detect_encoding(&[b'1', 0xB0, b'C']), Some("Windows-1252"));
+        assert_eq!(
+            detect_encoding(&[0xFF, 0xFE, b'a', 0]),
+            Some("UTF-16 (petit-boutiste)")
+        );
+        assert_eq!(detect_encoding(&[0, 1, 2, 3]), None);
     }
 }

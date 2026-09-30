@@ -220,3 +220,12 @@ Non fait : masquer/afficher la ligne comme les autres lignes d'en-tête (il n'y
 a pas encore de mécanisme pour celles-ci), la sélection par clé dans l'étape
 « Métadonnées » de l'assistant (#6), aucun remplissage automatique des unités
 (décidé).
+
+## Assistant en étapes (issue #6)
+
+`import_window` est maintenant un assistant en six étapes (voir
+`docs/application.md` § « Assistant d'import »). Côté `plotyx-import` :
+`ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignorer retire la colonne à
+l'import), `unify_header`, `detect_encoding`. Le réglage d'en-tête n'expose
+plus la case « Détection automatique » : seul le bouton « Détecter depuis le
+fichier » agit (`HeaderLayout::auto_detect` reste dans la recette, sans effet).

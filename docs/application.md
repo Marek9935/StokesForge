@@ -99,6 +99,22 @@ ouvre à la place la fenêtre d'import pré-remplie. Décision pure :
 `state::file_drop_plan`. Non couvert : le dépôt sur une fenêtre détachée
 (autre viewport) et le comportement réel sous Wayland — à valider à la main.
 
+### Assistant d'import
+
+« Importer… » ouvre un assistant en six étapes façon Origin (`import_window`,
+`ImportStep`) : fichiers et modèle, format, en-tête et fin des données,
+colonnes, métadonnées, destination. L'aperçu du fichier reste à droite à
+toutes les étapes ; un clic droit sur une ligne règle l'import à cet endroit
+(`AppState::import_line_action`). « Terminer » importe dès l'étape 1 avec le
+modèle tel quel. Les octets des fichiers sont lus une fois (cache par chemin,
+`ImportState::bytes`) ; chaque fichier montre avant l'import ses lignes lues ou
+son erreur. L'en-tête est un seul réglage (`ImportRecipe::unify_header` ramène
+`HeaderSkip::Lines` au découpage structuré) ; les rôles de colonne choisis à
+l'étape 4 vivent dans la recette (`column_roles`). Un dépôt de fichiers pendant
+que l'assistant est ouvert les ajoute à sa liste. Non fait : import en tâche de
+fond avec progression, raccourci clavier, fichiers récents et dossier
+mémorisé, lien « Régler l'import… » après un dépôt.
+
 ### Débordement des fenêtres de contenu
 
 Toutes les fenêtres de contenu flottantes et détachées partagent un rectangle

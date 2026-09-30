@@ -68,6 +68,9 @@ use crate::user_colors::UserColors;
 
 /// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
 /// ces valeurs ; elle ne touche jamais l'acteur directement.
+// `ImportFiles` porte une recette d'import entière, bien plus grosse que les
+// autres variantes : l'`Action` est consommée aussitôt, le boîtage n'y gagnerait rien.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     /// Annule la dernière entrée d'historique.
@@ -1435,6 +1438,104 @@ pub struct ImportState {
     /// écraser le nom du modèle chargé tant que « Enregistrer le modèle »
     /// n'a pas été cliqué).
     pub save_as_name: String,
+    /// Étape courante de l'assistant.
+    pub step: ImportStep,
+    /// Fichier montré dans l'aperçu (indice dans `paths`).
+    pub preview_index: usize,
+    /// Modèle dont la suppression attend une confirmation.
+    pub confirm_delete: Option<String>,
+    /// Recette telle qu'elle était au chargement du modèle : sert à dire
+    /// qu'elle a été modifiée sans être enregistrée.
+    baseline: plotyx_import::ImportRecipe,
+    /// Octets des fichiers choisis, lus une seule fois par chemin (le fichier
+    /// n'est plus relu à chaque image).
+    bytes: std::cell::RefCell<ImportBytesCache>,
+}
+
+/// Réglage proposé par le clic droit sur une ligne de l'aperçu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportLineAction {
+    /// « Les données commencent ici ».
+    DataStartsHere,
+    /// « Cette ligne donne les unités ».
+    UnitsLine,
+    /// « Fin des données ici » (la ligne est la première du pied de page).
+    DataEndsHere,
+    /// « Annuler la coupure automatique ».
+    NoAutoCut,
+}
+
+/// Octets lus par chemin (ou le message d'échec de lecture).
+type ImportBytesCache = std::collections::HashMap<PathBuf, Result<Arc<Vec<u8>>, String>>;
+
+/// Les six étapes de l'assistant d'import, façon assistant ASCII d'Origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ImportStep {
+    /// Fichier(s) et modèle.
+    Files,
+    /// Séparateur et décimale.
+    Format,
+    /// En-tête et fin des données.
+    Header,
+    /// Désignation colonne par colonne.
+    Columns,
+    /// Métadonnées à conserver.
+    Metadata,
+    /// Destination et enregistrement du modèle.
+    Destination,
+}
+
+impl ImportStep {
+    /// Toutes les étapes, dans l'ordre.
+    pub const ALL: [ImportStep; 6] = [
+        ImportStep::Files,
+        ImportStep::Format,
+        ImportStep::Header,
+        ImportStep::Columns,
+        ImportStep::Metadata,
+        ImportStep::Destination,
+    ];
+
+    /// Titre affiché.
+    pub fn title(self) -> &'static str {
+        match self {
+            ImportStep::Files => "Fichiers et modèle",
+            ImportStep::Format => "Format",
+            ImportStep::Header => "En-tête et fin des données",
+            ImportStep::Columns => "Colonnes",
+            ImportStep::Metadata => "Métadonnées",
+            ImportStep::Destination => "Destination",
+        }
+    }
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|step| *step == self).unwrap_or(0)
+    }
+
+    /// Étape suivante (la dernière reste elle-même).
+    pub fn next(self) -> Self {
+        Self::ALL[(self.index() + 1).min(Self::ALL.len() - 1)]
+    }
+
+    /// Étape précédente (la première reste elle-même).
+    pub fn previous(self) -> Self {
+        Self::ALL[self.index().saturating_sub(1)]
+    }
+}
+
+/// Une colonne du résultat d'import, pour l'étape « Colonnes ».
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportColumnPreview {
+    /// Nom (ligne de noms de colonnes) ou vide.
+    pub name: String,
+    /// Nom long (sous-en-tête) ou vide.
+    pub long_name: String,
+    /// Unité (sous-en-tête) ou vide.
+    pub unit: String,
+    /// Colonne à types mixtes (texte conservé).
+    pub mixed: bool,
+    /// Premières valeurs, mises en forme.
+    pub samples: Vec<String>,
 }
 
 /// Nature d'une fenêtre du [`ProjectTreeNode`] montré par le panneau Project
@@ -3275,6 +3376,8 @@ impl AppState {
             .first()
             .cloned()
             .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
+        let mut recipe = recipe;
+        recipe.unify_header();
         let save_as_name = recipe.name.clone();
         self.import_state = Some(ImportState {
             active_book,
@@ -3282,10 +3385,15 @@ impl AppState {
                 ImportDestination::NewBookForAll,
                 ImportDestination::ActiveBook,
             ),
-            recipe,
             paths: Vec::new(),
             store,
             save_as_name,
+            step: ImportStep::Files,
+            preview_index: 0,
+            confirm_delete: None,
+            baseline: recipe.clone(),
+            recipe,
+            bytes: Default::default(),
         });
     }
 
@@ -3298,6 +3406,12 @@ impl AppState {
     fn drop_files(&mut self, paths: Vec<PathBuf>, target_book: Option<NodeId>) {
         let plan = file_drop_plan(&paths, target_book);
         self.projects_to_open.extend(plan.projects);
+        // L'assistant est ouvert : le dépôt lui ajoute les fichiers au lieu
+        // de les importer par-dessus.
+        if self.import_state.is_some() {
+            self.add_import_paths(plan.data);
+            return;
+        }
         if plan.data.is_empty() {
             return;
         }
@@ -3367,6 +3481,7 @@ impl AppState {
     pub fn new_import_recipe(&mut self) {
         if let Some(state) = &mut self.import_state {
             state.recipe = plotyx_import::ImportRecipe::new("Sans titre");
+            state.baseline = state.recipe.clone();
             state.save_as_name = state.recipe.name.clone();
         }
     }
@@ -3377,7 +3492,10 @@ impl AppState {
     pub fn select_import_recipe(&mut self, name: &str) {
         if let Some(state) = &mut self.import_state {
             if let Some(recipe) = state.store.recipes().iter().find(|r| r.name == name) {
+                let mut recipe = recipe.clone();
+                recipe.unify_header();
                 state.recipe = recipe.clone();
+                state.baseline = recipe.clone();
                 state.save_as_name = recipe.name.clone();
             }
         }
@@ -3390,6 +3508,238 @@ impl AppState {
     pub fn set_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
         if let Some(state) = &mut self.import_state {
             state.paths = paths;
+            state.preview_index = 0;
+            state.bytes.borrow_mut().clear();
+        }
+    }
+
+    /// Ajoute `paths` aux fichiers de l'assistant (dépôt pendant qu'il est
+    /// ouvert, « Ajouter des fichiers… »), sans doublon.
+    pub fn add_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
+        if let Some(state) = &mut self.import_state {
+            for path in paths {
+                if !state.paths.contains(&path) {
+                    state.paths.push(path);
+                }
+            }
+        }
+    }
+
+    /// Retire le fichier `index` de la liste de l'assistant.
+    pub fn remove_import_path(&mut self, index: usize) {
+        if let Some(state) = &mut self.import_state {
+            if index < state.paths.len() {
+                let path = state.paths.remove(index);
+                state.bytes.borrow_mut().remove(&path);
+                state.preview_index = state.preview_index.min(state.paths.len().saturating_sub(1));
+            }
+        }
+    }
+
+    /// Choisit le fichier montré dans l'aperçu.
+    pub fn set_import_preview_index(&mut self, index: usize) {
+        if let Some(state) = &mut self.import_state {
+            if index < state.paths.len() {
+                state.preview_index = index;
+            }
+        }
+    }
+
+    /// Passe à l'étape suivante / précédente de l'assistant.
+    pub fn import_step_forward(&mut self) {
+        if let Some(state) = &mut self.import_state {
+            state.step = state.step.next();
+        }
+    }
+
+    /// Voir [`AppState::import_step_forward`].
+    pub fn import_step_back(&mut self) {
+        if let Some(state) = &mut self.import_state {
+            state.step = state.step.previous();
+        }
+    }
+
+    /// Octets du fichier `path`, lus une seule fois puis gardés : l'aperçu
+    /// est recalculé à chaque image, le disque ne doit pas l'être.
+    fn import_bytes(&self, path: &std::path::Path) -> Result<Arc<Vec<u8>>, String> {
+        let state = self.import_state.as_ref().ok_or("aucun import en cours")?;
+        let mut cache = state.bytes.borrow_mut();
+        cache
+            .entry(path.to_path_buf())
+            .or_insert_with(|| {
+                std::fs::read(path)
+                    .map(Arc::new)
+                    .map_err(|err| format!("{}: {err}", path.display()))
+            })
+            .clone()
+    }
+
+    /// Fichier montré dans l'aperçu.
+    fn import_preview_path(&self) -> Option<PathBuf> {
+        let state = self.import_state.as_ref()?;
+        state
+            .paths
+            .get(state.preview_index)
+            .or_else(|| state.paths.first())
+            .cloned()
+    }
+
+    /// Encodage détecté du fichier montré dans l'aperçu.
+    pub fn import_encoding(&self) -> Option<&'static str> {
+        let path = self.import_preview_path()?;
+        let bytes = self.import_bytes(&path).ok()?;
+        plotyx_import::detect_encoding(&bytes)
+    }
+
+    /// Ce que l'import donnerait pour chaque fichier choisi, avec la recette
+    /// courante : `Ok` avec le nombre de lignes, ou l'erreur qui l'attend —
+    /// montré **avant** le clic sur Importer.
+    pub fn import_file_statuses(&self) -> Vec<(PathBuf, Result<usize, String>)> {
+        let Some(state) = self.import_state.as_ref() else {
+            return Vec::new();
+        };
+        state
+            .paths
+            .iter()
+            .map(|path| {
+                let status = self.import_bytes(path).and_then(|bytes| {
+                    plotyx_import::parse(&bytes, &state.recipe)
+                        .map(|table| table.row_count())
+                        .map_err(|err| err.to_string())
+                });
+                (path.clone(), status)
+            })
+            .collect()
+    }
+
+    /// Le modèle courant diffère de celui qui a été chargé ou enregistré.
+    pub fn import_recipe_modified(&self) -> bool {
+        self.import_state
+            .as_ref()
+            .is_some_and(|state| state.recipe != state.baseline)
+    }
+
+    /// Demande la suppression du modèle `name` (elle n'a lieu qu'à la
+    /// confirmation, [`AppState::confirm_delete_import_recipe`]).
+    pub fn request_delete_import_recipe(&mut self, name: &str) {
+        if let Some(state) = &mut self.import_state {
+            state.confirm_delete = Some(name.to_string());
+        }
+    }
+
+    /// Annule la demande de suppression.
+    pub fn cancel_delete_import_recipe(&mut self) {
+        if let Some(state) = &mut self.import_state {
+            state.confirm_delete = None;
+        }
+    }
+
+    /// Supprime le modèle dont la suppression a été demandée.
+    pub fn confirm_delete_import_recipe(&mut self) {
+        let name = self
+            .import_state
+            .as_mut()
+            .and_then(|state| state.confirm_delete.take());
+        if let Some(name) = name {
+            self.delete_import_recipe(&name);
+        }
+    }
+
+    /// Colonnes du résultat d'import du fichier montré, avec leurs premières
+    /// valeurs — étape « Colonnes ».
+    pub fn import_column_previews(&self) -> Option<Result<Vec<ImportColumnPreview>, String>> {
+        let table = self.import_preview()?;
+        Some(table.map(|table| {
+            table
+                .columns
+                .iter()
+                .map(|column| ImportColumnPreview {
+                    name: column.name.clone().unwrap_or_default(),
+                    long_name: column.long_name.clone().unwrap_or_default(),
+                    unit: column.unit.clone().unwrap_or_default(),
+                    mixed: column.texts.iter().any(Option::is_some),
+                    samples: column
+                        .values
+                        .iter()
+                        .zip(&column.texts)
+                        .take(3)
+                        .map(|(value, text)| match text {
+                            Some(text) => text.clone(),
+                            None if value.is_nan() => String::new(),
+                            None => format!("{value}"),
+                        })
+                        .collect(),
+                })
+                .collect()
+        }))
+    }
+
+    /// Toutes les métadonnées que le fichier montré pourrait fournir (en-tête
+    /// et pied de page, sans exclusion) — étape « Métadonnées », pour cocher
+    /// ce qu'on garde.
+    pub fn import_available_metadata(&self) -> Vec<plotyx_import::MetadataLine> {
+        let Some(state) = self.import_state.as_ref() else {
+            return Vec::new();
+        };
+        let Some(path) = self.import_preview_path() else {
+            return Vec::new();
+        };
+        let Ok(bytes) = self.import_bytes(&path) else {
+            return Vec::new();
+        };
+        let mut recipe = state.recipe.clone();
+        recipe.keep_header_metadata = true;
+        recipe.keep_footer_metadata = true;
+        recipe.excluded_metadata.clear();
+        plotyx_import::parse(&bytes, &recipe)
+            .map(|table| table.metadata().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Réglage depuis un clic droit sur la ligne `number` (1-based, numéro
+    /// dans le fichier) de l'aperçu. Les lignes blanches de tête ne comptent
+    /// pas dans l'en-tête (comme à l'import) : le décalage vient de la
+    /// première ligne montrée.
+    pub fn import_line_action(&mut self, action: ImportLineAction, number: usize) {
+        let Some(Ok(preview)) = self.import_line_preview() else {
+            return;
+        };
+        let Some(first) = preview.lines.first().map(|line| line.number) else {
+            return;
+        };
+        let Some(state) = &mut self.import_state else {
+            return;
+        };
+        let recipe = &mut state.recipe;
+        let header_total =
+            recipe.header_layout.main_header_lines + recipe.header_layout.subheader_lines;
+        let data_start = first + header_total + usize::from(recipe.has_column_header_row);
+        let offset = number.saturating_sub(first);
+        match action {
+            ImportLineAction::DataStartsHere => {
+                recipe.header = plotyx_import::HeaderSkip::None;
+                let sub = recipe.header_layout.subheader_lines.min(offset);
+                recipe.header_layout.subheader_lines = sub;
+                recipe.header_layout.main_header_lines = offset - sub;
+                recipe.header_layout.auto_detect = false;
+            }
+            ImportLineAction::UnitsLine => {
+                // La ligne et celles qui la suivent, jusqu'aux données,
+                // forment le sous-en-tête ; la ligne donne les unités.
+                recipe.header = plotyx_import::HeaderSkip::None;
+                let total = header_total.max(offset + 1);
+                recipe.header_layout.main_header_lines = offset;
+                recipe.header_layout.subheader_lines = total - offset;
+                recipe.header_layout.auto_detect = false;
+                recipe.subheader_roles.same_line_name_unit = false;
+                recipe.subheader_roles.unit = Some(plotyx_import::SubheaderLineRange::single(1));
+            }
+            ImportLineAction::DataEndsHere => {
+                if number >= data_start {
+                    recipe.data_end = plotyx_import::DataEnd::LinesAfterHeader(number - data_start);
+                }
+            }
+            ImportLineAction::NoAutoCut => recipe.data_end = plotyx_import::DataEnd::None,
         }
     }
 
@@ -3441,12 +3791,10 @@ impl AppState {
     /// pas multiplier les types d'échec exposés à la fenêtre).
     pub fn import_preview(&self) -> Option<Result<plotyx_import::ParsedTable, String>> {
         let state = self.import_state.as_ref()?;
-        let path = state.paths.first()?;
-        let result = std::fs::read(path)
-            .map_err(|err| format!("{}: {err}", path.display()))
-            .and_then(|bytes| {
-                plotyx_import::parse(&bytes, &state.recipe).map_err(|err| err.to_string())
-            });
+        let path = self.import_preview_path()?;
+        let result = self.import_bytes(&path).and_then(|bytes| {
+            plotyx_import::parse(&bytes, &state.recipe).map_err(|err| err.to_string())
+        });
         Some(result)
     }
 
@@ -3460,12 +3808,10 @@ impl AppState {
     /// dans les mêmes conditions qu'`import_preview`.
     pub fn import_line_preview(&self) -> Option<Result<plotyx_import::FilePreview, String>> {
         let state = self.import_state.as_ref()?;
-        let path = state.paths.first()?;
-        let result = std::fs::read(path)
-            .map_err(|err| format!("{}: {err}", path.display()))
-            .and_then(|bytes| {
-                plotyx_import::preview(&bytes, &state.recipe).map_err(|err| err.to_string())
-            });
+        let path = self.import_preview_path()?;
+        let result = self.import_bytes(&path).and_then(|bytes| {
+            plotyx_import::preview(&bytes, &state.recipe).map_err(|err| err.to_string())
+        });
         Some(result)
     }
 
@@ -3480,12 +3826,12 @@ impl AppState {
         let Some(import) = &self.import_state else {
             return;
         };
-        let Some(path) = import.paths.first().cloned() else {
+        let Some(path) = self.import_preview_path() else {
             self.fail("Choisis un fichier avant de détecter l'en-tête".to_string());
             return;
         };
         let (separator, decimal) = (import.recipe.separator, import.recipe.decimal);
-        match std::fs::read(&path) {
+        match self.import_bytes(&path).map(|bytes| bytes.as_ref().clone()) {
             Ok(bytes) => {
                 let layout = plotyx_import::detect_header_layout(&bytes, separator, decimal);
                 if let Some(import) = &mut self.import_state {
@@ -4535,6 +4881,17 @@ impl AppState {
                 name: file_stem.to_string(),
             });
             for (index, parsed_column) in table.columns.iter().enumerate() {
+                // Rôle choisi à l'étape « Colonnes » de l'assistant : une
+                // colonne « Ignorer » n'est pas importée.
+                let role = match recipe.column_role(index) {
+                    plotyx_import::ColumnRoleChoice::Ignore => continue,
+                    plotyx_import::ColumnRoleChoice::X => ColumnRole::X,
+                    plotyx_import::ColumnRoleChoice::XError => ColumnRole::XError,
+                    plotyx_import::ColumnRoleChoice::YError => ColumnRole::YError,
+                    plotyx_import::ColumnRoleChoice::Y | plotyx_import::ColumnRoleChoice::Auto => {
+                        ColumnRole::Y
+                    }
+                };
                 // Une colonne dont au moins une cellule porte un texte
                 // conservé (`n/a`, un code d'instrument…) devient une
                 // colonne à types mixtes plutôt qu'une colonne numérique qui
@@ -4586,13 +4943,9 @@ impl AppState {
                             value: line.value.clone(),
                         })
                         .collect(),
-                    // La première colonne importée est l'abscisse ; la
-                    // désignation fine relève de l'étape « Colonnes ».
-                    role: if index == 0 {
-                        ColumnRole::X
-                    } else {
-                        ColumnRole::default()
-                    },
+                    // Par défaut la première colonne importée est l'abscisse
+                    // (`ImportRecipe::column_role`).
+                    role,
                     ..Default::default()
                 });
                 self.execute(Command::AddColumn {
