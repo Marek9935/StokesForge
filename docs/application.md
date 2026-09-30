@@ -92,12 +92,24 @@ classeur flottant sous le curseur réclame le dépôt en se peignant
 (`claim_file_drop`) : il reçoit une feuille par fichier, sinon un nouveau
 classeur est créé. Les `.plx` ne sont jamais importés : `AppState` les met en
 file (`take_projects_to_open`) et `app.rs` lance un second processus
-`plotyx-app <chemin>`. Les autres fichiers sont lus avec le premier modèle
-enregistré (sinon la recette permissive) et passent par `import_files` — une
+`plotyx-app <chemin>`. Chaque fichier utilise le modèle qui le reconnaît,
+sinon le dernier modèle utilisé dans cette session, sinon la recette permissive.
+Il passe par la conversion et l'application communes à l'assistant — une
 seule entrée « Importer » ; un fichier qui ne donne aucune valeur numérique
 ouvre à la place la fenêtre d'import pré-remplie. Décision pure :
-`state::file_drop_plan`. Non couvert : le dépôt sur une fenêtre détachée
-(autre viewport) et le comportement réel sous Wayland — à valider à la main.
+`state::file_drop_plan`. Le dépôt crée toujours de nouvelles feuilles, même
+si la recette du dernier import remplaçait ou fusionnait une feuille. Le lien
+« Régler l'import… » dans la barre d'état et Fichier › Régler le dernier
+import… reprennent ses fichiers dans l'assistant.
+
+Le même geste est câblé dans les fenêtres détachées : sur un classeur,
+la destination reste ce classeur ; sur un graphe, une note, une matrice ou le
+Project Manager, un nouveau classeur. Les dépôts sont isolés par viewport et
+leurs actions reviennent à la session principale. Un dépôt est refusé tant
+que les propriétés du graphe sont ouvertes, pour garder leur macro
+d'historique indépendante de l'import. Les événements de dépôt sont
+testés sans fenêtre ; le glisser-déposer réel (X11/Wayland, fenêtres OS
+détachées) reste à valider manuellement.
 
 ### Assistant d'import
 

@@ -5270,6 +5270,119 @@ fn a_new_graph_has_no_background_color() {
 
 // -- Glisser-déposer de fichiers (issue #8) --
 
+/// Un dépôt OS peut arriver depuis un viewport détaché malgré le dialogue
+/// modal de la racine : il ne doit pas entrer dans la macro du graphe.
+#[test]
+fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    state.dispatch(Action::OpenPlotSettings {
+        graph,
+        tab: PlotSettingsTab::Graph,
+        axis: None,
+    });
+    let before = session.handle().snapshot().unwrap();
+    assert!(before.history.in_macro, "le dialogue ouvre sa macro");
+    let file = dir.path().join("mesure.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::DropFiles {
+        paths: vec![file.clone()],
+        target_book: None,
+    });
+    let after = session.handle().snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert_eq!(after.revision, before.revision);
+    assert!(after.history.in_macro, "le dialogue conserve sa macro");
+    assert!(state.status().unwrap().is_error);
+    assert!(!state.can_reopen_last_import());
+    state.cancel_plot_settings();
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: None,
+    });
+    assert!(
+        !state.status().unwrap().is_error,
+        "le dépôt passe après fermeture du dialogue"
+    );
+    assert!(state.can_reopen_last_import());
+}
+
+/// Le dernier modèle réellement utilisé prime sur l'ordre du catalogue.
+/// Un dépôt crée toujours de nouvelles feuilles, même après un remplacement.
+#[test]
+fn dropping_files_uses_the_last_recipe_and_always_creates_new_sheets() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let mut recipe = plotyx_import::ImportRecipe::new("Dernier modèle utilisé");
+    recipe.separator = plotyx_import::Separator::Semicolon;
+    recipe.has_column_header_row = true;
+    recipe.import_mode = plotyx_import::ImportMode::ReplaceSheet;
+    recipe.files_layout = plotyx_import::FilesLayout::SideBySide;
+    let initial = dir.path().join("initial.csv");
+    std::fs::write(&initial, "Temps;Signal\n1;10\n").unwrap();
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: vec![initial],
+    });
+    assert!(!state.status().unwrap().is_error);
+    let before = state.snapshot().tree.clone();
+    let sheets_before = state.worksheets_of(book).len();
+    let files: Vec<_> = ["depot1.csv", "depot2.csv"]
+        .into_iter()
+        .map(|name| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "Temps;Signal\n2;20\n3;30\n").unwrap();
+            path
+        })
+        .collect();
+    state.dispatch(Action::DropFiles {
+        paths: files,
+        target_book: Some(book),
+    });
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
+    let sheet = sheet_named(state.tree(), "depot1");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(state.column_meta(columns[0].0).long_name, "Temps");
+    assert_eq!(cell_f64(&state, columns[0].0, 0), 2.);
+    assert!(state
+        .status()
+        .unwrap()
+        .text
+        .contains("Dernier modèle utilisé"));
+    state.dispatch(Action::Undo);
+    assert_eq!(*state.snapshot().tree, *before);
+}
+
+/// Sans dernier import ni modèle reconnu, on utilise la recette permissive,
+/// jamais le premier modèle du catalogue qui pourrait avaler les données.
+#[test]
+fn dropping_an_unknown_file_without_history_uses_the_default_recipe() {
+    let _recipes = isolate_recipe_store();
+    let mut store = plotyx_import::RecipeStore::default();
+    let mut unsuitable = plotyx_import::ImportRecipe::new("Mauvais modèle");
+    unsuitable.header = plotyx_import::HeaderSkip::Lines(1);
+    store.upsert(unsuitable);
+    store.save().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let path = dir.path().join("inconnu.csv");
+    std::fs::write(&path, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::DropFiles {
+        paths: vec![path],
+        target_book: Some(book),
+    });
+    let sheet = sheet_named(state.tree(), "inconnu");
+    let x = state.visible_columns(sheet)[0].0;
+    assert_eq!(cell_f64(&state, x, 0), 1., "première ligne conservée");
+    assert_eq!(cell_f64(&state, x, 1), 2.);
+}
+
 /// Le lieu du dépôt fixe la destination ; l'extension `.plx` fait d'un fichier
 /// un projet à ouvrir, pas une donnée à importer.
 #[test]
@@ -5971,6 +6084,17 @@ fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
+    // Le modèle reconnu prime même sur le dernier modèle utilisé, dont
+    // les réglages ne conviennent pas du tout à la structure Jasco.
+    let initial = dir.path().join("initial.csv");
+    std::fs::write(&initial, "Temps,Signal\n1,10\n").unwrap();
+    let mut previous_recipe = plotyx_import::ImportRecipe::new("Dernier CSV");
+    previous_recipe.has_column_header_row = true;
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: previous_recipe,
+        paths: vec![initial],
+    });
     let before = state.worksheets_of(book).len();
 
     state.dispatch(Action::DropFiles {

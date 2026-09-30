@@ -3451,11 +3451,20 @@ impl AppState {
 
     /// Traite un dépôt de fichiers ([`Action::DropFiles`]). Les `.plx` sont mis
     /// en file pour ouverture ([`AppState::take_projects_to_open`]). Les
-    /// autres fichiers sont lus avec le premier modèle enregistré, à défaut la
+    /// autres fichiers sont lus avec le modèle reconnu, sinon le dernier utilisé, à défaut la
     /// recette permissive ; ceux qui se lisent correctement partent dans un
     /// seul import annulable, les autres ouvrent la fenêtre d'import
     /// pré-remplie pour être réglés à la main.
     fn drop_files(&mut self, paths: Vec<PathBuf>, target_book: Option<NodeId>) {
+        // Un dépôt OS n'est pas bloqué par le calque modal d'egui, notamment
+        // depuis l'explorateur détaché. La racine possède la macro du graphe :
+        // l'import y serait absorbé si on ne refusait pas ce geste ici.
+        if self.plot_settings.is_some() {
+            self.fail(
+                "Validez ou annulez les propriétés du graphe avant de déposer des fichiers".into(),
+            );
+            return;
+        }
         let plan = file_drop_plan(&paths, target_book);
         self.projects_to_open.extend(plan.projects);
         // L'assistant est ouvert : le dépôt lui ajoute les fichiers au lieu
@@ -3468,25 +3477,29 @@ impl AppState {
             return;
         }
         // Un modèle par fichier : le choix automatique (extension, nom,
-        // signature de contenu), sinon le premier modèle de l'utilisateur,
+        // signature de contenu), sinon le dernier modèle réellement utilisé,
         // sinon la recette permissive.
         let store = plotyx_import::RecipeStore::load_with_builtins();
-        let fallback = store
-            .recipes()
-            .iter()
-            .find(|recipe| !plotyx_import::RecipeStore::is_builtin(recipe))
-            .cloned()
+        let fallback = self
+            .last_import
+            .as_ref()
+            .map(|last| last.recipe.clone())
             .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
         let mut items: Vec<ImportItem> = Vec::new();
         let mut bad: Vec<PathBuf> = Vec::new();
         let mut models: Vec<String> = Vec::new();
         for path in plan.data {
-            let recipe = std::fs::read(&path)
+            let mut recipe = std::fs::read(&path)
                 .ok()
                 .and_then(|bytes| {
                     plotyx_import::choose_recipe(store.recipes(), &path, &bytes).cloned()
                 })
                 .unwrap_or_else(|| fallback.clone());
+            // Le geste du dépôt ajoute une feuille par fichier : les options
+            // de remplacement ou de fusion du dernier assistant ne doivent
+            // pas modifier sa destination ni écraser une feuille existante.
+            recipe.import_mode = plotyx_import::ImportMode::NewSheet;
+            recipe.files_layout = plotyx_import::FilesLayout::SheetPerFile;
             if reads_well(&path, &recipe) {
                 if !models.contains(&recipe.name) {
                     models.push(recipe.name.clone());
@@ -3502,13 +3515,7 @@ impl AppState {
                 .status
                 .as_ref()
                 .filter(|status| !status.is_error)
-                .map(|status| {
-                    format!(
-                        "{} — modèle « {} » (Fichier › Régler le dernier import… pour corriger)",
-                        status.text,
-                        models.join("», «")
-                    )
-                });
+                .map(|status| format!("{} — modèle « {} »", status.text, models.join("», «")));
             if let Some(summary) = summary {
                 self.notice(summary);
             }

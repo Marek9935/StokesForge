@@ -828,6 +828,8 @@ struct ProjectManagerViewModel {
 /// plutôt que collectés en direct pendant la peinture.
 #[derive(Debug, Default)]
 struct DetachedProjectManagerRequests {
+    /// Dépôts de fichiers, traités par la même session que la fenêtre principale.
+    actions: Vec<Action>,
     /// Onglets demandés par un clic dans l'arbre depuis la dernière
     /// vidange ; [`PlotyxApp::ui`] les transfère dans son propre
     /// `open_requests` puis les vide.
@@ -1378,7 +1380,7 @@ impl PlotyxApp {
     /// Les dimensions (lignes × colonnes) qu'elle affichait ont disparu avec
     /// « la » feuille sélectionnée globale : chaque onglet de classeur les
     /// montre pour sa propre feuille, dans [`book_contents`].
-    fn status_bar(&self, ui: &mut egui::Ui) {
+    fn status_bar(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         egui::Panel::bottom("plotyx_status")
             .resizable(false)
             .show(ui, |ui| {
@@ -1393,6 +1395,12 @@ impl PlotyxApp {
                         None => {
                             ui.weak("prêt");
                         }
+                    }
+                    if self.state.can_reopen_last_import()
+                        && self.state.import_state().is_none()
+                        && ui.link("Régler l'import…").clicked()
+                    {
+                        actions.push(Action::ReopenLastImport);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.weak(format!("révision {}", self.state.snapshot().revision));
@@ -1575,6 +1583,7 @@ impl PlotyxApp {
                 .with_title("PlotYx — Project Manager")
                 .with_inner_size([PROJECT_MANAGER_WIDTH + 40.0, 480.0]),
             move |ui, _class| {
+                begin_file_drop(ui.ctx());
                 let mut opened = Vec::new();
                 let mut closed = Vec::new();
                 // Lecture d'une copie plutôt que du verrou tenu pendant
@@ -1611,6 +1620,10 @@ impl PlotyxApp {
                     requests.close.append(&mut closed);
                     requests.selection = Some(model.selected);
                     requests.hidden = Some(model.hidden);
+                    if let Some(action) = finish_file_drop(ui.ctx()) {
+                        requests.actions.push(action);
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                    }
                 }
                 // L'utilisateur a cliqué le bouton de fermeture de cette
                 // fenêtre OS : on la referme proprement en la réattachant au
@@ -1849,6 +1862,7 @@ impl PlotyxApp {
                 egui::ViewportId::from_hash_of(tab),
                 viewport,
                 move |ui, _class| {
+                    begin_file_drop(ui.ctx());
                     let mut model = view_model.lock().unwrap_or_else(|err| err.into_inner());
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                     let was_collapsed = model.collapsed;
@@ -1949,6 +1963,16 @@ impl PlotyxApp {
                     // du viewport qui a le focus, comme pour la racine.
                     if matches!(tab, Tab::Book(_)) {
                         collect_undo_redo_shortcuts(ui.ctx(), &mut requests.actions);
+                    }
+                    if let Some(mut action) = finish_file_drop(ui.ctx()) {
+                        // Même destination qu'un classeur flottant, y compris
+                        // si sa grille est repliée et n'a pas réclamé le dépôt.
+                        if let (Tab::Book(book), Action::DropFiles { target_book, .. }) =
+                            (tab, &mut action)
+                        {
+                            *target_book = Some(book);
+                        }
+                        requests.actions.push(action);
                     }
                     if !requests.actions.is_empty() {
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
@@ -2190,7 +2214,7 @@ impl eframe::App for PlotyxApp {
 
         self.collect_shortcuts(&ctx, &mut actions);
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
-        self.status_bar(ui);
+        self.status_bar(ui, &mut actions);
         // Panneau fixe, peint *avant* `PlotyxApp::project_manager_panel` —
         // voir la doc de tête du module, § Console de script, et la doc de
         // tête de `PlotyxApp::script_panel` : c'est cet ordre précis qui lui
@@ -2213,6 +2237,7 @@ impl eframe::App for PlotyxApp {
                     .unwrap_or_else(|err| err.into_inner());
                 open_requests.append(&mut requests.open);
                 close_requests.append(&mut requests.close);
+                actions.append(&mut requests.actions);
                 (
                     std::mem::take(&mut requests.reattach),
                     requests.selection.take(),
@@ -2779,8 +2804,10 @@ struct FileDropSlot {
     book: Option<NodeId>,
 }
 
-fn file_drop_slot_id() -> egui::Id {
-    egui::Id::new("plotyx_file_drop")
+fn file_drop_slot_id(ctx: &egui::Context) -> egui::Id {
+    // La mémoire temporaire est commune aux viewports : un dépôt différé
+    // ne doit ni écraser ni consommer celui de la fenêtre principale.
+    egui::Id::new("plotyx_file_drop").with(ctx.viewport_id())
 }
 
 /// Ouvre l'emplacement du dépôt de l'image et peint le retour visuel : un
@@ -2788,6 +2815,7 @@ fn file_drop_slot_id() -> egui::Id {
 /// (destination « nouveau classeur » ; un classeur survolé se surligne
 /// lui-même, voir [`claim_file_drop`]).
 fn begin_file_drop(ctx: &egui::Context) {
+    let slot_id = file_drop_slot_id(ctx);
     let (paths, hovering) = ctx.input(|input| {
         (
             input
@@ -2814,9 +2842,9 @@ fn begin_file_drop(ctx: &egui::Context) {
     }
     ctx.data_mut(|data| {
         if paths.is_empty() {
-            data.remove::<FileDropSlot>(file_drop_slot_id());
+            data.remove::<FileDropSlot>(slot_id);
         } else {
-            data.insert_temp(file_drop_slot_id(), FileDropSlot { paths, book: None });
+            data.insert_temp(slot_id, FileDropSlot { paths, book: None });
         }
     });
 }
@@ -2826,6 +2854,7 @@ fn begin_file_drop(ctx: &egui::Context) {
 /// curseur (`rect_contains_pointer` tient compte de l'empilement des
 /// fenêtres : seule la fenêtre du dessus répond).
 fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
+    let slot_id = file_drop_slot_id(ui.ctx());
     let rect = ui.max_rect();
     if !ui.rect_contains_pointer(rect) {
         return;
@@ -2839,10 +2868,10 @@ fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
         );
     }
     ui.ctx().data_mut(|data| {
-        if let Some(slot) = data.get_temp::<FileDropSlot>(file_drop_slot_id()) {
+        if let Some(slot) = data.get_temp::<FileDropSlot>(slot_id) {
             if slot.book.is_none() {
                 data.insert_temp(
-                    file_drop_slot_id(),
+                    slot_id,
                     FileDropSlot {
                         book: Some(book),
                         ..slot
@@ -2855,9 +2884,10 @@ fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
 
 /// Transforme le dépôt de l'image en [`Action::DropFiles`].
 fn finish_file_drop(ctx: &egui::Context) -> Option<Action> {
+    let slot_id = file_drop_slot_id(ctx);
     let slot = ctx.data_mut(|data| {
-        let slot = data.get_temp::<FileDropSlot>(file_drop_slot_id());
-        data.remove::<FileDropSlot>(file_drop_slot_id());
+        let slot = data.get_temp::<FileDropSlot>(slot_id);
+        data.remove::<FileDropSlot>(slot_id);
         slot
     })?;
     Some(Action::DropFiles {
@@ -8746,6 +8776,152 @@ mod graph_layout_tests {
             ),
             "{elsewhere:?}"
         );
+    }
+
+    /// Les callbacks détachés émettent la même action et ne consomment pas
+    /// le dépôt en attente dans le viewport racine (mémoire egui partagée).
+    #[test]
+    fn les_depots_detaches_gardent_leur_destination_et_sont_isoles_de_la_racine() {
+        #[derive(Debug)]
+        struct FakeFile(std::path::PathBuf);
+        impl egui::DroppedFile for FakeFile {
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                Ok(Vec::new())
+            }
+        }
+        for kind in ["classeur", "graphe", "explorateur"] {
+            let (session, graph) = graphe();
+            let state = AppState::new(session.handle(), "test.plotyx".into()).unwrap();
+            let mut app = PlotyxApp::new(state);
+            let book = app.state.books()[0].0;
+            let tab = if kind == "classeur" {
+                Tab::Book(book)
+            } else {
+                Tab::Graph(graph)
+            };
+            let viewport = if kind == "explorateur" {
+                app.detach_project_manager();
+                egui::ViewportId::from_hash_of("plotyx_project_manager_window")
+            } else {
+                app.detach_tab(tab);
+                egui::ViewportId::from_hash_of(tab)
+            };
+            let context = egui::Context::default();
+            context.set_embed_viewports(false);
+            crate::theme::install(&context);
+            let mut root_input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800., 600.),
+                )),
+                ..Default::default()
+            };
+            root_input.dropped_files = vec![Arc::new(FakeFile("racine.csv".into()))];
+            let mut output = context.run_ui(root_input.clone(), |ui| {
+                begin_file_drop(ui.ctx());
+                if kind == "explorateur" {
+                    app.show_detached_project_manager(ui.ctx(), None);
+                } else {
+                    app.show_detached_tabs(ui.ctx());
+                }
+            });
+            let callback = output.viewport_output[&viewport]
+                .viewport_ui_cb
+                .clone()
+                .unwrap();
+            output.textures_delta.clear();
+            let mut detached_input = root_input.clone();
+            detached_input.viewport_id = viewport;
+            detached_input.viewports.insert(
+                viewport,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    ..Default::default()
+                },
+            );
+            detached_input.dropped_files = vec![Arc::new(FakeFile("detache.csv".into()))];
+            context
+                .run_ui(detached_input, |ui| callback(ui))
+                .textures_delta
+                .clear();
+            let actions = if kind == "explorateur" {
+                std::mem::take(&mut app.pm_requests.lock().unwrap().actions)
+            } else {
+                std::mem::take(&mut app.detached_tabs[&tab].requests.lock().unwrap().actions)
+            };
+            let target = (kind == "classeur").then_some(book);
+            assert_eq!(
+                actions,
+                vec![Action::DropFiles {
+                    paths: vec!["detache.csv".into()],
+                    target_book: target
+                }]
+            );
+            let mut root_action = None;
+            root_input.dropped_files.clear();
+            context
+                .run_ui(root_input, |ui| {
+                    root_action = finish_file_drop(ui.ctx());
+                })
+                .textures_delta
+                .clear();
+            assert_eq!(
+                root_action,
+                Some(Action::DropFiles {
+                    paths: vec!["racine.csv".into()],
+                    target_book: None
+                })
+            );
+        }
+    }
+
+    /// Le lien de la barre d'état produit exactement l'action du menu Fichier.
+    #[test]
+    fn le_lien_de_statut_reprend_le_dernier_import() {
+        let (session, _) = graphe();
+        let mut state = AppState::new(session.handle(), "test.plotyx".into()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mesure.csv");
+        std::fs::write(&file, "1,10\n2,20\n").unwrap();
+        state.dispatch(Action::ImportFiles {
+            destination: crate::state::ImportDestination::NewBookForAll,
+            recipe: plotyx_import::ImportRecipe::new("Sans titre"),
+            paths: vec![file],
+        });
+        let app = PlotyxApp::new(state);
+        let context = egui::Context::default();
+        crate::theme::install(&context);
+        let mut actions = Vec::new();
+        let mut paint = |events| {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000., 600.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.status_bar(ui, &mut actions),
+            );
+            output.textures_delta.clear();
+            output
+        };
+        let output = paint(Vec::new());
+        let pos = find_text_center(&output.shapes, "Régler l'import…");
+        paint(vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            paint(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            }]);
+        }
+        assert_eq!(actions, vec![Action::ReopenLastImport]);
     }
 
     /// Ctrl+" ouvre l'assistant d'import, sur un clavier AZERTY (touche du 3
