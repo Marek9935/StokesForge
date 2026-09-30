@@ -52,6 +52,12 @@ impl Panels {
         self.0.get_mut(index)
     }
 
+    /// Les panneaux, modifiables un à un (leur nombre ne change pas : la
+    /// liste reste non vide).
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, PanelSpec> {
+        self.0.iter_mut()
+    }
+
     /// Les panneaux, en lecture.
     pub fn as_slice(&self) -> &[PanelSpec] {
         &self.0

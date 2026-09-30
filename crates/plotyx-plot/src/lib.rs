@@ -91,6 +91,7 @@ pub mod saved;
 pub mod series;
 pub mod spec;
 pub mod style;
+pub mod theme;
 
 pub use axis::{AxisScale, AxisSide, AxisSpec};
 pub use legend::{LegendPosition, LegendSpec};
@@ -103,3 +104,4 @@ pub use series::{
 };
 pub use spec::{Panels, PlotSpec, SeriesRef, SPEC_FORMAT_VERSION, TRANSPARENT};
 pub use style::{palette_color, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE};
+pub use theme::{Theme, THEMES};

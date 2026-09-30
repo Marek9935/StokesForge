@@ -1196,16 +1196,19 @@ pub enum PlotSettingsTab {
     Series,
     /// La légende.
     Legend,
+    /// Les couleurs globales : fond, texte, axes, thèmes prédéfinis.
+    Theme,
 }
 
 impl PlotSettingsTab {
     /// Tous les onglets, dans l'ordre d'affichage.
-    pub const ALL: [PlotSettingsTab; 5] = [
+    pub const ALL: [PlotSettingsTab; 6] = [
         PlotSettingsTab::Graph,
         PlotSettingsTab::PlotArea,
         PlotSettingsTab::Axes,
         PlotSettingsTab::Series,
         PlotSettingsTab::Legend,
+        PlotSettingsTab::Theme,
     ];
 
     /// Libellé de l'onglet.
@@ -1216,6 +1219,7 @@ impl PlotSettingsTab {
             PlotSettingsTab::Axes => "Axes",
             PlotSettingsTab::Series => "Séries",
             PlotSettingsTab::Legend => "Légende",
+            PlotSettingsTab::Theme => "Thème",
         }
     }
 }

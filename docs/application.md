@@ -566,7 +566,17 @@ par `Action::OpenPlotSettings { graph, tab, axis }`.
 **Onglets** (`state::PlotSettingsTab`) : « Graphe » (titre et sa couleur,
 fond), « Zone de tracé » (titre du panneau, grilles), « Axes » (un axe à la
 fois, choisi en tête de page : titre de l'axe et sa couleur, échelle,
-affichage et couleur de l'échelle), « Séries » et « Légende ».
+affichage et couleur de l'échelle), « Séries », « Légende » et « Thème ».
+
+**Onglet « Thème »** : deux thèmes prédéfinis (`plotyx_plot::THEMES` : Clair,
+Sombre) et trois couleurs globales — fond, texte, axes et échelles. Une
+couleur globale est **écrite dans tous les champs locaux** (titre du graphe,
+titre et échelle de chaque axe de chaque panneau ;
+`PlotSpec::set_text_color`/`set_axes_color`/`apply_theme`) : le dernier
+réglage écrase ce qui avait été réglé une à une, et rien n'est mémorisé en
+plus (le format `.plx` ne change pas). Le tout reste dans le brouillon de la
+fenêtre : un seul pas d'historique à la validation. Les thèmes laissent le
+texte et les axes en automatique, donc ils suivent le fond.
 
 **Sélecteur de couleur** (`crate::color_picker`) : toute couleur de la
 fenêtre se choisit par un bouton-échantillon (`color_field`/`color_button`)

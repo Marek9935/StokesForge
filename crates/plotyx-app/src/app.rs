@@ -1108,6 +1108,7 @@ impl PlotyxApp {
                             ("Axes…", PlotSettingsTab::Axes),
                             ("Séries…", PlotSettingsTab::Series),
                             ("Légende…", PlotSettingsTab::Legend),
+                            ("Thème…", PlotSettingsTab::Theme),
                         ] {
                             if ui.button(label).clicked() {
                                 actions.push(Action::OpenPlotSettings {
@@ -6433,6 +6434,9 @@ fn plot_settings_contents(
                         commit |= series_editor(ui, series, &mut env);
                     }
                 }
+                PlotSettingsTab::Theme => {
+                    commit |= theme_editor(ui, spec, &mut env);
+                }
                 PlotSettingsTab::Legend => {
                     let Some(panel) = spec.panels.get_mut(0) else {
                         return;
@@ -6462,6 +6466,65 @@ fn plot_settings_contents(
         current.tab = chosen_tab;
         current.axis = chosen_axis;
     }
+}
+
+/// Onglet « Thème » : fond, couleur du texte et couleur des axes, réglés
+/// globalement (issue #11), plus des thèmes prédéfinis. Le dernier réglage
+/// écrase ce qui avait été réglé une à une : voir [`plotyx_plot::theme`].
+/// Rend `true` si le brouillon doit être validé.
+fn theme_editor(ui: &mut egui::Ui, spec: &mut plotyx_plot::PlotSpec, env: &mut PickerEnv) -> bool {
+    let mut commit = false;
+    ui.strong("Thèmes");
+    ui.horizontal(|ui| {
+        for theme in &plotyx_plot::THEMES {
+            if ui.button(theme.name).clicked() {
+                spec.apply_theme(theme);
+                commit = true;
+            }
+        }
+    });
+    ui.add_space(6.0);
+    ui.strong("Couleurs globales");
+    commit |= color_field(
+        ui,
+        "Fond",
+        &mut spec.background,
+        ColorUsage::Background,
+        Some("Automatique (blanc)"),
+        env,
+    );
+    let mut text = spec.theme_text_color().to_string();
+    let text_committed = color_field(
+        ui,
+        "Texte",
+        &mut text,
+        ColorUsage::Text,
+        Some("Automatique (contraste avec le fond)"),
+        env,
+    );
+    if text != spec.theme_text_color() {
+        spec.set_text_color(&text);
+    }
+    commit |= text_committed;
+    let mut axes = spec.theme_axes_color().to_string();
+    let axes_committed = color_field(
+        ui,
+        "Axes et échelles",
+        &mut axes,
+        ColorUsage::Text,
+        Some("Automatique (contraste avec le fond)"),
+        env,
+    );
+    if axes != spec.theme_axes_color() {
+        spec.set_axes_color(&axes);
+    }
+    commit |= axes_committed;
+    ui.weak(
+        "Une couleur choisie ici est écrite partout : titre du graphe, titres d'axes, \
+         lignes, graduations et grilles de chaque axe. Elle remplace les couleurs déjà \
+         réglées une à une dans les autres onglets.",
+    );
+    commit
 }
 
 /// Un champ texte libellé, validé à la perte de focus. Rend `true` si le
@@ -7246,6 +7309,31 @@ mod graph_layout_tests {
             )),
             "la grille a volé Retour arrière/Suppr au champ texte : {actions:?}",
         );
+    }
+
+    /// #11 : l'onglet « Thème » se dessine (thèmes, fond, texte, axes) sans
+    /// rien modifier tant qu'on n'agit pas.
+    #[test]
+    fn l_onglet_theme_se_dessine_sans_rien_modifier() {
+        let mut spec =
+            plotyx_plot::PlotSpec::empty("Figure").with_panels(plotyx_plot::PanelSpec::at(0, 0));
+        spec.set_text_color("#336699");
+        let avant = spec.clone();
+        let mut env = PickerEnv {
+            project: Default::default(),
+            user: Default::default(),
+            requests: Vec::new(),
+        };
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let mut commit = true;
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            commit = theme_editor(ui, &mut spec, &mut env);
+        });
+        output.textures_delta.clear();
+        assert!(!commit);
+        assert_eq!(spec, avant);
+        assert!(!output.shapes.is_empty());
     }
 
     /// #12 : un fond sans couleur ou semi-transparent s'affiche sur du

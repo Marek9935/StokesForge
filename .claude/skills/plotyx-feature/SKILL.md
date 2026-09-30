@@ -144,6 +144,12 @@ RVB/TSL et Enregistrer. Tout nouvel élément lourd du sélecteur va dans la
 partie dépliée (`if custom`), et l'état se remet à zéro à la fermeture
 (`set_picker_open`).
 
+**Couleur globale ou thème** (issue #11) : une règle qui touche plusieurs
+champs de couleur vit dans `plotyx-plot::theme` (`PlotSpec::set_text_color`,
+`set_axes_color`, `apply_theme`), pas dans l'interface. Elle écrit dans les
+champs locaux — pas de champ « global » dans le modèle — donc le dernier
+réglage gagne ; un nouveau champ de couleur du modèle doit y être ajouté.
+
 ## 2 sexies. Fenêtres et dialogues
 
 Toute fenêtre de l'application se construit par la brique commune
