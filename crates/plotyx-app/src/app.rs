@@ -6063,22 +6063,38 @@ fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
     // `Arc<Tree>` cloné est un compteur de références, pas une copie.
     let tree = state.tree().clone();
     let Some(node) = tree.node(settings.graph) else {
-        state.close_plot_settings();
+        state.cancel_plot_settings();
         return;
     };
     let title = format!("Propriétés — {}", node.name());
     state.begin_plot_edit(settings.graph);
-    let close = modal_dialog(
+    let outcome = modal_dialog(
         ctx,
         egui::Id::new("plotyx_plot_settings"),
         &title,
         egui::vec2(PLOT_SETTINGS_WIDTH, PLOT_SETTINGS_HEIGHT),
         |ui| plot_settings_contents(ui, state, &tree, settings),
     );
-    if close {
-        state.close_plot_settings();
+    match outcome {
+        DialogOutcome::Open => {}
+        DialogOutcome::Accept => state.close_plot_settings(),
+        DialogOutcome::Cancel => state.cancel_plot_settings(),
     }
 }
+
+/// Issue d'une image de [`modal_dialog`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DialogOutcome {
+    /// Toujours ouvert.
+    Open,
+    /// « Valider » (bouton par défaut : Entrée).
+    Accept,
+    /// « Annuler », croix ou Échap.
+    Cancel,
+}
+
+/// Hauteur de la bande des boutons « Valider » / « Annuler ».
+const DIALOG_FOOTER_HEIGHT: f32 = 38.0;
 
 /// Durée d'une alerte de clic bloqué ([`modal_dialog`]) : deux impulsions.
 const MODAL_FLASH_SECONDS: f64 = 0.6;
@@ -6094,7 +6110,8 @@ struct DialogGeometry {
 /// Dialogue **modal** : au premier plan, le reste de l'interface ne reçoit
 /// plus aucun clic, et un clic ailleurs fait clignoter le contour du
 /// dialogue en rouge foncé ([`theme::blocked_flash_color`]) pour le
-/// désigner. Rend `true` quand l'utilisateur le ferme (croix, Échap).
+/// désigner. Il se ferme par « Valider » (bouton par défaut, Entrée hors
+/// saisie de texte) ou par « Annuler » (croix, Échap) : voir [`DialogOutcome`].
 ///
 /// Même brique que les fenêtres de contenu : [`show_window_in_layer`] (cadre,
 /// contour actif, rognage), [`window_header`] (placement
@@ -6112,7 +6129,7 @@ fn modal_dialog(
     title: &str,
     default_size: egui::Vec2,
     add_contents: impl FnOnce(&mut egui::Ui),
-) -> bool {
+) -> DialogOutcome {
     let screen = ctx.input(|input| input.content_rect());
     let geometry_id = id.with("geometry");
     let flash_id = id.with("flash_start");
@@ -6166,6 +6183,7 @@ fn modal_dialog(
     let popup_open = egui::Popup::is_any_open(ctx);
     let window_rect = egui::Rect::from_min_size(geometry.pos, geometry.size);
     let mut header_actions = WindowHeaderActions::default();
+    let mut button_outcome = DialogOutcome::Open;
     let mut position = geometry.pos;
     let mut size = geometry.size;
     show_window_in_layer(
@@ -6177,7 +6195,52 @@ fn modal_dialog(
         true,
         |ui| {
             header_actions = window_header(ui, id, title, None, false, HeaderPlacement::Dialog);
-            show_window_contents_bounded(ui, add_contents);
+            show_window_contents_bounded(ui, |ui| {
+                let full = ui.available_rect_before_wrap();
+                let split = (full.bottom() - DIALOG_FOOTER_HEIGHT).max(full.top());
+                let mut body = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(egui::Rect::from_min_max(
+                            full.min,
+                            egui::pos2(full.right(), split),
+                        ))
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                body.set_clip_rect(ui.clip_rect().intersect(body.max_rect()));
+                add_contents(&mut body);
+                let mut footer = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(egui::Rect::from_min_max(
+                            egui::pos2(full.left(), split),
+                            full.max,
+                        ))
+                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                );
+                footer.painter().hline(
+                    full.x_range(),
+                    split,
+                    footer.visuals().widgets.noninteractive.bg_stroke,
+                );
+                // Premier ajouté = le plus à droite : « Valider », par défaut.
+                let accept = egui::Button::new("Valider")
+                    .fill(footer.visuals().selection.bg_fill)
+                    .min_size(egui::vec2(84.0, 24.0));
+                if footer
+                    .add(accept)
+                    .on_hover_text("Garder les modifications (Entrée)")
+                    .clicked()
+                {
+                    button_outcome = DialogOutcome::Accept;
+                }
+                let cancel = egui::Button::new("Annuler").min_size(egui::vec2(84.0, 24.0));
+                if footer
+                    .add(cancel)
+                    .on_hover_text("Revenir à l'état d'ouverture (Échap)")
+                    .clicked()
+                {
+                    button_outcome = DialogOutcome::Cancel;
+                }
+            });
         },
         |ui, rect| {
             floating_resize_handles(ui, id, rect, &mut position, &mut size);
@@ -6203,17 +6266,27 @@ fn modal_dialog(
     ctx.data_mut(|data| data.insert_temp(geometry_id, geometry));
 
     // Échap : consommé par le sélecteur de couleur ou une liste ouverts (ils
-    // le lisent avant), sinon il ferme le dialogue.
+    // le lisent avant), sinon il annule. Entrée valide, sauf pendant une
+    // saisie de texte (où elle termine la saisie).
     let escape = !popup_open
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-    let close = header_actions.close || escape;
-    if close {
+    let enter = !popup_open
+        && ctx.memory(|memory| memory.focused().is_none())
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let outcome = if header_actions.close || escape {
+        DialogOutcome::Cancel
+    } else if enter {
+        DialogOutcome::Accept
+    } else {
+        button_outcome
+    };
+    if outcome != DialogOutcome::Open {
         ctx.data_mut(|data| {
             data.remove::<DialogGeometry>(geometry_id);
             data.remove::<f64>(flash_id);
         });
     }
-    close
+    outcome
 }
 
 /// Corps de [`plot_settings_window`] : la bande d'onglets, puis la page de
@@ -7117,7 +7190,7 @@ mod graph_layout_tests {
     fn un_dialogue_modal_bloque_l_arriere_plan_et_clignote() {
         let id = egui::Id::new("dialogue_test");
         let clicks = std::cell::Cell::new(0);
-        let closed = std::cell::Cell::new(false);
+        let closed = std::cell::Cell::new(DialogOutcome::Open);
         let run = |context: &egui::Context, modal: bool, events: Vec<egui::Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -7136,7 +7209,9 @@ mod graph_layout_tests {
                         modal_dialog(ui.ctx(), id, "Test", egui::vec2(300.0, 200.0), |ui| {
                             ui.label("contenu");
                         });
-                    closed.set(closed.get() | close);
+                    if close != DialogOutcome::Open {
+                        closed.set(close);
+                    }
                 }
             });
             output.textures_delta.clear();
@@ -7171,7 +7246,7 @@ mod graph_layout_tests {
                 .is_some(),
             "le clic bloqué déclenche le clignotement"
         );
-        assert!(!closed.get());
+        assert_eq!(closed.get(), DialogOutcome::Open);
         run(
             &context,
             true,
@@ -7183,7 +7258,26 @@ mod graph_layout_tests {
                 modifiers: Default::default(),
             }],
         );
-        assert!(closed.get(), "Échap ferme le dialogue");
+        assert_eq!(closed.get(), DialogOutcome::Cancel, "Échap annule");
+
+        // Valider est le bouton par défaut : Entrée (hors saisie de texte).
+        closed.set(DialogOutcome::Open);
+        let again = egui::Context::default();
+        for _ in 0..3 {
+            run(&again, true, vec![]);
+        }
+        run(
+            &again,
+            true,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(closed.get(), DialogOutcome::Accept, "Entrée valide");
     }
 
     /// #13 : la fenêtre des propriétés n'écrit pas son propre cadre — elle

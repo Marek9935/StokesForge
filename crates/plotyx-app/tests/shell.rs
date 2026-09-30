@@ -4804,6 +4804,63 @@ fn closing_plot_settings_commits_a_pending_edit() {
     assert_eq!(state.plot_spec(graph).expect("spec").title, "Spectre");
 }
 
+/// #15 : « Annuler » (aussi la croix et Échap) remet le graphe dans l'état où
+/// il était à l'ouverture de la fenêtre, après un aperçu en direct, et ne
+/// laisse aucune entrée d'historique.
+#[test]
+fn cancelling_plot_settings_restores_the_graph_and_leaves_no_history() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let original = state.plot_spec(graph).expect("spec");
+    let label_before = state.undo_label();
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+
+    state.plot_edit_mut().expect("brouillon").spec.title = "Aperçu".to_string();
+    state.commit_plot_edit();
+    assert_eq!(
+        state.plot_spec(graph).expect("spec").title,
+        "Aperçu",
+        "aperçu en direct dans le modèle"
+    );
+
+    state.cancel_plot_settings();
+
+    assert!(state.plot_settings().is_none());
+    assert!(state.plot_edit().is_none());
+    assert_eq!(state.plot_spec(graph).expect("spec"), original);
+    assert_eq!(state.undo_label(), label_before, "aucune entrée ajoutée");
+}
+
+/// #15 : « Valider » garde tout, en **une seule** entrée d'historique — un
+/// Ctrl+Z défait tous les gestes de la fenêtre d'un coup.
+#[test]
+fn accepting_plot_settings_is_a_single_history_entry() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let original = state.plot_spec(graph).expect("spec");
+    state.dispatch(PlotTarget::Title.open_settings(graph));
+
+    state.plot_edit_mut().expect("brouillon").spec.title = "Premier".to_string();
+    state.commit_plot_edit();
+    state.plot_edit_mut().expect("brouillon").spec.background = "#102030".to_string();
+    state.commit_plot_edit();
+    state.close_plot_settings();
+
+    let kept = state.plot_spec(graph).expect("spec");
+    assert_eq!(kept.title, "Premier");
+    assert_eq!(kept.background, "#102030");
+
+    state.dispatch(Action::Undo);
+
+    assert_eq!(
+        state.plot_spec(graph).expect("spec"),
+        original,
+        "un seul Ctrl+Z défait les deux gestes"
+    );
+}
+
 /// Ouvrir les propriétés d'un autre graphe valide d'abord le brouillon du
 /// premier : rien n'est perdu en passant de l'un à l'autre.
 #[test]
@@ -4831,7 +4888,9 @@ fn an_idle_plot_draft_follows_undo() {
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     let original = state.plot_spec(graph).expect("spec").title;
-    state.dispatch(PlotTarget::Title.open_settings(graph));
+    // Brouillon ouvert sans la fenêtre (pas de macro d'historique : Annuler
+    // reste possible, contrairement à la fenêtre modale qui le refuse).
+    state.begin_plot_edit(graph);
     state.plot_edit_mut().expect("brouillon").spec.title = "Modifié".to_string();
     state.commit_plot_edit();
 

@@ -1442,6 +1442,10 @@ pub struct AppState {
     /// Fenêtre des propriétés du graphe, si elle est ouverte (voir
     /// [`PlotSettings`]).
     plot_settings: Option<PlotSettings>,
+    /// Une macro d'historique est ouverte pour la fenêtre des propriétés :
+    /// ses gestes s'appliquent en direct (aperçu) mais ne forment qu'une
+    /// entrée d'historique, posée à la validation ; l'annulation la rejette.
+    plot_macro_open: bool,
     /// Couleurs enregistrées pour l'utilisateur, hors projet (voir
     /// [`crate::user_colors`]).
     user_colors: UserColors,
@@ -1536,6 +1540,7 @@ impl AppState {
             note_editing: None,
             plot_edit: None,
             plot_settings: None,
+            plot_macro_open: false,
             user_colors: UserColors::load(),
             selection: std::collections::HashMap::new(),
             header_editing: None,
@@ -2713,13 +2718,65 @@ impl AppState {
         self.plot_settings.as_mut()
     }
 
-    /// Ferme la fenêtre des propriétés : valide d'abord ce qui diverge
-    /// encore du modèle (une saisie dont le champ n'a pas perdu le focus),
-    /// puis abandonne le brouillon.
+    /// **Valide** et ferme la fenêtre des propriétés (bouton « Valider ») :
+    /// valide d'abord ce qui diverge encore du modèle (une saisie dont le
+    /// champ n'a pas perdu le focus), ferme la macro d'historique — tous les
+    /// gestes de la fenêtre ne forment qu'**une** entrée, qu'un seul Ctrl+Z
+    /// défait — puis abandonne le brouillon.
     pub fn close_plot_settings(&mut self) {
         self.commit_plot_edit();
+        self.end_plot_macro();
         self.plot_settings = None;
         self.plot_edit = None;
+    }
+
+    /// **Annule** et ferme la fenêtre des propriétés (bouton « Annuler »,
+    /// croix, Échap) : avorte la macro d'historique, ce qui restaure le
+    /// graphe tel qu'il était à l'ouverture, et jette le brouillon. Sans
+    /// macro (ouverture refusée, voir [`AppState::begin_plot_macro`]), les
+    /// gestes déjà appliqués restent dans l'historique ordinaire.
+    pub fn cancel_plot_settings(&mut self) {
+        if self.plot_macro_open {
+            self.plot_macro_open = false;
+            if let Err(err) = self.handle.abort_macro() {
+                self.fail(format!("Annulation des propriétés impossible : {err}"));
+            }
+            self.refresh();
+        }
+        self.plot_settings = None;
+        self.plot_edit = None;
+    }
+
+    /// Ouvre la macro d'historique de la fenêtre des propriétés. Un refus
+    /// (macro déjà ouverte par un autre émetteur, par exemple un script) est
+    /// dit à l'utilisateur ; la fenêtre reste utilisable, sans annulation
+    /// groupée.
+    fn begin_plot_macro(&mut self) {
+        if self.plot_macro_open {
+            return;
+        }
+        match self.handle.begin_macro("Propriétés du graphe") {
+            Ok(_) => self.plot_macro_open = true,
+            Err(err) => self.fail(format!(
+                "Propriétés : annulation groupée indisponible ({err})"
+            )),
+        }
+    }
+
+    /// Ferme la macro de la fenêtre des propriétés (une entrée d'historique,
+    /// aucune si rien n'a changé).
+    fn end_plot_macro(&mut self) {
+        if !self.plot_macro_open {
+            return;
+        }
+        self.plot_macro_open = false;
+        if let Err(err) = self.handle.end_macro() {
+            self.fail(format!(
+                "Clôture de l'entrée d'historique impossible : {err}"
+            ));
+        }
+        // `end_macro` ne rafraîchit pas l'instantané (voir l'import).
+        self.refresh();
     }
 
     /// Valide le brouillon courant ([`Action::SetPlotSpec`]) — mais
@@ -3037,8 +3094,10 @@ impl AppState {
             .is_some_and(|edit| edit.graph != graph)
         {
             self.commit_plot_edit();
+            self.end_plot_macro();
             self.plot_edit = None;
         }
+        self.begin_plot_macro();
         self.begin_plot_edit(graph);
         let current_axis = self
             .plot_settings

@@ -544,7 +544,14 @@ Les réglages d'un graphe vivent dans une **fenêtre flottante à onglets**
 (`app::plot_settings_window`), un **dialogue modal** (`app::modal_dialog`) :
 au premier plan, le reste de l'interface ne reçoit plus aucun clic, et un
 clic ailleurs fait clignoter son contour en rouge foncé
-(`theme::blocked_flash_color`). Échap ou la croix la ferme. Elle est construite
+(`theme::blocked_flash_color`). Deux boutons en bas : **Valider** (par défaut,
+Entrée hors saisie de texte) et **Annuler** (aussi la croix et Échap). Les
+gestes s'appliquent en direct au graphe (aperçu) mais dans une **macro
+d'historique** ouverte à l'ouverture de la fenêtre : Valider la ferme — une
+seule entrée, un Ctrl+Z défait tout (`AppState::close_plot_settings`) ;
+Annuler l'avorte et restaure le graphe d'avant
+(`AppState::cancel_plot_settings`). Pendant la macro, annuler/rétablir et
+enregistrer sont refusés (`plotyx-commands`). Elle est construite
 par la même brique que les fenêtres de contenu (`show_window_in_layer`,
 `window_header`, `floating_resize_handles`) — même cadre, même barre de
 titre — et non par une `egui::Window` brute ; seuls l'ordre de calque et le

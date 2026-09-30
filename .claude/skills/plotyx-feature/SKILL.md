@@ -145,7 +145,10 @@ Toute fenêtre de l'application se construit par la brique commune
 pour la barre de titre), **jamais** par une `egui::Window` brute. Un dialogue
 qui doit bloquer le reste de l'interface passe par `modal_dialog` (fenêtre des
 propriétés du graphe) : calque plein écran qui capte les clics, contour rouge
-foncé qui clignote sur un clic bloqué, Échap qui ferme. La fenêtre d'import
+foncé qui clignote sur un clic bloqué, boutons Valider (défaut, Entrée) /
+Annuler (croix, Échap) rendus par `DialogOutcome`. Les gestes d'un dialogue
+d'édition vivent dans une macro d'historique (`begin_macro`) : Valider la
+ferme (une entrée), Annuler l'avorte (modèle : `cancel_plot_settings`). La fenêtre d'import
 (`import_window`) est encore une `egui::Window` brute (issues #13/#14).
 
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
