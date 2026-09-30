@@ -62,10 +62,10 @@ use plotyx_core::resolve::{ResolvedPanel, ResolvedPlot};
 use plotyx_plot::{AxisScale, AxisSpec, PlotSpec, SeriesAxis};
 
 use crate::clip::{self, PixelBounds};
-use crate::color::{auto_ink, rgb_or};
+use crate::color::{auto_ink, over_white, rgba_or};
 use crate::decimate;
 use crate::legend;
-use crate::paint::{self, rgb, PAPER};
+use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
 use crate::series::{self, Geometry, Prepared};
 
@@ -255,11 +255,17 @@ pub fn draw_on<DB: DrawingBackend>(
     plot: &ResolvedPlot<'_>,
 ) -> Result<DrawnPlot, DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = plot.spec;
-    let background = rgb_or(&spec.background, PAPER);
+    let background = rgba_or(&spec.background, opaque(PAPER));
     // Encre automatique : celle de tout texte et de toute échelle dont la
     // couleur est laissée vide — blanche sur un fond sombre, sombre sinon.
-    let ink = auto_ink(background);
-    root.fill(&rgb(background))?;
+    // Un fond (semi-)transparent est jugé composé sur du blanc.
+    let ink = auto_ink(over_white(background));
+    // Un fond d'opacité nulle n'est pas peint du tout : la figure exportée
+    // (SVG, PNG, PDF) n'a pas de fond, pour s'intégrer à une autre
+    // présentation.
+    if background.3 > 0 {
+        root.fill(&rgba(background))?;
+    }
 
     // `titled` mesure le titre et rabaisse d'autant le haut de la zone : le
     // point où `estimate_text_size` entre dans la géométrie (voir la doc de
@@ -269,7 +275,7 @@ pub fn draw_on<DB: DrawingBackend>(
     } else {
         root.titled(
             &spec.title,
-            text_style(TITLE_SIZE, rgb_or(&spec.title_color, ink)),
+            text_style(TITLE_SIZE, rgba_or(&spec.title_color, opaque(ink))),
         )?
     };
     let title_height = (area.get_base_pixel().1 - root.get_base_pixel().1).max(0) as u32;
@@ -370,11 +376,11 @@ pub fn grid_of(spec: &PlotSpec, panels: usize) -> Layout {
 fn draw_panel<DB: DrawingBackend>(
     cell: &DrawingArea<DB, Shift>,
     panel: &ResolvedPanel<'_>,
-    background: (u8, u8, u8),
+    background: (u8, u8, u8, u8),
 ) -> Result<DrawnPanel, DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
     // Encre automatique du panneau, voir `draw_on`.
-    let ink = auto_ink(background);
+    let ink = auto_ink(over_white(background));
     let x_scale = spec.bottom.scale;
     let y_scale = spec.left.scale;
     let y2_scale = spec.right.scale;
@@ -427,7 +433,7 @@ fn draw_panel<DB: DrawingBackend>(
     let area = if spec.title.is_empty() {
         cell.clone()
     } else {
-        cell.titled(&spec.title, text_style(PANEL_TITLE_SIZE, ink))?
+        cell.titled(&spec.title, text_style(PANEL_TITLE_SIZE, opaque(ink)))?
     };
     let (width, height) = area.dim_in_pixel();
     // Les aires de graduation sont plafonnées à un tiers de la cellule :
@@ -506,7 +512,7 @@ fn draw_panel<DB: DrawingBackend>(
         let mut mesh = chart.configure_secondary_axes();
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
             .axis_desc_style(text_style(AXIS_DESC_SIZE, colors.title))
-            .axis_style(rgb(colors.ticks))
+            .axis_style(rgba(colors.ticks))
             .y_desc(spec.right.display_label());
         if scale::needs_formatter(y2_scale) {
             mesh.y_label_formatter(&format_y2)
@@ -600,7 +606,7 @@ fn draw_panel<DB: DrawingBackend>(
         size,
         &spec.legend,
         &entries,
-        &text_style(LABEL_SIZE, ink),
+        &text_style(LABEL_SIZE, opaque(ink)),
         legend::LegendColors { background, ink },
     )?;
     drawn.legend_entries = inscribed.entries;
@@ -811,9 +817,10 @@ fn label_area(visible: bool, wanted: u32, available: u32) -> u32 {
     wanted.min(available / 3)
 }
 
-/// Le style de texte du projet, à la taille et dans la couleur données.
-fn text_style(size: f64, color: (u8, u8, u8)) -> TextStyle<'static> {
-    (FONT_FAMILY, size).into_font().color(&rgb(color))
+/// Le style de texte du projet, à la taille et dans la couleur données
+/// (opacité comprise).
+fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
+    (FONT_FAMILY, size).into_font().color(&rgba(color))
 }
 
 /// Opacité des lignes principales de la grille, dans la couleur de
@@ -825,15 +832,15 @@ const GRID_LIGHT_OPACITY: f64 = 0.1;
 /// Couleurs effectives d'un axe : celles du spec, ou l'encre automatique
 /// quand elles sont vides.
 struct AxisColors {
-    title: (u8, u8, u8),
-    ticks: (u8, u8, u8),
+    title: (u8, u8, u8, u8),
+    ticks: (u8, u8, u8, u8),
 }
 
 impl AxisColors {
     fn of(axis: &AxisSpec, ink: (u8, u8, u8)) -> Self {
         Self {
-            title: rgb_or(&axis.title_color, ink),
-            ticks: rgb_or(&axis.tick_color, ink),
+            title: rgba_or(&axis.title_color, opaque(ink)),
+            ticks: rgba_or(&axis.tick_color, opaque(ink)),
         }
     }
 
@@ -848,7 +855,7 @@ impl AxisColors {
             + plotters::coord::ranged1d::ValueFormatter<f64>,
         DB: DrawingBackend,
     {
-        let ticks = rgb(self.ticks);
+        let ticks = rgba(self.ticks);
         mesh.label_style(text_style(LABEL_SIZE, self.ticks))
             .axis_desc_style(text_style(AXIS_DESC_SIZE, self.title))
             .axis_style(ticks)

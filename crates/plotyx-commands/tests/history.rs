@@ -9,7 +9,7 @@ use plotyx_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, CoreError, MixedCell, Node, NodeId, NodeKind,
     Project, Tree, ValueBlock, WindowMeta,
 };
-use plotyx_plot::PlotSpec;
+use plotyx_plot::{ColorUsage, PlotSpec, SavedColors};
 
 // -- fixture --------------------------------------------------------------
 
@@ -2156,6 +2156,38 @@ fn set_cells_on_a_formula_column_is_refused() {
     // Ni le modèle ni l'historique n'ont bougé.
     assert_eq!(**f.project.tree(), *before);
     assert_eq!(history.undo_label(), undo_label_before.as_deref());
+}
+
+/// Enregistrer une couleur dans le projet est une commande de données
+/// annulable : Annuler rend la liste d'avant, Rétablir celle d'après.
+#[test]
+fn set_saved_colors_round_trip() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let colors = SavedColors::default().with_added(ColorUsage::Curves, "#ff0000");
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetSavedColors {
+                colors: colors.clone(),
+            },
+        )
+        .expect("couleurs enregistrées");
+    assert_eq!(
+        history.undo_label(),
+        Some("Modifier les couleurs enregistrées")
+    );
+    assert_eq!(f.project.tree().saved_colors(), &colors);
+    let after = snapshot(&f.project);
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert!(f.project.tree().saved_colors().is_empty());
+    assert_eq!(**f.project.tree(), *before);
+
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
 }
 
 #[test]

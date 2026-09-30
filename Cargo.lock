@@ -3674,6 +3674,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "directories",
  "eframe",
  "egui_extras",
  "plotyx-commands",
@@ -3686,6 +3687,8 @@ dependencies = [
  "plotyx-script",
  "plotyx-session",
  "rfd",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

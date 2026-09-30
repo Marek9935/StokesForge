@@ -56,7 +56,7 @@ use plotyx_core::node::NodeKind;
 use plotyx_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
 };
-use plotyx_plot::{PanelSpec, Panels, PlotSpec, PlotType};
+use plotyx_plot::{ColorUsage, PanelSpec, Panels, PlotSpec, PlotType, SavedColors};
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
 #[cfg(feature = "python")]
@@ -64,6 +64,7 @@ use plotyx_script::{ScriptEngine, ScriptOutcome};
 use plotyx_session::{SessionHandle, SessionResult, Snapshot};
 
 use crate::selection::{GridCursor, Selection};
+use crate::user_colors::UserColors;
 
 /// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
 /// ces valeurs ; elle ne touche jamais l'acteur directement.
@@ -347,6 +348,48 @@ pub enum Action {
         /// Axe à afficher dans l'onglet « Axes ».
         axis: Option<PlotAxis>,
     },
+    /// Enregistre une couleur pour `usage`, dans le projet (commande
+    /// annulable [`Command::SetSavedColors`]) ou pour l'utilisateur (fichier
+    /// de configuration, [`crate::user_colors`], hors historique).
+    SaveColor {
+        /// Usage : courbes, texte ou fonds.
+        usage: ColorUsage,
+        /// Couleur `#RRGGBB` ou `#RRGGBBAA`.
+        color: String,
+        /// Où l'enregistrer.
+        target: SaveTarget,
+    },
+    /// Retire une couleur enregistrée — pendant de [`Action::SaveColor`].
+    RemoveSavedColor {
+        /// Usage : courbes, texte ou fonds.
+        usage: ColorUsage,
+        /// Couleur à retirer.
+        color: String,
+        /// D'où la retirer.
+        target: SaveTarget,
+    },
+}
+
+/// Où enregistrer une couleur du sélecteur de couleur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SaveTarget {
+    /// Dans le projet : la couleur voyage avec le fichier `.plx`, et
+    /// l'enregistrer s'annule par Ctrl+Z. Le choix par défaut.
+    #[default]
+    Project,
+    /// Pour l'utilisateur : la couleur reste sur cette machine, proposée
+    /// dans tous les projets.
+    User,
+}
+
+impl SaveTarget {
+    /// Libellé du choix.
+    pub fn label(self) -> &'static str {
+        match self {
+            SaveTarget::Project => "dans le projet",
+            SaveTarget::User => "pour moi (tous les projets)",
+        }
+    }
 }
 
 /// Un message à afficher à l'utilisateur, avec sa gravité.
@@ -1399,6 +1442,9 @@ pub struct AppState {
     /// Fenêtre des propriétés du graphe, si elle est ouverte (voir
     /// [`PlotSettings`]).
     plot_settings: Option<PlotSettings>,
+    /// Couleurs enregistrées pour l'utilisateur, hors projet (voir
+    /// [`crate::user_colors`]).
+    user_colors: UserColors,
     /// Sélection courante de la grille de chaque feuille affichée — état UI
     /// pur, jamais dans l'historique (voir la doc de tête de
     /// [`crate::selection`]). Clé absente = pas de sélection dans cette
@@ -1490,6 +1536,7 @@ impl AppState {
             note_editing: None,
             plot_edit: None,
             plot_settings: None,
+            user_colors: UserColors::load(),
             selection: std::collections::HashMap::new(),
             header_editing: None,
             grid_clipboard: None,
@@ -2926,6 +2973,53 @@ impl AppState {
             }
             Action::OpenPlotSettings { graph, tab, axis } => {
                 self.open_plot_settings(graph, tab, axis);
+            }
+            Action::SaveColor {
+                usage,
+                color,
+                target,
+            } => {
+                let next = self.saved_colors(target).with_added(usage, &color);
+                self.replace_saved_colors(target, next);
+            }
+            Action::RemoveSavedColor {
+                usage,
+                color,
+                target,
+            } => {
+                let next = self.saved_colors(target).with_removed(usage, &color);
+                self.replace_saved_colors(target, next);
+            }
+        }
+    }
+
+    /// Les couleurs enregistrées dans le projet, ou pour l'utilisateur.
+    pub fn saved_colors(&self, target: SaveTarget) -> SavedColors {
+        match target {
+            SaveTarget::Project => self.snapshot.tree.saved_colors().clone(),
+            SaveTarget::User => self.user_colors.colors().clone(),
+        }
+    }
+
+    /// Fait lire et écrire les couleurs de l'utilisateur dans `path` plutôt
+    /// que dans le dossier de configuration — pour les tests, qui ne doivent
+    /// pas toucher aux vraies préférences de la machine.
+    pub fn use_user_colors_file(&mut self, path: std::path::PathBuf) {
+        self.user_colors = UserColors::load_from(Some(path));
+    }
+
+    fn replace_saved_colors(&mut self, target: SaveTarget, next: SavedColors) {
+        if next == self.saved_colors(target) {
+            return;
+        }
+        match target {
+            SaveTarget::Project => self.execute(Command::SetSavedColors { colors: next }),
+            SaveTarget::User => {
+                if let Err(err) = self.user_colors.replace(next) {
+                    self.fail(format!(
+                        "Couleurs enregistrées pour cette session seulement : écriture impossible ({err})"
+                    ));
+                }
             }
         }
     }

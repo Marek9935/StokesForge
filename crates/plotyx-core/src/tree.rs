@@ -14,6 +14,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use plotyx_plot::SavedColors;
+
 use crate::column::Column;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
@@ -39,6 +41,10 @@ pub(crate) fn display_folders(folders: &[String]) -> String {
 pub struct Tree {
     nodes: HashMap<NodeId, Arc<Node>>,
     root: NodeId,
+    /// Couleurs enregistrées dans le projet, par usage — portées par l'arbre
+    /// pour voyager avec lui : un instantané de session, un retour arrière
+    /// structurel et la persistance les voient sans chemin à part.
+    saved_colors: SavedColors,
 }
 
 impl Tree {
@@ -65,7 +71,28 @@ impl Tree {
         let id = root.id();
         let mut nodes = HashMap::new();
         nodes.insert(id, Arc::new(root));
-        Self { nodes, root: id }
+        Self {
+            nodes,
+            root: id,
+            saved_colors: SavedColors::default(),
+        }
+    }
+
+    /// Les couleurs enregistrées dans le projet.
+    pub fn saved_colors(&self) -> &SavedColors {
+        &self.saved_colors
+    }
+
+    /// Le même arbre, avec ces couleurs enregistrées (bornées à
+    /// [`plotyx_plot::MAX_SAVED_COLORS`] par usage) — pour la persistance,
+    /// qui reconstruit l'arbre puis y repose ce que le fichier portait.
+    pub fn with_saved_colors(mut self, colors: SavedColors) -> Self {
+        self.saved_colors = colors.bounded();
+        self
+    }
+
+    pub(crate) fn saved_colors_mut(&mut self) -> &mut SavedColors {
+        &mut self.saved_colors
     }
 
     /// Reconstruit un arbre depuis une liste de nœuds (persistance). Valide
@@ -83,7 +110,11 @@ impl Tree {
                 )));
             }
         }
-        let tree = Self { nodes: map, root };
+        let tree = Self {
+            nodes: map,
+            root,
+            saved_colors: SavedColors::default(),
+        };
         tree.validate_loaded()?;
         Ok(tree)
     }

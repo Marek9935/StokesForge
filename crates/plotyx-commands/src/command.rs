@@ -32,7 +32,7 @@
 //! remplace elle aussi un contenu en bloc sans toucher à la structure.
 
 use plotyx_core::{Column, ColumnMeta, ColumnType, NodeId, Tree, ValueBlock, WindowMeta};
-use plotyx_plot::PlotSpec;
+use plotyx_plot::{PlotSpec, SavedColors};
 
 /// Une des mutations du modèle exprimables par l'utilisateur.
 #[derive(Debug, Clone, PartialEq)]
@@ -279,6 +279,13 @@ pub enum Command {
         /// Nouvelle description du graphe.
         spec: PlotSpec,
     },
+    /// Remplace les couleurs enregistrées dans le projet, en bloc (enregistrer
+    /// ou retirer une couleur du sélecteur de couleur). Données, pas
+    /// structure : aucun nœud ne bouge.
+    SetSavedColors {
+        /// Nouvelles couleurs enregistrées.
+        colors: SavedColors,
+    },
 }
 
 impl Command {
@@ -351,6 +358,7 @@ impl Command {
                 Some(name) => format!("Modifier le graphe {name}"),
                 None => "Modifier le graphe".to_string(),
             },
+            Command::SetSavedColors { .. } => "Modifier les couleurs enregistrées".to_string(),
         }
     }
 }

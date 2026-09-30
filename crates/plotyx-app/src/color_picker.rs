@@ -1,63 +1,70 @@
 //! Sélecteur de couleur de PlotYx : un bouton-échantillon qui ouvre une
-//! fenêtre surgissante avec une **palette** adaptée à ce qu'on colore, un
-//! **nuancier** (carré saturation × luminosité et barre de teinte), et la
-//! saisie en **RVB**, **TSL** et **hexadécimal**.
+//! fenêtre surgissante avec une **palette** adaptée à ce qu'on colore, les
+//! **couleurs enregistrées**, un **nuancier** (carré saturation ×
+//! luminosité ou **roue chromatique**), l'**opacité**, et la saisie en
+//! **RVB**, **TSL** et **hexadécimal**.
 //!
-//! # Trois palettes, pas une
+//! # Une palette par usage
 //!
 //! Une courbe, un texte et un fond n'ont pas besoin des mêmes couleurs
-//! ([`PaletteKind`]) :
+//! ([`ColorUsage`]) :
 //!
-//! - **courbes** : la palette d'attribution automatique des séries
-//!   ([`plotyx_plot::DEFAULT_PALETTE`]), des teintes contrastées entre elles,
-//!   avec leurs nuances foncées et claires calculées en TSL ;
-//! - **texte** : des encres lisibles — noirs, gris, blanc, et des teintes
-//!   foncées ;
-//! - **fonds** : des teintes claires, et une rangée de fonds **sombres**. Un
-//!   fond sombre fait passer d'un coup en blanc tout ce qui est en couleur
-//!   automatique (titre, axes, graduations, légende) — la règle vit dans le
-//!   rendu (`plotyx_render::color::auto_ink`), commune à l'écran et à
-//!   l'export.
+//! - **courbes** : un outil à part, plus complet — un choix de palettes
+//!   nommées ([`plotyx_plot::CURVE_PALETTES`] : PlotYx, Tableau 10,
+//!   Okabe-Ito lisible par les daltoniens, ColorBrewer, et les dégradés
+//!   Viridis, Plasma, gris), chacune avec ses nuances foncées et claires.
+//!   Les palettes vivent dans `plotyx-plot` pour qu'une évolution future
+//!   puisse colorer plusieurs courbes d'un coup (palette ou dégradé) sans
+//!   les déplacer ;
+//! - **texte** : des encres lisibles — noirs, gris, blanc, teintes foncées ;
+//! - **fonds** : des teintes claires, des fonds **sombres** (le texte
+//!   automatique passe alors en blanc, règle de `plotyx_render::color::
+//!   auto_ink`), et **« Aucune »** : un fond transparent, pour intégrer la
+//!   figure exportée à une autre présentation.
 //!
-//! # « Automatique »
+//! # Couleurs enregistrées
 //!
-//! Dans le modèle, une couleur est une chaîne `#RRGGBB` ; la chaîne vide veut
-//! dire « automatique » (encre contrastée avec le fond, couleur du trait pour
-//! un marqueur…). Le bouton propose alors une entrée « Automatique » qui
-//! remet la chaîne à vide.
+//! « Enregistrer » garde la couleur courante **dans le projet** (par
+//! défaut : elle voyage avec le `.plx`, et s'annule par Ctrl+Z) ou **pour
+//! l'utilisateur** (sur cette machine, dans tous les projets) — voir
+//! [`crate::state::SaveTarget`]. Une couleur enregistrée ne réapparaît que
+//! dans la palette de son usage. Clic droit sur une couleur enregistrée : la
+//! retirer. Ce module ne touche ni au modèle ni au disque : il dépose des
+//! [`SavedColorRequest`] dans le [`PickerEnv`] fourni par l'appelant, qui
+//! les traduit en actions.
+//!
+//! # « Automatique », « Aucune » et l'opacité
+//!
+//! Dans le modèle, une couleur est une chaîne `#RRGGBB` (opaque) ou
+//! `#RRGGBBAA` ; la chaîne vide veut dire « automatique » (encre contrastée
+//! avec le fond, couleur du trait pour un marqueur…). « Aucune » est une
+//! opacité nulle (`#ffffff00`). Une couleur transparente est montrée sur un
+//! damier.
 //!
 //! # Quand la couleur est-elle validée
 //!
 //! La chaîne est modifiée en direct (retour visuel immédiat dans le
 //! graphe), et [`color_button`] rend `true` quand l'interaction est finie :
-//! clic sur un échantillon ou sur « Automatique », fin d'un glisser dans le
-//! nuancier, champ numérique ou hexadécimal validé, fermeture de la fenêtre
-//! surgissante. C'est la même règle anti-inflation d'historique que le reste
-//! de la fenêtre des propriétés (`crate::app::plot_settings_window`) : une
-//! seule entrée d'historique par geste, pas une par pixel.
+//! clic sur un échantillon, fin d'un glisser dans le nuancier, champ
+//! validé, fermeture de la fenêtre surgissante. Même règle anti-inflation
+//! d'historique que le reste de la fenêtre des propriétés
+//! (`crate::app::plot_settings_window`).
 //!
-//! Les conversions (hexadécimal, RVB ↔ TSL, RVB ↔ TSV) sont des fonctions
-//! pures, testées sans fenêtre.
+//! Les conversions (hexadécimal, RVB ↔ TSL, RVB ↔ TSV) et les palettes sont
+//! des fonctions pures, testées sans fenêtre.
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
+pub use plotyx_plot::ColorUsage;
+use plotyx_plot::{SavedColors, CURVE_PALETTES};
 
-/// Ce que la couleur colore — choisit la palette proposée.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PaletteKind {
-    /// Trait et marqueur d'une courbe.
-    Curves,
-    /// Titre, titres d'axes, graduations.
-    Text,
-    /// Fond du graphe.
-    Background,
-}
+use crate::state::SaveTarget;
 
 /// Une rangée nommée d'échantillons.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaletteSection {
     /// Titre de la rangée.
-    pub title: &'static str,
-    /// Couleurs, en RVB.
+    pub title: String,
+    /// Couleurs, en RVB opaque.
     pub colors: Vec<[u8; 3]>,
 }
 
@@ -77,12 +84,25 @@ const DARK_BACKGROUNDS: [&str; 6] = [
     "#000000", "#1e1e1e", "#2b2f36", "#101820", "#14213d", "#102a1f",
 ];
 
-/// Les rangées de la palette `kind`.
-pub fn palette(kind: PaletteKind) -> Vec<PaletteSection> {
-    let parse_all = |colors: &[&str]| colors.iter().filter_map(|hex| parse_hex(hex)).collect();
-    match kind {
-        PaletteKind::Curves => {
-            let base: Vec<[u8; 3]> = parse_all(&plotyx_plot::DEFAULT_PALETTE);
+/// La chaîne d'un fond sans couleur : blanc d'opacité nulle.
+pub const NO_COLOR: &str = "#ffffff00";
+
+fn parse_all(colors: &[&str]) -> Vec<[u8; 3]> {
+    colors
+        .iter()
+        .filter_map(|hex| parse_hex(hex))
+        .map(|[r, g, b, _]| [r, g, b])
+        .collect()
+}
+
+/// Les rangées de la palette de `usage`. Pour les courbes, celles de la
+/// palette nommée d'indice `curve_palette` dans
+/// [`plotyx_plot::CURVE_PALETTES`] (ramené dans les bornes).
+pub fn palette(usage: ColorUsage, curve_palette: usize) -> Vec<PaletteSection> {
+    match usage {
+        ColorUsage::Curves => {
+            let named = CURVE_PALETTES[curve_palette.min(CURVE_PALETTES.len() - 1)];
+            let base = parse_all(named.colors);
             let shade = |factor: fn(f32) -> f32| {
                 base.iter()
                     .map(|&rgb| {
@@ -93,51 +113,61 @@ pub fn palette(kind: PaletteKind) -> Vec<PaletteSection> {
             };
             vec![
                 PaletteSection {
-                    title: "Couleurs des courbes",
+                    title: named.name.to_string(),
                     colors: base.clone(),
                 },
                 PaletteSection {
-                    title: "Nuances foncées",
+                    title: "Nuances foncées".to_string(),
                     colors: shade(|l| l * 0.62),
                 },
                 PaletteSection {
-                    title: "Nuances claires",
+                    title: "Nuances claires".to_string(),
                     colors: shade(|l| l + (100.0 - l) * 0.45),
                 },
             ]
         }
-        PaletteKind::Text => vec![PaletteSection {
-            title: "Encres",
+        ColorUsage::Text => vec![PaletteSection {
+            title: "Encres".to_string(),
             colors: parse_all(&TEXT_INKS),
         }],
-        PaletteKind::Background => vec![
+        ColorUsage::Background => vec![
             PaletteSection {
-                title: "Fonds clairs",
+                title: "Fonds clairs".to_string(),
                 colors: parse_all(&LIGHT_BACKGROUNDS),
             },
             PaletteSection {
-                title: "Fonds sombres (texte automatique en blanc)",
+                title: "Fonds sombres (texte automatique en blanc)".to_string(),
                 colors: parse_all(&DARK_BACKGROUNDS),
             },
         ],
     }
 }
 
-/// Les composantes d'une couleur `#RRGGBB` (casse indifférente, `#`
-/// facultatif, espaces de bordure ignorés), ou `None`.
-pub fn parse_hex(text: &str) -> Option<[u8; 3]> {
+/// Les composantes d'une couleur `#RRGGBB` (opaque) ou `#RRGGBBAA` —
+/// casse indifférente, `#` facultatif, espaces de bordure ignorés —, ou
+/// `None`.
+pub fn parse_hex(text: &str) -> Option<[u8; 4]> {
     let text = text.trim();
     let text = text.strip_prefix('#').unwrap_or(text);
-    if text.len() != 6 || !text.is_ascii() {
+    if !text.is_ascii() {
         return None;
     }
-    let byte = |index: usize| u8::from_str_radix(&text[index..index + 2], 16).ok();
-    Some([byte(0)?, byte(2)?, byte(4)?])
+    let byte = |index: usize| u8::from_str_radix(text.get(index..index + 2)?, 16).ok();
+    match text.len() {
+        6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
+        8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+        _ => None,
+    }
 }
 
-/// La chaîne `#rrggbb` d'une couleur.
-pub fn to_hex([r, g, b]: [u8; 3]) -> String {
-    format!("#{r:02x}{g:02x}{b:02x}")
+/// La chaîne d'une couleur : `#rrggbb` si elle est opaque, `#rrggbbaa`
+/// sinon.
+pub fn to_hex([r, g, b, a]: [u8; 4]) -> String {
+    if a == 255 {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    } else {
+        format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+    }
 }
 
 /// RVB → TSL : teinte en degrés (0–360), saturation et luminosité en
@@ -218,17 +248,67 @@ fn from_chroma(h: f32, c: f32, m: f32) -> [u8; 3] {
     [channel(r), channel(g), channel(b)]
 }
 
+/// Point d'une roue chromatique de rayon 1 centrée à l'origine → (teinte,
+/// saturation), chacune entre 0 et 1 ; la teinte 0 (rouge) est à droite et
+/// tourne dans le sens trigonométrique, la saturation croît vers le bord.
+pub fn wheel_to_hue_saturation(dx: f32, dy: f32) -> (f32, f32) {
+    let hue = (-dy).atan2(dx) / std::f32::consts::TAU;
+    (hue.rem_euclid(1.0), (dx * dx + dy * dy).sqrt().min(1.0))
+}
+
+/// Inverse de [`wheel_to_hue_saturation`].
+pub fn hue_saturation_to_wheel(hue: f32, saturation: f32) -> (f32, f32) {
+    let angle = hue * std::f32::consts::TAU;
+    (saturation * angle.cos(), -saturation * angle.sin())
+}
+
+/// Enregistrer ou retirer une couleur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SavedColorEdit {
+    /// Enregistrer.
+    Save,
+    /// Retirer.
+    Remove,
+}
+
+/// Une demande du sélecteur sur les couleurs enregistrées, que l'appelant
+/// traduit en action (`Action::SaveColor`/`RemoveSavedColor`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedColorRequest {
+    /// Enregistrer ou retirer.
+    pub edit: SavedColorEdit,
+    /// Usage.
+    pub usage: ColorUsage,
+    /// Projet ou utilisateur.
+    pub target: SaveTarget,
+    /// La couleur.
+    pub color: String,
+}
+
+/// Ce que le sélecteur lit et écrit hors de la couleur éditée : les couleurs
+/// enregistrées, et les demandes qui les modifient.
+#[derive(Debug, Clone, Default)]
+pub struct PickerEnv {
+    /// Couleurs enregistrées dans le projet.
+    pub project: SavedColors,
+    /// Couleurs enregistrées pour l'utilisateur.
+    pub user: SavedColors,
+    /// Demandes déposées pendant cette image.
+    pub requests: Vec<SavedColorRequest>,
+}
+
 /// Un libellé suivi de [`color_button`], sur une ligne.
 pub fn color_field(
     ui: &mut egui::Ui,
     label: &str,
     value: &mut String,
-    kind: PaletteKind,
+    usage: ColorUsage,
     auto_label: Option<&str>,
+    env: &mut PickerEnv,
 ) -> bool {
     ui.horizontal(|ui| {
         ui.label(label);
-        color_button(ui, label, value, kind, auto_label)
+        color_button(ui, label, value, usage, auto_label, env)
     })
     .inner
 }
@@ -237,47 +317,78 @@ pub fn color_field(
 const BUTTON_SWATCH: Vec2 = Vec2::new(44.0, 18.0);
 /// Taille d'un échantillon de palette.
 const PALETTE_SWATCH: f32 = 18.0;
-/// Côté du carré du nuancier.
-const SQUARE_SIDE: f32 = 200.0;
-/// Hauteur de la barre de teinte.
-const HUE_BAR_HEIGHT: f32 = 16.0;
-/// Finesse du maillage du nuancier (sommets par côté).
+/// Côté du carré du nuancier (et diamètre de la roue).
+const PICKER_SIDE: f32 = 200.0;
+/// Hauteur des barres (teinte, valeur, opacité).
+const BAR_HEIGHT: f32 = 16.0;
+/// Finesse des maillages du nuancier.
 const MESH_STEPS: usize = 24;
+/// Côté d'une case du damier des couleurs transparentes.
+const CHECKER: f32 = 5.0;
+
+/// Nuancier affiché : carré ou roue. Choix mémorisé pour la session, commun
+/// à tous les sélecteurs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum PickerShape {
+    #[default]
+    Square,
+    Wheel,
+}
 
 /// État du nuancier entre deux images : la couleur en TSV, gardée à part de
 /// la chaîne pour ne pas perdre la teinte sur un gris (où elle n'est pas
-/// définie) pendant qu'on glisse dans le carré.
+/// définie) pendant qu'on glisse.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PickerMemory {
-    /// La chaîne à laquelle `hsv` correspond ; si le modèle change (autre
+    /// La couleur à laquelle `hsv` correspond ; si le modèle change (autre
     /// champ, annulation), la mémoire est recalculée depuis la chaîne.
-    hex: [u8; 3],
+    rgb: [u8; 3],
     hsv: (f32, f32, f32),
 }
 
+/// Peint `rgba` dans `rect`, sur un damier si elle n'est pas opaque.
+fn paint_swatch(painter: &egui::Painter, rect: Rect, [r, g, b, a]: [u8; 4]) {
+    if a < 255 {
+        painter.rect_filled(rect, 0.0, Color32::WHITE);
+        let columns = (rect.width() / CHECKER).ceil() as i32;
+        let rows = (rect.height() / CHECKER).ceil() as i32;
+        for row in 0..rows {
+            for column in 0..columns {
+                if (row + column) % 2 == 0 {
+                    continue;
+                }
+                let min = rect.min + Vec2::new(column as f32 * CHECKER, row as f32 * CHECKER);
+                let cell = Rect::from_min_size(min, Vec2::splat(CHECKER)).intersect(rect);
+                painter.rect_filled(cell, 0.0, Color32::from_gray(0xcc));
+            }
+        }
+    }
+    painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
+}
+
 /// Le bouton-échantillon et sa fenêtre surgissante. `value` est la chaîne
-/// `#RRGGBB` du modèle (vide = automatique quand `auto_label` est donné).
-/// Rend `true` quand un geste vient de se terminer — voir la doc du module.
+/// du modèle (vide = automatique quand `auto_label` est donné). Rend `true`
+/// quand un geste vient de se terminer — voir la doc du module.
 pub fn color_button(
     ui: &mut egui::Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
     value: &mut String,
-    kind: PaletteKind,
+    usage: ColorUsage,
     auto_label: Option<&str>,
+    env: &mut PickerEnv,
 ) -> bool {
     let current = parse_hex(value);
     let (rect, response) = ui.allocate_exact_size(BUTTON_SWATCH, Sense::click());
     let response = response.on_hover_text(match current {
-        Some(rgb) => to_hex(rgb),
+        Some([_, _, _, 0]) => "Aucune (transparent)".to_string(),
+        Some(rgba) => to_hex(rgba),
         None => auto_label.unwrap_or("Automatique").to_string(),
     });
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let stroke = ui.visuals().widgets.inactive.fg_stroke;
         match current {
-            Some([r, g, b]) => {
-                painter.rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
-            }
+            Some(rgba) => paint_swatch(painter, rect, rgba),
             None => {
                 painter.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
                 painter.text(
@@ -299,8 +410,8 @@ pub fn color_button(
         .id(popup_id)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_width(SQUARE_SIDE + 24.0);
-            commit |= picker_contents(ui, popup_id, value, kind, auto_label);
+            ui.set_width(PICKER_SIDE + 40.0);
+            commit |= picker_contents(ui, popup_id, value, usage, auto_label, env);
         });
     let is_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     // Refermer la fenêtre surgissante valide ce qui a pu être modifié sans
@@ -308,69 +419,200 @@ pub fn color_button(
     commit || (was_open && !is_open)
 }
 
-/// Contenu de la fenêtre surgissante : palette, « Automatique », nuancier,
-/// champs numériques et hexadécimal.
+/// Contenu de la fenêtre surgissante.
 fn picker_contents(
     ui: &mut egui::Ui,
     popup_id: egui::Id,
     value: &mut String,
-    kind: PaletteKind,
+    usage: ColorUsage,
     auto_label: Option<&str>,
+    env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
     let mut close = false;
+    let mut chosen: Option<[u8; 4]> = None;
 
-    for section in palette(kind) {
+    // -- Palette -------------------------------------------------------
+    let curve_palette_id = egui::Id::new("plotyx_curve_palette");
+    let mut curve_palette: usize = ui
+        .memory(|memory| memory.data.get_temp(curve_palette_id))
+        .unwrap_or(0);
+    if usage == ColorUsage::Curves {
+        // L'outil des courbes : un choix de palettes nommées.
+        egui::ComboBox::from_id_salt(popup_id.with("curve_palette"))
+            .width(PICKER_SIDE + 20.0)
+            .selected_text(CURVE_PALETTES[curve_palette.min(CURVE_PALETTES.len() - 1)].name)
+            .show_ui(ui, |ui| {
+                for (index, named) in CURVE_PALETTES.iter().enumerate() {
+                    ui.selectable_value(&mut curve_palette, index, named.name);
+                }
+            });
+        ui.memory_mut(|memory| memory.data.insert_temp(curve_palette_id, curve_palette));
+    }
+    let current = parse_hex(value);
+    for section in palette(usage, curve_palette) {
         ui.label(egui::RichText::new(section.title).small().strong());
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(3.0);
-            for rgb in section.colors {
-                let selected = parse_hex(value) == Some(rgb);
-                if palette_swatch(ui, rgb, selected).clicked() {
-                    *value = to_hex(rgb);
-                    commit = true;
+            for [r, g, b] in section.colors {
+                let rgba = [r, g, b, 255];
+                let response = palette_swatch(ui, rgba, current == Some(rgba));
+                if response.clicked() {
+                    chosen = Some(rgba);
                     close = true;
                 }
             }
         });
         ui.add_space(2.0);
     }
-    if let Some(auto_label) = auto_label {
-        if ui
-            .selectable_label(value.trim().is_empty(), auto_label)
-            .clicked()
+    ui.horizontal_wrapped(|ui| {
+        if let Some(auto_label) = auto_label {
+            if ui
+                .selectable_label(value.trim().is_empty(), auto_label)
+                .clicked()
+            {
+                value.clear();
+                commit = true;
+                close = true;
+            }
+        }
+        if usage == ColorUsage::Background
+            && ui
+                .selectable_label(
+                    matches!(current, Some([_, _, _, 0])),
+                    "Aucune (transparent)",
+                )
+                .on_hover_text(
+                    "Pas de fond : la figure exportée s'intègre à une autre présentation.",
+                )
+                .clicked()
         {
-            value.clear();
+            *value = NO_COLOR.to_string();
             commit = true;
             close = true;
         }
+    });
+
+    // -- Couleurs enregistrées ------------------------------------------
+    ui.separator();
+    for (target, title) in [
+        (SaveTarget::Project, "Enregistrées dans le projet"),
+        (SaveTarget::User, "Mes couleurs (tous les projets)"),
+    ] {
+        let saved = match target {
+            SaveTarget::Project => env.project.get(usage).to_vec(),
+            SaveTarget::User => env.user.get(usage).to_vec(),
+        };
+        if saved.is_empty() {
+            continue;
+        }
+        ui.label(egui::RichText::new(title).small().strong());
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::splat(3.0);
+            for color in saved {
+                let Some(rgba) = parse_hex(&color) else {
+                    continue;
+                };
+                let response = palette_swatch(ui, rgba, current == Some(rgba))
+                    .on_hover_text("Clic droit : retirer");
+                if response.clicked() {
+                    chosen = Some(rgba);
+                    close = true;
+                }
+                if response.secondary_clicked() {
+                    env.requests.push(SavedColorRequest {
+                        edit: SavedColorEdit::Remove,
+                        usage,
+                        target,
+                        color,
+                    });
+                }
+            }
+        });
     }
+    let target_id = egui::Id::new("plotyx_save_color_target");
+    let mut target: SaveTarget = ui
+        .memory(|memory| memory.data.get_temp(target_id))
+        .unwrap_or_default();
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(current.is_some(), egui::Button::new("Enregistrer"))
+            .on_hover_text("Garder la couleur courante dans cette palette")
+            .clicked()
+        {
+            if let Some(rgba) = current {
+                env.requests.push(SavedColorRequest {
+                    edit: SavedColorEdit::Save,
+                    usage,
+                    target,
+                    color: to_hex(rgba),
+                });
+            }
+        }
+        egui::ComboBox::from_id_salt(popup_id.with("save_target"))
+            .selected_text(target.label())
+            .show_ui(ui, |ui| {
+                for candidate in [SaveTarget::Project, SaveTarget::User] {
+                    ui.selectable_value(&mut target, candidate, candidate.label());
+                }
+            });
+    });
+    ui.memory_mut(|memory| memory.data.insert_temp(target_id, target));
     ui.separator();
 
-    // Le nuancier part de la couleur courante, ou d'un gris moyen pour une
-    // couleur automatique (rien à montrer).
-    let rgb = parse_hex(value).unwrap_or([0x80, 0x80, 0x80]);
+    // -- Nuancier --------------------------------------------------------
+    let [r0, g0, b0, a0] = current.unwrap_or([0x80, 0x80, 0x80, 255]);
+    let rgb = [r0, g0, b0];
     let memory_id = popup_id.with("hsv");
     let mut memory = ui
         .memory(|memory| memory.data.get_temp::<PickerMemory>(memory_id))
-        .filter(|memory| memory.hex == rgb)
+        .filter(|memory| memory.rgb == rgb)
         .unwrap_or(PickerMemory {
-            hex: rgb,
+            rgb,
             hsv: rgb_to_hsv(rgb),
         });
+    let shape_id = egui::Id::new("plotyx_picker_shape");
+    let mut shape: PickerShape = ui
+        .memory(|memory| memory.data.get_temp(shape_id))
+        .unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut shape, PickerShape::Square, "Carré");
+        ui.selectable_value(&mut shape, PickerShape::Wheel, "Roue");
+    });
+    ui.memory_mut(|m| m.data.insert_temp(shape_id, shape));
 
+    let mut new_rgb: Option<[u8; 3]> = None;
     let (h, s, v) = &mut memory.hsv;
-    let square = sv_square(ui, *h, s, v);
-    let hue = hue_bar(ui, h);
-    let mut new_rgb = None;
-    if square.changed || hue.changed {
+    let gestures = match shape {
+        PickerShape::Square => [sv_square(ui, *h, s, v), hue_bar(ui, h)],
+        PickerShape::Wheel => [color_wheel(ui, h, s, *v), value_bar(ui, *h, *s, v)],
+    };
+    if gestures.iter().any(|gesture| gesture.changed) {
         new_rgb = Some(hsv_to_rgb(memory.hsv.0, memory.hsv.1, memory.hsv.2));
     }
-    commit |= square.finished || hue.finished;
+    commit |= gestures.iter().any(|gesture| gesture.finished);
 
+    // -- Opacité ---------------------------------------------------------
+    let mut opacity = f32::from(a0) / 255.0 * 100.0;
+    let opacity_response = ui
+        .horizontal(|ui| {
+            ui.label("Opacité");
+            ui.add(
+                egui::Slider::new(&mut opacity, 0.0..=100.0)
+                    .suffix(" %")
+                    .max_decimals(0),
+            )
+        })
+        .inner;
+    let mut alpha = a0;
+    if opacity_response.changed() {
+        alpha = (opacity / 100.0 * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+    commit |= opacity_response.drag_stopped() || opacity_response.lost_focus();
+
+    // -- RVB ---------------------------------------------------------------
     ui.add_space(4.0);
     let shown = new_rgb.unwrap_or(rgb);
-    // RVB.
     let mut channels = shown.map(i32::from);
     let mut rgb_edit = NumericEdit::default();
     ui.horizontal(|ui| {
@@ -393,7 +635,7 @@ fn picker_contents(
     }
     commit |= rgb_edit.finished;
 
-    // TSL.
+    // -- TSL ---------------------------------------------------------------
     let (mut th, mut ts, mut tl) = rgb_to_hsl(new_rgb.unwrap_or(rgb));
     let mut hsl_edit = NumericEdit::default();
     ui.horizontal(|ui| {
@@ -437,16 +679,17 @@ fn picker_contents(
     }
     commit |= hsl_edit.finished;
 
-    // Hexadécimal : le texte saisi n'est appliqué que lisible, à la
-    // validation.
+    // -- Hexadécimal : appliqué seulement lisible, à la validation ---------
     let hex_id = popup_id.with("hex");
+    let [r1, g1, b1] = new_rgb.unwrap_or(rgb);
     let mut hex_text: String = ui
         .memory(|memory| memory.data.get_temp(hex_id))
-        .unwrap_or_else(|| to_hex(new_rgb.unwrap_or(rgb)));
+        .unwrap_or_else(|| to_hex([r1, g1, b1, alpha]));
     let hex_response = ui
         .horizontal(|ui| {
             ui.label("Hexa");
-            ui.add(egui::TextEdit::singleline(&mut hex_text).desired_width(80.0))
+            ui.add(egui::TextEdit::singleline(&mut hex_text).desired_width(90.0))
+                .on_hover_text("#RRGGBB, ou #RRGGBBAA avec l'opacité")
         })
         .inner;
     if hex_response.has_focus() {
@@ -455,16 +698,22 @@ fn picker_contents(
         ui.memory_mut(|memory| memory.data.remove::<String>(hex_id));
     }
     if hex_response.lost_focus() {
-        if let Some(parsed) = parse_hex(&hex_text) {
-            new_rgb = Some(parsed);
-            memory.hsv = rgb_to_hsv(parsed);
+        if let Some([r, g, b, a]) = parse_hex(&hex_text) {
+            new_rgb = Some([r, g, b]);
+            alpha = a;
+            memory.hsv = rgb_to_hsv([r, g, b]);
             commit = true;
         }
     }
 
-    if let Some(edited) = new_rgb {
-        *value = to_hex(edited);
-        memory.hex = edited;
+    // -- Application -------------------------------------------------------
+    if let Some(rgba) = chosen {
+        *value = to_hex(rgba);
+        commit = true;
+    } else if new_rgb.is_some() || alpha != a0 {
+        let [r, g, b] = new_rgb.unwrap_or(rgb);
+        *value = to_hex([r, g, b, alpha]);
+        memory.rgb = [r, g, b];
     }
     ui.memory_mut(|m| m.data.insert_temp(memory_id, memory));
     if close {
@@ -489,11 +738,11 @@ impl NumericEdit {
 }
 
 /// Un échantillon de palette cliquable.
-fn palette_swatch(ui: &mut egui::Ui, [r, g, b]: [u8; 3], selected: bool) -> egui::Response {
+fn palette_swatch(ui: &mut egui::Ui, rgba: [u8; 4], selected: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(PALETTE_SWATCH), Sense::click());
-    let response = response.on_hover_text(to_hex([r, g, b]));
+    let response = response.on_hover_text(to_hex(rgba));
     let painter = ui.painter();
-    painter.rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
+    paint_swatch(painter, rect, rgba);
     let stroke = if selected {
         Stroke::new(2.0, ui.visuals().selection.stroke.color)
     } else if response.hovered() {
@@ -511,6 +760,13 @@ struct PickerGesture {
     finished: bool,
 }
 
+/// Position du pointeur pendant un appui ou un clic sur `response`.
+fn pressed_pos(response: &egui::Response) -> Option<Pos2> {
+    response
+        .interact_pointer_pos()
+        .filter(|_| response.is_pointer_button_down_on() || response.clicked())
+}
+
 fn gesture(response: &egui::Response) -> PickerGesture {
     PickerGesture {
         changed: false,
@@ -521,16 +777,14 @@ fn gesture(response: &egui::Response) -> PickerGesture {
 /// Le carré saturation (horizontale) × valeur (verticale) à la teinte `h`.
 fn sv_square(ui: &mut egui::Ui, h: f32, s: &mut f32, v: &mut f32) -> PickerGesture {
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::splat(SQUARE_SIDE), Sense::click_and_drag());
+        ui.allocate_exact_size(Vec2::splat(PICKER_SIDE), Sense::click_and_drag());
     let mut result = gesture(&response);
-    if let Some(pos) = response.interact_pointer_pos() {
-        if response.is_pointer_button_down_on() || response.clicked() {
-            let new_s = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-            let new_v = 1.0 - ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
-            if (new_s, new_v) != (*s, *v) {
-                (*s, *v) = (new_s, new_v);
-                result.changed = true;
-            }
+    if let Some(pos) = pressed_pos(&response) {
+        let new_s = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+        let new_v = 1.0 - ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
+        if (new_s, new_v) != (*s, *v) {
+            (*s, *v) = (new_s, new_v);
+            result.changed = true;
         }
     }
     if ui.is_rect_visible(rect) {
@@ -575,31 +829,95 @@ fn sv_square(ui: &mut egui::Ui, h: f32, s: &mut f32, v: &mut f32) -> PickerGestu
     result
 }
 
-/// La barre de teinte, de 0 à 360°.
-fn hue_bar(ui: &mut egui::Ui, h: &mut f32) -> PickerGesture {
-    let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(SQUARE_SIDE, HUE_BAR_HEIGHT),
-        Sense::click_and_drag(),
-    );
+/// La roue chromatique : teinte selon l'angle, saturation selon la distance
+/// au centre, à la valeur `v`.
+fn color_wheel(ui: &mut egui::Ui, h: &mut f32, s: &mut f32, v: f32) -> PickerGesture {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::splat(PICKER_SIDE), Sense::click_and_drag());
+    let center = rect.center();
+    let radius = rect.width() / 2.0;
     let mut result = gesture(&response);
-    if let Some(pos) = response.interact_pointer_pos() {
-        if response.is_pointer_button_down_on() || response.clicked() {
-            let new_h = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-            if new_h != *h {
-                *h = new_h;
-                result.changed = true;
-            }
+    if let Some(pos) = pressed_pos(&response) {
+        let (new_h, new_s) =
+            wheel_to_hue_saturation((pos.x - center.x) / radius, (pos.y - center.y) / radius);
+        if (new_h, new_s) != (*h, *s) {
+            (*h, *s) = (new_h, new_s);
+            result.changed = true;
         }
     }
+    if ui.is_rect_visible(rect) {
+        const RINGS: usize = 12;
+        const SEGMENTS: usize = 72;
+        let mut mesh = egui::Mesh::default();
+        let [r, g, b] = hsv_to_rgb(0.0, 0.0, v);
+        mesh.colored_vertex(center, Color32::from_rgb(r, g, b));
+        for ring in 1..=RINGS {
+            let saturation = ring as f32 / RINGS as f32;
+            for segment in 0..SEGMENTS {
+                let hue = segment as f32 / SEGMENTS as f32;
+                let (dx, dy) = hue_saturation_to_wheel(hue, saturation);
+                let [r, g, b] = hsv_to_rgb(hue, saturation, v);
+                mesh.colored_vertex(
+                    center + Vec2::new(dx, dy) * radius,
+                    Color32::from_rgb(r, g, b),
+                );
+            }
+        }
+        let vertex = |ring: usize, segment: usize| -> u32 {
+            if ring == 0 {
+                0
+            } else {
+                (1 + (ring - 1) * SEGMENTS + segment % SEGMENTS) as u32
+            }
+        };
+        for segment in 0..SEGMENTS {
+            mesh.add_triangle(0, vertex(1, segment), vertex(1, segment + 1));
+            for ring in 2..=RINGS {
+                let (a, b) = (vertex(ring - 1, segment), vertex(ring - 1, segment + 1));
+                let (c, d) = (vertex(ring, segment), vertex(ring, segment + 1));
+                mesh.add_triangle(a, c, d);
+                mesh.add_triangle(a, d, b);
+            }
+        }
+        let painter = ui.painter();
+        painter.add(egui::Shape::mesh(mesh));
+        let (dx, dy) = hue_saturation_to_wheel(*h, *s);
+        let marker = center + Vec2::new(dx, dy) * radius;
+        let contrast = if v > 0.5 {
+            Color32::BLACK
+        } else {
+            Color32::WHITE
+        };
+        painter.circle_stroke(marker, 5.0, Stroke::new(1.5, contrast));
+        painter.circle_stroke(
+            center,
+            radius,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+        );
+    }
+    result
+}
+
+/// Une barre horizontale peinte d'un dégradé `color(f)`, f de 0 à 1, avec
+/// un curseur en `position`. Rend la nouvelle position si on l'a bougée.
+fn gradient_bar(
+    ui: &mut egui::Ui,
+    position: f32,
+    color: impl Fn(f32) -> Color32,
+) -> (Option<f32>, PickerGesture) {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(PICKER_SIDE, BAR_HEIGHT), Sense::click_and_drag());
+    let result = gesture(&response);
+    let moved = pressed_pos(&response)
+        .map(|pos| ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0))
+        .filter(|&f| f != position);
     if ui.is_rect_visible(rect) {
         let mut mesh = egui::Mesh::default();
         for step in 0..=MESH_STEPS {
             let f = step as f32 / MESH_STEPS as f32;
-            let [r, g, b] = hsv_to_rgb(f, 1.0, 1.0);
-            let color = Color32::from_rgb(r, g, b);
             let x = rect.left() + f * rect.width();
-            mesh.colored_vertex(Pos2::new(x, rect.top()), color);
-            mesh.colored_vertex(Pos2::new(x, rect.bottom()), color);
+            mesh.colored_vertex(Pos2::new(x, rect.top()), color(f));
+            mesh.colored_vertex(Pos2::new(x, rect.bottom()), color(f));
             if step < MESH_STEPS {
                 let i = (step * 2) as u32;
                 mesh.add_triangle(i, i + 1, i + 2);
@@ -608,7 +926,7 @@ fn hue_bar(ui: &mut egui::Ui, h: &mut f32) -> PickerGesture {
         }
         let painter = ui.painter();
         painter.add(egui::Shape::mesh(mesh));
-        let x = rect.left() + *h * rect.width();
+        let x = rect.left() + moved.unwrap_or(position) * rect.width();
         painter.rect_stroke(
             Rect::from_center_size(
                 Pos2::new(x, rect.center().y),
@@ -619,6 +937,32 @@ fn hue_bar(ui: &mut egui::Ui, h: &mut f32) -> PickerGesture {
             egui::StrokeKind::Outside,
         );
     }
+    (moved, result)
+}
+
+/// La barre de teinte, de 0 à 360°.
+fn hue_bar(ui: &mut egui::Ui, h: &mut f32) -> PickerGesture {
+    let (moved, mut result) = gradient_bar(ui, *h, |f| {
+        let [r, g, b] = hsv_to_rgb(f, 1.0, 1.0);
+        Color32::from_rgb(r, g, b)
+    });
+    if let Some(new_h) = moved {
+        *h = new_h;
+        result.changed = true;
+    }
+    result
+}
+
+/// La barre de valeur (du noir à la couleur pleine), sous la roue.
+fn value_bar(ui: &mut egui::Ui, h: f32, s: f32, v: &mut f32) -> PickerGesture {
+    let (moved, mut result) = gradient_bar(ui, *v, |f| {
+        let [r, g, b] = hsv_to_rgb(h, s, f);
+        Color32::from_rgb(r, g, b)
+    });
+    if let Some(new_v) = moved {
+        *v = new_v;
+        result.changed = true;
+    }
     result
 }
 
@@ -627,13 +971,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn l_hexadecimal_se_lit_et_s_ecrit() {
-        assert_eq!(parse_hex("#4C78a8"), Some([0x4c, 0x78, 0xa8]));
-        assert_eq!(parse_hex(" 4c78a8 "), Some([0x4c, 0x78, 0xa8]));
+    fn l_hexadecimal_se_lit_et_s_ecrit_opacite_comprise() {
+        assert_eq!(parse_hex("#4C78a8"), Some([0x4c, 0x78, 0xa8, 255]));
+        assert_eq!(parse_hex(" 4c78a8 "), Some([0x4c, 0x78, 0xa8, 255]));
+        assert_eq!(parse_hex("#4c78a880"), Some([0x4c, 0x78, 0xa8, 0x80]));
         assert_eq!(parse_hex(""), None);
         assert_eq!(parse_hex("#abc"), None);
         assert_eq!(parse_hex("#12345g"), None);
-        assert_eq!(to_hex([0x4c, 0x78, 0xa8]), "#4c78a8");
+        assert_eq!(
+            to_hex([0x4c, 0x78, 0xa8, 255]),
+            "#4c78a8",
+            "opaque : 6 chiffres"
+        );
+        assert_eq!(to_hex([0x4c, 0x78, 0xa8, 0x80]), "#4c78a880");
+        assert_eq!(
+            parse_hex(NO_COLOR).map(|c| c[3]),
+            Some(0),
+            "« Aucune » est transparente"
+        );
     }
 
     #[test]
@@ -662,28 +1017,90 @@ mod tests {
         }
     }
 
+    /// La roue : rouge à droite, vert (1/3) en haut à gauche, saturation
+    /// nulle au centre et pleine au bord — et l'aller-retour tient.
+    #[test]
+    fn la_roue_place_les_teintes_comme_attendu() {
+        assert_eq!(wheel_to_hue_saturation(1.0, 0.0), (0.0, 1.0));
+        let (h, s) = wheel_to_hue_saturation(0.0, -1.0);
+        assert!(
+            (h - 0.25).abs() < 1e-6 && (s - 1.0).abs() < 1e-6,
+            "haut : 90°"
+        );
+        assert_eq!(wheel_to_hue_saturation(0.0, 0.0).1, 0.0);
+        assert_eq!(wheel_to_hue_saturation(3.0, 4.0).1, 1.0, "bornée au bord");
+        for (hue, saturation) in [(0.1, 0.5), (0.6, 0.9), (0.95, 0.2)] {
+            let (x, y) = hue_saturation_to_wheel(hue, saturation);
+            let (h, s) = wheel_to_hue_saturation(x, y);
+            assert!((h - hue).abs() < 1e-5 && (s - saturation).abs() < 1e-5);
+        }
+    }
+
+    /// Dessine, sans fenêtre, un sélecteur ouvert — pour chaque usage et
+    /// chaque forme de nuancier — et vérifie qu'il peint son contenu (dont
+    /// les couleurs enregistrées) sans paniquer. La capture d'écran ne sait
+    /// pas ouvrir une fenêtre surgissante ; ce test en est le filet.
+    #[test]
+    fn un_selecteur_ouvert_se_dessine_pour_chaque_usage_et_chaque_nuancier() {
+        for shape in [PickerShape::Square, PickerShape::Wheel] {
+            for usage in [ColorUsage::Curves, ColorUsage::Text, ColorUsage::Background] {
+                let context = egui::Context::default();
+                context.memory_mut(|memory| {
+                    memory
+                        .data
+                        .insert_temp(egui::Id::new("plotyx_picker_shape"), shape)
+                });
+                let mut env = PickerEnv {
+                    project: SavedColors::default().with_added(usage, "#123456"),
+                    user: SavedColors::default().with_added(usage, "#22aa4480"),
+                    requests: Vec::new(),
+                };
+                let mut value = "#ff000080".to_string();
+                let mut shapes = 0;
+                for frame in 0..3 {
+                    let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                        let popup_id = ui.make_persistent_id(("plotyx_color_popup", "Couleur"));
+                        if frame == 0 {
+                            egui::Popup::open_id(ui.ctx(), popup_id);
+                        }
+                        color_button(ui, "Couleur", &mut value, usage, Some("Auto"), &mut env);
+                    });
+                    output.textures_delta.clear();
+                    shapes = output.shapes.len();
+                }
+                assert!(
+                    shapes > 40,
+                    "{usage:?}/{shape:?} : {shapes} formes seulement"
+                );
+                assert_eq!(value, "#ff000080", "rien n'a été modifié sans geste");
+                assert!(env.requests.is_empty());
+            }
+        }
+    }
+
     fn luminance([r, g, b]: [u8; 3]) -> f32 {
         (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0
     }
 
-    /// Les trois palettes sont distinctes, et chacune est faite pour son
-    /// usage : la palette des courbes commence par les couleurs
-    /// d'attribution automatique, celle des fonds sépare clairs et sombres.
+    /// Les palettes sont distinctes par usage ; celle des courbes suit la
+    /// palette nommée choisie, avec ses nuances ; celle des fonds sépare
+    /// clairs et sombres.
     #[test]
     fn chaque_usage_a_sa_palette() {
-        let courbes = palette(PaletteKind::Curves);
-        let texte = palette(PaletteKind::Text);
-        let fonds = palette(PaletteKind::Background);
+        let courbes = palette(ColorUsage::Curves, 0);
+        let texte = palette(ColorUsage::Text, 0);
+        let fonds = palette(ColorUsage::Background, 0);
         assert_ne!(courbes, texte);
         assert_ne!(texte, fonds);
+        assert_eq!(courbes[0].colors, parse_all(&plotyx_plot::DEFAULT_PALETTE));
+        assert_eq!(courbes.len(), 3, "teintes, foncées, claires");
+        let okabe = palette(ColorUsage::Curves, 2);
+        assert_eq!(okabe[0].colors, parse_all(CURVE_PALETTES[2].colors));
         assert_eq!(
-            courbes[0].colors,
-            plotyx_plot::DEFAULT_PALETTE
-                .iter()
-                .filter_map(|hex| parse_hex(hex))
-                .collect::<Vec<_>>()
+            palette(ColorUsage::Curves, 999)[0].title,
+            CURVE_PALETTES[CURVE_PALETTES.len() - 1].name,
+            "indice ramené dans les bornes"
         );
-        assert!(courbes.iter().all(|section| section.colors.len() == 10));
         assert!(
             fonds[0].colors.iter().all(|&c| luminance(c) > 0.85),
             "fonds clairs"

@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use plotyx_plot::PlotSpec;
+use plotyx_plot::{PlotSpec, SavedColors};
 
 use crate::column::{Column, ColumnMeta, ColumnType, ColumnValues, ValueBlock, ValuesDelta};
 use crate::error::{CoreError, CoreResult};
@@ -481,6 +481,13 @@ impl Project {
             .plot_spec_mut()
             .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas un graphe")))?;
         Ok(std::mem::replace(slot, spec))
+    }
+
+    /// Remplace les couleurs enregistrées dans le projet, et rend les
+    /// précédentes. Bornées à [`plotyx_plot::MAX_SAVED_COLORS`] par usage.
+    pub fn set_saved_colors(&mut self, colors: SavedColors) -> SavedColors {
+        let tree = Arc::make_mut(&mut self.tree);
+        std::mem::replace(tree.saved_colors_mut(), colors.bounded())
     }
 
     // -- données --

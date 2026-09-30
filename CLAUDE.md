@@ -46,7 +46,7 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 - `rustfmt` + `clippy -D warnings` obligatoires (CI `.gitlab-ci.yml`).
 - Commits et docs techniques en français.
 - Toute mutation du modèle passe par une commande annulable de `plotyx-commands`, jamais par une primitive `core` en direct.
-- `plotyx-app` : tout réglage de couleur passe par `color_picker::color_field` avec la palette de son usage (`PaletteKind::Curves`/`Text`/`Background`), jamais par un champ texte `#RRGGBB`. Couleur vide = automatique ; le texte et les échelles automatiques suivent `plotyx_render::color::auto_ink` (blanc sur fond sombre).
+- `plotyx-app` : tout réglage de couleur passe par `color_picker::color_field` avec l'usage de la couleur (`ColorUsage::Curves`/`Text`/`Background`) et le `PickerEnv` des couleurs enregistrées, jamais par un champ texte `#RRGGBB`. Couleur vide = automatique ; opacité en `#RRGGBBAA` ; le texte et les échelles automatiques suivent `plotyx_render::color::auto_ink` (blanc sur fond sombre).
 - `plotyx-app` : l'aspect des barres de défilement (largeur, couleur) vient **uniquement** de `theme::scroll_style`, posé globalement par `theme::install` ; jamais de `ScrollStyle` local (verrouillé par le test `aucun_scroll_style_hors_du_theme`). La place d'une barre se lit par `theme::scroll_bar_allocated_width`.
 
 ## Pièges connus

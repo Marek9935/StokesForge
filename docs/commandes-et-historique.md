@@ -39,6 +39,7 @@ Liste faisant foi : `plotyx-commands/src/command.rs` (`Command`,
 | `SetNoteText { id, text }` | données |
 | `SetColumnMeta { column, meta }` | données |
 | `SetPlotSpec { graph, spec }` | données |
+| `SetSavedColors { colors }` | données |
 
 Une commande de création par nature de nœud plutôt qu'un `AddNode` générique
 (voir la doc de tête de `command.rs`) ; `RemoveNode` reste générique, comme

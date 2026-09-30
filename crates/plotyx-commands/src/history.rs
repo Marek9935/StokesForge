@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 use plotyx_core::{ColumnMeta, ColumnType, ColumnValues, MixedCell, WindowMeta};
 use plotyx_core::{CoreError, CoreResult, NodeId, Project, Tree, ValueBlock};
-use plotyx_plot::PlotSpec;
+use plotyx_plot::{PlotSpec, SavedColors};
 
 use crate::command::Command;
 use crate::error::{CommandError, CommandResult};
@@ -175,6 +175,14 @@ pub enum DataDelta {
         before: PlotSpec,
         /// Spec d'après.
         after: PlotSpec,
+    },
+    /// Remplacement des couleurs enregistrées dans le projet — quelques
+    /// chaînes, `before`/`after` directement.
+    SavedColors {
+        /// Couleurs d'avant.
+        before: SavedColors,
+        /// Couleurs d'après.
+        after: SavedColors,
     },
 }
 
@@ -1062,7 +1070,8 @@ impl History {
             | Command::SetWindowMeta { .. }
             | Command::SetNoteText { .. }
             | Command::SetColumnMeta { .. }
-            | Command::SetPlotSpec { .. } => {
+            | Command::SetPlotSpec { .. }
+            | Command::SetSavedColors { .. } => {
                 unreachable!("apply_structural appelée avec une commande de données")
             }
         }
@@ -1281,6 +1290,16 @@ impl History {
                     label,
                 })
             }
+            Command::SetSavedColors { colors } => {
+                let before = project.set_saved_colors(colors.clone());
+                Ok(Entry::Data {
+                    delta: Box::new(DataDelta::SavedColors {
+                        before,
+                        after: colors.bounded(),
+                    }),
+                    label,
+                })
+            }
             Command::AddColumn { .. }
             | Command::DeleteColumn { .. }
             | Command::Rename { .. }
@@ -1413,6 +1432,10 @@ impl History {
                 project.set_plot_spec(*graph, before.clone())?;
                 Ok(())
             }
+            DataDelta::SavedColors { before, .. } => {
+                project.set_saved_colors(before.clone());
+                Ok(())
+            }
         }
     }
 
@@ -1473,6 +1496,10 @@ impl History {
                 project.set_plot_spec(*graph, after.clone())?;
                 Ok(())
             }
+            DataDelta::SavedColors { after, .. } => {
+                project.set_saved_colors(after.clone());
+                Ok(())
+            }
         }
     }
 }
@@ -1527,7 +1554,8 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
             | DataDelta::WindowMeta { .. }
             | DataDelta::NoteText { .. }
             | DataDelta::ColumnMeta { .. }
-            | DataDelta::PlotSpec { .. } => false,
+            | DataDelta::PlotSpec { .. }
+            | DataDelta::SavedColors { .. } => false,
         },
         Entry::Macro { .. } => false,
     }
@@ -1816,7 +1844,10 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
         // `ColumnType` — juste quelques chaînes ou identités, jamais le
         // volume qui justifie ce mécanisme (colonnes de données). Même
         // choix que `InsertRows` ci-dessus.
-        DataDelta::WindowMeta { .. } | DataDelta::NoteText { .. } | DataDelta::PlotSpec { .. } => {}
+        DataDelta::WindowMeta { .. }
+        | DataDelta::NoteText { .. }
+        | DataDelta::PlotSpec { .. }
+        | DataDelta::SavedColors { .. } => {}
         // `ColumnMeta` rejoint `ColumnType` dès qu'elle porte `values_before`
         // (voir sa doc) : c'est alors, elle aussi, un `ColumnValues`
         // potentiellement partagé avec l'arbre courant.
@@ -1893,7 +1924,8 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::SetWindowMeta { .. }
         | Command::SetNoteText { .. }
         | Command::SetColumnMeta { .. }
-        | Command::SetPlotSpec { .. } => {}
+        | Command::SetPlotSpec { .. }
+        | Command::SetSavedColors { .. } => {}
     }
     out
 }
@@ -1935,7 +1967,8 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
         DataDelta::WindowMeta { .. }
         | DataDelta::NoteText { .. }
         | DataDelta::ColumnMeta { .. }
-        | DataDelta::PlotSpec { .. } => {}
+        | DataDelta::PlotSpec { .. }
+        | DataDelta::SavedColors { .. } => {}
     }
     out
 }

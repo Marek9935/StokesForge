@@ -835,3 +835,23 @@ fn column_formula_survives_save_and_load() {
         Some("A*2".to_string())
     );
 }
+
+/// Les couleurs enregistrées dans le projet, rangées par usage, survivent à
+/// `save`/`load` — et l'arbre relu reste identique à l'original.
+#[test]
+fn saved_colors_survive_save_and_load() {
+    use plotyx_plot::{ColorUsage, SavedColors};
+    let mut project = fixture_project();
+    project.set_saved_colors(
+        SavedColors::default()
+            .with_added(ColorUsage::Curves, "#ff0000")
+            .with_added(ColorUsage::Text, "#20202080")
+            .with_added(ColorUsage::Background, "#ffffff00"),
+    );
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("couleurs.plyx");
+    save(&project, &path).expect("sauvegarde réussie");
+    let loaded = load(&path).expect("chargement réussi");
+    assert_eq!(loaded.tree().saved_colors(), project.tree().saved_colors());
+    assert!(*loaded.tree() == *project.tree());
+}

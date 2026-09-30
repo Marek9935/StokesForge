@@ -197,6 +197,24 @@ mod tests {
         );
     }
 
+    /// Un fond sans couleur (opacité nulle) donne un PNG transparent, à
+    /// intégrer tel quel dans une autre présentation ; un fond opaque, un
+    /// PNG opaque.
+    #[test]
+    fn un_fond_sans_couleur_donne_un_png_transparent() {
+        let alpha_du_coin = |fond: &str| {
+            let (project, mut spec) = graphe_resolu();
+            spec.background = fond.to_string();
+            let plot = plotyx_core::resolve::resolve_spec(project.tree(), &spec);
+            let png = render_to_png(&plot, (400, 300), &TextMeasurer::default(), 1.0)
+                .expect("export PNG");
+            let pixmap = resvg::tiny_skia::Pixmap::decode_png(&png).expect("décodage PNG");
+            pixmap.pixel(1, 1).expect("pixel du coin").alpha()
+        };
+        assert_eq!(alpha_du_coin("#ffffff00"), 0, "fond transparent");
+        assert_eq!(alpha_du_coin("#ffffff"), 255, "fond opaque");
+    }
+
     #[test]
     fn deux_echelles_differentes_produisent_des_dimensions_differentes() {
         let (project, spec) = graphe_resolu();

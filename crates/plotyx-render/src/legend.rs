@@ -74,8 +74,9 @@ pub struct DrawnLegend {
 /// `crate::color::auto_ink`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LegendColors {
-    /// Fond du cadre.
-    pub background: (u8, u8, u8),
+    /// Fond du cadre, opacité comprise (transparent si le graphe n'a pas de
+    /// fond).
+    pub background: (u8, u8, u8, u8),
     /// Contour du cadre et des vignettes de barres.
     pub ink: (u8, u8, u8),
 }
@@ -141,7 +142,7 @@ pub fn draw<DB: DrawingBackend>(
     area.draw(&Rectangle::new(
         frame,
         ShapeStyle {
-            color: paint::rgb(background).into(),
+            color: paint::rgba(background),
             filled: true,
             stroke_width: 1,
         },

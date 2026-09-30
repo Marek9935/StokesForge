@@ -84,16 +84,20 @@
 
 pub mod axis;
 pub mod legend;
+pub mod palettes;
 pub mod panel;
 pub mod raw;
+pub mod saved;
 pub mod series;
 pub mod spec;
 pub mod style;
 
 pub use axis::{AxisScale, AxisSide, AxisSpec};
 pub use legend::{LegendPosition, LegendSpec};
+pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};
 pub use panel::PanelSpec;
 pub use raw::RawVariant;
+pub use saved::{ColorUsage, SavedColors, MAX_SAVED_COLORS};
 pub use series::{
     BinCount, PlotType, SeriesAxis, SeriesSpec, DEFAULT_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS,
 };

@@ -50,6 +50,13 @@ pub(crate) struct FileBody {
     /// ordre est ce qui rend deux sauvegardes du même projet identiques
     /// octet à octet.
     pub(crate) nodes: Vec<NodeRecord>,
+    /// Couleurs enregistrées dans le projet, par usage
+    /// (`plotyx_plot::SavedColors`, portées par l'arbre). Absentes des
+    /// fichiers écrits avant leur ajout : `#[serde(default)]` les ramène à
+    /// des listes vides. Placé avant `window_geometries` et `save_counter`,
+    /// pour la même raison qu'eux (voir ci-dessous).
+    #[serde(default)]
+    pub(crate) saved_colors: SavedColorsRecord,
     /// Géométrie des fenêtres (position/taille), par identifiant de nœud —
     /// bloc **séparé de l'arbre annulable** (voir la doc de tête de
     /// `plotyx-session` : la géométrie ne vit pas dans `Project`, ne passe
@@ -81,6 +88,18 @@ pub(crate) struct FileBody {
     /// en retienne un.
     #[serde(default)]
     pub(crate) save_counter: u64,
+}
+
+/// [`plotyx_plot::SavedColors`], à plat. Chaque liste est bornée à la
+/// lecture (`SavedColors::bounded`), un fichier n'étant pas borné.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) struct SavedColorsRecord {
+    #[serde(default)]
+    pub(crate) curves: Vec<String>,
+    #[serde(default)]
+    pub(crate) text: Vec<String>,
+    #[serde(default)]
+    pub(crate) backgrounds: Vec<String>,
 }
 
 /// Un nœud de l'arbre, à plat (l'appartenance aux enfants d'un parent est

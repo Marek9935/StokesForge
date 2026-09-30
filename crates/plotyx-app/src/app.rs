@@ -367,12 +367,12 @@ use plotyx_plot::{AxisSpec, LegendPosition, LineStyle, PlotType, SymbolShape};
 use plotyx_render_egui::{GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::{Snapshot, WindowGeometry};
 
-use crate::color_picker::{color_field, PaletteKind};
+use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
     active_graph, drop_payload_action, node_title_in, series_list_label, Action, ActiveTabKind,
     AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination, MoveDirection, PlotAxis,
-    PlotSettings, PlotSettingsTab, PlotTarget, ProjectTreeNode, WindowKind,
+    PlotSettings, PlotSettingsTab, PlotTarget, ProjectTreeNode, SaveTarget, WindowKind,
 };
 use crate::theme;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
@@ -5897,6 +5897,15 @@ fn graph_view_contents(
     );
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
+    // Un fond transparent (« Aucune » couleur, ou opacité partielle) se voit
+    // sur un damier, comme dans un logiciel de dessin : sans lui, la figure
+    // prendrait la couleur de la fenêtre, qui n'est pas celle de l'export.
+    let transparent_background = crate::state::current_plot_spec(&snapshot.tree, graph_id)
+        .and_then(|spec| crate::color_picker::parse_hex(&spec.background))
+        .is_some_and(|[_, _, _, alpha]| alpha < 255);
+    if transparent_background {
+        paint_checkerboard(figure_ui.painter(), rect);
+    }
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
             graph_context_menu(ui, view, graph_id, actions);
@@ -5906,6 +5915,21 @@ fn graph_view_contents(
         }
         Err(err) => {
             ui.colored_label(egui::Color32::RED, format!("rendu : {err}"));
+        }
+    }
+}
+
+/// Damier clair derrière une figure au fond transparent.
+fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
+    const CELL: f32 = 12.0;
+    painter.rect_filled(rect, 0.0, egui::Color32::WHITE);
+    let columns = (rect.width() / CELL).ceil() as i32;
+    let rows = (rect.height() / CELL).ceil() as i32;
+    for row in 0..rows {
+        for column in (row % 2..columns).step_by(2) {
+            let min = rect.min + egui::vec2(column as f32 * CELL, row as f32 * CELL);
+            let cell = egui::Rect::from_min_size(min, egui::Vec2::splat(CELL)).intersect(rect);
+            painter.rect_filled(cell, 0.0, egui::Color32::from_gray(0xe4));
         }
     }
 }
@@ -6048,6 +6072,14 @@ fn plot_settings_contents(
     ui.separator();
 
     let mut commit = false;
+    // Couleurs enregistrées, lues avant d'emprunter le brouillon ; les
+    // demandes du sélecteur (enregistrer, retirer) sont traduites en actions
+    // après.
+    let mut env = PickerEnv {
+        project: state.saved_colors(SaveTarget::Project),
+        user: state.saved_colors(SaveTarget::User),
+        requests: Vec::new(),
+    };
     if let Some(edit) = state
         .plot_edit_mut()
         .filter(|edit| edit.graph == settings.graph)
@@ -6067,16 +6099,18 @@ fn plot_settings_contents(
                         ui,
                         "Couleur du titre",
                         &mut spec.title_color,
-                        PaletteKind::Text,
+                        ColorUsage::Text,
                         Some("Automatique (contraste avec le fond)"),
+                        &mut env,
                     );
                     ui.add_space(6.0);
                     commit |= color_field(
                         ui,
                         "Fond",
                         &mut spec.background,
-                        PaletteKind::Background,
+                        ColorUsage::Background,
                         Some("Automatique (blanc)"),
+                        &mut env,
                     );
                     ui.weak(
                         "Sur un fond sombre, le texte, les axes et la légende en couleur \
@@ -6121,7 +6155,7 @@ fn plot_settings_contents(
                         PlotAxis::Left => &mut panel.left,
                         PlotAxis::Right => &mut panel.right,
                     };
-                    commit |= axis_editor(ui, axis);
+                    commit |= axis_editor(ui, axis, &mut env);
                 }
                 PlotSettingsTab::Series => {
                     let Some(panel) = spec.panels.get_mut(0) else {
@@ -6150,7 +6184,7 @@ fn plot_settings_contents(
                         });
                     ui.separator();
                     if let Some(series) = panel.series.get_mut(edit.selected_series) {
-                        commit |= series_editor(ui, series);
+                        commit |= series_editor(ui, series, &mut env);
                     }
                 }
                 PlotSettingsTab::Legend => {
@@ -6163,6 +6197,20 @@ fn plot_settings_contents(
     }
     if commit {
         state.commit_plot_edit();
+    }
+    for request in env.requests {
+        state.dispatch(match request.edit {
+            SavedColorEdit::Save => Action::SaveColor {
+                usage: request.usage,
+                color: request.color,
+                target: request.target,
+            },
+            SavedColorEdit::Remove => Action::RemoveSavedColor {
+                usage: request.usage,
+                color: request.color,
+                target: request.target,
+            },
+        });
     }
     if let Some(current) = state.plot_settings_mut() {
         current.tab = chosen_tab;
@@ -6186,7 +6234,7 @@ fn text_field(ui: &mut egui::Ui, label: &str, value: &mut String) -> bool {
 /// unité), son échelle (logarithmique, inversée, bornes) et son affichage
 /// (axe, grille). Rend `true` si le brouillon doit être validé — voir la doc
 /// de tête de [`plot_settings_window`].
-fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
+fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
     ui.strong("Titre de l'axe");
     commit |= text_field(ui, "Libellé", &mut axis.label);
@@ -6195,8 +6243,9 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
         ui,
         "Couleur du titre",
         &mut axis.title_color,
-        PaletteKind::Text,
+        ColorUsage::Text,
         Some("Automatique (contraste avec le fond)"),
+        env,
     );
 
     ui.add_space(6.0);
@@ -6244,8 +6293,9 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
         ui,
         "Couleur de l'échelle",
         &mut axis.tick_color,
-        PaletteKind::Text,
+        ColorUsage::Text,
         Some("Automatique (contraste avec le fond)"),
+        env,
     );
     ui.weak("Ligne d'axe, graduations et leurs libellés ; la grille la reprend, atténuée.");
     commit
@@ -6261,7 +6311,11 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
 /// peut y revenir alors que rien ne sait le reconstruire. Une série qui le
 /// porte s'affiche quand même, en lecture seule pour ce seul champ — le
 /// reste (nom, visibilité...) reste éditable normalement.
-fn series_editor(ui: &mut egui::Ui, series: &mut plotyx_plot::SeriesSpec) -> bool {
+fn series_editor(
+    ui: &mut egui::Ui,
+    series: &mut plotyx_plot::SeriesSpec,
+    env: &mut PickerEnv,
+) -> bool {
     let mut commit = false;
 
     let name_response = ui.horizontal(|ui| {
@@ -6316,8 +6370,9 @@ fn series_editor(ui: &mut egui::Ui, series: &mut plotyx_plot::SeriesSpec) -> boo
         ui,
         "Couleur",
         &mut series.line.color,
-        PaletteKind::Curves,
+        ColorUsage::Curves,
         None,
+        env,
     );
 
     ui.horizontal(|ui| {
@@ -6394,8 +6449,9 @@ fn series_editor(ui: &mut egui::Ui, series: &mut plotyx_plot::SeriesSpec) -> boo
         ui,
         "Couleur du marqueur",
         &mut series.symbol.color,
-        PaletteKind::Curves,
+        ColorUsage::Curves,
         Some("Comme le trait"),
+        env,
     );
 
     commit

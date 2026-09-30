@@ -15,8 +15,8 @@ use plotyx_plot::{
 use crate::schema::{
     AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord, LegendSpecRecord,
     LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord,
-    RoleRecord, SeriesAxisRecord, SeriesSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
-    TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    RoleRecord, SavedColorsRecord, SeriesAxisRecord, SeriesSpecRecord, SymbolShapeRecord,
+    SymbolSpecRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -484,6 +484,26 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
         row: record.row as usize,
         column: record.column as usize,
     })
+}
+
+/// Couleurs enregistrées → enregistrement. Infaillible.
+pub(crate) fn saved_colors_to_record(colors: &plotyx_plot::SavedColors) -> SavedColorsRecord {
+    SavedColorsRecord {
+        curves: colors.curves.clone(),
+        text: colors.text.clone(),
+        backgrounds: colors.backgrounds.clone(),
+    }
+}
+
+/// Enregistrement → couleurs enregistrées. Infaillible : une chaîne
+/// illisible reste telle quelle (le rendu la remplace par une couleur de
+/// repli), une liste trop longue est bornée par `Tree::with_saved_colors`.
+pub(crate) fn record_to_saved_colors(record: SavedColorsRecord) -> plotyx_plot::SavedColors {
+    plotyx_plot::SavedColors {
+        curves: record.curves,
+        text: record.text,
+        backgrounds: record.backgrounds,
+    }
 }
 
 /// `PlotSpec` → enregistrement. Infaillible.

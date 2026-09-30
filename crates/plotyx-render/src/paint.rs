@@ -69,7 +69,7 @@ use plotters::prelude::*;
 use plotters_backend::{BackendCoord, DrawingBackend};
 use plotyx_plot::{LineSpec, LineStyle, SymbolShape, SymbolSpec};
 
-use crate::color::rgb_or;
+use crate::color::rgba_or;
 
 /// Couleur de repli d'un trait dont la chaîne du spec est illisible.
 pub const SERIES_FALLBACK: (u8, u8, u8) = (0x4c, 0x78, 0xa8);
@@ -96,6 +96,16 @@ pub fn rgb((r, g, b): (u8, u8, u8)) -> RGBColor {
     RGBColor(r, g, b)
 }
 
+/// Une couleur de Plotters avec son opacité, depuis un quadruplet.
+pub fn rgba((r, g, b, a): (u8, u8, u8, u8)) -> RGBAColor {
+    RGBAColor(r, g, b, a as f64 / 255.0)
+}
+
+/// Un triplet opaque.
+pub fn opaque((r, g, b): (u8, u8, u8)) -> (u8, u8, u8, u8) {
+    (r, g, b, 255)
+}
+
 /// Épaisseur de trait : `LineSpec::width` est un `f64` libre côté spec (rien
 /// ne le borne), `ShapeStyle::stroke_width` est un `u32`.
 pub fn stroke_width(width: f64) -> u32 {
@@ -111,12 +121,12 @@ pub fn stroke_width(width: f64) -> u32 {
 /// Le style de trait d'une série, prêt pour Plotters.
 pub fn line_style(line: &LineSpec, broken: bool) -> ShapeStyle {
     let color = if broken {
-        BROKEN
+        opaque(BROKEN)
     } else {
-        rgb_or(&line.color, SERIES_FALLBACK)
+        rgba_or(&line.color, opaque(SERIES_FALLBACK))
     };
     ShapeStyle {
-        color: rgb(color).into(),
+        color: rgba(color),
         filled: false,
         stroke_width: stroke_width(line.width),
     }
@@ -270,22 +280,22 @@ pub fn symbol_at<DB: DrawingBackend>(
     }
     let r = radius(symbol.size);
     let fill_color = if broken {
-        BROKEN
+        opaque(BROKEN)
     } else {
-        rgb_or(&symbol.color, SERIES_FALLBACK)
+        rgba_or(&symbol.color, opaque(SERIES_FALLBACK))
     };
     let edge_color = if broken {
-        BROKEN
+        opaque(BROKEN)
     } else {
-        rgb_or(symbol.effective_edge_color(), fill_color)
+        rgba_or(symbol.effective_edge_color(), fill_color)
     };
     let fill = ShapeStyle {
-        color: rgb(fill_color).into(),
+        color: rgba(fill_color),
         filled: true,
         stroke_width: 1,
     };
     let edge = ShapeStyle {
-        color: rgb(edge_color).into(),
+        color: rgba(edge_color),
         filled: false,
         stroke_width: 1,
     };
@@ -346,7 +356,7 @@ pub fn whiskers<DB: DrawingBackend>(
     line: &LineSpec,
 ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
     let style = ShapeStyle {
-        color: rgb(rgb_or(&line.color, SERIES_FALLBACK)).into(),
+        color: rgba(rgba_or(&line.color, opaque(SERIES_FALLBACK))),
         filled: false,
         stroke_width: 1,
     };
@@ -379,9 +389,9 @@ pub fn bars<DB: DrawingBackend>(
     line: &LineSpec,
     edge_color: (u8, u8, u8),
 ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
-    let color = rgb_or(&line.color, SERIES_FALLBACK);
+    let color = rgba_or(&line.color, opaque(SERIES_FALLBACK));
     let fill = ShapeStyle {
-        color: rgb(color).into(),
+        color: rgba(color),
         filled: true,
         stroke_width: 1,
     };

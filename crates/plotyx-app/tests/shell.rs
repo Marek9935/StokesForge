@@ -5114,3 +5114,77 @@ fn editing_an_axis_scale_through_the_draft_is_visible_after_commit() {
     assert_eq!(spec.panels[0].left.range_min, Some(0.1));
     assert_eq!(spec.panels[0].left.range_max, Some(100.0));
 }
+
+// -- 25. Couleurs enregistrées --
+
+/// Enregistrer une couleur « dans le projet » passe par une commande
+/// annulable : elle apparaît dans l'arbre, Annuler la retire.
+#[test]
+fn saving_a_color_in_the_project_is_undoable() {
+    use plotyx_app::state::SaveTarget;
+    use plotyx_plot::ColorUsage;
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    state.use_user_colors_file(dir.path().join("couleurs.json"));
+
+    state.dispatch(Action::SaveColor {
+        usage: ColorUsage::Curves,
+        color: "#FF0000".to_string(),
+        target: SaveTarget::Project,
+    });
+    assert_eq!(
+        state
+            .saved_colors(SaveTarget::Project)
+            .get(ColorUsage::Curves),
+        ["#ff0000"]
+    );
+    assert!(
+        state
+            .saved_colors(SaveTarget::Project)
+            .get(ColorUsage::Text)
+            .is_empty(),
+        "rangée par usage"
+    );
+    assert!(
+        state.saved_colors(SaveTarget::User).is_empty(),
+        "pas chez l'utilisateur"
+    );
+
+    state.dispatch(Action::Undo);
+    assert!(state.saved_colors(SaveTarget::Project).is_empty());
+}
+
+/// Enregistrer une couleur « pour moi » l'écrit dans le fichier de
+/// l'utilisateur, hors projet et hors historique ; la retirer aussi.
+#[test]
+fn saving_a_color_for_the_user_writes_the_user_file() {
+    use plotyx_app::state::SaveTarget;
+    use plotyx_plot::ColorUsage;
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let path = dir.path().join("config").join("couleurs.json");
+    state.use_user_colors_file(path.clone());
+
+    state.dispatch(Action::SaveColor {
+        usage: ColorUsage::Background,
+        color: "#ffffff00".to_string(),
+        target: SaveTarget::User,
+    });
+    assert_eq!(
+        state
+            .saved_colors(SaveTarget::User)
+            .get(ColorUsage::Background),
+        ["#ffffff00"]
+    );
+    assert!(state.saved_colors(SaveTarget::Project).is_empty());
+    assert!(!state.can_undo(), "hors historique");
+    let written = std::fs::read_to_string(&path).expect("fichier écrit");
+    assert!(written.contains("#ffffff00"));
+
+    state.dispatch(Action::RemoveSavedColor {
+        usage: ColorUsage::Background,
+        color: "#FFFFFF00".to_string(),
+        target: SaveTarget::User,
+    });
+    assert!(state.saved_colors(SaveTarget::User).is_empty());
+}

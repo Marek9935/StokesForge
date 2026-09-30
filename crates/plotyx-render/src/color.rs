@@ -28,9 +28,27 @@ pub fn parse_hex(text: &str) -> Option<(u8, u8, u8, u8)> {
 }
 
 /// La couleur d'un trait, avec repli sur `fallback` si la chaîne est
-/// illisible ou vide.
+/// illisible ou vide. L'opacité est ignorée — voir [`rgba_or`].
 pub fn rgb_or(text: &str, fallback: (u8, u8, u8)) -> (u8, u8, u8) {
     parse_hex(text).map_or(fallback, |(r, g, b, _)| (r, g, b))
+}
+
+/// Comme [`rgb_or`], opacité comprise (`#RRGGBBAA` ; `#RRGGBB` est opaque).
+/// Un alpha nul est « aucune couleur » : un fond transparent, par exemple,
+/// pour intégrer la figure à une autre présentation.
+pub fn rgba_or(text: &str, fallback: (u8, u8, u8, u8)) -> (u8, u8, u8, u8) {
+    parse_hex(text).unwrap_or(fallback)
+}
+
+/// La couleur vue sur du blanc : `rgba` composée sur un fond blanc. C'est la
+/// couleur qu'on suppose derrière un fond transparent pour choisir l'encre
+/// automatique — une figure sans fond finit le plus souvent sur une page ou
+/// une diapositive claire ; sur une diapositive sombre, on choisit alors le
+/// texte en blanc à la main.
+pub fn over_white((r, g, b, a): (u8, u8, u8, u8)) -> (u8, u8, u8) {
+    let alpha = a as f64 / 255.0;
+    let blend = |c: u8| (c as f64 * alpha + 255.0 * (1.0 - alpha)).round() as u8;
+    (blend(r), blend(g), blend(b))
 }
 
 /// Encre sombre, celle du texte et des axes sur un fond clair.
@@ -80,6 +98,23 @@ pub fn auto_ink(background: (u8, u8, u8)) -> (u8, u8, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn l_opacite_est_lue_et_composee_sur_du_blanc() {
+        assert_eq!(
+            rgba_or("#10182080", (0, 0, 0, 255)),
+            (0x10, 0x18, 0x20, 0x80)
+        );
+        assert_eq!(rgba_or("", (1, 2, 3, 255)), (1, 2, 3, 255));
+        assert_eq!(
+            over_white((0, 0, 0, 0)),
+            (255, 255, 255),
+            "transparent : blanc"
+        );
+        assert_eq!(over_white((0, 0, 0, 255)), (0, 0, 0));
+        // Un fond noir à moitié transparent reste un fond clair sur du blanc.
+        assert_eq!(auto_ink(over_white((0, 0, 0, 0x40))), DARK_INK);
+    }
 
     #[test]
     fn l_encre_automatique_contraste_avec_le_fond() {

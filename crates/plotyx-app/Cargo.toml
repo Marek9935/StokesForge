@@ -45,6 +45,13 @@ rfd = "0.17.2"
 # ici n'ajoute rien à compiler. Voir `app::system_clipboard_text`.
 arboard = "3.6.1"
 anyhow = "1"
+# Couleurs enregistrées « pour l'utilisateur » (tous les projets) : un
+# fichier JSON dans le dossier de configuration de PlotYx, exactement comme
+# les recettes d'import (`plotyx_import::RecipeStore`) — mêmes bibliothèques,
+# déjà dans l'arbre de dépendances. Voir `user_colors`.
+directories = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"

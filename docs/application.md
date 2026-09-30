@@ -556,15 +556,38 @@ affichage et couleur de l'échelle), « Séries » et « Légende ».
 **Sélecteur de couleur** (`crate::color_picker`) : toute couleur de la
 fenêtre se choisit par un bouton-échantillon (`color_field`/`color_button`)
 qui ouvre une fenêtre surgissante — palette, « Automatique » quand la
-couleur peut l'être, nuancier (carré saturation × luminosité, barre de
-teinte), saisie RVB, TSL et hexadécimale. **Trois palettes** selon ce qu'on
-colore (`PaletteKind`) : courbes (la palette d'attribution automatique des
-séries et ses nuances foncées/claires), texte (encres lisibles), fonds
-(clairs, et sombres — sur lesquels le texte automatique passe en blanc, voir
-`docs/rendu.md`). La couleur est validée à la fin du geste (clic sur un
-échantillon, fin de glisser, champ validé, fermeture), jamais pixel par
-pixel. Tout nouveau réglage de couleur passe par ce sélecteur, avec la
-palette qui correspond à son usage.
+couleur peut l'être, couleurs enregistrées, nuancier (carré saturation ×
+luminosité avec barre de teinte, ou **roue chromatique** avec barre de
+valeur), **opacité**, saisie RVB, TSL et hexadécimale (`#RRGGBB`, ou
+`#RRGGBBAA` avec l'opacité). Une couleur transparente se montre sur un
+damier. **Une palette par usage** (`plotyx_plot::ColorUsage`) :
+
+- **courbes** : un outil à part, avec un choix de palettes nommées
+  (`plotyx_plot::CURVE_PALETTES` : PlotYx, Tableau 10, Okabe-Ito lisible par
+  les daltoniens, ColorBrewer Set1/Dark2/Paired, dégradés Viridis, Plasma,
+  gris), chacune avec ses nuances foncées et claires. Les palettes vivent
+  dans `plotyx-plot`, pour qu'une évolution future colore plusieurs courbes
+  d'un coup (palette ou dégradé) ;
+- **texte** : encres lisibles ;
+- **fonds** : clairs, sombres (le texte automatique passe en blanc, voir
+  `docs/rendu.md`), et **« Aucune (transparent) »** (`#ffffff00`) : la figure
+  exportée n'a pas de fond, pour s'intégrer à une autre présentation ; à
+  l'écran, elle se montre sur un damier (`app::paint_checkerboard`).
+
+**Couleurs enregistrées** : « Enregistrer » garde la couleur courante
+**dans le projet** (par défaut — commande annulable `SetSavedColors`,
+enregistrée dans le `.plx`) ou **pour l'utilisateur** (fichier
+`couleurs.json` du dossier de configuration de PlotYx, à côté des recettes
+d'import, hors historique — `crate::user_colors`), au choix
+(`state::SaveTarget`). Une couleur enregistrée ne réapparaît que dans la
+palette de son usage ; clic droit dessus pour la retirer
+(`Action::SaveColor`/`RemoveSavedColor`). Le sélecteur ne touche ni au
+modèle ni au disque : il dépose des demandes dans un `PickerEnv`, que
+`plot_settings_contents` traduit en actions.
+
+La couleur est validée à la fin du geste (clic sur un échantillon, fin de
+glisser, champ validé, fermeture), jamais pixel par pixel. Tout nouveau
+réglage de couleur passe par ce sélecteur, avec l'usage qui lui correspond.
 
 **Trois façons de l'ouvrir** :
 

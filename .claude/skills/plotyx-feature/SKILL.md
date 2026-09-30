@@ -119,10 +119,14 @@ délibérément sa place dans aucun menu, l'écrire et dire pourquoi.
 ## 2 quinquies. Couleurs : le sélecteur commun
 
 Un réglage de couleur ne s'écrit jamais comme un champ texte `#RRGGBB` :
-`color_picker::color_field(ui, libellé, &mut chaîne, PaletteKind::…,
-Some("Automatique…"))`, avec la palette de son usage — `Curves` pour une
-courbe, `Text` pour du texte ou une échelle, `Background` pour un fond. Dans
-le modèle, une couleur vide veut dire « automatique » ; pour du texte ou une
+`color_picker::color_field(ui, libellé, &mut chaîne, ColorUsage::…,
+Some("Automatique…"), &mut env)`, avec l'usage de la couleur — `Curves` pour
+une courbe (l'outil des courbes, palettes nommées), `Text` pour du texte ou
+une échelle, `Background` pour un fond — et le `PickerEnv` des couleurs
+enregistrées, dont les demandes sont traduites en `Action::SaveColor`/
+`RemoveSavedColor` par l'appelant (modèle : `plot_settings_contents`). Une
+couleur peut porter une opacité (`#RRGGBBAA`). Dans le modèle, une couleur
+vide veut dire « automatique » ; pour du texte ou une
 échelle, le rendu la résout par `plotyx_render::color::auto_ink` (blanc sur
 fond sombre) — dans `plotyx-render`, jamais dans un backend. Un nouveau
 champ de couleur du modèle porte `#[serde(default)]` côté
@@ -263,7 +267,7 @@ touche (`python`, `typst`), relecture du diff, message de commit en français.
 - [ ] ce n'est pas un plafond déjà arbitré (`questions-ouvertes.md` §11)
 - [ ] doublon docké/détaché vérifié (`rg "fn <nom>|fn detached_<nom>"`)
 - [ ] barres de défilement : aucun style local, place lue via `theme::scroll_bar_allocated_width`
-- [ ] couleurs : `color_picker::color_field` avec la palette de l'usage, vide = automatique
+- [ ] couleurs : `color_picker::color_field` avec l'usage et le `PickerEnv`, vide = automatique
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **plotyx-commande**)
 - [ ] logique dans `state.rs`, glu egui seulement dans `app.rs`

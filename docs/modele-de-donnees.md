@@ -12,7 +12,8 @@ moteur de rendu.
 ```text
 Project
 ├── allocateur d'identifiants  (hors de l'arbre — invariant 7)
-└── Arc<Tree>                  (carte plate NodeId → Arc<Node>, plus une racine)
+└── Arc<Tree>                  (carte plate NodeId → Arc<Node>, une racine,
+        │                          et les couleurs enregistrées du projet)
         └── Node { id, name, parent, kind }
               └── NodeKind
                   ├── Folder     { children }   dossiers et fenêtres
@@ -24,6 +25,14 @@ Project
                   ├── Note       { … }
                   └── Unknown(RawVariant)       lu d'un fichier plus récent
 ```
+
+Les **couleurs enregistrées** du projet (`plotyx_plot::SavedColors`, rangées
+par usage : courbes, texte, fonds) ne sont pas un nœud mais sont portées par
+`Tree` (`Tree::saved_colors`) : elles voyagent ainsi avec l'instantané de
+session, le retour arrière et le fichier `.plx` sans chemin à part, et se
+modifient par la commande `SetSavedColors`. Les couleurs enregistrées « pour
+l'utilisateur » ne sont, elles, pas dans le modèle (voir
+`docs/application.md`).
 
 Les listes d'enfants vivent **dans** la nature du nœud : une colonne, un
 graphe, une matrice ou une note n'en a pas, et c'est garanti à la compilation
