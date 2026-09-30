@@ -31,6 +31,10 @@ ouvertes. `x`/`y`/`width`/`height` y restent toujours la géométrie
 est écrite `Open`) et la position d'une fenêtre OS détachée non plus. `view`
 absent = disposition initiale par défaut ; un mode inconnu se lit `Closed`.
 
+Les colonnes portent aussi `import_source` (issue #7) : le fichier d'où elles
+viennent, la recette qui l'a lu (JSON) et l'index de colonne, de quoi les
+actualiser après réouverture. Absent pour une colonne saisie à la main.
+
 Les colonnes portent aussi `file_metadata` (issue #5) : les lignes clé / valeur
 de l'en-tête du fichier importé (et du pied de page si la recette le demande),
 dans l'ordre, sections comprises. Absent = liste vide ; aucune rétrocompatibilité

@@ -1056,6 +1056,13 @@ impl PlotyxApp {
     /// Ouvre l'assistant d'import sur le classeur actif (maximisé, ou au
     /// premier plan, ou le seul classeur détaché) — menu Fichier et Ctrl+".
     fn open_import_dialog(&mut self) {
+        let active_book = self.active_book();
+        self.state.open_import(active_book);
+    }
+
+    /// Le classeur actif : maximisé, sinon au premier plan, sinon le seul
+    /// classeur détaché.
+    fn active_book(&self) -> Option<NodeId> {
         let mut detached_books = self.detached_tabs.keys().filter_map(|tab| match tab {
             Tab::Book(book) => Some(*book),
             _ => None,
@@ -1063,15 +1070,13 @@ impl PlotyxApp {
         let only_detached_book = detached_books
             .next()
             .filter(|_| detached_books.next().is_none());
-        let active_book = self
-            .maximized_tab
+        self.maximized_tab
             .or_else(|| self.floating_tabs.last().copied())
             .and_then(|tab| match tab {
                 Tab::Book(book) => Some(book),
                 _ => None,
             })
-            .or(only_detached_book);
-        self.state.open_import(active_book);
+            .or(only_detached_book)
     }
 
     /// Consomme les raccourcis au niveau du contexte et en fait des actions.
@@ -1144,6 +1149,25 @@ impl PlotyxApp {
                         .clicked()
                     {
                         self.open_import_dialog();
+                        ui.close();
+                    }
+                    let active_sheet = self
+                        .active_book()
+                        .and_then(|book| self.state.selected_sheet_in(book));
+                    if ui
+                        .add_enabled(
+                            active_sheet
+                                .is_some_and(|sheet| self.state.can_refresh_from_source(sheet)),
+                            egui::Button::new("Actualiser depuis le fichier source"),
+                        )
+                        .on_hover_text(
+                            "Relit les fichiers d'où viennent les colonnes de la feuille active",
+                        )
+                        .clicked()
+                    {
+                        if let Some(sheet) = active_sheet {
+                            actions.push(Action::RefreshFromSource { sheet });
+                        }
                         ui.close();
                     }
                     if ui
@@ -6228,6 +6252,43 @@ fn import_step_destination(
         ImportDestination::NewBookForAll,
         "Un nouveau classeur pour tous les fichiers",
     );
+    if matches!(import.destination, ImportDestination::ActiveBook(_)) {
+        ui.separator();
+        ui.label("Dans le classeur actif :");
+        use plotyx_import::ImportMode;
+        for (mode, label) in [
+            (ImportMode::NewSheet, "Nouvelle feuille"),
+            (ImportMode::ReplaceSheet, "Remplacer la feuille active"),
+            (
+                ImportMode::AddColumns,
+                "Ajouter des colonnes à la feuille active",
+            ),
+            (
+                ImportMode::AddRows,
+                "Ajouter des lignes à la suite de la feuille active",
+            ),
+        ] {
+            ui.radio_value(&mut import.recipe.import_mode, mode, label);
+        }
+    }
+    if import.paths.len() > 1 {
+        ui.separator();
+        ui.label("Plusieurs fichiers :");
+        use plotyx_import::FilesLayout;
+        for (layout, label) in [
+            (FilesLayout::SheetPerFile, "Une feuille par fichier"),
+            (
+                FilesLayout::SideBySide,
+                "Une seule feuille, côte à côte (X Y X Y…)",
+            ),
+            (
+                FilesLayout::SharedX,
+                "Une seule feuille, avec le X du premier fichier partagé",
+            ),
+        ] {
+            ui.radio_value(&mut import.recipe.files_layout, layout, label);
+        }
+    }
     ui.separator();
     ui.horizontal(|ui| {
         ui.label("Nom du modèle :");

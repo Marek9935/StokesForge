@@ -155,10 +155,11 @@ pub enum DataDelta {
     ColumnMeta {
         /// Colonne visée.
         column: NodeId,
-        /// Métadonnées d'avant.
-        before: ColumnMeta,
+        /// Métadonnées d'avant (boîtées : `ColumnMeta` porte les métadonnées de
+        /// fichier et la source d'import, bien plus gros que les autres deltas).
+        before: Box<ColumnMeta>,
         /// Métadonnées d'après.
-        after: ColumnMeta,
+        after: Box<ColumnMeta>,
         /// Type et valeurs de la colonne juste avant cette commande,
         /// seulement quand `before.formula` était `None` et
         /// `after.formula` devient `Some(_)` — voir la doc ci-dessus.
@@ -1272,8 +1273,8 @@ impl History {
                 Ok(Entry::Data {
                     delta: Box::new(DataDelta::ColumnMeta {
                         column,
-                        before,
-                        after: meta,
+                        before: Box::new(before),
+                        after: Box::new(meta),
                         values_before,
                     }),
                     label,
@@ -1416,7 +1417,7 @@ impl History {
                 values_before,
                 ..
             } => {
-                project.set_column_meta(*column, before.clone())?;
+                project.set_column_meta(*column, ColumnMeta::clone(before))?;
                 // Voir la doc de `DataDelta::ColumnMeta::values_before` : la
                 // colonne redevient une source de vérité ordinaire, ses
                 // valeurs d'avant la formule doivent revenir avec elle — sans
@@ -1489,7 +1490,7 @@ impl History {
                 Ok(())
             }
             DataDelta::ColumnMeta { column, after, .. } => {
-                project.set_column_meta(*column, after.clone())?;
+                project.set_column_meta(*column, ColumnMeta::clone(after))?;
                 Ok(())
             }
             DataDelta::PlotSpec { graph, after, .. } => {

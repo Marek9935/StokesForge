@@ -38,6 +38,9 @@ logiciel.
 |---|---|
 | `recipe` | le **modèle de recette** : description figée et sérialisable d'un format d'appareil. Ne connaît pas le moteur de parsing |
 | `parse` | applique une recette à un fichier |
+| `layout` | **le** découpage d'un fichier en zones (en-tête, sous-en-tête, noms, données, pied, commentaires, lignes ignorées), calculé une fois et partagé par `parse` et `preview` : ne jamais réécrire cette suite d'étapes dans l'un des deux |
+| `numbers`, `datetime` | lecture des nombres (décimale `Auto`, milliers, valeurs manquantes) et des dates en timestamps POSIX |
+| `builtin`, `choose` | modèles fournis d'office, et choix automatique d'un modèle (extension, nom, signature de contenu) |
 | `preview` | (même découpage que `parse` : séparateur résolu sur la même ligne, virgule exclue si décimale virgule — test `accord_apercu_import.rs`, issue #23) classe chaque ligne en rôle (en-tête principal, sous-en-tête et son rôle, donnée, pied) pour l'aperçu en direct |
 | `store` | enregistre et recharge les recettes (JSON) |
 

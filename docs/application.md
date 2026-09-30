@@ -126,6 +126,22 @@ rouvre l'assistant sur les fichiers et le modèle du dernier import — en
 l'annulant d'abord s'il est encore au sommet de l'historique, jamais un travail
 postérieur.
 
+**Où vont les colonnes.** Dans le classeur actif, le mode d'import
+(`ImportMode`) est : nouvelle feuille, remplacer la feuille active, ajouter des
+colonnes, ou ajouter des lignes (la colonne *j* du fichier prolonge la colonne
+*j* de la feuille). Plusieurs fichiers se répartissent selon `FilesLayout` : une
+feuille par fichier, une seule feuille côte à côte (X Y X Y…), ou une seule
+feuille avec le X du premier fichier partagé. Le plan (`plan_import`) est
+calculé puis exécuté dans la même macro « Importer ».
+
+**Actualiser.** Chaque colonne importée garde sa source
+(`ColumnMeta::import_source` : chemin, recette en JSON, index de colonne).
+« Fichier › Actualiser depuis le fichier source » (`Action::RefreshFromSource`)
+relit les fichiers et réécrit les valeurs **en place** : les colonnes gardent
+leur identité, les graphes restent valides. Les lignes de la feuille suivent le
+plus long des nouveaux contenus ; elles ne raccourcissent que si toutes les
+colonnes sont actualisées.
+
 ### Glisser-déposer : le backend de fenêtre
 
 **winit 0.30 n'émet aucun dépôt de fichier sous Wayland** (seulement X11,

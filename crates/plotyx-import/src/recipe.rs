@@ -89,6 +89,42 @@ pub struct ImportRecipe {
     /// Plus court que le nombre de colonnes : les suivantes sont `Auto`.
     #[serde(default)]
     pub column_kinds: Vec<ColumnKind>,
+    /// Où les colonnes importées atterrissent dans le classeur actif — voir
+    /// [`ImportMode`]. Sans effet pour un nouveau classeur.
+    #[serde(default)]
+    pub import_mode: ImportMode,
+    /// Comment plusieurs fichiers se répartissent en feuilles — voir
+    /// [`FilesLayout`].
+    #[serde(default)]
+    pub files_layout: FilesLayout,
+}
+
+/// Mode d'import dans le classeur actif, comme les options d'Origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum ImportMode {
+    /// Une nouvelle feuille (le comportement d'origine).
+    #[default]
+    NewSheet,
+    /// Remplace le contenu de la feuille active.
+    ReplaceSheet,
+    /// Ajoute des colonnes à la suite de la feuille active.
+    AddColumns,
+    /// Ajoute des lignes à la suite de la feuille active : la colonne `j` du
+    /// fichier prolonge la colonne `j` de la feuille.
+    AddRows,
+}
+
+/// Répartition de plusieurs fichiers en feuilles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum FilesLayout {
+    /// Une feuille par fichier.
+    #[default]
+    SheetPerFile,
+    /// Tous les fichiers dans une même feuille, côte à côte (X Y X Y…).
+    SideBySide,
+    /// Tous les fichiers dans une même feuille avec le **X du premier fichier
+    /// partagé** : une colonne X, puis les autres colonnes de chaque fichier.
+    SharedX,
 }
 
 /// Nature d'une colonne importée.
@@ -385,6 +421,8 @@ impl ImportRecipe {
             encoding: Encoding::Auto,
             auto_match: AutoMatch::default(),
             column_kinds: Vec::new(),
+            import_mode: ImportMode::NewSheet,
+            files_layout: FilesLayout::SheetPerFile,
         }
     }
 }
@@ -482,6 +520,8 @@ mod tests {
                 content_contains: "ORIGIN;JASCO".into(),
             },
             column_kinds: vec![ColumnKind::DateTime, ColumnKind::Text],
+            import_mode: ImportMode::AddRows,
+            files_layout: FilesLayout::SharedX,
         };
         let json = serde_json::to_string(&recipe).unwrap();
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();

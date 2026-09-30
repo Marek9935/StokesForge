@@ -20,6 +20,10 @@ use crate::{ClientId, WindowGeometry};
 /// crate : les clients ne construisent jamais de `Request` eux-mêmes, ils
 /// passent par les méthodes de `SessionHandle`, qui portent chacune leur
 /// canal de réponse à usage unique.
+// `Execute` porte une `Command` entière (colonne et métadonnées comprises), bien
+// plus grosse que les autres requêtes : le message est consommé aussitôt par
+// l'acteur, le boîter n'y gagnerait qu'une allocation par commande.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Request {
     /// Exécute une commande. Répond la nouvelle révision, ou l'erreur rendue
     /// par `History::execute` — l'arbre et l'historique restent alors

@@ -680,6 +680,13 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                     .iter()
                     .map(|line| (line.key.clone(), line.value.clone()))
                     .collect(),
+                import_source: meta.import_source.as_ref().map(|source| {
+                    (
+                        source.path.clone(),
+                        source.recipe_json.clone(),
+                        source.column as u64,
+                    )
+                }),
             }
         }
         NodeKind::Graph { meta, spec } => KindRecord::Graph {
@@ -732,6 +739,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             version,
             formula,
             file_metadata,
+            import_source,
         } => {
             let column_type: ColumnType = column_type.into();
             let block = match values {
@@ -770,6 +778,13 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                     .into_iter()
                     .map(|(key, value)| plotyx_core::MetaLine { key, value })
                     .collect(),
+                import_source: import_source.map(|(path, recipe_json, column)| {
+                    plotyx_core::ImportSource {
+                        path,
+                        recipe_json,
+                        column: usize::try_from(column).unwrap_or(usize::MAX),
+                    }
+                }),
             };
             // `from_block_with_version`, pas `from_block` : le compteur doit
             // traverser le disque, sinon il ment après un rechargement.

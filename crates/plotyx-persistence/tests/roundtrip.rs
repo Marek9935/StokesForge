@@ -61,6 +61,7 @@ fn fixture_project() -> Project {
                 display_format: "0.000".to_string(),
                 formula: None,
                 file_metadata: Vec::new(),
+                import_source: None,
             },
         )
         .expect("colonne numérique valide");
@@ -120,6 +121,7 @@ fn fixture_project() -> Project {
                 display_format: String::new(),
                 formula: None,
                 file_metadata: Vec::new(),
+                import_source: None,
             },
         )
         .expect("colonne mixte valide");
@@ -904,4 +906,43 @@ fn column_file_metadata_survives_save_and_load() {
     let loaded = load(&path).expect("chargement réussi");
     let column = loaded.tree().node(a).unwrap().as_column().unwrap();
     assert_eq!(column.meta().file_metadata, lines);
+}
+
+/// `ColumnMeta::import_source` (chemin, recette JSON, index de colonne) survit à
+/// `save`/`load` : c'est ce qui permet d'actualiser une colonne après
+/// réouverture du projet (issue #7).
+#[test]
+fn column_import_source_survives_save_and_load() {
+    use plotyx_core::ImportSource;
+    let mut project = Project::new("Demo").expect("projet valide");
+    let root = project.root();
+    let book = project
+        .add_empty_workbook(root, Some("Book1"))
+        .expect("classeur");
+    let sheet = project
+        .add_worksheet(book, Some("Sheet1"))
+        .expect("feuille");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
+        .expect("colonne A");
+    let source = ImportSource {
+        path: "/data/mesure.csv".into(),
+        recipe_json: "{\"name\":\"x\"}".into(),
+        column: 3,
+    };
+    project
+        .set_column_meta(
+            a,
+            ColumnMeta {
+                import_source: Some(source.clone()),
+                ..Default::default()
+            },
+        )
+        .expect("source posée");
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("source.plyx");
+    save(&project, &path).expect("sauvegarde réussie");
+    let loaded = load(&path).expect("chargement réussi");
+    let column = loaded.tree().node(a).unwrap().as_column().unwrap();
+    assert_eq!(column.meta().import_source, Some(source));
 }

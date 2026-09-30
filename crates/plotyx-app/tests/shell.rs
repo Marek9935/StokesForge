@@ -6114,3 +6114,229 @@ fn import_builds_datetime_and_forced_text_columns() {
     assert_eq!(cell_f64(&state, columns[1].0, 0), 946_684_800.0);
     assert_eq!(column_type(&state, columns[2].0), ColumnType::Numeric);
 }
+
+// -- Modes d'import et répartition de plusieurs fichiers (issue #7) --
+
+fn write_csv(dir: &std::path::Path, name: &str, content: &str) -> std::path::PathBuf {
+    let file = dir.join(name);
+    std::fs::write(&file, content).unwrap();
+    file
+}
+
+fn column_values(state: &AppState, sheet: NodeId, position: usize) -> Vec<f64> {
+    let (column, ..) = state.visible_columns(sheet)[position].clone();
+    (0..state.row_count(sheet))
+        .map(|row| cell_f64(state, column, row))
+        .collect()
+}
+
+fn import_with(
+    state: &mut AppState,
+    book: NodeId,
+    mode: plotyx_import::ImportMode,
+    layout: plotyx_import::FilesLayout,
+    files: Vec<std::path::PathBuf>,
+) {
+    let mut recipe = ImportRecipe::new("Modes");
+    recipe.import_mode = mode;
+    recipe.files_layout = layout;
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: files,
+    });
+}
+
+/// Remplacer la feuille active vide ses colonnes d'avant et garde la feuille ;
+/// un seul Ctrl+Z rend l'ancien contenu.
+#[test]
+fn import_mode_replace_sheet_swaps_the_content_in_one_entry() {
+    use plotyx_import::{FilesLayout, ImportMode};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet = state.selected_sheet_in(book).unwrap();
+    let sheets = state.worksheets_of(book).len();
+    let before = state.visible_columns(sheet).len();
+    assert!(before > 0);
+    let file = write_csv(dir.path(), "neuf.csv", "1,10\n2,20\n3,30\n");
+
+    import_with(
+        &mut state,
+        book,
+        ImportMode::ReplaceSheet,
+        FilesLayout::SheetPerFile,
+        vec![file],
+    );
+
+    assert_eq!(
+        state.worksheets_of(book).len(),
+        sheets,
+        "pas de nouvelle feuille"
+    );
+    assert_eq!(state.visible_columns(sheet).len(), 2);
+    assert_eq!(column_values(&state, sheet, 0), vec![1.0, 2.0, 3.0]);
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        state.visible_columns(sheet).len(),
+        before,
+        "l'ancien contenu revient"
+    );
+}
+
+/// Ajouter des colonnes : à la suite de celles de la feuille active.
+#[test]
+fn import_mode_add_columns_appends_to_the_active_sheet() {
+    use plotyx_import::{FilesLayout, ImportMode};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet = state.selected_sheet_in(book).unwrap();
+    let before = state.visible_columns(sheet).len();
+    let file = write_csv(dir.path(), "plus.csv", "7,70\n8,80\n");
+
+    import_with(
+        &mut state,
+        book,
+        ImportMode::AddColumns,
+        FilesLayout::SheetPerFile,
+        vec![file],
+    );
+
+    assert_eq!(state.visible_columns(sheet).len(), before + 2);
+    assert_eq!(column_values(&state, sheet, before)[..2], [7.0, 8.0]);
+}
+
+/// Ajouter des lignes : la colonne j du fichier prolonge la colonne j de la
+/// feuille.
+#[test]
+fn import_mode_add_rows_extends_the_existing_columns() {
+    use plotyx_import::{FilesLayout, ImportMode};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet = state.selected_sheet_in(book).unwrap();
+    let rows_before = state.row_count(sheet);
+    let columns_before = state.visible_columns(sheet).len();
+    let first_before = column_values(&state, sheet, 0);
+    let file = write_csv(dir.path(), "suite.csv", "100,200\n101,201\n");
+
+    import_with(
+        &mut state,
+        book,
+        ImportMode::AddRows,
+        FilesLayout::SheetPerFile,
+        vec![file],
+    );
+
+    assert_eq!(state.row_count(sheet), rows_before + 2);
+    assert_eq!(
+        state.visible_columns(sheet).len(),
+        columns_before,
+        "mêmes colonnes"
+    );
+    let first = column_values(&state, sheet, 0);
+    assert_eq!(first[..rows_before], first_before[..]);
+    assert_eq!(first[rows_before..], [100.0, 101.0]);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.row_count(sheet), rows_before);
+}
+
+/// Plusieurs fichiers, une seule feuille : côte à côte (X Y X Y), ou avec le X
+/// du premier fichier partagé.
+#[test]
+fn several_files_can_share_one_sheet_side_by_side_or_with_a_common_x() {
+    use plotyx_import::{FilesLayout, ImportMode};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let a = write_csv(dir.path(), "spec_a.csv", "1,10\n2,20\n");
+    let b = write_csv(dir.path(), "spec_b.csv", "1,11\n2,21\n");
+    let sheets = state.worksheets_of(book).len();
+
+    import_with(
+        &mut state,
+        book,
+        ImportMode::NewSheet,
+        FilesLayout::SideBySide,
+        vec![a.clone(), b.clone()],
+    );
+    assert_eq!(
+        state.worksheets_of(book).len(),
+        sheets + 1,
+        "une seule feuille"
+    );
+    let sheet = sheet_named(state.tree(), "spec_a");
+    assert_eq!(state.visible_columns(sheet).len(), 4, "X Y X Y");
+    assert_eq!(column_values(&state, sheet, 3), vec![11.0, 21.0]);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.worksheets_of(book).len(), sheets);
+
+    import_with(
+        &mut state,
+        book,
+        ImportMode::NewSheet,
+        FilesLayout::SharedX,
+        vec![a, b],
+    );
+    let sheet = sheet_named(state.tree(), "spec_a");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(columns.len(), 3, "un X, puis un Y par fichier");
+    assert_eq!(state.column_meta(columns[0].0).role, ColumnRole::X);
+    assert_eq!(state.column_meta(columns[2].0).role, ColumnRole::Y);
+    assert_eq!(column_values(&state, sheet, 1), vec![10.0, 20.0]);
+    assert_eq!(column_values(&state, sheet, 2), vec![11.0, 21.0]);
+    // Les Y portent le nom de leur fichier pour la légende.
+    assert_eq!(state.column_meta(columns[1].0).long_name, "spec_a");
+    assert_eq!(state.column_meta(columns[2].0).long_name, "spec_b");
+}
+
+/// Réimport (issue #7) : les colonnes importées se relisent depuis leur fichier
+/// avec la recette mémorisée, **en place** — mêmes colonnes (donc les graphes
+/// qui les tracent restent valides), valeurs neuves, nombre de lignes suivi —,
+/// en une seule entrée annulable.
+#[test]
+fn refreshing_from_the_source_file_updates_the_columns_in_place() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = write_csv(dir.path(), "mesure.csv", "1;10\n2;20\n");
+    let mut recipe = ImportRecipe::new("Point-virgule");
+    recipe.separator = Separator::Semicolon;
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: vec![file.clone()],
+    });
+    let sheet = sheet_named(state.tree(), "mesure");
+    assert!(state.can_refresh_from_source(sheet));
+    let ids_before: Vec<NodeId> = state.visible_columns(sheet).iter().map(|c| c.0).collect();
+
+    // Le fichier change : plus de lignes, autres valeurs.
+    write_csv(dir.path(), "mesure.csv", "5;50\n6;60\n7;70\n");
+    state.dispatch(Action::RefreshFromSource { sheet });
+
+    let ids_after: Vec<NodeId> = state.visible_columns(sheet).iter().map(|c| c.0).collect();
+    assert_eq!(ids_before, ids_after, "les colonnes gardent leur identité");
+    assert_eq!(column_values(&state, sheet, 0), vec![5.0, 6.0, 7.0]);
+    assert_eq!(column_values(&state, sheet, 1), vec![50.0, 60.0, 70.0]);
+    assert!(state.status().is_some_and(|s| !s.is_error));
+
+    // Un seul Ctrl+Z revient aux valeurs d'avant l'actualisation.
+    state.dispatch(Action::Undo);
+    assert_eq!(column_values(&state, sheet, 0), vec![1.0, 2.0]);
+
+    // Un fichier disparu est signalé sans rien casser.
+    std::fs::remove_file(&file).unwrap();
+    state.dispatch(Action::RefreshFromSource { sheet });
+    assert!(state.status().is_some_and(|s| s.is_error));
+    assert_eq!(column_values(&state, sheet, 0), vec![1.0, 2.0]);
+    // La feuille de démonstration, saisie à la main, n'a rien à actualiser.
+    let demo_sheet = state.selected_sheet_in(book).unwrap();
+    assert!(!state.can_refresh_from_source(demo_sheet));
+}

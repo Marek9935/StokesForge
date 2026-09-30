@@ -319,6 +319,13 @@ pub enum Action {
     /// Reprend le dernier import dans l'assistant, pour le corriger : s'il est
     /// encore la dernière entrée de l'historique, il est d'abord annulé.
     ReopenLastImport,
+    /// Actualise les colonnes importées de `sheet` depuis leurs fichiers source
+    /// (relus avec la recette mémorisée), **en place** : les colonnes gardent
+    /// leur identité, donc les graphes qui les tracent restent valides.
+    RefreshFromSource {
+        /// Feuille à actualiser.
+        sheet: NodeId,
+    },
     /// Ouvre la fenêtre (lecture seule) des métadonnées de fichier de
     /// `column` — clic sur la ligne « Métadonnées » de l'en-tête.
     ViewColumnMetadata {
@@ -1416,6 +1423,80 @@ type ImportItem = (
     plotyx_import::ImportRecipe,
     Result<plotyx_import::ParsedTable, String>,
 );
+
+/// Une colonne à créer : la colonne `column` du fichier `item`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PlannedColumn {
+    item: usize,
+    column: usize,
+}
+
+/// Une feuille à remplir : son nom, ses colonnes, les fichiers qui y
+/// contribuent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImportPlan {
+    name: String,
+    columns: Vec<PlannedColumn>,
+    items: Vec<usize>,
+}
+
+/// Répartit les colonnes des fichiers lisibles en feuilles selon `layout` :
+/// une feuille par fichier, ou tous les fichiers côte à côte, ou tous avec le X
+/// du premier fichier partagé. Les colonnes « Ignorer » sont exclues partout.
+fn plan_import(items: &[ImportItem], layout: plotyx_import::FilesLayout) -> Vec<ImportPlan> {
+    use plotyx_import::{ColumnRoleChoice, FilesLayout};
+    let stem = |item: usize| {
+        items[item]
+            .0
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("fichier")
+            .to_string()
+    };
+    let kept = |item: usize| -> Vec<usize> {
+        let (_, recipe, table) = &items[item];
+        let count = table.as_ref().map_or(0, |t| t.columns.len());
+        (0..count)
+            .filter(|&c| recipe.column_role(c) != ColumnRoleChoice::Ignore)
+            .collect()
+    };
+    let readable: Vec<usize> = (0..items.len()).filter(|&i| items[i].2.is_ok()).collect();
+    match layout {
+        FilesLayout::SheetPerFile => readable
+            .iter()
+            .map(|&item| ImportPlan {
+                name: stem(item),
+                columns: kept(item)
+                    .into_iter()
+                    .map(|column| PlannedColumn { item, column })
+                    .collect(),
+                items: vec![item],
+            })
+            .collect(),
+        FilesLayout::SideBySide | FilesLayout::SharedX => {
+            let Some(&first) = readable.first() else {
+                return Vec::new();
+            };
+            let mut columns = Vec::new();
+            for &item in &readable {
+                for column in kept(item) {
+                    // X partagé : celui du premier fichier ; les suivants n'en
+                    // apportent pas.
+                    let is_x = items[item].1.column_role(column) == ColumnRoleChoice::X;
+                    if layout == FilesLayout::SharedX && item != first && is_x {
+                        continue;
+                    }
+                    columns.push(PlannedColumn { item, column });
+                }
+            }
+            vec![ImportPlan {
+                name: stem(first),
+                columns,
+                items: readable,
+            }]
+        }
+    }
+}
 
 /// Lit et analyse un fichier avec `recipe` ; l'erreur porte le chemin.
 fn parse_import_file(
@@ -3248,6 +3329,7 @@ impl AppState {
                 paths,
             } => self.start_import(destination, recipe, paths),
             Action::ReopenLastImport => self.reopen_last_import(),
+            Action::RefreshFromSource { sheet } => self.refresh_from_source(sheet),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
             Action::CloseColumnMetadata => self.metadata_view = None,
             Action::PlotColumns {
@@ -3620,6 +3702,155 @@ impl AppState {
     /// fichiers récents (vidés : chaque fichier n'est inscrit qu'une fois).
     pub fn take_imported_paths(&mut self) -> Vec<PathBuf> {
         std::mem::take(&mut self.recent_to_record)
+    }
+
+    /// Au moins une colonne de `sheet` vient d'un fichier qu'on peut relire.
+    pub fn can_refresh_from_source(&self, sheet: NodeId) -> bool {
+        self.visible_columns(sheet)
+            .iter()
+            .any(|(column, ..)| self.column_meta(*column).import_source.is_some())
+    }
+
+    /// [`Action::RefreshFromSource`] : relit les fichiers source des colonnes de
+    /// `sheet` et réécrit leurs valeurs en place, en une seule entrée
+    /// d'historique. Une colonne dont le fichier a disparu ou ne se lit plus est
+    /// laissée telle quelle, avec un message.
+    fn refresh_from_source(&mut self, sheet: NodeId) {
+        let sources: Vec<(NodeId, plotyx_core::ImportSource)> = self
+            .visible_columns(sheet)
+            .iter()
+            .filter_map(|(column, ..)| {
+                self.column_meta(*column)
+                    .import_source
+                    .map(|source| (*column, source))
+            })
+            .collect();
+        if sources.is_empty() {
+            self.fail("Cette feuille ne contient aucune colonne importée d'un fichier".to_string());
+            return;
+        }
+        // Un fichier source n'est relu qu'une fois, même s'il alimente plusieurs
+        // colonnes.
+        let mut items: Vec<ImportItem> = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
+        let mut item_of_path: Vec<(String, Option<usize>)> = Vec::new();
+        for (_, source) in &sources {
+            if item_of_path.iter().any(|(path, _)| *path == source.path) {
+                continue;
+            }
+            let recipe = match plotyx_import::ImportRecipe::from_json(&source.recipe_json) {
+                Ok(recipe) => recipe,
+                Err(message) => {
+                    failures.push(format!("{}: {message}", source.path));
+                    item_of_path.push((source.path.clone(), None));
+                    continue;
+                }
+            };
+            let path = PathBuf::from(&source.path);
+            let table = parse_import_file(&path, &recipe);
+            if let Err(message) = &table {
+                failures.push(message.clone());
+                item_of_path.push((source.path.clone(), None));
+                continue;
+            }
+            item_of_path.push((source.path.clone(), Some(items.len())));
+            items.push((path, recipe, table));
+        }
+        let refreshed: Vec<(NodeId, PlannedColumn)> = sources
+            .iter()
+            .filter_map(|(column, source)| {
+                let item = item_of_path
+                    .iter()
+                    .find(|(path, _)| *path == source.path)
+                    .and_then(|(_, item)| *item)?;
+                Some((
+                    *column,
+                    PlannedColumn {
+                        item,
+                        column: source.column,
+                    },
+                ))
+            })
+            .collect();
+        if refreshed.is_empty() {
+            self.fail(format!(
+                "Actualisation impossible — {}",
+                failures.join(" ; ")
+            ));
+            return;
+        }
+        if self
+            .handle
+            .begin_macro("Actualiser depuis le fichier")
+            .is_err()
+        {
+            self.fail("Impossible de grouper l'actualisation".to_string());
+            return;
+        }
+        // Les lignes de la feuille suivent le plus long des nouveaux contenus ;
+        // elles ne raccourcissent que si **toutes** les colonnes sont actualisées
+        // (on ne tronque jamais une colonne saisie à la main).
+        let new_len = refreshed
+            .iter()
+            .filter_map(|(_, planned)| self.import_block(&items, *planned))
+            .map(|block| match block {
+                ValueBlock::Float(values) => values.len(),
+                ValueBlock::Mixed(cells) => cells.len(),
+            })
+            .max()
+            .unwrap_or(0);
+        let rows = self.row_count(sheet);
+        let all_refreshed = refreshed.len() == self.visible_columns(sheet).len();
+        if new_len > rows {
+            self.execute(Command::InsertRows {
+                sheet,
+                at: rows,
+                count: new_len - rows,
+            });
+        } else if new_len < rows && all_refreshed {
+            self.execute(Command::DeleteRows {
+                sheet,
+                at: new_len,
+                count: rows - new_len,
+            });
+        }
+        let mut updated = 0usize;
+        for (column, planned) in &refreshed {
+            let Some(mut block) = self.import_block(&items, *planned) else {
+                continue;
+            };
+            let length = self
+                .snapshot
+                .tree
+                .node(*column)
+                .and_then(Node::as_column)
+                .map_or(0, Column::len);
+            // Les cases au-delà du nouveau contenu sont vidées, et rien n'est
+            // écrit au-delà de la colonne.
+            match &mut block {
+                ValueBlock::Float(values) => {
+                    values.resize(length, f64::NAN);
+                }
+                ValueBlock::Mixed(cells) => cells.resize(length, MixedCell::Empty),
+            }
+            self.execute(Command::SetCellsPromoting {
+                column: *column,
+                start: 0,
+                values: block,
+                expected_version: None,
+            });
+            updated += 1;
+        }
+        if self.handle.end_macro().is_err() {
+            failures.push("échec de la clôture de l'entrée d'historique".to_string());
+        }
+        self.refresh();
+        let summary = format!("{updated} colonne(s) actualisée(s) depuis leur fichier");
+        if failures.is_empty() {
+            self.notice(summary);
+        } else {
+            self.fail(format!("{summary} — {}", failures.join(" ; ")));
+        }
     }
 
     /// Un dernier import existe et peut être repris dans l'assistant.
@@ -5093,6 +5324,12 @@ impl AppState {
     /// Crée les feuilles et les colonnes d'un lot **déjà analysé** (par
     /// [`AppState::import_files`], ou en fond par [`AppState::start_import`]),
     /// en une seule entrée d'historique « Importer ».
+    ///
+    /// Trois décisions, toutes lues dans la recette du premier fichier lisible :
+    /// la **répartition** des fichiers en feuilles ([`plotyx_import::FilesLayout`]),
+    /// le **mode** dans le classeur actif ([`plotyx_import::ImportMode`]), et la
+    /// destination. Le plan (quelles colonnes de quels fichiers, sur quelle
+    /// feuille) est calculé d'abord ([`plan_import`]), puis exécuté.
     fn apply_import(&mut self, destination: ImportDestination, items: Vec<ImportItem>) {
         let paths: Vec<PathBuf> = items.iter().map(|(path, _, _)| path.clone()).collect();
         if self.handle.begin_macro("Importer").is_err() {
@@ -5101,192 +5338,75 @@ impl AppState {
             );
             return;
         }
-        let mut imported = 0usize;
         // Accumulées plutôt que passées à `self.fail` au fil de la boucle :
-        // `self.fail`/`self.notice` remplacent `self.status` sans le
-        // combiner à ce qu'il portait déjà (voir leur doc), donc un
-        // `self.fail` par fichier en échec se serait fait écraser par le
-        // suivant, puis par le message récapitulatif final — l'utilisateur
-        // n'aurait jamais vu **pourquoi** un fichier a échoué, seulement un
-        // décompte muet. Ici, tout finit dans un seul message, en échec
-        // (`self.fail`) dès qu'au moins un fichier a échoué, pour que ça se
-        // voie.
+        // `self.fail`/`self.notice` remplacent `self.status` sans le combiner à
+        // ce qu'il portait déjà, donc un `self.fail` par fichier en échec se
+        // serait fait écraser par le suivant. Tout finit dans un seul message,
+        // en échec dès qu'au moins un fichier a échoué, pour que ça se voie.
         let mut failures: Vec<String> = Vec::new();
-        let mut shared_book = None;
-        let mut done_paths: Vec<PathBuf> = Vec::new();
-        for (path, recipe, table) in &items {
-            let file_stem = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("fichier");
-            let table = match table {
-                Ok(table) => table,
-                Err(message) => {
-                    failures.push(message.clone());
-                    continue;
-                }
-            };
-            let book = match destination {
-                ImportDestination::ActiveBook(book) => book,
-                ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll => {
-                    if destination == ImportDestination::NewBookForAll {
-                        if let Some(book) = shared_book {
-                            book
-                        } else {
-                            let Some(book) = self.create_import_book(None) else {
-                                failures.push(format!(
-                                    "{}: échec de la création du classeur",
-                                    path.display()
-                                ));
-                                continue;
-                            };
-                            shared_book = Some(book);
-                            book
-                        }
-                    } else {
-                        let Some(book) = self.create_import_book(Some(file_stem)) else {
-                            failures.push(format!(
-                                "{}: échec de la création du classeur",
-                                path.display()
-                            ));
-                            continue;
-                        };
-                        book
-                    }
-                }
-            };
-            // `Command::AddWorksheet` ne rend que la `Revision`, jamais
-            // l'identifiant de la feuille créée. `Project::add_worksheet`
-            // (côté `plotyx-core`) insère toujours la nouvelle feuille en
-            // dernière position des enfants de `book` ; `self.execute`
-            // rafraîchit déjà `self.snapshot.tree` en cas de succès (voir sa
-            // doc), donc le dernier enfant de `book` juste après est bien la
-            // feuille qu'on vient de créer — c'est le seul moyen de la
-            // retrouver depuis ce banc, qui n'a qu'un `Arc<Tree>` figé, pas
-            // le `Project` qui l'a construite. Piège à ne pas redécouvrir à
-            // la dure : voir la tâche « feat/import-ui » §2.
-            let previous_sheet = self
-                .snapshot
-                .tree
-                .node(book)
-                .and_then(|node| node.children().last().copied());
-            self.execute(Command::AddWorksheet { book, name: None });
-            let Some(sheet) = self
-                .snapshot
-                .tree
-                .node(book)
-                .and_then(|node| node.children().last().copied())
-                .filter(|sheet| Some(*sheet) != previous_sheet)
-            else {
-                failures.push(format!(
-                    "{}: échec de la création de la feuille",
-                    path.display()
-                ));
-                continue;
-            };
-            // Nomme la feuille d'après le fichier plutôt que de garder le nom
-            // automatique « SheetN » — best-effort : si le nom est déjà pris,
-            // `Rename` échoue (`self.execute` l'écrit dans `self.status`,
-            // écrasé par le message final ci-dessous de toute façon), la
-            // feuille garde son nom automatique. Ce n'est pas un échec
-            // d'import — les données sont bien là — donc ça ne compte pas
-            // dans `failures`.
-            self.execute(Command::Rename {
-                id: sheet,
-                name: file_stem.to_string(),
-            });
-            for (index, parsed_column) in table.columns.iter().enumerate() {
-                // Rôle choisi à l'étape « Colonnes » de l'assistant : une
-                // colonne « Ignorer » n'est pas importée.
-                let role = match recipe.column_role(index) {
-                    plotyx_import::ColumnRoleChoice::Ignore => continue,
-                    plotyx_import::ColumnRoleChoice::X => ColumnRole::X,
-                    plotyx_import::ColumnRoleChoice::XError => ColumnRole::XError,
-                    plotyx_import::ColumnRoleChoice::YError => ColumnRole::YError,
-                    plotyx_import::ColumnRoleChoice::Y | plotyx_import::ColumnRoleChoice::Auto => {
-                        ColumnRole::Y
-                    }
-                };
-                // Une colonne dont au moins une cellule porte un texte
-                // conservé (`n/a`, un code d'instrument…) devient une
-                // colonne à types mixtes plutôt qu'une colonne numérique qui
-                // aurait tout aplati en `NaN` — c'est le cas d'usage
-                // motivant du chantier « colonnes à types mixtes »,
-                // qu'`import` ne servait pas encore avant ce chantier-ci
-                // (voir docs/chantier-colonnes-mixtes.md, section « ce qui
-                // reste »). Une colonne entièrement numérique garde le
-                // chemin `Numeric` d'avant, à l'identique : minimiser la
-                // casse, même politique que le chantier précédent.
-                let forced_text = recipe.column_kind(index) == plotyx_import::ColumnKind::Text;
-                let mut column = if forced_text || parsed_column.texts.iter().any(Option::is_some) {
-                    let cells: Vec<MixedCell> = parsed_column
-                        .values
-                        .iter()
-                        .zip(&parsed_column.texts)
-                        .map(|(value, text)| match text {
-                            Some(text) => MixedCell::Text(text.clone()),
-                            None => MixedCell::from_f64(*value),
-                        })
-                        .collect();
-                    Column::from_mixed(&cells)
-                } else {
-                    let mut numeric = Column::from_f64(&parsed_column.values);
-                    if parsed_column.datetime {
-                        // Dates et heures : les mêmes `f64` (timestamps POSIX),
-                        // typés `DateTime` pour l'affichage et les axes.
-                        numeric.set_column_type(ColumnType::DateTime);
-                    }
-                    numeric
-                };
-                // Le nom long privilégie le rôle de sous-en-tête
-                // `long_name`, quand la recette en assigne un — sinon la
-                // même chaîne de repli qu'avant ce chantier (ligne d'en-tête
-                // de colonnes, puis nom de fichier/clé d'en-tête pour la
-                // première colonne).
-                let long_name = parsed_column.long_name.clone().unwrap_or_else(|| {
-                    match (index, &parsed_column.name) {
-                        (_, Some(name)) => name.clone(),
-                        (0, None) => "X".to_string(),
-                        (_, None) => plotyx_import::resolve_series_name(recipe, table, file_stem),
-                    }
-                });
-                column.set_meta(ColumnMeta {
-                    long_name,
-                    unit: parsed_column.unit.clone().unwrap_or_default(),
-                    comment: parsed_column.comment.clone().unwrap_or_default(),
-                    // Métadonnées du fichier, copiées sur chaque colonne :
-                    // plusieurs fichiers dans une même feuille gardent
-                    // chacun les leurs (issue #5).
-                    file_metadata: table
-                        .metadata()
-                        .iter()
-                        .map(|line| plotyx_core::MetaLine {
-                            key: line.key.clone(),
-                            value: line.value.clone(),
-                        })
-                        .collect(),
-                    // Par défaut la première colonne importée est l'abscisse
-                    // (`ImportRecipe::column_role`).
-                    role,
-                    ..Default::default()
-                });
-                self.execute(Command::AddColumn {
-                    sheet,
-                    index: None,
-                    name: None,
-                    column,
-                });
+        for (_, _, table) in &items {
+            if let Err(message) = table {
+                failures.push(message.clone());
             }
-            imported += 1;
-            done_paths.push(path.clone());
         }
+        let mut done_paths: Vec<PathBuf> = Vec::new();
+        let first_ok = items.iter().find(|(_, _, table)| table.is_ok());
+        if let Some((_, first_recipe, _)) = first_ok {
+            let plans = plan_import(&items, first_recipe.files_layout);
+            let merge_sheet = match (destination, first_recipe.import_mode) {
+                (_, plotyx_import::ImportMode::NewSheet) => None,
+                (ImportDestination::ActiveBook(book), _) => self
+                    .selected_sheet_in(book)
+                    .or_else(|| self.worksheets_of(book).first().map(|(id, _)| *id)),
+                _ => None,
+            };
+            if let Some(sheet) = merge_sheet {
+                // Tous les plans se fondent dans la feuille active.
+                let columns: Vec<PlannedColumn> = plans
+                    .iter()
+                    .flat_map(|plan| plan.columns.iter().copied())
+                    .collect();
+                self.fill_existing_sheet(sheet, first_recipe.import_mode, &items, &columns);
+                for plan in &plans {
+                    for &item in &plan.items {
+                        done_paths.push(items[item].0.clone());
+                    }
+                }
+            } else {
+                let mut shared_book = None;
+                for plan in &plans {
+                    let Some(book) =
+                        self.book_for_plan(destination, plan, &mut shared_book, &mut failures)
+                    else {
+                        continue;
+                    };
+                    let Some(sheet) = self.add_named_sheet(book, &plan.name, &mut failures) else {
+                        continue;
+                    };
+                    for &planned in &plan.columns {
+                        if let Some(column) = self.make_import_column(&items, planned, 0) {
+                            self.execute(Command::AddColumn {
+                                sheet,
+                                index: None,
+                                name: None,
+                                column,
+                            });
+                        }
+                    }
+                    for &item in &plan.items {
+                        done_paths.push(items[item].0.clone());
+                    }
+                }
+            }
+        }
+        let imported = done_paths.len();
         if self.handle.end_macro().is_err() {
             failures.push("échec de la clôture de l'entrée d'historique d'import".to_string());
         }
         if imported > 0 {
             // De quoi « Régler le dernier import… » et les fichiers récents.
             self.recent_to_record.extend(done_paths.iter().cloned());
-            if let Some((_, first_recipe, _)) = items.first() {
+            if let Some((_, first_recipe, _)) = first_ok {
                 self.last_import = Some(LastImport {
                     destination,
                     recipe: first_recipe.clone(),
@@ -5294,13 +5414,9 @@ impl AppState {
                 });
             }
         }
-        // `self.execute` (appelé dans la boucle ci-dessus) rafraîchit déjà
-        // l'instantané à chaque commande, mais toujours **pendant** que la
-        // macro est ouverte : `self.snapshot.history` n'y reflète donc
-        // jamais l'annulabilité de la macro une fois close. `end_macro` lui-
-        // même ne rafraîchit rien (il ne passe pas par `self.execute`) — sans
-        // cet appel, `AppState::can_undo` resterait sur l'état d'avant la
-        // clôture jusqu'au prochain rafraîchissement fortuit.
+        // `self.execute` rafraîchit l'instantané à chaque commande, mais
+        // toujours **pendant** que la macro est ouverte : sans ce dernier
+        // rafraîchissement, `can_undo` resterait sur l'état d'avant la clôture.
         self.refresh();
         let summary = format!("{imported} fichier(s) importé(s) sur {}", paths.len());
         if failures.is_empty() {
@@ -5308,6 +5424,285 @@ impl AppState {
         } else {
             self.fail(format!("{summary} — {}", failures.join(" ; ")));
         }
+    }
+
+    /// Le classeur qui reçoit `plan` : le classeur actif, ou un classeur neuf
+    /// (un par plan, ou un seul partagé).
+    fn book_for_plan(
+        &mut self,
+        destination: ImportDestination,
+        plan: &ImportPlan,
+        shared_book: &mut Option<NodeId>,
+        failures: &mut Vec<String>,
+    ) -> Option<NodeId> {
+        match destination {
+            ImportDestination::ActiveBook(book) => Some(book),
+            ImportDestination::NewBookForAll => {
+                if let Some(book) = *shared_book {
+                    return Some(book);
+                }
+                let book = self.create_import_book(None);
+                if book.is_none() {
+                    failures.push(format!("{}: échec de la création du classeur", plan.name));
+                }
+                *shared_book = book;
+                book
+            }
+            ImportDestination::NewBookPerFile => {
+                let book = self.create_import_book(Some(&plan.name));
+                if book.is_none() {
+                    failures.push(format!("{}: échec de la création du classeur", plan.name));
+                }
+                book
+            }
+        }
+    }
+
+    /// Ajoute une feuille à `book` et la nomme `name` (au mieux : si le nom est
+    /// pris, elle garde son nom automatique — ce n'est pas un échec d'import).
+    ///
+    /// `Command::AddWorksheet` ne rend que la `Revision`, jamais l'identifiant
+    /// de la feuille créée. `Project::add_worksheet` insère toujours la feuille
+    /// en dernière position des enfants de `book`, et `self.execute` rafraîchit
+    /// déjà l'instantané : le dernier enfant juste après est la nouvelle
+    /// feuille — le seul moyen de la retrouver depuis ce banc, qui n'a qu'un
+    /// `Arc<Tree>` figé.
+    fn add_named_sheet(
+        &mut self,
+        book: NodeId,
+        name: &str,
+        failures: &mut Vec<String>,
+    ) -> Option<NodeId> {
+        let previous = self
+            .snapshot
+            .tree
+            .node(book)
+            .and_then(|node| node.children().last().copied());
+        self.execute(Command::AddWorksheet { book, name: None });
+        let sheet = self
+            .snapshot
+            .tree
+            .node(book)
+            .and_then(|node| node.children().last().copied())
+            .filter(|sheet| Some(*sheet) != previous);
+        let Some(sheet) = sheet else {
+            failures.push(format!("{name}: échec de la création de la feuille"));
+            return None;
+        };
+        self.execute(Command::Rename {
+            id: sheet,
+            name: name.to_string(),
+        });
+        Some(sheet)
+    }
+
+    /// Mode « classeur actif » hors nouvelle feuille : remplace le contenu de
+    /// `sheet`, ajoute des colonnes à sa suite, ou prolonge ses colonnes.
+    fn fill_existing_sheet(
+        &mut self,
+        sheet: NodeId,
+        mode: plotyx_import::ImportMode,
+        items: &[ImportItem],
+        columns: &[PlannedColumn],
+    ) {
+        use plotyx_import::ImportMode;
+        match mode {
+            ImportMode::NewSheet => {}
+            ImportMode::ReplaceSheet | ImportMode::AddColumns => {
+                if mode == ImportMode::ReplaceSheet {
+                    for (column, ..) in self.visible_columns(sheet) {
+                        self.execute(Command::DeleteColumn { column });
+                    }
+                }
+                for &planned in columns {
+                    if let Some(column) = self.make_import_column(items, planned, 0) {
+                        self.execute(Command::AddColumn {
+                            sheet,
+                            index: None,
+                            name: None,
+                            column,
+                        });
+                    }
+                }
+            }
+            ImportMode::AddRows => {
+                let start = self.row_count(sheet);
+                let existing: Vec<NodeId> = self
+                    .visible_columns(sheet)
+                    .into_iter()
+                    .map(|(id, ..)| id)
+                    .collect();
+                let added = columns
+                    .iter()
+                    .filter_map(|&planned| {
+                        items[planned.item].2.as_ref().ok().map(|table| {
+                            table
+                                .columns
+                                .get(planned.column)
+                                .map_or(0, |c| c.values.len())
+                        })
+                    })
+                    .max()
+                    .unwrap_or(0);
+                if added > 0 {
+                    self.execute(Command::InsertRows {
+                        sheet,
+                        at: start,
+                        count: added,
+                    });
+                }
+                for (position, &planned) in columns.iter().enumerate() {
+                    match existing.get(position) {
+                        Some(&target) => {
+                            if let Some(block) = self.import_block(items, planned) {
+                                self.execute(Command::SetCellsPromoting {
+                                    column: target,
+                                    start,
+                                    values: block,
+                                    expected_version: None,
+                                });
+                            }
+                        }
+                        // Plus de colonnes dans le fichier que dans la feuille :
+                        // la colonne neuve commence par autant de cases vides.
+                        None => {
+                            if let Some(column) = self.make_import_column(items, planned, start) {
+                                self.execute(Command::AddColumn {
+                                    sheet,
+                                    index: None,
+                                    name: None,
+                                    column,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Les valeurs d'une colonne planifiée, en bloc prêt à écrire : des
+    /// nombres, ou des cellules mixtes dès qu'un texte est conservé (colonne
+    /// forcée en texte comprise).
+    fn import_block(&self, items: &[ImportItem], planned: PlannedColumn) -> Option<ValueBlock> {
+        let (_, recipe, table) = items.get(planned.item)?;
+        let parsed = table.as_ref().ok()?.columns.get(planned.column)?;
+        let forced_text = recipe.column_kind(planned.column) == plotyx_import::ColumnKind::Text;
+        Some(if forced_text || parsed.texts.iter().any(Option::is_some) {
+            ValueBlock::Mixed(
+                parsed
+                    .values
+                    .iter()
+                    .zip(&parsed.texts)
+                    .map(|(value, text)| match text {
+                        Some(text) => MixedCell::Text(text.clone()),
+                        None => MixedCell::from_f64(*value),
+                    })
+                    .collect(),
+            )
+        } else {
+            ValueBlock::Float(parsed.values.clone())
+        })
+    }
+
+    /// Construit la colonne `planned` : valeurs typées (numérique, date-heure,
+    /// mixte), nom long, unité, commentaire, rôle, métadonnées du fichier et
+    /// source d'import. `None` pour une colonne « Ignorer ». `prefix` cases
+    /// vides sont ajoutées en tête (colonne neuve d'un import « ajouter des
+    /// lignes »).
+    fn make_import_column(
+        &self,
+        items: &[ImportItem],
+        planned: PlannedColumn,
+        prefix: usize,
+    ) -> Option<Column> {
+        let (path, recipe, table) = items.get(planned.item)?;
+        let table = table.as_ref().ok()?;
+        let index = planned.column;
+        let parsed_column = table.columns.get(index)?;
+        let file_stem = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("fichier");
+        // Rôle choisi à l'étape « Colonnes » de l'assistant : une colonne
+        // « Ignorer » n'est pas importée.
+        let role = match recipe.column_role(index) {
+            plotyx_import::ColumnRoleChoice::Ignore => return None,
+            plotyx_import::ColumnRoleChoice::X => ColumnRole::X,
+            plotyx_import::ColumnRoleChoice::XError => ColumnRole::XError,
+            plotyx_import::ColumnRoleChoice::YError => ColumnRole::YError,
+            plotyx_import::ColumnRoleChoice::Y | plotyx_import::ColumnRoleChoice::Auto => {
+                ColumnRole::Y
+            }
+        };
+        // Une colonne dont au moins une cellule porte un texte conservé
+        // (`n/a`, un code d'instrument…) devient une colonne à types mixtes
+        // plutôt qu'une colonne numérique qui aurait tout aplati en `NaN` ; une
+        // colonne entièrement numérique garde le chemin `Numeric` d'avant.
+        let block = self.import_block(items, planned)?;
+        let mut column = match block {
+            ValueBlock::Mixed(mut cells) => {
+                if prefix > 0 {
+                    let mut padded = vec![MixedCell::Empty; prefix];
+                    padded.append(&mut cells);
+                    cells = padded;
+                }
+                Column::from_mixed(&cells)
+            }
+            ValueBlock::Float(mut values) => {
+                if prefix > 0 {
+                    let mut padded = vec![f64::NAN; prefix];
+                    padded.append(&mut values);
+                    values = padded;
+                }
+                let mut numeric = Column::from_f64(&values);
+                if parsed_column.datetime {
+                    // Dates et heures : les mêmes `f64` (timestamps POSIX), typés
+                    // `DateTime` pour l'affichage et les axes.
+                    numeric.set_column_type(ColumnType::DateTime);
+                }
+                numeric
+            }
+        };
+        // Le nom long privilégie le rôle de sous-en-tête `long_name`, quand la
+        // recette en assigne un — sinon la ligne de noms de colonnes, puis « X »
+        // pour la première colonne, puis le nom de la série (fichier ou clé
+        // d'en-tête).
+        let long_name =
+            parsed_column
+                .long_name
+                .clone()
+                .unwrap_or_else(|| match (index, &parsed_column.name) {
+                    (_, Some(name)) => name.clone(),
+                    (0, None) => "X".to_string(),
+                    (_, None) => plotyx_import::resolve_series_name(recipe, table, file_stem),
+                });
+        column.set_meta(ColumnMeta {
+            long_name,
+            unit: parsed_column.unit.clone().unwrap_or_default(),
+            comment: parsed_column.comment.clone().unwrap_or_default(),
+            // Métadonnées du fichier, copiées sur chaque colonne : plusieurs
+            // fichiers dans une même feuille gardent chacun les leurs.
+            file_metadata: table
+                .metadata()
+                .iter()
+                .map(|line| plotyx_core::MetaLine {
+                    key: line.key.clone(),
+                    value: line.value.clone(),
+                })
+                .collect(),
+            // Par défaut la première colonne importée est l'abscisse
+            // (`ImportRecipe::column_role`).
+            role,
+            // De quoi actualiser la colonne depuis son fichier.
+            import_source: Some(plotyx_core::ImportSource {
+                path: path.display().to_string(),
+                recipe_json: recipe.to_json(),
+                column: index,
+            }),
+            ..Default::default()
+        });
+        Some(column)
     }
 
     /// `AddEmptyWorkbook` évite la feuille « Sheet1 » que `AddWorkbook`

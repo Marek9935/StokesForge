@@ -239,6 +239,23 @@ pub struct ColumnMeta {
     /// l'écriture initiale (macro « Importer ») les pose, aucune commande
     /// d'édition.
     pub file_metadata: Vec<MetaLine>,
+    /// D'où viennent les valeurs quand la colonne a été importée d'un fichier :
+    /// de quoi les **actualiser** depuis ce fichier (équivalent du *Data
+    /// Connector* d'Origin). `None` pour une colonne saisie à la main.
+    pub import_source: Option<ImportSource>,
+}
+
+/// Source d'une colonne importée : le fichier, la recette qui l'a lu
+/// (sérialisée en JSON, le modèle ne connaît pas `plotyx-import`) et la
+/// position de la colonne dans le fichier.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ImportSource {
+    /// Chemin du fichier source.
+    pub path: String,
+    /// La recette d'import, en JSON.
+    pub recipe_json: String,
+    /// Index de la colonne dans le fichier (0 = la première).
+    pub column: usize,
 }
 
 /// Une ligne de métadonnées de fichier, découpée en clé / valeur

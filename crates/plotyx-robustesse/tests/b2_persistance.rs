@@ -173,6 +173,7 @@ fn b2_aller_retour_preserve_tout() {
                 display_format: "%.3f".into(),
                 formula: None,
                 file_metadata: Vec::new(),
+                import_source: None,
             },
         )
         .unwrap();
