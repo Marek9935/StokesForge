@@ -99,7 +99,7 @@ avant la construction de la grille, qui ne peut donc plus la repousser hors du
 cadre (`book_contents`) ; ce découpage n'utilise pas `egui::Panel`, qui
 remplace le rognage de son parent au lieu de le combiner et dessinait les
 onglets sous la vue d'une fenêtre coupée. Les onglets
-gardent leur taille naturelle (`sheet_tabs`, `crates/plotyx-app/src/app.rs`) —
+gardent leur taille naturelle (`sheet_tabs`, enveloppe de `tab_strip`, `crates/plotyx-app/src/app.rs`) —
 ils ne rétrécissent pas et ne se replient pas dans un menu « … ». La bande n'a
 **pas** de barre de défilement : quand des onglets sont cachés, deux boutons
 « < » et « > » apparaissent à sa gauche et font apparaître l'onglet caché
@@ -107,7 +107,7 @@ suivant de ce côté (chacun grisé s'il n'y a rien à montrer de son côté) ; 
 disparaissent quand tout tient. Changer de feuille (au clic, au clavier ou
 par script) fait défiler la bande **du plus petit décalage** qui montre
 entièrement l'onglet sélectionné et ses deux voisins — cliquer sur le dernier
-onglet visible ne révèle qu'un onglet de plus (`scroll_sheet_tabs_to_selected`,
+onglet visible ne révèle qu'un onglet de plus (`scroll_tab_strip_to_selected`,
 issue #1). Les notes et matrices restent bornées au rectangle commun. Dans un
 graphe (`graph_view_contents`,
 `crates/plotyx-app/src/app.rs`), la figure garde le ratio de
@@ -555,7 +555,11 @@ enregistrer sont refusés (`plotyx-commands`). Elle est construite
 par la même brique que les fenêtres de contenu (`show_window_in_layer`,
 `window_header`, `floating_resize_handles`) — même cadre, même barre de
 titre — et non par une `egui::Window` brute ; seuls l'ordre de calque et le
-calque plein écran qui capte les clics la distinguent. Les fenêtres OS
+calque plein écran qui capte les clics la distinguent. Ce calque est
+**invisible** : aucun voile sombre sur le reste de l'application, pour continuer
+à voir le rendu du graphe pendant le réglage (issue #20). Ses onglets sont la
+même bande que ceux des feuilles (`tab_strip`, issue #19) : c'est le standard
+du projet pour tout jeu d'onglets. Les fenêtres OS
 détachées, autres viewports, ne sont pas couvertes par ce blocage. Elle
 n'occupe aucune place tant qu'elle est fermée.
 Elle remplace l'ancien panneau fixe à droite de l'espace de travail, affiché

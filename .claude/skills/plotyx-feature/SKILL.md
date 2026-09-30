@@ -160,7 +160,15 @@ propriétés du graphe) : calque plein écran qui capte les clics, contour rouge
 foncé qui clignote sur un clic bloqué, boutons Valider (défaut, Entrée) /
 Annuler (croix, Échap) rendus par `DialogOutcome`. Les gestes d'un dialogue
 d'édition vivent dans une macro d'historique (`begin_macro`) : Valider la
-ferme (une entrée), Annuler l'avorte (modèle : `cancel_plot_settings`). La fenêtre d'import
+ferme (une entrée), Annuler l'avorte (modèle : `cancel_plot_settings`). **Tout jeu d'onglets passe par `tab_strip`** (issue #19), la bande des
+onglets de feuille rendue générique : défilement horizontal sans barre,
+boutons « < » « > » quand des onglets sont cachés, défilement minimal vers
+l'onglet choisi. Ne jamais écrire une rangée de `selectable_label` pour des
+onglets ; `sheet_tabs` (feuilles) et la fenêtre des propriétés du graphe en
+sont des usages. Un dialogue modal ne **peint pas de voile** sur le reste de
+l'application (issue #20) : il le bloque seulement.
+
+La fenêtre d'import
 (`import_window`) est encore une `egui::Window` brute (issues #13/#14).
 
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement

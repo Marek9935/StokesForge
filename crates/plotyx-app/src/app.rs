@@ -515,7 +515,7 @@ const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 4.0 * HEADER_SUBROW_
 /// de la fenêtre. Juste la hauteur d'un onglet et un filet : la bande n'a
 /// plus de barre de défilement à loger (boutons « < » « > », voir
 /// [`sheet_tabs`]), et la barre horizontale de la grille est en dessous.
-const SHEET_TABS_HEIGHT: f32 = 24.0;
+const TAB_STRIP_HEIGHT: f32 = 24.0;
 /// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
 /// initial. Réserver sa hauteur garde le rectangle de la figure stable d'une
 /// image à l'autre — sans quoi le cache de formes serait invalidé au moindre
@@ -2748,7 +2748,7 @@ fn show_grid_vertical_bar(
 /// et « > »), si des onglets sont cachés à gauche ou à droite — ce qui ne se
 /// constate qu'en dessinant les onglets.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct SheetTabsOverflow {
+struct TabStripOverflow {
     hidden_left: bool,
     hidden_right: bool,
 }
@@ -2758,15 +2758,18 @@ struct SheetTabsOverflow {
 /// tests le lisent ; l'interface n'en a pas besoin.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Default)]
-struct SheetTabsOutput {
+struct TabStripOutput {
     offset: f32,
-    overflow: SheetTabsOverflow,
+    overflow: TabStripOverflow,
     arrows: Option<[egui::Rect; 2]>,
     /// Indices du premier et du dernier onglet entièrement visibles.
     fully_visible: Option<(usize, usize)>,
 }
 
-/// Bande d'onglets de feuille, style d'origine (bouton pleine taille, sans
+/// **La** bande d'onglets de l'application (standard du projet, issue #19) :
+/// tout jeu d'onglets — feuilles d'un classeur, pages de la fenêtre des
+/// propriétés du graphe — passe par elle, jamais par une rangée de
+/// `selectable_label`. Style d'origine (bouton pleine taille, sans
 /// troncature) : quand elle ne tient pas dans la largeur disponible, elle
 /// défile horizontalement plutôt que de rétrécir ses onglets ou de replier
 /// les feuilles cachées dans un menu « … ». Elle n'a **pas** de barre de
@@ -2774,26 +2777,34 @@ struct SheetTabsOutput {
 /// apparaître l'onglet caché suivant de ce côté — et n'apparaissent que si
 /// des onglets sont cachés. Changer de feuille sélectionnée (au clavier, par
 /// script, ou par clic) fait défiler la bande juste assez pour montrer
-/// l'onglet actif et ses voisins ([`scroll_sheet_tabs_to_selected`]).
-fn sheet_tabs(
+/// l'onglet actif et ses voisins ([`scroll_tab_strip_to_selected`]).
+fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
     ui: &mut egui::Ui,
-    sheets: &[(NodeId, String)],
-    selected: NodeId,
-    mut on_select: impl FnMut(NodeId),
+    tabs: &[(K, String)],
+    selected: K,
+    mut on_select: impl FnMut(K),
+    add_label: Option<&str>,
     mut on_add: impl FnMut(),
-) -> SheetTabsOutput {
-    if sheets.is_empty() {
-        ui.allocate_response(
-            egui::vec2(ui.available_width(), SHEET_TABS_HEIGHT),
-            egui::Sense::click(),
-        )
-        .context_menu(|ui| {
-            if ui.button("Ajouter une feuille").clicked() {
-                on_add();
+) -> TabStripOutput {
+    let add_menu = |ui: &mut egui::Ui, requested_add: &mut bool| {
+        if let Some(label) = add_label {
+            if ui.button(label).clicked() {
+                *requested_add = true;
                 ui.close();
             }
-        });
-        return SheetTabsOutput::default();
+        }
+    };
+    if tabs.is_empty() {
+        let mut requested_add = false;
+        ui.allocate_response(
+            egui::vec2(ui.available_width(), TAB_STRIP_HEIGHT),
+            egui::Sense::click(),
+        )
+        .context_menu(|ui| add_menu(ui, &mut requested_add));
+        if requested_add {
+            on_add();
+        }
+        return TabStripOutput::default();
     }
     // Mémorisée par instance de bande (scopée par la pile d'`Id` du parent,
     // donc distincte entre fenêtre flottante et fenêtre détachée) : ne
@@ -2801,12 +2812,12 @@ fn sheet_tabs(
     // réellement d'une image à l'autre, pas à chaque image où elle est
     // simplement reconduite — sinon un défilement manuel de l'utilisateur
     // serait annulé en continu.
-    let last_selected_id = ui.id().with("sheet_tabs_last_selected");
-    let last_selected: Option<NodeId> = ui.memory(|memory| memory.data.get_temp(last_selected_id));
+    let last_selected_id = ui.id().with("tab_strip_last_selected");
+    let last_selected: Option<K> = ui.memory(|memory| memory.data.get_temp(last_selected_id));
     let should_scroll_to_selected = last_selected != Some(selected);
     ui.memory_mut(|memory| memory.data.insert_temp(last_selected_id, selected));
-    let overflow_id = ui.id().with("sheet_tabs_overflow");
-    let overflow: SheetTabsOverflow = ui
+    let overflow_id = ui.id().with("tab_strip_overflow");
+    let overflow: TabStripOverflow = ui
         .memory(|memory| memory.data.get_temp(overflow_id))
         .unwrap_or_default();
 
@@ -2814,7 +2825,7 @@ fn sheet_tabs(
     let mut requested_add = false;
     // -1 : faire apparaître l'onglet caché à gauche ; +1 : à droite.
     let mut step: i8 = 0;
-    let mut new_overflow = SheetTabsOverflow::default();
+    let mut new_overflow = TabStripOverflow::default();
     let mut arrows = None;
     let mut offset = 0.0;
     let mut fully_visible: Option<(usize, usize)> = None;
@@ -2839,7 +2850,7 @@ fn sheet_tabs(
         }
         let band_width = ui.available_width();
         offset = egui::ScrollArea::horizontal()
-            .id_salt("sheet_tabs_scroll")
+            .id_salt("tab_strip_scroll")
             .auto_shrink([false, true])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(ui, |ui| {
@@ -2848,9 +2859,9 @@ fn sheet_tabs(
                     let visible = ui.clip_rect();
                     let mut last_hidden_left = None;
                     let mut first_hidden_right = None;
-                    let mut tab_rects = Vec::with_capacity(sheets.len());
+                    let mut tab_rects = Vec::with_capacity(tabs.len());
                     let mut selected_index = None;
-                    for (index, (id, name)) in sheets.iter().enumerate() {
+                    for (index, (id, name)) in tabs.iter().enumerate() {
                         let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
                             .small()
                             .fill(if selected == *id {
@@ -2859,12 +2870,7 @@ fn sheet_tabs(
                                 egui::Color32::TRANSPARENT
                             });
                         let response = ui.add(tab);
-                        response.context_menu(|ui| {
-                            if ui.button("Ajouter une feuille").clicked() {
-                                requested_add = true;
-                                ui.close();
-                            }
-                        });
+                        response.context_menu(|ui| add_menu(ui, &mut requested_add));
                         if response.clicked() {
                             requested = Some(*id);
                         }
@@ -2887,13 +2893,13 @@ fn sheet_tabs(
                             first_hidden_right = Some(response.clone());
                         }
                     }
-                    new_overflow = SheetTabsOverflow {
+                    new_overflow = TabStripOverflow {
                         hidden_left: last_hidden_left.is_some(),
                         hidden_right: first_hidden_right.is_some(),
                     };
                     if should_scroll_to_selected {
                         if let Some(index) = selected_index {
-                            scroll_sheet_tabs_to_selected(ui, &tab_rects, index, visible);
+                            scroll_tab_strip_to_selected(ui, &tab_rects, index, visible);
                         }
                     }
                     match step {
@@ -2911,15 +2917,10 @@ fn sheet_tabs(
                     }
                     let used = ui.cursor().left() - ui.min_rect().left();
                     let empty = ui.allocate_response(
-                        egui::vec2((band_width - used).max(1.0), SHEET_TABS_HEIGHT),
+                        egui::vec2((band_width - used).max(1.0), TAB_STRIP_HEIGHT),
                         egui::Sense::click(),
                     );
-                    empty.context_menu(|ui| {
-                        if ui.button("Ajouter une feuille").clicked() {
-                            requested_add = true;
-                            ui.close();
-                        }
-                    });
+                    empty.context_menu(|ui| add_menu(ui, &mut requested_add));
                 });
             })
             .state
@@ -2936,12 +2937,31 @@ fn sheet_tabs(
     if requested_add {
         on_add();
     }
-    SheetTabsOutput {
+    TabStripOutput {
         offset,
         overflow: new_overflow,
         arrows,
         fully_visible,
     }
+}
+
+/// Bande d'onglets des feuilles d'un classeur : [`tab_strip`] avec, en plus,
+/// « Ajouter une feuille » au clic droit.
+fn sheet_tabs(
+    ui: &mut egui::Ui,
+    sheets: &[(NodeId, String)],
+    selected: NodeId,
+    on_select: impl FnMut(NodeId),
+    on_add: impl FnMut(),
+) -> TabStripOutput {
+    tab_strip(
+        ui,
+        sheets,
+        selected,
+        on_select,
+        Some("Ajouter une feuille"),
+        on_add,
+    )
 }
 
 /// Défilement automatique de la bande d'onglets quand la feuille
@@ -2954,7 +2974,7 @@ fn sheet_tabs(
 /// Issue #1 : la bande centrait auparavant l'onglet sélectionné à chaque
 /// changement — cliquer sur le dernier onglet visible décalait alors de deux
 /// onglets ou plus au lieu d'un.
-fn scroll_sheet_tabs_to_selected(
+fn scroll_tab_strip_to_selected(
     ui: &egui::Ui,
     tab_rects: &[egui::Rect],
     selected: usize,
@@ -4719,7 +4739,7 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
         area.split_left_right_at_x(area.right() - bar_width.min(area.width()));
     let (upper_area, horizontal_bar_strip) =
         main_area.split_top_bottom_at_y(main_area.bottom() - bar_width.min(main_area.height()));
-    let tabs_height = SHEET_TABS_HEIGHT.min(upper_area.height());
+    let tabs_height = TAB_STRIP_HEIGHT.min(upper_area.height());
     let (grid_rect, tabs_rect) =
         upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height);
     let mut bounded = |rect: egui::Rect| {
@@ -6159,13 +6179,15 @@ fn modal_dialog(
     let layer = egui::LayerId::new(egui::Order::Foreground, id);
 
     // Le calque qui capte les clics : tout le reste de l'interface est sous lui.
+    // Il est **invisible** : pas de voile sombre sur le reste de l'application,
+    // pour qu'on continue de voir le rendu du graphe pendant qu'on règle ses
+    // propriétés (issue #20). Le clignotement du contour dit déjà que le
+    // reste est bloqué.
     let backdrop = egui::Area::new(id.with("backdrop"))
         .order(egui::Order::Foreground)
         .fixed_pos(screen.min)
         .sense(egui::Sense::click_and_drag())
         .show(ctx, |ui| {
-            ui.painter()
-                .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(40));
             ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
         });
     let blocked_click =
@@ -6306,16 +6328,13 @@ fn plot_settings_contents(
 ) {
     let mut chosen_tab = settings.tab;
     let mut chosen_axis = settings.axis;
-    ui.horizontal(|ui| {
-        for tab in PlotSettingsTab::ALL {
-            if ui
-                .selectable_label(chosen_tab == tab, tab.label())
-                .clicked()
-            {
-                chosen_tab = tab;
-            }
-        }
-    });
+    // Même bande que les onglets de feuille (`tab_strip`, issue #19) : elle
+    // défile au lieu de rétrécir quand la fenêtre est étroite.
+    let tabs: Vec<(PlotSettingsTab, String)> = PlotSettingsTab::ALL
+        .iter()
+        .map(|tab| (*tab, tab.label().to_string()))
+        .collect();
+    tab_strip(ui, &tabs, settings.tab, |tab| chosen_tab = tab, None, || {});
     ui.separator();
 
     let mut commit = false;
@@ -7336,6 +7355,73 @@ mod graph_layout_tests {
         assert!(!output.shapes.is_empty());
     }
 
+    /// #19 : les onglets de la fenêtre des propriétés du graphe sont la
+    /// bande commune (`tab_strip`) : tous les onglets sont peints, et un clic
+    /// sur l'un d'eux le choisit.
+    #[test]
+    fn les_onglets_des_proprietes_sont_la_bande_commune() {
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        let tabs: Vec<(PlotSettingsTab, String)> = PlotSettingsTab::ALL
+            .iter()
+            .map(|tab| (*tab, tab.label().to_string()))
+            .collect();
+        let mut chosen = None;
+        let run = |events: Vec<egui::Event>, chosen: &mut Option<PlotSettingsTab>| {
+            let input = egui::RawInput {
+                events,
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 200.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                tab_strip(
+                    ui,
+                    &tabs,
+                    PlotSettingsTab::Graph,
+                    |tab| *chosen = Some(tab),
+                    None,
+                    || {},
+                );
+            });
+            output.textures_delta.clear();
+            output
+        };
+        run(vec![], &mut chosen);
+        let output = run(vec![], &mut chosen);
+        fn position(output: &egui::FullOutput, needle: &str) -> Option<egui::Pos2> {
+            fn walk(shape: &egui::Shape, needle: &str) -> Option<egui::Pos2> {
+                match shape {
+                    egui::Shape::Text(text) if text.galley.text() == needle => {
+                        Some(text.visual_bounding_rect().center())
+                    }
+                    egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| walk(s, needle)),
+                    _ => None,
+                }
+            }
+            output
+                .shapes
+                .iter()
+                .find_map(|clipped| walk(&clipped.shape, needle))
+        }
+        for tab in PlotSettingsTab::ALL {
+            assert!(position(&output, tab.label()).is_some(), "{}", tab.label());
+        }
+        let theme = position(&output, "Thème").unwrap();
+        let click = |pressed| egui::Event::PointerButton {
+            pos: theme,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(vec![egui::Event::PointerMoved(theme)], &mut chosen);
+        run(vec![click(true)], &mut chosen);
+        run(vec![click(false)], &mut chosen);
+        assert_eq!(chosen, Some(PlotSettingsTab::Theme));
+    }
+
     /// #12 : un fond sans couleur ou semi-transparent s'affiche sur du
     /// blanc ; un fond opaque n'a pas besoin de dessous.
     #[test]
@@ -8156,7 +8242,7 @@ mod graph_layout_tests {
             ..Default::default()
         };
         let mut output = context.run_ui(input, |ui| {
-            ui.allocate_ui(egui::vec2(200.0, SHEET_TABS_HEIGHT), |ui| {
+            ui.allocate_ui(egui::vec2(200.0, TAB_STRIP_HEIGHT), |ui| {
                 sheet_tabs(ui, &sheets, sheets[0].0, |_| {}, || {});
             });
         });
@@ -8182,7 +8268,7 @@ mod graph_layout_tests {
         selected: NodeId,
         time: &mut f64,
         events: Vec<egui::Event>,
-    ) -> SheetTabsOutput {
+    ) -> TabStripOutput {
         *time += 0.1;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -8193,7 +8279,7 @@ mod graph_layout_tests {
             events,
             ..Default::default()
         };
-        let mut sortie = SheetTabsOutput::default();
+        let mut sortie = TabStripOutput::default();
         let mut output = context.run_ui(input, |ui| {
             sortie = sheet_tabs(ui, sheets, selected, |_| {}, || {});
         });
@@ -8242,7 +8328,7 @@ mod graph_layout_tests {
     fn selectionner_le_dernier_onglet_visible_ne_decale_que_d_un_onglet() {
         let (context, sheets) = dix_feuilles();
         let mut time = 0.0;
-        let mut sortie = SheetTabsOutput::default();
+        let mut sortie = TabStripOutput::default();
         for _ in 0..4 {
             sortie = peindre_onglets(&context, &sheets, sheets[0].0, &mut time, Vec::new());
         }
@@ -8292,13 +8378,13 @@ mod graph_layout_tests {
     fn les_fleches_d_onglets_n_apparaissent_que_si_des_feuilles_sont_cachees() {
         let (context, sheets) = dix_feuilles();
         let mut time = 0.0;
-        let mut sortie = SheetTabsOutput::default();
+        let mut sortie = TabStripOutput::default();
         for _ in 0..3 {
             sortie = peindre_onglets(&context, &sheets, sheets[0].0, &mut time, Vec::new());
         }
         assert_eq!(
             sortie.overflow,
-            SheetTabsOverflow {
+            TabStripOverflow {
                 hidden_left: false,
                 hidden_right: true
             }
