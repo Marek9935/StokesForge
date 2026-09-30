@@ -8,9 +8,10 @@
 //! écrit, exception de script qui ne casse rien — vues depuis `AppState`,
 //! exactement comme les verrait la fenêtre.
 //!
-//! Exige le préfixe vendorisé : lance `scripts/python-vendor.sh` puis
-//! `scripts/python-test.sh` (qui pose `PYO3_CONFIG_FILE`, le `rpath`
-//! d'exécution et `PLOTYX_PYTHON_HOME`).
+//! Exige le préfixe vendorisé et l'environnement Python décrit dans
+//! `.codex/README.md`, puis `cargo test -p plotyx-app --features python
+//! --test script_panel`. `scripts/python-test.sh` teste le pont et la
+//! robustesse, mais ne lance pas ce fichier propre à l'application.
 //!
 //! # `Action::RunScript` ne bloque pas
 //!
@@ -86,23 +87,29 @@ fn demo_project() -> Project {
 
 /// Démarre une session sur le projet de démonstration et l'état applicatif
 /// associé, avec un descripteur d'interpréteur posé (mais **pas démarré** —
-/// voir la doc de `plotyx_app::state`). Rend la session, à garder vivante.
-fn start() -> (Session, AppState) {
-    let session = Session::spawn(demo_project(), None).expect("thread de session");
+/// voir la doc de `plotyx_app::state`). Rend la session, à garder vivante,
+/// et la feuille explicite que les tests pilotent, comme `tests/shell.rs`.
+fn start() -> (Session, AppState, NodeId) {
+    let project = demo_project();
+    let sheet = project
+        .tree()
+        .resolve("[Book1]Sheet1")
+        .expect("feuille de démonstration");
+    let session = Session::spawn(project, None).expect("thread de session");
     let mut state = AppState::new(session.handle(), "script-test.plotyx".to_string())
         .expect("état applicatif initial");
     state.set_python(EmbeddedPython::with_home(home()));
-    (session, state)
+    (session, state, sheet)
 }
 
-/// Identifiant de la colonne `name` dans la feuille sélectionnée.
-fn column_id(state: &AppState, name: &str) -> NodeId {
+/// Identifiant de la colonne `name` dans `sheet`.
+fn column_id(state: &AppState, sheet: NodeId, name: &str) -> NodeId {
     state
-        .visible_columns()
+        .visible_columns(sheet)
         .into_iter()
         .find(|(_, column_name, _)| column_name == name)
         .map(|(id, _, _)| id)
-        .unwrap_or_else(|| panic!("colonne {name} visible"))
+        .unwrap_or_else(|| panic!("colonne {name} visible dans {sheet}"))
 }
 
 /// Pose `source` comme script courant, le lance et attend — en sondant
@@ -127,7 +134,7 @@ fn run_and_wait(state: &mut AppState, source: &str) {
 
 #[test]
 fn a_script_runs_and_its_output_comes_back() {
-    let (_session, mut state) = start();
+    let (_session, mut state, _sheet) = start();
 
     run_and_wait(&mut state, "print(\"bonjour\")\n");
 
@@ -148,8 +155,8 @@ fn a_script_runs_and_its_output_comes_back() {
 
 #[test]
 fn the_grid_reflects_the_model_after_a_script_without_any_extra_action() {
-    let (_session, mut state) = start();
-    let temps = column_id(&state, "Temps");
+    let (_session, mut state, sheet) = start();
+    let temps = column_id(&state, sheet, "Temps");
     assert_eq!(state.cell_text(temps, 0), "0");
     assert_eq!(state.cell_text(temps, 4), "2");
 
@@ -170,8 +177,8 @@ fn the_grid_reflects_the_model_after_a_script_without_any_extra_action() {
 
 #[test]
 fn action_undo_reverts_what_a_script_wrote() {
-    let (_session, mut state) = start();
-    let temps = column_id(&state, "Temps");
+    let (_session, mut state, sheet) = start();
+    let temps = column_id(&state, sheet, "Temps");
     assert_eq!(state.cell_text(temps, 1), "0.5");
 
     run_and_wait(
@@ -199,7 +206,7 @@ fn action_undo_reverts_what_a_script_wrote() {
 
 #[test]
 fn a_script_exception_is_not_an_application_error() {
-    let (_session, mut state) = start();
+    let (_session, mut state, sheet) = start();
     let before = state.snapshot().revision;
 
     run_and_wait(&mut state, "1 / 0\n");
@@ -234,6 +241,8 @@ fn a_script_exception_is_not_an_application_error() {
 
     // L'état reste utilisable pour de vrai : une action normale marche
     // encore après une exception de script.
-    state.dispatch(Action::AddColumn);
+    let columns_before = state.visible_columns(sheet).len();
+    state.dispatch(Action::AddColumn { sheet });
     assert!(state.status().is_some_and(|status| !status.is_error));
+    assert_eq!(state.visible_columns(sheet).len(), columns_before + 1);
 }

@@ -99,8 +99,17 @@ cargo test -p <crate> --test <fichier>        # un fichier de tests
 cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
 cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --features typst   # chemins Typst
 # (`--workspace --all-features` active AUSSI Python : voir .codex/README.md)
-scripts/python-test.sh                        # tout ce qui est derrière la feature `python`
+scripts/python-test.sh                        # pont Python, scripts et robustesse ; pas plotyx-app
 scripts/python-test.sh -- --ignored           # + les reproductions de la frontière Python
+```
+
+Les tests de console `script_panel` et de démarrage paresseux
+`script_bridge_lazy` exigent aussi la feature Python de `plotyx-app`.
+Avec l'environnement embarqué décrit dans [`.codex/README.md`](../.codex/README.md),
+les lancer explicitement :
+
+```sh
+cargo test -p plotyx-app --features python --test script_panel --test script_bridge_lazy
 ```
 
 ## CI (`.gitlab-ci.yml`)
