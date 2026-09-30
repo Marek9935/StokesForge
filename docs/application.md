@@ -138,6 +138,11 @@ rouvre l'assistant sur les fichiers et le modèle du dernier import — en
 l'annulant d'abord s'il est encore au sommet de l'historique, jamais un travail
 postérieur.
 
+Le témoin « modifié » du modèle compare les réglages au modèle chargé ou au
+dernier enregistrement réussi (`AppState::import_recipe_modified`). Enregistrer
+le modèle retire ce témoin ; un échec d'écriture conserve la référence
+précédente et signale l'erreur.
+
 **Où vont les colonnes.** Dans le classeur actif, le mode d'import
 (`ImportMode`) est : nouvelle feuille, remplacer la feuille active, ajouter des
 colonnes, ou ajouter des lignes (la colonne *j* du fichier prolonge la colonne

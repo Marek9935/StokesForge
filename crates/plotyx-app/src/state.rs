@@ -4202,6 +4202,10 @@ impl AppState {
             self.fail(format!("Échec de l'enregistrement du modèle : {err}"));
             return;
         }
+        // Le témoin « modifié » compare au dernier enregistrement réussi,
+        // pas seulement au modèle chargé à l'ouverture. En cas d'échec,
+        // garder l'ancienne référence pour ne pas annoncer une sauvegarde.
+        state.baseline = state.recipe.clone();
         self.notice(format!("Modèle « {saved_name} » enregistré"));
     }
 
