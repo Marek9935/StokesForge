@@ -13,16 +13,17 @@ cargo clippy --workspace --all-targets -- -D warnings   # bloquant en CI
 cargo test --workspace                        # tout, sauf #[ignore]
 cargo test -p <crate> --test <fichier>        # un fichier de tests
 cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
-cargo test --workspace --all-features         # ajoute les chemins Typst
-scripts/python-test.sh                        # tout ce qui est derrière la feature `python`
+cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --features typst
+scripts/python-test.sh                        # python, script, robustesse ; pas les tests de plotyx-app
 ```
 
-**Un pipeline vert n'active jamais la feature `python`.** Tout ce qui touche à
-PyO3 — la partie la plus risquée de l'architecture — y est compilé **vide** :
-ni compilé, ni vérifié par clippy, ni testé par `fmt`/`clippy`/`test`. C'est en
-partie voulu (la CI reste verte sur une machine sans Python) et en partie une
-impossibilité matérielle (l'interpréteur vendorisé n'est pas versionné). Même
-remarque pour `typst`.
+**Les travaux de CI par défaut n'activent ni `python` ni `typst`.** Le travail
+`test-python` est manuel et non bloquant : vérifier s'il a réellement tourné.
+`fmt` vérifie la mise en forme, pas la compilation de ces chemins.
+`cargo test --workspace --all-features` active **aussi Python** et exige son
+environnement ; ce n'est pas un contrôle de Typst seul. Les commandes et
+prérequis de référence sont dans [`.codex/README.md`](../../../.codex/README.md),
+§ « Fonctionnalités optionnelles ».
 
 Donc : **une tâche qui touche une feature hors défaut doit la compiler et la
 tester explicitement**, sinon elle valide du code mort.
@@ -30,7 +31,8 @@ tester explicitement**, sinon elle valide du code mort.
 | Le changement touche… | Lancer en plus |
 |---|---|
 | `plotyx-python`, `plotyx-script`, la surface `pyx` | `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE`) |
-| les formules, `plotyx-render::formula` | `cargo test --workspace --all-features` |
+| l'intégration Python de `plotyx-app` | tester aussi `plotyx-app --features python`, avec l'environnement de `scripts/python-test.sh` ; appliquer cet environnement à Clippy |
+| les formules Typst, `plotyx-render::formula` | tests et Clippy sur les trois crates de rendu avec `--features typst`, commandes dans `.codex/README.md` |
 | une reproduction `#[ignore]` de robustesse | `cargo test -p plotyx-robustesse -- --ignored` |
 | l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `PLOTYX_APP_SCREENSHOT` + `PLOTYX_APP_AUTOQUIT_MS`, voir [`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence |
 | une vraie fenêtre (Wayland, `rfd`, multi-écran, glisser, fenêtre détachée) | rien : **aucun outil non interactif ne peut valider ça**. Le dire dans le compte rendu, ou demander une capture à l'utilisateur. |
@@ -67,7 +69,7 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 
 | Test | Ce qu'il tient |
 |---|---|
-| `*/tests/no_ui_dependency.rs` | liste blanche de dépendances : toute addition au `Cargo.toml` doit y être ajoutée explicitement (invariant 2) |
+| `*/tests/no_ui_dependency.rs` | liste blanche de la section `[dependencies]` ; vérifier aussi les dépendances conditionnelles et les renommages, que ces tests ne couvrent pas actuellement (invariant 2) |
 | `plotyx-render-svg/tests/frontiere.rs` | l'export se teste sans serveur graphique |
 | `plotyx-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
 | `plotyx-render-egui/tests/accord.rs` | écran et export aux mêmes pixels |
@@ -122,15 +124,14 @@ explicite.
 Trois choses, sans les arrondir : **ce qui a changé**, **les contrôles
 réellement exécutés** (pas ceux prévus), et **les limites de validation**. Si
 un test échoue, le dire avec sa sortie ; si une étape a été sautée, le dire.
-Un « tout est vert » qui masque un `--all-features` jamais lancé coûte plus
-cher qu'un aveu.
+Un résultat vert sans les features concernées ne valide pas ces chemins.
 
 ## Checklist
 
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace`
-- [ ] features hors défaut touchées → `--all-features` et/ou `scripts/python-test.sh`
+- [ ] features hors défaut touchées → contrôles ciblés `typst` / `python`, y compris `plotyx-app` si concerné
 - [ ] aucun garde-fou d'architecture affaibli ; témoins intacts
 - [ ] `#[ignore]` retiré si une reproduction passe désormais
 - [ ] doc à jour (`//!`, page `docs/`, et fichiers de routage si les chemins ont bougé)

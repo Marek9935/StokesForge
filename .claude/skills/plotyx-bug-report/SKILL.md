@@ -60,12 +60,11 @@ et recensés dans `docs/archive/rustrewrite/questions-ouvertes.md` §11. Un refu
 
 ### Une limite assumée du banc
 
-`plotyx-app` est explicitement un banc d'intégration, pas l'interface finale.
-Sont **voulus**, écrits dans `docs/application.md` : une seule cellule éditable
-à la fois ; Ctrl+Z pendant une saisie annule la dernière commande du modèle ;
-les fenêtres ouvertes ne sont pas restaurées au démarrage ; l'éditeur de
-matrice est un espace réservé ; pas de sélecteur de couleur graphique ; pas de
-multi-panneaux.
+`plotyx-app` reste décrit comme un banc d'intégration, mais ses capacités
+évoluent. Vérifier chaque limite dans `docs/application.md` **et dans le
+code** : l'ancienne absence de restauration des fenêtres ou de sélecteur de
+couleur ne doit plus servir à écarter un signalement. Ne pas recopier ici une
+liste figée de fonctions absentes.
 
 ### Une dégradation volontaire (invariant 10)
 

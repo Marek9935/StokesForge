@@ -132,8 +132,11 @@ témoins d'abord**.
 
 Les formules scientifiques sont derrière la feature `typst`, hors défaut :
 `cargo build --workspace` ne compile pas ces chemins. Une tâche qui les touche
-doit lancer `cargo test --workspace --all-features`, sinon elle valide du code
-mort. Une formule qui ne compile pas s'affiche en texte brut, `$…$` compris —
+doit lancer les tests et Clippy des trois crates de rendu avec `--features
+typst` (commandes dans [`.codex/README.md`](../../../.codex/README.md),
+§ « Fonctionnalités optionnelles »). `--workspace --all-features` active aussi
+Python et exige son environnement. Une formule qui ne compile pas s'affiche
+en texte brut, `$…$` compris —
 le graphe ne disparaît pas (invariant 10).
 
 ## Checklist
@@ -144,5 +147,5 @@ le graphe ne disparaît pas (invariant 10).
 - [ ] témoin ajouté à `accord.rs` pour toute fonctionnalité nouvelle
 - [ ] clé de cache inchangée sauf raison explicite ; feathering toujours dehors
 - [ ] zoom/pan restés dans `ViewState`, hors du `PlotSpec`
-- [ ] `--all-features` si `typst` est touché
+- [ ] tests et Clippy avec `--features typst` sur les trois crates de rendu si Typst est touché
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts

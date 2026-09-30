@@ -47,12 +47,33 @@ acteur, *backend*, tessellation.
 4. **Dire ce qu'on ne sait pas.** « Ce n'est pas décrit et je ne l'ai pas
    vérifié » vaut mieux qu'une reconstitution plausible.
 
+### Quand la demande est un audit ou une recherche de doublons
+
+- Partir des manifestes et de `cargo metadata --no-deps --format-version 1
+  --offline` pour vérifier le graphe réel. Distinguer dépendances de
+  production, de test et features optionnelles ; le schéma documentaire ne
+  remplace pas cette vérification.
+- Suivre une même règle sur ses différents chemins : aperçu/import,
+  écran/export, fenêtres flottantes/détachées, ouverture/clôture des macros.
+  Chercher une divergence observable avant de proposer une factorisation.
+- Un type de transport distinct du modèle ou deux adaptations de backend
+  ne sont pas à fusionner par principe. Pour un doublon volontaire, lire sa
+  justification et distinguer dette de maintenance et bug reproduit.
+- Éprouver la portée des garde-fous : les tests `no_ui_dependency.rs` lisent
+  actuellement `[dependencies]`, pas les sections conditionnelles
+  `[target.…dependencies]`. Leur succès ne prouve pas toutes les frontières.
+- Consulter les issues GitLab ouvertes **et fermées** avant de signaler.
+  Pour une demande de diagnostic seul, créer les issues autorisées avec
+  preuves, portée, priorité et cohérence documentaire ; ne pas corriger le
+  code. Garder les sondes temporaires hors des sources si aucun ajout de
+  test au dépôt n'est demandé.
+
 ## La carte, en langage ordinaire
 
 À réutiliser comme base d'explication, en n'en sortant que ce que la question
 demande.
 
-**Le principe central** : PlotYx est découpé en une douzaine de paquets
+**Le principe central** : PlotYx est découpé en paquets
 (*crates*, l'équivalent des paquets Python) empilés du plus abstrait au plus
 concret. Chaque étage ne connaît que les étages du dessous. Un paquet qui
 décrit des données ne sait pas qu'une fenêtre existe — c'est ce qui permet de
@@ -82,14 +103,19 @@ ouvrir de fenêtre.
    les autres n'en ont qu'une photo figée, qu'ils peuvent lire à volonté sans
    risque. Pour modifier, on lui envoie une demande. Analogie Python : un seul
    fil possède l'objet, les autres reçoivent une copie en lecture. Conséquence
-   directe : il est **impossible** de modifier le projet sans passer par une
-   action annulable — ce n'est pas une règle de discipline, c'est le
-   compilateur qui l'interdit.
+   directe : les clients d'une session ne disposent pas du projet mutable.
+   Cela ne rend pas les primitives de `Project` privées : initialisation,
+   chargement et tests les emploient directement. La garantie porte sur
+   l'accès des clients au projet vivant de cette session, pas sur tout le
+   processus ni sur tout appel possible à `plotyx-core`.
 2. **Toute modification est une commande annulable.** Taper une valeur,
    renommer une feuille, ajouter un graphe : chacune est un objet « commande »
    qui sait aussi défaire son effet. C'est pour ça que Ctrl+Z marche partout de
    la même façon, et pourquoi ajouter une fonctionnalité qui modifie les
    données demande de créer une commande.
+   Distinguer les exceptions documentées : état de vue et géométrie hors
+   historique, chargement du projet, recalcul des valeurs de formule par
+   l'acteur comme conséquence d'une commande (sans entrée supplémentaire).
 3. **Le dessin est écrit une seule fois.** Une courbe à l'écran et la même
    courbe exportée en PDF passent par le **même** code ; seule la dernière
    étape (« poser un pixel » vs « écrire une balise SVG ») diffère. C'est ce

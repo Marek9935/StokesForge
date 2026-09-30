@@ -5390,3 +5390,52 @@ fn dropping_an_unreadable_file_opens_the_import_window_prefilled() {
     assert_eq!(import.paths, vec![bad]);
     assert_eq!(import.destination, ImportDestination::ActiveBook(book));
 }
+
+// -- Création d'un classeur ou d'une feuille : colonnes X et Y d'office --
+
+/// Un nouveau classeur naît avec une colonne X et une colonne Y, et un seul
+/// Ctrl+Z retire le tout.
+#[test]
+fn a_new_book_starts_with_an_x_and_a_y_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    let before = state.tree().node(root).unwrap().children().len();
+
+    state.dispatch(Action::AddWorkbook);
+
+    let book = *state.tree().node(root).unwrap().children().last().unwrap();
+    assert_eq!(
+        state.tree().node(root).unwrap().children().len(),
+        before + 1
+    );
+    let sheet = state.worksheets_of(book)[0].0;
+    let columns = state.visible_columns(sheet);
+    assert_eq!(columns.len(), 2);
+    assert_eq!(state.column_meta(columns[0].0).role, ColumnRole::X);
+    assert_eq!(state.column_meta(columns[1].0).role, ColumnRole::Y);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.tree().node(root).unwrap().children().len(), before);
+}
+
+/// Une feuille ajoutée à un classeur reçoit elle aussi X et Y.
+#[test]
+fn a_new_sheet_starts_with_an_x_and_a_y_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let before = state.worksheets_of(book).len();
+
+    state.dispatch(Action::AddWorksheet { book });
+
+    let sheets = state.worksheets_of(book);
+    assert_eq!(sheets.len(), before + 1);
+    let columns = state.visible_columns(sheets.last().unwrap().0);
+    assert_eq!(columns.len(), 2);
+    assert_eq!(state.column_meta(columns[0].0).role, ColumnRole::X);
+    assert_eq!(state.column_meta(columns[1].0).role, ColumnRole::Y);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.worksheets_of(book).len(), before);
+}

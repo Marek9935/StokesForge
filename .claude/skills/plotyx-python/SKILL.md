@@ -29,6 +29,13 @@ scripts/python-test.sh                # pose PYO3_CONFIG_FILE et le reste
 scripts/python-test.sh -- --ignored   # + les reproductions de la frontière
 ```
 
+Ce script teste `plotyx-python`, `plotyx-script` et `plotyx-robustesse` ; il
+ne lance pas les tests propres à `plotyx-app`. Si la console ou son câblage
+change, tester aussi ce crate avec `--features python` en reprenant le même
+environnement (`PYO3_CONFIG_FILE`, rpath, `PLOTYX_PYTHON_HOME`) ; voir
+[`.codex/README.md`](../../../.codex/README.md), § « Fonctionnalités
+optionnelles ». Appliquer cet environnement aux vérifications Clippy.
+
 `scripts/python-config.sh` produit la `PYO3_CONFIG_FILE` ; sans elle, PyO3 ne
 compile pas. L'interpréteur est vendorisé dans `vendor/python/` et **n'est pas
 versionné** : un dépôt fraîchement cloné n'en a aucun. Si les scripts échouent

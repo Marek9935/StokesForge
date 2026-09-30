@@ -3025,10 +3025,7 @@ impl AppState {
             Action::Redo => self.redo(),
             Action::Save => self.save(),
             Action::Load => self.load(),
-            Action::AddWorkbook => self.execute(Command::AddWorkbook {
-                parent: self.snapshot.tree.root(),
-                name: None,
-            }),
+            Action::AddWorkbook => self.add_workbook(),
             Action::SelectSheet(id) => self.select_sheet(id),
             Action::CommitCell { column, row, text } => {
                 self.commit_cell(column, row, text);
@@ -4263,8 +4260,89 @@ impl AppState {
         });
     }
 
+    /// Nouveau classeur de l'utilisateur (menu Fichier) : sa première feuille
+    /// reçoit déjà une colonne X et une colonne Y, en une seule entrée
+    /// d'historique. L'import, lui, crée ses classeurs vides
+    /// (`create_import_book`) : c'est le fichier qui fournit les colonnes.
+    fn add_workbook(&mut self) {
+        let root = self.snapshot.tree.root();
+        if !self.begin_creation_macro("Ajouter un classeur") {
+            return;
+        }
+        let previous = self
+            .snapshot
+            .tree
+            .node(root)
+            .and_then(|node| node.children().last().copied());
+        self.execute(Command::AddWorkbook {
+            parent: root,
+            name: None,
+        });
+        let book = self
+            .snapshot
+            .tree
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .filter(|book| Some(*book) != previous);
+        if let Some(sheet) =
+            book.and_then(|book| self.worksheets_of(book).first().map(|(id, _)| *id))
+        {
+            self.add_xy_columns(sheet);
+        }
+        self.end_creation_macro();
+    }
+
+    /// Nouvelle feuille de l'utilisateur : comme [`AppState::add_workbook`],
+    /// elle naît avec une colonne X et une colonne Y.
     fn add_worksheet(&mut self, book: NodeId) {
+        if !self.begin_creation_macro("Ajouter une feuille") {
+            return;
+        }
+        let previous = self
+            .snapshot
+            .tree
+            .node(book)
+            .and_then(|node| node.children().last().copied());
         self.execute(Command::AddWorksheet { book, name: None });
+        let sheet = self
+            .snapshot
+            .tree
+            .node(book)
+            .and_then(|node| node.children().last().copied())
+            .filter(|sheet| Some(*sheet) != previous);
+        if let Some(sheet) = sheet {
+            self.add_xy_columns(sheet);
+        }
+        self.end_creation_macro();
+    }
+
+    fn begin_creation_macro(&mut self, label: &str) -> bool {
+        if self.handle.begin_macro(label).is_err() {
+            self.fail(
+                "Impossible de grouper la création dans une seule entrée d'historique".to_string(),
+            );
+            return false;
+        }
+        true
+    }
+
+    fn end_creation_macro(&mut self) {
+        if self.handle.end_macro().is_err() {
+            self.fail("échec de la clôture de l'entrée d'historique".to_string());
+        }
+        self.refresh();
+    }
+
+    /// Ajoute à `sheet` une colonne X (rôle abscisse) puis une colonne Y.
+    fn add_xy_columns(&mut self, sheet: NodeId) {
+        self.add_column(sheet);
+        self.add_column(sheet);
+        let columns = self.visible_columns(sheet);
+        if let Some((x, ..)) = columns.first() {
+            let mut meta = self.column_meta(*x);
+            meta.role = ColumnRole::X;
+            self.execute(Command::SetColumnMeta { column: *x, meta });
+        }
     }
 
     /// Ajoute une colonne en fin de `sheet` puis y sélectionne `row` — voir
