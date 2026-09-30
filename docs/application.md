@@ -578,7 +578,7 @@ valeur), **opacité**, saisie RVB, TSL et hexadécimale (`#RRGGBB`, ou
 par `color_button` (et non un `egui::Popup`, dont egui n'autorise qu'un
 exemplaire ouvert : la liste d'un menu déroulant le refermerait) ; elle
 se ferme sur Échap ou sur un clic hors d'elle et de ses listes. Une couleur transparente se montre sur un
-damier. **Une palette par usage** (`plotyx_plot::ColorUsage`) :
+damier (dans l'échantillon du sélecteur). **Une palette par usage** (`plotyx_plot::ColorUsage`) :
 
 - **courbes** : un outil à part, avec un choix de palettes nommées
   (`plotyx_plot::CURVE_PALETTES` : PlotYx, Tableau 10, Okabe-Ito lisible par
@@ -591,7 +591,8 @@ damier. **Une palette par usage** (`plotyx_plot::ColorUsage`) :
   `plotyx_plot::TRANSPARENT`), qui est aussi le **fond par défaut** d'un
   graphe neuf (`PlotSpec::default`) : la figure exportée n'a pas de fond,
   pour s'intégrer à une autre présentation ; à l'écran, elle se montre sur
-  un damier (`app::paint_checkerboard`). Puis des fonds clairs, et des fonds
+  un fond **blanc** peint par l'application sous la figure
+  (`app::display_backdrop`), jamais exporté. Puis des fonds clairs, et des fonds
   sombres (le texte automatique passe en blanc, voir `docs/rendu.md`). Un
   fond vide (fichiers écrits avant ce défaut) reste blanc.
 

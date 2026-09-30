@@ -5939,13 +5939,16 @@ fn graph_view_contents(
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
     // Un fond transparent (« Aucune » couleur, ou opacité partielle) se voit
-    // sur un damier, comme dans un logiciel de dessin : sans lui, la figure
-    // prendrait la couleur de la fenêtre, qui n'est pas celle de l'export.
-    let transparent_background = crate::state::current_plot_spec(&snapshot.tree, graph_id)
-        .and_then(|spec| crate::color_picker::parse_hex(&spec.background))
-        .is_some_and(|[_, _, _, alpha]| alpha < 255);
-    if transparent_background {
-        paint_checkerboard(figure_ui.painter(), rect);
+    // sur du blanc : sans lui, la figure prendrait la couleur de la fenêtre,
+    // qui n'est pas celle de l'export. Ce blanc n'est peint **qu'ici**, sous
+    // la figure, jamais dans `plotyx-render` : l'export SVG/PNG/PDF d'un
+    // graphe sans fond reste transparent (invariant 5, lu dans l'autre sens ;
+    // test `un_fond_sans_couleur_donne_un_png_transparent`).
+    let background = crate::state::current_plot_spec(&snapshot.tree, graph_id)
+        .map(|spec| spec.background)
+        .unwrap_or_default();
+    if let Some(backdrop) = display_backdrop(&background) {
+        figure_ui.painter().rect_filled(rect, 0.0, backdrop);
     }
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
@@ -5960,19 +5963,14 @@ fn graph_view_contents(
     }
 }
 
-/// Damier clair derrière une figure au fond transparent.
-fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
-    const CELL: f32 = 12.0;
-    painter.rect_filled(rect, 0.0, egui::Color32::WHITE);
-    let columns = (rect.width() / CELL).ceil() as i32;
-    let rows = (rect.height() / CELL).ceil() as i32;
-    for row in 0..rows {
-        for column in (row % 2..columns).step_by(2) {
-            let min = rect.min + egui::vec2(column as f32 * CELL, row as f32 * CELL);
-            let cell = egui::Rect::from_min_size(min, egui::Vec2::splat(CELL)).intersect(rect);
-            painter.rect_filled(cell, 0.0, egui::Color32::from_gray(0xe4));
-        }
-    }
+/// Blanc d'affichage sous une figure dont le fond est (semi-)transparent —
+/// `None` sous un fond opaque, qui couvre déjà tout. Le fond transparent
+/// est donc vu composé sur du blanc, comme l'encre automatique le juge
+/// (`plotyx_render::color::over_white`).
+fn display_backdrop(background: &str) -> Option<egui::Color32> {
+    crate::color_picker::parse_hex(background)
+        .is_some_and(|[_, _, _, alpha]| alpha < 255)
+        .then_some(egui::Color32::WHITE)
 }
 
 /// Menu contextuel de la figure : un clic droit (sans glisser — le glisser
@@ -7248,6 +7246,18 @@ mod graph_layout_tests {
             )),
             "la grille a volé Retour arrière/Suppr au champ texte : {actions:?}",
         );
+    }
+
+    /// #12 : un fond sans couleur ou semi-transparent s'affiche sur du
+    /// blanc ; un fond opaque n'a pas besoin de dessous.
+    #[test]
+    fn le_blanc_d_affichage_ne_double_que_les_fonds_transparents() {
+        assert_eq!(
+            display_backdrop(plotyx_plot::TRANSPARENT),
+            Some(egui::Color32::WHITE)
+        );
+        assert_eq!(display_backdrop("#12345680"), Some(egui::Color32::WHITE));
+        assert_eq!(display_backdrop("#123456"), None);
     }
 
     /// #14 : tant qu'un dialogue modal est ouvert, un clic sur le reste de

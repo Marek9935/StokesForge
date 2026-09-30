@@ -40,6 +40,8 @@ Toute couleur du spec peut porter une opacité (`#RRGGBBAA`,
 fond par défaut d'un graphe est sans couleur (`plotyx_plot::TRANSPARENT`).
 Un fond d'opacité nulle n'est **pas peint** : l'export SVG, PNG ou PDF n'a pas
 de fond (`plotyx-render-svg`, test `un_fond_sans_couleur_donne_un_png_transparent`).
+À l'écran, `plotyx-app` peint un blanc sous la figure (`display_backdrop`) :
+ce blanc vit dans l'application, jamais dans ce crate, sinon il serait exporté.
 Pour choisir l'encre automatique, un fond (semi-)transparent est jugé
 composé sur du blanc (`color::over_white`).
 
