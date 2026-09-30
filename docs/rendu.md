@@ -36,8 +36,9 @@ formules — est dans `plotyx-render`.
 ### Transparence
 
 Toute couleur du spec peut porter une opacité (`#RRGGBBAA`,
-`color::rgba_or`) : traits, marqueurs, barres, texte, échelles, fond. Un
-fond d'opacité nulle n'est **pas peint** : l'export SVG, PNG ou PDF n'a pas
+`color::rgba_or`) : traits, marqueurs, barres, texte, échelles, fond. Le
+fond par défaut d'un graphe est sans couleur (`plotyx_plot::TRANSPARENT`).
+Un fond d'opacité nulle n'est **pas peint** : l'export SVG, PNG ou PDF n'a pas
 de fond (`plotyx-render-svg`, test `un_fond_sans_couleur_donne_un_png_transparent`).
 Pour choisir l'encre automatique, un fond (semi-)transparent est jugé
 composé sur du blanc (`color::over_white`).

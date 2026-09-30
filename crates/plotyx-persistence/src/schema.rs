@@ -580,7 +580,7 @@ impl Default for PlotSpecRecord {
         Self {
             title: String::new(),
             panels: vec![PanelSpecRecord::default()],
-            background: String::new(),
+            background: "#ffffff00".to_string(), // plotyx_plot::TRANSPARENT
             title_color: String::new(),
             format_version: 1, // plotyx_plot::SPEC_FORMAT_VERSION
         }

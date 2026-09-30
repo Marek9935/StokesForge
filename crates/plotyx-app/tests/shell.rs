@@ -5188,3 +5188,16 @@ fn saving_a_color_for_the_user_writes_the_user_file() {
     });
     assert!(state.saved_colors(SaveTarget::User).is_empty());
 }
+
+/// Un graphe créé depuis le classeur n'a pas de fond : « aucune couleur »
+/// (transparent) est le fond par défaut.
+#[test]
+fn a_new_graph_has_no_background_color() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    assert_eq!(
+        state.plot_spec(graph).expect("spec").background,
+        plotyx_plot::TRANSPARENT
+    );
+}

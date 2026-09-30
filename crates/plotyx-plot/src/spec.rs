@@ -112,6 +112,9 @@ impl std::fmt::Display for SeriesRef {
     }
 }
 
+/// Aucune couleur : blanc d'opacité nulle. Le fond par défaut d'un graphe.
+pub const TRANSPARENT: &str = "#ffffff00";
+
 /// La description complète d'un graphe : le seul objet qu'un renderer lira.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlotSpec {
@@ -119,8 +122,10 @@ pub struct PlotSpec {
     pub title: String,
     /// Panneaux, au moins un.
     pub panels: Panels,
-    /// Fond du graphe. Vide = laisser le renderer suivre le thème de
-    /// l'application.
+    /// Fond du graphe (`#RRGGBB` ou `#RRGGBBAA`). Par défaut **aucune
+    /// couleur** ([`TRANSPARENT`]) : la figure exportée n'a pas de fond et
+    /// s'intègre telle quelle à une autre présentation. Vide = fond blanc
+    /// (ce que portent les fichiers écrits avant ce choix).
     pub background: String,
     /// Couleur du titre du graphe (`#RRGGBB`). Vide = automatique : l'encre
     /// qui contraste avec le fond (sombre sur fond clair, blanche sur fond
@@ -229,7 +234,7 @@ impl Default for PlotSpec {
         Self {
             title: String::new(),
             panels: Panels::default(),
-            background: String::new(),
+            background: TRANSPARENT.to_string(),
             title_color: String::new(),
             format_version: SPEC_FORMAT_VERSION,
         }
@@ -239,6 +244,14 @@ impl Default for PlotSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un graphe neuf n'a pas de fond : « aucune couleur » est le défaut.
+    #[test]
+    fn le_fond_par_defaut_est_sans_couleur() {
+        assert_eq!(PlotSpec::default().background, TRANSPARENT);
+        assert_eq!(PlotSpec::empty("Titre").background, TRANSPARENT);
+        assert!(TRANSPARENT.ends_with("00"), "opacité nulle");
+    }
 
     #[test]
     fn panels_are_never_empty_even_when_asked_to_be() {

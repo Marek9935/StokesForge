@@ -64,8 +64,9 @@ use crate::state::SaveTarget;
 pub struct PaletteSection {
     /// Titre de la rangée.
     pub title: String,
-    /// Couleurs, en RVB opaque.
-    pub colors: Vec<[u8; 3]>,
+    /// Couleurs, en RVBA (opacité comprise : « Aucune couleur » est
+    /// transparente).
+    pub colors: Vec<[u8; 4]>,
 }
 
 /// Encres de la palette « texte ».
@@ -74,9 +75,11 @@ const TEXT_INKS: [&str; 12] = [
     "#8b1a1a", "#1e5631", "#4b2a6b", "#5c3a1e",
 ];
 
-/// Fonds clairs de la palette « fonds ».
-const LIGHT_BACKGROUNDS: [&str; 8] = [
-    "#ffffff", "#fafaf7", "#f5f0e1", "#f4ecd8", "#f0f0f0", "#e6e6e6", "#eef4fb", "#eef7ee",
+/// Fonds clairs de la palette « fonds », précédés d'« Aucune couleur »
+/// ([`NO_COLOR`]), le fond par défaut d'un graphe.
+const LIGHT_BACKGROUNDS: [&str; 9] = [
+    NO_COLOR, "#ffffff", "#fafaf7", "#f5f0e1", "#f4ecd8", "#f0f0f0", "#e6e6e6", "#eef4fb",
+    "#eef7ee",
 ];
 
 /// Fonds sombres de la palette « fonds » : texte automatique en blanc.
@@ -84,15 +87,12 @@ const DARK_BACKGROUNDS: [&str; 6] = [
     "#000000", "#1e1e1e", "#2b2f36", "#101820", "#14213d", "#102a1f",
 ];
 
-/// La chaîne d'un fond sans couleur : blanc d'opacité nulle.
-pub const NO_COLOR: &str = "#ffffff00";
+/// La chaîne d'un fond sans couleur : blanc d'opacité nulle — le fond par
+/// défaut d'un graphe (`plotyx_plot::TRANSPARENT`).
+pub const NO_COLOR: &str = plotyx_plot::TRANSPARENT;
 
-fn parse_all(colors: &[&str]) -> Vec<[u8; 3]> {
-    colors
-        .iter()
-        .filter_map(|hex| parse_hex(hex))
-        .map(|[r, g, b, _]| [r, g, b])
-        .collect()
+fn parse_all(colors: &[&str]) -> Vec<[u8; 4]> {
+    colors.iter().filter_map(|hex| parse_hex(hex)).collect()
 }
 
 /// Les rangées de la palette de `usage`. Pour les courbes, celles de la
@@ -105,9 +105,10 @@ pub fn palette(usage: ColorUsage, curve_palette: usize) -> Vec<PaletteSection> {
             let base = parse_all(named.colors);
             let shade = |factor: fn(f32) -> f32| {
                 base.iter()
-                    .map(|&rgb| {
-                        let (h, s, l) = rgb_to_hsl(rgb);
-                        hsl_to_rgb(h, s, factor(l))
+                    .map(|&[r, g, b, a]| {
+                        let (h, s, l) = rgb_to_hsl([r, g, b]);
+                        let [r, g, b] = hsl_to_rgb(h, s, factor(l));
+                        [r, g, b, a]
                     })
                     .collect()
             };
@@ -132,7 +133,7 @@ pub fn palette(usage: ColorUsage, curve_palette: usize) -> Vec<PaletteSection> {
         }],
         ColorUsage::Background => vec![
             PaletteSection {
-                title: "Fonds clairs".to_string(),
+                title: "Aucune couleur (par défaut) et fonds clairs".to_string(),
                 colors: parse_all(&LIGHT_BACKGROUNDS),
             },
             PaletteSection {
@@ -380,7 +381,7 @@ pub fn color_button(
     let current = parse_hex(value);
     let (rect, response) = ui.allocate_exact_size(BUTTON_SWATCH, Sense::click());
     let response = response.on_hover_text(match current {
-        Some([_, _, _, 0]) => "Aucune (transparent)".to_string(),
+        Some([_, _, _, 0]) => "Aucune couleur (transparent)".to_string(),
         Some(rgba) => to_hex(rgba),
         None => auto_label.unwrap_or("Automatique").to_string(),
     });
@@ -454,8 +455,7 @@ fn picker_contents(
         ui.label(egui::RichText::new(section.title).small().strong());
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(3.0);
-            for [r, g, b] in section.colors {
-                let rgba = [r, g, b, 255];
+            for rgba in section.colors {
                 let response = palette_swatch(ui, rgba, current == Some(rgba));
                 if response.clicked() {
                     chosen = Some(rgba);
@@ -475,21 +475,6 @@ fn picker_contents(
                 commit = true;
                 close = true;
             }
-        }
-        if usage == ColorUsage::Background
-            && ui
-                .selectable_label(
-                    matches!(current, Some([_, _, _, 0])),
-                    "Aucune (transparent)",
-                )
-                .on_hover_text(
-                    "Pas de fond : la figure exportée s'intègre à une autre présentation.",
-                )
-                .clicked()
-        {
-            *value = NO_COLOR.to_string();
-            commit = true;
-            close = true;
         }
     });
 
@@ -737,10 +722,20 @@ impl NumericEdit {
     }
 }
 
+/// Infobulle d'un échantillon : son code, ou « Aucune couleur » s'il est
+/// entièrement transparent.
+fn swatch_label(rgba: [u8; 4]) -> String {
+    if rgba[3] == 0 {
+        "Aucune couleur (transparent) — pas de fond à l'export".to_string()
+    } else {
+        to_hex(rgba)
+    }
+}
+
 /// Un échantillon de palette cliquable.
 fn palette_swatch(ui: &mut egui::Ui, rgba: [u8; 4], selected: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(PALETTE_SWATCH), Sense::click());
-    let response = response.on_hover_text(to_hex(rgba));
+    let response = response.on_hover_text(swatch_label(rgba));
     let painter = ui.painter();
     paint_swatch(painter, rect, rgba);
     let stroke = if selected {
@@ -1101,12 +1096,22 @@ mod tests {
             CURVE_PALETTES[CURVE_PALETTES.len() - 1].name,
             "indice ramené dans les bornes"
         );
+        assert_eq!(
+            fonds[0].colors[0],
+            [0xff, 0xff, 0xff, 0],
+            "« Aucune couleur » en premier"
+        );
         assert!(
-            fonds[0].colors.iter().all(|&c| luminance(c) > 0.85),
+            fonds[0].colors[1..]
+                .iter()
+                .all(|&[r, g, b, _]| luminance([r, g, b]) > 0.85),
             "fonds clairs"
         );
         assert!(
-            fonds[1].colors.iter().all(|&c| luminance(c) < 0.2),
+            fonds[1]
+                .colors
+                .iter()
+                .all(|&[r, g, b, _]| luminance([r, g, b]) < 0.2),
             "fonds sombres"
         );
     }

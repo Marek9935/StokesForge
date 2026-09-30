@@ -569,10 +569,13 @@ damier. **Une palette par usage** (`plotyx_plot::ColorUsage`) :
   dans `plotyx-plot`, pour qu'une évolution future colore plusieurs courbes
   d'un coup (palette ou dégradé) ;
 - **texte** : encres lisibles ;
-- **fonds** : clairs, sombres (le texte automatique passe en blanc, voir
-  `docs/rendu.md`), et **« Aucune (transparent) »** (`#ffffff00`) : la figure
-  exportée n'a pas de fond, pour s'intégrer à une autre présentation ; à
-  l'écran, elle se montre sur un damier (`app::paint_checkerboard`).
+- **fonds** : en premier **« Aucune couleur »** (`#ffffff00`,
+  `plotyx_plot::TRANSPARENT`), qui est aussi le **fond par défaut** d'un
+  graphe neuf (`PlotSpec::default`) : la figure exportée n'a pas de fond,
+  pour s'intégrer à une autre présentation ; à l'écran, elle se montre sur
+  un damier (`app::paint_checkerboard`). Puis des fonds clairs, et des fonds
+  sombres (le texte automatique passe en blanc, voir `docs/rendu.md`). Un
+  fond vide (fichiers écrits avant ce défaut) reste blanc.
 
 **Couleurs enregistrées** : « Enregistrer » garde la couleur courante
 **dans le projet** (par défaut — commande annulable `SetSavedColors`,

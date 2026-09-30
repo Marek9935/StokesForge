@@ -230,7 +230,6 @@ fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
     panel.series.push(serie);
     PlotSpec {
         title: "Spectre d'absorption — λ_max".into(),
-        background: "#ffffff".into(),
         ..PlotSpec::empty("")
     }
     .with_panels(panel)
