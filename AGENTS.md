@@ -24,6 +24,9 @@ confirmation pour les choix courants couverts par la demande.
   préserver ; les commentaires de tête de module expliquent les décisions.
   Le code et les tests décrivent l'état implémenté. Une note de chantier ou
   `docs/archive/` ne prouve pas qu'une fonctionnalité existe ou reste à faire.
+- Quand un travail installe une règle nouvelle (standard d'interface, motif à
+  suivre, frontière), mettre à jour au besoin les skills concernés
+  (`.claude/skills/`) et `CLAUDE.md` dans le même commit que le code.
 - Les skills de projet dans `.agents/skills/` renvoient aux sources maintenues
   dans `.claude/skills/`. Consulter le skill pertinent selon la table de
   `.codex/README.md` et ses références utiles, sans charger toute la collection.

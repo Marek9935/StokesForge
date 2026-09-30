@@ -44,6 +44,8 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 ## Conventions
 
 - `rustfmt` + `clippy -D warnings` obligatoires (CI `.gitlab-ci.yml`).
+- Quand un travail installe une règle nouvelle (standard d'interface, motif à suivre, frontière), mettre à jour **au besoin** les skills concernés (`.claude/skills/`) et ce fichier, dans le même commit que le code, pour garder le développement cohérent. Voir `.claude/skills/README.md` (règles transversales).
+- Bugs et évolutions se suivent en issues GitLab (`glab issue list`), pas en `.md` ; chaque issue porte une ligne « **Cohérence** » qui dit quels skills et quelles docs mettre à jour.
 - Commits et docs techniques en français.
 - Toute mutation du modèle passe par une commande annulable de `plotyx-commands`, jamais par une primitive `core` en direct.
 - `plotyx-app` : tout réglage de couleur passe par `color_picker::color_field` avec l'usage de la couleur (`ColorUsage::Curves`/`Text`/`Background`) et le `PickerEnv` des couleurs enregistrées, jamais par un champ texte `#RRGGBB`. Couleur vide = automatique ; opacité en `#RRGGBBAA` ; le texte et les échelles automatiques suivent `plotyx_render::color::auto_ink` (blanc sur fond sombre).

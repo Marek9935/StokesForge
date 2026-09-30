@@ -40,7 +40,7 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
   `plotyx-verification` : les tests couvrent la géométrie, **pas
   l'apparence**.
 
-## Deux règles transversales, apprises à l'usage
+## Trois règles transversales, apprises à l'usage
 
 **Demander plutôt que trancher.** L'utilisateur n'est pas développeur : il
 arbitre des comportements observables, jamais des structures de code. Un
@@ -50,6 +50,15 @@ classement à faire.
 
 **Regarder avant de conclure.** Un symptôme visuel diagnostiqué depuis le code
 seul produit une cause fausse et convaincante. C'est arrivé.
+
+**Tenir les skills à jour, dans le même commit.** Une fonctionnalité, un
+correctif ou un chantier qui installe une règle nouvelle — un standard
+d'interface (barres de défilement, sélecteur de couleur), un motif à suivre
+(une fenêtre, une commande), une frontière — met à jour **au besoin** le ou
+les skills concernés (`plotyx-feature`, `plotyx-bug-fix`, etc.), ainsi que
+`CLAUDE.md`, dans le même commit que le code. Sans cela, le prochain
+développement repart de l'ancienne règle et réintroduit l'incohérence. Les
+issues GitLab le rappellent dans une ligne « **Cohérence** ».
 
 ## Comment ils s'enchaînent
 
