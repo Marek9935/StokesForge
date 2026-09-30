@@ -2,7 +2,7 @@
 name = "plotyx-cli"
 version = "0.0.0"
 edition.workspace = true
-description = "Binaire headless de test — pas l'UI (pas encore choisie, voir docs/rustrewrite/roadmap.md §4)."
+description = "Binaire headless : vérifie que le socle se lie, et importe des fichiers d'appareils dans un projet sans interface."
 
 [lints]
 workspace = true
@@ -10,3 +10,9 @@ workspace = true
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
 plotyx-commands = { path = "../plotyx-commands" }
+plotyx-import = { path = "../plotyx-import" }
+plotyx-importer = { path = "../plotyx-importer" }
+plotyx-persistence = { path = "../plotyx-persistence" }
+
+[dev-dependencies]
+tempfile = "3"

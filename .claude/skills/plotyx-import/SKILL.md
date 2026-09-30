@@ -38,6 +38,7 @@ logiciel.
 |---|---|
 | `recipe` | le **modèle de recette** : description figée et sérialisable d'un format d'appareil. Ne connaît pas le moteur de parsing |
 | `parse` | applique une recette à un fichier |
+| (crate `plotyx-importer`) | `plan_import`, `make_import_column` : des tableaux analysés aux **colonnes du modèle**, partagés par l'application et le CLI — ne jamais réécrire cette conversion dans un consommateur ; chacun décide seulement comment écrire (commandes, `Project` direct) |
 | `layout` | **le** découpage d'un fichier en zones (en-tête, sous-en-tête, noms, données, pied, commentaires, lignes ignorées), calculé une fois et partagé par `parse` et `preview` : ne jamais réécrire cette suite d'étapes dans l'un des deux |
 | `numbers`, `datetime` | lecture des nombres (décimale `Auto`, milliers, valeurs manquantes) et des dates en timestamps POSIX |
 | `builtin`, `choose` | modèles fournis d'office, et choix automatique d'un modèle (extension, nom, signature de contenu) |

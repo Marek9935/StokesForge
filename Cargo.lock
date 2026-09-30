@@ -3680,6 +3680,7 @@ dependencies = [
  "plotyx-commands",
  "plotyx-core",
  "plotyx-import",
+ "plotyx-importer",
  "plotyx-persistence",
  "plotyx-plot",
  "plotyx-python",
@@ -3706,6 +3707,10 @@ version = "0.0.0"
 dependencies = [
  "plotyx-commands",
  "plotyx-core",
+ "plotyx-import",
+ "plotyx-importer",
+ "plotyx-persistence",
+ "tempfile",
 ]
 
 [[package]]
@@ -3746,6 +3751,15 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "plotyx-importer"
+version = "0.0.0"
+dependencies = [
+ "plotyx-arch-guard",
+ "plotyx-core",
+ "plotyx-import",
 ]
 
 [[package]]
