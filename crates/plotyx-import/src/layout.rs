@@ -182,6 +182,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         &recipe.data_end,
         &separator,
         &numbers,
+        recipe.column_kind(0),
     );
     if kept == 0 {
         return Err(ImportError::NoDataRows);

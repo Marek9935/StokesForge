@@ -102,7 +102,10 @@ ouvre à la place la fenêtre d'import pré-remplie. Décision pure :
 ### Assistant d'import
 
 « Importer… » ouvre un assistant en six étapes façon Origin (`import_window`,
-`ImportStep`) : fichiers et modèle, format, en-tête et fin des données,
+`ImportStep`), **dialogue modal de la brique commune** (`modal_dialog_with` :
+même cadre, même barre de titre, même blocage du reste de l'interface que les
+propriétés du graphe ; « Terminer » = bouton par défaut, « < Précédent » et
+« Suivant > » dans le pied de page) : fichiers et modèle, format, en-tête et fin des données,
 colonnes, métadonnées, destination. L'aperçu du fichier reste à droite à
 toutes les étapes ; un clic droit sur une ligne règle l'import à cet endroit
 (`AppState::import_line_action`). « Terminer » importe dès l'étape 1 avec le

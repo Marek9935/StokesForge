@@ -185,3 +185,47 @@ fn encodage_force() {
         "UTF-8 forcé : l'octet invalide ne fait pas échouer l'import"
     );
 }
+
+/// Nature forcée d'une colonne (issue #7) : texte (même un nombre reste du
+/// texte), date-heure (timestamps POSIX, une cellule illisible reste du texte).
+#[test]
+fn colonnes_texte_et_date_heure() {
+    use plotyx_import::ColumnKind;
+    let mut recipe = ImportRecipe::new("Natures");
+    recipe.separator = Separator::Semicolon;
+    recipe.column_kinds = vec![ColumnKind::Text, ColumnKind::DateTime, ColumnKind::Auto];
+    let bytes = b"007;25/11/24 15:17:22;1\nA12;2000-01-01;2\nZ9;pas une date;3\n";
+    let table = parse(bytes, &recipe).unwrap();
+    // Texte : les jetons non vides sont gardés tels quels, même « 007 ».
+    assert_eq!(
+        table.columns[0].texts,
+        vec![
+            Some("007".to_string()),
+            Some("A12".to_string()),
+            Some("Z9".to_string())
+        ]
+    );
+    assert!(table.columns[0].values.iter().all(|v| v.is_nan()));
+    // Date-heure : timestamps, la cellule illisible reste du texte.
+    assert!(table.columns[1].datetime);
+    assert_eq!(table.columns[1].values[0], 1_732_547_842.0);
+    assert_eq!(table.columns[1].values[1], 946_684_800.0);
+    assert_eq!(table.columns[1].texts[2].as_deref(), Some("pas une date"));
+    assert!(!table.columns[2].datetime);
+    // L'aperçu annote exactement les mêmes cellules.
+    let shown = preview(bytes, &recipe).unwrap();
+    let flags: Vec<Vec<bool>> = shown
+        .lines
+        .iter()
+        .filter_map(|l| l.cells.as_ref())
+        .map(|cells| cells.iter().map(|c| c.is_text).collect())
+        .collect();
+    assert_eq!(
+        flags,
+        vec![
+            vec![true, false, false],
+            vec![true, false, false],
+            vec![true, true, false]
+        ]
+    );
+}

@@ -5217,7 +5217,8 @@ impl AppState {
                 // reste »). Une colonne entièrement numérique garde le
                 // chemin `Numeric` d'avant, à l'identique : minimiser la
                 // casse, même politique que le chantier précédent.
-                let mut column = if parsed_column.texts.iter().any(Option::is_some) {
+                let forced_text = recipe.column_kind(index) == plotyx_import::ColumnKind::Text;
+                let mut column = if forced_text || parsed_column.texts.iter().any(Option::is_some) {
                     let cells: Vec<MixedCell> = parsed_column
                         .values
                         .iter()
@@ -5229,7 +5230,13 @@ impl AppState {
                         .collect();
                     Column::from_mixed(&cells)
                 } else {
-                    Column::from_f64(&parsed_column.values)
+                    let mut numeric = Column::from_f64(&parsed_column.values);
+                    if parsed_column.datetime {
+                        // Dates et heures : les mêmes `f64` (timestamps POSIX),
+                        // typés `DateTime` pour l'affichage et les axes.
+                        numeric.set_column_type(ColumnType::DateTime);
+                    }
+                    numeric
                 };
                 // Le nom long privilégie le rôle de sous-en-tête
                 // `long_name`, quand la recette en assigne un — sinon la

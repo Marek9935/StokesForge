@@ -26,6 +26,7 @@
 pub mod builtin;
 pub mod choose;
 mod data_end;
+mod datetime;
 pub mod decode;
 mod layout;
 pub mod metadata;

@@ -168,8 +168,20 @@ onglets ; `sheet_tabs` (feuilles) et la fenêtre des propriétés du graphe en
 sont des usages. Un dialogue modal ne **peint pas de voile** sur le reste de
 l'application (issue #20) : il le bloque seulement.
 
-La fenêtre d'import
-(`import_window`) est encore une `egui::Window` brute (issues #13/#14).
+**Aucune exception, y compris pour un assistant à plusieurs étapes.**
+L'assistant d'import (`import_window`) est un dialogue modal comme les
+propriétés du graphe : `modal_dialog_with(ctx, id, titre, taille, DialogFooter
+{ accept_label, accept_hint, accept_enabled }, boutons_du_pied, contenu)`. Le
+bouton par défaut peut changer de libellé et se griser (« Terminer » grisé sans
+fichier) ; des boutons supplémentaires se posent à gauche d'« Annuler » par la
+fermeture `boutons_du_pied` (« < Précédent », « Suivant > »). Entrée valide,
+Échap annule. **Avant d'écrire une fenêtre, dialogue ou assistant : partir de
+`modal_dialog_with` (dialogue) ou `show_window_in_layer` (fenêtre de contenu).**
+Si la brique manque d'un réglage, l'étendre (c'est ce qui a été fait pour
+l'import) plutôt que de la contourner. Un code existant qui déroge n'est
+**jamais** une raison d'en écrire un autre : c'est une dette à rembourser
+(aucune `egui::Window` brute ne subsiste ; le test
+`aucune_fenetre_n_est_une_egui_window_brute` le verrouille).
 
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
 

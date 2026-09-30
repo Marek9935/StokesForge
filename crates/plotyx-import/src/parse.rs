@@ -38,6 +38,9 @@ pub struct ParsedColumn {
     /// Commentaire extrait des lignes de sous-en-tête assignées au rôle
     /// « Comments ».
     pub comment: Option<String>,
+    /// Colonne lue comme dates et heures ([`crate::recipe::ColumnKind::DateTime`]) :
+    /// `values` porte alors des timestamps POSIX en secondes.
+    pub datetime: bool,
 }
 
 /// Le séparateur effectivement utilisé pour ce fichier, une fois
@@ -273,16 +276,8 @@ pub(crate) fn table_from_layout(
             separator
                 .tokenize(skip_str(layout.raw[i], recipe.skip_chars))
                 .into_iter()
-                .map(|t| {
-                    let value = numbers.parse(t);
-                    let trimmed = t.trim();
-                    let text = if value.is_nan() && !trimmed.is_empty() && !numbers.is_missing(t) {
-                        Some(trimmed.to_string())
-                    } else {
-                        None
-                    };
-                    (value, text)
-                })
+                .enumerate()
+                .map(|(column, t)| read_cell(t, recipe.column_kind(column), numbers))
                 .collect()
         })
         .collect();
@@ -317,6 +312,7 @@ pub(crate) fn table_from_layout(
                 long_name: pick(&long_names),
                 unit: pick(&units),
                 comment: pick(&comments),
+                datetime: recipe.column_kind(c) == crate::recipe::ColumnKind::DateTime,
             }
         })
         .collect();
@@ -357,6 +353,34 @@ pub(crate) fn table_from_layout(
         footer_lines,
         metadata,
         separator: separator.clone(),
+    }
+}
+
+/// Lit un jeton selon la nature choisie de sa colonne : `(valeur, texte
+/// conservé)`. Une seule règle, pour l'import comme pour l'aperçu (dont
+/// l'annotation « texte » se déduit du second élément).
+pub(crate) fn read_cell(
+    token: &str,
+    kind: crate::recipe::ColumnKind,
+    numbers: &crate::numbers::NumberFormat,
+) -> (f64, Option<String>) {
+    use crate::recipe::ColumnKind;
+    let trimmed = token.trim();
+    match kind {
+        ColumnKind::Auto => {
+            let value = numbers.parse(token);
+            let text = (value.is_nan() && !trimmed.is_empty() && !numbers.is_missing(token))
+                .then(|| trimmed.to_string());
+            (value, text)
+        }
+        ColumnKind::Text => (f64::NAN, (!trimmed.is_empty()).then(|| trimmed.to_string())),
+        ColumnKind::DateTime => match crate::datetime::parse_datetime(trimmed) {
+            Some(seconds) => (seconds, None),
+            None => (
+                f64::NAN,
+                (!trimmed.is_empty() && !numbers.is_missing(token)).then(|| trimmed.to_string()),
+            ),
+        },
     }
 }
 

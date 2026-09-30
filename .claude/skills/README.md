@@ -40,7 +40,7 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
   `plotyx-verification` : les tests couvrent la géométrie, **pas
   l'apparence**.
 
-## Trois règles transversales, apprises à l'usage
+## Quatre règles transversales, apprises à l'usage
 
 **Demander plutôt que trancher.** L'utilisateur n'est pas développeur : il
 arbitre des comportements observables, jamais des structures de code. Un
@@ -48,10 +48,19 @@ commentaire disant « choix volontaire » ferme *une* alternative, pas toutes �
 si la demande diffère de l'option rejetée, c'est une question à poser, pas un
 classement à faire.
 
+**Partir de la brique commune, jamais de l'existant qui déroge.** Une fenêtre,
+un dialogue, un assistant se construisent avec les briques du projet
+(`modal_dialog_with`, `show_window_in_layer`, `tab_strip`, `color_field`,
+`theme::scroll_style`…), **même si** un morceau voisin du code les contourne.
+Quand la brique manque d'un réglage, on l'étend ; on ne la réécrit pas à côté.
+L'assistant d'import a été écrit en `egui::Window` brute parce qu'un skill
+décrivait cette dérogation comme « encore brute » : un skill qui constate une
+dérogation doit dire qu'elle est à corriger, pas qu'elle existe.
+
 **Regarder avant de conclure.** Un symptôme visuel diagnostiqué depuis le code
 seul produit une cause fausse et convaincante. C'est arrivé.
 
-**Tenir les skills à jour, dans le même commit.** Une fonctionnalité, un
+**Tenir les skills à jour, dans le même commit** (et ne jamais y laisser une dérogation décrite comme un état normal). Une fonctionnalité, un
 correctif ou un chantier qui installe une règle nouvelle — un standard
 d'interface (barres de défilement, sélecteur de couleur), un motif à suivre
 (une fenêtre, une commande), une frontière — met à jour **au besoin** le ou

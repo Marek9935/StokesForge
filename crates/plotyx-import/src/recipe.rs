@@ -85,6 +85,24 @@ pub struct ImportRecipe {
     /// [`crate::choose_recipe`]. Vide : jamais choisi automatiquement.
     #[serde(default)]
     pub auto_match: AutoMatch,
+    /// Nature forcée de chaque colonne, par position (étape « Colonnes »).
+    /// Plus court que le nombre de colonnes : les suivantes sont `Auto`.
+    #[serde(default)]
+    pub column_kinds: Vec<ColumnKind>,
+}
+
+/// Nature d'une colonne importée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum ColumnKind {
+    /// Nombres ; un jeton illisible est conservé en texte (colonne mixte).
+    #[default]
+    Auto,
+    /// Texte : chaque jeton non vide est gardé tel quel, même s'il ressemble
+    /// à un nombre (codes, identifiants d'échantillon…).
+    Text,
+    /// Dates et heures, lues en timestamps POSIX ([`crate::datetime`]) ; un
+    /// jeton qui n'est pas une date reste en texte.
+    DateTime,
 }
 
 /// Critères auxquels un fichier doit **tous** répondre (les non vides) pour
@@ -313,6 +331,11 @@ pub struct SubheaderRoles {
 }
 
 impl ImportRecipe {
+    /// Nature choisie pour la colonne `index` (`Auto` par défaut).
+    pub fn column_kind(&self, index: usize) -> ColumnKind {
+        self.column_kinds.get(index).copied().unwrap_or_default()
+    }
+
     /// Rôle effectif de la colonne `index` : le choix explicite, sinon X pour
     /// la première colonne et Y pour les suivantes.
     pub fn column_role(&self, index: usize) -> ColumnRoleChoice {
@@ -328,7 +351,7 @@ impl ImportRecipe {
     /// d'en-tête principal. `UntilMarker` reste tel quel. Sans effet si le
     /// découpage structuré est déjà utilisé.
     pub fn unify_header(&mut self) {
-        if self.header_layout == HeaderLayout::default() {
+        if self.header_layout.main_header_lines == 0 && self.header_layout.subheader_lines == 0 {
             if let HeaderSkip::Lines(n) = self.header {
                 self.header_layout.main_header_lines = n;
                 self.header = HeaderSkip::None;
@@ -361,6 +384,7 @@ impl ImportRecipe {
             skip_data_rows: 0,
             encoding: Encoding::Auto,
             auto_match: AutoMatch::default(),
+            column_kinds: Vec::new(),
         }
     }
 }
@@ -396,6 +420,13 @@ mod tests {
         recipe.unify_header();
         assert_eq!(recipe.header, HeaderSkip::None);
         assert_eq!(recipe.header_layout.main_header_lines, 3);
+        // Le drapeau `auto_detect` seul (recettes anciennes) ne compte pas.
+        let mut old = ImportRecipe::new("t");
+        old.header = HeaderSkip::Lines(2);
+        old.header_layout.auto_detect = true;
+        old.unify_header();
+        assert_eq!(old.header_layout.main_header_lines, 2);
+        assert_eq!(old.header, HeaderSkip::None);
         // Déjà structuré, ou marqueur : rien ne bouge.
         recipe.header = HeaderSkip::UntilMarker("X".into());
         recipe.unify_header();
@@ -450,6 +481,7 @@ mod tests {
                 name_contains: "jasco".into(),
                 content_contains: "ORIGIN;JASCO".into(),
             },
+            column_kinds: vec![ColumnKind::DateTime, ColumnKind::Text],
         };
         let json = serde_json::to_string(&recipe).unwrap();
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();

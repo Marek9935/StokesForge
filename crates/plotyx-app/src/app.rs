@@ -5898,7 +5898,10 @@ fn import_step_header(
         return;
     };
     let recipe = &mut import.recipe;
-    let structured = recipe.header_layout != plotyx_import::HeaderLayout::default();
+    // Comme `parse` : le découpage structuré ne compte que s'il a des lignes
+    // (l'ancien drapeau `auto_detect` seul ne suffit pas).
+    let structured =
+        recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0;
     let is_marker = matches!(recipe.header, HeaderSkip::UntilMarker(_));
     ui.horizontal(|ui| {
         ui.label("En-tête :");
@@ -6016,6 +6019,15 @@ fn import_step_header(
     }
 }
 
+/// Libellé de la nature choisie pour une colonne.
+fn column_kind_label(kind: plotyx_import::ColumnKind) -> &'static str {
+    match kind {
+        plotyx_import::ColumnKind::Auto => "Nombres",
+        plotyx_import::ColumnKind::Text => "Texte",
+        plotyx_import::ColumnKind::DateTime => "Date-heure",
+    }
+}
+
 /// Libellé d'un rôle de colonne choisi à l'étape « Colonnes ».
 fn column_role_label(role: plotyx_import::ColumnRoleChoice) -> &'static str {
     use plotyx_import::ColumnRoleChoice;
@@ -6052,6 +6064,12 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
             .column_roles
             .resize(columns.len(), ColumnRoleChoice::Auto);
     }
+    if import.recipe.column_kinds.len() < columns.len() {
+        import
+            .recipe
+            .column_kinds
+            .resize(columns.len(), plotyx_import::ColumnKind::Auto);
+    }
     egui::ScrollArea::both()
         .id_salt("plotyx_import_columns_scroll")
         .auto_shrink([false, false])
@@ -6060,7 +6078,9 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
                 .striped(true)
                 .spacing([12.0, 4.0])
                 .show(ui, |ui| {
-                    for title in ["#", "Nom", "Nom long", "Unité", "Type", "Rôle", "Valeurs"] {
+                    for title in [
+                        "#", "Nom", "Nom long", "Unité", "Lu comme", "Type", "Rôle", "Valeurs",
+                    ] {
                         ui.strong(title);
                     }
                     ui.end_row();
@@ -6070,6 +6090,23 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
                         ui.label(&column.name);
                         ui.label(&column.long_name);
                         ui.label(&column.unit);
+                        let kind = import.recipe.column_kind(index);
+                        egui::ComboBox::from_id_salt(("plotyx_import_column_kind", index))
+                            .selected_text(column_kind_label(kind))
+                            .show_ui(ui, |ui| {
+                                for choice in [
+                                    plotyx_import::ColumnKind::Auto,
+                                    plotyx_import::ColumnKind::Text,
+                                    plotyx_import::ColumnKind::DateTime,
+                                ] {
+                                    if ui
+                                        .selectable_label(kind == choice, column_kind_label(choice))
+                                        .clicked()
+                                    {
+                                        import.recipe.column_kinds[index] = choice;
+                                    }
+                                }
+                            });
                         ui.label(if column.mixed { "Mixte" } else { "Numérique" });
                         let effective = import.recipe.column_role(index);
                         egui::ComboBox::from_id_salt(("plotyx_import_column_role", index))
@@ -6234,23 +6271,53 @@ fn import_step_destination(
 /// données, colonnes, métadonnées, destination. L'aperçu du fichier reste
 /// visible à droite à toutes les étapes. « Terminer » importe dès que des
 /// fichiers sont choisis, avec le modèle tel qu'il est — import en deux clics
-/// pour un format connu. Dialogue transitoire peint depuis [`PlotyxApp::ui`]
-/// tant que [`AppState::import_state`] est `Some` ; la croix vaut « Annuler ».
+/// pour un format connu. **Dialogue modal de la brique commune**
+/// ([`modal_dialog_with`], comme les propriétés du graphe), peint depuis
+/// [`PlotyxApp::ui`] tant que [`AppState::import_state`] est `Some` ; la croix
+/// et Échap valent « Annuler », Entrée « Terminer ».
 fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
-    if state.import_state().is_none() {
+    let Some(step) = state.import_state().map(|import| import.step) else {
         return;
-    }
-    let mut still_open = true;
-    let mut requests = ImportWizardRequests::default();
-    egui::Window::new("Importer des fichiers")
-        .collapsible(false)
-        .resizable(true)
-        .default_size([1000.0, 600.0])
-        .open(&mut still_open)
-        .show(ctx, |ui| {
-            let Some(step) = state.import_state().map(|import| import.step) else {
-                return;
-            };
+    };
+    let has_files = state
+        .import_state()
+        .is_some_and(|import| !import.paths.is_empty());
+    // Les deux fermetures de la brique (contenu, boutons du pied) écrivent
+    // dans les mêmes demandes, l'une après l'autre : `RefCell`.
+    let requests = std::cell::RefCell::new(ImportWizardRequests::default());
+    let outcome = modal_dialog_with(
+        ctx,
+        egui::Id::new("plotyx_import_wizard"),
+        "Importer des fichiers",
+        egui::vec2(1000.0, 620.0),
+        DialogFooter {
+            accept_label: "Terminer",
+            accept_hint: "Importer maintenant avec les réglages actuels (Entrée)",
+            accept_enabled: has_files,
+        },
+        |footer| {
+            // Ajoutés de droite à gauche : « Suivant » puis « Précédent ».
+            if footer
+                .add_enabled(
+                    step != ImportStep::Destination,
+                    egui::Button::new("Suivant >").min_size(egui::vec2(84.0, 24.0)),
+                )
+                .clicked()
+            {
+                requests.borrow_mut().forward = true;
+            }
+            if footer
+                .add_enabled(
+                    step != ImportStep::Files,
+                    egui::Button::new("< Précédent").min_size(egui::vec2(84.0, 24.0)),
+                )
+                .clicked()
+            {
+                requests.borrow_mut().back = true;
+            }
+        },
+        |ui| {
+            let mut requests = requests.borrow_mut();
             ui.horizontal_wrapped(|ui| {
                 for (i, candidate) in ImportStep::ALL.iter().enumerate() {
                     if i > 0 {
@@ -6265,7 +6332,7 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
                 }
             });
             ui.separator();
-            let body_height = (ui.available_height() - 40.0).max(240.0);
+            let body_height = ui.available_height().max(240.0);
             ui.columns(2, |columns| {
                 columns[0].set_min_height(body_height);
                 columns[0].set_max_height(body_height);
@@ -6287,42 +6354,17 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
                 columns[1].set_max_height(body_height);
                 import_preview_pane(&mut columns[1], state, &mut requests.line_action);
             });
-            ui.separator();
-            let has_files = state
-                .import_state()
-                .is_some_and(|import| !import.paths.is_empty());
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(step != ImportStep::Files, egui::Button::new("< Précédent"))
-                    .clicked()
-                {
-                    requests.back = true;
-                }
-                if ui
-                    .add_enabled(
-                        step != ImportStep::Destination,
-                        egui::Button::new("Suivant >"),
-                    )
-                    .clicked()
-                {
-                    requests.forward = true;
-                }
-                ui.add_space(16.0);
-                if ui
-                    .add_enabled(has_files, egui::Button::new("Terminer"))
-                    .on_hover_text("Importer maintenant avec les réglages actuels")
-                    .clicked()
-                {
-                    requests.import = true;
-                }
-                if ui.button("Annuler").clicked() {
-                    requests.cancel = true;
-                }
-            });
-        });
+        },
+    );
+    let mut requests = requests.into_inner();
+    match outcome {
+        DialogOutcome::Open => {}
+        DialogOutcome::Accept => requests.import = true,
+        DialogOutcome::Cancel => requests.cancel = true,
+    }
 
-    // Tout ce qui demande l'état entier est appliqué ici, l'emprunt de
-    // `.show` relâché.
+    // Tout ce qui demande l'état entier est appliqué ici, une fois la fenêtre
+    // peinte.
     if requests.save_recipe {
         state.save_import_recipe();
     }
@@ -6347,7 +6389,7 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
             });
         }
         state.cancel_import();
-    } else if requests.cancel || !still_open {
+    } else if requests.cancel {
         state.cancel_import();
     }
 }
@@ -6363,7 +6405,7 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
 /// arrière scopés à cette grille : ils ne sont consommés que si aucune
 /// cellule ni aucun champ d'en-tête n'est en édition, **ni la fenêtre
 /// d'import ouverte**, pour ne jamais voler le copier/coller natif d'un
-/// `TextEdit` en cours de saisie — la fenêtre d'import est un `egui::Window`
+/// `TextEdit` en cours de saisie — la fenêtre d'import est un dialogue modal
 /// flottant peint par-dessus cette grille, toujours présente dessous tant
 /// qu'il est ouvert (voir la garde plus bas, dans le corps de la fonction).
 fn grid_contents(
@@ -7212,6 +7254,51 @@ fn modal_dialog(
     default_size: egui::Vec2,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> DialogOutcome {
+    modal_dialog_with(
+        ctx,
+        id,
+        title,
+        default_size,
+        DialogFooter::default(),
+        |_| {},
+        add_contents,
+    )
+}
+
+/// Le pied de page d'un [`modal_dialog_with`] : libellé et grisage du bouton par
+/// défaut. Par défaut « Valider », toujours actif — ce que les propriétés du
+/// graphe emploient.
+struct DialogFooter<'a> {
+    accept_label: &'a str,
+    accept_hint: &'a str,
+    accept_enabled: bool,
+}
+
+impl Default for DialogFooter<'_> {
+    fn default() -> Self {
+        Self {
+            accept_label: "Valider",
+            accept_hint: "Garder les modifications (Entrée)",
+            accept_enabled: true,
+        }
+    }
+}
+
+/// [`modal_dialog`] avec un bouton par défaut personnalisé (`footer`) et des
+/// boutons supplémentaires à gauche d'« Annuler » (`extra_buttons`, ajoutés
+/// de droite à gauche comme les autres) : c'est ainsi que l'assistant d'import
+/// garde « Précédent / Suivant » tout en étant **la même fenêtre** que les
+/// propriétés du graphe — même cadre, même barre de titre, même blocage du
+/// reste de l'interface.
+fn modal_dialog_with(
+    ctx: &egui::Context,
+    id: egui::Id,
+    title: &str,
+    default_size: egui::Vec2,
+    footer_spec: DialogFooter<'_>,
+    extra_buttons: impl FnOnce(&mut egui::Ui),
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> DialogOutcome {
     let screen = ctx.input(|input| input.content_rect());
     let geometry_id = id.with("geometry");
     let flash_id = id.with("flash_start");
@@ -7306,12 +7393,12 @@ fn modal_dialog(
                     footer.visuals().widgets.noninteractive.bg_stroke,
                 );
                 // Premier ajouté = le plus à droite : « Valider », par défaut.
-                let accept = egui::Button::new("Valider")
+                let accept = egui::Button::new(footer_spec.accept_label)
                     .fill(footer.visuals().selection.bg_fill)
                     .min_size(egui::vec2(84.0, 24.0));
                 if footer
-                    .add(accept)
-                    .on_hover_text("Garder les modifications (Entrée)")
+                    .add_enabled(footer_spec.accept_enabled, accept)
+                    .on_hover_text(footer_spec.accept_hint)
                     .clicked()
                 {
                     button_outcome = DialogOutcome::Accept;
@@ -7324,6 +7411,7 @@ fn modal_dialog(
                 {
                     button_outcome = DialogOutcome::Cancel;
                 }
+                extra_buttons(&mut footer);
             });
         },
         |ui, rect| {
@@ -7359,7 +7447,7 @@ fn modal_dialog(
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let outcome = if header_actions.close || escape {
         DialogOutcome::Cancel
-    } else if enter {
+    } else if enter && footer_spec.accept_enabled {
         DialogOutcome::Accept
     } else {
         button_outcome
@@ -8896,6 +8984,28 @@ mod graph_layout_tests {
         let dialog = &source[dialog..dialog + 6000];
         assert!(dialog.contains("show_window_in_layer("));
         assert!(dialog.contains("window_header("));
+    }
+
+    /// Règle du projet : **toute** fenêtre de l'application passe par la brique
+    /// commune (`show_window_in_layer`, via `modal_dialog_with` pour un dialogue),
+    /// jamais par une `egui::Window` brute. L'assistant d'import a déjà dérogé
+    /// à cette règle une fois : ce garde-fou l'empêche de se reproduire.
+    #[test]
+    fn aucune_fenetre_n_est_une_egui_window_brute() {
+        let source = include_str!("app.rs");
+        let production = &source[..source.find("#[cfg(test)]").expect("module de tests")];
+        let construct = ["egui::Window", "::new("].concat();
+        assert!(
+            !production.contains(&construct),
+            "une fenêtre est construite par `egui::Window` brute : passer par \
+             `show_window_in_layer` / `modal_dialog_with` (voir `plotyx-feature`)"
+        );
+        let start = production.find("fn import_window").expect("fonction");
+        let body = &production[start..start + 4000];
+        assert!(
+            body.contains("modal_dialog_with("),
+            "l'assistant d'import est un dialogue modal"
+        );
     }
 
     #[test]

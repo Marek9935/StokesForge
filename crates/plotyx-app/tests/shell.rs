@@ -6076,3 +6076,41 @@ fn dropping_files_of_different_formats_uses_one_model_each_in_one_entry() {
     state.dispatch(Action::Undo);
     assert_eq!(state.worksheets_of(book).len(), before);
 }
+
+/// Colonne date-heure et colonne forcée en texte à l'import (issue #7).
+#[test]
+fn import_builds_datetime_and_forced_text_columns() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("natures.csv");
+    std::fs::write(
+        &file,
+        "007;2000-01-01 00:00:00;1\n008;2000-01-02 00:00:00;2\n",
+    )
+    .unwrap();
+    let mut recipe = ImportRecipe::new("Natures");
+    recipe.separator = Separator::Semicolon;
+    recipe.column_kinds = vec![
+        plotyx_import::ColumnKind::Text,
+        plotyx_import::ColumnKind::DateTime,
+    ];
+
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::ActiveBook(book),
+        recipe,
+        paths: vec![file],
+    });
+
+    let sheet = sheet_named(state.tree(), "natures");
+    let columns = state.visible_columns(sheet);
+    assert_eq!(column_type(&state, columns[0].0), ColumnType::Mixed);
+    match cell(&state, columns[0].0, 0) {
+        Cell::Text(Some(text)) => assert_eq!(text, "007"),
+        other => panic!("attendu le texte 007, obtenu {other:?}"),
+    }
+    assert_eq!(column_type(&state, columns[1].0), ColumnType::DateTime);
+    assert_eq!(cell_f64(&state, columns[1].0, 0), 946_684_800.0);
+    assert_eq!(column_type(&state, columns[2].0), ColumnType::Numeric);
+}

@@ -166,14 +166,13 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
                 .separator
                 .tokenize(crate::layout::skip_str(layout.raw[i], recipe.skip_chars))
                 .into_iter()
-                .map(|t| {
-                    let value = layout.numbers.parse(t);
-                    let trimmed = t.trim();
+                .enumerate()
+                .map(|(column, t)| {
+                    let (_, text) =
+                        crate::parse::read_cell(t, recipe.column_kind(column), &layout.numbers);
                     PreviewCell {
-                        text: trimmed.to_string(),
-                        is_text: value.is_nan()
-                            && !trimmed.is_empty()
-                            && !layout.numbers.is_missing(t),
+                        text: t.trim().to_string(),
+                        is_text: text.is_some(),
                     }
                 })
                 .collect()
