@@ -85,6 +85,20 @@ fichiers. La position et
 la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 « Géométrie des fenêtres »). L'éditeur de matrice reste un espace réservé.
 
+### Glisser-déposer de fichiers
+
+Déposer des fichiers sur la fenêtre principale émet `Action::DropFiles`. Le
+classeur flottant sous le curseur réclame le dépôt en se peignant
+(`claim_file_drop`) : il reçoit une feuille par fichier, sinon un nouveau
+classeur est créé. Les `.plx` ne sont jamais importés : `AppState` les met en
+file (`take_projects_to_open`) et `app.rs` lance un second processus
+`plotyx-app <chemin>`. Les autres fichiers sont lus avec le premier modèle
+enregistré (sinon la recette permissive) et passent par `import_files` — une
+seule entrée « Importer » ; un fichier qui ne donne aucune valeur numérique
+ouvre à la place la fenêtre d'import pré-remplie. Décision pure :
+`state::file_drop_plan`. Non couvert : le dépôt sur une fenêtre détachée
+(autre viewport) et le comportement réel sous Wayland — à valider à la main.
+
 ### Débordement des fenêtres de contenu
 
 Toutes les fenêtres de contenu flottantes et détachées partagent un rectangle

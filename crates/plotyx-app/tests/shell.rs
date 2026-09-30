@@ -29,9 +29,9 @@ use std::sync::Mutex;
 use plotyx_app::app::{grid_grip_side, GripSide};
 use plotyx_app::selection::Selection;
 use plotyx_app::state::{
-    active_graph, drop_payload_action, Action, ActiveTabKind, AppState, ColumnDragPayload,
-    GridZone, HeaderField, ImportDestination, MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab,
-    PlotTarget,
+    active_graph, drop_payload_action, file_drop_plan, Action, ActiveTabKind, AppState,
+    ColumnDragPayload, GridZone, HeaderField, ImportDestination, MoveDirection, PlotAxis, PlotEdit,
+    PlotSettingsTab, PlotTarget,
 };
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
@@ -5261,4 +5261,128 @@ fn a_new_graph_has_no_background_color() {
         state.plot_spec(graph).expect("spec").background,
         plotyx_plot::TRANSPARENT
     );
+}
+
+// -- Glisser-déposer de fichiers (issue #8) --
+
+/// Le lieu du dépôt fixe la destination ; l'extension `.plx` fait d'un fichier
+/// un projet à ouvrir, pas une donnée à importer.
+#[test]
+fn file_drop_plan_picks_destination_from_the_drop_target_and_splits_projects() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let paths = vec![
+        std::path::PathBuf::from("a.csv"),
+        std::path::PathBuf::from("projet.PLX"),
+        std::path::PathBuf::from("b.txt"),
+    ];
+
+    let on_book = file_drop_plan(&paths, Some(book));
+    assert_eq!(on_book.destination, ImportDestination::ActiveBook(book));
+    assert_eq!(
+        on_book.projects,
+        vec![std::path::PathBuf::from("projet.PLX")]
+    );
+    assert_eq!(on_book.data.len(), 2);
+
+    let elsewhere = file_drop_plan(&paths, None);
+    assert_eq!(elsewhere.destination, ImportDestination::NewBookForAll);
+}
+
+/// Dépôt sur un classeur : une feuille par fichier, une seule entrée
+/// d'historique, et le message nomme le modèle utilisé.
+#[test]
+fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+    let file_a = dir.path().join("depot_a.csv");
+    let file_b = dir.path().join("depot_b.csv");
+    std::fs::write(&file_a, "1,10\n2,20\n").unwrap();
+    std::fs::write(&file_b, "3,30\n4,40\n").unwrap();
+
+    state.dispatch(Action::DropFiles {
+        paths: vec![file_a, file_b],
+        target_book: Some(book),
+    });
+
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
+    assert!(state.import_state().is_none(), "aucune fenêtre d'import");
+    let status = state.status().expect("message de statut");
+    assert!(!status.is_error);
+    assert!(status.text.contains("modèle"), "{}", status.text);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.worksheets_of(book).len(), sheets_before);
+    assert!(!state.can_undo(), "un seul Ctrl+Z pour tout le dépôt");
+}
+
+/// Dépôt hors classeur : un nouveau classeur partagé par le lot.
+#[test]
+fn dropping_files_elsewhere_creates_a_new_book() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    let books_before = state.tree().node(root).unwrap().children().len();
+    let file = dir.path().join("depot.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: None,
+    });
+
+    assert_eq!(
+        state.tree().node(root).unwrap().children().len(),
+        books_before + 1
+    );
+}
+
+/// Un `.plx` n'est jamais importé : il est mis en file pour ouverture dans
+/// une nouvelle fenêtre, sans toucher au projet courant.
+#[test]
+fn dropping_a_project_file_queues_it_instead_of_importing() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let revision = state.revision();
+    let project = dir.path().join("autre.plx");
+    std::fs::write(&project, b"pas lu ici").unwrap();
+
+    state.dispatch(Action::DropFiles {
+        paths: vec![project.clone()],
+        target_book: None,
+    });
+
+    assert_eq!(state.revision(), revision, "le projet courant est intact");
+    assert_eq!(state.take_projects_to_open(), vec![project]);
+    assert!(state.take_projects_to_open().is_empty(), "file vidée");
+}
+
+/// Un fichier que la recette lit mal n'est pas importé : la fenêtre d'import
+/// s'ouvre, pré-remplie ; un fichier correct du même lot est importé.
+#[test]
+fn dropping_an_unreadable_file_opens_the_import_window_prefilled() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+    let bad = dir.path().join("binaire.dat");
+    std::fs::write(&bad, [0u8, 159, 146, 150, 0, 0]).unwrap();
+    let good = dir.path().join("bon.csv");
+    std::fs::write(&good, "1,10\n2,20\n").unwrap();
+
+    state.dispatch(Action::DropFiles {
+        paths: vec![bad.clone(), good],
+        target_book: Some(book),
+    });
+
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
+    let import = state.import_state().expect("fenêtre d'import ouverte");
+    assert_eq!(import.paths, vec![bad]);
+    assert_eq!(import.destination, ImportDestination::ActiveBook(book));
 }

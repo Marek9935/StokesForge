@@ -1977,6 +1977,11 @@ impl eframe::App for PlotyxApp {
             .maximized_tab
             .or_else(|| self.floating_tabs.last().copied());
 
+        // Glisser-déposer de fichiers : les chemins déposés cette image sont
+        // posés dans un emplacement que le classeur sous le curseur peut
+        // réclamer en se peignant (`book_contents`), puis vidés plus bas.
+        begin_file_drop(&ctx);
+
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
         // rafraîchit l'instantané après un script (voir la doc de tête de
@@ -2355,6 +2360,12 @@ impl eframe::App for PlotyxApp {
         // transitoire que la fenêtre d'import, peinte tant que
         // `self.state.plot_settings()` est `Some`.
         plot_settings_window(&ctx, &mut self.state);
+        if let Some(action) = finish_file_drop(&ctx) {
+            actions.push(action);
+        }
+        for project in self.state.take_projects_to_open() {
+            open_project_in_new_window(&project);
+        }
 
         // Les onglets demandés (Project Manager, panneau fixe ou détaché),
         // les détachements et fermetures demandés par l'en-tête d'une fenêtre
@@ -2417,6 +2428,9 @@ impl eframe::App for PlotyxApp {
                     destination: ImportDestination::NewBookPerFile
                         | ImportDestination::NewBookForAll,
                     ..
+                } | Action::DropFiles {
+                    target_book: None,
+                    ..
                 }
             ) {
                 let root = self.state.tree().root();
@@ -2478,6 +2492,115 @@ impl eframe::App for PlotyxApp {
 
         self.screenshot(&ctx);
         self.autoquit(&ctx);
+    }
+}
+
+/// Emplacement (mémoire temporaire d'egui) des fichiers déposés cette image :
+/// `book` est renseigné par le classeur sous le curseur, s'il y en a un.
+#[derive(Clone)]
+struct FileDropSlot {
+    paths: Vec<std::path::PathBuf>,
+    book: Option<NodeId>,
+}
+
+fn file_drop_slot_id() -> egui::Id {
+    egui::Id::new("plotyx_file_drop")
+}
+
+/// Ouvre l'emplacement du dépôt de l'image et peint le retour visuel : un
+/// contour autour de l'application tant qu'un fichier survole la fenêtre
+/// (destination « nouveau classeur » ; un classeur survolé se surligne
+/// lui-même, voir [`claim_file_drop`]).
+fn begin_file_drop(ctx: &egui::Context) {
+    let (paths, hovering) = ctx.input(|input| {
+        (
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .map(|file| file.path().to_path_buf())
+                .collect::<Vec<_>>(),
+            !input.raw.hovered_files.is_empty(),
+        )
+    });
+    if hovering {
+        let rect = ctx.content_rect().shrink(2.0);
+        ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Tooltip,
+            egui::Id::new("plotyx_file_drop_outline"),
+        ))
+        .rect_stroke(
+            rect,
+            0.0,
+            egui::Stroke::new(2.0, egui::Color32::from_rgb(0x2a, 0x7f, 0xff)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ctx.data_mut(|data| {
+        if paths.is_empty() {
+            data.remove::<FileDropSlot>(file_drop_slot_id());
+        } else {
+            data.insert_temp(file_drop_slot_id(), FileDropSlot { paths, book: None });
+        }
+    });
+}
+
+/// Appelé par le classeur en train de se peindre : surligne sa zone quand un
+/// fichier la survole, et réclame le dépôt de l'image s'il a eu lieu sous le
+/// curseur (`rect_contains_pointer` tient compte de l'empilement des
+/// fenêtres : seule la fenêtre du dessus répond).
+fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
+    let rect = ui.max_rect();
+    if !ui.rect_contains_pointer(rect) {
+        return;
+    }
+    if ui.ctx().input(|input| !input.raw.hovered_files.is_empty()) {
+        ui.painter().rect_stroke(
+            rect,
+            0.0,
+            egui::Stroke::new(3.0, egui::Color32::from_rgb(0x2a, 0x7f, 0xff)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.ctx().data_mut(|data| {
+        if let Some(slot) = data.get_temp::<FileDropSlot>(file_drop_slot_id()) {
+            if slot.book.is_none() {
+                data.insert_temp(
+                    file_drop_slot_id(),
+                    FileDropSlot {
+                        book: Some(book),
+                        ..slot
+                    },
+                );
+            }
+        }
+    });
+}
+
+/// Transforme le dépôt de l'image en [`Action::DropFiles`].
+fn finish_file_drop(ctx: &egui::Context) -> Option<Action> {
+    let slot = ctx.data_mut(|data| {
+        let slot = data.get_temp::<FileDropSlot>(file_drop_slot_id());
+        data.remove::<FileDropSlot>(file_drop_slot_id());
+        slot
+    })?;
+    Some(Action::DropFiles {
+        paths: slot.paths,
+        target_book: slot.book,
+    })
+}
+
+/// Ouvre `path` dans une nouvelle fenêtre PlotYx : un second processus de ce
+/// même binaire (`plotyx-app <chemin>`). Un échec de lancement n'est que
+/// journalisé — un dépôt raté ne doit rien casser.
+fn open_project_in_new_window(path: &std::path::Path) {
+    let spawned =
+        std::env::current_exe().and_then(|exe| std::process::Command::new(exe).arg(path).spawn());
+    if let Err(err) = spawned {
+        eprintln!(
+            "[plotyx-app] ouverture de {} impossible : {err}",
+            path.display()
+        );
     }
 }
 
@@ -4714,6 +4837,7 @@ fn header_field_text(state: &AppState, column: NodeId, field: HeaderField) -> St
 /// ([`Action::CommitCellAndAdvance`]), la suppression par la touche Suppr
 /// sur la sélection ([`Action::DeleteSelectedCells`]).
 fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>, book: NodeId) {
+    claim_file_drop(ui, book);
     let sheets = state.worksheets_of(book);
     let selected = state.selected_sheet_in(book).unwrap_or(book);
     let mut chosen_sheet = None;

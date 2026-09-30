@@ -294,6 +294,16 @@ pub enum Action {
         /// Fichiers à importer, chacun dans sa propre feuille.
         paths: Vec<std::path::PathBuf>,
     },
+    /// Fichiers déposés sur l'application (glisser-déposer) : importés sans
+    /// passer par la fenêtre d'import quand ils se lisent correctement, voir
+    /// [`file_drop_plan`]. Même macro d'historique « Importer » que
+    /// [`Action::ImportFiles`].
+    DropFiles {
+        /// Fichiers déposés, dans l'ordre fourni par le système.
+        paths: Vec<std::path::PathBuf>,
+        /// Classeur sous le curseur au moment du dépôt, s'il y en avait un.
+        target_book: Option<NodeId>,
+    },
     /// Crée un graphe à partir des colonnes sélectionnées d'une feuille de
     /// classeur — menu contextuel de l'en-tête de colonne. Le nouveau graphe
     /// est ajouté dans le même dossier parent que le classeur ([`Command::
@@ -1347,6 +1357,53 @@ pub enum ImportDestination {
     NewBookForAll,
 }
 
+/// Ce qu'un dépôt de fichiers demande de faire — voir [`file_drop_plan`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropPlan {
+    /// Projets `.plx` : chacun s'ouvre dans une nouvelle fenêtre PlotYx.
+    pub projects: Vec<PathBuf>,
+    /// Fichiers de données à importer.
+    pub data: Vec<PathBuf>,
+    /// Destination des fichiers de données.
+    pub destination: ImportDestination,
+}
+
+/// Décision pure d'un dépôt : le lieu du dépôt fixe la destination (un
+/// classeur sous le curseur reçoit une feuille par fichier, n'importe où
+/// ailleurs un nouveau classeur partagé), l'extension `.plx` fait d'un
+/// fichier un projet à ouvrir plutôt qu'une donnée à importer.
+pub fn file_drop_plan(paths: &[PathBuf], target_book: Option<NodeId>) -> DropPlan {
+    let is_project = |path: &PathBuf| {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("plx"))
+    };
+    DropPlan {
+        projects: paths.iter().filter(|p| is_project(p)).cloned().collect(),
+        data: paths.iter().filter(|p| !is_project(p)).cloned().collect(),
+        destination: target_book.map_or(
+            ImportDestination::NewBookForAll,
+            ImportDestination::ActiveBook,
+        ),
+    }
+}
+
+/// Un fichier « se lit correctement » quand la recette le découpe en au moins
+/// une colonne et une ligne dont une valeur est un nombre. Sinon le dépôt
+/// ouvre la fenêtre d'import plutôt que de créer une feuille vide ou
+/// illisible.
+fn reads_well(path: &std::path::Path, recipe: &plotyx_import::ImportRecipe) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    plotyx_import::parse(&bytes, recipe).is_ok_and(|table| {
+        table
+            .columns
+            .iter()
+            .any(|column| column.values.iter().any(|value| !value.is_nan()))
+    })
+}
+
 /// État transitoire de la fenêtre d'import (voir [`crate::app`] pour son
 /// rendu) : jamais dans l'historique, jamais envoyé à l'acteur — même
 /// famille que [`HeaderEdit`]/[`CellEdit`]/[`NoteEdit`]. Porte tout ce que la
@@ -1492,6 +1549,10 @@ pub struct AppState {
     /// État de la fenêtre d'import, tant qu'elle est ouverte — voir
     /// [`ImportState`].
     import_state: Option<ImportState>,
+    /// Projets `.plx` déposés, à ouvrir chacun dans une nouvelle fenêtre
+    /// PlotYx : l'état ne lance aucun processus (testable sans fenêtre), la
+    /// couche fenêtre les vide par [`AppState::take_projects_to_open`].
+    projects_to_open: Vec<PathBuf>,
     /// Texte de la zone de script.
     script_source: String,
     /// Sortie de la dernière exécution de script, s'il y en a eu une.
@@ -1553,6 +1614,7 @@ impl AppState {
             clipboard_dirty: false,
             delete_repeat: None,
             import_state: None,
+            projects_to_open: Vec::new(),
             script_source: String::new(),
             script_output: None,
             #[cfg(feature = "python")]
@@ -3019,6 +3081,7 @@ impl AppState {
                 recipe,
                 paths,
             } => self.import_files(destination, recipe, paths),
+            Action::DropFiles { paths, target_book } => self.drop_files(paths, target_book),
             Action::PlotColumns {
                 sheet,
                 columns,
@@ -3213,6 +3276,53 @@ impl AppState {
             store,
             save_as_name,
         });
+    }
+
+    /// Traite un dépôt de fichiers ([`Action::DropFiles`]). Les `.plx` sont mis
+    /// en file pour ouverture ([`AppState::take_projects_to_open`]). Les
+    /// autres fichiers sont lus avec le premier modèle enregistré, à défaut la
+    /// recette permissive ; ceux qui se lisent correctement partent dans un
+    /// seul import annulable, les autres ouvrent la fenêtre d'import
+    /// pré-remplie pour être réglés à la main.
+    fn drop_files(&mut self, paths: Vec<PathBuf>, target_book: Option<NodeId>) {
+        let plan = file_drop_plan(&paths, target_book);
+        self.projects_to_open.extend(plan.projects);
+        if plan.data.is_empty() {
+            return;
+        }
+        let recipe = plotyx_import::RecipeStore::load()
+            .recipes()
+            .first()
+            .cloned()
+            .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
+        let (good, bad): (Vec<PathBuf>, Vec<PathBuf>) = plan
+            .data
+            .into_iter()
+            .partition(|path| reads_well(path, &recipe));
+        if !good.is_empty() {
+            let model = recipe.name.clone();
+            self.import_files(plan.destination, recipe, good);
+            let summary = self
+                .status
+                .as_ref()
+                .filter(|status| !status.is_error)
+                .map(|status| format!("{} — modèle « {model} »", status.text));
+            if let Some(summary) = summary {
+                self.notice(summary);
+            }
+        }
+        if !bad.is_empty() {
+            self.open_import(target_book);
+            if let Some(import) = &mut self.import_state {
+                import.paths = bad;
+            }
+        }
+    }
+
+    /// Projets `.plx` déposés depuis le dernier appel, à ouvrir chacun dans
+    /// une nouvelle fenêtre PlotYx (vidés : un projet ne s'ouvre qu'une fois).
+    pub fn take_projects_to_open(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.projects_to_open)
     }
 
     /// Ferme la fenêtre d'import sans rien importer.
