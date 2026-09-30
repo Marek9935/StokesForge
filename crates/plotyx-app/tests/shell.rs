@@ -5648,6 +5648,67 @@ fn a_hand_made_column_has_no_file_metadata() {
 
 // -- Assistant d'import en étapes (issue #6) --
 
+/// Enregistrer le modèle fixe la référence du témoin « modifié », y compris
+/// après un changement de nom. Une nouvelle retouche le rallume.
+#[test]
+fn enregistrer_un_modele_d_import_actualise_le_temoin_de_modification() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    {
+        let import = state.import_state_mut().unwrap();
+        import.recipe.skip_chars = 2;
+        import.save_as_name = "Mon appareil".into();
+    }
+    assert!(state.import_recipe_modified());
+
+    state.save_import_recipe();
+
+    assert!(!state.status().unwrap().is_error);
+    assert!(
+        !state.import_recipe_modified(),
+        "le modèle vient d'être enregistré"
+    );
+    let saved = state.import_state().unwrap().recipe.clone();
+    assert!(RecipeStore::load().recipes().contains(&saved));
+
+    state.import_state_mut().unwrap().recipe.skip_chars = 3;
+    assert!(state.import_recipe_modified());
+    state.import_state_mut().unwrap().recipe.skip_chars = 2;
+    assert!(
+        !state.import_recipe_modified(),
+        "retour au modèle enregistré"
+    );
+}
+
+/// Un échec d'écriture ne doit pas faire croire que les réglages sont sauvés.
+#[test]
+fn un_echec_d_enregistrement_garde_le_modele_d_import_modifie() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    state.import_state_mut().unwrap().recipe.skip_chars = 2;
+    state.save_import_recipe();
+    assert!(!state.status().unwrap().is_error);
+    state.import_state_mut().unwrap().recipe.skip_chars = 3;
+
+    let config = directories::ProjectDirs::from("", "", "PlotYx").unwrap();
+    let file = config.config_dir().join("import_recipes.json");
+    std::fs::remove_file(&file).unwrap();
+    std::fs::create_dir(&file).unwrap();
+    state.save_import_recipe();
+
+    assert!(state.status().unwrap().is_error);
+    assert!(state.import_recipe_modified());
+    state.import_state_mut().unwrap().recipe.skip_chars = 2;
+    assert!(
+        !state.import_recipe_modified(),
+        "la référence reste le dernier succès"
+    );
+}
+
 fn jasco_like(dir: &std::path::Path) -> std::path::PathBuf {
     let file = dir.join("jasco.csv");
     std::fs::write(
