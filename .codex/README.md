@@ -101,7 +101,9 @@ la cible active Rust.
   actions concernées. Garder la logique testable dans `state.rs` et la
   traduction des événements et l'affichage dans `app.rs`.
 - L'import reste indépendant de l'UI, de `core`, des commandes et de la
-  session. L'application convertit ses résultats vers les colonnes du modèle.
+  session. `plotyx-importer` convertit ses résultats vers les colonnes du modèle
+  pour l'application, le CLI et `pyx.import_file` ; les scripts écrivent via
+  les commandes de leur session, GIL relâché, dans une macro annulable.
   Réutiliser recettes, parseur et aperçu avant de créer un second chemin.
 - Les fonctionnalités de tracé partagées vont dans `plotyx-render`, générique
   sur le backend. Les mesures de texte passent par `plotyx_render::text`.

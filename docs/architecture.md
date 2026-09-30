@@ -23,14 +23,14 @@ plotyx-session       l'acteur : le &mut Project de la session
 (commands, persistence, core)
    ↑            ↑
 plotyx-script   plotyx-render-egui (core, plot, render, session)
-(commands, core, python, session)
+(commands, core, import, importer, python, session)
 + plotyx-python (aucune dépendance plotyx)
 
 plotyx-cli    (core, commands, import, importer, persistence) — sans session :
                un `Project` construit directement, puis `.plx`
 plotyx-import (aucune dépendance plotyx) — lecture des fichiers d'appareil
 plotyx-importer (core, import) — plan de feuilles et colonnes du modèle, sans
-               commandes : partagé par l'application et le CLI
+               commandes : partagé par l'application, le CLI et les scripts
 plotyx-app    (commands, core, import, importer, persistence, plot, python,
                render-egui, script, session)
 ```
@@ -58,7 +58,7 @@ dépendances.
 | `plotyx-script` | le fil de script, la surface `pyx`, l'interruption | [python](python-et-script.md) |
 | `plotyx-app` | la coquille UI eframe (banc d'essai) | [application](application.md) |
 | `plotyx-cli` | binaire headless de vérification du lien | [application](application.md) |
-| `plotyx-importer` | du résultat de `plotyx-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application et le CLI | [application](application.md) |
+| `plotyx-importer` | du résultat de `plotyx-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
 | `plotyx-robustesse` | 21 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
 | `plotyx-arch-guard` | lecture commune des `Cargo.toml` pour les garde-fous de dépendances (dev-dependency) | [tests](tests.md) |
 

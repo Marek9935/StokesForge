@@ -97,10 +97,10 @@ l'exception ne sera levée qu'en revenant dans l'interpréteur. Un script qui
 avale les exceptions (`except: pass` en boucle pure) résiste à la seconde
 moitié — la première le rattrape dès qu'il touche à `pyx`.
 
-## La surface `pyx` — quatre appels
+## La surface `pyx`
 
 Ce n'est **pas** l'API v1 destinée aux utilisateurs (spécifiée dans
-`docs/archive/rustrewrite/cahier-des-charges-api-script.md`). Ces quatre appels
+`docs/archive/rustrewrite/cahier-des-charges-api-script.md`). Les quatre appels du socle
 ne sont pas choisis pour leur utilité mais parce qu'**ensemble ils rendent le
 critère de fin vérifiable** :
 
@@ -110,10 +110,22 @@ critère de fin vérifiable** :
 | `column` | vue numpy **sans copie**, `Arc` maintenu vivant |
 | `set_column` | mutation via l'acteur et le bus, GIL relâché pendant l'attente |
 | `undo` | délégation à la pile d'historique depuis Python |
+| `import_file(path, recipe=None)` | import dans un classeur neuf, conversion commune à l'application et au CLI, une macro annulable |
+
+`pyx.import_file("spectre.csv", recipe="Jasco (point-virgule)")` accepte un
+chemin texte ou `pathlib.Path` et rend la liste des poignées des feuilles
+créées. Sans nom de modèle, il applique le choix automatique, sinon la recette
+permissive. Il respecte les réglages du modèle (colonnes ignorées, types,
+métadonnées, blocs et répartition en feuilles) et crée toujours un classeur
+neuf ; les modes de modification d'une feuille active concernent l'assistant.
+Un seul `pyx.undo()` ou Ctrl+Z retire tout l'import. Un modèle inconnu ou un
+fichier illisible lève `InvalidValueError` avant toute mutation ; une erreur
+pendant la création avorte la macro. L'analyse et les commandes se déroulent
+GIL relâché, comme les autres appels au modèle.
 
 Une poignée (`Handle`) est **opaque** : pas de constructeur Python, aucun entier
-exposé, seul `resolve` en produit. Elle reste valide après un renommage, un
-déplacement, et même après une suppression **suivie d'une annulation** — c'est
+exposé ; `resolve` et `import_file` en produisent. Elle reste valide après un
+renommage, un déplacement, et même après une suppression **suivie d'une annulation** — c'est
 le contrat de l'identité, assuré par le modèle (identifiants monotones, jamais
 réutilisés). Elle est invalidée par un `Load`, détecté via l'`epoch` de
 l'instantané avant même de chercher le `NodeId` dans l'arbre courant

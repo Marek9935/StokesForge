@@ -102,6 +102,12 @@ Un script passe par les **mêmes commandes annulables** que l'interface :
 `Ctrl+Z` annule ce qu'un script vient d'écrire. C'est le critère de fin du
 socle, rejoué en entier par `plotyx-script::run_selftest`.
 
+`pyx.import_file(path, recipe=None)` rend les poignées des feuilles d'un
+classeur neuf. Réutiliser `plotyx-importer` (plans et conversion communs au CLI
+et à l'application), puis les commandes dans une macro « Importer ». Aucun
+type Python dans le pont hôte : analyse et écriture sont GIL relâché. Un refus
+avant création ne modifie rien ; une erreur de commande avorte la macro.
+
 `expected_version` est la condition optimiste que `plotyx-script` remplit :
 elle exige que la version de la colonne n'ait pas bougé **au moment
 d'appliquer**, ce qui ferme la fenêtre entre l'instantané qu'un script a lu et

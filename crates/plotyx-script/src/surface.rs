@@ -1,7 +1,7 @@
-//! La **surface-témoin** `pyx` : quatre appels, et pas un de plus.
+//! La surface `pyx` : quatre appels du socle, plus l'import de fichiers.
 //!
 //! Ce n'est **pas** l'API v1 destinée aux utilisateurs — celle-là est
-//! spécifiée ailleurs et reste le contrat pour plus tard. Ces quatre appels ne
+//! spécifiée ailleurs et reste le contrat pour plus tard. Les quatre appels du socle ne
 //! sont pas choisis pour leur utilité mais parce qu'**ensemble ils rendent le
 //! critère de fin du socle vérifiable** :
 //!
@@ -11,6 +11,7 @@
 //! | [`column`] | vue numpy **sans copie**, `Arc` maintenu vivant |
 //! | [`set_column`] | mutation via l'acteur et le bus, GIL relâché pendant l'attente |
 //! | [`undo`] | délégation à la pile d'historique depuis Python |
+//! | [`import_file`] | import commun au CLI et à l'application, en une macro annulable |
 //!
 //! # Vocabulaire d'erreurs
 //!
@@ -27,7 +28,7 @@
 //!
 //! # Où le GIL est relâché
 //!
-//! Chacun des quatre appels fait exactement la même chose : il prépare ses
+//! Chaque appel prépare ses
 //! arguments en Rust pur, puis traverse `Python::detach` pour attendre
 //! l'acteur. Le marqueur `Ungil` interdit à la compilation qu'une valeur liée
 //! au GIL entre dans ce bloc ou en ressorte.
@@ -83,7 +84,8 @@ fn to_py_error(error: HostError) -> PyErr {
 /// Poignée **opaque** vers un objet du projet.
 ///
 /// Un script ne peut ni l'inspecter ni la fabriquer : elle n'a pas de
-/// constructeur Python et n'expose aucun entier. Seul [`resolve`] en produit.
+/// constructeur Python et n'expose aucun entier. [`resolve`] et
+/// [`import_file`] en produisent.
 ///
 /// Une poignée reste valide après un renommage, après un déplacement, et après
 /// une suppression **suivie d'une annulation** : c'est le contrat de
@@ -212,14 +214,40 @@ fn undo(py: Python<'_>) -> PyResult<bool> {
     py.detach(|| bridge::undo(session)).map_err(to_py_error)
 }
 
+/// Importe un fichier dans un classeur neuf et rend les poignées de ses
+/// feuilles. `recipe` nomme un modèle enregistré ou fourni ; sans ce nom,
+/// le modèle est choisi automatiquement, sinon la recette permissive.
+/// Colonnes, rôles, métadonnées et source sont ceux de l'assistant.
+/// Un seul Ctrl+Z (ou `pyx.undo()`) annule tout l'import. Un fichier illisible
+/// ou un modèle inconnu lève `InvalidValueError` sans toucher au projet.
+#[pyfunction]
+#[pyo3(signature = (path, recipe=None))]
+fn import_file(
+    py: Python<'_>,
+    path: std::path::PathBuf,
+    recipe: Option<String>,
+) -> PyResult<Vec<Handle>> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let session = context.session();
+    let sheets = py
+        .detach(|| bridge::import_file(session, &path, recipe.as_deref()))
+        .map_err(to_py_error)?;
+    Ok(sheets
+        .into_iter()
+        .map(|(id, epoch)| Handle { id, epoch })
+        .collect())
+}
+
 /// Documentation du module telle qu'un script la voit (`help(pyx)`).
 const MODULE_DOC: &str = "\
-Surface-témoin de PlotYx : quatre appels pour piloter le projet ouvert.
+Surface de script de PlotYx : lecture, écriture, annulation et import.
 
     pyx.resolve(chemin)            -> Handle
     pyx.column(poignee)            -> numpy.ndarray (lecture seule, sans copie)
     pyx.set_column(poignee, tab)   -> None (passe par l'historique)
     pyx.undo()                     -> bool (False si rien à annuler)
+    pyx.import_file(path, recipe=None) -> list[Handle] (feuilles d'un nouveau classeur)
 
 Erreurs : UnknownPathError, BrokenReferenceError, InvalidValueError,
           ConcurrentWriteError.
@@ -239,7 +267,7 @@ Limites connues de cette surface :
 
 /// Construit le module `pyx` et l'enregistre dans `sys.modules`.
 ///
-/// Le module est **sans état** : les quatre fonctions retrouvent la session par
+/// Le module est **sans état** : les fonctions retrouvent la session par
 /// le contexte du fil courant (cf. [`crate::engine`]). Deux moteurs de script
 /// vivant dans le même processus peuvent donc partager le même module sans se
 /// gêner, et les quatre types d'exception sont des singletons du processus —
@@ -252,6 +280,7 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(column, &module)?)?;
     module.add_function(wrap_pyfunction!(set_column, &module)?)?;
     module.add_function(wrap_pyfunction!(undo, &module)?)?;
+    module.add_function(wrap_pyfunction!(import_file, &module)?)?;
     module.add("UnknownPathError", py.get_type::<UnknownPathError>())?;
     module.add(
         "BrokenReferenceError",

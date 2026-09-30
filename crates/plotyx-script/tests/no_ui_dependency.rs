@@ -10,6 +10,8 @@ const ALLOWED_DEPENDENCIES: &[&str] = &[
     "plotyx-commands", // le bus de commandes : tout passe par lui
     "plotyx-session",  // l'acteur, seul détenteur du `&mut Project`
     "plotyx-python",   // l'interpréteur embarqué et le pont de tableaux
+    "plotyx-import",   // recettes et choix du modèle, sans interface
+    "plotyx-importer", // conversion fichiers → colonnes commune au CLI et à l'application
     "pyo3",            // liaison CPython, version verrouillée avec plotyx-python
     "numpy",           // liaison de la C-API numpy, liée à celle de pyo3
     "thiserror",       // erreurs typées, sans surface UI

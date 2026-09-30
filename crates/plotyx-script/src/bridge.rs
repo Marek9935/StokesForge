@@ -18,6 +18,7 @@
 //! l'appelle sur l'arbre de son instantané. Il n'y a plus rien à garder
 //! synchronisé ici.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError};
@@ -276,4 +277,116 @@ pub(crate) fn undo(session: &SessionHandle) -> Result<bool, HostError> {
         .undo()
         .map(|revision| revision.is_some())
         .map_err(HostError::from_session)
+}
+
+/// Importe un fichier dans un classeur neuf, une feuille par plan. Toute
+/// l'analyse et la conversion restent celles du CLI et de l'application.
+/// Les erreurs de fichier sont détectées avant la première commande ; une
+/// erreur d'application avorte la macro, sans laisser un import partiel.
+/// La macro exclut les autres clients et les chargements de projet pendant
+/// la création : les identifiants rendus appartiennent à une seule époque.
+pub(crate) fn import_file(
+    session: &SessionHandle,
+    path: &Path,
+    recipe_name: Option<&str>,
+) -> Result<Vec<(NodeId, u64)>, HostError> {
+    let store = plotyx_import::RecipeStore::load_with_builtins();
+    let recipe = match recipe_name {
+        Some(name) => store
+            .recipes()
+            .iter()
+            .find(|r| r.name == name)
+            .cloned()
+            .ok_or_else(|| HostError::InvalidValue(format!("modèle « {name} » inconnu")))?,
+        None => {
+            let bytes = std::fs::read(path)
+                .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?;
+            plotyx_import::choose_recipe(store.recipes(), path, &bytes)
+                .cloned()
+                .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"))
+        }
+    };
+    let items = plotyx_importer::import_items(path, &recipe);
+    if let Some(error) = items.iter().find_map(|item| item.table.as_ref().err()) {
+        return Err(HostError::InvalidValue(error.clone()));
+    }
+    let plans = plotyx_importer::plan_import(&items, recipe.files_layout);
+    if plans.is_empty() || plans.iter().all(|plan| plan.columns.is_empty()) {
+        return Err(HostError::InvalidValue("aucune colonne à importer".into()));
+    }
+    session
+        .begin_macro("Importer")
+        .map_err(HostError::from_session)?;
+    let result = (|| {
+        let snapshot = session.snapshot().map_err(HostError::from_session)?;
+        let root = snapshot.tree.root();
+        let epoch = snapshot.epoch;
+        let book = add_import_node(
+            session,
+            root,
+            Command::AddEmptyWorkbook {
+                parent: root,
+                name: None,
+            },
+        )?;
+        let mut sheets = Vec::new();
+        for plan in plans {
+            // Comme le CLI : si le nom du fichier n'est pas un nom de nœud
+            // valide (ou s'il est pris), garder un nom automatique.
+            let sheet = add_import_node(
+                session,
+                book,
+                Command::AddWorksheet {
+                    book,
+                    name: Some(plan.name),
+                },
+            )
+            .or_else(|error| match error {
+                HostError::InvalidValue(_) => {
+                    add_import_node(session, book, Command::AddWorksheet { book, name: None })
+                }
+                _ => Err(error),
+            })?;
+            for planned in plan.columns {
+                if let Some(column) = plotyx_importer::make_import_column(&items, planned, 0) {
+                    session
+                        .execute(Command::AddColumn {
+                            sheet,
+                            index: None,
+                            name: None,
+                            column,
+                        })
+                        .map_err(HostError::from_session)?;
+                }
+            }
+            sheets.push((sheet, epoch));
+        }
+        Ok(sheets)
+    })();
+    match result {
+        Ok(sheets) => {
+            session.end_macro().map_err(HostError::from_session)?;
+            Ok(sheets)
+        }
+        Err(error) => {
+            session.abort_macro().map_err(HostError::from_session)?;
+            Err(error)
+        }
+    }
+}
+
+/// Les commandes de création ne rendent pas d'identifiant : sous la macro
+/// exclusive, le dernier enfant de `parent` est celui qu'on vient de créer.
+fn add_import_node(
+    session: &SessionHandle,
+    parent: NodeId,
+    command: Command,
+) -> Result<NodeId, HostError> {
+    session.execute(command).map_err(HostError::from_session)?;
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    snapshot
+        .tree
+        .node(parent)
+        .and_then(|n| n.children().last().copied())
+        .ok_or_else(|| HostError::InvalidValue("nœud importé introuvable après création".into()))
 }

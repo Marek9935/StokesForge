@@ -33,6 +33,9 @@ confirmation pour les choix courants couverts par la demande.
 - Les mutations métier passent par les commandes annulables et l'acteur de
   session. Respecter les exceptions documentées pour l'état de vue et la
   géométrie ; ne pas créer de voie d'écriture métier parallèle.
+- L'import de l'application, du CLI et des scripts partage les plans et la
+  conversion de `plotyx-importer` ; `pyx.import_file` écrit par les commandes
+  de sa session, GIL relâché, dans une macro annulable.
 - Le rendu partagé appartient à `plotyx-render`. Préserver l'accord entre
   l'écran et les exports, ainsi que la mesure de texte unique.
 - Suivre les conventions locales de nommage ; écrire les commentaires,

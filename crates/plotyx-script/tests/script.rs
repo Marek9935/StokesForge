@@ -166,6 +166,141 @@ fn executer(banc: &Banc, source: &str) -> ScriptOutcome {
     outcome
 }
 
+/// L'import Python emploie le modèle fourni et la conversion commune ; un
+/// seul Ctrl+Z retire classeur, feuilles, colonnes et métadonnées.
+#[test]
+fn import_python_par_modele_se_lit_et_sannule_en_un_geste() {
+    let banc = banc();
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test/import/jasco_uvvis_semicolon.csv");
+    let before = banc.session.snapshot().unwrap();
+    executer(
+        &banc,
+        &format!(
+            "feuilles = pyx.import_file({:?}, recipe='Jasco (point-virgule)')\n\
+         assert len(feuilles) == 1\n",
+            path.to_str().unwrap()
+        ),
+    );
+    let imported = banc.session.snapshot().unwrap();
+    let root = imported.tree.root();
+    let book = *imported.tree.node(root).unwrap().children().last().unwrap();
+    let sheets = imported.tree.node(book).unwrap().children();
+    assert_eq!(sheets.len(), 1, "aucune feuille vide supplémentaire");
+    let columns = imported.tree.node(sheets[0]).unwrap().children();
+    let x = imported.tree.node(columns[0]).unwrap().as_column().unwrap();
+    let y = imported.tree.node(columns[1]).unwrap().as_column().unwrap();
+    assert_eq!(x.meta().role, plotyx_core::ColumnRole::X);
+    assert_eq!(
+        x.float_values().unwrap().as_slice(),
+        &[800., 798., 796., 794., 792., 790.]
+    );
+    assert_eq!(y.meta().long_name, "Fixture_Jasco_UVVis");
+    assert!(y.meta().file_metadata.iter().any(|m| m.key == "XUNITS"));
+    assert!(y.meta().import_source.is_some());
+    assert_eq!(imported.history.undo_label.as_deref(), Some("Importer"));
+    executer(
+        &banc,
+        &format!(
+            "x = pyx.resolve('[{}]{}!{}')\n\
+         assert list(pyx.column(x)) == [800., 798., 796., 794., 792., 790.]\n\
+         assert pyx.undo()\n",
+            imported.tree.node(book).unwrap().name(),
+            imported.tree.node(sheets[0]).unwrap().name(),
+            imported.tree.node(columns[0]).unwrap().name()
+        ),
+    );
+    let undone = banc.session.snapshot().unwrap();
+    assert_eq!(*undone.tree, *before.tree);
+    assert!(!undone.history.can_undo);
+    banc.session.redo().unwrap();
+    assert_eq!(*banc.session.snapshot().unwrap().tree, *imported.tree);
+}
+
+/// Le choix automatique utilise la même signature Jasco que l'application.
+#[test]
+fn import_python_choisit_le_modele_automatiquement() {
+    let banc = banc();
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test/import/jasco_uvvis_semicolon.csv");
+    executer(
+        &banc,
+        &format!(
+            "from pathlib import Path\nassert len(pyx.import_file(Path({:?}))) == 1",
+            path.to_str().unwrap()
+        ),
+    );
+    let snapshot = banc.session.snapshot().unwrap();
+    let source = snapshot
+        .tree
+        .walk_all()
+        .into_iter()
+        .filter_map(|id| {
+            snapshot
+                .tree
+                .node(id)?
+                .as_column()?
+                .meta()
+                .import_source
+                .as_ref()
+        })
+        .next()
+        .unwrap();
+    assert!(source.recipe_json.contains("Jasco (point-virgule)"));
+}
+
+/// Modèle inconnu, fichier absent ou binaire : aucune mutation et aucune
+/// macro laissée ouverte. Une macro de l'interface n'est jamais absorbée.
+#[test]
+fn import_python_refuse_sans_toucher_au_projet_ni_aux_macros_dautrui() {
+    let banc = banc();
+    let dir = tempfile::tempdir().unwrap();
+    let binary = dir.path().join("binaire.dat");
+    std::fs::write(&binary, [0u8, 159, 146, 150, 0, 0]).unwrap();
+    let absent = dir.path().join("absent.csv");
+    let before = banc.session.snapshot().unwrap();
+    for source in [
+        format!(
+            "pyx.import_file({:?}, recipe='Modèle inexistant')",
+            binary.to_str().unwrap()
+        ),
+        format!("pyx.import_file({:?})", absent.to_str().unwrap()),
+        format!("pyx.import_file({:?})", binary.to_str().unwrap()),
+    ] {
+        let outcome = banc.engine.run(&source).unwrap();
+        assert!(
+            outcome
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("InvalidValueError")),
+            "{outcome:?}"
+        );
+        let snapshot = banc.session.snapshot().unwrap();
+        assert_eq!(*snapshot.tree, *before.tree);
+        assert_eq!(snapshot.revision, before.revision);
+        assert!(!snapshot.history.in_macro);
+    }
+    let csv = dir.path().join("mesure.csv");
+    std::fs::write(&csv, "1,10\n2,20\n").unwrap();
+    let interface = banc._actor.handle();
+    interface.begin_macro("Édition de l'interface").unwrap();
+    let outcome = banc
+        .engine
+        .run(&format!("pyx.import_file({:?})", csv.to_str().unwrap()))
+        .unwrap();
+    assert!(outcome
+        .error
+        .as_deref()
+        .is_some_and(|e| e.contains("InvalidValueError")));
+    let snapshot = banc.session.snapshot().unwrap();
+    assert_eq!(*snapshot.tree, *before.tree);
+    assert!(
+        snapshot.history.in_macro,
+        "la macro de l'interface reste ouverte"
+    );
+    interface.abort_macro().unwrap();
+}
+
 /// Valeurs actuelles d'une colonne numérique, lues côté Rust.
 fn valeurs(session: &SessionHandle, id: NodeId) -> Vec<f64> {
     session
@@ -870,11 +1005,13 @@ except pyx.BrokenReferenceError:
 // --- Compléments : la surface reste minuscule et documentée -----------------
 
 #[test]
-fn la_surface_expose_quatre_appels_et_quatre_erreurs() {
+fn la_surface_expose_cinq_appels_et_quatre_erreurs() {
     // A2 (`guide-de-correction-robustesse.md` §F6) a ajouté une quatrième
     // exception, `ConcurrentWriteError` — ce test s'appelait
     // « ...et_trois_erreurs » et n'énumérait que les trois premières ; son
     // nom et sa liste attendue suivent le vocabulaire d'erreurs à jour.
+    // L'import (issue #7) ajoute un cinquième appel ; la liste reste exacte
+    // et sa documentation est éprouvée comme celle des appels du socle.
     let banc = banc();
     let outcome = executer(
         &banc,
@@ -882,7 +1019,7 @@ fn la_surface_expose_quatre_appels_et_quatre_erreurs() {
 import pyx as importe
 print(sorted(nom for nom in dir(importe) if not nom.startswith("_")))
 print(importe.__doc__ is not None)
-print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, importe.set_column, importe.undo)))
+print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, importe.set_column, importe.undo, importe.import_file)))
 "#,
     );
 
@@ -890,10 +1027,10 @@ print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, imp
     assert_eq!(
         lignes[0],
         "['BrokenReferenceError', 'ConcurrentWriteError', 'Handle', 'InvalidValueError', \
-         'UnknownPathError', 'column', 'resolve', 'set_column', 'undo']"
+         'UnknownPathError', 'column', 'import_file', 'resolve', 'set_column', 'undo']"
     );
     assert_eq!(lignes[1], "True", "le module est documenté");
-    assert_eq!(lignes[2], "True", "les quatre appels sont documentés");
+    assert_eq!(lignes[2], "True", "les cinq appels sont documentés");
 }
 
 #[test]

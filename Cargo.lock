@@ -3876,9 +3876,12 @@ dependencies = [
  "plotyx-arch-guard",
  "plotyx-commands",
  "plotyx-core",
+ "plotyx-import",
+ "plotyx-importer",
  "plotyx-python",
  "plotyx-session",
  "pyo3",
+ "tempfile",
  "thiserror 2.0.20",
  "toml",
 ]
