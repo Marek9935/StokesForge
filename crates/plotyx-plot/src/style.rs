@@ -170,3 +170,54 @@ mod tests {
         assert_eq!(outlined.effective_edge_color(), "#000000");
     }
 }
+
+/// Les composantes `[r, g, b, a]` d'une couleur `#RRGGBB` (opaque) ou
+/// `#RRGGBBAA`, ou `None`.
+///
+/// **Source unique** de la syntaxe des couleurs du spec : le rendu
+/// (`plotyx_render::color::parse_hex`) et le sélecteur de couleur de
+/// l'interface (`plotyx-app::color_picker::parse_hex`) ne font qu'adapter son
+/// résultat à leur type, pour qu'une couleur acceptée d'un côté ne puisse pas
+/// être lue autrement de l'autre (issue #25). Tolérant sur ce qui est
+/// tolérable — casse indifférente, espaces de bordure ignorés, `#` facultatif —
+/// et net sur le reste : une chaîne mal formée (longueur, caractère non
+/// hexadécimal, non ASCII) rend `None` plutôt qu'une couleur inventée.
+pub fn parse_hex(text: &str) -> Option<[u8; 4]> {
+    let text = text.trim();
+    let text = text.strip_prefix('#').unwrap_or(text);
+    // Uniquement des chiffres hexadécimaux : `from_str_radix` accepterait
+    // aussi un `+` de tête (« +c78a8 » se lirait comme une couleur).
+    if !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |index: usize| u8::from_str_radix(text.get(index..index + 2)?, 16).ok();
+    match text.len() {
+        6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
+        8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod parse_hex_tests {
+    use super::parse_hex;
+
+    #[test]
+    fn syntax_edge_cases() {
+        assert_eq!(parse_hex("#4c78a8"), Some([0x4c, 0x78, 0xa8, 255]));
+        assert_eq!(parse_hex("4C78A8"), Some([0x4c, 0x78, 0xa8, 255]));
+        assert_eq!(parse_hex("  #4c78a880 "), Some([0x4c, 0x78, 0xa8, 0x80]));
+        for bad in [
+            "",
+            "#",
+            "#12345",
+            "#1234567",
+            "#gg0000",
+            "#é00000",
+            "4c78a8ff0",
+            "+c78a8",
+        ] {
+            assert_eq!(parse_hex(bad), None, "{bad:?}");
+        }
+    }
+}

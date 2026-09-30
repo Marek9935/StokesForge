@@ -1073,3 +1073,12 @@ Deux variables d'environnement servent aux tests et aux captures :
 Binaire headless de vérification — **pas** l'UI. Il sert à valider que le
 workspace se lie de bout en bout sans dépendre d'un choix d'UI. C'est un
 squelette : il affiche une ligne et sort.
+
+## Règles communes avec le rendu
+
+Deux règles ne sont **pas** réécrites dans l'interface (issue #25) :
+la syntaxe des couleurs `#RRGGBB[AA]` (`plotyx_plot::parse_hex`, dont
+`color_picker::parse_hex` n'est qu'un adaptateur) et le nom affiché d'une série
+(`plotyx_core::series_label`, appelée par la légende **et** par la liste des
+séries des propriétés du graphe via `series_list_label`). Les transformations
+RVB/TSL restent propres au sélecteur.

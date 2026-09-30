@@ -29,7 +29,7 @@ formules — est dans `plotyx-render`.
 | `decimate` | LTTB |
 | `interact` | correspondance pixel ↔ données d'un panneau tracé |
 | `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
-| `color` | lecture des couleurs `#RRGGBB` du spec, et l'encre automatique contrastée avec le fond (`auto_ink`) |
+| `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `plotyx_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
 | `formula` | Typst (feature `typst`) |
 | `sample` | deux graphes de démonstration |
 

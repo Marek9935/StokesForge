@@ -103,5 +103,7 @@ pub use series::{
     BinCount, PlotType, SeriesAxis, SeriesSpec, DEFAULT_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS,
 };
 pub use spec::{Panels, PlotSpec, SeriesRef, SPEC_FORMAT_VERSION, TRANSPARENT};
-pub use style::{palette_color, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE};
+pub use style::{
+    palette_color, parse_hex, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE,
+};
 pub use theme::{Theme, THEMES};

@@ -75,7 +75,7 @@ pub use node::{Node, NodeKind, WindowMeta};
 pub use path::{format_path, parse_path, ObjectPath, PathDepth};
 pub use project::{spreadsheet_name, Project};
 pub use resolve::{
-    bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_spec, MissingRole,
-    ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
+    bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_spec,
+    series_label, MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
 };
 pub use tree::Tree;

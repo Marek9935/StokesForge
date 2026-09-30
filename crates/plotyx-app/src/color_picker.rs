@@ -146,19 +146,10 @@ pub fn palette(usage: ColorUsage, curve_palette: usize) -> Vec<PaletteSection> {
 
 /// Les composantes d'une couleur `#RRGGBB` (opaque) ou `#RRGGBBAA` —
 /// casse indifférente, `#` facultatif, espaces de bordure ignorés —, ou
-/// `None`.
+/// `None`. La syntaxe est celle de [`plotyx_plot::parse_hex`], source unique
+/// partagée avec le rendu (issue #25).
 pub fn parse_hex(text: &str) -> Option<[u8; 4]> {
-    let text = text.trim();
-    let text = text.strip_prefix('#').unwrap_or(text);
-    if !text.is_ascii() {
-        return None;
-    }
-    let byte = |index: usize| u8::from_str_radix(text.get(index..index + 2)?, 16).ok();
-    match text.len() {
-        6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
-        8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
-        _ => None,
-    }
+    plotyx_plot::parse_hex(text)
 }
 
 /// La chaîne d'une couleur : `#rrggbb` si elle est opaque, `#rrggbbaa`

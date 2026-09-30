@@ -723,29 +723,11 @@ pub(crate) fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> 
     }
 }
 
-/// Nom affiché d'une série dans la liste de la fenêtre des propriétés : le
-/// même calcul que `label_for` (`plotyx-core/src/resolve.rs`, privée à ce
-/// crate) — `SeriesSpec::name` s'il est renseigné, sinon le nom long de la
-/// colonne Y, sinon son nom de nœud, sinon « (référence rompue) » si la
-/// colonne n'existe plus. Dupliqué plutôt que rendu public côté
-/// `plotyx-core` : c'est une règle d'affichage, pas une règle de résolution,
-/// et la fonction est petite.
+/// Nom affiché d'une série dans la liste de la fenêtre des propriétés : la
+/// même règle que la légende du graphe, [`plotyx_core::series_label`] (source
+/// unique, issue #25).
 pub(crate) fn series_list_label(tree: &Tree, series: &plotyx_plot::SeriesSpec) -> String {
-    if !series.name.is_empty() {
-        return series.name.clone();
-    }
-    let Some(y_node) = tree.node(series.y).filter(|node| node.kind().is_column()) else {
-        return "(référence rompue)".to_string();
-    };
-    let long_name = y_node
-        .as_column()
-        .map(|column| column.meta().long_name.as_str())
-        .unwrap_or_default();
-    if long_name.is_empty() {
-        y_node.name().to_string()
-    } else {
-        long_name.to_string()
-    }
+    plotyx_core::series_label(series, tree)
 }
 
 /// Charge utile du glisser-déposer d'une sélection de colonnes de classeur

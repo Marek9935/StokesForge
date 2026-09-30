@@ -6,25 +6,14 @@
 //! couleurs (`plotyx-plot/src/style.rs`). Le prix à payer est ici, une fois,
 //! pour les deux backends.
 
-/// Les composantes d'une couleur `#RRGGBB` ou `#RRGGBBAA`, ou `None`.
-///
-/// Tolérant sur ce qui est tolérable — casse indifférente, espaces de bordure
-/// ignorés, `#` facultatif — et net sur le reste : une chaîne mal formée rend
-/// `None` plutôt qu'une couleur inventée, à charge de l'appelant de choisir
-/// son repli. Une couleur venue d'un fichier ou d'un script n'est pas
-/// validée à l'entrée (`plotyx-plot` ne porte que la chaîne), donc ce chemin
-/// est réellement atteignable.
+/// Les composantes d'une couleur `#RRGGBB` ou `#RRGGBBAA`, ou `None` : la
+/// syntaxe est celle de [`plotyx_plot::parse_hex`] (source unique, partagée
+/// avec le sélecteur de couleur de l'interface), seul le type de retour
+/// diffère. Une couleur venue d'un fichier ou d'un script n'est pas validée à
+/// l'entrée (`plotyx-plot` ne porte que la chaîne), donc ce chemin est
+/// réellement atteignable : à charge de l'appelant de choisir son repli.
 pub fn parse_hex(text: &str) -> Option<(u8, u8, u8, u8)> {
-    let text = text.trim().strip_prefix('#').unwrap_or(text.trim());
-    if !text.is_ascii() {
-        return None;
-    }
-    let byte = |index: usize| u8::from_str_radix(text.get(index..index + 2)?, 16).ok();
-    match text.len() {
-        6 => Some((byte(0)?, byte(2)?, byte(4)?, 255)),
-        8 => Some((byte(0)?, byte(2)?, byte(4)?, byte(6)?)),
-        _ => None,
-    }
+    plotyx_plot::parse_hex(text).map(|[r, g, b, a]| (r, g, b, a))
 }
 
 /// La couleur d'un trait, avec repli sur `fallback` si la chaîne est

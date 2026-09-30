@@ -221,9 +221,16 @@ pub fn resolve_column(tree: &Tree, id: NodeId) -> Option<&Column> {
     tree.node(id).and_then(Node::as_column)
 }
 
-/// Nom affiché d'une série dont la colonne Y est `y_node` (déjà vérifié
-/// comme étant une colonne, ou `None` si la référence est rompue).
-fn label_for(series: &SeriesSpec, tree: &Tree) -> String {
+/// Nom affiché d'une série : `SeriesSpec::name` s'il est renseigné, sinon le
+/// nom long de la colonne Y, sinon son nom de nœud, sinon « (référence
+/// rompue) » si la colonne n'existe plus.
+///
+/// **Source unique** : la légende du graphe (via [`resolve_series`]) et la
+/// liste des séries de la fenêtre des propriétés (`plotyx-app`) l'appellent
+/// toutes deux, pour qu'un renommage ou un changement de règle atteigne les
+/// deux (issue #25). Elle vit ici, dans `plotyx-core`, parce que c'est
+/// l'endroit qui sait lire une colonne ; l'interface n'a pas à la réécrire.
+pub fn series_label(series: &SeriesSpec, tree: &Tree) -> String {
     if !series.name.is_empty() {
         return series.name.clone();
     }
@@ -258,7 +265,7 @@ fn resolve_numeric(tree: &Tree, id: NodeId) -> Option<Arc<Vec<f64>>> {
 /// Résout une série. Ne lève jamais : une référence rompue est un état
 /// (port de `resolve_series`, `resolve.py` ligne 165).
 pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries<'s> {
-    let label = label_for(series, tree);
+    let label = series_label(series, tree);
     let mut missing = Vec::new();
 
     let y = resolve_numeric(tree, series.y);
@@ -607,7 +614,7 @@ mod tests {
         // Le nom affiché suit le renommage : la colonne s'appelle maintenant
         // « Tension », et rien dans le spec ne fige l'ancien nom « Y ».
         assert_eq!(
-            label_for(&series, project.tree()),
+            series_label(&series, project.tree()),
             "Tension",
             "le nom affiché doit suivre le renommage de la colonne"
         );
@@ -752,14 +759,14 @@ mod tests {
             name: "Ma série".to_string(),
             ..SeriesSpec::new(f.y)
         };
-        assert_eq!(label_for(&series, f.project.tree()), "Ma série");
+        assert_eq!(series_label(&series, f.project.tree()), "Ma série");
     }
 
     #[test]
     fn empty_name_falls_back_to_the_long_name_then_the_column_name() {
         let f = Fixture::new();
         let series = SeriesSpec::new(f.y);
-        assert_eq!(label_for(&series, f.project.tree()), "Y");
+        assert_eq!(series_label(&series, f.project.tree()), "Y");
 
         let mut project = f.project;
         project
@@ -771,7 +778,7 @@ mod tests {
                 },
             )
             .expect("métadonnées valides");
-        assert_eq!(label_for(&series, project.tree()), "Tension");
+        assert_eq!(series_label(&series, project.tree()), "Tension");
     }
 
     #[test]
