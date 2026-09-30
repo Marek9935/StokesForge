@@ -2399,6 +2399,8 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
     assert_eq!(columns_a.len(), 2, "deux colonnes lues dans mesure_a.csv");
     assert_eq!(state.column_meta(columns_a[0].0).long_name, "X");
     assert_eq!(state.column_meta(columns_a[1].0).long_name, "Y");
+    assert_eq!(state.column_meta(columns_a[0].0).role, ColumnRole::X);
+    assert_eq!(state.column_meta(columns_a[1].0).role, ColumnRole::Y);
     assert_eq!(cell_f64(&state, columns_a[0].0, 0), 1.0);
     assert_eq!(cell_f64(&state, columns_a[1].0, 1), 20.0);
     let columns_b = state.visible_columns(sheet_b);

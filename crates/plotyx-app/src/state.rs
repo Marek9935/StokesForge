@@ -4352,6 +4352,13 @@ impl AppState {
                     long_name,
                     unit: parsed_column.unit.clone().unwrap_or_default(),
                     comment: parsed_column.comment.clone().unwrap_or_default(),
+                    // La première colonne importée est l'abscisse ; la
+                    // désignation fine relève de l'étape « Colonnes ».
+                    role: if index == 0 {
+                        ColumnRole::X
+                    } else {
+                        ColumnRole::default()
+                    },
                     ..Default::default()
                 });
                 self.execute(Command::AddColumn {
