@@ -31,7 +31,7 @@ Rendu (phases R0-R8 closes) : `plotyx-render` (mesure de texte unique via `epain
 
 `plotyx-robustesse` : pas de code de prod, dépend de tout le workspace — vingt-et-une batteries de tests (`b1`…`b21`, voir son `src/lib.rs`) qui éprouvent le socle aux limites.
 
-Features hors `default` : `python` (pont PyO3, exige `PYO3_CONFIG_FILE` — voir `scripts/python-test.sh`) et `typst` (notations scientifiques). `cargo build --workspace` ne compile ni l'une ni l'autre.
+Feature hors `default` : `python` (pont PyO3, exige `PYO3_CONFIG_FILE` — voir `scripts/python-test.sh`), seule du dépôt ; `cargo build --workspace` ne la compile pas. Typst (notations scientifiques) est une dépendance ferme des trois crates de rendu : `cargo build/test --workspace` le compilent et le testent.
 
 Règles de chargement par domaine (quel crate/doc charger selon la tâche) : `.claude/rules.md`.
 

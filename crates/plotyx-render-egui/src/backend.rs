@@ -82,10 +82,9 @@ pub struct EguiBackend<'a> {
     size: (u32, u32),
     text: &'a dyn TextSource,
     /// Chemin Typst de l'écran (tâche R8.3) — `None` tant que personne n'a
-    /// appelé [`Self::with_typst`], y compris quand la feature est
-    /// compilée : construire ce backend ne suffit pas à activer Typst,
-    /// c'est [`crate::GraphView`] qui décide.
-    #[cfg(feature = "typst")]
+    /// appelé [`Self::with_typst`] : construire ce backend ne suffit pas à
+    /// activer Typst. [`crate::GraphView`] l'active toujours (issue #29) ;
+    /// un backend sans lui sert de témoin aux tests.
     typst: Option<crate::typst_screen::TypstScreen<'a>>,
 }
 
@@ -102,7 +101,6 @@ impl<'a> EguiBackend<'a> {
             origin,
             size,
             text,
-            #[cfg(feature = "typst")]
             typst: None,
         }
     }
@@ -121,9 +119,7 @@ impl<'a> EguiBackend<'a> {
     /// reconnus par [`plotyx_render::formula::is_formula`] passent par
     /// `typst`, tous les autres restent en `Shape::Text`. Additif : les
     /// appelants existants (`in_rect`, `new`) sont inchangés, et un backend
-    /// construit sans cet appel se comporte exactement comme avant R8,
-    /// feature compilée ou non (tâche 8.6).
-    #[cfg(feature = "typst")]
+    /// construit sans cet appel dessine tout en texte brut, comme avant R8.
     pub fn with_typst(mut self, typst: crate::typst_screen::TypstScreen<'a>) -> Self {
         self.typst = Some(typst);
         self
@@ -362,7 +358,6 @@ impl DrawingBackend for EguiBackend<'_> {
         // vers le chemin ordinaire si la formule ne compile pas ou que
         // Typst n'est pas activé sur ce backend (`typst_screen`, tête de
         // module) — jamais d'erreur remontée pour un label malformé.
-        #[cfg(feature = "typst")]
         if let Some(typst) = &self.typst {
             if plotyx_render::formula::is_formula(text) {
                 let size_pt = plotyx_render::text::font_size(style.size());
@@ -418,7 +413,6 @@ impl DrawingBackend for EguiBackend<'_> {
         // la formule ne compile pas — la même politique que `draw_text`,
         // pour que la mesure et le dessin restent d'accord sur ce qu'ils
         // font (`architecture-choisie.md` §4.3).
-        #[cfg(feature = "typst")]
         if let Some(typst) = &self.typst {
             if plotyx_render::formula::is_formula(text) {
                 let size_pt = plotyx_render::text::font_size(style.size());

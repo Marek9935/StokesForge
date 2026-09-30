@@ -42,8 +42,8 @@ confirmation pour les choix courants couverts par la demande.
   la documentation et les messages de commit en français. Expliquer les
   décisions non évidentes au plus près du code.
 - Vérifier les features réellement exercées : les commandes Cargo par défaut
-  ne valident ni le pont Python ni Typst. Les commandes adaptées sont dans
-  `.codex/README.md`.
+  ne valident pas le pont Python (feature `python`). Typst est compilé et testé
+  par défaut. Les commandes adaptées sont dans `.codex/README.md`.
 
 ## Pour terminer une modification
 

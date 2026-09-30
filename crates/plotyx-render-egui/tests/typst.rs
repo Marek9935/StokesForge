@@ -1,10 +1,7 @@
 //! Chemin écran de Typst — tâche R8.3, et **le test de l'invariant 8.5**.
 //!
-//! Absent sans la feature `typst` (`architecture-choisie.md` §7) : ce
-//! fichier ne compile aucun test dans ce cas, comme les suites `python` du
-//! reste du dépôt (`plotyx-python/tests/embedded.rs`, par exemple).
-
-#![cfg(feature = "typst")]
+//! Compilé en permanence depuis l'issue #29 (plus de feature `typst`) :
+//! c'est désormais `cargo test --workspace` qui tient ce chemin.
 
 use egui::{FontFamily, FontId, Pos2, Rect, Shape};
 use plotyx_core::resolve::resolve_spec;

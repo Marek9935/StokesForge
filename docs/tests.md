@@ -97,8 +97,7 @@ pas croître avec X » et reste vraie sur n'importe quelle machine.
 cargo test --workspace                        # tout, sauf #[ignore]
 cargo test -p <crate> --test <fichier>        # un fichier de tests
 cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
-cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --features typst   # chemins Typst
-# (`--workspace --all-features` active AUSSI Python : voir .codex/README.md)
+# (Typst est compilé et testé par `cargo test --workspace` ; `--all-features` n'active plus que Python : voir .codex/README.md)
 scripts/python-test.sh                        # pont Python, scripts et robustesse ; pas plotyx-app
 scripts/python-test.sh -- --ignored           # + les reproductions de la frontière Python
 ```
@@ -136,9 +135,10 @@ versionné, donc un dépôt fraîchement cloné n'en a aucun. Seul `test-python`
 couvre ce chemin, et il est manuel parce qu'il télécharge une centaine de
 mégaoctets à froid.
 
-Même remarque pour la feature `typst` : `cargo build --workspace` ne compile pas
-ses chemins. Pour les exercer, `--features typst` sur les trois crates de rendu
-(`--workspace --all-features` activerait aussi Python).
+Typst, lui, n'est plus une feature (issue #29) : c'est une dépendance ferme des
+trois crates de rendu, donc `fmt`, `clippy` et `test` le compilent et le
+testent. Ce que la CI ne prouve pas pour Typst, c'est l'export : tant que
+l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
 
 ## Ce qu'il faut savoir avant d'écrire un test
 

@@ -60,14 +60,29 @@ impl<'a> TypstScreen<'a> {
         cache: &'a FormulaCache<FormulaTexture>,
         choice: &'a FontChoice,
     ) -> Result<Self, String> {
-        let (sans, math) = formula::resolve_fonts(choice)?;
-        Ok(Self {
+        let fonts = formula::resolve_fonts(choice)?;
+        Ok(Self::with_fonts(context, cache, choice, fonts))
+    }
+
+    /// Comme [`Self::new`], sur des polices déjà résolues
+    /// (`formula::resolve_fonts(choice)`) — pour un appelant qui construit
+    /// ce contexte à chaque reconstruction de la figure
+    /// ([`crate::GraphView`]) et ne veut pas redécoder deux polices à
+    /// chaque fois. `fonts` doit venir de `choice` : la clé du cache porte
+    /// `choice`, pas les polices elles-mêmes.
+    pub fn with_fonts(
+        context: &'a egui::Context,
+        cache: &'a FormulaCache<FormulaTexture>,
+        choice: &'a FontChoice,
+        (sans, math): (Font, Font),
+    ) -> Self {
+        Self {
             context,
             cache,
             choice,
             sans,
             math,
-        })
+        }
     }
 
     /// Le `pixels_per_point` réel du `Context` — celui auquel [`Self::render`]
@@ -80,10 +95,18 @@ impl<'a> TypstScreen<'a> {
     /// La taille qu'occuperait `text` compilé par Typst, à `size_pt` de
     /// corps — l'invariant de la tâche 8.5. `None` si la formule ne
     /// compile pas.
+    ///
+    /// Passe par le **même** cache et la **même** entrée que
+    /// [`Self::render`] (même texte, même corps, même `pixels_per_point`) :
+    /// Plotters mesure un texte juste avant de le dessiner, donc la
+    /// rastérisation faite ici est celle que le dessin réutilise. Avant
+    /// l'issue #29, chaque mesure recompilait et résolvait de nouveau les
+    /// polices. La taille rendue est celle de la page compilée, en points —
+    /// indépendante du `pixels_per_point` de la texture, arrondie par la
+    /// même fonction que [`formula::measure`].
     pub fn measure(&self, text: &str, size_pt: f32) -> Option<(u32, u32)> {
-        let (sans, math) = formula::resolve_fonts(self.choice).ok()?;
-        let compiled = formula::compile(text, size_pt, sans, math).ok()?;
-        Some(formula::measure(&compiled))
+        let texture = self.render(text, size_pt, self.pixels_per_point())?;
+        Some(formula::round_size_pt(texture.size_pt))
     }
 
     /// La texture (compilée et rastérisée, ou reprise du cache) pour
@@ -168,11 +191,21 @@ pub fn mesh(
     // Les quatre coins du rectangle **non tourné**, ancré en `origin` — le
     // même repère que `TextShape::pos` (le coin supérieur gauche du texte
     // non tourné, `epaint::shapes::text_shape`).
+    //
+    // **Dans l'ordre exact où `Mesh::add_rect_with_uv` pose ses sommets** :
+    // haut-gauche, haut-droit, bas-gauche, bas-droit (epaint 0.36,
+    // `mesh.rs`). Chaque sommet garde la coordonnée de texture qu'epaint lui
+    // a donnée ; un ordre « en tour » (…, bas-droit, bas-gauche) échangeait
+    // la position des deux derniers sans échanger leur texture et cisaillait
+    // l'image en bruit illisible, dans une boîte pourtant juste — défaut de
+    // R8 resté invisible tant que l'application n'affichait pas Typst, vu à
+    // la première capture de l'issue #29 et tenu par
+    // `chaque_sommet_du_maillage_porte_la_texture_de_son_coin`.
     let corners = [
         egui::vec2(0.0, 0.0),
         egui::vec2(w, 0.0),
-        egui::vec2(w, h),
         egui::vec2(0.0, h),
+        egui::vec2(w, h),
     ];
     let angle = formula::rotation_degrees(transform).to_radians() as f32;
     let (sin, cos) = angle.sin_cos();
@@ -248,6 +281,63 @@ mod tests {
             .expect("échec du rendu");
         assert_eq!(a.handle.id(), b.handle.id());
         assert_eq!(cache.len(), 1);
+    }
+
+    /// La mesure passe par le cache, et par la même entrée que le dessin
+    /// qui la suit : mesurer puis dessiner une formule ne compile qu'une
+    /// fois (issue #29 — avant, chaque mesure recompilait).
+    #[test]
+    fn mesurer_puis_dessiner_partage_une_seule_entree() {
+        let ctx = context();
+        let cache = FormulaCache::new();
+        let choice = FontChoice::default();
+        let screen =
+            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
+        let mesure = screen.measure("$lambda$", 14.0).expect("mesure");
+        let texture = screen
+            .render("$lambda$", 14.0, screen.pixels_per_point())
+            .expect("rendu");
+        assert_eq!(cache.len(), 1);
+        assert_eq!(mesure, formula::round_size_pt(texture.size_pt));
+    }
+
+    /// Chaque sommet du maillage porte la coordonnée de texture de **son**
+    /// coin : u = 0 au bord gauche, u = 1 au bord droit, v = 0 en haut,
+    /// v = 1 en bas. La boîte englobante seule ne le prouve pas — un
+    /// maillage aux sommets échangés a la même boîte et affiche un bruit
+    /// illisible (le défaut vu à l'écran lors de l'issue #29).
+    #[test]
+    fn chaque_sommet_du_maillage_porte_la_texture_de_son_coin() {
+        let ctx = context();
+        let cache = FormulaCache::new();
+        let choice = FontChoice::default();
+        let screen =
+            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
+        let texture = screen
+            .render("$lambda$", 14.0, 1.0)
+            .expect("échec du rendu");
+        let anchor = Pos::new(
+            plotters_backend::text_anchor::HPos::Left,
+            plotters_backend::text_anchor::VPos::Top,
+        );
+        let egui::Shape::Mesh(m) = mesh(
+            &texture,
+            egui::pos2(10.0, 20.0),
+            anchor,
+            FontTransform::None,
+        ) else {
+            panic!("un maillage était attendu")
+        };
+        let bounds = m.calc_bounds();
+        for vertex in &m.vertices {
+            let u = (vertex.pos.x - bounds.min.x) / bounds.width();
+            let v = (vertex.pos.y - bounds.min.y) / bounds.height();
+            assert!(
+                (u - vertex.uv.x).abs() < 1e-4 && (v - vertex.uv.y).abs() < 1e-4,
+                "sommet en ({u}, {v}) du rectangle mais texture en {:?}",
+                vertex.uv
+            );
+        }
     }
 
     /// Le maillage produit occupe une boîte de la bonne taille, ancrée à

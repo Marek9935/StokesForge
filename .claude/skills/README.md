@@ -85,7 +85,7 @@ demande  ──► plotyx-feature ──┬─► plotyx-commande ──┤
 
 `plotyx-verification` est le passage obligé avant tout commit : c'est lui qui
 porte ce qu'un `cargo test --workspace` vert **ne prouve pas** (ni `python`, ni
-`typst`, ni rien qui exige une vraie fenêtre).
+rien qui exige une vraie fenêtre).
 
 ## Les invoquer à la main
 

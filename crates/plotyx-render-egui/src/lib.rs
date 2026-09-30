@@ -49,18 +49,25 @@
 //! [`font_definitions`] sur son `Context` — `plotyx-app` le fait au
 //! démarrage.
 //!
-//! # Typst — tâche R8.3
+//! # Typst — tâche R8.3, branché par l'issue #29
 //!
-//! Derrière la feature `typst` (absente de `default`,
-//! `architecture-choisie.md` §7) : [`typst_screen`] rastérise une formule
-//! compilée par `plotyx-render` en RGBA (`typst-render`), la charge en
-//! texture `egui`, et [`EguiBackend::draw_text`]/[`estimate_text_size`]
-//! l'utilisent à la place du chemin `Shape::Text` pour un label reconnu
-//! comme une formule ([`plotyx_render::formula::is_formula`]). Sans la
-//! feature, ce module n'existe pas et rien ne change : tout le texte,
-//! `$...$` compris, reste du `Shape::Text` brut comme avant R8. Une formule
-//! qui ne compile pas dégrade vers ce même chemin plutôt que de faire
-//! échouer le rendu (voir `typst_screen`, tête de module).
+//! [`typst_screen`] rastérise une formule compilée par `plotyx-render` en
+//! RGBA (`typst-render`), la charge en texture `egui`, et
+//! [`EguiBackend::draw_text`]/[`estimate_text_size`] l'utilisent à la place
+//! du chemin `Shape::Text` pour un label reconnu comme une formule
+//! ([`plotyx_render::formula::is_formula`]). Une formule qui ne compile pas
+//! dégrade vers le `Shape::Text` brut plutôt que de faire échouer le rendu
+//! (voir `typst_screen`, tête de module).
+//!
+//! Typst est toujours compilé (la feature `typst` a été supprimée, issue
+//! #29), et [`GraphView`] — donc l'application — l'active toujours : il
+//! tient le cache des textures ([`FormulaCache`]) et les polices résolues
+//! une fois pour toutes. Reste optionnel au niveau du **backend** :
+//! [`collect_shapes`] trace tout en texte brut, [`collect_shapes_with_typst`]
+//! passe les formules par Typst. Le premier n'est pas un reliquat : c'est le
+//! témoin des tests qui prouvent que Typst est réellement consulté (une
+//! figure avec formule doit différer d'un chemin à l'autre), et le point
+//! d'entrée des tests qui n'ont pas de `Context` egui à prêter.
 
 #![cfg_attr(
     not(test),
@@ -71,7 +78,6 @@ pub mod backend;
 pub mod cache;
 pub mod feathering;
 pub mod scaled;
-#[cfg(feature = "typst")]
 pub mod typst_screen;
 pub mod view;
 
@@ -85,6 +91,7 @@ use plotyx_core::node::NodeKind;
 use plotyx_core::resolve::{resolve_panel, resolve_spec, ResolvedPlot};
 use plotyx_core::{NodeId, Tree};
 use plotyx_plot::{PlotSpec, SeriesAxis};
+use plotyx_render::formula::FormulaCache;
 use plotyx_render::pipeline::{self};
 use plotyx_render::series;
 use plotyx_session::Snapshot;
@@ -105,7 +112,6 @@ pub use plotyx_render::{FontChoice, FontSet, FontSource, ResolvedFonts};
 // (voir `plotyx_render::interact`, générique sur le backend), ce crate ne
 // fait que la consommer avec des types egui.
 pub use plotyx_render::{component_at, nearest_on_curve, AxisSide, PanelTransform, PlotComponent};
-#[cfg(feature = "typst")]
 pub use typst_screen::{FormulaTexture, TypstScreen};
 pub use view::{Framing, ViewState};
 
@@ -188,7 +194,6 @@ pub fn collect_shapes(
 ///
 /// Point d'entrée bas niveau équivalent, pour tester le chemin écran de
 /// Typst sans passer par un [`GraphView`] complet ni une session.
-#[cfg(feature = "typst")]
 pub fn collect_shapes_with_typst(
     shapes: &mut Vec<Shape>,
     rect: Rect,
@@ -234,6 +239,18 @@ pub struct PointHit {
 #[derive(Debug)]
 pub struct GraphView {
     cache: ShapeCache,
+    /// Les formules Typst déjà rastérisées (issue #29) : vit aussi longtemps
+    /// que la vue, pour qu'une reconstruction de la figure (zoom, révision)
+    /// ne recompile pas des titres inchangés. Borné par
+    /// [`FORMULA_CACHE_LIMIT`].
+    formulas: FormulaCache<FormulaTexture>,
+    /// Le choix de police des formules — la valeur par défaut, comme le
+    /// [`TextMeasurer`] de la vue.
+    font_choice: FontChoice,
+    /// Les polices Typst (texte, Math) de `font_choice`, résolues une fois à
+    /// la création de la vue. `None` si la résolution a échoué — alors tout
+    /// le texte reste brut, sans faire échouer le rendu (invariant 10).
+    typst_fonts: Option<(typst::text::Font, typst::text::Font)>,
     /// Les formes du cache mises à l'échelle d'affichage, texte compris
     /// (issue #18) : voir [`scaled`].
     scaled: scaled::ScaledShapes,
@@ -269,6 +286,17 @@ impl Default for GraphView {
 /// distinguerait pas.
 static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(0);
 
+/// Nombre de formules au-delà duquel [`GraphView`] vide son cache de
+/// textures avant de reconstruire la figure.
+///
+/// Chaque frappe dans un titre à formule crée une entrée (et une texture)
+/// qui ne resservira plus. Une figure réelle compte quelques dizaines de
+/// textes au plus — un titre, trois titres d'axe, vingt-quatre entrées de
+/// légende (`legend::MAX_ENTRIES`) —, donc la limite ne se déclenche
+/// qu'après une longue édition, et coûte alors une recompilation de ce qui
+/// est affiché (0,7 ms par formule).
+pub const FORMULA_CACHE_LIMIT: usize = 256;
+
 impl GraphView {
     /// Une vue neuve, sans rien en cache et sans zoom.
     ///
@@ -276,8 +304,12 @@ impl GraphView {
     /// la vue (le décodage des polices embarquées), payé une fois à
     /// l'ouverture d'une fenêtre de graphe.
     pub fn new() -> Self {
+        let font_choice = FontChoice::default();
         Self {
             cache: ShapeCache::new(),
+            formulas: FormulaCache::new(),
+            typst_fonts: plotyx_render::formula::resolve_fonts(&font_choice).ok(),
+            font_choice,
             scaled: scaled::ScaledShapes::default(),
             last: None,
             measurer: TextMeasurer::default(),
@@ -296,6 +328,12 @@ impl GraphView {
     /// Le cache, pour l'inspecter (compteurs de la tâche R4.3).
     pub fn cache(&self) -> &ShapeCache {
         &self.cache
+    }
+
+    /// Nombre de formules Typst gardées en cache par cette vue — pour les
+    /// tests (issue #29).
+    pub fn formula_count(&self) -> usize {
+        self.formulas.len()
     }
 
     /// La géométrie de la dernière figure construite.
@@ -429,6 +467,9 @@ impl GraphView {
         let tree = snapshot.tree.clone();
         let measurer = &self.measurer;
         let view = &self.view;
+        let formulas = &self.formulas;
+        let font_choice = &self.font_choice;
+        let typst_fonts = &self.typst_fonts;
         let outcome = self.cache.get_or_build(key, |shapes| {
             // R7.1 : la surcharge de cadrage vit sur un clone, jamais sur le
             // `PlotSpec` d'origine — voir `crate::view` pour la raison.
@@ -436,7 +477,16 @@ impl GraphView {
             view.apply(&mut framed);
             let plot = resolve_spec(&tree, &framed);
             let text = ScreenText::new(&context, measurer);
-            collect_shapes(shapes, logical_rect, &text, &plot)
+            let Some(fonts) = typst_fonts.clone() else {
+                return collect_shapes(shapes, logical_rect, &text, &plot);
+            };
+            // Vidé ici seulement : les formes que ce cache désignait sont
+            // justement en train d'être remplacées (voir `FormulaCache::clear`).
+            if formulas.len() > FORMULA_CACHE_LIMIT {
+                formulas.clear();
+            }
+            let typst = TypstScreen::with_fonts(&context, formulas, font_choice, fonts);
+            collect_shapes_with_typst(shapes, logical_rect, &text, typst, &plot)
         })?;
         if let Some(drawn) = outcome.built {
             self.last = Some(drawn);

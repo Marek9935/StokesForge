@@ -1,6 +1,6 @@
 ---
 name: plotyx-verification
-description: Écrire un test PlotYx au bon endroit, et vérifier un changement avant de le livrer — `fmt`, `clippy -D warnings`, `cargo test --workspace`, plus les features hors défaut (`python`, `typst`) que la CI ne couvre pas, mise à jour de la doc, message de commit en français sur la branche `rewriterust`. À utiliser dès que la demande est « teste », « vérifie », « c'est bon ? », « commit », « pousse », « j'ai fini », ou en fin de toute tâche d'implémentation ou de correction — un `cargo test` vert ne prouve pas ce qu'on croit dans ce dépôt, et ce skill dit exactement ce qu'il ne prouve pas.
+description: Écrire un test PlotYx au bon endroit, et vérifier un changement avant de le livrer — `fmt`, `clippy -D warnings`, `cargo test --workspace`, plus la feature hors défaut (`python`) que la CI ne couvre pas, mise à jour de la doc, message de commit en français sur la branche `rewriterust`. À utiliser dès que la demande est « teste », « vérifie », « c'est bon ? », « commit », « pousse », « j'ai fini », ou en fin de toute tâche d'implémentation ou de correction — un `cargo test` vert ne prouve pas ce qu'on croit dans ce dépôt, et ce skill dit exactement ce qu'il ne prouve pas.
 ---
 
 # Vérifier un changement PlotYx
@@ -13,15 +13,14 @@ cargo clippy --workspace --all-targets -- -D warnings   # bloquant en CI
 cargo test --workspace                        # tout, sauf #[ignore]
 cargo test -p <crate> --test <fichier>        # un fichier de tests
 cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
-cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --features typst
 scripts/python-test.sh                        # python, script, robustesse ; pas les tests de plotyx-app
 ```
 
-**Les travaux de CI par défaut n'activent ni `python` ni `typst`.** Le travail
+**Les travaux de CI par défaut n'activent pas `python`.** Le travail
 `test-python` est manuel et non bloquant : vérifier s'il a réellement tourné.
-`fmt` vérifie la mise en forme, pas la compilation de ces chemins.
-`cargo test --workspace --all-features` active **aussi Python** et exige son
-environnement ; ce n'est pas un contrôle de Typst seul. Les commandes et
+`fmt` vérifie la mise en forme, pas la compilation de ce chemin. Typst, lui,
+n'est plus une feature (issue #29) : `cargo test --workspace` le couvre.
+`--all-features` n'active plus que Python et exige son environnement. Les commandes et
 prérequis de référence sont dans [`.codex/README.md`](../../../.codex/README.md),
 § « Fonctionnalités optionnelles ».
 
@@ -32,7 +31,7 @@ tester explicitement**, sinon elle valide du code mort.
 |---|---|
 | `plotyx-python`, `plotyx-script`, la surface `pyx` | `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE`) |
 | l'intégration Python de `plotyx-app` | tester aussi `plotyx-app --features python`, avec l'environnement de `scripts/python-test.sh` ; appliquer cet environnement à Clippy |
-| les formules Typst, `plotyx-render::formula` | tests et Clippy sur les trois crates de rendu avec `--features typst`, commandes dans `.codex/README.md` |
+| les formules Typst, `plotyx-render::formula` | rien de plus : `cargo test --workspace` les couvre (dépendance ferme) ; l'export PDF/PNG reste hors Typst tant que l'issue #34 n'est pas faite |
 | une reproduction `#[ignore]` de robustesse | `cargo test -p plotyx-robustesse -- --ignored` |
 | l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `PLOTYX_APP_SCREENSHOT` + `PLOTYX_APP_AUTOQUIT_MS`, voir [`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence |
 | une vraie fenêtre (Wayland, `rfd`, multi-écran, glisser, fenêtre détachée) | rien : **aucun outil non interactif ne peut valider ça**. Le dire dans le compte rendu, ou demander une capture à l'utilisateur. |
@@ -131,7 +130,7 @@ Un résultat vert sans les features concernées ne valide pas ces chemins.
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace`
-- [ ] features hors défaut touchées → contrôles ciblés `typst` / `python`, y compris `plotyx-app` si concerné
+- [ ] features hors défaut touchées → contrôles ciblés `python`, y compris `plotyx-app` si concerné
 - [ ] aucun garde-fou d'architecture affaibli ; témoins intacts
 - [ ] `#[ignore]` retiré si une reproduction passe désormais
 - [ ] doc à jour (`//!`, page `docs/`, et fichiers de routage si les chemins ont bougé)

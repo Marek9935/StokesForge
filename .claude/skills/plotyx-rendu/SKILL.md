@@ -128,16 +128,18 @@ Donc : ajouter une fonctionnalité de tracé, c'est ajouter son témoin à
 erreur passerait pour correcte. Si vous touchez à ces tests, **lisez leurs
 témoins d'abord**.
 
-## Feature `typst`
+## Typst (dépendance ferme)
 
-Les formules scientifiques sont derrière la feature `typst`, hors défaut :
-`cargo build --workspace` ne compile pas ces chemins. Une tâche qui les touche
-doit lancer les tests et Clippy des trois crates de rendu avec `--features
-typst` (commandes dans [`.codex/README.md`](../../../.codex/README.md),
-§ « Fonctionnalités optionnelles »). `--workspace --all-features` active aussi
-Python et exige son environnement. Une formule qui ne compile pas s'affiche
-en texte brut, `$…$` compris —
-le graphe ne disparaît pas (invariant 10).
+Typst n'est plus une feature (issue #29) : il est toujours compilé, et
+`cargo test --workspace` / `cargo clippy --workspace --all-targets` couvrent ses
+chemins, sans commande ciblée. Ce qui reste optionnel est le chemin du backend :
+`collect_shapes` et `render_to_string` tracent en texte brut (le **témoin** des
+tests) ; `collect_shapes_with_typst`, `render_to_string_with_typst` et
+`with_typst()` passent les formules par Typst. `GraphView` (donc l'application)
+passe **toujours** par Typst, avec un `FormulaCache` borné (`FORMULA_CACHE_LIMIT`)
+et des polices résolues une fois (`TypstScreen::with_fonts`). L'export PDF/PNG
+n'y est pas encore branché (issue #34). Une formule qui ne compile pas s'affiche
+en texte brut, `$…$` compris — le graphe ne disparaît pas (invariant 10).
 
 ## Checklist
 
@@ -147,5 +149,5 @@ le graphe ne disparaît pas (invariant 10).
 - [ ] témoin ajouté à `accord.rs` pour toute fonctionnalité nouvelle
 - [ ] clé de cache inchangée sauf raison explicite ; feathering toujours dehors
 - [ ] zoom/pan restés dans `ViewState`, hors du `PlotSpec`
-- [ ] tests et Clippy avec `--features typst` sur les trois crates de rendu si Typst est touché
+- [ ] si Typst est touché : le témoin en texte brut reste intact, et un titre de formule inchangé n'est pas recompilé (`cache_session.rs`)
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts

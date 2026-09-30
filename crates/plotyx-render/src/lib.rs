@@ -75,7 +75,6 @@ pub mod clip;
 pub mod color;
 pub mod decimate;
 pub mod fonts;
-#[cfg(feature = "typst")]
 pub mod formula;
 pub mod hit;
 pub mod interact;

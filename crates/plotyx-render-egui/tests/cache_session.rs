@@ -26,6 +26,10 @@ struct Banc {
 
 impl Banc {
     fn new() -> Self {
+        Self::with_title("Cache")
+    }
+
+    fn with_title(title: &str) -> Self {
         let mut project = Project::new("Cache").expect("projet");
         let root = project.root();
         let book = project.add_empty_workbook(root, None).expect("classeur");
@@ -44,7 +48,7 @@ impl Banc {
         series.line = LineSpec::from_palette(0);
         panel.series.push(series);
         let spec = PlotSpec {
-            title: "Cache".into(),
+            title: title.into(),
             ..PlotSpec::empty("")
         }
         .with_panels(panel);
@@ -219,4 +223,87 @@ fn un_noeud_qui_nest_pas_un_graphe_est_une_erreur_pas_un_plantage() {
         inconnu,
         Some(Err(plotyx_render_egui::RenderError::UnknownNode(_)))
     ));
+}
+
+/// Nombre de maillages texturés parmi les formes en cache — la forme que
+/// prend une formule Typst à l'écran (`typst_screen::mesh`), là où un texte
+/// ordinaire est un `Shape::Text`.
+fn maillages(view: &GraphView) -> usize {
+    view.cache()
+        .shapes()
+        .iter()
+        .filter(|shape| matches!(shape, egui::Shape::Mesh(_)))
+        .count()
+}
+
+/// Issue #29 : `GraphView` — donc l'application — passe réellement les
+/// formules par Typst. Avant, elle appelait `collect_shapes` et un titre
+/// `$lambda$` s'affichait en texte brut, dollars compris.
+///
+/// Le témoin est le même graphe titré sans `$` : il ne doit produire aucun
+/// maillage. Sans lui, un maillage venu d'ailleurs (une série, un marqueur)
+/// ferait passer le test sans que Typst ait été consulté.
+#[test]
+fn graph_view_passe_un_titre_formule_par_typst() {
+    let context = contexte();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+
+    let temoin = Banc::with_title("Absorbance");
+    let mut vue_temoin = GraphView::new();
+    image(
+        &context,
+        &mut vue_temoin,
+        &temoin.snapshot(),
+        temoin.graph,
+        rect,
+    );
+    assert_eq!(
+        maillages(&vue_temoin),
+        0,
+        "un titre ordinaire reste du texte"
+    );
+    assert_eq!(vue_temoin.formula_count(), 0);
+
+    let banc = Banc::with_title("$lambda_\"max\"$ (nm)");
+    let mut vue = GraphView::new();
+    image(&context, &mut vue, &banc.snapshot(), banc.graph, rect);
+    assert_eq!(
+        maillages(&vue),
+        1,
+        "le titre formule doit être un maillage Typst"
+    );
+    assert_eq!(vue.formula_count(), 1);
+}
+
+/// Issue #29 : une reconstruction de la figure (nouvelle révision) ne
+/// recompile pas un titre inchangé, et la mesure d'un titre partage
+/// l'entrée de son dessin — une seule entrée pour un seul titre, pas une
+/// par appel à `estimate_text_size`.
+#[test]
+fn reconstruire_la_figure_ne_recompile_pas_un_titre_inchange() {
+    let banc = Banc::with_title("$Delta H$");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+
+    image(&context, &mut view, &banc.snapshot(), banc.graph, rect);
+    assert_eq!(view.formula_count(), 1);
+
+    banc.handle()
+        .execute(Command::SetCells {
+            column: banc.column,
+            start: 3,
+            values: ValueBlock::Float(vec![999.0]),
+            expected_version: None,
+        })
+        .expect("commande acceptée");
+    assert!(!image(
+        &context,
+        &mut view,
+        &banc.snapshot(),
+        banc.graph,
+        rect
+    ));
+    assert_eq!(maillages(&view), 1);
+    assert_eq!(view.formula_count(), 1, "le titre inchangé vient du cache");
 }

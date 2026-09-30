@@ -1,7 +1,7 @@
 # Architecture
 
-Dix-sept crates, une seule direction de dépendance, et deux features
-optionnelles. Cette page donne la carte ; le détail de chaque étage est dans
+Dix-sept crates, une seule direction de dépendance, et une feature
+optionnelle (`python`). Cette page donne la carte ; le détail de chaque étage est dans
 sa propre page.
 
 ## Le graphe, de bas en haut
@@ -105,22 +105,25 @@ complet est en tête de `crates/plotyx-id/src/lib.rs`.
 
 ## Les features
 
-Aucune n'est dans `default` : le workspace se construit et se teste
-entièrement sans elles.
+Une seule feature est hors `default`, `python` : le workspace se construit et se
+teste entièrement sans elle.
 
 | Feature | Crates | Ce qu'elle ajoute | Ce qu'elle exige |
 |---|---|---|---|
 | `python` | `plotyx-python`, `plotyx-script`, `plotyx-app`, `plotyx-robustesse` | PyO3, interpréteur embarqué, fil de script, console de script | `PYO3_CONFIG_FILE` (voir `scripts/python-config.sh`) et l'interpréteur vendorisé de `vendor/python/` |
-| `typst` | `plotyx-render`, `plotyx-render-egui`, `plotyx-render-svg` | notations scientifiques : un texte contenant `$` est compilé par Typst | rien de plus que les crates Typst |
 
-Sans la feature, le crate concerné compile vide ou retombe sur le chemin
-ordinaire — c'est la condition du droit d'abandonner Typst ou Python sans rien
-démonter. Conséquence pratique : `cargo build --workspace` **ne compile pas**
-ces chemins. Pour les exercer, `--features typst` sur les trois crates de rendu
-(Typst) ou `scripts/python-test.sh` (Python, qui pose les variables
-d'environnement). `--workspace --all-features` active **aussi Python** et exige
-son environnement : ce n'est pas un contrôle de Typst seul
+Sans la feature `python`, les crates concernés compilent vides — c'est la
+condition du droit d'abandonner Python sans rien démonter. Conséquence
+pratique : `cargo build --workspace` **ne compile pas** ce chemin ; pour
+l'exercer, `scripts/python-test.sh` pose les variables d'environnement
 (commandes de référence : [`.codex/README.md`](../.codex/README.md)).
+
+**Typst n'est pas une feature.** Depuis l'issue #29, `typst`, `typst-layout`,
+`typst-render` et `typst-svg` (tous `=0.15.1`) sont des dépendances fermes de
+`plotyx-render`, `plotyx-render-egui` et `plotyx-render-svg`, toujours
+compilées : `cargo build` et `cargo test --workspace` les couvrent. Ce qui
+reste optionnel est le **chemin d'exécution** d'un backend (formules par Typst
+ou en texte brut), détaillé dans [`rendu.md`](rendu.md#typst-r8).
 
 ## Où sont les binaires
 

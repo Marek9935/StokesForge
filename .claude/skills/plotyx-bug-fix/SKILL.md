@@ -119,8 +119,9 @@ commit du correctif** :
 
 Enchaîner sur **plotyx-verification** : `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo test --workspace`, plus les features hors défaut si le correctif les
-touche (`--all-features` pour `typst`, `scripts/python-test.sh` pour `python`).
+`cargo test --workspace`, plus la feature hors défaut si le correctif la
+touche (`scripts/python-test.sh` pour `python` ; Typst est couvert par
+`cargo test --workspace`).
 
 Mettre à jour la doc si le correctif change un comportement décrit :
 le `//!` du module (le *pourquoi*, y compris « l'hypothèse précédente était

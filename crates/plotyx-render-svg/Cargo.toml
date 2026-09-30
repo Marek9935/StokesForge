@@ -7,15 +7,6 @@ description = "Export SVG d'un graphe PlotYx : le SVGBackend de plotters, dont e
 [lints]
 workspace = true
 
-[features]
-default = []
-# R8 : le chemin export (8.4) — fragments `typst-svg` inlinés dans le SVG de
-# Plotters. `architecture-choisie.md` §7 : absente de `default`, condition
-# du droit d'abandonner Typst sans rien démonter. `plotyx-render/typst`
-# apporte le `World`, la compilation et le cache générique (8.1/8.2) ; ce
-# crate n'ajoute que ce qui est propre à l'export.
-typst = ["dep:typst", "dep:typst-svg", "plotyx-render/typst"]
-
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
 plotyx-plot = { path = "../plotyx-plot" }
@@ -39,11 +30,14 @@ svg2pdf = "0.13.0"
 # tire déjà en interne (voir Cargo.lock) pour ne pas faire coexister deux
 # `usvg` dans l'arbre de dépendances.
 resvg = "=0.45.1"
-# R8, feature `typst` : le type `Font` de `TypstExport` et le fragment SVG
-# d'une page compilée. Version épinglée exactement, comme dans
+# R8, chemin export (8.4) : le type `Font` de `TypstExport` et le fragment
+# SVG d'une page compilée, inliné dans le SVG de Plotters. `plotyx-render`
+# apporte le `World`, la compilation et le cache générique ; ce crate
+# n'ajoute que ce qui est propre à l'export. Dépendance ferme depuis l'issue
+# #29 (plus de feature `typst`). Version épinglée exactement, comme dans
 # `plotyx-render` et `plotyx-render-egui` (même raison).
-typst = { version = "=0.15.1", optional = true }
-typst-svg = { version = "=0.15.1", optional = true }
+typst = "=0.15.1"
+typst-svg = "=0.15.1"
 
 [dev-dependencies]
 tempfile = "3"

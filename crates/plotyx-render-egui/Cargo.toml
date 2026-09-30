@@ -7,15 +7,6 @@ description = "Backend egui de plotters : collecte des egui::Shape dans un Vec, 
 [lints]
 workspace = true
 
-[features]
-default = []
-# R8 : le chemin écran (8.3) — `typst-render` en RGBA, texture, `Shape::Mesh`.
-# `architecture-choisie.md` §7 : absente de `default`, condition du droit
-# d'abandonner Typst sans rien démonter. `plotyx-render/typst` apporte le
-# `World`, la compilation et le cache générique (8.1/8.2) ; ce crate n'ajoute
-# que ce qui est propre à l'écran.
-typst = ["dep:typst", "dep:typst-render", "plotyx-render/typst"]
-
 [dependencies]
 plotyx-core = { path = "../plotyx-core" }
 plotyx-plot = { path = "../plotyx-plot" }
@@ -30,12 +21,15 @@ plotters-backend = "0.3"
 # écarté précisément parce qu'aucune de ses versions ne suit
 # (`architecture-choisie.md` §4).
 egui = "0.36.2"
-# R8, feature `typst` : le type `Font`/`Bytes` de `TypstScreen` et le
-# rendu RGBA d'une page compilée. Version épinglée exactement, comme dans
-# `plotyx-render` — même raison (API non stabilisée entre versions
+# R8, chemin écran (8.3) : le type `Font`/`Bytes` de `TypstScreen` et le
+# rendu RGBA d'une page compilée (`typst-render` → texture → `Shape::Mesh`).
+# `plotyx-render` apporte le `World`, la compilation et le cache générique ;
+# ce crate n'ajoute que ce qui est propre à l'écran. Dépendance ferme depuis
+# l'issue #29 (plus de feature `typst`). Version épinglée exactement, comme
+# dans `plotyx-render` — même raison (API non stabilisée entre versions
 # mineures).
-typst = { version = "=0.15.1", optional = true }
-typst-render = { version = "=0.15.1", optional = true }
+typst = "=0.15.1"
+typst-render = "=0.15.1"
 
 [dev-dependencies]
 plotyx-commands = { path = "../plotyx-commands" }

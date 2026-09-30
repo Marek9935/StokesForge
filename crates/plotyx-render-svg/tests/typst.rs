@@ -1,9 +1,8 @@
 //! Chemin export de Typst — tâche R8.4, et le pendant export de
 //! l'invariant 8.5.
 //!
-//! Absent sans la feature `typst`, comme `plotyx-render-egui/tests/typst.rs`.
-
-#![cfg(feature = "typst")]
+//! Compilé en permanence depuis l'issue #29 (plus de feature `typst`),
+//! comme `plotyx-render-egui/tests/typst.rs`.
 
 use plotyx_core::resolve::resolve_spec;
 use plotyx_core::Project;

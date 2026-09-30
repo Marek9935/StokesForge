@@ -9,12 +9,18 @@
 //! deux dépendances backend-spécifiques que ce crate n'a aucune raison de
 //! tirer, la même règle que R4-R7 appliquent déjà au reste du pipeline.
 //!
-//! # Absent sans la feature `typst`
+//! # Toujours compilé (issue #29)
 //!
-//! Tout ce fichier est sous `#[cfg(feature = "typst")]` (voir `lib.rs`) :
-//! sans la feature, ce module n'existe pas, `is_formula` n'est appelée par
-//! personne, et les deux backends replient sur `Shape::Text` brut comme ils
-//! le faisaient avant R8 (`architecture-choisie.md` §7, tâche 8.6).
+//! Ce module était à l'origine derrière une feature `typst` hors défaut
+//! (`architecture-choisie.md` §7, tâche 8.6), pour garder le droit
+//! d'abandonner Typst sans rien démonter. La feature a été supprimée : tout
+//! texte de titre et de légende doit passer par Typst (issue #28), et un
+//! build sans elle aurait dessiné une autre figure que le build par défaut.
+//! Ce qui reste optionnel, c'est l'activation **par backend**
+//! (`with_typst`) : un backend construit sans elle dessine tout en texte
+//! brut, et c'est le témoin des tests qui prouvent que Typst est réellement
+//! consulté. Le repli en texte brut, `$…$` compris, ne joue plus en
+//! production que pour une chaîne qui ne compile pas (invariant 10).
 //!
 //! # La décision que ce module tranche, et que le roadmap ne tranchait pas
 //!
@@ -228,12 +234,24 @@ impl Compiled {
 /// qu'une page A4 : c'est ce qui fait qu'une formule compile en un
 /// document d'une page dont la taille **est** la taille du libellé, sans
 /// avoir à la déduire d'un rognage a posteriori.
+///
+/// `top-edge`/`bottom-edge: "bounds"` : par défaut, Typst borne une ligne
+/// de la hauteur des capitales à la ligne de base. Une page ajustée à son
+/// contenu coupait donc tout ce qui descend sous la ligne de base — les
+/// jambages (« p », « y ») et surtout les indices (`n_i`, `"Ru(bpy)"_3`),
+/// l'essentiel d'une notation scientifique. Le défaut est passé inaperçu
+/// jusqu'à la première capture de l'application avec Typst branché (issue
+/// #29). Avec `"bounds"`, la boîte est l'encre réellement posée : rien
+/// n'est coupé, au prix d'une hauteur qui varie d'un libellé à l'autre
+/// (« a » est moins haut que « Ag ») — l'alignement des lignes de base
+/// entre libellés voisins est le sujet de l'issue #32.
 pub fn compile(text: &str, size_pt: f32, sans: Font, math: Font) -> Result<Compiled, String> {
     let sans_name = family_name(&sans);
     let math_name = family_name(&math);
     let markup = format!(
         "#set page(width: auto, height: auto, margin: 0pt, fill: none)\n\
-         #set text(font: \"{sans_name}\", size: {size_pt}pt)\n\
+         #set text(font: \"{sans_name}\", size: {size_pt}pt, \
+                   top-edge: \"bounds\", bottom-edge: \"bounds\")\n\
          #show math.equation: set text(font: \"{math_name}\")\n\
          {text}"
     );
@@ -367,6 +385,26 @@ impl<V> FormulaCache<V> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Vide le cache — pour borner sa taille chez un appelant qui vit
+    /// longtemps (`plotyx_render_egui::GraphView`, où chaque frappe dans un
+    /// titre crée une entrée). À n'appeler qu'**avant** de reconstruire tout
+    /// ce qui référence les artefacts retirés : une texture libérée alors
+    /// qu'une forme en cache la désigne encore s'afficherait vide.
+    pub fn clear(&self) {
+        self.entries
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clear();
+    }
+}
+
+impl<V> std::fmt::Debug for FormulaCache<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FormulaCache")
+            .field("entries", &self.len())
+            .finish()
     }
 }
 
@@ -629,6 +667,23 @@ mod tests {
         let grande = compile("$lambda$", 32.0, sans2, math2).unwrap();
         assert!(grande.size_pt().0 > petite.size_pt().0);
         assert!(grande.size_pt().1 > petite.size_pt().1);
+    }
+
+    /// Un indice agrandit la boîte **vers le bas** : la page va jusqu'au
+    /// bas de l'encre, pas jusqu'à la ligne de base (défaut de Typst, qui
+    /// coupait les indices et les jambages à l'écran — issue #29). Même
+    /// vérification sur un jambage de texte ordinaire, hors mode maths.
+    #[test]
+    fn un_indice_ou_un_jambage_nest_pas_coupe_par_la_page() {
+        let hauteur = |text: &str| {
+            let (sans, math) = noto();
+            compile(text, 14.0, sans, math)
+                .expect("compilation Typst échouée")
+                .size_pt()
+                .1
+        };
+        assert!(hauteur("$n_i$") > hauteur("$n$"), "indice coupé");
+        assert!(hauteur("pn") > hauteur("n"), "jambage coupé");
     }
 
     /// Le cache : une deuxième demande identique ne recompile pas — vérifié

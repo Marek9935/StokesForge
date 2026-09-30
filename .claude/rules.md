@@ -57,10 +57,11 @@ arbitrés, documentés à l'endroit de leur constante et recensés dans
 
 ## Features : ce que `cargo build --workspace` ne compile pas
 
-Ni `python` ni `typst` n'est dans `default`. Une tâche qui les touche doit
-compiler et tester **explicitement**, sinon elle valide du code mort :
+Seule `python` est hors `default`. Une tâche qui la touche doit compiler et
+tester **explicitement**, sinon elle valide du code mort. Typst n'est plus une
+feature : c'est une dépendance ferme des crates de rendu, que `cargo build` et
+`cargo test --workspace` compilent et testent.
 
-- `typst` → `cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --features typst` (et `cargo clippy` ciblé de même ; `--workspace --all-features` active **aussi Python** et exige son environnement — voir `.codex/README.md`) ;
 - `python` → `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE` et les autres
   variables ; sans lui, PyO3 ne compile pas). L'interpréteur est vendorisé dans
   `vendor/python/` et **n'est pas versionné**.

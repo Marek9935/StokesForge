@@ -30,7 +30,7 @@ formules — est dans `plotyx-render`.
 | `interact` | correspondance pixel ↔ données d'un panneau tracé |
 | `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
 | `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `plotyx_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
-| `formula` | Typst (feature `typst`) |
+| `formula` | les formules Typst (dépendance ferme, pas une feature) |
 | `sample` | deux graphes de démonstration |
 
 ### Transparence
@@ -291,7 +291,7 @@ défaut de fidélité mineur, c'est un graphe muet. Repli sur le filet Noto
 embarqué si aucune police système ne convient ; le PNG réutilise la même
 politique telle quelle.
 
-## Typst (feature `typst`, R8)
+## Typst (R8)
 
 Un `&str` est une formule Typst **si et seulement s'il contient `$`**, le
 délimiteur natif du mode mathématique. Décision prise dans `formula.rs` : pas de
@@ -315,9 +315,55 @@ invraisemblable, vert et bleu encodant un compteur), posé à la place du texte,
 puis substitué par `splice` une fois le document entier écrit, après
 revérification de la position et de la taille.
 
-Sans la feature, ce module n'existe pas et les deux backends replient sur
-`Shape::Text` brut. Une formule qui ne compile pas ne fait jamais échouer le
-rendu : le texte brut, `$…$` compris, s'affiche tel quel (invariant 10).
+Typst n'est plus une feature Cargo (issue #29) : `typst`, `typst-layout`,
+`typst-render` et `typst-svg` (tous `=0.15.1`) sont des dépendances fermes des
+trois crates, toujours compilées, et `cargo test --workspace` exerce ces
+chemins. Ce qui reste optionnel est le **chemin d'exécution du backend** :
+`collect_shapes` (écran) et `render_to_string` (export SVG, donc PDF et PNG qui
+s'appuient dessus) tracent tout en `Shape::Text` / texte brut ;
+`collect_shapes_with_typst`, `render_to_string_with_typst` et `with_typst()`
+passent les formules par Typst. Le chemin en texte brut sert de **témoin** aux
+tests. Brancher l'export sur Typst est l'objet de l'issue #34, pas encore fait :
+aujourd'hui seul l'écran affiche les formules composées.
+
+Une formule qui ne compile pas ne fait jamais échouer le rendu : le texte brut,
+`$…$` compris, s'affiche tel quel (invariant 10).
+
+### Côté écran : `GraphView` passe toujours par Typst
+
+`GraphView` (donc `plotyx-app`) appelle toujours `collect_shapes_with_typst`. Il
+résout les polices Typst **une fois**, à sa création (`TypstScreen::with_fonts`) ;
+si cette résolution échoue, tout reste en texte brut. Il tient un
+`FormulaCache<FormulaTexture>` entre deux reconstructions de la figure, borné par
+`FORMULA_CACHE_LIMIT` (256) : au-delà, le cache est vidé **avant** la
+reconstruction qui suit. Les textures ne sont donc recompilées que si le texte
+d'une formule, sa taille ou le `pixels_per_point` change, pas à chaque
+reconstruction. La couleur n'est pas encore dans la clé : une formule sort
+toujours en noir (issue #30).
+
+`TypstScreen::measure` passe par ce même cache, sur **la même entrée** que le
+dessin : mesurer puis dessiner une formule ne la compile qu'une fois (avant,
+chaque mesure recompilait).
+
+Deux défauts de R8, restés invisibles tant que l'application n'affichait pas
+Typst, ont été vus à la première capture et corrigés :
+
+- **le maillage cisaillait la texture** : `typst_screen::mesh` remplace les
+  sommets de `Mesh::add_rect_with_uv` et doit suivre **son** ordre
+  (haut-gauche, haut-droit, bas-gauche, bas-droit), faute de quoi chaque
+  formule s'affiche en bruit dans une boîte pourtant juste — la boîte
+  englobante ne le voit pas, le test
+  `chaque_sommet_du_maillage_porte_la_texture_de_son_coin` si ;
+- **la page coupait les indices et les jambages** : Typst borne une ligne de
+  la hauteur des capitales à la ligne de base ; `compile` pose
+  `top-edge`/`bottom-edge: "bounds"` pour que la page aille jusqu'au bas de
+  l'encre (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`). La hauteur
+  d'un libellé varie donc avec son contenu ; l'alignement des lignes de base
+  entre libellés voisins relève de l'issue #32.
+
+Une formule agrandie avec la fenêtre (`paint_scaled`) reste floue : `scaled`
+ne remet en page que les `Shape::Text`, le maillage Typst est étiré
+(issue #31).
 
 ## Ce qu'il faut savoir avant de modifier
 
@@ -334,7 +380,15 @@ rendu : le texte brut, `$…$` compris, s'affiche tel quel (invariant 10).
   `cargo run -p plotyx-render-svg --example figure`.
 - Les tests : `render/tests/{mesure,geometrie,frontiere}.rs`,
   `render-egui/tests/{accord,formes,cache_session,feathering,interaction,typst}.rs`,
-  `render-svg/tests/{export,frontiere,pdf,typst}.rs`.
+  `render-svg/tests/{export,frontiere,pdf,typst}.rs`. Côté Typst :
+  `cache_session.rs` (`graph_view_passe_un_titre_formule_par_typst`,
+  `reconstruire_la_figure_ne_recompile_pas_un_titre_inchange`) verrouille que
+  `GraphView` passe par Typst et ne recompile pas un titre inchangé ;
+  `typst_screen.rs` (`mesurer_puis_dessiner_partage_une_seule_entree`,
+  `chaque_sommet_du_maillage_porte_la_texture_de_son_coin`) verrouille le
+  partage de l'entrée de cache entre mesure et dessin et l'ordre des sommets ;
+  `formula.rs` (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`) la
+  hauteur de page.
 
 ### Agrandir un graphe sans flouter le texte
 

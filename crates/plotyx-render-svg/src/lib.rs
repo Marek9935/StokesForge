@@ -27,15 +27,18 @@
 //!
 //! # Typst — tâche R8.4
 //!
-//! Derrière la feature `typst` (absente de `default`,
-//! `architecture-choisie.md` §7) : [`typst_export`] compile un label
-//! reconnu comme une formule ([`plotyx_render::formula::is_formula`]), pose
-//! un témoin substitué après coup par un fragment `typst-svg` inliné —
-//! voir la doc de [`typst_export`] pour le mécanisme complet, détaillé en
-//! tête de ce module. [`render_to_string_with_typst`] est le point d'entrée
-//! équivalent à [`render_to_string`], Typst activé. Sans la feature, ce
-//! module n'existe pas et [`render_to_string`] se comporte exactement comme
-//! avant R8.
+//! [`typst_export`] compile un label reconnu comme une formule
+//! ([`plotyx_render::formula::is_formula`]), pose un témoin substitué après
+//! coup par un fragment `typst-svg` inliné — voir la doc de
+//! [`typst_export`] pour le mécanisme complet, détaillé en tête de ce
+//! module. [`render_to_string_with_typst`] est le point d'entrée équivalent
+//! à [`render_to_string`], Typst activé.
+//!
+//! Typst est toujours compilé depuis l'issue #29 (la feature `typst` a été
+//! supprimée). [`render_to_string`] et les conversions PDF/PNG qui s'appuient
+//! sur lui tracent encore tout en texte brut : les brancher sur Typst est le
+//! travail de l'export depuis l'application (issue #34). Le chemin en texte
+//! brut reste, comme côté écran, le témoin des tests Typst.
 
 #![cfg_attr(
     not(test),
@@ -45,7 +48,6 @@
 pub mod backend;
 pub mod pdf;
 pub mod png;
-#[cfg(feature = "typst")]
 pub mod typst_export;
 
 use std::path::Path;
@@ -94,7 +96,6 @@ pub enum SvgError {
     /// lecture échouerait d'une façon que
     /// [`plotyx_render::fonts::resolve`] ne rencontre déjà pas lui-même
     /// (repli silencieux sur Noto).
-    #[cfg(feature = "typst")]
     #[error("résolution des polices Typst : {0}")]
     Typst(String),
 }
@@ -135,7 +136,6 @@ pub fn render_to_string(
 /// appel à l'autre, contrairement à [`plotyx_render_egui::GraphView`] côté
 /// écran, qui vit plus longtemps qu'un export. Pas un problème pour un
 /// export, par nature ponctuel.
-#[cfg(feature = "typst")]
 pub fn render_to_string_with_typst(
     plot: &ResolvedPlot<'_>,
     size: (u32, u32),

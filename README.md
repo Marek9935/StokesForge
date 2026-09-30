@@ -31,6 +31,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 `rust-toolchain.toml` épingle la chaîne stable + `rustfmt`/`clippy`.
 
-Les features `python` (pont PyO3) et `typst` (notations scientifiques) sont
-absentes de `default` : les commandes ci-dessus ne les compilent pas. Voir
+La feature `python` (pont PyO3) est absente de `default` : les commandes
+ci-dessus ne la compilent pas. Typst (notations scientifiques) est une
+dépendance ferme, toujours compilée. Voir
 [`docs/architecture.md`](docs/architecture.md#les-features).

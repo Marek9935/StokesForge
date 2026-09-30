@@ -308,8 +308,8 @@ Tout en **français**, comme le reste du dépôt.
 ## 6. Finir
 
 Enchaîner sur le skill **plotyx-verification** : `fmt`, `clippy -D warnings`,
-`cargo test --workspace`, plus les features hors défaut si le changement les
-touche (`python`, `typst`), relecture du diff, message de commit en français.
+`cargo test --workspace`, plus la feature hors défaut si le changement la
+touche (`python`), relecture du diff, message de commit en français.
 
 ## Checklist
 

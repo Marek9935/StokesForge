@@ -119,7 +119,7 @@ traité cette tâche). Le détail, gardé pour mémoire :
 | `b10` (compteur de version) | pas de cas mixte | **comblé** — la saisie tolérante qui promeut une colonne, puis une seconde saisie sur une colonne déjà mixte, avancent toutes deux le compteur |
 | `b2` (persistance) | le cas mixte vit dans `roundtrip.rs`, pas dans la batterie | **comblé** — ajouté à `b2_aller_retour_preserve_tout`, qui compare déjà type/méta/version/cellules nœud par nœud |
 | feature `python` | **non compilée par défaut, donc non vérifiée.** `float_values()` rend `None` pour une colonne mixte, ce qui *devrait* donner le refus attendu côté `pyx`, mais aucun test ne l'exerce. À lancer avec `scripts/python-test.sh` | **toujours ouvert** — voir la note dédiée ci-dessous |
-| feature `typst` | non compilée non plus. Aucun code sous `typst` ne touche aux colonnes (vérifié), donc risque faible — mais non nul | **vérifié** — `cargo build`/`cargo test` avec `--features typst` sur `plotyx-render`, `plotyx-render-svg` et `plotyx-render-egui` passent tous, sans aucun changement de code requis : confirme que rien sous `typst` ne touche aux colonnes |
+| feature `typst` (supprimée depuis : Typst est une dépendance ferme, issue #29) | non compilée non plus. Aucun code sous `typst` ne touche aux colonnes (vérifié), donc risque faible — mais non nul | **vérifié** — `cargo build`/`cargo test` avec `--features typst` sur `plotyx-render`, `plotyx-render-svg` et `plotyx-render-egui` passent tous, sans aucun changement de code requis : confirme que rien sous `typst` ne touche aux colonnes |
 
 **Note sur la feature `python`.** `scripts/python-test.sh` exige un
 interpréteur CPython embarqué que `scripts/python-vendor.sh` télécharge

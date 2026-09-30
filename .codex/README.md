@@ -149,18 +149,14 @@ n'est pas nécessaire de reconstruire le workspace.
 
 ### Fonctionnalités optionnelles
 
-Aucune des features `python` et `typst` n'est activée par défaut. Un contrôle
-sans la feature ne valide pas le code qu'elle protège.
+La feature `python` n'est pas activée par défaut (c'est la seule hors
+`default`). Un contrôle sans la feature ne valide pas le code qu'elle protège.
 
-Pour Typst, cibler explicitement les trois crates de rendu :
-
-```sh
-cargo test -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --features typst
-cargo clippy -p plotyx-render -p plotyx-render-egui -p plotyx-render-svg --all-targets --features typst -- -D warnings
-```
-
-`cargo test --workspace --all-features` active **aussi Python** et exige son
-environnement ; ce n'est pas une commande réservée à Typst.
+Typst n'est plus une feature (issue #29) : c'est une dépendance ferme des trois
+crates de rendu. `cargo test --workspace` et `cargo clippy --workspace
+--all-targets -- -D warnings` le compilent et le testent ; aucune commande
+ciblée n'est nécessaire. `--all-features` n'active plus que Python et exige son
+environnement.
 
 Pour Python, examiner d'abord l'interpréteur dans
 `vendor/python/extracted/python/` et lire les scripts. Si nécessaire,
@@ -204,5 +200,5 @@ Actualiser ce guide si les outils ou chemins évoluent. Éviter d'y copier les
 détails volatils déjà maintenus dans le code ou les manifestes.
 
 Dans le compte rendu, distinguer les tests exécutés, les échecs rencontrés
-et les vérifications non réalisées. Ne pas annoncer une validation Python,
-Typst ou visuelle à partir des seuls tests Rust par défaut.
+et les vérifications non réalisées. Ne pas annoncer une validation Python
+ou visuelle à partir des seuls tests Rust par défaut.

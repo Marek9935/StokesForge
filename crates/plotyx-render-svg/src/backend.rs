@@ -39,7 +39,6 @@ use plotters::prelude::*;
 use plotters_backend::{
     BackendColor, BackendCoord, BackendStyle, BackendTextStyle, DrawingErrorKind,
 };
-#[cfg(feature = "typst")]
 use plotyx_render::text::font_size;
 use plotyx_render::text::{estimate, TextMeasurer};
 
@@ -57,7 +56,6 @@ pub struct MeasuredSvgBackend<'a> {
     /// (`crate::render_to_string_with_typst`), pour que
     /// [`crate::typst_export::splice`] retrouve les témoins enregistrés
     /// pendant le tracé. Voir la doc de [`Self::with_typst`].
-    #[cfg(feature = "typst")]
     typst: Option<&'a crate::typst_export::TypstExport<'a>>,
 }
 
@@ -67,7 +65,6 @@ impl<'a> MeasuredSvgBackend<'a> {
         Self {
             inner,
             measurer,
-            #[cfg(feature = "typst")]
             typst: None,
         }
     }
@@ -87,7 +84,6 @@ impl<'a> MeasuredSvgBackend<'a> {
     /// tous les autres restent le `<text>` ordinaire de `plotters-svg`.
     /// Additif comme `EguiBackend::with_typst` : `new`/`with_string`
     /// restent inchangés, tâche 8.6.
-    #[cfg(feature = "typst")]
     pub fn with_typst(mut self, typst: &'a crate::typst_export::TypstExport<'a>) -> Self {
         self.typst = Some(typst);
         self
@@ -175,7 +171,6 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         // et pourquoi il n'a pas besoin de toucher `SVGBackend`. Dégrade
         // vers le `<text>` ordinaire si Typst n'est pas activé ou que la
         // formule ne compile pas.
-        #[cfg(feature = "typst")]
         if let Some(typst) = &self.typst {
             if plotyx_render::formula::is_formula(text) {
                 let size_pt = font_size(style.size());
@@ -230,7 +225,6 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         // label Typst se mesure en interrogeant Typst, jamais l'heuristique
         // `epaint`/naïve. Dégrade vers la mesure `epaint` si Typst n'est
         // pas activé ou que la formule ne compile pas.
-        #[cfg(feature = "typst")]
         if let Some(typst) = &self.typst {
             if plotyx_render::formula::is_formula(text) {
                 let size_pt = font_size(style.size());
