@@ -28,7 +28,7 @@ impl MetadataLine {
 /// clés, ou des sections entières (jusqu'au titre de section suivant).
 pub(crate) fn split_lines<'a>(
     lines: impl Iterator<Item = &'a str>,
-    separator: EffectiveSeparator,
+    separator: &EffectiveSeparator,
     recipe: &ImportRecipe,
 ) -> Vec<MetadataLine> {
     let excluded: Vec<String> = recipe
@@ -88,10 +88,14 @@ mod tests {
     use super::*;
 
     fn split(lines: &[&str], recipe: &ImportRecipe) -> Vec<(String, String)> {
-        split_lines(lines.iter().copied(), EffectiveSeparator::Char(';'), recipe)
-            .into_iter()
-            .map(|l| (l.key, l.value))
-            .collect()
+        split_lines(
+            lines.iter().copied(),
+            &EffectiveSeparator::Char(';'),
+            recipe,
+        )
+        .into_iter()
+        .map(|l| (l.key, l.value))
+        .collect()
     }
 
     #[test]

@@ -4019,7 +4019,7 @@ impl AppState {
             self.fail("Choisis un fichier avant de détecter l'en-tête".to_string());
             return;
         };
-        let (separator, decimal) = (import.recipe.separator, import.recipe.decimal);
+        let (separator, decimal) = (import.recipe.separator.clone(), import.recipe.decimal);
         match self.import_bytes(&path).map(|bytes| bytes.as_ref().clone()) {
             Ok(bytes) => {
                 let layout = plotyx_import::detect_header_layout(&bytes, separator, decimal);

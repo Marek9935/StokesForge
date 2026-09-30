@@ -5247,13 +5247,40 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
 }
 
 /// Libellé affiché pour un [`Separator`] dans la fenêtre d'import.
-fn separator_label(separator: Separator) -> &'static str {
+fn separator_label(separator: &Separator) -> &'static str {
     match separator {
         Separator::Comma => "Virgule",
         Separator::Semicolon => "Point-virgule",
         Separator::Tab => "Tabulation",
         Separator::Whitespace => "Espaces",
+        Separator::Custom(_) => "Autre caractère",
+        Separator::FixedWidth(_) => "Largeur fixe",
         Separator::Auto => "Auto",
+    }
+}
+
+/// Libellé d'un encodage forcé.
+fn encoding_label(encoding: plotyx_import::Encoding) -> &'static str {
+    use plotyx_import::Encoding;
+    match encoding {
+        Encoding::Auto => "Automatique",
+        Encoding::Utf8 => "UTF-8",
+        Encoding::Windows1252 => "Windows-1252",
+        Encoding::Latin1 => "ISO 8859-1",
+        Encoding::Utf16Le => "UTF-16 (petit-boutiste)",
+        Encoding::Utf16Be => "UTF-16 (gros-boutiste)",
+    }
+}
+
+/// Libellé d'un séparateur de milliers.
+fn thousands_label(thousands: Option<char>) -> &'static str {
+    match thousands {
+        None => "Aucun",
+        Some(' ') => "Espace",
+        Some(',') => "Virgule",
+        Some('.') => "Point",
+        Some('\'') => "Apostrophe",
+        Some(_) => "Autre",
     }
 }
 
@@ -5262,6 +5289,7 @@ fn decimal_label(decimal: DecimalStyle) -> &'static str {
     match decimal {
         DecimalStyle::Dot => "Point",
         DecimalStyle::Comma => "Virgule",
+        DecimalStyle::Auto => "Auto",
     }
 }
 
@@ -5324,6 +5352,7 @@ fn line_role_color(ui: &egui::Ui, role: plotyx_import::LineRole) -> egui::Color3
         | LineRole::ColumnHeaderRow => egui::Color32::from_rgb(80, 140, 220),
         LineRole::SubheaderComment => egui::Color32::from_rgb(200, 80, 200),
         LineRole::Footer => ui.visuals().warn_fg_color,
+        LineRole::Comment | LineRole::Skipped => ui.visuals().weak_text_color(),
         LineRole::Data | LineRole::Blank => ui.visuals().text_color(),
     }
 }
@@ -5340,6 +5369,8 @@ fn preview_legend(ui: &mut egui::Ui) {
             (LineRole::ColumnHeaderRow, "noms de colonnes"),
             (LineRole::Data, "données"),
             (LineRole::Footer, "pied de page"),
+            (LineRole::Comment, "commentaire ignoré"),
+            (LineRole::Skipped, "ligne ignorée"),
         ] {
             let color = line_role_color(ui, role);
             let code = match role {
@@ -5678,50 +5709,151 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(import) = state.import_state_mut() else {
         return;
     };
+    let recipe = &mut import.recipe;
     ui.horizontal(|ui| {
         ui.label("Séparateur :");
         egui::ComboBox::from_id_salt("plotyx_import_separator_combo")
-            .selected_text(separator_label(import.recipe.separator))
+            .selected_text(separator_label(&recipe.separator))
             .show_ui(ui, |ui| {
                 for sep in [
                     Separator::Comma,
                     Separator::Semicolon,
                     Separator::Tab,
                     Separator::Whitespace,
+                    Separator::Custom('|'),
+                    Separator::FixedWidth(vec![10]),
                     Separator::Auto,
                 ] {
+                    let same =
+                        std::mem::discriminant(&recipe.separator) == std::mem::discriminant(&sep);
+                    if ui.selectable_label(same, separator_label(&sep)).clicked() && !same {
+                        recipe.separator = sep;
+                    }
+                }
+            });
+        match &mut recipe.separator {
+            Separator::Custom(c) => {
+                let mut text = c.to_string();
+                if ui
+                    .add(egui::TextEdit::singleline(&mut text).desired_width(24.0))
+                    .changed()
+                {
+                    if let Some(first) = text.chars().last() {
+                        *c = first;
+                    }
+                }
+            }
+            Separator::FixedWidth(widths) => {
+                let mut text = widths
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                if ui
+                    .add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
+                    .on_hover_text("Largeur de chaque colonne, sauf la dernière (ex. 10,8,8)")
+                    .changed()
+                {
+                    *widths = text
+                        .split(',')
+                        .filter_map(|part| part.trim().parse::<usize>().ok())
+                        .collect();
+                }
+            }
+            _ => {}
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Séparateur décimal :");
+        egui::ComboBox::from_id_salt("plotyx_import_decimal_combo")
+            .selected_text(decimal_label(recipe.decimal))
+            .show_ui(ui, |ui| {
+                for dec in [DecimalStyle::Auto, DecimalStyle::Dot, DecimalStyle::Comma] {
                     if ui
-                        .selectable_label(import.recipe.separator == sep, separator_label(sep))
+                        .selectable_label(recipe.decimal == dec, decimal_label(dec))
                         .clicked()
                     {
-                        import.recipe.separator = sep;
+                        recipe.decimal = dec;
+                    }
+                }
+            });
+        ui.label("Milliers :");
+        egui::ComboBox::from_id_salt("plotyx_import_thousands_combo")
+            .selected_text(thousands_label(recipe.thousands))
+            .show_ui(ui, |ui| {
+                for candidate in [None, Some(' '), Some(','), Some('.'), Some('\'')] {
+                    if ui
+                        .selectable_label(recipe.thousands == candidate, thousands_label(candidate))
+                        .clicked()
+                    {
+                        recipe.thousands = candidate;
                     }
                 }
             });
     });
     ui.horizontal(|ui| {
-        ui.label("Séparateur décimal :");
-        egui::ComboBox::from_id_salt("plotyx_import_decimal_combo")
-            .selected_text(decimal_label(import.recipe.decimal))
+        ui.label("Valeurs manquantes (séparées par des virgules) :");
+        let mut text = recipe.missing_tokens.join(", ");
+        if ui
+            .add(egui::TextEdit::singleline(&mut text).desired_width(140.0))
+            .on_hover_text("Jetons lus comme une cellule vide : --, n/a, *, NaN…")
+            .changed()
+        {
+            recipe.missing_tokens = text
+                .split(',')
+                .map(|token| token.trim().to_string())
+                .filter(|token| !token.is_empty())
+                .collect();
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Préfixe des lignes de commentaire :");
+        ui.add(egui::TextEdit::singleline(&mut recipe.comment_prefix).desired_width(60.0))
+            .on_hover_text(
+                "Les lignes de données qui commencent par ce préfixe sont ignorées (#, ;, //…)",
+            );
+    });
+    ui.horizontal(|ui| {
+        ui.label("Encodage :");
+        egui::ComboBox::from_id_salt("plotyx_import_encoding_combo")
+            .selected_text(encoding_label(recipe.encoding))
             .show_ui(ui, |ui| {
-                for dec in [DecimalStyle::Dot, DecimalStyle::Comma] {
+                use plotyx_import::Encoding;
+                for candidate in [
+                    Encoding::Auto,
+                    Encoding::Utf8,
+                    Encoding::Windows1252,
+                    Encoding::Latin1,
+                    Encoding::Utf16Le,
+                    Encoding::Utf16Be,
+                ] {
                     if ui
-                        .selectable_label(import.recipe.decimal == dec, decimal_label(dec))
+                        .selectable_label(recipe.encoding == candidate, encoding_label(candidate))
                         .clicked()
                     {
-                        import.recipe.decimal = dec;
+                        recipe.encoding = candidate;
                     }
                 }
             });
     });
     ui.horizontal(|ui| {
         ui.label("Caractères à retirer en tête de chaque ligne de données :");
-        let mut value = import.recipe.skip_chars as i64;
+        let mut value = recipe.skip_chars as i64;
         if ui
             .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
             .changed()
         {
-            import.recipe.skip_chars = value.max(0) as usize;
+            recipe.skip_chars = value.max(0) as usize;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Lignes de données à ignorer au début :");
+        let mut value = recipe.skip_data_rows as i64;
+        if ui
+            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+            .changed()
+        {
+            recipe.skip_data_rows = value.max(0) as usize;
         }
     });
 }

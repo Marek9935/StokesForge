@@ -3,8 +3,9 @@
 //! endroit (un aperçu qui montrerait une coupure différente de l'import
 //! serait pire que pas d'aperçu).
 
-use crate::parse::{parse_token, EffectiveSeparator};
-use crate::recipe::{DataEnd, DecimalStyle};
+use crate::numbers::NumberFormat;
+use crate::parse::EffectiveSeparator;
+use crate::recipe::DataEnd;
 
 /// Nombre de lignes de données à **garder** parmi `lines` (les lignes qui
 /// suivent l'en-tête et la ligne d'en-tête de colonnes, `skip_chars` déjà
@@ -14,8 +15,8 @@ pub(crate) fn data_len<'a>(
     lines: impl Iterator<Item = &'a str>,
     total: usize,
     end: &DataEnd,
-    separator: EffectiveSeparator,
-    decimal: DecimalStyle,
+    separator: &EffectiveSeparator,
+    numbers: &NumberFormat,
 ) -> usize {
     match end {
         DataEnd::None => total,
@@ -42,7 +43,7 @@ pub(crate) fn data_len<'a>(
                 separator
                     .tokenize(line)
                     .first()
-                    .is_some_and(|token| !parse_token(token, decimal).is_nan())
+                    .is_some_and(|token| !numbers.parse(token).is_nan())
             };
             let mut armed = false;
             for (index, line) in lines.enumerate() {

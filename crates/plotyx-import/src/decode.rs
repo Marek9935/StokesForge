@@ -44,6 +44,50 @@ pub fn decode_text(bytes: &[u8]) -> Result<Cow<'_, str>, ImportError> {
     Ok(text)
 }
 
+/// Décode `bytes` avec l'encodage **choisi** dans la recette
+/// ([`crate::recipe::Encoding`]) ; `Auto` se comporte comme [`decode_text`].
+/// Un encodage forcé ne fait jamais échouer l'import pour un octet invalide
+/// (il devient `U+FFFD`) ; seul un fichier de type binaire est refusé.
+pub fn decode_with(
+    bytes: &[u8],
+    encoding: crate::recipe::Encoding,
+) -> Result<Cow<'_, str>, ImportError> {
+    use crate::recipe::Encoding;
+    let text: Cow<'_, str> = match encoding {
+        Encoding::Auto => return decode_text(bytes),
+        Encoding::Utf8 => {
+            let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+            String::from_utf8_lossy(body)
+        }
+        Encoding::Windows1252 => Cow::Owned(bytes.iter().map(|&b| windows_1252(b)).collect()),
+        Encoding::Latin1 => Cow::Owned(bytes.iter().map(|&b| b as char).collect()),
+        Encoding::Utf16Le | Encoding::Utf16Be => {
+            let little = encoding == Encoding::Utf16Le;
+            let body = bytes
+                .strip_prefix(&[0xFF, 0xFE])
+                .or_else(|| bytes.strip_prefix(&[0xFE, 0xFF]))
+                .unwrap_or(bytes);
+            let (pairs, _odd) = body.as_chunks::<2>();
+            let units = pairs.iter().map(|&pair| {
+                if little {
+                    u16::from_le_bytes(pair)
+                } else {
+                    u16::from_be_bytes(pair)
+                }
+            });
+            Cow::Owned(
+                char::decode_utf16(units)
+                    .map(|unit| unit.unwrap_or('\u{FFFD}'))
+                    .collect(),
+            )
+        }
+    };
+    if text.chars().any(is_binary_control) {
+        return Err(ImportError::NotText);
+    }
+    Ok(text)
+}
+
 /// Nom de l'encodage que [`decode_text`] retiendrait pour `bytes`, pour
 /// l'afficher dans l'assistant d'import ; `None` pour un fichier binaire.
 pub fn detect_encoding(bytes: &[u8]) -> Option<&'static str> {
@@ -163,5 +207,37 @@ mod encoding_tests {
             Some("UTF-16 (petit-boutiste)")
         );
         assert_eq!(detect_encoding(&[0, 1, 2, 3]), None);
+    }
+}
+
+#[cfg(test)]
+mod forced_encoding_tests {
+    use super::decode_with;
+    use crate::recipe::Encoding;
+
+    #[test]
+    fn a_forced_encoding_overrides_detection() {
+        // « 1°C » en UTF-8 valide, lu de force comme Windows-1252 : deux
+        // caractères pour le degré.
+        let utf8 = "1°C".as_bytes();
+        assert_eq!(decode_with(utf8, Encoding::Utf8).unwrap(), "1°C");
+        assert_eq!(decode_with(utf8, Encoding::Windows1252).unwrap(), "1Â°C");
+        assert_eq!(decode_with(&[b'1', 0xB0], Encoding::Latin1).unwrap(), "1°");
+        assert_eq!(decode_with(&[b'1', 0xB0], Encoding::Auto).unwrap(), "1°");
+    }
+
+    #[test]
+    fn utf16_without_a_bom_and_invalid_utf8_do_not_fail() {
+        assert_eq!(
+            decode_with(&[b'a', 0, b'b', 0], Encoding::Utf16Le).unwrap(),
+            "ab"
+        );
+        assert_eq!(
+            decode_with(&[0, b'a', 0, b'b'], Encoding::Utf16Be).unwrap(),
+            "ab"
+        );
+        let bad = decode_with(&[b'a', 0xFF, b'b'], Encoding::Utf8).unwrap();
+        assert!(bad.contains('\u{FFFD}'));
+        assert!(decode_with(&[0, 1, 2], Encoding::Utf8).is_err());
     }
 }

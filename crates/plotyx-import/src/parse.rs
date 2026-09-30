@@ -45,29 +45,48 @@ pub struct ParsedColumn {
 /// utile aussi à [`crate::preview`] (aperçu en direct) et à la détection
 /// automatique des lignes d'en-tête, pas seulement à retrouver les couples
 /// clé/valeur des lignes d'en-tête ignorées.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EffectiveSeparator {
     Char(char),
     Whitespace,
+    /// Colonnes à largeur fixe : la largeur de chacune sauf la dernière.
+    Fixed(Vec<usize>),
 }
 
 impl EffectiveSeparator {
     /// Découpe une ligne en jetons selon ce séparateur. Ne retire jamais les
     /// jetons vides pour un séparateur caractère (un CSV `a;;c` a bien 3
-    /// champs, le second vide) ; `Whitespace` les absorbe naturellement.
-    pub(crate) fn tokenize(self, line: &str) -> Vec<&str> {
+    /// champs, le second vide) ; `Whitespace` les absorbe naturellement ;
+    /// `Fixed` coupe aux positions données (en caractères).
+    pub(crate) fn tokenize<'a>(&self, line: &'a str) -> Vec<&'a str> {
         match self {
-            EffectiveSeparator::Char(c) => line.split(c).collect(),
+            EffectiveSeparator::Char(c) => line.split(*c).collect(),
             EffectiveSeparator::Whitespace => line.split_whitespace().collect(),
+            EffectiveSeparator::Fixed(widths) => {
+                let mut tokens = Vec::with_capacity(widths.len() + 1);
+                let mut rest = line;
+                for &width in widths {
+                    let cut = rest
+                        .char_indices()
+                        .nth(width)
+                        .map_or(rest.len(), |(byte, _)| byte);
+                    tokens.push(&rest[..cut]);
+                    rest = &rest[cut..];
+                }
+                tokens.push(rest);
+                tokens
+            }
         }
     }
 
     /// Coupe une ligne « CLÉ<séparateur>VALEUR » en `(clé, valeur)` à la
-    /// première occurrence du séparateur.
-    pub(crate) fn split_key_value(self, line: &str) -> Option<(&str, &str)> {
+    /// première occurrence du séparateur. Sans objet pour des colonnes à
+    /// largeur fixe : la ligne n'a alors pas de forme clé/valeur.
+    pub(crate) fn split_key_value<'a>(&self, line: &'a str) -> Option<(&'a str, &'a str)> {
         match self {
-            EffectiveSeparator::Char(c) => line.split_once(c),
+            EffectiveSeparator::Char(c) => line.split_once(*c),
             EffectiveSeparator::Whitespace => line.split_once(char::is_whitespace),
+            EffectiveSeparator::Fixed(_) => line.split_once(['=', ':', ';', '\t']),
         }
     }
 }
@@ -94,12 +113,6 @@ impl ParsedTable {
         self.columns.first().map_or(0, |c| c.values.len())
     }
 
-    /// Cherche, parmi les lignes d'en-tête ignorées lors du parsing, une
-    /// ligne de la forme « CLÉ<séparateur>VALEUR » où CLÉ correspond à `key`
-    /// (insensible à la casse, bordures blanches ignorées) — rend VALEUR
-    /// (`trim`ée), ou `None` si absente. `<séparateur>` est celui
-    /// effectivement résolu pour ce fichier (utile même quand la recette
-    /// demandait `Separator::Auto`).
     /// Métadonnées à conserver, selon la recette (en-tête, pied de page,
     /// exclusions) — voir [`crate::metadata`].
     pub fn metadata(&self) -> &[crate::metadata::MetadataLine] {
@@ -112,16 +125,21 @@ impl ParsedTable {
         &self.footer_lines
     }
 
-    /// Voir [`ParsedTable::footer_lines`] ; ceci cherche une valeur d'en-tête.
+    /// Cherche, parmi les lignes d'en-tête ignorées lors du parsing, une
+    /// ligne de la forme « CLÉ<séparateur>VALEUR » où CLÉ correspond à `key`
+    /// (insensible à la casse, bordures blanches ignorées) — rend VALEUR
+    /// (`trim`ée), ou `None` si absente. `<séparateur>` est celui
+    /// effectivement résolu pour ce fichier (utile même quand la recette
+    /// demandait `Separator::Auto`).
     pub fn header_value(&self, key: &str) -> Option<String> {
-        lookup_header_value(&self.header_lines, self.separator, key)
+        lookup_header_value(&self.header_lines, &self.separator, key)
     }
 }
 
 /// Cherche `key` dans `header_lines`, sous la forme CLÉ<séparateur>VALEUR.
 fn lookup_header_value(
     header_lines: &[String],
-    separator: EffectiveSeparator,
+    separator: &EffectiveSeparator,
     key: &str,
 ) -> Option<String> {
     let key_lower = key.trim().to_lowercase();
@@ -147,82 +165,43 @@ pub enum ImportError {
     NoDataRows,
 }
 
-use crate::recipe::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, Separator};
+use crate::recipe::{DecimalStyle, ImportRecipe, NameSource, Separator};
 
 /// Parse `bytes` selon `recipe`. `Err(ImportError::NotText)` si `bytes`
-/// n'est pas du texte ([`crate::decode::decode_text`] : UTF-8, UTF-16 avec
-/// marque, ou Windows-1252) — jamais de panique sur un fichier binaire.
+/// n'est pas du texte ([`crate::decode::decode_with`] : l'encodage choisi, ou
+/// détecté — UTF-8, UTF-16 avec marque, Windows-1252) — jamais de panique sur
+/// un fichier binaire.
+///
+/// Le découpage en zones (en-tête, données, pied de page…) vient de
+/// [`crate::layout::analyze`], le même que celui de l'aperçu.
 pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportError> {
     if bytes.is_empty() {
         return Err(ImportError::Empty);
     }
-    let text = crate::decode::decode_text(bytes)?;
+    let text = crate::decode::decode_with(bytes, recipe.encoding)?;
+    let layout = crate::layout::analyze(&text, recipe)?;
+    Ok(table_from_layout(&layout, recipe))
+}
 
-    // Découpe en lignes, tolère le CRLF, ne filtre les lignes vides qu'aux
-    // deux extrémités — une ligne de données vide au milieu du fichier
-    // reste à sa place (elle finira comme une ligne toute en NaN plutôt que
-    // d'être silencieusement absorbée : plus robuste face à un fichier
-    // partiellement corrompu que de décaler discrètement toutes les lignes
-    // suivantes).
-    let mut lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
-    while lines.first().is_some_and(|l| l.trim().is_empty()) {
-        lines.remove(0);
-    }
-    while lines.last().is_some_and(|l| l.trim().is_empty()) {
-        lines.pop();
-    }
-    if lines.is_empty() {
-        return Err(ImportError::Empty);
-    }
-
-    // Applique le saut d'en-tête, en mémorisant les lignes ignorées.
-    //
-    // Deux modes coexistent, voir `docs/chantier-import-previsualisation.md`
-    // (« l'en-tête structuré ne remplace le legacy que si l'utilisateur s'en
-    // sert ») : dès que `header_layout` compte au moins une ligne (principale
-    // ou de sous-en-tête), il **remplace** entièrement `recipe.header` pour
-    // cet import — sinon `recipe.header` (`None`/`Lines`/`UntilMarker`)
-    // continue de piloter le saut comme avant ce chantier, aucune régression
-    // pour une recette qui n'utilise pas le nouveau modèle.
-    let mut header_lines: Vec<String> = Vec::new();
-    let subheader_start: usize; // index dans `header_lines`, longueur si vide.
-    if recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0 {
-        let main_n = recipe.header_layout.main_header_lines.min(lines.len());
-        header_lines.extend(lines.drain(0..main_n).map(str::to_string));
-        subheader_start = header_lines.len();
-        let sub_n = recipe.header_layout.subheader_lines.min(lines.len());
-        header_lines.extend(lines.drain(0..sub_n).map(str::to_string));
-    } else {
-        match &recipe.header {
-            HeaderSkip::None => {}
-            HeaderSkip::Lines(n) => {
-                let n = (*n).min(lines.len());
-                header_lines.extend(lines.drain(0..n).map(str::to_string));
-            }
-            HeaderSkip::UntilMarker(marker) => {
-                let marker_norm = marker.trim().to_lowercase();
-                let mut found = false;
-                while !lines.is_empty() {
-                    let line = lines.remove(0);
-                    header_lines.push(line.to_string());
-                    if line.trim().to_lowercase() == marker_norm {
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    return Err(ImportError::NoDataRows);
-                }
-            }
-        }
-        subheader_start = header_lines.len();
-    }
+/// Construit la table d'un [`crate::layout::Layout`] : colonnes, sous-en-têtes,
+/// métadonnées, avertissements.
+pub(crate) fn table_from_layout(
+    layout: &crate::layout::Layout<'_>,
+    recipe: &ImportRecipe,
+) -> ParsedTable {
+    use crate::layout::skip_str;
+    let separator = &layout.separator;
+    let numbers = &layout.numbers;
+    let header_lines: Vec<String> = layout
+        .header
+        .iter()
+        .map(|&i| layout.raw[i].to_string())
+        .collect();
     // Rôles des lignes de sous-en-tête (« Long Names »/« Units »/
-    // « Comments »), résolus une fois pour toute la table : chaque rôle
-    // pointe la **première** ligne de sa plage (voir la doc de
-    // `SubheaderRoles`, une plage multi-lignes n'est pas encore répartie
-    // entre colonnes différentes — limitation documentée, pas un oubli).
-    let subheader_lines = &header_lines[subheader_start..];
+    // « Comments »), résolus une fois : chaque rôle pointe la **première**
+    // ligne de sa plage (une plage multi-lignes n'est pas répartie entre
+    // colonnes — limite documentée).
+    let subheader_lines = &header_lines[layout.subheader_start..];
     let role_line = |range: Option<crate::recipe::SubheaderLineRange>| {
         range.and_then(|r| subheader_lines.get(r.from.checked_sub(1)?))
     };
@@ -230,74 +209,17 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
     let unit_line = role_line(recipe.subheader_roles.unit);
     let comment_line = role_line(recipe.subheader_roles.comment);
 
-    // Copie des lignes d'origine (avant pied de page et `skip_chars`), pour
-    // garder le pied de page tel quel.
-    let original_lines = lines.clone();
-
-    // Retire le pied de page (jamais plus de lignes qu'il n'en reste).
-    let footer_n = recipe.footer_skip_lines.min(lines.len());
-    lines.truncate(lines.len() - footer_n);
-
-    if lines.is_empty() {
-        return Err(ImportError::NoDataRows);
-    }
-
-    // Retire le préfixe fixe de chaque ligne de données restante (utile pour
-    // les préfixes de certains formats d'instrument) — jamais plus de
-    // caractères qu'il n'en reste sur la ligne (une ligne trop courte devient
-    // vide, pas une erreur : invariant 10). Compté en `char`, pas en octet,
-    // pour ne jamais couper un caractère multi-octets en deux.
-    if recipe.skip_chars > 0 {
-        for line in &mut lines {
-            *line = match line.char_indices().nth(recipe.skip_chars) {
-                Some((byte_idx, _)) => &line[byte_idx..],
-                None => "",
-            };
-        }
-    }
-
-    // Résout le séparateur effectif sur la première ligne restante.
-    let separator = resolve_separator(recipe.separator, lines[0], recipe.decimal);
-
     // Ligne d'en-tête de colonnes, le cas échéant.
-    let column_names: Option<Vec<String>> = if recipe.has_column_header_row {
-        let header_row = lines.remove(0);
-        Some(
-            separator
-                .tokenize(header_row)
-                .into_iter()
-                .map(|t| t.trim().to_string())
-                .collect(),
-        )
-    } else {
-        None
-    };
+    let column_names: Option<Vec<String>> = layout.column_header.map(|i| {
+        separator
+            .tokenize(skip_str(layout.raw[i], recipe.skip_chars))
+            .into_iter()
+            .map(|t| t.trim().to_string())
+            .collect()
+    });
 
-    if lines.is_empty() {
-        return Err(ImportError::NoDataRows);
-    }
-
-    // Fin des données : la même règle que l'aperçu (`crate::data_end`).
-    let header_row_offset = usize::from(recipe.has_column_header_row);
-    let kept = crate::data_end::data_len(
-        lines.iter().copied(),
-        lines.len(),
-        &recipe.data_end,
-        separator,
-        recipe.decimal,
-    );
-    if kept == 0 {
-        return Err(ImportError::NoDataRows);
-    }
-    lines.truncate(kept);
-    let footer_lines: Vec<String> = original_lines
-        .iter()
-        .skip(header_row_offset + kept)
-        .map(|line| (*line).to_string())
-        .collect();
-
-    // Tokenise chaque ligne de sous-en-tête assignée à un rôle — une valeur
-    // par colonne de données, dans le même ordre.
+    // Une valeur par colonne de données, dans le même ordre, pour chaque ligne
+    // de sous-en-tête assignée à un rôle.
     let role_values = |line: Option<&String>| -> Option<Vec<String>> {
         line.map(|l| {
             separator
@@ -311,8 +233,7 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
     let units = if recipe.subheader_roles.same_line_name_unit {
         // Même ligne que `long_name` : chaque jeton est de la forme
         // « Nom (unité) » — sans parenthèses reconnues, tout le jeton reste
-        // le nom long et l'unité reste vide plutôt que d'inventer une
-        // coupure arbitraire.
+        // le nom long et l'unité reste vide.
         long_names.as_ref().map(|names| {
             names
                 .iter()
@@ -343,19 +264,19 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
     let comments = role_values(comment_line);
 
     // Tokenise et analyse chaque ligne de données, en gardant le jeton
-    // d'origine à côté de la valeur analysée : c'est ce que `texts`
-    // restitue en aval pour une cellule qui n'est pas un nombre (colonnes à
-    // types mixtes).
-    let rows: Vec<Vec<(f64, Option<String>)>> = lines
+    // d'origine à côté de la valeur : c'est ce que `texts` restitue pour une
+    // cellule qui n'est pas un nombre (colonnes à types mixtes).
+    let rows: Vec<Vec<(f64, Option<String>)>> = layout
+        .data
         .iter()
-        .map(|line| {
+        .map(|&i| {
             separator
-                .tokenize(line)
+                .tokenize(skip_str(layout.raw[i], recipe.skip_chars))
                 .into_iter()
                 .map(|t| {
-                    let value = parse_token(t, recipe.decimal);
+                    let value = numbers.parse(t);
                     let trimmed = t.trim();
-                    let text = if value.is_nan() && !trimmed.is_empty() {
+                    let text = if value.is_nan() && !trimmed.is_empty() && !numbers.is_missing(t) {
                         Some(trimmed.to_string())
                     } else {
                         None
@@ -367,7 +288,6 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
         .collect();
 
     let num_cols = rows.iter().map(Vec::len).max().unwrap_or(0);
-
     let columns: Vec<ParsedColumn> = (0..num_cols)
         .map(|c| {
             let name = column_names
@@ -383,30 +303,29 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
                 .iter()
                 .map(|r| r.get(c).and_then(|(_, t)| t.clone()))
                 .collect();
-            let long_name = long_names
-                .as_ref()
-                .and_then(|names| names.get(c))
-                .filter(|n| !n.is_empty())
-                .cloned();
-            let unit = units
-                .as_ref()
-                .and_then(|values| values.get(c))
-                .filter(|n| !n.is_empty())
-                .cloned();
-            let comment = comments
-                .as_ref()
-                .and_then(|values| values.get(c))
-                .filter(|n| !n.is_empty())
-                .cloned();
+            let pick = |values: &Option<Vec<String>>| {
+                values
+                    .as_ref()
+                    .and_then(|v| v.get(c))
+                    .filter(|n| !n.is_empty())
+                    .cloned()
+            };
             ParsedColumn {
                 name,
                 values,
                 texts,
-                long_name,
-                unit,
-                comment,
+                long_name: pick(&long_names),
+                unit: pick(&units),
+                comment: pick(&comments),
             }
         })
+        .collect();
+
+    // Pied de page : tout ce qui suit la dernière donnée, tel quel.
+    let last_data = layout.data.last().copied().unwrap_or(layout.start);
+    let footer_lines: Vec<String> = layout.raw[(last_data + 1).min(layout.end)..layout.end]
+        .iter()
+        .map(|line| (*line).to_string())
         .collect();
 
     let mut warnings = Vec::new();
@@ -431,27 +350,27 @@ pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportE
         recipe,
     );
 
-    Ok(ParsedTable {
+    ParsedTable {
         columns,
         warnings,
         header_lines,
         footer_lines,
         metadata,
-        separator,
-    })
+        separator: separator.clone(),
+    }
 }
 
 /// Résout `Separator::Auto`/`Whitespace` en un séparateur concret, sur la
 /// base de la première ligne restante après l'en-tête et le retrait des
 /// `skip_chars` — **ligne de noms de colonnes comprise**. `pub(crate)` :
-/// réutilisé par [`crate::preview`] avec la même ligne, pour que l'aperçu
-/// résolve le séparateur exactement comme [`parse`] (issue #23).
+/// appelé par [`crate::layout::analyze`], seul endroit où cette décision est
+/// prise pour l'import comme pour l'aperçu (issue #23).
 ///
 /// Avec la virgule pour décimale, la virgule n'est jamais candidate : elle
 /// ne peut pas être à la fois séparateur et décimale, et deux virgules
 /// décimales sur une ligne battraient sinon une seule tabulation.
 pub(crate) fn resolve_separator(
-    separator: Separator,
+    separator: &Separator,
     first_line: &str,
     decimal: DecimalStyle,
 ) -> EffectiveSeparator {
@@ -460,6 +379,8 @@ pub(crate) fn resolve_separator(
         Separator::Semicolon => EffectiveSeparator::Char(';'),
         Separator::Tab => EffectiveSeparator::Char('\t'),
         Separator::Whitespace => EffectiveSeparator::Whitespace,
+        Separator::Custom(c) => EffectiveSeparator::Char(*c),
+        Separator::FixedWidth(widths) => EffectiveSeparator::Fixed(widths.clone()),
         Separator::Auto => {
             let candidates = [
                 (';', first_line.matches(';').count()),
@@ -481,24 +402,6 @@ pub(crate) fn resolve_separator(
     }
 }
 
-/// Analyse un jeton individuel en `f64` ; `NaN` pour tout ce qui ne s'y
-/// prête pas — jamais d'erreur remontée pour un seul jeton (invariant 10).
-/// `pub(crate)` : réutilisé par [`crate::preview`], pour la classification
-/// des cellules affichées et pour l'heuristique de détection automatique des
-/// lignes d'en-tête (une ligne « ressemble à des données » si tous ses
-/// jetons s'y analysent).
-pub(crate) fn parse_token(token: &str, decimal: DecimalStyle) -> f64 {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
-        return f64::NAN;
-    }
-    let normalized = match decimal {
-        DecimalStyle::Comma => trimmed.replace(',', "."),
-        DecimalStyle::Dot => trimmed.to_string(),
-    };
-    normalized.parse::<f64>().unwrap_or(f64::NAN)
-}
-
 /// Résout le nom de série selon `recipe.name_source` : `Filename` rend
 /// `file_stem` tel quel ; `HeaderKey(key)` rend `table.header_value(key)`,
 /// ou replie sur `file_stem` si la clé est absente de l'en-tête — jamais
@@ -515,7 +418,7 @@ pub fn resolve_series_name(recipe: &ImportRecipe, table: &ParsedTable, file_stem
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recipe::ImportRecipe;
+    use crate::recipe::{HeaderSkip, ImportRecipe};
 
     #[test]
     fn fichier_binaire_rend_not_text_sans_paniquer() {

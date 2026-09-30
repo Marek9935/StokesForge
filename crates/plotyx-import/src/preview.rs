@@ -24,8 +24,9 @@
 //!   jamais pour le reste, aussi long soit-il. [`FilePreview::total_data_lines`]
 //!   restitue le compte réel sans avoir matérialisé chaque ligne.
 
-use crate::parse::{parse_token, resolve_separator, ImportError};
-use crate::recipe::{HeaderSkip, ImportRecipe, SubheaderRoles};
+use crate::numbers::NumberFormat;
+use crate::parse::{resolve_separator, ImportError};
+use crate::recipe::{ImportRecipe, SubheaderRoles};
 
 /// Rôle attribué à une ligne du fichier, pour l'aperçu. Vocabulaire calqué
 /// sur la légende de l'assistant d'import ASCII d'OriginLab
@@ -60,8 +61,13 @@ pub enum LineRole {
     ColumnHeaderRow,
     /// Ligne de données.
     Data,
-    /// Pied de page (`footer_skip_lines`).
+    /// Pied de page : `footer_skip_lines`, et tout ce qui suit la fin des
+    /// données ([`crate::recipe::DataEnd`]).
     Footer,
+    /// Ligne de commentaire (`comment_prefix`) : jamais une donnée.
+    Comment,
+    /// Ligne de données ignorée au début (`skip_data_rows`).
+    Skipped,
 }
 
 impl LineRole {
@@ -77,6 +83,8 @@ impl LineRole {
             LineRole::ColumnHeaderRow => "S",
             LineRole::Data => "",
             LineRole::Footer => "F",
+            LineRole::Comment => "#",
+            LineRole::Skipped => "x",
         }
     }
 }
@@ -114,205 +122,74 @@ pub struct FilePreview {
     pub total_data_lines: usize,
 }
 
+/// Nombre maximal de lignes autres que des données (en-tête, pied de page,
+/// commentaires, lignes ignorées) montrées par l'aperçu : un pied de page de
+/// plusieurs millions de lignes ne doit pas devenir autant d'allocations.
+const MAX_OTHER_LINES: usize = 500;
+
 /// Classe chaque ligne de `bytes` selon `recipe`, jusqu'à
 /// `recipe.preview_lines` lignes de données. Mêmes conditions d'échec que
 /// [`crate::parse::parse`] — `Err` exactement dans les mêmes cas, avec le
-/// même sens, pour que le panneau d'aperçu montre l'erreur qu'un import
-/// produirait réellement plutôt qu'une classification qui ne lui
-/// correspondrait pas.
+/// même sens : les deux s'appuient sur le **même** découpage
+/// ([`crate::layout::analyze`]), donc l'aperçu montre ce que l'import fera.
 pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, ImportError> {
     if bytes.is_empty() {
         return Err(ImportError::Empty);
     }
-    let text = crate::decode::decode_text(bytes)?;
-    let raw: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
-
-    // Même règle de rognage que `parse` : lignes blanches aux deux
-    // extrémités seulement.
-    let mut start = 0usize;
-    while start < raw.len() && raw[start].trim().is_empty() {
-        start += 1;
-    }
-    let mut end = raw.len();
-    while end > start && raw[end - 1].trim().is_empty() {
-        end -= 1;
-    }
-    if start >= end {
-        return Err(ImportError::Empty);
-    }
-
-    let mut roles: Vec<LineRole> = vec![LineRole::Blank; raw.len()];
-    let mut idx = start;
-
-    if recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0 {
-        let main_n = recipe.header_layout.main_header_lines.min(end - idx);
-        for _ in 0..main_n {
-            roles[idx] = LineRole::MainHeader;
-            idx += 1;
-        }
-        let sub_n = recipe.header_layout.subheader_lines.min(end - idx);
-        for s in 0..sub_n {
-            roles[idx] = subheader_line_role(s + 1, &recipe.subheader_roles);
-            idx += 1;
-        }
-    } else {
-        match &recipe.header {
-            HeaderSkip::None => {}
-            HeaderSkip::Lines(n) => {
-                let n = (*n).min(end - idx);
-                for _ in 0..n {
-                    roles[idx] = LineRole::MainHeader;
-                    idx += 1;
-                }
-            }
-            HeaderSkip::UntilMarker(marker) => {
-                let marker_norm = marker.trim().to_lowercase();
-                let mut found = false;
-                while idx < end {
-                    roles[idx] = LineRole::MainHeader;
-                    let matched = raw[idx].trim().to_lowercase() == marker_norm;
-                    idx += 1;
-                    if matched {
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    return Err(ImportError::NoDataRows);
-                }
-            }
-        }
-    }
-
-    let footer_n = recipe.footer_skip_lines.min(end - idx);
-    let footer_start = end - footer_n;
-    for role in roles.iter_mut().take(end).skip(footer_start) {
-        *role = LineRole::Footer;
-    }
-
-    if idx >= footer_start {
-        return Err(ImportError::NoDataRows);
-    }
-
-    // Première ligne restante après l'en-tête : c'est sur elle que `parse`
-    // résout le séparateur, ligne de noms de colonnes comprise.
-    let first_remaining = idx;
-
-    if recipe.has_column_header_row {
-        roles[idx] = LineRole::ColumnHeaderRow;
-        idx += 1;
-        if idx >= footer_start {
-            return Err(ImportError::NoDataRows);
-        }
-    }
-
-    let data_start = idx;
-
-    // Le préfixe et le séparateur sont résolus comme `parse` le fait : sur
-    // la première ligne restante après l'en-tête, une fois `skip_chars`
-    // retiré (issue #23).
-    let skip = |line: &str| -> String {
-        if recipe.skip_chars == 0 {
-            return line.to_string();
-        }
-        match line.char_indices().nth(recipe.skip_chars) {
-            Some((byte_idx, _)) => line[byte_idx..].to_string(),
-            None => String::new(),
-        }
-    };
-    let separator = resolve_separator(
-        recipe.separator,
-        skip_str(raw[first_remaining], recipe.skip_chars),
-        recipe.decimal,
-    );
-
-    // Fin des données : la même règle que `parse` (`crate::data_end`). Les
-    // lignes coupées rejoignent le pied de page.
-    let candidates = footer_start - data_start;
-    let kept = crate::data_end::data_len(
-        (data_start..footer_start).map(|i| skip_str(raw[i], recipe.skip_chars)),
-        candidates,
-        &recipe.data_end,
-        separator,
-        recipe.decimal,
-    );
-    if kept == 0 {
-        return Err(ImportError::NoDataRows);
-    }
-    let footer_start = data_start + kept;
-    for role in roles.iter_mut().take(end).skip(footer_start) {
-        *role = LineRole::Footer;
-    }
-    let total_data_lines = kept;
+    let text = crate::decode::decode_with(bytes, recipe.encoding)?;
+    let layout = crate::layout::analyze(&text, recipe)?;
+    let total_data_lines = layout.data.len();
     let shown_data_lines = total_data_lines.min(recipe.preview_lines);
-    for role in roles.iter_mut().take(footer_start).skip(data_start) {
-        *role = LineRole::Data;
-    }
 
     // N'émet un `PreviewLine` possédé que pour les lignes réellement
-    // montrées : en-tête/sous-en-tête/en-tête de colonnes/pied de
-    // page/blancs aux extrémités (des comptes petits, fixés par
-    // l'utilisateur) et au plus `preview_lines` lignes de données — jamais
-    // pour le reste, voir la doc de tête du module.
+    // montrées : en-tête, pied de page et autres zones (des comptes
+    // bornés par `MAX_OTHER_LINES`) et au plus `preview_lines` lignes de
+    // données — jamais pour le reste, voir la doc de tête du module.
     let mut lines = Vec::new();
-    let mut push = |i: usize, with_cells: bool| {
-        let role = roles[i];
-        let cells = if with_cells {
-            let skipped = skip(raw[i]);
-            Some(
-                separator
-                    .tokenize(&skipped)
-                    .into_iter()
-                    .map(|t| {
-                        let value = parse_token(t, recipe.decimal);
-                        let trimmed = t.trim();
-                        PreviewCell {
-                            text: trimmed.to_string(),
-                            is_text: value.is_nan() && !trimmed.is_empty(),
-                        }
-                    })
-                    .collect(),
-            )
+    let (mut data_seen, mut others) = (0usize, 0usize);
+    for i in layout.start..layout.end {
+        let role = layout.roles[i];
+        let with_cells = role == LineRole::Data;
+        if with_cells {
+            if data_seen >= shown_data_lines {
+                continue;
+            }
+            data_seen += 1;
         } else {
-            None
-        };
+            if others >= MAX_OTHER_LINES {
+                continue;
+            }
+            others += 1;
+        }
+        let cells = with_cells.then(|| {
+            layout
+                .separator
+                .tokenize(crate::layout::skip_str(layout.raw[i], recipe.skip_chars))
+                .into_iter()
+                .map(|t| {
+                    let value = layout.numbers.parse(t);
+                    let trimmed = t.trim();
+                    PreviewCell {
+                        text: trimmed.to_string(),
+                        is_text: value.is_nan()
+                            && !trimmed.is_empty()
+                            && !layout.numbers.is_missing(t),
+                    }
+                })
+                .collect()
+        });
         lines.push(PreviewLine {
             number: i + 1,
             role,
-            text: raw[i].to_string(),
+            text: layout.raw[i].to_string(),
             cells,
         });
-    };
-    // Les lignes blanches aux deux extrémités (hors `[start, end)`) ne sont
-    // pas montrées : `parse` les retire exactement de la même façon, ce
-    // n'est donc pas une perte d'information nouvelle par rapport à
-    // aujourd'hui — seulement pas un gain, documenté comme tel dans
-    // `docs/chantier-import-previsualisation.md`.
-    for i in start..data_start {
-        push(i, false);
-    }
-    for i in data_start..(data_start + shown_data_lines) {
-        push(i, true);
-    }
-    for i in footer_start..end {
-        push(i, false);
     }
 
     Ok(FilePreview {
         lines,
         total_data_lines,
     })
-}
-
-/// `line` privée de ses `skip_chars` premiers caractères (comme `parse`).
-fn skip_str(line: &str, skip_chars: usize) -> &str {
-    if skip_chars == 0 {
-        return line;
-    }
-    match line.char_indices().nth(skip_chars) {
-        Some((byte_idx, _)) => &line[byte_idx..],
-        None => "",
-    }
 }
 
 /// Rôle d'une ligne de sous-en-tête, 1-based **dans le bloc de
@@ -322,7 +199,7 @@ fn skip_str(line: &str, skip_chars: usize) -> &str {
 /// chevaucher deux rôles) suit la priorité `long_name` > `unit` > `comment`,
 /// documentée ici plutôt que de porter plusieurs rôles à la fois — ce que
 /// [`LineRole`] ne modélise pas.
-fn subheader_line_role(sub_index: usize, roles: &SubheaderRoles) -> LineRole {
+pub(crate) fn subheader_line_role(sub_index: usize, roles: &SubheaderRoles) -> LineRole {
     let contains = |range: Option<crate::recipe::SubheaderLineRange>| {
         range.is_some_and(|r| r.from <= sub_index && sub_index <= r.to)
     };
@@ -381,7 +258,8 @@ pub fn detect_header_layout(
     if lines.is_empty() {
         return crate::recipe::HeaderLayout::default();
     }
-    let effective = resolve_separator(separator, lines[lines.len() - 1], decimal);
+    let numbers = NumberFormat::new(decimal, None, &[], lines.iter().copied());
+    let effective = resolve_separator(&separator, lines[lines.len() - 1], numbers.decimal);
     let ref_count = effective.tokenize(lines[lines.len() - 1]).len();
 
     let mut i = 0usize;
@@ -395,7 +273,7 @@ pub fn detect_header_layout(
         let tokens = effective.tokenize(lines[i]);
         let all_numeric = tokens
             .iter()
-            .all(|t| t.trim().is_empty() || !parse_token(t, decimal).is_nan());
+            .all(|t| t.trim().is_empty() || !numbers.parse(t).is_nan());
         if all_numeric {
             break;
         }

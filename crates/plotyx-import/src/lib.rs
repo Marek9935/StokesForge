@@ -25,7 +25,9 @@
 
 mod data_end;
 pub mod decode;
+mod layout;
 pub mod metadata;
+mod numbers;
 pub mod parse;
 pub mod preview;
 pub mod recent;

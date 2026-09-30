@@ -60,6 +60,46 @@ pub struct ImportRecipe {
     /// les colonnes suivantes sont en [`ColumnRoleChoice::Auto`].
     #[serde(default)]
     pub column_roles: Vec<ColumnRoleChoice>,
+    /// Séparateur de milliers à ignorer dans les nombres (`' '`, `','`, `'.'`,
+    /// `'\''`…), `None` s'il n'y en a pas.
+    #[serde(default)]
+    pub thousands: Option<char>,
+    /// Jetons qui valent « valeur manquante » (`--`, `n/a`, `*`, `NaN`…) : la
+    /// cellule reste vide au lieu de devenir du texte (et une colonne mixte).
+    #[serde(default)]
+    pub missing_tokens: Vec<String>,
+    /// Préfixe des lignes de commentaire à ignorer dans la zone de données
+    /// (`#`, `;`, `//`…), vide s'il n'y en a pas. Une ligne qui commence (après
+    /// ses espaces) par ce préfixe n'est jamais une donnée.
+    #[serde(default)]
+    pub comment_prefix: String,
+    /// Nombre de lignes de données à ignorer au début (après l'en-tête et la
+    /// ligne de noms de colonnes) : avec [`DataEnd`], la plage de lignes à
+    /// importer.
+    #[serde(default)]
+    pub skip_data_rows: usize,
+    /// Encodage du fichier ; `Auto` le détecte ([`crate::decode`]).
+    #[serde(default)]
+    pub encoding: Encoding,
+}
+
+/// Encodage forcé d'un fichier, quand la détection automatique se trompe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum Encoding {
+    /// UTF-16 avec marque, sinon UTF-8, sinon Windows-1252.
+    #[default]
+    Auto,
+    /// UTF-8 (une marque d'ordre est retirée ; un octet invalide devient
+    /// `U+FFFD` au lieu de faire échouer l'import).
+    Utf8,
+    /// Windows-1252, la page de code des appareils sous Windows.
+    Windows1252,
+    /// ISO 8859-1.
+    Latin1,
+    /// UTF-16 petit-boutiste, avec ou sans marque.
+    Utf16Le,
+    /// UTF-16 gros-boutiste, avec ou sans marque.
+    Utf16Be,
 }
 
 /// Rôle d'une colonne importée, tel que choisi dans l'assistant.
@@ -156,12 +196,17 @@ pub struct HeaderLayout {
 }
 
 /// Séparateur de colonnes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Separator {
     Comma,
     Semicolon,
     Tab,
     Whitespace,
+    /// Un caractère au choix (`|`, `:`…).
+    Custom(char),
+    /// Colonnes à largeur fixe : la largeur, en caractères, de chacune sauf
+    /// la dernière, qui prend le reste de la ligne.
+    FixedWidth(Vec<usize>),
     /// Détecté automatiquement à partir de la première ligne de données.
     Auto,
 }
@@ -171,6 +216,10 @@ pub enum Separator {
 pub enum DecimalStyle {
     Dot,
     Comma,
+    /// Détecté d'après les premières lignes de données : virgule si elle
+    /// s'y trouve entre deux chiffres avec un autre séparateur de colonnes
+    /// (`;`, tabulation), point sinon.
+    Auto,
 }
 
 /// Combien de lignes ignorer avant les données.
@@ -263,6 +312,11 @@ impl ImportRecipe {
             keep_footer_metadata: false,
             excluded_metadata: Vec::new(),
             column_roles: Vec::new(),
+            thousands: None,
+            missing_tokens: Vec::new(),
+            comment_prefix: String::new(),
+            skip_data_rows: 0,
+            encoding: Encoding::Auto,
         }
     }
 }
@@ -342,6 +396,11 @@ mod tests {
             keep_footer_metadata: true,
             excluded_metadata: vec!["DATE".into()],
             column_roles: vec![ColumnRoleChoice::X, ColumnRoleChoice::Ignore],
+            thousands: Some(' '),
+            missing_tokens: vec!["--".into(), "n/a".into()],
+            comment_prefix: "#".into(),
+            skip_data_rows: 2,
+            encoding: Encoding::Windows1252,
         };
         let json = serde_json::to_string(&recipe).unwrap();
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();
