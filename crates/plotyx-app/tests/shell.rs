@@ -2404,6 +2404,8 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
     assert_eq!(cell_f64(&state, columns_a[0].0, 0), 1.0);
     assert_eq!(cell_f64(&state, columns_a[1].0, 1), 20.0);
     let columns_b = state.visible_columns(sheet_b);
+    assert_eq!(state.column_meta(columns_b[0].0).role, ColumnRole::X);
+    assert_eq!(state.column_meta(columns_b[1].0).role, ColumnRole::Y);
     assert_eq!(cell_f64(&state, columns_b[0].0, 0), 3.0);
 
     // Une seule entrée d'historique pour tout le lot : un unique `Undo`
@@ -2419,6 +2421,17 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
         !state.can_undo(),
         "l'import entier n'a compté que pour une seule entrée d'historique"
     );
+
+    // Le rétablissement restaure aussi les rôles, pour chaque fichier du lot
+    // (issue #3), avec les mêmes identifiants de colonnes et leurs données.
+    state.dispatch(Action::Redo);
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
+    for (sheet, columns, first_x) in [(sheet_a, columns_a, 1.0), (sheet_b, columns_b, 3.0)] {
+        assert_eq!(state.visible_columns(sheet), columns);
+        assert_eq!(state.column_meta(columns[0].0).role, ColumnRole::X);
+        assert_eq!(state.column_meta(columns[1].0).role, ColumnRole::Y);
+        assert_eq!(cell_f64(&state, columns[0].0, 0), first_x);
+    }
 }
 
 /// Les deux destinations qui créent des classeurs conservent la règle

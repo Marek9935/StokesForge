@@ -202,10 +202,11 @@ première colonne est un nombre, puis coupe à la première dont le X n'en est
 pas un (ligne vide comprise) ; un texte dans une autre colonne ne coupe pas.
 Autres options : aucune coupure, première ligne vide, marqueur, N lignes après
 l'en-tête, N lignes avant la fin. La règle vit dans `data_end.rs`, appelée par
-`parse` **et** `preview` pour qu'elles coupent au même endroit.
-`footer_skip_lines` s'applique d'abord. Non fait : conserver le pied dans les
-métadonnées des colonnes (dépend de #5), clic droit sur la ligne de coupure et
-étape « Colonnes » de l'assistant (#6).
+le découpage partagé `layout`, pour que `parse` **et** `preview` coupent au
+même endroit. `footer_skip_lines` s'applique d'abord. Les options et le clic
+droit sur la ligne de coupure sont disponibles dans l'assistant ; voir
+`docs/application.md` § « Assistant d'import ». Le pied peut être conservé
+dans les métadonnées avec `keep_footer_metadata`.
 
 ## Métadonnées de fichier par colonne (issue #5)
 
