@@ -541,8 +541,16 @@ global du `Context` plutôt que scopé à une fenêtre OS.
 ### Propriétés des graphiques
 
 Les réglages d'un graphe vivent dans une **fenêtre flottante à onglets**
-(`app::plot_settings_window`), un dialogue transitoire de la même famille que
-la fenêtre d'import : elle n'occupe aucune place tant qu'elle est fermée.
+(`app::plot_settings_window`), un **dialogue modal** (`app::modal_dialog`) :
+au premier plan, le reste de l'interface ne reçoit plus aucun clic, et un
+clic ailleurs fait clignoter son contour en rouge foncé
+(`theme::blocked_flash_color`). Échap ou la croix la ferme. Elle est construite
+par la même brique que les fenêtres de contenu (`show_window_in_layer`,
+`window_header`, `floating_resize_handles`) — même cadre, même barre de
+titre — et non par une `egui::Window` brute ; seuls l'ordre de calque et le
+calque plein écran qui capte les clics la distinguent. Les fenêtres OS
+détachées, autres viewports, ne sont pas couvertes par ce blocage. Elle
+n'occupe aucune place tant qu'elle est fermée.
 Elle remplace l'ancien panneau fixe à droite de l'espace de travail, affiché
 en permanence dès qu'un graphe était actif. Son état (quel graphe, quel
 onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
@@ -559,7 +567,10 @@ qui ouvre une fenêtre surgissante — palette, « Automatique » quand la
 couleur peut l'être, couleurs enregistrées, nuancier (carré saturation ×
 luminosité avec barre de teinte, ou **roue chromatique** avec barre de
 valeur), **opacité**, saisie RVB, TSL et hexadécimale (`#RRGGBB`, ou
-`#RRGGBBAA` avec l'opacité). Une couleur transparente se montre sur un
+`#RRGGBBAA` avec l'opacité). Cette fenêtre est une `egui::Area` gérée
+par `color_button` (et non un `egui::Popup`, dont egui n'autorise qu'un
+exemplaire ouvert : la liste d'un menu déroulant le refermerait) ; elle
+se ferme sur Échap ou sur un clic hors d'elle et de ses listes. Une couleur transparente se montre sur un
 damier. **Une palette par usage** (`plotyx_plot::ColorUsage`) :
 
 - **courbes** : un outil à part, avec un choix de palettes nommées

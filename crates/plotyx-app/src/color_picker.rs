@@ -405,19 +405,64 @@ pub fn color_button(
     }
 
     let popup_id = ui.make_persistent_id(("plotyx_color_popup", id_salt));
-    let was_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    let was_open = picker_is_open(ui.ctx(), popup_id);
+    if response.clicked() {
+        set_picker_open(ui.ctx(), popup_id, !was_open);
+    }
     let mut commit = false;
-    egui::Popup::from_toggle_button_response(&response)
-        .id(popup_id)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            ui.set_width(PICKER_SIDE + 40.0);
-            commit |= picker_contents(ui, popup_id, value, usage, auto_label, env);
+    // Une `Area` à nous, pas `egui::Popup` : egui ne retient qu'une fenêtre
+    // surgissante ouverte par viewport, donc la liste d'un `ComboBox` placé
+    // dans le sélecteur le refermerait (issue #9). La fermeture (Échap, clic
+    // extérieur) est écrite ici, en épargnant les couches surgissantes filles.
+    if picker_is_open(ui.ctx(), popup_id) {
+        let area = egui::Area::new(popup_id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(response.rect.left_bottom() + egui::vec2(0.0, 4.0))
+            .constrain(true)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(PICKER_SIDE + 40.0);
+                    commit |= picker_contents(ui, popup_id, value, usage, auto_label, env);
+                });
+            });
+        // Échap est consommé : le dialogue qui contient le sélecteur ne doit
+        // pas se fermer avec lui.
+        let escape =
+            ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let pressed_at = ui.input(|input| {
+            input
+                .pointer
+                .any_pressed()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
         });
-    let is_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+        let list_open = egui::Popup::is_any_open(ui.ctx());
+        let outside = pressed_at.is_some_and(|pos| {
+            !response.rect.contains(pos)
+                && !ui.ctx().layer_id_at(pos).is_some_and(|layer| {
+                    // Une liste de menu déroulant (couche surgissante fille)
+                    // compte comme « dedans » ; le dialogue et son calque
+                    // bloquant, eux, sont au même ordre mais sont « dehors ».
+                    layer == area.response.layer_id
+                        || (list_open && layer.order == egui::Order::Foreground)
+                })
+        });
+        if escape || outside {
+            set_picker_open(ui.ctx(), popup_id, false);
+        }
+    }
+    let is_open = picker_is_open(ui.ctx(), popup_id);
     // Refermer la fenêtre surgissante valide ce qui a pu être modifié sans
     // geste de fin explicite (champ encore en saisie).
     commit || (was_open && !is_open)
+}
+
+fn picker_is_open(ctx: &egui::Context, id: egui::Id) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(id)).unwrap_or(false)
+}
+
+fn set_picker_open(ctx: &egui::Context, id: egui::Id, open: bool) {
+    ctx.data_mut(|data| data.insert_temp(id, open));
 }
 
 /// Contenu de la fenêtre surgissante.
@@ -702,7 +747,7 @@ fn picker_contents(
     }
     ui.memory_mut(|m| m.data.insert_temp(memory_id, memory));
     if close {
-        egui::Popup::close_id(ui.ctx(), popup_id);
+        set_picker_open(ui.ctx(), popup_id, false);
     }
     commit
 }
@@ -1056,7 +1101,7 @@ mod tests {
                     let mut output = context.run_ui(egui::RawInput::default(), |ui| {
                         let popup_id = ui.make_persistent_id(("plotyx_color_popup", "Couleur"));
                         if frame == 0 {
-                            egui::Popup::open_id(ui.ctx(), popup_id);
+                            set_picker_open(ui.ctx(), popup_id, true);
                         }
                         color_button(ui, "Couleur", &mut value, usage, Some("Auto"), &mut env);
                     });
@@ -1071,6 +1116,93 @@ mod tests {
                 assert!(env.requests.is_empty());
             }
         }
+    }
+
+    /// Position du texte `needle` parmi les formes peintes.
+    fn find_text(output: &egui::FullOutput, needle: &str) -> Option<egui::Pos2> {
+        fn walk(shape: &egui::Shape, needle: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text().contains(needle) => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| walk(s, needle)),
+                _ => None,
+            }
+        }
+        output
+            .shapes
+            .iter()
+            .find_map(|clipped| walk(&clipped.shape, needle))
+    }
+
+    /// Bug #9 : le menu déroulant de destination de « Enregistrer » s'ouvre
+    /// sans refermer le sélecteur, on y choisit « utilisateur », et un clic
+    /// réellement extérieur referme bien le sélecteur.
+    #[test]
+    fn un_menu_deroulant_du_selecteur_ne_le_ferme_pas() {
+        let context = egui::Context::default();
+        let mut env = PickerEnv {
+            project: SavedColors::default(),
+            user: SavedColors::default(),
+            requests: Vec::new(),
+        };
+        let mut value = "#ff0000".to_string();
+        let mut run = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                color_button(
+                    ui,
+                    "Couleur",
+                    &mut value,
+                    ColorUsage::Background,
+                    Some("Auto"),
+                    &mut env,
+                );
+            });
+            output.textures_delta.clear();
+            output
+        };
+        // Ouvre le sélecteur puis laisse la mise en page se stabiliser.
+        let mut output = run(vec![]);
+        let button = egui::pos2(14.0, 14.0);
+        let click = |at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(vec![egui::Event::PointerMoved(button)]);
+        run(vec![click(button, true)]);
+        run(vec![click(button, false)]);
+        for _ in 0..2 {
+            output = run(vec![]);
+        }
+        let combo = find_text(&output, "dans le projet").expect("menu déroulant peint");
+        run(vec![egui::Event::PointerMoved(combo)]);
+        run(vec![click(combo, true)]);
+        run(vec![click(combo, false)]);
+        output = run(vec![]);
+        let entry = find_text(&output, "utilisateur").expect("liste du menu ouverte");
+        run(vec![egui::Event::PointerMoved(entry)]);
+        run(vec![click(entry, true)]);
+        run(vec![click(entry, false)]);
+        output = run(vec![]);
+        assert!(
+            find_text(&output, "Enregistrer").is_some(),
+            "le sélecteur est resté ouvert après le choix dans la liste"
+        );
+        let away = egui::pos2(700.0, 500.0);
+        run(vec![egui::Event::PointerMoved(away)]);
+        run(vec![click(away, true)]);
+        run(vec![click(away, false)]);
+        output = run(vec![]);
+        assert!(
+            find_text(&output, "Enregistrer").is_none(),
+            "un clic extérieur referme le sélecteur"
+        );
     }
 
     fn luminance([r, g, b]: [u8; 3]) -> f32 {

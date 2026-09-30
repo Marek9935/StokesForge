@@ -387,7 +387,7 @@ impl SaveTarget {
     pub fn label(self) -> &'static str {
         match self {
             SaveTarget::Project => "dans le projet",
-            SaveTarget::User => "pour moi (tous les projets)",
+            SaveTarget::User => "utilisateur",
         }
     }
 }

@@ -1697,7 +1697,7 @@ impl PlotyxApp {
                             ui,
                             id,
                             &tab_title_from_tree(&snapshot.tree, tab),
-                            tab,
+                            Some(tab),
                             was_collapsed,
                             HeaderPlacement::Detached,
                         );
@@ -2263,7 +2263,7 @@ impl eframe::App for PlotyxApp {
                                 ui,
                                 id,
                                 &title,
-                                tab,
+                                Some(tab),
                                 was_collapsed,
                                 HeaderPlacement::Floating,
                             );
@@ -3027,6 +3027,9 @@ enum HeaderPlacement {
     /// la déplacer, la redimensionner par ses icônes de maximisation, ou la
     /// fermer/réattacher.
     Detached,
+    /// Dialogue modal ([`modal_dialog`]) : ni repli, ni détachement, ni
+    /// maximisation — le titre, la croix, et le glisser.
+    Dialog,
 }
 
 /// Une icône d'en-tête peinte au pixel près, comme le titre et le chevron de
@@ -3182,12 +3185,39 @@ fn show_floating_window<R>(
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
     add_resize_handles: impl FnOnce(&egui::Ui, egui::Rect),
 ) -> Option<R> {
+    show_window_in_layer(
+        ctx,
+        id,
+        FLOATING_WINDOW_ORDER,
+        window_rect,
+        viewport_rect,
+        is_active,
+        add_contents,
+        add_resize_handles,
+    )
+}
+
+/// [`show_floating_window`] dans l'ordre de calque `order` : la seule
+/// écriture du cadre, du contour et du rognage d'une fenêtre, que se
+/// partagent les fenêtres de l'espace de travail (`Order::Middle`) et les
+/// dialogues modaux ([`modal_dialog`], au-dessus).
+#[allow(clippy::too_many_arguments)]
+fn show_window_in_layer<R>(
+    ctx: &egui::Context,
+    id: egui::Id,
+    order: egui::Order,
+    window_rect: egui::Rect,
+    viewport_rect: egui::Rect,
+    is_active: bool,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    add_resize_handles: impl FnOnce(&egui::Ui, egui::Rect),
+) -> Option<R> {
     let area_rect = window_rect.expand(RESIZE_BORDER).intersect(viewport_rect);
     if !window_rect.intersects(viewport_rect) || !area_rect.is_positive() {
         return None;
     }
     let response = egui::Area::new(id)
-        .order(FLOATING_WINDOW_ORDER)
+        .order(order)
         .movable(false)
         .fade_in(false)
         .fixed_pos(area_rect.min)
@@ -3231,7 +3261,7 @@ fn show_floating_window<R>(
 /// autre fenêtre posée par-dessus.
 fn floating_resize_handles(
     ui: &egui::Ui,
-    tab: Tab,
+    tab: impl std::hash::Hash + std::fmt::Debug,
     rect: egui::Rect,
     position: &mut egui::Pos2,
     size: &mut egui::Vec2,
@@ -3467,7 +3497,7 @@ fn window_header(
     ui: &mut egui::Ui,
     id: egui::Id,
     title: &str,
-    tab: Tab,
+    tab: Option<Tab>,
     collapsed: bool,
     placement: HeaderPlacement,
 ) -> WindowHeaderActions {
@@ -3482,14 +3512,14 @@ fn window_header(
     );
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     let icon_color = match placement {
-        HeaderPlacement::Floating => header.visuals().text_color(),
+        HeaderPlacement::Floating | HeaderPlacement::Dialog => header.visuals().text_color(),
         HeaderPlacement::Detached => theme::gutter_text_color(),
     };
     // B5 (`retours-2026-09-23-bugs.md`) : l'icône de repli
     // était réservée à `Tab::Graph`, sans justification documentée — une
     // extension jamais faite plutôt qu'un choix. `Matrix`/`Note` restent
     // exclus faute de raison de les y ajouter.
-    let collapse_width = if matches!(tab, Tab::Graph(_) | Tab::Book(_)) {
+    let collapse_width = if matches!(tab, Some(Tab::Graph(_) | Tab::Book(_))) {
         COLLAPSE_WIDTH
     } else {
         0.0
@@ -3498,7 +3528,7 @@ fn window_header(
         let collapse_rect =
             egui::Rect::from_min_size(rect.min, egui::vec2(collapse_width, rect.height()));
         let content_label = match tab {
-            Tab::Book(_) => "classeur",
+            Some(Tab::Book(_)) => "classeur",
             _ => "graphe",
         };
         let (icon, tooltip) = if collapsed {
@@ -3543,12 +3573,15 @@ fn window_header(
     // (`.with_decorations(false)`), donc pas question d'en perdre une
     // capacité pour certains onglets.
     let show_detach_and_maximize = match placement {
-        HeaderPlacement::Floating => matches!(tab, Tab::Book(_) | Tab::Graph(_)),
+        HeaderPlacement::Floating => matches!(tab, Some(Tab::Book(_) | Tab::Graph(_))),
         HeaderPlacement::Detached => true,
+        HeaderPlacement::Dialog => false,
     };
     if show_detach_and_maximize {
         let (detach_glyph, detach_tooltip) = match placement {
-            HeaderPlacement::Floating => ("↗", "Détacher dans une fenêtre"),
+            HeaderPlacement::Floating | HeaderPlacement::Dialog => {
+                ("↗", "Détacher dans une fenêtre")
+            }
             HeaderPlacement::Detached => ("↩", "Réattacher à la fenêtre principale"),
         };
         if header_icon(
@@ -6035,18 +6068,152 @@ fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
     };
     let title = format!("Propriétés — {}", node.name());
     state.begin_plot_edit(settings.graph);
-    let mut open = true;
-    egui::Window::new(title)
-        .id(egui::Id::new("plotyx_plot_settings"))
-        .collapsible(false)
-        .resizable(true)
-        .default_width(PLOT_SETTINGS_WIDTH)
-        .default_height(PLOT_SETTINGS_HEIGHT)
-        .open(&mut open)
-        .show(ctx, |ui| plot_settings_contents(ui, state, &tree, settings));
-    if !open {
+    let close = modal_dialog(
+        ctx,
+        egui::Id::new("plotyx_plot_settings"),
+        &title,
+        egui::vec2(PLOT_SETTINGS_WIDTH, PLOT_SETTINGS_HEIGHT),
+        |ui| plot_settings_contents(ui, state, &tree, settings),
+    );
+    if close {
         state.close_plot_settings();
     }
+}
+
+/// Durée d'une alerte de clic bloqué ([`modal_dialog`]) : deux impulsions.
+const MODAL_FLASH_SECONDS: f64 = 0.6;
+
+/// Position et taille d'un dialogue modal, gardées en mémoire egui le temps
+/// qu'il est ouvert.
+#[derive(Clone, Copy)]
+struct DialogGeometry {
+    pos: egui::Pos2,
+    size: egui::Vec2,
+}
+
+/// Dialogue **modal** : au premier plan, le reste de l'interface ne reçoit
+/// plus aucun clic, et un clic ailleurs fait clignoter le contour du
+/// dialogue en rouge foncé ([`theme::blocked_flash_color`]) pour le
+/// désigner. Rend `true` quand l'utilisateur le ferme (croix, Échap).
+///
+/// Même brique que les fenêtres de contenu : [`show_window_in_layer`] (cadre,
+/// contour actif, rognage), [`window_header`] (placement
+/// [`HeaderPlacement::Dialog`]) et [`floating_resize_handles`]. Ne diffère
+/// que par l'ordre de calque (`Foreground`, au-dessus des fenêtres en
+/// `Middle`) et par le calque plein écran qui capte les clics. Les menus
+/// déroulants et le sélecteur de couleur ouverts depuis le dialogue restent
+/// utilisables : ils sont créés après lui, donc au-dessus.
+///
+/// Limite : les fenêtres OS détachées sont d'autres viewports, que ce calque
+/// ne couvre pas.
+fn modal_dialog(
+    ctx: &egui::Context,
+    id: egui::Id,
+    title: &str,
+    default_size: egui::Vec2,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let screen = ctx.input(|input| input.content_rect());
+    let geometry_id = id.with("geometry");
+    let flash_id = id.with("flash_start");
+    let stored = ctx.data(|data| data.get_temp::<DialogGeometry>(geometry_id));
+    let just_opened = stored.is_none();
+    let mut geometry = stored.unwrap_or_else(|| {
+        let size = default_size.min(screen.size());
+        DialogGeometry {
+            pos: screen.center() - size / 2.0,
+            size,
+        }
+    });
+    geometry.size = geometry
+        .size
+        .max(MIN_CONTENT_WINDOW_SIZE)
+        .min(screen.size());
+    geometry.pos = geometry
+        .pos
+        .clamp(screen.min, (screen.max - geometry.size).max(screen.min));
+    let layer = egui::LayerId::new(egui::Order::Foreground, id);
+
+    // Le calque qui capte les clics : tout le reste de l'interface est sous lui.
+    let backdrop = egui::Area::new(id.with("backdrop"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(screen.min)
+        .sense(egui::Sense::click_and_drag())
+        .show(ctx, |ui| {
+            ui.painter()
+                .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(40));
+            ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+        });
+    let blocked_click =
+        backdrop.response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed());
+    let now = ctx.input(|input| input.time);
+    if blocked_click {
+        ctx.data_mut(|data| data.insert_temp(flash_id, now));
+    }
+    if blocked_click || just_opened {
+        ctx.move_to_top(layer);
+    }
+    let flash = ctx
+        .data(|data| data.get_temp::<f64>(flash_id))
+        .map(|start| now - start)
+        .filter(|elapsed| *elapsed < MODAL_FLASH_SECONDS)
+        .map(|elapsed| {
+            ctx.request_repaint();
+            // Deux impulsions sur la durée : 0 → 1 → 0, deux fois.
+            0.5 * (1.0 - (std::f64::consts::TAU * elapsed / (MODAL_FLASH_SECONDS / 2.0)).cos())
+        });
+
+    let popup_open = egui::Popup::is_any_open(ctx);
+    let window_rect = egui::Rect::from_min_size(geometry.pos, geometry.size);
+    let mut header_actions = WindowHeaderActions::default();
+    let mut position = geometry.pos;
+    let mut size = geometry.size;
+    show_window_in_layer(
+        ctx,
+        id,
+        egui::Order::Foreground,
+        window_rect,
+        screen,
+        true,
+        |ui| {
+            header_actions = window_header(ui, id, title, None, false, HeaderPlacement::Dialog);
+            show_window_contents_bounded(ui, add_contents);
+        },
+        |ui, rect| {
+            floating_resize_handles(ui, id, rect, &mut position, &mut size);
+            if let Some(intensity) = flash {
+                let style = ui.style();
+                ui.painter().rect_stroke(
+                    rect,
+                    style.visuals.window_corner_radius,
+                    egui::Stroke::new(
+                        2.5,
+                        theme::blocked_flash_color().gamma_multiply(intensity as f32),
+                    ),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        },
+    );
+    position += header_actions.drag_delta;
+    geometry = DialogGeometry {
+        pos: position,
+        size,
+    };
+    ctx.data_mut(|data| data.insert_temp(geometry_id, geometry));
+
+    // Échap : consommé par le sélecteur de couleur ou une liste ouverts (ils
+    // le lisent avant), sinon il ferme le dialogue.
+    let escape = !popup_open
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let close = header_actions.close || escape;
+    if close {
+        ctx.data_mut(|data| {
+            data.remove::<DialogGeometry>(geometry_id);
+            data.remove::<f64>(flash_id);
+        });
+    }
+    close
 }
 
 /// Corps de [`plot_settings_window`] : la bande d'onglets, puis la page de
@@ -6941,6 +7108,101 @@ mod graph_layout_tests {
             .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
             .unwrap();
         (Session::spawn(project, None).unwrap(), graph)
+    }
+
+    /// #14 : tant qu'un dialogue modal est ouvert, un clic sur le reste de
+    /// l'interface n'a aucun effet et déclenche le clignotement du contour ;
+    /// Échap le ferme ; sans dialogue, le même clic agit.
+    #[test]
+    fn un_dialogue_modal_bloque_l_arriere_plan_et_clignote() {
+        let id = egui::Id::new("dialogue_test");
+        let clicks = std::cell::Cell::new(0);
+        let closed = std::cell::Cell::new(false);
+        let run = |context: &egui::Context, modal: bool, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                if ui.button("fond").clicked() {
+                    clicks.set(clicks.get() + 1);
+                }
+                if modal {
+                    let close =
+                        modal_dialog(ui.ctx(), id, "Test", egui::vec2(300.0, 200.0), |ui| {
+                            ui.label("contenu");
+                        });
+                    closed.set(closed.get() | close);
+                }
+            });
+            output.textures_delta.clear();
+        };
+        let click = |context: &egui::Context, modal: bool| {
+            let at = egui::pos2(20.0, 14.0);
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            run(context, modal, vec![egui::Event::PointerMoved(at)]);
+            run(context, modal, vec![button(true)]);
+            run(context, modal, vec![button(false)]);
+        };
+
+        let free = egui::Context::default();
+        run(&free, false, vec![]);
+        click(&free, false);
+        assert_eq!(clicks.get(), 1, "sans dialogue, le bouton répond");
+
+        let context = egui::Context::default();
+        for _ in 0..3 {
+            run(&context, true, vec![]);
+        }
+        click(&context, true);
+        assert_eq!(clicks.get(), 1, "le dialogue a bloqué le clic");
+        assert!(
+            context
+                .data(|data| data.get_temp::<f64>(id.with("flash_start")))
+                .is_some(),
+            "le clic bloqué déclenche le clignotement"
+        );
+        assert!(!closed.get());
+        run(
+            &context,
+            true,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert!(closed.get(), "Échap ferme le dialogue");
+    }
+
+    /// #13 : la fenêtre des propriétés n'écrit pas son propre cadre — elle
+    /// passe par la brique des fenêtres de contenu (`show_window_in_layer`,
+    /// `window_header`) ; `egui::Window` n'y est plus employé.
+    #[test]
+    fn la_fenetre_des_proprietes_est_construite_comme_les_autres() {
+        let source = include_str!("app.rs");
+        let start = source.find("fn plot_settings_window").expect("fonction");
+        let end = source[start..]
+            .find("fn plot_settings_contents")
+            .expect("fin");
+        let body = &source[start..start + end];
+        assert!(!body.contains("egui::Window::new"), "plus de Window brute");
+        assert!(body.contains("modal_dialog("));
+        let dialog = source.find("fn modal_dialog").expect("brique");
+        let dialog = &source[dialog..dialog + 6000];
+        assert!(dialog.contains("show_window_in_layer("));
+        assert!(dialog.contains("window_header("));
     }
 
     #[test]
@@ -7988,7 +8250,7 @@ mod graph_layout_tests {
                     ui,
                     egui::Id::new("graph_header_centered_title"),
                     "Graph1",
-                    Tab::Graph(graph),
+                    Some(Tab::Graph(graph)),
                     false,
                     HeaderPlacement::Floating,
                 );
@@ -8056,7 +8318,7 @@ mod graph_layout_tests {
                         ui,
                         egui::Id::new("collapse_icon_presence"),
                         "Titre",
-                        tab,
+                        Some(tab),
                         false,
                         HeaderPlacement::Floating,
                     );
@@ -8967,8 +9229,14 @@ mod graph_layout_tests {
                     ui.ctx().content_rect(),
                     true,
                     |ui| {
-                        let _ =
-                            window_header(ui, id, "Figure", tab, false, HeaderPlacement::Floating);
+                        let _ = window_header(
+                            ui,
+                            id,
+                            "Figure",
+                            Some(tab),
+                            false,
+                            HeaderPlacement::Floating,
+                        );
                         graph_drop_target(ui, &state, &mut actions, &mut graph_views, graph);
                     },
                     |_, _| {},

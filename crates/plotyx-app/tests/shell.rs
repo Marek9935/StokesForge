@@ -5154,7 +5154,7 @@ fn saving_a_color_in_the_project_is_undoable() {
     assert!(state.saved_colors(SaveTarget::Project).is_empty());
 }
 
-/// Enregistrer une couleur « pour moi » l'écrit dans le fichier de
+/// Enregistrer une couleur « utilisateur » l'écrit dans le fichier de
 /// l'utilisateur, hors projet et hors historique ; la retirer aussi.
 #[test]
 fn saving_a_color_for_the_user_writes_the_user_file() {

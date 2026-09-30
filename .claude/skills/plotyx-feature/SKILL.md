@@ -132,6 +132,22 @@ fond sombre) — dans `plotyx-render`, jamais dans un backend. Un nouveau
 champ de couleur du modèle porte `#[serde(default)]` côté
 `plotyx-persistence` (`docs/persistance.md`).
 
+**Un menu déroulant dans une fenêtre surgissante exige une `egui::Area`
+à soi, pas `egui::Popup`** : egui ne retient qu'une fenêtre surgissante
+ouverte par viewport, donc la liste d'un `ComboBox` refermerait la fenêtre
+parente (issue #9). `color_button` tient l'état ouvert/fermé lui-même et
+ferme sur Échap ou clic extérieur ; s'en inspirer.
+
+## 2 sexies. Fenêtres et dialogues
+
+Toute fenêtre de l'application se construit par la brique commune
+(`show_window_in_layer` : cadre, contour actif, rognage ; `window_header`
+pour la barre de titre), **jamais** par une `egui::Window` brute. Un dialogue
+qui doit bloquer le reste de l'interface passe par `modal_dialog` (fenêtre des
+propriétés du graphe) : calque plein écran qui capte les clics, contour rouge
+foncé qui clignote sur un clic bloqué, Échap qui ferme. La fenêtre d'import
+(`import_window`) est encore une `egui::Window` brute (issues #13/#14).
+
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
 
 Une `QAction` reliée à un `QUndoStack` portait d'un coup le raccourci, l'entrée

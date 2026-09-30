@@ -58,6 +58,12 @@ pub fn gutter_text_color() -> Color32 {
     GUTTER_TEXT
 }
 
+/// Rouge foncé et discret du contour d'un dialogue modal qui vient de
+/// refuser un clic ([`crate::app`], `modal_dialog`).
+pub fn blocked_flash_color() -> Color32 {
+    Color32::from_rgb(150, 28, 28)
+}
+
 /// Fond de repos de la gouttière de la grille (lettres de colonnes, « # »,
 /// numéros de ligne, libellés de champ d'en-tête) — la distingue visuellement
 /// des données elles-mêmes. Dérivé de [`ACCENT`] comme le reste de la
