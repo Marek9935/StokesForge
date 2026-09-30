@@ -208,6 +208,12 @@ impl World for FormulaWorld {
 /// suivantes silencieusement ignorées plutôt que provoquer une erreur -
 /// cohérent avec le reste du chantier, où une entrée dégénérée du spec ne
 /// fait jamais planter le rendu (`architecture-choisie.md` §11.1).
+///
+/// `Clone` pour qu'un artefact d'écran garde son document et le rastérise de
+/// nouveau à une autre résolution sans recompiler
+/// (`plotyx_render_egui::scaled`, issue #31) ; le document de Typst est fait
+/// de pointeurs partagés, le clone ne recopie pas les glyphes.
+#[derive(Clone)]
 pub struct Compiled {
     document: PagedDocument,
 }
@@ -422,6 +428,19 @@ impl<V> FormulaCache<V> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Les artefacts actuellement en cache, dans un ordre quelconque — pour
+    /// retrouver l'artefact d'une forme déjà construite
+    /// (`plotyx_render_egui::scaled`, issue #31, qui rastérise de nouveau
+    /// une formule à la taille affichée).
+    pub fn values(&self) -> Vec<Arc<V>> {
+        self.entries
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Vide le cache — pour borner sa taille chez un appelant qui vit

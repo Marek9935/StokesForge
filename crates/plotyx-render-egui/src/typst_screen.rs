@@ -36,9 +36,45 @@ use typst_render::RenderOptions;
 /// pour rester nette sur un écran HiDPI, exactement comme un `Galley` reste
 /// ancré à une taille logique inchangée pendant que son atlas est mis en
 /// page plus finement (`plotyx_render::text`, tête de module).
+///
+/// Garde aussi le document compilé : [`Self::rerender`] en tire une image à
+/// une autre résolution sans recompiler, quand le graphe est agrandi
+/// (`crate::scaled`, issue #31).
 pub struct FormulaTexture {
     handle: TextureHandle,
     size_pt: (f64, f64),
+    /// Le `pixels_per_point` **demandé** pour cette image (l'effectif peut
+    /// être plus bas, voir [`rasterize`]).
+    pixels_per_point: f32,
+    /// `None` pour une formule vide, qui n'a rien à rastériser.
+    compiled: Option<Compiled>,
+    text: String,
+}
+
+impl FormulaTexture {
+    /// La texture egui que le maillage désigne.
+    pub fn id(&self) -> egui::TextureId {
+        self.handle.id()
+    }
+
+    /// La taille de l'image, en pixels.
+    pub fn size_pixels(&self) -> [usize; 2] {
+        self.handle.size()
+    }
+
+    /// Le `pixels_per_point` demandé à la rastérisation.
+    pub fn pixels_per_point(&self) -> f32 {
+        self.pixels_per_point
+    }
+
+    /// La même formule, rastérisée de nouveau à `pixels_per_point` — sans
+    /// recompiler : même document, donc même taille en points et même
+    /// boîte, seule la finesse de l'image change (issue #31). `None` pour
+    /// une formule vide.
+    pub fn rerender(&self, context: &egui::Context, pixels_per_point: f32) -> Option<Self> {
+        let compiled = self.compiled.as_ref()?;
+        Some(rasterize(context, compiled, pixels_per_point, &self.text))
+    }
 }
 
 /// Ce qu'il faut pour dessiner un label Typst à l'écran — construit une
@@ -139,6 +175,11 @@ impl<'a> TypstScreen<'a> {
 }
 
 /// Rastérise une page compilée en texture `egui` — tâche 8.3.
+///
+/// L'image ne dépasse jamais `max_texture_side` du `Context` : un titre
+/// agrandi en plein écran HiDPI (issue #31) peut demander plus que ce que
+/// le GPU accepte. Au-delà, la résolution est plafonnée et l'image un peu
+/// étirée, plutôt qu'une texture refusée.
 fn rasterize(
     context: &egui::Context,
     compiled: &Compiled,
@@ -155,10 +196,16 @@ fn rasterize(
         return FormulaTexture {
             handle,
             size_pt: (0.0, 0.0),
+            pixels_per_point,
+            compiled: None,
+            text: text.to_owned(),
         };
     };
+    let max_side = context.input(|input| input.max_texture_side) as f64;
+    let longest_pt = size_pt.0.max(size_pt.1).max(1.0);
+    let effective = (pixels_per_point as f64).min((max_side - 2.0).max(1.0) / longest_pt);
     let opts = RenderOptions {
-        pixel_per_pt: Scalar::new(pixels_per_point as f64),
+        pixel_per_pt: Scalar::new(effective),
         render_bleed: false,
     };
     let pixmap = typst_render::render(page, &opts);
@@ -174,7 +221,13 @@ fn rasterize(
         image,
         TextureOptions::LINEAR,
     );
-    FormulaTexture { handle, size_pt }
+    FormulaTexture {
+        handle,
+        size_pt,
+        pixels_per_point,
+        compiled: Some(compiled.clone()),
+        text: text.to_owned(),
+    }
 }
 
 /// Construit le `Shape::Mesh` d'une formule déjà rastérisée, ancrée et

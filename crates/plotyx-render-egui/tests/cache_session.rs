@@ -307,3 +307,67 @@ fn reconstruire_la_figure_ne_recompile_pas_un_titre_inchange() {
     assert_eq!(maillages(&view), 1);
     assert_eq!(view.formula_count(), 1, "le titre inchangé vient du cache");
 }
+
+/// La taille en pixels de la texture du premier maillage de `shapes`.
+fn texture_du_maillage<'a>(
+    context: &egui::Context,
+    shapes: impl IntoIterator<Item = &'a egui::Shape>,
+) -> (egui::TextureId, [usize; 2]) {
+    let id = shapes
+        .into_iter()
+        .find_map(|shape| match shape {
+            egui::Shape::Mesh(mesh) => Some(mesh.texture_id),
+            _ => None,
+        })
+        .expect("aucun maillage");
+    let size = context
+        .tex_manager()
+        .read()
+        .meta(id)
+        .expect("texture inconnue")
+        .size;
+    (id, size)
+}
+
+/// Issue #31, de bout en bout : un graphe affiché deux fois plus grand que
+/// sa mise en page logique (`paint_scaled`, comme l'application) peint son
+/// titre Typst avec une texture deux fois plus fine que celle du cache,
+/// au lieu d'étirer celle-ci. Le témoin est la même vue à sa taille
+/// logique : elle peint la texture du cache telle quelle.
+#[test]
+fn un_graphe_agrandi_peint_ses_formules_a_la_taille_affichee() {
+    let banc = Banc::with_title("$Delta H$");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let (largeur, hauteur) = plotyx_render_egui::DEFAULT_FIGURE_SIZE;
+    let logique = egui::vec2(largeur as f32, hauteur as f32);
+
+    let peint = |view: &mut GraphView, taille: egui::Vec2| {
+        let mut sortie = context.run_ui(egui::RawInput::default(), |ui| {
+            view.paint_scaled(
+                ui,
+                Rect::from_min_size(Pos2::ZERO, taille),
+                &banc.snapshot(),
+                banc.graph,
+            )
+            .expect("peinture");
+        });
+        let peintes: Vec<egui::Shape> = sortie.shapes.drain(..).map(|c| c.shape).collect();
+        sortie.textures_delta.clear();
+        texture_du_maillage(&context, &peintes)
+    };
+
+    let (temoin, _) = peint(&mut view, logique);
+    let (en_cache, [w, h]) = texture_du_maillage(&context, view.cache().shapes());
+    assert_eq!(temoin, en_cache, "à taille logique, la texture du cache");
+
+    let (agrandie, [w2, h2]) = peint(&mut view, logique * 2.0);
+    assert_ne!(agrandie, en_cache, "la texture du cache est étirée");
+    assert!(
+        w2.abs_diff(2 * w) <= 1 && h2.abs_diff(2 * h) <= 1,
+        "{:?} n'est pas le double de {:?}",
+        [w2, h2],
+        [w, h]
+    );
+    assert_eq!(view.formula_count(), 1, "le titre a été recompilé");
+}

@@ -367,9 +367,8 @@ Typst, ont été vus à la première capture et corrigés :
   d'un libellé varie donc avec son contenu ; l'alignement des lignes de base
   entre libellés voisins relève de l'issue #32.
 
-Une formule agrandie avec la fenêtre (`paint_scaled`) reste floue : `scaled`
-ne remet en page que les `Shape::Text`, le maillage Typst est étiré
-(issue #31).
+Une formule agrandie avec la fenêtre (`paint_scaled`) reste nette (issue #31) :
+voir « Agrandir un graphe sans flouter le texte » ci-dessous.
 
 ## Ce qu'il faut savoir avant de modifier
 
@@ -409,3 +408,18 @@ texte déjà rastérisé à la taille logique : agrandi, il devient flou (issue
 taille affichée (police × échelle) et garde le résultat par
 `(clé du cache, rectangle affiché)`. Les positions restent celles de la mise
 en page logique : la mesure du texte (invariant 4) n'est pas refaite.
+
+Une formule Typst est un `Shape::Mesh` texturé : son maillage est transformé
+comme toute forme (même place, même boîte), mais désigne une **autre texture**,
+la même formule rastérisée à `pixels_per_point × échelle` par
+`FormulaTexture::rerender` à partir du document déjà compilé (issue #31) — pas
+de recompilation, pas de nouvelle mesure. Ces textures agrandies vivent dans
+`ScaledShapes`, hors du `FormulaCache` de la vue (elles ne comptent pas dans
+`FORMULA_CACHE_LIMIT`), et sont reprises tant que l'échelle ne change pas. Une
+image ne dépasse jamais `max_texture_side` : au-delà, la résolution est
+plafonnée. Rastériser directement à l'échelle affichée pendant la collecte a été
+écarté : le rectangle affiché serait entré dans la clé du cache principal, donc
+tout le pipeline rejoué à chaque pas d'un redimensionnement. Tests :
+`scaled.rs` (`une_formule_agrandie_est_rasterisee_a_la_taille_affichee`,
+`deplacer_sans_agrandir_ne_rasterise_rien`) et `cache_session.rs`
+(`un_graphe_agrandi_peint_ses_formules_a_la_taille_affichee`).

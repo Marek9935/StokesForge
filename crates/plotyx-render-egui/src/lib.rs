@@ -251,8 +251,8 @@ pub struct GraphView {
     /// la création de la vue. `None` si la résolution a échoué — alors tout
     /// le texte reste brut, sans faire échouer le rendu (invariant 10).
     typst_fonts: Option<(typst::text::Font, typst::text::Font)>,
-    /// Les formes du cache mises à l'échelle d'affichage, texte compris
-    /// (issue #18) : voir [`scaled`].
+    /// Les formes du cache mises à l'échelle d'affichage, texte (issue #18)
+    /// et formules Typst (issue #31) compris : voir [`scaled`].
     scaled: scaled::ScaledShapes,
     last: Option<DrawnPlot>,
     measurer: TextMeasurer,
@@ -509,7 +509,13 @@ impl GraphView {
             };
             painter.extend(
                 self.scaled
-                    .get(&context, scaled_key, self.cache.shapes(), transform)
+                    .get(
+                        &context,
+                        scaled_key,
+                        self.cache.shapes(),
+                        transform,
+                        &self.formulas,
+                    )
                     .iter()
                     .cloned(),
             );

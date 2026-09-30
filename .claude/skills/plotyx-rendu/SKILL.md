@@ -139,7 +139,10 @@ tests) ; `collect_shapes_with_typst`, `render_to_string_with_typst` et
 passe **toujours** par Typst, avec un `FormulaCache` borné (`FORMULA_CACHE_LIMIT`)
 et des polices résolues une fois (`TypstScreen::with_fonts`). La couleur du
 texte (`style.color()`, via `formula::ink`) entre dans la compilation et dans la
-clé du cache : une formule n'est jamais teintée après coup (issue #30). L'export PDF/PNG
+clé du cache : une formule n'est jamais teintée après coup (issue #30). Agrandie avec
+la fenêtre, une formule garde son maillage mais change de texture, rastérisée de
+nouveau à la taille affichée dans `scaled` (issue #31) : ne pas mettre le
+rectangle affiché dans la clé du cache principal. L'export PDF/PNG
 n'y est pas encore branché (issue #34). Une formule qui ne compile pas s'affiche
 en texte brut, `$…$` compris — le graphe ne disparaît pas (invariant 10).
 
