@@ -144,7 +144,19 @@ colonnes, ou ajouter des lignes (la colonne *j* du fichier prolonge la colonne
 *j* de la feuille). Plusieurs fichiers se répartissent selon `FilesLayout` : une
 feuille par fichier, une seule feuille côte à côte (X Y X Y…), ou une seule
 feuille avec le X du premier fichier partagé. Le plan (`plan_import`) est
-calculé puis exécuté dans la même macro « Importer ».
+calculé puis exécuté dans la même macro « Importer ». Par défaut, la première
+colonne de chaque fichier reçoit le rôle X et les suivantes le rôle Y ; ces
+rôles sont conservés lors du rétablissement de l'import après annulation.
+
+**Fin des données.** La coupure automatique s'arme au premier X numérique,
+puis coupe au premier X non numérique (ligne vide comprise). Le texte et les
+lignes vides qui précèdent ce premier nombre sont conservés ; un texte dans Y
+ne coupe pas. Le préfixe `skip_chars` est retiré avant ce test ; avec le
+séparateur espaces, X est le premier jeton non vide. L'étape « En-tête et fin
+des données » propose aussi « Aucune coupure », première ligne vide, marqueur,
+N lignes après l'en-tête ou N lignes avant la fin. Le clic droit sur l'aperçu
+permet d'annuler la coupure automatique ; l'aperçu et l'import utilisent le
+même découpage (`plotyx_import::layout`, `data_end`).
 
 **Plusieurs blocs.** `BlockSplit` découpe un fichier qui enchaîne plusieurs
 spectres (à chaque ligne commençant par un texte comme `TITLE`, ou aux lignes

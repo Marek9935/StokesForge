@@ -268,3 +268,62 @@ fn fichier_a_plusieurs_blocs() {
     recipe.block_split = BlockSplit::BlankLines;
     assert!(parse_blocks(b"une\nautre\n", &recipe).is_err());
 }
+
+/// La coupure teste le X après retrait du préfixe (compté en caractères),
+/// même avec des espaces en tête. Le texte et le vide avant le premier
+/// nombre restent des données ; le texte dans Y ne coupe jamais (issue #4).
+#[test]
+fn fin_automatique_apres_prefixe_et_avant_pied() {
+    for (separator, text) in [
+        (
+            Separator::Semicolon,
+            "titre\nλ>texte;avant\nλ>\nλ> 1;10\nλ> 2;n/a\nλ>\nλ>Data points;551\n",
+        ),
+        (
+            Separator::Whitespace,
+            "titre\nλ>texte avant\nλ>\nλ>   1   10\nλ>   2   n/a\nλ>\nλ>Data points 551\n",
+        ),
+    ] {
+        let mut recipe = ImportRecipe::new("Préfixe d'instrument");
+        recipe.separator = separator;
+        recipe.header = HeaderSkip::Lines(1);
+        recipe.skip_chars = 2;
+        let table = parse(text.as_bytes(), &recipe).expect("import");
+        assert_eq!(table.row_count(), 4);
+        assert_eq!(table.columns[0].texts[0].as_deref(), Some("texte"));
+        assert!(table.columns[0].values[1].is_nan());
+        assert!(table.columns[0].texts[1].is_none());
+        assert_eq!(&table.columns[0].values[2..], &[1.0, 2.0]);
+        assert_eq!(table.columns[1].texts[3].as_deref(), Some("n/a"));
+
+        let shown = preview(text.as_bytes(), &recipe).expect("aperçu");
+        assert_eq!(shown.total_data_lines, 4);
+        let footer: Vec<_> = shown
+            .lines
+            .iter()
+            .filter(|line| line.role == LineRole::Footer)
+            .collect();
+        assert_eq!(
+            footer.iter().map(|line| line.number).collect::<Vec<_>>(),
+            vec![6, 7]
+        );
+        assert_eq!(
+            footer
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            table.footer_lines()
+        );
+
+        // La désactivation survit à l'enregistrement de la recette et garde
+        // le pied dans les données : témoin d'une coupure réellement active.
+        recipe.data_end = plotyx_import::DataEnd::None;
+        let restored = ImportRecipe::from_json(&recipe.to_json()).expect("recette relue");
+        let uncut = parse(text.as_bytes(), &restored).expect("sans coupure");
+        assert_eq!(uncut.row_count(), 6);
+        assert!(uncut.footer_lines().is_empty());
+        let shown = preview(text.as_bytes(), &restored).expect("aperçu sans coupure");
+        assert_eq!(shown.total_data_lines, 6);
+        assert!(!shown.lines.iter().any(|line| line.role == LineRole::Footer));
+    }
+}
