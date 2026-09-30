@@ -24,6 +24,13 @@ une table vide. L'application transmet les changements de géométrie à
 l'acteur et recharge cette table aussi bien depuis le menu Fichier qu'au
 démarrage avec un chemin de projet.
 
+Chaque `WindowGeometry` porte aussi, en option, un `WindowView` (issue #16) :
+mode `Open`/`Maximized`/`Closed`, repli, rang d'empilement parmi les fenêtres
+ouvertes. `x`/`y`/`width`/`height` y restent toujours la géométrie
+**flottante** ; le détachement n'est jamais enregistré (une fenêtre détachée
+est écrite `Open`) et la position d'une fenêtre OS détachée non plus. `view`
+absent = disposition initiale par défaut ; un mode inconnu se lit `Closed`.
+
 ## Le format ne s'écrit pas dans le modèle
 
 `plotyx-core` ne dérive aucun `Serialize`/`Deserialize`. Ce crate définit ses

@@ -725,9 +725,16 @@ pub struct PlotyxApp {
     /// [`PlotyxApp::ui`] applique ce décalage à la peinture. Transitoire, comme la position de défilement d'un
     /// `egui::ScrollArea` : jamais persisté.
     workspace_scroll: egui::Vec2,
-    /// Dernière géométrie envoyée à l'acteur, pour ne pas lui adresser une
-    /// requête à chaque image pendant qu'une fenêtre reste immobile.
+    /// Dernière géométrie (avec son état) envoyée à l'acteur, pour ne pas lui
+    /// adresser une requête à chaque image pendant qu'une fenêtre reste
+    /// immobile.
     saved_window_geometries: HashMap<NodeId, WindowGeometry>,
+    /// Dernier rectangle **flottant** connu de chaque fenêtre, en
+    /// coordonnées de l'espace de travail. Il survit à la fermeture, à la
+    /// maximisation et au détachement (issue #16) et prime sur l'instantané,
+    /// que `AppState::set_window_geometry` ne rafraîchit pas : sans lui, une
+    /// fenêtre rouverte reprendrait la géométrie du chargement du projet.
+    floating_rects: HashMap<NodeId, egui::Rect>,
     /// Sélection courante dans l'arbre du Project Manager (§6) — Ctrl/Cmd-clic
     /// en bascule l'appartenance ; consommée par « Afficher »/« Masquer ».
     /// Indépendante de `selection.rs`, propre à la grille de données.
@@ -873,8 +880,6 @@ struct DetachedTabRequests {
     reattach: bool,
     /// La croix du système ferme la vue détachée sans la réattacher.
     close: bool,
-    /// Géométrie rapportée par le viewport OS, en coordonnées écran.
-    geometry: Option<WindowGeometry>,
 }
 
 impl PlotyxApp {
@@ -908,19 +913,54 @@ impl PlotyxApp {
             .and_then(|raw| raw.trim().parse::<u64>().ok())
             .map(Duration::from_millis);
 
+        let saved_window_geometries: HashMap<NodeId, WindowGeometry> =
+            (*state.snapshot().window_geometries).clone();
+        let floating_rects: HashMap<NodeId, egui::Rect> = saved_window_geometries
+            .iter()
+            .map(|(node, geometry)| (*node, geometry_rect(geometry)))
+            .collect();
         let mut floating_tabs = Vec::new();
         let mut cascade_rank = HashMap::new();
         let mut next_cascade = 0u32;
+        let mut collapsed_tabs = HashSet::new();
+        let mut maximized_tab = None;
         let mut open_initial = |tab: Tab| {
             floating_tabs.push(tab);
             cascade_rank.insert(tab, next_cascade);
             next_cascade = next_cascade.wrapping_add(1);
         };
-        if let Some((first_book, _)) = state.books().into_iter().next() {
-            open_initial(Tab::Book(first_book));
-        }
-        if let Some((first_graph, _)) = state.graphs().into_iter().next() {
-            open_initial(Tab::Graph(first_graph));
+        if saved_window_geometries
+            .values()
+            .any(|geometry| geometry.view.is_some())
+        {
+            // Projet enregistré avec l'état des fenêtres (issue #16) : on le
+            // rétablit tel quel, une fenêtre détachée revenant flottante.
+            let mut restored: Vec<(u32, Tab, plotyx_session::WindowView)> = Vec::new();
+            for (node, kind) in window_nodes(&state.project_tree()) {
+                let Some(view) = saved_window_geometries.get(&node).and_then(|g| g.view) else {
+                    continue;
+                };
+                if view.mode != plotyx_session::WindowMode::Closed {
+                    restored.push((view.stack, tab_for_window(node, kind), view));
+                }
+            }
+            restored.sort_by_key(|(stack, tab, _)| (*stack, tab_node(*tab).raw()));
+            for (_, tab, view) in restored {
+                open_initial(tab);
+                if view.collapsed {
+                    collapsed_tabs.insert(tab);
+                }
+                if view.mode == plotyx_session::WindowMode::Maximized {
+                    maximized_tab = Some(tab);
+                }
+            }
+        } else {
+            if let Some((first_book, _)) = state.books().into_iter().next() {
+                open_initial(Tab::Book(first_book));
+            }
+            if let Some((first_graph, _)) = state.graphs().into_iter().next() {
+                open_initial(Tab::Graph(first_graph));
+            }
         }
         // Sans classeur ni graphe à montrer, aucune fenêtre flottante ne
         // s'ouvre — ni la console de script ni le Project Manager n'ont leur
@@ -933,8 +973,8 @@ impl PlotyxApp {
             next_cascade,
             focus_next: None,
             graph_views: HashMap::new(),
-            collapsed_tabs: HashSet::new(),
-            maximized_tab: None,
+            collapsed_tabs,
+            maximized_tab,
             pm_detached: false,
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
@@ -942,7 +982,8 @@ impl PlotyxApp {
             window_positions: HashMap::new(),
             window_sizes: HashMap::new(),
             workspace_scroll: egui::Vec2::ZERO,
-            saved_window_geometries: HashMap::new(),
+            saved_window_geometries,
+            floating_rects,
             pm_selection: HashSet::new(),
             hidden_tabs: HashSet::new(),
             autoquit,
@@ -1563,16 +1604,59 @@ impl PlotyxApp {
     /// ou redimensionnement. Cette information de vue est persistante mais
     /// reste hors de l'historique métier.
     fn remember_window_geometry(&mut self, tab: Tab, rect: egui::Rect) {
-        let node = tab_node(tab);
-        let geometry = WindowGeometry {
-            x: f64::from(rect.min.x),
-            y: f64::from(rect.min.y),
-            width: f64::from(rect.width()),
-            height: f64::from(rect.height()),
-        };
-        if self.saved_window_geometries.get(&node) != Some(&geometry) {
-            self.state.set_window_geometry(node, geometry);
-            self.saved_window_geometries.insert(node, geometry);
+        self.floating_rects.insert(tab_node(tab), rect);
+    }
+
+    /// Envoie à la session la géométrie flottante de chaque fenêtre connue
+    /// avec son état du moment (ouverte/maximisée/fermée, repliée, rang
+    /// d'empilement) — uniquement ce qui a changé depuis le dernier envoi.
+    /// Une fenêtre détachée compte comme ouverte : le détachement ne se
+    /// retient pas, et la position de sa fenêtre OS n'est jamais écrite.
+    fn sync_window_views(&mut self) {
+        let open_order: Vec<NodeId> = self
+            .floating_tabs
+            .iter()
+            .map(|tab| tab_node(*tab))
+            .collect();
+        let mut detached: Vec<NodeId> = self.detached_tabs.keys().map(|t| tab_node(*t)).collect();
+        detached.sort_by_key(|node| node.raw());
+        let nodes: Vec<NodeId> = self.floating_rects.keys().copied().collect();
+        for node in nodes {
+            let rect = self.floating_rects[&node];
+            let stack = open_order
+                .iter()
+                .position(|n| *n == node)
+                .or_else(|| {
+                    detached
+                        .iter()
+                        .position(|n| *n == node)
+                        .map(|i| open_order.len() + i)
+                })
+                .unwrap_or(0);
+            let is_open = open_order.contains(&node) || detached.contains(&node);
+            let mode = if self.maximized_tab.map(tab_node) == Some(node) {
+                plotyx_session::WindowMode::Maximized
+            } else if is_open {
+                plotyx_session::WindowMode::Open
+            } else {
+                plotyx_session::WindowMode::Closed
+            };
+            let collapsed = self.collapsed_tabs.iter().any(|tab| tab_node(*tab) == node);
+            let geometry = WindowGeometry {
+                x: f64::from(rect.min.x),
+                y: f64::from(rect.min.y),
+                width: f64::from(rect.width()),
+                height: f64::from(rect.height()),
+                view: Some(plotyx_session::WindowView {
+                    mode,
+                    collapsed,
+                    stack: u32::try_from(stack).unwrap_or(u32::MAX),
+                }),
+            };
+            if self.saved_window_geometries.get(&node) != Some(&geometry) {
+                self.state.set_window_geometry(node, geometry);
+                self.saved_window_geometries.insert(node, geometry);
+            }
         }
     }
 
@@ -1619,28 +1703,22 @@ impl PlotyxApp {
                 Tab::Graph(_) => [GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y],
                 _ => [420.0, 360.0],
             };
-            let saved_geometry = state.snapshot().window_geometries.get(&tab_node(tab));
             // Sans décoration native : la barre maison (`window_header`,
             // placement `Detached`) est tout ce que l'utilisateur a pour
             // déplacer/redimensionner/fermer cette fenêtre — voir la doc de
             // tête du module, § détachement générique, et
             // [`detached_resize_handles`] pour le redimensionnement.
-            let viewport = if let Some(geometry) = saved_geometry {
-                egui::ViewportBuilder::default()
-                    .with_title(title)
-                    .with_decorations(false)
-                    .with_inner_size([geometry.width as f32, geometry.height as f32])
-                    .with_position(egui::pos2(geometry.x as f32, geometry.y as f32))
-            } else {
-                egui::ViewportBuilder::default()
-                    .with_title(title)
-                    .with_decorations(false)
-                    .with_inner_size(size)
-            }
-            // Le repli B9 doit pouvoir réduire la hauteur sous le minimum
-            // habituel. Sous cette largeur, les onglets de feuille (taille
-            // naturelle) défilent au lieu de rétrécir — voir `sheet_tabs`.
-            .with_min_inner_size([MIN_CONTENT_WINDOW_SIZE.x, WINDOW_HEADER_HEIGHT]);
+            // Ni position ni taille mémorisées : la fenêtre OS détachée n'a
+            // pas de géométrie persistée (issue #16), seule la géométrie
+            // flottante l'est.
+            let viewport = egui::ViewportBuilder::default()
+                .with_title(title)
+                .with_decorations(false)
+                .with_inner_size(size)
+                // Le repli B9 doit pouvoir réduire la hauteur sous le minimum
+                // habituel. Sous cette largeur, les onglets de feuille (taille
+                // naturelle) défilent au lieu de rétrécir — voir `sheet_tabs`.
+                .with_min_inner_size([MIN_CONTENT_WINDOW_SIZE.x, WINDOW_HEADER_HEIGHT]);
             let id = egui::Id::new(tab);
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of(tab),
@@ -1847,27 +1925,6 @@ impl PlotyxApp {
                         requests.close = true;
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
-                    if let Some(rect) = ui.ctx().input(|input| input.viewport().outer_rect) {
-                        // B9 : même piège que `floating_window_geometry_to_
-                        // persist` (B3) — pendant un repli, `rect` est le
-                        // rectangle **réduit** que l'OS rapporte une fois le
-                        // `ViewportCommand::InnerSize` ci-dessus appliqué ; le
-                        // persister tel quel referait réapparaître la fenêtre
-                        // repliée, y compris une fois dépliée à nouveau, à la
-                        // prochaine ouverture du projet. `expanded_size` est
-                        // justement gelée à la taille d'avant repli tant que
-                        // `collapsed_now` est vrai (voir plus haut).
-                        let persisted = floating_window_geometry_to_persist(
-                            rect,
-                            model.expanded_size.unwrap_or_else(|| rect.size()),
-                        );
-                        requests.geometry = Some(WindowGeometry {
-                            x: f64::from(persisted.min.x),
-                            y: f64::from(persisted.min.y),
-                            width: f64::from(persisted.width()),
-                            height: f64::from(persisted.height()),
-                        });
-                    }
                 },
             );
         }
@@ -2044,7 +2101,6 @@ impl eframe::App for PlotyxApp {
             // demandé à être réattaché depuis la dernière image.
             let mut to_reattach: Vec<Tab> = Vec::new();
             let mut to_close: Vec<Tab> = Vec::new();
-            let mut geometries: Vec<(Tab, WindowGeometry)> = Vec::new();
             for (tab, detached) in &self.detached_tabs {
                 if let Tab::Book(book) = tab {
                     let mut model = detached
@@ -2065,16 +2121,6 @@ impl eframe::App for PlotyxApp {
                 }
                 if std::mem::take(&mut requests.close) {
                     to_close.push(*tab);
-                }
-                if let Some(geometry) = requests.geometry.take() {
-                    geometries.push((*tab, geometry));
-                }
-            }
-            for (tab, geometry) in geometries {
-                let node = tab_node(tab);
-                if self.saved_window_geometries.get(&node) != Some(&geometry) {
-                    self.state.set_window_geometry(node, geometry);
-                    self.saved_window_geometries.insert(node, geometry);
                 }
             }
             for tab in to_reattach {
@@ -2101,6 +2147,7 @@ impl eframe::App for PlotyxApp {
             window_sizes,
             workspace_scroll,
             hidden_tabs,
+            floating_rects,
             ..
         } = self;
 
@@ -2207,13 +2254,18 @@ impl eframe::App for PlotyxApp {
                         _ => FLOATING_WINDOW_SIZE,
                     };
                     let default_size = natural_size.min(WORKSPACE_SIZE);
-                    let saved_geometry = state.snapshot().window_geometries.get(&tab_node(tab));
-                    let saved_pos = saved_geometry
-                        .map(|geometry| egui::pos2(geometry.x as f32, geometry.y as f32))
-                        .unwrap_or(default_pos);
-                    let saved_size = saved_geometry
-                        .map(|geometry| egui::vec2(geometry.width as f32, geometry.height as f32))
-                        .unwrap_or(default_size)
+                    // Le dernier rectangle flottant connu de l'application
+                    // prime sur l'instantané (périmé après un déplacement).
+                    let saved_rect = floating_rects.get(&tab_node(tab)).copied().or_else(|| {
+                        state
+                            .snapshot()
+                            .window_geometries
+                            .get(&tab_node(tab))
+                            .map(geometry_rect)
+                    });
+                    let saved_pos = saved_rect.map_or(default_pos, |rect| rect.min);
+                    let saved_size = saved_rect
+                        .map_or(default_size, |rect| rect.size())
                         .max(MIN_CONTENT_WINDOW_SIZE)
                         .min(WORKSPACE_SIZE);
                     window_positions.entry(tab).or_insert(saved_pos);
@@ -2490,9 +2542,32 @@ impl eframe::App for PlotyxApp {
             }
         }
 
+        self.sync_window_views();
         self.screenshot(&ctx);
         self.autoquit(&ctx);
     }
+}
+
+/// Rectangle flottant d'une géométrie persistée.
+fn geometry_rect(geometry: &WindowGeometry) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(geometry.x as f32, geometry.y as f32),
+        egui::vec2(geometry.width as f32, geometry.height as f32),
+    )
+}
+
+/// Les fenêtres de l'arbre du Project Manager, à plat.
+fn window_nodes(tree: &[crate::state::ProjectTreeNode]) -> Vec<(NodeId, WindowKind)> {
+    let mut out = Vec::new();
+    for node in tree {
+        match node {
+            crate::state::ProjectTreeNode::Folder { children, .. } => {
+                out.extend(window_nodes(children));
+            }
+            crate::state::ProjectTreeNode::Window { id, kind, .. } => out.push((*id, *kind)),
+        }
+    }
+    out
 }
 
 /// Emplacement (mémoire temporaire d'egui) des fichiers déposés cette image :
@@ -7395,6 +7470,116 @@ mod graph_layout_tests {
         (Session::spawn(project, None).unwrap(), graph)
     }
 
+    fn vue_persistee(session: &Session, node: NodeId) -> WindowGeometry {
+        *session
+            .handle()
+            .snapshot()
+            .unwrap()
+            .window_geometries
+            .get(&node)
+            .expect("géométrie envoyée à la session")
+    }
+
+    /// Issue #16 : l'état de chaque fenêtre (ouverte/maximisée/fermée, repliée,
+    /// rang d'empilement) part à la session avec sa géométrie flottante, et
+    /// cette dernière ne bouge ni à la maximisation, ni à la fermeture, ni au
+    /// détachement.
+    #[test]
+    fn l_etat_des_fenetres_est_envoye_a_la_session_sans_toucher_a_la_geometrie_flottante() {
+        use plotyx_session::WindowMode;
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let mut app = PlotyxApp::new(state);
+        let book = app.state.books()[0].0;
+        let rect = egui::Rect::from_min_size(egui::pos2(40.0, 60.0), egui::vec2(500.0, 300.0));
+        app.remember_window_geometry(Tab::Graph(graph), rect);
+        app.remember_window_geometry(Tab::Book(book), rect.translate(egui::vec2(9.0, 9.0)));
+        app.sync_window_views();
+
+        let open = vue_persistee(&session, graph);
+        assert_eq!(
+            (open.x, open.y, open.width, open.height),
+            (40.0, 60.0, 500.0, 300.0)
+        );
+        let view = open.view.unwrap();
+        assert_eq!(view.mode, WindowMode::Open);
+        assert!(!view.collapsed);
+        // Le graphe est ouvert après le classeur : il est au-dessus.
+        assert!(view.stack > vue_persistee(&session, book).view.unwrap().stack);
+
+        // Replié + maximisé : état retenu, rectangle inchangé.
+        app.collapsed_tabs.insert(Tab::Graph(graph));
+        app.maximized_tab = Some(Tab::Graph(graph));
+        app.sync_window_views();
+        let maximized = vue_persistee(&session, graph);
+        assert_eq!(maximized.view.unwrap().mode, WindowMode::Maximized);
+        assert!(maximized.view.unwrap().collapsed);
+        assert_eq!((maximized.x, maximized.width), (open.x, open.width));
+
+        // Détachée : toujours « ouverte », rectangle flottant intact.
+        app.maximized_tab = None;
+        app.detach_tab(Tab::Graph(graph));
+        app.sync_window_views();
+        let detached = vue_persistee(&session, graph);
+        assert_eq!(detached.view.unwrap().mode, WindowMode::Open);
+        assert_eq!((detached.x, detached.y), (open.x, open.y));
+
+        // Fermée : la géométrie flottante reste celle d'avant.
+        app.detached_tabs.clear();
+        app.sync_window_views();
+        let closed = vue_persistee(&session, graph);
+        assert_eq!(closed.view.unwrap().mode, WindowMode::Closed);
+        assert_eq!(
+            (closed.x, closed.y, closed.width, closed.height),
+            (40.0, 60.0, 500.0, 300.0)
+        );
+        // Rouverte : c'est ce rectangle-là que la boucle de peinture relit.
+        assert_eq!(app.floating_rects[&graph], rect);
+    }
+
+    /// Issue #16 : après enregistrement et rechargement, les fenêtres
+    /// reviennent dans leur état — maximisée, repliée, fermée, et dans leur
+    /// ordre d'empilement.
+    #[test]
+    fn l_etat_des_fenetres_survit_a_l_enregistrement_et_au_rechargement() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+        let mut app = PlotyxApp::new(state);
+        let book = app.state.books()[0].0;
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(400.0, 300.0));
+        app.remember_window_geometry(Tab::Graph(graph), rect);
+        app.remember_window_geometry(Tab::Book(book), rect);
+        // Le graphe est sous le classeur et replié ; le classeur est maximisé.
+        app.floating_tabs = vec![Tab::Graph(graph), Tab::Book(book)];
+        app.collapsed_tabs.insert(Tab::Graph(graph));
+        app.maximized_tab = Some(Tab::Book(book));
+        app.sync_window_views();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("fenetres.plotyx");
+        session.handle().save(&path).unwrap();
+
+        let reloaded = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
+        reloaded.handle().load(&path).unwrap();
+        let state = AppState::new(reloaded.handle(), "test.plotyx".to_string()).unwrap();
+        let app = PlotyxApp::new(state);
+        assert_eq!(app.maximized_tab, Some(Tab::Book(book)));
+        assert!(
+            app.floating_tabs.contains(&Tab::Graph(graph)),
+            "détachée → flottante"
+        );
+        assert_eq!(
+            app.floating_tabs.last(),
+            Some(&Tab::Book(book)),
+            "le classeur, au-dessus, reste au-dessus"
+        );
+        assert!(app.collapsed_tabs.contains(&Tab::Graph(graph)));
+        assert!(
+            app.detached_tabs.is_empty(),
+            "le détachement ne se retient pas"
+        );
+        assert_eq!(app.floating_rects[&graph], rect);
+    }
+
     /// #17 : la grille reste peinte sous un dialogue (Propriétés du graphe,
     /// import…) ; tant qu'un champ texte y a le focus, Retour arrière et
     /// Suppr lui appartiennent — la grille ne doit ni les consommer ni vider
@@ -9431,29 +9616,14 @@ mod graph_layout_tests {
         }
 
         // L'OS applique la commande : l'image suivante rapporte le petit
-        // rectangle — piège symétrique de B3
-        // (`floating_window_geometry_to_persist`) : cette taille réduite ne
-        // doit pas s'écraser dans la géométrie persistée, sous peine de
-        // rouvrir une fenêtre minuscule au prochain chargement du projet.
+        // rectangle. Plus rien n'en est persisté depuis l'issue #16 : la
+        // fenêtre OS détachée n'a pas de géométrie retenue (seule la
+        // géométrie flottante l'est, voir `sync_window_views`).
         outer_rect.set(egui::Rect::from_min_size(
             outer_rect.get().min,
             egui::vec2(GRAPH_WINDOW_SIZE.x, expected_collapsed_height),
         ));
         paint(Vec::new());
-        {
-            let requests = app.detached_tabs[&tab]
-                .requests
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            let geometry = requests
-                .geometry
-                .expect("la géométrie doit être rapportée même repliée");
-            assert!(
-                (geometry.height - f64::from(GRAPH_WINDOW_SIZE.y)).abs() < 0.01,
-                "la géométrie persistée ne doit pas retenir la hauteur repliée, \
-                 geometry={geometry:?}"
-            );
-        }
 
         // Dépli : même chevron (glyphe différent, même rectangle), même
         // schéma de clic — doit retrouver exactement la taille d'avant

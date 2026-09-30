@@ -141,6 +141,45 @@ pub struct WindowGeometry {
     pub width: f64,
     /// Hauteur.
     pub height: f64,
+    /// État de la fenêtre (ouverte, maximisée, fermée, repliée, rang
+    /// d'empilement). `None` : jamais enregistré (fichier antérieur, ou
+    /// fenêtre jamais vue) — l'application applique alors sa disposition
+    /// initiale par défaut. Ne change jamais `x`/`y`/`width`/`height`, qui
+    /// restent la géométrie **flottante** quoi qu'il arrive à la fenêtre
+    /// (issue #16).
+    #[serde(default)]
+    pub view: Option<WindowView>,
+}
+
+/// État d'affichage d'une fenêtre de contenu, retenu avec sa
+/// [`WindowGeometry`] flottante. Une fenêtre détachée est enregistrée
+/// `Open` : le détachement ne se mémorise pas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowView {
+    /// Ouverte, maximisée ou fermée.
+    pub mode: WindowMode,
+    /// Fenêtre repliée sur sa barre de titre.
+    #[serde(default)]
+    pub collapsed: bool,
+    /// Rang d'empilement parmi les fenêtres ouvertes : 0 = tout en dessous,
+    /// le plus grand rang est au premier plan. Un rang relatif, pas une
+    /// valeur de calque egui.
+    #[serde(default)]
+    pub stack: u32,
+}
+
+/// Mode d'une fenêtre de contenu. Une valeur inconnue (fichier d'une version
+/// plus récente) se lit `Closed` : dégradation gracieuse, jamais un échec de
+/// chargement (invariant 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WindowMode {
+    /// Fenêtre flottante ouverte.
+    Open,
+    /// Fenêtre maximisée dans l'espace de travail.
+    Maximized,
+    /// Fenêtre fermée (sa géométrie flottante est conservée).
+    #[serde(other)]
+    Closed,
 }
 
 /// Borne haute d'un identifiant de nœud ou de `next_id_hint` lu d'un fichier
@@ -1127,6 +1166,11 @@ mod tests {
                 y: 34.0,
                 width: 640.0,
                 height: 480.0,
+                view: Some(crate::WindowView {
+                    mode: crate::WindowMode::Maximized,
+                    collapsed: true,
+                    stack: 3,
+                }),
             },
         );
 

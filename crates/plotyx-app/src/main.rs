@@ -251,6 +251,7 @@ mod startup_tests {
             y: 67.0,
             width: 520.0,
             height: 380.0,
+            view: None,
         };
         let original = Session::spawn(project, None).unwrap();
         original

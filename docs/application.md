@@ -165,13 +165,24 @@ table, contenu et décalage mis à l'échelle de la barre
 (`grid_vertical_bar_scale`) ; un glisser sur cette barre est appliqué à la
 table à l'image suivante (`grid_contents`, `pending_vertical_offset`).
 
-### Géométrie des fenêtres
+### Géométrie et état des fenêtres
 
-Chaque déplacement ou redimensionnement est envoyé à la session et enregistré
-dans le fichier `.plotyx`. Au redémarrage, la première ouverture d'un contenu
-reprend cette position et cette taille. Une fenêtre détachée utilise aussi ces
-valeurs pour son viewport OS ; sous Wayland, le compositeur peut refuser la
-position demandée, mais conserve sa taille.
+Pour chaque fenêtre de contenu, la session retient (et le `.plotyx`
+enregistre) sa **géométrie flottante** — position et taille dans l'espace de
+travail — et son **état** : ouverte, maximisée ou fermée, repliée, rang
+d'empilement (`WindowGeometry::view`, voir `docs/persistance.md`). Les deux
+partent ensemble à la fin de chaque image (`PlotyxApp::sync_window_views`),
+seulement quand ils changent. La géométrie flottante ne bouge jamais quand la
+fenêtre est fermée, maximisée ou détachée : `PlotyxApp::floating_rects` la
+conserve et prime sur l'instantané, que `AppState::set_window_geometry` ne
+rafraîchit pas.
+
+Le **détachement ne se retient pas** : une fenêtre détachée est enregistrée
+ouverte et revient flottante au rechargement ; la position et la taille de sa
+fenêtre OS ne sont ni écrites ni relues. Au démarrage, `PlotyxApp::new`
+rétablit les fenêtres ouvertes (dans l'ordre d'empilement), la maximisée et
+les repliées ; sans état enregistré, il ouvre le premier classeur et le
+premier graphe.
 
 ### Project Manager et fenêtres par contenu
 

@@ -22,6 +22,7 @@ fn genere_repro_contour_colle_au_pm() {
                 y: 80.0,
                 width: 500.0,
                 height: 400.0,
+                view: None,
             },
         )
         .unwrap();
@@ -85,6 +86,7 @@ fn genere_repro_graphe_petite_fenetre() {
                 y: 20.0,
                 width: 260.0,
                 height: 200.0,
+                view: None,
             },
         )
         .unwrap();
@@ -133,6 +135,7 @@ fn genere_repro_graphe_petite_fenetre() {
                 y: 20.0,
                 width: 1200.0,
                 height: 900.0,
+                view: None,
             },
         )
         .unwrap();

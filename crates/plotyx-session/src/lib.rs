@@ -163,7 +163,7 @@ pub use snapshot::{HistoryState, Revision, Snapshot};
 /// doc de tête de ce type explique pourquoi ce n'est pas une duplication
 /// (persistance est **sous** ce crate dans le graphe de dépendances et ne
 /// peut donc pas nommer un type défini ici).
-pub use plotyx_persistence::WindowGeometry;
+pub use plotyx_persistence::{WindowGeometry, WindowMode, WindowView};
 
 /// Identité stable et comparable d'un émetteur de requêtes (A4,
 /// `guide-de-correction-robustesse.md` §F6).
