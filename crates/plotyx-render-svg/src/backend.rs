@@ -173,10 +173,18 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         // formule ne compile pas.
         if let Some(typst) = &self.typst {
             if plotyx_render::formula::is_formula(text) {
+                // Un texte transparent ne dessine rien, comme le `<text>` de
+                // `plotters-svg` et le chemin écran : pas de témoin, donc
+                // pas de fragment Typst (qui, lui, ignorerait l'opacité
+                // nulle du style et serait visible).
+                if style.color().alpha == 0.0 {
+                    return Ok(());
+                }
                 let size_pt = font_size(style.size());
                 if let Some(witness) = typst.record(
                     text,
                     size_pt,
+                    plotyx_render::formula::ink(style.color()),
                     style.anchor(),
                     style.transform(),
                     (pos.0 as f64, pos.1 as f64),
@@ -228,7 +236,8 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         if let Some(typst) = &self.typst {
             if plotyx_render::formula::is_formula(text) {
                 let size_pt = font_size(style.size());
-                if let Some(size) = typst.measure(text, size_pt) {
+                let ink = plotyx_render::formula::ink(style.color());
+                if let Some(size) = typst.measure(text, size_pt, ink) {
                     return Ok(size);
                 }
             }

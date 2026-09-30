@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
 use plotters_backend::{text_anchor::Pos, FontTransform};
-use plotyx_render::formula::{self, Compiled, FormulaCache};
+use plotyx_render::formula::{self, Compiled, FormulaCache, Ink};
 use plotyx_render::FontChoice;
 use typst::text::Font;
 use typst::utils::Scalar;
@@ -96,26 +96,29 @@ impl<'a> TypstScreen<'a> {
     /// corps — l'invariant de la tâche 8.5. `None` si la formule ne
     /// compile pas.
     ///
-    /// Passe par le **même** cache et la **même** entrée que
-    /// [`Self::render`] (même texte, même corps, même `pixels_per_point`) :
+    /// `ink` ne change pas la taille ; il est demandé pour que la mesure
+    /// tombe sur l'entrée que le dessin réutilise. Passe par le **même**
+    /// cache et la **même** entrée que [`Self::render`] (même texte, même
+    /// corps, même couleur, même `pixels_per_point`) :
     /// Plotters mesure un texte juste avant de le dessiner, donc la
     /// rastérisation faite ici est celle que le dessin réutilise. Avant
     /// l'issue #29, chaque mesure recompilait et résolvait de nouveau les
     /// polices. La taille rendue est celle de la page compilée, en points —
     /// indépendante du `pixels_per_point` de la texture, arrondie par la
     /// même fonction que [`formula::measure`].
-    pub fn measure(&self, text: &str, size_pt: f32) -> Option<(u32, u32)> {
-        let texture = self.render(text, size_pt, self.pixels_per_point())?;
+    pub fn measure(&self, text: &str, size_pt: f32, ink: Ink) -> Option<(u32, u32)> {
+        let texture = self.render(text, size_pt, ink, self.pixels_per_point())?;
         Some(formula::round_size_pt(texture.size_pt))
     }
 
     /// La texture (compilée et rastérisée, ou reprise du cache) pour
-    /// `text` à `size_pt` de corps, au `pixels_per_point` réel de l'écran.
-    /// `None` si la formule ne compile pas.
+    /// `text` à `size_pt` de corps, en `ink` (issue #30), au
+    /// `pixels_per_point` demandé. `None` si la formule ne compile pas.
     pub fn render(
         &self,
         text: &str,
         size_pt: f32,
+        ink: Ink,
         pixels_per_point: f32,
     ) -> Option<Arc<FormulaTexture>> {
         let context = self.context;
@@ -124,6 +127,7 @@ impl<'a> TypstScreen<'a> {
             .get_or_try_insert(
                 text,
                 size_pt,
+                ink,
                 self.choice,
                 pixels_per_point,
                 self.sans.clone(),
@@ -237,6 +241,8 @@ mod tests {
         egui::Context::default()
     }
 
+    const NOIR: Ink = [0, 0, 0, 255];
+
     /// Une formule triviale mesure une taille non nulle — le test de
     /// sanité minimal avant tout dessin.
     #[test]
@@ -247,7 +253,7 @@ mod tests {
         let screen =
             TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
         let (w, h) = screen
-            .measure("$lambda$", 14.0)
+            .measure("$lambda$", 14.0, NOIR)
             .expect("la formule aurait dû compiler");
         assert!(w > 0 && h > 0, "taille nulle : ({w}, {h})");
     }
@@ -261,7 +267,7 @@ mod tests {
         let choice = FontChoice::default();
         let screen =
             TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
-        assert!(screen.measure("$ (unclosed", 14.0).is_none());
+        assert!(screen.measure("$ (unclosed", 14.0, NOIR).is_none());
     }
 
     /// Rendre deux fois la même formule au même `pixels_per_point` sert la
@@ -274,13 +280,32 @@ mod tests {
         let screen =
             TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
         let a = screen
-            .render("$lambda$", 14.0, 1.0)
+            .render("$lambda$", 14.0, NOIR, 1.0)
             .expect("échec du rendu");
         let b = screen
-            .render("$lambda$", 14.0, 1.0)
+            .render("$lambda$", 14.0, NOIR, 1.0)
             .expect("échec du rendu");
         assert_eq!(a.handle.id(), b.handle.id());
         assert_eq!(cache.len(), 1);
+    }
+
+    /// Deux couleurs du même texte sont deux textures (issue #30) : la
+    /// couleur est dans l'image rastérisée, pas dans une teinte posée après
+    /// coup, donc elle doit être dans la clé du cache.
+    #[test]
+    fn deux_couleurs_occupent_deux_entrees() {
+        let ctx = context();
+        let cache = FormulaCache::new();
+        let choice = FontChoice::default();
+        let screen =
+            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
+        let noir = screen.render("$lambda$", 14.0, NOIR, 1.0).expect("rendu");
+        let blanc = screen
+            .render("$lambda$", 14.0, [255, 255, 255, 255], 1.0)
+            .expect("rendu");
+        assert_eq!(cache.len(), 2);
+        assert_ne!(noir.handle.id(), blanc.handle.id());
+        assert_eq!(noir.size_pt, blanc.size_pt, "la couleur change la taille");
     }
 
     /// La mesure passe par le cache, et par la même entrée que le dessin
@@ -293,9 +318,9 @@ mod tests {
         let choice = FontChoice::default();
         let screen =
             TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
-        let mesure = screen.measure("$lambda$", 14.0).expect("mesure");
+        let mesure = screen.measure("$lambda$", 14.0, NOIR).expect("mesure");
         let texture = screen
-            .render("$lambda$", 14.0, screen.pixels_per_point())
+            .render("$lambda$", 14.0, NOIR, screen.pixels_per_point())
             .expect("rendu");
         assert_eq!(cache.len(), 1);
         assert_eq!(mesure, formula::round_size_pt(texture.size_pt));
@@ -314,7 +339,7 @@ mod tests {
         let screen =
             TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
         let texture = screen
-            .render("$lambda$", 14.0, 1.0)
+            .render("$lambda$", 14.0, NOIR, 1.0)
             .expect("échec du rendu");
         let anchor = Pos::new(
             plotters_backend::text_anchor::HPos::Left,
@@ -351,7 +376,7 @@ mod tests {
         let screen =
             TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
         let texture = screen
-            .render("$lambda$", 14.0, 1.0)
+            .render("$lambda$", 14.0, NOIR, 1.0)
             .expect("échec du rendu");
         let anchor = Pos::new(
             plotters_backend::text_anchor::HPos::Left,

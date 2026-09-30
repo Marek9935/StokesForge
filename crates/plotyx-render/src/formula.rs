@@ -84,6 +84,24 @@ use typst_layout::{Page, PagedDocument};
 
 use crate::fonts::{FontChoice, FontSet};
 
+/// La couleur d'un texte Typst : rouge, vert, bleu, opacité, en octets non
+/// prémultipliés — issue #30.
+///
+/// Un tableau plutôt que `plotters_backend::BackendColor` : la couleur entre
+/// dans la clé du cache ([`CacheKey`]), et un `f64` d'opacité ne s'y hache
+/// pas. [`ink`] fait la conversion, une fois, pour les deux backends.
+pub type Ink = [u8; 4];
+
+/// L'encre Typst d'une couleur de Plotters — celle que `draw_text` reçoit
+/// par `style.color()`, déjà résolue par le pipeline (couleur explicite ou
+/// `color::auto_ink`). Même arrondi de l'opacité que le chemin `epaint`
+/// de l'écran.
+pub fn ink(color: plotters_backend::BackendColor) -> Ink {
+    let (r, g, b) = color.rgb;
+    let alpha = (color.alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [r, g, b, alpha]
+}
+
 /// Vrai si `text` doit être compilé par Typst plutôt que dessiné en
 /// `Shape::Text` brut par les fonts egui.
 ///
@@ -235,6 +253,13 @@ impl Compiled {
 /// document d'une page dont la taille **est** la taille du libellé, sans
 /// avoir à la déduire d'un rognage a posteriori.
 ///
+/// `ink` devient la couleur de tout le texte (`#set text(fill: …)`, que le
+/// mode mathématique hérite) : sans elle, Typst dessine en noir, et un titre
+/// sur fond sombre disparaissait (issue #30). Une couleur écrite dans la
+/// formule elle-même (`#text(fill: red)[…]`) garde la priorité, comme toute
+/// règle locale de Typst — c'est ce qui interdit de rendre en blanc puis de
+/// teinter l'image après coup.
+///
 /// `top-edge`/`bottom-edge: "bounds"` : par défaut, Typst borne une ligne
 /// de la hauteur des capitales à la ligne de base. Une page ajustée à son
 /// contenu coupait donc tout ce qui descend sous la ligne de base — les
@@ -245,12 +270,19 @@ impl Compiled {
 /// n'est coupé, au prix d'une hauteur qui varie d'un libellé à l'autre
 /// (« a » est moins haut que « Ag ») — l'alignement des lignes de base
 /// entre libellés voisins est le sujet de l'issue #32.
-pub fn compile(text: &str, size_pt: f32, sans: Font, math: Font) -> Result<Compiled, String> {
+pub fn compile(
+    text: &str,
+    size_pt: f32,
+    ink: Ink,
+    sans: Font,
+    math: Font,
+) -> Result<Compiled, String> {
     let sans_name = family_name(&sans);
     let math_name = family_name(&math);
+    let [r, g, b, a] = ink;
     let markup = format!(
         "#set page(width: auto, height: auto, margin: 0pt, fill: none)\n\
-         #set text(font: \"{sans_name}\", size: {size_pt}pt, \
+         #set text(font: \"{sans_name}\", size: {size_pt}pt, fill: rgb({r}, {g}, {b}, {a}), \
                    top-edge: \"bounds\", bottom-edge: \"bounds\")\n\
          #show math.equation: set text(font: \"{math_name}\")\n\
          {text}"
@@ -275,9 +307,10 @@ fn family_name(font: &Font) -> String {
     font.info().family.clone()
 }
 
-/// Une clé de cache : la formule et sa taille (le texte généré les
-/// contient déjà, voir [`compile`]) plus le `pixels_per_point` de
-/// l'artefact backend demandé.
+/// Une clé de cache : la formule, sa taille et sa couleur (le texte généré
+/// les contient déjà, voir [`compile`]) plus le `pixels_per_point` de
+/// l'artefact backend demandé. La couleur y est depuis l'issue #30 : deux
+/// titres identiques de couleurs différentes sont deux artefacts.
 ///
 /// **Décision documentée, pas seulement codée** : la compilation Typst
 /// elle-même (`document`, en points) ne dépend pas de `pixels_per_point` —
@@ -297,15 +330,17 @@ fn family_name(font: &Font) -> String {
 struct CacheKey {
     text: String,
     size_pt_bits: u32,
+    ink: Ink,
     font_choice: String,
     pixels_per_point_bits: u32,
 }
 
 impl CacheKey {
-    fn new(text: &str, size_pt: f32, choice: &FontChoice, pixels_per_point: f32) -> Self {
+    fn new(text: &str, size_pt: f32, ink: Ink, choice: &FontChoice, pixels_per_point: f32) -> Self {
         Self {
             text: text.to_owned(),
             size_pt_bits: size_pt.to_bits(),
+            ink,
             // `FontChoice` n'a pas de `Hash` (fonts.rs, ajout du
             // 2026-09-13, hors périmètre de cette tâche) : sa
             // représentation `Debug` est déterministe et suffit à
@@ -334,8 +369,9 @@ impl<V> FormulaCache<V> {
         }
     }
 
-    /// Rend l'artefact déjà en cache pour `text` à `pixels_per_point`, ou
-    /// compile puis construit un nouvel artefact avec `build`.
+    /// Rend l'artefact déjà en cache pour `text` à `size_pt`, en `ink`, à
+    /// `pixels_per_point`, ou compile puis construit un nouvel artefact
+    /// avec `build`.
     ///
     /// `sans`/`math` sont les polices déjà résolues
     /// (`crate::fonts::resolve(choice)`) : ce cache ne sait pas les
@@ -348,13 +384,14 @@ impl<V> FormulaCache<V> {
         &self,
         text: &str,
         size_pt: f32,
+        ink: Ink,
         choice: &FontChoice,
         pixels_per_point: f32,
         sans: Font,
         math: Font,
         build: impl FnOnce(&Compiled) -> Result<V, String>,
     ) -> Result<Arc<V>, String> {
-        let key = CacheKey::new(text, size_pt, choice, pixels_per_point);
+        let key = CacheKey::new(text, size_pt, ink, choice, pixels_per_point);
         // Verrou empoisonné : reconstruit plutôt que de faire échouer tout
         // le rendu pour une raison qu'aucun appelant ne peut corriger — la
         // même politique que `TextMeasurer::layout_at`.
@@ -366,7 +403,7 @@ impl<V> FormulaCache<V> {
         {
             return Ok(Arc::clone(hit));
         }
-        let compiled = compile(text, size_pt, sans, math)?;
+        let compiled = compile(text, size_pt, ink, sans, math)?;
         let value = Arc::new(build(&compiled)?);
         self.entries
             .lock()
@@ -613,6 +650,8 @@ mod tests {
         resolve_fonts(&FontChoice::default()).expect("polices Noto illisibles")
     }
 
+    const NOIR: Ink = [0, 0, 0, 255];
+
     /// Détection de base : les délimiteurs `$` déclenchent Typst, un texte
     /// ordinaire ne le fait jamais — y compris une graduation numérique
     /// telle que `scale::format_tick` la produit.
@@ -630,7 +669,8 @@ mod tests {
     #[test]
     fn une_formule_triviale_compile_et_mesure_une_taille_non_nulle() {
         let (sans, math) = noto();
-        let compiled = compile("$lambda$", 12.0, sans, math).expect("compilation Typst échouée");
+        let compiled =
+            compile("$lambda$", 12.0, NOIR, sans, math).expect("compilation Typst échouée");
         let (w, h) = compiled.size_pt();
         assert!(w > 0.0, "largeur nulle : {w}");
         assert!(h > 0.0, "hauteur nulle : {h}");
@@ -642,7 +682,7 @@ mod tests {
     fn un_libelle_mixte_texte_et_formule_compile() {
         let (sans, math) = noto();
         let compiled =
-            compile("$lambda$ (nm)", 12.0, sans, math).expect("compilation Typst échouée");
+            compile("$lambda$ (nm)", 12.0, NOIR, sans, math).expect("compilation Typst échouée");
         assert!(compiled.page().is_some());
     }
 
@@ -652,7 +692,7 @@ mod tests {
     #[test]
     fn une_formule_invalide_echoue_sans_paniquer() {
         let (sans, math) = noto();
-        let result = compile("$ (unclosed", 12.0, sans, math);
+        let result = compile("$ (unclosed", 12.0, NOIR, sans, math);
         assert!(result.is_err());
     }
 
@@ -663,8 +703,8 @@ mod tests {
     fn une_taille_de_police_plus_grande_rend_une_boite_plus_grande() {
         let (sans1, math1) = noto();
         let (sans2, math2) = noto();
-        let petite = compile("$lambda$", 8.0, sans1, math1).unwrap();
-        let grande = compile("$lambda$", 32.0, sans2, math2).unwrap();
+        let petite = compile("$lambda$", 8.0, NOIR, sans1, math1).unwrap();
+        let grande = compile("$lambda$", 32.0, NOIR, sans2, math2).unwrap();
         assert!(grande.size_pt().0 > petite.size_pt().0);
         assert!(grande.size_pt().1 > petite.size_pt().1);
     }
@@ -677,7 +717,7 @@ mod tests {
     fn un_indice_ou_un_jambage_nest_pas_coupe_par_la_page() {
         let hauteur = |text: &str| {
             let (sans, math) = noto();
-            compile(text, 14.0, sans, math)
+            compile(text, 14.0, NOIR, sans, math)
                 .expect("compilation Typst échouée")
                 .size_pt()
                 .1
@@ -696,9 +736,16 @@ mod tests {
         for _ in 0..3 {
             let (sans, math) = noto();
             cache
-                .get_or_try_insert("$lambda$", 12.0, &choice, 1.0, sans, math, |compiled| {
-                    Ok(compiled.size_pt())
-                })
+                .get_or_try_insert(
+                    "$lambda$",
+                    12.0,
+                    NOIR,
+                    &choice,
+                    1.0,
+                    sans,
+                    math,
+                    |compiled| Ok(compiled.size_pt()),
+                )
                 .expect("échec de compilation/insertion");
         }
         assert_eq!(cache.len(), 1);
@@ -714,9 +761,16 @@ mod tests {
         for ppp in [1.0_f32, 1.25_f32] {
             let (sans, math) = noto();
             cache
-                .get_or_try_insert("$lambda$", 12.0, &choice, ppp, sans, math, |compiled| {
-                    Ok(compiled.size_pt())
-                })
+                .get_or_try_insert(
+                    "$lambda$",
+                    12.0,
+                    NOIR,
+                    &choice,
+                    ppp,
+                    sans,
+                    math,
+                    |compiled| Ok(compiled.size_pt()),
+                )
                 .expect("échec de compilation/insertion");
         }
         assert_eq!(cache.len(), 2);
@@ -735,7 +789,7 @@ mod tests {
         for i in 0..n {
             let (sans, math) = noto();
             let text = format!("$lambda_{i} = m_{i} c^2$");
-            compile(&text, 14.0, sans, math).expect("compilation Typst échouée");
+            compile(&text, 14.0, NOIR, sans, math).expect("compilation Typst échouée");
         }
         let elapsed = start.elapsed();
         let per_call = elapsed / n;
@@ -867,9 +921,9 @@ mod tests {
     #[test]
     fn la_mesure_dune_formule_ne_depend_pas_du_pixels_per_point() {
         let (sans, math) = noto();
-        let a = measure(&compile("$lambda$", 14.0, sans, math).unwrap());
+        let a = measure(&compile("$lambda$", 14.0, NOIR, sans, math).unwrap());
         let (sans, math) = noto();
-        let b = measure(&compile("$lambda$", 14.0, sans, math).unwrap());
+        let b = measure(&compile("$lambda$", 14.0, NOIR, sans, math).unwrap());
         assert_eq!(
             a, b,
             "deux compilations identiques mesurent différemment sans raison"

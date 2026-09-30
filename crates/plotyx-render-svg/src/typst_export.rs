@@ -58,7 +58,7 @@ use std::sync::Arc;
 
 use plotters::style::RGBColor;
 use plotters_backend::{text_anchor::Pos, FontTransform};
-use plotyx_render::formula::{self, Compiled, FormulaCache};
+use plotyx_render::formula::{self, Compiled, FormulaCache, Ink};
 use plotyx_render::FontChoice;
 use typst::text::Font;
 use typst_svg::SvgOptions;
@@ -180,12 +180,14 @@ impl<'a> TypstExport<'a> {
     }
 
     /// Le fragment compilé (ou repris du cache) pour `text` à `size_pt` de
-    /// corps. `None` si la formule ne compile pas.
-    fn fragment(&self, text: &str, size_pt: f32) -> Option<Arc<FormulaFragment>> {
+    /// corps, en `ink` (issue #30 : `typst-svg` écrit la couleur dans le
+    /// fragment). `None` si la formule ne compile pas.
+    fn fragment(&self, text: &str, size_pt: f32, ink: Ink) -> Option<Arc<FormulaFragment>> {
         self.cache
             .get_or_try_insert(
                 text,
                 size_pt,
+                ink,
                 self.choice,
                 EXPORT_PIXELS_PER_POINT,
                 self.sans.clone(),
@@ -196,9 +198,11 @@ impl<'a> TypstExport<'a> {
     }
 
     /// La taille (arrondie en pixels de backend) qu'occuperait `text`
-    /// compilé par Typst — l'invariant de la tâche 8.5, côté export.
-    pub fn measure(&self, text: &str, size_pt: f32) -> Option<(u32, u32)> {
-        let fragment = self.fragment(text, size_pt)?;
+    /// compilé par Typst — l'invariant de la tâche 8.5, côté export. `ink`
+    /// ne change pas la taille : il fait tomber la mesure sur l'entrée que
+    /// [`Self::record`] réutilise.
+    pub fn measure(&self, text: &str, size_pt: f32, ink: Ink) -> Option<(u32, u32)> {
+        let fragment = self.fragment(text, size_pt, ink)?;
         Some(formula::round_size_pt(fragment.size_pt))
     }
 
@@ -216,11 +220,12 @@ impl<'a> TypstExport<'a> {
         &self,
         text: &str,
         size_pt: f32,
+        ink: Ink,
         anchor: Pos,
         transform: FontTransform,
         pos: (f64, f64),
     ) -> Option<WitnessRect> {
-        let fragment = self.fragment(text, size_pt)?;
+        let fragment = self.fragment(text, size_pt, ink)?;
         let offset = formula::anchor_offset(fragment.size_pt, anchor.h_pos, anchor.v_pos);
         let offset = formula::rotate_offset(offset, transform.clone());
         let origin = (pos.0 + offset.0, pos.1 + offset.1);
@@ -375,6 +380,8 @@ mod tests {
     use super::*;
     use plotters_backend::text_anchor::{HPos, VPos};
 
+    const NOIR: Ink = [0, 0, 0, 255];
+
     fn export() -> (FormulaCache<FormulaFragment>, FontChoice) {
         (FormulaCache::new(), FontChoice::default())
     }
@@ -386,7 +393,14 @@ mod tests {
         let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
-            .record("$lambda$", 14.0, anchor, FontTransform::None, (10.0, 20.0))
+            .record(
+                "$lambda$",
+                14.0,
+                NOIR,
+                anchor,
+                FontTransform::None,
+                (10.0, 20.0),
+            )
             .expect("la formule aurait dû compiler");
         assert!(witness.size.0 > 0 && witness.size.1 > 0);
     }
@@ -398,7 +412,14 @@ mod tests {
         let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         assert!(typst
-            .record("$ (unclosed", 14.0, anchor, FontTransform::None, (0.0, 0.0))
+            .record(
+                "$ (unclosed",
+                14.0,
+                NOIR,
+                anchor,
+                FontTransform::None,
+                (0.0, 0.0)
+            )
             .is_none());
     }
 
@@ -410,7 +431,14 @@ mod tests {
         let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
-            .record("$lambda$", 14.0, anchor, FontTransform::None, (10.0, 20.0))
+            .record(
+                "$lambda$",
+                14.0,
+                NOIR,
+                anchor,
+                FontTransform::None,
+                (10.0, 20.0),
+            )
             .expect("compilation échouée");
 
         let hex = make_hex(witness.color);
@@ -452,10 +480,24 @@ mod tests {
         let anchor = Pos::new(HPos::Left, VPos::Top);
 
         let lambda = typst
-            .record("$lambda$", 14.0, anchor, FontTransform::None, (10.0, 20.0))
+            .record(
+                "$lambda$",
+                14.0,
+                NOIR,
+                anchor,
+                FontTransform::None,
+                (10.0, 20.0),
+            )
             .expect("compilation échouée (lambda)");
         let alpha = typst
-            .record("$alpha$", 14.0, anchor, FontTransform::None, (100.0, 200.0))
+            .record(
+                "$alpha$",
+                14.0,
+                NOIR,
+                anchor,
+                FontTransform::None,
+                (100.0, 200.0),
+            )
             .expect("compilation échouée (alpha)");
 
         assert_ne!(
@@ -536,7 +578,14 @@ mod tests {
         let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
-            .record("$lambda$", 14.0, anchor, FontTransform::None, (10.0, 20.0))
+            .record(
+                "$lambda$",
+                14.0,
+                NOIR,
+                anchor,
+                FontTransform::None,
+                (10.0, 20.0),
+            )
             .expect("compilation échouée");
 
         let hex = make_hex(witness.color);

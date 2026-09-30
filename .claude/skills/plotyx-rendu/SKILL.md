@@ -137,7 +137,9 @@ chemins, sans commande ciblée. Ce qui reste optionnel est le chemin du backend 
 tests) ; `collect_shapes_with_typst`, `render_to_string_with_typst` et
 `with_typst()` passent les formules par Typst. `GraphView` (donc l'application)
 passe **toujours** par Typst, avec un `FormulaCache` borné (`FORMULA_CACHE_LIMIT`)
-et des polices résolues une fois (`TypstScreen::with_fonts`). L'export PDF/PNG
+et des polices résolues une fois (`TypstScreen::with_fonts`). La couleur du
+texte (`style.color()`, via `formula::ink`) entre dans la compilation et dans la
+clé du cache : une formule n'est jamais teintée après coup (issue #30). L'export PDF/PNG
 n'y est pas encore branché (issue #34). Une formule qui ne compile pas s'affiche
 en texte brut, `$…$` compris — le graphe ne disparaît pas (invariant 10).
 

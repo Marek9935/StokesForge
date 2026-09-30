@@ -118,7 +118,7 @@ fn estimate_text_size_interroge_typst_pour_un_label_formule() {
 #[test]
 fn la_mesure_typst_differe_de_la_mesure_epaint_du_texte_source_litteral() {
     let (sans, math) = formula::resolve_fonts(&FontChoice::default()).unwrap();
-    let compiled = formula::compile("$lambda$ (nm)", 14.0, sans, math).unwrap();
+    let compiled = formula::compile("$lambda$ (nm)", 14.0, [0, 0, 0, 255], sans, math).unwrap();
     let mesure_typst = formula::measure(&compiled);
 
     let mesurer = TextMeasurer::default();
@@ -130,5 +130,76 @@ fn la_mesure_typst_differe_de_la_mesure_epaint_du_texte_source_litteral() {
         "la formule et son texte source brut mesurent la même chose : le \
          test ne distinguerait pas un vrai branchement Typst d'un bug qui \
          mesurerait toujours la chaîne source"
+    );
+}
+
+/// Les pixels presque opaques (alpha ≥ 200 : à 1 pixel par point, un trait
+/// fin n'atteint pas toujours 255) de la texture d'une formule, lus dans le
+/// delta de textures de l'image qui l'a chargée. Couleurs **prémultipliées**,
+/// comme `ColorImage` les garde.
+fn pixels_de_la_formule(fond: &str) -> Vec<egui::Color32> {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(plotyx_render::font_definitions());
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let cache: FormulaCache<_> = FormulaCache::new();
+    let project = Project::new("Typst").expect("projet");
+    let spec = PlotSpec {
+        background: fond.to_owned(),
+        ..PlotSpec::empty("$Delta H$")
+    }
+    .with_panels(Panels::new(vec![PanelSpec::at(0, 0)]));
+    let plot = resolve_spec(project.tree(), &spec);
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0));
+
+    let mut shapes = Vec::new();
+    let mut sortie = ctx.run_ui(egui::RawInput::default(), |_ui| {
+        let text_source = ScreenText::new(&ctx, &measurer);
+        let typst = TypstScreen::new(&ctx, &cache, &choice).expect("polices");
+        collect_shapes_with_typst(&mut shapes, rect, &text_source, typst, &plot).expect("tracé");
+    });
+    let id = shapes
+        .iter()
+        .find_map(|shape| match shape {
+            Shape::Mesh(mesh) => Some(mesh.texture_id),
+            _ => None,
+        })
+        .expect("le titre Typst n'a pas produit de maillage");
+    let (_, deltas) = sortie
+        .textures_delta
+        .set
+        .iter()
+        .find(|(texture, _)| **texture == id)
+        .expect("texture du titre absente du delta");
+    let egui::ImageData::Color(image) = &deltas[0].image;
+    let opaques = image
+        .pixels
+        .iter()
+        .copied()
+        .filter(|pixel| pixel.a() >= 200)
+        .collect();
+    sortie.textures_delta.clear();
+    opaques
+}
+
+/// Issue #30 : la texture d'un titre Typst porte la couleur du texte. Sur
+/// un fond sombre, l'encre automatique est blanche ; le témoin, sur fond
+/// clair, reste sombre. Avant, les deux étaient noirs.
+#[test]
+fn la_texture_dune_formule_prend_la_couleur_du_texte() {
+    let sombre = pixels_de_la_formule("#101820");
+    assert!(!sombre.is_empty(), "aucun pixel opaque");
+    // Blanc prémultiplié : chaque composante vaut l'opacité.
+    assert!(
+        sombre
+            .iter()
+            .all(|pixel| pixel.r().abs_diff(pixel.a()) <= 3 && pixel.b().abs_diff(pixel.a()) <= 3),
+        "titre Typst pas blanc sur fond sombre"
+    );
+    let clair = pixels_de_la_formule("#ffffff");
+    assert!(!clair.is_empty(), "aucun pixel opaque (témoin)");
+    assert!(
+        clair.iter().all(|pixel| pixel.r() < 64),
+        "le témoin sur fond clair n'est pas sombre"
     );
 }

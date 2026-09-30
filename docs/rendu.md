@@ -58,6 +58,13 @@ fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
 automatique — à l'écran comme à l'export, puisque le pipeline est commun
 (`plotyx-render-svg/tests/couleurs.rs`).
 
+Une formule Typst suit la même couleur (issue #30) : les backends passent
+`style.color()` à la compilation (`formula::ink`), qui pose
+`#set text(fill: rgb(…))`. La couleur est donc **dans l'image rastérisée** ou
+dans le fragment SVG, pas une teinte appliquée après coup : une couleur écrite
+dans la formule elle-même (`#text(fill: red)[…]`) reste prioritaire. Un texte
+d'opacité nulle ne dessine rien, formule comprise.
+
 `configure_mesh` de Plotters n'a qu'un style de titre d'axe et qu'un style de
 ligne d'axe pour les deux axes principaux : l'axe du bas et celui de gauche
 sont donc tracés en **deux passes**, chacune coupant l'autre axe
@@ -337,9 +344,8 @@ si cette résolution échoue, tout reste en texte brut. Il tient un
 `FormulaCache<FormulaTexture>` entre deux reconstructions de la figure, borné par
 `FORMULA_CACHE_LIMIT` (256) : au-delà, le cache est vidé **avant** la
 reconstruction qui suit. Les textures ne sont donc recompilées que si le texte
-d'une formule, sa taille ou le `pixels_per_point` change, pas à chaque
-reconstruction. La couleur n'est pas encore dans la clé : une formule sort
-toujours en noir (issue #30).
+d'une formule, sa taille, sa couleur (issue #30) ou le `pixels_per_point`
+change, pas à chaque reconstruction.
 
 `TypstScreen::measure` passe par ce même cache, sur **la même entrée** que le
 dessin : mesurer puis dessiner une formule ne la compile qu'une fois (avant,
@@ -388,7 +394,11 @@ ne remet en page que les `Shape::Text`, le maillage Typst est étiré
   `chaque_sommet_du_maillage_porte_la_texture_de_son_coin`) verrouille le
   partage de l'entrée de cache entre mesure et dessin et l'ordre des sommets ;
   `formula.rs` (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`) la
-  hauteur de page.
+  hauteur de page ; `render-egui/tests/typst.rs`
+  (`la_texture_dune_formule_prend_la_couleur_du_texte`) et
+  `render-svg/tests/couleurs.rs` (`un_titre_typst_prend_l_encre_automatique`,
+  `un_titre_typst_suit_title_color`) la couleur, pixels de la texture et
+  fragment SVG compris.
 
 ### Agrandir un graphe sans flouter le texte
 
