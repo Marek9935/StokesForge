@@ -138,6 +138,12 @@ ouverte par viewport, donc la liste d'un `ComboBox` refermerait la fenêtre
 parente (issue #9). `color_button` tient l'état ouvert/fermé lui-même et
 ferme sur Échap ou clic extérieur ; s'en inspirer.
 
+**Le sélecteur s'ouvre replié** (issue #10) : palette, couleurs enregistrées
+et hexadécimal seulement ; « + Personnalisée… » déplie nuancier, opacité,
+RVB/TSL et Enregistrer. Tout nouvel élément lourd du sélecteur va dans la
+partie dépliée (`if custom`), et l'état se remet à zéro à la fermeture
+(`set_picker_open`).
+
 ## 2 sexies. Fenêtres et dialogues
 
 Toute fenêtre de l'application se construit par la brique commune

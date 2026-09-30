@@ -462,7 +462,18 @@ fn picker_is_open(ctx: &egui::Context, id: egui::Id) -> bool {
 }
 
 fn set_picker_open(ctx: &egui::Context, id: egui::Id, open: bool) {
-    ctx.data_mut(|data| data.insert_temp(id, open));
+    ctx.data_mut(|data| {
+        data.insert_temp(id, open);
+        if !open {
+            // Le sélecteur se rouvre toujours replié sur la palette (#10).
+            data.remove::<bool>(custom_id(id));
+        }
+    });
+}
+
+/// Clé du dépli « Personnalisée » du sélecteur `popup_id` (#10).
+fn custom_id(popup_id: egui::Id) -> egui::Id {
+    popup_id.with("custom")
 }
 
 /// Contenu de la fenêtre surgissante.
@@ -510,6 +521,12 @@ fn picker_contents(
         });
         ui.add_space(2.0);
     }
+    // Le nuancier, l'opacité, RVB/TSL et l'enregistrement sont cachés : le
+    // « + » en fin de palette les déplie (#10, comme dans Office).
+    let mut custom = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(custom_id(popup_id)))
+        .unwrap_or(false);
     ui.horizontal_wrapped(|ui| {
         if let Some(auto_label) = auto_label {
             if ui
@@ -521,7 +538,11 @@ fn picker_contents(
                 close = true;
             }
         }
+        ui.toggle_value(&mut custom, "+ Personnalisée…")
+            .on_hover_text("Nuancier, opacité, codes RVB/TSL et enregistrement");
     });
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(custom_id(popup_id), custom));
 
     // -- Couleurs enregistrées ------------------------------------------
     ui.separator();
@@ -560,35 +581,37 @@ fn picker_contents(
             }
         });
     }
-    let target_id = egui::Id::new("plotyx_save_color_target");
-    let mut target: SaveTarget = ui
-        .memory(|memory| memory.data.get_temp(target_id))
-        .unwrap_or_default();
-    ui.horizontal(|ui| {
-        if ui
-            .add_enabled(current.is_some(), egui::Button::new("Enregistrer"))
-            .on_hover_text("Garder la couleur courante dans cette palette")
-            .clicked()
-        {
-            if let Some(rgba) = current {
-                env.requests.push(SavedColorRequest {
-                    edit: SavedColorEdit::Save,
-                    usage,
-                    target,
-                    color: to_hex(rgba),
-                });
-            }
-        }
-        egui::ComboBox::from_id_salt(popup_id.with("save_target"))
-            .selected_text(target.label())
-            .show_ui(ui, |ui| {
-                for candidate in [SaveTarget::Project, SaveTarget::User] {
-                    ui.selectable_value(&mut target, candidate, candidate.label());
+    if custom {
+        let target_id = egui::Id::new("plotyx_save_color_target");
+        let mut target: SaveTarget = ui
+            .memory(|memory| memory.data.get_temp(target_id))
+            .unwrap_or_default();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(current.is_some(), egui::Button::new("Enregistrer"))
+                .on_hover_text("Garder la couleur courante dans cette palette")
+                .clicked()
+            {
+                if let Some(rgba) = current {
+                    env.requests.push(SavedColorRequest {
+                        edit: SavedColorEdit::Save,
+                        usage,
+                        target,
+                        color: to_hex(rgba),
+                    });
                 }
-            });
-    });
-    ui.memory_mut(|memory| memory.data.insert_temp(target_id, target));
-    ui.separator();
+            }
+            egui::ComboBox::from_id_salt(popup_id.with("save_target"))
+                .selected_text(target.label())
+                .show_ui(ui, |ui| {
+                    for candidate in [SaveTarget::Project, SaveTarget::User] {
+                        ui.selectable_value(&mut target, candidate, candidate.label());
+                    }
+                });
+        });
+        ui.memory_mut(|memory| memory.data.insert_temp(target_id, target));
+        ui.separator();
+    }
 
     // -- Nuancier --------------------------------------------------------
     let [r0, g0, b0, a0] = current.unwrap_or([0x80, 0x80, 0x80, 255]);
@@ -601,113 +624,115 @@ fn picker_contents(
             rgb,
             hsv: rgb_to_hsv(rgb),
         });
-    let shape_id = egui::Id::new("plotyx_picker_shape");
-    let mut shape: PickerShape = ui
-        .memory(|memory| memory.data.get_temp(shape_id))
-        .unwrap_or_default();
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut shape, PickerShape::Square, "Carré");
-        ui.selectable_value(&mut shape, PickerShape::Wheel, "Roue");
-    });
-    ui.memory_mut(|m| m.data.insert_temp(shape_id, shape));
-
     let mut new_rgb: Option<[u8; 3]> = None;
-    let (h, s, v) = &mut memory.hsv;
-    let gestures = match shape {
-        PickerShape::Square => [sv_square(ui, *h, s, v), hue_bar(ui, h)],
-        PickerShape::Wheel => [color_wheel(ui, h, s, *v), value_bar(ui, *h, *s, v)],
-    };
-    if gestures.iter().any(|gesture| gesture.changed) {
-        new_rgb = Some(hsv_to_rgb(memory.hsv.0, memory.hsv.1, memory.hsv.2));
-    }
-    commit |= gestures.iter().any(|gesture| gesture.finished);
-
-    // -- Opacité ---------------------------------------------------------
-    let mut opacity = f32::from(a0) / 255.0 * 100.0;
-    let opacity_response = ui
-        .horizontal(|ui| {
-            ui.label("Opacité");
-            ui.add(
-                egui::Slider::new(&mut opacity, 0.0..=100.0)
-                    .suffix(" %")
-                    .max_decimals(0),
-            )
-        })
-        .inner;
     let mut alpha = a0;
-    if opacity_response.changed() {
-        alpha = (opacity / 100.0 * 255.0).round().clamp(0.0, 255.0) as u8;
-    }
-    commit |= opacity_response.drag_stopped() || opacity_response.lost_focus();
+    if custom {
+        let shape_id = egui::Id::new("plotyx_picker_shape");
+        let mut shape: PickerShape = ui
+            .memory(|memory| memory.data.get_temp(shape_id))
+            .unwrap_or_default();
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut shape, PickerShape::Square, "Carré");
+            ui.selectable_value(&mut shape, PickerShape::Wheel, "Roue");
+        });
+        ui.memory_mut(|m| m.data.insert_temp(shape_id, shape));
 
-    // -- RVB ---------------------------------------------------------------
-    ui.add_space(4.0);
-    let shown = new_rgb.unwrap_or(rgb);
-    let mut channels = shown.map(i32::from);
-    let mut rgb_edit = NumericEdit::default();
-    ui.horizontal(|ui| {
-        ui.label("RVB");
-        for (channel, prefix) in channels.iter_mut().zip(["R ", "V ", "B "]) {
-            rgb_edit.track(
+        let (h, s, v) = &mut memory.hsv;
+        let gestures = match shape {
+            PickerShape::Square => [sv_square(ui, *h, s, v), hue_bar(ui, h)],
+            PickerShape::Wheel => [color_wheel(ui, h, s, *v), value_bar(ui, *h, *s, v)],
+        };
+        if gestures.iter().any(|gesture| gesture.changed) {
+            new_rgb = Some(hsv_to_rgb(memory.hsv.0, memory.hsv.1, memory.hsv.2));
+        }
+        commit |= gestures.iter().any(|gesture| gesture.finished);
+
+        // -- Opacité ---------------------------------------------------------
+        let mut opacity = f32::from(a0) / 255.0 * 100.0;
+        let opacity_response = ui
+            .horizontal(|ui| {
+                ui.label("Opacité");
                 ui.add(
-                    egui::DragValue::new(channel)
-                        .range(0..=255)
-                        .speed(0.5)
-                        .prefix(prefix),
+                    egui::Slider::new(&mut opacity, 0.0..=100.0)
+                        .suffix(" %")
+                        .max_decimals(0),
+                )
+            })
+            .inner;
+        if opacity_response.changed() {
+            alpha = (opacity / 100.0 * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+        commit |= opacity_response.drag_stopped() || opacity_response.lost_focus();
+
+        // -- RVB ---------------------------------------------------------------
+        ui.add_space(4.0);
+        let shown = new_rgb.unwrap_or(rgb);
+        let mut channels = shown.map(i32::from);
+        let mut rgb_edit = NumericEdit::default();
+        ui.horizontal(|ui| {
+            ui.label("RVB");
+            for (channel, prefix) in channels.iter_mut().zip(["R ", "V ", "B "]) {
+                rgb_edit.track(
+                    ui.add(
+                        egui::DragValue::new(channel)
+                            .range(0..=255)
+                            .speed(0.5)
+                            .prefix(prefix),
+                    ),
+                );
+            }
+        });
+        if rgb_edit.changed {
+            let edited = channels.map(|c| c.clamp(0, 255) as u8);
+            new_rgb = Some(edited);
+            memory.hsv = rgb_to_hsv(edited);
+        }
+        commit |= rgb_edit.finished;
+
+        // -- TSL ---------------------------------------------------------------
+        let (mut th, mut ts, mut tl) = rgb_to_hsl(new_rgb.unwrap_or(rgb));
+        let mut hsl_edit = NumericEdit::default();
+        ui.horizontal(|ui| {
+            ui.label("TSL");
+            hsl_edit.track(
+                ui.add(
+                    egui::DragValue::new(&mut th)
+                        .range(0.0..=360.0)
+                        .speed(1.0)
+                        .max_decimals(0)
+                        .prefix("T ")
+                        .suffix("°"),
                 ),
             );
+            hsl_edit.track(
+                ui.add(
+                    egui::DragValue::new(&mut ts)
+                        .range(0.0..=100.0)
+                        .speed(0.5)
+                        .max_decimals(0)
+                        .prefix("S ")
+                        .suffix(" %"),
+                ),
+            );
+            hsl_edit.track(
+                ui.add(
+                    egui::DragValue::new(&mut tl)
+                        .range(0.0..=100.0)
+                        .speed(0.5)
+                        .max_decimals(0)
+                        .prefix("L ")
+                        .suffix(" %"),
+                ),
+            );
+        });
+        if hsl_edit.changed {
+            let edited = hsl_to_rgb(th, ts, tl);
+            new_rgb = Some(edited);
+            let (_, s, v) = rgb_to_hsv(edited);
+            memory.hsv = (th / 360.0, s, v);
         }
-    });
-    if rgb_edit.changed {
-        let edited = channels.map(|c| c.clamp(0, 255) as u8);
-        new_rgb = Some(edited);
-        memory.hsv = rgb_to_hsv(edited);
+        commit |= hsl_edit.finished;
     }
-    commit |= rgb_edit.finished;
-
-    // -- TSL ---------------------------------------------------------------
-    let (mut th, mut ts, mut tl) = rgb_to_hsl(new_rgb.unwrap_or(rgb));
-    let mut hsl_edit = NumericEdit::default();
-    ui.horizontal(|ui| {
-        ui.label("TSL");
-        hsl_edit.track(
-            ui.add(
-                egui::DragValue::new(&mut th)
-                    .range(0.0..=360.0)
-                    .speed(1.0)
-                    .max_decimals(0)
-                    .prefix("T ")
-                    .suffix("°"),
-            ),
-        );
-        hsl_edit.track(
-            ui.add(
-                egui::DragValue::new(&mut ts)
-                    .range(0.0..=100.0)
-                    .speed(0.5)
-                    .max_decimals(0)
-                    .prefix("S ")
-                    .suffix(" %"),
-            ),
-        );
-        hsl_edit.track(
-            ui.add(
-                egui::DragValue::new(&mut tl)
-                    .range(0.0..=100.0)
-                    .speed(0.5)
-                    .max_decimals(0)
-                    .prefix("L ")
-                    .suffix(" %"),
-            ),
-        );
-    });
-    if hsl_edit.changed {
-        let edited = hsl_to_rgb(th, ts, tl);
-        new_rgb = Some(edited);
-        let (_, s, v) = rgb_to_hsv(edited);
-        memory.hsv = (th / 360.0, s, v);
-    }
-    commit |= hsl_edit.finished;
 
     // -- Hexadécimal : appliqué seulement lisible, à la validation ---------
     let hex_id = popup_id.with("hex");
@@ -1102,6 +1127,10 @@ mod tests {
                         let popup_id = ui.make_persistent_id(("plotyx_color_popup", "Couleur"));
                         if frame == 0 {
                             set_picker_open(ui.ctx(), popup_id, true);
+                            // Le nuancier est replié par défaut (#10) : on le
+                            // déplie pour éprouver tout le contenu.
+                            ui.ctx()
+                                .data_mut(|data| data.insert_temp(custom_id(popup_id), true));
                         }
                         color_button(ui, "Couleur", &mut value, usage, Some("Auto"), &mut env);
                     });
@@ -1180,6 +1209,13 @@ mod tests {
         for _ in 0..2 {
             output = run(vec![]);
         }
+        let plus = find_text(&output, "Personnalisée").expect("« + » peint");
+        run(vec![egui::Event::PointerMoved(plus)]);
+        run(vec![click(plus, true)]);
+        run(vec![click(plus, false)]);
+        for _ in 0..2 {
+            output = run(vec![]);
+        }
         let combo = find_text(&output, "dans le projet").expect("menu déroulant peint");
         run(vec![egui::Event::PointerMoved(combo)]);
         run(vec![click(combo, true)]);
@@ -1203,6 +1239,67 @@ mod tests {
             find_text(&output, "Enregistrer").is_none(),
             "un clic extérieur referme le sélecteur"
         );
+    }
+
+    /// #10 : le sélecteur s'ouvre replié sur la palette (avec l'hexadécimal) ;
+    /// le dépli « + Personnalisée… » montre nuancier, opacité, RVB/TSL et
+    /// enregistrement ; refermé, il se rouvre replié.
+    #[test]
+    fn le_selecteur_est_replie_par_defaut_et_se_deplie_a_la_demande() {
+        let context = egui::Context::default();
+        let mut env = PickerEnv {
+            project: SavedColors::default(),
+            user: SavedColors::default(),
+            requests: Vec::new(),
+        };
+        let mut value = "#ff0000".to_string();
+        let popup_id = std::cell::Cell::new(egui::Id::NULL);
+        let mut run = |open: Option<bool>, custom: Option<bool>| {
+            let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                popup_id.set(ui.make_persistent_id(("plotyx_color_popup", "Couleur")));
+                if let Some(open) = open {
+                    set_picker_open(ui.ctx(), popup_id.get(), open);
+                }
+                if let Some(custom) = custom {
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(custom_id(popup_id.get()), custom));
+                }
+                color_button(
+                    ui,
+                    "Couleur",
+                    &mut value,
+                    ColorUsage::Background,
+                    Some("Auto"),
+                    &mut env,
+                );
+            });
+            output.textures_delta.clear();
+            output
+        };
+        let settle = |run: &mut dyn FnMut(Option<bool>, Option<bool>) -> egui::FullOutput| {
+            run(None, None);
+            run(None, None)
+        };
+        run(Some(true), None);
+        let replie = settle(&mut run);
+        assert!(
+            find_text(&replie, "Hexa").is_some(),
+            "hexa toujours visible"
+        );
+        assert!(find_text(&replie, "Personnalisée").is_some());
+        for cache in ["Opacité", "RVB", "TSL", "Enregistrer", "Carré"] {
+            assert!(find_text(&replie, cache).is_none(), "{cache} est replié");
+        }
+        run(None, Some(true));
+        let deplie = settle(&mut run);
+        for montre in ["Hexa", "Opacité", "RVB", "TSL", "Enregistrer", "Carré"] {
+            assert!(find_text(&deplie, montre).is_some(), "{montre} est déplié");
+        }
+        // Fermé puis rouvert : de nouveau replié.
+        run(Some(false), None);
+        run(Some(true), None);
+        let rouvert = settle(&mut run);
+        assert!(find_text(&rouvert, "Opacité").is_none());
     }
 
     fn luminance([r, g, b]: [u8; 3]) -> f32 {

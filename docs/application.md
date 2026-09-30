@@ -570,11 +570,13 @@ affichage et couleur de l'échelle), « Séries » et « Légende ».
 
 **Sélecteur de couleur** (`crate::color_picker`) : toute couleur de la
 fenêtre se choisit par un bouton-échantillon (`color_field`/`color_button`)
-qui ouvre une fenêtre surgissante — palette, « Automatique » quand la
-couleur peut l'être, couleurs enregistrées, nuancier (carré saturation ×
+qui ouvre une fenêtre surgissante **repliée** : palette, « Automatique »
+quand la couleur peut l'être, couleurs enregistrées et saisie hexadécimale
+(`#RRGGBB`, ou `#RRGGBBAA` avec l'opacité). Le bouton **« + Personnalisée… »**
+déplie le reste — Enregistrer et sa destination, nuancier (carré saturation ×
 luminosité avec barre de teinte, ou **roue chromatique** avec barre de
-valeur), **opacité**, saisie RVB, TSL et hexadécimale (`#RRGGBB`, ou
-`#RRGGBBAA` avec l'opacité). Cette fenêtre est une `egui::Area` gérée
+valeur), **opacité**, saisie RVB et TSL. Le sélecteur se rouvre toujours
+replié (`color_picker::custom_id`). Cette fenêtre est une `egui::Area` gérée
 par `color_button` (et non un `egui::Popup`, dont egui n'autorise qu'un
 exemplaire ouvert : la liste d'un menu déroulant le refermerait) ; elle
 se ferme sur Échap ou sur un clic hors d'elle et de ses listes. Une couleur transparente se montre sur un
