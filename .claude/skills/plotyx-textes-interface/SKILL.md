@@ -9,9 +9,8 @@ Source unique : [`docs/textes-interface.md`](../../../docs/textes-interface.md)
 (glossaire, règles R1-R16, exemples avant/après). Ce skill dit **quand** le
 lire et **dans quel ordre** s'en servir ; il ne recopie pas le glossaire.
 
-> Le guide est un **brouillon en attente de validation** (#40). Un terme listé
-> dans sa section « À trancher » n'est pas arrêté : demander avant d'écrire un
-> texte qui en dépend.
+> Le guide est **validé** (2026-10-01, #40) ; ses choix sont dans sa section 4.
+> Un terme absent du glossaire se propose à l'utilisateur, il ne s'invente pas.
 
 ## Quand
 

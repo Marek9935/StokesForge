@@ -1,9 +1,7 @@
 # Textes d'interface — glossaire et règles de rédaction
 
-> **Brouillon à valider** (issue #40). Les termes de la section « À trancher »
-> ne sont pas arrêtés : tant qu'ils ne sont pas validés, #42-#45 ne convertissent
-> rien. Le glossaire tel qu'il est écrit applique la recommandation de chaque
-> question.
+> **Validé le 2026-10-01** (issue #40). Les choix faits sont consignés en
+> section 4.
 
 L'interface est **écrite d'abord en anglais** ; le français en est la
 traduction (#39). Ce guide est la source unique des termes et des règles : un
@@ -24,7 +22,7 @@ l'interface, mais son mot est déjà fixé.
 | R3 | **Title Case** : menus, commandes, boutons, onglets, titres de fenêtre. **Sentence case** : champs, cases à cocher, options (boutons radio, listes), infobulles, messages. Mots de liaison en minuscule en Title Case (*of, and, to, in*). Français : initiale seule, jamais Title Case. |
 | R4 | **Commande = verbe** (*Add Column*, *Export Graph…*). « … » seulement si une fenêtre demande encore quelque chose. Une entrée qui ouvre une page de réglages porte le nom de la page (*Axes…*). |
 | R5 | **Visibilité = « Show X »** (*Show legend*), jamais « X affichée » ni « Présente dans… ». |
-| R6 | **Unité entre parenthèses, symbole SI, après un espace** : *Line width (pt)*, *Wavenumber (cm⁻¹)*. Exposants en Unicode dans l'interface (`cm⁻¹`) ; dans un titre d'axe (Typst), `$"cm"^(-1)$`. |
+| R6 | **Unités.** Champ de l'interface : unité entre parenthèses, symbole SI, après un espace (*Line width (pt)*). **Titre d'axe : grandeur / unité** (IUPAC), symbole ou nom : *ν̃ / cm⁻¹*, *Wavenumber / cm⁻¹* ; un titre repris d'une colonne s'écrit *Nom long / Unités*. Exposants en Unicode dans l'interface (`cm⁻¹`) ; dans un titre d'axe (Typst), `$"cm"^(-1)$`. |
 | R7 | **Libellé court, infobulle précise.** Libellé : 1 à 3 mots. Infobulle : l'effet, la valeur par défaut si elle compte, le raccourci. |
 | R8 | **Pas de point final** sur une phrase seule. Point entre deux phrases. |
 | R9 | **Message = ce qui s'est passé, puis quoi faire.** Ni « please », ni excuse, ni point d'exclamation. Jamais de jargon interne : *session, nœud, arbre, id, fil, spec, commande, entrée d'historique, jeton, recette*. |
@@ -138,7 +136,7 @@ l'interface, mais son mot est déjà fixé.
 | Graph Properties | Propriétés du graphique | Fenêtre de réglage d'un graphique | Propriétés du graphe | O |
 | General | Général | Onglet : titre et fond | Graph, Graphe | G (Q23) |
 | Plot Area | Zone de tracé | Rectangle délimité par les axes | Zone de dessin, Plot | G |
-| Panel | Panneau | Zone de tracé d'un graphique à plusieurs zones | Layer, Calque, Couche | — (Q22) |
+| Layer | Calque | Zone de tracé avec ses axes ; un graphique en contient une ou plusieurs | Panel, Panneau, Couche | O (Q22) |
 | Title | Titre | Texte en tête du graphique | Intitulé | G |
 | Axis (pl. Axes) | Axe | Ligne graduée portant une grandeur | — | G |
 | X (bottom) / Y (left) / Secondary Y (right) | X (bas) / Y (gauche) / Y secondaire (droite) | Les trois axes d'une zone | Y2, Axe de droite | G |
@@ -191,23 +189,24 @@ l'interface, mais son mot est déjà fixé.
 
 Le glossaire donne les mots des **titres d'axe, unités et traitements** que
 l'interface devra écrire. Grandeurs et unités : IUPAC *Green Book* ; une
-grandeur sans dimension (absorbance, transmittance) ne porte pas d'unité.
+grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
+**grandeur / unité** (R6), donné en dernière colonne de la définition.
 
 | Anglais | Français | Définition | Refusés | Réf. |
 |---|---|---|---|---|
 | Spectrum | Spectre | Intensité mesurée en fonction d'une abscisse spectrale | Courbe, Trace | I |
-| Wavenumber (cm⁻¹) | Nombre d'onde (cm⁻¹) | Inverse de la longueur d'onde, symbole ν̃ | Fréquence (cm⁻¹) | I |
-| Wavelength (nm) | Longueur d'onde (nm) | Distance entre deux maxima du champ, symbole λ | — | I |
-| Raman shift (cm⁻¹) | Déplacement Raman (cm⁻¹) | Écart en nombre d'onde à la raie excitatrice | Décalage Raman, Shift | I, D (Q16) |
-| Energy (eV) | Énergie (eV) | Énergie des photons | — | I |
-| Frequency (Hz) | Fréquence (Hz) | Nombre d'oscillations par seconde, symbole ν | — | I |
-| Chemical shift (ppm)† | Déplacement chimique (ppm) | Abscisse RMN, symbole δ | Shift | I |
-| Absorbance | Absorbance | Grandeur sans unité, A = lg(P₀/P) | Densité optique, OD, Extinction | I (Q17) |
-| Transmittance (%T) | Transmittance (%T) | Part de lumière transmise | Transmission | I |
-| Reflectance (%R) | Réflectance (%R) | Part de lumière réfléchie | Réflexion | I |
-| Intensity (a.u.) | Intensité (u.a.) | Signal en unités arbitraires | Intensité (arb. units) | D |
+| Wavenumber | Nombre d'onde | Inverse de la longueur d'onde · *ν̃ / cm⁻¹* | Fréquence (cm⁻¹) | I |
+| Wavelength | Longueur d'onde | Distance entre deux maxima du champ · *λ / nm* | — | I |
+| Raman shift | Déplacement Raman | Écart en nombre d'onde à la raie excitatrice · *Δν̃ / cm⁻¹* | Décalage Raman, Shift | I, D (Q16) |
+| Energy | Énergie | Énergie des photons · *E / eV* | — | I |
+| Frequency | Fréquence | Nombre d'oscillations par seconde · *ν / Hz* | — | I |
+| Chemical shift† | Déplacement chimique | Abscisse RMN · *δ / ppm* | Shift | I |
+| Absorbance | Absorbance | Grandeur sans unité, A = lg(P₀/P) · *A* | Densité optique, OD, Extinction | I (Q17) |
+| Transmittance | Transmittance | Part de lumière transmise · *T / %* | Transmission | I |
+| Reflectance | Réflectance | Part de lumière réfléchie · *R / %* | Réflexion | I |
+| Intensity | Intensité | Signal en unités arbitraires · *I / a.u.* (fr. *u.a.*) | Intensité (arb. units) | D |
 | Counts | Coups | Nombre de détections | Comptes | D (Q18) |
-| Molar absorption coefficient (L mol⁻¹ cm⁻¹)† | Coefficient d'absorption molaire (L mol⁻¹ cm⁻¹) | Absorbance ramenée à 1 mol L⁻¹ et 1 cm, symbole ε | Coefficient d'extinction | I |
+| Molar absorption coefficient† | Coefficient d'absorption molaire | Absorbance ramenée à 1 mol L⁻¹ et 1 cm · *ε / (L mol⁻¹ cm⁻¹)* | Coefficient d'extinction | I |
 | Sample / Blank / Reference | Échantillon / Blanc / Référence | Mesure étudiée / sans analyte / de comparaison | Témoin | D |
 | Baseline† | Ligne de base | Signal de fond sous les pics | Fond continu | I |
 | Peak† | Pic | Maximum local du signal | Bande (sauf IR/Raman : *band*) | I |
@@ -264,10 +263,10 @@ glossaire.
 | 33 | « Classeur actif (une feuille par fichier) » (`app.rs:6388`) | Active workbook (one worksheet per file) | Classeur actif (une feuille par fichier) | R3 |
 | 34 | « Fichiers et modèle », « En-tête et fin des données » (`state.rs:1584-1586`) | Files and Template, Header and Data End | Fichiers et modèle, En-tête et fin des données | R3 |
 
-## 4. À trancher
+## 4. Décisions
 
-Chaque question a une recommandation, déjà appliquée dans le glossaire, et
-une alternative.
+Validées par l'utilisateur le 2026-10-01 : la recommandation est retenue
+partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 
 | # | Question | Recommandation | Alternative |
 |---|---|---|---|
@@ -284,7 +283,7 @@ une alternative.
 | Q11 | Texte rattaché à un point ou à une graduation : **Label / Étiquette** pour le rôle de colonne et **Tick label / Étiquette de graduation** ? | **Étiquette** pour les deux ; « libellé » refusé partout | *Libellé de graduation* ; *Valeur de graduation* |
 | Q12 | Lignes qui prolongent les graduations : **Gridlines / Quadrillage** ou **Grid / Grille** ? | **Quadrillage** (« grille » est déjà la grille de la feuille) | *Grille* (terme actuel) |
 | Q13 | **Units** (pluriel d'Origin) ou **Unit** ? | **Units / Unités** partout | *Unit / Unité* (singulier, actuel dans l'aperçu d'import et l'axe) |
-| Q14 | Unités : parenthèses **Wavenumber (cm⁻¹)** ou barre IUPAC **ν̃ / cm⁻¹** ? | **Parenthèses** (décision #39, usage des revues et d'Origin) | *Barre de fraction* (IUPAC, titres d'axe de publication) |
+| Q14 | Unités : parenthèses **Wavenumber (cm⁻¹)** ou barre IUPAC **ν̃ / cm⁻¹** ? | *Parenthèses* (usage des revues et d'Origin) | ✔ **Barre de fraction** (IUPAC) pour les titres d'axe ; les champs de l'interface gardent les parenthèses (R6) |
 | Q15 | Panneau d'arborescence : **Project Manager** (nom actuel) ou **Project Explorer** (nom d'Origin) ? | **Project Manager** (déjà dans le code et les docs) | *Project Explorer* |
 | Q16 | Français de *Raman shift* : **Déplacement Raman** ou **Décalage Raman** ? Et *Offset* (empilement) : **Décalage** ? | **Déplacement Raman** ; **Décalage** réservé à l'empilement, pour ne pas les confondre | *Décalage Raman* ; *Translation* ou *Espacement* pour l'empilement |
 | Q17 | **Absorbance** sans unité (IUPAC) ou **Absorbance (a.u.)** (usage courant, gabarits d'Origin) ? | **Absorbance** seule | *Absorbance (a.u.)* |
@@ -292,7 +291,7 @@ une alternative.
 | Q19 | Tutoiement, « vous » ou infinitif pour les consignes en français ? | **Infinitif** (*Choisir un fichier*) | *Vous* impératif (*Choisissez un fichier*) |
 | Q20 | **Detach / Reattach** ou **Float / Dock** ? | **Detach / Reattach** (verbes déjà en place, compris sans jargon) | *Float / Dock* (Qt, Office) |
 | Q21 | Texte posé sur le graphique : **Text** ou **Annotation** ? | **Text** (un mot, le geste est « Add Text ») | *Annotation* (matplotlib, terme du code) ; *Text Label* (heurte *Label*) |
-| Q22 | Sous-ensemble tracé d'un graphique : **Panel** ou **Layer** (Origin) ? | **Panel / Panneau**, onglet **Plot Area** tant qu'il n'y en a qu'un | *Layer / Calque* (Origin ; ses calques se superposent, pas les panneaux) |
+| Q22 | Sous-ensemble tracé d'un graphique : **Panel** ou **Layer** (Origin) ? | *Panel / Panneau* | ✔ **Layer / Calque** (Origin) |
 | Q23 | Premier onglet de *Graph Properties* : **General** ou **Graph** ? | **General** (« Graph » répète le titre de la fenêtre) | *Graph* (nom actuel : « Graphe ») |
 | Q24 | Formes de symbole : **Plus / Cross** ou **Cross / X** ? | **Plus (+)** et **Cross (×)** | *Cross (+)* et *X (×)* |
 | Q25 | Deux-points après un libellé de champ (« Séparateur : »)  — les supprimer ? | **Supprimer** (R11 : plus court, aucun souci d'espace insécable) | *Garder* en français seulement |
