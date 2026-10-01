@@ -690,6 +690,18 @@ en permanence dès qu'un graphe était actif. Son état (quel graphe, quel
 onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
 par `Action::OpenPlotSettings { graph, tab, axis }`.
 
+**Exporter le graphe** (issue #34) : menu « Graphique » → « Exporter le
+graphe… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
+compris dans une fenêtre détachée). Un sélecteur `rfd` (SVG, PDF, PNG) propose
+le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
+`.svg` si elle manque. `app::request_graph_export` lit le zoom de la vue
+(`GraphView::framed_spec`) et pousse `Action::ExportGraph { path, spec }` ;
+`AppState` écrit le fichier (`plotyx-render-svg`, texte Typst compris) et le dit
+dans la barre d'état. Aucune commande : le modèle n'est pas touché. La
+résolution PNG (×1, ×2, ×4 ; ×4 par défaut, soit 1920 × 1440 px) se règle dans
+« Graphique » → « Résolution des exports PNG » (`Action::SetPngExportScale`,
+préférence de session).
+
 **Onglets** (`state::PlotSettingsTab`) : « Graphe » (titre et sa couleur,
 fond), « Zone de tracé » (titre du panneau, grilles), « Axes » (un axe à la
 fois, choisi en tête de page : titre de l'axe et sa couleur, échelle,

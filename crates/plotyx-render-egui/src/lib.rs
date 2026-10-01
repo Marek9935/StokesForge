@@ -356,6 +356,17 @@ impl GraphView {
         &self.view
     }
 
+    /// `spec` tel que cette vue le montre : un clone, cadré par le zoom
+    /// courant ([`ViewState::apply`], le même appel que la construction de
+    /// la figure). C'est ce qu'exporte l'application (issue #34) — on
+    /// exporte ce qu'on voit — sans que le zoom touche le `PlotSpec` du
+    /// modèle. Sans zoom, `spec` inchangé.
+    pub fn framed_spec(&self, spec: &PlotSpec) -> PlotSpec {
+        let mut framed = spec.clone();
+        self.view.apply(&mut framed);
+        framed
+    }
+
     /// Efface tout cadrage explicite : la vue revient au cadrage sur les
     /// données, pour tous les panneaux.
     pub fn reset_view(&mut self) {
@@ -839,5 +850,38 @@ fn graph_spec(tree: &Tree, graph: NodeId) -> Result<PlotSpec, RenderError> {
     match node.kind() {
         NodeKind::Graph { spec, .. } => Ok(spec.clone()),
         _ => Err(RenderError::NotAGraph(graph)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plotyx_plot::{PanelSpec, Panels};
+
+    /// Issue #34 : `framed_spec` rend le spec cadré par le zoom — ce que la
+    /// figure montre — sur un clone ; le spec d'origine, celui du modèle,
+    /// ne change pas. Sans zoom, le spec est rendu tel quel.
+    #[test]
+    fn framed_spec_applique_le_zoom_sur_un_clone() {
+        let spec = PlotSpec::empty("Zoom").with_panels(Panels::new(vec![PanelSpec::at(0, 0)]));
+        let mut view = GraphView::new();
+        assert_eq!(view.framed_spec(&spec), spec, "sans zoom, rien ne change");
+
+        view.view.set_framing(
+            0,
+            0,
+            Framing {
+                x: (2.0, 3.0),
+                y: (-1.0, 1.0),
+            },
+        );
+        let framed = view.framed_spec(&spec);
+        let bottom = &framed.panels[0].bottom;
+        assert_eq!((bottom.range_min, bottom.range_max), (Some(2.0), Some(3.0)));
+        assert!(!bottom.auto_range);
+        assert!(
+            spec.panels[0].bottom.auto_range,
+            "le spec d'origine a changé"
+        );
     }
 }

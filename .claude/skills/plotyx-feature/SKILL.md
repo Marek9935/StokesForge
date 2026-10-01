@@ -48,6 +48,13 @@ qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
 | est une **fonctionnalité de tracé** | `plotyx-render` (générique sur le backend) | jamais dans un seul backend (invariant 5) ; voir le skill **plotyx-rendu** |
 | lit un **fichier de données** | `plotyx-import` | reste indépendant de l'UI, de `core`, des commandes et de la session |
 
+Une action qui a besoin de l'**état de vue** (le zoom d'une `GraphView`, qui
+vit dans `app.rs`, jamais dans `AppState`) : `app.rs` le lit et le **met dans
+l'`Action`**, `state.rs` fait le travail et le dit dans la barre d'état. Modèle :
+`Action::ExportGraph { path, spec }`, dont le spec est déjà cadré par
+`GraphView::framed_spec` (issue #34) — testable dans `tests/shell.rs` sans
+fenêtre, et identique depuis une fenêtre détachée.
+
 La ligne de partage `state.rs` / `app.rs` est la colonne vertébrale du crate
 UI : `state` porte toute la logique, pilotée par un enum `Action`, et se teste
 en CI (`tests/shell.rs`) ; `app` ne fait que traduire clavier et souris en

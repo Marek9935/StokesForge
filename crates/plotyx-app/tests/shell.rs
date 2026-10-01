@@ -6594,3 +6594,127 @@ fn a_multi_block_file_gives_one_sheet_per_block_and_refreshes_per_block() {
     }
     assert_eq!(state.worksheets_of(book).len(), before);
 }
+
+// -- Issue #34 : exporter un graphe --
+
+/// Un projet de démonstration avec un graphe titré en Typst.
+fn demo_with_graph(dir: &Path) -> (Session, AppState, NodeId) {
+    let mut project = demo_project();
+    let root = project.root();
+    let sheet = sheet_named(project.tree(), "Sheet1");
+    let colonne = |name: &str| {
+        project
+            .tree()
+            .child_by_name(sheet, name)
+            .expect("Sheet1 lisible")
+            .expect("colonne")
+    };
+    let (x, y) = (colonne("Temps"), colonne("Signal"));
+    let mut panel = plotyx_plot::PanelSpec::at(0, 0);
+    panel.series.push(plotyx_plot::SeriesSpec::new_xy(x, y));
+    let spec = plotyx_plot::PlotSpec::empty("Spectre $Delta H$").with_panels(panel);
+    let graph = project
+        .add_graph(root, Some("Graph1"), spec)
+        .expect("graphe");
+    let (session, state) = start(project, &dir.join("projet.plotyx"));
+    (session, state, graph)
+}
+
+fn graph_spec(state: &AppState, graph: NodeId) -> plotyx_plot::PlotSpec {
+    match state.tree().get(graph).expect("graphe").kind() {
+        plotyx_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => panic!("pas un graphe"),
+    }
+}
+
+/// L'export écrit ce qu'on lui donne — le spec cadré par la vue, donc le
+/// zoom courant — sans toucher au modèle : ni le `PlotSpec` du graphe ni la
+/// révision ne bougent. Le témoin est l'export du spec non cadré, qui
+/// diffère.
+#[test]
+fn exporter_un_graphe_zoome_ne_touche_pas_le_modele() {
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let avant = (graph_spec(&state, graph), state.snapshot().revision);
+
+    // Ce que `GraphView::framed_spec` rend après un zoom : un clone cadré.
+    let mut zoome = avant.0.clone();
+    if let Some(panel) = zoome.panels.get_mut(0) {
+        panel.bottom.auto_range = false;
+        panel.bottom.range_min = Some(0.5);
+        panel.bottom.range_max = Some(1.0);
+    }
+    let exporte = |state: &mut AppState, nom: &str, spec: &plotyx_plot::PlotSpec| {
+        let path = dir.path().join(nom);
+        state.dispatch(Action::ExportGraph {
+            path: path.clone(),
+            spec: Box::new(spec.clone()),
+        });
+        let status = state.status().expect("un message");
+        assert!(!status.is_error, "{}", status.text);
+        std::fs::read(path).expect("fichier exporté")
+    };
+    let svg_zoome = exporte(&mut state, "zoome.svg", &zoome);
+    let svg_entier = exporte(&mut state, "entier.svg", &avant.0);
+    assert_ne!(
+        svg_zoome, svg_entier,
+        "le cadrage zoomé n'a pas été exporté"
+    );
+    assert!(String::from_utf8_lossy(&svg_zoome).contains("<svg"));
+
+    assert_eq!(graph_spec(&state, graph), avant.0, "le modèle a changé");
+    assert_eq!(
+        state.snapshot().revision,
+        avant.1,
+        "une commande a été émise"
+    );
+}
+
+/// Le format suit l'extension : PDF et PNG (à l'agrandissement réglé), `.svg`
+/// ajouté à un nom sans extension, et une extension inconnue est refusée
+/// avec un message, sans fichier écrit.
+#[test]
+fn le_format_dexport_suit_lextension() {
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let spec = Box::new(graph_spec(&state, graph));
+    let exporte = |state: &mut AppState, nom: &str| {
+        state.dispatch(Action::ExportGraph {
+            path: dir.path().join(nom),
+            spec: spec.clone(),
+        });
+        state.status().expect("un message").clone()
+    };
+
+    assert!(!exporte(&mut state, "figure.pdf").is_error);
+    let pdf = std::fs::read(dir.path().join("figure.pdf")).expect("PDF");
+    assert!(pdf.starts_with(b"%PDF"));
+
+    state.dispatch(Action::SetPngExportScale(2.0));
+    assert_eq!(state.png_export_scale(), 2.0);
+    assert!(!exporte(&mut state, "figure.png").is_error);
+    let png = std::fs::read(dir.path().join("figure.png")).expect("PNG");
+    assert_eq!(
+        u32::from_be_bytes([png[16], png[17], png[18], png[19]]),
+        960
+    );
+    // Un agrandissement hors de la liste proposée est ignoré.
+    state.dispatch(Action::SetPngExportScale(3.0));
+    assert_eq!(state.png_export_scale(), 2.0);
+
+    assert!(!exporte(&mut state, "sans_extension").is_error);
+    assert!(dir.path().join("sans_extension.svg").exists());
+
+    assert!(exporte(&mut state, "figure.jpg").is_error);
+    assert!(!dir.path().join("figure.jpg").exists());
+}
+
+#[test]
+fn le_nom_propose_est_celui_du_graphe() {
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, state, graph) = demo_with_graph(dir.path());
+    assert_eq!(
+        plotyx_app::state::export_file_name(state.tree(), graph),
+        "Graph1.svg"
+    );
+}

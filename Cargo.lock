@@ -3685,6 +3685,7 @@ dependencies = [
  "plotyx-plot",
  "plotyx-python",
  "plotyx-render-egui",
+ "plotyx-render-svg",
  "plotyx-script",
  "plotyx-session",
  "rfd",

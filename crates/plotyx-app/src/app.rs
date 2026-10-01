@@ -370,10 +370,10 @@ use plotyx_session::{Snapshot, WindowGeometry};
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    active_graph, drop_payload_action, node_title_in, series_list_label, Action, ActiveTabKind,
-    AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination, ImportLineAction,
-    ImportStep, MoveDirection, PlotAxis, PlotSettings, PlotSettingsTab, PlotTarget,
-    ProjectTreeNode, SaveTarget, WindowKind,
+    active_graph, drop_payload_action, export_file_name, node_title_in, series_list_label, Action,
+    ActiveTabKind, AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination,
+    ImportLineAction, ImportStep, MoveDirection, PlotAxis, PlotSettings, PlotSettingsTab,
+    PlotTarget, ProjectTreeNode, SaveTarget, WindowKind,
 };
 use crate::theme;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
@@ -430,6 +430,10 @@ pub const SHORTCUT_SAVE_AS: egui::KeyboardShortcut = egui::KeyboardShortcut::new
 /// Ctrl+O — choisir un projet à ouvrir.
 pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
+/// Ctrl+E — exporter le graphe actif en SVG, PDF ou PNG (issue #34). Sans
+/// effet quand l'onglet actif n'est pas un graphe.
+pub const SHORTCUT_EXPORT_GRAPH: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
 /// Ctrl+" — ouvrir l'assistant d'import. Sur un clavier AZERTY, `"` est la
 /// touche du chiffre 3 **sans** Maj : egui ne connaît pas de touche `"` et
 /// retombe sur la touche physique, donc le raccourci se consomme comme
@@ -1086,6 +1090,7 @@ impl PlotyxApp {
         let mut save_as = false;
         let mut open = false;
         let mut import = false;
+        let mut export = false;
         ctx.input_mut(|input| {
             // Ctrl+Maj+S doit être testé avant Ctrl+S : les modificateurs
             // supplémentaires restent compatibles avec ce dernier.
@@ -1096,6 +1101,9 @@ impl PlotyxApp {
             }
             if input.consume_shortcut(&SHORTCUT_OPEN) {
                 open = true;
+            }
+            if input.consume_shortcut(&SHORTCUT_EXPORT_GRAPH) {
+                export = true;
             }
             if input.consume_shortcut(&SHORTCUT_RUN_SCRIPT) {
                 actions.push(Action::RunScript);
@@ -1115,6 +1123,19 @@ impl PlotyxApp {
         }
         if open {
             self.choose_open_path(actions);
+        }
+        // Le graphe actif, calculé comme pour la barre de menus : le
+        // raccourci n'agit que là où le menu « Graphique » existe.
+        let active_tab = self
+            .maximized_tab
+            .or_else(|| self.floating_tabs.last().copied());
+        if let Some(graph) = active_graph(active_tab_kind(active_tab)).filter(|_| export) {
+            request_graph_export(
+                self.graph_views.get(&graph),
+                self.state.tree(),
+                graph,
+                actions,
+            );
         }
     }
 
@@ -1283,6 +1304,38 @@ impl PlotyxApp {
                             }
                             ui.close();
                         }
+                        ui.separator();
+                        if ui
+                            .add(
+                                egui::Button::new("Exporter le graphe…")
+                                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
+                            )
+                            .on_hover_text("SVG, PDF ou PNG, avec le zoom courant")
+                            .clicked()
+                        {
+                            request_graph_export(
+                                self.graph_views.get(&graph),
+                                self.state.tree(),
+                                graph,
+                                actions,
+                            );
+                            ui.close();
+                        }
+                        ui.menu_button("Résolution des exports PNG", |ui| {
+                            let current = self.state.png_export_scale();
+                            for scale in crate::state::PNG_EXPORT_SCALES {
+                                let (w, h) = DEFAULT_FIGURE_SIZE;
+                                let label = format!(
+                                    "×{scale} ({} × {} px)",
+                                    (w as f32 * scale) as u32,
+                                    (h as f32 * scale) as u32
+                                );
+                                if ui.radio(current == scale, label).clicked() {
+                                    actions.push(Action::SetPngExportScale(scale));
+                                    ui.close();
+                                }
+                            }
+                        });
                     });
                 }
                 ui.menu_button("Fenêtre", |ui| {
@@ -7148,7 +7201,7 @@ fn graph_view_contents(
     }
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
-            graph_context_menu(ui, view, graph_id, actions);
+            graph_context_menu(ui, view, &snapshot.tree, graph_id, actions);
             if ui.small_button("réinitialiser le zoom").clicked() {
                 view.reset_view();
             }
@@ -7178,6 +7231,7 @@ fn display_backdrop(background: &str) -> Option<egui::Color32> {
 fn graph_context_menu(
     ui: &egui::Ui,
     view: &mut GraphView,
+    tree: &Tree,
     graph_id: NodeId,
     actions: &mut Vec<Action>,
 ) {
@@ -7207,7 +7261,50 @@ fn graph_context_menu(
             view.reset_view();
             ui.close();
         }
+        if ui
+            .add(
+                egui::Button::new("Exporter le graphe…")
+                    .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
+            )
+            .clicked()
+        {
+            request_graph_export(Some(view), tree, graph_id, actions);
+            ui.close();
+        }
     });
+}
+
+/// Demande où exporter le graphe, puis confie l'export à
+/// [`AppState::dispatch`] (issue #34). Le spec exporté est celui que la vue
+/// montre, zoom compris ([`GraphView::framed_spec`]) ; sans vue (graphe pas
+/// encore peint), le cadrage enregistré. Le format se lit sur l'extension
+/// choisie.
+fn request_graph_export(
+    view: Option<&GraphView>,
+    tree: &Tree,
+    graph: NodeId,
+    actions: &mut Vec<Action>,
+) {
+    let Some(spec) = crate::state::current_plot_spec(tree, graph) else {
+        return;
+    };
+    let spec = match view {
+        Some(view) => view.framed_spec(&spec),
+        None => spec,
+    };
+    if let Some(path) = rfd::FileDialog::new()
+        .set_title("Exporter le graphe")
+        .add_filter("SVG", &["svg"])
+        .add_filter("PDF", &["pdf"])
+        .add_filter("PNG", &["png"])
+        .set_file_name(export_file_name(tree, graph))
+        .save_file()
+    {
+        actions.push(Action::ExportGraph {
+            path,
+            spec: Box::new(spec),
+        });
+    }
 }
 
 /// Traduit le composant désigné par le rendu en cible d'interface. Seul le

@@ -32,7 +32,7 @@ plotyx-import (aucune dépendance plotyx) — lecture des fichiers d'appareil
 plotyx-importer (core, import) — plan de feuilles et colonnes du modèle, sans
                commandes : partagé par l'application, le CLI et les scripts
 plotyx-app    (commands, core, import, importer, persistence, plot, python,
-               render-egui, script, session)
+               render-egui, render-svg, script, session)
 ```
 
 `plotyx-robustesse` est à part : il dépend du socle et du pont Python, et ne

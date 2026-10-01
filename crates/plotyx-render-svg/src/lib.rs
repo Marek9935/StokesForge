@@ -46,6 +46,7 @@
 )]
 
 pub mod backend;
+pub mod export;
 pub mod pdf;
 pub mod png;
 pub mod typst_export;
@@ -60,8 +61,12 @@ use plotyx_render::pipeline::{self, DrawnPlot};
 use plotyx_render::text::TextMeasurer;
 
 pub use backend::MeasuredSvgBackend;
+pub use export::{export_bytes, export_to_file, ExportError, ExportFormat};
+// Le choix de police de l'export, pour qu'un appelant sans egui (l'état de
+// l'application) n'ait pas à déclarer d'arête vers `plotyx-render`.
 pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};
 pub use plotyx_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer};
+pub use plotyx_render::FontChoice;
 pub use png::{document_to_png, render_to_png, render_to_png_file, PngError};
 
 /// Taille par défaut d'une figure exportée, en unités SVG.

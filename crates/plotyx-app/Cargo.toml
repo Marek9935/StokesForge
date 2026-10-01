@@ -25,6 +25,10 @@ plotyx-session = { path = "../plotyx-session" }
 plotyx-persistence = { path = "../plotyx-persistence" }
 plotyx-plot = { path = "../plotyx-plot" }
 plotyx-render-egui = { path = "../plotyx-render-egui" }
+# Export du graphe en SVG, PDF ou PNG (issue #34) : le même pipeline que
+# l'écran, texte Typst compris. Aucune commande : l'export ne touche pas le
+# modèle.
+plotyx-render-svg = { path = "../plotyx-render-svg" }
 # Chemins optionnels, activés uniquement par la feature `python` de CE crate :
 # c'est elle qui active la feature `python` de chacun (dont dépend l'existence
 # même de leurs types publics, cf. la doc de tête de leurs `lib.rs`).

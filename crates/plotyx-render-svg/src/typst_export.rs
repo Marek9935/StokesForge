@@ -355,13 +355,21 @@ fn geometry_matches(tag: &str, pos: (i32, i32), size: (i32, i32)) -> bool {
 /// Le `<g>` de remplacement d'un témoin : rotation puis translation vers
 /// `origin`, un `<svg>` imbriqué dimensionné en nombres nus (voir la doc de
 /// tête pour l'unité), et le fragment intérieur de Typst.
+///
+/// Le `<svg>` imbriqué redéclare `xmlns:xlink` : les glyphes de Typst sont
+/// des `<use xlink:href="#g…">`, et la balise racine qui déclarait ce
+/// préfixe a été retirée par [`inner_svg`]. Sans lui, un navigateur
+/// tolérant affichait le SVG, mais `usvg` refusait tout le document — donc
+/// l'export PDF et PNG d'un graphe à texte Typst échouait (vu en branchant
+/// l'export dans l'application, issue #34).
 fn group_for(formula: &PendingFormula) -> String {
     let (ox, oy) = formula.origin;
     let (w, h) = formula.size_pt;
     format!(
         "<g transform=\"rotate({deg}, {ox}, {oy}) translate({ox}, {oy})\">\
          <svg width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\" \
-         xmlns=\"http://www.w3.org/2000/svg\">{inner}</svg></g>",
+         xmlns=\"http://www.w3.org/2000/svg\" \
+         xmlns:xlink=\"http://www.w3.org/1999/xlink\">{inner}</svg></g>",
         deg = formula.angle_deg,
         inner = formula.inner_svg,
     )

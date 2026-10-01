@@ -69,6 +69,12 @@ donc **voulus à ce stade**, pas des oublis. Les principaux, écrits dans
   position et taille le sont) ;
 - une seule cellule éditable à la fois par fenêtre.
 
+**Exporter un graphe** : menu « Graphique » → « Exporter le graphe… »
+(Ctrl+E), ou clic droit sur la figure. SVG, PDF ou PNG selon l'extension du
+fichier ; l'export reprend le **zoom affiché** et les formules. La résolution
+PNG se choisit dans « Graphique » → « Résolution des exports PNG » (×4 par
+défaut). `docs/application.md` § Propriétés des graphiques.
+
 Quatre comportements ressemblent à des manques et n'en sont pas :
 
 - **Écrire une lettre grecque, un indice ou un exposant** dans un titre, un

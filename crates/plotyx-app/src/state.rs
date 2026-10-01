@@ -409,6 +409,40 @@ pub enum Action {
         /// D'où la retirer.
         target: SaveTarget,
     },
+    /// Exporte un graphe en SVG, PDF ou PNG (issue #34), le format lu sur
+    /// l'extension de `path` (`.svg` si elle manque).
+    ///
+    /// `spec` est le spec **déjà cadré** par la vue — le zoom courant,
+    /// `GraphView::framed_spec` : l'export montre ce qu'on voit. Le modèle
+    /// n'est pas touché, donc aucune commande (un zoom ne s'annule pas, un
+    /// export non plus).
+    ExportGraph {
+        /// Fichier à écrire.
+        path: PathBuf,
+        /// Spec cadré à exporter.
+        spec: Box<PlotSpec>,
+    },
+    /// Règle l'agrandissement des exports PNG ([`PNG_EXPORT_SCALES`]).
+    SetPngExportScale(f32),
+}
+
+/// Les agrandissements proposés pour un export PNG : la figure fait
+/// 480 × 360 points (`DEFAULT_FIGURE_SIZE`), donc ×4 donne 1920 × 1440 px,
+/// environ 300 ppp pour une figure de 16 cm de large.
+pub const PNG_EXPORT_SCALES: [f32; 3] = [1.0, 2.0, 4.0];
+
+/// L'agrandissement PNG par défaut : la résolution d'une figure de
+/// publication.
+pub const DEFAULT_PNG_EXPORT_SCALE: f32 = 4.0;
+
+/// Le nom de fichier proposé pour exporter `graph` : son nom dans le projet,
+/// en `.svg`, sans séparateur de chemin.
+pub fn export_file_name(tree: &Tree, graph: NodeId) -> String {
+    let name = tree
+        .node(graph)
+        .map_or("graphe", |node| node.name())
+        .replace(['/', '\\'], "_");
+    format!("{name}.svg")
 }
 
 /// Où enregistrer une couleur du sélecteur de couleur.
@@ -1623,6 +1657,9 @@ pub struct AppState {
     selected_sheets: std::collections::HashMap<NodeId, NodeId>,
     /// Chemin du fichier de travail (saisi à la main, cf. `crate::app`).
     path: String,
+    /// Agrandissement des exports PNG (issue #34), un de
+    /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
+    png_export_scale: f32,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
     /// Saisie de cellule en cours, s'il y en a une.
@@ -1742,6 +1779,7 @@ impl AppState {
             snapshot,
             selected_sheets: std::collections::HashMap::new(),
             path,
+            png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
             status: None,
             editing: None,
             note_editing: None,
@@ -3274,6 +3312,12 @@ impl AppState {
                 let next = self.saved_colors(target).with_removed(usage, &color);
                 self.replace_saved_colors(target, next);
             }
+            Action::ExportGraph { path, spec } => self.export_graph(path, &spec),
+            Action::SetPngExportScale(scale) => {
+                if PNG_EXPORT_SCALES.contains(&scale) {
+                    self.png_export_scale = scale;
+                }
+            }
         }
     }
 
@@ -4413,6 +4457,41 @@ impl AppState {
                 self.notice(text);
             }
             Err(err) => self.fail(format!("Échec de l'enregistrement : {err}")),
+        }
+    }
+
+    /// L'agrandissement des exports PNG.
+    pub fn png_export_scale(&self) -> f32 {
+        self.png_export_scale
+    }
+
+    /// Voir [`Action::ExportGraph`]. Mesure et compose comme l'écran : même
+    /// taille logique (`DEFAULT_SIZE`, celle où `GraphView::paint_scaled`
+    /// met la figure en page), mêmes polices.
+    fn export_graph(&mut self, mut path: PathBuf, spec: &PlotSpec) {
+        if path.extension().is_none() {
+            path.set_extension("svg");
+        }
+        let Some(format) = plotyx_render_svg::ExportFormat::from_path(&path, self.png_export_scale)
+        else {
+            self.fail(format!(
+                "Format d'export inconnu pour {} : choisir .svg, .pdf ou .png",
+                path.display()
+            ));
+            return;
+        };
+        let plot = plotyx_core::resolve::resolve_spec(&self.snapshot.tree, spec);
+        let measurer = plotyx_render_svg::SvgTextMeasurer::default();
+        match plotyx_render_svg::export_to_file(
+            &path,
+            &plot,
+            plotyx_render_svg::DEFAULT_SIZE,
+            &measurer,
+            &plotyx_render_svg::FontChoice::default(),
+            format,
+        ) {
+            Ok(()) => self.notice(format!("Graphe exporté dans {}", path.display())),
+            Err(err) => self.fail(format!("Échec de l'export : {err}")),
         }
     }
 

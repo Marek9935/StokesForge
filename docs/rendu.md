@@ -298,6 +298,17 @@ défaut de fidélité mineur, c'est un graphe muet. Repli sur le filet Noto
 embarqué si aucune police système ne convient ; le PNG réutilise la même
 politique telle quelle.
 
+**L'export depuis l'application** (issue #34) passe par `export::export_to_file`
+(`ExportFormat` lu sur l'extension : `.svg`, `.pdf`, `.png` à un agrandissement
+donné), **toujours avec Typst** : `render_to_string_with_typst`, puis
+`document_to_pdf` ou `document_to_png` sur ce SVG. L'application lui passe le
+spec cadré par la vue (`GraphView::framed_spec`) : on exporte le zoom courant,
+sans toucher au modèle. La taille est `DEFAULT_SIZE`, celle où l'écran met la
+figure en page. Le blanc d'affichage d'un fond transparent reste à l'écran.
+Le fragment Typst inliné redéclare `xmlns:xlink` (ses glyphes sont des
+`<use xlink:href>`) : sans lui `usvg` refusait le document, donc tout PDF ou PNG
+d'un graphe à texte Typst (`un_graphe_typst_sexporte_en_svg_pdf_et_png`).
+
 ## Typst (R8)
 
 **Tout** titre du graphe ou d'un panneau, tout titre d'axe et toute entrée de
@@ -324,7 +335,7 @@ La légende lui donne donc `formula::literal_style` (famille
 des backends le passe par `formula::source`, qui l'enveloppe en chaîne Typst
 `#"…"` (`formula::escape`) — composé par Typst, affiché tel quel, sans
 guillemets typographiques ni `...` changé en points de suspension. Le chemin
-sans Typst (export PDF/PNG avant #34, repli) affiche le texte d'origine, jamais
+sans Typst (témoin des tests, repli) affiche le texte d'origine, jamais
 sa forme échappée. Un nom **saisi** reste du markup voulu.
 
 Le partage suit la même règle que le reste :
@@ -351,8 +362,9 @@ chemins. Ce qui reste optionnel est le **chemin d'exécution du backend** :
 s'appuient dessus) tracent tout en `Shape::Text` / texte brut ;
 `collect_shapes_with_typst`, `render_to_string_with_typst` et `with_typst()`
 passent les formules par Typst. Le chemin en texte brut sert de **témoin** aux
-tests. Brancher l'export sur Typst est l'objet de l'issue #34, pas encore fait :
-aujourd'hui seul l'écran affiche les formules composées.
+tests. L'application exporte par `export::export_to_file`, donc avec Typst
+(issue #34) ; `render_to_string`, `render_to_pdf` et `render_to_png` restent le
+chemin brut des tests et de l'exemple `figure`.
 
 Un texte riche qui ne compile pas ne fait jamais échouer le rendu : le texte
 brut, `$…$` compris, s'affiche tel quel par `epaint`, mesure comprise

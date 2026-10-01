@@ -84,3 +84,48 @@ fn render_to_string_ignore_la_syntaxe_formule_sans_lappel_typst() {
         "aucun <svg> imbriqué ne doit apparaître sans l'appel Typst"
     );
 }
+
+/// Issue #34 : un graphe à texte Typst s'exporte en SVG, PDF et PNG. Le PDF et
+/// le PNG sont tirés du SVG par `usvg`, qui refusait le document tant que le
+/// fragment Typst utilisait `xlink:href` sans déclarer le préfixe — le
+/// défaut que ce test aurait vu. Et le texte de la figure n'est plus du
+/// `<text>` brut : aucun `$` n'en reste, il est en contours Typst.
+#[test]
+fn un_graphe_typst_sexporte_en_svg_pdf_et_png() {
+    use plotyx_render_svg::{export_bytes, ExportFormat};
+    let project = Project::new("Typst export").expect("projet");
+    let mut spec = spec_with_label("$lambda$ (nm)");
+    spec.title = "Spectre $Delta H$".to_owned();
+    let plot = resolve_spec(project.tree(), &spec);
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let exporte = |format| {
+        export_bytes(&plot, (480, 360), &measurer, &choice, format)
+            .unwrap_or_else(|error| panic!("export {format:?} : {error}"))
+    };
+
+    let svg = String::from_utf8(exporte(ExportFormat::Svg)).expect("SVG en UTF-8");
+    for (debut, _) in svg.match_indices("<text") {
+        let fin = svg[debut..]
+            .find("</text>")
+            .map_or(svg.len(), |i| debut + i);
+        assert!(
+            !svg[debut..fin].contains('$'),
+            "texte brut à dollars dans l'export : {}",
+            &svg[debut..fin]
+        );
+    }
+    assert!(svg.contains("xmlns:xlink"), "préfixe xlink non déclaré");
+
+    let pdf = exporte(ExportFormat::Pdf);
+    assert!(pdf.starts_with(b"%PDF"), "pas un PDF");
+    // Le témoin : le même graphe sans Typst donne un autre PDF.
+    let brut = plotyx_render_svg::render_to_pdf(&plot, (480, 360), &measurer).expect("PDF brut");
+    assert_ne!(pdf, brut, "le PDF ne doit rien à Typst");
+
+    let png = exporte(ExportFormat::Png { scale: 2.0 });
+    assert!(png.starts_with(b"\x89PNG"), "pas un PNG");
+    // Largeur dans l'en-tête IHDR (octets 16 à 19, gros-boutiste).
+    let largeur = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
+    assert_eq!(largeur, 960, "PNG pas à l'échelle 2");
+}
