@@ -18,7 +18,8 @@
 //!
 //! [`DEROGATIONS`] recense l'existant d'avant #41, **par fichier et par zone**,
 //! chaque zone portant le ticket qui la convertit : #42 menus, menus
-//! contextuels, barre d'état, titre de fenêtre ; #43 propriétés du graphe et
+//! contextuels, barre d'état, titre de fenêtre (fait, plus aucune zone) ; #43
+//! propriétés du graphe et
 //! export ; #44 assistant d'import ; #45 classeur, grille, Project Manager,
 //! notes, sélecteur de couleur, console de script. **Elle ne doit jamais
 //! grossir**, elle se réduit zone par zone, et elle doit être **vide** à #48.
@@ -95,37 +96,12 @@ struct Derogation {
     nombre: usize,
 }
 
-/// L'existant d'avant #41 : **213 littéraux**, 14 zones. À réduire, jamais à
-/// grossir ; vide à #48. Rangée par ticket de conversion (#42 : 59, #43 : 45,
-/// #44 : 71, #45 : 38) ; chaque ticket retire ses zones, et leur compte avec.
+/// L'existant d'avant #41 : **154 littéraux**, 11 zones (les 59 de #42 — menus,
+/// menus contextuels, fenêtres détachées — sont convertis). À réduire, jamais à
+/// grossir ; vide à #48. Rangée par ticket de conversion (#43 : 45, #44 : 71,
+/// #45 : 38) ; chaque ticket retire ses zones, et leur compte avec.
 const DEROGATIONS: &[Derogation] = &[
-    // --- #42 : menus, menus contextuels, actions, infobulles, titre de fenêtre
-    Derogation {
-        fichier: "app.rs",
-        zone: "barre de menus",
-        ticket: "#42",
-        fonctions: &["PlotyxApp::menu_bar"],
-        nombre: 32,
-    },
-    Derogation {
-        fichier: "app.rs",
-        zone: "menus contextuels de la grille et du graphe",
-        ticket: "#42",
-        fonctions: &["grid_edit_menu", "graph_context_menu"],
-        nombre: 18,
-    },
-    Derogation {
-        fichier: "app.rs",
-        zone: "fenêtres détachées, disposition, infobulles d'onglets",
-        ticket: "#42",
-        fonctions: &[
-            "PlotyxApp::show_detached_project_manager",
-            "PlotyxApp::show_detached_tabs",
-            "PlotyxApp::ui",
-            "tab_strip",
-        ],
-        nombre: 7,
-    },
+    // --- #42 : menus, actions, infobulles, barre d'état : converti, plus aucune dérogation.
     // --- #43 : propriétés du graphe et export : converti, plus aucune dérogation.
     // Ses fonctions restent gardées, plus strictement : `ZONE_43`.
     // --- #44 : assistant d'import : converti, plus aucune dérogation.

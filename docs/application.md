@@ -80,7 +80,7 @@ Chaque fenêtre flottante peut aussi être maximisée (plein cadre du
 `CentralPanel`, `PlotyxApp::maximized_tab`) ou détachée dans une vraie fenêtre
 OS séparée (`PlotyxApp::detach_tab`/`reattach_tab`, pour le multi-écran).
 
-Le menu Fichier propose la création d'un nouveau classeur et l'import de
+Le menu File propose la création d'un nouveau classeur (Add Workbook) et l'import de
 fichiers. La position et
 la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 « Géométrie des fenêtres »). L'éditeur de matrice reste un espace réservé.
@@ -99,8 +99,8 @@ seule entrée « Importer » ; un fichier qui ne donne aucune valeur numérique
 ouvre à la place la fenêtre d'import pré-remplie. Décision pure :
 `state::file_drop_plan`. Le dépôt crée toujours de nouvelles feuilles, même
 si la recette du dernier import remplaçait ou fusionnait une feuille. Le lien
-« Régler l'import… » dans la barre d'état et Fichier › Régler le dernier
-import… reprennent ses fichiers dans l'assistant.
+« Reopen Last Import… » dans la barre d'état et File › Reopen Last
+Import… reprennent ses fichiers dans l'assistant.
 
 Le même geste est câblé dans les fenêtres détachées : sur un classeur,
 la destination reste ce classeur ; sur un graphe, une note, une matrice ou le
@@ -136,7 +136,7 @@ image) et les feuilles se créent à la fin, en une seule entrée « Importer »
 Raccourci : **Ctrl+"** (`SHORTCUT_IMPORT` : touche du 3 sans Maj sur AZERTY,
 `SHORTCUT_IMPORT_QWERTY` : Ctrl+Maj+' sur QWERTY). Fichiers récents et dossier
 mémorisé : `plotyx_import::RecentFiles` (`import_recent.json`, à côté des
-recettes). « Fichier › Régler le dernier import… » (`Action::ReopenLastImport`)
+recettes). « File › Reopen Last Import… » (`Action::ReopenLastImport`)
 rouvre l'assistant sur les fichiers et le modèle du dernier import — en
 l'annulant d'abord s'il est encore au sommet de l'historique, jamais un travail
 postérieur.
@@ -174,7 +174,7 @@ selon `FilesLayout`. L'aperçu montre le premier bloc et le nombre de blocs.
 
 **Actualiser.** Chaque colonne importée garde sa source
 (`ColumnMeta::import_source` : chemin, recette en JSON, index de colonne).
-« Fichier › Actualiser depuis le fichier source » (`Action::RefreshFromSource`)
+« File › Refresh from Source » (`Action::RefreshFromSource`)
 relit les fichiers et réécrit les valeurs **en place** : les colonnes gardent
 leur identité, les graphes restent valides. Les lignes de la feuille suivent le
 plus long des nouveaux contenus ; elles ne raccourcissent que si toutes les
@@ -323,13 +323,13 @@ Les fenêtres de contenu proposent dans leur en-tête des icônes pour
 maximiser, détacher et fermer, accompagnées d'infobulles. Le classeur et le
 graphe utilisent les mêmes commandes. La maximisation remplit le
 `CentralPanel` ; le Project Manager et la console restent accessibles.
-Restaurer rend à la fenêtre sa disposition flottante. Le menu Fenêtre
+Restaurer rend à la fenêtre sa disposition flottante. Le menu Window
 permet aussi de maximiser ou restaurer la fenêtre active.
 
 ### Détachement du Project Manager
 
-Le Project Manager est un panneau fixe à gauche. Le menu Fenêtre permet de
-le détacher dans une fenêtre OS puis de le réattacher. Sa fermeture OS le
+Le Project Manager est un panneau fixe à gauche. Le menu Window permet de
+le détacher (Detach / Reattach Project Manager) dans une fenêtre OS puis de le réattacher. Sa fermeture OS le
 réattache, puisque ce panneau de navigation n'est jamais fermé.
 
 Les fenêtres séparées utilisent `show_viewport_deferred` : leur rendu est
@@ -467,6 +467,15 @@ argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Un te
 qui compare une langue précise passe son chargeur : `tr!(in loader; "clé")`
 (`build_loader`), pour ne pas dépendre de `PLOTYX_LANG`.
 
+**Menus et actions (#42)** : une action a **un** libellé, la clé `action-*`, partagé
+par la barre de menus, les menus contextuels, la barre d'état et le bouton de
+fenêtre détachée (`action-reopen-last-import`, `action-reset-zoom`…) ; les
+menus eux-mêmes sont `menu-*`. L'infobulle (l'effet, pas le raccourci, que le
+menu dessine déjà) est l'attribut `.hint` (`tr!("action-save", "hint")`) ;
+l'infobulle d'une entrée grisée, qui dit pourquoi, est `.disabled`. Les noms
+de touches (`shortcut-backspace`, `shortcut-delete`) sont aussi des clés. Le
+libellé d'historique qui suit « Undo » reste français jusqu'à #46.
+
 **Langue** : la variable `PLOTYX_LANG` (`en`, `fr`, `en-XA`), puis la
 préférence `language` de `preferences.json`, sinon l'anglais. La langue du
 système n'est **pas** suivie tant que le catalogue français n'est pas complet
@@ -482,8 +491,8 @@ dans `label`, `button`, `menu_button`, `checkbox`, `radio_value`,
 `selectable_value`, `selectable_label`, `on_hover_text`, `heading`, ni dans les
 `Button::new(…)`/`RichText::new(…)`, ni dans les tables `fn label()`/`fn title()`.
 L'existant d'avant #41 (213 littéraux, 14 zones) est recensé par fichier et par
-zone, chaque zone portant le ticket qui la convertit (#42-#45) : la liste se
-réduit, ne grossit pas, et doit être vide à #48. La zone #43 (propriétés du
+zone, chaque zone portant le ticket qui la convertit (#45 reste) : la liste se
+réduit, ne grossit pas, et doit être vide à #48. Les zones #42 (menus, actions, barre d'état) et #44 (assistant d'import) sont converties : plus de dérogation. La zone #43 (propriétés du
 graphe, éditeur de texte, pied des dialogues, export) est convertie : elle n'a
 plus de dérogation et reste gardée plus strictement (`ZONE_43` : aucun littéral
 textuel dans ses fonctions, quelle que soit la forme de l'appel). Mécanique détaillée : skill
@@ -509,7 +518,7 @@ système restent en anglais dans la phrase. `plotyx-importer` rend un
 ### Sélecteur de fichiers natif
 
 Le bandeau de fichier a été supprimé : Ouvrir, Enregistrer et Enregistrer
-sous sont réunis dans le menu Fichier. Les clics et leurs raccourcis
+sous sont réunis dans le menu File. Les clics et leurs raccourcis
 partagent le même routage. Ouvrir (Ctrl+O) affiche un `rfd::FileDialog` ;
 Enregistrer sous (Ctrl+Maj+S) demande une destination ; Enregistrer
 (Ctrl+S) utilise la destination courante.
@@ -596,7 +605,7 @@ Le classeur n'a plus de bandeau d'actions au-dessus de la grille. Un clic droit
 dans l'espace vide à droite de la dernière colonne propose « Ajouter une
 colonne » ; un clic droit sur un onglet de feuille ou sur la partie vide de sa
 bande propose « Ajouter une feuille ». La bande reste sous la grille dans les
-fenêtres flottantes et détachées. « Importer… » se trouve dans le menu Fichier.
+fenêtres flottantes et détachées. « Importer… » se trouve dans le menu File.
 Son dialogue choisit entre le classeur actif, un nouveau classeur par fichier
 et un seul nouveau classeur pour tout le lot. Chaque fichier valide crée sa
 propre feuille ; les nouveaux classeurs ne sont créés qu'après analyse
@@ -760,7 +769,7 @@ onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
 par `Action::OpenPlotSettings { graph, tab, axis }`.
 
 **Textes libres** (issue #35) : clic droit dans une zone de tracé →
-« Ajouter un texte » au point cliqué, ou « Graphique » → « Ajouter un texte »
+« Add Text » au point cliqué, ou « Graph » → « Add Text »
 (au centre du premier panneau). Le texte s'édite **sur place** : un champ posé
 sur le texte, et au-dessus une barre couleur / taille / rotation
 (`app::annotation_editor_ui`) ; Entrée ou clic ailleurs valide, Échap annule.
@@ -784,8 +793,8 @@ enregistrées sont publiées chaque image dans la mémoire d'egui
 (`publish_saved_colors`) pour que le sélecteur de l'éditeur les propose aussi
 dans une fenêtre détachée.
 
-**Exporter le graphe** (issue #34) : menu « Graphique » → « Exporter le
-graphe… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
+**Exporter le graphe** (issue #34) : menu « Graph » → « Export
+Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
 compris dans une fenêtre détachée). Un sélecteur `rfd` (SVG, PDF, PNG) propose
 le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
 `.svg` si elle manque. `app::request_graph_export` lit le zoom de la vue
@@ -793,7 +802,7 @@ le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
 `AppState` écrit le fichier (`plotyx-render-svg`, texte Typst compris) et le dit
 dans la barre d'état. Aucune commande : le modèle n'est pas touché. La
 résolution PNG (×1, ×2, ×4 ; ×4 par défaut, soit 1920 × 1440 px) se règle dans
-« Graphique » → « Résolution des exports PNG » (`Action::SetPngExportScale`,
+« Graph » → « PNG Resolution » (`Action::SetPngExportScale`,
 préférence de session).
 
 **Onglets** (`state::PlotSettingsTab`, clés `plot-tab-*`, en anglais) :
@@ -872,18 +881,18 @@ réglage de couleur passe par ce sélecteur, avec l'usage qui lui correspond.
 **Trois façons de l'ouvrir** :
 
 - **clic droit sur un composant du graphe** (`app::graph_context_menu`) :
-  titre, zone de tracé, axe, titre d'axe. Le menu propose « Propriétés… »,
+  titre, zone de tracé, axe, titre d'axe. Le menu propose « Properties… »,
   qui ouvre l'onglet qui règle ce composant (`state::PlotTarget::
-  settings_page`), et « Réinitialiser le zoom ». Le composant sous le
+  settings_page`), et « Reset Zoom ». Le composant sous le
   pointeur est trouvé par `plotyx_render::hit::component_at`, sur la
   géométrie réellement allouée par Plotters (zone de tracé, aires de
   graduation, bande du titre), pas sur une reconstitution. Le clic droit
   **sans** glisser ouvre le menu ; le glisser secondaire reste le zoom
   élastique. Même chemin en fenêtre flottante et détachée
   (`graph_view_contents`) ;
-- **menu « Graphique »** de la barre de menus, présent seulement quand
+- **menu « Graph »** de la barre de menus, présent seulement quand
   l'onglet actif est un graphe (`state::active_graph`, testée sans fenêtre) :
-  une entrée par onglet, et « Réinitialiser le zoom ». Aucun réglage n'est
+  une entrée par onglet, et « Reset Zoom ». Aucun réglage n'est
   donc atteignable **seulement** au clic droit ;
 - rouvrir la fenêtre sur un autre graphe valide d'abord le brouillon du
   précédent.

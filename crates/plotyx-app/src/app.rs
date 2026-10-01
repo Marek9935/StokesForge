@@ -498,9 +498,14 @@ pub const SHORTCUT_PASTE_ABSOLUTE: egui::KeyboardShortcut = egui::KeyboardShortc
 /// menu entièrement français. Les raccourcis à modificateur, eux, se rendent
 /// identiquement dans toutes les langues (« Ctrl+C ») et gagnent à passer
 /// par `format_shortcut`, qui sait les adapter à macOS.
-const SHORTCUT_TEXT_BACKSPACE: &str = "Retour arr.";
-/// Pendant de [`SHORTCUT_TEXT_BACKSPACE`] pour Suppr.
-const SHORTCUT_TEXT_DELETE: &str = "Suppr";
+fn shortcut_text_backspace() -> String {
+    tr!("shortcut-backspace")
+}
+
+/// Pendant de [`shortcut_text_backspace`] pour Suppr.
+fn shortcut_text_delete() -> String {
+    tr!("shortcut-delete")
+}
 
 /// Hauteur d'une ligne de la grille, en points.
 const ROW_HEIGHT: f32 = 20.0;
@@ -1164,12 +1169,20 @@ impl PlotyxApp {
         egui::Panel::top("plotyx_menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(tr!("menu-file"), |ui| {
-                    if ui.button("Nouveau classeur").clicked() {
+                    if ui
+                        .button(tr!("action-add-workbook"))
+                        .on_hover_text(tr!("action-add-workbook", "hint"))
+                        .clicked()
+                    {
                         actions.push(Action::AddWorkbook);
                         ui.close();
                     }
                     if ui
-                        .add(egui::Button::new("Importer…").shortcut_text(SHORTCUT_IMPORT_TEXT))
+                        .add(
+                            egui::Button::new(tr!("action-import"))
+                                .shortcut_text(SHORTCUT_IMPORT_TEXT),
+                        )
+                        .on_hover_text(tr!("action-import", "hint"))
                         .clicked()
                     {
                         self.open_import_dialog();
@@ -1182,11 +1195,9 @@ impl PlotyxApp {
                         .add_enabled(
                             active_sheet
                                 .is_some_and(|sheet| self.state.can_refresh_from_source(sheet)),
-                            egui::Button::new("Actualiser depuis le fichier source"),
+                            egui::Button::new(tr!("action-refresh-from-source")),
                         )
-                        .on_hover_text(
-                            "Relit les fichiers d'où viennent les colonnes de la feuille active",
-                        )
+                        .on_hover_text(tr!("action-refresh-from-source", "hint"))
                         .clicked()
                     {
                         if let Some(sheet) = active_sheet {
@@ -1197,11 +1208,9 @@ impl PlotyxApp {
                     if ui
                         .add_enabled(
                             self.state.can_reopen_last_import(),
-                            egui::Button::new("Régler le dernier import…"),
+                            egui::Button::new(tr!("action-reopen-last-import")),
                         )
-                        .on_hover_text(
-                            "Reprend les fichiers et le modèle du dernier import dans l'assistant",
-                        )
+                        .on_hover_text(tr!("action-reopen-last-import", "hint"))
                         .clicked()
                     {
                         actions.push(Action::ReopenLastImport);
@@ -1210,7 +1219,7 @@ impl PlotyxApp {
                     ui.separator();
                     if ui
                         .add(
-                            egui::Button::new("Ouvrir…")
+                            egui::Button::new(tr!("action-open"))
                                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_OPEN)),
                         )
                         .clicked()
@@ -1220,7 +1229,7 @@ impl PlotyxApp {
                     }
                     if ui
                         .add(
-                            egui::Button::new("Enregistrer")
+                            egui::Button::new(tr!("action-save"))
                                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_SAVE)),
                         )
                         .clicked()
@@ -1230,7 +1239,7 @@ impl PlotyxApp {
                     }
                     if ui
                         .add(
-                            egui::Button::new("Enregistrer sous…")
+                            egui::Button::new(tr!("action-save-as"))
                                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_SAVE_AS)),
                         )
                         .clicked()
@@ -1239,12 +1248,12 @@ impl PlotyxApp {
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Quitter").clicked() {
+                    if ui.button(tr!("action-quit")).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         ui.close();
                     }
                 });
-                ui.menu_button("Édition", |ui| {
+                ui.menu_button(tr!("menu-edit"), |ui| {
                     // Le libellé complet (« Undo Edit Cells in Column A ») et le
                     // grisage sont deux lignes distinctes ici ; Qt les tenait
                     // ensemble dans une seule `QAction`.
@@ -1280,16 +1289,40 @@ impl PlotyxApp {
                     }
                 });
                 if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
-                    ui.menu_button("Graphique", |ui| {
-                        for (label, tab) in [
-                            ("Propriétés du graphe…", PlotSettingsTab::Graph),
-                            ("Zone de tracé…", PlotSettingsTab::PlotArea),
-                            ("Axes…", PlotSettingsTab::Axes),
-                            ("Séries…", PlotSettingsTab::Series),
-                            ("Légende…", PlotSettingsTab::Legend),
-                            ("Thème…", PlotSettingsTab::Theme),
+                    ui.menu_button(tr!("menu-graph"), |ui| {
+                        for (label, hint, tab) in [
+                            (
+                                tr!("menu-graph-properties"),
+                                tr!("menu-graph-properties", "hint"),
+                                PlotSettingsTab::Graph,
+                            ),
+                            (
+                                tr!("menu-graph-plot-area"),
+                                tr!("menu-graph-plot-area", "hint"),
+                                PlotSettingsTab::PlotArea,
+                            ),
+                            (
+                                tr!("menu-graph-axes"),
+                                tr!("menu-graph-axes", "hint"),
+                                PlotSettingsTab::Axes,
+                            ),
+                            (
+                                tr!("menu-graph-series"),
+                                tr!("menu-graph-series", "hint"),
+                                PlotSettingsTab::Series,
+                            ),
+                            (
+                                tr!("menu-graph-legend"),
+                                tr!("menu-graph-legend", "hint"),
+                                PlotSettingsTab::Legend,
+                            ),
+                            (
+                                tr!("menu-graph-theme"),
+                                tr!("menu-graph-theme", "hint"),
+                                PlotSettingsTab::Theme,
+                            ),
                         ] {
-                            if ui.button(label).clicked() {
+                            if ui.button(label).on_hover_text(hint).clicked() {
                                 actions.push(Action::OpenPlotSettings {
                                     graph,
                                     tab,
@@ -1299,7 +1332,11 @@ impl PlotyxApp {
                             }
                         }
                         ui.separator();
-                        if ui.button("Réinitialiser le zoom").clicked() {
+                        if ui
+                            .button(tr!("action-reset-zoom"))
+                            .on_hover_text(tr!("action-reset-zoom", "hint"))
+                            .clicked()
+                        {
                             if let Some(view) = self.graph_views.get_mut(&graph) {
                                 view.reset_view();
                             }
@@ -1312,7 +1349,11 @@ impl PlotyxApp {
                             .graph_views
                             .get(&graph)
                             .and_then(GraphView::selected_annotation);
-                        if ui.button("Ajouter un texte").clicked() {
+                        if ui
+                            .button(tr!("action-add-text"))
+                            .on_hover_text(tr!("action-add-text", "hint"))
+                            .clicked()
+                        {
                             let tree = self.state.tree().clone();
                             if let Some(view) = self.graph_views.get_mut(&graph) {
                                 if let Some(point) = view.panel_center_data() {
@@ -1324,8 +1365,8 @@ impl PlotyxApp {
                         if ui
                             .add_enabled(
                                 selected.is_some(),
-                                egui::Button::new("Supprimer le texte sélectionné")
-                                    .shortcut_text("Suppr"),
+                                egui::Button::new(tr!("action-delete-text"))
+                                    .shortcut_text(shortcut_text_delete()),
                             )
                             .clicked()
                         {
@@ -1340,10 +1381,10 @@ impl PlotyxApp {
                         ui.separator();
                         if ui
                             .add(
-                                egui::Button::new("Exporter le graphe…")
+                                egui::Button::new(tr!("action-export-graph"))
                                     .shortcut_text(ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
                             )
-                            .on_hover_text("SVG, PDF ou PNG, avec le zoom courant")
+                            .on_hover_text(tr!("action-export-graph", "hint"))
                             .clicked()
                         {
                             request_graph_export(
@@ -1354,14 +1395,17 @@ impl PlotyxApp {
                             );
                             ui.close();
                         }
-                        ui.menu_button("Résolution des exports PNG", |ui| {
+                        ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
                             let current = self.state.png_export_scale();
                             for scale in crate::state::PNG_EXPORT_SCALES {
                                 let (w, h) = DEFAULT_FIGURE_SIZE;
-                                let label = format!(
-                                    "×{scale} ({} × {} px)",
-                                    (w as f32 * scale) as u32,
-                                    (h as f32 * scale) as u32
+                                let (width, height) =
+                                    ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
+                                let label = tr!(
+                                    "menu-graph-png-resolution-option",
+                                    scale = scale,
+                                    width = width,
+                                    height = height
                                 );
                                 if ui.radio(current == scale, label).clicked() {
                                     actions.push(Action::SetPngExportScale(scale));
@@ -1371,13 +1415,11 @@ impl PlotyxApp {
                         });
                     });
                 }
-                ui.menu_button("Fenêtre", |ui| {
+                ui.menu_button(tr!("menu-window"), |ui| {
                     let mut show_metadata = metadata_row_visible(ctx);
                     if ui
-                        .checkbox(
-                            &mut show_metadata,
-                            "Afficher la ligne Metadata des colonnes",
-                        )
+                        .checkbox(&mut show_metadata, tr!("menu-window-show-metadata-row"))
+                        .on_hover_text(tr!("menu-window-show-metadata-row", "hint"))
                         .changed()
                     {
                         set_metadata_row_visible(ctx, show_metadata);
@@ -1385,7 +1427,11 @@ impl PlotyxApp {
                     ui.separator();
                     if let Some(tab) = self.maximized_tab {
                         if ui
-                            .button(format!("Restaurer « {} »", tab_title(&self.state, tab)))
+                            .button(tr!(
+                                "action-restore-window",
+                                title = tab_title(&self.state, tab)
+                            ))
+                            .on_hover_text(tr!("action-restore-window", "hint"))
                             .clicked()
                         {
                             self.maximized_tab = None;
@@ -1402,8 +1448,9 @@ impl PlotyxApp {
                         if ui
                             .add_enabled(
                                 can_maximize,
-                                egui::Button::new("Maximiser l'onglet actif"),
+                                egui::Button::new(tr!("action-maximize-window")),
                             )
+                            .on_hover_text(tr!("action-maximize-window", "hint"))
                             .clicked()
                         {
                             self.maximized_tab = active;
@@ -1412,12 +1459,17 @@ impl PlotyxApp {
                     }
                     ui.separator();
                     if self.pm_detached {
-                        if ui.button("Réattacher le Project Manager").clicked() {
+                        if ui
+                            .button(tr!("action-reattach-project-manager"))
+                            .on_hover_text(tr!("action-reattach-project-manager", "hint"))
+                            .clicked()
+                        {
                             self.reattach_project_manager();
                             ui.close();
                         }
                     } else if ui
-                        .button("Détacher le Project Manager en fenêtre séparée")
+                        .button(tr!("action-detach-project-manager"))
+                        .on_hover_text(tr!("action-detach-project-manager", "hint"))
                         .clicked()
                     {
                         self.detach_project_manager();
@@ -1479,17 +1531,20 @@ impl PlotyxApp {
                             ui.label(&status.text);
                         }
                         None => {
-                            ui.weak("prêt");
+                            ui.weak(tr!("status-ready"));
                         }
                     }
                     if self.state.can_reopen_last_import()
                         && self.state.import_state().is_none()
-                        && ui.link("Régler l'import…").clicked()
+                        && ui.link(tr!("action-reopen-last-import")).clicked()
                     {
                         actions.push(Action::ReopenLastImport);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.weak(format!("révision {}", self.state.snapshot().revision));
+                        ui.weak(tr!(
+                            "status-revision",
+                            revision = self.state.snapshot().revision
+                        ));
                     });
                 });
             });
@@ -1666,7 +1721,7 @@ impl PlotyxApp {
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of("plotyx_project_manager_window"),
             egui::ViewportBuilder::default()
-                .with_title("PlotYx — Project Manager")
+                .with_title(tr!("window-title-project-manager"))
                 .with_inner_size([PROJECT_MANAGER_WIDTH + 40.0, 480.0]),
             move |ui, _class| {
                 begin_file_drop(ui.ctx());
@@ -1683,7 +1738,11 @@ impl PlotyxApp {
                     .unwrap_or_else(|err| err.into_inner())
                     .clone();
                 egui::CentralPanel::default().show(ui, |ui| {
-                    if ui.button("Réattacher à la fenêtre principale").clicked() {
+                    if ui
+                        .button(tr!("action-reattach-project-manager"))
+                        .on_hover_text(tr!("action-reattach-project-manager", "hint"))
+                        .clicked()
+                    {
                         requests
                             .lock()
                             .unwrap_or_else(|err| err.into_inner())
@@ -1914,7 +1973,7 @@ impl PlotyxApp {
             let requests = Arc::clone(&detached.requests);
             let root_context = ctx.clone();
             let tab = *tab;
-            let title = format!("PlotYx — {}", tab_title(state, tab));
+            let title = tr!("window-title-detached", name = tab_title(state, tab));
             // `Tab::Graph` part à une taille qui contient sa figure de
             // référence et son retour au cadrage initial.
             // Le reste (`Book`/`Matrix`/`Note`) partage une taille uniforme.
@@ -2018,7 +2077,7 @@ impl PlotyxApp {
                                     if let Some(view_state) = model.view_state.as_mut() {
                                         book_contents(ui, view_state, &mut requests.actions, id);
                                     } else {
-                                        ui.label("Session du classeur indisponible.");
+                                        ui.label(tr!("detached-workbook-unavailable"));
                                     }
                                 }
                                 Tab::Graph(id) => {
@@ -2039,7 +2098,7 @@ impl PlotyxApp {
                                     if let Some(view_state) = model.view_state.as_mut() {
                                         note_contents(ui, view_state, &mut requests.actions, id);
                                     } else {
-                                        ui.label("Session de la note indisponible.");
+                                        ui.label(tr!("detached-note-unavailable"));
                                     }
                                 }
                             }
@@ -2428,7 +2487,11 @@ impl eframe::App for PlotyxApp {
                 ui.horizontal(|ui| {
                     ui.heading(tab_title(state, tab));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Restaurer la disposition").clicked() {
+                        if ui
+                            .button(tr!("action-restore-window", title = tab_title(state, tab)))
+                            .on_hover_text(tr!("action-restore-window", "hint"))
+                            .clicked()
+                        {
                             *maximized_tab = None;
                         }
                     });
@@ -3356,10 +3419,10 @@ fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
                 |label: &str| egui::Button::new(egui::RichText::new(label).size(12.0)).small();
             let previous = ui
                 .add_enabled(overflow.hidden_left, arrow("<"))
-                .on_hover_text("Feuilles précédentes");
+                .on_hover_text(tr!("tabs-previous-worksheets"));
             let next = ui
                 .add_enabled(overflow.hidden_right, arrow(">"))
-                .on_hover_text("Feuilles suivantes");
+                .on_hover_text(tr!("tabs-next-worksheets"));
             if previous.clicked() {
                 step = -1;
             }
@@ -4186,10 +4249,10 @@ fn window_header(
 /// (invariant 10).
 fn tab_title(state: &AppState, tab: Tab) -> String {
     match tab {
-        Tab::Book(id) => node_title(state, id, "Classeur"),
-        Tab::Graph(id) => node_title(state, id, "Graphe"),
-        Tab::Matrix(id) => node_title(state, id, "Matrice"),
-        Tab::Note(id) => node_title(state, id, "Note"),
+        Tab::Book(id) => node_title(state, id, || tr!("window-kind-workbook")),
+        Tab::Graph(id) => node_title(state, id, || tr!("window-kind-graph")),
+        Tab::Matrix(id) => node_title(state, id, || tr!("window-kind-matrix")),
+        Tab::Note(id) => node_title(state, id, || tr!("window-kind-note")),
     }
 }
 
@@ -4200,10 +4263,10 @@ fn tab_title(state: &AppState, tab: Tab) -> String {
 /// factorisée »).
 fn tab_title_from_tree(tree: &Tree, tab: Tab) -> String {
     match tab {
-        Tab::Book(id) => node_title_in(tree, id, "Classeur"),
-        Tab::Graph(id) => node_title_in(tree, id, "Graphe"),
-        Tab::Matrix(id) => node_title_in(tree, id, "Matrice"),
-        Tab::Note(id) => node_title_in(tree, id, "Note"),
+        Tab::Book(id) => node_title_in(tree, id, || tr!("window-kind-workbook")),
+        Tab::Graph(id) => node_title_in(tree, id, || tr!("window-kind-graph")),
+        Tab::Matrix(id) => node_title_in(tree, id, || tr!("window-kind-matrix")),
+        Tab::Note(id) => node_title_in(tree, id, || tr!("window-kind-note")),
     }
 }
 
@@ -4221,13 +4284,13 @@ fn active_tab_kind(tab: Option<Tab>) -> ActiveTabKind {
     }
 }
 
-/// Le nom du nœud `id`, ou `"{missing} {id} (supprimé)"` s'il n'existe plus.
-fn node_title(state: &AppState, id: NodeId, missing: &str) -> String {
+/// Le nom du nœud `id`, ou `"{missing} {id} (deleted)"` s'il n'existe plus.
+fn node_title(state: &AppState, id: NodeId, missing: impl FnOnce() -> String) -> String {
     state
         .tree()
         .node(id)
         .map(|node| node.name().to_string())
-        .unwrap_or_else(|| format!("{missing} {id} (supprimé)"))
+        .unwrap_or_else(|| tr!("window-deleted", kind = missing(), id = id.to_string()))
 }
 
 /// Peint le contenu de l'onglet `tab`, quelle que soit sa provenance — la
@@ -4546,7 +4609,7 @@ fn grid_edit_menu(
     let ctx = ui.ctx().clone();
 
     if ui
-        .add(egui::Button::new("Couper").shortcut_text(ctx.format_shortcut(&SHORTCUT_CUT)))
+        .add(egui::Button::new(tr!("action-cut")).shortcut_text(ctx.format_shortcut(&SHORTCUT_CUT)))
         .clicked()
     {
         // Couper = copier puis vider, exactement comme le bloc clavier :
@@ -4560,7 +4623,10 @@ fn grid_edit_menu(
         ui.close();
     }
     if ui
-        .add(egui::Button::new("Copier").shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY)))
+        .add(
+            egui::Button::new(tr!("action-copy"))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY)),
+        )
         .clicked()
     {
         if let Some(text) = state.copy_selection(sheet) {
@@ -4570,9 +4636,10 @@ fn grid_edit_menu(
     }
     if ui
         .add(
-            egui::Button::new("Copier avec l'en-tête")
+            egui::Button::new(tr!("action-copy-with-header"))
                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY_FULL_COLUMNS)),
         )
+        .on_hover_text(tr!("action-copy-with-header", "hint"))
         .clicked()
     {
         if let Some(text) = state.copy_full_columns(sheet) {
@@ -4584,23 +4651,27 @@ fn grid_edit_menu(
     ui.separator();
 
     if ui
-        .add(egui::Button::new("Coller").shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE)))
+        .add(
+            egui::Button::new(tr!("action-paste"))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE)),
+        )
         .clicked()
     {
         state.forget_delete_repeat(sheet);
         match system_clipboard_text() {
             Some(text) => actions.push(Action::Paste { sheet, text }),
-            None => state.notice("Presse-papier vide ou illisible".to_string()),
+            None => state.notice(tr!("status-clipboard-unreadable")),
         }
         ui.close();
     }
     if ui
         .add_enabled(
             menu.paste_absolute_enabled,
-            egui::Button::new("Coller à l'identique")
+            egui::Button::new(tr!("action-paste-in-place"))
                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE_ABSOLUTE)),
         )
-        .on_disabled_hover_text("Copiez d'abord depuis la grille : un texte externe n'a pas de position d'origine à rejouer.")
+        .on_hover_text(tr!("action-paste-in-place", "hint"))
+        .on_disabled_hover_text(tr!("action-paste-in-place", "disabled"))
         .clicked()
     {
         state.forget_delete_repeat(sheet);
@@ -4611,7 +4682,8 @@ fn grid_edit_menu(
     ui.separator();
 
     if ui
-        .add(egui::Button::new("Vider").shortcut_text(SHORTCUT_TEXT_BACKSPACE))
+        .add(egui::Button::new(tr!("action-clear")).shortcut_text(shortcut_text_backspace()))
+        .on_hover_text(tr!("action-clear", "hint"))
         .clicked()
     {
         state.forget_delete_repeat(sheet);
@@ -4621,11 +4693,10 @@ fn grid_edit_menu(
     if menu.offers_delete_shift
         && ui
             .add(
-                egui::Button::new("Supprimer et décaler").shortcut_text(SHORTCUT_TEXT_DELETE),
+                egui::Button::new(tr!("action-delete-shift-up"))
+                    .shortcut_text(shortcut_text_delete()),
             )
-            .on_hover_text(
-                "Suppr vide à la première pression et ne supprime qu'à la seconde ; cette entrée supprime tout de suite.",
-            )
+            .on_hover_text(tr!("action-delete-shift-up", "hint"))
             .clicked()
     {
         // Passer par l'action directement, sans `consume_delete_key` : un
@@ -4643,7 +4714,8 @@ fn grid_edit_menu(
     if ui
         .add_enabled(
             state.can_undo(),
-            egui::Button::new("Annuler").shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
+            egui::Button::new(tr!("action-undo"))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
         )
         .clicked()
     {
@@ -4653,7 +4725,8 @@ fn grid_edit_menu(
     if ui
         .add_enabled(
             state.can_redo(),
-            egui::Button::new("Rétablir").shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
+            egui::Button::new(tr!("action-redo"))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
         )
         .clicked()
     {
@@ -5365,7 +5438,7 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
         grid_ui.centered_and_justified(|ui| {
             ui.weak(format!(
                 "« {} » n'a aucune feuille (ou a été supprimé).",
-                node_title(state, book, "Classeur")
+                node_title(state, book, || tr!("window-kind-workbook"))
             ));
         });
     } else {
@@ -7475,12 +7548,15 @@ fn graph_context_menu(
         // Textes libres (issue #35) : les mêmes gestes que la barre de menus
         // et le clavier (double-clic, Suppr).
         if let PlotTarget::Annotation(annotation) = target {
-            if ui.button("Modifier le texte").clicked() {
+            if ui.button(tr!("action-edit-text")).clicked() {
                 open_annotation_editor(ui.ctx(), view, tree, graph_id, annotation);
                 ui.close();
             }
             if ui
-                .add(egui::Button::new("Supprimer").shortcut_text("Suppr"))
+                .add(
+                    egui::Button::new(tr!("action-delete-text"))
+                        .shortcut_text(shortcut_text_delete()),
+                )
                 .clicked()
             {
                 actions.push(Action::RemoveAnnotation {
@@ -7492,8 +7568,9 @@ fn graph_context_menu(
             }
             ui.separator();
         } else if ui
-            .add_enabled(point.is_some(), egui::Button::new("Ajouter un texte"))
-            .on_disabled_hover_text("Cliquer dans une zone de tracé")
+            .add_enabled(point.is_some(), egui::Button::new(tr!("action-add-text")))
+            .on_hover_text(tr!("action-add-text", "hint"))
+            .on_disabled_hover_text(tr!("action-add-text", "disabled"))
             .clicked()
         {
             if let Some(point) = point {
@@ -7501,19 +7578,28 @@ fn graph_context_menu(
             }
             ui.close();
         }
-        if ui.button("Propriétés…").clicked() {
+        if ui
+            .button(tr!("action-properties"))
+            .on_hover_text(tr!("action-properties", "hint"))
+            .clicked()
+        {
             actions.push(target.open_settings(graph_id));
             ui.close();
         }
-        if ui.button("Réinitialiser le zoom").clicked() {
+        if ui
+            .button(tr!("action-reset-zoom"))
+            .on_hover_text(tr!("action-reset-zoom", "hint"))
+            .clicked()
+        {
             view.reset_view();
             ui.close();
         }
         if ui
             .add(
-                egui::Button::new("Exporter le graphe…")
+                egui::Button::new(tr!("action-export-graph"))
                     .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
             )
+            .on_hover_text(tr!("action-export-graph", "hint"))
             .clicked()
         {
             request_graph_export(Some(view), tree, graph_id, actions);
@@ -7581,7 +7667,7 @@ fn add_annotation_at(
     else {
         return;
     };
-    let draft = plotyx_render_egui::AnnotationSpec::new("Texte", x, y);
+    let draft = plotyx_render_egui::AnnotationSpec::new(tr!("graph-text-default"), x, y);
     start_annotation_editor(ctx, view, target, draft, None);
 }
 
@@ -8922,7 +9008,7 @@ fn legend_position_label(position: LegendPosition) -> String {
 /// ne lit que l'arbre, que les deux ont sous la main (`state.tree()` d'un
 /// côté, l'instantané du viewport de l'autre).
 fn matrix_contents(ui: &mut egui::Ui, tree: &Tree, matrix: NodeId) {
-    let name = node_title_in(tree, matrix, "Matrice");
+    let name = node_title_in(tree, matrix, || tr!("window-kind-matrix"));
     ui.centered_and_justified(|ui| {
         ui.weak(format!(
             "« {name} » — édition de matrice non implémentée dans ce banc \
@@ -8942,7 +9028,7 @@ fn note_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
         ui.centered_and_justified(|ui| {
             ui.weak(format!(
                 "« {} » a été supprimée.",
-                node_title(state, note, "Note")
+                node_title(state, note, || tr!("window-kind-note"))
             ));
         });
         return;
@@ -9717,7 +9803,7 @@ mod graph_layout_tests {
             output
         };
         let output = paint(Vec::new());
-        let pos = find_text_center(&output.shapes, "Régler l'import…");
+        let pos = find_text_center(&output.shapes, &tr!("action-reopen-last-import"));
         paint(vec![egui::Event::PointerMoved(pos)]);
         for pressed in [true, false] {
             paint(vec![egui::Event::PointerButton {

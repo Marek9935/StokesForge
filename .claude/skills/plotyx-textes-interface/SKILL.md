@@ -87,7 +87,9 @@ est en tête de `crates/plotyx-app/src/i18n.rs` ; la vue d'ensemble dans
    `crates/plotyx-app/i18n/en/plotyx_app.ftl`, jamais ailleurs d'abord. Nom en
    minuscules et tirets, `zone-objet[-précision]` : `menu-file`,
    `plot-axis-log-scale`. L'infobulle d'un contrôle est un attribut de sa clé
-   (`.hint`). Rédiger le texte selon le glossaire (`docs/textes-interface.md`) :
+   (`.hint`, lue par `tr!("clé", "hint")`) ; celle d'une entrée grisée, qui dit
+   pourquoi, est `.disabled`. Une action partagée entre menu, menu contextuel et
+   barre d'état a **une** clé `action-*`. Rédiger le texte selon le glossaire (`docs/textes-interface.md`) :
    Title Case pour menus, boutons, onglets et titres ; Sentence case pour champs,
    cases à cocher, infobulles, messages.
 2. **L'employer par `tr!`** : `tr!("menu-file")`, ou avec arguments nommés
@@ -183,8 +185,8 @@ Dans cette zone, l'infobulle d'un champ est l'attribut `.hint` (`tr!("clé",
 "hint")`) et `text_field(ui, libellé, infobulle, valeur)` la pose.
 
 **La liste de dérogations (`DEROGATIONS`) est une dette, pas un état normal.**
-Elle recense l'existant d'avant #41 (213 littéraux, 14 zones), par fichier et par
-zone, chaque zone portant le ticket qui la convertit (#42-#45) :
+Elle recense l'existant d'avant #41 (154 littéraux, 11 zones depuis #42), par fichier et par
+zone, chaque zone portant le ticket qui la convertit (#43-#45) :
 
 - elle **ne grossit jamais** : un texte neuf passe par `tr!`, même si la fonction
   voisine figure dans la liste — **un code qui y figure n'est pas un modèle** ;

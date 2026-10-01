@@ -116,13 +116,13 @@ celui de PlotYx.
 Avant de coder, décider explicitement où l'utilisateur **trouvera** la
 fonctionnalité, et le dire dans le compte rendu. Deux familles de menus :
 
-- **la barre de menus** (`PlotyxApp::menu_bar`) : « Fichier », « Édition »,
-  « Graphique » (présent seulement quand un graphe est l'onglet actif,
-  `state::active_graph`) et « Fenêtre ». Une action qui porte sur l'objet
+- **la barre de menus** (`PlotyxApp::menu_bar`) : *File*, *Edit*,
+  *Graph* (présent seulement quand un graphe est l'onglet actif,
+  `state::active_graph`) et *Window* (noms anglais, clés `menu-*`). Une action qui porte sur l'objet
   actif (le graphe, le classeur…) y a presque toujours sa place : c'est là
   qu'un utilisateur d'Origin la cherche. Si aucun menu existant ne convient
-  (un menu « Classeur » quand un classeur est actif, par exemple), le créer
-  sur le modèle de « Graphique » plutôt que de ranger l'action ailleurs ;
+  (un menu *Workbook* quand un classeur est actif, par exemple), le créer
+  sur le modèle de *Graph* plutôt que de ranger l'action ailleurs ;
 - **les menus contextuels** (clic droit sur la grille, les onglets de
   feuille, un composant du graphe…).
 
@@ -218,7 +218,9 @@ vérifier quand une action est ajoutée :
    jamais un littéral, même pour un bouton de passage (verrouillé par
    `aucun_libelle_en_dur`, `tests/libelles.rs`). Rédiger le texte selon le
    skill **plotyx-textes-interface** (mécanique : ajout d'une clé, pseudo-langue,
-   garde). La liste de dérogations de la garde est une dette à réduire, jamais
+   garde). Une action a **un** libellé : la clé `action-*`, partagée par la barre de
+   menus, le menu contextuel et la barre d'état ; son infobulle est l'attribut
+   `.hint` (`.disabled` si elle dit pourquoi l'entrée est grisée). La liste de dérogations de la garde est une dette à réduire, jamais
    une raison d'écrire un littéral de plus.
 
 ### Ajouter un raccourci clavier

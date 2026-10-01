@@ -864,13 +864,13 @@ pub(crate) fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
     }
 }
 
-/// Nom d'un nœud, ou `"{missing} {id} (supprimé)"` s'il n'existe plus dans
+/// Nom d'un nœud, ou `"{missing} {id} (deleted)"` s'il n'existe plus dans
 /// `tree` — pendant de `crate::app::node_title`, factorisé sur un `&Tree`
 /// pour la même raison que [`cell_text_in`].
-pub(crate) fn node_title_in(tree: &Tree, id: NodeId, missing: &str) -> String {
+pub(crate) fn node_title_in(tree: &Tree, id: NodeId, missing: impl FnOnce() -> String) -> String {
     tree.node(id)
         .map(|node| node.name().to_string())
-        .unwrap_or_else(|| format!("{missing} {id} (supprimé)"))
+        .unwrap_or_else(|| crate::tr!("window-deleted", kind = missing(), id = id.to_string()))
 }
 
 /// Saisie en cours dans une cellule.
@@ -4479,7 +4479,7 @@ impl AppState {
                 });
                 self.refresh();
             }
-            Ok(None) => self.notice("Rien à annuler".to_string()),
+            Ok(None) => self.notice(tr!("status-nothing-to-undo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
@@ -4494,7 +4494,7 @@ impl AppState {
                 });
                 self.refresh();
             }
-            Ok(None) => self.notice("Rien à rétablir".to_string()),
+            Ok(None) => self.notice(tr!("status-nothing-to-redo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
@@ -4503,7 +4503,7 @@ impl AppState {
         let path = PathBuf::from(&self.path);
         match self.handle.save(&path) {
             Ok(()) => {
-                let text = format!("Enregistré dans {}", self.path);
+                let text = crate::tr!("status-saved", path = self.path.as_str());
                 self.notice(text);
             }
             Err(err) => self.fail(errors::session::error_message(&err)),
@@ -4565,7 +4565,7 @@ impl AppState {
                 // l'arbre précédent : la sélection doit être revalidée, ce que
                 // fait `refresh`.
                 self.editing = None;
-                let text = format!("Chargé depuis {}", self.path);
+                let text = crate::tr!("status-loaded", path = self.path.as_str());
                 self.notice(text);
                 self.refresh();
             }

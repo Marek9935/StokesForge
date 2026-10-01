@@ -10,10 +10,112 @@
 ## Window
 
 window-title = PlotYx
+window-title-project-manager = PlotYx — Project Manager
+window-title-detached = PlotYx — { $name }
 
-## Menu bar
+## Menus and actions (#42)
+## One label per action, shared by the menu bar, the context menus and the
+## tooltips (`action-*`). `.hint` is the tooltip (the effect); `.disabled` is the
+## tooltip of a greyed-out entry (why it is unavailable). Shortcuts are drawn by
+## the menu itself, never written in the text.
 
 menu-file = File
+menu-edit = Edit
+menu-graph = Graph
+menu-window = Window
+
+action-add-workbook = Add Workbook
+    .hint = Adds a workbook with X and Y columns
+action-import = Import…
+    .hint = Reads instrument files into worksheets
+action-refresh-from-source = Refresh from Source
+    .hint = Re-reads the source files of the active worksheet's columns
+action-reopen-last-import = Reopen Last Import…
+    .hint = Reopens the Import Wizard with the last files and template
+action-open = Open…
+action-save = Save
+action-save-as = Save As…
+action-quit = Quit
+
+action-undo = Undo
+action-redo = Redo
+
+menu-graph-properties = Graph Properties…
+    .hint = Edits the title and background
+menu-graph-plot-area = Plot Area…
+    .hint = Edits the plot area title and gridlines
+menu-graph-axes = Axes…
+    .hint = Edits axis titles, scales and ranges
+menu-graph-series = Series…
+    .hint = Edits the plot type, line and symbol of each series
+menu-graph-legend = Legend…
+    .hint = Edits legend visibility and position
+menu-graph-theme = Theme…
+    .hint = Edits global colors and applies predefined themes
+menu-graph-png-resolution = PNG Resolution
+    .hint = Scale factor of PNG exports
+menu-graph-png-resolution-option = ×{ $scale } ({ $width } × { $height } px)
+
+action-reset-zoom = Reset Zoom
+    .hint = Returns to the original axis ranges
+action-add-text = Add Text
+    .hint = Adds a text in the plot area
+    .disabled = Right-click inside a plot area
+action-edit-text = Edit Text
+action-delete-text = Delete Text
+action-properties = Properties…
+    .hint = Opens Graph Properties on this item
+action-export-graph = Export Graph…
+    .hint = SVG, PDF or PNG, at the current zoom
+
+menu-window-show-metadata-row = Show Metadata Row
+    .hint = Shows the metadata of imported files in the column headers
+action-maximize-window = Maximize Window
+    .hint = Fills the workspace with the active window
+action-restore-window = Restore “{ $title }”
+    .hint = Shows all windows again
+action-detach-project-manager = Detach Project Manager
+    .hint = Moves the Project Manager to its own window
+action-reattach-project-manager = Reattach Project Manager
+    .hint = Puts the Project Manager back in the main window
+
+action-cut = Cut
+action-copy = Copy
+action-copy-with-header = Copy with Header
+    .hint = Copies the values and the column header
+action-paste = Paste
+action-paste-in-place = Paste in Place
+    .hint = Pastes at the position the cells were copied from
+    .disabled = Copy from the grid first. Text from elsewhere has no original position
+action-clear = Clear
+    .hint = Empties the selected cells
+action-delete-shift-up = Delete and Shift Up
+    .hint = Deletes now and shifts cells up. The Del key first clears, then deletes
+
+shortcut-backspace = Backspace
+shortcut-delete = Del
+
+tabs-previous-worksheets = Show previous worksheets
+tabs-next-worksheets = Show next worksheets
+
+detached-workbook-unavailable = Workbook unavailable in this window. Reattach it to the main window
+detached-note-unavailable = Note unavailable in this window. Reattach it to the main window
+
+graph-text-default = Text
+
+window-kind-workbook = Workbook
+window-kind-graph = Graph
+window-kind-matrix = Matrix
+window-kind-note = Note
+window-deleted = { $kind } { $id } (deleted)
+
+status-ready = Ready
+status-revision = Revision { $revision }
+status-saved = Saved to { $path }
+status-loaded = Loaded from { $path }
+status-nothing-to-undo = Nothing to undo
+status-nothing-to-redo = Nothing to redo
+status-clipboard-unreadable = Clipboard is empty or unreadable
 
 ## Assistant d'import (#44)
 ## Texts of the Import Wizard: six steps, templates, metadata and preview.
