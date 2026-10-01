@@ -60,7 +60,7 @@
 pub mod pseudo;
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, RwLock};
 
 use i18n_embed::fluent::{fluent_language_loader, FluentLanguageLoader};
 use i18n_embed::unic_langid::LanguageIdentifier;
@@ -117,7 +117,7 @@ pub enum Language {
     /// L'anglais : la langue source, et la valeur par défaut.
     #[default]
     English,
-    /// Le français (catalogue en cours de rédaction, #49).
+    /// Le français (catalogue complet, #49).
     French,
     /// La pseudo-langue de test : l'anglais accentué, allongé, encadré de `[[ ]]`.
     PseudoEnglish,
@@ -148,6 +148,17 @@ impl Language {
             other if other.starts_with("en-") => Some(Language::English),
             other if other.starts_with("fr-") => Some(Language::French),
             _ => None,
+        }
+    }
+
+    /// Le nom de la langue **dans cette langue**, tel qu'on le propose dans le
+    /// menu : jamais traduit, pour qu'on la retrouve quelle que soit la langue
+    /// courante.
+    pub fn native_name(self) -> &'static str {
+        match self {
+            Language::English => "English",
+            Language::French => "Français",
+            Language::PseudoEnglish => "English (pseudo)",
         }
     }
 
@@ -197,22 +208,51 @@ struct Current {
     loader: FluentLanguageLoader,
 }
 
-static CURRENT: LazyLock<Current> = LazyLock::new(|| {
+/// La langue courante. `egui` redessine tous les textes à chaque image : un
+/// changement de langue s'applique donc dès l'image suivante, sans redémarrer.
+/// Chaque changement fait fuir un petit chargeur (quelques Ko) pour que
+/// [`loader`] garde son `&'static` ; un utilisateur ne change pas de langue des
+/// milliers de fois.
+static CURRENT: LazyLock<RwLock<&'static Current>> = LazyLock::new(|| {
     let language = startup_language();
-    Current {
+    RwLock::new(Box::leak(Box::new(Current {
         language,
         loader: build_loader(language),
-    }
+    })))
 });
+
+fn current() -> &'static Current {
+    // Un verrou empoisonné ne peut venir que d'un panic ailleurs ; la valeur
+    // lue reste valide.
+    CURRENT
+        .read()
+        .map_or_else(|poisoned| *poisoned.into_inner(), |guard| *guard)
+}
 
 /// Le chargeur global, celui de [`tr!`].
 pub fn loader() -> &'static FluentLanguageLoader {
-    &CURRENT.loader
+    &current().loader
 }
 
 /// La langue du chargeur global.
 pub fn language() -> Language {
-    CURRENT.language
+    current().language
+}
+
+/// Change la langue du chargeur global : les [`tr!`] suivants parlent
+/// `language`. Ne touche pas aux préférences ([`Preferences::save_language`]).
+pub fn set_language(language: Language) {
+    if self::language() == language {
+        return;
+    }
+    let next: &'static Current = Box::leak(Box::new(Current {
+        language,
+        loader: build_loader(language),
+    }));
+    match CURRENT.write() {
+        Ok(mut guard) => *guard = next,
+        Err(poisoned) => *poisoned.into_inner() = next,
+    }
 }
 
 /// Traduit une clé du catalogue `en` dans la langue courante.
@@ -384,9 +424,9 @@ mod tests {
         assert!(fr.junk.is_empty(), "morceaux illisibles : {:?}", fr.junk);
     }
 
-    /// Toute clé de `fr` existe dans `en`, avec les mêmes arguments. Le rapport
-    /// des clés `en` pas encore traduites s'affiche (`--nocapture`) mais
-    /// n'échoue pas avant #49.
+    /// Complétude **bloquante** (#49) : toute clé de `fr` existe dans `en` avec
+    /// les mêmes arguments, et toute clé de `en` existe dans `fr`. Une clé
+    /// ajoutée à `en` s'ajoute à `fr` dans le même commit.
     #[test]
     fn toute_cle_francaise_existe_en_anglais_avec_les_memes_arguments() {
         let comparison = compare(&read(EN), &read(FR));
@@ -400,8 +440,9 @@ mod tests {
             "arguments différents de l'anglais : {:?}",
             comparison.arguments_differ
         );
-        eprintln!(
-            "[i18n] {} clé(s) de `en` absente(s) de `fr` (reprennent l'anglais) : {:?}",
+        assert!(
+            comparison.untranslated.is_empty(),
+            "{} clé(s) de `en` absente(s) de `fr` : {:?}",
             comparison.untranslated.len(),
             comparison.untranslated
         );
@@ -448,17 +489,54 @@ mod tests {
     }
 
     #[test]
-    fn un_catalogue_francais_vide_affiche_l_anglais() {
-        // `fr` n'a aucune clé : `PLOTYX_LANG=fr` doit montrer l'anglais, pas
-        // « No localization for id ».
-        assert!(
-            read(FR).messages.is_empty(),
-            "ce test suppose fr vide (#49)"
-        );
+    fn le_francais_traduit_le_catalogue() {
         let loader = build_loader(Language::French);
         assert_eq!(loader.current_language().to_string(), "fr");
-        assert_eq!(loader.get("menu-file"), "File");
+        assert_eq!(loader.get("menu-file"), "Fichier");
         assert_eq!(loader.get("window-title"), "PlotYx");
+    }
+
+    /// Règle CLDR française : le singulier vaut pour 0 **et** 1.
+    /// Une préférence `fr` ouvre l'interface en français au démarrage (sans
+    /// `PLOTYX_LANG`), et la variable l'emporte sur elle.
+    #[test]
+    fn une_preference_francaise_ouvre_l_interface_en_francais() {
+        let language = choose_language(None, Some("fr"));
+        assert_eq!(language, Language::French);
+        assert_eq!(build_loader(language).get("menu-file"), "Fichier");
+        assert_eq!(choose_language(Some("en"), Some("fr")), Language::English);
+    }
+
+    #[test]
+    fn les_pluriels_francais_suivent_la_regle_cldr() {
+        let loader = build_loader(Language::French);
+        let message = |count: i32| {
+            loader.get_args(
+                "history-insert-rows",
+                std::collections::HashMap::from([("count", count)]),
+            )
+        };
+        assert_eq!(message(0), "Insérer 0 ligne");
+        assert_eq!(message(1), "Insérer 1 ligne");
+        assert_eq!(message(2), "Insérer 2 lignes");
+    }
+
+    /// Typographie française : une espace insécable avant « : » et « ? », et
+    /// dans les guillemets — jamais une espace ordinaire.
+    #[test]
+    fn la_typographie_francaise_utilise_l_espace_insecable() {
+        for (number, line) in FR.lines().enumerate() {
+            if line.starts_with('#') {
+                continue;
+            }
+            for bad in [" :", " ?", " !", "« ", " »"] {
+                assert!(
+                    !line.contains(bad),
+                    "fr:{} : espace ordinaire avant ou dans « {bad} » : {line}",
+                    number + 1
+                );
+            }
+        }
     }
 
     #[test]

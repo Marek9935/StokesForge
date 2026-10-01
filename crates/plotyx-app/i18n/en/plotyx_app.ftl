@@ -23,6 +23,7 @@ menu-file = File
 menu-edit = Edit
 menu-graph = Graph
 menu-window = Window
+menu-language = Language
 
 action-add-workbook = Add Workbook
     .hint = Adds a workbook with X and Y columns
@@ -113,6 +114,7 @@ status-loaded = Loaded from { $path }
 status-nothing-to-undo = Nothing to undo
 status-nothing-to-redo = Nothing to redo
 status-clipboard-unreadable = Clipboard is empty or unreadable
+status-language-not-saved = Could not save the language choice: { $detail }
 
 ## Assistant d'import (#44)
 ## Texts of the Import Wizard: six steps, templates, metadata and preview.

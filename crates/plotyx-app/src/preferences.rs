@@ -7,10 +7,10 @@
 //! illisible ou corrompu (invariant 10) : on retombe sur les valeurs par défaut,
 //! donc sur l'anglais.
 //!
-//! Ce module ne fait que **lire**. Écrire la préférence viendra avec le choix de
-//! la langue dans l'interface (#49) ; d'ici là le fichier se crée à la main
-//! (`{ "language": "fr" }`), et la variable d'environnement `PLOTYX_LANG`
-//! l'emporte (voir [`crate::i18n::choose_language`]).
+//! La langue se choisit dans le menu Fichier › Langue, qui l'écrit ici
+//! ([`Preferences::save_language`]) ; le fichier se crée aussi à la main
+//! (`{ "language": "fr" }`). La variable d'environnement `PLOTYX_LANG` l'emporte
+//! au démarrage (voir [`crate::i18n::choose_language`]).
 
 use std::path::{Path, PathBuf};
 
@@ -51,6 +51,35 @@ impl Preferences {
     /// en porte une. Sa validité se juge dans [`crate::i18n::Language::parse`].
     pub fn language(&self) -> Option<&str> {
         self.language.as_deref()
+    }
+
+    /// Enregistre la langue choisie dans le fichier, en gardant les autres
+    /// champs qu'il contient (écrits par une version plus récente). Crée le
+    /// dossier au besoin. L'erreur d'écriture est rendue, jamais une panique :
+    /// l'appelant la montre, et la langue reste appliquée pour la session.
+    pub fn save_language(&mut self, tag: &str) -> std::io::Result<()> {
+        self.language = Some(tag.to_string());
+        let Some(path) = self.path.as_deref() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no configuration folder",
+            ));
+        };
+        let mut document = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+            .and_then(|value| match value {
+                serde_json::Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .unwrap_or_default();
+        document.insert("language".to_string(), serde_json::Value::from(tag));
+        if let Some(folder) = path.parent() {
+            std::fs::create_dir_all(folder)?;
+        }
+        let text = serde_json::to_string_pretty(&serde_json::Value::Object(document))
+            .map_err(std::io::Error::other)?;
+        std::fs::write(path, text)
     }
 
     /// Le fichier d'où viennent les préférences, s'il y en a un.
@@ -102,6 +131,39 @@ mod tests {
                 "{content:?}"
             );
         }
+    }
+
+    #[test]
+    fn la_langue_choisie_s_enregistre_et_se_relit() {
+        let dir = tempfile::tempdir().expect("dossier temporaire");
+        let path = dir.path().join("config").join("preferences.json");
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences.save_language("fr").expect("écriture");
+        assert_eq!(Preferences::load_from(Some(path)).language(), Some("fr"));
+    }
+
+    #[test]
+    fn enregistrer_la_langue_garde_les_autres_champs() {
+        let (_dir, path) = written(r#"{ "language": "en", "avenir": true }"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences.save_language("fr").expect("écriture");
+        let content = std::fs::read_to_string(&path).expect("lecture");
+        assert!(content.contains("\"avenir\""), "{content}");
+        assert_eq!(Preferences::load_from(Some(path)).language(), Some("fr"));
+    }
+
+    #[test]
+    fn enregistrer_sur_un_fichier_corrompu_le_remplace_sans_panique() {
+        let (_dir, path) = written("{ pas du json");
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences.save_language("en").expect("écriture");
+        assert_eq!(Preferences::load_from(Some(path)).language(), Some("en"));
+    }
+
+    #[test]
+    fn sans_dossier_de_configuration_l_enregistrement_echoue_sans_panique() {
+        let mut preferences = Preferences::load_from(None);
+        assert!(preferences.save_language("fr").is_err());
     }
 
     #[test]

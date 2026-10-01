@@ -69,6 +69,13 @@ donc **voulus à ce stade**, pas des oublis. Les principaux, écrits dans
   position et taille le sont) ;
 - une seule cellule éditable à la fois par fenêtre.
 
+**Langue de l'interface** : l'application démarre en **anglais** ; le français
+se choisit par « File » → « Language » → « Français » (tout de suite, sans
+redémarrer, et retenu au lancement suivant). Quand on décrit un menu, donner le
+nom **dans la langue de l'utilisateur** (celle de sa question), avec l'autre
+entre parenthèses la première fois : « Add Text » (« Ajouter un texte »). Les
+noms viennent des catalogues `crates/plotyx-app/i18n/{en,fr}/plotyx_app.ftl`.
+
 **Écrire un texte sur un graphe** (outil Texte d'Origin) : clic droit dans
 la zone de tracé → « Add Text » (ou menu « Graph »). On tape le
 texte sur place, formules comprises ; la petite barre au-dessus règle couleur,

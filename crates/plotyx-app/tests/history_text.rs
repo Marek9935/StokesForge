@@ -212,13 +212,17 @@ fn the_pseudo_language_covers_every_history_sentence() {
     );
 }
 
-/// Le français n'a pas encore de catalogue (#49) : il reprend l'anglais.
+/// Le français a son catalogue (#49) : le même `HistoryLabel`, en français.
 #[test]
-fn french_falls_back_to_english_until_it_is_translated() {
+fn french_translates_the_same_label() {
     let french = build_loader(Language::French);
     assert_eq!(
         history_text_in(&french, &HistoryLabel::InsertRows { count: 3 }),
-        "Insert 3 Rows"
+        "Insérer 3 lignes"
+    );
+    assert_eq!(
+        history_text_in(&french, &HistoryLabel::InsertRows { count: 1 }),
+        "Insérer 1 ligne"
     );
 }
 

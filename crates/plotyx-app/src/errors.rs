@@ -140,6 +140,9 @@ pub mod model {
 
         #[test]
         fn les_champs_entrent_dans_la_phrase() {
+            // Ces phrases sont comparées en anglais : la langue ne dépend pas
+            // de l\'environnement (`PLOTYX_LANG`, préférences) de celui qui teste.
+            crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&CoreError::DuplicateName("Sheet1 in Book1".into())),
                 "Name already used: Sheet1 in Book1"
@@ -211,6 +214,9 @@ pub mod commands {
 
         #[test]
         fn une_erreur_du_modele_garde_sa_phrase() {
+            // Ces phrases sont comparées en anglais : la langue ne dépend pas
+            // de l\'environnement (`PLOTYX_LANG`, préférences) de celui qui teste.
+            crate::i18n::set_language(crate::i18n::Language::English);
             let core = CoreError::IdentifiersExhausted;
             assert_eq!(
                 error_message(&CommandError::Core(core.clone())),
@@ -385,6 +391,9 @@ pub mod file {
 
         #[test]
         fn les_champs_entrent_dans_la_phrase() {
+            // Ces phrases sont comparées en anglais : la langue ne dépend pas
+            // de l\'environnement (`PLOTYX_LANG`, préférences) de celui qui teste.
+            crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&PersistenceError::NotAPlotyxFile {
                     path: "/data/run.plx".into()
@@ -465,6 +474,9 @@ pub mod import {
 
         #[test]
         fn un_fichier_en_echec_nomme_le_fichier_et_la_cause() {
+            // Ces phrases sont comparées en anglais : la langue ne dépend pas
+            // de l\'environnement (`PLOTYX_LANG`, préférences) de celui qui teste.
+            crate::i18n::set_language(crate::i18n::Language::English);
             let failure = ImportFailure {
                 path: "/data/a.csv".into(),
                 cause: ImportFailureCause::Parse(ImportError::Empty),
@@ -775,6 +787,9 @@ pub mod export {
 
         #[test]
         fn les_champs_entrent_dans_la_phrase() {
+            // Ces phrases sont comparées en anglais : la langue ne dépend pas
+            // de l\'environnement (`PLOTYX_LANG`, préférences) de celui qui teste.
+            crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&ExportError::Write {
                     path: "/out/fig.svg".into(),

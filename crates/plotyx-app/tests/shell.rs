@@ -614,6 +614,9 @@ fn a_failing_load_leaves_the_model_and_history_untouched() {
 /// ici, « corrupt file » dans le `Display` que lit le CLI.
 #[test]
 fn a_plx_read_error_is_shown_through_the_catalogue() {
+    // Compared in English: the test must not depend on `PLOTYX_LANG` or on the
+    // saved preference of whoever runs it.
+    plotyx_app::i18n::set_language(plotyx_app::i18n::Language::English);
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
 
@@ -4786,6 +4789,9 @@ fn plotted_graph(state: &mut AppState) -> NodeId {
 /// « Axes » sur cet axe.
 #[test]
 fn a_right_clicked_component_opens_the_settings_page_that_sets_it() {
+    // Compared in English: the test must not depend on `PLOTYX_LANG` or on the
+    // saved preference of whoever runs it.
+    plotyx_app::i18n::set_language(plotyx_app::i18n::Language::English);
     assert_eq!(
         PlotTarget::Title.settings_page(),
         (PlotSettingsTab::Graph, None)

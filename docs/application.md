@@ -454,7 +454,7 @@ en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifi�
 | Où | Quoi |
 |---|---|
 | `crates/plotyx-app/i18n/en/plotyx_app.ftl` | le catalogue de référence ; une clé absente d'ici n'existe pas |
-| `crates/plotyx-app/i18n/fr/plotyx_app.ftl` | la traduction, vide au départ ; une clé absente reprend l'anglais |
+| `crates/plotyx-app/i18n/fr/plotyx_app.ftl` | la traduction française, complète (#49) : même ensemble de clés que `en`, même commit |
 | `crates/plotyx-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues |
 | `src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
 | `src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
@@ -477,9 +477,11 @@ de touches (`shortcut-backspace`, `shortcut-delete`) sont aussi des clés.
 
 **Langue** : la variable `PLOTYX_LANG` (`en`, `fr`, `en-XA`), puis la
 préférence `language` de `preferences.json`, sinon l'anglais. La langue du
-système n'est **pas** suivie tant que le catalogue français n'est pas complet
-(#49). Une valeur inconnue ou un fichier corrompu passe au niveau suivant, sans
-panique (invariant 10). Choisie une fois, à la première lecture du chargeur.
+système n'est **pas** suivie (décision du 2026-10-01). Une valeur inconnue ou
+un fichier corrompu passe au niveau suivant, sans panique (invariant 10).
+Menu **Fichier › Langue** : change la langue tout de suite (`set_language`, les
+textes se redessinent à l'image suivante) et l'écrit dans `preferences.json` ;
+`PLOTYX_LANG` l'emporte encore au prochain démarrage.
 
 **Pseudo-langue `en-XA`** : fabriquée à la volée depuis `en` (accents, `[[ ]]`,
 +30 %), sans fichier. `PLOTYX_LANG=en-XA` : un texte sans `[[ ]]` n'est pas passé

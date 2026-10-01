@@ -23,7 +23,7 @@ par inadvertance, et ce sont eux qu'il faut comprendre avant de les modifier.
 | `plotyx-render-egui/tests/feathering.rs` | le feathering n'entre pas dans la clé de cache (invariant 6) |
 | `plotyx-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
 | `plotyx-app/tests/libelles.rs` | aucun texte d'interface en dur (`aucun_libelle_en_dur`, garde absolue, sans dérogation, #48) ; les dépendances de traduction restent dans `plotyx-app` ; les témoins qui prouvent que la garde voit un littéral |
-| `plotyx-app/src/i18n.rs` (tests) | toute clé de `fr` existe dans `en` avec les mêmes arguments ; la pseudo-langue entoure et allonge chaque message ; `fr` vide reprend l'anglais ; choix de la langue sans panique |
+| `plotyx-app/src/i18n.rs` (tests) | toute clé de `fr` existe dans `en` avec les mêmes arguments ; la pseudo-langue entoure et allonge chaque message ; complétude bloquante (toute clé de `en` existe dans `fr`) ; pluriels et typographie françaises ; une préférence `fr` ouvre l'interface en français ; choix de la langue sans panique ; `tests/language_switch.rs` : la langue change sans redémarrer |
 | `plotyx-commands/tests/memory_pinning.rs` | l'historique n'épingle pas indéfiniment de gros buffers |
 
 ### Le témoin, sans lequel un test d'égalité ne prouve rien

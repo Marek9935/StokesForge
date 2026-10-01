@@ -102,10 +102,14 @@ est en tête de `crates/plotyx-app/src/i18n.rs` ; la vue d'ensemble dans
 3. **Un nombre qui change la phrase** (pluriel, accord) se règle dans le `.ftl`
    par un sélecteur Fluent (`{ $count -> [one] … *[other] … }`), jamais par un
    `if` dans le Rust ni par deux clés.
-4. **Ne pas toucher à `fr/plotyx_app.ftl`** pour une clé nouvelle : le français
-   se rédige avec #49, et une clé absente de `fr` reprend l'anglais.
-5. Une **clé retirée** de `en` se retire aussi de `fr` : une clé de `fr` absente
-   de `en` fait échouer le test de complétude.
+4. **Écrire la même clé dans `fr/plotyx_app.ftl`**, dans le même commit, selon
+   la colonne française du glossaire : infinitif pour les consignes, initiale
+   seule en majuscule, espace insécable (U+00A0) avant « : », « ? » et dans les
+   « » ; mêmes arguments que `en` ; pluriel CLDR français (le singulier vaut
+   pour 0 et 1). La complétude est **bloquante** : une clé absente de `fr`
+   fait échouer `toute_cle_francaise_existe_en_anglais_avec_les_memes_arguments`.
+5. Une **clé retirée** de `en` se retire aussi de `fr` (clé de `fr` absente de
+   `en` : même test).
 
 **Libellés d'historique** (#46) : une clé `history-*` par variante de
 `HistoryLabel` (et par forme : cible connue ou non), branchée dans
@@ -139,9 +143,9 @@ message. Available arguments: `count`.` On ne peut pas l'écrire en test (un tes
 ne vérifie pas qu'un code *ne compile pas*) : si la mécanique change, **refaire
 cet essai à la main** et mettre la date ici.
 
-Le compilateur ne voit **pas** : une clé de `fr` absente de `en`, des arguments
-différents d'une langue à l'autre — ce sont les tests de `src/i18n.rs`
-(complétude `fr ⊆ en` avec les mêmes arguments) qui les attrapent ; ni un
+Le compilateur ne voit **pas** : une clé de `fr` absente de `en` (ou l'inverse),
+des arguments différents d'une langue à l'autre — ce sont les tests de
+`src/i18n.rs` (complétude `fr = en`, mêmes arguments) qui les attrapent ; ni un
 littéral écrit en dur — c'est la garde ci-dessous.
 
 ### Choisir la langue
@@ -149,10 +153,18 @@ littéral écrit en dur — c'est la garde ci-dessous.
 Par ordre : la variable `PLOTYX_LANG` (`en`, `fr`, `en-XA`), puis la préférence
 `language` de `preferences.json` (dossier de configuration de PlotYx, à côté de
 `couleurs.json` ; `{ "language": "fr" }`), sinon l'**anglais**. La langue du
-système n'est **pas** suivie (#49). Une valeur inconnue passe au niveau suivant ;
-un fichier absent ou corrompu donne l'anglais — jamais de panique (invariant 10).
-La langue est choisie une fois, à la première lecture du chargeur global : un
-test ne la change pas, il bâtit son propre chargeur (`i18n::build_loader`).
+système n'est **pas** suivie : décision de l'utilisateur (2026-10-01), l'interface
+reste en anglais tant qu'on n'a pas choisi le français. Une valeur inconnue
+passe au niveau suivant ; un fichier absent ou corrompu donne l'anglais — jamais
+de panique (invariant 10).
+
+**Changer de langue sans redémarrer** : menu Fichier › Langue
+(`PlotyxApp::choose_language`) → `i18n::set_language` (les textes se redessinent
+à l'image suivante) puis `Preferences::save_language`. `PLOTYX_LANG` l'emporte
+encore au prochain démarrage. Un test qui compare un texte exact **épingle**
+l'anglais (`set_language(English)`) pour ne pas dépendre de la préférence de
+celui qui teste ; un test qui change la langue globale a son propre binaire
+(`tests/language_switch.rs`).
 
 ### La pseudo-langue `en-XA`
 
@@ -211,7 +223,7 @@ français (*None* : Aucun / Aucune).
 
 | Test | Ce qu'il tient |
 |---|---|
-| `i18n::tests::toute_cle_francaise_existe_en_anglais_avec_les_memes_arguments` | `fr ⊆ en`, mêmes arguments ; **affiche** (`--nocapture`) les clés `en` pas encore traduites, sans échouer avant #49 |
+| `i18n::tests::toute_cle_francaise_existe_en_anglais_avec_les_memes_arguments` | `fr = en` : mêmes clés, mêmes arguments (**bloquant**, #49) |
 | `i18n::tests::la_completude_detecte_…` | le témoin : le comparateur voit une clé inconnue et un argument différent |
 | `i18n::tests::la_pseudo_langue_entoure_et_allonge_chaque_message` | `[[ ]]`, +30 %, accents, sur chaque clé sans argument |
 | `i18n::tests::un_catalogue_francais_vide_affiche_l_anglais` | `PLOTYX_LANG=fr` avec `fr` vide montre l'anglais |

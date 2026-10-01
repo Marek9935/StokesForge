@@ -368,6 +368,8 @@ use plotyx_render_egui::{GraphView, DEFAULT_FIGURE_SIZE};
 use plotyx_session::{Snapshot, WindowGeometry};
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
+use crate::i18n;
+use crate::preferences::Preferences;
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
     active_graph, drop_payload_action, export_file_name, node_title_in, series_list_label, Action,
@@ -1248,6 +1250,19 @@ impl PlotyxApp {
                         ui.close();
                     }
                     ui.separator();
+                    ui.menu_button(tr!("menu-language"), |ui| {
+                        for language in [i18n::Language::English, i18n::Language::French] {
+                            let current = i18n::language() == language;
+                            if ui
+                                .selectable_label(current, language.native_name())
+                                .clicked()
+                            {
+                                self.choose_language(language);
+                                ui.close();
+                            }
+                        }
+                    });
+                    ui.separator();
                     if ui.button(tr!("action-quit")).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         ui.close();
@@ -1501,6 +1516,17 @@ impl PlotyxApp {
 
     /// Demande la destination de sauvegarde, puis confie l'écriture à
     /// [`AppState::dispatch`] par l'action habituelle.
+    /// Applique la langue tout de suite (les textes se redessinent à l'image
+    /// suivante) et l'enregistre dans `preferences.json`. Un enregistrement
+    /// qui échoue se dit dans la barre d'état ; la langue reste appliquée.
+    fn choose_language(&mut self, language: i18n::Language) {
+        i18n::set_language(language);
+        if let Err(err) = Preferences::load().save_language(language.tag()) {
+            self.state
+                .notice(tr!("status-language-not-saved", detail = err.to_string()));
+        }
+    }
+
     fn choose_save_path(&mut self, actions: &mut Vec<Action>) {
         if let Some(path) = rfd::FileDialog::new()
             .set_title("Enregistrer le projet")
