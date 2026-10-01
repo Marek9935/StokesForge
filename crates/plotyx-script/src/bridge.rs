@@ -63,7 +63,7 @@ impl HostError {
         match error {
             CoreError::Path(message) => HostError::UnknownPath(message),
             CoreError::UnknownNode(id) => {
-                HostError::BrokenReference(format!("{id} n'existe plus dans le projet"))
+                HostError::BrokenReference(format!("{id} no longer exists in the project"))
             }
             CoreError::InvalidName(message)
             | CoreError::DuplicateName(message)
@@ -103,7 +103,7 @@ impl HostError {
     fn from_session(error: SessionError) -> Self {
         match error {
             SessionError::Disconnected => HostError::BrokenReference(
-                "la session PlotYx est fermée : plus aucune poignée n'est valide".to_owned(),
+                "the PlotYx session is closed: no handle is valid anymore".to_owned(),
             ),
             SessionError::Persistence(error) => HostError::InvalidValue(error.to_string()),
             SessionError::Command(CommandError::Core(error)) => Self::from_core(error),
@@ -143,8 +143,8 @@ fn check_epoch(id: NodeId, expected_epoch: u64, current_epoch: u64) -> Result<()
         return Ok(());
     }
     Err(HostError::BrokenReference(format!(
-        "{id} appartient à un projet qui n'existe plus : un chargement a eu lieu depuis que \
-         cette poignée a été obtenue"
+        "{id} belongs to a project that no longer exists: a project was loaded since \
+         this handle was obtained"
     )))
 }
 
@@ -161,13 +161,12 @@ pub(crate) fn float_buffer(
 ) -> Result<Arc<Vec<f64>>, HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     check_epoch(id, epoch, snapshot.epoch)?;
-    let node = snapshot
-        .tree
-        .node(id)
-        .ok_or_else(|| HostError::BrokenReference(format!("{id} n'existe plus dans le projet")))?;
+    let node = snapshot.tree.node(id).ok_or_else(|| {
+        HostError::BrokenReference(format!("{id} no longer exists in the project"))
+    })?;
     let column = node.as_column().ok_or_else(|| {
         HostError::InvalidValue(format!(
-            "{id} est {} et non une colonne",
+            "{id} is {}, not a column",
             node.kind().with_article()
         ))
     })?;
@@ -178,8 +177,8 @@ pub(crate) fn float_buffer(
     // silencieux pour un script qui croirait tenir le buffer.
     column.float_values().cloned().ok_or_else(|| {
         HostError::InvalidValue(format!(
-            "la colonne « {} » est de type {} : pyx.column ne rend que des colonnes \
-             numériques",
+            "column \"{}\" is of type {}: pyx.column only returns numeric \
+             columns",
             node.name(),
             column.column_type().type_name()
         ))
@@ -219,26 +218,26 @@ pub(crate) fn set_column(
         let snapshot = session.snapshot().map_err(HostError::from_session)?;
         check_epoch(id, epoch, snapshot.epoch)?;
         let node = snapshot.tree.node(id).ok_or_else(|| {
-            HostError::BrokenReference(format!("{id} n'existe plus dans le projet"))
+            HostError::BrokenReference(format!("{id} no longer exists in the project"))
         })?;
         let column = node.as_column().ok_or_else(|| {
             HostError::InvalidValue(format!(
-                "{id} est {} et non une colonne",
+                "{id} is {}, not a column",
                 node.kind().with_article()
             ))
         })?;
         if column.float_values().is_none() {
             return Err(HostError::InvalidValue(format!(
-                "la colonne « {} » est de type {} : pyx.set_column n'écrit que des valeurs \
-                 numériques",
+                "column \"{}\" is of type {}: pyx.set_column only writes numeric \
+                 values",
                 node.name(),
                 column.column_type().type_name()
             )));
         }
         if values.len() != column.len() {
             return Err(HostError::InvalidValue(format!(
-                "longueur {} attendue pour la colonne « {} », {} reçue : la surface-témoin \
-                 n'écrit qu'une colonne entière, elle ne l'allonge ni ne la tronque",
+                "expected length {} for column \"{}\", got {}: pyx.set_column writes a whole \
+                 column, it neither extends nor truncates it",
                 column.len(),
                 node.name(),
                 values.len()
@@ -263,8 +262,8 @@ pub(crate) fn set_column(
         }
     }
     Err(HostError::ConcurrentWrite(format!(
-        "l'écriture de la colonne {id} a été refusée {MAX_SET_COLUMN_ATTEMPTS} fois de suite : \
-         un autre client la modifie en continu ; relisez l'état courant ou retentez plus tard"
+        "writing column {id} was refused {MAX_SET_COLUMN_ATTEMPTS} times in a row: \
+         another client keeps modifying it; read the current state again or retry later"
     )))
 }
 
@@ -297,7 +296,7 @@ pub(crate) fn import_file(
             .iter()
             .find(|r| r.name == name)
             .cloned()
-            .ok_or_else(|| HostError::InvalidValue(format!("modèle « {name} » inconnu")))?,
+            .ok_or_else(|| HostError::InvalidValue(format!("unknown template \"{name}\"")))?,
         None => {
             let bytes = std::fs::read(path)
                 .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?;
@@ -308,11 +307,11 @@ pub(crate) fn import_file(
     };
     let items = plotyx_importer::import_items(path, &recipe);
     if let Some(error) = items.iter().find_map(|item| item.table.as_ref().err()) {
-        return Err(HostError::InvalidValue(error.clone()));
+        return Err(HostError::InvalidValue(error.to_string()));
     }
     let plans = plotyx_importer::plan_import(&items, recipe.files_layout);
     if plans.is_empty() || plans.iter().all(|plan| plan.columns.is_empty()) {
-        return Err(HostError::InvalidValue("aucune colonne à importer".into()));
+        return Err(HostError::InvalidValue("no column to import".into()));
     }
     session
         .begin_macro(MacroKind::Import)
@@ -388,5 +387,5 @@ fn add_import_node(
         .tree
         .node(parent)
         .and_then(|n| n.children().last().copied())
-        .ok_or_else(|| HostError::InvalidValue("nœud importé introuvable après création".into()))
+        .ok_or_else(|| HostError::InvalidValue("imported node not found after creation".into()))
 }

@@ -92,3 +92,75 @@ history-undone = Undone: { $label }
 history-undone-last = Undone last action
 history-redone = Redone: { $label }
 history-redone-last = Redone last action
+
+## Errors (#47)
+## Raw English text of the lower crates stays in their `Display`; each variant
+## is mapped to one of these keys in `src/errors.rs`. What happened, then what
+## to do (only when useful). `{ $detail }` is the raw cause given by the crate
+## or by the system; it is not translated.
+
+# Project model
+error-model-invalid-name = Invalid name: { $detail }
+error-model-duplicate-name = Name already used: { $detail }
+error-model-invalid-path = Invalid path: { $detail }
+error-model-invalid-structure = Operation not allowed: { $detail }
+error-model-unknown-object = This object no longer exists in the project
+error-model-index-out-of-bounds = Position out of range: { $detail }
+error-model-incompatible-values = Incompatible values: { $detail }
+error-model-ids-exhausted = No more objects can be created in this project
+error-model-concurrent-edit = The column changed while it was being edited. Try again
+error-model-formula-column-read-only = This column is computed by a formula. Edit the formula to change its values
+
+# Grouped actions and history
+error-command-no-group = No grouped action is in progress
+error-command-busy = Not available while another action is in progress. Finish it first
+error-command-limit-not-empty = The history limit can only be changed when the history is empty
+error-command-group-too-deep = Grouped actions are nested too deeply (limit: { $limit })
+error-command-foreign-group = Another action is in progress. Wait for it to finish, then try again
+
+# Engine
+error-session-closed = The project is no longer available. Restart PlotYx
+
+# Project files
+error-file-io = Could not access { $path }: { $detail }
+error-file-not-plotyx = { $path } is not a PlotYx file
+error-file-too-new = { $path } needs a newer version of PlotYx (file format { $found }, supported up to { $supported })
+error-file-corrupt = { $path } is damaged: { $detail }
+error-file-invalid-project = { $path } does not contain a valid project: { $detail }
+error-file-unknown-feature = { $path } uses features from a newer version of PlotYx ({ $detail })
+error-file-changed = { $path } was modified elsewhere since it was opened or saved. Reload it before saving
+
+# Import
+error-import-binary = The file is not readable text
+error-import-empty = The file is empty
+error-import-no-data = No data found after the header. Check the number of header lines
+error-import-file = { $path }: { $detail }
+
+# Formulas
+error-formula-invalid = Invalid formula: { $detail }
+error-formula-unknown-column = Column { $letter } does not exist in this worksheet
+error-formula-self-reference = A formula cannot refer to its own column ({ $letter })
+error-formula-cycle = Formulas refer to each other in a loop. Remove one of the references
+
+# Graph display and export
+error-render-unknown-graph = This graph no longer exists
+error-render-not-a-graph = This object is not a graph
+error-export-drawing = Could not draw the graph: { $detail }
+error-export-write = Could not write { $path }: { $detail }
+error-export-fonts = Could not load the fonts: { $detail }
+error-export-reread = Could not prepare the figure for export: { $detail }
+error-export-pdf = Could not create the PDF: { $detail }
+error-export-png-scale = Invalid PNG resolution ({ $scale }). Use a positive number
+error-export-png-size = The PNG size is invalid ({ $width }×{ $height } px). Increase the resolution
+error-export-png-encode = Could not encode the PNG: { $detail }
+
+# Scripts
+error-script-thread = Could not start the script engine: { $detail }
+error-script-install = Could not set up the pyx module: { $detail }
+error-script-busy = A script is already running
+error-script-stopped = The script engine has stopped. Run the script again
+error-python-home = Python was not found in { $path }
+error-python-init = Could not start Python: { $detail }
+error-python-trace =
+    Python error:
+    { $trace }

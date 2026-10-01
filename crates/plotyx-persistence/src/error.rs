@@ -11,7 +11,7 @@ use plotyx_core::CoreError;
 #[derive(Debug, thiserror::Error)]
 pub enum PersistenceError {
     /// Échec d'entrée/sortie sur le fichier.
-    #[error("entrée/sortie sur {path} : {source}")]
+    #[error("I/O error on {path}: {source}")]
     Io {
         /// Chemin visé par l'opération.
         path: PathBuf,
@@ -21,16 +21,14 @@ pub enum PersistenceError {
     },
     /// Le fichier ne commence pas par la signature `PLYX` : ce n'est pas un
     /// fichier PlotYx (ou il est vide / tronqué avant la signature).
-    #[error("{path} n'est pas un fichier PlotYx")]
+    #[error("{path} is not a PlotYx file")]
     NotAPlotyxFile {
         /// Chemin du fichier lu.
         path: PathBuf,
     },
     /// Le fichier porte un numéro de version supérieur à celui que ce
     /// lecteur sait comprendre. Le corps n'a **pas** été lu.
-    #[error(
-        "{path} a été écrit par une version plus récente (format {found}, lecteur {supported})"
-    )]
+    #[error("{path} was written by a newer version (format {found}, reader supports {supported})")]
     UnsupportedVersion {
         /// Chemin du fichier lu.
         path: PathBuf,
@@ -41,7 +39,7 @@ pub enum PersistenceError {
     },
     /// Le corps du fichier n'a pas pu être décodé (MessagePack invalide,
     /// tronqué, ou buffer de colonne `Float` de longueur non multiple de 8).
-    #[error("fichier corrompu {path} : {detail}")]
+    #[error("corrupt file {path}: {detail}")]
     Corrupt {
         /// Chemin du fichier lu.
         path: PathBuf,
@@ -50,7 +48,7 @@ pub enum PersistenceError {
     },
     /// Le contenu lu ne forme pas un modèle valide (`Tree::from_nodes` ou
     /// `Node::with_parent` l'a refusé).
-    #[error("modèle invalide dans {path} : {source}")]
+    #[error("invalid model in {path}: {source}")]
     InvalidModel {
         /// Chemin du fichier lu.
         path: PathBuf,
@@ -67,9 +65,7 @@ pub enum PersistenceError {
     /// que de le confondre avec une vraie corruption ; la dégradation
     /// gracieuse (garder ce qui se comprend, niveau 2) reste un chantier
     /// séparé.
-    #[error(
-        "{path} a été écrit par une version plus récente de PlotYx (variante inconnue) : {detail}"
-    )]
+    #[error("{path} was written by a newer version of PlotYx (unknown variant): {detail}")]
     UnknownVariant {
         /// Chemin du fichier lu.
         path: PathBuf,
@@ -82,9 +78,8 @@ pub enum PersistenceError {
     /// (`guide-de-correction-robustesse.md` §F2) : sans ce contrôle,
     /// l'écriture écraserait silencieusement le travail de l'autre écrivain.
     #[error(
-        "{path} a changé depuis le dernier chargement/sauvegarde par ce processus \
-         (compteur de sauvegarde attendu {expected}, trouvé {found}) : recharger avant \
-         d'écraser"
+        "{path} changed since this process last loaded or saved it \
+         (expected save counter {expected}, found {found}): reload before overwriting"
     )]
     ConcurrentModification {
         /// Chemin du fichier visé par `save`.

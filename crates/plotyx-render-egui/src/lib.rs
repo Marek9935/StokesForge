@@ -171,9 +171,9 @@ pub enum RenderError {
 impl std::fmt::Display for RenderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnknownNode(id) => write!(f, "aucun nœud {id:?} dans cet instantané"),
-            Self::NotAGraph(id) => write!(f, "le nœud {id:?} n'est pas un graphe"),
-            Self::Drawing(message) => write!(f, "échec du tracé : {message}"),
+            Self::UnknownNode(id) => write!(f, "no node {id:?} in this snapshot"),
+            Self::NotAGraph(id) => write!(f, "node {id:?} is not a graph"),
+            Self::Drawing(message) => write!(f, "drawing failed: {message}"),
         }
     }
 }

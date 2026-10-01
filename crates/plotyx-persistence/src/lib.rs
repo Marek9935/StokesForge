@@ -342,7 +342,7 @@ pub fn load_with_geometries(
     if bytes.len() < MAGIC.len() + 4 {
         return Err(PersistenceError::Corrupt {
             path: path.to_path_buf(),
-            detail: "en-tête tronqué avant le numéro de version".to_string(),
+            detail: "header truncated before the version number".to_string(),
         });
     }
     let mut version_bytes = [0u8; 4];
@@ -351,8 +351,8 @@ pub fn load_with_geometries(
     if version == 0 {
         return Err(PersistenceError::Corrupt {
             path: path.to_path_buf(),
-            detail: "numéro de version 0 dans l'en-tête : ce numéro n'a jamais existé, \
-                     la première version réelle du format est 1"
+            detail: "version number 0 in the header: it never existed, \
+                     the first real format version is 1"
                 .to_string(),
         });
     }
@@ -469,7 +469,7 @@ fn check_node_id(id: u64, path: &Path) -> PersistenceResult<()> {
         Err(PersistenceError::Corrupt {
             path: path.to_path_buf(),
             detail: format!(
-                "identifiant de nœud {id} dépasse la borne acceptée à la lecture \
+                "node identifier {id} exceeds the limit accepted when reading \
                  ({MAX_NODE_ID})"
             ),
         })
@@ -485,13 +485,13 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
     match err {
         ConvertError::BadFloatLength(len) => PersistenceError::Corrupt {
             path: path.to_path_buf(),
-            detail: format!("buffer de colonne flottante de {len} octet(s), non multiple de 8"),
+            detail: format!("float column buffer of {len} bytes, not a multiple of 8"),
         },
         ConvertError::BadMixedTag(tag) => PersistenceError::Corrupt {
             path: path.to_path_buf(),
             detail: format!(
-                "étiquette de cellule mixte inconnue ({tag}) : attendu 0 (vide), \
-                 1 (nombre) ou 2 (texte)"
+                "unknown mixed cell tag ({tag}): expected 0 (empty), \
+                 1 (number) or 2 (text)"
             ),
         },
         ConvertError::BadMixedLength {
@@ -501,22 +501,22 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
         } => PersistenceError::Corrupt {
             path: path.to_path_buf(),
             detail: format!(
-                "colonne mixte incohérente : les étiquettes annoncent {expected} {what}, \
-                 le tableau en porte {found}"
+                "inconsistent mixed column: the tags announce {expected} {what}, \
+                 the array holds {found}"
             ),
         },
         ConvertError::Core(source) => PersistenceError::Corrupt {
             path: path.to_path_buf(),
-            detail: format!("colonne incohérente : {source}"),
+            detail: format!("inconsistent column: {source}"),
         },
         ConvertError::ZeroHistogramBins => PersistenceError::Corrupt {
             path: path.to_path_buf(),
-            detail: "histogram_bins d'une série vaut 0, ce qui n'est pas représentable".to_string(),
+            detail: "a series has histogram_bins of 0, which is not representable".to_string(),
         },
         ConvertError::HistogramBinsTooLarge(bins) => PersistenceError::Corrupt {
             path: path.to_path_buf(),
             detail: format!(
-                "histogram_bins d'une série vaut {bins}, au-delà de la borne acceptée \
+                "a series has histogram_bins of {bins}, beyond the accepted limit \
                  ({})",
                 convert::MAX_HISTOGRAM_BINS
             ),
@@ -524,15 +524,15 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
         ConvertError::PanelPositionOutOfBounds { row, column } => PersistenceError::Corrupt {
             path: path.to_path_buf(),
             detail: format!(
-                "panneau en position (row={row}, column={column}), au-delà de la borne \
-                 acceptée ({})",
+                "panel at position (row={row}, column={column}), beyond the accepted \
+                 limit ({})",
                 convert::MAX_PANEL_POSITION
             ),
         },
         ConvertError::UnsupportedSpecVersion { found, supported } => PersistenceError::Corrupt {
             path: path.to_path_buf(),
             detail: format!(
-                "format_version {found} d'un PlotSpec, ce lecteur ne connaît que jusqu'à \
+                "a PlotSpec has format_version {found}, this reader only knows up to \
                  {supported}"
             ),
         },

@@ -58,16 +58,16 @@ pub enum PngError {
     ///
     /// Ne devrait jamais arriver en pratique — voir [`crate::pdf::PdfError::Parse`],
     /// même raisonnement.
-    #[error("relecture du SVG par usvg : {0}")]
+    #[error("could not re-read the SVG with usvg: {0}")]
     Parse(String),
     /// L'échelle demandée n'est pas exploitable (non finie, nulle ou
     /// négative) : `resvg` ne rasterise pas une image sans dimension.
-    #[error("échelle invalide : {0}")]
+    #[error("invalid scale: {0}")]
     InvalidScale(f32),
     /// La taille résultante, une fois l'échelle appliquée, ne tient pas
     /// dans un canevas de rasterisation (largeur ou hauteur nulle une fois
     /// arrondie).
-    #[error("taille de canevas invalide : {width}x{height}")]
+    #[error("invalid canvas size: {width}x{height}")]
     InvalidSize {
         /// Largeur calculée, en pixels.
         width: u32,
@@ -75,10 +75,10 @@ pub enum PngError {
         height: u32,
     },
     /// L'encodage PNG du raster a échoué.
-    #[error("encodage PNG : {0}")]
+    #[error("PNG encoding failed: {0}")]
     Encode(String),
     /// Le fichier n'a pas pu être écrit.
-    #[error("écriture de {path} : {source}")]
+    #[error("could not write {path}: {source}")]
     Write {
         /// Chemin visé.
         path: String,

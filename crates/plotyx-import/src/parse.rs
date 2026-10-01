@@ -160,11 +160,11 @@ fn lookup_header_value(
 /// dégrade plutôt que d'échouer (invariant 10).
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ImportError {
-    #[error("le fichier n'est pas du texte lisible (fichier binaire)")]
+    #[error("the file is not readable text (binary file)")]
     NotText,
-    #[error("le fichier est vide")]
+    #[error("the file is empty")]
     Empty,
-    #[error("aucune ligne de données trouvée après l'en-tête")]
+    #[error("no data line found after the header")]
     NoDataRows,
 }
 
@@ -353,7 +353,7 @@ pub(crate) fn table_from_layout(
             let actual = rows.len() as i64;
             if declared_n != actual {
                 warnings.push(format!(
-                    "NPOINTS annonce {declared_n} lignes, {actual} lues"
+                    "NPOINTS declares {declared_n} lines, {actual} read"
                 ));
             }
         }

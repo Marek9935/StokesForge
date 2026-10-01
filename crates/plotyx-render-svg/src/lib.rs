@@ -84,10 +84,10 @@ pub enum SvgError {
     /// Plotters a refusé de tracer. En pratique inatteignable avec le backend
     /// SVG, qui écrit dans une `String` — mais l'erreur existe dans la
     /// signature de Plotters et la taire par un `unwrap` serait pire.
-    #[error("échec du tracé : {0}")]
+    #[error("drawing failed: {0}")]
     Drawing(String),
     /// Le fichier n'a pas pu être écrit.
-    #[error("écriture de {path} : {source}")]
+    #[error("could not write {path}: {source}")]
     Write {
         /// Chemin visé.
         path: String,
@@ -101,7 +101,7 @@ pub enum SvgError {
     /// lecture échouerait d'une façon que
     /// [`plotyx_render::fonts::resolve`] ne rencontre déjà pas lui-même
     /// (repli silencieux sur Noto).
-    #[error("résolution des polices Typst : {0}")]
+    #[error("could not resolve Typst fonts: {0}")]
     Typst(String),
 }
 

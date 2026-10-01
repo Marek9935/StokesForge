@@ -42,7 +42,37 @@ fichier ou d'une colonne : il suit les mêmes règles s'il est écrit par PlotYx
 - Un synonyme du glossaire « parce que ça sonne mieux ici ».
 - Traduire les noms choisis par l'utilisateur ou par défaut (*Book1*, *Sheet1*).
 - Écrire un texte d'erreur d'un crate du dessous pour l'utilisateur : ces
-  crates rendent des données structurées, l'application les met en phrase.
+  crates rendent des données structurées, l'application les met en phrase
+  (section suivante).
+
+## Erreurs : texte brut anglais en bas, phrase du catalogue dans l'application
+
+Le `Display` (`#[error(...)]`) des crates du dessous (core, commands,
+persistence, import, script, render-svg…) est **de l'anglais brut**, concis et
+lisible par un utilisateur du CLI ou de `pyx` : il n'est jamais traduit et aucun
+de ces crates ne dépend de Fluent. L'application met chaque erreur affichée en
+phrase par `crates/plotyx-app/src/errors.rs` :
+
+- une fonction `error_message(&Erreur) -> String` par famille
+  (`errors::model`, `commands`, `session`, `file`, `import`, `formula`,
+  `render`, `export`, `script` sous la feature `python`) ;
+- chaque variante → une clé `error-<famille>-<cause>` du catalogue `en`, ses
+  champs en arguments nommés (`tr!("error-file-corrupt", path = …, detail = …)`) ;
+- le `match` est **exhaustif, sans `_`** : une variante nouvelle ne compile pas
+  tant qu'on ne l'a pas associée. À défaut de phrase, `errors::fallback` renvoie
+  son `Display` anglais (rien ne disparaît) ;
+- le test de la famille construit une valeur de chaque variante et vérifie
+  phrase non vide, sans jargon (R9), sans point final : en ajouter une pour la
+  variante nouvelle ;
+- un `detail` (cause décrite par le crate d'origine) ou un message du système
+  est repris tel quel, en anglais ;
+- **jamais** `to_string()` ni `{err}` d'une erreur montrée à l'utilisateur.
+
+Rédaction : ce qui s'est passé, puis quoi faire seulement si c'est utile ;
+Sentence case, pas de point final sur une ligne unique, ni « please », ni
+excuse, ni jargon interne (*nœud, session, macro, commande, arbre*). Un message
+faux ou ambigu se corrige dans le catalogue (`en`), pas dans le crate du dessous
+— sauf si c'est le texte brut anglais lui-même qui est faux.
 
 ## Mécanique : Fluent, `tr!`, pseudo-langue, garde
 

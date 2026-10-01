@@ -55,14 +55,14 @@ pub enum FormulaError {
 impl std::fmt::Display for FormulaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FormulaError::Parse(message) => write!(f, "formule invalide : {message}"),
+            FormulaError::Parse(message) => write!(f, "invalid formula: {message}"),
             FormulaError::UnknownColumn(letter) => {
-                write!(f, "colonne {letter} inexistante dans la feuille")
+                write!(f, "column {letter} does not exist in the worksheet")
             }
             FormulaError::SelfReference(letter) => {
-                write!(f, "la formule référence sa propre colonne ({letter})")
+                write!(f, "the formula refers to its own column ({letter})")
             }
-            FormulaError::Cycle => write!(f, "cycle de dépendance entre colonnes-formule"),
+            FormulaError::Cycle => write!(f, "dependency cycle between formula columns"),
         }
     }
 }
@@ -179,7 +179,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, FormulaError> {
                 let text: String = chars[start..i].iter().collect();
                 let value: f64 = text
                     .parse()
-                    .map_err(|_| FormulaError::Parse(format!("nombre invalide : {text}")))?;
+                    .map_err(|_| FormulaError::Parse(format!("invalid number: {text}")))?;
                 tokens.push(Token::Number(value));
             }
             c if c.is_ascii_alphabetic() => {
@@ -192,13 +192,13 @@ fn tokenize(source: &str) -> Result<Vec<Token>, FormulaError> {
                     .collect::<String>()
                     .to_ascii_uppercase();
                 let index = letters_to_index(&letters).ok_or_else(|| {
-                    FormulaError::Parse(format!("référence de colonne invalide : {letters}"))
+                    FormulaError::Parse(format!("invalid column reference: {letters}"))
                 })?;
                 tokens.push(Token::Column(index));
             }
             other => {
                 return Err(FormulaError::Parse(format!(
-                    "caractère inattendu : {other}"
+                    "unexpected character: {other}"
                 )))
             }
         }
@@ -311,12 +311,12 @@ impl<'a> Parser<'a> {
                         Ok(inner)
                     }
                     _ => Err(FormulaError::Parse(
-                        "parenthèse fermante manquante".to_string(),
+                        "missing closing parenthesis".to_string(),
                     )),
                 }
             }
-            Some(other) => Err(FormulaError::Parse(format!("jeton inattendu : {other:?}"))),
-            None => Err(FormulaError::Parse("expression incomplète".to_string())),
+            Some(other) => Err(FormulaError::Parse(format!("unexpected token: {other:?}"))),
+            None => Err(FormulaError::Parse("incomplete expression".to_string())),
         }
     }
 }
@@ -337,13 +337,13 @@ impl Formula {
     pub fn parse(source: &str) -> Result<Formula, FormulaError> {
         let tokens = tokenize(source)?;
         if tokens.is_empty() {
-            return Err(FormulaError::Parse("formule vide".to_string()));
+            return Err(FormulaError::Parse("empty formula".to_string()));
         }
         let mut parser = Parser::new(&tokens);
         let expr = parser.parse_expr()?;
         if parser.pos != tokens.len() {
             return Err(FormulaError::Parse(
-                "jetons superflus après la formule".to_string(),
+                "unexpected tokens after the formula".to_string(),
             ));
         }
         Ok(Formula { expr })

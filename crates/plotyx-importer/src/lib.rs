@@ -16,7 +16,47 @@ use std::path::{Path, PathBuf};
 use plotyx_core::{
     Column, ColumnMeta, ColumnRole, ColumnType, ImportSource, MixedCell, ValueBlock,
 };
-use plotyx_import::{ColumnKind, ColumnRoleChoice, FilesLayout, ImportRecipe, ParsedTable};
+use plotyx_import::{
+    ColumnKind, ColumnRoleChoice, FilesLayout, ImportError, ImportRecipe, ParsedTable,
+};
+
+/// Pourquoi un fichier n'a pas pu être lu ou analysé. Structuré, pour que
+/// l'application le mette en phrase dans la langue de l'interface ; le
+/// [`Display`](std::fmt::Display) anglais sert au CLI et aux scripts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportFailure {
+    /// Le fichier en cause.
+    pub path: PathBuf,
+    /// La cause.
+    pub cause: ImportFailureCause,
+}
+
+/// La cause d'un [`ImportFailure`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportFailureCause {
+    /// Le fichier n'a pas pu être lu : le message du système (`io::Error`
+    /// n'est pas `Clone`).
+    Read(String),
+    /// Le fichier a été lu mais pas analysé.
+    Parse(ImportError),
+}
+
+impl std::fmt::Display for ImportFailureCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read(message) => f.write_str(message),
+            Self::Parse(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::fmt::Display for ImportFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.cause)
+    }
+}
+
+impl std::error::Error for ImportFailure {}
 
 /// Un fichier (ou un bloc de fichier) à importer : son chemin, la recette qui
 /// le lit, et le résultat de l'analyse (ou son erreur).
@@ -24,7 +64,7 @@ use plotyx_import::{ColumnKind, ColumnRoleChoice, FilesLayout, ImportRecipe, Par
 pub struct ImportItem {
     pub path: PathBuf,
     pub recipe: ImportRecipe,
-    pub table: Result<ParsedTable, String>,
+    pub table: Result<ParsedTable, ImportFailure>,
     /// Rang du bloc quand le fichier en contient plusieurs
     /// (`ImportRecipe::block_split`) ; `None` pour un fichier à un seul bloc.
     pub block: Option<usize>,
@@ -34,17 +74,20 @@ pub struct ImportItem {
 /// fichier ordinaire) ; une erreur de lecture ou d'analyse donne un élément en
 /// erreur.
 pub fn import_items(path: &Path, recipe: &ImportRecipe) -> Vec<ImportItem> {
-    let failed = |message: String| {
+    let failed = |cause: ImportFailureCause| {
         vec![ImportItem {
             path: path.to_path_buf(),
             recipe: recipe.clone(),
-            table: Err(message),
+            table: Err(ImportFailure {
+                path: path.to_path_buf(),
+                cause,
+            }),
             block: None,
         }]
     };
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(err) => return failed(format!("{}: {err}", path.display())),
+        Err(err) => return failed(ImportFailureCause::Read(err.to_string())),
     };
     match plotyx_import::parse_blocks(&bytes, recipe) {
         Ok(tables) => {
@@ -60,7 +103,7 @@ pub fn import_items(path: &Path, recipe: &ImportRecipe) -> Vec<ImportItem> {
                 })
                 .collect()
         }
-        Err(err) => failed(format!("{}: {err}", path.display())),
+        Err(err) => failed(ImportFailureCause::Parse(err)),
     }
 }
 

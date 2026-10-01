@@ -386,6 +386,42 @@ fn a_file_without_the_plotyx_signature_is_rejected() {
     ));
 }
 
+/// Le texte brut des erreurs de lecture est de l'anglais lisible : c'est ce que
+/// voient le CLI, les scripts et les journaux (l'application, elle, le met en
+/// phrase par son catalogue, #47).
+#[test]
+fn reading_errors_display_in_plain_english() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+
+    let not_plotyx = dir.path().join("not_plotyx.plyx");
+    std::fs::write(&not_plotyx, b"PK\x03\x04reste").expect("écriture du fichier de test");
+    let message = load(&not_plotyx)
+        .expect_err("pas un fichier PlotYx")
+        .to_string();
+    assert_eq!(
+        message,
+        format!("{} is not a PlotYx file", not_plotyx.display())
+    );
+
+    let truncated = dir.path().join("truncated.plyx");
+    std::fs::write(&truncated, b"PLYX\x01").expect("écriture du fichier de test");
+    let message = load(&truncated).expect_err("en-tête tronqué").to_string();
+    assert_eq!(
+        message,
+        format!(
+            "corrupt file {}: header truncated before the version number",
+            truncated.display()
+        )
+    );
+
+    let missing = dir.path().join("absent.plyx");
+    let message = load(&missing).expect_err("fichier absent").to_string();
+    assert!(
+        message.starts_with(&format!("I/O error on {}: ", missing.display())),
+        "{message}"
+    );
+}
+
 #[test]
 fn a_truncated_or_garbage_body_is_reported_as_corrupt() {
     let project = fixture_project();

@@ -14,14 +14,14 @@ pub enum CommandError {
     #[error(transparent)]
     Core(#[from] CoreError),
     /// `end_macro`/`abort_macro` sans `begin_macro`.
-    #[error("aucune macro en cours")]
+    #[error("no macro in progress")]
     NotInMacro,
     /// `undo`/`redo`/`set_limit`/`clear` pendant qu'une macro est ouverte.
     /// Le champ nomme l'opération refusée.
-    #[error("opération refusée pendant une macro : {0}")]
+    #[error("operation refused while a macro is open: {0}")]
     MacroOpen(&'static str),
     /// Changement de limite refusé : la pile n'est pas vide.
-    #[error("la limite d'historique ne se change que sur une pile vide")]
+    #[error("the history limit can only be changed when the stack is empty")]
     StackNotEmpty,
     /// `begin_macro` refusé : l'imbrication a déjà atteint
     /// [`crate::history::MAX_MACRO_DEPTH`] niveaux (B7,
@@ -32,7 +32,7 @@ pub enum CommandError {
     /// débordait la pile du fil de l'acteur et faisait `abort()` le
     /// processus — voir `plotyx-robustesse/src/bin/sonde_pile.rs`. Le champ
     /// nomme la limite refusée.
-    #[error("imbrication de macros trop profonde (limite : {0})")]
+    #[error("macro nesting too deep (limit: {0})")]
     MacroTooDeep(usize),
     /// A4 (`guide-de-correction-robustesse.md` §F6) — refus d'un
     /// `Execute`/`BeginMacro`/`EndMacro`/`AbortMacro` dont l'émetteur n'est
@@ -42,7 +42,7 @@ pub enum CommandError {
     /// une macro **est** ouverte, l'opération lui serait normalement
     /// permise, mais son émetteur n'est pas le propriétaire de celle-ci. Le
     /// champ nomme l'opération refusée.
-    #[error("opération refusée : une macro est ouverte par un autre client ({0})")]
+    #[error("operation refused: a macro is open by another client ({0})")]
     ForeignMacro(&'static str),
 }
 

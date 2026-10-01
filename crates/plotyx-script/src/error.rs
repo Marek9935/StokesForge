@@ -12,20 +12,20 @@ use plotyx_python::interpreter::PythonError;
 #[derive(Debug, thiserror::Error)]
 pub enum ScriptError {
     /// Le système d'exploitation a refusé de créer le fil de script.
-    #[error("le fil de script n'a pas pu être créé : {0}")]
+    #[error("could not create the script thread: {0}")]
     Thread(#[from] std::io::Error),
     /// L'interpréteur CPython embarqué n'a pas pu démarrer.
     #[error(transparent)]
     Interpreter(#[from] PythonError),
     /// L'interpréteur a démarré mais la surface `pyx` n'a pas pu être posée.
-    #[error("échec d'installation de la surface pyx :\n{0}")]
+    #[error("could not install the pyx surface:\n{0}")]
     Install(String),
     /// Un script est déjà en cours d'exécution : le socle en autorise **un à
     /// la fois**.
-    #[error("un script est déjà en cours d'exécution")]
+    #[error("a script is already running")]
     Busy,
     /// Le fil de script est arrêté (après [`crate::ScriptEngine::shutdown`],
     /// ou parce qu'il a paniqué) : plus aucun script ne peut être exécuté.
-    #[error("le fil de script est arrêté")]
+    #[error("the script thread is stopped")]
     Stopped,
 }

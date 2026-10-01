@@ -67,18 +67,18 @@ fn split_tag(value: &rmpv::Value) -> Result<Tag, String> {
         rmpv::Value::String(name) => {
             let name = name
                 .as_str()
-                .ok_or_else(|| "nom de variante non UTF-8".to_string())?;
+                .ok_or_else(|| "variant name is not UTF-8".to_string())?;
             Ok(Tag::Bare(name.to_string()))
         }
         rmpv::Value::Map(entries) if entries.len() == 1 => {
             let (key, content) = &entries[0];
             let name = key
                 .as_str()
-                .ok_or_else(|| "clé de variante non textuelle".to_string())?;
+                .ok_or_else(|| "variant key is not text".to_string())?;
             Ok(Tag::Tagged(name.to_string(), content.clone()))
         }
         other => Err(format!(
-            "forme de variante externally-tagged inattendue : {other:?}"
+            "unexpected externally-tagged variant shape: {other:?}"
         )),
     }
 }

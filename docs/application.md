@@ -483,6 +483,23 @@ zone, chaque zone portant le ticket qui la convertit (#42-#45) : la liste se
 réduit, ne grossit pas, et doit être vide à #48. Mécanique détaillée : skill
 `plotyx-textes-interface`.
 
+**Erreurs affichées (#47).** Les crates du dessous rendent des erreurs
+structurées dont le `Display` (`#[error(...)]`) est en **anglais brut** — ce que
+lisent le CLI, `pyx` et les journaux — et que personne ne traduit. L'application
+les met en phrase par `src/errors.rs` : une fonction `error_message` par
+famille (`model` pour `CoreError`, `commands`, `session`, `file` pour
+`PersistenceError`, `import`, `formula`, `render`, `export`, et `script` avec la
+feature `python`), qui associe chaque variante à une clé `error-*` du catalogue
+`en` avec ses champs en arguments. Le `match` est exhaustif, sans `_` : une
+variante nouvelle ne compile pas tant qu'elle n'est pas associée (ou renvoyée
+volontairement à son `Display` par `errors::fallback`). Le test de chaque
+famille construit une valeur de chaque variante et vérifie que la phrase n'est
+pas vide, sans jargon interne, sans point final. Toute erreur montrée à
+l'utilisateur passe par ces fonctions, jamais par `to_string()` ni `{err}`.
+Les champs `detail` (cause décrite par le crate d'origine) et les messages du
+système restent en anglais dans la phrase. `plotyx-importer` rend un
+`ImportFailure` structuré (fichier + cause) pour la même raison.
+
 ### Sélecteur de fichiers natif
 
 Le bandeau de fichier a été supprimé : Ouvrir, Enregistrer et Enregistrer

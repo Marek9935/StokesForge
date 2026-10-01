@@ -173,7 +173,7 @@ impl CaptureStream {
     /// Représentation lisible, pour qu'un script qui inspecte `sys.stdout`
     /// comprenne ce qu'il regarde.
     fn __repr__(&self) -> String {
-        format!("<sortie de script PlotYx : {}>", self.stream.attribute())
+        format!("<PlotYx script output: {}>", self.stream.attribute())
     }
 }
 

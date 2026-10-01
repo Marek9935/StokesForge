@@ -48,27 +48,27 @@ create_exception!(
     pyx,
     UnknownPathError,
     PyException,
-    "Le chemin donné est mal formé, ou ne désigne aucun objet du projet."
+    "The given path is malformed, or does not designate any object of the project."
 );
 create_exception!(
     pyx,
     BrokenReferenceError,
     PyException,
-    "La poignée désigne un objet absent du projet courant (supprimé, ou d'un projet rechargé)."
+    "The handle designates an object absent from the current project (deleted, or from a reloaded project)."
 );
 create_exception!(
     pyx,
     InvalidValueError,
     PyException,
-    "Valeur refusée : mauvais type, mauvaise longueur, ou objet de nature inattendue."
+    "Value refused: wrong type, wrong length, or object of an unexpected kind."
 );
 create_exception!(
     pyx,
     ConcurrentWriteError,
     PyException,
-    "pyx.set_column a été refusée cinq fois de suite par un autre client qui modifiait la \
-     même colonne. Ce n'est pas un bug du script ni une valeur refusée : relisez l'état \
-     courant, ou retentez plus tard."
+    "pyx.set_column was refused five times in a row because another client kept \
+     modifying the same column. This is neither a script bug nor a refused value: read the \
+     current state again, or retry later."
 );
 
 /// Traduit une erreur de l'hôte, déjà classée, en exception Python.

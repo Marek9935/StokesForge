@@ -129,6 +129,15 @@ désormais unifiés ; un doublon réintroduit se trouve par
 `rg "fn detached_" crates/plotyx-app/src/`. Un rapport qui ne cite qu'une des
 deux écritures fait livrer un correctif à moitié.
 
+### Un message d'erreur faux ou ambigu
+
+Le texte d'une erreur affichée vient du catalogue (`i18n/en/plotyx_app.ftl`, clé
+`error-*`) et de l'association variante → clé de `crates/plotyx-app/src/errors.rs` ;
+le texte brut anglais du crate d'origine (`#[error(...)]`) n'est lu que par le CLI,
+`pyx` et les journaux. Localiser le message **par sa clé**, pas par le littéral, et
+dire si c'est la phrase du catalogue, l'association, ou le `detail` brut du crate
+d'origine qui est en cause.
+
 ### La famille de symptôme la plus révélatrice
 
 Un désaccord **entre deux surfaces** — écran vs export, dock vs détaché, menu

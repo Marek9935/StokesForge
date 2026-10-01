@@ -88,18 +88,24 @@ enum Role {
 }
 
 fn localize_pattern(pattern: &mut Pattern<String>, role: Role) {
+    // `letters` décide s'il y a du texte à allonger ; `length` (espaces compris)
+    // fixe l'allongement : 30 % de la longueur *affichée*, pas des seules
+    // lettres, sinon un message riche en espaces (une phrase d'erreur) resterait
+    // en deçà de +30 %.
     let mut letters = 0usize;
+    let mut length = 0usize;
     for element in &mut pattern.elements {
         match element {
             PatternElement::TextElement { value } => {
                 *value = value.chars().map(accent).collect();
                 letters += value.chars().filter(|c| !c.is_whitespace()).count();
+                length += value.chars().count();
             }
             PatternElement::Placeable { expression } => localize_expression(expression, role),
         }
     }
     let padding = || {
-        let extra = (letters * EXTRA_PERCENT).div_ceil(100);
+        let extra = (length * EXTRA_PERCENT).div_ceil(100);
         format!(" {}", FILLER.to_string().repeat(extra.max(1)))
     };
     match role {

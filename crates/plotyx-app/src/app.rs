@@ -7351,7 +7351,10 @@ fn graph_view_contents(
             }
         }
         Err(err) => {
-            ui.colored_label(egui::Color32::RED, format!("rendu : {err}"));
+            ui.colored_label(
+                egui::Color32::RED,
+                crate::errors::render::error_message(&err),
+            );
         }
     }
 }

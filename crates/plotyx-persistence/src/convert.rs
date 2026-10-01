@@ -59,7 +59,7 @@ pub(crate) enum ConvertError {
         expected: usize,
         /// Ce que le tableau correspondant porte.
         found: usize,
-        /// `"nombre(s)"` ou `"texte(s)"`, pour le message.
+        /// `"numbers"` ou `"texts"`, pour le message.
         what: &'static str,
     },
     /// `Column::from_block` a refusé la paire (type, valeurs) reconstruite.
@@ -646,7 +646,7 @@ fn decode_mixed(
         return Err(ConvertError::BadMixedLength {
             expected: expected_numbers,
             found: numbers.len(),
-            what: "nombre(s)",
+            what: "numbers",
         });
     }
     let expected_texts = tags.iter().filter(|&&tag| tag == MIXED_TAG_TEXT).count();
@@ -654,7 +654,7 @@ fn decode_mixed(
         return Err(ConvertError::BadMixedLength {
             expected: expected_texts,
             found: texts.len(),
-            what: "texte(s)",
+            what: "texts",
         });
     }
     let mut numbers = numbers.into_iter();

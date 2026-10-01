@@ -174,7 +174,7 @@ pub fn borrowed_readonly_array<'py>(
     // n'en a la référence.
     let readonly = array
         .try_readwrite()
-        .map_err(|err| PyRuntimeError::new_err(format!("emprunt exclusif refusé : {err}")))?
+        .map_err(|err| PyRuntimeError::new_err(format!("exclusive borrow refused: {err}")))?
         .make_nonwriteable();
     drop(readonly);
 
@@ -224,11 +224,11 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     //    le seul endroit où le distinguer.
     if has_hidden_masked_values(array)? {
         return Err(MaskedArrayError::new_err(format!(
-            "tableau numpy masqué (`{}`) refusé : au moins une valeur est \
-             masquée et serait copiée comme une donnée réelle si on l'acceptait \
-             — appelez `.filled(float('nan'))` (case masquée -> valeur \
-             manquante du modèle) ou `.compressed()` (case masquée -> écartée) \
-             avant `pyx.set_column`",
+            "masked numpy array (`{}`) refused: at least one value is \
+             masked and would be copied as real data if accepted \
+             — call `.filled(float('nan'))` (masked cell -> missing \
+             value of the model) or `.compressed()` (masked cell -> dropped) \
+             before `pyx.set_column`",
             type_name(array)
         )));
     }
@@ -236,7 +236,7 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     // 1. Est-ce seulement un tableau numpy ? Une liste Python échoue ici.
     let untyped = array.cast::<PyUntypedArray>().map_err(|_| {
         PyTypeError::new_err(format!(
-            "attendu un tableau numpy à une dimension de float64, reçu un objet de type `{}`",
+            "expected a one-dimensional numpy float64 array, got an object of type `{}`",
             type_name(array)
         ))
     })?;
@@ -244,7 +244,7 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     // 2. Dimension. Un tableau 2-D échoue ici, avec sa forme dans le message.
     if untyped.ndim() != 1 {
         return Err(PyTypeError::new_err(format!(
-            "attendu un tableau numpy à 1 dimension, reçu {} dimensions (forme {:?})",
+            "expected a one-dimensional numpy array, got {} dimensions (shape {:?})",
             untyped.ndim(),
             untyped.shape()
         )));
@@ -257,16 +257,16 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     let actual = untyped.dtype();
     if !actual.is_equiv_to(&expected) {
         return Err(PyTypeError::new_err(format!(
-            "attendu un tableau numpy de float64, reçu un tableau de `{actual}`"
+            "expected a numpy float64 array, got an array of `{actual}`"
         )));
     }
 
     let typed = untyped.cast::<PyArray1<f64>>().map_err(|_| {
-        PyTypeError::new_err("tableau numpy de float64 à 1 dimension attendu".to_owned())
+        PyTypeError::new_err("one-dimensional numpy float64 array expected".to_owned())
     })?;
     let readonly = typed
         .try_readonly()
-        .map_err(|err| PyRuntimeError::new_err(format!("emprunt partagé refusé : {err}")))?;
+        .map_err(|err| PyRuntimeError::new_err(format!("shared borrow refused: {err}")))?;
     let view = readonly.as_array();
 
     // Compactage explicite : `as_slice` ne rend `Some` que pour un tableau

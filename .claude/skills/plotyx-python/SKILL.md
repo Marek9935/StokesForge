@@ -139,6 +139,18 @@ est une copie volontairement indépendante de `plotyx_script::ScriptOutcome`
 pour que la surface publique de `state` soit la même avec et sans la feature.
 Ajouter un champ à l'une oblige à le refléter dans l'autre.
 
+## Messages de la surface `pyx` : en anglais
+
+Tout texte que voit un script — message des exceptions `pyx` (`UnknownPathError`,
+`BrokenReferenceError`, `InvalidValueError`, `ConcurrentWriteError`), erreurs de
+numpy (`array.rs`), de l'interpréteur (`PythonError`) et du fil de script
+(`ScriptError`) — est de l'**anglais brut**, jamais traduit : il est lu par
+l'utilisateur de `pyx`, pas par l'interface (#47). La console de l'application,
+elle, met `ScriptError` en phrase par `errors::script::error_message` (feature
+`python`) ; la trace d'une exception de script reste celle de Python. Un message
+nouveau suit la même rédaction (ce qui s'est passé, puis quoi faire) et un test qui
+l'asserte compare l'anglais.
+
 ## Tests
 
 - `plotyx-script/tests/selftest.rs` — le critère de fin du socle, en entier ;

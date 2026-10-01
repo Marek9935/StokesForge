@@ -53,13 +53,13 @@ impl Tree {
     pub(crate) fn new(root: Node) -> CoreResult<Self> {
         if !root.kind().is_folder() {
             return Err(CoreError::Structure(format!(
-                "la racine doit être un dossier, pas {}",
+                "the root must be a folder, not {}",
                 root.kind().with_article()
             )));
         }
         if root.parent().is_some() {
             return Err(CoreError::Structure(
-                "la racine ne peut pas avoir de parent".to_string(),
+                "the root cannot have a parent".to_string(),
             ));
         }
         Ok(Self::with_root(root))
@@ -106,7 +106,7 @@ impl Tree {
             let id = node.id();
             if map.insert(id, Arc::new(node)).is_some() {
                 return Err(CoreError::Structure(format!(
-                    "identifiant dupliqué dans la liste de nœuds : {id}"
+                    "duplicate identifier in the node list: {id}"
                 )));
             }
         }
@@ -122,21 +122,18 @@ impl Tree {
     /// Vérifie l'intégralité des invariants d'un arbre fraîchement chargé.
     fn validate_loaded(&self) -> CoreResult<()> {
         let root_node = self.nodes.get(&self.root).ok_or_else(|| {
-            CoreError::Structure(format!(
-                "racine absente de la liste de nœuds : {}",
-                self.root
-            ))
+            CoreError::Structure(format!("root missing from the node list: {}", self.root))
         })?;
         if !root_node.kind().is_folder() {
             return Err(CoreError::Structure(format!(
-                "la racine {} doit être un dossier, pas {}",
+                "the root {} must be a folder, not {}",
                 self.root,
                 root_node.kind().with_article()
             )));
         }
         if let Some(parent) = root_node.parent() {
             return Err(CoreError::Structure(format!(
-                "la racine {} ne peut pas avoir de parent ({parent})",
+                "the root {} cannot have a parent ({parent})",
                 self.root
             )));
         }
@@ -144,18 +141,18 @@ impl Tree {
         for (id, node) in &self.nodes {
             for child in node.children() {
                 let child_node = self.nodes.get(child).ok_or_else(|| {
-                    CoreError::Structure(format!("{id} cite un enfant absent : {child}"))
+                    CoreError::Structure(format!("{id} lists a missing child: {child}"))
                 })?;
                 match child_node.parent() {
                     Some(parent) if parent == *id => {}
                     Some(parent) => {
                         return Err(CoreError::Structure(format!(
-                            "{child} figure dans les enfants de {id} mais déclare {parent} comme parent"
-                        )))
+                        "{child} is listed as a child of {id} but declares {parent} as its parent"
+                    )))
                     }
                     None => {
                         return Err(CoreError::Structure(format!(
-                            "{child} figure dans les enfants de {id} mais ne déclare aucun parent"
+                            "{child} is listed as a child of {id} but declares no parent"
                         )))
                     }
                 }
@@ -166,15 +163,15 @@ impl Tree {
             }
             let Some(parent) = node.parent() else {
                 return Err(CoreError::Structure(format!(
-                    "{id} n'a pas de parent alors qu'il n'est pas la racine"
+                    "{id} has no parent but is not the root"
                 )));
             };
             let parent_node = self.nodes.get(&parent).ok_or_else(|| {
-                CoreError::Structure(format!("{id} déclare un parent absent : {parent}"))
+                CoreError::Structure(format!("{id} declares a missing parent: {parent}"))
             })?;
             if !parent_node.kind().accepts_child(node.kind()) {
                 return Err(CoreError::Structure(format!(
-                    "{id} est mal rangé : {}",
+                    "{id} is misplaced: {}",
                     containment_message(parent_node.kind(), node.kind())
                 )));
             }
@@ -185,7 +182,7 @@ impl Tree {
                 .count();
             if occurrences != 1 {
                 return Err(CoreError::Structure(format!(
-                    "{id} figure {occurrences} fois dans les enfants de {parent} (exactement une attendue)"
+                    "{id} is listed {occurrences} times as a child of {parent} (exactly one expected)"
                 )));
             }
         }
@@ -195,7 +192,7 @@ impl Tree {
         let reachable = self.walk(self.root)?.len();
         if reachable != self.nodes.len() {
             return Err(CoreError::Structure(format!(
-                "{} nœud(s) inaccessible(s) depuis la racine {}",
+                "{} node(s) unreachable from the root {}",
                 self.nodes.len() - reachable,
                 self.root
             )));
@@ -229,7 +226,7 @@ impl Tree {
         for node in self.nodes.values() {
             if node.kind().is_window() && !windows.insert(node.name()) {
                 return Err(CoreError::Structure(format!(
-                    "deux fenêtres portent le nom {}",
+                    "two windows share the name {}",
                     node.name()
                 )));
             }
@@ -250,8 +247,8 @@ impl Tree {
                 // séparément, ci-dessus.
                 if let Some(&earlier) = seen.get(child_node.name()) {
                     return Err(CoreError::Structure(format!(
-                        "{child} ({}) ne peut pas porter le nom {} dans {id} : {earlier} \
-                         le porte déjà",
+                        "{child} ({}) cannot be named {} in {id}: {earlier} \
+                         already has that name",
                         child_node.kind().type_name(),
                         child_node.name()
                     )));
@@ -328,7 +325,7 @@ impl Tree {
         let node = self.get(id)?;
         let Some(parent) = node.parent() else {
             return Err(CoreError::Structure(format!(
-                "{id} est la racine : elle n'a pas de position dans un parent"
+                "{id} is the root: it has no position in a parent"
             )));
         };
         self.get(parent)?
@@ -337,7 +334,7 @@ impl Tree {
             .position(|child| *child == id)
             .ok_or_else(|| {
                 CoreError::Structure(format!(
-                    "{id} est absent de la liste d'enfants de son parent {parent}"
+                    "{id} is missing from the child list of its parent {parent}"
                 ))
             })
     }
@@ -483,7 +480,7 @@ impl Tree {
         let node = self.get(sheet)?;
         if !node.kind().is_worksheet() {
             return Err(CoreError::Structure(format!(
-                "{sheet} n'est pas une feuille mais {}",
+                "{sheet} is not a worksheet but {}",
                 node.kind().with_article()
             )));
         }
@@ -553,20 +550,20 @@ impl Tree {
             for segment in &path.folders {
                 current = self
                     .folder_child_by_name(current, segment)?
-                    .ok_or_else(|| CoreError::Path(format!("dossier introuvable : {segment}")))?;
+                    .ok_or_else(|| CoreError::Path(format!("folder not found: {segment}")))?;
             }
             return Ok(current);
         };
 
         let window = self
             .find_window(window_name)
-            .ok_or_else(|| CoreError::Path(format!("fenêtre introuvable : [{window_name}]")))?;
+            .ok_or_else(|| CoreError::Path(format!("window not found: [{window_name}]")))?;
 
         if !path.folders.is_empty() {
             let actual = self.folder_names_above(window)?;
             if actual != path.folders {
                 return Err(CoreError::Path(format!(
-                    "[{window_name}] n'est pas dans le dossier {} mais dans {}",
+                    "[{window_name}] is not in folder {} but in {}",
                     display_folders(&path.folders),
                     display_folders(&actual)
                 )));
@@ -580,11 +577,11 @@ impl Tree {
         // rendre « feuille introuvable » sur une fenêtre qui n'en aura jamais.
         if !matches!(self.get(window)?.kind(), NodeKind::Workbook { .. }) {
             return Err(CoreError::Path(format!(
-                "[{window_name}] n'est pas un classeur, il n'a pas de feuille"
+                "[{window_name}] is not a workbook, it has no worksheet"
             )));
         }
         let sheet = self.child_by_name(window, sheet_name)?.ok_or_else(|| {
-            CoreError::Path(format!("feuille introuvable : [{window_name}]{sheet_name}"))
+            CoreError::Path(format!("worksheet not found: [{window_name}]{sheet_name}"))
         })?;
 
         let Some(column_name) = path.column.as_deref() else {
@@ -594,7 +591,7 @@ impl Tree {
         // d'entrée : c'est la seule branche qui nomme le chemin entier, et
         // `resolve_parsed` n'a de toute façon plus le texte d'origine.
         self.child_by_name(sheet, column_name)?
-            .ok_or_else(|| CoreError::Path(format!("colonne introuvable : {}", format_path(path))))
+            .ok_or_else(|| CoreError::Path(format!("column not found: {}", format_path(path))))
     }
 
     /// Noms des dossiers au-dessus de `id`, de la racine (exclue) vers `id`.
@@ -633,7 +630,7 @@ impl Tree {
                 }
                 if self.node(id).is_some_and(|node| node.name() == name) {
                     return Err(CoreError::DuplicateName(format!(
-                        "{name} (une autre fenêtre du projet porte déjà ce nom)"
+                        "{name} (another window in the project already has this name)"
                     )));
                 }
             }
@@ -660,7 +657,7 @@ impl Tree {
             }
             if self.node(*child).is_some_and(|node| node.name() == name) {
                 return Err(CoreError::DuplicateName(format!(
-                    "{name} dans {}",
+                    "{name} in {}",
                     parent_node.name()
                 )));
             }
@@ -679,7 +676,7 @@ impl Tree {
         check_name(name)?;
         if !kind.children().is_empty() {
             return Err(CoreError::Structure(
-                "un nœud inséré ne peut pas porter d'enfants : reconstruire l'arbre avec from_nodes"
+                "an inserted node cannot carry children: rebuild the tree with from_nodes"
                     .to_string(),
             ));
         }
@@ -694,7 +691,7 @@ impl Tree {
         let count = parent_node.children().len();
         if index > count {
             return Err(CoreError::IndexOutOfBounds(format!(
-                "position {index} dans {} qui contient {count} enfant(s)",
+                "position {index} out of range in {} (children: {count})",
                 parent_node.name()
             )));
         }
@@ -705,7 +702,7 @@ impl Tree {
     pub(crate) fn validate_remove(&self, id: NodeId) -> CoreResult<usize> {
         if id == self.root {
             return Err(CoreError::Structure(
-                "la racine du projet ne peut pas être supprimée".to_string(),
+                "the project root cannot be removed".to_string(),
             ));
         }
         self.index_in_parent(id)
@@ -720,7 +717,7 @@ impl Tree {
     ) -> CoreResult<(NodeId, usize)> {
         if id == self.root {
             return Err(CoreError::Structure(
-                "la racine du projet ne peut pas être déplacée".to_string(),
+                "the project root cannot be moved".to_string(),
             ));
         }
         let node = self.get(id)?;
@@ -733,12 +730,12 @@ impl Tree {
         }
         if self.walk(id)?.contains(&new_parent) {
             return Err(CoreError::Structure(format!(
-                "déplacement circulaire refusé : {new_parent} est {id} ou l'un de ses descendants"
+                "circular move refused: {new_parent} is {id} or one of its descendants"
             )));
         }
         let Some(old_parent) = node.parent() else {
             return Err(CoreError::Structure(format!(
-                "{id} n'a pas de parent : il ne peut pas être déplacé"
+                "{id} has no parent: it cannot be moved"
             )));
         };
         let old_index = self.index_in_parent(id)?;
@@ -749,7 +746,7 @@ impl Tree {
         }
         if index > count {
             return Err(CoreError::IndexOutOfBounds(format!(
-                "position {index} dans {} qui accueillera {count} autre(s) enfant(s)",
+                "position {index} out of range in {} (other children: {count})",
                 target.name()
             )));
         }
@@ -779,12 +776,12 @@ impl Tree {
     ) -> CoreResult<NodeId> {
         if let Some(existing) = node.parent() {
             return Err(CoreError::Structure(format!(
-                "le nœud à insérer doit être détaché, or il déclare {existing} comme parent"
+                "the node to insert must be detached, but it declares {existing} as its parent"
             )));
         }
         if self.contains(node.id()) {
             return Err(CoreError::Structure(format!(
-                "{} est déjà présent dans l'arbre",
+                "{} is already in the tree",
                 node.id()
             )));
         }
@@ -800,7 +797,7 @@ impl Tree {
             .ok_or(CoreError::UnknownNode(parent))?;
         let Some(children) = Arc::make_mut(parent_arc).children_mut() else {
             return Err(CoreError::Structure(format!(
-                "{parent} ne peut pas accueillir d'enfant"
+                "{parent} cannot accept a child"
             )));
         };
         let at = index.min(children.len());
@@ -814,7 +811,7 @@ impl Tree {
     pub(crate) fn remove(&mut self, id: NodeId) -> CoreResult<usize> {
         let index = self.validate_remove(id)?;
         let Some(parent) = self.parent(id)? else {
-            return Err(CoreError::Structure(format!("{id} n'a pas de parent")));
+            return Err(CoreError::Structure(format!("{id} has no parent")));
         };
         let doomed = self.walk(id)?;
 
@@ -884,13 +881,13 @@ impl Tree {
         };
         if let Some(label) = kind_label {
             return Err(CoreError::Structure(format!(
-                "{id} n'est pas une colonne mais {label}"
+                "{id} is not a column but {label}"
             )));
         }
         let node_arc = self.nodes.get_mut(&id).ok_or(CoreError::UnknownNode(id))?;
         Arc::make_mut(node_arc)
             .column_mut()
-            .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas une colonne")))
+            .ok_or_else(|| CoreError::Structure(format!("{id} is not a column")))
     }
 
     /// Nœud mutable (`Arc::make_mut`). Aucune validation : l'appelant est
@@ -1121,7 +1118,7 @@ mod tests {
         let inner = f.add(f.folder, "Interne", folder_kind());
         let error = f.tree.move_node(f.folder, inner, 0).unwrap_err();
         match error {
-            CoreError::Structure(message) => assert!(message.contains("circulaire"), "{message}"),
+            CoreError::Structure(message) => assert!(message.contains("circular"), "{message}"),
             other => panic!("attendu Structure, obtenu {other:?}"),
         }
     }
@@ -1195,7 +1192,7 @@ mod tests {
         let CoreError::Path(message) = err else {
             panic!("attendu Path, obtenu {err:?}");
         };
-        assert!(message.contains("n'est pas dans le dossier"), "{message}");
+        assert!(message.contains("is not in folder"), "{message}");
     }
 
     #[test]
@@ -1267,10 +1264,7 @@ mod tests {
         let CoreError::Path(message) = err else {
             panic!("attendu Path, obtenu {err:?}");
         };
-        assert_eq!(
-            message,
-            "colonne introuvable : /Manips/[Book1]Sheet1!Absente"
-        );
+        assert_eq!(message, "column not found: /Manips/[Book1]Sheet1!Absente");
     }
 
     #[test]

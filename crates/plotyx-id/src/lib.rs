@@ -53,7 +53,7 @@ impl NodeId {
 
 impl std::fmt::Display for NodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "nœud {}", self.0)
+        write!(f, "node {}", self.0)
     }
 }
 
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn display_formats_as_expected() {
-        assert_eq!(NodeId::from_raw(412).to_string(), "nœud 412");
+        assert_eq!(NodeId::from_raw(412).to_string(), "node 412");
     }
 
     #[test]

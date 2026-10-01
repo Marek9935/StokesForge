@@ -98,7 +98,7 @@ impl ScriptContext {
     pub(crate) fn check_interrupt(&self) -> PyResult<()> {
         if self.shared.interrupt_requested.load(Ordering::Acquire) {
             return Err(PyKeyboardInterrupt::new_err(
-                "script interrompu à la demande de PlotYx",
+                "script interrupted at the request of PlotYx",
             ));
         }
         Ok(())
@@ -115,9 +115,7 @@ thread_local! {
 /// Contexte du fil courant, ou une erreur Python explicite.
 pub(crate) fn current_context() -> PyResult<Arc<ScriptContext>> {
     CONTEXT.with(|cell| cell.borrow().clone()).ok_or_else(|| {
-        PyRuntimeError::new_err(
-            "la surface pyx n'est utilisable que depuis le fil de script de PlotYx",
-        )
+        PyRuntimeError::new_err("the pyx surface can only be used from the PlotYx script thread")
     })
 }
 
@@ -432,7 +430,7 @@ fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome
         let result = match CString::new(source) {
             Ok(code) => py.run(&code, Some(globals.bind(py)), None),
             Err(_) => Err(pyo3::exceptions::PyValueError::new_err(
-                "la source du script contient un octet nul",
+                "the script source contains a null byte",
             )),
         };
 

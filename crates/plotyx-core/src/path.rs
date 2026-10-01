@@ -65,10 +65,10 @@ impl std::str::FromStr for ObjectPath {
 /// vide, sans espace de bordure, sans caractère réservé.
 fn check_segment(segment: &str) -> CoreResult<&str> {
     if segment.is_empty() || segment != segment.trim() {
-        return Err(CoreError::Path(format!("segment invalide : {segment}")));
+        return Err(CoreError::Path(format!("invalid segment: {segment}")));
     }
     if segment.contains(RESERVED_NAME_CHARS) {
-        return Err(CoreError::Path(format!("segment invalide : {segment}")));
+        return Err(CoreError::Path(format!("invalid segment: {segment}")));
     }
     Ok(segment)
 }
@@ -87,17 +87,17 @@ fn parse_folder_segments(prefix: &str) -> CoreResult<Vec<String>> {
 pub fn parse_path(text: &str) -> CoreResult<ObjectPath> {
     let raw = text.trim();
     if raw.is_empty() {
-        return Err(CoreError::Path("chemin vide".to_string()));
+        return Err(CoreError::Path("empty path".to_string()));
     }
 
     if !raw.contains('[') {
         if raw.contains(']') || raw.contains('!') {
-            return Err(CoreError::Path("chemin mal formé".to_string()));
+            return Err(CoreError::Path("malformed path".to_string()));
         }
         let rooted = raw.starts_with('/');
         let folders = parse_folder_segments(raw)?;
         if folders.is_empty() && !rooted {
-            return Err(CoreError::Path("chemin mal formé".to_string()));
+            return Err(CoreError::Path("malformed path".to_string()));
         }
         return Ok(ObjectPath {
             folders,
@@ -107,24 +107,24 @@ pub fn parse_path(text: &str) -> CoreResult<ObjectPath> {
     }
 
     let Some((prefix, rest)) = raw.split_once('[') else {
-        return Err(CoreError::Path("chemin mal formé".to_string()));
+        return Err(CoreError::Path("malformed path".to_string()));
     };
 
     if !prefix.is_empty() && !prefix.ends_with('/') {
         return Err(CoreError::Path(
-            "préfixe de dossier non terminé par '/'".to_string(),
+            "folder prefix not ending with '/'".to_string(),
         ));
     }
     let rooted = prefix.starts_with('/');
     let folders = parse_folder_segments(prefix)?;
 
     let Some((window, tail)) = rest.split_once(']') else {
-        return Err(CoreError::Path("crochet fermant manquant".to_string()));
+        return Err(CoreError::Path("missing closing bracket".to_string()));
     };
     let window = check_segment(window)?.to_string();
 
     if tail.contains('[') || tail.contains(']') {
-        return Err(CoreError::Path("crochet en trop".to_string()));
+        return Err(CoreError::Path("extra bracket".to_string()));
     }
 
     let (sheet_part, bang_present, column_part) = match tail.split_once('!') {
@@ -141,7 +141,7 @@ pub fn parse_path(text: &str) -> CoreResult<ObjectPath> {
     let column = if bang_present {
         let column = check_segment(column_part)?.to_string();
         if sheet.is_none() {
-            return Err(CoreError::Path("colonne sans feuille".to_string()));
+            return Err(CoreError::Path("column without a worksheet".to_string()));
         }
         Some(column)
     } else {

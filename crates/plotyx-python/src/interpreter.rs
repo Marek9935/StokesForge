@@ -57,13 +57,13 @@ static INIT: OnceLock<Result<(), String>> = OnceLock::new();
 #[derive(Debug, thiserror::Error)]
 pub enum PythonError {
     /// Le préfixe embarqué est absent ou mal formé (pas de `lib/python3.12`).
-    #[error("préfixe Python embarqué introuvable : {0} (attendu {0}/lib/python{PYTHON_XY})")]
+    #[error("embedded Python prefix not found: {0} (expected {0}/lib/python{PYTHON_XY})")]
     HomeNotFound(PathBuf),
     /// L'interpréteur n'a pas pu démarrer.
-    #[error("échec d'initialisation de l'interpréteur embarqué : {0}")]
+    #[error("could not initialise the embedded interpreter: {0}")]
     InitFailed(String),
     /// Une exception Python est remontée, avec sa trace formatée.
-    #[error("erreur Python :\n{0}")]
+    #[error("Python error:\n{0}")]
     Python(String),
 }
 
@@ -86,9 +86,9 @@ impl EmbeddedPython {
             Some(value) => PathBuf::from(value),
             None => {
                 let exe = std::env::current_exe()
-                    .map_err(|err| PythonError::InitFailed(format!("current_exe : {err}")))?;
+                    .map_err(|err| PythonError::InitFailed(format!("current_exe: {err}")))?;
                 let dir = exe.parent().ok_or_else(|| {
-                    PythonError::InitFailed("exécutable sans répertoire parent".to_owned())
+                    PythonError::InitFailed("executable without a parent directory".to_owned())
                 })?;
                 dir.join("lib").join("python")
             }
@@ -224,7 +224,7 @@ unsafe fn append_search_path(config_ptr: *mut ffi::PyConfig, path: &Path) -> Res
     // l'initialisation ; la mémoire rendue se libère par `PyMem_RawFree`.
     let wide = ffi::Py_DecodeLocale(bytes.as_ptr(), std::ptr::null_mut());
     if wide.is_null() {
-        return Err(format!("Py_DecodeLocale a échoué sur {}", path.display()));
+        return Err(format!("Py_DecodeLocale failed on {}", path.display()));
     }
     let status = ffi::PyWideStringList_Append(
         std::ptr::addr_of_mut!((*config_ptr).module_search_paths),
@@ -244,21 +244,21 @@ fn check_status(status: ffi::PyStatus, what: &str) -> Result<(), String> {
         return Ok(());
     }
     let detail = if status.err_msg.is_null() {
-        "sans message".to_owned()
+        "no message".to_owned()
     } else {
         // SAFETY : pointeur non nul fourni par CPython sur une chaîne C statique.
         unsafe { std::ffi::CStr::from_ptr(status.err_msg) }
             .to_string_lossy()
             .into_owned()
     };
-    Err(format!("{what} : {detail}"))
+    Err(format!("{what}: {detail}"))
 }
 
 /// Importe numpy une fois l'interpréteur démarré ; échoue avec la trace Python.
 fn import_numpy() -> Result<(), String> {
     Python::attach(|py| match py.import("numpy") {
         Ok(_) => Ok(()),
-        Err(err) => Err(format!("import numpy : {}", format_error(py, &err))),
+        Err(err) => Err(format!("import numpy: {}", format_error(py, &err))),
     })
 }
 
@@ -266,8 +266,8 @@ fn import_numpy() -> Result<(), String> {
 fn to_cstring(path: &Path) -> Result<CString, String> {
     let text = path
         .to_str()
-        .ok_or_else(|| format!("chemin non-UTF-8 : {}", path.display()))?;
-    CString::new(text).map_err(|err: NulError| format!("chemin contenant un octet nul : {err}"))
+        .ok_or_else(|| format!("path is not UTF-8: {}", path.display()))?;
+    CString::new(text).map_err(|err: NulError| format!("path contains a null byte: {err}"))
 }
 
 /// Prend le GIL et convertit toute exception Python en [`PythonError::Python`]

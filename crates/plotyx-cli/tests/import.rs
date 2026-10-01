@@ -73,14 +73,14 @@ fn layout_and_named_model_options() {
         &fixture("rpe_nohead_tab.asc"),
     ]);
     result.unwrap();
-    assert!(output.contains("1 feuille(s), 4 colonne(s)"), "{output}");
+    assert!(output.contains("1 worksheet, 4 columns"), "{output}");
     assert!(out_path.exists());
 }
 
 #[test]
 fn errors_are_reported_not_panicked() {
     let _dir = isolated();
-    assert!(run(&["import"]).0.unwrap_err().contains("aucun fichier"));
+    assert!(run(&["import"]).0.unwrap_err().contains("no file"));
     assert!(run(&["import", "--recipe", "Inconnu", "x.csv"])
         .0
         .unwrap_err()
@@ -91,8 +91,11 @@ fn errors_are_reported_not_panicked() {
     assert!(run(&["import", "/n/existe/pas.csv"])
         .0
         .unwrap_err()
-        .contains("rien à importer"));
-    assert!(run(&["frobnicate"]).0.unwrap_err().contains("inconnue"));
+        .contains("nothing to import"));
+    assert!(run(&["frobnicate"])
+        .0
+        .unwrap_err()
+        .contains("unknown command"));
     // Un fichier illisible n'empêche pas les autres.
     let (result, output) = run(&[
         "import",
@@ -100,7 +103,7 @@ fn errors_are_reported_not_panicked() {
         &fixture("rpe_nohead_tab.asc"),
     ]);
     result.unwrap();
-    assert!(output.contains("ignoré"), "{output}");
+    assert!(output.contains("skipped"), "{output}");
     let (_, listing) = run(&["recipes"]);
     assert!(listing.contains("Jasco (tabulation)"));
 }

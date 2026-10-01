@@ -609,6 +609,40 @@ fn a_failing_load_leaves_the_model_and_history_untouched() {
     assert!(state.can_undo(), "l'historique est préservé");
 }
 
+/// Une erreur de lecture `.plx` s'affiche par la phrase du catalogue de
+/// l'application (#47), pas par le texte brut du crate du dessous : « is damaged »
+/// ici, « corrupt file » dans le `Display` que lit le CLI.
+#[test]
+fn a_plx_read_error_is_shown_through_the_catalogue() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+
+    let truncated = dir.path().join("tronque.plotyx");
+    std::fs::write(&truncated, b"PLYX\x01").expect("écriture du fichier de test");
+    state.set_path(truncated.display().to_string());
+    state.dispatch(Action::Load);
+    let status = state.status().expect("un message");
+    assert!(status.is_error);
+    assert_eq!(
+        status.text,
+        format!(
+            "{} is damaged: header truncated before the version number",
+            truncated.display()
+        )
+    );
+
+    let foreign = dir.path().join("etranger.plotyx");
+    std::fs::write(&foreign, b"hello").expect("écriture du fichier de test");
+    state.set_path(foreign.display().to_string());
+    state.dispatch(Action::Load);
+    let status = state.status().expect("un message");
+    assert!(status.is_error);
+    assert_eq!(
+        status.text,
+        format!("{} is not a PlotYx file", foreign.display())
+    );
+}
+
 #[test]
 fn a_failing_save_reports_an_error_and_writes_nothing() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");

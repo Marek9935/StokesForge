@@ -85,13 +85,13 @@ pub enum PdfError {
     /// propre `SVGBackend`. S'il arrivait, ce serait le signe que l'export
     /// SVG a cessé d'être un SVG valide — un fait plus grave que celui que
     /// ce module existe pour vérifier, et qui mérite de ne pas être avalé.
-    #[error("relecture du SVG par usvg : {0}")]
+    #[error("could not re-read the SVG with usvg: {0}")]
     Parse(String),
     /// `svg2pdf` a refusé de convertir l'arbre.
-    #[error("conversion en PDF : {0}")]
+    #[error("PDF conversion failed: {0}")]
     Conversion(String),
     /// Le fichier n'a pas pu être écrit.
-    #[error("écriture de {path} : {source}")]
+    #[error("could not write {path}: {source}")]
     Write {
         /// Chemin visé.
         path: String,

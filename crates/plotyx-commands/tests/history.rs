@@ -475,7 +475,7 @@ fn delete_column_refuses_a_node_that_is_not_a_column() {
     match err {
         CommandError::Core(CoreError::Structure(message)) => {
             assert!(
-                message.contains("n'est pas une colonne"),
+                message.contains("is not a column"),
                 "message inattendu : {message}"
             );
         }

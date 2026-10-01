@@ -68,6 +68,13 @@ Deux règles de conduite qui orientent la forme du correctif :
   `StatusMessage` affiché. Corriger un bug en faisant remonter une erreur
   d'interface casse cette règle ; la nuance « impossible pour l'instant »
   (annuler à vide) n'est d'ailleurs pas une erreur.
+- **Un message d'erreur faux ou ambigu se corrige dans le catalogue** : la
+  phrase vit dans `crates/plotyx-app/i18n/en/plotyx_app.ftl` (clé `error-*`),
+  associée à sa variante dans `crates/plotyx-app/src/errors.rs`. Le `Display`
+  anglais du crate d'origine (`#[error(...)]`) ne se modifie que s'il est lui-même
+  faux — il est lu par le CLI et `pyx`. Une variante d'erreur **nouvelle** s'associe
+  dans `errors.rs` (le `match` exhaustif le force) avec un exemple dans le test de
+  sa famille ; jamais de `to_string()` d'erreur dans l'interface.
 - **Un défaut de donnée dégrade, il ne plante pas** (invariant 10). Le
   correctif d'un cas de donnée invalide est un état de première classe visible
   et localisé, pas une erreur qui remonte ni une série silencieusement vide.

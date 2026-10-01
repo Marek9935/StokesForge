@@ -19,8 +19,8 @@ use std::path::PathBuf;
 use plotyx_core::Project;
 use plotyx_import::{choose_recipe, FilesLayout, ImportRecipe, RecipeStore};
 
-const USAGE: &str = "usage :
-  plotyx-cli import [--recipe NOM] [--layout per-file|side-by-side|shared-x] [--out projet.plx] FICHIER...
+const USAGE: &str = "usage:
+  plotyx-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x] [--out project.plx] FILE...
   plotyx-cli recipes";
 
 /// Exécute la ligne de commande `args` (sans le nom du programme), en écrivant
@@ -28,7 +28,7 @@ const USAGE: &str = "usage :
 /// sortie non nul).
 pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     match args.first().map(String::as_str) {
-        None => writeln!(out, "plotyx-cli : rien à faire sans commande.\n{USAGE}")
+        None => writeln!(out, "plotyx-cli: nothing to do without a command.\n{USAGE}")
             .map_err(|err| err.to_string()),
         Some("recipes") => {
             for recipe in RecipeStore::load_with_builtins().recipes() {
@@ -37,7 +37,16 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             Ok(())
         }
         Some("import") => import(&args[1..], out),
-        Some(other) => Err(format!("commande inconnue « {other} »\n{USAGE}")),
+        Some(other) => Err(format!("unknown command \"{other}\"\n{USAGE}")),
+    }
+}
+
+/// « 1 column », « 2 columns ».
+fn counted(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("{count} {noun}")
+    } else {
+        format!("{count} {noun}s")
     }
 }
 
@@ -60,7 +69,7 @@ fn parse_import_args(args: &[String]) -> Result<ImportArgs, String> {
         let mut value = |name: &str| {
             iter.next()
                 .cloned()
-                .ok_or_else(|| format!("{name} attend une valeur\n{USAGE}"))
+                .ok_or_else(|| format!("{name} expects a value\n{USAGE}"))
         };
         match arg.as_str() {
             "--recipe" => parsed.recipe = Some(value("--recipe")?),
@@ -70,17 +79,17 @@ fn parse_import_args(args: &[String]) -> Result<ImportArgs, String> {
                     "per-file" => FilesLayout::SheetPerFile,
                     "side-by-side" => FilesLayout::SideBySide,
                     "shared-x" => FilesLayout::SharedX,
-                    other => return Err(format!("répartition inconnue « {other} »\n{USAGE}")),
+                    other => return Err(format!("unknown layout \"{other}\"\n{USAGE}")),
                 });
             }
             flag if flag.starts_with("--") => {
-                return Err(format!("option inconnue « {flag} »\n{USAGE}"))
+                return Err(format!("unknown option \"{flag}\"\n{USAGE}"))
             }
             file => parsed.files.push(PathBuf::from(file)),
         }
     }
     if parsed.files.is_empty() {
-        return Err(format!("aucun fichier à importer\n{USAGE}"));
+        return Err(format!("no file to import\n{USAGE}"));
     }
     Ok(parsed)
 }
@@ -98,7 +107,7 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
                 .ok_or_else(|| {
                     let known: Vec<&str> =
                         store.recipes().iter().map(|r| r.name.as_str()).collect();
-                    format!("modèle « {name} » inconnu (connus : {})", known.join(", "))
+                    format!("unknown template \"{name}\" (known: {})", known.join(", "))
                 })?,
         ),
         None => None,
@@ -119,9 +128,10 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         }
         items.extend(plotyx_importer::import_items(path, &recipe));
     }
-    let failures: Vec<&String> = items
+    let failures: Vec<String> = items
         .iter()
         .filter_map(|item| item.table.as_ref().err())
+        .map(ToString::to_string)
         .collect();
     let layout = items
         .iter()
@@ -129,8 +139,8 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         .map_or(FilesLayout::SheetPerFile, |item| item.recipe.files_layout);
     let plans = plotyx_importer::plan_import(&items, layout);
     if plans.is_empty() {
-        let reasons: Vec<&str> = failures.iter().map(|m| m.as_str()).collect();
-        return Err(format!("rien à importer — {}", reasons.join(" ; ")));
+        let reasons: Vec<&str> = failures.iter().map(String::as_str).collect();
+        return Err(format!("nothing to import: {}", reasons.join(" ; ")));
     }
 
     let mut project = Project::new("Import").map_err(|err| err.to_string())?;
@@ -155,20 +165,25 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         let recipe = &items[plan.items[0]].recipe.name;
         writeln!(
             out,
-            "feuille « {} » : {} colonne(s), modèle « {recipe} »",
+            "worksheet \"{}\": {}, template \"{recipe}\"",
             plan.name,
-            plan.columns.len()
+            counted(plan.columns.len(), "column")
         )
         .map_err(|err| err.to_string())?;
     }
     for failure in &failures {
-        writeln!(out, "ignoré : {failure}").map_err(|err| err.to_string())?;
+        writeln!(out, "skipped: {failure}").map_err(|err| err.to_string())?;
     }
-    writeln!(out, "{} feuille(s), {column_count} colonne(s)", plans.len())
-        .map_err(|err| err.to_string())?;
+    writeln!(
+        out,
+        "{}, {}",
+        counted(plans.len(), "worksheet"),
+        counted(column_count, "column")
+    )
+    .map_err(|err| err.to_string())?;
     if let Some(path) = &args.output {
         plotyx_persistence::save(&project, path).map_err(|err| err.to_string())?;
-        writeln!(out, "projet écrit : {}", path.display()).map_err(|err| err.to_string())?;
+        writeln!(out, "project written: {}", path.display()).map_err(|err| err.to_string())?;
     }
     Ok(())
 }

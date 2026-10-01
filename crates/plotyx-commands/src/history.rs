@@ -1011,7 +1011,7 @@ impl History {
                 let node = before.get(column)?;
                 if !node.kind().is_column() {
                     return Err(CoreError::Structure(format!(
-                        "{column} n'est pas une colonne mais {} : suppression de colonne refusée",
+                        "{column} is not a column but {}: column deletion refused",
                         node.kind().with_article()
                     ))
                     .into());
@@ -1637,7 +1637,7 @@ fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, Co
     let node = project.tree().get(column)?;
     let target = node
         .as_column()
-        .ok_or_else(|| CoreError::Structure(format!("{column} n'est pas une colonne")))?;
+        .ok_or_else(|| CoreError::Structure(format!("{column} is not a column")))?;
     Ok((target.column_type(), target.values().clone()))
 }
 

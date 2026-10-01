@@ -62,7 +62,7 @@ pub enum ExportError {
     #[error(transparent)]
     Png(#[from] PngError),
     /// L'écriture du fichier.
-    #[error("écriture de {path} : {source}")]
+    #[error("could not write {path}: {source}")]
     Write {
         /// Chemin visé.
         path: String,

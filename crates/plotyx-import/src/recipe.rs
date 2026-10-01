@@ -195,7 +195,7 @@ impl ImportRecipe {
     /// Relit une recette exportée par [`ImportRecipe::to_json`]. `Err` avec un
     /// message lisible si le texte n'est pas une recette.
     pub fn from_json(text: &str) -> Result<Self, String> {
-        serde_json::from_str(text).map_err(|err| format!("recette illisible : {err}"))
+        serde_json::from_str(text).map_err(|err| format!("unreadable template: {err}"))
     }
 }
 

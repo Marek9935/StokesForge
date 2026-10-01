@@ -462,7 +462,7 @@ fn critere_10_deplacements_refuses_laissent_l_arbre_intact() {
     // Un dossier ne va pas dans son propre descendant.
     match demo.project.move_node(f1, interne, 0) {
         Err(CoreError::Structure(message)) => {
-            assert!(message.contains("circulaire"), "{message}")
+            assert!(message.contains("circular"), "{message}")
         }
         other => panic!("attendu Structure circulaire, obtenu {other:?}"),
     }
@@ -510,7 +510,7 @@ fn critere_11_resolution_de_chemins() {
     );
     match p.resolve_path("/Ailleurs/[Book1]Sheet1!Temps") {
         Err(CoreError::Path(message)) => {
-            assert!(message.contains("n'est pas dans le dossier"), "{message}")
+            assert!(message.contains("is not in folder"), "{message}")
         }
         other => panic!("attendu Path, obtenu {other:?}"),
     }
@@ -539,7 +539,7 @@ fn critere_12_chemins_irresolubles() {
     }
     match p.resolve_path("[Fig1]Sheet1") {
         Err(CoreError::Path(message)) => {
-            assert!(message.contains("pas un classeur"), "{message}")
+            assert!(message.contains("is not a workbook"), "{message}")
         }
         other => panic!("attendu Path, obtenu {other:?}"),
     }

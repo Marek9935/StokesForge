@@ -18,7 +18,7 @@ pub enum SessionError {
     Persistence(#[from] PersistenceError),
     /// L'acteur n'est plus là (thread terminé ou en panique) : aucune
     /// requête ne peut plus être servie.
-    #[error("la session est fermée")]
+    #[error("the session is closed")]
     Disconnected,
 }
 

@@ -35,23 +35,27 @@ fn is_control_or_deceptive_format(c: char) -> bool {
 /// inchangé (emprunté) si valide.
 pub fn check_name(name: &str) -> CoreResult<&str> {
     if name.is_empty() {
-        return Err(CoreError::InvalidName(name.to_string()));
+        return Err(CoreError::InvalidName("the name is empty".to_string()));
     }
     if name != name.trim() {
-        return Err(CoreError::InvalidName(name.to_string()));
+        return Err(CoreError::InvalidName(format!(
+            "\"{name}\" starts or ends with a space"
+        )));
     }
     if name.contains(RESERVED_NAME_CHARS) {
-        return Err(CoreError::InvalidName(name.to_string()));
+        return Err(CoreError::InvalidName(format!(
+            "\"{name}\" contains a reserved character ([ ] ! /)"
+        )));
     }
     if name.chars().any(is_control_or_deceptive_format) {
         return Err(CoreError::InvalidName(
-            "caractère de contrôle ou de formatage Unicode refusé dans un nom".to_string(),
+            "control and Unicode formatting characters are not allowed in a name".to_string(),
         ));
     }
     let char_count = name.chars().count();
     if char_count > MAX_NAME_CHARS {
         return Err(CoreError::InvalidName(format!(
-            "nom de {char_count} caractères, {MAX_NAME_CHARS} au maximum"
+            "the name has {char_count} characters, {MAX_NAME_CHARS} at most"
         )));
     }
     Ok(name)

@@ -138,18 +138,18 @@ impl NodeKind {
     /// Nom lisible du type, en français, pour les messages d'erreur.
     pub fn type_name(&self) -> &'static str {
         match self {
-            NodeKind::Folder { .. } => "dossier",
-            NodeKind::Workbook { .. } => "classeur",
-            NodeKind::Worksheet { .. } => "feuille",
-            NodeKind::Column(_) => "colonne",
-            NodeKind::Graph { .. } => "graphe",
-            NodeKind::Matrix { .. } => "matrice",
+            NodeKind::Folder { .. } => "folder",
+            NodeKind::Workbook { .. } => "workbook",
+            NodeKind::Worksheet { .. } => "worksheet",
+            NodeKind::Column(_) => "column",
+            NodeKind::Graph { .. } => "graph",
+            NodeKind::Matrix { .. } => "matrix",
             NodeKind::Note { .. } => "note",
             // Affichage dégradé plutôt qu'un panique ou un rendu absent
             // (C5, niveau 2) : l'utilisateur voit « nature non reconnue »
             // au lieu d'un texte de type inventé pour un contenu que ce
             // lecteur ne comprend pas.
-            NodeKind::Unknown(_) => "nature non reconnue",
+            NodeKind::Unknown(_) => "unrecognized kind",
         }
     }
 
@@ -199,14 +199,14 @@ impl NodeKind {
     /// « une colonne », « un classeur »…
     pub fn with_article(&self) -> &'static str {
         match self {
-            NodeKind::Folder { .. } => "un dossier",
-            NodeKind::Workbook { .. } => "un classeur",
-            NodeKind::Worksheet { .. } => "une feuille",
-            NodeKind::Column(_) => "une colonne",
-            NodeKind::Graph { .. } => "un graphe",
-            NodeKind::Matrix { .. } => "une matrice",
-            NodeKind::Note { .. } => "une note",
-            NodeKind::Unknown(_) => "une nature non reconnue",
+            NodeKind::Folder { .. } => "a folder",
+            NodeKind::Workbook { .. } => "a workbook",
+            NodeKind::Worksheet { .. } => "a worksheet",
+            NodeKind::Column(_) => "a column",
+            NodeKind::Graph { .. } => "a graph",
+            NodeKind::Matrix { .. } => "a matrix",
+            NodeKind::Note { .. } => "a note",
+            NodeKind::Unknown(_) => "an unrecognized kind",
         }
     }
 
@@ -214,11 +214,9 @@ impl NodeKind {
     /// elle n'accepte aucun enfant.
     pub(crate) fn allowed_children(&self) -> Option<&'static str> {
         match self {
-            NodeKind::Folder { .. } => {
-                Some("des dossiers, des classeurs, des graphes, des matrices et des notes")
-            }
-            NodeKind::Workbook { .. } => Some("des feuilles"),
-            NodeKind::Worksheet { .. } => Some("des colonnes"),
+            NodeKind::Folder { .. } => Some("folders, workbooks, graphs, matrices and notes"),
+            NodeKind::Workbook { .. } => Some("worksheets"),
+            NodeKind::Worksheet { .. } => Some("columns"),
             NodeKind::Column(_)
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
@@ -280,13 +278,13 @@ impl NodeKind {
 pub(crate) fn containment_message(parent: &NodeKind, child: &NodeKind) -> String {
     match parent.allowed_children() {
         Some(allowed) => format!(
-            "{} ne contient que {}, pas {}",
+            "{} only contains {}, not {}",
             parent.with_article(),
             allowed,
             child.with_article()
         ),
         None => format!(
-            "{} ne peut contenir aucun enfant, pas {}",
+            "{} cannot contain any child, not {}",
             parent.with_article(),
             child.with_article()
         ),
@@ -561,25 +559,22 @@ mod tests {
     }
 
     #[test]
-    fn type_names_are_french() {
-        assert_eq!(folder().type_name(), "dossier");
-        assert_eq!(workbook().type_name(), "classeur");
-        assert_eq!(worksheet().type_name(), "feuille");
-        assert_eq!(column().type_name(), "colonne");
-        assert_eq!(graph().type_name(), "graphe");
-        assert_eq!(matrix().type_name(), "matrice");
+    fn type_names_are_english() {
+        assert_eq!(folder().type_name(), "folder");
+        assert_eq!(workbook().type_name(), "workbook");
+        assert_eq!(worksheet().type_name(), "worksheet");
+        assert_eq!(column().type_name(), "column");
+        assert_eq!(graph().type_name(), "graph");
+        assert_eq!(matrix().type_name(), "matrix");
         assert_eq!(note().type_name(), "note");
     }
 
     #[test]
     fn containment_message_names_both_natures() {
         let message = containment_message(&workbook(), &column());
-        assert_eq!(
-            message,
-            "un classeur ne contient que des feuilles, pas une colonne"
-        );
+        assert_eq!(message, "a workbook only contains worksheets, not a column");
         let message = containment_message(&note(), &column());
-        assert!(message.contains("aucun enfant"), "{message}");
+        assert!(message.contains("cannot contain any child"), "{message}");
     }
 
     #[test]

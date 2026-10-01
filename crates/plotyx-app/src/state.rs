@@ -61,9 +61,10 @@ use plotyx_plot::{
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
 #[cfg(feature = "python")]
-use plotyx_script::{ScriptEngine, ScriptOutcome};
+use plotyx_script::{ScriptEngine, ScriptError, ScriptOutcome};
 use plotyx_session::{SessionHandle, SessionResult, Snapshot};
 
+use crate::errors;
 use crate::history_text::history_text;
 use crate::selection::{GridCursor, Selection};
 use crate::tr;
@@ -1785,7 +1786,10 @@ pub struct AppState {
 /// refusé ou échoué — une [`plotyx_script::ScriptError`] n'a pas à traverser
 /// ce canal, `state.rs` n'en a pas besoin au-delà de son message.
 #[cfg(feature = "python")]
-type PendingScriptResult = (Option<Arc<ScriptEngine>>, Result<ScriptOutcome, String>);
+type PendingScriptResult = (
+    Option<Arc<ScriptEngine>>,
+    Result<ScriptOutcome, ScriptError>,
+);
 
 impl AppState {
     /// Construit l'état depuis une poignée d'acteur. `Err` seulement si
@@ -1940,7 +1944,10 @@ impl AppState {
     /// un aller-retour par image rendrait le glisser inutilement coûteux.
     pub fn set_window_geometry(&mut self, node: NodeId, geometry: plotyx_session::WindowGeometry) {
         if let Err(err) = self.handle.set_window_geometry(node, geometry) {
-            self.fail(format!("Échec de la mise à jour de la géométrie : {err}"));
+            self.fail(format!(
+                "Échec de la mise à jour de la géométrie : {}",
+                errors::session::error_message(&err)
+            ));
         }
     }
 
@@ -3021,7 +3028,10 @@ impl AppState {
         if self.plot_macro_open {
             self.plot_macro_open = false;
             if let Err(err) = self.handle.abort_macro() {
-                self.fail(format!("Annulation des propriétés impossible : {err}"));
+                self.fail(format!(
+                    "Annulation des propriétés impossible : {}",
+                    errors::session::error_message(&err)
+                ));
             }
             self.refresh();
         }
@@ -3040,7 +3050,8 @@ impl AppState {
         match self.handle.begin_macro(MacroKind::GraphProperties) {
             Ok(_) => self.plot_macro_open = true,
             Err(err) => self.fail(format!(
-                "Propriétés : annulation groupée indisponible ({err})"
+                "Propriétés : annulation groupée indisponible ({})",
+                errors::session::error_message(&err)
             )),
         }
     }
@@ -3430,7 +3441,7 @@ impl AppState {
                 self.snapshot = snapshot;
                 self.revalidate_selection();
             }
-            Err(err) => self.fail(format!("Session injoignable : {err}")),
+            Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
 
@@ -3470,7 +3481,7 @@ impl AppState {
             }
             match result {
                 Ok(outcome) => self.finish_script_run(outcome),
-                Err(message) => self.fail(message),
+                Err(error) => self.fail(errors::script::error_message(&error)),
             }
         }
     }
@@ -3741,7 +3752,7 @@ impl AppState {
             };
             for item in import_items(&PathBuf::from(&source.path), &recipe) {
                 if let Err(message) = &item.table {
-                    failures.push(message.clone());
+                    failures.push(errors::import::failure_message(message));
                 } else {
                     items.push(item);
                 }
@@ -4119,7 +4130,7 @@ impl AppState {
                 let status = self.import_bytes(path).and_then(|bytes| {
                     plotyx_import::parse(&bytes, &state.recipe)
                         .map(|table| table.row_count())
-                        .map_err(|err| err.to_string())
+                        .map_err(|err| errors::import::error_message(&err))
                 });
                 (path.clone(), status)
             })
@@ -4311,7 +4322,8 @@ impl AppState {
         let state = self.import_state.as_ref()?;
         let path = self.import_preview_path()?;
         let result = self.import_bytes(&path).and_then(|bytes| {
-            plotyx_import::parse(&bytes, &state.recipe).map_err(|err| err.to_string())
+            plotyx_import::parse(&bytes, &state.recipe)
+                .map_err(|err| errors::import::error_message(&err))
         });
         Some(result)
     }
@@ -4328,7 +4340,8 @@ impl AppState {
         let state = self.import_state.as_ref()?;
         let path = self.import_preview_path()?;
         let result = self.import_bytes(&path).and_then(|bytes| {
-            plotyx_import::preview(&bytes, &state.recipe).map_err(|err| err.to_string())
+            plotyx_import::preview(&bytes, &state.recipe)
+                .map_err(|err| errors::import::error_message(&err))
         });
         Some(result)
     }
@@ -4450,7 +4463,7 @@ impl AppState {
                 self.notice(history_text(&label));
                 self.refresh();
             }
-            Err(err) => self.fail(format!("{err}")),
+            Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
 
@@ -4467,7 +4480,7 @@ impl AppState {
                 self.refresh();
             }
             Ok(None) => self.notice("Rien à annuler".to_string()),
-            Err(err) => self.fail(format!("{err}")),
+            Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
 
@@ -4482,7 +4495,7 @@ impl AppState {
                 self.refresh();
             }
             Ok(None) => self.notice("Rien à rétablir".to_string()),
-            Err(err) => self.fail(format!("{err}")),
+            Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
 
@@ -4493,7 +4506,7 @@ impl AppState {
                 let text = format!("Enregistré dans {}", self.path);
                 self.notice(text);
             }
-            Err(err) => self.fail(format!("Échec de l'enregistrement : {err}")),
+            Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
 
@@ -4540,7 +4553,7 @@ impl AppState {
             format,
         ) {
             Ok(()) => self.notice(format!("Graphe exporté dans {}", path.display())),
-            Err(err) => self.fail(format!("Échec de l'export : {err}")),
+            Err(err) => self.fail(errors::export::error_message(&err)),
         }
     }
 
@@ -4556,7 +4569,7 @@ impl AppState {
                 self.notice(text);
                 self.refresh();
             }
-            Err(err) => self.fail(format!("Échec du chargement : {err}")),
+            Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
 
@@ -5289,7 +5302,8 @@ impl AppState {
     fn end_grouped_macro(&mut self) {
         if let Err(err) = self.handle.end_macro() {
             self.fail(format!(
-                "Clôture de l'entrée d'historique impossible : {err}"
+                "Clôture de l'entrée d'historique impossible : {}",
+                errors::session::error_message(&err)
             ));
         }
         self.refresh();
@@ -5392,8 +5406,8 @@ impl AppState {
         // en échec dès qu'au moins un fichier a échoué, pour que ça se voie.
         let mut failures: Vec<String> = Vec::new();
         for item in &items {
-            if let Err(message) = &item.table {
-                failures.push(message.clone());
+            if let Err(failure) = &item.table {
+                failures.push(errors::import::failure_message(failure));
             }
         }
         let mut done_paths: Vec<PathBuf> = Vec::new();
@@ -5799,13 +5813,11 @@ impl AppState {
             .spawn(move || {
                 let engine = match existing_engine {
                     Some(engine) => Ok(engine),
-                    None => ScriptEngine::spawn(handle, python)
-                        .map(Arc::new)
-                        .map_err(|err| err.to_string()),
+                    None => ScriptEngine::spawn(handle, python).map(Arc::new),
                 };
                 let reply = match engine {
                     Ok(engine) => {
-                        let outcome = engine.run(&source).map_err(|err| err.to_string());
+                        let outcome = engine.run(&source);
                         (Some(engine), outcome)
                     }
                     Err(message) => (None, Err(message)),

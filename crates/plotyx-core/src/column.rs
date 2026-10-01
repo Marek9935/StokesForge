@@ -83,9 +83,9 @@ impl ColumnType {
     /// deux messages ne nomment pas le même type différemment.
     pub fn type_name(self) -> &'static str {
         match self {
-            ColumnType::Numeric => "numérique",
-            ColumnType::DateTime => "date-heure",
-            ColumnType::Mixed => "mixte",
+            ColumnType::Numeric => "numeric",
+            ColumnType::DateTime => "date/time",
+            ColumnType::Mixed => "mixed",
         }
     }
 }
@@ -649,7 +649,7 @@ fn write_block<T: Clone>(
     let resulting_len = start.saturating_add(new_values.len()).max(vec.len());
     if resulting_len > MAX_COLUMN_ROWS {
         return Err(CoreError::IndexOutOfBounds(format!(
-            "l'écriture porterait la colonne à {resulting_len} lignes, au-delà de la borne de {MAX_COLUMN_ROWS}"
+            "the write would grow the column to {resulting_len} rows, beyond the limit of {MAX_COLUMN_ROWS}"
         )));
     }
     let previous_length = vec.len();
@@ -836,7 +836,7 @@ impl Column {
             (ColumnType::Mixed, ValueBlock::Mixed(values)) => ColumnValues::Mixed(Arc::new(values)),
             _ => {
                 return Err(CoreError::TypeMismatch(
-                    "le bloc de valeurs ne correspond pas au type de la colonne".to_string(),
+                    "the value block does not match the column type".to_string(),
                 ))
             }
         };
@@ -1007,7 +1007,7 @@ impl Column {
                 })
             }
             _ => Err(CoreError::TypeMismatch(format!(
-                "bloc de valeurs incompatible avec le type de la colonne ({:?})",
+                "value block incompatible with the column type ({:?})",
                 self.column_type
             ))),
         }
@@ -1061,13 +1061,13 @@ impl Column {
         let len = self.len();
         if at > len {
             return Err(CoreError::IndexOutOfBounds(format!(
-                "ligne {at} hors bornes (longueur {len})"
+                "row {at} out of bounds (length {len})"
             )));
         }
         let resulting_len = len.saturating_add(count);
         if resulting_len > MAX_COLUMN_ROWS {
             return Err(CoreError::IndexOutOfBounds(format!(
-                "l'insertion porterait la colonne à {resulting_len} lignes, au-delà de la borne de {MAX_COLUMN_ROWS}"
+                "the insertion would grow the column to {resulting_len} rows, beyond the limit of {MAX_COLUMN_ROWS}"
             )));
         }
         self.version = self.version.wrapping_add(1);
@@ -1094,7 +1094,7 @@ impl Column {
         let len = self.len();
         if at > len {
             return Err(CoreError::IndexOutOfBounds(format!(
-                "ligne {at} hors bornes (longueur {len})"
+                "row {at} out of bounds (length {len})"
             )));
         }
         self.version = self.version.wrapping_add(1);
@@ -1179,7 +1179,7 @@ impl Column {
         );
         if !matches_type {
             return Err(CoreError::TypeMismatch(format!(
-                "les valeurs ne correspondent pas au type {column_type:?}"
+                "the values do not match the type {column_type:?}"
             )));
         }
         self.column_type = column_type;

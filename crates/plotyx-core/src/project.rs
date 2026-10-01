@@ -300,7 +300,7 @@ impl Project {
         let sheet_node = self.tree.get(sheet)?;
         if !sheet_node.kind().is_worksheet() {
             return Err(CoreError::Structure(format!(
-                "{sheet} n'est pas une feuille mais {}",
+                "{sheet} is not a worksheet but {}",
                 sheet_node.kind().with_article()
             )));
         }
@@ -430,7 +430,7 @@ impl Project {
         let node = self.tree.get(id)?;
         if !node.kind().is_window() {
             return Err(CoreError::Structure(format!(
-                "{id} n'est pas une fenêtre mais {}",
+                "{id} is not a window but {}",
                 node.kind().with_article()
             )));
         }
@@ -439,7 +439,7 @@ impl Project {
             .node_mut(id)?
             .kind_mut()
             .window_meta_mut()
-            .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas une fenêtre")))?;
+            .ok_or_else(|| CoreError::Structure(format!("{id} is not a window")))?;
         Ok(std::mem::replace(slot, meta))
     }
 
@@ -449,7 +449,7 @@ impl Project {
         let node = self.tree.get(id)?;
         if !matches!(node.kind(), NodeKind::Note { .. }) {
             return Err(CoreError::Structure(format!(
-                "{id} n'est pas une note mais {}",
+                "{id} is not a note but {}",
                 node.kind().with_article()
             )));
         }
@@ -457,7 +457,7 @@ impl Project {
         let slot = tree
             .node_mut(id)?
             .note_text_mut()
-            .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas une note")))?;
+            .ok_or_else(|| CoreError::Structure(format!("{id} is not a note")))?;
         Ok(std::mem::replace(slot, text.to_string()))
     }
 
@@ -470,7 +470,7 @@ impl Project {
         let node = self.tree.get(id)?;
         if !matches!(node.kind(), NodeKind::Graph { .. }) {
             return Err(CoreError::Structure(format!(
-                "{id} n'est pas un graphe mais {}",
+                "{id} is not a graph but {}",
                 node.kind().with_article()
             )));
         }
@@ -479,7 +479,7 @@ impl Project {
             .node_mut(id)?
             .kind_mut()
             .plot_spec_mut()
-            .ok_or_else(|| CoreError::Structure(format!("{id} n'est pas un graphe")))?;
+            .ok_or_else(|| CoreError::Structure(format!("{id} is not a graph")))?;
         Ok(std::mem::replace(slot, spec))
     }
 
@@ -864,7 +864,7 @@ impl Project {
     fn required_parent(&self, id: NodeId) -> CoreResult<NodeId> {
         self.tree
             .parent(id)?
-            .ok_or_else(|| CoreError::Structure(format!("{id} n'a pas de parent")))
+            .ok_or_else(|| CoreError::Structure(format!("{id} has no parent")))
     }
 
     /// Vérifie en lecture seule que `id` est une colonne — évite de cloner
@@ -875,7 +875,7 @@ impl Project {
             Ok(())
         } else {
             Err(CoreError::Structure(format!(
-                "{id} n'est pas une colonne mais {}",
+                "{id} is not a column but {}",
                 node.kind().with_article()
             )))
         }
@@ -890,7 +890,7 @@ impl Project {
         let sheet_node = self.tree.get(sheet)?;
         if !sheet_node.kind().is_worksheet() {
             return Err(CoreError::Structure(format!(
-                "{sheet} n'est pas une feuille mais {}",
+                "{sheet} is not a worksheet but {}",
                 sheet_node.kind().with_article()
             )));
         }
