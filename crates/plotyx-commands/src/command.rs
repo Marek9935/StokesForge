@@ -34,6 +34,8 @@
 use plotyx_core::{Column, ColumnMeta, ColumnType, NodeId, Tree, ValueBlock, WindowMeta};
 use plotyx_plot::{PlotSpec, SavedColors};
 
+use crate::label::{ColumnRef, HistoryLabel};
+
 /// Une des mutations du modèle exprimables par l'utilisateur.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -289,76 +291,53 @@ pub enum Command {
 }
 
 impl Command {
-    /// Libellé d'historique, en français, à calculer sur l'arbre **avant**
-    /// application : c'est là que les noms visés existent encore (une colonne
-    /// supprimée n'a plus de nom après coup).
+    /// Libellé d'historique, **structuré** (l'action et ses paramètres, pas une
+    /// phrase : l'application la met en phrase dans la langue courante), à
+    /// calculer sur l'arbre **avant** application : c'est là que les noms visés
+    /// existent encore (une colonne supprimée n'a plus de nom après coup).
     ///
-    /// Cette fonction ne peut pas échouer : si le nœud est inconnu, elle rend
-    /// un libellé générique (« Saisie », « Renommer en Z »...). C'est
-    /// l'application de la commande qui échouera, avec la bonne erreur ; un
-    /// libellé n'est pas l'endroit où signaler un problème.
-    pub fn label(&self, tree: &Tree) -> String {
+    /// Cette fonction ne peut pas échouer : si le nœud est inconnu, le champ
+    /// concerné vaut `None` et la phrase retombe sur une forme générique.
+    /// C'est l'application de la commande qui échouera, avec la bonne erreur ;
+    /// un libellé n'est pas l'endroit où signaler un problème.
+    pub fn label(&self, tree: &Tree) -> HistoryLabel {
+        let name = |id: NodeId| name_of(tree, id).map(str::to_string);
         match self {
             Command::SetCells { column, .. } | Command::SetCellsPromoting { column, .. } => {
-                match column_label(tree, *column) {
-                    Some(label) => format!("Saisie dans {label}"),
-                    None => "Saisie".to_string(),
+                HistoryLabel::SetCells {
+                    column: column_ref(tree, *column),
                 }
             }
-            Command::AddColumn { .. } => "Ajouter une colonne".to_string(),
-            Command::DeleteColumn { column } => match column_label(tree, *column) {
-                Some(label) => format!("Supprimer {label}"),
-                None => "Supprimer la colonne".to_string(),
+            Command::AddColumn { .. } => HistoryLabel::AddColumn,
+            Command::DeleteColumn { column } => HistoryLabel::DeleteColumn {
+                column: column_ref(tree, *column),
             },
-            Command::Rename { id, name } => match name_of(tree, *id) {
-                Some(previous) => format!("Renommer {previous} en {name}"),
-                None => format!("Renommer en {name}"),
+            Command::Rename { id, name: to } => HistoryLabel::Rename {
+                from: name(*id),
+                to: to.clone(),
             },
-            Command::Move { id, .. } => match name_of(tree, *id) {
-                Some(name) => format!("Déplacer {name}"),
-                None => "Déplacer".to_string(),
+            Command::Move { id, .. } => HistoryLabel::Move { name: name(*id) },
+            Command::SetColumnType { column, .. } => HistoryLabel::SetColumnType {
+                column: column_ref(tree, *column),
             },
-            Command::SetColumnType { column, .. } => match column_label(tree, *column) {
-                Some(label) => format!("Changer le type de {label}"),
-                None => "Changer le type".to_string(),
+            Command::InsertRows { count, .. } => HistoryLabel::InsertRows { count: *count },
+            Command::DeleteRows { count, .. } => HistoryLabel::DeleteRows { count: *count },
+            Command::DeleteCells { count, .. } => HistoryLabel::DeleteCells { count: *count },
+            Command::AddFolder { name, .. } => HistoryLabel::AddFolder { name: name.clone() },
+            Command::AddWorkbook { .. } => HistoryLabel::AddWorkbook,
+            Command::AddEmptyWorkbook { .. } => HistoryLabel::AddEmptyWorkbook,
+            Command::AddWorksheet { .. } => HistoryLabel::AddWorksheet,
+            Command::AddGraph { .. } => HistoryLabel::AddGraph,
+            Command::AddMatrix { .. } => HistoryLabel::AddMatrix,
+            Command::AddNote { .. } => HistoryLabel::AddNote,
+            Command::RemoveNode { id } => HistoryLabel::RemoveNode { name: name(*id) },
+            Command::SetWindowMeta { id, .. } => HistoryLabel::SetWindowMeta { name: name(*id) },
+            Command::SetNoteText { id, .. } => HistoryLabel::SetNoteText { name: name(*id) },
+            Command::SetColumnMeta { column, .. } => HistoryLabel::SetColumnMeta {
+                column: column_ref(tree, *column),
             },
-            Command::InsertRows { count, .. } => {
-                format!("Insérer {count} {}", rows_word(*count))
-            }
-            Command::DeleteRows { count, .. } => {
-                format!("Supprimer {count} {}", rows_word(*count))
-            }
-            Command::DeleteCells { count, .. } => {
-                format!("Supprimer et remonter {count} {}", rows_word(*count))
-            }
-            Command::AddFolder { name, .. } => format!("Ajouter le dossier {name}"),
-            Command::AddWorkbook { .. } => "Ajouter un classeur".to_string(),
-            Command::AddEmptyWorkbook { .. } => "Ajouter un classeur vide".to_string(),
-            Command::AddWorksheet { .. } => "Ajouter une feuille".to_string(),
-            Command::AddGraph { .. } => "Ajouter un graphe".to_string(),
-            Command::AddMatrix { .. } => "Ajouter une matrice".to_string(),
-            Command::AddNote { .. } => "Ajouter une note".to_string(),
-            Command::RemoveNode { id } => match name_of(tree, *id) {
-                Some(name) => format!("Supprimer {name}"),
-                None => "Supprimer".to_string(),
-            },
-            Command::SetWindowMeta { id, .. } => match name_of(tree, *id) {
-                Some(name) => format!("Modifier les propriétés de {name}"),
-                None => "Modifier les propriétés de la fenêtre".to_string(),
-            },
-            Command::SetNoteText { id, .. } => match name_of(tree, *id) {
-                Some(name) => format!("Modifier le texte de {name}"),
-                None => "Modifier le texte de la note".to_string(),
-            },
-            Command::SetColumnMeta { column, .. } => match column_label(tree, *column) {
-                Some(label) => format!("Modifier les métadonnées de {label}"),
-                None => "Modifier les métadonnées de la colonne".to_string(),
-            },
-            Command::SetPlotSpec { graph, .. } => match name_of(tree, *graph) {
-                Some(name) => format!("Modifier le graphe {name}"),
-                None => "Modifier le graphe".to_string(),
-            },
-            Command::SetSavedColors { .. } => "Modifier les couleurs enregistrées".to_string(),
+            Command::SetPlotSpec { graph, .. } => HistoryLabel::SetPlotSpec { name: name(*graph) },
+            Command::SetSavedColors { .. } => HistoryLabel::SetSavedColors,
         }
     }
 }
@@ -411,42 +390,18 @@ fn name_of(tree: &Tree, id: NodeId) -> Option<&str> {
     tree.node(id).map(plotyx_core::Node::name)
 }
 
-/// Désignation d'une **colonne** dans un libellé d'historique : « colonne A »,
-/// d'après sa position dans sa feuille — jamais son nom de nœud.
+/// Désignation d'une **colonne** dans un libellé d'historique : sa position
+/// dans sa feuille ([`ColumnRef`]), jamais son nom de nœud — voir la doc de
+/// [`ColumnRef`] pour le piège des deux identités.
 ///
-/// Une colonne porte deux identités, et une seule est visible. Son **nom de
-/// nœud** (« Temps », « A », « Signal »…) est une clé du modèle : il sert à
-/// la résoudre depuis un script (`pyx.resolve("[Book1]Sheet1!Temps")`), à
-/// l'adresser dans une spec de graphe et à la retrouver dans un `.plx`. La
-/// grille, elle, ne l'affiche **nulle part** : elle montre la lettre de
-/// position (A, B, C…) et les quatre champs de `ColumnMeta` (Nom long,
-/// Unité, Commentaire, Formule), qui sont autre chose encore. Un libellé
-/// bâti sur le nom de nœud annonçait donc « Saisie dans Temps » pour une
-/// colonne que l'utilisateur ne connaît que sous le nom de « A » — un mot
-/// introuvable à l'écran.
-///
-/// Passe par [`plotyx_core::spreadsheet_name`], la même fonction que la
-/// grille, pour que la lettre du libellé soit toujours celle de l'en-tête.
 /// `None` si la colonne n'est plus dans l'arbre ou n'a pas de feuille
-/// parente : l'appelant retombe alors sur un libellé générique.
-fn column_label(tree: &Tree, column: NodeId) -> Option<String> {
+/// parente : la phrase retombe alors sur une forme générique.
+fn column_ref(tree: &Tree, column: NodeId) -> Option<ColumnRef> {
     let sheet = tree.parent(column).ok().flatten()?;
     let index = tree
         .children(sheet)
         .ok()?
         .iter()
         .position(|&child| child == column)?;
-    Some(format!(
-        "la colonne {}",
-        plotyx_core::spreadsheet_name(index)
-    ))
-}
-
-/// « ligne » ou « lignes » : en français, 0 et 1 restent au singulier.
-fn rows_word(count: usize) -> &'static str {
-    if count > 1 {
-        "lignes"
-    } else {
-        "ligne"
-    }
+    Some(ColumnRef(index))
 }

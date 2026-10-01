@@ -71,6 +71,17 @@ est en tête de `crates/plotyx-app/src/i18n.rs` ; la vue d'ensemble dans
 5. Une **clé retirée** de `en` se retire aussi de `fr` : une clé de `fr` absente
    de `en` fait échouer le test de complétude.
 
+**Libellés d'historique** (#46) : une clé `history-*` par variante de
+`HistoryLabel` (et par forme : cible connue ou non), branchée dans
+`src/history_text.rs`. Title Case, verbe d'abord ; un nom choisi par
+l'utilisateur est entre « “ ” », une colonne se dit « Column A » (lettre de la
+grille). Le `Display` anglais de `plotyx-commands` doit dire la même chose que
+le catalogue : `tests/history_text.rs` le vérifie.
+
+Un test qui compare une langue précise bâtit son chargeur et écrit
+`tr!(in loader; "clé", arg = …)` : même vérification à la compilation, sans
+dépendre de `PLOTYX_LANG`.
+
 `tr!` est l'**unique point d'entrée** (il enveloppe `fl!`) : un changement de
 mécanique ne doit pas toucher les appels. Ne jamais appeler `fl!` ni le
 chargeur directement dans l'interface.

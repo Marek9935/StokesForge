@@ -1245,13 +1245,13 @@ impl PlotyxApp {
                     }
                 });
                 ui.menu_button("Édition", |ui| {
-                    // Le libellé complet (« Annuler Saisie dans A ») et le
+                    // Le libellé complet (« Undo Edit Cells in Column A ») et le
                     // grisage sont deux lignes distinctes ici ; Qt les tenait
                     // ensemble dans une seule `QAction`.
                     let undo = self
                         .state
                         .undo_label()
-                        .unwrap_or_else(|| "Annuler".to_string());
+                        .unwrap_or_else(|| tr!("history-undo"));
                     if ui
                         .add_enabled(
                             self.state.can_undo(),
@@ -1266,7 +1266,7 @@ impl PlotyxApp {
                     let redo = self
                         .state
                         .redo_label()
-                        .unwrap_or_else(|| "Rétablir".to_string());
+                        .unwrap_or_else(|| tr!("history-redo"));
                     if ui
                         .add_enabled(
                             self.state.can_redo(),

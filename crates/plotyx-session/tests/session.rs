@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::thread;
 
-use plotyx_commands::{Command, CommandError, DEFAULT_LIMIT};
+use plotyx_commands::{ColumnRef, Command, CommandError, HistoryLabel, MacroKind, DEFAULT_LIMIT};
 use plotyx_core::{Cell, Column, CoreError, NodeId, Project, ValueBlock};
 use plotyx_persistence::PersistenceError;
 use plotyx_session::{Session, SessionError, Snapshot};
@@ -70,8 +70,10 @@ fn round_trip_execute_undo_redo() {
     assert_eq!(read_a(&snap1, a)[0], 42.0);
     assert!(snap1.history.can_undo);
     assert_eq!(
-        snap1.history.undo_label.as_deref(),
-        Some("Saisie dans la colonne A")
+        snap1.history.undo_label,
+        Some(HistoryLabel::SetCells {
+            column: Some(ColumnRef(0))
+        })
     );
 
     let after_undo = handle.undo().expect("undo réussi");
@@ -155,7 +157,9 @@ fn macros_group_and_undo_atomically() {
     let session = Session::spawn(project, None).expect("thread de l'acteur démarré");
     let handle = session.handle();
 
-    let begin_rev = handle.begin_macro("Import").expect("ouverture de macro");
+    let begin_rev = handle
+        .begin_macro(MacroKind::Import)
+        .expect("ouverture de macro");
     assert_eq!(begin_rev, 1);
     assert!(handle.snapshot().expect("snapshot").history.in_macro);
 
@@ -170,7 +174,10 @@ fn macros_group_and_undo_atomically() {
 
     let snap = handle.snapshot().expect("snapshot");
     assert!(!snap.history.in_macro);
-    assert_eq!(snap.history.undo_label.as_deref(), Some("Import"));
+    assert_eq!(
+        snap.history.undo_label,
+        Some(HistoryLabel::Macro(MacroKind::Import))
+    );
 
     handle.undo().expect("undo de la macro");
     let after = handle.snapshot().expect("snapshot");
@@ -183,7 +190,7 @@ fn macros_group_and_undo_atomically() {
     ));
 
     handle
-        .begin_macro("Autre")
+        .begin_macro(MacroKind::PasteCells)
         .expect("ouverture d'une nouvelle macro");
     let err = handle
         .undo()
@@ -229,8 +236,10 @@ fn two_clients_share_one_history_stack() {
     let handle = session.handle();
     let both_done = handle.snapshot().expect("snapshot");
     assert_eq!(
-        both_done.history.undo_label.as_deref(),
-        Some("Saisie dans la colonne A")
+        both_done.history.undo_label,
+        Some(HistoryLabel::SetCells {
+            column: Some(ColumnRef(0))
+        })
     );
 
     // Le premier undo annule la dernière écriture arrivée, quelle qu'elle
@@ -474,7 +483,9 @@ fn load_is_refused_while_a_macro_is_open() {
     let session = Session::spawn(project, None).expect("thread de l'acteur démarré");
     let handle = session.handle();
 
-    handle.begin_macro("Import").expect("ouverture de macro");
+    handle
+        .begin_macro(MacroKind::Import)
+        .expect("ouverture de macro");
 
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let path = dir.path().join("session.plyx");
@@ -556,7 +567,7 @@ fn a_handle_with_a_new_identity_cannot_write_into_anothers_macro() {
         expected_version: None,
     };
 
-    owner.begin_macro("Propriétés").unwrap();
+    owner.begin_macro(MacroKind::GraphProperties).unwrap();
     assert!(
         same.execute(write(5.0)).is_ok(),
         "le clone est le même émetteur"

@@ -218,13 +218,22 @@ pub fn language() -> Language {
 /// Traduit une clé du catalogue `en` dans la langue courante.
 ///
 /// - sans argument : `tr!("menu-file")` ;
-/// - avec arguments nommés : `tr!("witness-count", count = n)`.
+/// - avec arguments nommés : `tr!("witness-count", count = n)` ;
+/// - dans un autre chargeur que le global : `tr!(in loader; "menu-file")`, pour
+///   un test qui compare une langue précise ([`build_loader`]) sans dépendre de
+///   celle de l'environnement. Les mêmes vérifications à la compilation.
 ///
 /// Enveloppe `i18n_embed_fl::fl!` : une clé inconnue ou un argument inconnu
 /// **ne compile pas**. C'est le seul point d'entrée à employer dans
 /// l'interface (voir la doc du module).
 #[macro_export]
 macro_rules! tr {
+    (in $loader:expr; $message_id:literal) => {
+        ::i18n_embed_fl::fl!($loader, $message_id)
+    };
+    (in $loader:expr; $message_id:literal, $($args:tt)*) => {
+        ::i18n_embed_fl::fl!($loader, $message_id, $($args)*)
+    };
     ($message_id:literal) => {
         ::i18n_embed_fl::fl!($crate::i18n::loader(), $message_id)
     };

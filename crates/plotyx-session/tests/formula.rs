@@ -3,7 +3,7 @@
 //! `plotyx-session::actor::recalc_formulas` pour la portée exacte du
 //! déclenchement que ces tests vérifient depuis l'extérieur.
 
-use plotyx_commands::Command;
+use plotyx_commands::{ColumnRef, Command, HistoryLabel};
 use plotyx_core::{Cell, Column, ColumnMeta, ColumnType, MixedCell, NodeId, Project, ValueBlock};
 use plotyx_session::{Session, Snapshot};
 
@@ -106,8 +106,10 @@ fn editing_a_source_column_recalculates_the_formula_column() {
     assert_eq!(read_floats(&snapshot, a)[0], 100.0);
     assert_eq!(read_floats(&snapshot, c)[0], 110.0);
     assert_eq!(
-        snapshot.history.undo_label.as_deref(),
-        Some("Saisie dans la colonne A"),
+        snapshot.history.undo_label,
+        Some(HistoryLabel::SetCells {
+            column: Some(ColumnRef(0))
+        }),
         "le recalcul ne pousse pas sa propre entrée d'historique"
     );
 

@@ -1,6 +1,6 @@
 //! Batterie 6 — accès concurrents à l'état partagé (l'acteur de session).
 
-use plotyx_commands::{Command, CommandError};
+use plotyx_commands::{Command, CommandError, MacroKind};
 use plotyx_core::{Column, ColumnType, CoreError, NodeId, Project, ValueBlock};
 use plotyx_session::{Session, SessionError, SessionHandle};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -165,7 +165,7 @@ fn b6_macro_dun_client_avale_le_travail_dun_autre() {
     let script = s.handle();
     let valeur_initiale = valeurs(&script, cols[1])[0];
 
-    ui.begin_macro("import").unwrap();
+    ui.begin_macro(MacroKind::Import).unwrap();
     let refus = script.execute(Command::SetCells {
         column: cols[1],
         start: 0,
@@ -283,7 +283,7 @@ fn b6_acteur_arrete_rend_disconnected_et_pas_pire() {
     assert!(matches!(h.undo(), Err(SessionError::Disconnected)));
     assert!(matches!(h.redo(), Err(SessionError::Disconnected)));
     assert!(matches!(
-        h.begin_macro("x"),
+        h.begin_macro(MacroKind::Import),
         Err(SessionError::Disconnected)
     ));
     assert!(matches!(h.end_macro(), Err(SessionError::Disconnected)));

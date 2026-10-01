@@ -78,13 +78,19 @@ Dans cet ordre, en s'arrêtant aux maillons que la commande touche réellement :
    Chercher d'abord : elle existe peut-être déjà.
 2. **`plotyx-commands/src/command.rs`** — la variante de `Command`, son
    classement dans `is_structural`, son libellé d'historique.
+   **Le libellé est une donnée, pas une phrase** (#46) : une variante de
+   `HistoryLabel` (`src/label.rs`) avec ses paramètres, jamais une `String`.
+   Ajouter la variante, sa ligne de `Display` (anglais, journaux et CLI), et
+   l'exemple de `plotyx-commands/tests/labels.rs` (le test exhaustif échoue
+   sinon). Un groupe ouvert par `begin_macro` est un `MacroKind` fermé : une
+   nouvelle nature de groupe ajoute une variante, pas un texte.
    **Piège de libellé** : une colonne a deux identités, et une seule est
    visible. Son nom de nœud (« Temps ») est une clé du modèle ; la grille
    n'affiche que sa **lettre de position** (A, B, C…). Un libellé d'historique
-   doit désigner une colonne par sa position (`command::column_label`,
-   `plotyx_core::spreadsheet_name`), sinon il nomme un mot introuvable à
-   l'écran. Les autres natures de nœud gardent leur nom réel — celui-là *est*
-   affiché, dans le Project Manager.
+   doit désigner une colonne par sa position (`ColumnRef`, depuis
+   `command::column_ref` ; lettre par `plotyx_core::spreadsheet_name`), sinon il
+   nomme un mot introuvable à l'écran. Les autres natures de nœud gardent leur
+   nom réel — celui-là *est* affiché, dans le Project Manager.
 3. **`plotyx-commands/src/history.rs`** — le delta calculé à l'application, et
    son annulation.
 4. **`plotyx-persistence`** — seulement si la commande écrit un état qui doit
@@ -98,7 +104,13 @@ Dans cet ordre, en s'arrêtant aux maillons que la commande touche réellement :
    type de réponse.
 6. **`plotyx-app`** — une variante d'`Action`, son traitement dans
    `AppState::dispatch`, puis le câblage UI (skill **plotyx-feature** pour les
-   quatre surfaces : raccourci, menu, grisage, libellé).
+   quatre surfaces : raccourci, menu, grisage, libellé). **La phrase
+   d'historique** s'écrit ici : la clé `history-*` dans
+   `i18n/en/plotyx_app.ftl` (Title Case, verbe, pluriel par sélecteur Fluent —
+   skill **plotyx-textes-interface**) et la branche de
+   `history_text.rs` (`match` exhaustif : une variante sans phrase ne compile
+   pas). `tests/history_text.rs` vérifie que le catalogue `en` et le `Display`
+   disent la même chose : le mettre d'accord.
 
 **Ne pas oublier le rafraîchissement** : l'instantané détenu par l'UI est figé
 (l'arbre est persistant). Il faut le redemander à l'acteur après toute mutation
@@ -126,7 +138,7 @@ dans `plotyx-robustesse/src/lib.rs`.
 - [ ] `docs/commandes-et-historique.md` et la doc de tête de `command.rs` lues
 - [ ] la primitive `core` existe (ou est ajoutée avec sa commande, sinon `b21` échoue)
 - [ ] classement structurelle/données assumé et cohérent avec le coût du delta
-- [ ] libellé d'historique : colonne désignée par sa **position**, pas son nom de nœud
+- [ ] libellé d'historique : variante de `HistoryLabel` (+ `Display`, exemple de `tests/labels.rs`, clé `history-*`, branche de `history_text.rs`), colonne désignée par sa **position**, pas son nom de nœud
 - [ ] transport `.plx` ajouté si l'état doit survivre au rechargement
 - [ ] `Action` + `dispatch` + rafraîchissement de l'instantané côté UI
 - [ ] tests : undo/redo, macro LIFO, aller-retour `.plx`, `b21`

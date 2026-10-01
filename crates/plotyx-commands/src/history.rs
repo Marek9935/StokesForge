@@ -44,6 +44,7 @@ use plotyx_plot::{PlotSpec, SavedColors};
 
 use crate::command::Command;
 use crate::error::{CommandError, CommandResult};
+use crate::label::{HistoryLabel, MacroKind};
 
 /// Delta d'une entrée de données : tout ce qu'il faut pour annuler **et**
 /// rétablir, sans retenir d'arbre.
@@ -198,7 +199,7 @@ pub enum Entry {
         /// Arbre d'après la commande.
         after: Arc<Tree>,
         /// Libellé d'historique.
-        label: String,
+        label: HistoryLabel,
     },
     /// Delta de données.
     Data {
@@ -212,20 +213,20 @@ pub enum Entry {
         /// mémoire du plus gros delta possible.
         delta: Box<DataDelta>,
         /// Libellé d'historique.
-        label: String,
+        label: HistoryLabel,
     },
     /// Groupe d'entrées, annulé en ordre inverse et rétabli en ordre direct.
     Macro {
         /// Entrées dans leur ordre d'application.
         entries: Vec<Entry>,
-        /// Libellé du groupe.
-        label: String,
+        /// Libellé du groupe : toujours [`HistoryLabel::Macro`].
+        label: HistoryLabel,
     },
 }
 
 impl Entry {
     /// Libellé affichable de l'entrée (« Annuler : ... »).
-    pub fn label(&self) -> &str {
+    pub fn label(&self) -> &HistoryLabel {
         match self {
             Entry::Structural { label, .. }
             | Entry::Data { label, .. }
@@ -355,7 +356,7 @@ pub struct History {
     /// Macros ouvertes, de la plus externe à la plus interne : libellé et
     /// entrées déjà empreintées, accumulées avant de devenir une seule
     /// entrée `Macro` à la fermeture.
-    macros: Vec<(String, Vec<Pinned>)>,
+    macros: Vec<(MacroKind, Vec<Pinned>)>,
     /// Pile de rétablissement telle qu'elle était avant l'ouverture de la
     /// macro la plus externe (`None` hors macro). Sauvegardée à
     /// `begin_macro`, elle est restaurée si cette macro est avortée — ou
@@ -578,12 +579,12 @@ impl History {
     }
 
     /// Libellé de la prochaine annulation.
-    pub fn undo_label(&self) -> Option<&str> {
+    pub fn undo_label(&self) -> Option<&HistoryLabel> {
         self.undo.last().map(|pinned| pinned.entry.label())
     }
 
     /// Libellé du prochain rétablissement.
-    pub fn redo_label(&self) -> Option<&str> {
+    pub fn redo_label(&self) -> Option<&HistoryLabel> {
         self.redo.last().map(|pinned| pinned.entry.label())
     }
 
@@ -613,14 +614,14 @@ impl History {
     /// 1`), la pile de rétablissement courante est mise de côté : elle
     /// pourra être restaurée si cette macro est avortée, voir
     /// [`History::abort_macro`].
-    pub fn begin_macro(&mut self, label: &str) -> CommandResult<()> {
+    pub fn begin_macro(&mut self, kind: MacroKind) -> CommandResult<()> {
         if self.macros.len() >= MAX_MACRO_DEPTH {
             return Err(CommandError::MacroTooDeep(MAX_MACRO_DEPTH));
         }
         if self.macros.is_empty() {
             self.saved_redo = Some(std::mem::take(&mut self.redo));
         }
-        self.macros.push((label.to_string(), Vec::new()));
+        self.macros.push((kind, Vec::new()));
         Ok(())
     }
 
@@ -638,7 +639,7 @@ impl History {
     /// pour toute commande. **Sauf** si la macro est vide (aucune entrée
     /// appliquée) : elle n'a rien changé, la sauvegarde est alors restaurée.
     pub fn end_macro(&mut self, project: &mut Project) -> CommandResult<()> {
-        let Some((label, entries)) = self.macros.pop() else {
+        let Some((kind, entries)) = self.macros.pop() else {
             return Err(CommandError::NotInMacro);
         };
         let is_outermost = self.macros.is_empty();
@@ -664,7 +665,7 @@ impl History {
         let footprint = union_footprint(entries.iter().map(|pinned| &pinned.footprint));
         let entry = Entry::Macro {
             entries: entries.into_iter().map(|pinned| pinned.entry).collect(),
-            label,
+            label: HistoryLabel::Macro(kind),
         };
         // `prior` n'est lu que sur la branche `Data` de `push_pinned` ; une
         // entrée `Macro` retombe sur `resync_pinned`, qui ne le regarde pas.
@@ -991,7 +992,7 @@ impl History {
         project: &mut Project,
         command: Command,
         before: &Arc<Tree>,
-        label: String,
+        label: HistoryLabel,
     ) -> CommandResult<Entry> {
         match command {
             Command::AddColumn {
@@ -1088,7 +1089,11 @@ impl History {
     ///
     /// N'est jamais appelée avec une commande structurelle — voir
     /// [`History::apply_structural`].
-    fn apply_data(project: &mut Project, command: Command, label: String) -> CommandResult<Entry> {
+    fn apply_data(
+        project: &mut Project,
+        command: Command,
+        label: HistoryLabel,
+    ) -> CommandResult<Entry> {
         match command {
             Command::SetCells {
                 column,
@@ -1514,7 +1519,7 @@ impl Default for History {
 }
 
 /// Entrée structurelle : l'arbre d'avant et celui d'après, deux pointeurs.
-fn structural(before: &Arc<Tree>, project: &Project, label: String) -> Entry {
+fn structural(before: &Arc<Tree>, project: &Project, label: HistoryLabel) -> Entry {
     Entry::Structural {
         before: Arc::clone(before),
         after: Arc::clone(project.tree()),

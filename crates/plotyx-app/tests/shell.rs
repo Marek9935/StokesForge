@@ -27,12 +27,14 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use plotyx_app::app::{grid_grip_side, GripSide};
+use plotyx_app::history_text::history_text;
 use plotyx_app::selection::Selection;
 use plotyx_app::state::{
     active_graph, drop_payload_action, file_drop_plan, Action, ActiveTabKind, AppState,
     ColumnDragPayload, GridZone, HeaderField, ImportDestination, MoveDirection, PlotAxis, PlotEdit,
     PlotSettingsTab, PlotTarget,
 };
+use plotyx_commands::{ColumnRef, HistoryLabel, MacroKind};
 use plotyx_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
 use plotyx_import::{DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator};
 use plotyx_plot::{AxisScale, PlotType, RawVariant};
@@ -285,15 +287,17 @@ fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
     assert_eq!(cell(&state, temps, 1), Cell::Float(42.5));
     assert_eq!(state.cell_text(temps, 1), "42.5");
     assert!(state.can_undo());
-    // « la colonne A », pas « Temps » : le libellé désigne la colonne comme
-    // la grille l'affiche (sa lettre de position), jamais par son nom de
-    // nœud, qui n'apparaît nulle part à l'écran — voir
-    // `plotyx_commands::command::column_label`. `Temps` reste le nom de nœud
-    // de cette colonne (c'est par lui que `column_id` la retrouve ici), il
-    // n'a simplement plus sa place dans un libellé destiné à l'utilisateur.
+    // La colonne A, pas « Temps » : le libellé désigne la colonne comme la
+    // grille l'affiche (sa lettre de position, `ColumnRef`), jamais par son
+    // nom de nœud, qui n'apparaît nulle part à l'écran. `Temps` reste le nom
+    // de nœud de cette colonne (c'est par lui que `column_id` la retrouve
+    // ici), il n'a simplement plus sa place dans un libellé destiné à
+    // l'utilisateur.
     assert_eq!(
         state.undo_label(),
-        Some("Annuler Saisie dans la colonne A".to_string())
+        Some(undo_entry(&HistoryLabel::SetCells {
+            column: Some(ColumnRef(0))
+        }))
     );
     assert!(state.snapshot().revision > before);
 }
@@ -445,7 +449,9 @@ fn undo_and_redo_walk_the_history_both_ways() {
     assert!(state.can_redo());
     assert_eq!(
         state.redo_label(),
-        Some("Rétablir Saisie dans la colonne A".to_string())
+        Some(redo_entry(&HistoryLabel::SetCells {
+            column: Some(ColumnRef(0))
+        }))
     );
 
     state.dispatch(Action::Redo);
@@ -762,8 +768,8 @@ fn creating_a_workbook_is_undoable_and_redoable() {
         "un nouveau classeur contient sa feuille initiale"
     );
     assert_eq!(
-        state.undo_label().as_deref(),
-        Some("Annuler Ajouter un classeur")
+        state.undo_label(),
+        Some(undo_entry(&HistoryLabel::Macro(MacroKind::AddWorkbook)))
     );
 
     state.dispatch(Action::Undo);
@@ -822,6 +828,18 @@ fn selecting_something_that_is_not_a_sheet_is_refused() {
     assert_eq!(state.selected_sheet_in(book1), selected);
 }
 
+/// Le texte du menu Annuler pour `label`, dans la langue courante : le test
+/// compare la **structure** (quelle entrée, quels paramètres), pas une langue ;
+/// les phrases anglaises sont tenues par `tests/history_text.rs`.
+fn undo_entry(label: &HistoryLabel) -> String {
+    plotyx_app::tr!("history-undo-entry", label = history_text(label))
+}
+
+/// Le texte du menu Rétablir pour `label`, comme [`undo_entry`].
+fn redo_entry(label: &HistoryLabel) -> String {
+    plotyx_app::tr!("history-redo-entry", label = history_text(label))
+}
+
 // -- 12. Libellés --
 
 #[test]
@@ -835,20 +853,12 @@ fn labels_prefix_the_history_entry_and_vanish_when_the_action_is_impossible() {
 
     state.dispatch(Action::AddColumn { sheet: sheet1 });
     let undo = state.undo_label().expect("un libellé d'annulation");
-    assert!(
-        undo.starts_with("Annuler "),
-        "préfixe attendu, reçu {undo:?}"
-    );
-    assert_eq!(undo, "Annuler Ajouter une colonne");
+    assert_eq!(undo, undo_entry(&HistoryLabel::AddColumn));
     assert_eq!(state.redo_label(), None, "rien à rétablir");
 
     state.dispatch(Action::Undo);
     let redo = state.redo_label().expect("un libellé de rétablissement");
-    assert!(
-        redo.starts_with("Rétablir "),
-        "préfixe attendu, reçu {redo:?}"
-    );
-    assert_eq!(redo, "Rétablir Ajouter une colonne");
+    assert_eq!(redo, redo_entry(&HistoryLabel::AddColumn));
     assert_eq!(state.undo_label(), None);
 }
 
@@ -5938,14 +5948,14 @@ fn dropping_files_while_the_wizard_is_open_adds_them_to_its_list() {
 
 /// L'instantané de l'UI reflète la macro close dès la fin de l'action : même
 /// `can_undo` et même libellé que l'acteur.
-fn assert_undo_state_matches_actor(session: &Session, state: &AppState, label: &str) {
+fn assert_undo_state_matches_actor(session: &Session, state: &AppState, label: HistoryLabel) {
     let actual = session.handle().snapshot().unwrap();
     assert_eq!(state.can_undo(), actual.history.can_undo);
-    assert!(state.can_undo(), "{label} doit être annulable");
-    assert_eq!(actual.history.undo_label.as_deref(), Some(label));
+    assert!(state.can_undo(), "{label:?} doit être annulable");
+    assert_eq!(actual.history.undo_label.as_ref(), Some(&label));
     assert_eq!(
-        state.undo_label().as_deref(),
-        Some(format!("Annuler {label}").as_str()),
+        state.undo_label(),
+        Some(undo_entry(&label)),
         "le libellé du menu vient de l'entrée close"
     );
 }
@@ -5966,7 +5976,7 @@ fn undo_state_is_fresh_right_after_a_grouped_paste() {
         sheet,
         text: "10\t20".into(),
     });
-    assert_undo_state_matches_actor(&session, &state, "Coller");
+    assert_undo_state_matches_actor(&session, &state, HistoryLabel::Macro(MacroKind::PasteCells));
 }
 
 #[test]
@@ -5982,7 +5992,11 @@ fn undo_state_is_fresh_right_after_a_grouped_clear() {
         state.dispatch(Action::Undo);
     }
     state.dispatch(Action::ClearSelectedCells { sheet });
-    assert_undo_state_matches_actor(&session, &state, "Effacer la sélection");
+    assert_undo_state_matches_actor(
+        &session,
+        &state,
+        HistoryLabel::Macro(MacroKind::ClearSelection),
+    );
 }
 
 // -- Annuler les propriétés d'un graphe n'annule pas une saisie détachée (#21) --

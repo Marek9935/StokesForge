@@ -58,7 +58,10 @@
 //!     values: ValueBlock::Float(vec![42.0]),
 //!     expected_version: None,
 //! })?;
-//! assert_eq!(history.undo_label(), Some("Saisie dans la colonne A"));
+//! assert_eq!(
+//!     history.undo_label().map(ToString::to_string).as_deref(),
+//!     Some("Edit Cells in Column A")
+//! );
 //! assert!(history.undo(&mut project)?);
 //! # Ok(())
 //! # }
@@ -72,7 +75,9 @@
 pub mod command;
 pub mod error;
 pub mod history;
+pub mod label;
 
 pub use command::Command;
 pub use error::{CommandError, CommandResult};
 pub use history::{DataDelta, Entry, History, DEFAULT_BYTE_LIMIT, DEFAULT_LIMIT, MAX_MACRO_DEPTH};
+pub use label::{ColumnRef, HistoryLabel, MacroKind};

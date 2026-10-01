@@ -19,7 +19,7 @@ use std::sync::Arc;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestCaseError, TestRng, TestRunner};
 
-use plotyx_commands::{Command, History};
+use plotyx_commands::{Command, History, HistoryLabel, MacroKind};
 use plotyx_core::{Column, ColumnType, MixedCell, Node, NodeId, Project, ValueBlock};
 
 // -- tirage ---------------------------------------------------------------
@@ -381,7 +381,7 @@ impl World {
                     // la doc de `play_step`. Non-imbriqué ici (un groupe ne
                     // s'ouvre jamais avant que le précédent ne se soit
                     // refermé), donc jamais atteint en pratique.
-                    if history.begin_macro("Groupe").is_err() {
+                    if history.begin_macro(MacroKind::Import).is_err() {
                         return accepted;
                     }
                     for step in steps {
@@ -486,12 +486,12 @@ fn undoing_everything_restores_the_initial_tree_bit_for_bit() {
 #[test]
 fn replaying_the_same_draw_yields_the_same_history_labels() {
     /// Joue un tirage et rend les libellés de la pile, du sommet vers le fond.
-    fn labels(scripts: &[Script]) -> Vec<String> {
+    fn labels(scripts: &[Script]) -> Vec<HistoryLabel> {
         let mut world = World::new();
         let mut history = History::with_limit(0);
         world.play(&mut history, scripts);
         let mut collected = Vec::new();
-        while let Some(label) = history.undo_label().map(str::to_string) {
+        while let Some(label) = history.undo_label().cloned() {
             collected.push(label);
             if history.undo(&mut world.project) != Ok(true) {
                 break;

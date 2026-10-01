@@ -100,6 +100,22 @@ Le choix de MessagePack découle directement de la propriété 5 : `bincode`
 encode les structures en tuples **positionnels** — ajouter un champ y décale
 tout ce qui suit, en retirer un est tout aussi cassant.
 
+## L'historique n'est pas dans le fichier
+
+Le `.plx` ne porte **ni pile d'annulation ni libellés d'historique** :
+`plotyx-persistence` ne dépend même pas de `plotyx-commands`. Les champs
+`label` du schéma sont ceux des *fenêtres* (`WindowMeta::label`), sans rapport.
+Un projet rouvert repart d'un historique vide, donc aucune phrase d'historique
+ne survit à la langue de la session qui l'a écrite (issue #46 : le constat
+« le `.plx` enregistre des phrases françaises » était inexact).
+
+Si l'historique est un jour écrit, le chemin est tracé : `HistoryLabel` est
+déjà une donnée structurée. Il faudra un type de transport dans `schema.rs`
+(sans `serde` dans `plotyx-commands`, comme pour `plotyx-plot`) et la même
+dégradation que `KindRecord` — un nom de variante inconnu capturé dans un
+`RawVariant`, rendu par un libellé générique, jamais un échec de lecture
+(invariant 10).
+
 ## Variantes inconnues : la perte est bornée au nœud
 
 La propriété 5 ne couvrait que les **champs**, pas les **variantes**

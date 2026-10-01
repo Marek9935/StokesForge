@@ -149,7 +149,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
-use plotyx_commands::Command;
+use plotyx_commands::{Command, MacroKind};
 use plotyx_core::{NodeId, Project};
 
 use actor::Request;
@@ -256,16 +256,15 @@ impl SessionHandle {
             .map_err(SessionError::from)
     }
 
-    /// Ouvre une macro portant `label` — voir la table en tête de crate.
+    /// Ouvre une macro de nature `kind` — voir la table en tête de crate.
     /// Refusée (`Command(ForeignMacro("begin_macro"))`) si une macro est déjà
     /// ouverte par un *autre* émetteur ; un même émetteur peut toujours
     /// imbriquer la sienne, jusqu'à [`plotyx_commands::MAX_MACRO_DEPTH`]
     /// niveaux (`Err(MacroTooDeep)` au-delà).
-    pub fn begin_macro(&self, label: &str) -> SessionResult<Revision> {
-        let label = label.to_string();
+    pub fn begin_macro(&self, kind: MacroKind) -> SessionResult<Revision> {
         let client = self.client;
         self.request(|reply| Request::BeginMacro {
-            label,
+            kind,
             client,
             reply,
         })?

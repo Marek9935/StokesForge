@@ -104,6 +104,7 @@ l'interface, mais son mot est déjà fixé.
 | Clear | Effacer | Vider des cellules, sans les supprimer | Vider | G |
 | Remove | Retirer | Sortir un élément d'une liste, sans le détruire | Supprimer | G |
 | Rename / Move | Renommer / Déplacer | Changer le nom / la place d'un objet | — | G |
+| Edit | Modifier | Changer le contenu ou les réglages d'un objet existant (libellés d'historique) ; *Change* seulement dans « Change Type of Column A » | Éditer, Changer | G |
 | Show / Hide | Afficher / Masquer | Rendre visible / invisible | Cacher | G |
 | Grid | Grille | Cellules d'une feuille (jamais le quadrillage d'un graphique) | — | G |
 

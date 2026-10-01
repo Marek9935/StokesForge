@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use plotyx_commands::HistoryLabel;
 use plotyx_core::{NodeId, Tree};
 
 use crate::WindowGeometry;
@@ -22,9 +23,9 @@ pub struct HistoryState {
     /// Vrai s'il y a quelque chose à rétablir.
     pub can_redo: bool,
     /// Libellé de la prochaine annulation, s'il y en a une.
-    pub undo_label: Option<String>,
+    pub undo_label: Option<HistoryLabel>,
     /// Libellé du prochain rétablissement, s'il y en a un.
-    pub redo_label: Option<String>,
+    pub redo_label: Option<HistoryLabel>,
     /// Vrai si une macro est actuellement ouverte. Une macro est globale à
     /// la session : ce drapeau ne dit rien de qui l'a ouverte (voir la
     /// limite documentée en tête de crate).

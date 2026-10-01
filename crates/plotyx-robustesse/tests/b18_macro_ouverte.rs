@@ -10,7 +10,7 @@
 //! toucher au disque. `Request::Save`, trois lignes plus haut dans le même
 //! `match`, ne le sait pas.
 
-use plotyx_commands::{Command, History};
+use plotyx_commands::{Command, History, MacroKind};
 use plotyx_core::{Column, NodeId, Project, ValueBlock};
 use plotyx_session::{Session, SessionError, SessionHandle};
 use tempfile::TempDir;
@@ -59,7 +59,9 @@ fn b18_le_chargement_est_refuse_pendant_une_macro() {
     let chemin = dir.path().join("autre.plx");
     let (_session, handle, colonne) = session();
     handle.save(&chemin).expect("sauvegarde initiale");
-    handle.begin_macro("import").expect("macro ouverte");
+    handle
+        .begin_macro(MacroKind::Import)
+        .expect("macro ouverte");
     ecrire(&handle, colonne, 99.0);
     assert!(
         matches!(
@@ -75,7 +77,9 @@ fn b18_le_chargement_est_refuse_pendant_une_macro() {
 #[test]
 fn b18_une_macro_avortee_ne_laisse_rien_dans_le_modele() {
     let (session, handle, colonne) = session();
-    handle.begin_macro("import").expect("macro ouverte");
+    handle
+        .begin_macro(MacroKind::Import)
+        .expect("macro ouverte");
     ecrire(&handle, colonne, 99.0);
     handle.abort_macro().expect("macro avortée");
     let project = session.shutdown().expect("arrêt");
@@ -92,9 +96,9 @@ fn b18_une_macro_de_profondeur_raisonnable_sannule_dun_bloc() {
         .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
         .expect("colonne");
     let mut history = History::with_limit(0);
-    for i in 0..1000 {
+    for _ in 0..1000 {
         history
-            .begin_macro(&format!("m{i}"))
+            .begin_macro(MacroKind::Import)
             .expect("dans la limite de MAX_MACRO_DEPTH");
     }
     history
@@ -124,9 +128,7 @@ fn b18_la_sauvegarde_est_refusee_pendant_une_macro() {
     let chemin = dir.path().join("projet.plx");
     let (session, handle, colonne) = session();
 
-    handle
-        .begin_macro("import d'un fichier de mesures")
-        .expect("macro");
+    handle.begin_macro(MacroKind::Import).expect("macro");
     ecrire(&handle, colonne, 99.0);
     let sauvegarde = handle.save(&chemin);
     println!("save pendant la macro → {sauvegarde:?}");
@@ -172,7 +174,7 @@ fn b18_limbrication_des_macros_est_bornee() {
     let mut history = History::with_limit(0);
     let mut refusee_a = None;
     for i in 0..50_000 {
-        if let Err(err) = history.begin_macro(&format!("m{i}")) {
+        if let Err(err) = history.begin_macro(MacroKind::Import) {
             println!("begin_macro refusé au niveau {i} : {err}");
             refusee_a = Some(i);
             break;
@@ -196,7 +198,7 @@ fn b18_limbrication_des_macros_est_bornee() {
 fn b18_linterface_nannonce_pas_une_annulation_impossible() {
     let (_session, handle, colonne) = session();
     ecrire(&handle, colonne, 5.0);
-    handle.begin_macro("groupe").expect("macro");
+    handle.begin_macro(MacroKind::Import).expect("macro");
 
     let instantane = handle.snapshot().expect("instantané");
     println!(

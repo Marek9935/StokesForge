@@ -455,11 +455,14 @@ en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifi�
 | `crates/plotyx-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues |
 | `src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
 | `src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
+| `src/history_text.rs` | les libellés d'historique (`HistoryLabel`) en phrases, clés `history-*` (#46) |
 | `tests/libelles.rs` | la garde `aucun_libelle_en_dur` et sa liste de dérogations |
 
 **`tr!` est l'unique point d'entrée** : `tr!("menu-file")`, ou avec arguments
 nommés `tr!("witness-count", count = n)`. Il enveloppe `fl!` ; une clé ou un
-argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé.
+argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Un test
+qui compare une langue précise passe son chargeur : `tr!(in loader; "clé")`
+(`build_loader`), pour ne pas dépendre de `PLOTYX_LANG`.
 
 **Langue** : la variable `PLOTYX_LANG` (`en`, `fr`, `en-XA`), puis la
 préférence `language` de `preferences.json`, sinon l'anglais. La langue du
@@ -587,7 +590,7 @@ ensuite ce qui lui est propre (type et rôle de colonne), qui décrit la colonne
 plutôt qu'il n'agit sur son contenu.
 
 Les entrées sont des verbes **nus** : « Copier », pas « Copier la cellule » ;
-« Annuler », pas « Annuler Saisie dans la colonne A ». Le clic droit vient de
+« Annuler », pas « Annuler Edit Cells in Column A ». Le clic droit vient de
 se poser sur ce qu'il vise, et le raccourci est déjà rappelé à droite de
 l'entrée — nommer la cible en plus allongeait chaque ligne sans rien
 apprendre. `GridMenu::target_label`/`copy_full_columns_label` et
@@ -981,8 +984,9 @@ sont encore autre chose.
 le nom de nœud, et annonçait donc « Saisie dans Temps » pour une colonne que
 l'utilisateur ne connaît que comme « A » — un mot introuvable à l'écran, et
 carrément trompeur quand les deux divergent (un nœud nommé `T` en troisième
-position s'affiche « C »). `command::column_label` les désigne désormais par
-leur position : « Saisie dans la colonne A ». Les autres natures de nœud
+position s'affiche « C »). Le libellé désigne désormais la colonne par sa
+position (`ColumnRef`, depuis #46 une donnée et non une phrase) : « Edit Cells
+in Column A ». Les autres natures de nœud
 (feuille, classeur, graphe, note) gardent leur nom réel — celui-là *est*
 affiché, dans le Project Manager.
 

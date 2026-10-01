@@ -49,7 +49,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use plotyx_commands::Command;
+use plotyx_commands::{Command, HistoryLabel, MacroKind};
 use plotyx_core::node::NodeKind;
 use plotyx_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
@@ -64,7 +64,9 @@ use plotyx_python::interpreter::EmbeddedPython;
 use plotyx_script::{ScriptEngine, ScriptOutcome};
 use plotyx_session::{SessionHandle, SessionResult, Snapshot};
 
+use crate::history_text::history_text;
 use crate::selection::{GridCursor, Selection};
+use crate::tr;
 use crate::user_colors::UserColors;
 
 /// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
@@ -1998,14 +2000,15 @@ impl AppState {
         self.python = Some(python);
     }
 
-    /// Libellé de l'action « Annuler » : `Some("Annuler Saisie dans la colonne A")`, ou
-    /// `None` si la pile est vide (l'entrée de menu est alors grisée).
+    /// Libellé de l'action « Annuler » : `Some("Undo Edit Cells in Column A")`
+    /// (mis en phrase par [`history_text`]), ou `None` si la pile est vide
+    /// (l'entrée de menu est alors grisée).
     pub fn undo_label(&self) -> Option<String> {
         self.snapshot
             .history
             .undo_label
             .as_ref()
-            .map(|label| format!("Annuler {label}"))
+            .map(|label| tr!("history-undo-entry", label = history_text(label)))
     }
 
     /// Libellé de l'action « Rétablir », `None` si rien à rétablir.
@@ -2014,7 +2017,7 @@ impl AppState {
             .history
             .redo_label
             .as_ref()
-            .map(|label| format!("Rétablir {label}"))
+            .map(|label| tr!("history-redo-entry", label = history_text(label)))
     }
 
     /// Vrai s'il y a quelque chose à annuler.
@@ -3034,7 +3037,7 @@ impl AppState {
         if self.plot_macro_open {
             return;
         }
-        match self.handle.begin_macro("Propriétés du graphe") {
+        match self.handle.begin_macro(MacroKind::GraphProperties) {
             Ok(_) => self.plot_macro_open = true,
             Err(err) => self.fail(format!(
                 "Propriétés : annulation groupée indisponible ({err})"
@@ -3768,11 +3771,7 @@ impl AppState {
             ));
             return;
         }
-        if self
-            .handle
-            .begin_macro("Actualiser depuis le fichier")
-            .is_err()
-        {
+        if self.handle.begin_macro(MacroKind::RefreshFromFile).is_err() {
             self.fail("Impossible de grouper l'actualisation".to_string());
             return;
         }
@@ -3855,7 +3854,8 @@ impl AppState {
             self.fail("Aucun import à reprendre".to_string());
             return;
         };
-        let undone = self.snapshot.history.undo_label.as_deref() == Some("Importer")
+        let undone = self.snapshot.history.undo_label
+            == Some(HistoryLabel::Macro(MacroKind::Import))
             && !self.snapshot.history.in_macro;
         if undone {
             self.undo();
@@ -4447,7 +4447,7 @@ impl AppState {
         let label = command.label(&self.snapshot.tree);
         match self.handle.execute(command) {
             Ok(_) => {
-                self.notice(label);
+                self.notice(history_text(&label));
                 self.refresh();
             }
             Err(err) => self.fail(format!("{err}")),
@@ -4460,8 +4460,10 @@ impl AppState {
         let label = self.snapshot.history.undo_label.clone();
         match self.handle.undo() {
             Ok(Some(_)) => {
-                let label = label.unwrap_or_else(|| "la dernière action".to_string());
-                self.notice(format!("Annulé : {label}"));
+                self.notice(match label {
+                    Some(label) => tr!("history-undone", label = history_text(&label)),
+                    None => tr!("history-undone-last"),
+                });
                 self.refresh();
             }
             Ok(None) => self.notice("Rien à annuler".to_string()),
@@ -4473,8 +4475,10 @@ impl AppState {
         let label = self.snapshot.history.redo_label.clone();
         match self.handle.redo() {
             Ok(Some(_)) => {
-                let label = label.unwrap_or_else(|| "la dernière action".to_string());
-                self.notice(format!("Rétabli : {label}"));
+                self.notice(match label {
+                    Some(label) => tr!("history-redone", label = history_text(&label)),
+                    None => tr!("history-redone-last"),
+                });
                 self.refresh();
             }
             Ok(None) => self.notice("Rien à rétablir".to_string()),
@@ -4737,7 +4741,7 @@ impl AppState {
             return;
         }
         let grouped = ranges.len() + header_fields.len() > 1;
-        if grouped && self.handle.begin_macro("Effacer la sélection").is_err() {
+        if grouped && self.handle.begin_macro(MacroKind::ClearSelection).is_err() {
             self.fail("Impossible de grouper l'effacement de la sélection".to_string());
             return;
         }
@@ -5028,7 +5032,7 @@ impl AppState {
                     })
                     .collect();
                 let grouped = writes.len() * targets.len() > 1;
-                if grouped && self.handle.begin_macro("Coller").is_err() {
+                if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
                     self.fail("Impossible de grouper le collage".to_string());
                     return;
                 }
@@ -5061,7 +5065,7 @@ impl AppState {
                 }
                 let paste_row = if absolute { *start } else { anchor_row };
                 let grouped = targets.len() > 1;
-                if grouped && self.handle.begin_macro("Coller").is_err() {
+                if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
                     self.fail("Impossible de grouper le collage".to_string());
                     return;
                 }
@@ -5131,7 +5135,7 @@ impl AppState {
             .filter(|(_, c)| !c.data.is_empty())
             .count();
         let grouped = header_ops + body_ops > 1;
-        if grouped && self.handle.begin_macro("Coller").is_err() {
+        if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
             self.fail("Impossible de grouper le collage".to_string());
             return;
         }
@@ -5212,7 +5216,7 @@ impl AppState {
     /// (`create_import_book`) : c'est le fichier qui fournit les colonnes.
     fn add_workbook(&mut self) {
         let root = self.snapshot.tree.root();
-        if !self.begin_creation_macro("Ajouter un classeur") {
+        if !self.begin_creation_macro(MacroKind::AddWorkbook) {
             return;
         }
         let previous = self
@@ -5241,7 +5245,7 @@ impl AppState {
     /// Nouvelle feuille de l'utilisateur : comme [`AppState::add_workbook`],
     /// elle naît avec une colonne X et une colonne Y.
     fn add_worksheet(&mut self, book: NodeId) {
-        if !self.begin_creation_macro("Ajouter une feuille") {
+        if !self.begin_creation_macro(MacroKind::AddWorksheet) {
             return;
         }
         let previous = self
@@ -5262,8 +5266,8 @@ impl AppState {
         self.end_creation_macro();
     }
 
-    fn begin_creation_macro(&mut self, label: &str) -> bool {
-        if self.handle.begin_macro(label).is_err() {
+    fn begin_creation_macro(&mut self, kind: MacroKind) -> bool {
+        if self.handle.begin_macro(kind).is_err() {
             self.fail(
                 "Impossible de grouper la création dans une seule entrée d'historique".to_string(),
             );
@@ -5375,7 +5379,7 @@ impl AppState {
                 paths.push(item.path.clone());
             }
         }
-        if self.handle.begin_macro("Importer").is_err() {
+        if self.handle.begin_macro(MacroKind::Import).is_err() {
             self.fail(
                 "Impossible de grouper l'import dans une seule entrée d'historique".to_string(),
             );

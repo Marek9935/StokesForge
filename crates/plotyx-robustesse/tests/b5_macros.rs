@@ -1,7 +1,7 @@
 //! Batterie 5 — macros imbriquées, avortement, et la pile de rétablissement.
 //! C'est la partie de l'historique que `undo_random.rs` du dépôt ne tire pas.
 
-use plotyx_commands::{Command, History};
+use plotyx_commands::{Command, History, MacroKind};
 use plotyx_core::{Column, ColumnType, MixedCell, NodeId, Project, Tree, ValueBlock};
 use std::sync::Arc;
 
@@ -60,7 +60,7 @@ fn b5_macro_avortee_ne_laisse_aucune_trace() {
         "mise en place : un cran doit être rétablissable"
     );
 
-    h.begin_macro("essai").unwrap();
+    h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
         &mut p,
         Command::SetCells {
@@ -103,7 +103,7 @@ fn b5_macro_avortee_ne_laisse_aucune_trace() {
 fn b5_macro_imbriquee_avortee_ne_touche_pas_la_parente() {
     let (mut p, sheet, cols) = projet();
     let mut h = History::new();
-    h.begin_macro("externe").unwrap();
+    h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
         &mut p,
         Command::Rename {
@@ -114,7 +114,7 @@ fn b5_macro_imbriquee_avortee_ne_touche_pas_la_parente() {
     .unwrap();
     let apres_externe = Arc::clone(p.tree());
 
-    h.begin_macro("interne").unwrap();
+    h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
         &mut p,
         Command::AddColumn {
@@ -167,7 +167,7 @@ fn b5_macro_vide_ne_laisse_rien_et_rend_le_redo() {
     h.undo(&mut p).unwrap();
     assert_eq!(h.redo_len(), 1);
 
-    h.begin_macro("vide").unwrap();
+    h.begin_macro(MacroKind::Import).unwrap();
     h.end_macro(&mut p).unwrap();
     assert_eq!(h.len(), 0);
     assert_eq!(h.redo_len(), 1, "une macro vide a mangé le rétablissement");
@@ -178,7 +178,7 @@ fn b5_macro_avec_commande_refusee_reste_coherente() {
     let (mut p, sheet, cols) = projet();
     let mut h = History::new();
     let avant = Arc::clone(p.tree());
-    h.begin_macro("mixte").unwrap();
+    h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
         &mut p,
         Command::Rename {
@@ -237,7 +237,7 @@ fn b5_macro_profondement_imbriquee() {
     let avant = Arc::clone(p.tree());
     const N: usize = 64;
     for i in 0..N {
-        h.begin_macro(&format!("n{i}")).unwrap();
+        h.begin_macro(MacroKind::Import).unwrap();
         h.execute(
             &mut p,
             Command::SetCells {
@@ -278,7 +278,7 @@ fn b5_undo_refuse_en_macro_ne_casse_rien() {
         },
     )
     .unwrap();
-    h.begin_macro("m").unwrap();
+    h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
         &mut p,
         Command::Rename {
@@ -307,7 +307,7 @@ fn b5_macro_puis_annulation_totale_ramene_larbre_initial() {
 
     for tour in 0..20u64 {
         if tour % 3 == 0 {
-            h.begin_macro(&format!("t{tour}")).unwrap();
+            h.begin_macro(MacroKind::Import).unwrap();
         }
         // Le bloc doit suivre le type courant de la colonne visée : une
         // commande refusée pour cause de type est un refus légitime du cœur,

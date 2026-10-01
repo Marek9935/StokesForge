@@ -11,7 +11,7 @@
 //! fixe — c'est-à-dire celle du fil de l'acteur de `plotyx-session`, qui
 //! appelle `thread::Builder::new().name(…).spawn(…)` sans `stack_size`.
 
-use plotyx_commands::{Command, History};
+use plotyx_commands::{Command, History, MacroKind};
 use plotyx_core::{Column, Project, ValueBlock};
 
 /// Pile d'un `std::thread` quand `stack_size` n'est pas fixé.
@@ -63,7 +63,7 @@ fn travail(profondeur: usize, geste: &str) {
         // avec une `profondeur` au-delà de cette borne doit donc voir ce
         // refus, pas un crash — c'est exactement la preuve que le correctif
         // fonctionne.
-        if let Err(err) = history.begin_macro(&format!("m{i}")) {
+        if let Err(err) = history.begin_macro(MacroKind::Import) {
             println!("  begin_macro refusé au niveau {i} : {err} — REFUS PROPRE, pas de crash");
             return;
         }

@@ -42,6 +42,7 @@
 
 pub mod app;
 pub mod color_picker;
+pub mod history_text;
 pub mod i18n;
 pub mod preferences;
 pub mod selection;

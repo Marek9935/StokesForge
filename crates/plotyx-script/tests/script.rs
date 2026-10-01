@@ -20,7 +20,7 @@ use std::sync::{mpsc, Arc, OnceLock, PoisonError, RwLock, RwLockReadGuard, RwLoc
 use std::thread;
 use std::time::{Duration, Instant};
 
-use plotyx_commands::Command;
+use plotyx_commands::{Command, HistoryLabel, MacroKind};
 use plotyx_core::{Column, NodeId, Project, Tree};
 use plotyx_python::interpreter::{self, EmbeddedPython};
 use plotyx_script::{ScriptEngine, ScriptError, ScriptOutcome};
@@ -198,7 +198,10 @@ fn import_python_par_modele_se_lit_et_sannule_en_un_geste() {
     assert_eq!(y.meta().long_name, "Fixture_Jasco_UVVis");
     assert!(y.meta().file_metadata.iter().any(|m| m.key == "XUNITS"));
     assert!(y.meta().import_source.is_some());
-    assert_eq!(imported.history.undo_label.as_deref(), Some("Importer"));
+    assert_eq!(
+        imported.history.undo_label,
+        Some(HistoryLabel::Macro(MacroKind::Import))
+    );
     executer(
         &banc,
         &format!(
@@ -283,7 +286,7 @@ fn import_python_refuse_sans_toucher_au_projet_ni_aux_macros_dautrui() {
     let csv = dir.path().join("mesure.csv");
     std::fs::write(&csv, "1,10\n2,20\n").unwrap();
     let interface = banc._actor.handle();
-    interface.begin_macro("Édition de l'interface").unwrap();
+    interface.begin_macro(MacroKind::Import).unwrap();
     let outcome = banc
         .engine
         .run(&format!("pyx.import_file({:?})", csv.to_str().unwrap()))

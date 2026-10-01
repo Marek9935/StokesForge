@@ -96,7 +96,7 @@ const DEROGATIONS: &[Derogation] = &[
         zone: "barre de menus",
         ticket: "#42",
         fonctions: &["PlotyxApp::menu_bar"],
-        nombre: 34,
+        nombre: 32,
     },
     Derogation {
         fichier: "app.rs",

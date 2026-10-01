@@ -21,7 +21,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use plotyx_commands::{Command, CommandError};
+use plotyx_commands::{Command, CommandError, MacroKind};
 use plotyx_core::{CoreError, NodeId, ValueBlock};
 use plotyx_session::{SessionError, SessionHandle};
 
@@ -315,7 +315,7 @@ pub(crate) fn import_file(
         return Err(HostError::InvalidValue("aucune colonne à importer".into()));
     }
     session
-        .begin_macro("Importer")
+        .begin_macro(MacroKind::Import)
         .map_err(HostError::from_session)?;
     let result = (|| {
         let snapshot = session.snapshot().map_err(HostError::from_session)?;

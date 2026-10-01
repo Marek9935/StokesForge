@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
-use plotyx_commands::{Command, CommandError, CommandResult, History};
+use plotyx_commands::{Command, CommandError, CommandResult, History, MacroKind};
 use plotyx_core::{
     evaluate_formula, topological_order, ColumnType, Formula, NodeId, NumericStatus, Project,
     ValueBlock,
@@ -53,8 +53,8 @@ pub(crate) enum Request {
     /// macro est déjà ouverte par un autre émetteur que `client` (A4) — un
     /// même émetteur peut toujours imbriquer la sienne.
     BeginMacro {
-        /// Libellé de la macro.
-        label: String,
+        /// Nature du groupe.
+        kind: MacroKind,
         /// Émetteur de la requête.
         client: ClientId,
         /// Réponse : nouvelle révision (l'état de l'historique a changé), ou
@@ -210,7 +210,7 @@ pub(crate) fn run(
                 let _ = reply.send(outcome);
             }
             Request::BeginMacro {
-                label,
+                kind,
                 client,
                 reply,
             } => {
@@ -226,7 +226,7 @@ pub(crate) fn run(
                     // changé d'état. Un succès, en revanche, avance la
                     // révision même sans mutation du modèle (l'état de
                     // l'historique, `in_macro`, a changé).
-                    let result = history.begin_macro(&label);
+                    let result = history.begin_macro(kind);
                     if result.is_ok() {
                         macro_owner = Some(client);
                     }
@@ -737,8 +737,8 @@ fn build_snapshot(
             // pas annoncer une annulation que l'acteur refusera.
             can_undo: history.can_undo() && !history.in_macro(),
             can_redo: history.can_redo(),
-            undo_label: history.undo_label().map(str::to_string),
-            redo_label: history.redo_label().map(str::to_string),
+            undo_label: history.undo_label().cloned(),
+            redo_label: history.redo_label().cloned(),
             in_macro: history.in_macro(),
         },
         epoch,

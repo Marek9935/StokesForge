@@ -126,6 +126,33 @@ Trois règles d'éviction à connaître, toutes délibérées :
   pas vide : décider quoi évincer au milieu d'un historique n'appartient pas à
   la pile.
 
+## Libellés d'historique : une donnée, pas une phrase
+
+Chaque entrée porte un `HistoryLabel` (`plotyx-commands/src/label.rs`) : une
+énumération — l'action et ses paramètres (`InsertRows { count }`,
+`Rename { from, to }`, `SetCells { column: Option<ColumnRef> }`…), plus
+`Macro(MacroKind)` pour un groupe. `Command::label(&Tree)` le calcule sur
+l'arbre **d'avant** (le nom d'un nœud supprimé n'existe plus après) et ne peut
+pas échouer : un nœud introuvable donne `None`, que la phrase rend sous une
+forme générique. Une colonne se désigne par sa position (`ColumnRef`, lettre de
+la grille), jamais par son nom de nœud.
+
+Le crate ne met **rien** en phrase et ne dépend pas de Fluent :
+
+| Où | Rôle |
+|---|---|
+| `plotyx-commands` | rend la donnée ; `Display` en **anglais** pour les journaux et le CLI |
+| `plotyx-app/src/history_text.rs` | `history_text` : la variante en phrase, par `tr!` et les clés `history-*` du catalogue `en`, pluriels Fluent ; `match` exhaustif |
+| `plotyx-app/tests/history_text.rs` | le catalogue `en` et le `Display` disent la même chose, variante par variante |
+
+`begin_macro` prend un `MacroKind`, énumération **fermée** (coller, effacer la
+sélection, propriétés du graphe, actualiser, importer, créer un classeur ou une
+feuille) : un groupe est une valeur qui se compare (`undo_label ==
+Some(HistoryLabel::Macro(MacroKind::Import))`), pas un texte à relire. Un
+nouveau groupe ajoute une variante de `MacroKind`, sa clé `history-macro-*` et
+sa ligne de `Display`. L'historique n'est pas écrit dans le `.plx`
+([`persistance.md`](persistance.md)).
+
 ## Macros
 
 `begin_macro` / `end_macro` / `abort_macro` groupent des commandes en une seule
