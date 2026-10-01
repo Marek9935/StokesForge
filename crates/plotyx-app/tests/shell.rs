@@ -5657,7 +5657,10 @@ fn import_keeps_file_metadata_on_every_column() {
         assert_eq!(lines[2].value, "NANOMETERS");
         assert!(lines[1].is_section());
     }
-    assert_eq!(state.file_metadata_summary(columns[0].0), "3 clés");
+    assert_eq!(
+        state.file_metadata_summary(columns[0].0),
+        plotyx_app::tr!("workbook-metadata-summary", count = 3)
+    );
 
     let revision = state.revision();
     state.dispatch(Action::ViewColumnMetadata {

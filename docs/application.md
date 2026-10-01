@@ -463,9 +463,9 @@ en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifi�
 
 **`tr!` est l'unique point d'entrée** : `tr!("menu-file")`, ou avec arguments
 nommés `tr!("witness-count", count = n)`. Il enveloppe `fl!` ; une clé ou un
-argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Un test
+argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Pour l'infobulle d'un contrôle (attribut `.hint` de sa clé) : `tr!("project-manager-show", "hint")`. Un test
 qui compare une langue précise passe son chargeur : `tr!(in loader; "clé")`
-(`build_loader`), pour ne pas dépendre de `PLOTYX_LANG`.
+(`build_loader`), pour ne pas dépendre de `PLOTYX_LANG` ; un test qui cherche un texte peint le demande à `tr!`, jamais un littéral.
 
 **Menus et actions (#42)** : une action a **un** libellé, la clé `action-*`, partagé
 par la barre de menus, les menus contextuels, la barre d'état et le bouton de
@@ -473,8 +473,7 @@ fenêtre détachée (`action-reopen-last-import`, `action-reset-zoom`…) ; les
 menus eux-mêmes sont `menu-*`. L'infobulle (l'effet, pas le raccourci, que le
 menu dessine déjà) est l'attribut `.hint` (`tr!("action-save", "hint")`) ;
 l'infobulle d'une entrée grisée, qui dit pourquoi, est `.disabled`. Les noms
-de touches (`shortcut-backspace`, `shortcut-delete`) sont aussi des clés. Le
-libellé d'historique qui suit « Undo » reste français jusqu'à #46.
+de touches (`shortcut-backspace`, `shortcut-delete`) sont aussi des clés. 
 
 **Langue** : la variable `PLOTYX_LANG` (`en`, `fr`, `en-XA`), puis la
 préférence `language` de `preferences.json`, sinon l'anglais. La langue du
@@ -563,7 +562,7 @@ sont ouverts en même temps.
 ### La console de script ne fige pas la fenêtre
 
 `ScriptEngine::run` **bloque** jusqu'au terme du script. L'appeler depuis la
-boucle de rendu figerait la fenêtre entière, bouton « Arrêter » compris — le
+boucle de rendu figerait la fenêtre entière, bouton « Stop » compris — le
 défaut le plus visible qu'une console de script puisse avoir.
 
 La parade vit dans `state`, pas dans `app`. Trois décisions, prises là et
@@ -656,8 +655,8 @@ Deux contextualisations s'y jouent :
 
 ### Tracer depuis un classeur
 
-La rangée des lettres offre, en plus de « Type » et « Rôle », un sous-menu
-« Tracer » (Ligne, Points, Ligne + points, Barres) qui crée un graphe à
+La rangée des lettres offre, en plus des types (Numeric, Mixed) et du
+sous-menu « Role », un sous-menu « Plot » (Line, Scatter, Line + Symbol, Bar) qui crée un graphe à
 partir de la sélection de colonnes courante — même cible que les deux autres
 sous-menus (`target_columns` : toute la plage sélectionnée si la colonne
 cliquée en fait partie, sinon cette colonne seule). Le graphe créé est
@@ -690,7 +689,7 @@ ci-dessous.
 ### Glisser une sélection de colonnes vers un graphe
 
 Second chemin vers `Action::AddSeriesToGraph`, complémentaire du sous-menu
-« Tracer » : glisser une sélection de colonnes depuis la grille jusqu'à un
+« Plot » : glisser une sélection de colonnes depuis la grille jusqu'à un
 graphe déjà ouvert y ajoute des séries, en `PlotType::Line` toujours (le
 glisser ne propose pas de choisir le type — contrairement au sous-menu
 contextuel, qui lui le demande).
@@ -835,12 +834,12 @@ texte et les axes en automatique, donc ils suivent le fond.
 
 **Sélecteur de couleur** (`crate::color_picker`) : toute couleur de la
 fenêtre se choisit par un bouton-échantillon (`color_field`/`color_button`)
-qui ouvre une fenêtre surgissante **repliée** : palette, « Automatique »
+qui ouvre une fenêtre surgissante **repliée** : palette, « Auto »
 quand la couleur peut l'être, couleurs enregistrées et saisie hexadécimale
-(`#RRGGBB`, ou `#RRGGBBAA` avec l'opacité). Le bouton **« + Personnalisée… »**
-déplie le reste — Enregistrer et sa destination, nuancier (carré saturation ×
+(`#RRGGBB`, ou `#RRGGBBAA` avec l'opacité). Le bouton **« + Custom »**
+déplie le reste — Save Color et sa destination, nuancier (carré saturation ×
 luminosité avec barre de teinte, ou **roue chromatique** avec barre de
-valeur), **opacité**, saisie RVB et TSL. Le sélecteur se rouvre toujours
+valeur), **opacité**, saisie RGB et HSL. Le sélecteur se rouvre toujours
 replié (`color_picker::custom_id`). Cette fenêtre est une `egui::Area` gérée
 par `color_button` (et non un `egui::Popup`, dont egui n'autorise qu'un
 exemplaire ouvert : la liste d'un menu déroulant le refermerait) ; elle
@@ -854,7 +853,7 @@ damier (dans l'échantillon du sélecteur). **Une palette par usage** (`plotyx_p
   dans `plotyx-plot`, pour qu'une évolution future colore plusieurs courbes
   d'un coup (palette ou dégradé) ;
 - **texte** : encres lisibles ;
-- **fonds** : en premier **« Aucune couleur »** (`#ffffff00`,
+- **fonds** : en premier **« No color »** (`#ffffff00`,
   `plotyx_plot::TRANSPARENT`), qui est aussi le **fond par défaut** d'un
   graphe neuf (`PlotSpec::default`) : la figure exportée n'a pas de fond,
   pour s'intégrer à une autre présentation ; à l'écran, elle se montre sur
@@ -999,7 +998,7 @@ ne connaît que le nom et des octets bruts (C5, niveau 2,
   `SeriesSpec::bar_width`/`histogram_bins` existent dans `plotyx-plot` mais
   n'ont pas de widget ici, laissé à une itération suivante ;
 - **pas d'ajout/suppression de série ou de panneau depuis la fenêtre** —
-  ça reste le rôle du sous-menu « Tracer » et du glisser-déposer déjà
+  ça reste le rôle du sous-menu « Plot » et du glisser-déposer déjà
   décrits plus haut ;
 - **zoom/pan n'y entrent pas, et ne doivent jamais y entrer** —
   `plotyx_render_egui::ViewState` vit sur `GraphView`, hors du `PlotSpec`
@@ -1327,4 +1326,4 @@ la syntaxe des couleurs `#RRGGBB[AA]` (`plotyx_plot::parse_hex`, dont
 `color_picker::parse_hex` n'est qu'un adaptateur) et le nom affiché d'une série
 (`plotyx_core::series_label`, appelée par la légende **et** par la liste des
 séries des propriétés du graphe via `series_list_label`). Les transformations
-RVB/TSL restent propres au sélecteur.
+RGB/HSL restent propres au sélecteur.

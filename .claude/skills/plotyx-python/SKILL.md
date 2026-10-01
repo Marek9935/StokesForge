@@ -151,6 +151,10 @@ elle, met `ScriptError` en phrase par `errors::script::error_message` (feature
 nouveau suit la même rédaction (ce qui s'est passé, puis quoi faire) et un test qui
 l'asserte compare l'anglais.
 
+Les textes de la console (titre, Run/Stop, sorties, trace d'appels) passent
+par `tr!` (clés `script-*`) ; les messages de la surface `pyx` — ce que
+voit un script — restent en anglais, ce ne sont pas des textes d'interface.
+
 ## Tests
 
 - `plotyx-script/tests/selftest.rs` — le critère de fin du socle, en entier ;

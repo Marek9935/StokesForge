@@ -96,56 +96,15 @@ struct Derogation {
     nombre: usize,
 }
 
-/// L'existant d'avant #41 : **154 littéraux**, 11 zones (les 59 de #42 — menus,
-/// menus contextuels, fenêtres détachées — sont convertis). À réduire, jamais à
-/// grossir ; vide à #48. Rangée par ticket de conversion (#43 : 45, #44 : 71,
-/// #45 : 38) ; chaque ticket retire ses zones, et leur compte avec.
+/// L'existant d'avant #41 : **213 littéraux**, 14 zones, tous convertis (#42 à
+/// #45) : la liste est vide. Elle ne doit jamais regrossir ; #48 supprime la
+/// table et la garde n'a plus de dérogation.
 const DEROGATIONS: &[Derogation] = &[
-    // --- #42 : menus, actions, infobulles, barre d'état : converti, plus aucune dérogation.
-    // --- #43 : propriétés du graphe et export : converti, plus aucune dérogation.
+    // --- #42 : menus, actions, infobulles, barre d'état : converti.
+    // --- #43 : propriétés du graphe et export : converti.
     // Ses fonctions restent gardées, plus strictement : `ZONE_43`.
-    // --- #44 : assistant d'import : converti, plus aucune dérogation.
-    // --- #45 : classeur, grille, Project Manager, couleur, console -------------
-    Derogation {
-        fichier: "app.rs",
-        zone: "grille : en-têtes de colonnes et de lignes, cellule de métadonnées",
-        ticket: "#45",
-        fonctions: &[
-            "column_header_widget",
-            "grid_contents",
-            "row_number_header_widget",
-            "metadata_cell_widget",
-        ],
-        nombre: 13,
-    },
-    Derogation {
-        fichier: "app.rs",
-        zone: "Project Manager",
-        ticket: "#45",
-        fonctions: &["project_manager_contents_from_tree", "project_tree_node_ui"],
-        nombre: 4,
-    },
-    Derogation {
-        fichier: "app.rs",
-        zone: "console de script",
-        ticket: "#45",
-        fonctions: &["script_contents"],
-        nombre: 5,
-    },
-    Derogation {
-        fichier: "color_picker.rs",
-        zone: "sélecteur de couleur",
-        ticket: "#45",
-        fonctions: &["color_button", "picker_contents"],
-        nombre: 14,
-    },
-    Derogation {
-        fichier: "state.rs",
-        zone: "cible d'enregistrement des couleurs",
-        ticket: "#45",
-        fonctions: &["SaveTarget::label"],
-        nombre: 2,
-    },
+    // --- #44 : assistant d'import : converti.
+    // --- #45 : classeur, grille, Project Manager, couleur, console : converti.
 ];
 
 // ---------------------------------------------------------------------------

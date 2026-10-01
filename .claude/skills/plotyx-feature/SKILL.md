@@ -136,7 +136,7 @@ délibérément sa place dans aucun menu, l'écrire et dire pourquoi.
 
 Un réglage de couleur ne s'écrit jamais comme un champ texte `#RRGGBB` :
 `color_picker::color_field(ui, libellé, &mut chaîne, ColorUsage::…,
-Some("Automatique…"), &mut env)`, avec l'usage de la couleur — `Curves` pour
+Some(&tr!("…")), &mut env)`, avec l'usage de la couleur — `Curves` pour
 une courbe (l'outil des courbes, palettes nommées), `Text` pour du texte ou
 une échelle, `Background` pour un fond — et le `PickerEnv` des couleurs
 enregistrées, dont les demandes sont traduites en `Action::SaveColor`/
@@ -155,8 +155,8 @@ parente (issue #9). `color_button` tient l'état ouvert/fermé lui-même et
 ferme sur Échap ou clic extérieur ; s'en inspirer.
 
 **Le sélecteur s'ouvre replié** (issue #10) : palette, couleurs enregistrées
-et hexadécimal seulement ; « + Personnalisée… » déplie nuancier, opacité,
-RVB/TSL et Enregistrer. Tout nouvel élément lourd du sélecteur va dans la
+et hexadécimal seulement ; « + Custom » déplie nuancier, opacité,
+RGB/HSL et Save Color. Tout nouvel élément lourd du sélecteur va dans la
 partie dépliée (`if custom`), et l'état se remet à zéro à la fermeture
 (`set_picker_open`).
 

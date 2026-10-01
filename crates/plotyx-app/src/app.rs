@@ -3537,14 +3537,8 @@ fn sheet_tabs(
     on_select: impl FnMut(NodeId),
     on_add: impl FnMut(),
 ) -> TabStripOutput {
-    tab_strip(
-        ui,
-        sheets,
-        selected,
-        on_select,
-        Some("Ajouter une feuille"),
-        on_add,
-    )
+    let add_label = tr!("workbook-worksheet-add");
+    tab_strip(ui, sheets, selected, on_select, Some(&add_label), on_add)
 }
 
 /// Défilement automatique de la bande d'onglets quand la feuille
@@ -4401,24 +4395,35 @@ fn project_manager_contents_from_tree(
     tree: &[ProjectTreeNode],
     interaction: &mut PmInteraction,
 ) {
-    ui.heading("Project Manager");
+    ui.heading(tr!("project-manager-title"));
     ui.separator();
     if !interaction.selection.is_empty() {
         // Barre d'actions groupées, seulement quand elle a un effet — pas de
         // boutons désactivés à regarder tant que rien n'est sélectionné.
         ui.horizontal(|ui| {
-            if ui.button("Afficher").clicked() {
+            if ui
+                .button(tr!("project-manager-show"))
+                .on_hover_text(tr!("project-manager-show", "hint"))
+                .clicked()
+            {
                 for &tab in interaction.selection.iter() {
                     interaction.hidden.remove(&tab);
                     interaction.open_requests.push(tab);
                 }
             }
-            if ui.button("Masquer").clicked() {
+            if ui
+                .button(tr!("project-manager-hide"))
+                .on_hover_text(tr!("project-manager-hide", "hint"))
+                .clicked()
+            {
                 for &tab in interaction.selection.iter() {
                     interaction.hidden.insert(tab);
                 }
             }
-            ui.weak(format!("{} sélectionné(s)", interaction.selection.len()));
+            ui.weak(tr!(
+                "project-manager-selected",
+                count = interaction.selection.len()
+            ));
         });
         ui.separator();
     }
@@ -4437,11 +4442,11 @@ fn project_tree_node_ui(
 ) {
     match node {
         ProjectTreeNode::Folder { name, children, .. } => {
-            egui::CollapsingHeader::new(format!("📁 {name}"))
+            egui::CollapsingHeader::new(icon_label("📁", name))
                 .default_open(false)
                 .show(ui, |ui| {
                     if children.is_empty() {
-                        ui.weak("(vide)");
+                        ui.weak(tr!("project-folder-empty"));
                     }
                     for child in children {
                         project_tree_node_ui(ui, child, interaction);
@@ -4458,7 +4463,7 @@ fn project_tree_node_ui(
             let tab = tab_for_window(*id, *kind);
             let selected = interaction.selection.contains(&tab);
             let is_hidden = interaction.hidden.contains(&tab);
-            let label = format!("{icon} {name}");
+            let label = icon_label(icon, name);
             let fill = if selected {
                 ui.visuals().selection.bg_fill
             } else {
@@ -4504,31 +4509,37 @@ fn project_tree_node_ui(
     }
 }
 
-/// Suffixe affiché sous le nom d'une colonne pour rappeler son type.
-fn type_suffix(column_type: ColumnType) -> &'static str {
+/// Un pictogramme suivi d'un nom (un nom de dossier ou de fenêtre, choisi par
+/// l'utilisateur : jamais traduit, R15).
+fn icon_label(icon: &str, name: &str) -> String {
+    format!("{icon} {name}")
+}
+
+/// Nom d'un type de colonne, tel que l'offre le menu de la rangée des lettres.
+fn type_label(column_type: ColumnType) -> String {
     match column_type {
-        ColumnType::Numeric => "num",
-        ColumnType::DateTime => "date",
-        ColumnType::Mixed => "mixte",
+        ColumnType::Numeric => tr!("workbook-type-numeric"),
+        ColumnType::DateTime => tr!("workbook-type-datetime"),
+        ColumnType::Mixed => tr!("workbook-type-mixed"),
     }
 }
 
-/// Suffixe affiché entre parenthèses après la lettre de colonne pour rappeler
-/// son rôle de tracé ([`plotyx_core::ColumnRole`]) — `A(x)`, `B(y)`… Ce rôle
+/// Nom du rôle, affiché entre parenthèses après la lettre de colonne pour
+/// rappeler son rôle de tracé et dans le sous-menu « Role » ([`plotyx_core::ColumnRole`]) — `A(x)`, `B(y)`… Ce rôle
 /// n'est pour l'instant lu par rien d'autre que la persistance
 /// (`plotyx-persistence`) : aucune résolution de série ne s'en sert encore
 /// (voir `plotyx_core::resolve`, qui détermine X/Y autrement) — l'afficher et
 /// le rendre modifiable ici n'a donc, pour l'instant, qu'une valeur
 /// informative, en avance sur son câblage au rendu.
-fn role_suffix(role: ColumnRole) -> &'static str {
+fn role_label(role: ColumnRole) -> String {
     match role {
-        ColumnRole::X => "x",
-        ColumnRole::Y => "y",
-        ColumnRole::Z => "z",
-        ColumnRole::XError => "xerr",
-        ColumnRole::YError => "yerr",
-        ColumnRole::Label => "label",
-        ColumnRole::None => "aucun",
+        ColumnRole::X => tr!("workbook-role-x"),
+        ColumnRole::Y => tr!("workbook-role-y"),
+        ColumnRole::Z => tr!("workbook-role-z"),
+        ColumnRole::XError => tr!("workbook-role-x-error"),
+        ColumnRole::YError => tr!("workbook-role-y-error"),
+        ColumnRole::Label => tr!("workbook-role-label"),
+        ColumnRole::None => tr!("workbook-role-none"),
     }
 }
 
@@ -4785,11 +4796,11 @@ fn column_header_widget(
             // préalable.
             let id = ui.id().with(("plotyx_column_letter_row", column.raw()));
             let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+            let letter_text = format!("{letter}({})", role_label(role));
             ui.put(
                 rect,
                 egui::Label::new(
-                    egui::RichText::new(format!("{letter}({})", role_suffix(role).to_uppercase()))
-                        .color(crate::theme::gutter_text_color()),
+                    egui::RichText::new(letter_text).color(crate::theme::gutter_text_color()),
                 )
                 .selectable(false),
             );
@@ -4847,7 +4858,7 @@ fn column_header_widget(
                 // pour toute saisie directe dans une colonne numérique.
                 for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
                     if ui
-                        .selectable_label(column_type == candidate, type_suffix(candidate))
+                        .selectable_label(column_type == candidate, type_label(candidate))
                         .clicked()
                     {
                         if candidate != column_type {
@@ -4865,7 +4876,7 @@ fn column_header_widget(
                 // effet sur la résolution de série (voir `role_suffix`),
                 // mais un seul et même endroit pour tout ce qui décrit une
                 // colonne à l'utilisateur.
-                ui.menu_button("Rôle", |ui| {
+                ui.menu_button(tr!("workbook-role-menu"), |ui| {
                     for candidate in [
                         ColumnRole::X,
                         ColumnRole::Y,
@@ -4876,7 +4887,7 @@ fn column_header_widget(
                         ColumnRole::None,
                     ] {
                         if ui
-                            .selectable_label(role == candidate, role_suffix(candidate))
+                            .selectable_label(role == candidate, role_label(candidate))
                             .clicked()
                         {
                             if candidate != role {
@@ -4898,12 +4909,12 @@ fn column_header_widget(
                 // ce menu ne fait que choisir le type de tracé et pousser
                 // l'action sur `target_columns`, comme les deux sous-menus
                 // ci-dessus.
-                ui.menu_button("Tracer", |ui| {
+                ui.menu_button(tr!("workbook-plot-menu"), |ui| {
                     for (label, plot_type) in [
-                        ("Ligne", PlotType::Line),
-                        ("Points", PlotType::Scatter),
-                        ("Ligne + points", PlotType::LineScatter),
-                        ("Barres", PlotType::Bar),
+                        (tr!("workbook-plot-line"), PlotType::Line),
+                        (tr!("workbook-plot-scatter"), PlotType::Scatter),
+                        (tr!("workbook-plot-line-symbol"), PlotType::LineScatter),
+                        (tr!("workbook-plot-bar"), PlotType::Bar),
                     ] {
                         if ui.button(label).clicked() {
                             actions.push(Action::PlotColumns {
@@ -4990,7 +5001,7 @@ fn metadata_cell_widget(
         ui.put(
             rect,
             egui::Label::new(
-                egui::RichText::new(format!("📋 {summary}"))
+                egui::RichText::new(icon_label("📋", &summary))
                     .color(crate::theme::gutter_text_color()),
             )
             .selectable(false)
@@ -4999,7 +5010,7 @@ fn metadata_cell_widget(
         if response.clicked() {
             actions.push(Action::ViewColumnMetadata { column });
         }
-        response.on_hover_text("Métadonnées du fichier importé — cliquer pour consulter");
+        response.on_hover_text(tr!("workbook-metadata-summary", "hint"));
     });
 }
 
@@ -5246,7 +5257,7 @@ fn row_number_header_widget(
             sheet,
             HeaderField::LongName,
             HEADER_LONGNAME_HEIGHT,
-            "Long Name",
+            &tr!("workbook-header-long-name"),
         );
         header_row_label_widget(
             ui,
@@ -5255,7 +5266,7 @@ fn row_number_header_widget(
             sheet,
             HeaderField::Unit,
             HEADER_SUBROW_HEIGHT,
-            "Units",
+            &tr!("workbook-header-units"),
         );
         header_row_label_widget(
             ui,
@@ -5264,7 +5275,7 @@ fn row_number_header_widget(
             sheet,
             HeaderField::Comment,
             HEADER_SUBROW_HEIGHT,
-            "Comments",
+            &tr!("workbook-header-comments"),
         );
         header_row_label_widget(
             ui,
@@ -5273,7 +5284,7 @@ fn row_number_header_widget(
             sheet,
             HeaderField::Formula,
             HEADER_SUBROW_HEIGHT,
-            "F(x)=",
+            &tr!("workbook-header-formula"),
         );
         if metadata_row_visible(ui.ctx()) {
             ui.scope(|ui| {
@@ -5286,7 +5297,7 @@ fn row_number_header_widget(
                 let response = ui.put(
                     rect,
                     egui::Label::new(
-                        egui::RichText::new("Metadata")
+                        egui::RichText::new(tr!("workbook-header-metadata"))
                             .strong()
                             .color(crate::theme::gutter_text_color()),
                     )
@@ -5296,7 +5307,7 @@ fn row_number_header_widget(
                 // Miroir du menu Fenêtre : rien n'est atteignable au seul
                 // clic droit.
                 response.context_menu(|ui| {
-                    if ui.button("Masquer la ligne Metadata").clicked() {
+                    if ui.button(tr!("workbook-metadata-hide")).clicked() {
                         set_metadata_row_visible(ui.ctx(), false);
                         ui.close();
                     }
@@ -5436,10 +5447,7 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     );
     if sheets.is_empty() {
         grid_ui.centered_and_justified(|ui| {
-            ui.weak(format!(
-                "« {} » n'a aucune feuille (ou a été supprimé).",
-                node_title(state, book, || tr!("window-kind-workbook"))
-            ));
+            ui.weak(tr!("workbook-no-worksheets"));
         });
     } else {
         let vertical_bar_id = grid_ui.id().with("grid_vertical_bar");
@@ -6825,10 +6833,10 @@ fn grid_contents(
     let row_count = state.row_count(sheet);
     if columns.is_empty() {
         let empty = ui.centered_and_justified(|ui| {
-            ui.weak("Aucune colonne dans cette feuille.");
+            ui.weak(tr!("workbook-grid-no-columns"));
         });
         empty.response.context_menu(|ui| {
-            if ui.button("Ajouter une colonne").clicked() {
+            if ui.button(tr!("workbook-column-add")).clicked() {
                 actions.push(Action::AddColumn { sheet });
                 ui.close();
             }
@@ -6938,7 +6946,7 @@ fn grid_contents(
             egui::Sense::click(),
         );
         response.context_menu(|ui| {
-            if ui.button("Ajouter une colonne").clicked() {
+            if ui.button(tr!("workbook-column-add")).clicked() {
                 actions.push(Action::AddColumn { sheet });
                 ui.close();
             }
@@ -7304,11 +7312,9 @@ fn script_contents(
     }
 
     ui.horizontal(|ui| {
-        ui.heading("Script Python");
+        ui.heading(tr!("script-title"));
         if !state.script_available() {
-            ui.weak(
-                "— compilé sans le pont Python : la surface pyx n'est pas disponible dans ce binaire.",
-            );
+            ui.weak(tr!("script-unavailable"));
         }
     });
     ui.separator();
@@ -7330,7 +7336,7 @@ fn script_contents(
         if ui
             .add_enabled(
                 available,
-                egui::Button::new("Exécuter")
+                egui::Button::new(tr!("script-run"))
                     .shortcut_text(ctx.format_shortcut(&SHORTCUT_RUN_SCRIPT)),
             )
             .clicked()
@@ -7338,14 +7344,14 @@ fn script_contents(
             actions.push(Action::RunScript);
         }
         if ui
-            .add_enabled(running, egui::Button::new("Arrêter"))
+            .add_enabled(running, egui::Button::new(tr!("script-stop")))
             .clicked()
         {
             actions.push(Action::InterruptScript);
         }
         if running {
             ui.spinner();
-            ui.weak("exécution en cours…");
+            ui.weak(tr!("script-running"));
         }
     });
 
@@ -7354,27 +7360,27 @@ fn script_contents(
         .max_height(SCRIPT_OUTPUT_HEIGHT)
         .show(ui, |ui| match state.script_output() {
             None => {
-                ui.weak("Aucune exécution pour l'instant.");
+                ui.weak(tr!("script-not-run"));
             }
             Some(output) => {
                 let mut empty = true;
                 if !output.stdout.is_empty() {
                     empty = false;
-                    ui.label("Sortie standard :");
+                    ui.label(tr!("script-stdout"));
                     ui.monospace(&output.stdout);
                 }
                 if !output.stderr.is_empty() {
                     empty = false;
-                    ui.label("Sortie d'erreur :");
+                    ui.label(tr!("script-stderr"));
                     ui.monospace(&output.stderr);
                 }
                 if let Some(error) = &output.error {
                     empty = false;
-                    ui.colored_label(ui.visuals().warn_fg_color, "Trace d'appels :");
+                    ui.colored_label(ui.visuals().warn_fg_color, tr!("script-traceback"));
                     ui.monospace(error);
                 }
                 if empty {
-                    ui.weak("(sortie vide)");
+                    ui.weak(tr!("script-no-output"));
                 }
             }
         });
@@ -8079,9 +8085,12 @@ fn column_metadata_window(ctx: &egui::Context, state: &AppState, actions: &mut V
     let meta = state.column_meta(column);
     let lines = meta.file_metadata;
     let title = if meta.long_name.is_empty() {
-        "Métadonnées du fichier".to_string()
+        tr!("workbook-metadata-title")
     } else {
-        format!("Métadonnées — {}", meta.long_name)
+        tr!(
+            "workbook-metadata-title-named",
+            name = meta.long_name.as_str()
+        )
     };
     let outcome = modal_dialog(
         ctx,
@@ -9007,14 +9016,9 @@ fn legend_position_label(position: LegendPosition) -> String {
 /// Une seule écriture pour la fenêtre flottante et la fenêtre détachée : elle
 /// ne lit que l'arbre, que les deux ont sous la main (`state.tree()` d'un
 /// côté, l'instantané du viewport de l'autre).
-fn matrix_contents(ui: &mut egui::Ui, tree: &Tree, matrix: NodeId) {
-    let name = node_title_in(tree, matrix, || tr!("window-kind-matrix"));
+fn matrix_contents(ui: &mut egui::Ui, _tree: &Tree, _matrix: NodeId) {
     ui.centered_and_justified(|ui| {
-        ui.weak(format!(
-            "« {name} » — édition de matrice non implémentée dans ce banc \
-             (hors périmètre ; `plotyx-core` n'expose pas encore de contenu \
-             de matrice à éditer)."
-        ));
+        ui.weak(tr!("matrix-unavailable"));
     });
 }
 
@@ -9026,10 +9030,7 @@ fn matrix_contents(ui: &mut egui::Ui, tree: &Tree, matrix: NodeId) {
 fn note_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>, note: NodeId) {
     let Some(current_name) = state.tree().node(note).map(|node| node.name().to_string()) else {
         ui.centered_and_justified(|ui| {
-            ui.weak(format!(
-                "« {} » a été supprimée.",
-                node_title(state, note, || tr!("window-kind-note"))
-            ));
+            ui.weak(tr!("note-deleted"));
         });
         return;
     };
@@ -11646,13 +11647,20 @@ mod graph_layout_tests {
         // bug (troncature qui ignore la géométrie du contenu). Ce test
         // verrouille donc : le rognage logique de tout contenu doit être
         // strictement plus petit que `window_rect`, pas égal à lui.
-        let content_labels = ["#", "Long Name", "Units", "A(Y)", "Sheet1"];
+        let letter_label = format!("A({})", role_label(ColumnRole::Y));
+        let content_labels = [
+            "#".to_string(),
+            tr!("workbook-header-long-name"),
+            tr!("workbook-header-units"),
+            letter_label.clone(),
+            "Sheet1".to_string(),
+        ];
         let mut checked = 0;
         for painted in &output.shapes {
             let egui::Shape::Text(shape) = &painted.shape else {
                 continue;
             };
-            if !content_labels.contains(&shape.galley.job.text.as_str()) {
+            if !content_labels.contains(&shape.galley.job.text) {
                 continue;
             }
             checked += 1;
@@ -11702,7 +11710,7 @@ mod graph_layout_tests {
         let tab_y = position_of("Sheet1")
             .expect("l'onglet détaché doit être visible")
             .y;
-        let header_y = position_of("A(Y)")
+        let header_y = position_of(&letter_label)
             .expect("l'en-tête détaché doit être visible")
             .y;
         assert!(
@@ -11722,8 +11730,8 @@ mod graph_layout_tests {
         let session = Session::spawn(project, None).unwrap();
 
         for (on_tabs, label) in [
-            (false, "Ajouter une colonne"),
-            (true, "Ajouter une feuille"),
+            (false, tr!("workbook-column-add")),
+            (true, tr!("workbook-worksheet-add")),
         ] {
             let context = egui::Context::default();
             let mut state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
@@ -11776,7 +11784,7 @@ mod graph_layout_tests {
                 let output = paint(Vec::new());
                 assert!(
                     output.shapes.iter().any(|painted| match &painted.shape {
-                        egui::Shape::Text(shape) => shape.galley.job.text == label,
+                        egui::Shape::Text(shape) => shape.galley.job.text == *label,
                         _ => false,
                     }),
                     "le menu contextuel doit proposer {label} : {:?}",
@@ -11789,7 +11797,7 @@ mod graph_layout_tests {
                         })
                         .collect::<Vec<_>>()
                 );
-                let menu_pos = find_text_center(&output.shapes, label);
+                let menu_pos = find_text_center(&output.shapes, &label);
                 paint(vec![egui::Event::PointerMoved(menu_pos)]);
                 paint(vec![egui::Event::PointerButton {
                     pos: menu_pos,
@@ -12552,7 +12560,7 @@ mod graph_layout_tests {
         };
 
         let with_toolbar = paint(&context, Vec::new());
-        let hide_pos = find_text_center(&with_toolbar.shapes, "Masquer");
+        let hide_pos = find_text_center(&with_toolbar.shapes, &tr!("project-manager-hide"));
         click_at(&context, hide_pos, egui::Modifiers::NONE, &paint);
         assert_eq!(
             *hidden.borrow(),
@@ -12562,7 +12570,7 @@ mod graph_layout_tests {
         );
 
         let with_hidden_rows = paint(&context, Vec::new());
-        let show_pos = find_text_center(&with_hidden_rows.shapes, "Afficher");
+        let show_pos = find_text_center(&with_hidden_rows.shapes, &tr!("project-manager-show"));
         click_at(&context, show_pos, egui::Modifiers::NONE, &paint);
         assert!(
             hidden.borrow().is_empty(),

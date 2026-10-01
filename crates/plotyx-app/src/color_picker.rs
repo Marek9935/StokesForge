@@ -58,6 +58,7 @@ pub use plotyx_plot::ColorUsage;
 use plotyx_plot::{SavedColors, CURVE_PALETTES};
 
 use crate::state::SaveTarget;
+use crate::tr;
 
 /// Une rangée nommée d'échantillons.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,6 +68,26 @@ pub struct PaletteSection {
     /// Couleurs, en RVBA (opacité comprise : « Aucune couleur » est
     /// transparente).
     pub colors: Vec<[u8; 4]>,
+}
+
+/// Le nom affiché de la palette de courbes d'indice `index` dans
+/// [`CURVE_PALETTES`] (ramené dans les bornes). Les noms de `plotyx-plot` sont
+/// ceux de la description neutre du graphique : l'interface, elle, les écrit
+/// par le catalogue (clés `color-palette-*`, dans l'ordre de la table).
+pub fn curve_palette_name(index: usize) -> String {
+    let index = index.min(CURVE_PALETTES.len() - 1);
+    match index {
+        0 => tr!("color-palette-plotyx"),
+        1 => tr!("color-palette-tableau"),
+        2 => tr!("color-palette-okabe-ito"),
+        3 => tr!("color-palette-brewer-set1"),
+        4 => tr!("color-palette-brewer-dark2"),
+        5 => tr!("color-palette-brewer-paired"),
+        6 => tr!("color-palette-viridis"),
+        7 => tr!("color-palette-plasma"),
+        8 => tr!("color-palette-grayscale"),
+        _ => CURVE_PALETTES[index].name.to_string(),
+    }
 }
 
 /// Encres de la palette « texte ».
@@ -114,30 +135,30 @@ pub fn palette(usage: ColorUsage, curve_palette: usize) -> Vec<PaletteSection> {
             };
             vec![
                 PaletteSection {
-                    title: named.name.to_string(),
+                    title: curve_palette_name(curve_palette),
                     colors: base.clone(),
                 },
                 PaletteSection {
-                    title: "Nuances foncées".to_string(),
+                    title: tr!("color-shades-dark"),
                     colors: shade(|l| l * 0.62),
                 },
                 PaletteSection {
-                    title: "Nuances claires".to_string(),
+                    title: tr!("color-shades-light"),
                     colors: shade(|l| l + (100.0 - l) * 0.45),
                 },
             ]
         }
         ColorUsage::Text => vec![PaletteSection {
-            title: "Encres".to_string(),
+            title: tr!("color-section-text"),
             colors: parse_all(&TEXT_INKS),
         }],
         ColorUsage::Background => vec![
             PaletteSection {
-                title: "Aucune couleur (par défaut) et fonds clairs".to_string(),
+                title: tr!("color-section-light-backgrounds"),
                 colors: parse_all(&LIGHT_BACKGROUNDS),
             },
             PaletteSection {
-                title: "Fonds sombres (texte automatique en blanc)".to_string(),
+                title: tr!("color-section-dark-backgrounds"),
                 colors: parse_all(&DARK_BACKGROUNDS),
             },
         ],
@@ -372,9 +393,9 @@ pub fn color_button(
     let current = parse_hex(value);
     let (rect, response) = ui.allocate_exact_size(BUTTON_SWATCH, Sense::click());
     let response = response.on_hover_text(match current {
-        Some([_, _, _, 0]) => "Aucune couleur (transparent)".to_string(),
+        Some([_, _, _, 0]) => tr!("color-none"),
         Some(rgba) => to_hex(rgba),
-        None => auto_label.unwrap_or("Automatique").to_string(),
+        None => auto_label.map_or_else(|| tr!("color-auto"), str::to_string),
     });
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -386,7 +407,7 @@ pub fn color_button(
                 painter.text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    "Auto",
+                    tr!("color-auto"),
                     egui::FontId::proportional(11.0),
                     stroke.color,
                 );
@@ -489,10 +510,10 @@ fn picker_contents(
         // L'outil des courbes : un choix de palettes nommées.
         egui::ComboBox::from_id_salt(popup_id.with("curve_palette"))
             .width(PICKER_SIDE + 20.0)
-            .selected_text(CURVE_PALETTES[curve_palette.min(CURVE_PALETTES.len() - 1)].name)
+            .selected_text(curve_palette_name(curve_palette))
             .show_ui(ui, |ui| {
-                for (index, named) in CURVE_PALETTES.iter().enumerate() {
-                    ui.selectable_value(&mut curve_palette, index, named.name);
+                for index in 0..CURVE_PALETTES.len() {
+                    ui.selectable_value(&mut curve_palette, index, curve_palette_name(index));
                 }
             });
         ui.memory_mut(|memory| memory.data.insert_temp(curve_palette_id, curve_palette));
@@ -529,8 +550,8 @@ fn picker_contents(
                 close = true;
             }
         }
-        ui.toggle_value(&mut custom, "+ Personnalisée…")
-            .on_hover_text("Nuancier, opacité, codes RVB/TSL et enregistrement");
+        ui.toggle_value(&mut custom, tr!("color-custom"))
+            .on_hover_text(tr!("color-custom", "hint"));
     });
     ui.ctx()
         .data_mut(|data| data.insert_temp(custom_id(popup_id), custom));
@@ -538,8 +559,8 @@ fn picker_contents(
     // -- Couleurs enregistrées ------------------------------------------
     ui.separator();
     for (target, title) in [
-        (SaveTarget::Project, "Enregistrées dans le projet"),
-        (SaveTarget::User, "Mes couleurs (tous les projets)"),
+        (SaveTarget::Project, tr!("color-saved-project")),
+        (SaveTarget::User, tr!("color-saved-user")),
     ] {
         let saved = match target {
             SaveTarget::Project => env.project.get(usage).to_vec(),
@@ -556,7 +577,7 @@ fn picker_contents(
                     continue;
                 };
                 let response = palette_swatch(ui, rgba, current == Some(rgba))
-                    .on_hover_text("Clic droit : retirer");
+                    .on_hover_text(tr!("color-saved-remove-hint"));
                 if response.clicked() {
                     chosen = Some(rgba);
                     close = true;
@@ -579,8 +600,8 @@ fn picker_contents(
             .unwrap_or_default();
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(current.is_some(), egui::Button::new("Enregistrer"))
-                .on_hover_text("Garder la couleur courante dans cette palette")
+                .add_enabled(current.is_some(), egui::Button::new(tr!("color-save")))
+                .on_hover_text(tr!("color-save", "hint"))
                 .clicked()
             {
                 if let Some(rgba) = current {
@@ -623,8 +644,8 @@ fn picker_contents(
             .memory(|memory| memory.data.get_temp(shape_id))
             .unwrap_or_default();
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut shape, PickerShape::Square, "Carré");
-            ui.selectable_value(&mut shape, PickerShape::Wheel, "Roue");
+            ui.selectable_value(&mut shape, PickerShape::Square, tr!("color-shape-square"));
+            ui.selectable_value(&mut shape, PickerShape::Wheel, tr!("color-shape-wheel"));
         });
         ui.memory_mut(|m| m.data.insert_temp(shape_id, shape));
 
@@ -642,7 +663,7 @@ fn picker_contents(
         let mut opacity = f32::from(a0) / 255.0 * 100.0;
         let opacity_response = ui
             .horizontal(|ui| {
-                ui.label("Opacité");
+                ui.label(tr!("color-opacity"));
                 ui.add(
                     egui::Slider::new(&mut opacity, 0.0..=100.0)
                         .suffix(" %")
@@ -661,14 +682,19 @@ fn picker_contents(
         let mut channels = shown.map(i32::from);
         let mut rgb_edit = NumericEdit::default();
         ui.horizontal(|ui| {
-            ui.label("RVB");
-            for (channel, prefix) in channels.iter_mut().zip(["R ", "V ", "B "]) {
+            ui.label(tr!("color-rgb"));
+            let prefixes = [
+                tr!("color-channel-red"),
+                tr!("color-channel-green"),
+                tr!("color-channel-blue"),
+            ];
+            for (channel, prefix) in channels.iter_mut().zip(prefixes) {
                 rgb_edit.track(
                     ui.add(
                         egui::DragValue::new(channel)
                             .range(0..=255)
                             .speed(0.5)
-                            .prefix(prefix),
+                            .prefix(format!("{prefix} ")),
                     ),
                 );
             }
@@ -684,14 +710,14 @@ fn picker_contents(
         let (mut th, mut ts, mut tl) = rgb_to_hsl(new_rgb.unwrap_or(rgb));
         let mut hsl_edit = NumericEdit::default();
         ui.horizontal(|ui| {
-            ui.label("TSL");
+            ui.label(tr!("color-hsl"));
             hsl_edit.track(
                 ui.add(
                     egui::DragValue::new(&mut th)
                         .range(0.0..=360.0)
                         .speed(1.0)
                         .max_decimals(0)
-                        .prefix("T ")
+                        .prefix(format!("{} ", tr!("color-channel-hue")))
                         .suffix("°"),
                 ),
             );
@@ -701,7 +727,7 @@ fn picker_contents(
                         .range(0.0..=100.0)
                         .speed(0.5)
                         .max_decimals(0)
-                        .prefix("S ")
+                        .prefix(format!("{} ", tr!("color-channel-saturation")))
                         .suffix(" %"),
                 ),
             );
@@ -711,7 +737,7 @@ fn picker_contents(
                         .range(0.0..=100.0)
                         .speed(0.5)
                         .max_decimals(0)
-                        .prefix("L ")
+                        .prefix(format!("{} ", tr!("color-channel-lightness")))
                         .suffix(" %"),
                 ),
             );
@@ -733,9 +759,9 @@ fn picker_contents(
         .unwrap_or_else(|| to_hex([r1, g1, b1, alpha]));
     let hex_response = ui
         .horizontal(|ui| {
-            ui.label("Hexa");
+            ui.label(tr!("color-hex"));
             ui.add(egui::TextEdit::singleline(&mut hex_text).desired_width(90.0))
-                .on_hover_text("#RRGGBB, ou #RRGGBBAA avec l'opacité")
+                .on_hover_text(tr!("color-hex", "hint"))
         })
         .inner;
     if hex_response.has_focus() {
@@ -787,7 +813,7 @@ impl NumericEdit {
 /// entièrement transparent.
 fn swatch_label(rgba: [u8; 4]) -> String {
     if rgba[3] == 0 {
-        "Aucune couleur (transparent) — pas de fond à l'export".to_string()
+        tr!("color-none-swatch")
     } else {
         to_hex(rgba)
     }
@@ -1200,25 +1226,25 @@ mod tests {
         for _ in 0..2 {
             output = run(vec![]);
         }
-        let plus = find_text(&output, "Personnalisée").expect("« + » peint");
+        let plus = find_text(&output, &tr!("color-custom")).expect("« + » peint");
         run(vec![egui::Event::PointerMoved(plus)]);
         run(vec![click(plus, true)]);
         run(vec![click(plus, false)]);
         for _ in 0..2 {
             output = run(vec![]);
         }
-        let combo = find_text(&output, "dans le projet").expect("menu déroulant peint");
+        let combo = find_text(&output, &tr!("color-target-project")).expect("menu déroulant peint");
         run(vec![egui::Event::PointerMoved(combo)]);
         run(vec![click(combo, true)]);
         run(vec![click(combo, false)]);
         output = run(vec![]);
-        let entry = find_text(&output, "utilisateur").expect("liste du menu ouverte");
+        let entry = find_text(&output, &tr!("color-target-user")).expect("liste du menu ouverte");
         run(vec![egui::Event::PointerMoved(entry)]);
         run(vec![click(entry, true)]);
         run(vec![click(entry, false)]);
         output = run(vec![]);
         assert!(
-            find_text(&output, "Enregistrer").is_some(),
+            find_text(&output, &tr!("color-save")).is_some(),
             "le sélecteur est resté ouvert après le choix dans la liste"
         );
         let away = egui::pos2(700.0, 500.0);
@@ -1227,7 +1253,7 @@ mod tests {
         run(vec![click(away, false)]);
         output = run(vec![]);
         assert!(
-            find_text(&output, "Enregistrer").is_none(),
+            find_text(&output, &tr!("color-save")).is_none(),
             "un clic extérieur referme le sélecteur"
         );
     }
@@ -1274,23 +1300,30 @@ mod tests {
         run(Some(true), None);
         let replie = settle(&mut run);
         assert!(
-            find_text(&replie, "Hexa").is_some(),
+            find_text(&replie, &tr!("color-hex")).is_some(),
             "hexa toujours visible"
         );
-        assert!(find_text(&replie, "Personnalisée").is_some());
-        for cache in ["Opacité", "RVB", "TSL", "Enregistrer", "Carré"] {
+        assert!(find_text(&replie, &tr!("color-custom")).is_some());
+        let derriere_le_plus = [
+            tr!("color-opacity"),
+            tr!("color-rgb"),
+            tr!("color-hsl"),
+            tr!("color-save"),
+            tr!("color-shape-square"),
+        ];
+        for cache in &derriere_le_plus {
             assert!(find_text(&replie, cache).is_none(), "{cache} est replié");
         }
         run(None, Some(true));
         let deplie = settle(&mut run);
-        for montre in ["Hexa", "Opacité", "RVB", "TSL", "Enregistrer", "Carré"] {
+        for montre in std::iter::once(&tr!("color-hex")).chain(&derriere_le_plus) {
             assert!(find_text(&deplie, montre).is_some(), "{montre} est déplié");
         }
         // Fermé puis rouvert : de nouveau replié.
         run(Some(false), None);
         run(Some(true), None);
         let rouvert = settle(&mut run);
-        assert!(find_text(&rouvert, "Opacité").is_none());
+        assert!(find_text(&rouvert, &tr!("color-opacity")).is_none());
     }
 
     fn luminance([r, g, b]: [u8; 3]) -> f32 {
@@ -1300,6 +1333,21 @@ mod tests {
     /// Les palettes sont distinctes par usage ; celle des courbes suit la
     /// palette nommée choisie, avec ses nuances ; celle des fonds sépare
     /// clairs et sombres.
+    #[test]
+    fn chaque_palette_de_courbes_a_son_nom_dans_le_catalogue() {
+        // Une clé `color-palette-*` par palette de `plotyx-plot`, dans l'ordre :
+        // une palette ajoutée à la table sans sa clé retomberait sur le nom
+        // de `plotyx-plot`, qui n'est pas traduit.
+        assert_eq!(
+            CURVE_PALETTES.len(),
+            9,
+            "`curve_palette_name` écrit les neuf palettes : en ajouter une demande sa clé              `color-palette-*` et sa branche"
+        );
+        for index in 0..CURVE_PALETTES.len() {
+            assert!(!curve_palette_name(index).is_empty());
+        }
+    }
+
     #[test]
     fn chaque_usage_a_sa_palette() {
         let courbes = palette(ColorUsage::Curves, 0);
@@ -1313,7 +1361,7 @@ mod tests {
         assert_eq!(okabe[0].colors, parse_all(CURVE_PALETTES[2].colors));
         assert_eq!(
             palette(ColorUsage::Curves, 999)[0].title,
-            CURVE_PALETTES[CURVE_PALETTES.len() - 1].name,
+            curve_palette_name(CURVE_PALETTES.len() - 1),
             "indice ramené dans les bornes"
         );
         assert_eq!(

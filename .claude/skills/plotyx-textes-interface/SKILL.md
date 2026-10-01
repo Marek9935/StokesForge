@@ -95,6 +95,10 @@ est en tête de `crates/plotyx-app/src/i18n.rs` ; la vue d'ensemble dans
 2. **L'employer par `tr!`** : `tr!("menu-file")`, ou avec arguments nommés
    `tr!("witness-count", count = n)`. Renvoie un `String`. Dans `app.rs` :
    `use crate::tr;` ; dans `main.rs` : `plotyx_app::tr!(…)`.
+   L'infobulle se lit par `tr!("clé", "hint")` (attribut `.hint` de la clé).
+   Un nom choisi par l'utilisateur (*Book1*, une colonne) se passe en
+   argument ou se concatène : jamais dans le catalogue (R15). Un test qui
+   cherche un texte peint l'obtient par `tr!`, pas par un littéral.
 3. **Un nombre qui change la phrase** (pluriel, accord) se règle dans le `.ftl`
    par un sélecteur Fluent (`{ $count -> [one] … *[other] … }`), jamais par un
    `if` dans le Rust ni par deux clés.

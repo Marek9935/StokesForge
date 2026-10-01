@@ -484,10 +484,10 @@ pub enum SaveTarget {
 
 impl SaveTarget {
     /// Libellé du choix.
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            SaveTarget::Project => "dans le projet",
-            SaveTarget::User => "utilisateur",
+            SaveTarget::Project => crate::tr!("color-target-project"),
+            SaveTarget::User => crate::tr!("color-target-user"),
         }
     }
 }
@@ -3908,11 +3908,10 @@ impl AppState {
             .iter()
             .filter(|line| !line.is_section())
             .count();
-        match count {
-            0 => String::new(),
-            1 => "1 clé".to_string(),
-            n => format!("{n} clés"),
+        if count == 0 {
+            return String::new();
         }
+        crate::tr!("workbook-metadata-summary", count = count)
     }
 
     /// Projets `.plx` déposés depuis le dernier appel, à ouvrir chacun dans

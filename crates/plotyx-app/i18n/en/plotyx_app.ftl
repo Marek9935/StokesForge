@@ -642,3 +642,109 @@ plot-view-reset-zoom = Reset Zoom
 # Export
 
 export-dialog-title = Export Graph
+
+## Workbook, Project Manager, notes, colors, console (#45)
+
+# Project Manager
+project-manager-title = Project Manager
+project-manager-show = Show
+    .hint = Open or unhide the selected windows
+project-manager-hide = Hide
+    .hint = Hide the selected windows without closing them
+project-manager-selected = { $count } selected
+project-folder-empty = (empty)
+
+# Workbook: stacked column header (left gutter)
+workbook-header-long-name = Long Name
+workbook-header-units = Units
+workbook-header-comments = Comments
+workbook-header-formula = F(x)=
+workbook-header-metadata = Metadata
+workbook-metadata-hide = Hide Metadata Row
+workbook-metadata-summary =
+    { $count ->
+        [one] { $count } key
+       *[other] { $count } keys
+    }
+    .hint = View the file metadata
+workbook-metadata-title = File Metadata
+workbook-metadata-title-named = Metadata — { $name }
+
+# Workbook: column menu (type, role, plot)
+workbook-type-numeric = Numeric
+workbook-type-mixed = Mixed
+workbook-type-datetime = Date/Time
+workbook-role-menu = Role
+workbook-role-x = X
+workbook-role-y = Y
+workbook-role-z = Z
+workbook-role-x-error = X Error
+workbook-role-y-error = Y Error
+workbook-role-label = Label
+workbook-role-none = None
+workbook-plot-menu = Plot
+workbook-plot-line = Line
+workbook-plot-scatter = Scatter
+workbook-plot-line-symbol = Line + Symbol
+workbook-plot-bar = Bar
+
+# Workbook: grid, worksheet tabs, empty states
+workbook-column-add = Add Column
+workbook-grid-no-columns = No columns in this worksheet
+workbook-no-worksheets = This workbook has no worksheets
+workbook-worksheet-add = Add Worksheet
+matrix-unavailable = Matrix editing is not available yet
+note-deleted = This note was deleted
+
+# Script console
+script-title = Python Script
+script-unavailable = — Not available in this build
+script-run = Run
+script-stop = Stop
+script-running = Running…
+script-not-run = Not run yet
+script-stdout = Standard output
+script-stderr = Error output
+script-traceback = Traceback
+script-no-output = (no output)
+
+# Color picker
+color-auto = Auto
+color-none = No color (transparent)
+color-none-swatch = No color (transparent, no background in exports)
+color-custom = + Custom
+    .hint = Pick any color, set its opacity, save it
+color-shades-dark = Darker shades
+color-shades-light = Lighter shades
+color-section-text = Text colors
+color-section-light-backgrounds = No color (default) and light backgrounds
+color-section-dark-backgrounds = Dark backgrounds (auto text is white)
+color-saved-project = Saved in project
+color-saved-user = My colors (all projects)
+color-saved-remove-hint = Right-click to remove
+color-save = Save Color
+    .hint = Keep the current color in the saved colors
+color-target-project = In project
+color-target-user = In my colors
+color-shape-square = Square
+color-shape-wheel = Wheel
+color-opacity = Opacity
+color-rgb = RGB
+color-hsl = HSL
+color-hex = Hex
+    .hint = #RRGGBB, or #RRGGBBAA with opacity
+color-channel-red = R
+color-channel-green = G
+color-channel-blue = B
+color-channel-hue = H
+color-channel-saturation = S
+color-channel-lightness = L
+color-palette-plotyx = PlotYx (default)
+color-palette-tableau = Tableau 10
+color-palette-okabe-ito = Okabe-Ito (colorblind-safe)
+color-palette-brewer-set1 = ColorBrewer Set1
+color-palette-brewer-dark2 = ColorBrewer Dark2
+color-palette-brewer-paired = ColorBrewer Paired
+color-palette-viridis = Viridis (gradient)
+color-palette-plasma = Plasma (gradient)
+color-palette-grayscale = Grayscale (gradient)
