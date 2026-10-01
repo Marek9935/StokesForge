@@ -6,8 +6,8 @@
 //!
 //! - les lettres sont accentuées (« Save Project » → « Šàṽé Þŕöĵéçţ »), donc un
 //!   texte reste lisible mais reconnaissable ;
-//! - chaque message est encadré de `⟦ ⟧` : **un texte sans `⟦ ⟧` à l'écran n'est
-//!   pas passé par le catalogue** (littéral resté dans le code), et un `⟧`
+//! - chaque message est encadré de `[[ ]]` : **un texte sans `[[ ]]` à l'écran n'est
+//!   pas passé par le catalogue** (littéral resté dans le code), et un `]]`
 //!   manquant signale un texte **tronqué** par la mise en page ;
 //! - chaque message est allongé de 30 % (le français est plus long que
 //!   l'anglais) : une disposition qui ne tient pas en `en-XA` ne tiendra pas en
@@ -20,20 +20,30 @@
 //! pseudo-langue accepte les mêmes arguments que l'anglais.
 //!
 //! Dans un `select` (pluriel), chaque variante est allongée séparément ; le
-//! cadre `⟦ ⟧` n'entoure que le message entier. Les termes (`-nom = …`) sont
+//! cadre `[[ ]]` n'entoure que le message entier. Les termes (`-nom = …`) sont
 //! seulement accentués : ils entrent dans d'autres messages, déjà encadrés.
 
 use fluent_syntax::ast::{Entry, Expression, InlineExpression, Pattern, PatternElement};
 use fluent_syntax::{parser, serializer};
 
-/// Ouvre un message de la pseudo-langue.
-pub const OPEN: char = '⟦';
+/// Ouvre un message de la pseudo-langue. ASCII, pour que toute police
+/// l'affiche (`⟦ ⟧` sortaient en carrés « glyphe absent » avec Noto Sans).
+pub const OPEN: &str = "[[";
 /// Ferme un message de la pseudo-langue. Absent à l'écran : texte tronqué.
-pub const CLOSE: char = '⟧';
+pub const CLOSE: &str = "]]";
 /// Allongement visé, en pourcent du texte d'origine.
 pub const EXTRA_PERCENT: usize = 30;
 /// Lettre qui sert à allonger : accentuée, de largeur courante.
 const FILLER: char = 'ŏ';
+
+/// Un littéral de chaîne Fluent, `{ "…" }`.
+fn literal(value: &str) -> PatternElement<String> {
+    PatternElement::Placeable {
+        expression: Expression::Inline(InlineExpression::StringLiteral {
+            value: value.to_string(),
+        }),
+    }
+}
 
 /// Produit la pseudo-langue d'un catalogue Fluent. Une source qui ne
 /// s'analyse pas entièrement garde ses entrées valides ; les morceaux
@@ -102,20 +112,16 @@ fn localize_pattern(pattern: &mut Pattern<String>, role: Role) {
             }
         }
         Role::Message => {
-            let closing = if letters > 0 {
-                format!("{}{CLOSE}", padding())
-            } else {
-                CLOSE.to_string()
-            };
-            pattern.elements.insert(
-                0,
-                PatternElement::TextElement {
-                    value: OPEN.to_string(),
-                },
-            );
-            pattern
-                .elements
-                .push(PatternElement::TextElement { value: closing });
+            // Le cadre est un littéral `{ "[[" }`, pas du texte : un `[` en
+            // tête de ligne d'un motif sur plusieurs lignes se lirait comme
+            // une clé de variante. Fluent n'isole pas les littéraux (FSI/PDI).
+            if letters > 0 {
+                pattern
+                    .elements
+                    .push(PatternElement::TextElement { value: padding() });
+            }
+            pattern.elements.insert(0, literal(OPEN));
+            pattern.elements.push(literal(CLOSE));
         }
     }
 }
@@ -258,10 +264,12 @@ literal = Say { \"hi\" }
             .strip_prefix("save = ")
             .and_then(|rest| rest.strip_suffix('\n'))
             .expect("une ligne");
-        assert!(text.starts_with(OPEN), "{text}");
-        assert!(text.ends_with(CLOSE), "{text}");
+        // Le source sérialisé porte le cadre en littéraux `{ "[[" }`.
+        let (open, close) = (format!("{{ \"{OPEN}\" }}"), format!("{{ \"{CLOSE}\" }}"));
+        assert!(text.starts_with(&open), "{text}");
+        assert!(text.ends_with(&close), "{text}");
         assert!(text.contains("Šàṽé Þŕöĵéçţ"), "accentué : {text}");
-        let inner = text.trim_start_matches(OPEN).trim_end_matches(CLOSE);
+        let inner = text.trim_start_matches(&open).trim_end_matches(&close);
         assert!(
             inner.chars().count() >= "Save Project".chars().count() * 13 / 10,
             "allongé d'au moins 30 % : {inner}"
@@ -287,7 +295,10 @@ literal = Say { \"hi\" }
                 "{fragment:?} absent de :\n{pseudo}"
             );
         }
-        assert!(!pseudo.contains("-brand = ⟦"), "un terme n'est pas encadré");
+        assert!(
+            !pseudo.contains("-brand = { \"[[\" }"),
+            "un terme n'est pas encadré"
+        );
     }
 
     #[test]
@@ -300,6 +311,6 @@ literal = Say { \"hi\" }
     #[test]
     fn un_message_sans_texte_est_quand_meme_encadre() {
         let pseudo = localize("only = { $n }\n");
-        assert!(pseudo.contains("⟦{ $n }⟧"), "{pseudo}");
+        assert!(pseudo.contains("{ \"[[\" }{ $n }{ \"]]\" }"), "{pseudo}");
     }
 }

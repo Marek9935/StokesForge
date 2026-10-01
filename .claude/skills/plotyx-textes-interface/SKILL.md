@@ -110,18 +110,18 @@ test ne la change pas, il bâtit son propre chargeur (`i18n::build_loader`).
 ### La pseudo-langue `en-XA`
 
 Fabriquée à la volée depuis `en` (`src/i18n/pseudo.rs`), sans fichier à tenir :
-lettres accentuées, texte allongé de 30 %, message encadré de `⟦ ⟧`. Lancer
+lettres accentuées, texte allongé de 30 %, message encadré de `[[ ]]`. Lancer
 l'application avec `PLOTYX_LANG=en-XA` (et la capture, voir
 `plotyx-bug-report/references/voir-l-interface.md`) :
 
-- un texte **sans** `⟦ ⟧` n'est pas passé par le catalogue : un littéral est
+- un texte **sans** `[[ ]]` n'est pas passé par le catalogue : un littéral est
   resté dans le code ;
-- un `⟧` **absent** est un texte tronqué par la mise en page ;
+- un `]]` **absent** est un texte tronqué par la mise en page ;
 - les arguments (`{ $count }`) ne sont jamais touchés.
 
-Limite connue : la police de l'interface (Noto Sans) n'a pas les glyphes `⟦ ⟧` ;
-ils s'affichent comme des carrés « glyphe absent », qui encadrent tout de même
-le texte.
+Le cadre est en ASCII (`[[ ]]`) parce que Noto Sans n'a pas `⟦ ⟧` ; il est
+posé en littéral Fluent `{ "[[" }`, jamais en texte (un `[` en tête de ligne
+se lirait comme une clé de variante).
 
 ### La garde `aucun_libelle_en_dur`
 
@@ -152,7 +152,7 @@ zone, chaque zone portant le ticket qui la convertit (#42-#45) :
 |---|---|
 | `i18n::tests::toute_cle_francaise_existe_en_anglais_avec_les_memes_arguments` | `fr ⊆ en`, mêmes arguments ; **affiche** (`--nocapture`) les clés `en` pas encore traduites, sans échouer avant #49 |
 | `i18n::tests::la_completude_detecte_…` | le témoin : le comparateur voit une clé inconnue et un argument différent |
-| `i18n::tests::la_pseudo_langue_entoure_et_allonge_chaque_message` | `⟦ ⟧`, +30 %, accents, sur chaque clé sans argument |
+| `i18n::tests::la_pseudo_langue_entoure_et_allonge_chaque_message` | `[[ ]]`, +30 %, accents, sur chaque clé sans argument |
 | `i18n::tests::un_catalogue_francais_vide_affiche_l_anglais` | `PLOTYX_LANG=fr` avec `fr` vide montre l'anglais |
 | `i18n::tests::une_preference_corrompue_demarre_en_anglais` | invariant 10 pour `preferences.json` |
 | `libelles::la_garde_voit_un_litteral_dans_chaque_forme_d_appel` | le témoin de la garde : sans lui, une garde aveugle passerait |

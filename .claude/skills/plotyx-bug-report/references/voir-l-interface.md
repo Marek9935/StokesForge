@@ -54,8 +54,8 @@ PLOTYX_APP_AUTOQUIT_MS=2000 cargo run -p plotyx-app
 ```
 
 Chaque texte qui vient du catalogue s'affiche accentué, allongé de 30 % et
-encadré de `⟦ ⟧`. Un texte **sans** `⟦ ⟧` est écrit en dur dans le code (il a
-échappé à `tr!`) ; un `⟧` **absent** est un texte coupé par la mise en page —
+encadré de `[[ ]]`. Un texte **sans** `[[ ]]` est écrit en dur dans le code (il a
+échappé à `tr!`) ; un `]]` **absent** est un texte coupé par la mise en page —
 le français, plus long que l'anglais, le couperait aussi.
 
 ## Ce que la capture ne donne pas

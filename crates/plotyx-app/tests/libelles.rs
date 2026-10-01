@@ -35,7 +35,7 @@
 //! (leurs arguments mêlent texte et identifiants), un nom de colonne ou
 //! d'unité calculé. Les tickets de conversion étendent [`APPELS`] quand ils
 //! traitent ces zones, et la capture en pseudo-langue (`PLOTYX_LANG=en-XA`)
-//! montre ce qui a échappé : un texte sans `⟦ ⟧`.
+//! montre ce qui a échappé : un texte sans `[[ ]]`.
 
 use std::collections::BTreeMap;
 use std::path::Path;

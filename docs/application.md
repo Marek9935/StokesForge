@@ -467,9 +467,9 @@ système n'est **pas** suivie tant que le catalogue français n'est pas complet
 (#49). Une valeur inconnue ou un fichier corrompu passe au niveau suivant, sans
 panique (invariant 10). Choisie une fois, à la première lecture du chargeur.
 
-**Pseudo-langue `en-XA`** : fabriquée à la volée depuis `en` (accents, `⟦ ⟧`,
-+30 %), sans fichier. `PLOTYX_LANG=en-XA` : un texte sans `⟦ ⟧` n'est pas passé
-par le catalogue, un `⟧` manquant signale un texte tronqué.
+**Pseudo-langue `en-XA`** : fabriquée à la volée depuis `en` (accents, `[[ ]]`,
++30 %), sans fichier. `PLOTYX_LANG=en-XA` : un texte sans `[[ ]]` n'est pas passé
+par le catalogue, un `]]` manquant signale un texte tronqué.
 
 **Garde `aucun_libelle_en_dur`** (`tests/libelles.rs`) : aucun littéral textuel
 dans `label`, `button`, `menu_button`, `checkbox`, `radio_value`,

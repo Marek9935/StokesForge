@@ -44,9 +44,9 @@
 //!
 //! # La pseudo-langue `en-XA`
 //!
-//! Produite à la volée depuis `en` ([`pseudo`]) : accents, `⟦ ⟧`, +30 %. Lancer
+//! Produite à la volée depuis `en` ([`pseudo`]) : accents, `[[ ]]`, +30 %. Lancer
 //! l'application avec `PLOTYX_LANG=en-XA` montre d'un coup d'œil ce qui n'est
-//! pas passé par le catalogue (pas de `⟦ ⟧`) ou qui est tronqué (`⟧` absent).
+//! pas passé par le catalogue (pas de `[[ ]]`) ou qui est tronqué (`]]` absent).
 //!
 //! # Ce que `fl!` ne peut pas garantir
 //!
@@ -119,7 +119,7 @@ pub enum Language {
     English,
     /// Le français (catalogue en cours de rédaction, #49).
     French,
-    /// La pseudo-langue de test : l'anglais accentué, allongé, encadré de `⟦ ⟧`.
+    /// La pseudo-langue de test : l'anglais accentué, allongé, encadré de `[[ ]]`.
     PseudoEnglish,
 }
 
