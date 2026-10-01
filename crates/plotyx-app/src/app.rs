@@ -376,6 +376,7 @@ use crate::state::{
     PlotTarget, ProjectTreeNode, SaveTarget, WindowKind,
 };
 use crate::theme;
+use crate::tr;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 use plotyx_render_egui::{AxisSide, PlotComponent};
 
@@ -1162,7 +1163,7 @@ impl PlotyxApp {
     ) {
         egui::Panel::top("plotyx_menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("Fichier", |ui| {
+                ui.menu_button(tr!("menu-file"), |ui| {
                     if ui.button("Nouveau classeur").clicked() {
                         actions.push(Action::AddWorkbook);
                         ui.close();

@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("PlotYx — banc d'essai")
+            .with_title(plotyx_app::tr!("window-title"))
             .with_inner_size([1100.0, 700.0]),
         event_loop_builder: Some(Box::new(prefer_x11)),
         ..Default::default()

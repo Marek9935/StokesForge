@@ -438,6 +438,48 @@ qui doit réserver la place d'une barre la lit par
 `theme::scroll_bar_allocated_width`. Le test `aucun_scroll_style_hors_du_theme`
 fait échouer la CI sinon.
 
+### Interface multilingue (Fluent)
+
+L'interface s'écrit **d'abord en anglais** ; le français en est une traduction
+(chantier #39). Seule l'application traduit : Fluent (`i18n-embed`,
+`i18n-embed-fl`, `rust-embed`, plus `fluent-syntax` pour la pseudo-langue) est
+une dépendance de `plotyx-app` et d'aucun autre crate — `core`, `commands`,
+`session` et les autres rendent des données structurées que l'application met
+en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifiés
+à la compilation) est en tête de `src/i18n.rs`.
+
+| Où | Quoi |
+|---|---|
+| `crates/plotyx-app/i18n/en/plotyx_app.ftl` | le catalogue de référence ; une clé absente d'ici n'existe pas |
+| `crates/plotyx-app/i18n/fr/plotyx_app.ftl` | la traduction, vide au départ ; une clé absente reprend l'anglais |
+| `crates/plotyx-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues |
+| `src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
+| `src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
+| `tests/libelles.rs` | la garde `aucun_libelle_en_dur` et sa liste de dérogations |
+
+**`tr!` est l'unique point d'entrée** : `tr!("menu-file")`, ou avec arguments
+nommés `tr!("witness-count", count = n)`. Il enveloppe `fl!` ; une clé ou un
+argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé.
+
+**Langue** : la variable `PLOTYX_LANG` (`en`, `fr`, `en-XA`), puis la
+préférence `language` de `preferences.json`, sinon l'anglais. La langue du
+système n'est **pas** suivie tant que le catalogue français n'est pas complet
+(#49). Une valeur inconnue ou un fichier corrompu passe au niveau suivant, sans
+panique (invariant 10). Choisie une fois, à la première lecture du chargeur.
+
+**Pseudo-langue `en-XA`** : fabriquée à la volée depuis `en` (accents, `⟦ ⟧`,
++30 %), sans fichier. `PLOTYX_LANG=en-XA` : un texte sans `⟦ ⟧` n'est pas passé
+par le catalogue, un `⟧` manquant signale un texte tronqué.
+
+**Garde `aucun_libelle_en_dur`** (`tests/libelles.rs`) : aucun littéral textuel
+dans `label`, `button`, `menu_button`, `checkbox`, `radio_value`,
+`selectable_value`, `selectable_label`, `on_hover_text`, `heading`, ni dans les
+`Button::new(…)`/`RichText::new(…)`, ni dans les tables `fn label()`/`fn title()`.
+L'existant d'avant #41 (213 littéraux, 14 zones) est recensé par fichier et par
+zone, chaque zone portant le ticket qui la convertit (#42-#45) : la liste se
+réduit, ne grossit pas, et doit être vide à #48. Mécanique détaillée : skill
+`plotyx-textes-interface`.
+
 ### Sélecteur de fichiers natif
 
 Le bandeau de fichier a été supprimé : Ouvrir, Enregistrer et Enregistrer
@@ -1228,7 +1270,8 @@ Deux variables d'environnement servent aux tests et aux captures :
 
 `tests/shell.rs` (la boucle complète, sans fenêtre), `tests/script_panel.rs`,
 `tests/script_bridge_lazy.rs` (l'interpréteur ne démarre pas tout seul),
-`tests/perf_write_under_snapshot.rs`.
+`tests/perf_write_under_snapshot.rs`, `tests/libelles.rs` (la garde de
+traduction, voir « Interface multilingue »).
 
 ## `plotyx-cli`
 

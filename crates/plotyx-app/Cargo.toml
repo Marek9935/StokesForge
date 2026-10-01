@@ -61,6 +61,19 @@ anyhow = "1"
 directories = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Interface multilingue (issue #41, chantier #39) : Fluent, uniquement ici —
+# aucun crate du dessous ne traduit ni ne dépend de ces bibliothèques (les
+# listes blanches de `no_ui_dependency` les refuseraient). `fl!` (i18n-embed-fl)
+# vérifie à la compilation qu'une clé et ses arguments existent dans le
+# catalogue `en` ; rust-embed embarque `i18n/` dans le binaire. `fluent-syntax`
+# sert à produire la pseudo-langue `en-XA` depuis le catalogue `en`
+# (`i18n::pseudo`). La feature `desktop-requester` suit la demande de l'issue
+# mais n'est pas employée : PlotYx ne suit pas la langue du système pour
+# l'instant.
+i18n-embed = { version = "0.16.0", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10.1"
+rust-embed = "8.12.0"
+fluent-syntax = "0.12"
 
 [dev-dependencies]
 tempfile = "3"

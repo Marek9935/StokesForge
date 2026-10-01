@@ -213,7 +213,13 @@ vérifier quand une action est ajoutée :
 3. **le grisage** (`add_enabled`), calculé depuis `AppState` ;
 4. **le libellé**, qui vient de `state` (`AppState::undo_label`,
    `GridMenu::target_label`…), jamais écrit en dur dans `app.rs` quand une
-   contextualisation existe déjà.
+   contextualisation existe déjà. **Tout libellé est une clé du catalogue
+   `en`** (`crates/plotyx-app/i18n/en/plotyx_app.ftl`), lue par `tr!("clé")` —
+   jamais un littéral, même pour un bouton de passage (verrouillé par
+   `aucun_libelle_en_dur`, `tests/libelles.rs`). Rédiger le texte selon le
+   skill **plotyx-textes-interface** (mécanique : ajout d'une clé, pseudo-langue,
+   garde). La liste de dérogations de la garde est une dette à réduire, jamais
+   une raison d'écrire un littéral de plus.
 
 ### Ajouter un raccourci clavier
 
@@ -351,6 +357,7 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] logique dans `state.rs`, glu egui seulement dans `app.rs`
 - [ ] place dans la barre de menus **et** les menus contextuels étudiée (§2 quater) ; rien n'est accessible seulement au clic droit
 - [ ] les quatre surfaces en accord : raccourci, menu, grisage, libellé
+- [ ] libellés : clés du catalogue `en` + `tr!`, aucun littéral (`aucun_libelle_en_dur`) ; un changement visuel est regardé aussi en `PLOTYX_LANG=en-XA`
 - [ ] menu contextuel = miroir du clavier, décision dans `GridMenu`
 - [ ] test dans `tests/shell.rs` (ou le crate concerné)
 - [ ] changement visuel **regardé** (capture), pas seulement testé

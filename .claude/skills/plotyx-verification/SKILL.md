@@ -33,7 +33,7 @@ tester explicitement**, sinon elle valide du code mort.
 | l'intégration Python de `plotyx-app` | tester aussi `plotyx-app --features python`, avec l'environnement de `scripts/python-test.sh` ; appliquer cet environnement à Clippy |
 | les formules Typst, `plotyx-render::formula` | rien de plus : `cargo test --workspace` les couvre (dépendance ferme) ; l'export PDF/PNG reste hors Typst tant que l'issue #34 n'est pas faite |
 | une reproduction `#[ignore]` de robustesse | `cargo test -p plotyx-robustesse -- --ignored` |
-| l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `PLOTYX_APP_SCREENSHOT` + `PLOTYX_APP_AUTOQUIT_MS`, voir [`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence |
+| l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `PLOTYX_APP_SCREENSHOT` + `PLOTYX_APP_AUTOQUIT_MS`, voir [`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence. Pour un texte d'interface (nouveau libellé, zone convertie), refaire la capture avec `PLOTYX_LANG=en-XA` : un texte sans `⟦ ⟧` a échappé au catalogue, un `⟧` manquant est un texte tronqué |
 | une vraie fenêtre (Wayland, `rfd`, multi-écran, glisser, fenêtre détachée) | rien : **aucun outil non interactif ne peut valider ça**. Le dire dans le compte rendu, ou demander une capture à l'utilisateur. |
 
 ## Où poser un test
@@ -74,6 +74,8 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 | `plotyx-render-egui/tests/accord.rs` | écran et export aux mêmes pixels |
 | `plotyx-render-egui/tests/feathering.rs` | le feathering hors de la clé de cache (invariant 6) |
 | `plotyx-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
+| `plotyx-app/tests/libelles.rs` | `aucun_libelle_en_dur` : aucun texte d'interface en dur. Strict dans les deux sens — un littéral de plus **ou de moins** que la liste de dérogations échoue ; abaisser le compte, ne jamais le relever |
+| `plotyx-app/src/i18n.rs` (tests) | complétude `fr ⊆ en` avec les mêmes arguments, pseudo-langue `en-XA`, repli sur l'anglais ; le rapport des clés `en` non traduites s'affiche (`--nocapture`) sans échouer avant #49 |
 | `plotyx-commands/tests/memory_pinning.rs` | l'historique n'épingle pas de gros buffers |
 
 ### Reproduction vs garde-fou
@@ -132,6 +134,7 @@ Un résultat vert sans les features concernées ne valide pas ces chemins.
 - [ ] `cargo test --workspace`
 - [ ] features hors défaut touchées → contrôles ciblés `python`, y compris `plotyx-app` si concerné
 - [ ] aucun garde-fou d'architecture affaibli ; témoins intacts
+- [ ] texte d'interface : clés dans `en`, complétude `fr ⊆ en` verte, `aucun_libelle_en_dur` sans dérogation ajoutée (le compte baisse, il ne monte pas), capture en `en-XA` si le texte est visuel
 - [ ] `#[ignore]` retiré si une reproduction passe désormais
 - [ ] doc à jour (`//!`, page `docs/`, et fichiers de routage si les chemins ont bougé)
 - [ ] diff relu, travail en cours de l'utilisateur préservé

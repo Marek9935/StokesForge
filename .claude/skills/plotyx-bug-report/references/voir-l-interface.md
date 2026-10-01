@@ -43,6 +43,21 @@ dit **rien** sur ce à quoi la fenêtre ressemble. C'est aussi le seul moyen
 d'accéder à une fenêtre sous Wayland, où aucun outil externe ne peut
 photographier une fenêtre donnée.
 
+## En pseudo-langue, pour les textes
+
+Pour un symptôme de **texte** (libellé tronqué, texte qui n'a pas été traduit,
+bouton trop étroit), lancer la même capture avec `PLOTYX_LANG=en-XA` :
+
+```sh
+PLOTYX_LANG=en-XA PLOTYX_APP_SCREENSHOT=/tmp/plotyx.ppm \
+PLOTYX_APP_AUTOQUIT_MS=2000 cargo run -p plotyx-app
+```
+
+Chaque texte qui vient du catalogue s'affiche accentué, allongé de 30 % et
+encadré de `⟦ ⟧`. Un texte **sans** `⟦ ⟧` est écrit en dur dans le code (il a
+échappé à `tr!`) ; un `⟧` **absent** est un texte coupé par la mise en page —
+le français, plus long que l'anglais, le couperait aussi.
+
 ## Ce que la capture ne donne pas
 
 Elle photographie **un** état, à **un** instant, dans la fenêtre principale.

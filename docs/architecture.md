@@ -56,7 +56,7 @@ dépendances.
 | `plotyx-render-svg` | export SVG, et par-dessus PDF et PNG | [rendu](rendu.md) |
 | `plotyx-python` | interpréteur CPython embarqué, aller-retour numpy | [python](python-et-script.md) |
 | `plotyx-script` | le fil de script, la surface `pyx`, l'interruption | [python](python-et-script.md) |
-| `plotyx-app` | la coquille UI eframe (banc d'essai) | [application](application.md) |
+| `plotyx-app` | la coquille UI eframe (banc d'essai) ; **seul** crate qui traduit l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application.md) |
 | `plotyx-cli` | binaire headless de vérification du lien | [application](application.md) |
 | `plotyx-importer` | du résultat de `plotyx-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
 | `plotyx-robustesse` | 21 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
