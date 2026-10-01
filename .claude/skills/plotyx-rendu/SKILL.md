@@ -162,7 +162,10 @@ modifie pas le modèle à chaque image : l'aperçu est posé sur la vue
 compteur dans `view_generation`), et l'application envoie **une** action à la
 fin — une entrée d'historique. `hold_preview` garde l'aperçu jusqu'à ce que le
 modèle l'ait rattrapé, sans image de l'ancienne position entre les deux
-(issue #35). Un futur geste du même genre suit ce motif.
+(issue #35). Un futur geste du même genre suit ce motif. Un champ de saisie
+posé sur la figure se place par une fonction pure (`annotation_field` : centre
+du rendu, corps × échelle d'affichage, jamais tourné) et devient transparent
+quand il n'a pas le focus, pour que l'aperçu reste visible (issues #36, #37).
 
 ## Checklist
 

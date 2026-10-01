@@ -836,6 +836,57 @@ mod tests {
         assert_eq!(rotated_family(0.0), RICH_FAMILY);
     }
 
+    /// Issue #36 : l'angle d'un `DragValue` n'a rien d'un entier — fractionnaire,
+    /// très petit, négatif. Le source Typst doit rester une durée valide
+    /// (jamais de notation `1e-7deg`, que Typst refuserait : le texte
+    /// retomberait alors, non tourné, sur le chemin brut) et la page doit
+    /// épouser la boîte tournée, donc différer de la boîte droite.
+    #[test]
+    fn un_angle_libre_fractionnaire_ou_minuscule_est_compile_et_trace_tourne() {
+        use plotters::style::{IntoFont, BLACK};
+        let (sans, math) = noto();
+        let taille = |angle: f64| {
+            let family = rotated_family(angle);
+            let style = (family.as_str(), 16.0).into_font().color(&BLACK);
+            let code = source("Pic de référence", &style).into_owned();
+            let duree = code
+                .strip_prefix(ROTATE_CALL)
+                .and_then(|reste| reste.split("deg)").next())
+                .unwrap_or_else(|| panic!("{angle}° : pas enveloppé : {code}"));
+            assert!(
+                duree
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '.' || c == '-'),
+                "{angle}° : durée `{duree}` en notation scientifique"
+            );
+            compile(&code, 14.0, NOIR, sans.clone(), math.clone())
+                .unwrap_or_else(|erreur| panic!("{angle}° : {erreur:?}"))
+                .size_pt()
+        };
+        let droit = {
+            let style = (RICH_FAMILY, 16.0).into_font().color(&BLACK);
+            compile(
+                &source("Pic de référence", &style),
+                14.0,
+                NOIR,
+                sans.clone(),
+                math.clone(),
+            )
+            .expect("texte droit")
+            .size_pt()
+        };
+        for angle in [0.5, 33.3, -33.3, 179.99, -179.99] {
+            let (w, h) = taille(angle);
+            assert!(
+                (w, h) != droit,
+                "{angle}° : boîte identique à celle du texte droit"
+            );
+        }
+        // Un angle minuscule reste valide ; il peut être sans effet visible.
+        taille(1e-7);
+        taille(-1e-7);
+    }
+
     /// L'aiguillage porte sur le rôle (la famille du style), pas sur le
     /// contenu : un texte sans `$` en style riche passe par Typst, une
     /// formule en style ordinaire non (issue #32).

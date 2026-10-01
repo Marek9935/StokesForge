@@ -7365,6 +7365,9 @@ struct AnnotationEditor {
     original: Option<plotyx_render_egui::AnnotationSpec>,
     /// Donner le focus au champ à la prochaine image (ouverture).
     focus: bool,
+    /// Le dernier centre et la dernière taille (écran) du texte droit rendu :
+    /// un texte vidé n'est plus tracé, mais le champ doit rester où il est.
+    anchor: Option<(egui::Pos2, egui::Vec2)>,
 }
 
 fn annotation_editor_id(view: &GraphView) -> egui::Id {
@@ -7419,6 +7422,7 @@ fn start_annotation_editor(
         draft,
         original,
         focus: true,
+        anchor: None,
     };
     ctx.data_mut(|data| data.insert_temp(annotation_editor_id(view), editor));
 }
@@ -7494,15 +7498,25 @@ fn annotation_editor_ui(
     actions: &mut Vec<Action>,
 ) {
     let id = annotation_editor_id(view);
-    let (center, size, _) = view
-        .annotation_screen_box(editor.target)
-        .or_else(|| {
-            view.display_rect()
-                .map(|rect| (rect.center(), egui::vec2(120.0, 20.0), 0.0))
-        })
-        .unwrap_or((egui::Pos2::ZERO, egui::vec2(120.0, 20.0), 0.0));
-    let width = size.x.max(160.0);
-    let text_pos = center - egui::vec2(width / 2.0, 14.0);
+    // Le cadre du texte rendu ; à défaut (texte neuf, ou vidé donc plus
+    // tracé), le dernier connu, puis le centre de la figure.
+    if let Some((center, size, _)) = view.annotation_screen_box(editor.target) {
+        editor.anchor = Some((center, size));
+    }
+    let (center, size) = editor.anchor.unwrap_or_else(|| {
+        let center = view
+            .display_rect()
+            .map_or(egui::Pos2::ZERO, |rect| rect.center());
+        (center, egui::Vec2::ZERO)
+    });
+    // Le champ s'écrit dans le cadre du rendu (#37) : centré, au corps du
+    // texte, droit même si le texte est tourné.
+    let field = plotyx_render_egui::annotation_field(
+        center,
+        size,
+        editor.draft.effective_size(),
+        view.display_scale().unwrap_or(1.0),
+    );
 
     let (project, user): (plotyx_plot::SavedColors, plotyx_plot::SavedColors) = ctx
         .data(|data| data.get_temp(saved_colors_id()))
@@ -7516,7 +7530,7 @@ fn annotation_editor_ui(
     let mut accept = false;
     let toolbar = egui::Area::new(id.with("toolbar"))
         .order(egui::Order::Foreground)
-        .fixed_pos(text_pos - egui::vec2(0.0, 36.0))
+        .fixed_pos(field.rect.min - egui::vec2(0.0, 36.0))
         .constrain(true)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -7549,14 +7563,44 @@ fn annotation_editor_ui(
                 });
             });
         });
+    // Tant qu'on tape, le champ droit couvre le texte ; dès qu'il perd le
+    // focus (on règle la rotation ou la taille), il devient transparent et
+    // l'aperçu — tourné — se voit (#36).
+    let field_id = id.with("field");
+    let typing = editor.focus || ctx.memory(|memory| memory.has_focus(field_id));
     let text = egui::Area::new(id.with("text"))
         .order(egui::Order::Foreground)
-        .fixed_pos(text_pos)
+        .fixed_pos(field.rect.min)
         .constrain(true)
         .show(ctx, |ui| {
-            let response = ui.add(
+            let visuals = ui.visuals().clone();
+            let outline = if typing {
+                visuals.selection.stroke
+            } else {
+                visuals.widgets.inactive.bg_stroke
+            };
+            if typing {
+                ui.painter()
+                    .rect_filled(field.rect, 2.0, visuals.extreme_bg_color);
+            }
+            ui.painter()
+                .rect_stroke(field.rect, 2.0, outline, egui::StrokeKind::Inside);
+            let padding = (field.font_size * 0.3).round() as i8;
+            let response = ui.put(
+                field.rect,
                 egui::TextEdit::singleline(&mut editor.draft.text)
-                    .desired_width(width)
+                    .id(field_id)
+                    .font(egui::FontId::proportional(field.font_size))
+                    .frame(egui::Frame::NONE)
+                    .margin(egui::Margin::same(padding))
+                    .desired_width(field.rect.width())
+                    .horizontal_align(egui::Align::Center)
+                    .vertical_align(egui::Align::Center)
+                    .text_color(if typing {
+                        visuals.text_color()
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    })
                     .hint_text("Texte, $formule$"),
             );
             if editor.focus {

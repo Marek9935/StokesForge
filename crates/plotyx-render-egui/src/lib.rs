@@ -736,7 +736,10 @@ impl GraphView {
         (scale > 0.0).then(|| Pos2::ZERO + (pos - display.min) / scale)
     }
 
-    fn display_scale(&self) -> Option<f32> {
+    /// Le rapport entre un pixel de la figure et un point egui à l'écran
+    /// (1 tant qu'elle n'est ni agrandie ni réduite). `None` avant la
+    /// première figure tracée.
+    pub fn display_scale(&self) -> Option<f32> {
         Some(self.display_rect?.width() / self.cache.key()?.rect.width())
     }
 
@@ -1127,6 +1130,58 @@ fn nearest_point(
     best.filter(|hit| hit.distance <= HIT_RADIUS)
 }
 
+/// Le champ de saisie d'un texte libre en cours d'édition (issue #37) : où
+/// il se pose et à quelle taille d'écriture.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnnotationField {
+    /// Le rectangle du champ, à l'écran. Toujours **droit** : la rotation du
+    /// texte n'y entre pas (voir [`annotation_field`]).
+    pub rect: egui::Rect,
+    /// La taille de police du champ, en points egui — celle du texte rendu.
+    pub font_size: f32,
+}
+
+/// Réserve de largeur d'un champ à l'écran, en multiples de son corps, pour
+/// qu'un texte très court (ou vide) laisse place à la saisie.
+const FIELD_MIN_WIDTH_EM: f32 = 6.0;
+/// Marge autour du texte, en multiples du corps : la hauteur d'une ligne de
+/// saisie, un peu plus que le texte seul.
+const FIELD_PADDING_EM: f32 = 0.3;
+
+/// Où poser le champ de saisie d'un texte libre, pour qu'on écrive **dans le
+/// cadre du rendu** (issue #37).
+///
+/// - **centré** sur `center`, le centre du texte rendu ;
+/// - à la **taille de police** du texte : son corps (`annotation_size`, au
+///   sens de Plotters, comme `AnnotationSpec::effective_size`) ramené au
+///   corps d'epaint, fois `scale`, l'échelle d'affichage de la figure ;
+/// - **sans rotation** : le champ reste droit, quelle que soit celle du
+///   texte, donc rien ici ne la prend en paramètre ;
+/// - au moins aussi grand que le texte droit rendu (`text_size`, à l'écran),
+///   plus une marge et une largeur minimale pour qu'un texte vide reste
+///   saisissable.
+///
+/// Fonction pure : la taille finale diffère un peu après recompilation par
+/// Typst (une formule `$…$` se compose autrement que sa source), le champ
+/// n'est pas censé la prédire.
+pub fn annotation_field(
+    center: Pos2,
+    text_size: egui::Vec2,
+    annotation_size: f64,
+    scale: f32,
+) -> AnnotationField {
+    let font_size = plotyx_render::text::font_size(annotation_size) * scale;
+    let padding = font_size * FIELD_PADDING_EM;
+    let size = egui::vec2(
+        (text_size.x + 2.0 * padding).max(font_size * FIELD_MIN_WIDTH_EM),
+        (text_size.y + 2.0 * padding).max(font_size + 2.0 * padding),
+    );
+    AnnotationField {
+        rect: egui::Rect::from_center_size(center, size),
+        font_size,
+    }
+}
+
 /// Le `PlotSpec` d'un nœud, cloné.
 ///
 /// Cloné et non emprunté : le spec ne porte que des identités et du style
@@ -1145,6 +1200,40 @@ fn graph_spec(tree: &Tree, graph: NodeId) -> Result<PlotSpec, RenderError> {
 mod tests {
     use super::*;
     use plotyx_plot::{PanelSpec, Panels};
+
+    /// Issue #37 : le champ de saisie est centré sur le texte rendu, à son
+    /// corps (proportionnel à la taille et à l'échelle d'affichage), et au
+    /// moins aussi grand que lui — la rotation n'y entre pas.
+    #[test]
+    fn le_champ_de_saisie_est_centre_et_a_la_taille_du_texte() {
+        let centre = Pos2::new(240.0, 130.0);
+        let texte = egui::vec2(90.0, 20.0);
+        let champ = annotation_field(centre, texte, 16.0, 1.0);
+        assert_eq!(champ.rect.center(), centre);
+        assert!(champ.rect.width() >= texte.x && champ.rect.height() >= texte.y);
+        assert_eq!(champ.font_size, plotyx_render::text::font_size(16.0));
+
+        // Le corps suit la taille du texte…
+        let grand = annotation_field(centre, texte, 32.0, 1.0);
+        assert!((grand.font_size - 2.0 * champ.font_size).abs() < 1e-4);
+        // … et l'échelle d'affichage de la figure.
+        let agrandi = annotation_field(centre, texte * 2.0, 16.0, 2.0);
+        assert!((agrandi.font_size - 2.0 * champ.font_size).abs() < 1e-4);
+        assert_eq!(agrandi.rect.center(), centre);
+    }
+
+    /// Un texte vide (ou très court) laisse une largeur de saisie ; un texte
+    /// long fait grandir le champ des deux côtés, toujours centré.
+    #[test]
+    fn le_champ_reste_saisissable_vide_et_suit_un_texte_long() {
+        let centre = Pos2::new(100.0, 50.0);
+        let vide = annotation_field(centre, egui::Vec2::ZERO, 16.0, 1.0);
+        assert!(vide.rect.width() >= 6.0 * vide.font_size);
+        assert!(vide.rect.height() > vide.font_size);
+        let long = annotation_field(centre, egui::vec2(600.0, 20.0), 16.0, 1.0);
+        assert!(long.rect.width() >= 600.0);
+        assert_eq!(long.rect.center(), centre);
+    }
 
     /// Issue #34 : `framed_spec` rend le spec cadré par le zoom — ce que la
     /// figure montre — sur un clone ; le spec d'origine, celui du modèle,

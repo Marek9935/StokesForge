@@ -695,6 +695,15 @@ par `Action::OpenPlotSettings { graph, tab, axis }`.
 (au centre du premier panneau). Le texte s'édite **sur place** : un champ posé
 sur le texte, et au-dessus une barre couleur / taille / rotation
 (`app::annotation_editor_ui`) ; Entrée ou clic ailleurs valide, Échap annule.
+Le champ s'écrit **dans le cadre du rendu** (issue #37) : centré sur le centre
+du texte rendu, à la taille de police du texte (corps × échelle d'affichage de
+la figure), droit même si le texte est tourné — son placement est la fonction
+pure `plotyx_render_egui::annotation_field`. Un texte vidé n'étant plus tracé,
+l'éditeur garde le dernier cadre connu. Tant qu'on tape, le champ a un léger
+fond ; dès qu'il perd le focus (on règle la rotation ou la taille), il devient
+transparent et l'aperçu **tourné** se voit (issue #36) ; un clic dans son cadre
+redonne la main à la saisie. La taille finale diffère un peu après
+recompilation par Typst (une formule `$…$` se compose autrement que sa source).
 Double-clic ou clic droit → « Modifier le texte » rouvrent l'éditeur ; un clic
 sélectionne (contour bleu), Suppr ou « Supprimer » le retire ; un glisser le
 déplace. L'aperçu vit dans la vue (`GraphView::set_annotation_preview`) et

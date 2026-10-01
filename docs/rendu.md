@@ -343,7 +343,11 @@ rapporte centre, taille du texte droit et rotation : `hit` désigne le rectangle
 (`set_annotation_preview`, appliqué au clone comme le zoom, compteur ajouté à
 `view_generation`), la sélection et les signaux `GraphEvent` (double-clic,
 texte relâché) ; l'aperçu validé reste affiché jusqu'à ce que le modèle change
-(`hold_preview`). Sans Typst (témoin, repli), le texte est brut et non tourné.
+(`hold_preview`). Le champ de saisie de l'éditeur (`annotation_field`, issue
+#37) est posé sur le centre et le corps de ce texte rendu, jamais tourné : un
+angle libre de `DragValue` (fractionnaire, minuscule, négatif) reste une durée
+Typst valide (`formula::source`, issue #36 — l'hypothèse d'un format `1e-7deg`
+était fausse : le format décimal de Rust n'a pas d'exposant). Sans Typst (témoin, repli), le texte est brut et non tourné.
 
 **Texte repris automatiquement** (issue #33) : un nom de série laissé vide
 reprend le nom long ou le nom de la colonne, souvent importé d'un appareil

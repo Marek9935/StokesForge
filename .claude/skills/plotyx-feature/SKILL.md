@@ -59,7 +59,10 @@ Un **geste continu sur un graphe** (glisser, édition sur place) n'émet pas une
 action par image : l'aperçu vit dans la `GraphView`, l'état d'un éditeur dans
 la mémoire d'egui sous `GraphView::id()` (donc identique en fenêtre détachée),
 et une seule action part à la validation. Modèle : textes libres, issue #35
-(`app::annotation_interactions`).
+(`app::annotation_interactions`). Le champ de saisie d'un tel éditeur s'écrit
+**dans le cadre du rendu** (centre, corps, sans rotation : une fonction pure de
+placement, testée sans fenêtre — `plotyx_render_egui::annotation_field`, issue
+#37), et ne masque pas l'aperçu quand on règle autre chose que le texte (#36).
 
 La ligne de partage `state.rs` / `app.rs` est la colonne vertébrale du crate
 UI : `state` porte toute la logique, pilotée par un enum `Action`, et se teste
