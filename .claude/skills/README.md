@@ -27,6 +27,7 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
 | [`plotyx-verification`](plotyx-verification/SKILL.md) | écrire un test au bon endroit, puis vérifier et committer | « teste », « vérifie », « c'est bon ? », « commit » |
 | [`plotyx-architecture`](plotyx-architecture/SKILL.md) | répondre sur l'architecture — **pour un chimiste**, par analogies Python | « comment ça marche », « pourquoi ce découpage », « où vit X » |
 | [`plotyx-fonctionnalites`](plotyx-fonctionnalites/SKILL.md) | répondre sur ce que le logiciel sait faire — **pour un chimiste** venu d'Origin | « est-ce que je peux… », « comment je fais pour… » |
+| [`plotyx-textes-interface`](plotyx-textes-interface/SKILL.md) | écrire un texte visible : glossaire anglais ↔ français, majuscules, ton, messages | tout libellé, infobulle, message ou titre ajouté ou modifié |
 
 ## Ressources partagées
 

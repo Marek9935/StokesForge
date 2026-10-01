@@ -30,6 +30,7 @@ page qui contredit le code a tort.
 | toucher au tracé, aux axes, à l'export SVG/PDF/PNG, aux formules | [`rendu.md`](rendu.md) |
 | toucher au pont PyO3 ou à la surface `pyx` des scripts | [`python-et-script.md`](python-et-script.md) |
 | toucher à la fenêtre, aux raccourcis, à la grille | [`application.md`](application.md) |
+| écrire ou modifier un texte visible (libellé, infobulle, message) | [`textes-interface.md`](textes-interface.md) |
 | écrire ou lancer un test, comprendre la CI | [`tests.md`](tests.md) |
 
 `.claude/rules.md` complète ce tableau côté **chargement de contexte** : quels

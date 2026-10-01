@@ -32,12 +32,12 @@ en refonte générale.
 
 ### Skills de projet repris de Claude
 
-Les dix skills maintenus dans [`.claude/skills/`](../.claude/skills/README.md)
+Les onze skills maintenus dans [`.claude/skills/`](../.claude/skills/README.md)
 sont également disponibles pour Codex via les liens de `.agents/skills/`.
 Ce sont les mêmes fichiers : modifier le skill source dans `.claude/skills/`
 met à jour les deux assistants. Pour une tâche donnée, lire le `SKILL.md`
 concerné et ses seules références utiles, après le parcours de lecture
-ci-dessus ; ne pas charger les dix systématiquement.
+ci-dessus ; ne pas charger les onze systématiquement.
 
 | Besoin | Skill à consulter |
 |---|---|
@@ -51,6 +51,7 @@ ci-dessus ; ne pas charger les dix systématiquement.
 | Tests, vérification finale et commit | [`plotyx-verification`](../.agents/skills/plotyx-verification/SKILL.md) |
 | Expliquer le découpage du logiciel | [`plotyx-architecture`](../.agents/skills/plotyx-architecture/SKILL.md) |
 | Expliquer ce que le logiciel sait faire | [`plotyx-fonctionnalites`](../.agents/skills/plotyx-fonctionnalites/SKILL.md) |
+| Écrire ou modifier un texte visible | [`plotyx-textes-interface`](../.agents/skills/plotyx-textes-interface/SKILL.md) |
 
 Les skills s'enchaînent selon le besoin : `plotyx-feature` ou
 `plotyx-bug-report` → `plotyx-bug-fix` si une correction est demandée →

@@ -22,6 +22,7 @@ l'historique ou à l'acteur.
 | Tracé, axes, export, formules | `docs/rendu.md` | `plotyx-render` **d'abord**, puis le backend visé, + `plotyx-plot` et `plotyx-core::resolve` en lecture | `commands`, `persistence`, `python`, `script` |
 | Pont PyO3, surface `pyx` | `docs/python-et-script.md` | `plotyx-python`, `plotyx-script` | `render*`, `persistence` |
 | Fenêtre, raccourcis, grille | `docs/application.md` | `plotyx-app`, `plotyx-session` ; `plotyx-render-egui` si la tâche touche au graphe | `render-svg`, `persistence` |
+| Texte d'interface (libellé, infobulle, message) | `docs/textes-interface.md` + skill `plotyx-textes-interface` | le seul fichier de `plotyx-app` qui porte le texte | le reste du crate, les autres crates |
 | Test de robustesse `bN` | `docs/tests.md` | `plotyx-robustesse/src/lib.rs` (index) + le **seul** fichier `bN` visé + le crate qu'il éprouve | les 20 autres fichiers de `tests/` |
 | Question transverse (« où vit X ? ») | `docs/README.md` | rien encore | tout |
 

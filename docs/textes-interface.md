@@ -1,0 +1,298 @@
+# Textes d'interface — glossaire et règles de rédaction
+
+> **Brouillon à valider** (issue #40). Les termes de la section « À trancher »
+> ne sont pas arrêtés : tant qu'ils ne sont pas validés, #42-#45 ne convertissent
+> rien. Le glossaire tel qu'il est écrit applique la recommandation de chaque
+> question.
+
+L'interface est **écrite d'abord en anglais** ; le français en est la
+traduction (#39). Ce guide est la source unique des termes et des règles : un
+texte visible qui s'en écarte est un défaut. Les chemins `app.rs:N` désignent
+`crates/plotyx-app/src/` au 2026-10-01.
+
+Colonne « Réf. » : **O** usage d'Origin · **G** terme générique des logiciels
+de bureau · **I** IUPAC · **D** usage courant de la discipline · **—** propre
+à PlotYx. Un `†` marque un terme **réservé** : il n'est pas encore dans
+l'interface, mais son mot est déjà fixé.
+
+## 1. Règles
+
+| # | Règle |
+|---|---|
+| R1 | **Anglais d'abord.** Le français traduit l'anglais, jamais l'inverse. |
+| R2 | **Une notion = un mot.** Le glossaire fait foi ; un terme refusé n'apparaît nulle part (libellé, infobulle, message, nom de clé). |
+| R3 | **Title Case** : menus, commandes, boutons, onglets, titres de fenêtre. **Sentence case** : champs, cases à cocher, options (boutons radio, listes), infobulles, messages. Mots de liaison en minuscule en Title Case (*of, and, to, in*). Français : initiale seule, jamais Title Case. |
+| R4 | **Commande = verbe** (*Add Column*, *Export Graph…*). « … » seulement si une fenêtre demande encore quelque chose. Une entrée qui ouvre une page de réglages porte le nom de la page (*Axes…*). |
+| R5 | **Visibilité = « Show X »** (*Show legend*), jamais « X affichée » ni « Présente dans… ». |
+| R6 | **Unité entre parenthèses, symbole SI, après un espace** : *Line width (pt)*, *Wavenumber (cm⁻¹)*. Exposants en Unicode dans l'interface (`cm⁻¹`) ; dans un titre d'axe (Typst), `$"cm"^(-1)$`. |
+| R7 | **Libellé court, infobulle précise.** Libellé : 1 à 3 mots. Infobulle : l'effet, la valeur par défaut si elle compte, le raccourci. |
+| R8 | **Pas de point final** sur une phrase seule. Point entre deux phrases. |
+| R9 | **Message = ce qui s'est passé, puis quoi faire.** Ni « please », ni excuse, ni point d'exclamation. Jamais de jargon interne : *session, nœud, arbre, id, fil, spec, commande, entrée d'historique, jeton, recette*. |
+| R10 | **Pas de « (s) »** : pluriel et accord par Fluent. |
+| R11 | **Pas de deux-points** après un libellé de champ. |
+| R12 | **Typographie.** « … » (un caractère), « × » et non « x ». Guillemets « » en français, “ ” en anglais. Espace insécable avant `: ; ? !` en français. |
+| R13 | **Français : infinitif** pour les consignes (*Choisir un fichier*). Ni tutoiement, ni « vous ». |
+| R14 | **Boutons de dialogue** : le verbe de l'action (*Delete*, *Keep*). *OK* / *Cancel* seulement pour valider / abandonner. Jamais *Yes* / *No*. Assistant : *Back*, *Next*, *Finish*. |
+| R15 | **Noms choisis par l'utilisateur ou par défaut** (*Book1*, *Sheet1*, noms de colonnes) : jamais traduits. Sans nom : *Untitled* / *Sans titre*. |
+| R16 | **Clés Fluent** : `zone-element-role` (`menu-file-open`, `plot-axes-tick-length`, `import-step-header-title`). |
+
+## 2. Glossaire
+
+### 2.1 Projet et fenêtres
+
+| Anglais | Français | Définition | Refusés | Réf. |
+|---|---|---|---|---|
+| Project | Projet | Contenu d'un fichier `.plx` | Document, Espace de travail | O |
+| Project Manager | Gestionnaire de projet | Panneau qui montre l'arborescence du projet | Explorateur, Navigateur | O (Q15) |
+| Folder | Dossier | Conteneur d'objets dans le projet | Répertoire | O |
+| Workbook | Classeur | Fenêtre de données qui contient des feuilles | Book, Cahier, Tableur | O |
+| Worksheet | Feuille | Grille de colonnes d'un classeur | Sheet, Onglet, Table, Feuille de calcul | O (Q4) |
+| Matrix | Matrice | Fenêtre de données en grille régulière | Tableau | O |
+| Graph | Graphique | Fenêtre qui trace des séries | Graphe, Chart, Figure, Plot | O (Q1, Q2) |
+| Note | Note | Fenêtre de texte libre | Mémo | G |
+| Window | Fenêtre | Classeur, graphique, matrice ou note ouvert | Onglet, Vue | O |
+| Detach / Reattach | Détacher / Réattacher | Sortir une fenêtre du cadre principal / l'y remettre | Flotter, Désancrer, Dock | G |
+| Restore | Restaurer | Rouvrir une fenêtre fermée ou réduite | Rétablir | G |
+| Status bar | Barre d'état | Ligne du bas : dernier message | Barre de statut | G |
+| Script | Script | Programme Python exécuté sur le projet | Macro, Programme | — |
+| Run / Stop | Exécuter / Arrêter | Lancer / interrompre un script | Lancer, Interrompre, Kill | G |
+| Output | Sortie | Texte écrit par un script | Résultat, Log | G |
+| Traceback | Trace d'appels | Pile d'appels d'une exception Python | Backtrace, Pile | D |
+
+### 2.2 Application
+
+| Anglais | Français | Définition | Refusés | Réf. |
+|---|---|---|---|---|
+| Open / Save / Save As / Quit | Ouvrir / Enregistrer / Enregistrer sous / Quitter | Commandes de fichier | Sauvegarder, Fermer (pour Quitter) | G |
+| Undo / Redo | Annuler / Rétablir | Défaire / refaire la dernière action | Refaire, Répéter | G |
+| Import / Export | Importer / Exporter | Lire un fichier d'appareil / écrire un graphique | Charger, Sauvegarder | O |
+| Refresh | Actualiser | Relire le fichier source d'une colonne | Rafraîchir, Recharger | G |
+| Properties | Propriétés | Réglages d'un objet précis | Options, Paramètres | O |
+| Preferences† | Préférences | Réglages de l'application | Options, Paramètres | G |
+| Setting | Réglage | Valeur choisie par l'utilisateur | Option, Paramètre | G |
+| Template | Modèle | Réglages d'import enregistrés sous un nom | Recette, Preset, Filtre | O |
+| Wizard | Assistant | Fenêtre à étapes | Wizard, Guide | G |
+| Theme | Thème | Jeu de couleurs globales d'un graphique | Style, Palette | O |
+| Shortcut | Raccourci | Touches qui lancent une commande | Raccourci clavier | G |
+
+### 2.3 Classeur et grille
+
+| Anglais | Français | Définition | Refusés | Réf. |
+|---|---|---|---|---|
+| Column | Colonne | Série de valeurs d'un même type | Champ, Variable | O |
+| Row | Ligne | Rangée de cellules d'une feuille | Enregistrement | O |
+| Line | Ligne | Rangée de texte **d'un fichier** (import) | Row | G |
+| Cell | Cellule | Une valeur dans une colonne et une ligne | Case | G |
+| Selection | Sélection | Cellules, colonnes ou lignes choisies | Plage | G |
+| Long Name | Nom long | Description d'une colonne, affichée dans l'en-tête | Libellé, Description | O |
+| Units | Unités | Unité des valeurs d'une colonne, affichée dans l'en-tête | Unité (singulier) | O (Q13) |
+| Comments | Commentaires | Texte libre d'une colonne | Remarques, Notes | O |
+| Metadata | Métadonnées | Paires clé-valeur lues dans le fichier importé | Infos, En-tête du fichier | O |
+| Role | Rôle | Fonction d'une colonne dans un tracé | Désignation, Type | O (Q8) |
+| X / Y / Z | X / Y / Z | Rôles : abscisse, ordonnée, troisième axe | — | O |
+| X Error / Y Error | Erreur X / Erreur Y | Rôles : barre d'erreur en X ou en Y | xerr, yerr | O |
+| Label | Étiquette | Rôle : texte rattaché à chaque point | Libellé, Annotation | O (Q11) |
+| None | Aucun | Rôle : colonne hors tracé | Ignorer, Disregard | O |
+| Type | Type | Nature d'une colonne : Numeric, Text, Mixed, Date/Time | Format | O |
+| Numeric / Text / Mixed / Date/Time | Numérique / Texte / Mixte / Date et heure | Valeur des types | Nombres, Date-heure | O |
+| Cut / Copy / Paste | Couper / Copier / Coller | Presse-papiers | — | G |
+| Paste in Place | Coller à l'identique | Coller à la position d'origine de la copie | Coller en absolu | G |
+| Copy with Header | Copier avec l'en-tête | Copier les valeurs et l'en-tête de colonne | — | O |
+| Clipboard | Presse-papiers | Mémoire de copie du système | Presse-papier, Tampon | G |
+| Add | Ajouter | Créer un objet **à la fin** (colonne, feuille, texte) | Nouveau, Créer | O |
+| Insert | Insérer | Créer **à une position** (lignes) | Ajouter | G |
+| Delete | Supprimer | Détruire un objet, des lignes ou des cellules | Effacer, Enlever | G |
+| Delete and Shift Up | Supprimer et remonter | Supprimer des cellules et remonter celles du dessous | Supprimer et décaler | G |
+| Clear | Effacer | Vider des cellules, sans les supprimer | Vider | G |
+| Remove | Retirer | Sortir un élément d'une liste, sans le détruire | Supprimer | G |
+| Rename / Move | Renommer / Déplacer | Changer le nom / la place d'un objet | — | G |
+| Show / Hide | Afficher / Masquer | Rendre visible / invisible | Cacher | G |
+| Grid | Grille | Cellules d'une feuille (jamais le quadrillage d'un graphique) | — | G |
+
+### 2.4 Import
+
+| Anglais | Français | Définition | Refusés | Réf. |
+|---|---|---|---|---|
+| Import Wizard | Assistant d'import | Fenêtre à six étapes qui règle l'import | Importateur | O |
+| Delimiter | Séparateur | Caractère qui sépare les valeurs d'une ligne | Délimiteur | O |
+| Decimal separator | Séparateur décimal | Caractère entre partie entière et décimale | Virgule (pour le nom) | O |
+| Thousands separator | Séparateur de milliers | Caractère qui groupe les chiffres | Milliers | O |
+| Fixed width | Largeur fixe | Colonnes de largeur donnée, sans séparateur | Colonnes fixes | O |
+| Encoding | Encodage | Jeu de caractères du fichier | Codage, Charset | G |
+| Preview | Aperçu | Contenu du fichier tel que lu | Prévisualisation | O |
+| Header | En-tête | Lignes au début du fichier, avant les données | Entête | O |
+| Subheader | Sous-en-tête | Lignes d'en-tête qui donnent nom long, unités, commentaires | — | O |
+| Footer | Pied de page | Lignes après les données | Fin | G |
+| Comment line | Ligne de commentaire | Ligne ignorée à cause de son préfixe | — | G |
+| Skipped line | Ligne ignorée | Ligne que l'import n'utilise pas | — | G |
+| Block | Bloc | Série de données d'un fichier, séparée des autres | Section | O |
+| Missing values | Valeurs manquantes | Textes lus comme une cellule vide | Jetons, Nulls | G |
+| Source file | Fichier source | Fichier d'où vient une colonne | Origine | O |
+| Header key | Clé d'en-tête | Nom d'une métadonnée de l'en-tête | — | — |
+| Destination | Destination | Où l'import écrit ses colonnes | Cible | O |
+
+### 2.5 Graphique
+
+| Anglais | Français | Définition | Refusés | Réf. |
+|---|---|---|---|---|
+| Graph Properties | Propriétés du graphique | Fenêtre de réglage d'un graphique | Propriétés du graphe | O |
+| General | Général | Onglet : titre et fond | Graph, Graphe | G (Q23) |
+| Plot Area | Zone de tracé | Rectangle délimité par les axes | Zone de dessin, Plot | G |
+| Panel | Panneau | Zone de tracé d'un graphique à plusieurs zones | Layer, Calque, Couche | — (Q22) |
+| Title | Titre | Texte en tête du graphique | Intitulé | G |
+| Axis (pl. Axes) | Axe | Ligne graduée portant une grandeur | — | G |
+| X (bottom) / Y (left) / Secondary Y (right) | X (bas) / Y (gauche) / Y secondaire (droite) | Les trois axes d'une zone | Y2, Axe de droite | G |
+| Axis title | Titre de l'axe | Texte qui nomme la grandeur de l'axe | Libellé, Label | G |
+| Tick | Graduation | Trait sur l'axe | Repère, Coche | I |
+| Tick label | Étiquette de graduation | Valeur écrite à côté d'une graduation | Libellé de graduation | G (Q11) |
+| Gridlines | Quadrillage | Lignes qui prolongent les graduations | Grille | G (Q12) |
+| Scale | Échelle | Loi de répartition des valeurs sur l'axe | Mode | O |
+| Linear / Log scale | Linéaire / Échelle log | Les deux échelles actuelles (Log10) | Logarithmique | O |
+| Reciprocal† | Inverse | Échelle en 1/x (spectres en nombre d'onde) | Réciproque | O |
+| Range | Plage | Intervalle de valeurs montré sur l'axe | Bornes, Étendue | O |
+| Auto range | Plage auto | Plage calculée d'après les données | Bornes automatiques | O |
+| Min / Max | Min / Max | Extrémités de la plage | De / À | O |
+| Reverse axis | Axe inversé | Valeurs décroissantes dans le sens de lecture | Axe retourné | O |
+| Legend | Légende | Liste des séries avec leur style | — | G |
+| Legend entry | Entrée de légende | Une ligne de la légende | Libellé de légende | G |
+| Position | Position | Coin de la légende : Top Left… | Emplacement | G |
+| Series | Série | Données tracées d'une colonne Y | Courbe, Trace, Plot, Jeu de données | G (Q3) |
+| Plot type | Type de tracé | Façon de tracer une série | Mode | O |
+| Scatter | Points | Symboles seuls | Nuage de points | O (Q6) |
+| Line | Ligne | Trait seul | Courbe | O |
+| Line + Symbol | Ligne + symboles | Trait et symboles | Ligne + points | O |
+| Bar | Barres | Barres verticales | Colonnes | O (Q7) |
+| Histogram | Histogramme | Barres des effectifs par classe | — | G |
+| Line + Error Bars | Ligne + barres d'erreur | Trait avec barres d'erreur | — | G |
+| Line (stroke) | Trait | Style, épaisseur et couleur du tracé | Ligne | O |
+| Line style | Style de trait | Aucun, Continu, Tirets, Pointillés, Tiret-point | Plein | G |
+| Line width (pt) | Épaisseur (pt) | Largeur du trait | Largeur | O |
+| Symbol | Symbole | Figure posée sur chaque point | Marqueur, Point | O (Q5) |
+| Shape / Size (pt) | Forme / Taille (pt) | Figure du symbole / sa dimension | — | O |
+| Circle, Square, Triangle, Diamond, Plus, Cross | Cercle, Carré, Triangle, Losange, Plus, Croix | Formes de symbole | Disque, Rond | G (Q24) |
+| Fill† | Remplissage | Couleur de l'intérieur d'une forme | Fond | O |
+| Color | Couleur | Teinte d'un élément | — | G |
+| Opacity | Opacité | Part de couleur opaque (0-100 %) | Transparence, Alpha | G |
+| Background | Fond | Couleur derrière le graphique | Arrière-plan | G |
+| Auto | Auto | Valeur choisie par PlotYx d'après le contexte | Automatique, Défaut | G (Q9) |
+| Text | Texte | Texte libre ancré aux données, posé sur le graphique | Annotation, Texte libre | O (Q21) |
+| Font size (pt) / Rotation (°) | Taille (pt) / Rotation (°) | Réglages d'un texte | Angle | G |
+| Formula | Formule | Texte composé par Typst, entre `$…$` | Équation, LaTeX | — |
+| Zoom / Reset Zoom | Zoom / Réinitialiser le zoom | Cadrage de la vue ; retour aux plages d'origine | Rescale, Recadrer | G |
+| Pan† | Panoramique | Déplacer le cadrage | Déplacement | G |
+| Global colors | Couleurs globales | Fond, texte, axes d'un thème | — | — |
+| Palette | Palette | Jeu de couleurs proposé | — | G |
+| Swatch | Nuance | Une couleur d'une palette | Échantillon | G |
+| Saved colors | Couleurs enregistrées | Couleurs gardées dans le projet ou pour l'utilisateur | Favoris | — |
+| Hex / RGB / HSL | Hexa / RVB / TSL | Façons d'écrire une couleur | — | G |
+| Resolution | Résolution | Facteur d'échelle d'un export PNG | DPI | G |
+
+### 2.6 Spectroscopie
+
+Le glossaire donne les mots des **titres d'axe, unités et traitements** que
+l'interface devra écrire. Grandeurs et unités : IUPAC *Green Book* ; une
+grandeur sans dimension (absorbance, transmittance) ne porte pas d'unité.
+
+| Anglais | Français | Définition | Refusés | Réf. |
+|---|---|---|---|---|
+| Spectrum | Spectre | Intensité mesurée en fonction d'une abscisse spectrale | Courbe, Trace | I |
+| Wavenumber (cm⁻¹) | Nombre d'onde (cm⁻¹) | Inverse de la longueur d'onde, symbole ν̃ | Fréquence (cm⁻¹) | I |
+| Wavelength (nm) | Longueur d'onde (nm) | Distance entre deux maxima du champ, symbole λ | — | I |
+| Raman shift (cm⁻¹) | Déplacement Raman (cm⁻¹) | Écart en nombre d'onde à la raie excitatrice | Décalage Raman, Shift | I, D (Q16) |
+| Energy (eV) | Énergie (eV) | Énergie des photons | — | I |
+| Frequency (Hz) | Fréquence (Hz) | Nombre d'oscillations par seconde, symbole ν | — | I |
+| Chemical shift (ppm)† | Déplacement chimique (ppm) | Abscisse RMN, symbole δ | Shift | I |
+| Absorbance | Absorbance | Grandeur sans unité, A = lg(P₀/P) | Densité optique, OD, Extinction | I (Q17) |
+| Transmittance (%T) | Transmittance (%T) | Part de lumière transmise | Transmission | I |
+| Reflectance (%R) | Réflectance (%R) | Part de lumière réfléchie | Réflexion | I |
+| Intensity (a.u.) | Intensité (u.a.) | Signal en unités arbitraires | Intensité (arb. units) | D |
+| Counts | Coups | Nombre de détections | Comptes | D (Q18) |
+| Molar absorption coefficient (L mol⁻¹ cm⁻¹)† | Coefficient d'absorption molaire (L mol⁻¹ cm⁻¹) | Absorbance ramenée à 1 mol L⁻¹ et 1 cm, symbole ε | Coefficient d'extinction | I |
+| Sample / Blank / Reference | Échantillon / Blanc / Référence | Mesure étudiée / sans analyte / de comparaison | Témoin | D |
+| Baseline† | Ligne de base | Signal de fond sous les pics | Fond continu | I |
+| Peak† | Pic | Maximum local du signal | Bande (sauf IR/Raman : *band*) | I |
+| Peak position† | Position du pic | Abscisse du maximum | Centre | D |
+| Height† | Hauteur | Ordonnée du maximum, ligne de base retirée | Amplitude | D |
+| FWHM† | LMH | Largeur à mi-hauteur d'un pic | Largeur | I |
+| Area† | Aire | Intégrale d'un pic | Surface | D |
+| Normalize† | Normaliser | Ramener l'intensité à 1 au maximum ou à l'aire | Standardiser | D |
+| Smooth† | Lisser | Réduire le bruit d'un spectre | Filtrer | D |
+| Derivative† | Dérivée | Pente du spectre, d'ordre 1 ou 2 | Différentielle | D |
+| Integrate† | Intégrer | Calculer l'aire sous la courbe | — | D |
+| Fit† | Ajuster | Faire coller un modèle aux données | Fitter, Lisser | D |
+| Offset (stack)† | Décalage (empilement) | Translation verticale entre spectres superposés | Espacement | D |
+
+## 3. Exemples avant / après
+
+Libellés réels, cités tels quels. Règle : numéro de la section 1 ou terme du
+glossaire.
+
+| # | Avant (`fichier:ligne`) | Anglais | Français | Règle |
+|---|---|---|---|---|
+| 1 | « Graphique » › « Propriétés du graphe… » (`app.rs:1282-1284`) ; onglet « Graphe » (`state.rs:1296`) | Graph › Graph Properties… ; tab General | Graphique › Propriétés du graphique… ; onglet Général | R2 |
+| 2 | « Réinitialiser le zoom » (`app.rs:1301`) ; « réinitialiser le zoom » (`app.rs:7239`) | Reset Zoom | Réinitialiser le zoom | R3 |
+| 3 | « Ajouter un texte », « Supprimer le texte sélectionné » (`app.rs:1314, 1326`) ; « Texte libre » (`state.rs:1355`) | Add Text, Delete Text | Ajouter un texte, Supprimer le texte | R2 |
+| 4 | « Exporter le graphe… » + « SVG, PDF ou PNG, avec le zoom courant » (`app.rs:1342-1345`) | Export Graph… + tip “SVG, PDF or PNG, at the current zoom” | Exporter le graphique… + « SVG, PDF ou PNG, au zoom courant » | R4, R7 |
+| 5 | « Résolution des exports PNG » (`app.rs:1356`) | PNG Resolution | Résolution PNG | R7 |
+| 6 | « Afficher la ligne Metadata des colonnes » (`app.rs:1378`) ; « Long Name », « Units » (`app.rs:5162-5171`) en anglais dans une interface française | Show Metadata Row ; Long Name, Units | Afficher la ligne Métadonnées ; Nom long, Unités | R1, R2 |
+| 7 | « Détacher le Project Manager en fenêtre séparée » (`app.rs:1419`) | Detach Project Manager | Détacher le gestionnaire de projet | R7 |
+| 8 | « Suivant > », « < Précédent », « Terminer » (`app.rs:6515, 6524, 6506`) | Next, Back, Finish | Suivant, Précédent, Terminer | R14 |
+| 9 | « Séparateur décimal : » (`app.rs:5939`) | Decimal separator | Séparateur décimal | R11 |
+| 10 | « Valeurs manquantes (séparées par des virgules) : » + « Jetons lus comme une cellule vide : --, n/a, *, NaN… » (`app.rs:5967-5971`) | Missing values + tip “Comma-separated. Read as empty cells: --, n/a, *, NaN…” | Valeurs manquantes + « Séparées par des virgules. Lues comme cellules vides : --, n/a, *, NaN… » | R7, R9 |
+| 11 | « Caractères à retirer en tête de chaque ligne de données : » (`app.rs:6042`) | Remove leading characters + tip “Removed at the start of every data line” | Retirer les premiers caractères + « Retirés au début de chaque ligne de données » | R7 |
+| 12 | « Lignes d'en-tête : », « dont sous-en-tête : » (`app.rs:6104, 6112`) | Header lines, Subheader lines + tip “Counted in the header lines” | Lignes d'en-tête, Lignes de sous-en-tête + « Comptées dans les lignes d'en-tête » | R7, R11 |
+| 13 | « Les données commencent ici », « Cette ligne donne les unités » (`app.rs:5574-5578`) | Start Data Here, Use as Units Line | Commencer les données ici, Utiliser comme ligne d'unités | R4 |
+| 14 | « {shown} ligne(s) de données montrée(s) sur {} au total. » (`app.rs:5543`) | Showing {$shown} of {$total} data lines | {$shown} lignes de données sur {$total} | R8, R10 |
+| 15 | « Nom des séries : » → « Nom de fichier » / « Clé d'en-tête » (`app.rs:6173-6191`) | Column names → File name / Header key | Nom des colonnes → Nom du fichier / Clé d'en-tête | Colonne ≠ Série |
+| 16 | « Choisis un fichier avant de détecter l'en-tête » (`state.rs:4348`) ; « Choisissez un fichier à l'étape 1. » (`app.rs:6224`) | Choose a file before detecting the header | Choisir un fichier avant de détecter l'en-tête | R13 |
+| 17 | « Presse-papier vide ou illisible » (`app.rs:4588`) | Clipboard is empty or unreadable | Presse-papiers vide ou illisible | R9 (orthographe) |
+| 18 | « Vider » (`app.rs:4609`) ; « Effacer la sélection » (`state.rs:4740`) | Clear ; Clear Selection | Effacer ; Effacer la sélection | R2 |
+| 19 | « Supprimer et décaler » + « Suppr vide à la première pression et ne supprime qu'à la seconde ; cette entrée supprime tout de suite. » (`app.rs:4619-4622`) | Delete and Shift Up + tip “Deletes now and shifts cells up. The Del key first clears, then deletes” | Supprimer et remonter + « Supprime tout de suite et remonte les cellules. La touche Suppr efface d'abord, puis supprime » | R7 |
+| 20 | « Session injoignable : {err} » (`state.rs:3430`) ; « Le fil de script a disparu sans répondre (a-t-il paniqué ?) » (`state.rs:3453`) | Internal error: {$error} ; The script engine stopped unexpectedly. Run the script again | Erreur interne : {$error} ; Le moteur de script s'est arrêté. Relancer le script | R9 |
+| 21 | « {id} n'est pas une feuille de ce projet » (`state.rs:4562`) ; « Impossible de grouper l'effacement de la sélection » (`state.rs:4741`) | This worksheet is no longer in the project ; Could not clear the selection | Cette feuille n'est plus dans le projet ; Effacement impossible | R9 |
+| 22 | « Aucune colonne de rôle Y dans la sélection : rien à tracer » (`state.rs:5674`) | No Y column selected. Select a Y column to plot | Aucune colonne Y sélectionnée. Sélectionner une colonne Y à tracer | R9 |
+| 23 | « Import en cours… 0/{total} fichier(s) » (`state.rs:3645`) ; « {} sélectionné(s) » (`app.rs:4353`) | Importing… {$done} of {$total} files ; {$count} selected | Import en cours… {$done}/{$total} fichiers ; {$count} sélectionné / {$count} sélectionnés (accord par Fluent) | R10 |
+| 24 | « Axe affiché », « Légende affichée », « Présente dans la légende » (`app.rs:8451, 8628, 8526`) | Show axis, Show legend, Show in legend | Afficher l'axe, Afficher la légende, Afficher dans la légende | R5 |
+| 25 | « Échelle logarithmique », « Axe inversé », « Bornes automatiques » (`app.rs:8416-8428`) | Log scale, Reverse axis, Auto range | Échelle log, Axe inversé, Plage auto | R7 |
+| 26 | « Épaisseur (pt) », « Taille (pt) », « Plein » (`app.rs:8563, 8600, 8675`) | Line width (pt), Size (pt), Solid | Épaisseur (pt), Taille (pt), Continu | R6 |
+| 27 | « Marqueur », « Forme », « Couleur du marqueur », « Comme le trait » (`app.rs:8574-8615`) | Symbol, Shape, Symbol color, Same as line | Symbole, Forme, Couleur du symbole, Comme le trait | Symbole |
+| 28 | « Points », « Ligne + points », « Barres » (`app.rs:8661-8664`) | Scatter, Line + Symbol, Bar | Points, Ligne + symboles, Barres | Symbole |
+| 29 | « Automatique (contraste avec le fond) », « Automatique (blanc) » (`app.rs:8158, 8167`) ; « Auto » (`color_picker.rs:389`) | Auto (contrasts with background), Auto (white) | Auto (contraste avec le fond), Auto (blanc) | R2 |
+| 30 | « Grille », « Lignes verticales (graduations X) » (`app.rs:8182-8184`) | Gridlines, Vertical (X ticks) | Quadrillage, Verticales (graduations X) | Grille ≠ Quadrillage |
+| 31 | « Nom vide = celui de la colonne tracée, affiché tel quel. » (`app.rs:8487`) | Empty: uses the plotted column's name as is | Vide : reprend le nom de la colonne tracée tel quel | R7 |
+| 32 | « Clic droit : retirer » (`color_picker.rs:559`) | Right-click to remove | Clic droit pour retirer | R7 |
+| 33 | « Classeur actif (une feuille par fichier) » (`app.rs:6388`) | Active workbook (one worksheet per file) | Classeur actif (une feuille par fichier) | R3 |
+| 34 | « Fichiers et modèle », « En-tête et fin des données » (`state.rs:1584-1586`) | Files and Template, Header and Data End | Fichiers et modèle, En-tête et fin des données | R3 |
+
+## 4. À trancher
+
+Chaque question a une recommandation, déjà appliquée dans le glossaire, et
+une alternative.
+
+| # | Question | Recommandation | Alternative |
+|---|---|---|---|
+| Q1 | Anglais : **Graph**, **Chart** ou **Plot** pour la fenêtre de tracé ? | **Graph** (Origin ; le code dit déjà `Graph1`) | *Chart* (générique, Excel) ; *Plot* (matplotlib, mais Origin l'emploie pour la série) |
+| Q2 | Français : **Graphique** ou **Graphe** ? | **Graphique** (générique bureautique ; « graphe » évoque la théorie des graphes) | *Graphe* (usage d'Origin en français, mot du code et des docs actuels) |
+| Q3 | La donnée tracée : **Series**, **Plot** (Origin) ou **Curve** ? | **Series / Série** (générique, jamais ambigu avec « tracé » ni avec « graphique ») | *Plot* (Origin) ; *Curve / Courbe* (usage des spectroscopistes, faux pour un nuage de points) |
+| Q4 | **Worksheet** partout, ou **Sheet** (plus court) ? | **Worksheet** partout (décision #39) | *Sheet* : plus court, et c'est le nom par défaut (`Sheet1`) ; Origin emploie les deux |
+| Q5 | **Symbol** ou **Marker** ? (français : Symbole ou Marqueur) | **Symbol / Symbole** (Origin ; cohérent avec *Line + Symbol*) | *Marker / Marqueur* (matplotlib, Excel ; terme actuel de l'interface) |
+| Q6 | Français de *Scatter* : **Points** ou **Nuage de points** ? | **Points** (un mot, déjà en place) | *Nuage de points* (terme statistique, 3 mots) |
+| Q7 | **Bar** ou **Column** pour les barres verticales ? | **Bar / Barres** (*Column* est déjà « colonne de données ») | *Column* (Origin : Column = vertical, Bar = horizontal) |
+| Q8 | Fonction d'une colonne : **Role** ou **Designation** (Origin « Set As ») ? Et *None* ou *Disregard* ? | **Role / Rôle**, valeur **None** | *Designation* ; *Disregard / Ignorer* |
+| Q9 | **Auto** ou **Automatic** ? | **Auto** (court ; l'infobulle précise « contraste avec le fond ») | *Automatic / Automatique* écrit en entier |
+| Q10 | « Annuler » nomme à la fois *Undo* et le bouton *Cancel* de la fenêtre des propriétés. Le garder ? | **Oui** (usage courant ; contextes distincts) | *Abandonner* pour *Cancel* (propre, mais inhabituel) |
+| Q11 | Texte rattaché à un point ou à une graduation : **Label / Étiquette** pour le rôle de colonne et **Tick label / Étiquette de graduation** ? | **Étiquette** pour les deux ; « libellé » refusé partout | *Libellé de graduation* ; *Valeur de graduation* |
+| Q12 | Lignes qui prolongent les graduations : **Gridlines / Quadrillage** ou **Grid / Grille** ? | **Quadrillage** (« grille » est déjà la grille de la feuille) | *Grille* (terme actuel) |
+| Q13 | **Units** (pluriel d'Origin) ou **Unit** ? | **Units / Unités** partout | *Unit / Unité* (singulier, actuel dans l'aperçu d'import et l'axe) |
+| Q14 | Unités : parenthèses **Wavenumber (cm⁻¹)** ou barre IUPAC **ν̃ / cm⁻¹** ? | **Parenthèses** (décision #39, usage des revues et d'Origin) | *Barre de fraction* (IUPAC, titres d'axe de publication) |
+| Q15 | Panneau d'arborescence : **Project Manager** (nom actuel) ou **Project Explorer** (nom d'Origin) ? | **Project Manager** (déjà dans le code et les docs) | *Project Explorer* |
+| Q16 | Français de *Raman shift* : **Déplacement Raman** ou **Décalage Raman** ? Et *Offset* (empilement) : **Décalage** ? | **Déplacement Raman** ; **Décalage** réservé à l'empilement, pour ne pas les confondre | *Décalage Raman* ; *Translation* ou *Espacement* pour l'empilement |
+| Q17 | **Absorbance** sans unité (IUPAC) ou **Absorbance (a.u.)** (usage courant, gabarits d'Origin) ? | **Absorbance** seule | *Absorbance (a.u.)* |
+| Q18 | Français de *Counts* : **Coups** ou **Counts** conservé ? | **Coups** | *Counts* invariant (usage oral en XPS et Raman) |
+| Q19 | Tutoiement, « vous » ou infinitif pour les consignes en français ? | **Infinitif** (*Choisir un fichier*) | *Vous* impératif (*Choisissez un fichier*) |
+| Q20 | **Detach / Reattach** ou **Float / Dock** ? | **Detach / Reattach** (verbes déjà en place, compris sans jargon) | *Float / Dock* (Qt, Office) |
+| Q21 | Texte posé sur le graphique : **Text** ou **Annotation** ? | **Text** (un mot, le geste est « Add Text ») | *Annotation* (matplotlib, terme du code) ; *Text Label* (heurte *Label*) |
+| Q22 | Sous-ensemble tracé d'un graphique : **Panel** ou **Layer** (Origin) ? | **Panel / Panneau**, onglet **Plot Area** tant qu'il n'y en a qu'un | *Layer / Calque* (Origin ; ses calques se superposent, pas les panneaux) |
+| Q23 | Premier onglet de *Graph Properties* : **General** ou **Graph** ? | **General** (« Graph » répète le titre de la fenêtre) | *Graph* (nom actuel : « Graphe ») |
+| Q24 | Formes de symbole : **Plus / Cross** ou **Cross / X** ? | **Plus (+)** et **Cross (×)** | *Cross (+)* et *X (×)* |
+| Q25 | Deux-points après un libellé de champ (« Séparateur : »)  — les supprimer ? | **Supprimer** (R11 : plus court, aucun souci d'espace insécable) | *Garder* en français seulement |
