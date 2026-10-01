@@ -44,7 +44,10 @@
 //! Conséquence : un texte de titre ou de légende est compilé **comme du
 //! markup Typst**. C'est voulu pour le texte saisi (syntaxe Typst brute :
 //! `*gras*`, `$x^2$`, `\$` pour un dollar). Le texte repris automatiquement
-//! d'une colonne doit être échappé en amont (issue #33). Une chaîne qui ne
+//! (nom de colonne en légende, ligne « … et N autres ») prend
+//! [`literal_style`] : Typst le compose aussi, mais **tel quel**, via
+//! [`escape`] (issue #33) — un `Abs_280` importé d'un appareil ne passe pas
+//! en italique. Une chaîne qui ne
 //! compile pas s'affiche en brut par `epaint` (invariant 10) : c'est le seul
 //! cas où les deux moteurs se côtoient encore.
 //!
@@ -95,25 +98,94 @@ pub fn ink(color: plotters_backend::BackendColor) -> Ink {
     [r, g, b, alpha]
 }
 
-/// La famille de police réservée qui désigne un texte riche, compilé par
-/// Typst — voir la tête de module.
+/// La famille de police réservée qui désigne un texte riche **saisi**,
+/// compilé par Typst comme du markup — voir la tête de module.
 pub const RICH_FAMILY: &str = "plotyx-typst";
 
-/// Le style d'un texte riche (titre, titre d'axe, légende), à la taille de
-/// Plotters et dans la couleur données — le pendant de
+/// La famille réservée d'un texte riche **repris automatiquement** (nom de
+/// colonne en légende, texte généré par le rendu) : composé par Typst comme
+/// les autres, mais affiché tel quel, sans être lu comme du markup (issue
+/// #33). Voir [`source`].
+pub const LITERAL_FAMILY: &str = "plotyx-typst-litteral";
+
+/// Le style d'un texte riche saisi (titre, titre d'axe, nom de série), à la
+/// taille de Plotters et dans la couleur données — le pendant de
 /// `pipeline::text_style` pour les graduations.
 pub fn rich_style(size: f64, color: (u8, u8, u8, u8)) -> plotters::style::TextStyle<'static> {
-    use plotters::style::IntoFont;
-    (RICH_FAMILY, size)
-        .into_font()
-        .color(&crate::paint::rgba(color))
+    family_style(RICH_FAMILY, size, color)
 }
 
-/// Vrai si `style` désigne un texte riche, à compiler par Typst plutôt qu'à
-/// mettre en page par `epaint`. La seule condition d'aiguillage des deux
-/// backends, pour la mesure comme pour le dessin.
+/// Le style d'un texte riche repris automatiquement — voir
+/// [`LITERAL_FAMILY`].
+pub fn literal_style(size: f64, color: (u8, u8, u8, u8)) -> plotters::style::TextStyle<'static> {
+    family_style(LITERAL_FAMILY, size, color)
+}
+
+fn family_style(
+    family: &'static str,
+    size: f64,
+    color: (u8, u8, u8, u8),
+) -> plotters::style::TextStyle<'static> {
+    use plotters::style::IntoFont;
+    (family, size).into_font().color(&crate::paint::rgba(color))
+}
+
+/// Vrai si `style` désigne un texte riche, saisi ou repris, à composer par
+/// Typst plutôt qu'à mettre en page par `epaint`. La seule condition
+/// d'aiguillage des deux backends, pour la mesure comme pour le dessin.
 pub fn is_rich<S: plotters_backend::BackendTextStyle>(style: &S) -> bool {
-    matches!(style.family(), plotters_backend::FontFamily::Name(name) if name == RICH_FAMILY)
+    matches!(
+        style.family(),
+        plotters_backend::FontFamily::Name(name) if name == RICH_FAMILY || name == LITERAL_FAMILY
+    )
+}
+
+/// Le source Typst d'un texte riche : le texte lui-même s'il est saisi
+/// (markup voulu), [`escape`]`(text)` s'il est repris automatiquement. Les
+/// deux backends l'appellent dans leur branche Typst ; la décision, elle,
+/// vient du style posé par le pipeline. Le chemin `epaint` (backend sans
+/// Typst, repli de l'invariant 10) affiche le texte d'origine, jamais sa
+/// forme échappée.
+pub fn source<'a, S: plotters_backend::BackendTextStyle>(
+    text: &'a str,
+    style: &S,
+) -> std::borrow::Cow<'a, str> {
+    match style.family() {
+        plotters_backend::FontFamily::Name(name) if name == LITERAL_FAMILY => escape(text).into(),
+        _ => text.into(),
+    }
+}
+
+/// Un texte quelconque sous une forme que Typst affiche **tel quel** :
+/// une chaîne Typst, `#"…"`, dont seuls `\` et `"` (et les fins de ligne)
+/// sont échappés (issue #33).
+///
+/// Préféré à un `\` devant chaque caractère spécial du markup : la liste en
+/// est longue et dépend du contexte (`-`, `+`, `=`, `/` en début de ligne,
+/// `//` qui ouvre un commentaire), et le markup **remplace** aussi du texte
+/// sans le dire — `...` en points de suspension, `--` en tiret, `'` et `"`
+/// en guillemets typographiques. Une chaîne n'est rien de tout cela : c'est
+/// du texte. Rien de valide ne peut suivre la chaîne sans espace dans ce que
+/// le rendu produit (un `.` collé lirait un champ) : le seul ajout est
+/// « — référence rompue », précédé d'une espace.
+pub fn escape(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let mut escaped = String::with_capacity(text.len() + 3);
+    escaped.push_str("#\"");
+    for character in text.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            other => escaped.push(other),
+        }
+    }
+    escaped.push('"');
+    escaped
 }
 
 /// La bibliothèque standard de Typst, construite une fois pour tout le
@@ -689,7 +761,58 @@ mod tests {
     fn laiguillage_repose_sur_le_style_et_non_sur_le_dollar() {
         use plotters::style::{IntoFont, BLACK};
         assert!(is_rich(&rich_style(16.0, (0, 0, 0, 255))));
+        assert!(is_rich(&literal_style(16.0, (0, 0, 0, 255))));
         assert!(!is_rich(&("sans-serif", 16.0).into_font().color(&BLACK)));
+        // Seul le texte repris est échappé.
+        assert_eq!(source("$x$", &rich_style(16.0, (0, 0, 0, 255))), "$x$");
+        assert_eq!(
+            source("$x$", &literal_style(16.0, (0, 0, 0, 255))),
+            "#\"$x$\""
+        );
+    }
+
+    /// Issue #33 : un nom de colonne importé compile, et se compose comme
+    /// son texte littéral — même largeur que le markup échappé caractère par
+    /// caractère, alors que le même texte lu comme markup (le témoin) passe
+    /// en italique ou ne compile pas.
+    #[test]
+    fn un_texte_echappe_saffiche_tel_quel() {
+        let largeur = |text: &str| {
+            let (sans, math) = noto();
+            compile(text, 14.0, NOIR, sans, math).map(|c| c.size_pt().0)
+        };
+        let litteral = largeur(&escape("Abs_280 #1")).expect("texte échappé non compilé");
+        let a_la_main = largeur("Abs\\_280 \\#1").expect("référence non compilée");
+        assert!(
+            (litteral - a_la_main).abs() < 1e-6,
+            "{litteral} ≠ {a_la_main}"
+        );
+        // Le témoin : lu comme markup, `_` ouvre une emphase.
+        assert!(
+            largeur("Abs_280 #1").map_or(true, |brut| (brut - litteral).abs() > 1e-3),
+            "le markup brut se compose comme le texte échappé : le test ne prouve rien"
+        );
+
+        for piege in [
+            "Prix ($)",
+            "a\\b",
+            "\"cité\"",
+            "x // y",
+            "- liste",
+            "= titre",
+            "...",
+            "<étiquette>",
+            "@ref",
+            "`code`",
+        ] {
+            assert!(largeur(&escape(piege)).is_ok(), "{piege:?} ne compile pas");
+        }
+        // Ni points de suspension ni guillemets typographiques : le texte
+        // échappé garde ses caractères (même largeur que l'échappement
+        // caractère par caractère).
+        let points = largeur(&escape("a...b")).expect("points");
+        let points_a_la_main = largeur("a\\.\\.\\.b").expect("points à la main");
+        assert!((points - points_a_la_main).abs() < 1e-6);
     }
 
     /// L'étai : texte ordinaire, jambage, indice, exposant ont **la même**

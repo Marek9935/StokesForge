@@ -316,6 +316,17 @@ la même ligne de base (19,07 pt de haut à 14 pt pour Noto) ; une formule plus
 haute (fraction, somme) agrandit la boîte sans être coupée. Une légende mixte a
 donc des lignes de même hauteur.
 
+**Texte repris automatiquement** (issue #33) : un nom de série laissé vide
+reprend le nom long ou le nom de la colonne, souvent importé d'un appareil
+(`Abs_280 #1`). Lu comme du markup, `_` ouvrirait de l'italique et `#` du code.
+La légende lui donne donc `formula::literal_style` (famille
+`plotyx-typst-litteral`), comme à la ligne « … et N autres » : la branche Typst
+des backends le passe par `formula::source`, qui l'enveloppe en chaîne Typst
+`#"…"` (`formula::escape`) — composé par Typst, affiché tel quel, sans
+guillemets typographiques ni `...` changé en points de suspension. Le chemin
+sans Typst (export PDF/PNG avant #34, repli) affiche le texte d'origine, jamais
+sa forme échappée. Un nom **saisi** reste du markup voulu.
+
 Le partage suit la même règle que le reste :
 
 | Où | Quoi |

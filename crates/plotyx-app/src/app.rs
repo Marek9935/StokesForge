@@ -7630,6 +7630,7 @@ fn plot_settings_contents(
             .show(ui, |ui| match chosen_tab {
                 PlotSettingsTab::Graph => {
                     commit |= text_field(ui, "Titre", &mut spec.title);
+                    formula_memo(ui, "plot_settings_memo_graph");
                     commit |= color_field(
                         ui,
                         "Couleur du titre",
@@ -7657,6 +7658,7 @@ fn plot_settings_contents(
                         return;
                     };
                     commit |= text_field(ui, "Titre du panneau", &mut panel.title);
+                    formula_memo(ui, "plot_settings_memo_panel");
                     ui.add_space(4.0);
                     ui.strong("Grille");
                     commit |= ui
@@ -7815,6 +7817,48 @@ fn theme_editor(ui: &mut egui::Ui, spec: &mut plotyx_plot::PlotSpec, env: &mut P
     commit
 }
 
+/// Le mémo de syntaxe des textes du graphe (issue #33), replié par défaut,
+/// sous les champs de titre, de libellé et de nom de série.
+///
+/// Ces textes sont composés par Typst et lus comme du **markup** (issue
+/// #32) : un chimiste venu d'Origin n'en connaît pas la syntaxe, et un `_`
+/// ou un `$` isolé change le rendu sans prévenir. Une section repliable
+/// plutôt qu'une bulle d'aide : la fenêtre des propriétés est un dialogue
+/// modal, où une fenêtre surgissante de plus se disputerait l'unique place
+/// qu'egui leur réserve (issue #9).
+fn formula_memo(ui: &mut egui::Ui, id_salt: &str) {
+    egui::CollapsingHeader::new("Écrire une formule")
+        .id_salt(id_salt)
+        .default_open(false)
+        .show(ui, |ui| {
+            egui::Grid::new(id_salt)
+                .num_columns(2)
+                .spacing([12.0, 2.0])
+                .show(ui, |ui| {
+                    for (source, effet) in FORMULA_MEMO {
+                        ui.monospace(*source);
+                        ui.weak(*effet);
+                        ui.end_row();
+                    }
+                });
+            ui.weak(
+                "Le texte entre $ … $ est une formule ; le reste est du texte. \
+                 Syntaxe complète : typst.app/docs/reference/math.",
+            );
+        });
+}
+
+/// Les lignes du mémo de [`formula_memo`] : ce qu'on tape, ce qu'on obtient.
+const FORMULA_MEMO: &[(&str, &str)] = &[
+    ("$lambda$  $Delta$", "lettres grecques λ, Δ"),
+    ("$x_2$  $\"Ru(bpy)\"_3$", "indice"),
+    ("$x^2$  $\"cm\"^(-1)$", "exposant"),
+    ("$Delta H = sum_i n_i$", "formule complète"),
+    ("$\"L mol\"^(-1)$", "texte droit dans une formule"),
+    ("*gras*  _italique_", "mise en forme du texte"),
+    ("\\$  \\_  \\*  \\#", "le caractère lui-même"),
+];
+
 /// Un champ texte libellé, validé à la perte de focus. Rend `true` si le
 /// brouillon doit être validé — voir la doc de tête de
 /// [`plot_settings_window`].
@@ -7836,6 +7880,7 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
     ui.strong("Titre de l'axe");
     commit |= text_field(ui, "Libellé", &mut axis.label);
     commit |= text_field(ui, "Unité", &mut axis.unit);
+    formula_memo(ui, "plot_settings_memo_axis");
     commit |= color_field(
         ui,
         "Couleur du titre",
@@ -7920,7 +7965,8 @@ fn series_editor(
         ui.text_edit_singleline(&mut series.name)
     });
     commit |= name_response.inner.lost_focus();
-    ui.weak("Nom vide = dérivé de la colonne tracée.");
+    ui.weak("Nom vide = celui de la colonne tracée, affiché tel quel.");
+    formula_memo(ui, "plot_settings_memo_series");
 
     ui.horizontal(|ui| {
         ui.label("Type de tracé");
@@ -8512,6 +8558,26 @@ fn cell_widget(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod formula_memo_tests {
+    use plotyx_render_egui::formula;
+
+    /// Chaque exemple du mémo de syntaxe compile vraiment en Typst : un mémo
+    /// qui montre une syntaxe fausse enseignerait une erreur.
+    #[test]
+    fn chaque_exemple_du_memo_compile() {
+        let fonts =
+            formula::resolve_fonts(&plotyx_render_egui::FontChoice::default()).expect("polices");
+        for (source, _) in super::FORMULA_MEMO {
+            for example in source.split("  ") {
+                let (sans, math) = fonts.clone();
+                formula::compile(example, 14.0, [0, 0, 0, 255], sans, math)
+                    .unwrap_or_else(|error| panic!("{example:?} ne compile pas : {error}"));
+            }
+        }
+    }
 }
 
 #[cfg(test)]

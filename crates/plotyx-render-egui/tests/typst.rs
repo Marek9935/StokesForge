@@ -208,6 +208,12 @@ fn la_texture_dune_formule_prend_la_couleur_du_texte() {
 
 /// Un projet à deux séries nommées, de quoi remplir une légende.
 fn projet_a_legende(noms: [&str; 2]) -> (Project, PlotSpec) {
+    projet_a_colonnes(["Y0", "Y1"], noms)
+}
+
+/// Comme [`projet_a_legende`], en nommant aussi les colonnes Y ; un nom de
+/// série vide laisse la légende reprendre celui de la colonne.
+fn projet_a_colonnes(colonnes: [&str; 2], noms: [&str; 2]) -> (Project, PlotSpec) {
     use plotyx_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
     use plotyx_plot::{LineSpec, SeriesSpec};
     let colonne = |values: Vec<f64>| {
@@ -230,10 +236,10 @@ fn projet_a_legende(noms: [&str; 2]) -> (Project, PlotSpec) {
     panel.bottom.label = "$lambda$".to_owned();
     panel.bottom.unit = "nm".to_owned();
     panel.left.label = "Absorbance".to_owned();
-    for (index, nom) in noms.into_iter().enumerate() {
+    for (index, (colonne_y, nom)) in colonnes.into_iter().zip(noms).enumerate() {
         let ys: Vec<f64> = xs.iter().map(|x| x * (index + 1) as f64).collect();
         let y = project
-            .add_column(sheet, None, Some(&format!("Y{index}")), colonne(ys))
+            .add_column(sheet, None, Some(colonne_y), colonne(ys))
             .expect("Y");
         let mut series = SeriesSpec::new_xy(x, y);
         series.line = LineSpec::from_palette(index);
@@ -384,4 +390,58 @@ fn une_legende_mixte_a_des_lignes_de_meme_hauteur() {
         (hauteurs[0] - hauteurs[1]).abs() < 0.01,
         "hauteurs de ligne différentes : {hauteurs:?}"
     );
+}
+
+/// Les maillages des entrées de légende (en haut à droite de la zone de
+/// tracé), dans l'ordre des lignes.
+fn entrees_de_legende(shapes: &[Shape]) -> Vec<egui::Rect> {
+    let mut entrees: Vec<_> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Mesh(mesh) => Some(mesh.calc_bounds()),
+            _ => None,
+        })
+        .filter(|bounds| bounds.min.x > 240.0 && (40.0..200.0).contains(&bounds.min.y))
+        .collect();
+    entrees.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+    entrees
+}
+
+/// Issue #33 : un nom de colonne repris en légende est composé par Typst
+/// **tel quel**, un nom saisi comme du markup. La même chaîne `$lambda$`
+/// donne une formule (une lettre) saisie, et huit caractères reprise d'une
+/// colonne. Et le chemin sans Typst affiche le nom d'origine, jamais sa
+/// forme échappée `#"…"`.
+#[test]
+fn un_nom_de_colonne_saffiche_tel_quel_un_nom_saisi_est_compose() {
+    let (project, spec) = projet_a_colonnes(["Abs_280 #1", "$lambda$"], ["", "$lambda$"]);
+    let (shapes, _) = ecran(&project, &spec, true);
+    let [colonne, saisi] = entrees_de_legende(&shapes)[..] else {
+        panic!("deux entrées de légende Typst attendues")
+    };
+    assert!(colonne.width() > 0.0 && saisi.width() > 0.0);
+
+    let (project, repris) = projet_a_colonnes(["Abs_280 #1", "$lambda$"], ["", ""]);
+    let (shapes_repris, _) = ecran(&project, &repris, true);
+    let [_, litteral] = entrees_de_legende(&shapes_repris)[..] else {
+        panic!("deux entrées de légende Typst attendues")
+    };
+    assert!(
+        litteral.width() > 2.0 * saisi.width(),
+        "le nom de colonne « $lambda$ » a été lu comme une formule"
+    );
+
+    let (sans_typst, _) = ecran(&project, &repris, false);
+    let textes: Vec<String> = sans_typst
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Text(text) => Some(text.galley.job.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        textes.iter().any(|texte| texte == "Abs_280 #1"),
+        "{textes:?}"
+    );
+    assert!(!textes.iter().any(|texte| texte.starts_with("#\"")));
 }

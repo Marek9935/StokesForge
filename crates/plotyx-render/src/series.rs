@@ -125,6 +125,13 @@ impl Prepared<'_> {
         }
         format!("{} — référence rompue", self.label)
     }
+
+    /// Vrai si le texte de légende a été **saisi** (`SeriesSpec::name`) : du
+    /// markup Typst voulu. Faux s'il est repris de la colonne, donc à
+    /// afficher tel quel (issue #33, `formula::literal_style`).
+    pub fn legend_is_typed(&self) -> bool {
+        !self.spec.name.is_empty()
+    }
 }
 
 /// Prépare une série résolue, sur les échelles d'axe qui la concernent.

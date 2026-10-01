@@ -695,6 +695,15 @@ fond), « Zone de tracé » (titre du panneau, grilles), « Axes » (un axe à l
 fois, choisi en tête de page : titre de l'axe et sa couleur, échelle,
 affichage et couleur de l'échelle), « Séries », « Légende » et « Thème ».
 
+**Textes du graphe** : titre, titre du panneau, libellé et unité d'axe, nom de
+série sont composés par Typst et lus comme du **markup** (`docs/rendu.md`
+§ Typst). Sous chacun de ces champs, une section repliée « Écrire une formule »
+(`app::formula_memo`, issue #33) rappelle la syntaxe : `$lambda$`, `$x_2$`,
+`$"cm"^(-1)$`, `*gras*`, `\$` pour un dollar. Repliable plutôt qu'en bulle
+d'aide : la fenêtre est un dialogue modal (issue #9). Le test
+`chaque_exemple_du_memo_compile` vérifie que chaque exemple compile. Un nom de
+série laissé vide reprend celui de la colonne, affiché tel quel.
+
 **Onglet « Thème »** : deux thèmes prédéfinis (`plotyx_plot::THEMES` : Clair,
 Sombre) et trois couleurs globales — fond, texte, axes et échelles. Une
 couleur globale est **écrite dans tous les champs locaux** (titre du graphe,

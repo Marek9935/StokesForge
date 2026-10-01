@@ -72,7 +72,7 @@ use plotyx_plot::{AxisScale, AxisSpec, PlotSpec, SeriesAxis};
 use crate::clip::{self, PixelBounds};
 use crate::color::{auto_ink, over_white, rgba_or};
 use crate::decimate;
-use crate::formula::rich_style;
+use crate::formula::{literal_style, rich_style};
 use crate::legend;
 use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
@@ -615,7 +615,10 @@ fn draw_panel<DB: DrawingBackend>(
         size,
         &spec.legend,
         &entries,
-        &rich_style(LABEL_SIZE, opaque(ink)),
+        &legend::LegendText {
+            typed: rich_style(LABEL_SIZE, opaque(ink)),
+            literal: literal_style(LABEL_SIZE, opaque(ink)),
+        },
         legend::LegendColors { background, ink },
     )?;
     drawn.legend_entries = inscribed.entries;

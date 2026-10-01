@@ -69,7 +69,14 @@ donc **voulus à ce stade**, pas des oublis. Les principaux, écrits dans
   position et taille le sont) ;
 - une seule cellule éditable à la fois par fenêtre.
 
-Trois comportements ressemblent à des manques et n'en sont pas :
+Quatre comportements ressemblent à des manques et n'en sont pas :
+
+- **Écrire une lettre grecque, un indice ou un exposant** dans un titre, un
+  libellé d'axe ou un nom de série : la syntaxe est celle de Typst, entre
+  dollars — `$lambda$`, `$x_2$`, `$x^2$`, `$"cm"^(-1)$` ; `\$` pour un vrai
+  dollar, `\_` pour un vrai tiret bas. La fenêtre des propriétés a un mémo
+  replié « Écrire une formule » sous ces champs. Un nom de colonne repris en
+  légende s'affiche toujours tel quel (`docs/rendu.md` § Typst).
 
 - **Ctrl+Z pendant une saisie** annule la dernière modification du projet, pas
   la dernière frappe — comportement de tableur, assumé.

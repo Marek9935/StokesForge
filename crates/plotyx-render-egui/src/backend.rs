@@ -365,7 +365,8 @@ impl DrawingBackend for EguiBackend<'_> {
                 let size_pt = plotyx_render::text::font_size(style.size());
                 let ink = plotyx_render::formula::ink(fill);
                 let pixels_per_point = typst.pixels_per_point();
-                if let Some(texture) = typst.render(text, size_pt, ink, pixels_per_point) {
+                let source = plotyx_render::formula::source(text, style);
+                if let Some(texture) = typst.render(&source, size_pt, ink, pixels_per_point) {
                     let origin = self.at(pos);
                     let shape = crate::typst_screen::mesh(
                         &texture,
@@ -421,7 +422,8 @@ impl DrawingBackend for EguiBackend<'_> {
             if plotyx_render::formula::is_rich(style) {
                 let size_pt = plotyx_render::text::font_size(style.size());
                 let ink = plotyx_render::formula::ink(style.color());
-                if let Some(size) = typst.measure(text, size_pt, ink) {
+                let source = plotyx_render::formula::source(text, style);
+                if let Some(size) = typst.measure(&source, size_pt, ink) {
                     return Ok(size);
                 }
             }

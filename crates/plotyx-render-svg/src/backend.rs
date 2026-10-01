@@ -182,7 +182,7 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
                 }
                 let size_pt = font_size(style.size());
                 if let Some(witness) = typst.record(
-                    text,
+                    &plotyx_render::formula::source(text, style),
                     size_pt,
                     plotyx_render::formula::ink(style.color()),
                     style.anchor(),
@@ -237,7 +237,8 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
             if plotyx_render::formula::is_rich(style) {
                 let size_pt = font_size(style.size());
                 let ink = plotyx_render::formula::ink(style.color());
-                if let Some(size) = typst.measure(text, size_pt, ink) {
+                let source = plotyx_render::formula::source(text, style);
+                if let Some(size) = typst.measure(&source, size_pt, ink) {
                     return Ok(size);
                 }
             }

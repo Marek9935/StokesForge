@@ -69,6 +69,18 @@ pub struct DrawnLegend {
     pub omitted: usize,
 }
 
+/// Les deux styles de texte de la légende : celui d'un nom saisi (markup
+/// Typst) et celui d'un texte repris d'une colonne ou généré ici, affiché tel
+/// quel (issue #33). Même corps, même couleur.
+#[derive(Clone)]
+pub struct LegendText<'a> {
+    /// Nom de série saisi (`formula::rich_style`).
+    pub typed: TextStyle<'a>,
+    /// Nom repris de la colonne, ligne « … et N autres »
+    /// (`formula::literal_style`).
+    pub literal: TextStyle<'a>,
+}
+
 /// Couleurs de la légende : le fond de son cadre (celui du graphe) et
 /// l'encre de son contour et de ses vignettes (l'encre automatique du fond,
 /// `crate::color::auto_ink`).
@@ -93,7 +105,7 @@ pub fn draw<DB: DrawingBackend>(
     size: (u32, u32),
     spec: &LegendSpec,
     entries: &[&Prepared<'_>],
-    style: &TextStyle<'_>,
+    styles: &LegendText<'_>,
     colors: LegendColors,
 ) -> Result<DrawnLegend, DrawingAreaErrorKind<DB::ErrorType>> {
     let LegendColors { background, ink } = colors;
@@ -106,14 +118,24 @@ pub fn draw<DB: DrawingBackend>(
 
     // Les textes sont mesurés une fois, et c'est la même mesure qui décide
     // du cadre et qui a servi à placer les axes.
-    let mut texts: Vec<String> = shown.iter().map(|entry| entry.legend_text()).collect();
+    let mut texts: Vec<(String, &TextStyle<'_>)> = shown
+        .iter()
+        .map(|entry| {
+            let style = if entry.legend_is_typed() {
+                &styles.typed
+            } else {
+                &styles.literal
+            };
+            (entry.legend_text(), style)
+        })
+        .collect();
     if omitted > 0 {
-        texts.push(format!("… et {omitted} autres"));
+        texts.push((format!("… et {omitted} autres"), &styles.literal));
     }
 
     let mut label_width = 0i32;
     let mut row_height = 1i32;
-    for text in &texts {
+    for (text, style) in &texts {
         let (w, h) = area.estimate_text_size(text, style)?;
         label_width = label_width.max(w as i32);
         row_height = row_height.max(h as i32);
@@ -156,7 +178,7 @@ pub fn draw<DB: DrawingBackend>(
         },
     ))?;
 
-    for (index, text) in texts.iter().enumerate() {
+    for (index, (text, style)) in texts.iter().enumerate() {
         let row_top = y0 + PADDING + index as i32 * (row_height + ROW_GAP);
         let middle = row_top + row_height / 2;
         let key_left = x0 + PADDING;
@@ -166,7 +188,7 @@ pub fn draw<DB: DrawingBackend>(
         area.draw(&Text::new(
             text.as_str(),
             (key_left + KEY_WIDTH + KEY_GAP, row_top),
-            style,
+            *style,
         ))?;
     }
 

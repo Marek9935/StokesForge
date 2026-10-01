@@ -114,6 +114,10 @@ pub use plotyx_render::{FontChoice, FontSet, FontSource, ResolvedFonts};
 // fait que la consommer avec des types egui.
 pub use plotyx_render::{component_at, nearest_on_curve, AxisSide, PanelTransform, PlotComponent};
 pub use typst_screen::{FormulaTexture, TypstScreen};
+// Typst côté modèle de texte (compilation, échappement) : l'interface en a
+// besoin pour vérifier ce qu'elle propose d'écrire (mémo de syntaxe des
+// propriétés), sans déclarer d'arête vers `plotyx-render`.
+pub use plotyx_render::formula;
 pub use view::{Framing, ViewState};
 
 /// Distance maximale, en pixels, à laquelle un point est encore « désigné »

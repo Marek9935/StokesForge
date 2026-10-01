@@ -136,7 +136,10 @@ chemins, sans commande ciblée. **Tout titre, titre d'axe et entrée de légende
 passe par Typst, les graduations jamais** (issue #32) : le pipeline pose
 `formula::rich_style` sur ces textes, et les backends aiguillent sur
 `formula::is_rich` — jamais sur le contenu (`$`). Un nouveau texte de figure
-(annotation…) choisit son style dans le pipeline, pas dans un backend. Ce qui
+(annotation…) choisit son style dans le pipeline, pas dans un backend :
+`rich_style` pour un texte saisi (markup Typst), `literal_style` pour un texte
+repris d'une colonne ou généré par le rendu, affiché tel quel (`formula::source`
+l'échappe dans la branche Typst, issue #33). Ce qui
 reste optionnel est le chemin du backend : `collect_shapes` et
 `render_to_string` tracent tout en texte brut (le **témoin** des tests) ;
 `collect_shapes_with_typst`, `render_to_string_with_typst` et `with_typst()`
