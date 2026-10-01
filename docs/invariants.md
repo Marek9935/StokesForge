@@ -100,6 +100,16 @@ Deux angles morts connus, tous deux traités : `configure_series_labels` et
 `estimate_text_size`. C'est pour cette raison précise que la légende est
 écrite à la main dans `plotyx_render::legend`.
 
+Deux moteurs mesurent, chacun pour un rôle, jamais pour le même texte :
+`epaint` (par `plotyx_render::text`) pour les graduations, Typst
+(`plotyx_render::formula`) pour les titres, titres d'axe et la légende (issue
+#32). Le rôle est décidé **une fois**, par le pipeline, dans le style du texte
+(`formula::rich_style`) ; les deux backends aiguillent sur `formula::is_rich`
+dans `estimate_text_size` **et** dans `draw_text` — une mesure par un moteur et
+un dessin par l'autre serait le même défaut silencieux. Le seul cas où un texte
+riche est mesuré par `epaint` est son repli quand il ne compile pas
+(invariant 10), et le repli vaut alors pour la mesure comme pour le dessin.
+
 Trois tests tiennent la règle, et le troisième est celui sans lequel les deux
 autres ne prouveraient rien :
 
@@ -203,7 +213,7 @@ quatre formes qui se ressemblent :
 |---|---|
 | une série référence une colonne supprimée | `ResolvedSeries` existe toujours, `broken()` vrai, tracée en gris et annotée dans la légende |
 | une variante d'énumération inconnue dans un `.plx` | capturée telle quelle dans un `RawVariant` ; la perte est bornée à ce nœud (ou cette série), pas au fichier — **y compris sous une feuille ou un classeur**, que `accepts_child` accepte pour cette raison précise |
-| une formule Typst qui ne compile pas | le texte brut, `$…$` compris, s'affiche tel quel ; le graphe ne disparaît pas |
+| un titre, un titre d'axe ou une entrée de légende qui ne compile pas en Typst | le texte brut, `$…$` compris, s'affiche tel quel par `epaint` (seul cas où un texte riche n'est pas composé par Typst) ; le graphe ne disparaît pas |
 | une valeur manquante | `f64::NAN` (numérique, date-heure), `None` (texte, distinct de `Some("")`) ou `MixedCell::Empty` (mixte, distinct de `Number(NaN)` et de `Text("")`) |
 | une cellule texte dans une colonne tracée | une colonne mixte trace ses seules cellules numériques, les autres valant `NaN` — jamais un refus de tracer la colonne |
 

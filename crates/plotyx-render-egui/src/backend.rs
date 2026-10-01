@@ -115,9 +115,10 @@ impl<'a> EguiBackend<'a> {
         Self::new(shapes, rect.min, size, text)
     }
 
-    /// Active le chemin Typst (tâche R8.3) sur ce backend : les labels
-    /// reconnus par [`plotyx_render::formula::is_formula`] passent par
-    /// `typst`, tous les autres restent en `Shape::Text`. Additif : les
+    /// Active le chemin Typst (tâche R8.3) sur ce backend : les textes en
+    /// style riche ([`plotyx_render::formula::is_rich`] — titres, titres
+    /// d'axe, légende, issue #32) passent par `typst`, les graduations
+    /// restent en `Shape::Text`. Additif : les
     /// appelants existants (`in_rect`, `new`) sont inchangés, et un backend
     /// construit sans cet appel dessine tout en texte brut, comme avant R8.
     pub fn with_typst(mut self, typst: crate::typst_screen::TypstScreen<'a>) -> Self {
@@ -334,10 +335,12 @@ impl DrawingBackend for EguiBackend<'_> {
         Ok(())
     }
 
-    /// Texte ordinaire — graduations, titres d'axe — en `Shape::Text`.
+    /// Texte en `Shape::Text`, ou par Typst pour un texte riche.
     ///
-    /// **Jamais par Typst**, quoi qu'en dise la phase R8 : ce serait une
-    /// compilation Typst par graduation (`architecture-choisie.md` §4.3). Le
+    /// Les **graduations** ne passent jamais par Typst : ce serait une
+    /// compilation par graduation (`architecture-choisie.md` §4.3). Titres,
+    /// titres d'axe et légende, si (issue #32) — le pipeline les marque par
+    /// leur style. Pour un texte ordinaire, le
     /// `Galley` obtenu ici est celui-là même que
     /// [`DrawingBackend::estimate_text_size`] mesure, ci-dessous : la mesure
     /// et le dessin ne sont pas « cohérents », ils sont le même objet.
@@ -352,14 +355,13 @@ impl DrawingBackend for EguiBackend<'_> {
             return Ok(());
         }
 
-        // R8.3 : un label reconnu comme une formule Typst (`$...$`, voir
-        // `plotyx_render::formula::is_formula`) passe par la texture
-        // rastérisée plutôt que par le `Galley` egui. Dégrade silencieusement
-        // vers le chemin ordinaire si la formule ne compile pas ou que
-        // Typst n'est pas activé sur ce backend (`typst_screen`, tête de
-        // module) — jamais d'erreur remontée pour un label malformé.
+        // Un texte riche (`plotyx_render::formula::is_rich`, issue #32)
+        // passe par la texture Typst plutôt que par le `Galley` egui.
+        // Dégrade silencieusement vers le chemin ordinaire s'il ne compile
+        // pas ou que Typst n'est pas activé sur ce backend (`typst_screen`,
+        // tête de module) — jamais d'erreur remontée pour un label malformé.
         if let Some(typst) = &self.typst {
-            if plotyx_render::formula::is_formula(text) {
+            if plotyx_render::formula::is_rich(style) {
                 let size_pt = plotyx_render::text::font_size(style.size());
                 let ink = plotyx_render::formula::ink(fill);
                 let pixels_per_point = typst.pixels_per_point();
@@ -407,15 +409,16 @@ impl DrawingBackend for EguiBackend<'_> {
         text: &str,
         style: &S,
     ) -> Result<(u32, u32), DrawingErrorKind<Self::ErrorType>> {
-        // R8.5 — **l'invariant du chantier** : un label Typst se mesure en
+        // R8.5 — **l'invariant du chantier** : un texte riche se mesure en
         // interrogeant Typst, jamais l'heuristique `epaint` (qui mesurerait
-        // le texte source `$...$` lui-même, pas la formule qu'il désigne).
+        // le texte source lui-même, pas ce que Typst en compose). La même
+        // condition que `draw_text`, au même endroit.
         // Dégrade vers la mesure `epaint` si Typst n'est pas activé ou que
         // la formule ne compile pas — la même politique que `draw_text`,
         // pour que la mesure et le dessin restent d'accord sur ce qu'ils
         // font (`architecture-choisie.md` §4.3).
         if let Some(typst) = &self.typst {
-            if plotyx_render::formula::is_formula(text) {
+            if plotyx_render::formula::is_rich(style) {
                 let size_pt = plotyx_render::text::font_size(style.size());
                 let ink = plotyx_render::formula::ink(style.color());
                 if let Some(size) = typst.measure(text, size_pt, ink) {

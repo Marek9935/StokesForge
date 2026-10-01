@@ -27,8 +27,8 @@
 //!
 //! # Typst — tâche R8.4
 //!
-//! [`typst_export`] compile un label reconnu comme une formule
-//! ([`plotyx_render::formula::is_formula`]), pose un témoin substitué après
+//! [`typst_export`] compile tout texte riche — titres, titres d'axe,
+//! légende ([`plotyx_render::formula::is_rich`], issue #32) —, pose un témoin substitué après
 //! coup par un fragment `typst-svg` inliné — voir la doc de
 //! [`typst_export`] pour le mécanisme complet, détaillé en tête de ce
 //! module. [`render_to_string_with_typst`] est le point d'entrée équivalent
@@ -126,8 +126,8 @@ pub fn render_to_string(
 }
 
 /// Comme [`render_to_string`], avec le chemin Typst de la tâche R8.4 activé
-/// pour les labels reconnus comme des formules
-/// ([`plotyx_render::formula::is_formula`]).
+/// pour les textes riches ([`plotyx_render::formula::is_rich`] : titres,
+/// titres d'axe, légende).
 ///
 /// Point d'entrée additif — [`render_to_string`] n'est pas touché, tâche
 /// 8.6 — construit son propre [`plotyx_render::formula::FormulaCache`] en

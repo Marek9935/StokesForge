@@ -55,6 +55,14 @@
 //! `architecture-choisie.md` §4.4, et le test d'accord le prend par là. La
 //! légende passe par le même chemin, pour la même raison
 //! ([`crate::legend`]).
+//!
+//! # Deux styles de texte, selon le rôle
+//!
+//! Les graduations prennent `text_style` (mise en page `epaint`) ; titre du
+//! graphe, titres de panneau, titres d'axe et légende prennent
+//! [`rich_style`], que les backends compilent par Typst (issue #32, voir
+//! [`crate::formula`]). C'est ici, et seulement ici, que le rôle d'un texte
+//! est décidé.
 
 use plotters::coord::Shift;
 use plotters::prelude::*;
@@ -64,6 +72,7 @@ use plotyx_plot::{AxisScale, AxisSpec, PlotSpec, SeriesAxis};
 use crate::clip::{self, PixelBounds};
 use crate::color::{auto_ink, over_white, rgba_or};
 use crate::decimate;
+use crate::formula::rich_style;
 use crate::legend;
 use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
@@ -275,7 +284,7 @@ pub fn draw_on<DB: DrawingBackend>(
     } else {
         root.titled(
             &spec.title,
-            text_style(TITLE_SIZE, rgba_or(&spec.title_color, opaque(ink))),
+            rich_style(TITLE_SIZE, rgba_or(&spec.title_color, opaque(ink))),
         )?
     };
     let title_height = (area.get_base_pixel().1 - root.get_base_pixel().1).max(0) as u32;
@@ -433,7 +442,7 @@ fn draw_panel<DB: DrawingBackend>(
     let area = if spec.title.is_empty() {
         cell.clone()
     } else {
-        cell.titled(&spec.title, text_style(PANEL_TITLE_SIZE, opaque(ink)))?
+        cell.titled(&spec.title, rich_style(PANEL_TITLE_SIZE, opaque(ink)))?
     };
     let (width, height) = area.dim_in_pixel();
     // Les aires de graduation sont plafonnées à un tiers de la cellule :
@@ -511,7 +520,7 @@ fn draw_panel<DB: DrawingBackend>(
         let colors = AxisColors::of(&spec.right, ink);
         let mut mesh = chart.configure_secondary_axes();
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
-            .axis_desc_style(text_style(AXIS_DESC_SIZE, colors.title))
+            .axis_desc_style(rich_style(AXIS_DESC_SIZE, colors.title))
             .axis_style(rgba(colors.ticks))
             .y_desc(spec.right.display_label());
         if scale::needs_formatter(y2_scale) {
@@ -606,7 +615,7 @@ fn draw_panel<DB: DrawingBackend>(
         size,
         &spec.legend,
         &entries,
-        &text_style(LABEL_SIZE, opaque(ink)),
+        &rich_style(LABEL_SIZE, opaque(ink)),
         legend::LegendColors { background, ink },
     )?;
     drawn.legend_entries = inscribed.entries;
@@ -817,8 +826,9 @@ fn label_area(visible: bool, wanted: u32, available: u32) -> u32 {
     wanted.min(available / 3)
 }
 
-/// Le style de texte du projet, à la taille et dans la couleur données
-/// (opacité comprise).
+/// Le style des **graduations**, à la taille et dans la couleur données
+/// (opacité comprise) : mis en page par `epaint`, jamais par Typst. Titres,
+/// titres d'axe et légende prennent [`rich_style`] (issue #32).
 fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
     (FONT_FAMILY, size).into_font().color(&rgba(color))
 }
@@ -857,7 +867,7 @@ impl AxisColors {
     {
         let ticks = rgba(self.ticks);
         mesh.label_style(text_style(LABEL_SIZE, self.ticks))
-            .axis_desc_style(text_style(AXIS_DESC_SIZE, self.title))
+            .axis_desc_style(rich_style(AXIS_DESC_SIZE, self.title))
             .axis_style(ticks)
             .bold_line_style(ticks.mix(GRID_BOLD_OPACITY))
             .light_line_style(ticks.mix(GRID_LIGHT_OPACITY));

@@ -30,7 +30,7 @@ formules — est dans `plotyx-render`.
 | `interact` | correspondance pixel ↔ données d'un panneau tracé |
 | `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
 | `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `plotyx_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
-| `formula` | les formules Typst (dépendance ferme, pas une feature) |
+| `formula` | Typst (dépendance ferme, pas une feature) : le style « texte riche » des titres, titres d'axe et légende, la compilation, le cache |
 | `sample` | deux graphes de démonstration |
 
 ### Transparence
@@ -300,11 +300,21 @@ politique telle quelle.
 
 ## Typst (R8)
 
-Un `&str` est une formule Typst **si et seulement s'il contient `$`**, le
-délimiteur natif du mode mathématique. Décision prise dans `formula.rs` : pas de
-nouveau champ dans `plotyx_plot`, donc **pas de migration du format `.plx`**.
-S'applique à `PlotSpec::title`, `PanelSpec::title` et `AxisSpec::label`, qui
-sont des `String` ordinaires.
+**Tout** titre du graphe ou d'un panneau, tout titre d'axe et toute entrée de
+légende passe par Typst, avec ou sans `$` ; les graduations jamais (issue #32).
+Deux moteurs de texte côte à côte ne s'alignaient pas. Le rôle est décidé par
+le pipeline, dans le style : `formula::rich_style` pose la famille réservée
+`plotyx-typst`, et les deux backends aiguillent sur `formula::is_rich`, à la
+mesure comme au dessin. Aucun champ n'est ajouté à `plotyx_plot` : **pas de
+migration du format `.plx`**. Le texte est donc compilé comme du **markup
+Typst** : `$…$` pour le mode mathématique, `*gras*`, `\$` pour un dollar.
+
+Pour que des libellés voisins s'alignent, `compile` fait précéder le texte d'un
+**étai** invisible de largeur nulle, borné de l'ascendante à la descendante de la
+police : texte ordinaire, indices et exposants simples ont tous la même boîte et
+la même ligne de base (19,07 pt de haut à 14 pt pour Noto) ; une formule plus
+haute (fraction, somme) agrandit la boîte sans être coupée. Une légende mixte a
+donc des lignes de même hauteur.
 
 Le partage suit la même règle que le reste :
 
@@ -333,8 +343,10 @@ passent les formules par Typst. Le chemin en texte brut sert de **témoin** aux
 tests. Brancher l'export sur Typst est l'objet de l'issue #34, pas encore fait :
 aujourd'hui seul l'écran affiche les formules composées.
 
-Une formule qui ne compile pas ne fait jamais échouer le rendu : le texte brut,
-`$…$` compris, s'affiche tel quel (invariant 10).
+Un texte riche qui ne compile pas ne fait jamais échouer le rendu : le texte
+brut, `$…$` compris, s'affiche tel quel par `epaint`, mesure comprise
+(invariant 10). C'est le seul cas où un titre ou une entrée de légende n'est
+pas composé par Typst.
 
 ### Côté écran : `GraphView` passe toujours par Typst
 
@@ -397,7 +409,12 @@ voir « Agrandir un graphe sans flouter le texte » ci-dessous.
   (`la_texture_dune_formule_prend_la_couleur_du_texte`) et
   `render-svg/tests/couleurs.rs` (`un_titre_typst_prend_l_encre_automatique`,
   `un_titre_typst_suit_title_color`) la couleur, pixels de la texture et
-  fragment SVG compris.
+  fragment SVG compris ; `render-egui/tests/typst.rs`
+  (`un_titre_sans_dollar_se_mesure_et_se_dessine_par_typst`,
+  `ecran_et_export_placent_les_textes_typst_au_meme_endroit`,
+  `une_legende_mixte_a_des_lignes_de_meme_hauteur`) et
+  `formula.rs` (`les_libelles_simples_ont_tous_la_meme_hauteur`) l'aiguillage
+  par rôle et l'étai (#32).
 
 ### Agrandir un graphe sans flouter le texte
 

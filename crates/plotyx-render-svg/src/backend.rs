@@ -78,8 +78,8 @@ impl<'a> MeasuredSvgBackend<'a> {
         Self::new(SVGBackend::with_string(buffer, size), measurer)
     }
 
-    /// Active le chemin Typst (tâche R8.4) sur ce backend : les labels
-    /// reconnus par [`plotyx_render::formula::is_formula`] rendent un
+    /// Active le chemin Typst (tâche R8.4) sur ce backend : les textes en
+    /// style riche ([`plotyx_render::formula::is_rich`], issue #32) rendent un
     /// témoin substitué après coup par [`crate::typst_export::splice`],
     /// tous les autres restent le `<text>` ordinaire de `plotters-svg`.
     /// Additif comme `EguiBackend::with_typst` : `new`/`with_string`
@@ -164,7 +164,7 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         style: &S,
         pos: BackendCoord,
     ) -> Result<(), DrawingErrorKind<Self::ErrorType>> {
-        // R8.4 : un label Typst pose un rectangle-témoin à la place du
+        // R8.4 : un texte riche (issue #32) pose un rectangle-témoin à la place du
         // `<text>` ordinaire ; `crate::typst_export::splice` le remplace
         // après coup par le fragment `typst-svg` — voir
         // `crate::typst_export`, tête de module, pour le mécanisme complet
@@ -172,7 +172,7 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         // vers le `<text>` ordinaire si Typst n'est pas activé ou que la
         // formule ne compile pas.
         if let Some(typst) = &self.typst {
-            if plotyx_render::formula::is_formula(text) {
+            if plotyx_render::formula::is_rich(style) {
                 // Un texte transparent ne dessine rien, comme le `<text>` de
                 // `plotters-svg` et le chemin écran : pas de témoin, donc
                 // pas de fragment Typst (qui, lui, ignorerait l'opacité
@@ -230,11 +230,11 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         style: &S,
     ) -> Result<(u32, u32), DrawingErrorKind<Self::ErrorType>> {
         // R8.5 — le même invariant que côté écran (`EguiBackend`) : un
-        // label Typst se mesure en interrogeant Typst, jamais l'heuristique
+        // texte riche se mesure en interrogeant Typst, jamais l'heuristique
         // `epaint`/naïve. Dégrade vers la mesure `epaint` si Typst n'est
         // pas activé ou que la formule ne compile pas.
         if let Some(typst) = &self.typst {
-            if plotyx_render::formula::is_formula(text) {
+            if plotyx_render::formula::is_rich(style) {
                 let size_pt = font_size(style.size());
                 let ink = plotyx_render::formula::ink(style.color());
                 if let Some(size) = typst.measure(text, size_pt, ink) {

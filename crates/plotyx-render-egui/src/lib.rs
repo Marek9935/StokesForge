@@ -54,8 +54,9 @@
 //! [`typst_screen`] rastérise une formule compilée par `plotyx-render` en
 //! RGBA (`typst-render`), la charge en texture `egui`, et
 //! [`EguiBackend::draw_text`]/[`estimate_text_size`] l'utilisent à la place
-//! du chemin `Shape::Text` pour un label reconnu comme une formule
-//! ([`plotyx_render::formula::is_formula`]). Une formule qui ne compile pas
+//! du chemin `Shape::Text` pour tout texte riche — titres, titres d'axe,
+//! légende, marqués par leur style ([`plotyx_render::formula::is_rich`],
+//! issue #32). Un texte qui ne compile pas
 //! dégrade vers le `Shape::Text` brut plutôt que de faire échouer le rendu
 //! (voir `typst_screen`, tête de module).
 //!

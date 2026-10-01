@@ -22,38 +22,31 @@
 //! consulté. Le repli en texte brut, `$…$` compris, ne joue plus en
 //! production que pour une chaîne qui ne compile pas (invariant 10).
 //!
-//! # La décision que ce module tranche, et que le roadmap ne tranchait pas
+//! # Quels textes passent par Typst : décidé par le rôle (issue #32)
 //!
-//! `plotyx_plot` ne distingue pas syntaxiquement un texte ordinaire d'une
-//! formule : `AxisSpec::label`, `PanelSpec::title`, `PlotSpec::title` sont
-//! des `String` ordinaires. **Décision prise ici** : un `&str` est une
-//! formule Typst si et seulement s'il contient le caractère `$`, le
-//! délimiteur natif du mode mathématique de Typst — pas de nouveau champ
-//! dans `plotyx_plot`, donc pas de migration du format `.plx` (la même
-//! discipline que le choix de police du 2026-09-13, qui n'a pas non plus
-//! touché `PlotSpec`).
+//! **Tout** titre (du graphe, d'un panneau), tout titre d'axe et toute
+//! entrée de légende passe par Typst ; les graduations jamais (une
+//! compilation par graduation, `architecture-choisie.md` §4.3). Le pipeline
+//! le dit au backend par la famille de police du style : [`rich_style`]
+//! pose la famille réservée [`RICH_FAMILY`], et les deux backends aiguillent
+//! sur [`is_rich`], à la mesure comme au dessin — une seule condition, au
+//! même endroit des deux côtés (invariant 4). Côté `epaint`, la famille
+//! réservée retombe sur la police proportionnelle (`text::font_id`) : c'est
+//! le repli.
 //!
-//! Ce choix a été préféré à un marqueur dédié (un préfixe réservé, un
-//! second champ) pour deux raisons :
+//! Avant #32, l'aiguillage portait sur le **contenu** : une chaîne était une
+//! formule si elle contenait `$`. Un titre à moitié formule et son voisin en
+//! texte simple passaient alors par deux moteurs, aux métriques différentes,
+//! et ne s'alignaient pas. Le `$` reste ce qu'il est en Typst, l'entrée en
+//! mode mathématique, mais ne décide plus du chemin. Aucun champ n'a été
+//! ajouté à `plotyx_plot` : pas de migration du format `.plx`.
 //!
-//! - c'est la syntaxe que Typst lui-même utilise pour entrer en mode
-//!   mathématique dans un document markup — le texte est compilé tel quel,
-//!   sans l'envelopper artificiellement dans un `$...$` supplémentaire,
-//!   donc un libellé mixte comme `"$lambda$ (nm)"` produit une formule
-//!   suivie de texte ordinaire, dans le **même** appel à Typst, sans code
-//!   de découpage à écrire ici ;
-//! - les libellés qui ne doivent jamais passer par Typst (les graduations
-//!   numériques, produites par `scale::format_tick`) ne contiennent jamais
-//!   `$` : aucune numérisation ne l'introduit, donc la détection ne peut
-//!   pas les faire dévier de leur chemin actuel par accident.
-//!
-//! **Limite assumée, pas corrigée** : un texte ordinaire qui contiendrait
-//! littéralement un `$` (un prix, « Coût ($) ») serait à tort envoyé à
-//! Typst, qui échouerait à le compiler comme markup valide dans la plupart
-//! des cas ou produirait un rendu inattendu dans les autres. Aucun texte de
-//! ce chantier (titres, unités scientifiques) n'a ce besoin aujourd'hui ; si
-//! le cas se présentait, la sortie serait un préfixe d'échappement (`\$`,
-//! déjà valide en Typst) plutôt qu'un nouveau champ.
+//! Conséquence : un texte de titre ou de légende est compilé **comme du
+//! markup Typst**. C'est voulu pour le texte saisi (syntaxe Typst brute :
+//! `*gras*`, `$x^2$`, `\$` pour un dollar). Le texte repris automatiquement
+//! d'une colonne doit être échappé en amont (issue #33). Une chaîne qui ne
+//! compile pas s'affiche en brut par `epaint` (invariant 10) : c'est le seul
+//! cas où les deux moteurs se côtoient encore.
 //!
 //! # Ce que R0 avait déjà noté sur l'API, vérifié de nouveau ici
 //!
@@ -102,13 +95,25 @@ pub fn ink(color: plotters_backend::BackendColor) -> Ink {
     [r, g, b, alpha]
 }
 
-/// Vrai si `text` doit être compilé par Typst plutôt que dessiné en
-/// `Shape::Text` brut par les fonts egui.
-///
-/// Voir la documentation de tête de ce module pour la décision et sa
-/// limite assumée.
-pub fn is_formula(text: &str) -> bool {
-    text.contains('$')
+/// La famille de police réservée qui désigne un texte riche, compilé par
+/// Typst — voir la tête de module.
+pub const RICH_FAMILY: &str = "plotyx-typst";
+
+/// Le style d'un texte riche (titre, titre d'axe, légende), à la taille de
+/// Plotters et dans la couleur données — le pendant de
+/// `pipeline::text_style` pour les graduations.
+pub fn rich_style(size: f64, color: (u8, u8, u8, u8)) -> plotters::style::TextStyle<'static> {
+    use plotters::style::IntoFont;
+    (RICH_FAMILY, size)
+        .into_font()
+        .color(&crate::paint::rgba(color))
+}
+
+/// Vrai si `style` désigne un texte riche, à compiler par Typst plutôt qu'à
+/// mettre en page par `epaint`. La seule condition d'aiguillage des deux
+/// backends, pour la mesure comme pour le dessin.
+pub fn is_rich<S: plotters_backend::BackendTextStyle>(style: &S) -> bool {
+    matches!(style.family(), plotters_backend::FontFamily::Name(name) if name == RICH_FAMILY)
 }
 
 /// La bibliothèque standard de Typst, construite une fois pour tout le
@@ -244,8 +249,8 @@ impl Compiled {
     }
 }
 
-/// Compile `text` (potentiellement un mélange de markup et de mode
-/// mathématique, voir [`is_formula`]) en document Typst — tâche 8.1.
+/// Compile `text` (du markup Typst, mode mathématique `$…$` compris) en
+/// document Typst — tâche 8.1.
 ///
 /// `size_pt` est la taille de police au sens de
 /// [`crate::text::font_size`] : le même nombre que celui qui construirait
@@ -291,8 +296,14 @@ pub fn compile(
          #set text(font: \"{sans_name}\", size: {size_pt}pt, fill: rgb({r}, {g}, {b}, {a}), \
                    top-edge: \"bounds\", bottom-edge: \"bounds\")\n\
          #show math.equation: set text(font: \"{math_name}\")\n\
+         #box(width: 0pt, text(top-edge: \"ascender\", bottom-edge: \"descender\", hide[x]))\
          {text}"
     );
+    compile_markup(markup, sans, math)
+}
+
+/// Compile un document Typst complet, réglages de page compris.
+fn compile_markup(markup: String, sans: Font, math: Font) -> Result<Compiled, String> {
     let world = FormulaWorld::new(markup, sans, math)?;
     let warned = typst::compile::<PagedDocument>(&world);
     let document = warned.output.map_err(|diagnostics| {
@@ -671,15 +682,37 @@ mod tests {
 
     const NOIR: Ink = [0, 0, 0, 255];
 
-    /// Détection de base : les délimiteurs `$` déclenchent Typst, un texte
-    /// ordinaire ne le fait jamais — y compris une graduation numérique
-    /// telle que `scale::format_tick` la produit.
+    /// L'aiguillage porte sur le rôle (la famille du style), pas sur le
+    /// contenu : un texte sans `$` en style riche passe par Typst, une
+    /// formule en style ordinaire non (issue #32).
     #[test]
-    fn la_detection_repose_sur_le_dollar() {
-        assert!(is_formula("$lambda$"));
-        assert!(!is_formula("Temps (s)"));
-        assert!(!is_formula("111"));
-        assert!(!is_formula(""));
+    fn laiguillage_repose_sur_le_style_et_non_sur_le_dollar() {
+        use plotters::style::{IntoFont, BLACK};
+        assert!(is_rich(&rich_style(16.0, (0, 0, 0, 255))));
+        assert!(!is_rich(&("sans-serif", 16.0).into_font().color(&BLACK)));
+    }
+
+    /// L'étai : texte ordinaire, jambage, indice, exposant ont **la même**
+    /// boîte, donc la même ligne de base ; une fraction l'agrandit sans être
+    /// coupée (issue #32).
+    #[test]
+    fn les_libelles_simples_ont_tous_la_meme_hauteur() {
+        let hauteur = |text: &str| {
+            let (sans, math) = noto();
+            compile(text, 14.0, NOIR, sans, math)
+                .expect("compilation Typst échouée")
+                .size_pt()
+                .1
+        };
+        let reference = hauteur("a");
+        for text in ["Ag", "Temps (s)", "$n_i$", "$x^2$", "$\"Ru(bpy)\"_3^(2+)$"] {
+            assert!(
+                (hauteur(text) - reference).abs() < 1e-6,
+                "{text} : {} au lieu de {reference}",
+                hauteur(text)
+            );
+        }
+        assert!(hauteur("$a/b$") > reference, "une fraction est coupée");
     }
 
     /// Une formule triviale compile en une page dont la taille n'est pas
@@ -728,10 +761,12 @@ mod tests {
         assert!(grande.size_pt().1 > petite.size_pt().1);
     }
 
-    /// Un indice agrandit la boîte **vers le bas** : la page va jusqu'au
-    /// bas de l'encre, pas jusqu'à la ligne de base (défaut de Typst, qui
-    /// coupait les indices et les jambages à l'écran — issue #29). Même
-    /// vérification sur un jambage de texte ordinaire, hors mode maths.
+    /// Ce qui descend sous la police agrandit la boîte **vers le bas** : la
+    /// page va jusqu'au bas de l'encre, pas jusqu'à la ligne de base (défaut
+    /// de Typst, qui coupait les indices et les jambages à l'écran — issue
+    /// #29). Depuis l'étai de #32, un indice simple tient dans la hauteur de
+    /// la police ; des indices emboîtés la dépassent, et doivent agrandir la
+    /// page plutôt qu'être coupés.
     #[test]
     fn un_indice_ou_un_jambage_nest_pas_coupe_par_la_page() {
         let hauteur = |text: &str| {
@@ -741,8 +776,10 @@ mod tests {
                 .size_pt()
                 .1
         };
-        assert!(hauteur("$n_i$") > hauteur("$n$"), "indice coupé");
-        assert!(hauteur("pn") > hauteur("n"), "jambage coupé");
+        assert!(
+            hauteur("$x_(x_(x_(x_x)))$") > hauteur("$x$"),
+            "indices emboîtés coupés"
+        );
     }
 
     /// Le cache : une deuxième demande identique ne recompile pas — vérifié

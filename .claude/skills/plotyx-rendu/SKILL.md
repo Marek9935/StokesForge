@@ -132,10 +132,15 @@ témoins d'abord**.
 
 Typst n'est plus une feature (issue #29) : il est toujours compilé, et
 `cargo test --workspace` / `cargo clippy --workspace --all-targets` couvrent ses
-chemins, sans commande ciblée. Ce qui reste optionnel est le chemin du backend :
-`collect_shapes` et `render_to_string` tracent en texte brut (le **témoin** des
-tests) ; `collect_shapes_with_typst`, `render_to_string_with_typst` et
-`with_typst()` passent les formules par Typst. `GraphView` (donc l'application)
+chemins, sans commande ciblée. **Tout titre, titre d'axe et entrée de légende
+passe par Typst, les graduations jamais** (issue #32) : le pipeline pose
+`formula::rich_style` sur ces textes, et les backends aiguillent sur
+`formula::is_rich` — jamais sur le contenu (`$`). Un nouveau texte de figure
+(annotation…) choisit son style dans le pipeline, pas dans un backend. Ce qui
+reste optionnel est le chemin du backend : `collect_shapes` et
+`render_to_string` tracent tout en texte brut (le **témoin** des tests) ;
+`collect_shapes_with_typst`, `render_to_string_with_typst` et `with_typst()`
+passent les textes riches par Typst. `GraphView` (donc l'application)
 passe **toujours** par Typst, avec un `FormulaCache` borné (`FORMULA_CACHE_LIMIT`)
 et des polices résolues une fois (`TypstScreen::with_fonts`). La couleur du
 texte (`style.color()`, via `formula::ink`) entre dans la compilation et dans la

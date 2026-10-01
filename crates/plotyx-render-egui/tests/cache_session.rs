@@ -236,49 +236,56 @@ fn maillages(view: &GraphView) -> usize {
         .count()
 }
 
-/// Issue #29 : `GraphView` — donc l'application — passe réellement les
-/// formules par Typst. Avant, elle appelait `collect_shapes` et un titre
-/// `$lambda$` s'affichait en texte brut, dollars compris.
+/// Les textes restés en `Shape::Text` (mis en page par `epaint`).
+fn textes_epaint(view: &GraphView) -> Vec<String> {
+    view.cache()
+        .shapes()
+        .iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Issues #29 et #32 : `GraphView` — donc l'application — passe titres et
+/// légende par Typst, **avec ou sans `$`**, et les graduations jamais.
 ///
-/// Le témoin est le même graphe titré sans `$` : il ne doit produire aucun
-/// maillage. Sans lui, un maillage venu d'ailleurs (une série, un marqueur)
-/// ferait passer le test sans que Typst ait été consulté.
+/// Les deux moitiés se tiennent l'une l'autre : un maillage venu d'ailleurs
+/// (une série, un marqueur) ferait passer « il y a des maillages » sans que
+/// Typst ait été consulté, mais pas « le titre n'est plus du texte
+/// `epaint` » ; et un backend qui passerait tout par Typst ne laisserait pas
+/// les graduations en `Shape::Text`.
 #[test]
-fn graph_view_passe_un_titre_formule_par_typst() {
+fn graph_view_passe_titres_et_legende_par_typst() {
     let context = contexte();
     let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
 
-    let temoin = Banc::with_title("Absorbance");
-    let mut vue_temoin = GraphView::new();
-    image(
-        &context,
-        &mut vue_temoin,
-        &temoin.snapshot(),
-        temoin.graph,
-        rect,
-    );
-    assert_eq!(
-        maillages(&vue_temoin),
-        0,
-        "un titre ordinaire reste du texte"
-    );
-    assert_eq!(vue_temoin.formula_count(), 0);
-
-    let banc = Banc::with_title("$lambda_\"max\"$ (nm)");
-    let mut vue = GraphView::new();
-    image(&context, &mut vue, &banc.snapshot(), banc.graph, rect);
-    assert_eq!(
-        maillages(&vue),
-        1,
-        "le titre formule doit être un maillage Typst"
-    );
-    assert_eq!(vue.formula_count(), 1);
+    for titre in ["Absorbance", "$lambda_\"max\"$ (nm)"] {
+        let banc = Banc::with_title(titre);
+        let mut vue = GraphView::new();
+        image(&context, &mut vue, &banc.snapshot(), banc.graph, rect);
+        let textes = textes_epaint(&vue);
+        assert!(
+            !textes.iter().any(|texte| texte == titre),
+            "le titre {titre:?} est resté du texte epaint"
+        );
+        assert!(maillages(&vue) > 0, "aucun maillage Typst pour {titre:?}");
+        assert!(vue.formula_count() > 0);
+        assert!(!textes.is_empty(), "plus aucune graduation epaint");
+        for texte in &textes {
+            assert!(
+                texte.parse::<f64>().is_ok(),
+                "{texte:?} n'est pas une graduation et n'est pas passé par Typst"
+            );
+        }
+    }
 }
 
 /// Issue #29 : une reconstruction de la figure (nouvelle révision) ne
-/// recompile pas un titre inchangé, et la mesure d'un titre partage
-/// l'entrée de son dessin — une seule entrée pour un seul titre, pas une
-/// par appel à `estimate_text_size`.
+/// recompile pas des textes inchangés, et la mesure d'un texte partage
+/// l'entrée de son dessin — une entrée par texte, pas une par appel à
+/// `estimate_text_size`.
 #[test]
 fn reconstruire_la_figure_ne_recompile_pas_un_titre_inchange() {
     let banc = Banc::with_title("$Delta H$");
@@ -287,7 +294,8 @@ fn reconstruire_la_figure_ne_recompile_pas_un_titre_inchange() {
     let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
 
     image(&context, &mut view, &banc.snapshot(), banc.graph, rect);
-    assert_eq!(view.formula_count(), 1);
+    let (formules, maillages_avant) = (view.formula_count(), maillages(&view));
+    assert!(formules > 0);
 
     banc.handle()
         .execute(Command::SetCells {
@@ -304,8 +312,12 @@ fn reconstruire_la_figure_ne_recompile_pas_un_titre_inchange() {
         banc.graph,
         rect
     ));
-    assert_eq!(maillages(&view), 1);
-    assert_eq!(view.formula_count(), 1, "le titre inchangé vient du cache");
+    assert_eq!(maillages(&view), maillages_avant);
+    assert_eq!(
+        view.formula_count(),
+        formules,
+        "les textes inchangés viennent du cache"
+    );
 }
 
 /// La taille en pixels de la texture du premier maillage de `shapes`.
@@ -358,6 +370,7 @@ fn un_graphe_agrandi_peint_ses_formules_a_la_taille_affichee() {
     };
 
     let (temoin, _) = peint(&mut view, logique);
+    let formules = view.formula_count();
     let (en_cache, [w, h]) = texture_du_maillage(&context, view.cache().shapes());
     assert_eq!(temoin, en_cache, "à taille logique, la texture du cache");
 
@@ -369,5 +382,5 @@ fn un_graphe_agrandi_peint_ses_formules_a_la_taille_affichee() {
         [w2, h2],
         [w, h]
     );
-    assert_eq!(view.formula_count(), 1, "le titre a été recompilé");
+    assert_eq!(view.formula_count(), formules, "un texte a été recompilé");
 }

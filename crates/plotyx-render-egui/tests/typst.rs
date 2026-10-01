@@ -203,3 +203,185 @@ fn la_texture_dune_formule_prend_la_couleur_du_texte() {
         "le témoin sur fond clair n'est pas sombre"
     );
 }
+
+// -- Issue #32 : tout titre, titre d'axe et légende passe par Typst --
+
+/// Un projet à deux séries nommées, de quoi remplir une légende.
+fn projet_a_legende(noms: [&str; 2]) -> (Project, PlotSpec) {
+    use plotyx_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
+    use plotyx_plot::{LineSpec, SeriesSpec};
+    let colonne = |values: Vec<f64>| {
+        Column::from_block(
+            ColumnType::Numeric,
+            ValueBlock::Float(values),
+            ColumnMeta::default(),
+        )
+        .expect("colonne")
+    };
+    let mut project = Project::new("Typst").expect("projet");
+    let root = project.root();
+    let book = project.add_empty_workbook(root, None).expect("classeur");
+    let sheet = project.add_worksheet(book, None).expect("feuille");
+    let xs: Vec<f64> = (0..20).map(f64::from).collect();
+    let x = project
+        .add_column(sheet, None, Some("X"), colonne(xs.clone()))
+        .expect("X");
+    let mut panel = PanelSpec::at(0, 0);
+    panel.bottom.label = "$lambda$".to_owned();
+    panel.bottom.unit = "nm".to_owned();
+    panel.left.label = "Absorbance".to_owned();
+    for (index, nom) in noms.into_iter().enumerate() {
+        let ys: Vec<f64> = xs.iter().map(|x| x * (index + 1) as f64).collect();
+        let y = project
+            .add_column(sheet, None, Some(&format!("Y{index}")), colonne(ys))
+            .expect("Y");
+        let mut series = SeriesSpec::new_xy(x, y);
+        series.line = LineSpec::from_palette(index);
+        series.name = nom.to_owned();
+        panel.series.push(series);
+    }
+    let spec = PlotSpec::empty("Spectre").with_panels(Panels::new(vec![panel]));
+    (project, spec)
+}
+
+/// Trace `spec` à l'écran, Typst activé ou non.
+fn ecran(
+    project: &Project,
+    spec: &PlotSpec,
+    avec_typst: bool,
+) -> (Vec<Shape>, plotyx_render_egui::DrawnPlot) {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(plotyx_render::font_definitions());
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let cache: FormulaCache<_> = FormulaCache::new();
+    let plot = resolve_spec(project.tree(), spec);
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(480.0, 360.0));
+    let mut shapes = Vec::new();
+    let mut drawn = None;
+    let mut sortie = ctx.run_ui(egui::RawInput::default(), |_ui| {
+        let text = ScreenText::new(&ctx, &measurer);
+        drawn = Some(if avec_typst {
+            let typst = TypstScreen::new(&ctx, &cache, &choice).expect("polices");
+            collect_shapes_with_typst(&mut shapes, rect, &text, typst, &plot).expect("tracé")
+        } else {
+            plotyx_render_egui::collect_shapes(&mut shapes, rect, &text, &plot).expect("tracé")
+        });
+    });
+    sortie.textures_delta.clear();
+    (shapes, drawn.expect("figure"))
+}
+
+/// Le coin haut-gauche non tourné de chaque maillage Typst — son premier
+/// sommet (`typst_screen::mesh`) —, au demi-pixel, trié.
+fn origines_ecran(shapes: &[Shape]) -> Vec<(i64, i64)> {
+    let mut origines: Vec<_> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Mesh(mesh) => mesh.vertices.first().map(|v| v.pos),
+            _ => None,
+        })
+        .map(|pos| ((pos.x * 2.0).round() as i64, (pos.y * 2.0).round() as i64))
+        .collect();
+    origines.sort_unstable();
+    origines
+}
+
+/// Le même relevé dans le SVG exporté : l'origine de chaque groupe Typst
+/// (`translate(ox, oy)`, `typst_export::group_for`).
+fn origines_export(document: &str) -> Vec<(i64, i64)> {
+    let mut origines: Vec<_> = document
+        .match_indices(") translate(")
+        .filter_map(|(index, motif)| {
+            let reste = &document[index + motif.len()..];
+            let (x, reste) = reste.split_once(", ")?;
+            let (y, _) = reste.split_once(')')?;
+            let (x, y): (f64, f64) = (x.parse().ok()?, y.parse().ok()?);
+            Some(((x * 2.0).round() as i64, (y * 2.0).round() as i64))
+        })
+        .collect();
+    origines.sort_unstable();
+    origines
+}
+
+/// Un titre **sans `$`** se mesure par Typst : la bande du titre n'a pas la
+/// même hauteur que la mesure `epaint` du même texte (le témoin), et le titre
+/// n'est plus un `Shape::Text`. Les graduations, elles, restent du texte
+/// `epaint`.
+#[test]
+fn un_titre_sans_dollar_se_mesure_et_se_dessine_par_typst() {
+    let (project, spec) = projet_a_legende(["A", "B"]);
+    let (avec, figure_typst) = ecran(&project, &spec, true);
+    let (_, figure_epaint) = ecran(&project, &spec, false);
+    assert_ne!(
+        figure_typst.title_height, figure_epaint.title_height,
+        "le titre « Spectre » se mesure encore par epaint"
+    );
+    let textes: Vec<String> = avec
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Text(text) => Some(text.galley.job.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(!textes.is_empty(), "plus aucune graduation epaint");
+    for texte in textes {
+        assert!(
+            texte.parse::<f64>().is_ok(),
+            "{texte:?} est resté en texte epaint"
+        );
+    }
+}
+
+/// Écran et export placent les mêmes boîtes Typst aux mêmes pixels : titre,
+/// deux titres d'axe et deux entrées de légende, dont des textes sans `$`.
+/// Le témoin est l'export sans Typst, qui n'en place aucune.
+#[test]
+fn ecran_et_export_placent_les_textes_typst_au_meme_endroit() {
+    let (project, spec) = projet_a_legende(["$\"Ru(bpy)\"_3^(2+)$", "Témoin"]);
+    let (shapes, _) = ecran(&project, &spec, true);
+    let plot = resolve_spec(project.tree(), &spec);
+    let measurer = TextMeasurer::default();
+    let document = plotyx_render_svg::render_to_string_with_typst(
+        &plot,
+        (480, 360),
+        &measurer,
+        &FontChoice::default(),
+    )
+    .expect("export");
+    let ecran = origines_ecran(&shapes);
+    assert_eq!(ecran.len(), 5, "titre, deux titres d'axe, deux entrées");
+    assert_eq!(ecran, origines_export(&document));
+
+    let sans = plotyx_render_svg::render_to_string(&plot, (480, 360), &measurer).expect("export");
+    assert!(
+        origines_export(&sans).is_empty(),
+        "le témoin a des groupes Typst"
+    );
+}
+
+/// Une légende mixte — une entrée formule, une sans — a des lignes de même
+/// hauteur : les deux textes ont la même boîte (l'étai de
+/// `formula::compile`), donc la vignette, centrée sur la ligne, l'est aussi
+/// sur chacun des deux.
+#[test]
+fn une_legende_mixte_a_des_lignes_de_meme_hauteur() {
+    let (project, spec) = projet_a_legende(["$\"Ru(bpy)\"_3^(2+)$", "Témoin"]);
+    let (shapes, _) = ecran(&project, &spec, true);
+    let hauteurs: Vec<f32> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Mesh(mesh) => Some(mesh.calc_bounds()),
+            _ => None,
+        })
+        // Les deux entrées de légende : en haut à droite de la zone de
+        // tracé, sous le titre et loin du titre de l'axe du bas.
+        .filter(|bounds| bounds.min.x > 240.0 && (40.0..200.0).contains(&bounds.min.y))
+        .map(|bounds| bounds.height())
+        .collect();
+    assert_eq!(hauteurs.len(), 2, "deux entrées attendues : {hauteurs:?}");
+    assert!(
+        (hauteurs[0] - hauteurs[1]).abs() < 0.01,
+        "hauteurs de ligne différentes : {hauteurs:?}"
+    );
+}

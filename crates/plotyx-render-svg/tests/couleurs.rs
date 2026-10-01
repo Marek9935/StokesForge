@@ -59,7 +59,8 @@ fn une_couleur_explicite_prime_sur_l_automatique() {
 }
 
 /// Le fragment Typst du titre, tel que `splice` l'a inliné : du `<svg>`
-/// imbriqué (le premier après la racine) jusqu'à la fin de son groupe.
+/// imbriqué (le premier après la racine : le titre du graphe est tracé
+/// avant les titres d'axe et la légende) jusqu'à la fin de son groupe.
 /// `document` est passé en majuscules par l'appelant, pour comparer les
 /// couleurs sans casse.
 fn fragment_typst(document: &str) -> &str {
@@ -122,11 +123,12 @@ fn un_titre_typst_suit_title_color() {
     let document = exporte_avec_typst(&spec).to_uppercase();
     assert!(fragment_typst(&document).contains("#AA3311"));
 
+    let opaque = document.matches("<SVG").count();
     spec.title_color = "#aa331100".to_owned();
     let document = exporte_avec_typst(&spec);
     assert_eq!(
         document.matches("<svg").count(),
-        1,
+        opaque - 1,
         "un titre transparent a produit un fragment Typst"
     );
 }

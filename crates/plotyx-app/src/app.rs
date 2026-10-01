@@ -10531,21 +10531,25 @@ mod graph_layout_tests {
                 for shape in view.cache().shapes() {
                     let mut displayed = shape.clone();
                     // Le texte est remis en page à la taille affichée (#18) :
-                    // même transformation que `GraphView::paint_scaled`. Ce
-                    // graphe n'a pas de formule Typst, donc aucune texture à
-                    // remplacer (#31).
+                    // même transformation que `GraphView::paint_scaled`. Un
+                    // texte Typst (titres, légende : #32) y change de
+                    // texture, rastérisée à la taille affichée (#31) : un
+                    // maillage se compare donc sur sa géométrie seule.
                     plotyx_render_egui::scaled::transform_shape(
                         &context,
                         &mut displayed,
                         transform,
                         &mut |_| None,
                     );
+                    let same = |painted: &egui::Shape| match (painted, &displayed) {
+                        (egui::Shape::Mesh(a), egui::Shape::Mesh(b)) => {
+                            a.vertices == b.vertices && a.indices == b.indices
+                        }
+                        (a, b) => a == b,
+                    };
                     assert!(
-                        output
-                            .shapes
-                            .iter()
-                            .any(|painted| painted.shape == displayed
-                                && visible.contains_rect(painted.clip_rect)),
+                        output.shapes.iter().any(|painted| same(&painted.shape)
+                            && visible.contains_rect(painted.clip_rect)),
                         "forme du graphe hors de la zone visible"
                     );
                 }
