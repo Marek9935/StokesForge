@@ -2686,7 +2686,10 @@ fn new_import_recipe_resets_to_a_permissive_default() {
 
     state.new_import_recipe();
     let import = state.import_state().expect("fenêtre d'import ouverte");
-    assert_eq!(import.recipe.name, "Sans titre");
+    assert_eq!(
+        import.recipe.name,
+        plotyx_app::tr!("import-template-untitled")
+    );
     assert_eq!(import.recipe.separator, Separator::Auto);
     assert_eq!(import.recipe.decimal, DecimalStyle::Dot);
     assert_eq!(import.recipe.header, HeaderSkip::None);
@@ -6246,7 +6249,10 @@ fn the_wizard_chooses_the_model_from_the_first_file() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
-    assert_eq!(state.import_state().unwrap().recipe.name, "Sans titre");
+    assert_eq!(
+        state.import_state().unwrap().recipe.name,
+        plotyx_app::tr!("import-template-untitled")
+    );
 
     state.add_import_paths(vec![fixture_path("jasco_fluo_tab.txt")]);
 

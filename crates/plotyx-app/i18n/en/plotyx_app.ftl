@@ -15,6 +15,203 @@ window-title = PlotYx
 
 menu-file = File
 
+## Assistant d'import (#44)
+## Texts of the Import Wizard: six steps, templates, metadata and preview.
+## Template names and file contents are data and are never translated.
+
+import-window-title = Import Wizard
+import-button-back = Back
+import-button-next = Next
+import-button-finish = Finish
+    .hint = Import with the current settings (Enter)
+
+import-step-files-title = Files and Template
+import-step-format-title = Format
+import-step-header-title = Header and Data End
+import-step-columns-title = Columns
+import-step-metadata-title = Metadata
+import-step-destination-title = Destination
+
+# Values shared by several lists.
+import-option-auto = Auto
+import-option-none = None
+import-option-comma = Comma
+import-option-dot = Dot
+import-option-space = Space
+import-option-apostrophe = Apostrophe
+import-option-other = Other
+
+# Column types, shared by the "Read As" and "Type" columns.
+import-type-numeric = Numeric
+import-type-text = Text
+import-type-mixed = Mixed
+import-type-datetime = Date/Time
+
+# Step 1: files and template.
+import-template-untitled = Untitled
+import-files-template = Template
+import-files-template-modified = { $name } (modified)
+import-files-reset = Reset
+    .hint = Start again from default settings
+import-files-delete = Delete…
+    .hint = Delete this saved template
+import-files-delete-confirm = Delete template “{ $name }”?
+import-files-delete-yes = Delete
+import-files-delete-keep = Keep
+import-files-export = Export Template…
+    .hint = Save this template to a JSON file
+import-files-export-title = Export Template
+import-files-import = Import Template…
+    .hint = Load a template from a JSON file
+import-files-import-title = Import Template
+import-files-template-filter = Import template
+import-files-unsaved = Unsaved changes. Save the template in the Destination step
+import-files-add = Add Files…
+    .hint = Choose the files to import
+import-files-add-title = Choose Files to Import
+import-files-drop = or drop files in the window
+import-files-recent = Recent Files…
+import-files-none = No files chosen
+import-files-row-count =
+    { $count ->
+        [one] { $count } row
+       *[other] { $count } rows
+    }
+import-files-remove = Remove
+
+# Step 2: format.
+import-format-delimiter = Delimiter
+    .hint = Character that separates the values on a line
+import-delimiter-semicolon = Semicolon
+import-delimiter-tab = Tab
+import-delimiter-whitespace = Whitespace
+import-delimiter-fixed = Fixed width
+import-format-widths-hint = Width of each column but the last, e.g. 10,8,8
+import-format-decimal = Decimal separator
+import-format-thousands = Thousands separator
+import-format-missing = Missing values
+    .hint = Comma-separated. Read as empty cells: --, n/a, *, NaN…
+import-format-comment-prefix = Comment prefix
+    .hint = Data lines starting with it are skipped (#, ;, //…)
+import-format-blocks = Blocks
+    .hint = How a file holding several data blocks is split
+import-blocks-single = Single block
+import-blocks-line-start = Line starting with
+import-blocks-blank = Blank lines
+import-format-encoding = Encoding
+import-format-skip-chars = Remove leading characters
+    .hint = Removed at the start of every data line
+import-format-skip-lines = Skip data lines
+    .hint = Ignored at the start of the data
+
+# Step 3: header and data end.
+import-header-mode = Header
+import-header-mode-lines = Line count
+import-header-mode-marker = Until marker
+import-header-marker = Marker
+    .hint = The header ends at the line equal to this text
+import-header-lines = Header lines
+import-header-subheader-lines = Subheader lines
+    .hint = Counted in the header lines
+import-header-detect = Detect Header
+    .hint = Recount the header and subheader lines from the file
+import-header-combined = Combined line
+    .hint = Long name and units share the same subheader line
+import-header-role-long-name = Long name
+    .hint = Subheader lines that give the long names
+import-header-role-units = Units
+    .hint = Subheader lines that give the units
+import-header-role-comments = Comments
+    .hint = Subheader lines that give the comments
+import-header-range-from = from
+import-header-range-to = to
+import-header-names-first-line = Names in first line
+    .hint = The first data line gives the column names
+import-dataend = Data end
+import-dataend-auto = Auto
+    .hint = Stops at the first non-numeric X
+import-dataend-blank = First blank line
+import-dataend-marker = End marker
+import-dataend-after-header = Lines after header
+import-dataend-before-end = Lines before end
+import-header-skip-footer = Skip footer lines
+    .hint = Ignored at the end of the file
+import-header-column-names = Column names
+import-header-name-file = File name
+import-header-name-key = Header key
+import-header-key = Key
+
+# Step 4: columns.
+import-columns-name = Name
+import-columns-long-name = Long Name
+import-columns-units = Units
+import-columns-read-as = Read As
+import-columns-type = Type
+import-columns-role = Role
+import-columns-values = Values
+import-role-x-error = X Error
+import-role-y-error = Y Error
+import-columns-choose-file = Choose a file in step 1
+
+# Step 5: metadata.
+import-metadata-keep-header = Keep header
+    .hint = Keep the file header as metadata
+import-metadata-keep-footer = Keep footer
+    .hint = Keep the file footer as metadata
+import-metadata-uncheck = Uncheck a key or section to drop it
+import-metadata-none = No metadata with the current settings
+
+# Step 6: destination and template.
+import-destination = Destination
+import-destination-active = Active workbook (one worksheet per file)
+import-destination-active-none = Active workbook (none)
+import-destination-new-per-file = New workbook per file
+import-destination-new-all = New workbook for all files
+import-destination-mode = In active workbook
+import-mode-new-sheet = New worksheet
+import-mode-replace = Replace active worksheet
+import-mode-add-columns = Add columns to active worksheet
+import-mode-add-rows = Add rows to active worksheet
+import-destination-multiple = Multiple files
+import-layout-per-file = One worksheet per file
+import-layout-side-by-side = One worksheet, side by side (X Y X Y…)
+import-layout-shared-x = One worksheet, X of first file shared
+import-destination-template-name = Template name
+import-destination-save = Save Template
+import-destination-saved-note = Saved templates are offered at the next import
+import-destination-auto = Auto-select
+    .hint = Picks this template for a file that matches every filled criterion
+import-auto-extensions = Extensions
+    .hint = csv, txt, asc…
+import-auto-name = Name contains
+import-auto-content = File start contains
+    .hint = A signature, such as ORIGIN;JASCO
+
+# Preview pane.
+import-preview-title = Preview
+import-preview-encoding = Encoding { $encoding }
+import-preview-blocks = { $count } blocks, showing the first
+import-preview-tip = Right-click a line to set the import there
+import-preview-empty = Choose a file to see a preview
+import-preview-showing =
+    { $total ->
+        [one] Showing { $shown } of { $total } data line
+       *[other] Showing { $shown } of { $total } data lines
+    }
+import-legend-header = Header
+import-legend-long-name = Long name
+import-legend-units = Units
+import-legend-comments = Comments
+import-legend-column-names = Column names
+import-legend-data = Data
+import-legend-footer = Footer
+import-legend-comment-line = Comment line
+import-legend-skipped = Skipped line
+import-line-data-start = Start Data Here
+import-line-units = Use as Units Line
+import-line-data-end = End Data Here
+import-line-no-auto-end = Disable Auto Data End
+
 ## Witness of the machinery
 ## (read by the tests of `i18n.rs` only: one argument and one CLDR plural; to be
 ## removed once a real key with arguments exists)

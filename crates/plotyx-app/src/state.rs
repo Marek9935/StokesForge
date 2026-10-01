@@ -1582,14 +1582,14 @@ impl ImportStep {
     ];
 
     /// Titre affiché.
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            ImportStep::Files => "Fichiers et modèle",
-            ImportStep::Format => "Format",
-            ImportStep::Header => "En-tête et fin des données",
-            ImportStep::Columns => "Colonnes",
-            ImportStep::Metadata => "Métadonnées",
-            ImportStep::Destination => "Destination",
+            ImportStep::Files => tr!("import-step-files-title"),
+            ImportStep::Format => tr!("import-step-format-title"),
+            ImportStep::Header => tr!("import-step-header-title"),
+            ImportStep::Columns => tr!("import-step-columns-title"),
+            ImportStep::Metadata => tr!("import-step-metadata-title"),
+            ImportStep::Destination => tr!("import-step-destination-title"),
         }
     }
 
@@ -3517,7 +3517,7 @@ impl AppState {
             .iter()
             .find(|recipe| !plotyx_import::RecipeStore::is_builtin(recipe))
             .cloned()
-            .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
+            .unwrap_or_else(|| plotyx_import::ImportRecipe::new(tr!("import-template-untitled")));
         let mut recipe = recipe;
         recipe.unify_header();
         let save_as_name = recipe.name.clone();
@@ -3575,7 +3575,7 @@ impl AppState {
             .last_import
             .as_ref()
             .map(|last| last.recipe.clone())
-            .unwrap_or_else(|| plotyx_import::ImportRecipe::new("Sans titre"));
+            .unwrap_or_else(|| plotyx_import::ImportRecipe::new(tr!("import-template-untitled")));
         let mut items: Vec<ImportItem> = Vec::new();
         let mut bad: Vec<PathBuf> = Vec::new();
         let mut models: Vec<String> = Vec::new();
@@ -3930,7 +3930,7 @@ impl AppState {
     /// Sans effet si la fenêtre d'import n'est pas ouverte.
     pub fn new_import_recipe(&mut self) {
         if let Some(state) = &mut self.import_state {
-            state.recipe = plotyx_import::ImportRecipe::new("Sans titre");
+            state.recipe = plotyx_import::ImportRecipe::new(tr!("import-template-untitled"));
             state.baseline = state.recipe.clone();
             state.save_as_name = state.recipe.name.clone();
         }

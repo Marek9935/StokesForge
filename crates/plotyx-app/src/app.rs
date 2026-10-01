@@ -2831,15 +2831,15 @@ fn window_nodes(tree: &[crate::state::ProjectTreeNode]) -> Vec<(NodeId, WindowKi
 fn data_end_row(ui: &mut egui::Ui, end: &mut plotyx_import::DataEnd) {
     use plotyx_import::DataEnd;
     let label = |end: &DataEnd| match end {
-        DataEnd::Auto => "Automatique (premier X non numérique)",
-        DataEnd::None => "Aucune coupure",
-        DataEnd::FirstBlankLine => "Première ligne vide",
-        DataEnd::Marker(_) => "Marqueur de fin",
-        DataEnd::LinesAfterHeader(_) => "N lignes après l'en-tête",
-        DataEnd::LinesBeforeEnd(_) => "N lignes avant la fin",
+        DataEnd::Auto => tr!("import-dataend-auto"),
+        DataEnd::None => tr!("import-option-none"),
+        DataEnd::FirstBlankLine => tr!("import-dataend-blank"),
+        DataEnd::Marker(_) => tr!("import-dataend-marker"),
+        DataEnd::LinesAfterHeader(_) => tr!("import-dataend-after-header"),
+        DataEnd::LinesBeforeEnd(_) => tr!("import-dataend-before-end"),
     };
     ui.horizontal(|ui| {
-        ui.label("Fin des données :");
+        ui.label(tr!("import-dataend"));
         egui::ComboBox::from_id_salt("plotyx_import_data_end")
             .selected_text(label(end))
             .show_ui(ui, |ui| {
@@ -2852,7 +2852,11 @@ fn data_end_row(ui: &mut egui::Ui, end: &mut plotyx_import::DataEnd) {
                     DataEnd::LinesBeforeEnd(1),
                 ] {
                     let same = std::mem::discriminant(&*end) == std::mem::discriminant(&candidate);
-                    if ui.selectable_label(same, label(&candidate)).clicked() && !same {
+                    let mut item = ui.selectable_label(same, label(&candidate));
+                    if matches!(candidate, DataEnd::Auto) {
+                        item = item.on_hover_text(tr!("import-dataend-auto", "hint"));
+                    }
+                    if item.clicked() && !same {
                         *end = candidate;
                     }
                 }
@@ -5397,49 +5401,50 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
 }
 
 /// Libellé affiché pour un [`Separator`] dans la fenêtre d'import.
-fn separator_label(separator: &Separator) -> &'static str {
+fn separator_label(separator: &Separator) -> String {
     match separator {
-        Separator::Comma => "Virgule",
-        Separator::Semicolon => "Point-virgule",
-        Separator::Tab => "Tabulation",
-        Separator::Whitespace => "Espaces",
-        Separator::Custom(_) => "Autre caractère",
-        Separator::FixedWidth(_) => "Largeur fixe",
-        Separator::Auto => "Auto",
+        Separator::Comma => tr!("import-option-comma"),
+        Separator::Semicolon => tr!("import-delimiter-semicolon"),
+        Separator::Tab => tr!("import-delimiter-tab"),
+        Separator::Whitespace => tr!("import-delimiter-whitespace"),
+        Separator::Custom(_) => tr!("import-option-other"),
+        Separator::FixedWidth(_) => tr!("import-delimiter-fixed"),
+        Separator::Auto => tr!("import-option-auto"),
     }
 }
 
 /// Libellé d'un encodage forcé.
-fn encoding_label(encoding: plotyx_import::Encoding) -> &'static str {
+fn encoding_label(encoding: plotyx_import::Encoding) -> String {
     use plotyx_import::Encoding;
+    // Les noms d'encodage sont des noms techniques : seul « Auto » se traduit.
     match encoding {
-        Encoding::Auto => "Automatique",
-        Encoding::Utf8 => "UTF-8",
-        Encoding::Windows1252 => "Windows-1252",
-        Encoding::Latin1 => "ISO 8859-1",
-        Encoding::Utf16Le => "UTF-16 (petit-boutiste)",
-        Encoding::Utf16Be => "UTF-16 (gros-boutiste)",
+        Encoding::Auto => tr!("import-option-auto"),
+        Encoding::Utf8 => "UTF-8".to_string(),
+        Encoding::Windows1252 => "Windows-1252".to_string(),
+        Encoding::Latin1 => "ISO 8859-1".to_string(),
+        Encoding::Utf16Le => "UTF-16 LE".to_string(),
+        Encoding::Utf16Be => "UTF-16 BE".to_string(),
     }
 }
 
 /// Libellé d'un séparateur de milliers.
-fn thousands_label(thousands: Option<char>) -> &'static str {
+fn thousands_label(thousands: Option<char>) -> String {
     match thousands {
-        None => "Aucun",
-        Some(' ') => "Espace",
-        Some(',') => "Virgule",
-        Some('.') => "Point",
-        Some('\'') => "Apostrophe",
-        Some(_) => "Autre",
+        None => tr!("import-option-none"),
+        Some(' ') => tr!("import-option-space"),
+        Some(',') => tr!("import-option-comma"),
+        Some('.') => tr!("import-option-dot"),
+        Some('\'') => tr!("import-option-apostrophe"),
+        Some(_) => tr!("import-option-other"),
     }
 }
 
 /// Libellé affiché pour un [`DecimalStyle`] dans la fenêtre d'import.
-fn decimal_label(decimal: DecimalStyle) -> &'static str {
+fn decimal_label(decimal: DecimalStyle) -> String {
     match decimal {
-        DecimalStyle::Dot => "Point",
-        DecimalStyle::Comma => "Virgule",
-        DecimalStyle::Auto => "Auto",
+        DecimalStyle::Dot => tr!("import-option-dot"),
+        DecimalStyle::Comma => tr!("import-option-comma"),
+        DecimalStyle::Auto => tr!("import-option-auto"),
     }
 }
 
@@ -5452,13 +5457,18 @@ fn decimal_label(decimal: DecimalStyle) -> &'static str {
 fn subheader_role_row(
     ui: &mut egui::Ui,
     id_source: &str,
-    label: &str,
+    label: String,
+    hint: String,
     range: &mut Option<plotyx_import::SubheaderLineRange>,
 ) {
     ui.push_id(id_source, |ui| {
         ui.horizontal(|ui| {
             let mut enabled = range.is_some();
-            if ui.checkbox(&mut enabled, label).changed() {
+            if ui
+                .checkbox(&mut enabled, label)
+                .on_hover_text(hint)
+                .changed()
+            {
                 *range = if enabled {
                     Some(plotyx_import::SubheaderLineRange::single(1))
                 } else {
@@ -5466,7 +5476,7 @@ fn subheader_role_row(
                 };
             }
             if let Some(r) = range {
-                ui.label("de");
+                ui.label(tr!("import-header-range-from"));
                 let mut from = r.from as i64;
                 if ui
                     .add(egui::DragValue::new(&mut from).range(1..=i64::MAX))
@@ -5474,7 +5484,7 @@ fn subheader_role_row(
                 {
                     r.from = from.max(1) as usize;
                 }
-                ui.label("à");
+                ui.label(tr!("import-header-range-to"));
                 let mut to = r.to as i64;
                 if ui
                     .add(egui::DragValue::new(&mut to).range(1..=i64::MAX))
@@ -5512,15 +5522,15 @@ fn preview_legend(ui: &mut egui::Ui) {
     use plotyx_import::LineRole;
     ui.horizontal_wrapped(|ui| {
         for (role, label) in [
-            (LineRole::MainHeader, "en-tête"),
-            (LineRole::SubheaderLongName, "nom long"),
-            (LineRole::SubheaderUnit, "unité"),
-            (LineRole::SubheaderComment, "commentaire"),
-            (LineRole::ColumnHeaderRow, "noms de colonnes"),
-            (LineRole::Data, "données"),
-            (LineRole::Footer, "pied de page"),
-            (LineRole::Comment, "commentaire ignoré"),
-            (LineRole::Skipped, "ligne ignorée"),
+            (LineRole::MainHeader, tr!("import-legend-header")),
+            (LineRole::SubheaderLongName, tr!("import-legend-long-name")),
+            (LineRole::SubheaderUnit, tr!("import-legend-units")),
+            (LineRole::SubheaderComment, tr!("import-legend-comments")),
+            (LineRole::ColumnHeaderRow, tr!("import-legend-column-names")),
+            (LineRole::Data, tr!("import-legend-data")),
+            (LineRole::Footer, tr!("import-legend-footer")),
+            (LineRole::Comment, tr!("import-legend-comment-line")),
+            (LineRole::Skipped, tr!("import-legend-skipped")),
         ] {
             let color = line_role_color(ui, role);
             let code = match role {
@@ -5549,9 +5559,10 @@ fn import_line_preview_widget(
         .filter(|l| l.role == plotyx_import::LineRole::Data)
         .count();
     if preview.total_data_lines > shown {
-        ui.weak(format!(
-            "{shown} ligne(s) de données montrée(s) sur {} au total.",
-            preview.total_data_lines
+        ui.weak(tr!(
+            "import-preview-showing",
+            shown = shown,
+            total = preview.total_data_lines
         ));
     }
     egui::ScrollArea::both()
@@ -5581,16 +5592,19 @@ fn import_line_preview_widget(
                                 line.role,
                                 plotyx_import::LineRole::Data | plotyx_import::LineRole::Footer
                             );
-                            if ui.button("Les données commencent ici").clicked() {
+                            if ui.button(tr!("import-line-data-start")).clicked() {
                                 *chosen = Some((ImportLineAction::DataStartsHere, line.number));
                                 ui.close();
                             }
-                            if ui.button("Cette ligne donne les unités").clicked() {
+                            if ui.button(tr!("import-line-units")).clicked() {
                                 *chosen = Some((ImportLineAction::UnitsLine, line.number));
                                 ui.close();
                             }
                             if ui
-                                .add_enabled(on_data, egui::Button::new("Fin des données ici"))
+                                .add_enabled(
+                                    on_data,
+                                    egui::Button::new(tr!("import-line-data-end")),
+                                )
                                 .clicked()
                             {
                                 *chosen = Some((ImportLineAction::DataEndsHere, line.number));
@@ -5599,7 +5613,7 @@ fn import_line_preview_widget(
                             if ui
                                 .add_enabled(
                                     auto_cut,
-                                    egui::Button::new("Annuler la coupure automatique"),
+                                    egui::Button::new(tr!("import-line-no-auto-end")),
                                 )
                                 .clicked()
                             {
@@ -5663,7 +5677,7 @@ fn import_preview_pane(
     let auto_cut = matches!(import.recipe.data_end, plotyx_import::DataEnd::Auto);
     let mut picked = None;
     ui.horizontal(|ui| {
-        ui.strong("Aperçu");
+        ui.strong(tr!("import-preview-title"));
         if names.len() > 1 {
             egui::ComboBox::from_id_salt("plotyx_import_preview_file")
                 .selected_text(&names[current])
@@ -5678,11 +5692,11 @@ fn import_preview_pane(
             ui.label(name);
         }
         if let Some(encoding) = state.import_encoding() {
-            ui.weak(format!("encodage : {encoding}"));
+            ui.weak(tr!("import-preview-encoding", encoding = encoding));
         }
         if let Some(Ok(preview)) = state.import_line_preview() {
             if preview.block_count > 1 {
-                ui.weak(format!("{} blocs — aperçu du premier", preview.block_count));
+                ui.weak(tr!("import-preview-blocks", count = preview.block_count));
             }
         }
     });
@@ -5690,10 +5704,10 @@ fn import_preview_pane(
         state.set_import_preview_index(i);
     }
     preview_legend(ui);
-    ui.weak("Clic droit sur une ligne pour régler l'import à cet endroit.");
+    ui.weak(tr!("import-preview-tip"));
     match state.import_line_preview() {
         None => {
-            ui.weak("Choisissez un fichier pour voir un aperçu.");
+            ui.weak(tr!("import-preview-empty"));
         }
         Some(Err(message)) => {
             ui.colored_label(egui::Color32::RED, message);
@@ -5719,7 +5733,7 @@ struct ImportWizardRequests {
 
 fn recipe_combo_text(name: &str, modified: bool) -> String {
     if modified {
-        format!("{name} (modifié)")
+        tr!("import-files-template-modified", name = name)
     } else {
         name.to_string()
     }
@@ -5744,7 +5758,7 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
         )
     };
     ui.horizontal(|ui| {
-        ui.label("Modèle :");
+        ui.label(tr!("import-files-template"));
         egui::ComboBox::from_id_salt("plotyx_import_recipe_combo")
             .selected_text(recipe_combo_text(&current_name, modified))
             .show_ui(ui, |ui| {
@@ -5754,7 +5768,11 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 }
             });
-        if ui.button("Nouveau").clicked() {
+        if ui
+            .button(tr!("import-files-reset"))
+            .on_hover_text(tr!("import-files-reset", "hint"))
+            .clicked()
+        {
             state.new_import_recipe();
         }
         // Un modèle fourni d'office ne se supprime pas (il reviendrait au
@@ -5765,27 +5783,36 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
                 .import_state()
                 .is_some_and(|import| plotyx_import::RecipeStore::is_builtin(&import.recipe));
         if ui
-            .add_enabled(can_delete, egui::Button::new("Supprimer…"))
+            .add_enabled(can_delete, egui::Button::new(tr!("import-files-delete")))
+            .on_hover_text(tr!("import-files-delete", "hint"))
             .clicked()
         {
             state.request_delete_import_recipe(&current_name);
         }
     });
     ui.horizontal(|ui| {
-        if ui.button("Exporter le modèle…").clicked() {
+        if ui
+            .button(tr!("import-files-export"))
+            .on_hover_text(tr!("import-files-export", "hint"))
+            .clicked()
+        {
             if let Some(path) = rfd::FileDialog::new()
-                .set_title("Exporter le modèle d'import")
-                .add_filter("Modèle d'import", &["json"])
+                .set_title(tr!("import-files-export-title"))
+                .add_filter(tr!("import-files-template-filter"), &["json"])
                 .set_file_name(format!("{current_name}.json"))
                 .save_file()
             {
                 state.export_import_recipe(&path);
             }
         }
-        if ui.button("Importer un modèle…").clicked() {
+        if ui
+            .button(tr!("import-files-import"))
+            .on_hover_text(tr!("import-files-import", "hint"))
+            .clicked()
+        {
             if let Some(path) = rfd::FileDialog::new()
-                .set_title("Importer un modèle d'import")
-                .add_filter("Modèle d'import", &["json"])
+                .set_title(tr!("import-files-import-title"))
+                .add_filter(tr!("import-files-template-filter"), &["json"])
                 .pick_file()
             {
                 state.import_import_recipe(&path);
@@ -5793,26 +5820,30 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
     if modified {
-        ui.weak("Ce modèle a été modifié sans être enregistré (étape Destination).");
+        ui.weak(tr!("import-files-unsaved"));
     }
     if let Some(name) = confirm {
         ui.horizontal(|ui| {
             ui.colored_label(
                 ui.visuals().warn_fg_color,
-                format!("Supprimer le modèle « {name} » ?"),
+                tr!("import-files-delete-confirm", name = name),
             );
-            if ui.button("Supprimer").clicked() {
+            if ui.button(tr!("import-files-delete-yes")).clicked() {
                 state.confirm_delete_import_recipe();
             }
-            if ui.button("Garder").clicked() {
+            if ui.button(tr!("import-files-delete-keep")).clicked() {
                 state.cancel_delete_import_recipe();
             }
         });
     }
     ui.separator();
     ui.horizontal(|ui| {
-        if ui.button("Ajouter des fichiers…").clicked() {
-            let mut dialog = rfd::FileDialog::new().set_title("Choisir des fichiers à importer");
+        if ui
+            .button(tr!("import-files-add"))
+            .on_hover_text(tr!("import-files-add", "hint"))
+            .clicked()
+        {
+            let mut dialog = rfd::FileDialog::new().set_title(tr!("import-files-add-title"));
             // Le dossier du dernier fichier importé.
             if let Some(dir) = state
                 .import_state()
@@ -5824,7 +5855,7 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
                 state.add_import_paths(paths);
             }
         }
-        ui.weak("ou glissez-les dans l'application");
+        ui.weak(tr!("import-files-drop"));
     });
     let recent: Vec<std::path::PathBuf> = state
         .import_state()
@@ -5833,7 +5864,7 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
     if !recent.is_empty() {
         let mut picked = None;
         egui::ComboBox::from_id_salt("plotyx_import_recent")
-            .selected_text("Fichiers récents…")
+            .selected_text(tr!("import-files-recent"))
             .show_ui(ui, |ui| {
                 for path in &recent {
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
@@ -5855,7 +5886,7 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
         .import_state()
         .map_or(0, |import| import.preview_index);
     if statuses.is_empty() {
-        ui.weak("Aucun fichier choisi.");
+        ui.weak(tr!("import-files-none"));
     }
     let mut remove = None;
     let mut preview = None;
@@ -5867,13 +5898,18 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
             }
             match status {
                 Ok(rows) => {
-                    ui.weak(format!("{rows} ligne(s)"));
+                    let count = *rows;
+                    ui.weak(tr!("import-files-row-count", count = count));
                 }
                 Err(message) => {
                     ui.colored_label(egui::Color32::RED, message);
                 }
             }
-            if ui.small_button("×").on_hover_text("Retirer").clicked() {
+            if ui
+                .small_button("×")
+                .on_hover_text(tr!("import-files-remove"))
+                .clicked()
+            {
                 remove = Some(i);
             }
         });
@@ -5893,7 +5929,8 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
     };
     let recipe = &mut import.recipe;
     ui.horizontal(|ui| {
-        ui.label("Séparateur :");
+        ui.label(tr!("import-format-delimiter"))
+            .on_hover_text(tr!("import-format-delimiter", "hint"));
         egui::ComboBox::from_id_salt("plotyx_import_separator_combo")
             .selected_text(separator_label(&recipe.separator))
             .show_ui(ui, |ui| {
@@ -5933,7 +5970,7 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
                     .join(",");
                 if ui
                     .add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
-                    .on_hover_text("Largeur de chaque colonne, sauf la dernière (ex. 10,8,8)")
+                    .on_hover_text(tr!("import-format-widths-hint"))
                     .changed()
                 {
                     *widths = text
@@ -5946,7 +5983,7 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
     ui.horizontal(|ui| {
-        ui.label("Séparateur décimal :");
+        ui.label(tr!("import-format-decimal"));
         egui::ComboBox::from_id_salt("plotyx_import_decimal_combo")
             .selected_text(decimal_label(recipe.decimal))
             .show_ui(ui, |ui| {
@@ -5959,7 +5996,7 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 }
             });
-        ui.label("Milliers :");
+        ui.label(tr!("import-format-thousands"));
         egui::ComboBox::from_id_salt("plotyx_import_thousands_combo")
             .selected_text(thousands_label(recipe.thousands))
             .show_ui(ui, |ui| {
@@ -5974,11 +6011,11 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
             });
     });
     ui.horizontal(|ui| {
-        ui.label("Valeurs manquantes (séparées par des virgules) :");
+        ui.label(tr!("import-format-missing"));
         let mut text = recipe.missing_tokens.join(", ");
         if ui
             .add(egui::TextEdit::singleline(&mut text).desired_width(140.0))
-            .on_hover_text("Jetons lus comme une cellule vide : --, n/a, *, NaN…")
+            .on_hover_text(tr!("import-format-missing", "hint"))
             .changed()
         {
             recipe.missing_tokens = text
@@ -5989,30 +6026,29 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
     ui.horizontal(|ui| {
-        ui.label("Préfixe des lignes de commentaire :");
+        ui.label(tr!("import-format-comment-prefix"));
         ui.add(egui::TextEdit::singleline(&mut recipe.comment_prefix).desired_width(60.0))
-            .on_hover_text(
-                "Les lignes de données qui commencent par ce préfixe sont ignorées (#, ;, //…)",
-            );
+            .on_hover_text(tr!("import-format-comment-prefix", "hint"));
     });
     ui.horizontal(|ui| {
         use plotyx_import::BlockSplit;
-        ui.label("Plusieurs blocs dans le fichier :");
+        ui.label(tr!("import-format-blocks"))
+            .on_hover_text(tr!("import-format-blocks", "hint"));
         let current = match &recipe.block_split {
-            BlockSplit::None => "Non",
-            BlockSplit::BeforeLine(_) => "À chaque ligne commençant par…",
-            BlockSplit::BlankLines => "Séparés par des lignes vides",
+            BlockSplit::None => tr!("import-blocks-single"),
+            BlockSplit::BeforeLine(_) => tr!("import-blocks-line-start"),
+            BlockSplit::BlankLines => tr!("import-blocks-blank"),
         };
         egui::ComboBox::from_id_salt("plotyx_import_blocks_combo")
             .selected_text(current)
             .show_ui(ui, |ui| {
                 for (candidate, label) in [
-                    (BlockSplit::None, "Non"),
+                    (BlockSplit::None, tr!("import-blocks-single")),
                     (
                         BlockSplit::BeforeLine("TITLE".into()),
-                        "À chaque ligne commençant par…",
+                        tr!("import-blocks-line-start"),
                     ),
-                    (BlockSplit::BlankLines, "Séparés par des lignes vides"),
+                    (BlockSplit::BlankLines, tr!("import-blocks-blank")),
                 ] {
                     let same = std::mem::discriminant(&recipe.block_split)
                         == std::mem::discriminant(&candidate);
@@ -6026,7 +6062,7 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
     ui.horizontal(|ui| {
-        ui.label("Encodage :");
+        ui.label(tr!("import-format-encoding"));
         egui::ComboBox::from_id_salt("plotyx_import_encoding_combo")
             .selected_text(encoding_label(recipe.encoding))
             .show_ui(ui, |ui| {
@@ -6049,7 +6085,8 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
             });
     });
     ui.horizontal(|ui| {
-        ui.label("Caractères à retirer en tête de chaque ligne de données :");
+        ui.label(tr!("import-format-skip-chars"))
+            .on_hover_text(tr!("import-format-skip-chars", "hint"));
         let mut value = recipe.skip_chars as i64;
         if ui
             .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
@@ -6059,7 +6096,8 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
     ui.horizontal(|ui| {
-        ui.label("Lignes de données à ignorer au début :");
+        ui.label(tr!("import-format-skip-lines"))
+            .on_hover_text(tr!("import-format-skip-lines", "hint"));
         let mut value = recipe.skip_data_rows as i64;
         if ui
             .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
@@ -6089,29 +6127,41 @@ fn import_step_header(
         recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0;
     let is_marker = matches!(recipe.header, HeaderSkip::UntilMarker(_));
     ui.horizontal(|ui| {
-        ui.label("En-tête :");
-        if ui.radio(!structured && !is_marker, "Aucun").clicked() {
+        ui.label(tr!("import-header-mode"));
+        if ui
+            .radio(!structured && !is_marker, tr!("import-option-none"))
+            .clicked()
+        {
             recipe.header = HeaderSkip::None;
             recipe.header_layout = plotyx_import::HeaderLayout::default();
         }
-        if ui.radio(structured, "Nombre de lignes").clicked() && !structured {
+        if ui
+            .radio(structured, tr!("import-header-mode-lines"))
+            .clicked()
+            && !structured
+        {
             recipe.header = HeaderSkip::None;
             recipe.header_layout.main_header_lines = 1;
         }
-        if ui.radio(is_marker, "Jusqu'à un marqueur").clicked() && !is_marker {
+        if ui
+            .radio(is_marker, tr!("import-header-mode-marker"))
+            .clicked()
+            && !is_marker
+        {
             recipe.header_layout = plotyx_import::HeaderLayout::default();
             recipe.header = HeaderSkip::UntilMarker(String::new());
         }
     });
     if let HeaderSkip::UntilMarker(marker) = &mut recipe.header {
         ui.horizontal(|ui| {
-            ui.label("Marqueur (dernière ligne de l'en-tête) :");
+            ui.label(tr!("import-header-marker"))
+                .on_hover_text(tr!("import-header-marker", "hint"));
             ui.text_edit_singleline(marker);
         });
     }
     if structured {
         ui.horizontal(|ui| {
-            ui.label("Lignes d'en-tête :");
+            ui.label(tr!("import-header-lines"));
             let mut value = recipe.header_layout.main_header_lines as i64;
             if ui
                 .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
@@ -6119,7 +6169,8 @@ fn import_step_header(
             {
                 recipe.header_layout.main_header_lines = value.max(0) as usize;
             }
-            ui.label("dont sous-en-tête :");
+            ui.label(tr!("import-header-subheader-lines"))
+                .on_hover_text(tr!("import-header-subheader-lines", "hint"));
             let mut value = recipe.header_layout.subheader_lines as i64;
             if ui
                 .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
@@ -6130,8 +6181,8 @@ fn import_step_header(
         });
     }
     if ui
-        .add_enabled(has_files, egui::Button::new("Détecter depuis le fichier"))
-        .on_hover_text("Recalcule le nombre de lignes d'en-tête et de sous-en-tête")
+        .add_enabled(has_files, egui::Button::new(tr!("import-header-detect")))
+        .on_hover_text(tr!("import-header-detect", "hint"))
         .clicked()
     {
         requests.auto_detect = true;
@@ -6139,37 +6190,43 @@ fn import_step_header(
     if recipe.header_layout.subheader_lines > 0 {
         ui.checkbox(
             &mut recipe.subheader_roles.same_line_name_unit,
-            "Extraire noms longs et unités de la même ligne",
-        );
+            tr!("import-header-combined"),
+        )
+        .on_hover_text(tr!("import-header-combined", "hint"));
         subheader_role_row(
             ui,
             "plotyx_import_role_long_name",
-            "Noms longs, lignes de sous-en-tête :",
+            tr!("import-header-role-long-name"),
+            tr!("import-header-role-long-name", "hint"),
             &mut recipe.subheader_roles.long_name,
         );
         if !recipe.subheader_roles.same_line_name_unit {
             subheader_role_row(
                 ui,
                 "plotyx_import_role_unit",
-                "Unités, lignes de sous-en-tête :",
+                tr!("import-header-role-units"),
+                tr!("import-header-role-units", "hint"),
                 &mut recipe.subheader_roles.unit,
             );
         }
         subheader_role_row(
             ui,
             "plotyx_import_role_comment",
-            "Commentaires, lignes de sous-en-tête :",
+            tr!("import-header-role-comments"),
+            tr!("import-header-role-comments", "hint"),
             &mut recipe.subheader_roles.comment,
         );
     }
     ui.checkbox(
         &mut recipe.has_column_header_row,
-        "La première ligne de données donne les noms de colonnes",
-    );
+        tr!("import-header-names-first-line"),
+    )
+    .on_hover_text(tr!("import-header-names-first-line", "hint"));
     ui.separator();
     data_end_row(ui, &mut recipe.data_end);
     ui.horizontal(|ui| {
-        ui.label("Lignes à ignorer tout en bas du fichier :");
+        ui.label(tr!("import-header-skip-footer"))
+            .on_hover_text(tr!("import-header-skip-footer", "hint"));
         let mut value = recipe.footer_skip_lines as i64;
         if ui
             .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
@@ -6180,17 +6237,17 @@ fn import_step_header(
     });
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label("Nom des séries :");
+        ui.label(tr!("import-header-column-names"));
         let mut is_filename = matches!(recipe.name_source, NameSource::Filename);
         let mut is_header_key = matches!(recipe.name_source, NameSource::HeaderKey(_));
         if ui
-            .radio_value(&mut is_filename, true, "Nom de fichier")
+            .radio_value(&mut is_filename, true, tr!("import-header-name-file"))
             .clicked()
         {
             recipe.name_source = NameSource::Filename;
         }
         if ui
-            .radio_value(&mut is_header_key, true, "Clé d'en-tête")
+            .radio_value(&mut is_header_key, true, tr!("import-header-name-key"))
             .clicked()
         {
             recipe.name_source = NameSource::HeaderKey(String::new());
@@ -6198,31 +6255,31 @@ fn import_step_header(
     });
     if let NameSource::HeaderKey(key) = &mut recipe.name_source {
         ui.horizontal(|ui| {
-            ui.label("Clé :");
+            ui.label(tr!("import-header-key"));
             ui.text_edit_singleline(key);
         });
     }
 }
 
 /// Libellé de la nature choisie pour une colonne.
-fn column_kind_label(kind: plotyx_import::ColumnKind) -> &'static str {
+fn column_kind_label(kind: plotyx_import::ColumnKind) -> String {
     match kind {
-        plotyx_import::ColumnKind::Auto => "Nombres",
-        plotyx_import::ColumnKind::Text => "Texte",
-        plotyx_import::ColumnKind::DateTime => "Date-heure",
+        plotyx_import::ColumnKind::Auto => tr!("import-type-numeric"),
+        plotyx_import::ColumnKind::Text => tr!("import-type-text"),
+        plotyx_import::ColumnKind::DateTime => tr!("import-type-datetime"),
     }
 }
 
 /// Libellé d'un rôle de colonne choisi à l'étape « Colonnes ».
-fn column_role_label(role: plotyx_import::ColumnRoleChoice) -> &'static str {
+fn column_role_label(role: plotyx_import::ColumnRoleChoice) -> String {
     use plotyx_import::ColumnRoleChoice;
     match role {
-        ColumnRoleChoice::Auto => "Auto",
-        ColumnRoleChoice::X => "X",
-        ColumnRoleChoice::Y => "Y",
-        ColumnRoleChoice::XError => "Erreur X",
-        ColumnRoleChoice::YError => "Erreur Y",
-        ColumnRoleChoice::Ignore => "Ignorer",
+        ColumnRoleChoice::Auto => tr!("import-option-auto"),
+        ColumnRoleChoice::X => "X".to_string(),
+        ColumnRoleChoice::Y => "Y".to_string(),
+        ColumnRoleChoice::XError => tr!("import-role-x-error"),
+        ColumnRoleChoice::YError => tr!("import-role-y-error"),
+        ColumnRoleChoice::Ignore => tr!("import-option-none"),
     }
 }
 
@@ -6231,7 +6288,7 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
     use plotyx_import::ColumnRoleChoice;
     let columns = match state.import_column_previews() {
         None => {
-            ui.weak("Choisissez un fichier à l'étape 1.");
+            ui.weak(tr!("import-columns-choose-file"));
             return;
         }
         Some(Err(message)) => {
@@ -6264,7 +6321,14 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
                 .spacing([12.0, 4.0])
                 .show(ui, |ui| {
                     for title in [
-                        "#", "Nom", "Nom long", "Unité", "Lu comme", "Type", "Rôle", "Valeurs",
+                        "#".to_string(),
+                        tr!("import-columns-name"),
+                        tr!("import-columns-long-name"),
+                        tr!("import-columns-units"),
+                        tr!("import-columns-read-as"),
+                        tr!("import-columns-type"),
+                        tr!("import-columns-role"),
+                        tr!("import-columns-values"),
                     ] {
                         ui.strong(title);
                     }
@@ -6292,7 +6356,11 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
                                     }
                                 }
                             });
-                        ui.label(if column.mixed { "Mixte" } else { "Numérique" });
+                        ui.label(if column.mixed {
+                            tr!("import-type-mixed")
+                        } else {
+                            tr!("import-type-numeric")
+                        });
                         let effective = import.recipe.column_role(index);
                         egui::ComboBox::from_id_salt(("plotyx_import_column_role", index))
                             .selected_text(column_role_label(effective))
@@ -6336,13 +6404,15 @@ fn import_step_metadata(ui: &mut egui::Ui, state: &mut AppState) {
     let recipe = &mut import.recipe;
     ui.checkbox(
         &mut recipe.keep_header_metadata,
-        "Conserver l'en-tête du fichier",
-    );
+        tr!("import-metadata-keep-header"),
+    )
+    .on_hover_text(tr!("import-metadata-keep-header", "hint"));
     ui.checkbox(
         &mut recipe.keep_footer_metadata,
-        "Conserver aussi le pied de page",
-    );
-    ui.weak("Décochez une clé (ou une section entière) pour ne pas la garder.");
+        tr!("import-metadata-keep-footer"),
+    )
+    .on_hover_text(tr!("import-metadata-keep-footer", "hint"));
+    ui.weak(tr!("import-metadata-uncheck"));
     ui.separator();
     let is_excluded = |recipe: &plotyx_import::ImportRecipe, key: &str| {
         recipe
@@ -6376,7 +6446,7 @@ fn import_step_metadata(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
             if available.is_empty() {
-                ui.weak("Aucune métadonnée dans ce fichier avec ces réglages.");
+                ui.weak(tr!("import-metadata-none"));
             }
         });
 }
@@ -6390,84 +6460,73 @@ fn import_step_destination(
     let Some(import) = state.import_state_mut() else {
         return;
     };
-    ui.label("Destination :");
+    ui.label(tr!("import-destination"));
     if let Some(book) = import.active_book {
         ui.radio_value(
             &mut import.destination,
             ImportDestination::ActiveBook(book),
-            "Classeur actif (une feuille par fichier)",
+            tr!("import-destination-active"),
         );
     } else {
         ui.add_enabled(
             false,
-            egui::RadioButton::new(false, "Classeur actif (aucun classeur actif)"),
+            egui::RadioButton::new(false, tr!("import-destination-active-none")),
         );
     }
     ui.radio_value(
         &mut import.destination,
         ImportDestination::NewBookPerFile,
-        "Un nouveau classeur par fichier",
+        tr!("import-destination-new-per-file"),
     );
     ui.radio_value(
         &mut import.destination,
         ImportDestination::NewBookForAll,
-        "Un nouveau classeur pour tous les fichiers",
+        tr!("import-destination-new-all"),
     );
     if matches!(import.destination, ImportDestination::ActiveBook(_)) {
         ui.separator();
-        ui.label("Dans le classeur actif :");
+        ui.label(tr!("import-destination-mode"));
         use plotyx_import::ImportMode;
         for (mode, label) in [
-            (ImportMode::NewSheet, "Nouvelle feuille"),
-            (ImportMode::ReplaceSheet, "Remplacer la feuille active"),
-            (
-                ImportMode::AddColumns,
-                "Ajouter des colonnes à la feuille active",
-            ),
-            (
-                ImportMode::AddRows,
-                "Ajouter des lignes à la suite de la feuille active",
-            ),
+            (ImportMode::NewSheet, tr!("import-mode-new-sheet")),
+            (ImportMode::ReplaceSheet, tr!("import-mode-replace")),
+            (ImportMode::AddColumns, tr!("import-mode-add-columns")),
+            (ImportMode::AddRows, tr!("import-mode-add-rows")),
         ] {
             ui.radio_value(&mut import.recipe.import_mode, mode, label);
         }
     }
     if import.paths.len() > 1 {
         ui.separator();
-        ui.label("Plusieurs fichiers :");
+        ui.label(tr!("import-destination-multiple"));
         use plotyx_import::FilesLayout;
         for (layout, label) in [
-            (FilesLayout::SheetPerFile, "Une feuille par fichier"),
-            (
-                FilesLayout::SideBySide,
-                "Une seule feuille, côte à côte (X Y X Y…)",
-            ),
-            (
-                FilesLayout::SharedX,
-                "Une seule feuille, avec le X du premier fichier partagé",
-            ),
+            (FilesLayout::SheetPerFile, tr!("import-layout-per-file")),
+            (FilesLayout::SideBySide, tr!("import-layout-side-by-side")),
+            (FilesLayout::SharedX, tr!("import-layout-shared-x")),
         ] {
             ui.radio_value(&mut import.recipe.files_layout, layout, label);
         }
     }
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label("Nom du modèle :");
+        ui.label(tr!("import-destination-template-name"));
         ui.text_edit_singleline(&mut import.save_as_name);
-        if ui.button("Enregistrer le modèle").clicked() {
+        if ui.button(tr!("import-destination-save")).clicked() {
             requests.save_recipe = true;
         }
     });
-    ui.weak("Le modèle enregistré est proposé à la prochaine importation.");
+    ui.weak(tr!("import-destination-saved-note"));
     ui.separator();
-    ui.label("Choix automatique de ce modèle (tous les critères remplis doivent correspondre) :");
+    ui.label(tr!("import-destination-auto"))
+        .on_hover_text(tr!("import-destination-auto", "hint"));
     let auto = &mut import.recipe.auto_match;
     ui.horizontal(|ui| {
-        ui.label("Extensions :");
+        ui.label(tr!("import-auto-extensions"));
         let mut text = auto.extensions.join(", ");
         if ui
             .add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
-            .on_hover_text("csv, txt, asc…")
+            .on_hover_text(tr!("import-auto-extensions", "hint"))
             .changed()
         {
             auto.extensions = text
@@ -6478,13 +6537,13 @@ fn import_step_destination(
         }
     });
     ui.horizontal(|ui| {
-        ui.label("Le nom contient :");
+        ui.label(tr!("import-auto-name"));
         ui.add(egui::TextEdit::singleline(&mut auto.name_contains).desired_width(120.0));
     });
     ui.horizontal(|ui| {
-        ui.label("Le début du fichier contient :");
+        ui.label(tr!("import-auto-content"));
         ui.add(egui::TextEdit::singleline(&mut auto.content_contains).desired_width(160.0))
-            .on_hover_text("Une signature, comme ORIGIN;JASCO");
+            .on_hover_text(tr!("import-auto-content", "hint"));
     });
 }
 
@@ -6507,22 +6566,26 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
     // Les deux fermetures de la brique (contenu, boutons du pied) écrivent
     // dans les mêmes demandes, l'une après l'autre : `RefCell`.
     let requests = std::cell::RefCell::new(ImportWizardRequests::default());
+    let (finish_label, finish_hint) = (
+        tr!("import-button-finish"),
+        tr!("import-button-finish", "hint"),
+    );
     let outcome = modal_dialog_with(
         ctx,
         egui::Id::new("plotyx_import_wizard"),
-        "Importer des fichiers",
+        &tr!("import-window-title"),
         egui::vec2(1000.0, 620.0),
         DialogFooter {
-            accept_label: "Terminer",
-            accept_hint: "Importer maintenant avec les réglages actuels (Entrée)",
+            accept_label: &finish_label,
+            accept_hint: &finish_hint,
             accept_enabled: has_files,
         },
         |footer| {
-            // Ajoutés de droite à gauche : « Suivant » puis « Précédent ».
+            // Ajoutés de droite à gauche : « Next » puis « Back ».
             if footer
                 .add_enabled(
                     step != ImportStep::Destination,
-                    egui::Button::new("Suivant >").min_size(egui::vec2(84.0, 24.0)),
+                    egui::Button::new(tr!("import-button-next")).min_size(egui::vec2(84.0, 24.0)),
                 )
                 .clicked()
             {
@@ -6531,7 +6594,7 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
             if footer
                 .add_enabled(
                     step != ImportStep::Files,
-                    egui::Button::new("< Précédent").min_size(egui::vec2(84.0, 24.0)),
+                    egui::Button::new(tr!("import-button-back")).min_size(egui::vec2(84.0, 24.0)),
                 )
                 .clicked()
             {
@@ -9440,7 +9503,7 @@ mod graph_layout_tests {
             let mut output = output.unwrap();
             output.textures_delta.clear();
             let shapes = output.shapes;
-            find_text_center(&shapes, step.title());
+            find_text_center(&shapes, &step.title());
             find_text_center(&shapes, "TITLE;S13");
             assert!(actions.is_empty(), "peindre n'importe rien");
             state.import_step_forward();

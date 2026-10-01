@@ -72,8 +72,17 @@ const CONSTRUCTEURS: &[&str] = &[
 ];
 
 /// Les fonctions dont le corps est une table de libellés : aucun littéral
-/// textuel dedans.
-const TABLES: &[&str] = &["label", "title"];
+/// textuel dedans. Les quatre dernières sont les tables de l'assistant d'import
+/// (#44) ; `encoding_label` et `column_role_label` n'y sont pas : leurs noms
+/// techniques (`UTF-8`, `Windows-1252`, `X`, `Y`) sont des littéraux légitimes.
+const TABLES: &[&str] = &[
+    "label",
+    "title",
+    "separator_label",
+    "thousands_label",
+    "decimal_label",
+    "column_kind_label",
+];
 
 /// Une dérogation : `nombre` littéraux tolérés dans les fonctions `fonctions`
 /// du fichier `fichier`, jusqu'à la conversion du ticket `ticket`. Les
@@ -119,32 +128,7 @@ const DEROGATIONS: &[Derogation] = &[
     },
     // --- #43 : propriétés du graphe et export : converti, plus aucune dérogation.
     // Ses fonctions restent gardées, plus strictement : `ZONE_43`.
-    // --- #44 : assistant d'import ---------------------------------------------
-    Derogation {
-        fichier: "app.rs",
-        zone: "assistant d'import : fenêtre, six étapes, aperçu",
-        ticket: "#44",
-        fonctions: &[
-            "import_window",
-            "import_step_files",
-            "import_step_format",
-            "import_step_header",
-            "import_step_columns",
-            "import_step_metadata",
-            "import_step_destination",
-            "import_line_preview_widget",
-            "subheader_role_row",
-            "data_end_row",
-        ],
-        nombre: 65,
-    },
-    Derogation {
-        fichier: "state.rs",
-        zone: "titres des étapes de l'assistant d'import",
-        ticket: "#44",
-        fonctions: &["ImportStep::title"],
-        nombre: 6,
-    },
+    // --- #44 : assistant d'import : converti, plus aucune dérogation.
     // --- #45 : classeur, grille, Project Manager, couleur, console -------------
     Derogation {
         fichier: "app.rs",

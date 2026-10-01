@@ -27,6 +27,16 @@ Conséquence pratique : **ne jamais faire entrer un type de `plotyx-core` dans
 conversion, elle s'ajoute au vocabulaire propre du crate, pas en important le
 modèle.
 
+Et côté application : **les textes de l'assistant** (`import_window` et ses six
+étapes, `ImportStep::title`, tables `separator_label`, `column_role_label`…) sont
+des clés `import-*` du catalogue `en`, employées par `tr!` ; les termes viennent
+de `docs/textes-interface.md` § 2.4 (*Delimiter*, pas « separator » ; *Template*,
+jamais « recipe » ni « recette » à l'écran ; *Subheader*, *Footer*, *Block*). Un
+réglage nouveau ajoute sa clé (libellé de 1 à 3 mots, infobulle en attribut
+`.hint`), pas un littéral. Les noms de modèles (« JASCO »…) et le contenu du
+fichier sont des données : jamais traduits. Le vocabulaire de `plotyx-import`
+(`recipe`, `SubheaderRoles`…) reste celui du code et ne passe jamais à l'écran.
+
 Et côté application : l'import écrit dans le projet, donc il passe par une
 **commande annulable** comme tout le reste (skill **plotyx-commande**). Un
 import qu'on ne peut pas annuler serait la seule écriture non réversible du

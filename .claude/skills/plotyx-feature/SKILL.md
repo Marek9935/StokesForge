@@ -188,9 +188,9 @@ l'application (issue #20) : il le bloque seulement.
 L'assistant d'import (`import_window`) est un dialogue modal comme les
 propriétés du graphe : `modal_dialog_with(ctx, id, titre, taille, DialogFooter
 { accept_label, accept_hint, accept_enabled }, boutons_du_pied, contenu)`. Le
-bouton par défaut peut changer de libellé et se griser (« Terminer » grisé sans
-fichier) ; des boutons supplémentaires se posent à gauche d'« Annuler » par la
-fermeture `boutons_du_pied` (« < Précédent », « Suivant > »). Entrée valide,
+bouton par défaut peut changer de libellé et se griser (*Finish* grisé sans
+fichier) ; des boutons supplémentaires se posent à gauche de *Cancel* par la
+fermeture `boutons_du_pied` (*Back*, *Next*). Entrée valide,
 Échap annule. **Avant d'écrire une fenêtre, dialogue ou assistant : partir de
 `modal_dialog_with` (dialogue) ou `show_window_in_layer` (fenêtre de contenu).**
 Si la brique manque d'un réglage, l'étendre (c'est ce qui a été fait pour
