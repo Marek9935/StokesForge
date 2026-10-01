@@ -1294,14 +1294,14 @@ impl PlotSettingsTab {
     ];
 
     /// Libellé de l'onglet.
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            PlotSettingsTab::Graph => "Graphe",
-            PlotSettingsTab::PlotArea => "Zone de tracé",
-            PlotSettingsTab::Axes => "Axes",
-            PlotSettingsTab::Series => "Séries",
-            PlotSettingsTab::Legend => "Légende",
-            PlotSettingsTab::Theme => "Thème",
+            PlotSettingsTab::Graph => tr!("plot-tab-general"),
+            PlotSettingsTab::PlotArea => tr!("plot-tab-plot-area"),
+            PlotSettingsTab::Axes => tr!("plot-tab-axes"),
+            PlotSettingsTab::Series => tr!("plot-tab-series"),
+            PlotSettingsTab::Legend => tr!("plot-tab-legend"),
+            PlotSettingsTab::Theme => tr!("plot-tab-theme"),
         }
     }
 }
@@ -1319,11 +1319,11 @@ pub enum PlotAxis {
 
 impl PlotAxis {
     /// Libellé de l'axe.
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            PlotAxis::Bottom => "X (bas)",
-            PlotAxis::Left => "Y (gauche)",
-            PlotAxis::Right => "Y secondaire (droite)",
+            PlotAxis::Bottom => tr!("plot-axis-bottom"),
+            PlotAxis::Left => tr!("plot-axis-left"),
+            PlotAxis::Right => tr!("plot-axis-right"),
         }
     }
 }
@@ -1350,12 +1350,12 @@ impl PlotTarget {
     /// Nom du composant, en tête du menu contextuel.
     pub fn label(self) -> String {
         match self {
-            PlotTarget::Background => "Graphe".to_string(),
-            PlotTarget::Title => "Titre du graphe".to_string(),
-            PlotTarget::PlotArea => "Zone de tracé".to_string(),
-            PlotTarget::Axis(axis) => format!("Axe {}", axis.label()),
-            PlotTarget::AxisTitle(axis) => format!("Titre de l'axe {}", axis.label()),
-            PlotTarget::Annotation(_) => "Texte libre".to_string(),
+            PlotTarget::Background => tr!("plot-target-graph"),
+            PlotTarget::Title => tr!("plot-target-title"),
+            PlotTarget::PlotArea => tr!("plot-target-plot-area"),
+            PlotTarget::Axis(axis) => tr!("plot-target-axis", axis = axis.label()),
+            PlotTarget::AxisTitle(axis) => tr!("plot-target-axis-title", axis = axis.label()),
+            PlotTarget::Annotation(_) => tr!("plot-target-text"),
         }
     }
 

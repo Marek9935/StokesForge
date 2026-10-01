@@ -174,7 +174,13 @@ un littéral textuel dans `label`, `button`, `menu_button`, `checkbox`, `radio`,
 `CollapsingHeader::new(…)`, et dans les tables `fn label()` / `fn title()`. Un
 littéral sans lettre (`"→"`, `"{}"`) ou la clé d'un `tr!` ne compte pas. Elle ne
 voit pas un `&str` passé en variable ni un titre de `modal_dialog_with` : les
-tickets #43-#44 étendent `APPELS` quand ils traitent ces zones.
+tickets de conversion étendent la garde quand ils traitent ces zones. #43 l'a
+fait pour les propriétés du graphe : `ZONE_43` (même fichier) interdit **tout**
+littéral textuel dans ses fonctions (`strong`, `weak`, `color_field`,
+`set_title`, argument de fonction libre…), hors identifiants (`[a-z0-9_./-]`) et
+sigles de format (`SVG`) ; une fonction nouvelle de cette fenêtre s'y ajoute.
+Dans cette zone, l'infobulle d'un champ est l'attribut `.hint` (`tr!("clé",
+"hint")`) et `text_field(ui, libellé, infobulle, valeur)` la pose.
 
 **La liste de dérogations (`DEROGATIONS`) est une dette, pas un état normal.**
 Elle recense l'existant d'avant #41 (213 littéraux, 14 zones), par fichier et par

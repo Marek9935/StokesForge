@@ -117,45 +117,8 @@ const DEROGATIONS: &[Derogation] = &[
         ],
         nombre: 7,
     },
-    // --- #43 : propriétés du graphe et export ---------------------------------
-    Derogation {
-        fichier: "app.rs",
-        zone: "propriétés du graphe : axes, séries, légende, mémo Typst",
-        ticket: "#43",
-        fonctions: &[
-            "axis_editor",
-            "series_editor",
-            "legend_editor",
-            "plot_settings_contents",
-            "formula_memo",
-        ],
-        nombre: 22,
-    },
-    Derogation {
-        fichier: "app.rs",
-        zone: "textes libres et vue du graphe",
-        ticket: "#43",
-        fonctions: &["annotation_editor_ui", "graph_view_contents"],
-        nombre: 6,
-    },
-    Derogation {
-        fichier: "app.rs",
-        zone: "pied commun des dialogues modaux",
-        ticket: "#43",
-        fonctions: &["modal_dialog_with"],
-        nombre: 2,
-    },
-    Derogation {
-        fichier: "state.rs",
-        zone: "tables de libellés : onglets, axes, cibles du graphe",
-        ticket: "#43",
-        fonctions: &[
-            "PlotSettingsTab::label",
-            "PlotAxis::label",
-            "PlotTarget::label",
-        ],
-        nombre: 15,
-    },
+    // --- #43 : propriétés du graphe et export : converti, plus aucune dérogation.
+    // Ses fonctions restent gardées, plus strictement : `ZONE_43`.
     // --- #44 : assistant d'import ---------------------------------------------
     Derogation {
         fichier: "app.rs",
@@ -736,6 +699,127 @@ fn le_total_des_derogations_se_lit() {
         eprintln!(
             "[i18n]   {:<14} {:<48} {:>4}  {}",
             derogation.fichier, derogation.zone, derogation.nombre, derogation.ticket
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// La zone #43, gardée sans réserve
+// ---------------------------------------------------------------------------
+
+/// Les fonctions de `app.rs` de la fenêtre des propriétés du graphe, de
+/// l'éditeur de texte sur le graphique et du pied commun des dialogues
+/// modaux (#43). Zéro dérogation, et plus strictement que [`APPELS`] : **aucun**
+/// littéral textuel dans leur corps, quelle que soit la forme de l'appel
+/// (`strong`, `weak`, `color_field`, `text_field`, `set_title`, un argument de
+/// fonction libre…) — seuls passent les littéraux qui sont des identifiants
+/// (`[a-z0-9_./-]` : sels d'identifiants egui, adresses), les sigles de format
+/// (`SVG`) et les clés de `tr!`.
+/// À fusionner dans la garde générale quand [`APPELS`] saura voir ces formes
+/// (#48).
+const ZONE_43: &[&str] = &[
+    "plot_settings_window",
+    "plot_settings_contents",
+    "theme_editor",
+    "formula_memo",
+    "text_field",
+    "axis_editor",
+    "series_editor",
+    "legend_editor",
+    "plot_type_label",
+    "line_style_label",
+    "symbol_shape_label",
+    "legend_position_label",
+    "annotation_editor_ui",
+    "graph_view_contents",
+    "request_graph_export",
+    "modal_dialog",
+    "modal_dialog_with",
+];
+
+/// Les littéraux textuels, hors identifiants, du corps des fonctions `zone`.
+fn litteraux_nus(texte: &str, zone: &[&str]) -> Vec<(String, usize, String)> {
+    let source = masquer(texte);
+    let fin_production = (0..source.masque.len())
+        .find(|i| commence_par(&source.masque, *i, "#[cfg(test)]"))
+        .unwrap_or(source.masque.len());
+    let masque = &source.masque[..fin_production];
+    let mut trouves = Vec::new();
+    for (position, nom) in fonctions(masque) {
+        if !zone.contains(&nom.as_str()) {
+            continue;
+        }
+        let Some(accolade) = (position..masque.len()).find(|k| masque[*k] == '{') else {
+            continue;
+        };
+        let Some(fin) = fermante(masque, accolade) else {
+            continue;
+        };
+        for ouverture in litteraux_textuels(masque, accolade + 1, fin) {
+            let litteral = extrait(&source, ouverture);
+            let contenu = &litteral[1..litteral.len().saturating_sub(1)];
+            let identifiant = contenu
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_./-".contains(c));
+            // Un sigle de format (`SVG`, `PDF`) n'a pas de traduction.
+            let sigle = contenu
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+            if !identifiant && !sigle {
+                trouves.push((nom.clone(), ligne_de(&source.original, ouverture), litteral));
+            }
+        }
+    }
+    trouves
+}
+
+/// La fenêtre des propriétés du graphe, ses onglets, l'éditeur de texte et le
+/// pied des dialogues modaux sont **entièrement** passés par `tr!` : aucune
+/// dérogation (#43).
+#[test]
+fn les_proprietes_du_graphe_et_l_export_sont_sans_litteral() {
+    let (_, texte) = sources_de_l_application()
+        .into_iter()
+        .find(|(nom, _)| nom == "app.rs")
+        .expect("app.rs");
+    let trouves = litteraux_nus(&texte, ZONE_43);
+    assert!(
+        trouves.is_empty(),
+        "{} texte(s) en dur dans la zone #43 :\n  {}",
+        trouves.len(),
+        trouves
+            .iter()
+            .map(|(f, l, t)| format!("app.rs:{l} dans `{f}` : {t}"))
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+}
+
+/// Le témoin de la garde de la zone : un littéral dans une forme d'appel que
+/// [`APPELS`] ne voit pas (`strong`, un argument de fonction libre) est refusé ;
+/// un identifiant et une clé de `tr!` passent ; une fonction hors zone aussi.
+#[test]
+fn la_garde_de_la_zone_43_voit_les_formes_que_appels_ignore() {
+    let zone = &["page"];
+    for code in [
+        r#"fn page(ui: &mut Ui) { ui.strong("Titre"); }"#,
+        r#"fn page(ui: &mut Ui) { champ(ui, "Couleur", &mut x); }"#,
+        r#"fn page(ui: &mut Ui) { let _ = ui.hyperlink("lien"); let _ = Some("Auto"); }"#,
+        r#"fn page(ui: &mut Ui) { let _ = format!("Axe {}", n); }"#,
+    ] {
+        assert_eq!(litteraux_nus(code, zone).len(), 1, "non vu : {code}");
+    }
+    for code in [
+        r#"fn page(ui: &mut Ui) { ui.strong(tr!("plot-tab-axes")); }"#,
+        r#"fn page(ui: &mut Ui) { ui.id_salt("plot_settings_series_list"); }"#,
+        r#"fn page(ui: &mut Ui) { let _ = tr!("a", url = "typst.app/docs/reference/math"); }"#,
+        r#"fn ailleurs(ui: &mut Ui) { ui.strong("Titre"); }"#,
+        r#"fn page(d: Dialog) { d.add_filter("SVG", &["svg"]); }"#,
+        "fn page(ui: &mut Ui) { let _ = \"→\"; }",
+    ] {
+        assert!(
+            litteraux_nus(code, zone).is_empty(),
+            "faux positif : {code}"
         );
     }
 }

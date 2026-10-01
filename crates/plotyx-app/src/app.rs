@@ -7346,7 +7346,7 @@ fn graph_view_contents(
         Ok(_) => {
             graph_context_menu(ui, view, &snapshot.tree, graph_id, actions);
             annotation_interactions(ui, view, &snapshot.tree, graph_id, actions);
-            if ui.small_button("réinitialiser le zoom").clicked() {
+            if ui.small_button(tr!("plot-view-reset-zoom")).clicked() {
                 view.reset_view();
             }
         }
@@ -7653,24 +7653,27 @@ fn annotation_editor_ui(
                         ("annotation_color", id),
                         &mut editor.draft.color,
                         ColorUsage::Text,
-                        Some("Automatique (contraste avec le fond)"),
+                        Some(&tr!("plot-color-auto-contrast")),
                         &mut env,
                     );
-                    ui.label("Taille");
+                    ui.label(tr!("plot-text-size"));
                     let (low, high) = plotyx_render_egui::AnnotationSpec::SIZE_RANGE;
                     ui.add(
                         egui::DragValue::new(&mut editor.draft.size)
                             .range(low..=high)
                             .speed(0.2),
                     );
-                    ui.label("Rotation");
+                    ui.label(tr!("plot-text-rotation"));
                     ui.add(
                         egui::DragValue::new(&mut editor.draft.rotation)
                             .range(-180.0..=180.0)
-                            .speed(1.0)
-                            .suffix("°"),
+                            .speed(1.0),
                     );
-                    if ui.button("OK").on_hover_text("Valider (Entrée)").clicked() {
+                    if ui
+                        .button(tr!("plot-text-ok"))
+                        .on_hover_text(tr!("plot-text-ok", "hint"))
+                        .clicked()
+                    {
                         accept = true;
                     }
                 });
@@ -7714,7 +7717,7 @@ fn annotation_editor_ui(
                     } else {
                         egui::Color32::TRANSPARENT
                     })
-                    .hint_text("Texte, $formule$"),
+                    .hint_text(tr!("plot-text-placeholder")),
             );
             if editor.focus {
                 response.request_focus();
@@ -7825,7 +7828,7 @@ fn request_graph_export(
         None => spec,
     };
     if let Some(path) = rfd::FileDialog::new()
-        .set_title("Exporter le graphe")
+        .set_title(tr!("export-dialog-title"))
         .add_filter("SVG", &["svg"])
         .add_filter("PDF", &["pdf"])
         .add_filter("PNG", &["png"])
@@ -7900,7 +7903,7 @@ fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
         state.cancel_plot_settings();
         return;
     };
-    let title = format!("Propriétés — {}", node.name());
+    let title = tr!("plot-window-title", name = node.name());
     state.begin_plot_edit(settings.graph);
     let outcome = modal_dialog(
         ctx,
@@ -8012,34 +8015,32 @@ fn modal_dialog(
     default_size: egui::Vec2,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> DialogOutcome {
+    // Le pied par défaut : « OK », toujours actif — ce que les propriétés du
+    // graphe emploient. Les textes viennent du catalogue ; le pied les emprunte.
+    let accept_label = tr!("dialog-ok");
+    let accept_hint = tr!("dialog-ok", "hint");
     modal_dialog_with(
         ctx,
         id,
         title,
         default_size,
-        DialogFooter::default(),
+        DialogFooter {
+            accept_label: &accept_label,
+            accept_hint: &accept_hint,
+            accept_enabled: true,
+        },
         |_| {},
         add_contents,
     )
 }
 
 /// Le pied de page d'un [`modal_dialog_with`] : libellé et grisage du bouton par
-/// défaut. Par défaut « Valider », toujours actif — ce que les propriétés du
-/// graphe emploient.
+/// défaut. [`modal_dialog`] y met « OK », toujours actif — ce que les propriétés
+/// du graphe emploient.
 struct DialogFooter<'a> {
     accept_label: &'a str,
     accept_hint: &'a str,
     accept_enabled: bool,
-}
-
-impl Default for DialogFooter<'_> {
-    fn default() -> Self {
-        Self {
-            accept_label: "Valider",
-            accept_hint: "Garder les modifications (Entrée)",
-            accept_enabled: true,
-        }
-    }
 }
 
 /// [`modal_dialog`] avec un bouton par défaut personnalisé (`footer`) et des
@@ -8161,10 +8162,11 @@ fn modal_dialog_with(
                 {
                     button_outcome = DialogOutcome::Accept;
                 }
-                let cancel = egui::Button::new("Annuler").min_size(egui::vec2(84.0, 24.0));
+                let cancel =
+                    egui::Button::new(tr!("dialog-cancel")).min_size(egui::vec2(84.0, 24.0));
                 if footer
                     .add(cancel)
-                    .on_hover_text("Revenir à l'état d'ouverture (Échap)")
+                    .on_hover_text(tr!("dialog-cancel", "hint"))
                     .clicked()
                 {
                     button_outcome = DialogOutcome::Cancel;
@@ -8233,7 +8235,7 @@ fn plot_settings_contents(
     // défile au lieu de rétrécir quand la fenêtre est étroite.
     let tabs: Vec<(PlotSettingsTab, String)> = PlotSettingsTab::ALL
         .iter()
-        .map(|tab| (*tab, tab.label().to_string()))
+        .map(|tab| (*tab, tab.label()))
         .collect();
     tab_strip(ui, &tabs, settings.tab, |tab| chosen_tab = tab, None, || {});
     ui.separator();
@@ -8261,43 +8263,50 @@ fn plot_settings_contents(
             .auto_shrink([false, false])
             .show(ui, |ui| match chosen_tab {
                 PlotSettingsTab::Graph => {
-                    commit |= text_field(ui, "Titre", &mut spec.title);
+                    commit |= text_field(
+                        ui,
+                        &tr!("plot-general-title"),
+                        &tr!("plot-general-title", "hint"),
+                        &mut spec.title,
+                    );
                     formula_memo(ui, "plot_settings_memo_graph");
                     commit |= color_field(
                         ui,
-                        "Couleur du titre",
+                        &tr!("plot-general-title-color"),
                         &mut spec.title_color,
                         ColorUsage::Text,
-                        Some("Automatique (contraste avec le fond)"),
+                        Some(&tr!("plot-color-auto-contrast")),
                         &mut env,
                     );
                     ui.add_space(6.0);
                     commit |= color_field(
                         ui,
-                        "Fond",
+                        &tr!("plot-general-background"),
                         &mut spec.background,
                         ColorUsage::Background,
-                        Some("Automatique (blanc)"),
+                        Some(&tr!("plot-color-auto-white")),
                         &mut env,
                     );
-                    ui.weak(
-                        "Sur un fond sombre, le texte, les axes et la légende en couleur \
-                         automatique passent en blanc.",
-                    );
+                    ui.weak(tr!("plot-general-dark-note"));
                 }
                 PlotSettingsTab::PlotArea => {
                     let Some(panel) = spec.panels.get_mut(0) else {
                         return;
                     };
-                    commit |= text_field(ui, "Titre du panneau", &mut panel.title);
+                    commit |= text_field(
+                        ui,
+                        &tr!("plot-area-layer-title"),
+                        &tr!("plot-area-layer-title", "hint"),
+                        &mut panel.title,
+                    );
                     formula_memo(ui, "plot_settings_memo_panel");
                     ui.add_space(4.0);
-                    ui.strong("Grille");
+                    ui.strong(tr!("plot-area-gridlines"));
                     commit |= ui
-                        .checkbox(&mut panel.bottom.grid, "Lignes verticales (graduations X)")
+                        .checkbox(&mut panel.bottom.grid, tr!("plot-area-gridlines-vertical"))
                         .changed();
                     commit |= ui
-                        .checkbox(&mut panel.left.grid, "Lignes horizontales (graduations Y)")
+                        .checkbox(&mut panel.left.grid, tr!("plot-area-gridlines-horizontal"))
                         .changed();
                 }
                 PlotSettingsTab::Axes => {
@@ -8331,7 +8340,7 @@ fn plot_settings_contents(
                         return;
                     };
                     if panel.series.is_empty() {
-                        ui.weak("Ce graphe ne trace aucune série.");
+                        ui.weak(tr!("plot-series-empty"));
                         return;
                     }
                     if edit.selected_series >= panel.series.len() {
@@ -8396,7 +8405,7 @@ fn plot_settings_contents(
 /// Rend `true` si le brouillon doit être validé.
 fn theme_editor(ui: &mut egui::Ui, spec: &mut plotyx_plot::PlotSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
-    ui.strong("Thèmes");
+    ui.strong(tr!("plot-theme-themes"));
     ui.horizontal(|ui| {
         for theme in &plotyx_plot::THEMES {
             if ui.button(theme.name).clicked() {
@@ -8406,22 +8415,22 @@ fn theme_editor(ui: &mut egui::Ui, spec: &mut plotyx_plot::PlotSpec, env: &mut P
         }
     });
     ui.add_space(6.0);
-    ui.strong("Couleurs globales");
+    ui.strong(tr!("plot-theme-global-colors"));
     commit |= color_field(
         ui,
-        "Fond",
+        &tr!("plot-theme-background"),
         &mut spec.background,
         ColorUsage::Background,
-        Some("Automatique (blanc)"),
+        Some(&tr!("plot-color-auto-white")),
         env,
     );
     let mut text = spec.theme_text_color().to_string();
     let text_committed = color_field(
         ui,
-        "Texte",
+        &tr!("plot-theme-text"),
         &mut text,
         ColorUsage::Text,
-        Some("Automatique (contraste avec le fond)"),
+        Some(&tr!("plot-color-auto-contrast")),
         env,
     );
     if text != spec.theme_text_color() {
@@ -8431,21 +8440,17 @@ fn theme_editor(ui: &mut egui::Ui, spec: &mut plotyx_plot::PlotSpec, env: &mut P
     let mut axes = spec.theme_axes_color().to_string();
     let axes_committed = color_field(
         ui,
-        "Axes et échelles",
+        &tr!("plot-theme-axes"),
         &mut axes,
         ColorUsage::Text,
-        Some("Automatique (contraste avec le fond)"),
+        Some(&tr!("plot-color-auto-contrast")),
         env,
     );
     if axes != spec.theme_axes_color() {
         spec.set_axes_color(&axes);
     }
     commit |= axes_committed;
-    ui.weak(
-        "Une couleur choisie ici est écrite partout : titre du graphe, titres d'axes, \
-         lignes, graduations et grilles de chaque axe. Elle remplace les couleurs déjà \
-         réglées une à une dans les autres onglets.",
-    );
+    ui.weak(tr!("plot-theme-note"));
     commit
 }
 
@@ -8459,7 +8464,7 @@ fn theme_editor(ui: &mut egui::Ui, spec: &mut plotyx_plot::PlotSpec, env: &mut P
 /// modal, où une fenêtre surgissante de plus se disputerait l'unique place
 /// qu'egui leur réserve (issue #9).
 fn formula_memo(ui: &mut egui::Ui, id_salt: &str) {
-    egui::CollapsingHeader::new("Écrire une formule")
+    egui::CollapsingHeader::new(tr!("plot-formula-memo-header"))
         .id_salt(id_salt)
         .default_open(false)
         .show(ui, |ui| {
@@ -8467,37 +8472,40 @@ fn formula_memo(ui: &mut egui::Ui, id_salt: &str) {
                 .num_columns(2)
                 .spacing([12.0, 2.0])
                 .show(ui, |ui| {
-                    for (source, effet) in FORMULA_MEMO {
-                        ui.monospace(*source);
-                        ui.weak(*effet);
+                    for (source, effect) in formula_memo_rows() {
+                        ui.monospace(source);
+                        ui.weak(effect);
                         ui.end_row();
                     }
                 });
-            ui.weak(
-                "Le texte entre $ … $ est une formule ; le reste est du texte. \
-                 Syntaxe complète : typst.app/docs/reference/math.",
-            );
+            ui.weak(tr!(
+                "plot-formula-footer",
+                url = "typst.app/docs/reference/math"
+            ));
         });
 }
 
-/// Les lignes du mémo de [`formula_memo`] : ce qu'on tape, ce qu'on obtient.
-const FORMULA_MEMO: &[(&str, &str)] = &[
-    ("$lambda$  $Delta$", "lettres grecques λ, Δ"),
-    ("$x_2$  $\"Ru(bpy)\"_3$", "indice"),
-    ("$x^2$  $\"cm\"^(-1)$", "exposant"),
-    ("$Delta H = sum_i n_i$", "formule complète"),
-    ("$\"L mol\"^(-1)$", "texte droit dans une formule"),
-    ("*gras*  _italique_", "mise en forme du texte"),
-    ("\\$  \\_  \\*  \\#", "le caractère lui-même"),
-];
+/// Les lignes du mémo de [`formula_memo`] : ce qu'on tape (de la syntaxe
+/// Typst, jamais traduite), ce qu'on obtient (traduit).
+fn formula_memo_rows() -> [(&'static str, String); 7] {
+    [
+        ("$lambda$  $Delta$", tr!("plot-formula-greek")),
+        ("$x_2$  $\"Ru(bpy)\"_3$", tr!("plot-formula-subscript")),
+        ("$x^2$  $\"cm\"^(-1)$", tr!("plot-formula-superscript")),
+        ("$Delta H = sum_i n_i$", tr!("plot-formula-full")),
+        ("$\"L mol\"^(-1)$", tr!("plot-formula-upright")),
+        ("*bold*  _italic_", tr!("plot-formula-format")),
+        ("\\$  \\_  \\*  \\#", tr!("plot-formula-escape")),
+    ]
+}
 
-/// Un champ texte libellé, validé à la perte de focus. Rend `true` si le
-/// brouillon doit être validé — voir la doc de tête de
-/// [`plot_settings_window`].
-fn text_field(ui: &mut egui::Ui, label: &str, value: &mut String) -> bool {
+/// Un champ texte libellé, validé à la perte de focus ; `hint` est son
+/// infobulle. Rend `true` si le brouillon doit être validé — voir la doc de
+/// tête de [`plot_settings_window`].
+fn text_field(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) -> bool {
     ui.horizontal(|ui| {
-        ui.label(label);
-        ui.text_edit_singleline(value)
+        ui.label(label).on_hover_text(hint);
+        ui.text_edit_singleline(value).on_hover_text(hint)
     })
     .inner
     .lost_focus()
@@ -8509,24 +8517,35 @@ fn text_field(ui: &mut egui::Ui, label: &str, value: &mut String) -> bool {
 /// de tête de [`plot_settings_window`].
 fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
-    ui.strong("Titre de l'axe");
-    commit |= text_field(ui, "Libellé", &mut axis.label);
-    commit |= text_field(ui, "Unité", &mut axis.unit);
+    ui.strong(tr!("plot-axes-title-section"));
+    commit |= text_field(
+        ui,
+        &tr!("plot-axes-quantity"),
+        &tr!("plot-axes-quantity", "hint"),
+        &mut axis.label,
+    );
+    commit |= text_field(
+        ui,
+        &tr!("plot-axes-units"),
+        &tr!("plot-axes-units", "hint"),
+        &mut axis.unit,
+    );
     formula_memo(ui, "plot_settings_memo_axis");
     commit |= color_field(
         ui,
-        "Couleur du titre",
+        &tr!("plot-axes-title-color"),
         &mut axis.title_color,
         ColorUsage::Text,
-        Some("Automatique (contraste avec le fond)"),
+        Some(&tr!("plot-color-auto-contrast")),
         env,
     );
 
     ui.add_space(6.0);
-    ui.strong("Échelle");
+    ui.strong(tr!("plot-axes-scale-section"));
     let mut log_scale = axis.scale == plotyx_plot::AxisScale::Log;
     if ui
-        .checkbox(&mut log_scale, "Échelle logarithmique")
+        .checkbox(&mut log_scale, tr!("plot-axes-log-scale"))
+        .on_hover_text(tr!("plot-axes-log-scale", "hint"))
         .changed()
     {
         axis.scale = if log_scale {
@@ -8536,19 +8555,23 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
         };
         commit = true;
     }
-    commit |= ui.checkbox(&mut axis.inverted, "Axe inversé").changed();
     commit |= ui
-        .checkbox(&mut axis.auto_range, "Bornes automatiques")
+        .checkbox(&mut axis.inverted, tr!("plot-axes-reverse"))
+        .on_hover_text(tr!("plot-axes-reverse", "hint"))
+        .changed();
+    commit |= ui
+        .checkbox(&mut axis.auto_range, tr!("plot-axes-auto-range"))
+        .on_hover_text(tr!("plot-axes-auto-range", "hint"))
         .changed();
     if !axis.auto_range {
         let mut min = axis.range_min.unwrap_or(0.0);
         let mut max = axis.range_max.unwrap_or(0.0);
         let min_response = ui.horizontal(|ui| {
-            ui.label("Min");
+            ui.label(tr!("plot-axes-min"));
             ui.add(egui::DragValue::new(&mut min).speed(0.1))
         });
         let max_response = ui.horizontal(|ui| {
-            ui.label("Max");
+            ui.label(tr!("plot-axes-max"));
             ui.add(egui::DragValue::new(&mut max).speed(0.1))
         });
         axis.range_min = Some(min);
@@ -8560,18 +8583,22 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
     }
 
     ui.add_space(6.0);
-    ui.strong("Affichage");
-    commit |= ui.checkbox(&mut axis.visible, "Axe affiché").changed();
-    commit |= ui.checkbox(&mut axis.grid, "Grille").changed();
+    ui.strong(tr!("plot-axes-display-section"));
+    commit |= ui
+        .checkbox(&mut axis.visible, tr!("plot-axes-show-axis"))
+        .changed();
+    commit |= ui
+        .checkbox(&mut axis.grid, tr!("plot-axes-show-gridlines"))
+        .changed();
     commit |= color_field(
         ui,
-        "Couleur de l'échelle",
+        &tr!("plot-axes-color"),
         &mut axis.tick_color,
         ColorUsage::Text,
-        Some("Automatique (contraste avec le fond)"),
+        Some(&tr!("plot-color-auto-contrast")),
         env,
     );
-    ui.weak("Ligne d'axe, graduations et leurs libellés ; la grille la reprend, atténuée.");
+    ui.weak(tr!("plot-axes-color-note"));
     commit
 }
 
@@ -8592,19 +8619,19 @@ fn series_editor(
 ) -> bool {
     let mut commit = false;
 
-    let name_response = ui.horizontal(|ui| {
-        ui.label("Nom");
-        ui.text_edit_singleline(&mut series.name)
-    });
-    commit |= name_response.inner.lost_focus();
-    ui.weak("Nom vide = celui de la colonne tracée, affiché tel quel.");
+    commit |= text_field(
+        ui,
+        &tr!("plot-series-name"),
+        &tr!("plot-series-name", "hint"),
+        &mut series.name,
+    );
     formula_memo(ui, "plot_settings_memo_series");
 
     ui.horizontal(|ui| {
-        ui.label("Type de tracé");
+        ui.label(tr!("plot-series-plot-type"));
         match &series.plot_type {
             PlotType::Unknown(_) => {
-                ui.weak("(type inconnu de cette version, non modifiable)");
+                ui.weak(tr!("plot-series-type-unknown"));
             }
             current => {
                 let mut selected = current.clone();
@@ -8634,16 +8661,21 @@ fn series_editor(
         }
     });
 
-    commit |= ui.checkbox(&mut series.visible, "Visible").changed();
     commit |= ui
-        .checkbox(&mut series.show_in_legend, "Présente dans la légende")
+        .checkbox(&mut series.visible, tr!("plot-series-show"))
+        .changed();
+    commit |= ui
+        .checkbox(
+            &mut series.show_in_legend,
+            tr!("plot-series-show-in-legend"),
+        )
         .changed();
 
     ui.separator();
-    ui.label("Trait");
+    ui.label(tr!("plot-series-line-section"));
     commit |= color_field(
         ui,
-        "Couleur",
+        &tr!("plot-series-line-color"),
         &mut series.line.color,
         ColorUsage::Curves,
         None,
@@ -8651,7 +8683,7 @@ fn series_editor(
     );
 
     ui.horizontal(|ui| {
-        ui.label("Style");
+        ui.label(tr!("plot-series-line-style"));
         let mut style = series.line.style;
         egui::ComboBox::new("plot_config_line_style", "")
             .selected_text(line_style_label(style))
@@ -8673,7 +8705,7 @@ fn series_editor(
     });
 
     let width_response = ui.horizontal(|ui| {
-        ui.label("Épaisseur (pt)");
+        ui.label(tr!("plot-series-line-width"));
         ui.add(
             egui::DragValue::new(&mut series.line.width)
                 .speed(0.1)
@@ -8684,9 +8716,9 @@ fn series_editor(
     commit |= width_inner.drag_stopped() || width_inner.lost_focus();
 
     ui.separator();
-    ui.label("Marqueur");
+    ui.label(tr!("plot-series-symbol-section"));
     ui.horizontal(|ui| {
-        ui.label("Forme");
+        ui.label(tr!("plot-series-symbol-shape"));
         let mut shape = series.symbol.shape;
         egui::ComboBox::new("plot_config_symbol_shape", "")
             .selected_text(symbol_shape_label(shape))
@@ -8710,7 +8742,7 @@ fn series_editor(
     });
 
     let size_response = ui.horizontal(|ui| {
-        ui.label("Taille (pt)");
+        ui.label(tr!("plot-series-symbol-size"));
         ui.add(
             egui::DragValue::new(&mut series.symbol.size)
                 .speed(0.1)
@@ -8722,10 +8754,10 @@ fn series_editor(
 
     commit |= color_field(
         ui,
-        "Couleur du marqueur",
+        &tr!("plot-series-symbol-color"),
         &mut series.symbol.color,
         ColorUsage::Curves,
-        Some("Comme le trait"),
+        Some(&tr!("plot-color-same-as-line")),
         env,
     );
 
@@ -8738,11 +8770,11 @@ fn series_editor(
 fn legend_editor(ui: &mut egui::Ui, legend: &mut plotyx_plot::LegendSpec) -> bool {
     let mut commit = false;
     commit |= ui
-        .checkbox(&mut legend.visible, "Légende affichée")
+        .checkbox(&mut legend.visible, tr!("plot-legend-show"))
         .changed();
 
     ui.horizontal(|ui| {
-        ui.label("Position");
+        ui.label(tr!("plot-legend-position"));
         let mut position = legend.position;
         egui::ComboBox::new("plot_config_legend_position", "")
             .selected_text(legend_position_label(position))
@@ -8765,53 +8797,53 @@ fn legend_editor(ui: &mut egui::Ui, legend: &mut plotyx_plot::LegendSpec) -> boo
     commit
 }
 
-/// Libellé français d'un [`PlotType`], y compris [`PlotType::Unknown`] (par
+/// Libellé d'un [`PlotType`], y compris [`PlotType::Unknown`] (par
 /// prudence : ce bras existe pour que la fonction reste totale, mais
 /// `series_editor` ne l'affiche jamais — un type inconnu ne passe pas par le
 /// menu déroulant qui appelle cette fonction).
 fn plot_type_label(plot_type: &PlotType) -> String {
     match plot_type {
-        PlotType::Scatter => "Points".to_string(),
-        PlotType::Line => "Ligne".to_string(),
-        PlotType::LineScatter => "Ligne + points".to_string(),
-        PlotType::Bar => "Barres".to_string(),
-        PlotType::Histogram => "Histogramme".to_string(),
-        PlotType::ErrorBar => "Ligne + barres d'erreur".to_string(),
-        PlotType::Unknown(_) => "Type inconnu".to_string(),
+        PlotType::Scatter => tr!("plot-type-scatter"),
+        PlotType::Line => tr!("plot-type-line"),
+        PlotType::LineScatter => tr!("plot-type-line-symbol"),
+        PlotType::Bar => tr!("plot-type-bar"),
+        PlotType::Histogram => tr!("plot-type-histogram"),
+        PlotType::ErrorBar => tr!("plot-type-error-bars"),
+        PlotType::Unknown(_) => tr!("plot-type-unknown"),
     }
 }
 
-/// Libellé français d'un [`LineStyle`].
-fn line_style_label(style: LineStyle) -> &'static str {
+/// Libellé d'un [`LineStyle`].
+fn line_style_label(style: LineStyle) -> String {
     match style {
-        LineStyle::None => "Aucun",
-        LineStyle::Solid => "Plein",
-        LineStyle::Dash => "Tirets",
-        LineStyle::Dot => "Pointillés",
-        LineStyle::DashDot => "Tiret-point",
+        LineStyle::None => tr!("plot-line-style-none"),
+        LineStyle::Solid => tr!("plot-line-style-solid"),
+        LineStyle::Dash => tr!("plot-line-style-dashed"),
+        LineStyle::Dot => tr!("plot-line-style-dotted"),
+        LineStyle::DashDot => tr!("plot-line-style-dash-dot"),
     }
 }
 
-/// Libellé français d'un [`SymbolShape`].
-fn symbol_shape_label(shape: SymbolShape) -> &'static str {
+/// Libellé d'un [`SymbolShape`].
+fn symbol_shape_label(shape: SymbolShape) -> String {
     match shape {
-        SymbolShape::None => "Aucun",
-        SymbolShape::Circle => "Disque",
-        SymbolShape::Square => "Carré",
-        SymbolShape::Triangle => "Triangle",
-        SymbolShape::Diamond => "Losange",
-        SymbolShape::Plus => "Croix droite",
-        SymbolShape::Cross => "Croix oblique",
+        SymbolShape::None => tr!("plot-symbol-none"),
+        SymbolShape::Circle => tr!("plot-symbol-circle"),
+        SymbolShape::Square => tr!("plot-symbol-square"),
+        SymbolShape::Triangle => tr!("plot-symbol-triangle"),
+        SymbolShape::Diamond => tr!("plot-symbol-diamond"),
+        SymbolShape::Plus => tr!("plot-symbol-plus"),
+        SymbolShape::Cross => tr!("plot-symbol-cross"),
     }
 }
 
-/// Libellé français d'une [`LegendPosition`].
-fn legend_position_label(position: LegendPosition) -> &'static str {
+/// Libellé d'une [`LegendPosition`].
+fn legend_position_label(position: LegendPosition) -> String {
     match position {
-        LegendPosition::TopLeft => "Haut gauche",
-        LegendPosition::TopRight => "Haut droite",
-        LegendPosition::BottomLeft => "Bas gauche",
-        LegendPosition::BottomRight => "Bas droite",
+        LegendPosition::TopLeft => tr!("plot-legend-top-left"),
+        LegendPosition::TopRight => tr!("plot-legend-top-right"),
+        LegendPosition::BottomLeft => tr!("plot-legend-bottom-left"),
+        LegendPosition::BottomRight => tr!("plot-legend-bottom-right"),
     }
 }
 
@@ -9215,7 +9247,7 @@ mod formula_memo_tests {
     fn chaque_exemple_du_memo_compile() {
         let fonts =
             formula::resolve_fonts(&plotyx_render_egui::FontChoice::default()).expect("polices");
-        for (source, _) in super::FORMULA_MEMO {
+        for (source, _) in super::formula_memo_rows() {
             for example in source.split("  ") {
                 let (sans, math) = fonts.clone();
                 formula::compile(example, 14.0, [0, 0, 0, 255], sans, math)
@@ -9783,7 +9815,7 @@ mod graph_layout_tests {
         context.set_fonts(plotyx_render_egui::font_definitions());
         let tabs: Vec<(PlotSettingsTab, String)> = PlotSettingsTab::ALL
             .iter()
-            .map(|tab| (*tab, tab.label().to_string()))
+            .map(|tab| (*tab, tab.label()))
             .collect();
         let mut chosen = None;
         let run = |events: Vec<egui::Event>, chosen: &mut Option<PlotSettingsTab>| {
@@ -9826,9 +9858,9 @@ mod graph_layout_tests {
                 .find_map(|clipped| walk(&clipped.shape, needle))
         }
         for tab in PlotSettingsTab::ALL {
-            assert!(position(&output, tab.label()).is_some(), "{}", tab.label());
+            assert!(position(&output, &tab.label()).is_some(), "{}", tab.label());
         }
-        let theme = position(&output, "Thème").unwrap();
+        let theme = position(&output, &PlotSettingsTab::Theme.label()).unwrap();
         let click = |pressed| egui::Event::PointerButton {
             pos: theme,
             button: egui::PointerButton::Primary,

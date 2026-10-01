@@ -89,7 +89,7 @@ Quatre comportements ressemblent à des manques et n'en sont pas :
   libellé d'axe ou un nom de série : la syntaxe est celle de Typst, entre
   dollars — `$lambda$`, `$x_2$`, `$x^2$`, `$"cm"^(-1)$` ; `\$` pour un vrai
   dollar, `\_` pour un vrai tiret bas. La fenêtre des propriétés a un mémo
-  replié « Écrire une formule » sous ces champs. Un nom de colonne repris en
+  replié « Formula syntax » sous ces champs. Un nom de colonne repris en
   légende s'affiche toujours tel quel (`docs/rendu.md` § Typst).
 
 - **Ctrl+Z pendant une saisie** annule la dernière modification du projet, pas

@@ -480,7 +480,10 @@ dans `label`, `button`, `menu_button`, `checkbox`, `radio_value`,
 `Button::new(…)`/`RichText::new(…)`, ni dans les tables `fn label()`/`fn title()`.
 L'existant d'avant #41 (213 littéraux, 14 zones) est recensé par fichier et par
 zone, chaque zone portant le ticket qui la convertit (#42-#45) : la liste se
-réduit, ne grossit pas, et doit être vide à #48. Mécanique détaillée : skill
+réduit, ne grossit pas, et doit être vide à #48. La zone #43 (propriétés du
+graphe, éditeur de texte, pied des dialogues, export) est convertie : elle n'a
+plus de dérogation et reste gardée plus strictement (`ZONE_43` : aucun littéral
+textuel dans ses fonctions, quelle que soit la forme de l'appel). Mécanique détaillée : skill
 `plotyx-textes-interface`.
 
 **Erreurs affichées (#47).** Les crates du dessous rendent des erreurs
@@ -725,12 +728,13 @@ Les réglages d'un graphe vivent dans une **fenêtre flottante à onglets**
 (`app::plot_settings_window`), un **dialogue modal** (`app::modal_dialog`) :
 au premier plan, le reste de l'interface ne reçoit plus aucun clic, et un
 clic ailleurs fait clignoter son contour en rouge foncé
-(`theme::blocked_flash_color`). Deux boutons en bas : **Valider** (par défaut,
-Entrée hors saisie de texte) et **Annuler** (aussi la croix et Échap). Les
+(`theme::blocked_flash_color`). Deux boutons en bas : **OK** (par défaut,
+Entrée hors saisie de texte) et **Cancel** (aussi la croix et Échap) ; leurs
+textes viennent du catalogue (`dialog-ok`, `dialog-cancel`). Les
 gestes s'appliquent en direct au graphe (aperçu) mais dans une **macro
-d'historique** ouverte à l'ouverture de la fenêtre : Valider la ferme — une
+d'historique** ouverte à l'ouverture de la fenêtre : OK la ferme — une
 seule entrée, un Ctrl+Z défait tout (`AppState::close_plot_settings`) ;
-Annuler l'avorte et restaure le graphe d'avant
+Cancel l'avorte et restaure le graphe d'avant
 (`AppState::cancel_plot_settings`). Pendant la macro, annuler/rétablir et
 enregistrer sont refusés (`plotyx-commands`), ainsi que les écritures d'une
 fenêtre détachée (autre identité d'émetteur : refusées par la session) et les
@@ -789,22 +793,26 @@ résolution PNG (×1, ×2, ×4 ; ×4 par défaut, soit 1920 × 1440 px) se règl
 « Graphique » → « Résolution des exports PNG » (`Action::SetPngExportScale`,
 préférence de session).
 
-**Onglets** (`state::PlotSettingsTab`) : « Graphe » (titre et sa couleur,
-fond), « Zone de tracé » (titre du panneau, grilles), « Axes » (un axe à la
-fois, choisi en tête de page : titre de l'axe et sa couleur, échelle,
-affichage et couleur de l'échelle), « Séries », « Légende » et « Thème ».
+**Onglets** (`state::PlotSettingsTab`, clés `plot-tab-*`, en anglais) :
+« General » (titre et sa couleur, fond), « Plot Area » (titre du calque,
+quadrillage), « Axes » (un axe à la fois, choisi en tête de page : titre de
+l'axe — grandeur et unités —, échelle, affichage, couleur de l'axe), « Series »,
+« Legend » et « Theme ». Les textes de toute la fenêtre sont des clés `plot-*`
+du catalogue `en` (infobulle en attribut `.hint`), selon le glossaire
+`docs/textes-interface.md` ; les noms saisis (titres, noms de série, thèmes)
+sont des données, jamais traduits.
 
 **Textes du graphe** : titre, titre du panneau, libellé et unité d'axe, nom de
 série sont composés par Typst et lus comme du **markup** (`docs/rendu.md`
-§ Typst). Sous chacun de ces champs, une section repliée « Écrire une formule »
+§ Typst). Sous chacun de ces champs, une section repliée « Formula syntax »
 (`app::formula_memo`, issue #33) rappelle la syntaxe : `$lambda$`, `$x_2$`,
-`$"cm"^(-1)$`, `*gras*`, `\$` pour un dollar. Repliable plutôt qu'en bulle
+`$"cm"^(-1)$`, `*bold*`, `\$` pour un dollar. Repliable plutôt qu'en bulle
 d'aide : la fenêtre est un dialogue modal (issue #9). Le test
 `chaque_exemple_du_memo_compile` vérifie que chaque exemple compile. Un nom de
 série laissé vide reprend celui de la colonne, affiché tel quel.
 
 **Onglet « Thème »** : deux thèmes prédéfinis (`plotyx_plot::THEMES` : Clair,
-Sombre) et trois couleurs globales — fond, texte, axes et échelles. Une
+Sombre) et trois couleurs globales — fond, texte, axes. Une
 couleur globale est **écrite dans tous les champs locaux** (titre du graphe,
 titre et échelle de chaque axe de chaque panneau ;
 `PlotSpec::set_text_color`/`set_axes_color`/`apply_theme`) : le dernier

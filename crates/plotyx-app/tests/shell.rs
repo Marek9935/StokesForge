@@ -4779,7 +4779,7 @@ fn plotted_graph(state: &mut AppState) -> NodeId {
 }
 
 /// Le clic droit sur un composant ouvre l'onglet qui le règle : titre →
-/// « Graphe », zone de tracé → « Zone de tracé », axe ou titre d'axe →
+/// « General », zone de tracé → « Plot Area », axe ou titre d'axe →
 /// « Axes » sur cet axe.
 #[test]
 fn a_right_clicked_component_opens_the_settings_page_that_sets_it() {
@@ -4805,7 +4805,7 @@ fn a_right_clicked_component_opens_the_settings_page_that_sets_it() {
     );
     assert_eq!(
         PlotTarget::AxisTitle(PlotAxis::Bottom).label(),
-        "Titre de l'axe X (bas)"
+        "X (bottom) Axis Title"
     );
 }
 

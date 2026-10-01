@@ -164,3 +164,182 @@ error-python-init = Could not start Python: { $detail }
 error-python-trace =
     Python error:
     { $trace }
+
+## Propriétés du graphe et export (#43)
+##
+## Zone `plot-*` : fenêtre des propriétés du graphe (six onglets), cibles du
+## clic droit, éditeur de texte sur le graphique. `dialog-*` : pied commun des
+## dialogues modaux. `export-*` : dialogue d'export. Un attribut `.hint` est
+## l'infobulle de son contrôle. Les noms saisis par l'utilisateur, les thèmes et
+## les noms de colonnes sont des données, jamais traduits.
+
+# Footer shared by all modal dialogs (`modal_dialog_with`)
+
+dialog-ok =
+    OK
+    .hint = Keep changes (Enter)
+dialog-cancel =
+    Cancel
+    .hint = Discard changes (Esc)
+
+# Window and tabs
+
+plot-window-title = Graph Properties — { $name }
+plot-tab-general = General
+plot-tab-plot-area = Plot Area
+plot-tab-axes = Axes
+plot-tab-series = Series
+plot-tab-legend = Legend
+plot-tab-theme = Theme
+
+# The three axes of a layer
+
+plot-axis-bottom = X (bottom)
+plot-axis-left = Y (left)
+plot-axis-right = Secondary Y (right)
+
+# What a right-click designates (head of the context menu)
+
+plot-target-graph = Graph
+plot-target-title = Title
+plot-target-plot-area = Plot Area
+plot-target-axis = { $axis } Axis
+plot-target-axis-title = { $axis } Axis Title
+plot-target-text = Text
+
+# Automatic values of the color fields
+
+plot-color-auto-contrast = Auto (contrasts with background)
+plot-color-auto-white = Auto (white)
+plot-color-same-as-line = Same as line
+
+# General tab
+
+plot-general-title =
+    Title
+    .hint = Shown above the graph
+plot-general-title-color = Title color
+plot-general-background = Background
+plot-general-dark-note = Auto colors turn white on a dark background
+
+# Plot Area tab
+
+plot-area-layer-title =
+    Layer title
+    .hint = Shown above the plot area
+plot-area-gridlines = Gridlines
+plot-area-gridlines-vertical = Vertical (X ticks)
+plot-area-gridlines-horizontal = Horizontal (Y ticks)
+
+# Axes tab
+
+plot-axes-title-section = Axis title
+plot-axes-quantity =
+    Quantity
+    .hint = Name or symbol, e.g. Wavenumber
+plot-axes-units =
+    Units
+    .hint = Shown after the quantity, in parentheses
+plot-axes-title-color = Title color
+plot-axes-scale-section = Scale
+plot-axes-log-scale =
+    Log scale
+    .hint = Base-10 logarithm
+plot-axes-reverse =
+    Reverse axis
+    .hint = Values decrease in the reading direction
+plot-axes-auto-range =
+    Auto range
+    .hint = Computed from the data
+plot-axes-min = Min
+plot-axes-max = Max
+plot-axes-display-section = Display
+plot-axes-show-axis = Show axis
+plot-axes-show-gridlines = Show gridlines
+plot-axes-color = Axis color
+plot-axes-color-note = Axis line, ticks and tick labels. Gridlines use it, faded
+
+# Series tab
+
+plot-series-empty = This graph has no series
+plot-series-name =
+    Name
+    .hint = Empty: uses the plotted column's name as is
+plot-series-plot-type = Plot type
+plot-series-type-unknown = Unknown type (from a newer version)
+plot-series-show = Show series
+plot-series-show-in-legend = Show in legend
+plot-series-line-section = Line
+plot-series-line-color = Color
+plot-series-line-style = Line style
+plot-series-line-width = Line width (pt)
+plot-series-symbol-section = Symbol
+plot-series-symbol-shape = Shape
+plot-series-symbol-size = Size (pt)
+plot-series-symbol-color = Symbol color
+
+plot-type-scatter = Scatter
+plot-type-line = Line
+plot-type-line-symbol = Line + Symbol
+plot-type-bar = Bar
+plot-type-histogram = Histogram
+plot-type-error-bars = Line + Error Bars
+plot-type-unknown = Unknown type
+
+plot-line-style-none = None
+plot-line-style-solid = Solid
+plot-line-style-dashed = Dashed
+plot-line-style-dotted = Dotted
+plot-line-style-dash-dot = Dash-dot
+
+plot-symbol-none = None
+plot-symbol-circle = Circle
+plot-symbol-square = Square
+plot-symbol-triangle = Triangle
+plot-symbol-diamond = Diamond
+plot-symbol-plus = Plus (+)
+plot-symbol-cross = Cross (×)
+
+# Legend tab
+
+plot-legend-show = Show legend
+plot-legend-position = Position
+plot-legend-top-left = Top Left
+plot-legend-top-right = Top Right
+plot-legend-bottom-left = Bottom Left
+plot-legend-bottom-right = Bottom Right
+
+# Theme tab
+
+plot-theme-themes = Themes
+plot-theme-global-colors = Global colors
+plot-theme-background = Background
+plot-theme-text = Text
+plot-theme-axes = Axes
+plot-theme-note = Applies to all titles, axes, ticks and gridlines. Replaces colors set in other tabs
+
+# Memo of the Typst syntax, under every title field
+
+plot-formula-memo-header = Formula syntax
+plot-formula-greek = Greek letters λ, Δ
+plot-formula-subscript = Subscript
+plot-formula-superscript = Superscript
+plot-formula-full = Full formula
+plot-formula-upright = Upright text in a formula
+plot-formula-format = Text formatting
+plot-formula-escape = The character itself
+plot-formula-footer = Text between $ … $ is a formula, the rest is plain text. Full syntax: { $url }
+
+# Text on the graph (editor in place) and view of the graph
+
+plot-text-size = Font size (pt)
+plot-text-rotation = Rotation (°)
+plot-text-ok =
+    OK
+    .hint = Apply (Enter)
+plot-text-placeholder = Text, $formula$
+plot-view-reset-zoom = Reset Zoom
+
+# Export
+
+export-dialog-title = Export Graph
