@@ -99,7 +99,6 @@ tabs-next-worksheets = Show next worksheets
 detached-workbook-unavailable = Workbook unavailable in this window. Reattach it to the main window
 detached-note-unavailable = Note unavailable in this window. Reattach it to the main window
 
-graph-text-default = Text
 
 window-kind-workbook = Workbook
 window-kind-graph = Graph

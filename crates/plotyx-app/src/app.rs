@@ -7673,7 +7673,7 @@ fn add_annotation_at(
     else {
         return;
     };
-    let draft = plotyx_render_egui::AnnotationSpec::new(tr!("graph-text-default"), x, y);
+    let draft = plotyx_render_egui::AnnotationSpec::new(String::new(), x, y);
     start_annotation_editor(ctx, view, target, draft, None);
 }
 
