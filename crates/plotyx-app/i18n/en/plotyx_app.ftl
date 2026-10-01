@@ -37,8 +37,6 @@ action-save = Save
 action-save-as = Save As…
 action-quit = Quit
 
-action-undo = Undo
-action-redo = Redo
 
 menu-graph-properties = Graph Properties…
     .hint = Edits the title and background
@@ -125,17 +123,15 @@ import-window-title = Import Wizard
 import-button-back = Back
 import-button-next = Next
 import-button-finish = Finish
-    .hint = Import with the current settings (Enter)
+    .hint = Imports with the current settings (Enter)
 
 import-step-files-title = Files and Template
 import-step-format-title = Format
 import-step-header-title = Header and Data End
 import-step-columns-title = Columns
-import-step-metadata-title = Metadata
-import-step-destination-title = Destination
 
 # Values shared by several lists.
-import-option-auto = Auto
+common-auto = Auto
 import-option-none = None
 import-option-comma = Comma
 import-option-dot = Dot
@@ -144,32 +140,32 @@ import-option-apostrophe = Apostrophe
 import-option-other = Other
 
 # Column types, shared by the "Read As" and "Type" columns.
-import-type-numeric = Numeric
-import-type-text = Text
-import-type-mixed = Mixed
-import-type-datetime = Date/Time
+column-type-numeric = Numeric
+column-type-text = Text
+column-type-mixed = Mixed
+column-type-datetime = Date/Time
 
 # Step 1: files and template.
 import-template-untitled = Untitled
 import-files-template = Template
 import-files-template-modified = { $name } (modified)
 import-files-reset = Reset
-    .hint = Start again from default settings
+    .hint = Restarts from the default settings
 import-files-delete = Delete…
-    .hint = Delete this saved template
+    .hint = Deletes this saved template
 import-files-delete-confirm = Delete template “{ $name }”?
 import-files-delete-yes = Delete
 import-files-delete-keep = Keep
 import-files-export = Export Template…
-    .hint = Save this template to a JSON file
+    .hint = Saves this template to a JSON file
 import-files-export-title = Export Template
 import-files-import = Import Template…
-    .hint = Load a template from a JSON file
+    .hint = Loads a template from a JSON file
 import-files-import-title = Import Template
 import-files-template-filter = Import template
 import-files-unsaved = Unsaved changes. Save the template in the Destination step
 import-files-add = Add Files…
-    .hint = Choose the files to import
+    .hint = Picks the files to import
 import-files-add-title = Choose Files to Import
 import-files-drop = or drop files in the window
 import-files-recent = Recent Files…
@@ -216,10 +212,10 @@ import-header-lines = Header lines
 import-header-subheader-lines = Subheader lines
     .hint = Counted in the header lines
 import-header-detect = Detect Header
-    .hint = Recount the header and subheader lines from the file
+    .hint = Recounts the header and subheader lines from the file
 import-header-combined = Combined line
     .hint = Long name and units share the same subheader line
-import-header-role-long-name = Long name
+import-header-role-long-name = Long Name
     .hint = Subheader lines that give the long names
 import-header-role-units = Units
     .hint = Subheader lines that give the units
@@ -238,28 +234,23 @@ import-dataend-after-header = Lines after header
 import-dataend-before-end = Lines before end
 import-header-skip-footer = Skip footer lines
     .hint = Ignored at the end of the file
-import-header-column-names = Column names
+import-column-names = Column names
 import-header-name-file = File name
 import-header-name-key = Header key
 import-header-key = Key
 
 # Step 4: columns.
 import-columns-name = Name
-import-columns-long-name = Long Name
-import-columns-units = Units
 import-columns-read-as = Read As
 import-columns-type = Type
-import-columns-role = Role
 import-columns-values = Values
-import-role-x-error = X Error
-import-role-y-error = Y Error
 import-columns-choose-file = Choose a file in step 1
 
 # Step 5: metadata.
 import-metadata-keep-header = Keep header
-    .hint = Keep the file header as metadata
+    .hint = Stores the file header as metadata
 import-metadata-keep-footer = Keep footer
-    .hint = Keep the file footer as metadata
+    .hint = Stores the file footer as metadata
 import-metadata-uncheck = Uncheck a key or section to drop it
 import-metadata-none = No metadata with the current settings
 
@@ -301,10 +292,6 @@ import-preview-showing =
        *[other] Showing { $shown } of { $total } data lines
     }
 import-legend-header = Header
-import-legend-long-name = Long name
-import-legend-units = Units
-import-legend-comments = Comments
-import-legend-column-names = Column names
 import-legend-data = Data
 import-legend-footer = Footer
 import-legend-comment-line = Comment line
@@ -313,16 +300,6 @@ import-line-data-start = Start Data Here
 import-line-units = Use as Units Line
 import-line-data-end = End Data Here
 import-line-no-auto-end = Disable Auto Data End
-
-## Witness of the machinery
-## (read by the tests of `i18n.rs` only: one argument and one CLDR plural; to be
-## removed once a real key with arguments exists)
-
-witness-count =
-    { $count ->
-        [one] { $count } item
-       *[other] { $count } items
-    }
 
 ## History entries (issue #46)
 ## One key per `HistoryLabel` variant (`plotyx-commands/src/label.rs`). Commands:
@@ -476,10 +453,10 @@ error-python-trace =
 
 dialog-ok =
     OK
-    .hint = Keep changes (Enter)
+    .hint = Keeps the changes (Enter)
 dialog-cancel =
     Cancel
-    .hint = Discard changes (Esc)
+    .hint = Discards the changes (Esc)
 
 # Window and tabs
 
@@ -517,7 +494,7 @@ plot-color-same-as-line = Same as line
 plot-general-title =
     Title
     .hint = Shown above the graph
-plot-general-title-color = Title color
+plot-title-color = Title color
 plot-general-background = Background
 plot-general-dark-note = Auto colors turn white on a dark background
 
@@ -539,7 +516,6 @@ plot-axes-quantity =
 plot-axes-units =
     Units
     .hint = Shown after the quantity, in parentheses
-plot-axes-title-color = Title color
 plot-axes-scale-section = Scale
 plot-axes-log-scale =
     Log scale
@@ -603,10 +579,10 @@ plot-symbol-cross = Cross (×)
 
 plot-legend-show = Show legend
 plot-legend-position = Position
-plot-legend-top-left = Top Left
-plot-legend-top-right = Top Right
-plot-legend-bottom-left = Bottom Left
-plot-legend-bottom-right = Bottom Right
+plot-legend-top-left = Top left
+plot-legend-top-right = Top right
+plot-legend-bottom-left = Bottom left
+plot-legend-bottom-right = Bottom right
 
 # Theme tab
 
@@ -635,7 +611,7 @@ plot-text-size = Font size (pt)
 plot-text-rotation = Rotation (°)
 plot-text-ok =
     OK
-    .hint = Apply (Enter)
+    .hint = Applies the text (Enter)
 plot-text-placeholder = Text, $formula$
 plot-view-reset-zoom = Reset Zoom
 
@@ -648,45 +624,38 @@ export-dialog-title = Export Graph
 # Project Manager
 project-manager-title = Project Manager
 project-manager-show = Show
-    .hint = Open or unhide the selected windows
+    .hint = Opens or unhides the selected windows
 project-manager-hide = Hide
-    .hint = Hide the selected windows without closing them
+    .hint = Hides the selected windows without closing them
 project-manager-selected = { $count } selected
 project-folder-empty = (empty)
 
 # Workbook: stacked column header (left gutter)
-workbook-header-long-name = Long Name
-workbook-header-units = Units
-workbook-header-comments = Comments
+column-long-name = Long Name
+column-units = Units
+column-comments = Comments
 workbook-header-formula = F(x)=
-workbook-header-metadata = Metadata
+common-metadata = Metadata
 workbook-metadata-hide = Hide Metadata Row
 workbook-metadata-summary =
     { $count ->
         [one] { $count } key
        *[other] { $count } keys
     }
-    .hint = View the file metadata
+    .hint = Shows the file metadata
 workbook-metadata-title = File Metadata
 workbook-metadata-title-named = Metadata — { $name }
 
 # Workbook: column menu (type, role, plot)
-workbook-type-numeric = Numeric
-workbook-type-mixed = Mixed
-workbook-type-datetime = Date/Time
-workbook-role-menu = Role
+column-role = Role
 workbook-role-x = X
 workbook-role-y = Y
 workbook-role-z = Z
-workbook-role-x-error = X Error
-workbook-role-y-error = Y Error
+column-role-x-error = X Error
+column-role-y-error = Y Error
 workbook-role-label = Label
 workbook-role-none = None
 workbook-plot-menu = Plot
-workbook-plot-line = Line
-workbook-plot-scatter = Scatter
-workbook-plot-line-symbol = Line + Symbol
-workbook-plot-bar = Bar
 
 # Workbook: grid, worksheet tabs, empty states
 workbook-column-add = Add Column
@@ -709,11 +678,10 @@ script-traceback = Traceback
 script-no-output = (no output)
 
 # Color picker
-color-auto = Auto
 color-none = No color (transparent)
 color-none-swatch = No color (transparent, no background in exports)
 color-custom = + Custom
-    .hint = Pick any color, set its opacity, save it
+    .hint = Picks any color and its opacity, and saves it
 color-shades-dark = Darker shades
 color-shades-light = Lighter shades
 color-section-text = Text colors
@@ -723,7 +691,7 @@ color-saved-project = Saved in project
 color-saved-user = My colors (all projects)
 color-saved-remove-hint = Right-click to remove
 color-save = Save Color
-    .hint = Keep the current color in the saved colors
+    .hint = Adds the current color to the saved colors
 color-target-project = In project
 color-target-user = In my colors
 color-shape-square = Square

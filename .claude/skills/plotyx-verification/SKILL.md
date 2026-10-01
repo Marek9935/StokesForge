@@ -74,7 +74,7 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 | `plotyx-render-egui/tests/accord.rs` | écran et export aux mêmes pixels |
 | `plotyx-render-egui/tests/feathering.rs` | le feathering hors de la clé de cache (invariant 6) |
 | `plotyx-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
-| `plotyx-app/tests/libelles.rs` | `aucun_libelle_en_dur` : aucun texte d'interface en dur. Strict dans les deux sens — un littéral de plus **ou de moins** que la liste de dérogations échoue ; abaisser le compte, ne jamais le relever |
+| `plotyx-app/tests/libelles.rs` | `aucun_libelle_en_dur` : aucun texte d'interface en dur. Absolue, sans dérogation ; `aucune_cle_du_catalogue_n_est_morte` (`src/i18n.rs`) : une clé de `en` sans emploi échoue |
 | `plotyx-app/src/i18n.rs` (tests) | complétude `fr ⊆ en` avec les mêmes arguments, pseudo-langue `en-XA`, repli sur l'anglais ; le rapport des clés `en` non traduites s'affiche (`--nocapture`) sans échouer avant #49 |
 | `plotyx-commands/tests/memory_pinning.rs` | l'historique n'épingle pas de gros buffers |
 
@@ -134,7 +134,7 @@ Un résultat vert sans les features concernées ne valide pas ces chemins.
 - [ ] `cargo test --workspace`
 - [ ] features hors défaut touchées → contrôles ciblés `python`, y compris `plotyx-app` si concerné
 - [ ] aucun garde-fou d'architecture affaibli ; témoins intacts
-- [ ] texte d'interface : clés dans `en`, complétude `fr ⊆ en` verte, `aucun_libelle_en_dur` sans dérogation ajoutée (le compte baisse, il ne monte pas), capture en `en-XA` si le texte est visuel
+- [ ] texte d'interface : clés dans `en`, complétude `fr ⊆ en` verte, `aucun_libelle_en_dur` et `aucune_cle_du_catalogue_n_est_morte` verts (aucune dérogation, aucune clé orpheline), capture en `en-XA` si le texte est visuel
 - [ ] `#[ignore]` retiré si une reproduction passe désormais
 - [ ] doc à jour (`//!`, page `docs/`, et fichiers de routage si les chemins ont bougé)
 - [ ] diff relu, travail en cours de l'utilisateur préservé

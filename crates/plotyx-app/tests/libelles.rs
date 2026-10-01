@@ -14,31 +14,21 @@
 //! Un littéral sans aucune lettre (`"→"`, `" · "`, `"{}"`) n'est pas un texte à
 //! traduire et passe ; la clé d'un `tr!("…")` non plus.
 //!
-//! ## La liste de dérogations n'est pas un état normal
+//! ## Une garde absolue (#48)
 //!
-//! [`DEROGATIONS`] recense l'existant d'avant #41, **par fichier et par zone**,
-//! chaque zone portant le ticket qui la convertit : #42 menus, menus
-//! contextuels, barre d'état, titre de fenêtre (fait, plus aucune zone) ; #43
-//! propriétés du graphe et
-//! export ; #44 assistant d'import ; #45 classeur, grille, Project Manager,
-//! notes, sélecteur de couleur, console de script. **Elle ne doit jamais
-//! grossir**, elle se réduit zone par zone, et elle doit être **vide** à #48.
-//!
-//! Le test est strict **dans les deux sens** : un littéral de plus échoue (un
-//! nouveau texte en dur), et un littéral de moins échoue aussi tant que le
-//! compte n'est pas abaissé ici — la réduction se voit dans le diff, au lieu de
-//! laisser une marge où un nouveau littéral se cacherait.
+//! Aucune dérogation : un littéral textuel dans un de ces appels fait échouer le
+//! test, quel que soit le fichier. (La liste d'avant #41, 213 littéraux en 14
+//! zones, a été réduite à zéro zone par zone, #42 à #45, puis supprimée.)
 //!
 //! ## Ce que la garde ne voit pas
 //!
 //! Un texte posé par un autre chemin : un `&str` bâti ailleurs puis passé en
 //! variable, un titre de `modal_dialog_with` / `window_header` / `tab_strip`
 //! (leurs arguments mêlent texte et identifiants), un nom de colonne ou
-//! d'unité calculé. Les tickets de conversion étendent [`APPELS`] quand ils
-//! traitent ces zones, et la capture en pseudo-langue (`PLOTYX_LANG=en-XA`)
-//! montre ce qui a échappé : un texte sans `[[ ]]`.
+//! d'unité calculé. [`ZONE_43`] garde plus strictement les fonctions de la
+//! fenêtre des propriétés du graphe ; la capture en pseudo-langue
+//! (`PLOTYX_LANG=en-XA`) montre ce qui a échappé : un texte sans `[[ ]]`.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Les appels `.nom(…)` dont un argument ne doit pas être un littéral textuel.
@@ -59,6 +49,12 @@ const APPELS: &[&str] = &[
     "hint_text",
     "selected_text",
     "with_title",
+    "strong",
+    "weak",
+    "small",
+    "monospace",
+    "colored_label",
+    "on_hover_text_at_pointer",
 ];
 
 /// Les widgets bâtis par `Type::new("texte")` : `egui::Button::new("Ouvrir…")`
@@ -83,28 +79,6 @@ const TABLES: &[&str] = &[
     "thousands_label",
     "decimal_label",
     "column_kind_label",
-];
-
-/// Une dérogation : `nombre` littéraux tolérés dans les fonctions `fonctions`
-/// du fichier `fichier`, jusqu'à la conversion du ticket `ticket`. Les
-/// fonctions s'écrivent `Type::nom` quand elles sont dans un bloc `impl`.
-struct Derogation {
-    fichier: &'static str,
-    zone: &'static str,
-    ticket: &'static str,
-    fonctions: &'static [&'static str],
-    nombre: usize,
-}
-
-/// L'existant d'avant #41 : **213 littéraux**, 14 zones, tous convertis (#42 à
-/// #45) : la liste est vide. Elle ne doit jamais regrossir ; #48 supprime la
-/// table et la garde n'a plus de dérogation.
-const DEROGATIONS: &[Derogation] = &[
-    // --- #42 : menus, actions, infobulles, barre d'état : converti.
-    // --- #43 : propriétés du graphe et export : converti.
-    // Ses fonctions restent gardées, plus strictement : `ZONE_43`.
-    // --- #44 : assistant d'import : converti.
-    // --- #45 : classeur, grille, Project Manager, couleur, console : converti.
 ];
 
 // ---------------------------------------------------------------------------
@@ -210,6 +184,15 @@ fn masquer(texte: &str) -> Source {
                                 j += 1;
                             }
                         }
+                    }
+                    continue;
+                }
+                // Un champ de format (`{code}`, `{label:>4}`) n'est pas du texte :
+                // son contenu est neutre. `{{` est une accolade littérale.
+                if original[j] == '{' && original.get(j + 1) != Some(&'{') {
+                    while j < n && original[j] != '}' && original[j] != '"' {
+                        masquer_neutre(&original, &mut masque, j);
+                        j += 1;
                     }
                     continue;
                 }
@@ -536,90 +519,31 @@ fn sources_de_l_application() -> Vec<(String, String)> {
 // La garde
 // ---------------------------------------------------------------------------
 
-/// Compare les infractions de `sources` à la liste `derogations` ; rend la
-/// liste des écarts, vide si tout est en règle.
-fn ecarts(sources: &[(String, String)], derogations: &[Derogation]) -> Vec<String> {
+/// Les infractions de `sources`, une ligne chacune ; vide si tout est en règle.
+fn ecarts(sources: &[(String, String)]) -> Vec<String> {
     let mut ecarts = Vec::new();
-
-    // Une fonction ne figure que dans une seule zone.
-    let mut zone_de: BTreeMap<(&str, &str), &str> = BTreeMap::new();
-    for derogation in derogations {
-        for fonction in derogation.fonctions {
-            if let Some(autre) = zone_de.insert((derogation.fichier, fonction), derogation.zone) {
-                ecarts.push(format!(
-                    "{} : `{fonction}` est dans deux zones (« {autre} » et « {} »)",
-                    derogation.fichier, derogation.zone
-                ));
-            }
-        }
-    }
-
-    let mut comptes: BTreeMap<(String, &str), usize> = BTreeMap::new();
     for (fichier, texte) in sources {
         for infraction in infractions(fichier, texte, APPELS, CONSTRUCTEURS, TABLES) {
-            let zone = derogations.iter().find(|d| {
-                d.fichier == fichier && d.fonctions.contains(&infraction.fonction.as_str())
-            });
-            match zone {
-                Some(zone) => *comptes.entry((fichier.clone(), zone.zone)).or_default() += 1,
-                None => ecarts.push(format!(
-                    "{fichier}:{} dans `{}` : {} {} — texte en dur, passer par `tr!` avec une clé \
-                     de `i18n/en/plotyx_app.ftl` (skill `plotyx-textes-interface`)",
-                    infraction.ligne, infraction.fonction, infraction.appel, infraction.extrait
-                )),
-            }
-        }
-    }
-
-    for derogation in derogations {
-        let trouve = comptes
-            .get(&(derogation.fichier.to_string(), derogation.zone))
-            .copied()
-            .unwrap_or(0);
-        if trouve > derogation.nombre {
             ecarts.push(format!(
-                "{} / {} ({}) : {trouve} littéral(aux) pour {} toléré(s) — un texte en dur de plus",
-                derogation.fichier, derogation.zone, derogation.ticket, derogation.nombre
-            ));
-        } else if trouve < derogation.nombre {
-            ecarts.push(format!(
-                "{} / {} ({}) : {trouve} littéral(aux) pour {} déclaré(s) — abaisser le compte \
-                 dans `DEROGATIONS` (ou retirer la zone si elle est à 0)",
-                derogation.fichier, derogation.zone, derogation.ticket, derogation.nombre
+                "{fichier}:{} dans `{}` : {} {} — texte en dur, passer par `tr!` avec une clé \
+                 de `i18n/en/plotyx_app.ftl` (skill `plotyx-textes-interface`)",
+                infraction.ligne, infraction.fonction, infraction.appel, infraction.extrait
             ));
         }
     }
     ecarts
 }
 
-/// Aucun texte d'interface écrit en dur dans `src/`, hors la liste des
-/// dérogations d'avant #41 (voir la doc du module : elle se réduit, elle ne
-/// grossit pas, et elle est vide à #48).
+/// Aucun texte d'interface écrit en dur dans `src/` : tout passe par `tr!`.
 #[test]
 fn aucun_libelle_en_dur() {
-    let ecarts = ecarts(&sources_de_l_application(), DEROGATIONS);
+    let ecarts = ecarts(&sources_de_l_application());
     assert!(
         ecarts.is_empty(),
         "{} écart(s) :\n  {}",
         ecarts.len(),
         ecarts.join("\n  ")
     );
-}
-
-/// Le total de la liste, pour qu'un relecteur le voie d'un coup d'œil.
-#[test]
-fn le_total_des_derogations_se_lit() {
-    let total: usize = DEROGATIONS.iter().map(|d| d.nombre).sum();
-    eprintln!(
-        "[i18n] dérogations : {total} littéral(aux) en {} zone(s)",
-        DEROGATIONS.len()
-    );
-    for derogation in DEROGATIONS {
-        eprintln!(
-            "[i18n]   {:<14} {:<48} {:>4}  {}",
-            derogation.fichier, derogation.zone, derogation.nombre, derogation.ticket
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -791,6 +715,7 @@ fn la_garde_laisse_passer_ce_qui_n_est_pas_un_libelle() {
         r#"fn f(ui: &mut Ui) { ui.label("→"); }"#,
         r#"fn f(ui: &mut Ui) { ui.label(" · "); }"#,
         r#"fn f(ui: &mut Ui) { ui.label(format!("{}", n)); }"#,
+        r#"fn f(ui: &mut Ui) { ui.colored_label(c, format!("{code} {label}")); }"#,
         r#"fn f(ui: &mut Ui) { ui.separator(); ui.id_salt("graphe"); }"#,
         "fn f(ui: &mut Ui) {\n    // ui.label(\"commentaire\");\n}",
         "fn f(ui: &mut Ui) { let _ = \"ui.label(\\\"dans une chaîne\\\")\"; }",
@@ -821,31 +746,17 @@ fn la_garde_nomme_la_fonction_et_le_bloc_impl() {
 }
 
 #[test]
-fn la_comparaison_refuse_un_litteral_hors_liste_et_un_compte_trop_haut_ou_trop_bas() {
+fn la_garde_rapporte_chaque_litteral_avec_son_fichier_et_sa_fonction() {
     let sources = vec![(
         "t.rs".to_string(),
-        "fn menu(ui: &mut Ui) { ui.label(\"un\"); ui.label(\"deux\"); }\nfn autre(ui: &mut Ui) { ui.label(\"trois\"); }\n"
+        "fn menu(ui: &mut Ui) { ui.label(\"un\"); ui.label(\"deux\"); }\nfn autre(ui: &mut Ui) { ui.label(tr!(\"ok\")); }\n"
             .to_string(),
     )];
-    let zone = |nombre| Derogation {
-        fichier: "t.rs",
-        zone: "menus",
-        ticket: "#42",
-        fonctions: &["menu"],
-        nombre,
-    };
-    // `autre` n'est dans aucune zone : écart. La zone « menus » est juste.
-    let rapport = ecarts(&sources, &[zone(2)]);
-    assert_eq!(rapport.len(), 1, "{rapport:?}");
-    assert!(rapport[0].contains("`autre`"));
-    // Compte trop bas dans la liste : un littéral de plus que toléré.
-    assert!(ecarts(&sources, &[zone(1)])
+    let rapport = ecarts(&sources);
+    assert_eq!(rapport.len(), 2, "{rapport:?}");
+    assert!(rapport
         .iter()
-        .any(|e| e.contains("de plus")));
-    // Compte trop haut : la réduction n'a pas été reportée.
-    assert!(ecarts(&sources, &[zone(3)])
-        .iter()
-        .any(|e| e.contains("abaisser")));
+        .all(|e| e.contains("t.rs") && e.contains("`menu`")));
 }
 
 /// Les dépendances de traduction n'existent que dans `plotyx-app` : aucun

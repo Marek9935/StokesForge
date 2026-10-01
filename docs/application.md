@@ -459,10 +459,10 @@ en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifi�
 | `src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
 | `src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
 | `src/history_text.rs` | les libellés d'historique (`HistoryLabel`) en phrases, clés `history-*` (#46) |
-| `tests/libelles.rs` | la garde `aucun_libelle_en_dur` et sa liste de dérogations |
+| `tests/libelles.rs` | la garde `aucun_libelle_en_dur` (absolue : aucune dérogation) |
 
 **`tr!` est l'unique point d'entrée** : `tr!("menu-file")`, ou avec arguments
-nommés `tr!("witness-count", count = n)`. Il enveloppe `fl!` ; une clé ou un
+nommés `tr!("history-insert-rows", count = n)`. Il enveloppe `fl!` ; une clé ou un
 argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Pour l'infobulle d'un contrôle (attribut `.hint` de sa clé) : `tr!("project-manager-show", "hint")`. Un test
 qui compare une langue précise passe son chargeur : `tr!(in loader; "clé")`
 (`build_loader`), pour ne pas dépendre de `PLOTYX_LANG` ; un test qui cherche un texte peint le demande à `tr!`, jamais un littéral.
@@ -489,12 +489,14 @@ par le catalogue, un `]]` manquant signale un texte tronqué.
 dans `label`, `button`, `menu_button`, `checkbox`, `radio_value`,
 `selectable_value`, `selectable_label`, `on_hover_text`, `heading`, ni dans les
 `Button::new(…)`/`RichText::new(…)`, ni dans les tables `fn label()`/`fn title()`.
-L'existant d'avant #41 (213 littéraux, 14 zones) est recensé par fichier et par
-zone, chaque zone portant le ticket qui la convertit (#45 reste) : la liste se
-réduit, ne grossit pas, et doit être vide à #48. Les zones #42 (menus, actions, barre d'état) et #44 (assistant d'import) sont converties : plus de dérogation. La zone #43 (propriétés du
-graphe, éditeur de texte, pied des dialogues, export) est convertie : elle n'a
-plus de dérogation et reste gardée plus strictement (`ZONE_43` : aucun littéral
-textuel dans ses fonctions, quelle que soit la forme de l'appel). Mécanique détaillée : skill
+Elle est **absolue** : aucune dérogation (les 213 littéraux d'avant #41 ont été
+convertis, #42 à #45, et la liste supprimée à #48). Elle voit aussi `strong`,
+`weak`, `small`, `monospace`, `colored_label`, et ignore les champs de format
+(`{code}`). La zone #43 (propriétés du graphe, éditeur de texte, pied des
+dialogues, export) reste gardée plus strictement (`ZONE_43` : aucun littéral
+textuel dans ses fonctions, quelle que soit la forme de l'appel). Une clé du
+catalogue `en` qu'aucun source de `src/` n'emploie fait échouer
+`aucune_cle_du_catalogue_n_est_morte`. Mécanique détaillée : skill
 `plotyx-textes-interface`.
 
 **Erreurs affichées (#47).** Les crates du dessous rendent des erreurs

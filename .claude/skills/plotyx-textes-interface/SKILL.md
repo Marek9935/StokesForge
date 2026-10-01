@@ -188,16 +188,24 @@ sigles de format (`SVG`) ; une fonction nouvelle de cette fenêtre s'y ajoute.
 Dans cette zone, l'infobulle d'un champ est l'attribut `.hint` (`tr!("clé",
 "hint")`) et `text_field(ui, libellé, infobulle, valeur)` la pose.
 
-**La liste de dérogations (`DEROGATIONS`) est une dette, pas un état normal.**
-Elle recense l'existant d'avant #41 (154 littéraux, 11 zones depuis #42), par fichier et par
-zone, chaque zone portant le ticket qui la convertit (#43-#45) :
+**La garde est absolue (#48) : aucune dérogation.** Les 213 littéraux d'avant #41
+ont été convertis (#42 à #45) et la liste supprimée. Un littéral dans un de ces
+appels fait échouer `aucun_libelle_en_dur`, quel que soit le fichier : on écrit
+la clé dans `en`, jamais une exception. Un champ de format (`{code}`) n'est pas
+du texte ; un texte posé par un chemin que la garde ne voit pas (un `&str` passé
+en variable, un titre de `modal_dialog_with`) reste à la charge de la capture en
+pseudo-langue.
 
-- elle **ne grossit jamais** : un texte neuf passe par `tr!`, même si la fonction
-  voisine figure dans la liste — **un code qui y figure n'est pas un modèle** ;
-- quand un ticket convertit une zone, il **abaisse le compte** (ou retire la
-  zone) dans le même commit : le test échoue aussi quand il y a *moins* de
-  littéraux que déclaré, pour que la réduction se voie dans le diff ;
-- elle doit être **vide** à #48 ; le test est alors sans dérogation.
+`aucune_cle_du_catalogue_n_est_morte` (`src/i18n.rs`) est le pendant : une clé
+de `en` dont le nom n'apparaît dans aucune source de `src/` échoue. Une clé
+retirée du code se retire du catalogue dans le même commit.
+
+**Une notion = une clé.** Un même texte au même sens dans deux zones se partage
+(`common-auto`, `column-type-*`, `column-role*`, `column-long-name`,
+`column-units`, `column-comments`, `plot-type-*`…) ; ne pas dupliquer pour
+« rester dans sa zone ». Exceptions voulues : les clés `history-*` (la phrase
+d'une action enregistrée peut évoluer seule) et les mots dont l'accord change en
+français (*None* : Aucun / Aucune).
 
 ### Les tests de la mécanique
 

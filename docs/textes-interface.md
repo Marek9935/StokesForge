@@ -23,7 +23,7 @@ l'interface, mais son mot est déjà fixé.
 | R4 | **Commande = verbe** (*Add Column*, *Export Graph…*). « … » seulement si une fenêtre demande encore quelque chose. Une entrée qui ouvre une page de réglages porte le nom de la page (*Axes…*). |
 | R5 | **Visibilité = « Show X »** (*Show legend*), jamais « X affichée » ni « Présente dans… ». |
 | R6 | **Unités.** Champ de l'interface : unité entre parenthèses, symbole SI, après un espace (*Line width (pt)*). **Titre d'axe : grandeur / unité** (IUPAC), symbole ou nom : *ν̃ / cm⁻¹*, *Wavenumber / cm⁻¹* ; un titre repris d'une colonne s'écrit *Nom long / Unités*. Exposants en Unicode dans l'interface (`cm⁻¹`) ; dans un titre d'axe (Typst), `$"cm"^(-1)$`. |
-| R7 | **Libellé court, infobulle précise.** Libellé : 1 à 3 mots. Infobulle : l'effet, la valeur par défaut si elle compte, le raccourci. |
+| R7 | **Libellé court, infobulle précise.** Libellé : 1 à 3 mots. Infobulle : l'effet **à la 3ᵉ personne** (« Adds a workbook », jamais « Add a workbook »), la valeur par défaut si elle compte, le raccourci ; jamais une répétition du libellé. Un geste s'écrit comme un geste (« Right-click to remove »). |
 | R8 | **Pas de point final** sur une phrase seule. Point entre deux phrases. |
 | R9 | **Message = ce qui s'est passé, puis quoi faire.** Ni « please », ni excuse, ni point d'exclamation. Jamais de jargon interne : *session, nœud, arbre, id, fil, spec, commande, entrée d'historique, jeton, recette*. |
 | R10 | **Pas de « (s) »** : pluriel et accord par Fluent. |
@@ -154,7 +154,7 @@ l'interface, mais son mot est déjà fixé.
 | Reverse axis | Axe inversé | Valeurs décroissantes dans le sens de lecture | Axe retourné | O |
 | Legend | Légende | Liste des séries avec leur style | — | G |
 | Legend entry | Entrée de légende | Une ligne de la légende | Libellé de légende | G |
-| Position | Position | Coin de la légende : Top Left… | Emplacement | G |
+| Position | Position | Coin de la légende : Top left… | Emplacement | G |
 | Series | Série | Données tracées d'une colonne Y | Courbe, Trace, Plot, Jeu de données | G (Q3) |
 | Plot type | Type de tracé | Façon de tracer une série | Mode | O |
 | Scatter | Points | Symboles seuls | Nuage de points | O (Q6) |

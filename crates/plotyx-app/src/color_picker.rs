@@ -395,7 +395,7 @@ pub fn color_button(
     let response = response.on_hover_text(match current {
         Some([_, _, _, 0]) => tr!("color-none"),
         Some(rgba) => to_hex(rgba),
-        None => auto_label.map_or_else(|| tr!("color-auto"), str::to_string),
+        None => auto_label.map_or_else(|| tr!("common-auto"), str::to_string),
     });
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -407,7 +407,7 @@ pub fn color_button(
                 painter.text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    tr!("color-auto"),
+                    tr!("common-auto"),
                     egui::FontId::proportional(11.0),
                     stroke.color,
                 );

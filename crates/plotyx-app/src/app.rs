@@ -4518,9 +4518,9 @@ fn icon_label(icon: &str, name: &str) -> String {
 /// Nom d'un type de colonne, tel que l'offre le menu de la rangée des lettres.
 fn type_label(column_type: ColumnType) -> String {
     match column_type {
-        ColumnType::Numeric => tr!("workbook-type-numeric"),
-        ColumnType::DateTime => tr!("workbook-type-datetime"),
-        ColumnType::Mixed => tr!("workbook-type-mixed"),
+        ColumnType::Numeric => tr!("column-type-numeric"),
+        ColumnType::DateTime => tr!("column-type-datetime"),
+        ColumnType::Mixed => tr!("column-type-mixed"),
     }
 }
 
@@ -4536,8 +4536,8 @@ fn role_label(role: ColumnRole) -> String {
         ColumnRole::X => tr!("workbook-role-x"),
         ColumnRole::Y => tr!("workbook-role-y"),
         ColumnRole::Z => tr!("workbook-role-z"),
-        ColumnRole::XError => tr!("workbook-role-x-error"),
-        ColumnRole::YError => tr!("workbook-role-y-error"),
+        ColumnRole::XError => tr!("column-role-x-error"),
+        ColumnRole::YError => tr!("column-role-y-error"),
         ColumnRole::Label => tr!("workbook-role-label"),
         ColumnRole::None => tr!("workbook-role-none"),
     }
@@ -4725,7 +4725,7 @@ fn grid_edit_menu(
     if ui
         .add_enabled(
             state.can_undo(),
-            egui::Button::new(tr!("action-undo"))
+            egui::Button::new(tr!("history-undo"))
                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
         )
         .clicked()
@@ -4736,7 +4736,7 @@ fn grid_edit_menu(
     if ui
         .add_enabled(
             state.can_redo(),
-            egui::Button::new(tr!("action-redo"))
+            egui::Button::new(tr!("history-redo"))
                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
         )
         .clicked()
@@ -4876,7 +4876,7 @@ fn column_header_widget(
                 // effet sur la résolution de série (voir `role_suffix`),
                 // mais un seul et même endroit pour tout ce qui décrit une
                 // colonne à l'utilisateur.
-                ui.menu_button(tr!("workbook-role-menu"), |ui| {
+                ui.menu_button(tr!("column-role"), |ui| {
                     for candidate in [
                         ColumnRole::X,
                         ColumnRole::Y,
@@ -4911,10 +4911,10 @@ fn column_header_widget(
                 // ci-dessus.
                 ui.menu_button(tr!("workbook-plot-menu"), |ui| {
                     for (label, plot_type) in [
-                        (tr!("workbook-plot-line"), PlotType::Line),
-                        (tr!("workbook-plot-scatter"), PlotType::Scatter),
-                        (tr!("workbook-plot-line-symbol"), PlotType::LineScatter),
-                        (tr!("workbook-plot-bar"), PlotType::Bar),
+                        (tr!("plot-type-line"), PlotType::Line),
+                        (tr!("plot-type-scatter"), PlotType::Scatter),
+                        (tr!("plot-type-line-symbol"), PlotType::LineScatter),
+                        (tr!("plot-type-bar"), PlotType::Bar),
                     ] {
                         if ui.button(label).clicked() {
                             actions.push(Action::PlotColumns {
@@ -5257,7 +5257,7 @@ fn row_number_header_widget(
             sheet,
             HeaderField::LongName,
             HEADER_LONGNAME_HEIGHT,
-            &tr!("workbook-header-long-name"),
+            &tr!("column-long-name"),
         );
         header_row_label_widget(
             ui,
@@ -5266,7 +5266,7 @@ fn row_number_header_widget(
             sheet,
             HeaderField::Unit,
             HEADER_SUBROW_HEIGHT,
-            &tr!("workbook-header-units"),
+            &tr!("column-units"),
         );
         header_row_label_widget(
             ui,
@@ -5275,7 +5275,7 @@ fn row_number_header_widget(
             sheet,
             HeaderField::Comment,
             HEADER_SUBROW_HEIGHT,
-            &tr!("workbook-header-comments"),
+            &tr!("column-comments"),
         );
         header_row_label_widget(
             ui,
@@ -5297,7 +5297,7 @@ fn row_number_header_widget(
                 let response = ui.put(
                     rect,
                     egui::Label::new(
-                        egui::RichText::new(tr!("workbook-header-metadata"))
+                        egui::RichText::new(tr!("common-metadata"))
                             .strong()
                             .color(crate::theme::gutter_text_color()),
                     )
@@ -5490,7 +5490,7 @@ fn separator_label(separator: &Separator) -> String {
         Separator::Whitespace => tr!("import-delimiter-whitespace"),
         Separator::Custom(_) => tr!("import-option-other"),
         Separator::FixedWidth(_) => tr!("import-delimiter-fixed"),
-        Separator::Auto => tr!("import-option-auto"),
+        Separator::Auto => tr!("common-auto"),
     }
 }
 
@@ -5499,7 +5499,7 @@ fn encoding_label(encoding: plotyx_import::Encoding) -> String {
     use plotyx_import::Encoding;
     // Les noms d'encodage sont des noms techniques : seul « Auto » se traduit.
     match encoding {
-        Encoding::Auto => tr!("import-option-auto"),
+        Encoding::Auto => tr!("common-auto"),
         Encoding::Utf8 => "UTF-8".to_string(),
         Encoding::Windows1252 => "Windows-1252".to_string(),
         Encoding::Latin1 => "ISO 8859-1".to_string(),
@@ -5525,7 +5525,7 @@ fn decimal_label(decimal: DecimalStyle) -> String {
     match decimal {
         DecimalStyle::Dot => tr!("import-option-dot"),
         DecimalStyle::Comma => tr!("import-option-comma"),
-        DecimalStyle::Auto => tr!("import-option-auto"),
+        DecimalStyle::Auto => tr!("common-auto"),
     }
 }
 
@@ -5604,10 +5604,10 @@ fn preview_legend(ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         for (role, label) in [
             (LineRole::MainHeader, tr!("import-legend-header")),
-            (LineRole::SubheaderLongName, tr!("import-legend-long-name")),
-            (LineRole::SubheaderUnit, tr!("import-legend-units")),
-            (LineRole::SubheaderComment, tr!("import-legend-comments")),
-            (LineRole::ColumnHeaderRow, tr!("import-legend-column-names")),
+            (LineRole::SubheaderLongName, tr!("column-long-name")),
+            (LineRole::SubheaderUnit, tr!("column-units")),
+            (LineRole::SubheaderComment, tr!("column-comments")),
+            (LineRole::ColumnHeaderRow, tr!("import-column-names")),
             (LineRole::Data, tr!("import-legend-data")),
             (LineRole::Footer, tr!("import-legend-footer")),
             (LineRole::Comment, tr!("import-legend-comment-line")),
@@ -6318,7 +6318,7 @@ fn import_step_header(
     });
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label(tr!("import-header-column-names"));
+        ui.label(tr!("import-column-names"));
         let mut is_filename = matches!(recipe.name_source, NameSource::Filename);
         let mut is_header_key = matches!(recipe.name_source, NameSource::HeaderKey(_));
         if ui
@@ -6345,9 +6345,9 @@ fn import_step_header(
 /// Libellé de la nature choisie pour une colonne.
 fn column_kind_label(kind: plotyx_import::ColumnKind) -> String {
     match kind {
-        plotyx_import::ColumnKind::Auto => tr!("import-type-numeric"),
-        plotyx_import::ColumnKind::Text => tr!("import-type-text"),
-        plotyx_import::ColumnKind::DateTime => tr!("import-type-datetime"),
+        plotyx_import::ColumnKind::Auto => tr!("column-type-numeric"),
+        plotyx_import::ColumnKind::Text => tr!("column-type-text"),
+        plotyx_import::ColumnKind::DateTime => tr!("column-type-datetime"),
     }
 }
 
@@ -6355,11 +6355,11 @@ fn column_kind_label(kind: plotyx_import::ColumnKind) -> String {
 fn column_role_label(role: plotyx_import::ColumnRoleChoice) -> String {
     use plotyx_import::ColumnRoleChoice;
     match role {
-        ColumnRoleChoice::Auto => tr!("import-option-auto"),
+        ColumnRoleChoice::Auto => tr!("common-auto"),
         ColumnRoleChoice::X => "X".to_string(),
         ColumnRoleChoice::Y => "Y".to_string(),
-        ColumnRoleChoice::XError => tr!("import-role-x-error"),
-        ColumnRoleChoice::YError => tr!("import-role-y-error"),
+        ColumnRoleChoice::XError => tr!("column-role-x-error"),
+        ColumnRoleChoice::YError => tr!("column-role-y-error"),
         ColumnRoleChoice::Ignore => tr!("import-option-none"),
     }
 }
@@ -6404,11 +6404,11 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
                     for title in [
                         "#".to_string(),
                         tr!("import-columns-name"),
-                        tr!("import-columns-long-name"),
-                        tr!("import-columns-units"),
+                        tr!("column-long-name"),
+                        tr!("column-units"),
                         tr!("import-columns-read-as"),
                         tr!("import-columns-type"),
-                        tr!("import-columns-role"),
+                        tr!("column-role"),
                         tr!("import-columns-values"),
                     ] {
                         ui.strong(title);
@@ -6438,9 +6438,9 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
                                 }
                             });
                         ui.label(if column.mixed {
-                            tr!("import-type-mixed")
+                            tr!("column-type-mixed")
                         } else {
-                            tr!("import-type-numeric")
+                            tr!("column-type-numeric")
                         });
                         let effective = import.recipe.column_role(index);
                         egui::ComboBox::from_id_salt(("plotyx_import_column_role", index))
@@ -8430,7 +8430,7 @@ fn plot_settings_contents(
                     formula_memo(ui, "plot_settings_memo_graph");
                     commit |= color_field(
                         ui,
-                        &tr!("plot-general-title-color"),
+                        &tr!("plot-title-color"),
                         &mut spec.title_color,
                         ColorUsage::Text,
                         Some(&tr!("plot-color-auto-contrast")),
@@ -8691,7 +8691,7 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
     formula_memo(ui, "plot_settings_memo_axis");
     commit |= color_field(
         ui,
-        &tr!("plot-axes-title-color"),
+        &tr!("plot-title-color"),
         &mut axis.title_color,
         ColorUsage::Text,
         Some(&tr!("plot-color-auto-contrast")),
@@ -11650,8 +11650,8 @@ mod graph_layout_tests {
         let letter_label = format!("A({})", role_label(ColumnRole::Y));
         let content_labels = [
             "#".to_string(),
-            tr!("workbook-header-long-name"),
-            tr!("workbook-header-units"),
+            tr!("column-long-name"),
+            tr!("column-units"),
             letter_label.clone(),
             "Sheet1".to_string(),
         ];

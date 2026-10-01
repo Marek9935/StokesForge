@@ -220,8 +220,7 @@ vérifier quand une action est ajoutée :
    skill **plotyx-textes-interface** (mécanique : ajout d'une clé, pseudo-langue,
    garde). Une action a **un** libellé : la clé `action-*`, partagée par la barre de
    menus, le menu contextuel et la barre d'état ; son infobulle est l'attribut
-   `.hint` (`.disabled` si elle dit pourquoi l'entrée est grisée). La liste de dérogations de la garde est une dette à réduire, jamais
-   une raison d'écrire un littéral de plus.
+   `.hint` (`.disabled` si elle dit pourquoi l'entrée est grisée). La garde est absolue : aucune dérogation.
 
 ### Ajouter un raccourci clavier
 

@@ -1588,8 +1588,8 @@ impl ImportStep {
             ImportStep::Format => tr!("import-step-format-title"),
             ImportStep::Header => tr!("import-step-header-title"),
             ImportStep::Columns => tr!("import-step-columns-title"),
-            ImportStep::Metadata => tr!("import-step-metadata-title"),
-            ImportStep::Destination => tr!("import-step-destination-title"),
+            ImportStep::Metadata => tr!("common-metadata"),
+            ImportStep::Destination => tr!("import-destination"),
         }
     }
 

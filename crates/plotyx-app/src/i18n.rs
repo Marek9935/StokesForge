@@ -20,7 +20,7 @@
 //! ```ignore
 //! use crate::tr;
 //! ui.menu_button(tr!("menu-file"), |ui| { /* … */ });
-//! ui.label(tr!("witness-count", count = n));
+//! ui.label(tr!("history-insert-rows", count = n));
 //! ```
 //!
 //! [`tr!`] est **l'unique point d'entrée** : il enveloppe `fl!` sur le
@@ -218,7 +218,7 @@ pub fn language() -> Language {
 /// Traduit une clé du catalogue `en` dans la langue courante.
 ///
 /// - sans argument : `tr!("menu-file")` ;
-/// - avec arguments nommés : `tr!("witness-count", count = n)` ;
+/// - avec arguments nommés : `tr!("history-insert-rows", count = n)` ;
 /// - dans un autre chargeur que le global : `tr!(in loader; "menu-file")`, pour
 ///   un test qui compare une langue précise ([`build_loader`]) sans dépendre de
 ///   celle de l'environnement. Les mêmes vérifications à la compilation.
@@ -466,12 +466,12 @@ mod tests {
         let loader = build_loader(Language::English);
         let message = |count: i32| {
             loader.get_args(
-                "witness-count",
+                "history-insert-rows",
                 std::collections::HashMap::from([("count", count)]),
             )
         };
-        assert_eq!(message(1), "1 item");
-        assert_eq!(message(3), "3 items");
+        assert_eq!(message(1), "Insert 1 Row");
+        assert_eq!(message(3), "Insert 3 Rows");
     }
 
     #[test]
@@ -509,11 +509,11 @@ mod tests {
     fn la_pseudo_langue_garde_les_arguments_de_l_anglais() {
         let pseudo = build_loader(Language::PseudoEnglish);
         let message = pseudo.get_args(
-            "witness-count",
+            "history-insert-rows",
             std::collections::HashMap::from([("count", 3)]),
         );
         assert!(message.starts_with(pseudo::OPEN), "{message}");
-        assert!(message.contains("3 îţéɱš"), "{message}");
+        assert!(message.contains(" 3 "), "{message}");
         assert!(message.ends_with(pseudo::CLOSE), "{message}");
     }
 
@@ -596,11 +596,46 @@ mod tests {
         let reference = build_loader(language());
         assert_eq!(tr!("menu-file"), reference.get("menu-file"));
         assert_eq!(
-            tr!("witness-count", count = 2),
+            tr!("history-insert-rows", count = 2),
             reference.get_args(
-                "witness-count",
+                "history-insert-rows",
                 std::collections::HashMap::from([("count", 2)])
             )
+        );
+    }
+
+    /// Une clé du catalogue `en` que le code n'emploie nulle part est une clé
+    /// morte (un texte qu'on croit visible, ou le reste d'une conversion) : elle
+    /// fait échouer ce test (#48). Une clé est employée quand son nom, entre
+    /// guillemets, figure dans une source de `src/`.
+    #[test]
+    fn aucune_cle_du_catalogue_n_est_morte() {
+        fn lire(dossier: &std::path::Path, sortie: &mut String) {
+            for entree in std::fs::read_dir(dossier).expect("dossier src").flatten() {
+                let chemin = entree.path();
+                if chemin.is_dir() {
+                    lire(&chemin, sortie);
+                } else if chemin.extension().is_some_and(|ext| ext == "rs") {
+                    sortie.push_str(&std::fs::read_to_string(&chemin).expect("source lisible"));
+                }
+            }
+        }
+        let mut sources = String::new();
+        lire(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut sources,
+        );
+        let mortes: Vec<String> = read(EN)
+            .messages
+            .keys()
+            .filter(|key| !key.contains('.'))
+            .filter(|key| !sources.contains(&format!("\"{key}\"")))
+            .cloned()
+            .collect();
+        assert!(
+            mortes.is_empty(),
+            "{} clé(s) de `en` sans emploi dans `src/` : {mortes:?}",
+            mortes.len()
         );
     }
 }
