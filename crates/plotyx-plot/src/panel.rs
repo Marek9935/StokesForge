@@ -1,7 +1,9 @@
-//! Un panneau : une zone de tracé, ses quatre axes, sa légende, ses séries.
+//! Un panneau : une zone de tracé, ses quatre axes, sa légende, ses séries,
+//! ses textes libres.
 
 use plotyx_id::NodeId;
 
+use crate::annotation::AnnotationSpec;
 use crate::axis::{AxisSide, AxisSpec};
 use crate::legend::LegendSpec;
 use crate::series::{SeriesAxis, SeriesSpec};
@@ -32,6 +34,9 @@ pub struct PanelSpec {
     pub row: usize,
     /// Colonne du panneau dans la grille.
     pub column: usize,
+    /// Textes libres posés sur le panneau, ancrés aux données (issue #35),
+    /// dans l'ordre de superposition.
+    pub annotations: Vec<AnnotationSpec>,
 }
 
 impl PanelSpec {
@@ -102,6 +107,7 @@ impl Default for PanelSpec {
             legend: LegendSpec::default(),
             row: 0,
             column: 0,
+            annotations: Vec::new(),
         }
     }
 }

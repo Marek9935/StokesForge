@@ -384,3 +384,171 @@ fn un_graphe_agrandi_peint_ses_formules_a_la_taille_affichee() {
     );
     assert_eq!(view.formula_count(), formules, "un texte a été recompilé");
 }
+
+// -- Issue #35 : glisser et double-cliquer un texte libre --
+
+/// Un banc dont le panneau porte un texte libre au milieu des données.
+fn banc_avec_texte() -> Banc {
+    let banc = Banc::with_title("Texte");
+    let snapshot = banc.snapshot();
+    let mut spec = match snapshot.tree.node(banc.graph).expect("graphe").kind() {
+        plotyx_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => panic!("pas un graphe"),
+    };
+    if let Some(panel) = spec.panels.get_mut(0) {
+        panel
+            .annotations
+            .push(plotyx_plot::AnnotationSpec::new("Pic", 16.0, 24.0));
+    }
+    banc.handle()
+        .execute(Command::SetPlotSpec {
+            graph: banc.graph,
+            spec,
+        })
+        .expect("spec posé");
+    banc
+}
+
+/// Une image avec les événements donnés, à l'instant `time` (secondes).
+fn image_avec(
+    context: &egui::Context,
+    view: &mut GraphView,
+    banc: &Banc,
+    rect: Rect,
+    events: Vec<egui::Event>,
+    time: f64,
+) -> Vec<plotyx_render_egui::GraphEvent> {
+    let input = egui::RawInput {
+        events,
+        time: Some(time),
+        ..Default::default()
+    };
+    let sortie = context.run_ui(input, |ui| {
+        view.paint(ui, rect, &banc.snapshot(), banc.graph)
+            .expect("peinture");
+    });
+    consomme(sortie);
+    view.take_events()
+}
+
+fn bouton(pos: Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+/// Glisser un texte sur plusieurs images : l'aperçu suit le pointeur sans
+/// toucher au modèle, et **un seul** signal sort, au relâchement — donc une
+/// seule modification du modèle, un seul pas d'historique. Le cadrage de la
+/// vue, lui, n'a pas bougé : le glisser n'a pas fait défiler.
+#[test]
+fn glisser_un_texte_ne_signale_quau_relachement() {
+    let banc = banc_avec_texte();
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let target = plotyx_plot::AnnotationRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+
+    assert!(image_avec(&context, &mut view, &banc, rect, vec![], 0.0).is_empty());
+    let (centre, _, _) = view.annotation_screen_box(target).expect("texte tracé");
+    let revision = banc.snapshot().revision;
+    let generation = view.view().generation();
+
+    let mut signaux = image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![egui::Event::PointerMoved(centre), bouton(centre, true)],
+        0.1,
+    );
+    for pas in 1..=5 {
+        let pos = centre + egui::vec2(12.0 * pas as f32, 0.0);
+        signaux.extend(image_avec(
+            &context,
+            &mut view,
+            &banc,
+            rect,
+            vec![egui::Event::PointerMoved(pos)],
+            0.1 + 0.05 * pas as f64,
+        ));
+        assert!(signaux.is_empty(), "un signal avant le relâchement");
+    }
+    let apercu = view
+        .annotation_preview()
+        .expect("aperçu pendant le glisser");
+    assert!(apercu.1.x > 16.0, "l'aperçu n'a pas suivi le pointeur");
+    assert_eq!(
+        banc.snapshot().revision,
+        revision,
+        "le modèle a bougé pendant le glisser"
+    );
+
+    let fin = centre + egui::vec2(60.0, 0.0);
+    signaux.extend(image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![bouton(fin, false)],
+        0.5,
+    ));
+    let [plotyx_render_egui::GraphEvent::AnnotationMoved {
+        target: deplace,
+        annotation,
+    }] = &signaux[..]
+    else {
+        panic!("un seul signal attendu : {signaux:?}")
+    };
+    assert_eq!(*deplace, target);
+    assert!(annotation.x > 16.0 && (annotation.y - 24.0).abs() < 1.0);
+    assert_eq!(
+        view.view().generation(),
+        generation,
+        "le glisser a fait défiler"
+    );
+}
+
+/// Un double-clic sur un texte demande à l'éditer et ne réinitialise pas le
+/// zoom ; ailleurs, il garde son rôle (réinitialiser).
+#[test]
+fn double_cliquer_un_texte_demande_a_lediter() {
+    let banc = banc_avec_texte();
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let target = plotyx_plot::AnnotationRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    let (centre, _, _) = view.annotation_screen_box(target).expect("texte tracé");
+    let mut signaux = Vec::new();
+    for (index, (pressed, time)) in [(true, 0.1), (false, 0.12), (true, 0.2), (false, 0.22)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut events = vec![bouton(centre, pressed)];
+        if index == 0 {
+            events.insert(0, egui::Event::PointerMoved(centre));
+        }
+        signaux.extend(image_avec(&context, &mut view, &banc, rect, events, time));
+    }
+    assert_eq!(
+        signaux,
+        vec![plotyx_render_egui::GraphEvent::EditAnnotation(target)]
+    );
+    assert_eq!(
+        view.selected_annotation(),
+        Some(target),
+        "le texte est sélectionné"
+    );
+}

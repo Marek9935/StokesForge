@@ -55,6 +55,12 @@ l'`Action`**, `state.rs` fait le travail et le dit dans la barre d'état. Modèl
 `GraphView::framed_spec` (issue #34) — testable dans `tests/shell.rs` sans
 fenêtre, et identique depuis une fenêtre détachée.
 
+Un **geste continu sur un graphe** (glisser, édition sur place) n'émet pas une
+action par image : l'aperçu vit dans la `GraphView`, l'état d'un éditeur dans
+la mémoire d'egui sous `GraphView::id()` (donc identique en fenêtre détachée),
+et une seule action part à la validation. Modèle : textes libres, issue #35
+(`app::annotation_interactions`).
+
 La ligne de partage `state.rs` / `app.rs` est la colonne vertébrale du crate
 UI : `state` porte toute la logique, pilotée par un enum `Action`, et se teste
 en CI (`tests/shell.rs`) ; `app` ne fait que traduire clavier et souris en

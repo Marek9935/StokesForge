@@ -82,6 +82,7 @@
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+pub mod annotation;
 pub mod axis;
 pub mod legend;
 pub mod palettes;
@@ -93,6 +94,7 @@ pub mod spec;
 pub mod style;
 pub mod theme;
 
+pub use annotation::{AnnotationRef, AnnotationSpec};
 pub use axis::{AxisScale, AxisSide, AxisSpec};
 pub use legend::{LegendPosition, LegendSpec};
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};

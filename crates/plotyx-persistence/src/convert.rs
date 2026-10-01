@@ -8,15 +8,17 @@ use plotyx_core::{
     NodeKind, ValueBlock, WindowMeta,
 };
 use plotyx_plot::{
-    AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle, PanelSpec, PlotSpec,
-    PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec, SPEC_FORMAT_VERSION,
+    AnnotationSpec, AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,
+    PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec,
+    SPEC_FORMAT_VERSION,
 };
 
 use crate::schema::{
-    AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord, LegendSpecRecord,
-    LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord,
-    RoleRecord, SavedColorsRecord, SeriesAxisRecord, SeriesSpecRecord, SymbolShapeRecord,
-    SymbolSpecRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord,
+    LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord,
+    PlotTypeRecord, RoleRecord, SavedColorsRecord, SeriesAxisRecord, SeriesSpecRecord,
+    SymbolShapeRecord, SymbolSpecRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY,
+    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -453,6 +455,19 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
         legend: (&panel.legend).into(),
         row: panel.row as u64,
         column: panel.column as u64,
+        annotations: panel
+            .annotations
+            .iter()
+            .map(|annotation| AnnotationSpecRecord {
+                text: annotation.text.clone(),
+                x: annotation.x,
+                y: annotation.y,
+                axis: annotation.axis.into(),
+                color: annotation.color.clone(),
+                size: annotation.size,
+                rotation: annotation.rotation,
+            })
+            .collect(),
     }
 }
 
@@ -483,6 +498,19 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
         legend: record.legend.into(),
         row: record.row as usize,
         column: record.column as usize,
+        annotations: record
+            .annotations
+            .into_iter()
+            .map(|annotation| AnnotationSpec {
+                text: annotation.text,
+                x: annotation.x,
+                y: annotation.y,
+                axis: annotation.axis.into(),
+                color: annotation.color,
+                size: annotation.size,
+                rotation: annotation.rotation,
+            })
+            .collect(),
     })
 }
 

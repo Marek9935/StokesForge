@@ -40,8 +40,11 @@
 //!    pixels existe ;
 //! 4. **décimer** ([`crate::decimate`]), qui a besoin de cette largeur ;
 //! 5. **peindre**, en pixels ([`crate::paint`]) ;
-//! 6. **la légende** en dernier, par-dessus, et mesurée par le même chemin
-//!    que les axes ([`crate::legend`]).
+//! 6. **la légende**, par-dessus, et mesurée par le même chemin que les
+//!    axes ([`crate::legend`]) ;
+//! 7. **les textes libres** (issue #35), tout au-dessus : centrés sur leur
+//!    point de données, projeté comme une série ; un point hors du cadrage
+//!    n'est pas dessiné, un texte peut déborder sur les graduations.
 //!
 //! # Où la mesure de texte entre dans la géométrie
 //!
@@ -160,6 +163,9 @@ pub struct DrawnPanel {
     pub x_scale: AxisScale,
     /// Échelle de l'ordonnée de gauche.
     pub y_scale: AxisScale,
+    /// Échelle de l'ordonnée de droite (sans effet si [`Self::y2_range`]
+    /// est `None`).
+    pub y2_scale: AxisScale,
     /// Nombre de séries réellement tracées.
     pub drawn_series: usize,
     /// Nombre de séries laissées de côté parce que leur référence est
@@ -179,6 +185,36 @@ pub struct DrawnPanel {
     /// de quoi retrouver, sans relire des pixels, quel axe (ou quel titre
     /// d'axe) est sous un clic ([`crate::hit`]).
     pub axis_areas: AxisAreas,
+    /// Les textes libres réellement tracés (issue #35), dans l'ordre du
+    /// spec ; un texte hors du cadrage visible n'y figure pas.
+    pub annotations: Vec<DrawnAnnotation>,
+}
+
+/// Un texte libre tel qu'il a été tracé — de quoi le désigner sous le
+/// pointeur ([`crate::hit`]), rotation comprise.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawnAnnotation {
+    /// Indice dans `PanelSpec::annotations`.
+    pub index: usize,
+    /// Centre du texte, en pixels de backend.
+    pub center: (f64, f64),
+    /// Taille du texte **non tourné**, en pixels de backend.
+    pub size: (u32, u32),
+    /// Rotation, en degrés, sens antihoraire.
+    pub rotation: f64,
+}
+
+impl DrawnAnnotation {
+    /// Vrai si le pixel `(x, y)` tombe dans le rectangle tourné du texte.
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        let (dx, dy) = (x - self.center.0, y - self.center.1);
+        // Le texte est tourné dans le sens antihoraire à l'écran (axe y
+        // vers le bas) ; on ramène le point dans le repère du texte droit
+        // par la rotation inverse.
+        let (sin, cos) = self.rotation.to_radians().sin_cos();
+        let (u, v) = (dx * cos - dy * sin, dx * sin + dy * cos);
+        u.abs() <= self.size.0 as f64 / 2.0 && v.abs() <= self.size.1 as f64 / 2.0
+    }
 }
 
 /// Une aire de graduation : son épaisseur en pixels (0 si l'axe est masqué
@@ -547,6 +583,7 @@ fn draw_panel<DB: DrawingBackend>(
         pixel_size: size,
         x_scale,
         y_scale,
+        y2_scale,
         drawn_series: 0,
         broken_series: 0,
         unknown_series: 0,
@@ -566,6 +603,7 @@ fn draw_panel<DB: DrawingBackend>(
                 titled: !spec.right.display_label().is_empty(),
             },
         },
+        annotations: Vec::new(),
     };
 
     // Le rectangle de tracé, en pixels : c'est contre lui que les segments
@@ -623,12 +661,92 @@ fn draw_panel<DB: DrawingBackend>(
     )?;
     drawn.legend_entries = inscribed.entries;
 
+    // 7 — les textes libres, par-dessus tout (issue #35).
+    let ranges = Ranges {
+        x: (x_scale, x_range),
+        y: (y_scale, y_range),
+        y2: y2_range.map(|range| (y2_scale, range)),
+    };
+    for (index, annotation) in spec.annotations.iter().enumerate() {
+        let right = annotation.axis == SeriesAxis::Right && right_active;
+        let Some(point) = ranges.project(annotation.x, annotation.y, right) else {
+            continue;
+        };
+        let pixel = if right {
+            chart.secondary_plotting_area().map_coordinate(&point)
+        } else {
+            chart.plotting_area().map_coordinate(&point)
+        };
+        if let Some(drawn_annotation) = draw_annotation(&screen, annotation, index, pixel, ink)? {
+            drawn.annotations.push(drawn_annotation);
+        }
+    }
+
     // R7 : le réticule, le rectangle de zoom élastique et la désignation de
     // point se peignent **par-dessus** ce qui précède, et surtout par-dessus
     // le cache de `Shape` — donc pas ici, sous peine de rejouer tout le
     // pipeline à chaque mouvement de souris (`architecture-choisie.md`
     // §4.2, tâche 7.3).
     Ok(drawn)
+}
+
+/// Les cadrages d'un panneau, dans l'espace transformé, avec leur échelle —
+/// de quoi projeter un point de données comme une série.
+struct Ranges {
+    x: (AxisScale, (f64, f64)),
+    y: (AxisScale, (f64, f64)),
+    y2: Option<(AxisScale, (f64, f64))>,
+}
+
+impl Ranges {
+    /// Le point `(x, y)` dans l'espace transformé, s'il tombe dans le
+    /// cadrage visible ; `None` sinon (hors zoom, ou ≤ 0 sur un axe log) —
+    /// comme un point de série hors cadre, il n'est pas dessiné.
+    fn project(&self, x: f64, y: f64, right: bool) -> Option<(f64, f64)> {
+        let inside =
+            |value: f64, (low, high): (f64, f64)| value >= low.min(high) && value <= low.max(high);
+        let (y_scale, y_range) = if right { self.y2? } else { self.y };
+        let fx = scale::forward(self.x.0, x)?;
+        let fy = scale::forward(y_scale, y)?;
+        (inside(fx, self.x.1) && inside(fy, y_range)).then_some((fx, fy))
+    }
+}
+
+/// Trace un texte libre centré sur `pixel`, et rend ce qui a été tracé.
+///
+/// Texte riche saisi (Typst), tourné par Typst d'un angle libre
+/// ([`crate::formula::rotated_family`]). La taille rapportée est celle du
+/// texte **droit**, mesurée par le même chemin : le rectangle désignable
+/// est ce rectangle, tourné autour du centre.
+fn draw_annotation<DB: DrawingBackend>(
+    screen: &DrawingArea<DB, Shift>,
+    annotation: &plotyx_plot::AnnotationSpec,
+    index: usize,
+    pixel: plotters_backend::BackendCoord,
+    ink: (u8, u8, u8),
+) -> Result<Option<DrawnAnnotation>, DrawingAreaErrorKind<DB::ErrorType>> {
+    use plotters::style::text_anchor::{HPos, Pos, VPos};
+    if annotation.text.is_empty() {
+        return Ok(None);
+    }
+    let color = rgba_or(&annotation.color, opaque(ink));
+    let size = annotation.effective_size();
+    let rotation = annotation.effective_rotation();
+    let centered = Pos::new(HPos::Center, VPos::Center);
+    let straight = rich_style(size, color).pos(centered);
+    let family = crate::formula::rotated_family(rotation);
+    let turned = (family.as_str(), size)
+        .into_font()
+        .color(&rgba(color))
+        .pos(centered);
+    let (width, height) = screen.estimate_text_size(&annotation.text, &straight)?;
+    screen.draw(&Text::new(annotation.text.as_str(), pixel, &turned))?;
+    Ok(Some(DrawnAnnotation {
+        index,
+        center: (pixel.0 as f64, pixel.1 as f64),
+        size: (width, height),
+        rotation,
+    }))
 }
 
 /// Peint une série préparée, et rend le nombre de points que la décimation a

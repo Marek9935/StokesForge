@@ -620,6 +620,22 @@ pub(crate) struct PanelSpecRecord {
     pub(crate) legend: LegendSpecRecord,
     pub(crate) row: u64,
     pub(crate) column: u64,
+    /// Textes libres (issue #35) : absents d'un fichier plus ancien,
+    /// `#[serde(default)]` les ramène à une liste vide.
+    #[serde(default)]
+    pub(crate) annotations: Vec<AnnotationSpecRecord>,
+}
+
+/// [`plotyx_plot::AnnotationSpec`], à plat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AnnotationSpecRecord {
+    pub(crate) text: String,
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) axis: SeriesAxisRecord,
+    pub(crate) color: String,
+    pub(crate) size: f64,
+    pub(crate) rotation: f64,
 }
 
 impl Default for PanelSpecRecord {
@@ -634,6 +650,7 @@ impl Default for PanelSpecRecord {
             legend: LegendSpecRecord::default(),
             row: 0,
             column: 0,
+            annotations: Vec::new(),
         }
     }
 }

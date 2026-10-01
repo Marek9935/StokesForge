@@ -69,6 +69,14 @@ donc **voulus à ce stade**, pas des oublis. Les principaux, écrits dans
   position et taille le sont) ;
 - une seule cellule éditable à la fois par fenêtre.
 
+**Écrire un texte sur un graphe** (outil Texte d'Origin) : clic droit dans
+la zone de tracé → « Ajouter un texte » (ou menu « Graphique »). On tape le
+texte sur place, formules comprises ; la petite barre au-dessus règle couleur,
+taille et rotation ; Entrée valide, Échap annule. Double-clic pour le
+modifier, glisser pour le déplacer, Suppr pour le retirer. Le texte est
+**attaché aux données** : il suit le zoom et disparaît si son point sort du
+cadrage. Pas encore de cadre ni de fond autour du texte.
+
 **Exporter un graphe** : menu « Graphique » → « Exporter le graphe… »
 (Ctrl+E), ou clic droit sur la figure. SVG, PDF ou PNG selon l'extension du
 fichier ; l'export reprend le **zoom affiché** et les formules. La résolution

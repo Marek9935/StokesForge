@@ -55,7 +55,9 @@ use plotyx_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
 };
 use plotyx_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
-use plotyx_plot::{ColorUsage, PanelSpec, Panels, PlotSpec, PlotType, SavedColors};
+use plotyx_plot::{
+    AnnotationRef, AnnotationSpec, ColorUsage, PanelSpec, Panels, PlotSpec, PlotType, SavedColors,
+};
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
 #[cfg(feature = "python")]
@@ -424,6 +426,26 @@ pub enum Action {
     },
     /// Règle l'agrandissement des exports PNG ([`PNG_EXPORT_SCALES`]).
     SetPngExportScale(f32),
+    /// Pose un texte libre (issue #35) : remplace celui de `target`, ou
+    /// l'ajoute si `target` est le rang qui suit le dernier
+    /// ([`AnnotationRef::set`]). **Une** modification du modèle, donc une
+    /// entrée d'historique — quel que soit le nombre d'images qu'a duré
+    /// l'édition sur place ou le glisser, dont l'aperçu vit dans la vue.
+    SetAnnotation {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Adresse du texte.
+        target: AnnotationRef,
+        /// Sa nouvelle version.
+        annotation: Box<AnnotationSpec>,
+    },
+    /// Retire un texte libre (Suppr, menu contextuel).
+    RemoveAnnotation {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Adresse du texte.
+        target: AnnotationRef,
+    },
 }
 
 /// Les agrandissements proposés pour un export PNG : la figure fait
@@ -1317,6 +1339,8 @@ pub enum PlotTarget {
     Axis(PlotAxis),
     /// Le titre d'un axe.
     AxisTitle(PlotAxis),
+    /// Un texte libre (issue #35).
+    Annotation(AnnotationRef),
 }
 
 impl PlotTarget {
@@ -1328,6 +1352,7 @@ impl PlotTarget {
             PlotTarget::PlotArea => "Zone de tracé".to_string(),
             PlotTarget::Axis(axis) => format!("Axe {}", axis.label()),
             PlotTarget::AxisTitle(axis) => format!("Titre de l'axe {}", axis.label()),
+            PlotTarget::Annotation(_) => "Texte libre".to_string(),
         }
     }
 
@@ -1336,7 +1361,7 @@ impl PlotTarget {
     pub fn settings_page(self) -> (PlotSettingsTab, Option<PlotAxis>) {
         match self {
             PlotTarget::Background | PlotTarget::Title => (PlotSettingsTab::Graph, None),
-            PlotTarget::PlotArea => (PlotSettingsTab::PlotArea, None),
+            PlotTarget::PlotArea | PlotTarget::Annotation(_) => (PlotSettingsTab::PlotArea, None),
             PlotTarget::Axis(axis) | PlotTarget::AxisTitle(axis) => {
                 (PlotSettingsTab::Axes, Some(axis))
             }
@@ -3313,6 +3338,14 @@ impl AppState {
                 self.replace_saved_colors(target, next);
             }
             Action::ExportGraph { path, spec } => self.export_graph(path, &spec),
+            Action::SetAnnotation {
+                graph,
+                target,
+                annotation,
+            } => self.edit_annotations(graph, |spec| target.set(spec, *annotation)),
+            Action::RemoveAnnotation { graph, target } => {
+                self.edit_annotations(graph, |spec| target.remove(spec))
+            }
             Action::SetPngExportScale(scale) => {
                 if PNG_EXPORT_SCALES.contains(&scale) {
                     self.png_export_scale = scale;
@@ -4457,6 +4490,18 @@ impl AppState {
                 self.notice(text);
             }
             Err(err) => self.fail(format!("Échec de l'enregistrement : {err}")),
+        }
+    }
+
+    /// Applique `change` à un clone du spec de `graph` et l'envoie au modèle
+    /// ([`Command::SetPlotSpec`]) s'il a réellement changé quelque chose.
+    fn edit_annotations(&mut self, graph: NodeId, change: impl FnOnce(&mut PlotSpec) -> bool) {
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        let before = spec.clone();
+        if change(&mut spec) && spec != before {
+            self.execute(Command::SetPlotSpec { graph, spec });
         }
     }
 

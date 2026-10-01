@@ -51,12 +51,24 @@ pub enum PlotComponent {
     Axis { panel: usize, side: AxisSide },
     /// Le titre d'un axe.
     AxisTitle { panel: usize, side: AxisSide },
+    /// Un texte libre (issue #35) : `index` dans `PanelSpec::annotations`.
+    /// Prioritaire sur tout le reste — il est tracé par-dessus.
+    Annotation { panel: usize, index: usize },
 }
 
 /// Le composant sous le pixel `(x, y)` (repère du backend, celui de
 /// [`DrawnPanel::pixel_origin`]), ou `None` s'il ne vise que le fond (marges,
 /// espace entre panneaux).
 pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
+    // Le dernier tracé est au-dessus : on cherche du dernier au premier.
+    for (panel, drawn) in plot.panels.iter().enumerate().rev() {
+        if let Some(annotation) = drawn.annotations.iter().rev().find(|a| a.contains(x, y)) {
+            return Some(PlotComponent::Annotation {
+                panel,
+                index: annotation.index,
+            });
+        }
+    }
     if y >= 0.0 && y < plot.title_height as f64 {
         return Some(PlotComponent::Title);
     }
@@ -125,6 +137,7 @@ mod tests {
                 pixel_size: (360, 220),
                 x_scale: AxisScale::Linear,
                 y_scale: AxisScale::Linear,
+                y2_scale: AxisScale::Linear,
                 drawn_series: 0,
                 broken_series: 0,
                 unknown_series: 0,
@@ -135,6 +148,7 @@ mod tests {
                     left: area(64),
                     right: AxisArea::default(),
                 },
+                annotations: Vec::new(),
             }],
             omitted_panels: 0,
             drawn_series: 0,
@@ -200,6 +214,44 @@ mod tests {
                 panel: 0,
                 side: AxisSide::Bottom
             })
+        );
+    }
+
+    /// Issue #35 : un texte tourné se désigne sur son rectangle **tourné**,
+    /// pas sur sa boîte englobante, et passe devant la zone de tracé et le
+    /// titre d'axe qu'il recouvre.
+    #[test]
+    fn un_texte_tourne_se_designe_sur_son_rectangle_tourne() {
+        use crate::pipeline::DrawnAnnotation;
+        let mut plot = figure();
+        // 100 × 20 px, tourné d'un quart de tour : vertical, centré en
+        // (240, 150).
+        plot.panels[0].annotations.push(DrawnAnnotation {
+            index: 3,
+            center: (240.0, 150.0),
+            size: (100, 20),
+            rotation: 90.0,
+        });
+        let annotation = Some(PlotComponent::Annotation { panel: 0, index: 3 });
+        assert_eq!(
+            component_at(&plot, 240.0, 105.0),
+            annotation,
+            "haut du texte"
+        );
+        assert_eq!(component_at(&plot, 245.0, 190.0), annotation);
+        // Dans la boîte du texte **droit**, mais hors du texte tourné.
+        assert_eq!(
+            component_at(&plot, 280.0, 150.0),
+            Some(PlotComponent::PlotArea { panel: 0 })
+        );
+        // À 45°, un coin de la boîte englobante n'est pas le texte.
+        plot.panels[0].annotations[0].rotation = 45.0;
+        assert_eq!(component_at(&plot, 240.0, 150.0), annotation, "centre");
+        assert_ne!(component_at(&plot, 280.0, 185.0), annotation, "coin vide");
+        assert_eq!(
+            component_at(&plot, 270.0, 120.0),
+            annotation,
+            "le long du texte"
         );
     }
 

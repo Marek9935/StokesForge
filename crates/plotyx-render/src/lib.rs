@@ -91,6 +91,6 @@ pub use decimate::lttb;
 pub use fonts::{FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use hit::{component_at, AxisSide, PlotComponent};
 pub use interact::{nearest_on_curve, PanelTransform};
-pub use pipeline::{draw, draw_on, AxisArea, AxisAreas, DrawnPanel, DrawnPlot};
+pub use pipeline::{draw, draw_on, AxisArea, AxisAreas, DrawnAnnotation, DrawnPanel, DrawnPlot};
 pub use series::{Geometry, Prepared};
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};

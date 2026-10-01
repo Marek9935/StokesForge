@@ -6718,3 +6718,73 @@ fn le_nom_propose_est_celui_du_graphe() {
         "Graph1.svg"
     );
 }
+
+// -- Issue #35 : textes libres --
+
+/// Ajouter, déplacer, retirer un texte libre : chaque geste est **une**
+/// modification du modèle, donc un seul Ctrl+Z — quel que soit le nombre
+/// d'images qu'a duré l'édition ou le glisser, dont l'aperçu vit dans la
+/// vue. Et un geste qui ne change rien n'empile rien.
+#[test]
+fn un_texte_libre_sajoute_se_deplace_et_se_retire_en_un_pas_chacun() {
+    use plotyx_plot::{AnnotationRef, AnnotationSpec};
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let target = AnnotationRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+    let texte = |state: &AppState| target.get(&graph_spec(state, graph)).cloned();
+    let revision = |state: &AppState| state.snapshot().revision;
+
+    let depart = revision(&state);
+    state.dispatch(Action::SetAnnotation {
+        graph,
+        target,
+        annotation: Box::new(AnnotationSpec::new("Pic $lambda$", 1.0, 30.0)),
+    });
+    assert_eq!(
+        texte(&state).map(|a| a.text),
+        Some("Pic $lambda$".to_owned())
+    );
+    let apres_ajout = revision(&state);
+    assert_ne!(apres_ajout, depart);
+
+    // Le même texte : rien ne change, rien n'est empilé.
+    state.dispatch(Action::SetAnnotation {
+        graph,
+        target,
+        annotation: Box::new(AnnotationSpec::new("Pic $lambda$", 1.0, 30.0)),
+    });
+    assert_eq!(
+        revision(&state),
+        apres_ajout,
+        "un geste sans effet a été empilé"
+    );
+
+    // Déplacé : une seule entrée, qu'un Ctrl+Z défait entièrement.
+    state.dispatch(Action::SetAnnotation {
+        graph,
+        target,
+        annotation: Box::new(AnnotationSpec::new("Pic $lambda$", 1.5, 40.0)),
+    });
+    assert_eq!(texte(&state).map(|a| (a.x, a.y)), Some((1.5, 40.0)));
+    state.dispatch(Action::Undo);
+    assert_eq!(texte(&state).map(|a| (a.x, a.y)), Some((1.0, 30.0)));
+
+    state.dispatch(Action::RemoveAnnotation { graph, target });
+    assert!(texte(&state).is_none());
+    state.dispatch(Action::Undo);
+    assert!(texte(&state).is_some(), "Ctrl+Z rend le texte retiré");
+    state.dispatch(Action::Undo);
+    assert!(texte(&state).is_none(), "Ctrl+Z défait l'ajout");
+
+    // Une adresse au-delà du dernier rang est ignorée.
+    state.dispatch(Action::SetAnnotation {
+        graph,
+        target: AnnotationRef { index: 4, ..target },
+        annotation: Box::new(AnnotationSpec::new("x", 0.0, 0.0)),
+    });
+    assert!(graph_spec(&state, graph).panels[0].annotations.is_empty());
+}

@@ -327,6 +327,24 @@ la même ligne de base (19,07 pt de haut à 14 pt pour Noto) ; une formule plus
 haute (fraction, somme) agrandit la boîte sans être coupée. Une légende mixte a
 donc des lignes de même hauteur.
 
+**Textes libres** (issue #35) : tracés en dernier, par-dessus la légende,
+centrés (`HPos`/`VPos::Center`) sur leur point de données projeté comme une
+série (`scale::forward`, même axe secondaire) ; un point hors du cadrage, ou
+≤ 0 sur un axe log, n'est pas tracé, mais un texte dont le point est visible
+peut déborder sur les graduations (décision du 2026-10-01). Un angle libre ne
+passe pas par Plotters (`FontTransform` : quarts de tour seulement) : il voyage
+dans le style (`formula::rotated_family`, famille `plotyx-typst@<degrés>`) et
+`formula::source` enveloppe le texte dans `#plotyx-rotate` (Typst
+`rotate(reflow: true)`, l'étai dans la rotation), dont la page épouse la boîte
+tournée — l'ancrage centré reste le centre du texte. `DrawnPanel::annotations`
+rapporte centre, taille du texte droit et rotation : `hit` désigne le rectangle
+**tourné** (`PlotComponent::Annotation`, prioritaire). Côté écran,
+`GraphView` porte l'aperçu d'une édition ou d'un glisser
+(`set_annotation_preview`, appliqué au clone comme le zoom, compteur ajouté à
+`view_generation`), la sélection et les signaux `GraphEvent` (double-clic,
+texte relâché) ; l'aperçu validé reste affiché jusqu'à ce que le modèle change
+(`hold_preview`). Sans Typst (témoin, repli), le texte est brut et non tourné.
+
 **Texte repris automatiquement** (issue #33) : un nom de série laissé vide
 reprend le nom long ou le nom de la colonne, souvent importé d'un appareil
 (`Abs_280 #1`). Lu comme du markup, `_` ouvrirait de l'italique et `#` du code.

@@ -1305,6 +1305,38 @@ impl PlotyxApp {
                             ui.close();
                         }
                         ui.separator();
+                        // Textes libres (issue #35) : le pendant, dans la
+                        // barre de menus, du clic droit et de Suppr.
+                        let selected = self
+                            .graph_views
+                            .get(&graph)
+                            .and_then(GraphView::selected_annotation);
+                        if ui.button("Ajouter un texte").clicked() {
+                            let tree = self.state.tree().clone();
+                            if let Some(view) = self.graph_views.get_mut(&graph) {
+                                if let Some(point) = view.panel_center_data() {
+                                    add_annotation_at(ctx, view, &tree, graph, point);
+                                }
+                            }
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                selected.is_some(),
+                                egui::Button::new("Supprimer le texte sélectionné")
+                                    .shortcut_text("Suppr"),
+                            )
+                            .clicked()
+                        {
+                            if let Some(target) = selected {
+                                actions.push(Action::RemoveAnnotation { graph, target });
+                            }
+                            if let Some(view) = self.graph_views.get_mut(&graph) {
+                                view.clear_annotation_selection();
+                            }
+                            ui.close();
+                        }
+                        ui.separator();
                         if ui
                             .add(
                                 egui::Button::new("Exporter le graphe…")
@@ -2265,6 +2297,7 @@ impl eframe::App for PlotyxApp {
             remember_recent_imports(&imported);
         }
 
+        publish_saved_colors(&ctx, &self.state);
         self.collect_shortcuts(&ctx, &mut actions);
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
         self.status_bar(ui, &mut actions);
@@ -7202,6 +7235,7 @@ fn graph_view_contents(
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
             graph_context_menu(ui, view, &snapshot.tree, graph_id, actions);
+            annotation_interactions(ui, view, &snapshot.tree, graph_id, actions);
             if ui.small_button("réinitialiser le zoom").clicked() {
                 view.reset_view();
             }
@@ -7239,20 +7273,58 @@ fn graph_context_menu(
         return;
     };
     let target_id = response.id.with("plot_target");
+    let point_id = response.id.with("plot_point");
     if response.secondary_clicked() {
-        let target = response
-            .interact_pointer_pos()
-            .map_or(PlotTarget::Background, |pos| {
-                plot_target(view.component_at(pos))
-            });
-        ui.memory_mut(|memory| memory.data.insert_temp(target_id, target));
+        let pos = response.interact_pointer_pos();
+        let target = pos.map_or(PlotTarget::Background, |pos| {
+            view.annotation_at(pos).map_or_else(
+                || plot_target(view.component_at(pos)),
+                PlotTarget::Annotation,
+            )
+        });
+        let point = pos.and_then(|pos| view.data_at(pos));
+        ui.memory_mut(|memory| {
+            memory.data.insert_temp(target_id, target);
+            memory.data.insert_temp(point_id, point);
+        });
     }
     response.context_menu(|ui| {
         let target: PlotTarget = ui
             .memory(|memory| memory.data.get_temp(target_id))
             .unwrap_or(PlotTarget::Background);
+        let point: Option<(usize, usize, f64, f64)> =
+            ui.memory(|memory| memory.data.get_temp(point_id)).flatten();
         ui.weak(target.label());
         ui.separator();
+        // Textes libres (issue #35) : les mêmes gestes que la barre de menus
+        // et le clavier (double-clic, Suppr).
+        if let PlotTarget::Annotation(annotation) = target {
+            if ui.button("Modifier le texte").clicked() {
+                open_annotation_editor(ui.ctx(), view, tree, graph_id, annotation);
+                ui.close();
+            }
+            if ui
+                .add(egui::Button::new("Supprimer").shortcut_text("Suppr"))
+                .clicked()
+            {
+                actions.push(Action::RemoveAnnotation {
+                    graph: graph_id,
+                    target: annotation,
+                });
+                view.clear_annotation_selection();
+                ui.close();
+            }
+            ui.separator();
+        } else if ui
+            .add_enabled(point.is_some(), egui::Button::new("Ajouter un texte"))
+            .on_disabled_hover_text("Cliquer dans une zone de tracé")
+            .clicked()
+        {
+            if let Some(point) = point {
+                add_annotation_at(ui.ctx(), view, tree, graph_id, point);
+            }
+            ui.close();
+        }
         if ui.button("Propriétés…").clicked() {
             actions.push(target.open_settings(graph_id));
             ui.close();
@@ -7272,6 +7344,309 @@ fn graph_context_menu(
             ui.close();
         }
     });
+}
+
+// -- Textes libres (issue #35) --
+//
+// L'édition sur place et le glisser ne touchent pas le modèle tant qu'ils
+// durent : l'aperçu vit dans la vue (`GraphView::set_annotation_preview`),
+// comme le zoom, et la validation envoie **une** `Action::SetAnnotation` —
+// une entrée d'historique, Échap jette l'aperçu. L'état de l'éditeur est
+// rangé dans la mémoire d'egui sous l'identifiant de la vue : la même
+// écriture sert la fenêtre flottante et la fenêtre détachée, sans rien
+// faire transiter par `AppState`.
+
+/// L'éditeur sur place d'un texte libre, ouvert sur une vue.
+#[derive(Debug, Clone)]
+struct AnnotationEditor {
+    target: plotyx_render_egui::AnnotationRef,
+    draft: plotyx_render_egui::AnnotationSpec,
+    /// Le texte tel qu'il est dans le modèle ; `None` pour un texte nouveau.
+    original: Option<plotyx_render_egui::AnnotationSpec>,
+    /// Donner le focus au champ à la prochaine image (ouverture).
+    focus: bool,
+}
+
+fn annotation_editor_id(view: &GraphView) -> egui::Id {
+    view.id().with("annotation_editor")
+}
+
+/// Ouvre l'éditeur sur un texte existant ; sans effet si le texte n'existe
+/// plus dans le modèle.
+fn open_annotation_editor(
+    ctx: &egui::Context,
+    view: &mut GraphView,
+    tree: &Tree,
+    graph: NodeId,
+    target: plotyx_render_egui::AnnotationRef,
+) {
+    let Some(original) =
+        crate::state::current_plot_spec(tree, graph).and_then(|spec| target.get(&spec).cloned())
+    else {
+        return;
+    };
+    start_annotation_editor(ctx, view, target, original.clone(), Some(original));
+}
+
+/// Ajoute un texte au point de données `(row, column, x, y)` et ouvre
+/// l'éditeur dessus : rien n'entre dans le modèle avant validation.
+fn add_annotation_at(
+    ctx: &egui::Context,
+    view: &mut GraphView,
+    tree: &Tree,
+    graph: NodeId,
+    (row, column, x, y): (usize, usize, f64, f64),
+) {
+    let Some(target) = crate::state::current_plot_spec(tree, graph)
+        .and_then(|spec| plotyx_render_egui::AnnotationRef::next_in(&spec, row, column))
+    else {
+        return;
+    };
+    let draft = plotyx_render_egui::AnnotationSpec::new("Texte", x, y);
+    start_annotation_editor(ctx, view, target, draft, None);
+}
+
+fn start_annotation_editor(
+    ctx: &egui::Context,
+    view: &mut GraphView,
+    target: plotyx_render_egui::AnnotationRef,
+    draft: plotyx_render_egui::AnnotationSpec,
+    original: Option<plotyx_render_egui::AnnotationSpec>,
+) {
+    view.set_annotation_preview(Some((target, draft.clone())));
+    let editor = AnnotationEditor {
+        target,
+        draft,
+        original,
+        focus: true,
+    };
+    ctx.data_mut(|data| data.insert_temp(annotation_editor_id(view), editor));
+}
+
+/// Les couleurs enregistrées, publiées chaque image par la racine pour que
+/// le sélecteur de couleur de l'éditeur sur place les propose aussi depuis
+/// une fenêtre détachée (qui n'a pas `AppState`).
+fn saved_colors_id() -> egui::Id {
+    egui::Id::new("plotyx_saved_colors_for_graphs")
+}
+
+fn publish_saved_colors(ctx: &egui::Context, state: &AppState) {
+    let colors = (
+        state.saved_colors(SaveTarget::Project),
+        state.saved_colors(SaveTarget::User),
+    );
+    ctx.data_mut(|data| data.insert_temp(saved_colors_id(), colors));
+}
+
+/// Signaux de la vue, éditeur sur place et Suppr — après la peinture de la
+/// figure, dans la fenêtre flottante comme dans la fenêtre détachée.
+fn annotation_interactions(
+    ui: &egui::Ui,
+    view: &mut GraphView,
+    tree: &Tree,
+    graph: NodeId,
+    actions: &mut Vec<Action>,
+) {
+    for event in view.take_events() {
+        match event {
+            plotyx_render_egui::GraphEvent::EditAnnotation(target) => {
+                open_annotation_editor(ui.ctx(), view, tree, graph, target);
+            }
+            plotyx_render_egui::GraphEvent::AnnotationMoved { target, annotation } => {
+                actions.push(Action::SetAnnotation {
+                    graph,
+                    target,
+                    annotation: Box::new(annotation),
+                });
+            }
+        }
+    }
+    let id = annotation_editor_id(view);
+    let editor: Option<AnnotationEditor> = ui.ctx().data(|data| data.get_temp(id));
+    match editor {
+        Some(editor) => annotation_editor_ui(ui.ctx(), view, graph, editor, actions),
+        None => {
+            // Suppr retire le texte sélectionné, quand aucun champ n'a le
+            // focus (sinon la touche appartient à la saisie).
+            let typing = ui.ctx().memory(|memory| memory.focused().is_some());
+            if let Some(target) = view.selected_annotation() {
+                if !typing
+                    && ui.ctx().input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                    })
+                {
+                    actions.push(Action::RemoveAnnotation { graph, target });
+                    view.clear_annotation_selection();
+                }
+            }
+        }
+    }
+}
+
+/// Peint l'éditeur sur place : le champ de texte posé sur le texte, et
+/// au-dessus une barre couleur / taille / rotation. Entrée ou clic ailleurs
+/// valide, Échap annule.
+fn annotation_editor_ui(
+    ctx: &egui::Context,
+    view: &mut GraphView,
+    graph: NodeId,
+    mut editor: AnnotationEditor,
+    actions: &mut Vec<Action>,
+) {
+    let id = annotation_editor_id(view);
+    let (center, size, _) = view
+        .annotation_screen_box(editor.target)
+        .or_else(|| {
+            view.display_rect()
+                .map(|rect| (rect.center(), egui::vec2(120.0, 20.0), 0.0))
+        })
+        .unwrap_or((egui::Pos2::ZERO, egui::vec2(120.0, 20.0), 0.0));
+    let width = size.x.max(160.0);
+    let text_pos = center - egui::vec2(width / 2.0, 14.0);
+
+    let (project, user): (plotyx_plot::SavedColors, plotyx_plot::SavedColors) = ctx
+        .data(|data| data.get_temp(saved_colors_id()))
+        .unwrap_or_default();
+    let mut env = PickerEnv {
+        project,
+        user,
+        requests: Vec::new(),
+    };
+
+    let mut accept = false;
+    let toolbar = egui::Area::new(id.with("toolbar"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(text_pos - egui::vec2(0.0, 36.0))
+        .constrain(true)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    crate::color_picker::color_button(
+                        ui,
+                        ("annotation_color", id),
+                        &mut editor.draft.color,
+                        ColorUsage::Text,
+                        Some("Automatique (contraste avec le fond)"),
+                        &mut env,
+                    );
+                    ui.label("Taille");
+                    let (low, high) = plotyx_render_egui::AnnotationSpec::SIZE_RANGE;
+                    ui.add(
+                        egui::DragValue::new(&mut editor.draft.size)
+                            .range(low..=high)
+                            .speed(0.2),
+                    );
+                    ui.label("Rotation");
+                    ui.add(
+                        egui::DragValue::new(&mut editor.draft.rotation)
+                            .range(-180.0..=180.0)
+                            .speed(1.0)
+                            .suffix("°"),
+                    );
+                    if ui.button("OK").on_hover_text("Valider (Entrée)").clicked() {
+                        accept = true;
+                    }
+                });
+            });
+        });
+    let text = egui::Area::new(id.with("text"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(text_pos)
+        .constrain(true)
+        .show(ctx, |ui| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut editor.draft.text)
+                    .desired_width(width)
+                    .hint_text("Texte, $formule$"),
+            );
+            if editor.focus {
+                response.request_focus();
+                editor.focus = false;
+            }
+            if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                accept = true;
+            }
+        });
+
+    for request in env.requests {
+        actions.push(match request.edit {
+            SavedColorEdit::Save => Action::SaveColor {
+                usage: request.usage,
+                color: request.color,
+                target: request.target,
+            },
+            SavedColorEdit::Remove => Action::RemoveSavedColor {
+                usage: request.usage,
+                color: request.color,
+                target: request.target,
+            },
+        });
+    }
+
+    // Échap : le sélecteur de couleur ouvert le consomme d'abord pour lui.
+    let cancel = ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    // Un clic hors de l'éditeur (et hors de toute couche surgissante, comme
+    // le sélecteur de couleur) valide.
+    let pressed_at = ctx.input(|input| {
+        input
+            .pointer
+            .any_pressed()
+            .then(|| input.pointer.interact_pos())
+            .flatten()
+    });
+    let outside = pressed_at.is_some_and(|pos| {
+        !toolbar.response.rect.contains(pos)
+            && !text.response.rect.contains(pos)
+            && ctx
+                .layer_id_at(pos)
+                .is_none_or(|layer| layer.order != egui::Order::Foreground)
+    });
+
+    if cancel {
+        view.set_annotation_preview(None);
+        ctx.data_mut(|data| data.remove::<AnnotationEditor>(id));
+        return;
+    }
+    if accept || outside {
+        commit_annotation_editor(view, graph, &editor, actions);
+        ctx.data_mut(|data| data.remove::<AnnotationEditor>(id));
+        return;
+    }
+    view.set_annotation_preview(Some((editor.target, editor.draft.clone())));
+    ctx.data_mut(|data| data.insert_temp(id, editor));
+}
+
+/// Valide l'éditeur : une seule action, et seulement si quelque chose a
+/// changé. Un texte vidé est retiré (un texte vide n'est pas tracé, il ne
+/// pourrait plus être désigné).
+fn commit_annotation_editor(
+    view: &mut GraphView,
+    graph: NodeId,
+    editor: &AnnotationEditor,
+    actions: &mut Vec<Action>,
+) {
+    let empty = editor.draft.text.trim().is_empty();
+    match (&editor.original, empty) {
+        (None, true) => view.set_annotation_preview(None),
+        (Some(_), true) => {
+            actions.push(Action::RemoveAnnotation {
+                graph,
+                target: editor.target,
+            });
+            view.hold_preview();
+        }
+        (Some(original), false) if *original == editor.draft => {
+            view.set_annotation_preview(None);
+        }
+        _ => {
+            actions.push(Action::SetAnnotation {
+                graph,
+                target: editor.target,
+                annotation: Box::new(editor.draft.clone()),
+            });
+            view.hold_preview();
+        }
+    }
 }
 
 /// Demande où exporter le graphe, puis confie l'export à
@@ -7322,6 +7697,9 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
         Some(PlotComponent::PlotArea { .. }) => PlotTarget::PlotArea,
         Some(PlotComponent::Axis { side, .. }) => PlotTarget::Axis(axis(side)),
         Some(PlotComponent::AxisTitle { side, .. }) => PlotTarget::AxisTitle(axis(side)),
+        // Le menu contextuel lit le texte libre par `GraphView::annotation_at`,
+        // qui donne son adresse dans le spec ; ce repli ne sert pas.
+        Some(PlotComponent::Annotation { .. }) => PlotTarget::PlotArea,
     }
 }
 

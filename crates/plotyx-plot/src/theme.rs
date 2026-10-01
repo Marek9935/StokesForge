@@ -64,13 +64,16 @@ impl PlotSpec {
             .map_or("", |panel| panel.bottom.tick_color.as_str())
     }
 
-    /// Écrit `color` comme couleur du texte : titre du graphe et titre de
-    /// chaque axe de chaque panneau.
+    /// Écrit `color` comme couleur du texte : titre du graphe, titre de
+    /// chaque axe et textes libres (issue #35) de chaque panneau.
     pub fn set_text_color(&mut self, color: &str) {
         self.title_color = color.to_string();
         for panel in self.panels.iter_mut() {
             for side in SIDES {
                 panel.axis_mut(side).title_color = color.to_string();
+            }
+            for annotation in &mut panel.annotations {
+                annotation.color = color.to_string();
             }
         }
     }

@@ -130,15 +130,51 @@ fn family_style(
     (family, size).into_font().color(&crate::paint::rgba(color))
 }
 
-/// Vrai si `style` désigne un texte riche, saisi ou repris, à composer par
-/// Typst plutôt qu'à mettre en page par `epaint`. La seule condition
-/// d'aiguillage des deux backends, pour la mesure comme pour le dessin.
+/// Le préfixe de famille d'un texte riche saisi **tourné d'un angle
+/// libre** (annotation, issue #35) : `plotyx-typst@<degrés>`. Plotters ne
+/// tourne le texte que par quarts de tour (`FontTransform`) ; un angle libre
+/// est donc confié à Typst (`#rotate`), et il voyage dans le style comme le
+/// reste du rôle d'un texte.
+const ROTATED_PREFIX: &str = "plotyx-typst@";
+
+/// La famille d'un texte riche saisi tourné de `angle_deg` degrés, sens
+/// antihoraire — [`RICH_FAMILY`] pour un angle nul.
+pub fn rotated_family(angle_deg: f64) -> String {
+    if angle_deg == 0.0 || !angle_deg.is_finite() {
+        RICH_FAMILY.to_owned()
+    } else {
+        format!("{ROTATED_PREFIX}{angle_deg}")
+    }
+}
+
+/// L'angle porté par la famille de `style` ([`rotated_family`]), 0 sinon.
+fn rotation_of<S: plotters_backend::BackendTextStyle>(style: &S) -> f64 {
+    match style.family() {
+        plotters_backend::FontFamily::Name(name) => name
+            .strip_prefix(ROTATED_PREFIX)
+            .and_then(|angle| angle.parse::<f64>().ok())
+            .filter(|angle| angle.is_finite())
+            .unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
+/// Vrai si `style` désigne un texte riche, saisi, repris ou tourné, à
+/// composer par Typst plutôt qu'à mettre en page par `epaint`. La seule
+/// condition d'aiguillage des deux backends, pour la mesure comme pour le
+/// dessin.
 pub fn is_rich<S: plotters_backend::BackendTextStyle>(style: &S) -> bool {
     matches!(
         style.family(),
-        plotters_backend::FontFamily::Name(name) if name == RICH_FAMILY || name == LITERAL_FAMILY
+        plotters_backend::FontFamily::Name(name)
+            if name == RICH_FAMILY || name == LITERAL_FAMILY || name.starts_with(ROTATED_PREFIX)
     )
 }
+
+/// Le nom, dans le préambule de [`compile`], de la fonction qui tourne un
+/// texte riche. Un texte saisi ne peut pas l'appeler par mégarde : c'est
+/// un identifiant que rien ne documente.
+const ROTATE_CALL: &str = "#plotyx-rotate(";
 
 /// Le source Typst d'un texte riche : le texte lui-même s'il est saisi
 /// (markup voulu), [`escape`]`(text)` s'il est repris automatiquement. Les
@@ -146,10 +182,20 @@ pub fn is_rich<S: plotters_backend::BackendTextStyle>(style: &S) -> bool {
 /// vient du style posé par le pipeline. Le chemin `epaint` (backend sans
 /// Typst, repli de l'invariant 10) affiche le texte d'origine, jamais sa
 /// forme échappée.
+///
+/// Un texte tourné ([`rotated_family`]) est enveloppé dans la rotation de
+/// Typst : `#rotate(…, reflow: true)`, dont la page épouse la boîte
+/// tournée, si bien qu'un ancrage centré reste le centre du texte.
 pub fn source<'a, S: plotters_backend::BackendTextStyle>(
     text: &'a str,
     style: &S,
 ) -> std::borrow::Cow<'a, str> {
+    let angle = rotation_of(style);
+    if angle != 0.0 {
+        // Typst tourne dans le sens horaire (repère écran) : l'angle
+        // antihoraire du modèle change de signe.
+        return format!("{ROTATE_CALL}{}deg)[{text}]", -angle).into();
+    }
     match style.family() {
         plotters_backend::FontFamily::Name(name) if name == LITERAL_FAMILY => escape(text).into(),
         _ => text.into(),
@@ -363,13 +409,25 @@ pub fn compile(
     let sans_name = family_name(&sans);
     let math_name = family_name(&math);
     let [r, g, b, a] = ink;
+    // Un texte tourné porte son étai **dans** la rotation : un étai de plus
+    // à côté de la boîte tournée agrandirait la page d'un côté seulement, et
+    // son centre ne serait plus celui du texte.
+    let strut = if text.starts_with(ROTATE_CALL) {
+        ""
+    } else {
+        // `;` termine l'expression : sans lui, un texte qui commence par
+        // une lettre prolongerait l'identifiant (`#plotyx-strutPic`).
+        "#plotyx-strut;"
+    };
     let markup = format!(
         "#set page(width: auto, height: auto, margin: 0pt, fill: none)\n\
          #set text(font: \"{sans_name}\", size: {size_pt}pt, fill: rgb({r}, {g}, {b}, {a}), \
                    top-edge: \"bounds\", bottom-edge: \"bounds\")\n\
          #show math.equation: set text(font: \"{math_name}\")\n\
-         #box(width: 0pt, text(top-edge: \"ascender\", bottom-edge: \"descender\", hide[x]))\
-         {text}"
+         #let plotyx-strut = box(width: 0pt, text(top-edge: \"ascender\", \
+                                 bottom-edge: \"descender\", hide[x]))\n\
+         #let plotyx-rotate(angle, body) = rotate(angle, reflow: true, [#plotyx-strut#body])\n\
+         {strut}{text}"
     );
     compile_markup(markup, sans, math)
 }
@@ -753,6 +811,30 @@ mod tests {
     }
 
     const NOIR: Ink = [0, 0, 0, 255];
+
+    /// Un texte tourné (issue #35) : sa page épouse la boîte tournée, donc un
+    /// quart de tour échange largeur et hauteur, et le texte d'origine compile
+    /// toujours.
+    #[test]
+    fn un_texte_tourne_dun_quart_de_tour_echange_largeur_et_hauteur() {
+        use plotters::style::{IntoFont, BLACK};
+        let taille = |angle: f64| {
+            let family = rotated_family(angle);
+            let style = (family.as_str(), 16.0).into_font().color(&BLACK);
+            let (sans, math) = noto();
+            compile(&source("Pic de référence", &style), 14.0, NOIR, sans, math)
+                .expect("compilation Typst échouée")
+                .size_pt()
+        };
+        let (droit, quart) = (taille(0.0), taille(90.0));
+        assert!((droit.0 - quart.1).abs() < 0.01 && (droit.1 - quart.0).abs() < 0.01);
+        let (w, h) = taille(30.0);
+        assert!(
+            w < droit.0 && h > droit.1,
+            "30° : boîte ni plus étroite ni plus haute"
+        );
+        assert_eq!(rotated_family(0.0), RICH_FAMILY);
+    }
 
     /// L'aiguillage porte sur le rôle (la famille du style), pas sur le
     /// contenu : un texte sans `$` en style riche passe par Typst, une

@@ -553,6 +553,15 @@ fn temoin_chaque_fonctionnalite_de_r5_change_la_figure() {
                 panel.series[0].histogram_bins = plotyx_plot::BinCount::new(7).expect("7 classes");
             }
         }),
+        ("texte libre", |spec| {
+            // Au sommet du spectre A (λ = 520 nm, absorbance ≈ 0,9), dans le
+            // cadrage du panneau des spectres.
+            if let Some(panel) = spec.panels.get_mut(0) {
+                panel
+                    .annotations
+                    .push(plotyx_plot::AnnotationSpec::new("Pic", 520.0, 0.5));
+            }
+        }),
         ("grille de panneaux", |spec| {
             if let Some(panel) = spec.panels.get_mut(4) {
                 panel.column = 2;

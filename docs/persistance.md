@@ -154,6 +154,12 @@ supposée. Incrémenter aurait eu un coût sans contrepartie : *tous* les
 fichiers écrits ensuite, colonne mixte ou pas, seraient devenus illisibles par
 les lecteurs antérieurs.
 
+Même mécanisme, sans variante cette fois, pour les **textes libres** d'un
+panneau (issue #35) : `PanelSpecRecord::annotations`, un champ
+`#[serde(default)]` — un fichier plus ancien se relit sans texte, un lecteur
+plus ancien ignore le champ (il le perd à la ré-écriture). Aller-retour tenu
+par `a_non_trivial_plot_spec_round_trips_intact`.
+
 ### Pourquoi trois tableaux parallèles et pas un tableau d'énumérations
 
 `ValuesRecord::Mixed` porte `{ tags, numbers, texts }` : un octet d'étiquette

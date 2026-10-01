@@ -69,6 +69,19 @@ impl PanelTransform {
         })
     }
 
+    /// La transformation d'un panneau pour une ordonnée donnée : celle de
+    /// droite si `right` et que le panneau en a une (`y2_range`), sinon
+    /// celle de gauche — la règle des séries et des textes libres (issue
+    /// #35).
+    pub fn of_axis(panel: &DrawnPanel, right: bool) -> Option<Self> {
+        let mut transform = Self::of(panel)?;
+        if let (true, Some(range)) = (right, panel.y2_range) {
+            transform.y_range = range;
+            transform.y_scale = panel.y2_scale;
+        }
+        Some(transform)
+    }
+
     /// Vrai si le pixel donné tombe dans la zone de tracé de ce panneau.
     pub fn contains(&self, x: f64, y: f64) -> bool {
         let (ox, oy) = (self.origin.0 as f64, self.origin.1 as f64);

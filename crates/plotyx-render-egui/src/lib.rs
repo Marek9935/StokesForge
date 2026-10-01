@@ -95,6 +95,7 @@ use plotyx_plot::{PlotSpec, SeriesAxis};
 use plotyx_render::formula::FormulaCache;
 use plotyx_render::pipeline::{self};
 use plotyx_render::series;
+use plotyx_session::Revision;
 use plotyx_session::Snapshot;
 
 pub use backend::{EguiBackend, EguiBackendError};
@@ -103,7 +104,10 @@ pub use feathering::Feathering;
 // Réexportés pour que l'UI n'ait pas à déclarer une arête vers
 // `plotyx-render` pour lire ce que la figure a tracé : ce crate est déjà sa
 // façade de rendu écran.
-pub use plotyx_render::pipeline::{DrawnPanel, DrawnPlot, DEFAULT_FIGURE_SIZE};
+pub use plotyx_render::pipeline::{DrawnAnnotation, DrawnPanel, DrawnPlot, DEFAULT_FIGURE_SIZE};
+// L'adresse et le modèle d'un texte libre : l'application les manipule avec
+// les signaux de la vue ([`GraphEvent`]).
+pub use plotyx_plot::{AnnotationRef, AnnotationSpec};
 pub use plotyx_render::text::{font_definitions, font_definitions_for, TextMeasurer, TextSource};
 // Le choix de police (embed du 2026-09-13, `plotyx_render::fonts`) : une UI
 // qui veut proposer Fira/Libertinus/Noto ou une police système n'a pas à
@@ -119,6 +123,34 @@ pub use typst_screen::{FormulaTexture, TypstScreen};
 // propriétés), sans déclarer d'arête vers `plotyx-render`.
 pub use plotyx_render::formula;
 pub use view::{Framing, ViewState};
+
+/// Ce que la vue signale à l'application, à traduire en actions — textes
+/// libres (issue #35). Relevé par [`GraphView::take_events`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum GraphEvent {
+    /// Double-clic sur un texte libre : l'éditer sur place.
+    EditAnnotation(AnnotationRef),
+    /// Un texte libre a été glissé puis relâché : sa nouvelle version, à
+    /// valider en **une** modification du modèle. L'aperçu reste affiché
+    /// jusqu'à ce que le modèle change ([`GraphView::hold_preview`]).
+    AnnotationMoved {
+        /// Le texte déplacé.
+        target: AnnotationRef,
+        /// Sa version déplacée.
+        annotation: AnnotationSpec,
+    },
+}
+
+/// Un glisser de texte libre en cours.
+#[derive(Debug, Clone)]
+struct AnnotationDrag {
+    target: AnnotationRef,
+    original: AnnotationSpec,
+    /// Centre tracé du texte au début du geste, en repère de la figure.
+    start_center: Pos2,
+    /// Point d'appui du geste, en repère de la figure.
+    press: Pos2,
+}
 
 /// Distance maximale, en pixels, à laquelle un point est encore « désigné »
 /// par le curseur (tâche R7.2). Au-delà, personne n'est sous la souris.
@@ -274,6 +306,22 @@ pub struct GraphView {
     /// y accroche son menu contextuel (clic droit **sans** glisser — le
     /// glisser secondaire reste le zoom élastique).
     response: Option<egui::Response>,
+    /// Aperçu d'un texte libre en cours d'édition ou de glisser (issue
+    /// #35) : posé sur le clone du spec à la construction de la figure,
+    /// comme le zoom — jamais dans le modèle tant que l'application n'a pas
+    /// validé.
+    annotation_preview: Option<(AnnotationRef, AnnotationSpec)>,
+    /// Compteur de l'aperçu, ajouté à la génération de vue dans la clé du
+    /// cache.
+    preview_generation: u64,
+    /// Révision du modèle à laquelle l'aperçu a été validé : il s'efface dès
+    /// que le modèle a changé, pour ne pas montrer une image de l'ancienne
+    /// position entre la validation et la mise à jour du modèle.
+    preview_until: Option<Revision>,
+    annotation_drag: Option<AnnotationDrag>,
+    /// Texte libre sélectionné (clic), cible de Suppr.
+    selected_annotation: Option<AnnotationRef>,
+    events: Vec<GraphEvent>,
 }
 
 impl Default for GraphView {
@@ -327,6 +375,12 @@ impl GraphView {
             display_rect: None,
             drag_box: None,
             response: None,
+            annotation_preview: None,
+            preview_generation: 0,
+            preview_until: None,
+            annotation_drag: None,
+            selected_annotation: None,
+            events: Vec::new(),
         }
     }
 
@@ -354,6 +408,115 @@ impl GraphView {
     /// L'état de vue (zoom/pan) de cette vue — tâche R7.1.
     pub fn view(&self) -> &ViewState {
         &self.view
+    }
+
+    /// L'identifiant d'interaction de cette vue — propre à la vue, stable,
+    /// de quoi y accrocher un état d'interface (l'éditeur sur place d'un
+    /// texte libre, `plotyx-app`).
+    pub fn id(&self) -> Id {
+        self.id
+    }
+
+    /// Les signaux de la vue depuis le dernier relevé (issue #35).
+    pub fn take_events(&mut self) -> Vec<GraphEvent> {
+        std::mem::take(&mut self.events)
+    }
+
+    /// Le texte libre sélectionné, s'il y en a un.
+    pub fn selected_annotation(&self) -> Option<AnnotationRef> {
+        self.selected_annotation
+    }
+
+    /// Désélectionne le texte libre (après sa suppression, par exemple).
+    pub fn clear_annotation_selection(&mut self) {
+        self.selected_annotation = None;
+    }
+
+    /// L'aperçu d'un texte libre, s'il y en a un.
+    pub fn annotation_preview(&self) -> Option<&(AnnotationRef, AnnotationSpec)> {
+        self.annotation_preview.as_ref()
+    }
+
+    /// Pose (ou retire) l'aperçu d'un texte libre : la figure le montre à la
+    /// prochaine image, sans toucher au modèle. Un aperçu identique ne
+    /// reconstruit rien.
+    pub fn set_annotation_preview(&mut self, preview: Option<(AnnotationRef, AnnotationSpec)>) {
+        self.preview_until = None;
+        if self.annotation_preview != preview {
+            self.annotation_preview = preview;
+            self.preview_generation += 1;
+        }
+    }
+
+    /// Garde l'aperçu affiché jusqu'à ce que le modèle change — à appeler
+    /// quand l'application vient de valider l'aperçu (une modification du
+    /// modèle est en route). Sans révision connue, l'aperçu s'efface.
+    pub fn hold_preview(&mut self) {
+        match self.cache.key() {
+            Some(key) => self.preview_until = Some(key.revision),
+            None => self.set_annotation_preview(None),
+        }
+    }
+
+    /// Le texte libre sous le pixel egui `pos`, cherché dans la dernière
+    /// figure tracée.
+    pub fn annotation_at(&self, pos: Pos2) -> Option<AnnotationRef> {
+        match self.component_at(pos)? {
+            PlotComponent::Annotation { panel, index } => {
+                let drawn = self.last.as_ref()?.panels.get(panel)?;
+                Some(AnnotationRef {
+                    row: drawn.row,
+                    column: drawn.column,
+                    index,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Le point de données sous le pixel egui `pos` (ordonnée de gauche), et
+    /// la position `(row, column)` de son panneau.
+    pub fn data_at(&self, pos: Pos2) -> Option<(usize, usize, f64, f64)> {
+        let (index, transform) = self.panel_at(pos)?;
+        let figure = self.figure_position(pos)?;
+        let (x, y) = transform.pixel_to_data(figure.x as f64, figure.y as f64)?;
+        let panel = self.last.as_ref()?.panels.get(index)?;
+        Some((panel.row, panel.column, x, y))
+    }
+
+    /// Le point de données au centre de la zone de tracé du premier panneau
+    /// tracé — où poser un texte ajouté par la barre de menus.
+    pub fn panel_center_data(&self) -> Option<(usize, usize, f64, f64)> {
+        let panel = self.last.as_ref()?.panels.first()?;
+        let transform = PanelTransform::of(panel)?;
+        let center = (
+            panel.pixel_origin.0 as f64 + panel.pixel_size.0 as f64 / 2.0,
+            panel.pixel_origin.1 as f64 + panel.pixel_size.1 as f64 / 2.0,
+        );
+        let (x, y) = transform.pixel_to_data(center.0, center.1)?;
+        Some((panel.row, panel.column, x, y))
+    }
+
+    /// Où un texte libre est tracé à l'écran : centre, taille du texte droit
+    /// et rotation (degrés, antihoraire) — pour poser l'éditeur sur place.
+    pub fn annotation_screen_box(&self, target: AnnotationRef) -> Option<(Pos2, egui::Vec2, f32)> {
+        let drawn = self.drawn_annotation(target)?;
+        let display = self.display_rect?;
+        let scale = self.display_scale()?;
+        let center = display.min + egui::vec2(drawn.center.0 as f32, drawn.center.1 as f32) * scale;
+        let size = egui::vec2(drawn.size.0 as f32, drawn.size.1 as f32) * scale;
+        Some((center, size, drawn.rotation as f32))
+    }
+
+    fn drawn_annotation(&self, target: AnnotationRef) -> Option<&DrawnAnnotation> {
+        self.last
+            .as_ref()?
+            .panels
+            .iter()
+            .find(|panel| panel.row == target.row && panel.column == target.column)?
+            .annotations
+            .iter()
+            .find(|annotation| annotation.index == target.index)
     }
 
     /// `spec` tel que cette vue le montre : un clone, cadré par le zoom
@@ -472,17 +635,28 @@ impl GraphView {
         // aujourd'hui), à revoir si plusieurs vues cohabitent un jour.
         feathering::apply(&context, Feathering::during_drag(response.dragged()));
 
-        self.handle_navigation(&response, &context);
+        // Un aperçu validé s'efface dès que le modèle l'a rattrapé.
+        if self
+            .preview_until
+            .is_some_and(|revision| revision != snapshot.revision)
+        {
+            self.set_annotation_preview(None);
+        }
+
+        self.handle_navigation(&response, &context, &spec);
 
         let key = CacheKey {
             revision: snapshot.revision,
             rect: logical_rect,
             pixels_per_point: context.pixels_per_point(),
-            view_generation: self.view.generation(),
+            // Deux compteurs qui ne font que monter : leur somme change à
+            // chaque zoom comme à chaque aperçu de texte libre.
+            view_generation: self.view.generation() + self.preview_generation,
         };
         let tree = snapshot.tree.clone();
         let measurer = &self.measurer;
         let view = &self.view;
+        let preview = &self.annotation_preview;
         let formulas = &self.formulas;
         let font_choice = &self.font_choice;
         let typst_fonts = &self.typst_fonts;
@@ -491,6 +665,9 @@ impl GraphView {
             // `PlotSpec` d'origine — voir `crate::view` pour la raison.
             let mut framed = spec.clone();
             view.apply(&mut framed);
+            if let Some((target, annotation)) = preview {
+                target.set(&mut framed, annotation.clone());
+            }
             let plot = resolve_spec(&tree, &framed);
             let text = ScreenText::new(&context, measurer);
             let Some(fonts) = typst_fonts.clone() else {
@@ -604,13 +781,29 @@ impl GraphView {
     /// Molette (zoom), glissé principal (pan), glissé secondaire (rectangle
     /// de zoom élastique) et double-clic (réinitialisation) — tâches 7.1 et
     /// 7.4. Ne fait rien tant qu'aucune figure n'a encore été tracée.
-    fn handle_navigation(&mut self, response: &Response, context: &egui::Context) {
+    fn handle_navigation(&mut self, response: &Response, context: &egui::Context, spec: &PlotSpec) {
         if self.last.is_none() {
             return;
         }
 
+        // Issue #35 : un clic choisit le texte libre sous le pointeur (ou
+        // aucun), un double-clic sur un texte l'édite au lieu de
+        // réinitialiser le zoom.
+        let pointer = response.interact_pointer_pos();
+        if response.clicked() {
+            self.selected_annotation = pointer.and_then(|pos| self.annotation_at(pos));
+        }
         if response.double_clicked() {
-            self.view.reset();
+            match pointer.and_then(|pos| self.annotation_at(pos)) {
+                Some(target) => {
+                    self.selected_annotation = Some(target);
+                    self.events.push(GraphEvent::EditAnnotation(target));
+                }
+                None => self.view.reset(),
+            }
+        }
+        if self.handle_annotation_drag(response, spec) {
+            return;
         }
 
         if response.hovered() {
@@ -708,6 +901,83 @@ impl GraphView {
         }
     }
 
+    /// Glisser un texte libre (issue #35) : un glisser principal **parti
+    /// d'un texte** le déplace au lieu de faire défiler la vue. L'aperçu suit
+    /// le pointeur ; au relâchement, un seul [`GraphEvent::AnnotationMoved`].
+    /// Rend `true` si le geste est un glisser de texte (la navigation ne
+    /// doit alors rien en faire).
+    fn handle_annotation_drag(&mut self, response: &Response, spec: &PlotSpec) -> bool {
+        if response.drag_stopped_by(PointerButton::Primary) {
+            if let Some(drag) = self.annotation_drag.take() {
+                if let Some((target, annotation)) = self.annotation_preview.clone() {
+                    if annotation != drag.original {
+                        self.events
+                            .push(GraphEvent::AnnotationMoved { target, annotation });
+                        self.hold_preview();
+                    } else {
+                        self.set_annotation_preview(None);
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+        if !response.dragged_by(PointerButton::Primary) {
+            return false;
+        }
+        let Some(pos) = response.interact_pointer_pos() else {
+            return self.annotation_drag.is_some();
+        };
+        if self.annotation_drag.is_none() {
+            // Le point de départ réel, comme pour le rectangle élastique.
+            let origin = pos - response.drag_delta();
+            let Some(target) = self.annotation_at(origin) else {
+                return false;
+            };
+            let (Some(original), Some(drawn), Some(press)) = (
+                target.get(spec).cloned(),
+                self.drawn_annotation(target).copied(),
+                self.figure_position(origin),
+            ) else {
+                return false;
+            };
+            self.selected_annotation = Some(target);
+            self.annotation_drag = Some(AnnotationDrag {
+                target,
+                original,
+                start_center: Pos2::new(drawn.center.0 as f32, drawn.center.1 as f32),
+                press,
+            });
+        }
+        let Some(drag) = self.annotation_drag.clone() else {
+            return false;
+        };
+        let Some(current) = self.figure_position(pos) else {
+            return true;
+        };
+        let center = drag.start_center + (current - drag.press);
+        let right = drag.original.axis == SeriesAxis::Right;
+        let moved = self
+            .last
+            .as_ref()
+            .and_then(|last| {
+                last.panels.iter().find(|panel| {
+                    panel.row == drag.target.row && panel.column == drag.target.column
+                })
+            })
+            .and_then(|panel| PanelTransform::of_axis(panel, right))
+            .and_then(|transform| transform.pixel_to_data(center.x as f64, center.y as f64));
+        if let Some((x, y)) = moved {
+            let annotation = AnnotationSpec {
+                x,
+                y,
+                ..drag.original.clone()
+            };
+            self.set_annotation_preview(Some((drag.target, annotation)));
+        }
+        true
+    }
+
     /// Réticule, désignation de point et rectangle de zoom élastique —
     /// tâches 7.2 à 7.4. Peint directement sur `painter`, **jamais** dans le
     /// `Vec<Shape>` du cache : c'est ce qui remplace le blitting
@@ -728,6 +998,24 @@ impl GraphView {
                 Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
                 StrokeKind::Outside,
             );
+        }
+
+        // Le texte libre sélectionné : son rectangle tourné (issue #35).
+        if let Some((center, size, rotation)) = self
+            .selected_annotation
+            .and_then(|target| self.annotation_screen_box(target))
+        {
+            let (sin, cos) = rotation.to_radians().sin_cos();
+            let half = size / 2.0 + egui::vec2(3.0, 3.0);
+            let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(sx, sy)| {
+                let (u, v) = (sx * half.x, sy * half.y);
+                // Rotation antihoraire à l'écran (axe y vers le bas).
+                center + egui::vec2(u * cos + v * sin, -u * sin + v * cos)
+            });
+            painter.add(Shape::closed_line(
+                corners.to_vec(),
+                Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
+            ));
         }
 
         let pos = response.hover_pos()?;

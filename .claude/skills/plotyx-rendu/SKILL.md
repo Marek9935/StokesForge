@@ -154,6 +154,16 @@ rectangle affiché dans la clé du cache principal. L'export PDF/PNG
 n'y est pas encore branché (issue #34). Une formule qui ne compile pas s'affiche
 en texte brut, `$…$` compris — le graphe ne disparaît pas (invariant 10).
 
+## Aperçu dans la vue, une seule écriture dans le modèle
+
+Un geste continu sur la figure (glisser un texte libre, éditer sur place) ne
+modifie pas le modèle à chaque image : l'aperçu est posé sur la vue
+(`GraphView::set_annotation_preview`, appliqué au clone du spec comme le zoom,
+compteur dans `view_generation`), et l'application envoie **une** action à la
+fin — une entrée d'historique. `hold_preview` garde l'aperçu jusqu'à ce que le
+modèle l'ait rattrapé, sans image de l'ancienne position entre les deux
+(issue #35). Un futur geste du même genre suit ce motif.
+
 ## Checklist
 
 - [ ] `docs/rendu.md` lu ; `plotyx-render` chargé avant le backend

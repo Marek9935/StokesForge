@@ -737,6 +737,17 @@ fn non_trivial_spec(
             visible: true,
             position: LegendPosition::BottomLeft,
         },
+        // Issue #35 : textes libres, tous champs non défaut.
+        annotations: vec![
+            plotyx_plot::AnnotationSpec::new("Pic $lambda_\"max\"$", 1.5, 2.5),
+            plotyx_plot::AnnotationSpec {
+                axis: SeriesAxis::Right,
+                color: "#11223344".to_string(),
+                size: 22.0,
+                rotation: -30.0,
+                ..plotyx_plot::AnnotationSpec::new("*seuil*", -0.25, 1e-3)
+            },
+        ],
         ..PanelSpec::at(0, 0)
     };
     let panel_b = PanelSpec {

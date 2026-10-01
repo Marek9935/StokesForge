@@ -148,11 +148,15 @@ PlotSpec
     ├── title
     ├── bottom / left / right / top → AxisSpec  (échelle, limites, grille)
     ├── legend : LegendSpec
-    └── series : SeriesSpec
-        ├── y : NodeId, x / x_error / y_error : Option<NodeId>
-        ├── plot_type : PlotType
-        ├── line : LineSpec, symbol : SymbolSpec
-        └── axis : SeriesAxis    (gauche ou droite)
+    ├── series : SeriesSpec
+    │   ├── y : NodeId, x / x_error / y_error : Option<NodeId>
+    │   ├── plot_type : PlotType
+    │   ├── line : LineSpec, symbol : SymbolSpec
+    │   └── axis : SeriesAxis    (gauche ou droite)
+    └── annotations : AnnotationSpec   (textes libres, issue #35)
+        ├── text                  (markup Typst)
+        ├── x, y + axis : SeriesAxis   (centre, en données)
+        └── color, size, rotation (vide = automatique ; degrés, antihoraire)
 ```
 
 Une série ne porte **aucune donnée** et **aucun nom de colonne** — seulement
@@ -165,6 +169,12 @@ renommer ou déplacer une colonne ne casse rien.
 - Le style n'emprunte son vocabulaire à aucun moteur : des énumérations
   nommées (`LineStyle`, `SymbolShape`), dont la table de traduction vit dans
   le renderer.
+- `AnnotationSpec` : un texte libre **ancré aux données** — son centre est le
+  point `(x, y)` de l'ordonnée `axis`, il suit donc le zoom ; hors du cadrage,
+  il n'est pas tracé. `AnnotationRef { row, column, index }` l'adresse dans un
+  `PlotSpec` (`get`, `set` qui remplace ou ajoute, `remove`) : pas de commande
+  dédiée, tout passe par `SetPlotSpec`. `PlotSpec::set_text_color` (thème)
+  écrit aussi leur couleur.
 - `AxisSpec::has_explicit_range` : un cadrage explicite prime sur les données
   calculées. C'est le levier — déjà présent, rien n'a été inventé pour lui —
   sur lequel le zoom/pan de l'écran s'appuie ([`rendu.md`](rendu.md)).

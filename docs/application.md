@@ -690,6 +690,22 @@ en permanence dès qu'un graphe était actif. Son état (quel graphe, quel
 onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
 par `Action::OpenPlotSettings { graph, tab, axis }`.
 
+**Textes libres** (issue #35) : clic droit dans une zone de tracé →
+« Ajouter un texte » au point cliqué, ou « Graphique » → « Ajouter un texte »
+(au centre du premier panneau). Le texte s'édite **sur place** : un champ posé
+sur le texte, et au-dessus une barre couleur / taille / rotation
+(`app::annotation_editor_ui`) ; Entrée ou clic ailleurs valide, Échap annule.
+Double-clic ou clic droit → « Modifier le texte » rouvrent l'éditeur ; un clic
+sélectionne (contour bleu), Suppr ou « Supprimer » le retire ; un glisser le
+déplace. L'aperçu vit dans la vue (`GraphView::set_annotation_preview`) et
+l'état de l'éditeur dans la mémoire d'egui, sous l'identifiant de la vue : même
+écriture pour la fenêtre flottante et la fenêtre détachée, rien dans
+`AppState`. Chaque geste validé est **une** `Action::SetAnnotation` ou
+`RemoveAnnotation`, donc un `SetPlotSpec`, une entrée d'historique. Les couleurs
+enregistrées sont publiées chaque image dans la mémoire d'egui
+(`publish_saved_colors`) pour que le sélecteur de l'éditeur les propose aussi
+dans une fenêtre détachée.
+
 **Exporter le graphe** (issue #34) : menu « Graphique » → « Exporter le
 graphe… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
 compris dans une fenêtre détachée). Un sélecteur `rfd` (SVG, PDF, PNG) propose
