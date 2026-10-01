@@ -1066,6 +1066,44 @@ colonne pour un même champ ; les intercepter aussi aurait empêché d'atteindre
 les champs suivants de cette colonne, en ajoutant une colonne à chaque
 pression plutôt que d'y circuler.
 
+### Tab et flèches appartiennent à la grille (#38)
+
+egui traite Tab et les flèches **au début de l'image** (`Focus::begin_pass`)
+pour déplacer son propre focus de widget en widget, sauf si le widget
+focalisé les réclame par un `EventFilter`. La grille les lisait par
+`key_pressed`, qui ne retire rien : egui donnait le focus au premier widget
+focalisable venu (souvent hors de la grille), et dès qu'un widget avait le
+focus la garde des raccourcis (`egui_wants_keyboard_input`) coupait net la
+sélection de la grille.
+Même chose en édition : le `TextEdit` d'une cellule ou d'un champ d'en-tête
+perdait le focus sur Tab.
+
+La règle, dans `grid_contents` (donc la même pour le classeur flottant et le
+classeur détaché, tous deux par `book_contents`) :
+
+- **Un ancrage de focus par grille** (`grid_focus_id`) : un widget posé sur le
+  rectangle de la grille, focalisable *seulement tant qu'il a le focus* (sinon
+  un Tab sans focus y entrerait de lui-même), qui porte le filtre
+  `GRID_KEYS` (Tab, flèches ; pas Échap, qui rend le focus). La grille le
+  réclame (`claim_grid_focus`) à un appui ou un relâchement dans son
+  rectangle, et à la fin d'une édition qui a rendu le focus à personne.
+  egui le retire seul à un clic ailleurs : Tab y reprend alors son rôle
+  habituel, sans toucher la sélection.
+- **En édition**, les champs de cellule et d'en-tête posent le même filtre
+  (`TextEdit::event_filter(GRID_KEYS)`) : Tab ne les fait plus perdre le
+  focus, ils le lisent eux-mêmes (`tab_pressed`), valident, rendent le focus
+  et laissent la grille le reprendre.
+- **Garde des raccourcis** : `focus_free` (aucun focus, ou celui de cette
+  grille). Le reste de l'application, qui testait `focused().is_some()` pour
+  savoir si l'on tape dans un champ (Entrée d'un dialogue, Suppr d'une
+  annotation), passe par `keyboard_focus_outside_grid`.
+
+Limite : le filtre ne s'applique qu'à l'image qui suit la prise de focus
+(`set_focus_lock_filter` exige `had_focus_last_frame`) — une touche tombant
+dans l'image même du clic n'est pas une frappe réaliste. Verrouillé par
+`app::grid_keyboard_tests`. Le focus d'egui ne se voit pas dans une capture
+(`PLOTYX_APP_SCREENSHOT`) : à confirmer sur une vraie fenêtre.
+
 ### Alignement du corps : nombres à droite, texte à gauche
 
 `cell_widget` aligne chaque cellule du **corps** de la grille comme un

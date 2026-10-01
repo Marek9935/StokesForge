@@ -231,6 +231,17 @@ vérifier quand une action est ajoutée :
   widgets : Ctrl+Z pendant la saisie d'une cellule annule la dernière commande
   du modèle, pas la dernière frappe. C'est voulu (comportement de tableur).
 
+- **Tab, Maj+Tab et les flèches appartiennent à la grille** (#38) : egui les
+  prend au début de l'image pour déplacer son focus, et `key_pressed` n'y
+  change rien. Un raccourci de grille qui lit l'une de ces touches ne marche
+  que parce que `grid_contents` tient le focus clavier par un ancrage portant
+  `GRID_KEYS` ; un nouveau champ de saisie dans la grille doit poser
+  `TextEdit::event_filter(GRID_KEYS)` et lire Tab lui-même. Pour savoir si
+  l'on « tape dans un champ », utiliser `keyboard_focus_outside_grid`, jamais
+  `focused().is_some()` ni `egui_wants_keyboard_input` (la grille focalisée les
+  rendrait vrais). Voir `docs/application.md`, « Tab et flèches appartiennent
+  à la grille ».
+
 ### Ajouter une entrée de menu contextuel
 
 Le menu contextuel de la grille suit trois règles qu'il ne faut pas casser :

@@ -4997,7 +4997,9 @@ fn header_field_widget(
             let response = ui.add(
                 egui::TextEdit::singleline(&mut edit.buffer)
                     .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY),
+                    .desired_width(f32::INFINITY)
+                    // #38 : même filtre que la cellule — voir `GRID_KEYS`.
+                    .event_filter(GRID_KEYS),
             );
             // Même piège que [`cell_widget`] : lire `lost_focus()` avant de
             // décider de redemander le focus, sous peine de se le redonner
@@ -5007,7 +5009,14 @@ fn header_field_widget(
             if !response.has_focus() && !lost_focus {
                 response.request_focus();
             }
-            if lost_focus {
+            // Tab ne fait plus perdre le focus au champ (filtre `GRID_KEYS`) :
+            // même lecture explicite que dans [`cell_widget`].
+            let tab_pressed =
+                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab));
+            if tab_pressed {
+                response.surrender_focus();
+            }
+            if lost_focus || tab_pressed {
                 if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                     state.cancel_header_edit();
                 } else {
@@ -6606,6 +6615,54 @@ fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Ac
     }
 }
 
+/// Touches que la grille réclame à egui tant qu'elle a le focus clavier (#38) :
+/// Tab et les flèches. egui les traite au **début** de l'image
+/// (`Focus::begin_pass`) pour déplacer son propre focus de widget en widget,
+/// sauf si le widget focalisé les réclame par ce filtre — les lire ensuite par
+/// `key_pressed`, comme le faisait la grille, ne retire rien : la sélection
+/// avançait (ou pas), et le focus partait quand même dans le reste de
+/// l'interface. Échap reste à egui : il rend le focus.
+const GRID_KEYS: egui::EventFilter = egui::EventFilter {
+    tab: true,
+    horizontal_arrows: true,
+    vertical_arrows: true,
+    escape: false,
+};
+
+/// Clé mémoire egui du dernier ancrage de focus qu'une grille a réclamé
+/// ([`claim_grid_focus`]) — de quoi reconnaître, depuis le reste de
+/// l'application, que le focus clavier est à la grille et non à un champ texte.
+fn grid_focus_owner_key() -> egui::Id {
+    egui::Id::new("plotyx_grid_focus_owner")
+}
+
+/// Identifiant du widget d'ancrage du focus de la grille de `sheet` — un par
+/// feuille et par `Ui`, pour que le classeur flottant et sa copie détachée
+/// ne se disputent pas le même identifiant.
+fn grid_focus_id(ui: &egui::Ui, sheet: NodeId) -> egui::Id {
+    ui.id().with(("grid_focus", sheet.raw()))
+}
+
+/// La grille prend le focus clavier : sa sélection reçoit désormais Tab et les
+/// flèches (voir [`GRID_KEYS`]).
+fn claim_grid_focus(ctx: &egui::Context, anchor: egui::Id) {
+    ctx.memory_mut(|memory| memory.request_focus(anchor));
+    ctx.data_mut(|data| data.insert_temp(grid_focus_owner_key(), anchor));
+}
+
+/// Vrai si un widget **autre qu'une grille** a le focus clavier — typiquement
+/// un champ texte, qui garde alors Entrée, Suppr, Tab… Remplace le test
+/// `focused().is_some()` partout où la grille, elle, peut légitimement tenir le
+/// focus (#38) : sans lui, une grille focalisée ferait passer ses voisins pour
+/// des champs en cours de saisie.
+fn keyboard_focus_outside_grid(ctx: &egui::Context) -> bool {
+    let Some(focused) = ctx.memory(|memory| memory.focused()) else {
+        return false;
+    };
+    let owner: Option<egui::Id> = ctx.data(|data| data.get_temp(grid_focus_owner_key()));
+    owner != Some(focused)
+}
+
 /// La grille, en lignes **virtualisées** : seules les lignes visibles sont
 /// construites, sans quoi une feuille d'un million de lignes bloquerait
 /// chaque image. Scopée à `sheet` — voir [`book_contents`], son seul
@@ -6654,6 +6711,31 @@ fn grid_contents(
     // justement tout cet espace disponible : sert de référence à la zone de
     // prise du glisser-déposer de colonnes plus bas ([`grid_grip_side`]).
     let grid_rect = ui.available_rect_before_wrap();
+    // Ancrage du focus clavier de la grille (#38) : un widget focalisable
+    // **seulement tant qu'il a le focus** (sinon un Tab tombant sur un
+    // clavier sans focus l'y ferait entrer de lui-même). Il porte le filtre
+    // d'événements [`GRID_KEYS`] — voir la doc de cette constante. La grille
+    // le réclame par [`claim_grid_focus`] après un appui dans son rectangle
+    // ou la fin d'une édition (plus bas) ; egui le lui retire seul à un appui
+    // ailleurs ou si la grille cesse d'être peinte. Le filtre n'est pris en
+    // compte qu'à l'image qui suit la prise de focus (`set_focus_lock_filter`
+    // exige `had_focus_last_frame`) : un Tab dans l'image même du clic n'est
+    // pas une frappe réaliste.
+    let focus_anchor = grid_focus_id(ui, sheet);
+    let anchor_focused = ui.memory(|memory| memory.has_focus(focus_anchor));
+    ui.interact(
+        grid_rect,
+        focus_anchor,
+        if anchor_focused {
+            egui::Sense::focusable_noninteractive()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    if anchor_focused {
+        ui.memory_mut(|memory| memory.set_focus_lock_filter(focus_anchor, GRID_KEYS));
+    }
+    let was_editing = state.editing().is_some() || state.header_editing().is_some();
     let mut last_column_right = grid_rect.left();
     let header_height = stacked_header_height(metadata_row_visible(ui.ctx()));
     let mut table = TableBuilder::new(ui)
@@ -6785,6 +6867,32 @@ fn grid_contents(
         }
     }
 
+    // Prise du focus clavier (#38), **avant** le bloc de raccourcis, pour que
+    // la touche qui suit un clic soit déjà celle de la grille. Deux cas : un
+    // appui dans le rectangle de la grille (clic, glisser, menu contextuel),
+    // sauf s'il ouvre ou prolonge une édition, dont le champ texte réclame le
+    // focus lui-même ; et la fin d'une édition qui a rendu le focus à
+    // personne (Entrée, Tab — voir [`cell_widget`] —, Échap) : sans lui, le
+    // Tab suivant repartirait dans le reste de l'interface. Un focus tenu par
+    // un autre widget (clic dans un autre champ) n'est jamais repris.
+    let editing_now = state.editing().is_some() || state.header_editing().is_some();
+    // Appui **ou** relâchement : egui rend le focus de l'ancrage au clic
+    // (`SurrenderFocusOn::Clicks`, son réglage par défaut), donc au
+    // relâchement, parce que l'ancrage n'est pas sous le curseur ; l'appui
+    // seul ne suffit pas pour un clic simple.
+    let pressed_in_grid = ui
+        .input(|input| input.pointer.any_pressed() || input.pointer.any_released())
+        && ui.rect_contains_pointer(grid_rect);
+    let edit_just_ended =
+        was_editing && !editing_now && ui.ctx().memory(|memory| memory.focused()).is_none();
+    if !editing_now && (pressed_in_grid || edit_just_ended) {
+        claim_grid_focus(ui.ctx(), focus_anchor);
+    }
+    let focus_free = ui
+        .ctx()
+        .memory(|memory| memory.focused())
+        .is_none_or(|focused| focused == focus_anchor);
+
     // Raccourcis clavier de la grille — voir la doc de tête de cette
     // fonction pour la garde d'édition.
     //
@@ -6806,14 +6914,15 @@ fn grid_contents(
     //
     // #17 : même vol, cette fois dans le dialogue des propriétés du graphe —
     // la liste de conditions par fenêtre ne pouvait que rater la suivante.
-    // `wants_keyboard_input` (un champ texte a le focus, où que ce soit dans
-    // le `Context`) couvre d'un coup ce dialogue, l'import et tout futur
-    // dialogue ; `import_state` reste pour le cas d'un import ouvert sans
-    // champ focalisé.
+    // `focus_free` (aucun widget n'a le focus clavier, ou c'est l'ancrage de
+    // **cette** grille — voir `GRID_KEYS`, #38 ; `egui_wants_keyboard_input`
+    // ne le distinguait pas d'un champ texte) couvre d'un coup ce dialogue,
+    // l'import et tout futur dialogue ; `import_state` reste pour le cas d'un
+    // import ouvert sans champ focalisé.
     if state.editing().is_none()
         && state.header_editing().is_none()
         && state.import_state().is_none()
-        && !ui.ctx().egui_wants_keyboard_input()
+        && focus_free
     {
         // Taper sur une cellule ou un champ d'en-tête sélectionné (simple
         // clic, pas encore en édition) démarre l'édition en remplaçant tout
@@ -7472,7 +7581,7 @@ fn annotation_interactions(
         None => {
             // Suppr retire le texte sélectionné, quand aucun champ n'a le
             // focus (sinon la touche appartient à la saisie).
-            let typing = ui.ctx().memory(|memory| memory.focused().is_some());
+            let typing = keyboard_focus_outside_grid(ui.ctx());
             if let Some(target) = view.selected_annotation() {
                 if !typing
                     && ui.ctx().input_mut(|input| {
@@ -8088,7 +8197,7 @@ fn modal_dialog_with(
     let escape = !popup_open
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     let enter = !popup_open
-        && ctx.memory(|memory| memory.focused().is_none())
+        && !keyboard_focus_outside_grid(ctx)
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let outcome = if header_actions.close || escape {
         DialogOutcome::Cancel
@@ -8892,7 +9001,11 @@ fn cell_widget(
             let response = ui.add(
                 egui::TextEdit::singleline(&mut edit.buffer)
                     .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY),
+                    .desired_width(f32::INFINITY)
+                    // #38 : Tab ne doit pas faire sortir le focus du champ
+                    // vers le reste de l'interface — voir `GRID_KEYS` ; c'est
+                    // ce widget qui le lit (`tab_pressed`) pour valider.
+                    .event_filter(GRID_KEYS),
             );
             // `Response::has_focus`/`lost_focus` sont recalculés à chaque
             // appel à partir de l'état *courant* du focus (pas un instantané
@@ -8914,7 +9027,16 @@ fn cell_widget(
             if !response.has_focus() && !lost_focus {
                 response.request_focus();
             }
-            if !lost_focus {
+            // Avec le filtre `GRID_KEYS`, Tab ne fait plus perdre le focus au
+            // champ (c'était lui, auparavant, qui signalait la validation) :
+            // on lit la touche, et on rend le focus nous-mêmes — la grille le
+            // reprend à la fin de l'édition (`grid_contents`).
+            let tab_pressed =
+                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab));
+            if tab_pressed {
+                response.surrender_focus();
+            }
+            if !lost_focus && !tab_pressed {
                 return;
             }
             // Échap referme la saisie sans rien écrire ; toute autre perte
@@ -12268,5 +12390,345 @@ mod graph_layout_tests {
             "« Afficher » doit aussi garantir que chaque onglet est ouvert, open_requests={:?}",
             open_requests.borrow()
         );
+    }
+}
+
+/// #38 : Tab et les flèches appartiennent à la grille. egui les traite au
+/// début de l'image (`Focus::begin_pass`) pour déplacer **son** focus, sauf si
+/// le widget focalisé les réclame par un `EventFilter` : sans filtre, Tab
+/// faisait sortir le focus du tableau vers le reste de l'interface au lieu
+/// d'avancer la sélection de cellule en cellule.
+///
+/// Banc sans fenêtre : un bouton voisin (« avant », premier widget focalisable
+/// venu de l'image, donc celui qu'egui choisirait sur un Tab) puis un
+/// classeur. [`book_contents`] est le contenu commun du classeur flottant et
+/// du classeur détaché : tester ce chemin couvre les deux fenêtres.
+#[cfg(test)]
+mod grid_keyboard_tests {
+    use super::*;
+    use plotyx_core::{Column, Project};
+    use plotyx_session::Session;
+
+    struct Banc {
+        _session: Session,
+        context: egui::Context,
+        state: AppState,
+        actions: Vec<Action>,
+        book: NodeId,
+        sheet: NodeId,
+        columns: Vec<NodeId>,
+        voisin_focalise: bool,
+        dernier: Option<egui::FullOutput>,
+    }
+
+    impl Banc {
+        /// Trois colonnes de quatre lignes, valeurs 101..104, 201..204, 301..304.
+        fn new() -> Self {
+            let mut project = Project::new("Clavier").unwrap();
+            let root = project.root();
+            let book = project.add_empty_workbook(root, None).unwrap();
+            let sheet = project.add_worksheet(book, None).unwrap();
+            let columns = (1..=3)
+                .map(|c| {
+                    let valeurs: Vec<f64> = (1..=4).map(|r| f64::from(c * 100 + r)).collect();
+                    project
+                        .add_column(sheet, None, None, Column::from_f64(&valeurs))
+                        .unwrap()
+                })
+                .collect();
+            let session = Session::spawn(project, None).unwrap();
+            let state = AppState::new(session.handle(), "test.plotyx".to_string()).unwrap();
+            let context = egui::Context::default();
+            context.set_fonts(plotyx_render_egui::font_definitions());
+            theme::install(&context);
+            let mut banc = Banc {
+                _session: session,
+                context,
+                state,
+                actions: Vec::new(),
+                book,
+                sheet,
+                columns,
+                voisin_focalise: false,
+                dernier: None,
+            };
+            for _ in 0..3 {
+                banc.image(Vec::new());
+            }
+            banc
+        }
+
+        fn image(&mut self, events: Vec<egui::Event>) {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(700.0, 420.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            self.actions.clear();
+            let (state, actions, book) = (&mut self.state, &mut self.actions, self.book);
+            let mut voisin = false;
+            let mut sortie = self.context.run_ui(input, |ui| {
+                voisin = ui.button("avant").has_focus();
+                book_contents(ui, state, actions, book);
+            });
+            self.voisin_focalise = voisin;
+            sortie.textures_delta.clear();
+            self.dernier = Some(sortie);
+        }
+
+        fn touche(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
+            // `ModifiersChanged` explicite : un `Event::Key` ne met pas à jour
+            // `InputState::modifiers`, que la grille lit pour Maj.
+            let touche = |pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers,
+            };
+            self.image(vec![egui::Event::ModifiersChanged(modifiers), touche(true)]);
+            self.image(vec![
+                touche(false),
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ]);
+            // Une image de plus, sans événement : le focus rendu à un autre
+            // widget par `end_pass` se verrait ici.
+            self.image(Vec::new());
+        }
+
+        fn tab(&mut self) {
+            self.touche(egui::Key::Tab, egui::Modifiers::NONE);
+        }
+
+        fn maj_tab(&mut self) {
+            self.touche(egui::Key::Tab, egui::Modifiers::SHIFT);
+        }
+
+        /// Clic gauche sur la cellule peinte portant `texte`, comme à la souris.
+        fn clic_sur(&mut self, texte: &str) {
+            let position = self
+                .dernier
+                .as_ref()
+                .unwrap()
+                .shapes
+                .iter()
+                .find_map(|peint| match &peint.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == texte => {
+                        Some(shape.pos + shape.galley.rect.center().to_vec2())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("aucune cellule peinte ne porte {texte:?}"));
+            self.image(vec![egui::Event::PointerMoved(position)]);
+            for pressed in [true, false] {
+                self.image(vec![egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            // Laisse passer les images de retombée (focus, relâchement).
+            self.image(Vec::new());
+        }
+
+        fn curseur(&self) -> Option<GridCursor> {
+            self.state
+                .selection(self.sheet)
+                .and_then(Selection::grid_cursor)
+        }
+    }
+
+    #[test]
+    fn tab_hors_edition_avance_la_selection_sans_sortir_de_la_grille() {
+        let mut banc = Banc::new();
+        banc.clic_sur("101");
+        assert_eq!(
+            banc.curseur(),
+            Some(GridCursor::Data(banc.columns[0], 0)),
+            "le clic sélectionne la cellule"
+        );
+        banc.tab();
+        assert_eq!(
+            banc.curseur(),
+            Some(GridCursor::Data(banc.columns[1], 0)),
+            "Tab avance d'une colonne"
+        );
+        assert!(
+            !banc.voisin_focalise,
+            "Tab a fait sortir le focus de la grille vers le widget voisin"
+        );
+        banc.tab();
+        assert_eq!(banc.curseur(), Some(GridCursor::Data(banc.columns[2], 0)));
+        banc.maj_tab();
+        assert_eq!(
+            banc.curseur(),
+            Some(GridCursor::Data(banc.columns[1], 0)),
+            "Maj+Tab recule"
+        );
+        assert!(!banc.voisin_focalise);
+    }
+
+    #[test]
+    fn les_fleches_deplacent_la_selection_et_gardent_le_focus_dans_la_grille() {
+        let mut banc = Banc::new();
+        banc.clic_sur("102");
+        for (key, attendu) in [
+            (egui::Key::ArrowRight, GridCursor::Data(banc.columns[1], 1)),
+            (egui::Key::ArrowDown, GridCursor::Data(banc.columns[1], 2)),
+            (egui::Key::ArrowLeft, GridCursor::Data(banc.columns[0], 2)),
+            (egui::Key::ArrowUp, GridCursor::Data(banc.columns[0], 1)),
+        ] {
+            banc.touche(key, egui::Modifiers::NONE);
+            assert_eq!(banc.curseur(), Some(attendu), "{key:?}");
+            assert!(!banc.voisin_focalise, "{key:?} a déplacé le focus egui");
+        }
+    }
+
+    #[test]
+    fn tab_pendant_l_edition_valide_et_garde_le_focus_dans_la_grille() {
+        let mut banc = Banc::new();
+        banc.clic_sur("101");
+        // Une frappe sur une cellule sélectionnée ouvre l'édition.
+        banc.image(vec![egui::Event::Text("7".to_string())]);
+        banc.image(Vec::new());
+        banc.image(Vec::new());
+        assert!(banc.state.editing().is_some(), "la frappe ouvre l'édition");
+        banc.tab();
+        assert!(banc.state.editing().is_none(), "Tab valide la saisie");
+        assert_eq!(
+            banc.curseur(),
+            Some(GridCursor::Data(banc.columns[1], 0)),
+            "Tab valide *et* avance"
+        );
+        // Et la grille garde la main pour les Tab suivants, hors édition.
+        banc.tab();
+        assert_eq!(
+            banc.curseur(),
+            Some(GridCursor::Data(banc.columns[2], 0)),
+            "après la validation, Tab continue d'avancer dans la grille"
+        );
+        assert!(!banc.voisin_focalise);
+    }
+
+    #[test]
+    fn tab_pendant_l_edition_d_un_champ_d_en_tete_valide_et_reste_dans_la_grille() {
+        let mut banc = Banc::new();
+        let (sheet, colonne) = (banc.sheet, banc.columns[0]);
+        banc.state
+            .select_header_field(sheet, colonne, HeaderField::LongName);
+        banc.state.begin_header_edit(colonne, HeaderField::LongName);
+        for _ in 0..3 {
+            banc.image(Vec::new());
+        }
+        assert!(banc.state.header_editing().is_some());
+        banc.tab();
+        assert!(banc.state.header_editing().is_none(), "Tab valide le champ");
+        assert_eq!(
+            banc.curseur(),
+            Some(GridCursor::Header(banc.columns[1], HeaderField::LongName)),
+            "Tab valide *et* passe à la colonne suivante"
+        );
+        banc.tab();
+        assert_eq!(
+            banc.curseur(),
+            Some(GridCursor::Header(banc.columns[2], HeaderField::LongName)),
+            "puis continue hors édition"
+        );
+        assert!(!banc.voisin_focalise);
+    }
+
+    /// Le focus de la grille ne se retient pas : un clic ailleurs le rend, et
+    /// Tab reprend alors son rôle d'egui (déplacer le focus), sans toucher la
+    /// sélection de la grille.
+    #[test]
+    fn un_clic_hors_de_la_grille_lui_retire_tab() {
+        let mut banc = Banc::new();
+        banc.clic_sur("101");
+        assert!(!keyboard_focus_outside_grid(&banc.context));
+        assert!(
+            banc.context.memory(|memory| memory.focused()).is_some(),
+            "un clic dans la grille lui donne le focus clavier"
+        );
+        banc.clic_sur("avant");
+        let avant = banc.curseur();
+        banc.tab();
+        assert_eq!(
+            banc.curseur(),
+            avant,
+            "Tab, hors de la grille, ne déplace pas sa sélection"
+        );
+    }
+
+    /// Le focus de la grille n'est pas un champ texte pour le reste de
+    /// l'application (Entrée d'un dialogue, Suppr d'une annotation) : seul un
+    /// autre widget focalisé l'est.
+    #[test]
+    fn le_focus_de_la_grille_n_est_pas_un_champ_en_cours_de_saisie() {
+        let mut banc = Banc::new();
+        assert!(!keyboard_focus_outside_grid(&banc.context), "aucun focus");
+        banc.clic_sur("101");
+        assert!(
+            !keyboard_focus_outside_grid(&banc.context),
+            "focus de la grille"
+        );
+        banc.context
+            .memory_mut(|memory| memory.request_focus(egui::Id::new("champ_etranger")));
+        assert!(keyboard_focus_outside_grid(&banc.context), "focus étranger");
+    }
+
+    /// Le focus clavier d'un champ étranger à la grille (ici un champ texte
+    /// d'un dialogue) reste le sien : ni Tab ni flèche ne déplacent la
+    /// sélection.
+    #[test]
+    fn un_champ_etranger_focalise_garde_tab_et_les_fleches() {
+        let mut banc = Banc::new();
+        banc.clic_sur("101");
+        let champ = egui::Id::new("champ_etranger");
+        let avant = banc.curseur();
+        let mut texte = String::new();
+        for key in [egui::Key::ArrowRight, egui::Key::Tab] {
+            // Trois images pour que le champ soit posé et focalisé, puis la touche.
+            for frame in 0..4 {
+                let events = if frame == 3 {
+                    vec![egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }]
+                } else {
+                    Vec::new()
+                };
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(700.0, 420.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                let (state, actions, book) = (&mut banc.state, &mut banc.actions, banc.book);
+                let mut sortie = banc.context.run_ui(input, |ui| {
+                    egui::Area::new(egui::Id::new("dialogue")).show(ui.ctx(), |ui| {
+                        ui.add(egui::TextEdit::singleline(&mut texte).id(champ));
+                    });
+                    if frame < 3 {
+                        ui.ctx().memory_mut(|memory| memory.request_focus(champ));
+                    }
+                    book_contents(ui, state, actions, book);
+                });
+                sortie.textures_delta.clear();
+            }
+            assert_eq!(
+                banc.curseur(),
+                avant,
+                "{key:?} : la grille a volé la touche au champ texte focalisé"
+            );
+        }
     }
 }
