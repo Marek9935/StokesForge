@@ -376,10 +376,10 @@ use crate::state::{
     active_graph, drop_payload_action, export_file_name, node_title_in, series_list_label, Action,
     ActiveTabKind, AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination,
     ImportLineAction, ImportStep, MoveDirection, PlotAxis, PlotSettings, PlotSettingsTab,
-    PlotTarget, ProjectTreeNode, SaveTarget, WindowKind,
+    PlotTarget, ProjectTreeNode, SaveTarget, ShapeOrder, WindowKind,
 };
 use crate::theme;
-use crate::toolbar::{ToolbarId, ToolbarLayout, ToolbarState};
+use crate::toolbar::{BarEnv, ToolbarId, ToolbarLayout, ToolbarRequest, ToolbarState};
 use crate::tr;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 use plotyx_render_egui::{AxisSide, PlotComponent};
@@ -454,7 +454,7 @@ pub const SHORTCUT_IMPORT_QWERTY: egui::KeyboardShortcut = egui::KeyboardShortcu
 );
 /// Rappel affiché dans le menu : le caractère, pas le nom de la touche
 /// physique.
-const SHORTCUT_IMPORT_TEXT: &str = "Ctrl+\"";
+pub(crate) const SHORTCUT_IMPORT_TEXT: &str = "Ctrl+\"";
 /// Ctrl+Entrée — exécuter le script de la console.
 pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
@@ -1414,6 +1414,24 @@ impl PlotyxApp {
                             ui.close();
                         }
                         ui.separator();
+                        // Objets graphiques (issue #76) : l'ordre
+                        // d'empilement et la suppression de l'objet
+                        // sélectionné ; les outils de tracé sont dans la barre
+                        // d'outils, comme l'outil Texte.
+                        let object = self
+                            .graph_views
+                            .get(&graph)
+                            .and_then(GraphView::selected_shape);
+                        if let Some(view) = self.graph_views.get_mut(&graph) {
+                            let tree = self.state.tree().clone();
+                            match object {
+                                Some(object) => {
+                                    shape_order_buttons(ui, view, &tree, graph, object, actions)
+                                }
+                                None => disabled_shape_order_buttons(ui),
+                            }
+                        }
+                        ui.separator();
                         if ui
                             .add(
                                 egui::Button::new(tr!("action-export-graph"))
@@ -1568,6 +1586,214 @@ impl PlotyxApp {
         if let Err(err) = Preferences::load().save_toolbars(layout) {
             self.state
                 .notice(tr!("status-toolbars-not-saved", detail = err.to_string()));
+        }
+    }
+
+    /// Ce que la barre contextuelle montre pour la fenêtre au premier plan.
+    fn tools_context(&self, active_tab: Option<Tab>) -> crate::toolbar::ToolsContext {
+        use crate::toolbar::ToolsContext;
+        match active_tab_kind(active_tab) {
+            ActiveTabKind::Graph(graph) => ToolsContext::Graph {
+                graph,
+                tool: self
+                    .graph_views
+                    .get(&graph)
+                    .map_or_else(Default::default, GraphView::tool),
+            },
+            ActiveTabKind::Book(book) => {
+                let sheet = self.state.selected_sheet_in(book);
+                let columns = sheet
+                    .and_then(|sheet| {
+                        self.state
+                            .selection(sheet)
+                            .map(|selection| selection.columns(self.state.tree(), sheet))
+                    })
+                    .unwrap_or_default();
+                ToolsContext::Book {
+                    book,
+                    sheet,
+                    columns,
+                }
+            }
+            _ => ToolsContext::None,
+        }
+    }
+
+    /// Sur quoi la barre de format agit : un champ en édition sur place, sinon
+    /// un texte libre sélectionné, sinon rien (issue #63).
+    fn format_target(
+        &self,
+        ctx: &egui::Context,
+        active_tab: Option<Tab>,
+    ) -> crate::toolbar::FormatTarget {
+        use crate::toolbar::FormatTarget;
+        let Some(view) = active_graph(active_tab_kind(active_tab))
+            .and_then(|graph| self.graph_views.get(&graph))
+        else {
+            return FormatTarget::None;
+        };
+        let editing = ctx.data(|data| {
+            data.get_temp::<TextEditor>(text_editor_id(view)).is_some()
+                || data
+                    .get_temp::<AnnotationEditor>(annotation_editor_id(view))
+                    .is_some()
+        });
+        if editing {
+            FormatTarget::Field
+        } else if view.selected_annotation().is_some() {
+            FormatTarget::Block
+        } else {
+            FormatTarget::None
+        }
+    }
+
+    /// L'objet graphique sélectionné du graphe au premier plan, avec son
+    /// adresse (issue #64).
+    fn selected_object(
+        &self,
+        active_tab: Option<Tab>,
+    ) -> Option<(
+        NodeId,
+        plotyx_render_egui::ShapeRef,
+        plotyx_render_egui::ShapeSpec,
+    )> {
+        let graph = active_graph(active_tab_kind(active_tab))?;
+        let target = self.graph_views.get(&graph)?.selected_shape()?;
+        let shape = crate::state::current_plot_spec(self.state.tree(), graph)
+            .and_then(|spec| target.get(&spec).cloned())?;
+        Some((graph, target, shape))
+    }
+
+    /// Ce que la barre de format d'objet montre.
+    fn object_format_state(
+        &self,
+        active_tab: Option<Tab>,
+    ) -> Option<crate::toolbar::ObjectFormatState> {
+        let (_, _, shape) = self.selected_object(active_tab)?;
+        Some(crate::toolbar::ObjectFormatState {
+            closed: shape.kind.is_closed(),
+            line_color: shape.line_color,
+            fill_color: shape.fill_color,
+            line_width: shape.line_width,
+        })
+    }
+
+    /// Règle l'objet sélectionné : une seule action annulable, comme un
+    /// déplacement (`ObjectFormat::apply` dit si quelque chose a changé).
+    fn format_object(
+        &mut self,
+        format: &crate::object_format::ObjectFormat,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        let Some((graph, target, mut shape)) = self.selected_object(active_tab) else {
+            return;
+        };
+        if format.apply(&mut shape) {
+            actions.push(Action::SetShape {
+                graph,
+                target,
+                shape: Box::new(shape),
+            });
+        }
+    }
+
+    /// Met en forme le texte visé : dans le champ en édition (le champ pose
+    /// les balises à son prochain tracé, voir [`apply_pending_format`]), ou
+    /// sur tout le texte libre sélectionné — une seule action annulable.
+    fn format_text(
+        &mut self,
+        ctx: &egui::Context,
+        format: crate::text_format::TextFormat,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        use crate::text_format::{apply, TextFormat};
+        match self.format_target(ctx, active_tab) {
+            crate::toolbar::FormatTarget::None => {}
+            crate::toolbar::FormatTarget::Field => {
+                ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(format)));
+            }
+            crate::toolbar::FormatTarget::Block => {
+                let Some(graph) = active_graph(active_tab_kind(active_tab)) else {
+                    return;
+                };
+                let Some(target) = self
+                    .graph_views
+                    .get(&graph)
+                    .and_then(GraphView::selected_annotation)
+                else {
+                    return;
+                };
+                let Some(mut annotation) =
+                    crate::state::current_plot_spec(self.state.tree(), graph)
+                        .and_then(|spec| target.get(&spec).cloned())
+                else {
+                    return;
+                };
+                // Couleur et corps d'un texte libre sont des champs du modèle.
+                match &format {
+                    TextFormat::Color(color) => annotation.color = color.clone(),
+                    TextFormat::Size(size) => annotation.size = *size,
+                    _ => {
+                        let length = annotation.text.chars().count();
+                        annotation.text = apply(&annotation.text, 0..length, &format).text;
+                    }
+                }
+                actions.push(Action::SetAnnotation {
+                    graph,
+                    target,
+                    annotation: Box::new(annotation),
+                });
+            }
+        }
+    }
+
+    /// Exécute ce qu'un bouton de barre d'outils a demandé : les mêmes
+    /// chemins que les entrées de menu correspondantes, jamais une seconde
+    /// écriture.
+    fn run_toolbar_request(
+        &mut self,
+        ctx: &egui::Context,
+        request: ToolbarRequest,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        match request {
+            ToolbarRequest::Action(action) => actions.push(*action),
+            ToolbarRequest::SetGraphTool(tool) => {
+                if let Some(view) = active_graph(active_tab_kind(active_tab))
+                    .and_then(|graph| self.graph_views.get_mut(&graph))
+                {
+                    view.set_tool(tool);
+                }
+            }
+            ToolbarRequest::ResetZoom => {
+                if let Some(view) = active_graph(active_tab_kind(active_tab))
+                    .and_then(|graph| self.graph_views.get_mut(&graph))
+                {
+                    view.reset_view();
+                }
+            }
+            ToolbarRequest::FormatText(format) => {
+                self.format_text(ctx, format, active_tab, actions);
+            }
+            ToolbarRequest::FormatObject(format) => {
+                self.format_object(&format, active_tab, actions);
+            }
+            ToolbarRequest::Import => self.open_import_dialog(),
+            ToolbarRequest::Open => self.choose_open_path(actions),
+            ToolbarRequest::SaveAs => self.choose_save_path(actions),
+            ToolbarRequest::ExportGraph => {
+                if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+                    request_graph_export(
+                        self.graph_views.get(&graph),
+                        self.state.tree(),
+                        graph,
+                        actions,
+                    );
+                }
+            }
         }
     }
 
@@ -2438,7 +2664,24 @@ impl eframe::App for PlotyxApp {
         publish_saved_colors(&ctx, &self.state);
         self.collect_shortcuts(&ctx, &mut actions);
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
-        self.toolbars.show(ui, &mut actions);
+        let bar_env = BarEnv {
+            export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
+            tools: self.tools_context(active_tab),
+            text_format: self.format_target(&ctx, active_tab),
+            object_format: self.object_format_state(active_tab),
+            shortcuts: crate::toolbar::ShortcutTexts {
+                open: ctx.format_shortcut(&SHORTCUT_OPEN),
+                save: ctx.format_shortcut(&SHORTCUT_SAVE),
+                save_as: ctx.format_shortcut(&SHORTCUT_SAVE_AS),
+                import: SHORTCUT_IMPORT_TEXT.to_string(),
+                export: ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH),
+            },
+        };
+        let mut bar_requests = Vec::new();
+        self.toolbars.show(ui, &bar_env, &mut bar_requests);
+        for request in bar_requests {
+            self.run_toolbar_request(&ctx, request, active_tab, &mut actions);
+        }
         if self.toolbars.take_changed() {
             self.save_toolbar_layout();
         }
@@ -7671,7 +7914,10 @@ fn graph_context_menu(
         let pos = response.interact_pointer_pos();
         let target = pos.map_or(PlotTarget::Background, |pos| {
             view.annotation_at(pos).map_or_else(
-                || plot_target(view.component_at(pos)),
+                || {
+                    view.shape_at(pos)
+                        .map_or_else(|| plot_target(view.component_at(pos)), PlotTarget::Object)
+                },
                 PlotTarget::Annotation,
             )
         });
@@ -7771,6 +8017,12 @@ fn graph_context_menu(
                 view.clear_annotation_selection();
                 ui.close();
             }
+            ui.separator();
+        } else if let PlotTarget::Object(object) = target {
+            // Objets graphiques (issue #76) : les mêmes gestes que la barre
+            // de menus et le clavier (Suppr).
+            view.select_shape(Some(object));
+            shape_order_buttons(ui, view, tree, graph_id, object, actions);
             ui.separator();
         } else if ui
             .add_enabled(point.is_some(), egui::Button::new(tr!("action-add-text")))
@@ -7876,6 +8128,41 @@ struct TextEditor {
     anchor: (egui::Pos2, egui::Vec2),
 }
 
+/// La mise en forme demandée par la barre, en attente du champ en édition.
+fn pending_format_id() -> egui::Id {
+    egui::Id::new("plotyx_pending_text_format")
+}
+
+/// Pose la mise en forme demandée par la barre de format sur `buffer`, selon
+/// la sélection que le champ `field` a gardée (egui la conserve quand le
+/// champ perd le focus au clic sur la barre), puis rend le focus au champ avec
+/// la sélection à l'intérieur des balises.
+fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut String) {
+    use egui::text::{CCursor, CCursorRange};
+    let Some(format) = ctx
+        .data_mut(|data| {
+            data.remove_temp::<Option<crate::text_format::TextFormat>>(pending_format_id())
+        })
+        .flatten()
+    else {
+        return;
+    };
+    let mut state = egui::TextEdit::load_state(ctx, field).unwrap_or_default();
+    let length = buffer.chars().count();
+    let selection = state.cursor.char_range().map_or(length..length, |range| {
+        let [start, end] = range.sorted_cursors();
+        start.index.0..end.index.0
+    });
+    let done = crate::text_format::apply(buffer, selection, &format);
+    *buffer = done.text;
+    state.cursor.set_char_range(Some(CCursorRange::two(
+        CCursor::new(done.selection.start),
+        CCursor::new(done.selection.end),
+    )));
+    state.store(ctx, field);
+    ctx.memory_mut(|memory| memory.request_focus(field));
+}
+
 fn text_editor_id(view: &GraphView) -> egui::Id {
     view.id().with("text_editor")
 }
@@ -7970,6 +8257,7 @@ fn text_editor_ui(
     actions: &mut Vec<Action>,
 ) {
     let id = text_editor_id(view);
+    apply_pending_format(ctx, id.with("field"), &mut editor.buffer);
     let (center, size) = editor.anchor;
     let field = egui::Rect::from_center_size(
         center,
@@ -8007,7 +8295,13 @@ fn text_editor_ui(
                 .then(|| input.pointer.interact_pos())
                 .flatten()
         })
-        .is_some_and(|pos| !area.response.rect.contains(pos));
+        .is_some_and(|pos| {
+            !area.response.rect.contains(pos)
+                && !crate::toolbar::over_format_bar(ctx, pos)
+                && ctx
+                    .layer_id_at(pos)
+                    .is_none_or(|layer| layer.order != egui::Order::Foreground)
+        });
     if cancel {
         ctx.data_mut(|data| data.remove::<TextEditor>(id));
         return;
@@ -8093,7 +8387,7 @@ fn start_annotation_editor(
 /// Les couleurs enregistrées, publiées chaque image par la racine pour que
 /// le sélecteur de couleur de l'éditeur sur place les propose aussi depuis
 /// une fenêtre détachée (qui n'a pas `AppState`).
-fn saved_colors_id() -> egui::Id {
+pub(crate) fn saved_colors_id() -> egui::Id {
     egui::Id::new("plotyx_saved_colors_for_graphs")
 }
 
@@ -8107,6 +8401,73 @@ fn publish_saved_colors(ctx: &egui::Context, state: &AppState) {
 
 /// Signaux de la vue, éditeur sur place et Suppr — après la peinture de la
 /// figure, dans la fenêtre flottante comme dans la fenêtre détachée.
+/// Les trois entrées d'un objet graphique sélectionné : premier plan,
+/// arrière-plan, suppression (barre de menus et menu contextuel).
+fn shape_order_buttons(
+    ui: &mut egui::Ui,
+    view: &mut GraphView,
+    tree: &Tree,
+    graph: NodeId,
+    object: plotyx_render_egui::ShapeRef,
+    actions: &mut Vec<Action>,
+) {
+    let count = crate::state::current_plot_spec(tree, graph)
+        .and_then(|spec| {
+            spec.panels
+                .iter()
+                .find(|panel| panel.row == object.row && panel.column == object.column)
+                .map(|panel| panel.shapes.len())
+        })
+        .unwrap_or(0);
+    for order in [ShapeOrder::ToFront, ShapeOrder::ToBack] {
+        let label = match order {
+            ShapeOrder::ToFront => tr!("action-bring-to-front"),
+            ShapeOrder::ToBack => tr!("action-send-to-back"),
+        };
+        let hint = match order {
+            ShapeOrder::ToFront => tr!("action-bring-to-front", "hint"),
+            ShapeOrder::ToBack => tr!("action-send-to-back", "hint"),
+        };
+        if ui.button(label).on_hover_text(hint).clicked() {
+            actions.push(Action::ReorderShape {
+                graph,
+                target: object,
+                order,
+            });
+            // Le rang change : la sélection suit l'objet.
+            let index = match order {
+                ShapeOrder::ToFront => count.saturating_sub(1),
+                ShapeOrder::ToBack => 0,
+            };
+            view.select_shape(Some(plotyx_render_egui::ShapeRef { index, ..object }));
+            ui.close();
+        }
+    }
+    if ui
+        .add(egui::Button::new(tr!("action-delete-object")).shortcut_text(shortcut_text_delete()))
+        .clicked()
+    {
+        actions.push(Action::RemoveShape {
+            graph,
+            target: object,
+        });
+        view.select_shape(None);
+        ui.close();
+    }
+}
+
+/// Les mêmes entrées, grisées, quand aucun objet n'est sélectionné.
+fn disabled_shape_order_buttons(ui: &mut egui::Ui) {
+    ui.add_enabled(false, egui::Button::new(tr!("action-bring-to-front")))
+        .on_disabled_hover_text(tr!("action-bring-to-front", "disabled"));
+    ui.add_enabled(false, egui::Button::new(tr!("action-send-to-back")))
+        .on_disabled_hover_text(tr!("action-send-to-back", "disabled"));
+    ui.add_enabled(
+        false,
+        egui::Button::new(tr!("action-delete-object")).shortcut_text(shortcut_text_delete()),
+    );
+}
+
 fn annotation_interactions(
     ui: &egui::Ui,
     view: &mut GraphView,
@@ -8116,6 +8477,10 @@ fn annotation_interactions(
 ) {
     for event in view.take_events() {
         match event {
+            plotyx_render_egui::GraphEvent::PlaceText { row, column, x, y } => {
+                add_annotation_at(ui.ctx(), view, tree, graph, (row, column, x, y));
+                view.set_tool(plotyx_render_egui::GraphTool::Pointer);
+            }
             plotyx_render_egui::GraphEvent::EditAnnotation(target) => {
                 open_annotation_editor(ui.ctx(), view, tree, graph, target);
             }
@@ -8124,6 +8489,13 @@ fn annotation_interactions(
                     graph,
                     target,
                     annotation: Box::new(annotation),
+                });
+            }
+            plotyx_render_egui::GraphEvent::ShapeChanged { target, shape } => {
+                actions.push(Action::SetShape {
+                    graph,
+                    target,
+                    shape: Box::new(shape),
                 });
             }
             plotyx_render_egui::GraphEvent::EditText(target) => {
@@ -8166,6 +8538,16 @@ fn annotation_interactions(
                     actions.push(Action::RemoveAnnotation { graph, target });
                     view.clear_annotation_selection();
                 }
+            } else if let Some(target) = view.selected_shape() {
+                // Objets graphiques (issue #76) : même geste.
+                if !typing
+                    && ui.ctx().input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                    })
+                {
+                    actions.push(Action::RemoveShape { graph, target });
+                    view.select_shape(None);
+                }
             }
         }
     }
@@ -8182,6 +8564,7 @@ fn annotation_editor_ui(
     actions: &mut Vec<Action>,
 ) {
     let id = annotation_editor_id(view);
+    apply_pending_format(ctx, id.with("field"), &mut editor.draft.text);
     // Le cadre du texte rendu ; à défaut (texte neuf, ou vidé donc plus
     // tracé), le dernier connu, puis le centre de la figure.
     if let Some((center, size, _)) = view.annotation_screen_box(editor.target) {
@@ -8328,6 +8711,7 @@ fn annotation_editor_ui(
     let outside = pressed_at.is_some_and(|pos| {
         !toolbar.response.rect.contains(pos)
             && !text.response.rect.contains(pos)
+            && !crate::toolbar::over_format_bar(ctx, pos)
             && ctx
                 .layer_id_at(pos)
                 .is_none_or(|layer| layer.order != egui::Order::Foreground)
@@ -8431,6 +8815,8 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
         // Le menu contextuel lit le texte libre par `GraphView::annotation_at`,
         // qui donne son adresse dans le spec ; ce repli ne sert pas.
         Some(PlotComponent::Annotation { .. }) => PlotTarget::PlotArea,
+        // Idem pour un objet graphique (`GraphView::shape_at`).
+        Some(PlotComponent::Shape { .. }) => PlotTarget::PlotArea,
         // Titres et légende (issue #53) : leurs propriétés sont celles du
         // composant, comme avant qu'ils soient désignables en propre.
         Some(PlotComponent::Text(target)) => match target {
@@ -13603,5 +13989,51 @@ mod window_header_tests {
         assert_eq!(trois, 80.0);
         assert_eq!(matrice, croix);
         assert!(shows_detach_and_maximize(HeaderPlacement::Detached, None));
+    }
+}
+
+#[cfg(test)]
+mod pending_format_tests {
+    use super::*;
+    use crate::text_format::TextFormat;
+    use egui::text::{CCursor, CCursorRange};
+
+    fn context_with_selection(field: egui::Id, range: std::ops::Range<usize>) -> egui::Context {
+        let ctx = egui::Context::default();
+        let mut state = egui::text_edit::TextEditState::default();
+        state.cursor.set_char_range(Some(CCursorRange::two(
+            CCursor::new(range.start),
+            CCursor::new(range.end),
+        )));
+        state.store(&ctx, field);
+        ctx
+    }
+
+    /// #63 : la mise en forme demandée par la barre s'applique au surlignage
+    /// que le champ a gardé, puis la sélection se place dans les balises.
+    #[test]
+    fn la_mise_en_forme_en_attente_s_applique_au_surlignage_du_champ() {
+        let field = egui::Id::new("champ");
+        let ctx = context_with_selection(field, 4..7);
+        ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(TextFormat::Bold)));
+        let mut buffer = "Abs 280 nm".to_owned();
+        apply_pending_format(&ctx, field, &mut buffer);
+        assert_eq!(buffer, "Abs #strong[280] nm");
+        let state = egui::text_edit::TextEditState::load(&ctx, field).unwrap();
+        let [start, end] = state.cursor.char_range().unwrap().sorted_cursors();
+        assert_eq!((start.index.0, end.index.0), (12, 15));
+        // La demande est consommée : une seconde image ne la rejoue pas.
+        apply_pending_format(&ctx, field, &mut buffer);
+        assert_eq!(buffer, "Abs #strong[280] nm");
+    }
+
+    #[test]
+    fn sans_surlignage_le_curseur_recoit_les_balises() {
+        let field = egui::Id::new("champ");
+        let ctx = context_with_selection(field, 3..3);
+        ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(TextFormat::Subscript)));
+        let mut buffer = "H2O".to_owned();
+        apply_pending_format(&ctx, field, &mut buffer);
+        assert_eq!(buffer, "H2O#sub[]");
     }
 }

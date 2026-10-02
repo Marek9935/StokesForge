@@ -55,6 +55,10 @@ pub enum PlotComponent {
     /// Un texte libre (issue #35) : `index` dans `PanelSpec::annotations`.
     /// Prioritaire sur tout le reste — il est tracé par-dessus.
     Annotation { panel: usize, index: usize },
+    /// Un objet graphique (issue #76) : `index` dans `PanelSpec::shapes`.
+    /// Désigné sur son trait, ou dedans s'il est rempli ; prioritaire sur la
+    /// zone de tracé, sous les textes libres.
+    Shape { panel: usize, index: usize },
     /// Un titre ou une légende (issue #53) : double-clic pour l'éditer,
     /// glisser pour le déplacer. Tracé par-dessus la zone de tracé comme les
     /// textes libres, donc prioritaire sur elle et sur les axes.
@@ -75,6 +79,24 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
             return Some(PlotComponent::Annotation {
                 panel,
                 index: annotation.index,
+            });
+        }
+    }
+    // Les objets graphiques (issue #76) : le plus haut d'abord, et seulement
+    // dans la zone de tracé où ils sont rognés.
+    for (panel, drawn) in plot.panels.iter().enumerate().rev() {
+        let (left, top) = (drawn.pixel_origin.0 as f64, drawn.pixel_origin.1 as f64);
+        let inside = x >= left
+            && x <= left + drawn.pixel_size.0 as f64
+            && y >= top
+            && y <= top + drawn.pixel_size.1 as f64;
+        if !inside {
+            continue;
+        }
+        if let Some(shape) = drawn.shapes.iter().rev().find(|s| s.contains(x, y)) {
+            return Some(PlotComponent::Shape {
+                panel,
+                index: shape.index,
             });
         }
     }
@@ -188,6 +210,7 @@ mod tests {
                     right: AxisArea::default(),
                 },
                 annotations: Vec::new(),
+                shapes: Vec::new(),
                 texts: Vec::new(),
                 legend_rows: Vec::new(),
             }],

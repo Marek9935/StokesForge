@@ -112,10 +112,14 @@ fn pointer_button(pos: Pos2, button: PointerButton, pressed: bool) -> Event {
 /// avance par grands crans), et le test devrait attendre plusieurs images
 /// pour voir tout l'effet.
 fn wheel(delta_y: f32) -> Event {
+    wheel_with(delta_y, egui::Modifiers::CTRL)
+}
+
+fn wheel_with(delta_y: f32, modifiers: egui::Modifiers) -> Event {
     Event::MouseWheel {
         unit: MouseWheelUnit::Point,
         delta: Vec2::new(0.0, delta_y),
-        modifiers: egui::Modifiers::default(),
+        modifiers,
         phase: egui::TouchPhase::Move,
     }
 }
@@ -248,6 +252,7 @@ fn le_rectangle_elastique_zoome_sur_la_zone_choisie() {
     let snapshot = session.handle().snapshot().expect("instantané");
     let context = contexte();
     let mut view = GraphView::new();
+    view.set_tool(plotyx_render_egui::GraphTool::ZoomBox);
 
     image(&context, &mut view, &snapshot, graph, vec![]);
     // Le cadrage attendu se lit sur la transformation *d'avant* le geste :
@@ -277,7 +282,7 @@ fn le_rectangle_elastique_zoome_sur_la_zone_choisie() {
         graph,
         vec![
             pointer_moved(start),
-            pointer_button(start, PointerButton::Secondary, true),
+            pointer_button(start, PointerButton::Primary, true),
         ],
     );
     image(
@@ -292,7 +297,7 @@ fn le_rectangle_elastique_zoome_sur_la_zone_choisie() {
         &mut view,
         &snapshot,
         graph,
-        vec![pointer_button(end, PointerButton::Secondary, false)],
+        vec![pointer_button(end, PointerButton::Primary, false)],
     );
     image(&context, &mut view, &snapshot, graph, vec![]);
 
@@ -427,4 +432,75 @@ fn double_cliquer_reinitialise_le_zoom() {
         view.view().is_empty(),
         "le double-clic n'a pas réinitialisé le cadrage"
     );
+}
+
+#[test]
+fn la_molette_seule_ne_zoome_plus() {
+    let (session, graph) = banc();
+    let snapshot = session.handle().snapshot().expect("instantané");
+    let context = contexte();
+    let mut view = GraphView::new();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![
+            pointer_moved(SOUS_CURSEUR),
+            wheel_with(7.9, egui::Modifiers::default()),
+        ],
+    );
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    assert_eq!(view.view().generation(), 0, "la molette seule a zoomé");
+}
+
+#[test]
+fn le_glisser_secondaire_ne_trace_plus_de_rectangle() {
+    let (session, graph) = banc();
+    let snapshot = session.handle().snapshot().expect("instantané");
+    let context = contexte();
+    let mut view = GraphView::new();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let (start, end) = (Pos2::new(300.0, 200.0), Pos2::new(500.0, 400.0));
+    for events in [
+        vec![
+            pointer_moved(start),
+            pointer_button(start, PointerButton::Secondary, true),
+        ],
+        vec![pointer_moved(end)],
+        vec![pointer_button(end, PointerButton::Secondary, false)],
+        vec![],
+    ] {
+        image(&context, &mut view, &snapshot, graph, events);
+    }
+    assert_eq!(view.view().generation(), 0, "le clic droit a zoomé");
+}
+
+#[test]
+fn l_outil_texte_demande_un_texte_au_clic_et_ne_fait_pas_defiler() {
+    let (session, graph) = banc();
+    let snapshot = session.handle().snapshot().expect("instantané");
+    let context = contexte();
+    let mut view = GraphView::new();
+    view.set_tool(plotyx_render_egui::GraphTool::Text);
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    for events in [
+        vec![
+            pointer_moved(SOUS_CURSEUR),
+            pointer_button(SOUS_CURSEUR, PointerButton::Primary, true),
+        ],
+        vec![pointer_button(SOUS_CURSEUR, PointerButton::Primary, false)],
+        vec![],
+    ] {
+        image(&context, &mut view, &snapshot, graph, events);
+    }
+    let events = view.take_events();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, plotyx_render_egui::GraphEvent::PlaceText { .. })),
+        "aucun PlaceText : {events:?}"
+    );
+    assert_eq!(view.view().generation(), 0);
 }

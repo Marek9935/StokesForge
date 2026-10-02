@@ -429,7 +429,34 @@ accueil en haut seulement.
 - Un bouton est un `ToolbarButton` : icône du composant commun, info-bulle
   (libellé + raccourci + `.hint`), grisage. Il pousse la même `Action` que le
   menu — jamais une seconde écriture. Le contenu de chaque barre est
-  `toolbar::bar_contents`.
+  `toolbar::bar_contents` ; un geste qui n'est pas une `Action` (sélecteur de
+  fichier, assistant d'import, export) remonte en `ToolbarRequest`, exécuté par
+  `PlotyxApp::run_toolbar_request` avec les méthodes mêmes des menus. Barre
+  Fichier (#61) : classeur, import, ouvrir, enregistrer, enregistrer sous,
+  exporter (grisé sans graphe au premier plan).
+- Barre contextuelle `Tools` (#62) : son contenu suit la fenêtre au premier
+  plan (`ToolsContext`, calculé par `PlotyxApp::tools_context`). Graphe : les
+  outils Pointeur / Zoom / Texte (`GraphTool` de la vue, bouton enfoncé pour
+  l'outil actif), réinitialiser le zoom, propriétés. Classeur : ajouter
+  feuille, ajouter colonne, tracer la sélection (courbe, nuage, barres ; grisé
+  sans colonne sélectionnée). Matrice, note, aucune fenêtre : la barre
+  disparaît (jamais de bouton mort) et ses voisines se recalent
+  (`ToolbarLayout::docked_rows_where`).
+- Barre `Text` (format du texte, #63) : visible avec un graphe au premier
+  plan, sur sa propre rangée par défaut. Police, corps, couleur, gras,
+  italique, indice, exposant, formule. Les textes du graphe étant déjà du
+  markup Typst, un bouton **écrit des balises dans le texte**
+  (`text_format::apply`, pur) : aucun champ de modèle, aucun changement du
+  `.plx`. Cible (`FormatTarget`, `PlotyxApp::format_target`) : un champ en
+  édition sur place (texte libre, titre, titre d'axe, légende) → la demande
+  attend dans la mémoire d'egui (`pending_format_id`) et le champ la pose à
+  son prochain tracé sur le surlignage qu'egui a gardé, ou insère les balises
+  au curseur (`apply_pending_format`) ; sinon un texte libre sélectionné →
+  tout le texte, en **une** `Action::SetAnnotation` (couleur et corps sont les
+  champs du modèle) ; sinon les boutons sont grisés. Gras, italique, indice,
+  exposant et formule se défont en les reposant. Un clic sur la barre ne ferme
+  pas l'éditeur (`toolbar::over_format_bar`). Le formateur ne pose pas
+  d'alignement : les textes tiennent sur une ligne.
 - Visibilité : menu **View**, une case par barre. Emplacement et visibilité
   sont dans `preferences.json` (champ `toolbars`), pas dans le `.plx` ; la
   lecture ignore ce qu'elle ne comprend pas. `PlotyxApp::new` ne lit pas le
@@ -841,6 +868,20 @@ l'état de l'éditeur dans la mémoire d'egui, sous l'identifiant de la vue : m�
 enregistrées sont publiées chaque image dans la mémoire d'egui
 (`publish_saved_colors`) pour que le sélecteur de l'éditeur les propose aussi
 dans une fenêtre détachée.
+
+**Objets graphiques** (issue #76) : quatre outils de la barre « Outils »
+(`GraphTool::Rectangle`, `Ellipse`, `Line`, `Arrow`) ; glisser trace l'objet
+(aperçu dans la vue), le relâchement rend la main à l'outil Pointeur et le
+sélectionne. Avec le Pointeur : un clic sélectionne (contour et poignées),
+glisser le corps déplace, glisser une poignée redimensionne, Suppr retire. Menu
+« Graph » et clic droit sur l'objet : « Bring to Front », « Send to Back »,
+« Delete Object » (`shape_order_buttons`). Chaque geste validé est **une**
+`Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec`. La
+barre « Object format » (`ToolbarId::Object`, issue #64 ; `object_format.rs`)
+règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
+une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
+épaisseur. Chaque réglage est un champ du modèle posé par une `Action::SetShape`
+(`App::format_object`). Côté script : `pyx.add_shape` / `pyx.remove_shape` (`docs/python-et-script.md`).
 
 **Exporter le graphe** (issue #34) : menu « Graph » → « Export
 Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y

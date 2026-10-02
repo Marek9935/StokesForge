@@ -125,6 +125,8 @@ avec toute session, y compris une session sans interface.
 | `set_values(handle, values)` | remplace les valeurs et la longueur de cette seule colonne |
 | `set_column_meta(handle, **metadata)` | modifie les seuls champs nommés, en préservant la provenance |
 | `plot(y, x=None, *, graph=None, name=None, parent=None, **options)` | crée un graphe natif ou ajoute une série à un graphe ; poignée |
+| `add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color="")` | ajoute un objet graphique en coordonnées de données ; rang dans le panneau |
+| `remove_shape(graph, index, *, panel=(0, 0))` | retire l'objet graphique de ce rang |
 | `undo()` | termine puis annule le groupe courant, ou annule le dernier groupe déjà terminé ; `False` si l'historique est vide |
 | `import_file(path, recipe=None)` | import dans un classeur neuf, une macro annulable ; poignées des feuilles créées |
 
@@ -239,6 +241,20 @@ Contrat : `tests/graphs.rs` compare le `PlotSpec` exact et le SVG partagé,
 avec un témoin différent et du Typst ; il couvre aussi ajout, rollback,
 persistance et références invalidées. Matplotlib est évalué séparément par
 le [spike #69](python-matplotlib-spike.md), sans changer le rendu natif.
+
+`pyx.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311")` pose un objet
+(`rectangle`, `ellipse`, `line` ou `arrow`, pointe en `(x2, y2)`) en coordonnées
+de données du panneau `panel=(ligne, colonne)`, au-dessus des autres, et rend
+son rang. `axis` vaut `left` ou `right`. La couleur du trait vide est
+automatique, celle du remplissage vide signifie aucun remplissage.
+`remove_shape` retire ce rang ; les objets suivants descendent d'un rang.
+
+Ces appels de #76 rejoignent la même macro `Script`, même s'ils sont la
+première mutation de l'exécution. Une erreur ou interruption annule donc aussi
+les ajouts et retraits d'objets. Nature, époque et panneau sont revalidés après
+réservation ; aucun client concurrent ne peut écraser le spec pendant cette
+écriture. Des coordonnées non finies, un type, axe, style ou rang invalide
+sont refusés sans mutation. Contrat : `tests/script.rs` et `tests/graphs.rs`.
 
 ### CLI sans fenêtre (#71)
 

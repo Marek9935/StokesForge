@@ -79,8 +79,9 @@ pub mod backend;
 pub mod cache;
 pub mod feathering;
 pub mod scaled;
+mod shape_tools;
 pub mod typst_screen;
-pub mod view;
+mod view;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -109,12 +110,16 @@ pub use plotyx_render::pipeline::{
 };
 // L'adresse et le modèle d'un texte libre : l'application les manipule avec
 // les signaux de la vue ([`GraphEvent`]).
-pub use plotyx_plot::{AnnotationRef, AnnotationSpec, TextAnchor, TextTarget};
+pub use plotyx_plot::{
+    AnnotationRef, AnnotationSpec, ShapeKind, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+};
 pub use plotyx_render::text::{font_definitions, font_definitions_for, TextMeasurer, TextSource};
 // Le choix de police (embed du 2026-09-13, `plotyx_render::fonts`) : une UI
 // qui veut proposer Fira/Libertinus/Noto ou une police système n'a pas à
 // déclarer sa propre arête vers `plotyx-render` pour ça non plus.
-pub use plotyx_render::{FontChoice, FontSet, FontSource, ResolvedFonts};
+pub use plotyx_render::{
+    available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts,
+};
 // La correspondance pixel ↔ données (tâche R7) : `plotyx-render` la porte
 // (voir `plotyx_render::interact`, générique sur le backend), ce crate ne
 // fait que la consommer avec des types egui.
@@ -130,6 +135,18 @@ pub use view::{Framing, ViewState};
 /// libres (issue #35). Relevé par [`GraphView::take_events`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum GraphEvent {
+    /// Clic de l'outil Texte (issue #62) : poser un texte libre au point de
+    /// données visé et ouvrir son éditeur. L'outil revient au pointeur.
+    PlaceText {
+        /// Ligne du panneau.
+        row: usize,
+        /// Colonne du panneau.
+        column: usize,
+        /// Abscisse de données.
+        x: f64,
+        /// Ordonnée de données.
+        y: f64,
+    },
     /// Double-clic sur un texte libre : l'éditer sur place.
     EditAnnotation(AnnotationRef),
     /// Un texte libre a été glissé puis relâché : sa nouvelle version, à
@@ -140,6 +157,17 @@ pub enum GraphEvent {
         target: AnnotationRef,
         /// Sa version déplacée.
         annotation: AnnotationSpec,
+    },
+    /// Un objet graphique a été tracé, déplacé ou redimensionné (issue #76) :
+    /// sa nouvelle version, à valider en **une** modification du modèle
+    /// (`target.index` égal au nombre d'objets du panneau : un ajout).
+    /// L'aperçu reste affiché jusqu'à ce que le modèle change
+    /// ([`GraphView::hold_preview`]).
+    ShapeChanged {
+        /// L'objet concerné.
+        target: ShapeRef,
+        /// Sa nouvelle version.
+        shape: ShapeSpec,
     },
     /// Double-clic sur un titre : l'éditer sur place (issue #53).
     EditText(TextTarget),
@@ -162,6 +190,41 @@ pub enum GraphEvent {
         /// Sa nouvelle ancre.
         anchor: TextAnchor,
     },
+}
+
+/// L'outil actif d'un graphe (issue #62), façon Origin. Un réglage de **vue**,
+/// comme le cadrage : jamais dans le modèle, jamais annulable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum GraphTool {
+    /// Le défaut : glisser fait défiler la vue, les textes se saisissent et
+    /// se déplacent, Ctrl+molette zoome.
+    #[default]
+    Pointer,
+    /// Glisser trace un rectangle de zoom.
+    ZoomBox,
+    /// Un clic dans la zone de tracé pose un texte libre.
+    Text,
+    /// Glisser trace un rectangle (issue #76).
+    Rectangle,
+    /// Glisser trace une ellipse (issue #76).
+    Ellipse,
+    /// Glisser trace une ligne (issue #76).
+    Line,
+    /// Glisser trace une flèche, pointe au relâchement (issue #76).
+    Arrow,
+}
+
+impl GraphTool {
+    /// La sorte d'objet que l'outil trace, s'il en trace une.
+    pub fn shape_kind(self) -> Option<ShapeKind> {
+        match self {
+            Self::Rectangle => Some(ShapeKind::Rectangle),
+            Self::Ellipse => Some(ShapeKind::Ellipse),
+            Self::Line => Some(ShapeKind::Line),
+            Self::Arrow => Some(ShapeKind::Arrow),
+            Self::Pointer | Self::ZoomBox | Self::Text => None,
+        }
+    }
 }
 
 /// Un glisser de titre ou de légende en cours (issue #53).
@@ -336,11 +399,12 @@ pub struct GraphView {
     /// logique de référence quand l'application agrandit ou réduit la figure.
     display_rect: Option<Rect>,
     /// Coins du rectangle de zoom élastique en cours (tâche 7.4), en pixels
-    /// d'écran. `None` hors glissé secondaire.
+    /// d'écran. `None` hors glissé de l'outil Zoom.
     drag_box: Option<(Pos2, Pos2)>,
+    /// L'outil actif (issue #62).
+    tool: GraphTool,
     /// Réponse d'interaction de la figure au dernier rendu : l'application
-    /// y accroche son menu contextuel (clic droit **sans** glisser — le
-    /// glisser secondaire reste le zoom élastique).
+    /// y accroche son menu contextuel (clic droit).
     response: Option<egui::Response>,
     /// Aperçu d'un texte libre en cours d'édition ou de glisser (issue
     /// #35) : posé sur le clone du spec à la construction de la figure,
@@ -361,6 +425,13 @@ pub struct GraphView {
     text_drag: Option<TextDrag>,
     /// Texte libre sélectionné (clic), cible de Suppr.
     selected_annotation: Option<AnnotationRef>,
+    /// Aperçu d'un objet graphique en cours de tracé, de déplacement ou de
+    /// redimensionnement (issue #76), sur le même principe que
+    /// `annotation_preview`.
+    shape_preview: Option<(ShapeRef, ShapeSpec)>,
+    shape_drag: Option<shape_tools::ShapeDrag>,
+    /// Objet graphique sélectionné (clic), cible de Suppr et des poignées.
+    selected_shape: Option<ShapeRef>,
     events: Vec<GraphEvent>,
 }
 
@@ -414,6 +485,7 @@ impl GraphView {
             hover: None,
             display_rect: None,
             drag_box: None,
+            tool: GraphTool::default(),
             response: None,
             annotation_preview: None,
             preview_generation: 0,
@@ -422,6 +494,9 @@ impl GraphView {
             text_preview: None,
             text_drag: None,
             selected_annotation: None,
+            shape_preview: None,
+            shape_drag: None,
+            selected_shape: None,
             events: Vec::new(),
         }
     }
@@ -504,6 +579,7 @@ impl GraphView {
     fn clear_previews(&mut self) {
         self.set_annotation_preview(None);
         self.set_text_preview(None);
+        self.set_shape_preview(None);
     }
 
     /// L'aperçu d'un titre ou d'une légende déplacé, s'il y en a un.
@@ -600,6 +676,20 @@ impl GraphView {
                 .texts
                 .iter()
                 .find(|text| text.target == target),
+        }
+    }
+
+    /// L'outil actif.
+    pub fn tool(&self) -> GraphTool {
+        self.tool
+    }
+
+    /// Change d'outil ; un geste de rectangle en cours est abandonné.
+    pub fn set_tool(&mut self, tool: GraphTool) {
+        if self.tool != tool {
+            self.tool = tool;
+            self.drag_box = None;
+            self.abort_shape_drag();
         }
     }
 
@@ -787,6 +877,7 @@ impl GraphView {
         let view = &self.view;
         let preview = &self.annotation_preview;
         let text_preview = &self.text_preview;
+        let shape_preview = &self.shape_preview;
         let formulas = &self.formulas;
         let font_choice = &self.font_choice;
         let typst_fonts = &self.typst_fonts;
@@ -797,6 +888,9 @@ impl GraphView {
             view.apply(&mut framed);
             if let Some((target, annotation)) = preview {
                 target.set(&mut framed, annotation.clone());
+            }
+            if let Some((target, shape)) = shape_preview {
+                target.set(&mut framed, shape.clone());
             }
             if let Some((target, anchor)) = text_preview {
                 target.set_anchor(&mut framed, Some(*anchor));
@@ -914,9 +1008,9 @@ impl GraphView {
         );
     }
 
-    /// Molette (zoom), glissé principal (pan), glissé secondaire (rectangle
-    /// de zoom élastique) et double-clic (réinitialisation) — tâches 7.1 et
-    /// 7.4. Ne fait rien tant qu'aucune figure n'a encore été tracée.
+    /// Ctrl+molette (zoom), glissé principal (pan avec l'outil Pointeur,
+    /// rectangle de zoom élastique avec l'outil Zoom), clic de l'outil Texte
+    /// et double-clic (réinitialisation) — tâches 7.1 et 7.4, issue #62. Ne fait rien tant qu'aucune figure n'a encore été tracée.
     fn handle_navigation(&mut self, response: &Response, context: &egui::Context, spec: &PlotSpec) {
         if self.last.is_none() {
             return;
@@ -928,6 +1022,10 @@ impl GraphView {
         let pointer = response.interact_pointer_pos();
         if response.clicked() {
             self.selected_annotation = pointer.and_then(|pos| self.annotation_at(pos));
+            self.selected_shape = match self.selected_annotation {
+                Some(_) => None,
+                None => pointer.and_then(|pos| self.shape_at(pos)),
+            };
         }
         if response.double_clicked() {
             let component = pointer.and_then(|pos| self.component_at(pos));
@@ -958,8 +1056,21 @@ impl GraphView {
                 _ => self.view.reset(),
             }
         }
-        if self.handle_annotation_drag(response, spec) || self.handle_text_drag(response, spec) {
+        if self.tool == GraphTool::Pointer
+            && (self.handle_annotation_drag(response, spec)
+                || self.handle_shape_drag(response, spec)
+                || self.handle_text_drag(response, spec))
+        {
             return;
+        }
+        self.handle_shape_draw(response, spec);
+
+        // Outil Texte : un clic dans la zone de tracé pose le texte.
+        if self.tool == GraphTool::Text && response.clicked() {
+            if let Some((row, column, x, y)) = pointer.and_then(|pos| self.data_at(pos)) {
+                self.events
+                    .push(GraphEvent::PlaceText { row, column, x, y });
+            }
         }
 
         if response.hovered() {
@@ -968,16 +1079,16 @@ impl GraphView {
                 .filter(|pos| response.interact_rect.contains(*pos))
                 .and_then(|pos| self.figure_position(pos).map(|position| (pos, position)))
             {
-                let scroll = context.input(|input| input.smooth_scroll_delta.y);
-                if scroll != 0.0 {
+                // Ctrl+molette (ou pincement) : egui range ce geste dans
+                // `zoom_delta`, un facteur multiplicatif (> 1 : vers l'avant,
+                // on zoome). La molette seule ne zoome plus (issue #62).
+                // Le facteur de cadrage est l'inverse, borné pour qu'un
+                // défilement continu (pavé tactile) ne fasse pas s'effondrer
+                // le cadrage d'un coup.
+                let zoom = context.input(|input| input.zoom_delta());
+                if zoom != 1.0 {
                     if let Some((panel_index, transform)) = self.panel_at(pos.0) {
-                        // Un cran de molette classique vaut plusieurs
-                        // dizaines d'unités de défilement ; 0,2 % par unité
-                        // donne un zoom perceptible sans à-coups, et le
-                        // `clamp` évite qu'un défilement continu (pavé
-                        // tactile) ne fasse s'effondrer le cadrage d'un
-                        // coup.
-                        let factor = (-scroll as f64 * 0.002).exp().clamp(0.5, 2.0);
+                        let factor = (1.0 / zoom as f64).clamp(0.5, 2.0);
                         if let Some((x_range, y_range)) =
                             transform.zoom((pos.1.x as f64, pos.1.y as f64), factor)
                         {
@@ -988,7 +1099,7 @@ impl GraphView {
             }
         }
 
-        if response.dragged_by(PointerButton::Primary) {
+        if self.tool == GraphTool::Pointer && response.dragged_by(PointerButton::Primary) {
             let delta = response.drag_delta();
             if let Some(pos) = response.interact_pointer_pos() {
                 // Le panneau visé est celui sous le point de départ du
@@ -1009,7 +1120,7 @@ impl GraphView {
             }
         }
 
-        if response.dragged_by(PointerButton::Secondary) {
+        if self.tool == GraphTool::ZoomBox && response.dragged_by(PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
                 // **Ne pas** se fier à `drag_started_by` pour capturer le
                 // point de départ : sur un widget sensible au clic *et* au
@@ -1031,7 +1142,7 @@ impl GraphView {
                 self.drag_box = Some((start, pos));
             }
         }
-        if response.drag_stopped_by(PointerButton::Secondary) {
+        if self.tool == GraphTool::ZoomBox && response.drag_stopped_by(PointerButton::Primary) {
             if let Some((start, end)) = self.drag_box.take() {
                 // En dessous de quelques pixels, c'est un tremblement de
                 // main, pas un rectangle : un rectangle de zoom d'un pixel
@@ -1255,6 +1366,8 @@ impl GraphView {
                 Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
             ));
         }
+
+        self.paint_shape_selection(painter);
 
         let pos = response.hover_pos()?;
         let figure_pos = self.figure_position(pos)?;

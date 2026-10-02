@@ -57,6 +57,30 @@ pub enum Icon {
     Graph,
     Matrix,
     Note,
+    Open,
+    Save,
+    SaveAs,
+    Import,
+    Export,
+    Pointer,
+    ZoomTool,
+    TextTool,
+    ResetZoom,
+    Properties,
+    AddColumn,
+    AddSheet,
+    PlotLine,
+    PlotScatter,
+    PlotBar,
+    Bold,
+    Italic,
+    Subscript,
+    Superscript,
+    Formula,
+    ShapeRectangle,
+    ShapeEllipse,
+    ShapeLine,
+    ShapeArrow,
 }
 
 macro_rules! svg {
@@ -131,6 +155,114 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     (Icon::Graph, IconRole::Graph, svg!("chart-line.graph.svg")),
     (Icon::Matrix, IconRole::Matrix, svg!("grid-nine.matrix.svg")),
     (Icon::Note, IconRole::Note, svg!("note.note.svg")),
+    (
+        Icon::Open,
+        IconRole::Neutral,
+        svg!("folder-open.neutral.svg"),
+    ),
+    (
+        Icon::Save,
+        IconRole::Neutral,
+        svg!("floppy-disk.neutral.svg"),
+    ),
+    (
+        Icon::SaveAs,
+        IconRole::Neutral,
+        svg!("floppy-disk-back.neutral.svg"),
+    ),
+    (
+        Icon::Import,
+        IconRole::Neutral,
+        svg!("download-simple.neutral.svg"),
+    ),
+    (Icon::Export, IconRole::Neutral, svg!("export.neutral.svg")),
+    (Icon::Pointer, IconRole::Neutral, svg!("cursor.neutral.svg")),
+    (
+        Icon::ZoomTool,
+        IconRole::Neutral,
+        svg!("magnifying-glass-plus.neutral.svg"),
+    ),
+    (
+        Icon::TextTool,
+        IconRole::Neutral,
+        svg!("text-t.neutral.svg"),
+    ),
+    (
+        Icon::ShapeRectangle,
+        IconRole::Neutral,
+        svg!("rectangle.neutral.svg"),
+    ),
+    (
+        Icon::ShapeEllipse,
+        IconRole::Neutral,
+        svg!("circle.neutral.svg"),
+    ),
+    (
+        Icon::ShapeLine,
+        IconRole::Neutral,
+        svg!("line-segment.neutral.svg"),
+    ),
+    (
+        Icon::ShapeArrow,
+        IconRole::Neutral,
+        svg!("arrow-up-right.neutral.svg"),
+    ),
+    (
+        Icon::ResetZoom,
+        IconRole::Neutral,
+        svg!("arrow-counter-clockwise.neutral.svg"),
+    ),
+    (
+        Icon::Properties,
+        IconRole::Neutral,
+        svg!("sliders-horizontal.neutral.svg"),
+    ),
+    (
+        Icon::AddColumn,
+        IconRole::Neutral,
+        svg!("columns-plus-right.neutral.svg"),
+    ),
+    (
+        Icon::AddSheet,
+        IconRole::Neutral,
+        svg!("rows-plus-bottom.neutral.svg"),
+    ),
+    (
+        Icon::PlotLine,
+        IconRole::Neutral,
+        svg!("chart-line.neutral.svg"),
+    ),
+    (
+        Icon::PlotScatter,
+        IconRole::Neutral,
+        svg!("chart-scatter.neutral.svg"),
+    ),
+    (
+        Icon::PlotBar,
+        IconRole::Neutral,
+        svg!("chart-bar.neutral.svg"),
+    ),
+    (Icon::Bold, IconRole::Neutral, svg!("text-b.neutral.svg")),
+    (
+        Icon::Italic,
+        IconRole::Neutral,
+        svg!("text-italic.neutral.svg"),
+    ),
+    (
+        Icon::Subscript,
+        IconRole::Neutral,
+        svg!("text-subscript.neutral.svg"),
+    ),
+    (
+        Icon::Superscript,
+        IconRole::Neutral,
+        svg!("text-superscript.neutral.svg"),
+    ),
+    (
+        Icon::Formula,
+        IconRole::Neutral,
+        svg!("function.neutral.svg"),
+    ),
 ];
 
 /// Inatteignable tant que chaque icône a une variante (test `le_tableau_…`).

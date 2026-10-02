@@ -279,3 +279,47 @@ for action in (lambda: pyx.plot(y), lambda: pyx.plot(fresh_y, x), lambda: pyx.pl
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.revision, before.revision);
 }
+
+#[test]
+fn objets_graphiques_seuls_ou_avec_donnees_rejoignent_le_groupe_du_script() {
+    let b = banc();
+    run(&b, &format!("{HANDLES}g = pyx.plot(y, x, name='Graph1')"));
+    run(&b, "pyx.add_shape(g, 'rectangle', 0, 0, 1, 1)");
+    let before = b.session.snapshot().unwrap();
+    for mutation in [
+        "pyx.add_shape(g, 'arrow', 0, 0, 2, 2)",
+        "pyx.remove_shape(g, 0)",
+    ] {
+        let out = b
+            .engine
+            .run(&format!("{mutation}\nraise RuntimeError('rollback objet')"))
+            .unwrap();
+        assert!(out.error.unwrap().contains("rollback objet"));
+        let after = b.session.snapshot().unwrap();
+        assert_eq!(
+            *after.tree, *before.tree,
+            "l'objet écrit seul doit être annulé sur erreur"
+        );
+        assert_eq!(after.history, before.history);
+    }
+    run(
+        &b,
+        "pyx.add_shape(g, 'arrow', 0, 0, 2, 2)\npyx.set_values(y, [42.])",
+    );
+    assert_eq!(graph_spec(&b).panels[0].shapes.len(), 2);
+    let after = b.session.snapshot().unwrap();
+    b.session.undo().unwrap();
+    assert_eq!(*b.session.snapshot().unwrap().tree, *before.tree);
+    b.session.redo().unwrap();
+    assert_eq!(*b.session.snapshot().unwrap().tree, *after.tree);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("shapes.plx");
+    b.session.save(&path).unwrap();
+    b.session.load(&path).unwrap();
+    let before = b.session.snapshot().unwrap();
+    run(&b, "for action in (lambda: pyx.add_shape(g, 'line', 0, 0, 1, 1), lambda: pyx.remove_shape(g, 0)):\n    try: action()\n    except pyx.BrokenReferenceError: pass\n    else: raise AssertionError('ancienne poignée acceptée')");
+    let after = b.session.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert_eq!(after.history, before.history);
+}

@@ -304,9 +304,7 @@ fn definitions_for(name: &str, bytes: &'static [u8], owned: Option<FontData>) ->
 /// propres `typst::text::Font`, texte et Math — même mécanisme de
 /// résolution système, pas un second à écrire pour ce seul consommateur.
 pub(crate) fn load_system_font(name: &str) -> Option<FontData> {
-    let mut database = fontdb::Database::new();
-    database.load_system_fonts();
-
+    let database = system_database();
     let query = fontdb::Query {
         families: &[fontdb::Family::Name(name)],
         ..fontdb::Query::default()
@@ -317,6 +315,61 @@ pub(crate) fn load_system_font(name: &str) -> Option<FontData> {
         data.index = index;
         data
     })
+}
+
+/// La base des polices du système, scannée **une fois** par processus : le
+/// scan coûte de quelques dizaines de millisecondes à une seconde, et sert
+/// aussi bien la résolution d'une police par son nom que la liste proposée
+/// par la barre de format de texte (issue #63).
+fn system_database() -> &'static fontdb::Database {
+    static DATABASE: std::sync::OnceLock<fontdb::Database> = std::sync::OnceLock::new();
+    DATABASE.get_or_init(|| {
+        let mut database = fontdb::Database::new();
+        database.load_system_fonts();
+        database
+    })
+}
+
+/// Les familles qu'un texte peut demander par `#text(font: "…")` : d'abord
+/// les trois polices de texte embarquées (toujours présentes, donc
+/// reproductibles d'une machine à l'autre), puis celles du système, triées
+/// et sans doublon. Une figure qui nomme une police du système ne se
+/// recompose à l'identique que sur une machine qui l'a (issue #63).
+///
+/// Le premier appel scanne le système (voir [`system_database`]).
+pub fn available_families() -> &'static [FamilyEntry] {
+    static FAMILIES: std::sync::OnceLock<Vec<FamilyEntry>> = std::sync::OnceLock::new();
+    FAMILIES.get_or_init(|| {
+        let mut embedded: Vec<FamilyEntry> = FontSet::ALL
+            .iter()
+            .map(|set| FamilyEntry {
+                name: set.sans_family_name().to_owned(),
+                embedded: true,
+            })
+            .collect();
+        let mut system: Vec<String> = system_database()
+            .faces()
+            .flat_map(|face| face.families.iter().map(|(name, _)| name.clone()))
+            .filter(|name| !embedded.iter().any(|entry| entry.name == *name))
+            .collect();
+        system.sort_by_key(|name| name.to_lowercase());
+        system.dedup();
+        embedded.extend(system.into_iter().map(|name| FamilyEntry {
+            name,
+            embedded: false,
+        }));
+        embedded
+    })
+}
+
+/// Une famille proposée par [`available_families`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FamilyEntry {
+    /// Le nom de famille, tel que Typst le reconnaît.
+    pub name: String,
+    /// Embarquée dans PlotYx (donc présente partout), par opposition à une
+    /// police du système.
+    pub embedded: bool,
 }
 
 #[cfg(test)]

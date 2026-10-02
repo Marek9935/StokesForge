@@ -597,6 +597,65 @@ fn set_column_meta(
         .map_err(to_py_error)
 }
 
+/// Pose un objet graphique sur un graphe et rend son rang dans le panneau.
+///
+/// `kind` : `"rectangle"`, `"ellipse"`, `"line"` ou `"arrow"` (pointe en
+/// `(x2, y2)`). Les points sont en **coordonnées de données** du panneau
+/// `panel = (ligne, colonne)` et de l'ordonnée `axis` (`"left"` ou
+/// `"right"`) : l'objet suit le zoom. Couleurs `"#RRGGBB"` ou `"#RRGGBBAA"` ;
+/// `line_color=""` = automatique, `fill_color=""` = aucun remplissage.
+/// L'objet est posé au-dessus des autres. Les écritures d'une exécution sont
+/// groupées : un `pyx.undo()` ou Ctrl+Z les annule ensemble.
+#[pyfunction]
+#[pyo3(signature = (graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color=""))]
+#[allow(clippy::too_many_arguments)]
+fn add_shape(
+    py: Python<'_>,
+    graph: &Handle,
+    kind: &str,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    panel: (usize, usize),
+    axis: &str,
+    line_color: &str,
+    line_width: f64,
+    fill_color: &str,
+) -> PyResult<usize> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let args = bridge::ShapeArgs {
+        kind: kind.to_owned(),
+        points: (x1, y1, x2, y2),
+        panel,
+        axis: axis.to_owned(),
+        line_color: line_color.to_owned(),
+        line_width,
+        fill_color: fill_color.to_owned(),
+    };
+    let (id, epoch) = (graph.id, graph.epoch);
+    py.detach(|| bridge::add_shape(&context, id, epoch, &args))
+        .map_err(to_py_error)
+}
+
+/// Retire l'objet graphique de rang `index` du panneau `panel`. Les objets
+/// au-dessus de lui descendent d'un rang. Annulable par `pyx.undo()`.
+#[pyfunction]
+#[pyo3(signature = (graph, index, *, panel=(0, 0)))]
+fn remove_shape(
+    py: Python<'_>,
+    graph: &Handle,
+    index: usize,
+    panel: (usize, usize),
+) -> PyResult<()> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let (id, epoch) = (graph.id, graph.epoch);
+    py.detach(|| bridge::remove_shape(&context, id, epoch, panel, index))
+        .map_err(to_py_error)
+}
+
 /// Documentation du module telle qu'un script la voit (`help(pyx)`).
 const MODULE_DOC: &str = "\
 Surface de script de PlotYx : navigation, lecture, écriture, annulation et import.
@@ -616,6 +675,9 @@ Surface de script de PlotYx : navigation, lecture, écriture, annulation et impo
     pyx.set_values(handle, values) -> None (remplacement, longueur comprise)
     pyx.set_column_meta(handle, **metadata) -> None
     pyx.plot(y, x=None, *, graph=None, name=None, parent=None, **options) -> Handle
+    pyx.add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left',
+                  line_color='', line_width=1.5, fill_color='') -> int
+    pyx.remove_shape(graph, index, *, panel=(0, 0)) -> None
     pyx.undo()                     -> bool (False si rien à annuler)
     pyx.import_file(path, recipe=None) -> list[Handle] (feuilles d'un nouveau classeur)
 
@@ -663,6 +725,8 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(set_values, &module)?)?;
     module.add_function(wrap_pyfunction!(set_column_meta, &module)?)?;
     module.add_function(wrap_pyfunction!(crate::graph::plot, &module)?)?;
+    module.add_function(wrap_pyfunction!(add_shape, &module)?)?;
+    module.add_function(wrap_pyfunction!(remove_shape, &module)?)?;
     module.add_function(wrap_pyfunction!(undo, &module)?)?;
     module.add_function(wrap_pyfunction!(import_file, &module)?)?;
     module.add("UnknownPathError", py.get_type::<UnknownPathError>())?;

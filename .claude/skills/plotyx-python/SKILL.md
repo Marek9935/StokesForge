@@ -165,6 +165,10 @@ un `PlotSpec` par `AddGraph`, ou ajoute une série au premier panneau par
 `SetPlotSpec`. Réutiliser `plotyx-plot` : palette, couleurs, axes et styles ;
 pas de dépendance de production à un moteur de rendu. Valider les poignées
 sur un seul instantané, puis de nouveau après acquisition de la macro.
+`add_shape` et `remove_shape` (#76) passent eux aussi par le contexte :
+valider le spec avant réservation puis le relire sous macro, même si l'objet
+est la première mutation. Aucun mutateur de graphe ne doit contourner la macro
+`Script`, sinon une exception laisserait son objet derrière elle.
 Conserver les autres panneaux et les options non fournies. Les titres et
 labels explicites sont du markup Typst ; les labels automatiques restent
 littéraux. Contrat et SVG témoins : `tests/graphs.rs`.

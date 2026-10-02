@@ -14,8 +14,8 @@ default = []
 # machine sans interpréteur vendorisé.
 python = [
     "dep:plotyx-core",
-    "dep:plotyx-plot",
     "dep:plotyx-commands",
+    "dep:plotyx-plot",
     "dep:plotyx-session",
     "dep:plotyx-python",
     "dep:plotyx-import",
@@ -26,9 +26,9 @@ python = [
 ]
 
 [dependencies]
-plotyx-plot = { path = "../plotyx-plot", optional = true }
 plotyx-core = { version = "0.0.0", path = "../plotyx-core", optional = true }
 plotyx-commands = { version = "0.0.0", path = "../plotyx-commands", optional = true }
+plotyx-plot = { version = "0.0.0", path = "../plotyx-plot", optional = true }
 plotyx-session = { version = "0.0.0", path = "../plotyx-session", optional = true }
 plotyx-python = { version = "0.0.0", path = "../plotyx-python", optional = true, features = ["python"] }
 plotyx-import = { path = "../plotyx-import", optional = true }

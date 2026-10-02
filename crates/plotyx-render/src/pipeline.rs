@@ -75,7 +75,7 @@ use plotyx_plot::{
 };
 
 use crate::clip::{self, PixelBounds};
-use crate::color::{auto_ink, over_white, rgba_or};
+use crate::color::{auto_ink, over_white, parse_hex, rgba_or};
 use crate::decimate;
 use crate::formula::{literal_style, rich_style};
 use crate::legend;
@@ -190,6 +190,11 @@ pub struct DrawnPanel {
     /// Les textes libres réellement tracés (issue #35), dans l'ordre du
     /// spec ; un texte hors du cadrage visible n'y figure pas.
     pub annotations: Vec<DrawnAnnotation>,
+    /// Les objets graphiques réellement tracés (issue #76), dans l'ordre du
+    /// spec (du dessous au dessus). Contrairement à un texte libre, un objet
+    /// qui déborde du cadrage visible y figure : il est tracé rogné, mais
+    /// désignable par la partie visible.
+    pub shapes: Vec<crate::shapes::DrawnShape>,
     /// Les titres et la légende de ce panneau (issue #53) : titre du
     /// panneau, titres d'axe, cadre de la légende. Un texte à sa place par
     /// défaut y figure aussi, avec une position **approchée** (Plotters le
@@ -825,6 +830,7 @@ fn draw_panel<DB: DrawingBackend>(
             },
         },
         annotations: Vec::new(),
+        shapes: Vec::new(),
         texts: Vec::new(),
         legend_rows: Vec::new(),
     };
@@ -1041,12 +1047,45 @@ fn draw_panel<DB: DrawingBackend>(
     }
     drawn.texts = texts;
 
-    // 7 — les textes libres, par-dessus tout (issue #35).
     let ranges = Ranges {
         x: (x_scale, x_range),
         y: (y_scale, y_range),
         y2: y2_range.map(|range| (y2_scale, range)),
     };
+
+    // 6 bis — les objets graphiques (issue #76), du dessous au dessus, sous
+    // les textes libres. Projetés sans test d'appartenance au cadrage : un
+    // rectangle qui déborde du zoom est rogné, pas omis.
+    for (index, shape) in spec.shapes.iter().enumerate() {
+        let right = shape.axis == SeriesAxis::Right && right_active;
+        if !shape.is_finite() {
+            continue;
+        }
+        let pixel_of = |x: f64, y: f64| {
+            let point = ranges.forward(x, y, right)?;
+            Some(if right {
+                chart.secondary_plotting_area().map_coordinate(&point)
+            } else {
+                chart.plotting_area().map_coordinate(&point)
+            })
+        };
+        let (Some(a), Some(b)) = (pixel_of(shape.x1, shape.y1), pixel_of(shape.x2, shape.y2))
+        else {
+            continue;
+        };
+        let (p1, p2) = ((a.0 as f64, a.1 as f64), (b.0 as f64, b.1 as f64));
+        crate::shapes::draw_shape(&screen, shape, p1, p2, bounds, ink)?;
+        drawn.shapes.push(crate::shapes::DrawnShape {
+            index,
+            kind: shape.kind,
+            p1,
+            p2,
+            filled: shape.kind.is_closed() && parse_hex(&shape.fill_color).is_some(),
+            width: shape.effective_width(),
+        });
+    }
+
+    // 7 — les textes libres, par-dessus tout (issue #35).
     for (index, annotation) in spec.annotations.iter().enumerate() {
         let right = annotation.axis == SeriesAxis::Right && right_active;
         let Some(point) = ranges.project(annotation.x, annotation.y, right) else {
@@ -1079,6 +1118,14 @@ struct Ranges {
 }
 
 impl Ranges {
+    /// Le point `(x, y)` dans l'espace transformé, **sans** test
+    /// d'appartenance au cadrage (objets graphiques, issue #76) ; `None`
+    /// seulement si l'échelle ne le représente pas (≤ 0 sur un axe log).
+    fn forward(&self, x: f64, y: f64, right: bool) -> Option<(f64, f64)> {
+        let (y_scale, _) = if right { self.y2? } else { self.y };
+        Some((scale::forward(self.x.0, x)?, scale::forward(y_scale, y)?))
+    }
+
     /// Le point `(x, y)` dans l'espace transformé, s'il tombe dans le
     /// cadrage visible ; `None` sinon (hors zoom, ou ≤ 0 sur un axe log) —
     /// comme un point de série hors cadre, il n'est pas dessiné.

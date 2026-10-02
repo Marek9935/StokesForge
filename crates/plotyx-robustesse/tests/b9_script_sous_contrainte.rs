@@ -518,7 +518,8 @@ fn b9_interruption_avalee_annule_aussi_le_graphe_et_les_valeurs() {
 a = pyx.resolve('[Book1]Sheet1!A')
 try:
     pyx.set_values(a, [9.,10.,11.])
-    pyx.plot(a, name='À annuler')
+    g = pyx.plot(a, name='À annuler')
+    pyx.add_shape(g, 'rectangle', 0, 0, 1, 1)
     while True: pass
 except KeyboardInterrupt:
     print('interruption avalée')
@@ -529,17 +530,15 @@ except KeyboardInterrupt:
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let snapshot = handle.snapshot().unwrap();
-        if snapshot
-            .tree
-            .node(snapshot.tree.root())
-            .unwrap()
-            .children()
-            .len()
-            == 2
-        {
+        if snapshot.tree.resolve("[À annuler]").ok().is_some_and(|id| {
+            matches!(snapshot.tree.node(id).unwrap().kind(), plotyx_core::NodeKind::Graph { spec, .. } if !spec.panels[0].shapes.is_empty())
+        })        {
             break;
         }
-        assert!(std::time::Instant::now() < deadline, "graphe non créé");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "graphe et objet non créés"
+        );
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     engine.interrupt();

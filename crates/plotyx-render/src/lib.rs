@@ -84,11 +84,12 @@ pub mod pipeline;
 pub mod sample;
 pub mod scale;
 pub mod series;
+pub mod shapes;
 pub mod text;
 
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
-pub use fonts::{FontChoice, FontSet, FontSource, ResolvedFonts};
+pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use hit::{component_at, AxisSide, PlotComponent};
 pub use interact::{nearest_on_curve, PanelTransform};
 pub use pipeline::{
@@ -96,4 +97,5 @@ pub use pipeline::{
     DrawnText,
 };
 pub use series::{Geometry, Prepared};
+pub use shapes::DrawnShape;
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};

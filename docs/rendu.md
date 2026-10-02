@@ -58,6 +58,17 @@ fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
 automatique — à l'écran comme à l'export, puisque le pipeline est commun
 (`plotyx-render-svg/tests/couleurs.rs`).
 
+Polices dans le texte (issue #63) : un texte peut nommer sa police,
+`#text(font: "Fira Sans")[…]`. Le `World` Typst (`formula::requested_fonts`)
+lit ces noms dans le markup et charge la famille demandée, embarquée
+(Libertinus Sans, Fira Sans, Noto Sans) sinon installée sur la machine
+(`fonts::available_families`, base `fontdb` scannée une fois). Introuvable :
+Typst retombe sur la police du document, le texte ne disparaît pas — mais la
+figure change d'une machine à l'autre, puisque seules les polices embarquées
+voyagent. Le gras vient de l'axe `wght` de Noto Sans ; l'italique de la face
+italique de Noto Sans embarquée avec lui (Typst ne fabrique pas d'italique) ;
+Fira et Libertinus n'ont que le régulier.
+
 Une formule Typst suit la même couleur (issue #30) : les backends passent
 `style.color()` à la compilation (`formula::ink`), qui pose
 `#set text(fill: rgb(…))`. La couleur est donc **dans l'image rastérisée** ou
@@ -242,9 +253,14 @@ Un panneau est identifié par `(row, column)`, **pas par son indice** :
 `DrawnPlot::panels` omet les panneaux trop petits pour être tracés (`MIN_CELL`),
 ce qui décale les indices.
 
-Gestes câblés : molette (zoom), glisser principal (pan), glisser secondaire
-(rectangle de zoom élastique), double-clic (réinitialisation), plus réticule et
-désignation de point (`PointHit`, rayon `HIT_RADIUS`).
+Gestes câblés : Ctrl+molette (zoom ; la molette seule ne fait rien), double-clic
+(réinitialisation), plus réticule et désignation de point (`PointHit`, rayon
+`HIT_RADIUS`). Le glisser principal dépend de l'**outil** de la vue
+(`GraphTool`, issue #62, réglage de vue comme le cadrage, jamais annulable) :
+`Pointer` (défaut) fait défiler la vue et déplace les textes, `ZoomBox` trace le
+rectangle de zoom élastique, `Text` pose un texte au clic
+(`GraphEvent::PlaceText`, puis retour au pointeur). Le clic droit n'est plus un
+geste de zoom : il ouvre le menu contextuel.
 
 ### Le levier d'anticrénelage
 
@@ -348,6 +364,23 @@ texte relâché) ; l'aperçu validé reste affiché jusqu'à ce que le modèle c
 angle libre de `DragValue` (fractionnaire, minuscule, négatif) reste une durée
 Typst valide (`formula::source`, issue #36 — l'hypothèse d'un format `1e-7deg`
 était fausse : le format décimal de Rust n'a pas d'exposant). Sans Typst (témoin, repli), le texte est brut et non tourné.
+
+**Objets graphiques** (issue #76) : rectangle, ellipse, ligne, flèche
+(`plotyx_render::shapes`), tracés par le pipeline commun entre la légende et
+les textes libres (étape « 6 bis »), donc identiques à l'écran et à l'export.
+Les deux points sont projetés **sans** test d'appartenance au cadrage
+(`Ranges::forward`) puis rognés en pixels : trait par `clip_polyline`
+(contour fermé), remplissage par Sutherland-Hodgman (`clip_polygon`), pointe de
+flèche omise si elle est hors cadre. L'ellipse est un polygone à 72 côtés.
+`DrawnPanel::shapes` (`DrawnShape`, pixels non rognés) sert à `hit` :
+`PlotComponent::Shape`, désigné **sur son trait** (ou dedans s'il est rempli)
+dans la zone de tracé, sous les textes libres. Côté écran, `GraphView`
+(`shape_tools.rs`) porte l'aperçu (`set_shape_preview`, même mécanisme que les
+textes), la sélection, les huit poignées d'un rectangle ou d'une ellipse (deux
+extrémités pour une ligne), les outils de tracé (`GraphTool::Rectangle`…) et
+le signal unique `GraphEvent::ShapeChanged` au relâchement. Un déplacement sur
+axes linéaires se fait **en données** (les points tracés sont arrondis au
+pixel).
 
 **Titres et légende déplaçables** (issue #53) : titre du graphe, titre de
 panneau, titres d'axe et cadre de la légende portent une `TextAnchor` optionnelle
