@@ -71,7 +71,8 @@ d'egui, pour le dessin comme pour les interactions. Elle ne recouvre donc
 ni l'en-tête ni les commandes placées sous elle. Les compteurs de cache et
 le résumé technique de la figure ne sont plus affichés.
 
-La barre de titre maison centre le nom du contenu. Celle d'un graphe garde à
+La barre de titre maison centre le nom du contenu dans la place laissée par les
+icônes réellement peintes (un dialogue ne réserve que la croix, #50). Celle d'un graphe garde à
 gauche la flèche de repli d'une fenêtre egui : elle masque ou réaffiche le
 seul contenu de ce graphe, sans modifier le projet, la géométrie enregistrée
 ni les autres fenêtres.
