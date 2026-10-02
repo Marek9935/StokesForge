@@ -11,7 +11,7 @@
 //!   dont un côté est hors cadre n'est pas replaqué sur le bord ;
 //! - le **remplissage** est le polygone rogné par Sutherland-Hodgman
 //!   ([`clip_polygon`]) — un contour fermé de l'ellipse, polygonal à
-//!   [`ELLIPSE_SEGMENTS`] côtés, est convexe, ce qui suffit à cet algorithme ;
+//!   [`ellipse_segments`] côtés, est convexe, ce qui suffit à cet algorithme ;
 //! - la **pointe** d'une flèche est un triangle plein, omis quand la pointe
 //!   est hors cadre.
 
@@ -25,8 +25,26 @@ use crate::clip::{clip_polyline, clip_segment, PixelBounds};
 use crate::color::{parse_hex, rgba_or};
 use crate::paint::{opaque, rgba, stroke_width};
 
-/// Côtés du polygone qui approche une ellipse.
-pub const ELLIPSE_SEGMENTS: usize = 72;
+/// Bornes du nombre de côtés du polygone qui approche une ellipse.
+const ELLIPSE_SEGMENTS_RANGE: (usize, usize) = (24, 2048);
+/// Flèche maximale (écart entre la corde et l'arc), en pixels, du polygone
+/// d'ellipse. Les coordonnées sont arrondies au pixel entier par le backend,
+/// donc on vise bien en dessous du demi-pixel.
+const ELLIPSE_SAGITTA: f64 = 0.1;
+
+/// Côtés du polygone qui approche une ellipse de demi-axe maximal `radius`
+/// pixels : assez pour que la corde ne s'écarte pas de l'arc de plus de
+/// [`ELLIPSE_SAGITTA`] (issue #91 : 72 côtés fixes se voyaient sur un grand
+/// cercle). Un polygone régulier inscrit reste convexe, quel que soit n.
+pub fn ellipse_segments(radius: f64) -> usize {
+    let (min, max) = ELLIPSE_SEGMENTS_RANGE;
+    if !radius.is_finite() || radius <= ELLIPSE_SAGITTA {
+        return min;
+    }
+    // sagitta = r (1 - cos(π/n))  ⇒  n = π / acos(1 - s/r)
+    let n = std::f64::consts::PI / (1.0 - ELLIPSE_SAGITTA / radius).acos();
+    (n.ceil() as usize).clamp(min, max)
+}
 
 /// Tolérance de désignation autour du trait, en pixels.
 const HIT_TOLERANCE: f64 = 4.0;
@@ -124,9 +142,10 @@ pub fn outline(kind: ShapeKind, p1: (f64, f64), p2: (f64, f64)) -> Vec<(f64, f64
         ShapeKind::Ellipse => {
             let (cx, cy) = ((left + right) / 2.0, (top + bottom) / 2.0);
             let (a, b) = ((right - left) / 2.0, (bottom - top) / 2.0);
-            (0..ELLIPSE_SEGMENTS)
+            let segments = ellipse_segments(a.max(b));
+            (0..segments)
                 .map(|i| {
-                    let angle = std::f64::consts::TAU * i as f64 / ELLIPSE_SEGMENTS as f64;
+                    let angle = std::f64::consts::TAU * i as f64 / segments as f64;
                     (cx + a * angle.cos(), cy + b * angle.sin())
                 })
                 .collect()
@@ -352,6 +371,26 @@ mod tests {
         assert!(line.contains(30.0, 28.0));
         assert!(!line.contains(30.0, 40.0));
         assert!(!line.contains(80.0, 55.0), "au-delà de l'extrémité");
+    }
+
+    #[test]
+    fn l_ellipse_garde_un_ecart_a_l_arc_sous_la_tolerance_quel_que_soit_le_rayon() {
+        for radius in [5.0, 40.0, 150.0, 600.0, 3000.0] {
+            let polygon = outline(ShapeKind::Ellipse, (0.0, 0.0), (2.0 * radius, 2.0 * radius));
+            assert!(polygon.len() >= ELLIPSE_SEGMENTS_RANGE.0, "{radius}");
+            // Le milieu de chaque corde est le point le plus éloigné de l'arc.
+            let worst = polygon
+                .iter()
+                .zip(polygon.iter().cycle().skip(1))
+                .map(|(a, b)| {
+                    let mid = ((a.0 + b.0) / 2.0 - radius, (a.1 + b.1) / 2.0 - radius);
+                    radius - mid.0.hypot(mid.1)
+                })
+                .fold(0.0_f64, f64::max);
+            assert!(worst <= ELLIPSE_SAGITTA * 1.01, "rayon {radius} : {worst}");
+        }
+        assert!(ellipse_segments(600.0) > ellipse_segments(40.0));
+        assert_eq!(ellipse_segments(f64::NAN), ELLIPSE_SEGMENTS_RANGE.0);
     }
 
     #[test]

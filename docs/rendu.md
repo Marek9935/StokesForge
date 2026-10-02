@@ -390,7 +390,7 @@ les textes libres (étape « 6 bis »), donc identiques à l'écran et à l'expo
 Les deux points sont projetés **sans** test d'appartenance au cadrage
 (`Ranges::forward`) puis rognés en pixels : trait par `clip_polyline`
 (contour fermé), remplissage par Sutherland-Hodgman (`clip_polygon`), pointe de
-flèche omise si elle est hors cadre. L'ellipse est un polygone à 72 côtés.
+flèche omise si elle est hors cadre. L'ellipse est un polygone convexe dont le nombre de côtés suit le rayon en pixels (`ellipse_segments` : corde à moins de 0,1 px de l'arc, #91).
 `DrawnPanel::shapes` (`DrawnShape`, pixels non rognés) sert à `hit` :
 `PlotComponent::Shape`, désigné **sur son trait** (ou dedans s'il est rempli)
 dans la zone de tracé, sous les textes libres. Côté écran, `GraphView`
