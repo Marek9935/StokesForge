@@ -123,6 +123,7 @@ impl GraphView {
         self.selected_shape = target;
         if target.is_some() {
             self.selected_annotation = None;
+            self.selected_text = None;
         }
     }
 

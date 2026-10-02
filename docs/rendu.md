@@ -58,7 +58,26 @@ fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
 automatique — à l'écran comme à l'export, puisque le pipeline est commun
 (`plotyx-render-svg/tests/couleurs.rs`).
 
-Polices dans le texte (issue #63) : un texte peut nommer sa police,
+Police d'une zone de texte (issues #77, #78) : la police et le corps d'un
+titre, d'un titre d'axe, de la légende et d'un texte libre sont des champs de la
+zone (`plotyx_plot::TextFont`), pas du contenu. Le pipeline en tire le style
+(`pipeline::font_style`, corps borné à 4-200) et la police voyage dans la
+**famille du style** (`formula::rich_style_font` : `plotyx-typst|Fira Sans`, comme
+l'angle d'un texte tourné) ; `formula::source` pose alors `#set text(font: …)`
+et `#show math.equation: set text(font: …)` avant le texte, les deux backends
+l'ignorant. La police Math suit (`math_family_for`) : Libertinus Sans →
+Libertinus Math, Fira Sans → Fira Math, Noto Sans → Noto Sans Math, une police
+système → Noto Sans Math (repli). Tests : `formula.rs`
+(`la_police_d_une_zone_est_posee_dans_le_source_avec_sa_math`), `geometrie.rs`
+(`le_corps_d_une_zone_de_texte_change_sa_taille`), `plotyx-render-svg/tests/typst.rs`.
+
+Le titre et la légende se **sélectionnent** au clic (`GraphView::selected_text`,
+cadre bleu comme un texte libre, issue #77) ; une entrée de légende désigne la
+légende entière, qui se déplace aussi en la glissant par une entrée.
+
+Polices dans le texte (issue #63, **remplacé** pour le choix de police par ce
+qui précède — la barre ne pose plus de balise de police ; un `#text(font: …)`
+saisi à la main reste lu) : un texte peut nommer sa police,
 `#text(font: "Fira Sans")[…]`. Le `World` Typst (`formula::requested_fonts`)
 lit ces noms dans le markup et charge la famille demandée, embarquée
 (Libertinus Sans, Fira Sans, Noto Sans) sinon installée sur la machine

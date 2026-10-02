@@ -192,6 +192,13 @@ renommer ou déplacer une colonne ne casse rien.
   dans un `PlotSpec` (`anchor`, `set_anchor`, `text`, `set_text`) ;
   `PlotSpec::reset_text_anchors` les retire toutes. Pas de commande dédiée :
   tout passe par `SetPlotSpec`.
+- `TextFont { family, size }` (issues #77, #78) : la police et le corps d'une
+  **zone** de texte entière — jamais une balise dans son contenu. Vide / `None`
+  = la police du graphe et le corps du pipeline. Champs `PlotSpec::title_font`,
+  `PanelSpec::title_font`, `AxisSpec::title_font`, `LegendSpec::font` ; un texte
+  libre garde son corps dans `AnnotationSpec::size` et reçoit `font`.
+  `TextTarget::font` / `set_font` l'adressent. Pas de commande dédiée :
+  `SetPlotSpec` (`Action::SetTextFont` côté application).
 - `AxisSpec::has_explicit_range` : un cadrage explicite prime sur les données
   calculées. C'est le levier — déjà présent, rien n'a été inventé pour lui —
   sur lequel le zoom/pan de l'écran s'appuie ([`rendu.md`](rendu.md)).

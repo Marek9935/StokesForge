@@ -1648,6 +1648,8 @@ impl PlotyxApp {
             FormatTarget::Field
         } else if view.selected_annotation().is_some() {
             FormatTarget::Block
+        } else if view.selected_text().is_some() {
+            FormatTarget::Zone
         } else {
             FormatTarget::None
         }
@@ -1704,6 +1706,111 @@ impl PlotyxApp {
         }
     }
 
+    /// Règle la police (ou le corps) de la **zone** de texte visée, sans
+    /// toucher à son contenu. Rend `true` si la demande a été prise en charge ;
+    /// `false` laisse [`PlotyxApp::format_text`] poser des balises (le corps
+    /// d'un passage du champ en édition, la couleur, le gras…).
+    ///
+    /// - un texte libre en édition : le brouillon de l'éditeur
+    ///   ([`apply_pending_zone_font`]) ;
+    /// - un titre ou un nom de légende en édition : le titre, ou la légende,
+    ///   directement ;
+    /// - un titre, un titre d'axe ou la légende sélectionné : idem, police et
+    ///   corps ;
+    /// - un texte libre sélectionné : sa police.
+    fn format_zone(
+        &mut self,
+        ctx: &egui::Context,
+        format: &crate::text_format::TextFormat,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) -> bool {
+        use crate::text_format::TextFormat;
+        let Some(graph) = active_graph(active_tab_kind(active_tab)) else {
+            return false;
+        };
+        let Some(view) = self.graph_views.get(&graph) else {
+            return false;
+        };
+        let annotation_editing = ctx.data(|data| {
+            data.get_temp::<AnnotationEditor>(annotation_editor_id(view))
+                .is_some()
+        });
+        let title_editing = ctx.data(|data| data.get_temp::<TextEditor>(text_editor_id(view)));
+        // Quelle zone de titre ? (`None` : pas de titre visé)
+        let zone = match (&title_editing, view.selected_text()) {
+            (Some(editor), _) => Some(match editor.target {
+                TextEditTarget::Title(target) => target,
+                TextEditTarget::LegendEntry(_, (row, column)) => {
+                    plotyx_render_egui::TextTarget::Legend { row, column }
+                }
+            }),
+            (None, selected) if !annotation_editing => selected,
+            _ => None,
+        };
+        if let TextFormat::Font(name) = format {
+            let name = name.trim().to_owned();
+            if annotation_editing {
+                ctx.data_mut(|data| data.insert_temp(pending_zone_font_id(), Some(name)));
+                return true;
+            }
+            if let Some(target) = zone {
+                return self.set_zone_font(graph, target, actions, |font| font.family = name);
+            }
+            if let Some(target) = view.selected_annotation() {
+                let Some(mut annotation) =
+                    crate::state::current_plot_spec(self.state.tree(), graph)
+                        .and_then(|spec| target.get(&spec).cloned())
+                else {
+                    return true;
+                };
+                annotation.font = name;
+                actions.push(Action::SetAnnotation {
+                    graph,
+                    target,
+                    annotation: Box::new(annotation),
+                });
+                return true;
+            }
+            return false;
+        }
+        // Le corps : celui de la zone d'un titre sélectionné ; dans un champ
+        // en édition il reste une balise sur le passage surligné.
+        if let (TextFormat::Size(size), Some(target), None, false) =
+            (format, zone, &title_editing, annotation_editing)
+        {
+            if size.is_finite() && *size > 0.0 {
+                let size = *size;
+                return self.set_zone_font(graph, target, actions, |font| font.size = Some(size));
+            }
+        }
+        false
+    }
+
+    /// Pose la police ou le corps de la zone de titre `target` : lit la
+    /// police actuelle dans le modèle, la change par `edit`, et pousse
+    /// **une** action annulable. `true` toujours (la demande est prise en
+    /// charge même si le graphe n'a plus ce texte).
+    fn set_zone_font(
+        &self,
+        graph: NodeId,
+        target: plotyx_render_egui::TextTarget,
+        actions: &mut Vec<Action>,
+        edit: impl FnOnce(&mut plotyx_plot::TextFont),
+    ) -> bool {
+        if let Some(mut font) = crate::state::current_plot_spec(self.state.tree(), graph)
+            .and_then(|spec| target.font(&spec))
+        {
+            edit(&mut font);
+            actions.push(Action::SetTextFont {
+                graph,
+                target,
+                font,
+            });
+        }
+        true
+    }
+
     /// Met en forme le texte visé : dans le champ en édition (le champ pose
     /// les balises à son prochain tracé, voir [`apply_pending_format`]), ou
     /// sur tout le texte libre sélectionné — une seule action annulable.
@@ -1715,8 +1822,13 @@ impl PlotyxApp {
         actions: &mut Vec<Action>,
     ) {
         use crate::text_format::{apply, TextFormat};
+        // La police est un attribut de la zone, jamais une balise (issue
+        // #78) ; le corps aussi pour un titre ou la légende (issue #77).
+        if self.format_zone(ctx, &format, active_tab, actions) {
+            return;
+        }
         match self.format_target(ctx, active_tab) {
-            crate::toolbar::FormatTarget::None => {}
+            crate::toolbar::FormatTarget::None | crate::toolbar::FormatTarget::Zone => {}
             crate::toolbar::FormatTarget::Field => {
                 ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(format)));
             }
@@ -8196,6 +8308,21 @@ fn pending_format_id() -> egui::Id {
     egui::Id::new("plotyx_pending_text_format")
 }
 
+/// La police demandée par la barre pour le texte libre en édition : elle
+/// s'applique au brouillon de l'éditeur, pas au contenu (issue #78).
+fn pending_zone_font_id() -> egui::Id {
+    egui::Id::new("plotyx_pending_zone_font")
+}
+
+/// Pose sur `font` la police demandée par la barre de format, s'il y en a une.
+fn apply_pending_zone_font(ctx: &egui::Context, font: &mut String) {
+    if let Some(Some(name)) =
+        ctx.data_mut(|data| data.remove_temp::<Option<String>>(pending_zone_font_id()))
+    {
+        *font = name;
+    }
+}
+
 /// Pose la mise en forme demandée par la barre de format sur `buffer`, selon
 /// la sélection que le champ `field` a gardée (egui la conserve quand le
 /// champ perd le focus au clic sur la barre), puis rend le focus au champ avec
@@ -8628,6 +8755,7 @@ fn annotation_editor_ui(
 ) {
     let id = annotation_editor_id(view);
     apply_pending_format(ctx, id.with("field"), &mut editor.draft.text);
+    apply_pending_zone_font(ctx, &mut editor.draft.font);
     // Le cadre du texte rendu ; à défaut (texte neuf, ou vidé donc plus
     // tracé), le dernier connu, puis le centre de la figure.
     if let Some((center, size, _)) = view.annotation_screen_box(editor.target) {

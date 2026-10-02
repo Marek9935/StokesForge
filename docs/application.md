@@ -445,9 +445,15 @@ accueil en haut seulement.
 - Barre `Text` (format du texte, #63) : visible avec un graphe au premier
   plan, sur sa propre rangée par défaut. Police, corps, couleur, gras,
   italique, indice, exposant, formule. Les textes du graphe étant déjà du
-  markup Typst, un bouton **écrit des balises dans le texte**
-  (`text_format::apply`, pur) : aucun champ de modèle, aucun changement du
-  `.plx`. Cible (`FormatTarget`, `PlotyxApp::format_target`) : un champ en
+  markup Typst, gras, italique, indice, exposant, formule, couleur et corps
+  d'un passage **écrivent des balises dans le texte** (`text_format::apply`,
+  pur). La **police** n'est plus une balise (#78) : c'est un champ de la zone
+  entière (`TextFont`, `AnnotationSpec::font`), posé par `PlotyxApp::format_zone`
+  — brouillon de l'éditeur pour un texte libre en édition
+  (`pending_zone_font_id`), `Action::SetTextFont` pour un titre ou la légende,
+  `Action::SetAnnotation` pour un texte libre sélectionné. Un titre, un titre
+  d'axe ou la légende **sélectionné** (`FormatTarget::Zone`, #77) ne prend que
+  la police et le corps (les autres boutons sont grisés). Cible (`FormatTarget`, `PlotyxApp::format_target`) : un champ en
   édition sur place (texte libre, titre, titre d'axe, légende) → la demande
   attend dans la mémoire d'egui (`pending_format_id`) et le champ la pose à
   son prochain tracé sur le surlignage qu'egui a gardé, ou insère les balises

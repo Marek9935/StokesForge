@@ -490,6 +490,17 @@ pub enum Action {
         /// Sa nouvelle ancre ; `None` le remet à sa place par défaut.
         anchor: Option<TextAnchor>,
     },
+    /// Pose la police et le corps d'un titre ou de la légende (issues #77,
+    /// #78) : un attribut de la zone entière, pas une balise dans son texte.
+    /// Une modification du modèle ([`Command::SetPlotSpec`]).
+    SetTextFont {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Le texte réglé.
+        target: TextTarget,
+        /// Sa nouvelle police et son nouveau corps.
+        font: plotyx_plot::TextFont,
+    },
     /// Remet **tous** les titres et la légende du graphe à leur place par
     /// défaut (menu *Graph*).
     ResetTextAnchors {
@@ -3466,6 +3477,11 @@ impl AppState {
                 target,
                 anchor,
             } => self.edit_annotations(graph, |spec| target.set_anchor(spec, anchor)),
+            Action::SetTextFont {
+                graph,
+                target,
+                font,
+            } => self.edit_annotations(graph, |spec| target.set_font(spec, font)),
             Action::ResetTextAnchors { graph } => {
                 self.edit_annotations(graph, |spec| spec.reset_text_anchors() > 0)
             }

@@ -663,6 +663,70 @@ fn double_cliquer_un_titre_demande_a_lediter() {
     assert_eq!(signaux, vec![GraphEvent::EditText(TextTarget::Title)]);
 }
 
+/// Issue #77 : un clic sur le titre le sélectionne (et le cadre se peint),
+/// un clic dans le vide ne sélectionne plus rien ; la légende se sélectionne
+/// par un clic sur l'une de ses entrées, et se déplace par un glisser qui
+/// part d'une entrée.
+#[test]
+fn un_clic_selectionne_un_titre_ou_la_legende() {
+    use plotyx_render_egui::{GraphEvent, TextTarget};
+    let banc = Banc::with_title("Titre");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    assert_eq!(view.selected_text(), None);
+
+    let (titre, _, _) = view
+        .text_screen_box(TextTarget::Title)
+        .expect("titre tracé");
+    let mut temps = 0.1;
+    let mut cliquer = |view: &mut GraphView, pos: Pos2| {
+        for (pressed, dt) in [(true, 0.0), (false, 0.02)] {
+            let mut events = vec![bouton(pos, pressed)];
+            if pressed {
+                events.insert(0, egui::Event::PointerMoved(pos));
+            }
+            temps += dt + 0.4;
+            image_avec(&context, view, &banc, rect, events, temps);
+        }
+    };
+    cliquer(&mut view, titre);
+    assert_eq!(view.selected_text(), Some(TextTarget::Title));
+
+    let legende = TextTarget::Legend { row: 0, column: 0 };
+    let (centre, taille, _) = view.text_screen_box(legende).expect("légende tracée");
+    let entree = centre + egui::vec2(0.0, -taille.y / 2.0 + 14.0);
+    cliquer(&mut view, entree);
+    assert_eq!(view.selected_text(), Some(legende));
+
+    // Le vide : au centre de la zone de tracé, loin de la légende et du titre.
+    cliquer(&mut view, Pos2::new(300.0, 250.0));
+    assert_eq!(
+        view.selected_text(),
+        None,
+        "un clic dans le vide désélectionne"
+    );
+
+    // Un glisser parti d'une entrée de légende déplace la légende.
+    let signaux = glisser(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        entree,
+        entree + egui::vec2(-60.0, 40.0),
+        10.0,
+    );
+    assert!(
+        signaux
+            .iter()
+            .any(|s| matches!(s, GraphEvent::TextMoved { target, .. } if *target == legende)),
+        "{signaux:?}"
+    );
+    assert_eq!(view.selected_text(), Some(legende));
+}
+
 // -- Issue #76 : objets graphiques (rectangle, ellipse, ligne, flèche) --
 
 /// Un banc dont le panneau porte un rectangle **rempli** au milieu des

@@ -180,6 +180,13 @@ Idem pour les **objets graphiques** (issue #76) : `PanelSpecRecord::shapes`
 (`ShapeSpecRecord`, `ShapeKindRecord`), `#[serde(default)]` ; même aller-retour
 tenu par `a_non_trivial_plot_spec_round_trips_intact`.
 
+Idem pour la **police et le corps des zones de texte** (issues #77, #78) :
+`TextFontRecord` (`family`, `size`) en champ `#[serde(default)]` de
+`PlotSpecRecord`, `PanelSpecRecord`, `AxisSpecRecord` (`title_font`) et
+`LegendSpecRecord` (`font`), et `font` sur `AnnotationSpecRecord` — absent d'un
+fichier plus ancien = la police du graphe. Aller-retour tenu par
+`a_non_trivial_plot_spec_round_trips_intact`.
+
 Idem pour les **textes déplacés** (issue #53) : `TextAnchorRecord` en champ
 `#[serde(default)]` sur `PlotSpecRecord` (titre), `PanelSpecRecord` (titre du
 panneau), `AxisSpecRecord` (titre d'axe) et `LegendSpecRecord` (légende) —

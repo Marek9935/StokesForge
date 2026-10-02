@@ -433,6 +433,9 @@ pub enum FormatTarget {
     Field,
     /// Un texte est sélectionné sans être édité : tout le texte.
     Block,
+    /// Un titre, un titre d'axe ou la légende est sélectionné (issue #77) :
+    /// la police et le corps de la zone, rien dans son contenu.
+    Zone,
 }
 
 /// Les réglages de l'objet graphique sélectionné, tels que la barre de format
@@ -923,12 +926,20 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
         };
 
         // Police.
+        let rich = matches!(env.text_format, FormatTarget::Field | FormatTarget::Block);
         let chosen = egui::ComboBox::from_id_salt("plotyx_format_font")
             .selected_text(tr!("format-font"))
             .width(110.0)
             .show_ui(ui, |ui| {
                 let mut chosen = None;
                 let mut shown_system_title = false;
+                if ui
+                    .selectable_label(false, tr!("format-font-default"))
+                    .clicked()
+                {
+                    chosen = Some(String::new());
+                }
+                ui.separator();
                 ui.label(egui::RichText::new(tr!("format-font-embedded")).weak());
                 for family in plotyx_render_egui::available_families() {
                     if !family.embedded && !shown_system_title {
@@ -985,7 +996,7 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             user,
             requests: Vec::new(),
         };
-        ui.scope(|ui| {
+        ui.add_enabled_ui(rich, |ui| {
             crate::color_picker::color_button(
                 ui,
                 "plotyx_format_color_button",
@@ -1038,12 +1049,12 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
                 tr!("format-formula", "hint"),
             ),
         ] {
-            let hint = if enabled {
+            let hint = if rich {
                 hint
             } else {
                 format!("{hint}\n{}", tr!("format-disabled"))
             };
-            if tool_button(ui, icon, label, Some(hint), enabled, false) {
+            if tool_button(ui, icon, label, Some(hint), rich, false) {
                 requests.push(ToolbarRequest::FormatText(format));
             }
         }

@@ -425,6 +425,8 @@ pub struct GraphView {
     text_drag: Option<TextDrag>,
     /// Texte libre sélectionné (clic), cible de Suppr.
     selected_annotation: Option<AnnotationRef>,
+    /// Le titre, titre d'axe ou la légende sélectionné (issue #77).
+    selected_text: Option<TextTarget>,
     /// Aperçu d'un objet graphique en cours de tracé, de déplacement ou de
     /// redimensionnement (issue #76), sur le même principe que
     /// `annotation_preview`.
@@ -494,6 +496,7 @@ impl GraphView {
             text_preview: None,
             text_drag: None,
             selected_annotation: None,
+            selected_text: None,
             shape_preview: None,
             shape_drag: None,
             selected_shape: None,
@@ -542,6 +545,30 @@ impl GraphView {
     /// Le texte libre sélectionné, s'il y en a un.
     pub fn selected_annotation(&self) -> Option<AnnotationRef> {
         self.selected_annotation
+    }
+
+    /// Le titre, titre d'axe ou la légende sélectionné, s'il y en a un
+    /// (issue #77) : un clic le sélectionne, le glisser le déplace, la barre
+    /// de format règle sa police et son corps.
+    pub fn selected_text(&self) -> Option<TextTarget> {
+        self.selected_text
+    }
+
+    /// Le titre ou la légende sous le pixel egui `pos`. Une entrée de la
+    /// légende désigne la légende entière : on ne sélectionne ni ne déplace
+    /// une ligne à part.
+    pub fn text_target_at(&self, pos: Pos2) -> Option<TextTarget> {
+        match self.component_at(pos)? {
+            PlotComponent::Text(target) => Some(target),
+            PlotComponent::LegendEntry { panel, .. } => {
+                let drawn = self.last.as_ref()?.panels.get(panel)?;
+                Some(TextTarget::Legend {
+                    row: drawn.row,
+                    column: drawn.column,
+                })
+            }
+            _ => None,
+        }
     }
 
     /// Désélectionne le texte libre (après sa suppression, par exemple).
@@ -1026,9 +1053,18 @@ impl GraphView {
                 Some(_) => None,
                 None => pointer.and_then(|pos| self.shape_at(pos)),
             };
+            // Issue #77 : un titre ou la légende se sélectionne au clic,
+            // quand ni un texte libre ni un objet n'est visé.
+            self.selected_text = match (self.selected_annotation, self.selected_shape) {
+                (None, None) => pointer.and_then(|pos| self.text_target_at(pos)),
+                _ => None,
+            };
         }
         if response.double_clicked() {
             let component = pointer.and_then(|pos| self.component_at(pos));
+            if let Some(PlotComponent::Text(target)) = component {
+                self.selected_text = Some(target);
+            }
             match (pointer.and_then(|pos| self.annotation_at(pos)), component) {
                 (Some(target), _) => {
                     self.selected_annotation = Some(target);
@@ -1209,6 +1245,8 @@ impl GraphView {
                 return false;
             };
             self.selected_annotation = Some(target);
+            self.selected_text = None;
+            self.selected_shape = None;
             self.annotation_drag = Some(AnnotationDrag {
                 target,
                 original,
@@ -1274,9 +1312,12 @@ impl GraphView {
         };
         if self.text_drag.is_none() {
             let origin = pos - response.drag_delta();
-            let Some(PlotComponent::Text(target)) = self.component_at(origin) else {
+            let Some(target) = self.text_target_at(origin) else {
                 return false;
             };
+            self.selected_text = Some(target);
+            self.selected_annotation = None;
+            self.selected_shape = None;
             let (Some(drawn), Some(press)) = (
                 self.drawn_text(target).copied(),
                 self.figure_position(origin),
@@ -1359,6 +1400,22 @@ impl GraphView {
             let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(sx, sy)| {
                 let (u, v) = (sx * half.x, sy * half.y);
                 // Rotation antihoraire à l'écran (axe y vers le bas).
+                center + egui::vec2(u * cos + v * sin, -u * sin + v * cos)
+            });
+            painter.add(Shape::closed_line(
+                corners.to_vec(),
+                Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
+            ));
+        }
+
+        if let Some((center, size, rotation)) = self
+            .selected_text
+            .and_then(|target| self.text_screen_box(target))
+        {
+            let (sin, cos) = rotation.to_radians().sin_cos();
+            let half = size / 2.0 + egui::vec2(3.0, 3.0);
+            let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(sx, sy)| {
+                let (u, v) = (sx * half.x, sy * half.y);
                 center + egui::vec2(u * cos + v * sin, -u * sin + v * cos)
             });
             painter.add(Shape::closed_line(

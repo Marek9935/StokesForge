@@ -129,3 +129,36 @@ fn un_graphe_typst_sexporte_en_svg_pdf_et_png() {
     let largeur = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
     assert_eq!(largeur, 960, "PNG pas à l'échelle 2");
 }
+
+/// Issues #77 et #78 : la police et le corps réglés sur une zone de texte
+/// changent l'export — le titre d'axe composé en Fira Sans 28 n'est pas celui
+/// composé dans la police du graphe, et les autres zones ne bougent pas de
+/// police.
+#[test]
+fn la_police_d_une_zone_de_texte_change_l_export() {
+    let project = Project::new("Police par zone").expect("projet");
+    let mut spec = spec_with_label("Absorbance");
+    let plot = resolve_spec(project.tree(), &spec);
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let export = |plot: &plotyx_core::resolve::ResolvedPlot<'_>| -> String {
+        render_to_string_with_typst(plot, (500, 400), &measurer, &choice).expect("export")
+    };
+    let defaut = export(&plot);
+
+    let font = plotyx_plot::TextFont {
+        family: "Fira Sans".to_owned(),
+        size: Some(28.0),
+    };
+    spec.title_font = font.clone();
+    spec.title = "Titre".to_owned();
+    let mut panels = spec.panels.iter().cloned().collect::<Vec<_>>();
+    panels[0].left.title_font = font;
+    let spec = spec.with_panels(Panels::new(panels));
+    let plot = resolve_spec(project.tree(), &spec);
+    let regle = export(&plot);
+    assert_ne!(defaut, regle, "la police et le corps n'ont rien changé");
+    if let Ok(path) = std::env::var("PLOTYX_TEST_SVG_OUT") {
+        std::fs::write(path, &regle).expect("écriture de l'export");
+    }
+}

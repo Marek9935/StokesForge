@@ -3,8 +3,12 @@
 //! Les titres, titres d'axe, entrées de légende et textes libres sont déjà du
 //! **markup Typst** (`docs/rendu.md`, issue #32) : mettre un mot en gras,
 //! c'est l'envelopper dans `#strong[…]`. Aucun champ n'est donc ajouté au
-//! modèle ni au `.plx` ; la barre ne fait qu'écrire dans le texte, et chaque
-//! écriture passe par la même action annulable que la saisie.
+//! modèle ni au `.plx` pour le gras, l'italique, la couleur et le corps d'un
+//! passage ; la barre écrit dans le texte, et chaque écriture passe par la
+//! même action annulable que la saisie. **La police n'en fait plus partie**
+//! (issue #78) : c'est un champ de la zone, posé par `PlotyxApp::format_zone` ;
+//! [`TextFormat::Font`] reste ce que la barre demande, mais n'arrive ici que si
+//! aucune zone n'est visée.
 //!
 //! Tout ici est pur (texte et indices de caractères), testé sans fenêtre. Les
 //! indices sont des **indices de caractères**, comme ceux du curseur d'egui.

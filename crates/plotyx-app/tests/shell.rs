@@ -6936,6 +6936,51 @@ fn un_objet_graphique_sajoute_sempile_et_se_retire_en_un_pas_chacun() {
 /// Déplacer un titre, un titre d'axe ou la légende, puis les remettre : chaque
 /// geste est **une** modification du modèle (un seul Ctrl+Z), et un geste sans
 /// effet n'empile rien.
+/// Issues #77 et #78 : la police et le corps d'un titre, d'un titre d'axe ou
+/// de la légende sont un attribut de la zone, posé en une entrée annulable.
+#[test]
+fn la_police_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
+    use plotyx_plot::{AxisSide, TextFont, TextTarget};
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let cibles = [
+        TextTarget::Title,
+        TextTarget::AxisTitle {
+            row: 0,
+            column: 0,
+            side: AxisSide::Left,
+        },
+        TextTarget::Legend { row: 0, column: 0 },
+    ];
+    let police = |state: &AppState, cible: TextTarget| cible.font(&graph_spec(state, graph));
+    let voulue = TextFont {
+        family: "Fira Sans".to_string(),
+        size: Some(20.0),
+    };
+    for cible in cibles {
+        assert_eq!(police(&state, cible), Some(TextFont::default()));
+        state.dispatch(Action::SetTextFont {
+            graph,
+            target: cible,
+            font: voulue.clone(),
+        });
+        assert_eq!(police(&state, cible), Some(voulue.clone()));
+        let apres = state.snapshot().revision;
+        state.dispatch(Action::SetTextFont {
+            graph,
+            target: cible,
+            font: voulue.clone(),
+        });
+        assert_eq!(
+            state.snapshot().revision,
+            apres,
+            "un réglage identique a été empilé"
+        );
+        state.dispatch(Action::Undo);
+        assert_eq!(police(&state, cible), Some(TextFont::default()));
+    }
+}
+
 #[test]
 fn un_titre_se_deplace_et_se_reinitialise_en_un_pas_chacun() {
     use plotyx_plot::{AxisSide, TextAnchor, TextTarget};
