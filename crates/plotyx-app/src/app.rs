@@ -4111,6 +4111,28 @@ fn detached_resize_handles(ui: &egui::Ui) {
     }
 }
 
+/// Largeur d'une icône d'action de la barre de titre (croix, détacher,
+/// maximiser).
+const HEADER_ACTION_WIDTH: f32 = 24.0;
+
+/// Détacher et maximiser sont-ils peints ? Une seule source pour le dessin
+/// et pour la largeur réservée au titre (#50).
+fn shows_detach_and_maximize(placement: HeaderPlacement, tab: Option<Tab>) -> bool {
+    match placement {
+        HeaderPlacement::Floating => matches!(tab, Some(Tab::Book(_) | Tab::Graph(_))),
+        HeaderPlacement::Detached => true,
+        HeaderPlacement::Dialog => false,
+    }
+}
+
+/// Largeur que les icônes réellement peintes retranchent au titre : la
+/// croix seule, ou la croix plus détacher et maximiser (pas de 26 px, marge
+/// de 2 px comprise).
+fn header_actions_width(with_detach_and_maximize: bool) -> f32 {
+    let icons = if with_detach_and_maximize { 3.0 } else { 1.0 };
+    2.0 + icons * (HEADER_ACTION_WIDTH + 2.0)
+}
+
 /// Barre de titre des fenêtres de contenu — la même base de code pour les
 /// fenêtres flottantes MDI et les fenêtres OS détachées (`placement`, voir
 /// [`HeaderPlacement`]). Les actions et la croix sont peintes de la même
@@ -4125,9 +4147,7 @@ fn window_header(
     collapsed: bool,
     placement: HeaderPlacement,
 ) -> WindowHeaderActions {
-    const ACTIONS_WIDTH: f32 = 90.0;
     const COLLAPSE_WIDTH: f32 = 24.0;
-    const ACTION_WIDTH: f32 = 24.0;
 
     let mut actions = WindowHeaderActions::default();
     let (rect, _) = ui.allocate_exact_size(
@@ -4174,8 +4194,8 @@ fn window_header(
     }
     let action_rect = |offset: f32| {
         egui::Rect::from_min_size(
-            egui::pos2(rect.right() - offset - ACTION_WIDTH, rect.top() + 2.0),
-            egui::vec2(ACTION_WIDTH, rect.height() - 4.0),
+            egui::pos2(rect.right() - offset - HEADER_ACTION_WIDTH, rect.top() + 2.0),
+            egui::vec2(HEADER_ACTION_WIDTH, rect.height() - 4.0),
         )
     };
     if header_icon(
@@ -4196,11 +4216,7 @@ fn window_header(
     // remplace la barre de titre native de l'OS retirée avec elle
     // (`.with_decorations(false)`), donc pas question d'en perdre une
     // capacité pour certains onglets.
-    let show_detach_and_maximize = match placement {
-        HeaderPlacement::Floating => matches!(tab, Some(Tab::Book(_) | Tab::Graph(_))),
-        HeaderPlacement::Detached => true,
-        HeaderPlacement::Dialog => false,
-    };
+    let show_detach_and_maximize = shows_detach_and_maximize(placement, tab);
     if show_detach_and_maximize {
         let (detach_glyph, detach_tooltip) = match placement {
             HeaderPlacement::Floating | HeaderPlacement::Dialog => {
@@ -4233,10 +4249,13 @@ fn window_header(
     }
     let title_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + collapse_width, rect.top()),
-        egui::pos2(rect.right() - ACTIONS_WIDTH, rect.bottom()),
+        egui::pos2(
+            rect.right() - header_actions_width(show_detach_and_maximize),
+            rect.bottom(),
+        ),
     );
     header.painter().with_clip_rect(title_rect).text(
-        rect.center(),
+        title_rect.center(),
         egui::Align2::CENTER_CENTER,
         title,
         egui::TextStyle::Heading.resolve(header.style()),
@@ -12949,5 +12968,30 @@ mod grid_keyboard_tests {
                 "{key:?} : la grille a volé la touche au champ texte focalisé"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod window_header_tests {
+    use super::*;
+
+    /// #50 : un dialogue ne peint que la croix, il ne doit donc réserver que
+    /// sa place ; la largeur retranchée au titre suit les icônes peintes.
+    #[test]
+    fn la_largeur_reservee_suit_les_icones_peintes() {
+        let id = NodeId::from_raw(1);
+        let croix = header_actions_width(shows_detach_and_maximize(HeaderPlacement::Dialog, None));
+        let trois = header_actions_width(shows_detach_and_maximize(
+            HeaderPlacement::Floating,
+            Some(Tab::Graph(id)),
+        ));
+        let matrice = header_actions_width(shows_detach_and_maximize(
+            HeaderPlacement::Floating,
+            Some(Tab::Matrix(id)),
+        ));
+        assert_eq!(croix, 28.0);
+        assert_eq!(trois, 80.0);
+        assert_eq!(matrice, croix);
+        assert!(shows_detach_and_maximize(HeaderPlacement::Detached, None));
     }
 }
