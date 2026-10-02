@@ -444,6 +444,12 @@ qui doit réserver la place d'une barre la lit par
 `theme::scroll_bar_allocated_width`. Le test `aucun_scroll_style_hors_du_theme`
 fait échouer la CI sinon.
 
+**Icônes.** Phosphor duotone, un seul composant (`icons.rs` : `icon_image`,
+`icon_button`, taille unique, info-bulle obligatoire), couleur « neutre par
+défaut, rare ensuite » : règles et marche à suivre dans [`icones.md`](icones.md).
+Le test `aucune_icone_hors_du_composant` interdit tout chargement d'icône
+ailleurs.
+
 ### Interface multilingue (Fluent)
 
 L'interface s'écrit **d'abord en anglais** ; le français en est une traduction

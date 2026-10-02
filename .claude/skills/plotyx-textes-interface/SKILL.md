@@ -36,6 +36,12 @@ fichier ou d'une colonne : il suit les mêmes règles s'il est écrit par PlotYx
 6. **Une règle ou un terme nouveau** : l'ajouter au glossaire dans le même
    commit (règle transversale de `.claude/skills/README.md`).
 
+## Icônes : l'info-bulle est le texte
+
+Une icône seule ne dit rien : son info-bulle est un texte visible comme un
+autre (clé `tr!`, anglais d'abord, verbe pour une commande, R4). `icon_button`
+l'exige ; une icône sans info-bulle est un défaut. Voir `docs/icones.md`.
+
 ## Ce qu'on ne fait pas
 
 - Un littéral français dans le code d'une interface : l'anglais est la source.

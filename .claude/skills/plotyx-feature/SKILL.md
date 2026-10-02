@@ -178,7 +178,7 @@ Annuler (croix, Échap) rendus par `DialogOutcome`. Les gestes d'un dialogue
 d'édition vivent dans une macro d'historique (`begin_macro`) : Valider la
 ferme (une entrée), Annuler l'avorte (modèle : `cancel_plot_settings`). **Tout jeu d'onglets passe par `tab_strip`** (issue #19), la bande des
 onglets de feuille rendue générique : défilement horizontal sans barre,
-boutons « < » « > » quand des onglets sont cachés, défilement minimal vers
+flèches (icônes `CaretLeft`/`CaretRight`) quand des onglets sont cachés, défilement minimal vers
 l'onglet choisi. Ne jamais écrire une rangée de `selectable_label` pour des
 onglets ; `sheet_tabs` (feuilles) et la fenêtre des propriétés du graphe en
 sont des usages. Un dialogue modal ne **peint pas de voile** sur le reste de
@@ -198,6 +198,16 @@ l'import) plutôt que de la contourner. Un code existant qui déroge n'est
 **jamais** une raison d'en écrire un autre : c'est une dette à rembourser
 (aucune `egui::Window` brute ne subsiste ; le test
 `aucune_fenetre_n_est_une_egui_window_brute` le verrouille).
+
+## 2 septies. Icônes : le composant commun
+
+Une icône s'affiche par `icons::icon_image` / `icon_button` (taille unique,
+info-bulle `tr!` obligatoire), jamais par un glyphe Unicode ni un emoji. **N'en
+mettre que si elle apporte quelque chose** (action répétée reconnaissable, type
+d'objet) ; un mot vaut mieux qu'une icône ambiguë. Couleur : `IconRole::Neutral`
+par défaut, un rôle coloré seulement pour un type d'objet, une action
+destructive ou un état à repérer. Une icône nouvelle : `docs/icones.md`
+(planche-contact à faire valider). Verrou : `aucune_icone_hors_du_composant`.
 
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
 
@@ -352,6 +362,7 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] ce n'est pas un plafond déjà arbitré (`questions-ouvertes.md` §11)
 - [ ] doublon docké/détaché vérifié (`rg "fn <nom>|fn detached_<nom>"`)
 - [ ] barres de défilement : aucun style local, place lue via `theme::scroll_bar_allocated_width`
+- [ ] icônes : composant `icons.rs`, info-bulle `tr!`, seulement si elle apporte quelque chose (`docs/icones.md`)
 - [ ] couleurs : `color_picker::color_field` avec l'usage et le `PickerEnv`, vide = automatique
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **plotyx-commande**)

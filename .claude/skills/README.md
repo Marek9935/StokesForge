@@ -52,7 +52,7 @@ classement à faire.
 **Partir de la brique commune, jamais de l'existant qui déroge.** Une fenêtre,
 un dialogue, un assistant se construisent avec les briques du projet
 (`modal_dialog_with`, `show_window_in_layer`, `tab_strip`, `color_field`,
-`theme::scroll_style`…), **même si** un morceau voisin du code les contourne.
+`theme::scroll_style`, `icons::icon_button`…), **même si** un morceau voisin du code les contourne.
 Quand la brique manque d'un réglage, on l'étend ; on ne la réécrit pas à côté.
 L'assistant d'import a été écrit en `egui::Window` brute parce qu'un skill
 décrivait cette dérogation comme « encore brute » : un skill qui constate une
