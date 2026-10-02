@@ -1647,6 +1647,57 @@ impl PlotyxApp {
         }
     }
 
+    /// L'objet graphique sélectionné du graphe au premier plan, avec son
+    /// adresse (issue #64).
+    fn selected_object(
+        &self,
+        active_tab: Option<Tab>,
+    ) -> Option<(
+        NodeId,
+        plotyx_render_egui::ShapeRef,
+        plotyx_render_egui::ShapeSpec,
+    )> {
+        let graph = active_graph(active_tab_kind(active_tab))?;
+        let target = self.graph_views.get(&graph)?.selected_shape()?;
+        let shape = crate::state::current_plot_spec(self.state.tree(), graph)
+            .and_then(|spec| target.get(&spec).cloned())?;
+        Some((graph, target, shape))
+    }
+
+    /// Ce que la barre de format d'objet montre.
+    fn object_format_state(
+        &self,
+        active_tab: Option<Tab>,
+    ) -> Option<crate::toolbar::ObjectFormatState> {
+        let (_, _, shape) = self.selected_object(active_tab)?;
+        Some(crate::toolbar::ObjectFormatState {
+            closed: shape.kind.is_closed(),
+            line_color: shape.line_color,
+            fill_color: shape.fill_color,
+            line_width: shape.line_width,
+        })
+    }
+
+    /// Règle l'objet sélectionné : une seule action annulable, comme un
+    /// déplacement (`ObjectFormat::apply` dit si quelque chose a changé).
+    fn format_object(
+        &mut self,
+        format: &crate::object_format::ObjectFormat,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        let Some((graph, target, mut shape)) = self.selected_object(active_tab) else {
+            return;
+        };
+        if format.apply(&mut shape) {
+            actions.push(Action::SetShape {
+                graph,
+                target,
+                shape: Box::new(shape),
+            });
+        }
+    }
+
     /// Met en forme le texte visé : dans le champ en édition (le champ pose
     /// les balises à son prochain tracé, voir [`apply_pending_format`]), ou
     /// sur tout le texte libre sélectionné — une seule action annulable.
@@ -1726,6 +1777,9 @@ impl PlotyxApp {
             }
             ToolbarRequest::FormatText(format) => {
                 self.format_text(ctx, format, active_tab, actions);
+            }
+            ToolbarRequest::FormatObject(format) => {
+                self.format_object(&format, active_tab, actions);
             }
             ToolbarRequest::Import => self.open_import_dialog(),
             ToolbarRequest::Open => self.choose_open_path(actions),
@@ -2614,6 +2668,7 @@ impl eframe::App for PlotyxApp {
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
             tools: self.tools_context(active_tab),
             text_format: self.format_target(&ctx, active_tab),
+            object_format: self.object_format_state(active_tab),
             shortcuts: crate::toolbar::ShortcutTexts {
                 open: ctx.format_shortcut(&SHORTCUT_OPEN),
                 save: ctx.format_shortcut(&SHORTCUT_SAVE),

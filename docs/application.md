@@ -876,7 +876,12 @@ sélectionne. Avec le Pointeur : un clic sélectionne (contour et poignées),
 glisser le corps déplace, glisser une poignée redimensionne, Suppr retire. Menu
 « Graph » et clic droit sur l'objet : « Bring to Front », « Send to Back »,
 « Delete Object » (`shape_order_buttons`). Chaque geste validé est **une**
-`Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec`. Côté script : `pyx.add_shape` / `pyx.remove_shape` (`docs/python-et-script.md`).
+`Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec`. La
+barre « Object format » (`ToolbarId::Object`, issue #64 ; `object_format.rs`)
+règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
+une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
+épaisseur. Chaque réglage est un champ du modèle posé par une `Action::SetShape`
+(`App::format_object`). Côté script : `pyx.add_shape` / `pyx.remove_shape` (`docs/python-et-script.md`).
 
 **Exporter le graphe** (issue #34) : menu « Graph » → « Export
 Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y

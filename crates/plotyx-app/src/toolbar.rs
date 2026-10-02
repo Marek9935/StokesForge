@@ -45,6 +45,7 @@ use plotyx_plot::PlotType;
 use plotyx_render_egui::GraphTool;
 
 use crate::color_picker::{ColorUsage, PickerEnv};
+use crate::object_format::{ObjectFormat, LINE_WIDTHS};
 use crate::text_format::TextFormat;
 
 /// Les barres existantes — un enum fermé : ajouter une barre, c'est ajouter une
@@ -58,10 +59,17 @@ pub enum ToolbarId {
     Tools,
     /// Le format du texte (issue #63) : propre au graphe au premier plan.
     Text,
+    /// Le format de l'objet graphique sélectionné (issue #64).
+    Object,
 }
 
 impl ToolbarId {
-    pub const ALL: [ToolbarId; 3] = [ToolbarId::File, ToolbarId::Tools, ToolbarId::Text];
+    pub const ALL: [ToolbarId; 4] = [
+        ToolbarId::File,
+        ToolbarId::Tools,
+        ToolbarId::Text,
+        ToolbarId::Object,
+    ];
 
     /// Nom de la barre : entrée du menu View.
     pub fn label(self) -> String {
@@ -69,6 +77,7 @@ impl ToolbarId {
             ToolbarId::File => tr!("toolbar-file"),
             ToolbarId::Tools => tr!("toolbar-tools"),
             ToolbarId::Text => tr!("toolbar-text"),
+            ToolbarId::Object => tr!("toolbar-object"),
         }
     }
 
@@ -78,6 +87,7 @@ impl ToolbarId {
             ToolbarId::File => tr!("toolbar-file", "hint"),
             ToolbarId::Tools => tr!("toolbar-tools", "hint"),
             ToolbarId::Text => tr!("toolbar-text", "hint"),
+            ToolbarId::Object => tr!("toolbar-object", "hint"),
         }
     }
 }
@@ -115,9 +125,9 @@ impl Default for ToolbarLayout {
                 .map(|&id| Entry {
                     id,
                     visible: true,
-                    // La barre de format est large : elle a sa propre rangée.
+                    // Les barres de format sont larges : elles ont leur propre rangée.
                     placement: Placement::Docked {
-                        row: usize::from(id == ToolbarId::Text),
+                        row: usize::from(matches!(id, ToolbarId::Text | ToolbarId::Object)),
                     },
                 })
                 .collect(),
@@ -399,6 +409,8 @@ pub enum ToolbarRequest {
     ResetZoom,
     /// Met en forme le texte visé du graphe au premier plan.
     FormatText(TextFormat),
+    /// Règle l'objet graphique sélectionné du graphe au premier plan.
+    FormatObject(ObjectFormat),
 }
 
 /// Les raccourcis tels que les menus les écrivent (rappel dans l'info-bulle).
@@ -421,6 +433,17 @@ pub enum FormatTarget {
     Field,
     /// Un texte est sélectionné sans être édité : tout le texte.
     Block,
+}
+
+/// Les réglages de l'objet graphique sélectionné, tels que la barre de format
+/// d'objet les montre (issue #64).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectFormatState {
+    /// Vrai pour un rectangle ou une ellipse : seuls ceux-là se remplissent.
+    pub closed: bool,
+    pub line_color: String,
+    pub fill_color: String,
+    pub line_width: f64,
 }
 
 /// Ce que la barre contextuelle montre : décidé par la fenêtre au premier plan.
@@ -451,6 +474,8 @@ pub struct BarEnv {
     pub shortcuts: ShortcutTexts,
     pub tools: ToolsContext,
     pub text_format: FormatTarget,
+    /// L'objet graphique sélectionné, s'il y en a un (issue #64).
+    pub object_format: Option<ObjectFormatState>,
 }
 
 impl BarEnv {
@@ -459,7 +484,9 @@ impl BarEnv {
         match id {
             ToolbarId::File => true,
             ToolbarId::Tools => !matches!(self.tools, ToolsContext::None),
-            ToolbarId::Text => matches!(self.tools, ToolsContext::Graph { .. }),
+            ToolbarId::Text | ToolbarId::Object => {
+                matches!(self.tools, ToolsContext::Graph { .. })
+            }
         }
     }
 }
@@ -568,6 +595,7 @@ pub fn bar_contents(
         }
         ToolbarId::Tools => tools_contents(ui, env, requests),
         ToolbarId::Text => text_format_contents(ui, env, requests),
+        ToolbarId::Object => object_format_contents(ui, env, requests),
     }
 }
 
@@ -742,6 +770,121 @@ fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarReq
             }
         }
     }
+}
+
+/// La barre de format d'objet : couleur de trait, couleur de remplissage
+/// (l'opacité se règle dans le sélecteur, `#RRGGBBAA`), épaisseur. Grisée tant
+/// qu'aucun objet n'est sélectionné.
+fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
+    let state = env.object_format.clone();
+    let enabled = state.is_some();
+    let state = state.unwrap_or(ObjectFormatState {
+        closed: false,
+        line_color: String::new(),
+        fill_color: String::new(),
+        line_width: plotyx_plot::ShapeSpec::DEFAULT_WIDTH,
+    });
+    let ctx = ui.ctx().clone();
+    ui.add_enabled_ui(enabled, |ui| {
+        let on_hover = |response: egui::Response, label: String, hint: Option<String>| {
+            let mut tooltip = label;
+            if let Some(hint) = hint {
+                tooltip.push('\n');
+                tooltip.push_str(&hint);
+            }
+            if !enabled {
+                tooltip.push('\n');
+                tooltip.push_str(&tr!("format-object-disabled"));
+            }
+            response.on_hover_text(tooltip)
+        };
+        let (project, user) = ctx
+            .data(|data| data.get_temp(crate::app::saved_colors_id()))
+            .unwrap_or_default();
+        let mut picker = PickerEnv {
+            project,
+            user,
+            requests: Vec::new(),
+        };
+
+        // Trait.
+        let mut line_color = state.line_color.clone();
+        ui.scope(|ui| {
+            crate::color_picker::color_button(
+                ui,
+                "plotyx_object_line_color_button",
+                &mut line_color,
+                ColorUsage::Curves,
+                Some(&tr!("plot-color-auto-contrast")),
+                &mut picker,
+            );
+        })
+        .response
+        .on_hover_text(format!(
+            "{}\n{}",
+            tr!("format-object-line-color"),
+            tr!("format-object-line-color", "hint")
+        ));
+        if line_color != state.line_color {
+            requests.push(ToolbarRequest::FormatObject(ObjectFormat::LineColor(
+                line_color,
+            )));
+        }
+
+        // Remplissage : grisé pour une ligne ou une flèche.
+        let mut fill_color = state.fill_color.clone();
+        ui.add_enabled_ui(state.closed || !enabled, |ui| {
+            ui.scope(|ui| {
+                crate::color_picker::color_button(
+                    ui,
+                    "plotyx_object_fill_color_button",
+                    &mut fill_color,
+                    ColorUsage::Curves,
+                    Some(&tr!("format-object-no-fill")),
+                    &mut picker,
+                );
+            })
+            .response
+            .on_hover_text(format!(
+                "{}\n{}",
+                tr!("format-object-fill-color"),
+                tr!("format-object-fill-color", "hint")
+            ));
+        });
+        if fill_color != state.fill_color {
+            requests.push(ToolbarRequest::FormatObject(ObjectFormat::FillColor(
+                fill_color,
+            )));
+        }
+        for request in picker.requests {
+            requests.push(ToolbarRequest::Action(Box::new(request.into_action())));
+        }
+
+        // Épaisseur.
+        let chosen = egui::ComboBox::from_id_salt("plotyx_object_line_width")
+            .selected_text(format!("{}", state.line_width))
+            .width(54.0)
+            .show_ui(ui, |ui| {
+                let mut chosen = None;
+                for width in LINE_WIDTHS {
+                    if ui
+                        .selectable_label(width == state.line_width, format!("{width}"))
+                        .clicked()
+                    {
+                        chosen = Some(width);
+                    }
+                }
+                chosen
+            });
+        on_hover(
+            chosen.response.clone(),
+            tr!("format-object-line-width"),
+            Some(tr!("format-object-line-width", "hint")),
+        );
+        if let Some(width) = chosen.inner.flatten() {
+            requests.push(ToolbarRequest::FormatObject(ObjectFormat::LineWidth(width)));
+        }
+    });
 }
 
 /// Corps proposés par la barre de format, en points.
@@ -1178,7 +1321,7 @@ mod tests {
             layout.docked_rows(),
             vec![
                 vec![ToolbarId::File, ToolbarId::Tools],
-                vec![ToolbarId::Text]
+                vec![ToolbarId::Text, ToolbarId::Object]
             ]
         );
         assert!(layout.floating().is_empty());
@@ -1218,7 +1361,10 @@ mod tests {
         layout.float(ToolbarId::File, Pos2::new(120.0, 80.0));
         assert_eq!(
             layout.docked_rows(),
-            vec![vec![ToolbarId::Tools], vec![ToolbarId::Text]]
+            vec![
+                vec![ToolbarId::Tools],
+                vec![ToolbarId::Text, ToolbarId::Object]
+            ]
         );
         assert_eq!(
             layout.floating(),
@@ -1230,7 +1376,7 @@ mod tests {
             layout.docked_rows(),
             vec![
                 vec![ToolbarId::Tools],
-                vec![ToolbarId::Text],
+                vec![ToolbarId::Text, ToolbarId::Object],
                 vec![ToolbarId::File]
             ]
         );
@@ -1240,7 +1386,7 @@ mod tests {
             layout.docked_rows(),
             vec![
                 vec![ToolbarId::File, ToolbarId::Tools],
-                vec![ToolbarId::Text]
+                vec![ToolbarId::Text, ToolbarId::Object]
             ]
         );
     }
@@ -1249,6 +1395,7 @@ mod tests {
     fn les_rangees_se_comptent_sans_les_barres_sans_contenu() {
         let mut layout = ToolbarLayout::default();
         layout.set_visible(ToolbarId::Text, false);
+        layout.set_visible(ToolbarId::Object, false);
         // Tools seule en rangée 0, File en rangée 1.
         layout.dock(ToolbarId::Tools, 0, 0);
         layout.dock(ToolbarId::File, 1, 0);
@@ -1273,6 +1420,7 @@ mod tests {
     fn une_barre_masquee_ne_se_peint_nulle_part() {
         let mut layout = ToolbarLayout::default();
         layout.set_visible(ToolbarId::Text, false);
+        layout.set_visible(ToolbarId::Object, false);
         layout.set_visible(ToolbarId::File, false);
         assert_eq!(layout.docked_rows(), vec![vec![ToolbarId::Tools]]);
         layout.set_visible(ToolbarId::File, true);
