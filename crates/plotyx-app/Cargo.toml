@@ -39,7 +39,9 @@ eframe = "0.36.2"
 # PAS le glisser-déposer de fichiers sous Wayland (seulement X11, Windows et
 # macOS). Voir `main.rs` (`prefer_x11`). Même version que celle d'eframe.
 winit = { version = "0.30", default-features = false, features = ["x11", "wayland"] }
-egui_extras = "0.36.2"
+# `svg` : chargeur des icônes embarquées (`icons.rs`) ; resvg est déjà dans l'arbre
+# (plotyx-render-svg), aucune dépendance nouvelle.
+egui_extras = { version = "0.36.2", features = ["svg"] }
 # Sélecteur de fichiers natif pour Save/Load (remplace le champ texte de
 # saisie manuelle du chemin, cf. `docs/application.md` § « Limites assumées
 # du banc »). `xdg-portal` (feature par défaut) est une dépendance runtime

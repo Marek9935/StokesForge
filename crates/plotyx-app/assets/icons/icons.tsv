@@ -1,0 +1,17 @@
+# icône Phosphor (sans « -duotone »)	rôles à produire, séparés par des virgules
+x	neutral,danger
+arrow-square-out	neutral
+arrow-square-in	neutral
+corners-out	neutral
+corners-in	neutral
+caret-down	neutral
+caret-right	neutral
+caret-left	neutral
+caret-up	neutral
+plus	neutral
+trash	danger
+folder-simple	folder
+table	workbook
+chart-line	graph
+grid-nine	matrix
+note	note

@@ -1342,6 +1342,7 @@ dependencies = [
  "log",
  "mime_guess2",
  "profiling",
+ "resvg 0.45.1",
 ]
 
 [[package]]

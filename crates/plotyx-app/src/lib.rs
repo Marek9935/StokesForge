@@ -45,6 +45,7 @@ pub mod color_picker;
 pub mod errors;
 pub mod history_text;
 pub mod i18n;
+pub mod icons;
 pub mod preferences;
 pub mod selection;
 pub mod state;

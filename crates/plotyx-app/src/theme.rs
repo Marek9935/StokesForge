@@ -160,6 +160,8 @@ pub fn install(ctx: &Context) {
     ctx.set_theme(Theme::Light);
     ctx.set_visuals(visuals());
     ctx.all_styles_mut(|style| style.spacing.scroll = scroll_style());
+    // Chargeurs d'images (SVG des icônes, `icons.rs`).
+    egui_extras::install_image_loaders(ctx);
 }
 
 /// Construit la palette PlotYx : un `Visuals::light()` standard, avec juste
