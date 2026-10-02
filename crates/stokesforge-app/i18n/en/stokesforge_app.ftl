@@ -814,3 +814,20 @@ object-manager-group = Plot Group
 
 toolbar-object-manager = Object Manager Toolbar
     .hint = Show or hide the Object Manager toolbar.
+
+menu-selected-content = Selection
+action-rename-series = Rename Series
+action-move-series-up = Move Up
+action-move-series-down = Move Down
+action-show-content = Show
+action-hide-content = Hide
+action-delete-content = Delete
+object-properties-title = Object Properties
+object-coordinate = { $coordinate }
+history-plot-visibility = Change Visibility
+history-plot-rename-series = Rename Series
+history-plot-reorder-series = Reorder Series
+history-plot-remove-series = Delete Series
+history-plot-remove-text = Delete Text
+history-plot-remove-object = Delete Object
+history-plot-reorder-object = Reorder Object

@@ -240,10 +240,17 @@ puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
 **À lire** : `stokesforge-persistence/src/lib.rs`, `src/schema.rs`,
 `src/unknown.rs` (têtes).
 
-## Visibilité des objets (#81)
+## Visibilité des objets (#81, #85)
 
 La visibilité des séries était déjà transportée par `SeriesSpecRecord`.
 `AnnotationSpecRecord::visible` et `ShapeSpecRecord::visible` la complètent ;
 les champs absents se relisent à `true`. Masquer ne supprime ni données,
 style, position ni rang. Le panneau Object Manager n'entre pas dans le `.stf` :
 son ouverture est une préférence de la personne.
+
+`PlotSpecRecord::title_visible`, `PanelSpecRecord::title_visible` et
+`AxisSpecRecord::title_visible` transportent aussi la visibilité des titres.
+Ces champs absents se relisent à `true` : les fichiers antérieurs gardent
+tous leurs titres visibles. Le numéro de format ne change pas pour l'ajout de
+ces champs avec valeur par défaut. Le libellé d'une commande `EditPlotSpec`
+appartient à l'historique en mémoire ; il n'est pas enregistré dans le fichier.

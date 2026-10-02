@@ -49,7 +49,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use stokesforge_commands::{Command, HistoryLabel, MacroKind};
+use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
@@ -388,6 +388,22 @@ pub enum Action {
         graph: NodeId,
         target: crate::object_manager::VisibilityTarget,
         visible: bool,
+    },
+    /// Retire un contenu du graphe par la même voie depuis menu et arbre.
+    RemovePlotObject {
+        graph: NodeId,
+        target: crate::object_manager::VisibilityTarget,
+    },
+    /// Déplace une série au rang final dans son calque.
+    ReorderSeries {
+        graph: NodeId,
+        source: stokesforge_plot::SeriesRef,
+        index: usize,
+    },
+    /// Propriétés sur la série ou le calque exacts.
+    OpenObjectProperties {
+        graph: NodeId,
+        target: crate::object_manager::VisibilityTarget,
     },
     /// Remplace en bloc le [`PlotSpec`] d'un graphe — fenêtre des
     /// propriétés d'un graphe ([`Command::SetPlotSpec`]). Poussée à la
@@ -1527,6 +1543,8 @@ pub struct PlotEdit {
     /// Série actuellement choisie dans la liste, pour l'édition détaillée —
     /// état d'UI pur, jamais envoyé au modèle.
     pub selected_series: usize,
+    /// Calque affiché par les propriétés ; indépendant de son rang de série.
+    pub selected_panel: usize,
     /// Le spec du modèle sur lequel le brouillon est parti (ou qu'il vient
     /// de valider). Tant que `spec` lui est égal, le brouillon n'a rien en
     /// cours : si le modèle change sous lui (Annuler, Rétablir, script,
@@ -3116,6 +3134,7 @@ impl AppState {
             graph,
             spec: model.clone(),
             selected_series: 0,
+            selected_panel: 0,
             base: model,
         });
     }
@@ -3488,7 +3507,100 @@ impl AppState {
             } => {
                 if let Some(mut spec) = current_plot_spec(self.tree(), graph) {
                     if target.set(&mut spec, visible) {
-                        self.execute(Command::SetPlotSpec { graph, spec });
+                        self.execute(Command::EditPlotSpec {
+                            graph,
+                            spec,
+                            kind: PlotEditKind::Visibility,
+                        });
+                    }
+                }
+            }
+            Action::ReorderSeries {
+                graph,
+                source,
+                index,
+            } => self.edit_plot_object(graph, PlotEditKind::ReorderSeries, |spec| {
+                crate::object_manager::reorder_series(spec, source, index)
+            }),
+            Action::RemovePlotObject { graph, target } => {
+                use crate::object_manager::VisibilityTarget as T;
+                match target {
+                    T::Series(series) => {
+                        self.edit_plot_object(graph, PlotEditKind::RemoveSeries, |spec| {
+                            let Some(panel) = spec.panels.get_mut(series.panel) else {
+                                return false;
+                            };
+                            if series.index >= panel.series.len() {
+                                return false;
+                            }
+                            panel.series.remove(series.index);
+                            true
+                        })
+                    }
+                    T::Annotation(target) => {
+                        self.dispatch(Action::RemoveAnnotation { graph, target })
+                    }
+                    T::Shape(target) => self.dispatch(Action::RemoveShape { graph, target }),
+                    T::Text(target) => {
+                        self.edit_plot_object(graph, PlotEditKind::RemoveText, |spec| {
+                            target.set_text(spec, String::new())
+                        })
+                    }
+                    T::Graph | T::Panel(_) | T::Group(_) => {}
+                }
+            }
+            Action::OpenObjectProperties { graph, target } => {
+                use crate::object_manager::VisibilityTarget as T;
+                let Some(spec) = self.plot_spec(graph) else {
+                    return;
+                };
+                if !target.exists(&spec) {
+                    return;
+                }
+                let (tab, axis, panel, series) = match target {
+                    T::Series(s) => (PlotSettingsTab::Series, None, s.panel, Some(s.index)),
+                    T::Panel(i) => (PlotSettingsTab::PlotArea, None, i, None),
+                    T::Group(i) => (PlotSettingsTab::Series, None, i, None),
+                    T::Text(TextTarget::Legend { row, column }) => (
+                        PlotSettingsTab::Legend,
+                        None,
+                        spec.panels
+                            .iter()
+                            .position(|p| p.row == row && p.column == column)
+                            .unwrap_or(0),
+                        None,
+                    ),
+                    T::Text(TextTarget::AxisTitle { row, column, side }) => (
+                        PlotSettingsTab::Axes,
+                        Some(match side {
+                            stokesforge_plot::AxisSide::Bottom => PlotAxis::Bottom,
+                            // Axe réservé dans le modèle, sans page ni rendu.
+                            stokesforge_plot::AxisSide::Top => return,
+                            stokesforge_plot::AxisSide::Left => PlotAxis::Left,
+                            stokesforge_plot::AxisSide::Right => PlotAxis::Right,
+                        }),
+                        spec.panels
+                            .iter()
+                            .position(|p| p.row == row && p.column == column)
+                            .unwrap_or(0),
+                        None,
+                    ),
+                    T::Text(TextTarget::PanelTitle { row, column }) => (
+                        PlotSettingsTab::PlotArea,
+                        None,
+                        spec.panels
+                            .iter()
+                            .position(|p| p.row == row && p.column == column)
+                            .unwrap_or(0),
+                        None,
+                    ),
+                    _ => (PlotSettingsTab::Graph, None, 0, None),
+                };
+                self.open_plot_settings(graph, tab, axis);
+                if let Some(edit) = self.plot_edit.as_mut() {
+                    edit.selected_panel = panel;
+                    if let Some(series) = series {
+                        edit.selected_series = series;
                     }
                 }
             }
@@ -3521,7 +3633,7 @@ impl AppState {
                 annotation,
             } => self.edit_annotations(graph, |spec| target.set(spec, *annotation)),
             Action::RemoveAnnotation { graph, target } => {
-                self.edit_annotations(graph, |spec| target.remove(spec))
+                self.edit_plot_object(graph, PlotEditKind::RemoveText, |spec| target.remove(spec))
             }
             Action::SetShape {
                 graph,
@@ -3529,13 +3641,15 @@ impl AppState {
                 shape,
             } => self.edit_annotations(graph, |spec| target.set(spec, *shape)),
             Action::RemoveShape { graph, target } => {
-                self.edit_annotations(graph, |spec| target.remove(spec))
+                self.edit_plot_object(graph, PlotEditKind::RemoveObject, |spec| {
+                    target.remove(spec)
+                })
             }
             Action::ReorderShape {
                 graph,
                 target,
                 order,
-            } => self.edit_annotations(graph, |spec| match order {
+            } => self.edit_plot_object(graph, PlotEditKind::ReorderObject, |spec| match order {
                 ShapeOrder::ToFront => target.bring_to_front(spec).is_some(),
                 ShapeOrder::ToBack => target.send_to_back(spec).is_some(),
             }),
@@ -3561,7 +3675,7 @@ impl AppState {
                 graph,
                 series,
                 name,
-            } => self.edit_annotations(graph, |spec| {
+            } => self.edit_plot_object(graph, PlotEditKind::RenameSeries, |spec| {
                 spec.series_at_mut(series)
                     .map(|series| series.name = name)
                     .is_some()
@@ -4733,6 +4847,22 @@ impl AppState {
         let before = spec.clone();
         if change(&mut spec) && spec != before {
             self.execute(Command::SetPlotSpec { graph, spec });
+        }
+    }
+
+    /// Même delta que les propriétés ; le motif précise le geste dans l'historique.
+    fn edit_plot_object(
+        &mut self,
+        graph: NodeId,
+        kind: PlotEditKind,
+        change: impl FnOnce(&mut PlotSpec) -> bool,
+    ) {
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        let before = spec.clone();
+        if change(&mut spec) && spec != before {
+            self.execute(Command::EditPlotSpec { graph, spec, kind });
         }
     }
 

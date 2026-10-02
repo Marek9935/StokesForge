@@ -383,8 +383,9 @@ pub fn draw_on<DB: DrawingBackend>(
     // par-dessus.
     let title_color = rgba_or(&spec.title_color, opaque(ink));
     let title_style = font_style(&spec.title_font, TITLE_SIZE, title_color);
-    let title_anchor = usable_anchor(spec.title_anchor).filter(|_| !spec.title.is_empty());
-    let area = if spec.title.is_empty() {
+    let title_anchor =
+        usable_anchor(spec.title_anchor).filter(|_| spec.title_visible && !spec.title.is_empty());
+    let area = if !spec.title_visible || spec.title.is_empty() {
         root.clone()
     } else if title_anchor.is_some() {
         reserve_title_band(root, &spec.title, &title_style)?
@@ -393,7 +394,8 @@ pub fn draw_on<DB: DrawingBackend>(
     };
     let title_height = (area.get_base_pixel().1 - root.get_base_pixel().1).max(0) as u32;
     let (root_width, _) = root.dim_in_pixel();
-    let mut drawn_title = if spec.title.is_empty() || title_anchor.is_some() {
+    let mut drawn_title = if !spec.title_visible || spec.title.is_empty() || title_anchor.is_some()
+    {
         None
     } else {
         let size = root.estimate_text_size(&spec.title, &title_style)?;
@@ -672,9 +674,10 @@ fn draw_panel<DB: DrawingBackend>(
     // 3 — la zone de tracé. Le titre du panneau la rabaisse, comme celui du
     // graphe rabaisse la figure entière.
     // Un titre déplacé (issue #53) garde sa bande vide, voir `draw_on`.
-    let panel_title_anchor = usable_anchor(spec.title_anchor).filter(|_| !spec.title.is_empty());
+    let panel_title_anchor =
+        usable_anchor(spec.title_anchor).filter(|_| spec.title_visible && !spec.title.is_empty());
     let title_style = font_style(&spec.title_font, PANEL_TITLE_SIZE, opaque(ink));
-    let area = if spec.title.is_empty() {
+    let area = if !spec.title_visible || spec.title.is_empty() {
         cell.clone()
     } else if panel_title_anchor.is_some() {
         reserve_title_band(cell, &spec.title, &title_style)?
@@ -682,7 +685,7 @@ fn draw_panel<DB: DrawingBackend>(
         cell.titled(&spec.title, title_style.clone())?
     };
     let mut texts: Vec<DrawnText> = Vec::new();
-    if !spec.title.is_empty() && panel_title_anchor.is_none() {
+    if spec.title_visible && !spec.title.is_empty() && panel_title_anchor.is_none() {
         let band = (area.get_base_pixel().1 - cell.get_base_pixel().1).max(0);
         let cell_origin = cell.get_base_pixel();
         let (cell_w, _) = cell.dim_in_pixel();
@@ -733,13 +736,14 @@ fn draw_panel<DB: DrawingBackend>(
     // Un titre d'axe déplacé n'est plus écrit par Plotters (l'aire de
     // graduation reste réservée) : il est posé sur son ancre plus bas.
     let axis_anchor = |axis: &AxisSpec| {
-        usable_anchor(axis.title_anchor).filter(|_| !axis.display_label().is_empty())
+        usable_anchor(axis.title_anchor)
+            .filter(|_| axis.title_visible && !axis.display_label().is_empty())
     };
     let bottom_anchor = axis_anchor(&spec.bottom);
     let left_anchor = axis_anchor(&spec.left);
     let right_anchor = axis_anchor(&spec.right);
     let plotters_desc = |axis: &AxisSpec, anchor: Option<TextAnchor>| {
-        if anchor.is_some() {
+        if !axis.title_visible || anchor.is_some() {
             String::new()
         } else {
             axis.display_label()
@@ -827,15 +831,21 @@ fn draw_panel<DB: DrawingBackend>(
         axis_areas: AxisAreas {
             bottom: AxisArea {
                 size: x_label_area,
-                titled: !spec.bottom.display_label().is_empty() && bottom_anchor.is_none(),
+                titled: spec.bottom.title_visible
+                    && !spec.bottom.display_label().is_empty()
+                    && bottom_anchor.is_none(),
             },
             left: AxisArea {
                 size: y_label_area,
-                titled: !spec.left.display_label().is_empty() && left_anchor.is_none(),
+                titled: spec.left.title_visible
+                    && !spec.left.display_label().is_empty()
+                    && left_anchor.is_none(),
             },
             right: AxisArea {
                 size: right_label_area,
-                titled: !spec.right.display_label().is_empty() && right_anchor.is_none(),
+                titled: spec.right.title_visible
+                    && !spec.right.display_label().is_empty()
+                    && right_anchor.is_none(),
             },
         },
         annotations: Vec::new(),
@@ -866,7 +876,7 @@ fn draw_panel<DB: DrawingBackend>(
         ),
     ] {
         let label = axis.display_label();
-        if label.is_empty() || anchor.is_some() || area_size == 0 {
+        if !axis.title_visible || label.is_empty() || anchor.is_some() || area_size == 0 {
             continue;
         }
         let colors = AxisColors::of(axis, ink);

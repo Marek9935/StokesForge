@@ -49,7 +49,9 @@ Conventions déjà arbitrées, à suivre plutôt qu'à rejouer :
 - **les commandes d'édition de contenu remplacent leur cible en bloc**
   (`SetWindowMeta`, `SetNoteText`, `SetColumnMeta`, `SetPlotSpec`, à l'image de
   `SetCells`) — pas d'édition par sous-champ, qui multiplierait les variantes
-  et les deltas sans rien gagner ;
+  et les deltas sans rien gagner ; `EditPlotSpec` réutilise le delta
+  `SetPlotSpec` et ajoute seulement un motif fermé `PlotEditKind` pour
+  l'historique des gestes du graphe (#84–85) ;
 - **`expected_version`** est la condition optimiste des écritures de cellules :
   `None` ne vérifie rien (le comportement de l'UI), `Some(v)` exige que
   `Column::version` vaille encore `v` **au moment d'appliquer** — c'est ce qui

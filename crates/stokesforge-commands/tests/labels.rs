@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use stokesforge_commands::{ColumnRef, Command, HistoryLabel, MacroKind};
+use stokesforge_commands::{ColumnRef, Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::{Column, ColumnMeta, ColumnType, NodeId, Project, ValueBlock, WindowMeta};
 use stokesforge_plot::{PlotSpec, SavedColors};
 
@@ -69,10 +69,11 @@ fn rank(command: &Command) -> usize {
         Command::SetColumnMeta { .. } => 20,
         Command::SetPlotSpec { .. } => 21,
         Command::SetSavedColors { .. } => 22,
+        Command::EditPlotSpec { .. } => 23,
     }
 }
 
-const VARIANTS: usize = 23;
+const VARIANTS: usize = 24;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -282,7 +283,17 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
 #[test]
 fn every_command_variant_produces_its_label() {
     let w = world();
-    let samples = samples(&w);
+    let mut samples = samples(&w);
+    samples.extend(PlotEditKind::ALL.map(|kind| {
+        (
+            Command::EditPlotSpec {
+                graph: w.book,
+                spec: PlotSpec::default(),
+                kind,
+            },
+            HistoryLabel::EditPlotSpec(kind),
+        )
+    }));
     let covered: BTreeSet<usize> = samples.iter().map(|(command, _)| rank(command)).collect();
     assert_eq!(
         covered,

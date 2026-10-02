@@ -693,3 +693,57 @@ fn objets_et_serie_masques_accord_et_temoin_visible() {
         "masquer n'ajoute aucune primitive"
     );
 }
+
+/// Les titres masqués n'ont plus ni dessin ni zone de sélection ; les deux
+/// backends suivent cette règle avec ou sans ancre (#85).
+#[test]
+fn titres_masques_accord_et_temoins_avec_et_sans_ancre() {
+    use stokesforge_plot::{AxisSide, TextAnchor, TextTarget};
+    let fixture = minimal();
+    let tree = fixture.project.tree();
+    let mut spec = fixture.spec.clone();
+    spec.title = "Titre global".into();
+    spec.panels.get_mut(0).unwrap().title = "Titre calque".into();
+    spec.panels.get_mut(0).unwrap().bottom.label = "Temps".into();
+    spec.panels.get_mut(0).unwrap().left.label = "Signal".into();
+    for anchored in [false, true] {
+        let mut visible = spec.clone();
+        if anchored {
+            visible.title_anchor = Some(TextAnchor::new(0.5, 0.5));
+            let panel = visible.panels.get_mut(0).unwrap();
+            panel.title_anchor = Some(TextAnchor::new(0.5, 0.5));
+            panel.bottom.title_anchor = Some(TextAnchor::new(0.5, 0.5));
+            panel.left.title_anchor = Some(TextAnchor::new(0.5, 0.5));
+        }
+        let (baseline, _) = accord(tree, &visible, SIZE, "titres visibles");
+        for target in [
+            TextTarget::Title,
+            TextTarget::PanelTitle { row: 0, column: 0 },
+            TextTarget::AxisTitle {
+                row: 0,
+                column: 0,
+                side: AxisSide::Bottom,
+            },
+            TextTarget::AxisTitle {
+                row: 0,
+                column: 0,
+                side: AxisSide::Left,
+            },
+        ] {
+            let mut hidden = visible.clone();
+            assert!(target.set_visible(&mut hidden, false));
+            let (pixels, drawn) = accord(tree, &hidden, SIZE, "titre masqué");
+            assert_ne!(pixels, baseline, "{target:?}, ancré={anchored}");
+            assert_ne!(drawn.title.as_ref().map(|t| t.target), Some(target));
+            assert!(!drawn.panels[0]
+                .texts
+                .iter()
+                .any(|text| text.target == target));
+            assert_eq!(
+                target.text(&hidden),
+                target.text(&visible),
+                "masquer conserve le texte"
+            );
+        }
+    }
+}

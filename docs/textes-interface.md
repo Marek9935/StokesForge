@@ -301,7 +301,7 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | Q24 | Formes de symbole : **Plus / Cross** ou **Cross / X** ? | **Plus (+)** et **Cross (×)** | *Cross (+)* et *X (×)* |
 | Q25 | Deux-points après un libellé de champ (« Séparateur : »)  — les supprimer ? | **Supprimer** (R11 : plus court, aucun souci d'espace insécable) | *Garder* en français seulement |
 
-### Gestionnaire d'objets (#81–83)
+### Gestionnaire d'objets (#81–85)
 
 | Anglais | Français | Définition |
 |---|---|---|

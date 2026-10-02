@@ -647,3 +647,56 @@ fn selection_calque_axe_droit_barres_et_rangs_masques() {
         .is_empty());
     assert!(view.series_at(pos, &spec).is_none());
 }
+
+#[test]
+fn object_manager_selectionne_les_contenus_masques_sans_deux_selections() {
+    use stokesforge_plot::{
+        AnnotationRef, AnnotationSpec, SeriesRef, SeriesSpec, ShapeKind, ShapeRef, ShapeSpec,
+        TextTarget,
+    };
+    let mut spec = stokesforge_plot::PlotSpec::empty("Titre");
+    let panel = spec.panels.get_mut(0).unwrap();
+    panel
+        .series
+        .push(SeriesSpec::new(stokesforge_core::NodeId::from_raw(900)));
+    panel
+        .annotations
+        .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+    panel.annotations[0].visible = false;
+    panel
+        .shapes
+        .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
+    panel.shapes[0].visible = false;
+    spec.title_visible = false;
+    let annotation = AnnotationRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+    let shape = ShapeRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+    let mut view = stokesforge_render_egui::GraphView::new();
+    view.select_series(Some(SeriesRef::new(0, 0)), &spec);
+    view.select_annotation(Some(annotation), &spec);
+    assert_eq!(view.selected_annotation(), Some(annotation));
+    assert_eq!(view.selected_series(), None);
+    view.select_shape(Some(shape));
+    assert_eq!(view.selected_shape(), Some(shape));
+    assert_eq!(view.selected_annotation(), None);
+    view.select_text(Some(TextTarget::Title), &spec);
+    assert_eq!(view.selected_text(), Some(TextTarget::Title));
+    assert_eq!(view.selected_shape(), None);
+    view.select_series(Some(SeriesRef::new(0, 0)), &spec);
+    assert_eq!(view.selected_text(), None);
+    view.select_annotation(
+        Some(AnnotationRef {
+            index: 99,
+            ..annotation
+        }),
+        &spec,
+    );
+    assert_eq!(view.selected_annotation(), None);
+}

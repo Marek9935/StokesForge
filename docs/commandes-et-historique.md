@@ -39,6 +39,7 @@ Liste faisant foi : `stokesforge-commands/src/command.rs` (`Command`,
 | `SetNoteText { id, text }` | données |
 | `SetColumnMeta { column, meta }` | données |
 | `SetPlotSpec { graph, spec }` | données |
+| `EditPlotSpec { graph, spec, kind }` | données (même delta de spec, motif `PlotEditKind`) |
 | `SetSavedColors { colors }` | données |
 
 Le graphique vide de « File › Add Graph » (#73) réutilise `AddGraph` avec
@@ -196,7 +197,11 @@ propres à la pile : macro ouverte, pas de macro, pile non vide, macro
 
 **À lire** : `stokesforge-commands/src/lib.rs` et `src/history.rs` (têtes).
 
-La visibilité d'Object Manager (#81–82) réutilise `SetPlotSpec` : une case de
-série ou de parent remplace le spec en une seule entrée annulable. La bascule
-sur une cible absente ou déjà dans cet état n'envoie aucune commande. Ouvrir
-le panneau et sélectionner une série sont des gestes de vue, hors historique.
+Object Manager (#81–85) réutilise le delta de `SetPlotSpec` par
+`Command::EditPlotSpec { graph, spec, kind }` : un remplacement en bloc,
+avec le motif `PlotEditKind` dans `HistoryLabel::EditPlotSpec`. Visibilité,
+renommage, ordre et suppression ont leurs clés `history-plot-*`, sans phrase
+transportée par l'acteur. Le menu et l'arbre émettent les mêmes `Action`.
+Une cible périmée, un rang inchangé ou une valeur identique n'envoie aucune
+commande. Ouvrir le panneau, choisir un contenu ou ouvrir ses propriétés
+relève de l'état de vue ; les modifications validées sont annulables.

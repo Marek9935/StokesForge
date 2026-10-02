@@ -97,6 +97,45 @@ impl TextTarget {
             .position(|panel| panel.row == row && panel.column == column)
     }
 
+    /// Visibilité mémorisée du texte, sans effacer son contenu ni son ancre.
+    pub fn visible(&self, spec: &PlotSpec) -> Option<bool> {
+        Some(match *self {
+            Self::Title => spec.title_visible,
+            Self::PanelTitle { .. } => spec.panels.get(self.panel_index(spec)?)?.title_visible,
+            Self::AxisTitle { side, .. } => {
+                spec.panels
+                    .get(self.panel_index(spec)?)?
+                    .axis(side)
+                    .title_visible
+            }
+            Self::Legend { .. } => spec.panels.get(self.panel_index(spec)?)?.legend.visible,
+        })
+    }
+
+    /// Change seulement la visibilité ; une cible absente reste sans effet.
+    pub fn set_visible(&self, spec: &mut PlotSpec, visible: bool) -> bool {
+        if self.visible(spec).is_none_or(|value| value == visible) {
+            return false;
+        }
+        if *self == Self::Title {
+            spec.title_visible = visible;
+            return true;
+        }
+        let Some(index) = self.panel_index(spec) else {
+            return false;
+        };
+        let Some(panel) = spec.panels.get_mut(index) else {
+            return false;
+        };
+        match *self {
+            Self::Title => unreachable!(),
+            Self::PanelTitle { .. } => panel.title_visible = visible,
+            Self::AxisTitle { side, .. } => panel.axis_mut(side).title_visible = visible,
+            Self::Legend { .. } => panel.legend.visible = visible,
+        }
+        true
+    }
+
     /// L'ancre du texte, s'il a été déplacé.
     pub fn anchor(&self, spec: &PlotSpec) -> Option<TextAnchor> {
         match *self {

@@ -8,7 +8,7 @@
 
 use stokesforge_app::history_text::history_text_in;
 use stokesforge_app::i18n::{build_loader, pseudo, Language};
-use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
+use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind, PlotEditKind};
 
 fn name(text: &str) -> Option<String> {
     Some(text.to_string())
@@ -42,10 +42,11 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::SetPlotSpec { .. } => 20,
         HistoryLabel::SetSavedColors => 21,
         HistoryLabel::Macro(_) => 22,
+        HistoryLabel::EditPlotSpec(_) => 23,
     }
 }
 
-const VARIANTS: usize = 23;
+const VARIANTS: usize = 24;
 
 /// Chaque variante, sous **chacune** de ses formes (cible connue ou non, 0, 1 et
 /// plusieurs lignes, chaque nature de groupe).
@@ -114,6 +115,7 @@ fn all_labels() -> Vec<HistoryLabel> {
         labels.push(HistoryLabel::DeleteCells { count });
     }
     labels.extend(MacroKind::ALL.map(HistoryLabel::Macro));
+    labels.extend(PlotEditKind::ALL.map(HistoryLabel::EditPlotSpec));
     labels
 }
 

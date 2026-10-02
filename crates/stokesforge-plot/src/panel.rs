@@ -19,6 +19,8 @@ use crate::text_anchor::TextAnchor;
 pub struct PanelSpec {
     /// Titre du panneau.
     pub title: String,
+    /// Visibilité du titre, indépendante de son contenu (#85).
+    pub title_visible: bool,
     /// Position du titre du panneau s'il a été déplacé (issue #53).
     pub title_anchor: Option<TextAnchor>,
     /// Police et corps du titre du panneau (issue #78).
@@ -108,6 +110,7 @@ impl Default for PanelSpec {
     fn default() -> Self {
         Self {
             title: String::new(),
+            title_visible: true,
             title_anchor: None,
             title_font: crate::TextFont::default(),
             series: Vec::new(),

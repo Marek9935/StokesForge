@@ -768,6 +768,7 @@ fn non_trivial_spec(
             inverted: true,
             title_color: "#aa3311".to_string(),
             // Issue #53 : textes déplacés, une ancre par sorte de texte.
+            title_visible: true,
             title_anchor: Some(stokesforge_plot::TextAnchor::new(3.5, -0.75)),
             // Issues #77 et #78 : police et corps, un jeu par sorte de texte.
             title_font: stokesforge_plot::TextFont {
@@ -776,6 +777,7 @@ fn non_trivial_spec(
             },
             tick_color: "#fefefe".to_string(),
         },
+        title_visible: true,
         title_anchor: Some(stokesforge_plot::TextAnchor {
             axis: SeriesAxis::Right,
             ..stokesforge_plot::TextAnchor::new(0.5, 4.25)
@@ -855,6 +857,7 @@ fn non_trivial_spec(
     PlotSpec {
         background: "#0a0a0a".to_string(),
         title_color: "#ffcc00".to_string(),
+        title_visible: true,
         title_anchor: Some(stokesforge_plot::TextAnchor::new(1.0, 9.5)),
         title_font: stokesforge_plot::TextFont {
             family: "Libertinus Sans".to_string(),

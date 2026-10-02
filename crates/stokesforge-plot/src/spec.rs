@@ -128,6 +128,8 @@ pub const TRANSPARENT: &str = "#ffffff00";
 pub struct PlotSpec {
     /// Titre du graphe.
     pub title: String,
+    /// Visibilité du titre, indépendante de son contenu (#85).
+    pub title_visible: bool,
     /// Panneaux, au moins un.
     pub panels: Panels,
     /// Fond du graphe (`#RRGGBB` ou `#RRGGBBAA`). Par défaut **aucune
@@ -249,6 +251,7 @@ impl Default for PlotSpec {
             panels: Panels::default(),
             background: TRANSPARENT.to_string(),
             title_color: String::new(),
+            title_visible: true,
             title_anchor: None,
             title_font: TextFont::default(),
             format_version: SPEC_FORMAT_VERSION,

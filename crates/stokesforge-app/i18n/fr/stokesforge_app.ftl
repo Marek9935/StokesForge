@@ -810,3 +810,20 @@ object-manager-group = Groupe de tracés
 
 toolbar-object-manager = Barre du gestionnaire d’objets
     .hint = Afficher ou masquer la barre du gestionnaire d’objets.
+
+menu-selected-content = Sélection
+action-rename-series = Renommer la série
+action-move-series-up = Déplacer vers le haut
+action-move-series-down = Déplacer vers le bas
+action-show-content = Afficher
+action-hide-content = Masquer
+action-delete-content = Supprimer
+object-properties-title = Propriétés de l'objet
+object-coordinate = { $coordinate }
+history-plot-visibility = Modifier la visibilité
+history-plot-rename-series = Renommer la série
+history-plot-reorder-series = Réordonner les séries
+history-plot-remove-series = Supprimer la série
+history-plot-remove-text = Supprimer le texte
+history-plot-remove-object = Supprimer l'objet
+history-plot-reorder-object = Réordonner les objets

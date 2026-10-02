@@ -1073,6 +1073,7 @@ impl History {
             | Command::SetNoteText { .. }
             | Command::SetColumnMeta { .. }
             | Command::SetPlotSpec { .. }
+            | Command::EditPlotSpec { .. }
             | Command::SetSavedColors { .. } => {
                 unreachable!("apply_structural appelée avec une commande de données")
             }
@@ -1285,7 +1286,7 @@ impl History {
                     label,
                 })
             }
-            Command::SetPlotSpec { graph, spec } => {
+            Command::SetPlotSpec { graph, spec } | Command::EditPlotSpec { graph, spec, .. } => {
                 let before = project.set_plot_spec(graph, spec.clone())?;
                 Ok(Entry::Data {
                     delta: Box::new(DataDelta::PlotSpec {
@@ -1932,6 +1933,7 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::SetNoteText { .. }
         | Command::SetColumnMeta { .. }
         | Command::SetPlotSpec { .. }
+        | Command::EditPlotSpec { .. }
         | Command::SetSavedColors { .. } => {}
     }
     out

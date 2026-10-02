@@ -11,7 +11,7 @@
 //! `Display` de `HistoryLabel` (anglais, pour les journaux et le CLI) double le
 //! catalogue `en` ; `tests/shell.rs` vérifie qu'ils disent la même chose.
 
-use stokesforge_commands::{HistoryLabel, MacroKind};
+use stokesforge_commands::{HistoryLabel, MacroKind, PlotEditKind};
 
 use i18n_embed::fluent::FluentLanguageLoader;
 
@@ -92,6 +92,15 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         HistoryLabel::SetPlotSpec { name: Some(name) } => {
             tr!("history-set-plot-spec-named", name = name.as_str())
         }
+        HistoryLabel::EditPlotSpec(kind) => match kind {
+            PlotEditKind::Visibility => tr!("history-plot-visibility"),
+            PlotEditKind::RenameSeries => tr!("history-plot-rename-series"),
+            PlotEditKind::ReorderSeries => tr!("history-plot-reorder-series"),
+            PlotEditKind::RemoveSeries => tr!("history-plot-remove-series"),
+            PlotEditKind::RemoveText => tr!("history-plot-remove-text"),
+            PlotEditKind::RemoveObject => tr!("history-plot-remove-object"),
+            PlotEditKind::ReorderObject => tr!("history-plot-reorder-object"),
+        },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::Macro(kind) => match kind {
             MacroKind::PasteCells => tr!("history-macro-paste-cells"),

@@ -650,6 +650,24 @@ impl GraphView {
         }
     }
 
+    /// Sélection d'un texte libre depuis Object Manager, y compris masqué.
+    pub fn select_annotation(&mut self, target: Option<AnnotationRef>, spec: &PlotSpec) {
+        self.select_series(None, spec);
+        self.selected_shape = None;
+        self.selected_text = None;
+        self.selected_annotation = target.filter(|t| t.get(spec).is_some());
+        self.tool = GraphTool::Pointer;
+    }
+
+    /// Sélection d'un titre ou d'une légende depuis Object Manager.
+    pub fn select_text(&mut self, target: Option<TextTarget>, spec: &PlotSpec) {
+        self.select_series(None, spec);
+        self.selected_shape = None;
+        self.selected_annotation = None;
+        self.selected_text = target.filter(|t| t.visible(spec).is_some());
+        self.tool = GraphTool::Pointer;
+    }
+
     /// Série sous le pointeur, par sa géométrie réellement dessinée.
     pub fn series_at(&self, pos: Pos2, spec: &PlotSpec) -> Option<stokesforge_plot::SeriesRef> {
         let pos = self.figure_position(pos)?;
@@ -1014,6 +1032,9 @@ impl GraphView {
         self.selected_series = self
             .selected_series
             .filter(|target| spec.series_at(*target).is_some());
+        self.selected_annotation = self.selected_annotation.filter(|t| t.get(&spec).is_some());
+        self.selected_shape = self.selected_shape.filter(|t| t.get(&spec).is_some());
+        self.selected_text = self.selected_text.filter(|t| t.visible(&spec).is_some());
         self.handle_navigation(&response, &context, &spec);
 
         let key = CacheKey {

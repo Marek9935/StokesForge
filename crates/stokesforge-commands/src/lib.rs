@@ -80,4 +80,4 @@ pub mod label;
 pub use command::Command;
 pub use error::{CommandError, CommandResult};
 pub use history::{DataDelta, Entry, History, DEFAULT_BYTE_LIMIT, DEFAULT_LIMIT, MAX_MACRO_DEPTH};
-pub use label::{ColumnRef, HistoryLabel, MacroKind};
+pub use label::{ColumnRef, HistoryLabel, MacroKind, PlotEditKind};

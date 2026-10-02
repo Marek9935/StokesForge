@@ -587,6 +587,9 @@ pub(crate) const MIXED_TAG_TEXT: u8 = 2;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PlotSpecRecord {
     pub(crate) title: String,
+    /// Visibilité du titre, indépendante de son contenu (#85).
+    #[serde(default = "visible_by_default")]
+    pub(crate) title_visible: bool,
     pub(crate) panels: Vec<PanelSpecRecord>,
     pub(crate) background: String,
     /// Ajouté après coup : absent des fichiers plus anciens, ramené à la
@@ -628,6 +631,7 @@ impl Default for PlotSpecRecord {
             panels: vec![PanelSpecRecord::default()],
             background: "#ffffff00".to_string(), // stokesforge_plot::TRANSPARENT
             title_color: String::new(),
+            title_visible: true,
             title_anchor: None,
             title_font: TextFontRecord::default(),
             format_version: 1, // stokesforge_plot::SPEC_FORMAT_VERSION
@@ -639,6 +643,9 @@ impl Default for PlotSpecRecord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PanelSpecRecord {
     pub(crate) title: String,
+    /// Visibilité du titre, indépendante de son contenu (#85).
+    #[serde(default = "visible_by_default")]
+    pub(crate) title_visible: bool,
     /// Titre déplacé (issue #53), comme `PlotSpecRecord::title_anchor`.
     #[serde(default)]
     pub(crate) title_anchor: Option<TextAnchorRecord>,
@@ -710,6 +717,7 @@ impl Default for PanelSpecRecord {
     fn default() -> Self {
         Self {
             title: String::new(),
+            title_visible: true,
             title_anchor: None,
             title_font: TextFontRecord::default(),
             series: Vec::new(),
@@ -730,6 +738,9 @@ impl Default for PanelSpecRecord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AxisSpecRecord {
     pub(crate) label: String,
+    /// Visibilité du titre, indépendante de son contenu (#85).
+    #[serde(default = "visible_by_default")]
+    pub(crate) title_visible: bool,
     pub(crate) unit: String,
     pub(crate) scale: AxisScaleRecord,
     pub(crate) auto_range: bool,
@@ -776,6 +787,7 @@ impl Default for AxisSpecRecord {
             visible: true,
             inverted: false,
             title_color: String::new(),
+            title_visible: true,
             title_anchor: None,
             title_font: TextFontRecord::default(),
             tick_color: String::new(),
@@ -1020,6 +1032,7 @@ mod tests {
         assert_eq!(relu.label, "Temps");
         assert_eq!(relu.title_color, "");
         assert_eq!(relu.tick_color, "");
+        assert!(relu.title_visible, "un ancien axe garde son titre visible");
 
         let spec = AncienSpec {
             title: "Ancien".to_string(),
@@ -1030,6 +1043,10 @@ mod tests {
         let octets = rmp_serde::to_vec_named(&spec).expect("encodage");
         let relu: PlotSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");
         assert_eq!(relu.title, "Ancien");
+        assert!(
+            relu.title_visible,
+            "un ancien graphe garde son titre visible"
+        );
         assert_eq!(relu.title_color, "");
     }
 }
@@ -1083,5 +1100,53 @@ mod visibility_tests {
         let shape: ShapeSpecRecord = rmp_serde::from_slice(&bytes).unwrap();
         assert!(text.visible);
         assert!(shape.visible);
+    }
+}
+
+#[cfg(test)]
+mod title_visibility_tests {
+    use super::*;
+    #[test]
+    fn titres_masques_et_anciens_champs_absents() {
+        let mut record = PlotSpecRecord {
+            title_visible: false,
+            ..Default::default()
+        };
+        record.panels[0].title_visible = false;
+        record.panels[0].bottom.title_visible = false;
+        let bytes = rmp_serde::to_vec_named(&record).unwrap();
+        let reloaded: PlotSpecRecord = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(reloaded, record);
+        let mut value = rmpv::decode::read_value(&mut std::io::Cursor::new(bytes)).unwrap();
+        fn remove_field(value: &mut rmpv::Value) {
+            match value {
+                rmpv::Value::Map(fields) => {
+                    fields.retain(|(key, _)| key.as_str() != Some("title_visible"));
+                    for (_, value) in fields {
+                        remove_field(value);
+                    }
+                }
+                rmpv::Value::Array(values) => {
+                    for value in values {
+                        remove_field(value);
+                    }
+                }
+                _ => {}
+            }
+        }
+        remove_field(&mut value);
+        let mut old = Vec::new();
+        rmpv::encode::write_value(&mut old, &value).unwrap();
+        let reloaded: PlotSpecRecord = rmp_serde::from_slice(&old).unwrap();
+        assert!(reloaded.title_visible);
+        assert!(reloaded.panels[0].title_visible);
+        for side in [
+            &reloaded.panels[0].bottom,
+            &reloaded.panels[0].left,
+            &reloaded.panels[0].right,
+            &reloaded.panels[0].top,
+        ] {
+            assert!(side.title_visible);
+        }
     }
 }
