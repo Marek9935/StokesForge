@@ -195,3 +195,8 @@ propres à la pile : macro ouverte, pas de macro, pile non vide, macro
   (coût et identité sur le chemin d'écriture).
 
 **À lire** : `stokesforge-commands/src/lib.rs` et `src/history.rs` (têtes).
+
+La visibilité d'Object Manager (#81–82) réutilise `SetPlotSpec` : une case de
+série ou de parent remplace le spec en une seule entrée annulable. La bascule
+sur une cible absente ou déjà dans cet état n'envoie aucune commande. Ouvrir
+le panneau et sélectionner une série sont des gestes de vue, hors historique.

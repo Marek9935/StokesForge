@@ -643,3 +643,53 @@ fn la_decimation_sapplique_et_les_deux_backends_deciment_pareil() {
         drawn.y_range()
     );
 }
+
+#[test]
+fn objets_et_serie_masques_accord_et_temoin_visible() {
+    use stokesforge_plot::{AnnotationSpec, ShapeKind, ShapeSpec};
+    let fixture = minimal();
+    let tree = fixture.project.tree();
+    let mut visible = fixture.spec.clone();
+    let panel = visible.panels.get_mut(0).unwrap();
+    let y = panel.series[0].y;
+    panel.series.push(SeriesSpec::new(y));
+    panel.series[1].name = "Témoin".into();
+    panel
+        .annotations
+        .push(AnnotationSpec::new("Texte témoin", 1.0, 1.0));
+    panel
+        .shapes
+        .push(ShapeSpec::new(ShapeKind::Rectangle, 0.2, 0.3, 0.7, 0.8));
+    // Fixer les axes pour que textes et formes soient bien dans le cadre.
+    panel.bottom.auto_range = false;
+    panel.bottom.range_min = Some(0.0);
+    panel.bottom.range_max = Some(2.0);
+    panel.left.auto_range = false;
+    panel.left.range_min = Some(0.0);
+    panel.left.range_max = Some(2.0);
+    let (before, drawn_before) = accord(tree, &visible, SIZE, "objets visibles");
+    assert_eq!(drawn_before.panels[0].annotations.len(), 1);
+    assert_eq!(drawn_before.panels[0].shapes.len(), 1);
+    let mut hidden = visible.clone();
+    hidden.panels.get_mut(0).unwrap().series[1].visible = false;
+    hidden.panels.get_mut(0).unwrap().annotations[0].visible = false;
+    hidden.panels.get_mut(0).unwrap().shapes[0].visible = false;
+    let (after, drawn_after) = accord(tree, &hidden, SIZE, "objets masqués");
+    assert_ne!(before, after, "la visibilité doit changer les pixels");
+    assert!(drawn_after.panels[0].annotations.is_empty());
+    assert!(drawn_after.panels[0].shapes.is_empty());
+    assert_eq!(
+        drawn_after.panels[0].legend_entries + 1,
+        drawn_before.panels[0].legend_entries
+    );
+    assert_eq!(drawn_after.panels[0].series_geometry.len(), 1);
+    let mut removed = visible;
+    removed.panels.get_mut(0).unwrap().series.pop();
+    removed.panels.get_mut(0).unwrap().annotations.clear();
+    removed.panels.get_mut(0).unwrap().shapes.clear();
+    assert_eq!(
+        after,
+        accord(tree, &removed, SIZE, "objets retirés").0,
+        "masquer n'ajoute aucune primitive"
+    );
+}

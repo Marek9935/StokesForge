@@ -239,3 +239,11 @@ puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
 
 **À lire** : `stokesforge-persistence/src/lib.rs`, `src/schema.rs`,
 `src/unknown.rs` (têtes).
+
+## Visibilité des objets (#81)
+
+La visibilité des séries était déjà transportée par `SeriesSpecRecord`.
+`AnnotationSpecRecord::visible` et `ShapeSpecRecord::visible` la complètent ;
+les champs absents se relisent à `true`. Masquer ne supprime ni données,
+style, position ni rang. Le panneau Object Manager n'entre pas dans le `.stf` :
+son ouverture est une préférence de la personne.

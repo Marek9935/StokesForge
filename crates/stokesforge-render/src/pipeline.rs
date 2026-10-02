@@ -195,6 +195,8 @@ pub struct DrawnPanel {
     /// qui déborde du cadrage visible y figure : il est tracé rogné, mais
     /// désignable par la partie visible.
     pub shapes: Vec<crate::shapes::DrawnShape>,
+    /// Géométrie visible des séries, après décimation et rognage (#83).
+    pub series_geometry: Vec<crate::series_selection::DrawnSeries>,
     /// Les titres et la légende de ce panneau (issue #53) : titre du
     /// panneau, titres d'axe, cadre de la légende. Un texte à sa place par
     /// défaut y figure aussi, avec une position **approchée** (Plotters le
@@ -838,6 +840,7 @@ fn draw_panel<DB: DrawingBackend>(
         },
         annotations: Vec::new(),
         shapes: Vec::new(),
+        series_geometry: Vec::new(),
         texts: Vec::new(),
         legend_rows: Vec::new(),
     };
@@ -900,7 +903,7 @@ fn draw_panel<DB: DrawingBackend>(
     // pas linéaire (doc de tête de `clip`).
     let bounds = PixelBounds::of_panel(origin, size);
 
-    for series in &mut prepared {
+    for (rank, series) in source.iter().copied().zip(&mut prepared) {
         if series.broken {
             drawn.broken_series += 1;
             continue;
@@ -913,7 +916,7 @@ fn draw_panel<DB: DrawingBackend>(
             continue;
         }
         let right = series.axis == SeriesAxis::Right && right_active;
-        let removed = paint_series(
+        let (removed, mut geometry) = paint_series(
             &screen,
             |point| {
                 if right {
@@ -928,6 +931,8 @@ fn draw_panel<DB: DrawingBackend>(
             bounds,
             ink,
         )?;
+        geometry.index = rank;
+        drawn.series_geometry.push(geometry);
         series.decimated = removed;
         drawn.decimated_points += removed;
         drawn.drawn_series += 1;
@@ -1060,7 +1065,7 @@ fn draw_panel<DB: DrawingBackend>(
     // rectangle qui déborde du zoom est rogné, pas omis.
     for (index, shape) in spec.shapes.iter().enumerate() {
         let right = shape.axis == SeriesAxis::Right && right_active;
-        if !shape.is_finite() {
+        if !shape.visible || !shape.is_finite() {
             continue;
         }
         let pixel_of = |x: f64, y: f64| {
@@ -1089,6 +1094,9 @@ fn draw_panel<DB: DrawingBackend>(
 
     // 7 — les textes libres, par-dessus tout (issue #35).
     for (index, annotation) in spec.annotations.iter().enumerate() {
+        if !annotation.visible {
+            continue;
+        }
         let right = annotation.axis == SeriesAxis::Right && right_active;
         let Some(point) = ranges.project(annotation.x, annotation.y, right) else {
             continue;
@@ -1185,10 +1193,11 @@ fn paint_series<DB: DrawingBackend>(
     y_range: (f64, f64),
     bounds: Option<PixelBounds>,
     ink: (u8, u8, u8),
-) -> Result<usize, DrawingAreaErrorKind<DB::ErrorType>> {
+) -> Result<(usize, crate::series_selection::DrawnSeries), DrawingAreaErrorKind<DB::ErrorType>> {
+    let mut geometry = crate::series_selection::DrawnSeries::default();
     let spec = series.spec;
     match &series.geometry {
-        Geometry::Nothing => Ok(0),
+        Geometry::Nothing => Ok((0, geometry)),
         Geometry::Bars(bars) => {
             // La ligne de base d'une barre est zéro quand l'axe sait le
             // représenter, et le bas du cadrage sinon — sur une échelle
@@ -1199,7 +1208,21 @@ fn paint_series<DB: DrawingBackend>(
                 .map(|(left, right, top)| (map((*left, *top)), map((*right, baseline))))
                 .collect();
             paint::bars(screen, &rects, &spec.line, ink)?;
-            Ok(0)
+            geometry.bars = rects
+                .into_iter()
+                .filter_map(|(a, b)| {
+                    let (mut left, mut right) = (a.0.min(b.0), a.0.max(b.0));
+                    let (mut top, mut bottom) = (a.1.min(b.1), a.1.max(b.1));
+                    if let Some(bounds) = bounds {
+                        left = left.max(bounds.x_min as i32);
+                        right = right.min(bounds.x_max as i32);
+                        top = top.max(bounds.y_min as i32);
+                        bottom = bottom.min(bounds.y_max as i32);
+                    }
+                    (left <= right && top <= bottom).then_some(((left, top), (right, bottom)))
+                })
+                .collect();
+            Ok((0, geometry))
         }
         Geometry::Curve { points, whiskers } => {
             // Décimer une série à moustaches dissocierait les barres
@@ -1213,7 +1236,7 @@ fn paint_series<DB: DrawingBackend>(
             let removed = points.len() - drawn_points.len();
 
             let mapped: Vec<_> = drawn_points.iter().map(|point| map(*point)).collect();
-            if spec.plot_type.draws_line() {
+            if spec.plot_type.draws_line() && spec.line.style != stokesforge_plot::LineStyle::None {
                 // Rognage géométrique contre le rectangle de tracé, **avant**
                 // `paint::polyline` : un segment qui traverse le panneau est
                 // coupé à l'intersection réelle plutôt que ramené sur le bord
@@ -1226,9 +1249,13 @@ fn paint_series<DB: DrawingBackend>(
                     Some(bounds) => {
                         for run in clip::clip_polyline(bounds, &mapped) {
                             paint::polyline(screen, &run, &spec.line, false)?;
+                            geometry.paths.push(run);
                         }
                     }
-                    None => paint::polyline(screen, &mapped, &spec.line, false)?,
+                    None => {
+                        paint::polyline(screen, &mapped, &spec.line, false)?;
+                        geometry.paths.push(mapped.clone());
+                    }
                 }
             }
             if !whiskers.is_empty() {
@@ -1237,11 +1264,41 @@ fn paint_series<DB: DrawingBackend>(
                     .map(|(from, to)| (map(*from), map(*to)))
                     .collect();
                 paint::whiskers(screen, &segments, &spec.line)?;
+                for (a, b) in segments {
+                    match bounds {
+                        Some(bounds) => {
+                            if let Some((a, b)) = clip::clip_segment(
+                                bounds,
+                                (a.0 as f64, a.1 as f64),
+                                (b.0 as f64, b.1 as f64),
+                            ) {
+                                geometry.paths.push(vec![
+                                    (a.0.round() as i32, a.1.round() as i32),
+                                    (b.0.round() as i32, b.1.round() as i32),
+                                ]);
+                            }
+                        }
+                        None => geometry.paths.push(vec![a, b]),
+                    }
+                }
             }
-            if spec.plot_type.draws_symbols() {
+            if spec.plot_type.draws_symbols()
+                && spec.symbol.shape != stokesforge_plot::SymbolShape::None
+            {
                 paint::symbols(screen, &mapped, &spec.symbol, false)?;
+                geometry.points = mapped
+                    .into_iter()
+                    .filter(|&(x, y)| {
+                        bounds.is_none_or(|b| {
+                            x as f64 >= b.x_min
+                                && x as f64 <= b.x_max
+                                && y as f64 >= b.y_min
+                                && y as f64 <= b.y_max
+                        })
+                    })
+                    .collect();
             }
-            Ok(removed)
+            Ok((removed, geometry))
         }
     }
 }

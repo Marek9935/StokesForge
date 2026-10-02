@@ -570,3 +570,17 @@ décalage reste inférieur à un pixel ; la mise en page n'est pas touchée
 (`une_formule_reduite_est_calee_sur_les_pixels`). Hors du chemin `scaled`
 (`paint` avec rectangle logique = rectangle affiché) le calage n'est pas
 appliqué.
+
+## Visibilité et sélection (#81–83)
+
+Le filtre `SeriesSpec::visible` précède préparation, autoscale et légende.
+Les textes libres et formes masqués sont omis avec leur géométrie de
+désignation. Cette règle vit dans le pipeline partagé, donc vaut aussi en
+SVG, PDF et PNG.
+
+`DrawnPanel::series_geometry` conserve les pixels des séries après décimation,
+projection sur l'axe gauche ou droit et rognage. `series_selection` les
+désigne ; `GraphView` y peint la sélection sans modifier le cache de figure ni
+le modèle. Les rangs restent ceux du spec, même quand une série est masquée.
+Object Manager utilise `series_swatch`, qui appelle la vignette de légende
+partagée (`legend::series_key`), sans redessiner le style dans l'application.

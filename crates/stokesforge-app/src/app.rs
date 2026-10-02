@@ -708,6 +708,9 @@ pub struct StokesForgeApp {
     /// Les barres d'outils : disposition, visibilité et glisser en cours
     /// (issue #60).
     toolbars: ToolbarState,
+    object_manager_floating: bool,
+    object_manager_rect: Option<egui::Rect>,
+    active_detached: Option<Tab>,
     /// Les onglets de contenu actuellement ouverts en fenêtre flottante, dans
     /// l'ordre où ils ont été focalisés pour la dernière fois — le dernier
     /// élément est le plus récemment focalisé (voir la doc de tête du
@@ -931,6 +934,7 @@ struct DetachedTabViewModel {
     /// taille (ou si la fenêtre a été détachée déjà repliée et jamais
     /// dépliée depuis).
     expanded_size: Option<egui::Vec2>,
+    focused: bool,
 }
 
 /// Ce qu'une fenêtre détachée écrit, pour que [`StokesForgeApp::ui`] (seule à
@@ -1037,6 +1041,9 @@ impl StokesForgeApp {
         Self {
             state,
             toolbars: ToolbarState::default(),
+            object_manager_floating: false,
+            object_manager_rect: None,
+            active_detached: None,
             floating_tabs,
             cascade_rank,
             next_cascade,
@@ -1160,16 +1167,9 @@ impl StokesForgeApp {
         }
         // Le graphe actif, calculé comme pour la barre de menus : le
         // raccourci n'agit que là où le menu « Graphique » existe.
-        let active_tab = self
-            .maximized_tab
-            .or_else(|| self.floating_tabs.last().copied());
+        let active_tab = self.active_content_tab(ctx);
         if let Some(graph) = active_graph(active_tab_kind(active_tab)).filter(|_| export) {
-            request_graph_export(
-                self.graph_views.get(&graph),
-                self.state.tree(),
-                graph,
-                actions,
-            );
+            self.request_graph_export(graph, actions);
         }
     }
 
@@ -1482,12 +1482,7 @@ impl StokesForgeApp {
                             .on_hover_text(tr!("action-export-graph", "hint"))
                             .clicked()
                         {
-                            request_graph_export(
-                                self.graph_views.get(&graph),
-                                self.state.tree(),
-                                graph,
-                                actions,
-                            );
+                            self.request_graph_export(graph, actions);
                             ui.close();
                         }
                         ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
@@ -1511,6 +1506,27 @@ impl StokesForgeApp {
                     });
                 }
                 ui.menu_button(tr!("menu-view"), |ui| {
+                    let mut open = self.state.object_manager_open();
+                    if ui
+                        .checkbox(&mut open, tr!("action-object-manager"))
+                        .on_hover_text(tr!("action-object-manager", "hint"))
+                        .changed()
+                    {
+                        actions.push(Action::SetObjectManagerOpen(open));
+                    }
+                    if open
+                        && ui
+                            .button(if self.object_manager_floating {
+                                tr!("action-object-manager-dock")
+                            } else {
+                                tr!("action-object-manager-float")
+                            })
+                            .clicked()
+                    {
+                        self.object_manager_floating = !self.object_manager_floating;
+                        ui.close();
+                    }
+                    ui.separator();
                     for id in ToolbarId::ALL {
                         let mut visible = self.toolbars.layout().is_visible(id);
                         if ui
@@ -1638,9 +1654,8 @@ impl StokesForgeApp {
             ActiveTabKind::Graph(graph) => ToolsContext::Graph {
                 graph,
                 tool: self
-                    .graph_views
-                    .get(&graph)
-                    .map_or_else(Default::default, GraphView::tool),
+                    .read_graph_view(graph, GraphView::tool)
+                    .unwrap_or_default(),
             },
             ActiveTabKind::Book(book) => {
                 let sheet = self.state.selected_sheet_in(book);
@@ -1713,6 +1728,17 @@ impl StokesForgeApp {
         &self,
         active_tab: Option<Tab>,
     ) -> Option<crate::toolbar::ObjectFormatState> {
+        let graph = active_graph(active_tab_kind(active_tab))?;
+        if let Some(target) = self.selected_series(graph) {
+            let spec = crate::state::current_plot_spec(self.state.tree(), graph)?;
+            let series = spec.series_at(target)?;
+            return Some(crate::toolbar::ObjectFormatState {
+                closed: false,
+                line_color: series.line.color.clone(),
+                fill_color: String::new(),
+                line_width: series.line.width,
+            });
+        }
         let (_, _, shape) = self.selected_object(active_tab)?;
         Some(crate::toolbar::ObjectFormatState {
             closed: shape.kind.is_closed(),
@@ -1730,6 +1756,19 @@ impl StokesForgeApp {
         active_tab: Option<Tab>,
         actions: &mut Vec<Action>,
     ) {
+        if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+            if let Some(target) = self.selected_series(graph) {
+                if let Some(mut spec) = crate::state::current_plot_spec(self.state.tree(), graph) {
+                    if spec
+                        .series_at_mut(target)
+                        .is_some_and(|series| format.apply_series(series))
+                    {
+                        actions.push(Action::SetPlotSpec { graph, spec });
+                    }
+                }
+                return;
+            }
+        }
         let Some((graph, target, mut shape)) = self.selected_object(active_tab) else {
             return;
         };
@@ -1916,17 +1955,13 @@ impl StokesForgeApp {
         match request {
             ToolbarRequest::Action(action) => actions.push(*action),
             ToolbarRequest::SetGraphTool(tool) => {
-                if let Some(view) = active_graph(active_tab_kind(active_tab))
-                    .and_then(|graph| self.graph_views.get_mut(&graph))
-                {
-                    view.set_tool(tool);
+                if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+                    self.with_graph_view(graph, |view| view.set_tool(tool));
                 }
             }
             ToolbarRequest::ResetZoom => {
-                if let Some(view) = active_graph(active_tab_kind(active_tab))
-                    .and_then(|graph| self.graph_views.get_mut(&graph))
-                {
-                    view.reset_view();
+                if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+                    self.with_graph_view(graph, GraphView::reset_view);
                 }
             }
             ToolbarRequest::FormatText(format) => {
@@ -1940,12 +1975,7 @@ impl StokesForgeApp {
             ToolbarRequest::SaveAs => self.choose_save_path(actions),
             ToolbarRequest::ExportGraph => {
                 if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
-                    request_graph_export(
-                        self.graph_views.get(&graph),
-                        self.state.tree(),
-                        graph,
-                        actions,
-                    );
+                    self.request_graph_export(graph, actions);
                 }
             }
         }
@@ -2091,6 +2121,174 @@ impl StokesForgeApp {
             });
     }
 
+    fn active_content_tab(&mut self, ctx: &egui::Context) -> Option<Tab> {
+        if !ctx.input(|input| input.focused) {
+            for (&tab, detached) in &self.detached_tabs {
+                if detached.view_model.lock().is_ok_and(|model| model.focused) {
+                    self.active_detached = Some(tab);
+                }
+            }
+        }
+        self.active_detached
+            .filter(|tab| self.detached_tabs.contains_key(tab))
+            .or(self.maximized_tab)
+            .or_else(|| self.floating_tabs.last().copied())
+    }
+
+    /// Les barres et l'export lisent aussi la vue détachée ciblée par le panneau.
+    fn read_graph_view<R>(&self, graph: NodeId, read: impl FnOnce(&GraphView) -> R) -> Option<R> {
+        if let Some(detached) = self.detached_tabs.get(&Tab::Graph(graph)) {
+            let model = detached
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            model.graph_view.as_ref().map(read)
+        } else {
+            self.graph_views.get(&graph).map(read)
+        }
+    }
+
+    fn request_graph_export(&mut self, graph: NodeId, actions: &mut Vec<Action>) {
+        let tree = self.state.snapshot().tree.clone();
+        self.with_graph_view(graph, |view| {
+            request_graph_export(Some(view), &tree, graph, actions)
+        });
+    }
+
+    /// Même vue de sélection pour les graphes flottants et détachés.
+    fn with_graph_view<R>(
+        &mut self,
+        graph: NodeId,
+        run: impl FnOnce(&mut GraphView) -> R,
+    ) -> Option<R> {
+        if let Some(detached) = self.detached_tabs.get(&Tab::Graph(graph)) {
+            let mut model = detached
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            Some(run(model.graph_view.get_or_insert_with(GraphView::default)))
+        } else {
+            Some(run(self.graph_views.entry(graph).or_default()))
+        }
+    }
+
+    fn selected_series(&self, graph: NodeId) -> Option<stokesforge_plot::SeriesRef> {
+        self.read_graph_view(graph, GraphView::selected_series)
+            .flatten()
+    }
+
+    fn object_manager_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        if !self.state.object_manager_open() {
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let graph = active_graph(active_tab_kind(active_tab));
+        let tree = self.state.snapshot().tree.clone();
+        let spec = graph.and_then(|graph| crate::state::current_plot_spec(&tree, graph));
+        let model = graph.and_then(|graph| {
+            crate::object_manager::object_tree(&tree, graph, self.selected_series(graph))
+        });
+        let mut select = None;
+        let mut close = false;
+        let mut toggle_dock = false;
+        let mut contents = |ui: &mut egui::Ui| {
+            ui.horizontal(|ui| {
+                if !self.object_manager_floating {
+                    ui.heading(tr!("action-object-manager"));
+                }
+                toggle_dock |= icon_button(
+                    ui,
+                    if self.object_manager_floating {
+                        Icon::Reattach
+                    } else {
+                        Icon::Detach
+                    },
+                    IconRole::Neutral,
+                    if self.object_manager_floating {
+                        tr!("action-object-manager-dock")
+                    } else {
+                        tr!("action-object-manager-float")
+                    },
+                )
+                .clicked();
+                close |= icon_button(
+                    ui,
+                    Icon::Close,
+                    IconRole::Neutral,
+                    tr!("action-object-manager-close"),
+                )
+                .clicked();
+            });
+            ui.separator();
+            select = object_manager_contents(ui, &tree, model.as_ref(), spec.as_ref(), actions);
+        };
+        if self.object_manager_floating {
+            let viewport = ctx.input(|input| input.content_rect());
+            let rect = self.object_manager_rect.unwrap_or_else(|| {
+                egui::Rect::from_min_size(
+                    viewport.min + egui::vec2(80.0, 80.0),
+                    egui::vec2(330.0, 420.0),
+                )
+            });
+            let id = egui::Id::new("stokesforge_object_manager_float");
+            let mut header = WindowHeaderActions::default();
+            let mut position = rect.min;
+            let mut size = rect.size();
+            show_window_in_layer(
+                &ctx,
+                id,
+                egui::Order::Foreground,
+                rect,
+                viewport,
+                false,
+                |ui| {
+                    header = window_header(
+                        ui,
+                        id,
+                        &tr!("action-object-manager"),
+                        None,
+                        false,
+                        HeaderPlacement::Floating,
+                    );
+                    contents(ui);
+                },
+                |ui, rect| floating_resize_handles(ui, id, rect, &mut position, &mut size),
+            );
+            close |= header.close;
+            size = size.min(viewport.size());
+            position += header.drag_delta;
+            position.x = position.x.clamp(
+                viewport.left(),
+                (viewport.right() - size.x).max(viewport.left()),
+            );
+            position.y = position.y.clamp(
+                viewport.top(),
+                (viewport.bottom() - size.y).max(viewport.top()),
+            );
+            self.object_manager_rect = Some(egui::Rect::from_min_size(position, size));
+        } else {
+            egui::Panel::right("stokesforge_object_manager")
+                .default_size(300.0)
+                .size_range(180.0..=500.0)
+                .show(ui, &mut contents);
+        }
+        if toggle_dock {
+            self.object_manager_floating = !self.object_manager_floating;
+        }
+        if close {
+            actions.push(Action::SetObjectManagerOpen(false));
+        }
+        if let (Some(graph), Some(spec), Some(target)) = (graph, spec, select) {
+            self.with_graph_view(graph, |view| view.select_series(Some(target), &spec));
+            ctx.request_repaint();
+        }
+    }
+
     /// Ouvre l'onglet `tab`, ou le focalise s'il est déjà ouvert.
     ///
     /// Le seul endroit qui décide entre les deux, pour toute nature de
@@ -2098,6 +2296,7 @@ impl StokesForgeApp {
     /// la même entrée du Project Manager ne doit jamais dupliquer son
     /// onglet, seulement l'amener au premier plan.
     fn open_tab(&mut self, tab: Tab) {
+        self.active_detached = None;
         if let Some(pos) = self.floating_tabs.iter().position(|t| *t == tab) {
             self.floating_tabs.remove(pos);
             self.floating_tabs.push(tab);
@@ -2309,6 +2508,7 @@ impl StokesForgeApp {
             graph_view,
             needs_initial_repaint: true,
             collapsed: self.collapsed_tabs.contains(&tab),
+            focused: false,
             expanded_size: None,
         };
         self.detached_tabs.insert(
@@ -2517,6 +2717,10 @@ impl StokesForgeApp {
                     // ne le couvrent pas. `RawInput::focused` est déjà
                     // rapporté par le backend par viewport.
                     let is_active = ui.input(|input| input.focused);
+                    if model.focused != is_active {
+                        model.focused = is_active;
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                    }
                     // Trait par défaut (inactif) uniquement — le contour actif
                     // n'est plus recoloré ici (B7,
                     // `retours-2026-09-23-bugs.md`) : la
@@ -2565,6 +2769,7 @@ impl StokesForgeApp {
                                 Tab::Graph(id) => {
                                     let view =
                                         model.graph_view.get_or_insert_with(GraphView::default);
+                                    let before = view.selected_series();
                                     graph_view_contents(
                                         ui,
                                         view,
@@ -2572,6 +2777,9 @@ impl StokesForgeApp {
                                         id,
                                         &mut requests.actions,
                                     );
+                                    if before != view.selected_series() {
+                                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                                    }
                                 }
                                 Tab::Matrix(id) => {
                                     matrix_contents(ui, tree, id);
@@ -2806,9 +3014,7 @@ impl eframe::App for StokesForgeApp {
         // calculé une fois ici, avant même le panneau fixe du Project
         // Manager qui en a besoin, plutôt qu'à l'intérieur du `CentralPanel`
         // (trop tard pour lui).
-        let active_tab = self
-            .maximized_tab
-            .or_else(|| self.floating_tabs.last().copied());
+        let active_tab = self.active_content_tab(&ctx);
 
         // Glisser-déposer de fichiers : les chemins déposés cette image sont
         // posés dans un emplacement que le classeur sous le curseur peut
@@ -2845,6 +3051,7 @@ impl eframe::App for StokesForgeApp {
         let bar_env = BarEnv {
             new_project_enabled: self.state.can_new_project(),
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
+            object_manager_open: self.state.object_manager_open(),
             tools: self.tools_context(active_tab),
             text_format: self.format_target(&ctx, active_tab),
             object_format: self.object_format_state(active_tab),
@@ -2913,6 +3120,8 @@ impl eframe::App for StokesForgeApp {
             self.project_manager_panel(ui, &mut open_requests, &mut close_requests, active_tab);
         }
 
+        self.object_manager_panel(ui, active_tab, &mut actions);
+
         if !self.detached_tabs.is_empty() {
             self.show_detached_tabs(&ctx);
             // Même vidange que pour le Project Manager, généralisée à
@@ -2971,6 +3180,7 @@ impl eframe::App for StokesForgeApp {
             cascade_rank,
             next_cascade,
             focus_next,
+            active_detached,
             graph_views,
             collapsed_tabs,
             maximized_tab,
@@ -3002,6 +3212,9 @@ impl eframe::App for StokesForgeApp {
                     });
                 });
                 ui.separator();
+                if window_pointer_pressed(ui.ctx(), ui.layer_id(), ui.max_rect()) {
+                    *active_detached = None;
+                }
                 tab_contents(ui, state, &mut actions, graph_views, tab);
             } else {
                 // Ce que les panneaux fixes peints plus haut (menu, outils,
@@ -3182,6 +3395,13 @@ impl eframe::App for StokesForgeApp {
                     );
                     if shown.is_none() {
                         continue;
+                    }
+                    if window_pointer_pressed(
+                        ui.ctx(),
+                        egui::LayerId::new(FLOATING_WINDOW_ORDER, id),
+                        window_rect.intersect(viewport_rect),
+                    ) {
+                        *active_detached = None;
                     }
                     if header_actions.toggle_collapse {
                         toggle_collapse(collapsed_tabs, tab);
@@ -3414,6 +3634,7 @@ impl eframe::App for StokesForgeApp {
                 self.next_cascade = 0;
                 self.focus_next = None;
                 self.graph_views.clear();
+                self.active_detached = None;
                 self.collapsed_tabs.clear();
                 self.maximized_tab = None;
                 self.window_positions.clear();
@@ -3483,6 +3704,12 @@ impl eframe::App for StokesForgeApp {
         self.screenshot(&ctx);
         self.autoquit(&ctx);
     }
+}
+
+/// Un clic ne réactive le contenu que sur son calque : Object Manager
+/// flottant peut le recouvrir tout en gardant un autre graphe comme cible.
+fn window_pointer_pressed(ctx: &egui::Context, layer: egui::LayerId, rect: egui::Rect) -> bool {
+    ctx.input(|input| input.pointer.any_pressed()) && ctx.rect_contains_pointer(layer, rect)
 }
 
 /// Rectangle flottant d'une géométrie persistée.
@@ -5046,6 +5273,100 @@ struct PmInteraction<'a> {
     /// affichés atténués dans l'arbre, et ce que « Afficher »/« Masquer »
     /// modifient pour la sélection courante.
     hidden: &'a mut HashSet<Tab>,
+}
+
+/// Un seul contenu pour Object Manager, quel que soit son emplacement.
+fn object_manager_contents(
+    ui: &mut egui::Ui,
+    tree: &Tree,
+    model: Option<&crate::object_manager::ObjectTree>,
+    spec: Option<&stokesforge_plot::PlotSpec>,
+    actions: &mut Vec<Action>,
+) -> Option<stokesforge_plot::SeriesRef> {
+    use crate::object_manager::VisibilityTarget;
+    let (Some(model), Some(spec)) = (model, spec) else {
+        ui.label(tr!("object-manager-no-graph"));
+        return None;
+    };
+    let mut selected = None;
+    let visibility = |ui: &mut egui::Ui, target: VisibilityTarget, actions: &mut Vec<Action>| {
+        let state = target.visibility(spec);
+        let mut checked = state.checked;
+        if ui
+            .add_enabled(
+                state.enabled,
+                egui::Checkbox::new(&mut checked, "").indeterminate(state.mixed),
+            )
+            .on_hover_text(tr!("object-manager-visibility"))
+            .changed()
+        {
+            actions.push(Action::SetPlotVisibility {
+                graph: model.graph,
+                target,
+                visible: checked,
+            });
+        }
+    };
+    egui::ScrollArea::both().show(ui, |ui| {
+        let id = ui.make_persistent_id(("object_manager_graph", model.graph));
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+            .show_header(ui, |ui| {
+                visibility(ui, VisibilityTarget::Graph, actions);
+                ui.label(&model.title);
+            })
+            .body(|ui| {
+                for layer in &model.layers {
+                    let id = ui.make_persistent_id((model.graph, layer.index));
+                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                        ui.ctx(),
+                        id,
+                        true,
+                    )
+                    .show_header(ui, |ui| {
+                        visibility(ui, VisibilityTarget::Panel(layer.index), actions);
+                        ui.label(tr!("object-manager-layer", index = (layer.index + 1)));
+                    })
+                    .body(|ui| {
+                        let id = ui.make_persistent_id((model.graph, layer.index, "group"));
+                        egui::collapsing_header::CollapsingState::load_with_default_open(
+                            ui.ctx(),
+                            id,
+                            true,
+                        )
+                        .show_header(ui, |ui| {
+                            visibility(ui, VisibilityTarget::Group(layer.index), actions);
+                            ui.label(tr!("object-manager-group"));
+                        })
+                        .body(|ui| {
+                            for series in &layer.series {
+                                ui.horizontal(|ui| {
+                                    visibility(
+                                        ui,
+                                        VisibilityTarget::Series(series.target),
+                                        actions,
+                                    );
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(28.0, 18.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().extend(stokesforge_render_egui::series_swatch(
+                                        tree,
+                                        &series.spec,
+                                        rect,
+                                    ));
+                                    let text = egui::RichText::new(&series.label);
+                                    let text = if series.selected { text.strong() } else { text };
+                                    if ui.selectable_label(series.selected, text).clicked() {
+                                        selected = Some(series.target);
+                                    }
+                                });
+                            }
+                        });
+                    });
+                }
+            });
+    });
+    selected
 }
 
 /// Le corps du Project Manager, à partir d'un arbre déjà construit plutôt
@@ -14461,5 +14782,147 @@ mod pending_format_tests {
         let mut buffer = "H2O".to_owned();
         apply_pending_format(&ctx, field, &mut buffer);
         assert_eq!(buffer, "H2O#sub[]");
+    }
+}
+
+#[cfg(test)]
+mod object_manager_tests {
+    use super::*;
+    use stokesforge_core::Project;
+    use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};
+    use stokesforge_session::Session;
+
+    #[test]
+    fn cliquer_le_gestionnaire_flottant_ne_reactive_pas_le_contenu_derriere() {
+        let ctx = egui::Context::default();
+        let content_id = egui::Id::new("object_manager_content_test");
+        let manager_id = egui::Id::new("object_manager_float_test");
+        let content = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(400.0, 300.0));
+        let manager = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let paint = |events: Vec<egui::Event>, expected: bool| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let viewport = ui.ctx().content_rect();
+                    show_window_in_layer(
+                        &ctx,
+                        manager_id,
+                        egui::Order::Foreground,
+                        manager,
+                        viewport,
+                        false,
+                        |_| {},
+                        |_, _| {},
+                    );
+                    show_floating_window(
+                        &ctx,
+                        content_id,
+                        content,
+                        viewport,
+                        false,
+                        |_| {},
+                        |_, _| {},
+                    );
+                    assert_eq!(
+                        window_pointer_pressed(
+                            &ctx,
+                            egui::LayerId::new(FLOATING_WINDOW_ORDER, content_id),
+                            content
+                        ),
+                        expected
+                    );
+                },
+            );
+            output.textures_delta.clear();
+        };
+        let press = |pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        };
+        paint(Vec::new(), false);
+        paint(vec![egui::Event::PointerMoved(manager.center())], false);
+        paint(vec![press(manager.center())], false);
+        paint(
+            vec![egui::Event::PointerButton {
+                pos: manager.center(),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            false,
+        );
+        let exposed = egui::pos2(70.0, 70.0);
+        paint(vec![egui::Event::PointerMoved(exposed)], false);
+        paint(vec![press(exposed)], true);
+    }
+
+    #[test]
+    fn la_selection_et_le_format_rejoignent_la_meme_vue_detachee() {
+        let mut project = Project::new("Objets").unwrap();
+        let root = project.root();
+        let mut panel = PanelSpec::default();
+        panel.series.push(SeriesSpec::new(NodeId::from_raw(100)));
+        let spec = PlotSpec::empty("Objets").with_panels(panel);
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let target = SeriesRef::new(0, 0);
+        app.with_graph_view(graph, |view| view.select_series(Some(target), &spec));
+        app.detach_tab(Tab::Graph(graph));
+        assert!(!app.graph_views.contains_key(&graph));
+        assert_eq!(app.selected_series(graph), Some(target));
+        let ctx = egui::Context::default();
+        app.detached_tabs[&Tab::Graph(graph)]
+            .view_model
+            .lock()
+            .unwrap()
+            .focused = true;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: false,
+                ..Default::default()
+            },
+            |_| {
+                assert_eq!(app.active_content_tab(&ctx), Some(Tab::Graph(graph)));
+            },
+        );
+        output.textures_delta.clear();
+        // Revenir dans le panneau conserve la cible native du graphe.
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {
+            assert_eq!(app.active_content_tab(&ctx), Some(Tab::Graph(graph)));
+        });
+        output.textures_delta.clear();
+        let mut actions = Vec::new();
+        app.format_object(
+            &crate::object_format::ObjectFormat::LineWidth(4.0),
+            Some(Tab::Graph(graph)),
+            &mut actions,
+        );
+        assert_eq!(actions.len(), 1);
+        app.state.dispatch(actions.pop().unwrap());
+        assert_eq!(
+            app.object_format_state(Some(Tab::Graph(graph)))
+                .unwrap()
+                .line_width,
+            4.0
+        );
+        app.state.dispatch(Action::Undo);
+        assert_eq!(
+            crate::state::current_plot_spec(app.state.tree(), graph).unwrap(),
+            spec
+        );
+        app.reattach_tab(Tab::Graph(graph));
+        assert_eq!(app.selected_series(graph), Some(target));
+        assert_eq!(app.graph_views[&graph].selected_series(), Some(target));
     }
 }

@@ -330,6 +330,42 @@ pub fn collect_shapes(
     pipeline::draw(backend, plot).map_err(|error| RenderError::Drawing(error.to_string()))
 }
 
+/// Échantillon partagé avec la légende, pour Object Manager (#82).
+pub fn series_swatch(tree: &Tree, spec: &stokesforge_plot::SeriesSpec, rect: Rect) -> Vec<Shape> {
+    use plotters::drawing::IntoDrawingArea;
+    // Vérifier les références par leurs métadonnées, sans convertir les
+    // cellules mixtes ni allouer la géométrie de la série pour une vignette.
+    let references = [
+        Some(spec.y),
+        spec.x.filter(|_| spec.plot_type.needs_x()),
+        spec.x_error,
+        spec.y_error,
+    ];
+    let broken = references
+        .into_iter()
+        .flatten()
+        .any(|id| stokesforge_core::resolve::resolve_column(tree, id).is_none());
+    let bars = !broken
+        && matches!(
+            spec.plot_type,
+            stokesforge_plot::PlotType::Bar | stokesforge_plot::PlotType::Histogram
+        );
+    let mut shapes = Vec::new();
+    static TEXT: std::sync::OnceLock<TextMeasurer> = std::sync::OnceLock::new();
+    let text = TEXT.get_or_init(TextMeasurer::default);
+    let area = EguiBackend::in_rect(&mut shapes, rect, text).into_drawing_area();
+    let _ = stokesforge_render::legend::series_key(
+        &area,
+        spec,
+        broken,
+        bars,
+        (0, rect.height() as i32 / 2),
+        stokesforge_render::paint::INK,
+    );
+    drop(area);
+    shapes
+}
+
 /// Comme [`collect_shapes`], avec le chemin Typst de la tâche R8.3 activé.
 ///
 /// Point d'entrée bas niveau équivalent, pour tester le chemin écran de
@@ -438,6 +474,8 @@ pub struct GraphView {
     shape_drag: Option<shape_tools::ShapeDrag>,
     /// Objet graphique sélectionné (clic), cible de Suppr et des poignées.
     selected_shape: Option<ShapeRef>,
+    /// Série sélectionnée, commune au graphe et à Object Manager (#83).
+    selected_series: Option<stokesforge_plot::SeriesRef>,
     events: Vec<GraphEvent>,
 }
 
@@ -504,7 +542,57 @@ impl GraphView {
             shape_preview: None,
             shape_drag: None,
             selected_shape: None,
+            selected_series: None,
             events: Vec::new(),
+        }
+    }
+
+    fn paint_series_selection(&self, painter: &egui::Painter, spec: &PlotSpec) {
+        let Some(target) = self.selected_series else {
+            return;
+        };
+        let Some(source) = spec.panels.get(target.panel) else {
+            return;
+        };
+        let Some(panel) = self.last.as_ref().and_then(|plot| {
+            plot.panels
+                .iter()
+                .find(|p| p.row == source.row && p.column == source.column)
+        }) else {
+            return;
+        };
+        let Some(series) = panel
+            .series_geometry
+            .iter()
+            .find(|s| s.index == target.index)
+        else {
+            return;
+        };
+        let Some(rect) = self.display_rect else {
+            return;
+        };
+        let Some(scale) = self.display_scale() else {
+            return;
+        };
+        let pixel = |p: (i32, i32)| rect.min + egui::vec2(p.0 as f32 * scale, p.1 as f32 * scale);
+        let color = Color32::from_rgb(90, 150, 255);
+        let stroke = Stroke::new(3.0, color.gamma_multiply(0.6));
+        for path in &series.paths {
+            painter.add(Shape::line(
+                path.iter().copied().map(pixel).collect(),
+                stroke,
+            ));
+        }
+        for &point in &series.points {
+            painter.circle_stroke(pixel(point), 5.0, stroke);
+        }
+        for &(a, b) in &series.bars {
+            painter.rect_stroke(
+                Rect::from_two_pos(pixel(a), pixel(b)),
+                0.0,
+                stroke,
+                StrokeKind::Inside,
+            );
         }
     }
 
@@ -544,6 +632,36 @@ impl GraphView {
     /// Les signaux de la vue depuis le dernier relevé (issue #35).
     pub fn take_events(&mut self) -> Vec<GraphEvent> {
         std::mem::take(&mut self.events)
+    }
+
+    /// La série sélectionnée, visible ou masquée (#83).
+    pub fn selected_series(&self) -> Option<stokesforge_plot::SeriesRef> {
+        self.selected_series
+    }
+
+    /// Sélection d'interface : elle ne change ni le modèle, ni son historique.
+    pub fn select_series(&mut self, target: Option<stokesforge_plot::SeriesRef>, spec: &PlotSpec) {
+        self.selected_series = target.filter(|target| spec.series_at(*target).is_some());
+        if self.selected_series.is_some() {
+            self.selected_annotation = None;
+            self.selected_shape = None;
+            self.selected_text = None;
+            self.tool = GraphTool::Pointer;
+        }
+    }
+
+    /// Série sous le pointeur, par sa géométrie réellement dessinée.
+    pub fn series_at(&self, pos: Pos2, spec: &PlotSpec) -> Option<stokesforge_plot::SeriesRef> {
+        let pos = self.figure_position(pos)?;
+        let last = self.last.as_ref()?;
+        let (row, column, index) =
+            stokesforge_render::series_selection::series_at(last, (pos.x as f64, pos.y as f64))?;
+        Some(stokesforge_plot::SeriesRef::new(
+            spec.panels
+                .iter()
+                .position(|p| p.row == row && p.column == column)?,
+            index,
+        ))
     }
 
     /// Le texte libre sélectionné, s'il y en a un.
@@ -893,6 +1011,9 @@ impl GraphView {
             self.clear_previews();
         }
 
+        self.selected_series = self
+            .selected_series
+            .filter(|target| spec.series_at(*target).is_some());
         self.handle_navigation(&response, &context, &spec);
 
         let key = CacheKey {
@@ -1052,6 +1173,7 @@ impl GraphView {
         // réinitialiser le zoom.
         let pointer = response.interact_pointer_pos();
         if response.clicked() {
+            self.selected_series = None;
             self.selected_annotation = pointer.and_then(|pos| self.annotation_at(pos));
             self.selected_shape = match self.selected_annotation {
                 Some(_) => None,
@@ -1063,6 +1185,13 @@ impl GraphView {
                 (None, None) => pointer.and_then(|pos| self.text_target_at(pos)),
                 _ => None,
             };
+            if self.tool == GraphTool::Pointer
+                && self.selected_annotation.is_none()
+                && self.selected_shape.is_none()
+                && self.selected_text.is_none()
+            {
+                self.selected_series = pointer.and_then(|pos| self.series_at(pos, spec));
+            }
         }
         if response.double_clicked() {
             let component = pointer.and_then(|pos| self.component_at(pos));
@@ -1248,6 +1377,7 @@ impl GraphView {
             ) else {
                 return false;
             };
+            self.selected_series = None;
             self.selected_annotation = Some(target);
             self.selected_text = None;
             self.selected_shape = None;
@@ -1319,6 +1449,7 @@ impl GraphView {
             let Some(target) = self.text_target_at(origin) else {
                 return false;
             };
+            self.selected_series = None;
             self.selected_text = Some(target);
             self.selected_annotation = None;
             self.selected_shape = None;
@@ -1429,6 +1560,7 @@ impl GraphView {
         }
 
         self.paint_shape_selection(painter);
+        self.paint_series_selection(painter, spec);
 
         let pos = response.hover_pos()?;
         let figure_pos = self.figure_position(pos)?;

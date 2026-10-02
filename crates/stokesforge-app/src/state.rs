@@ -381,6 +381,14 @@ pub enum Action {
         /// Type de tracé demandé pour chaque nouvelle série.
         plot_type: PlotType,
     },
+    /// Ouvre ou ferme le panneau ; préférence de la personne, hors historique.
+    SetObjectManagerOpen(bool),
+    /// Visibilité d'un contenu ou d'un ensemble de contenus (#81–82).
+    SetPlotVisibility {
+        graph: NodeId,
+        target: crate::object_manager::VisibilityTarget,
+        visible: bool,
+    },
     /// Remplace en bloc le [`PlotSpec`] d'un graphe — fenêtre des
     /// propriétés d'un graphe ([`Command::SetPlotSpec`]). Poussée à la
     /// validation d'un brouillon ([`AppState::commit_plot_edit`]), jamais à
@@ -1797,6 +1805,7 @@ pub struct AppState {
     /// Agrandissement des exports PNG (issue #34), un de
     /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
     png_export_scale: f32,
+    object_manager_open: bool,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
     /// Saisie de cellule en cours, s'il y en a une.
@@ -1925,6 +1934,7 @@ impl AppState {
             selected_sheets: std::collections::HashMap::new(),
             path,
             png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
+            object_manager_open: crate::preferences::Preferences::load().object_manager_open(),
             status: None,
             editing: None,
             note_editing: None,
@@ -3361,6 +3371,11 @@ impl AppState {
         parts.join(" / ")
     }
 
+    /// Ouverture du panneau, mémorisée hors du projet.
+    pub fn object_manager_open(&self) -> bool {
+        self.object_manager_open
+    }
+
     /// Applique une action. Ne rend jamais d'erreur : toute erreur devient un
     /// [`StatusMessage`]. Rafraîchit l'instantané après toute action qui a pu
     /// changer le modèle.
@@ -3458,6 +3473,25 @@ impl AppState {
                 columns,
                 plot_type,
             } => self.add_series_to_graph(graph, columns, plot_type),
+            Action::SetObjectManagerOpen(open) => {
+                self.object_manager_open = open;
+                if let Err(error) =
+                    crate::preferences::Preferences::load().save_object_manager_open(open)
+                {
+                    self.fail(error.to_string());
+                }
+            }
+            Action::SetPlotVisibility {
+                graph,
+                target,
+                visible,
+            } => {
+                if let Some(mut spec) = current_plot_spec(self.tree(), graph) {
+                    if target.set(&mut spec, visible) {
+                        self.execute(Command::SetPlotSpec { graph, spec });
+                    }
+                }
+            }
             Action::SetPlotSpec { graph, spec } => {
                 self.execute(Command::SetPlotSpec { graph, spec })
             }

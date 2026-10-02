@@ -76,7 +76,7 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Sauvegarde, chargement et format `.stf` | `docs/persistance.md` | `stokesforge-persistence`, types du modèle et du graphe |
 | Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, commandes et persistance appelées |
 | Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `stokesforge-render` d'abord, puis `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
-| Fenêtre, grille, raccourcis | `docs/application.md` | `stokesforge-app/src/state.rs`, `app.rs`, `selection.rs`, `theme.rs` ; `stokesforge-session` |
+| Fenêtre, grille, raccourcis | `docs/application.md` | `stokesforge-app/src/state.rs`, `app.rs`, `selection.rs`, `object_manager.rs`, `theme.rs` ; `stokesforge-session` |
 | Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app/src/state.rs` et `app.rs`, `stokesforge-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |

@@ -375,3 +375,12 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] changement visuel **regardé** (capture), pas seulement testé
 - [ ] `//!` du module mis à jour (le *pourquoi*) + page `docs/` (le *quoi*)
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts
+
+### Panneau d'objets et sélection de séries (#81–83)
+
+Object Manager projette l'instantané (`object_manager::object_tree`) et lit la
+sélection de `GraphView` : jamais de sélection parallèle dans le panneau.
+`with_graph_view` atteint la même vue flottante ou détachée. Les cases de
+visibilité passent par `Action::SetPlotVisibility`, puis `SetPlotSpec` ;
+ouverture et sélection restent hors historique. L'échantillon de série appelle
+`stokesforge_render_egui::series_swatch` (vignette partagée de la légende).

@@ -797,3 +797,16 @@ format-font-system = Installées sur cet ordinateur
 format-size = Taille
     .hint = Règle la taille, en points, du texte sélectionné
 format-color = Couleur du texte
+
+action-object-manager = Gestionnaire d’objets
+    .hint = Afficher ou masquer les objets du graphique actif.
+action-object-manager-dock = Ancrer le gestionnaire d’objets
+action-object-manager-float = Faire flotter le gestionnaire d’objets
+action-object-manager-close = Fermer le gestionnaire d’objets
+object-manager-no-graph = Activer un graphique pour voir ses objets.
+object-manager-visibility = Afficher ou masquer ce contenu. Les séries masquées sont exclues de la légende et des bornes automatiques des axes.
+object-manager-layer = Calque { $index }
+object-manager-group = Groupe de tracés
+
+toolbar-object-manager = Barre du gestionnaire d’objets
+    .hint = Afficher ou masquer la barre du gestionnaire d’objets.

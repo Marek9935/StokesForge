@@ -48,6 +48,8 @@ impl ShapeKind {
 pub struct ShapeSpec {
     /// Sa nature.
     pub kind: ShapeKind,
+    /// Visible au rendu ; masquer conserve le contenu et son adresse (#81).
+    pub visible: bool,
     /// Abscisse du premier point (coin, queue), en données.
     pub x1: f64,
     /// Ordonnée du premier point, en données de l'axe [`Self::axis`].
@@ -77,6 +79,7 @@ impl ShapeSpec {
     pub fn new(kind: ShapeKind, x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
         Self {
             kind,
+            visible: true,
             x1,
             y1,
             x2,

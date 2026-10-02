@@ -77,3 +77,7 @@ affichées coûtent.
 La réinitialisation du zoom (#74) utilise `arrows-out` : quatre flèches vers
 les limites du cadrage, distinctes des coins de maximisation. « New Project »
 (#73) utilise `file-plus` ; le nouveau graphique garde le rôle `Graph`.
+
+Object Manager (#82) réutilise l'icône `Graph` en rôle neutre pour son bouton
+de barre : son infobulle porte le nom du panneau. Ancrer, faire flotter et
+fermer réutilisent `Reattach`, `Detach` et `Close` ; aucune icône ajoutée.

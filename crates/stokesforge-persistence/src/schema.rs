@@ -674,6 +674,8 @@ pub(crate) enum ShapeKindRecord {
 /// [`stokesforge_plot::ShapeSpec`], à plat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ShapeSpecRecord {
+    #[serde(default = "visible_by_default")]
+    pub(crate) visible: bool,
     pub(crate) kind: ShapeKindRecord,
     pub(crate) x1: f64,
     pub(crate) y1: f64,
@@ -690,6 +692,8 @@ pub(crate) struct ShapeSpecRecord {
 /// [`stokesforge_plot::AnnotationSpec`], à plat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AnnotationSpecRecord {
+    #[serde(default = "visible_by_default")]
+    pub(crate) visible: bool,
     pub(crate) text: String,
     pub(crate) x: f64,
     pub(crate) y: f64,
@@ -967,6 +971,11 @@ pub(crate) enum LegendPositionRecord {
     BottomRight,
 }
 
+// Les objets des fichiers antérieurs étaient tous visibles.
+fn visible_by_default() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1022,5 +1031,57 @@ mod tests {
         let relu: PlotSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");
         assert_eq!(relu.title, "Ancien");
         assert_eq!(relu.title_color, "");
+    }
+}
+
+#[cfg(test)]
+mod visibility_tests {
+    use super::*;
+    #[test]
+    fn objets_anterieurs_sans_champ_visible_se_relisent_visibles() {
+        #[derive(Serialize)]
+        struct OldText {
+            text: String,
+            x: f64,
+            y: f64,
+            axis: SeriesAxisRecord,
+            color: String,
+            size: f64,
+            rotation: f64,
+        }
+        #[derive(Serialize)]
+        struct OldShape {
+            kind: ShapeKindRecord,
+            x1: f64,
+            y1: f64,
+            x2: f64,
+            y2: f64,
+            axis: SeriesAxisRecord,
+            line_width: f64,
+        }
+        let bytes = rmp_serde::to_vec_named(&OldText {
+            text: "Pic".into(),
+            x: 1.0,
+            y: 2.0,
+            axis: SeriesAxisRecord::Left,
+            color: String::new(),
+            size: 16.0,
+            rotation: 0.0,
+        })
+        .unwrap();
+        let text: AnnotationSpecRecord = rmp_serde::from_slice(&bytes).unwrap();
+        let bytes = rmp_serde::to_vec_named(&OldShape {
+            kind: ShapeKindRecord::Rectangle,
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+            axis: SeriesAxisRecord::Left,
+            line_width: 1.5,
+        })
+        .unwrap();
+        let shape: ShapeSpecRecord = rmp_serde::from_slice(&bytes).unwrap();
+        assert!(text.visible);
+        assert!(shape.visible);
     }
 }

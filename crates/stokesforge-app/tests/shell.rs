@@ -7213,3 +7213,107 @@ fn un_titre_et_un_nom_de_legende_se_modifient_en_un_pas() {
     });
     assert_eq!(state.snapshot().revision, avant);
 }
+
+#[test]
+fn object_manager_visibilite_groupe_annulable_et_persistante() {
+    use stokesforge_app::object_manager::{object_tree, VisibilityTarget};
+    use stokesforge_plot::{
+        AnnotationSpec, PanelSpec, PlotSpec, SeriesRef, SeriesSpec, ShapeKind, ShapeSpec,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = demo_project();
+    let root = project.root();
+    let book = project
+        .tree()
+        .child_by_name(root, "Book1")
+        .unwrap()
+        .unwrap();
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .unwrap()
+        .unwrap();
+    let column = project
+        .tree()
+        .child_by_name(sheet, "Signal")
+        .unwrap()
+        .unwrap();
+    let mut first = PanelSpec::at(0, 0);
+    first.series = vec![SeriesSpec::new(column), SeriesSpec::new(column)];
+    first.series[1].name = "Référence".into();
+    first
+        .annotations
+        .push(AnnotationSpec::new("Pic", 0.5, 10.0));
+    first
+        .shapes
+        .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 20.0));
+    let mut second = PanelSpec::at(1, 0);
+    second.series.push(SeriesSpec::new(column));
+    let spec = PlotSpec::empty("Mesures").with_panels(vec![first, second]);
+    let graph = project.add_graph(root, None, spec.clone()).unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
+    let target = SeriesRef::new(0, 1);
+    let tree = object_tree(state.tree(), graph, Some(target)).unwrap();
+    assert_eq!(tree.layers.len(), 2);
+    assert_eq!(tree.layers[0].series[1].label, "Référence");
+    assert!(tree.layers[0].series[1].selected);
+    assert!(!tree.layers[1].series[0].selected);
+
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Series(target),
+        visible: false,
+    });
+    let hidden = graph_spec(&state, graph);
+    assert!(!hidden.series_at(target).unwrap().visible);
+    assert_eq!(hidden.series_at(target).unwrap().name, "Référence");
+    assert!(VisibilityTarget::Group(0).visibility(&hidden).mixed);
+    let revision = state.revision();
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Series(target),
+        visible: false,
+    });
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Series(SeriesRef::new(9, 9)),
+        visible: false,
+    });
+    assert_eq!(
+        state.revision(),
+        revision,
+        "ni commande identique, ni cible périmée"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), spec);
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), hidden);
+
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Panel(0),
+        visible: false,
+    });
+    let panel_hidden = graph_spec(&state, graph);
+    assert!(!panel_hidden.panels[0].annotations[0].visible);
+    assert!(!panel_hidden.panels[0].shapes[0].visible);
+    assert!(
+        panel_hidden.panels[1].series[0].visible,
+        "l'autre calque reste visible"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        graph_spec(&state, graph),
+        hidden,
+        "le calque entier s'annule en une entrée"
+    );
+    state.dispatch(Action::Redo);
+    state.dispatch(Action::Save);
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Graph,
+        visible: true,
+    });
+    state.dispatch(Action::Load);
+    assert_eq!(graph_spec(&state, graph), panel_hidden);
+}

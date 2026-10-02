@@ -503,6 +503,7 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
             .iter()
             .map(|annotation| AnnotationSpecRecord {
                 text: annotation.text.clone(),
+                visible: annotation.visible,
                 x: annotation.x,
                 y: annotation.y,
                 axis: annotation.axis.into(),
@@ -532,6 +533,7 @@ fn shape_to_record(shape: &ShapeSpec) -> ShapeSpecRecord {
         line_color: shape.line_color.clone(),
         line_width: shape.line_width,
         fill_color: shape.fill_color.clone(),
+        visible: shape.visible,
     }
 }
 
@@ -551,6 +553,7 @@ fn record_to_shape(record: ShapeSpecRecord) -> ShapeSpec {
         line_color: record.line_color,
         line_width: record.line_width,
         fill_color: record.fill_color,
+        visible: record.visible,
     }
 }
 
@@ -588,6 +591,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
             .into_iter()
             .map(|annotation| AnnotationSpec {
                 text: annotation.text,
+                visible: annotation.visible,
                 x: annotation.x,
                 y: annotation.y,
                 axis: annotation.axis.into(),

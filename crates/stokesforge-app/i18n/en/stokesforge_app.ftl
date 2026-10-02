@@ -801,3 +801,16 @@ format-font-system = Installed on this computer
 format-size = Size
     .hint = Sets the size, in points, of the selected text
 format-color = Text color
+
+action-object-manager = Object Manager
+    .hint = Show or hide the objects of the active graph.
+action-object-manager-dock = Dock Object Manager
+action-object-manager-float = Float Object Manager
+action-object-manager-close = Close Object Manager
+object-manager-no-graph = Activate a graph to see its objects.
+object-manager-visibility = Show or hide this content. Hidden series are excluded from the legend and automatic axis limits.
+object-manager-layer = Layer { $index }
+object-manager-group = Plot Group
+
+toolbar-object-manager = Object Manager Toolbar
+    .hint = Show or hide the Object Manager toolbar.

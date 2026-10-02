@@ -504,3 +504,146 @@ fn l_outil_texte_demande_un_texte_au_clic_et_ne_fait_pas_defiler() {
     );
     assert_eq!(view.view().generation(), 0);
 }
+
+#[test]
+fn selection_serie_par_clic_et_arbre_sans_mutation_ni_reconstruction() {
+    use stokesforge_plot::SeriesRef;
+    let (session, graph) = banc();
+    let snapshot = session.handle().snapshot().unwrap();
+    let stokesforge_core::node::NodeKind::Graph { spec, .. } =
+        snapshot.tree.node(graph).unwrap().kind()
+    else {
+        panic!("graphe")
+    };
+    let spec = spec.clone();
+    let context = contexte();
+    let mut view = GraphView::new();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let panel = &view.last_drawn().unwrap().panels[0];
+    let point = panel.series_geometry[0].paths[0][50];
+    let pos = Pos2::new(point.0 as f32, point.1 as f32);
+    assert_eq!(view.series_at(pos, &spec), Some(SeriesRef::new(0, 0)));
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![
+            pointer_moved(pos),
+            pointer_button(pos, PointerButton::Primary, true),
+        ],
+    );
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![pointer_button(pos, PointerButton::Primary, false)],
+    );
+    assert_eq!(view.selected_series(), Some(SeriesRef::new(0, 0)));
+    assert!(view.selected_annotation().is_none());
+    assert!(view.selected_text().is_none());
+    view.select_series(None, &spec);
+    assert!(view.selected_series().is_none());
+    view.select_series(Some(SeriesRef::new(0, 0)), &spec);
+    assert!(
+        image(&context, &mut view, &snapshot, graph, vec![]),
+        "sélection hors du cache de figure"
+    );
+    view.select_series(Some(SeriesRef::new(8, 8)), &spec);
+    assert!(view.selected_series().is_none());
+    assert_eq!(
+        session.handle().snapshot().unwrap().revision,
+        snapshot.revision
+    );
+}
+
+#[test]
+fn selection_calque_axe_droit_barres_et_rangs_masques() {
+    use stokesforge_commands::Command;
+    use stokesforge_plot::{PlotType, SeriesAxis, SeriesRef};
+    let (session, graph) = banc();
+    let handle = session.handle();
+    let snapshot = handle.snapshot().unwrap();
+    let stokesforge_core::node::NodeKind::Graph { spec, .. } =
+        snapshot.tree.node(graph).unwrap().kind()
+    else {
+        panic!("graphe")
+    };
+    let first = spec.panels[0].clone();
+    let mut second = first.clone();
+    second.row = 1;
+    second.series[0].visible = false;
+    let mut right = second.series[0].clone();
+    right.visible = true;
+    right.axis = SeriesAxis::Right;
+    second.series.push(right);
+    second.right.visible = true;
+    second.right.auto_range = false;
+    second.right.range_min = Some(0.0);
+    second.right.range_max = Some(1000.0);
+    let mut spec = spec.clone().with_panels(vec![first, second]);
+    handle
+        .execute(Command::SetPlotSpec {
+            graph,
+            spec: spec.clone(),
+        })
+        .unwrap();
+    let snapshot = handle.snapshot().unwrap();
+    let context = contexte();
+    let mut view = GraphView::new();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let panel = &view.last_drawn().unwrap().panels[1];
+    assert_eq!(panel.series_geometry.len(), 1);
+    assert_eq!(panel.series_geometry[0].index, 1);
+    let point = panel.series_geometry[0].paths[0][50];
+    let pos = Pos2::new(point.0 as f32, point.1 as f32);
+    assert_eq!(view.series_at(pos, &spec), Some(SeriesRef::new(1, 1)));
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![
+            pointer_moved(pos),
+            pointer_button(pos, PointerButton::Primary, true),
+        ],
+    );
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![pointer_button(pos, PointerButton::Primary, false)],
+    );
+    assert_eq!(view.selected_series(), Some(SeriesRef::new(1, 1)));
+    // Les barres se choisissent aussi à l'intérieur, pas seulement au sommet.
+    spec.series_at_mut(SeriesRef::new(1, 1)).unwrap().plot_type = PlotType::Bar;
+    handle
+        .execute(Command::SetPlotSpec {
+            graph,
+            spec: spec.clone(),
+        })
+        .unwrap();
+    let snapshot = handle.snapshot().unwrap();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let panel = &view.last_drawn().unwrap().panels[1];
+    let (a, b) = panel.series_geometry[0].bars[50];
+    let pos = Pos2::new((a.0 + b.0) as f32 / 2.0, (a.1 + b.1) as f32 / 2.0);
+    assert_eq!(view.series_at(pos, &spec), Some(SeriesRef::new(1, 1)));
+    // Masquer conserve la sélection de l'arbre et retire toute géométrie.
+    spec.series_at_mut(SeriesRef::new(1, 1)).unwrap().visible = false;
+    handle
+        .execute(Command::SetPlotSpec {
+            graph,
+            spec: spec.clone(),
+        })
+        .unwrap();
+    let snapshot = handle.snapshot().unwrap();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    assert_eq!(view.selected_series(), Some(SeriesRef::new(1, 1)));
+    assert!(view.last_drawn().unwrap().panels[1]
+        .series_geometry
+        .is_empty());
+    assert!(view.series_at(pos, &spec).is_none());
+}

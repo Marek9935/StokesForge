@@ -1470,3 +1470,28 @@ la syntaxe des couleurs `#RRGGBB[AA]` (`stokesforge_plot::parse_hex`, dont
 (`stokesforge_core::series_label`, appelée par la légende **et** par la liste des
 séries des propriétés du graphe via `series_list_label`). Les transformations
 RGB/HSL restent propres au sélecteur.
+
+## Gestionnaire d'objets (Object Manager, #81–83)
+
+Affichage › Gestionnaire d'objets et la barre du même nom ouvrent l'arbre du
+graphique actif : graphique › calques (`PlotSpec::panels`) › groupe de tracés ›
+séries. Le panneau est redimensionnable à droite ; son bouton Détacher le rend
+flottant, Ancrer le replace à droite. Son ouverture se mémorise dans
+`preferences.json`, hors du projet et de l'historique.
+
+Chaque série garde son nom dérivé de colonne et son échantillon de légende
+(trait, couleur, épaisseur, marqueur ou barre). Les cases des parents modifient
+ensemble leurs contenus, sans supprimer les axes ; une case indéterminée
+signale une visibilité partielle. Masquer conserve les données et le style ;
+la série sort du tracé, de la légende et des bornes automatiques. Une bascule
+réutilise `SetPlotSpec`, donc une seule entrée annulable.
+
+Cliquer une série dans l'arbre ou sur le tracé synchronise la sélection, en
+gras dans l'arbre et surlignée sur la figure. La barre de format d'objet règle
+alors la couleur et l'épaisseur de son trait. Une série masquée reste
+sélectionnable dans l'arbre. Le panneau suit aussi une fenêtre de graphique
+détachée ; revenir dans le panneau conserve cette cible.
+
+`object_manager.rs` porte la projection et les règles de visibilité, `app.rs`
+le contenu commun du panneau ancré/flottant. La visibilité des textes libres
+et des formes est déjà persistée ; leur liste appartient au ticket #85.

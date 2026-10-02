@@ -798,12 +798,14 @@ fn non_trivial_spec(
                 size: 22.0,
                 rotation: -30.0,
                 font: "Fira Sans".to_string(),
+                visible: false,
                 ..stokesforge_plot::AnnotationSpec::new("*seuil*", -0.25, 1e-3)
             },
         ],
         // Issue #76 : objets graphiques, un de chaque sorte, dans l'ordre.
         shapes: vec![
             stokesforge_plot::ShapeSpec {
+                visible: false,
                 axis: SeriesAxis::Right,
                 line_color: "#aa221188".to_string(),
                 line_width: 3.0,
