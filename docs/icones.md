@@ -20,17 +20,6 @@ qui les affiche est `crates/stokesforge-app/src/icons.rs` ; son `//!` dit le
   l'exige.
 - **Jamais un emoji ni un glyphe Unicode** (« × », « ↗ », « 📁 ») comme icône.
 
-### Icônes maison
-
-Une icône qui n'existe pas chez Phosphor se dessine **à partir d'une icône
-Phosphor** (dérivé, donc la notice MIT du `LICENSE` voisin reste la seule
-attribution requise) et se range dans `assets/icons/src/` sous le nom
-`<nom>-duotone.svg`, sur la grille 256, trait `currentColor` : le script de
-cuisson la traite comme les autres. Un commentaire dans le SVG dit de quelle
-icône elle dérive. Actuellement : `auto` (le « A » de la couleur
-automatique, #89), dérivé de `angular-logo` — seul le A est gardé, jamais le
-bouclier ; la marque Angular n'est pas reprise.
-
 ## Couleur : neutre par défaut, couleur rare
 
 Le trait est foncé et commun ; la couleur ne vient que du **rôle** (`IconRole`),
