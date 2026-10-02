@@ -300,3 +300,12 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | Q23 | Premier onglet de *Graph Properties* : **General** ou **Graph** ? | **General** (« Graph » répète le titre de la fenêtre) | *Graph* (nom actuel : « Graphe ») |
 | Q24 | Formes de symbole : **Plus / Cross** ou **Cross / X** ? | **Plus (+)** et **Cross (×)** | *Cross (+)* et *X (×)* |
 | Q25 | Deux-points après un libellé de champ (« Séparateur : »)  — les supprimer ? | **Supprimer** (R11 : plus court, aucun souci d'espace insécable) | *Garder* en français seulement |
+
+### Gestionnaire d'objets (#81–85)
+
+| Anglais | Français | Définition |
+|---|---|---|
+| Object Manager | Gestionnaire d'objets | Arbre des contenus du graphique actif |
+| Layer | Calque | Un panneau de tracé (`PlotSpec::panels`) |
+| Plot Group | Groupe de tracés | Les séries d'un calque |
+| Dock / Float | Ancrer / Faire flotter | Replacer le gestionnaire à droite / le placer dans l'espace de travail |

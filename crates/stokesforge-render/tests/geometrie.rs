@@ -358,6 +358,8 @@ fn une_serie_invisible_ne_compte_ni_dans_le_trace_ni_dans_le_cadrage() {
         },
     );
     assert_eq!(drawn.drawn_series, 1);
+    assert_eq!(drawn.panels[0].legend_entries, 1);
+    assert_eq!(drawn.panels[0].series_geometry.len(), 1);
     assert!(
         drawn.y_range().1 < 2.0,
         "la série cachée a élargi le cadrage : {:?}",

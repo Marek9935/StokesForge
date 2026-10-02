@@ -1,5 +1,6 @@
 //! Format d'objet : ce que la barre « Object format » règle sur un objet
-//! graphique sélectionné (issue #64, après #76).
+//! graphique sélectionné (issue #64, après #76), ou le trait d’une série
+//! sélectionnée depuis Object Manager (#83).
 //!
 //! Contrairement au format de texte ([`crate::text_format`]), qui écrit des
 //! balises dans un texte, ici chaque réglage est un **champ du modèle**
@@ -10,7 +11,7 @@
 //!
 //! Tout est pur, testé sans fenêtre.
 
-use stokesforge_plot::ShapeSpec;
+use stokesforge_plot::{SeriesSpec, ShapeSpec};
 
 /// Épaisseurs de trait proposées, en points.
 pub const LINE_WIDTHS: [f64; 9] = [0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0];
@@ -28,6 +29,19 @@ pub enum ObjectFormat {
 }
 
 impl ObjectFormat {
+    /// Pose les réglages de trait sur la série sélectionnée (#83).
+    pub fn apply_series(&self, series: &mut SeriesSpec) -> bool {
+        let before = series.clone();
+        match self {
+            Self::LineColor(color) => series.line.color = color.clone(),
+            Self::LineWidth(width) if width.is_finite() && *width > 0.0 => {
+                series.line.width = *width
+            }
+            _ => {}
+        }
+        *series != before
+    }
+
     /// Pose le réglage sur `shape`. Rend `true` si l'objet a changé.
     pub fn apply(&self, shape: &mut ShapeSpec) -> bool {
         let before = shape.clone();
@@ -87,5 +101,22 @@ mod tests {
             assert!(!ObjectFormat::LineWidth(width).apply(&mut rect));
         }
         assert_eq!(rect.line_width, ShapeSpec::DEFAULT_WIDTH);
+    }
+}
+
+#[cfg(test)]
+mod series_tests {
+    use super::*;
+    #[test]
+    fn le_trait_de_la_serie_se_regle_sans_changer_les_symboles() {
+        let mut spec = SeriesSpec::new(stokesforge_core::NodeId::from_raw(1));
+        let symbol = spec.symbol.clone();
+        assert!(ObjectFormat::LineColor("#cc3300".into()).apply_series(&mut spec));
+        assert!(ObjectFormat::LineWidth(4.0).apply_series(&mut spec));
+        assert_eq!(spec.line.color, "#cc3300");
+        assert_eq!(spec.line.width, 4.0);
+        assert_eq!(spec.symbol, symbol);
+        assert!(!ObjectFormat::FillColor("#cc3300".into()).apply_series(&mut spec));
+        assert!(!ObjectFormat::LineWidth(f64::NAN).apply_series(&mut spec));
     }
 }

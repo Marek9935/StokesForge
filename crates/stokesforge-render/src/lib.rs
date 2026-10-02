@@ -84,6 +84,7 @@ pub mod pipeline;
 pub mod sample;
 pub mod scale;
 pub mod series;
+pub mod series_selection;
 pub mod shapes;
 pub mod text;
 

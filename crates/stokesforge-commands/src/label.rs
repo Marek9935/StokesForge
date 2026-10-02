@@ -175,8 +175,46 @@ pub enum HistoryLabel {
     },
     /// Modification des couleurs enregistrées du projet.
     SetSavedColors,
+    /// Édition ciblée du contenu du graphe, toujours par remplacement du spec.
+    EditPlotSpec(PlotEditKind),
     /// Un groupe d'actions annulé d'un bloc.
     Macro(MacroKind),
+}
+
+/// Motif d'une édition de contenu du graphe (#84–85), sans texte traduit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlotEditKind {
+    Visibility,
+    RenameSeries,
+    ReorderSeries,
+    RemoveSeries,
+    RemoveText,
+    RemoveObject,
+    ReorderObject,
+}
+impl PlotEditKind {
+    pub const ALL: [Self; 7] = [
+        Self::Visibility,
+        Self::RenameSeries,
+        Self::ReorderSeries,
+        Self::RemoveSeries,
+        Self::RemoveText,
+        Self::RemoveObject,
+        Self::ReorderObject,
+    ];
+}
+impl std::fmt::Display for PlotEditKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Visibility => "Change Visibility",
+            Self::RenameSeries => "Rename Series",
+            Self::ReorderSeries => "Reorder Series",
+            Self::RemoveSeries => "Delete Series",
+            Self::RemoveText => "Delete Text",
+            Self::RemoveObject => "Delete Object",
+            Self::ReorderObject => "Reorder Object",
+        })
+    }
 }
 
 /// « Row » ou « Rows » : en anglais seul 1 est au singulier.
@@ -254,6 +292,7 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::SetColumnMeta { column: None } => f.write_str("Edit Column Properties"),
             HistoryLabel::SetPlotSpec { name: Some(name) } => write!(f, "Edit Graph “{name}”"),
             HistoryLabel::SetPlotSpec { name: None } => f.write_str("Edit Graph"),
+            HistoryLabel::EditPlotSpec(kind) => kind.fmt(f),
             HistoryLabel::SetSavedColors => f.write_str("Edit Saved Colors"),
             HistoryLabel::Macro(kind) => kind.fmt(f),
         }

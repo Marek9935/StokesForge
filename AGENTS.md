@@ -45,6 +45,10 @@ confirmation pour les choix courants couverts par la demande.
   de sa session, GIL relâché, dans une macro annulable.
 - Le rendu partagé appartient à `stokesforge-render`. Préserver l'accord entre
   l'écran et les exports, ainsi que la mesure de texte unique.
+- Object Manager projette l'instantané dans `object_manager.rs` ; la sélection
+  reste dans `GraphView`, y compris en fenêtre détachée. La visibilité passe
+  par `EditPlotSpec` (même delta que `SetPlotSpec`) et les vignettes réutilisent
+  la légende du rendu partagé.
 - Suivre les conventions locales de nommage ; écrire les commentaires,
   la documentation et les messages de commit en français. Expliquer les
   décisions non évidentes au plus près du code.

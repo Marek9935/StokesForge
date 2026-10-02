@@ -61,14 +61,16 @@ pub enum ToolbarId {
     Text,
     /// Le format de l'objet graphique sélectionné (issue #64).
     Object,
+    ObjectManager,
 }
 
 impl ToolbarId {
-    pub const ALL: [ToolbarId; 4] = [
+    pub const ALL: [ToolbarId; 5] = [
         ToolbarId::File,
         ToolbarId::Tools,
         ToolbarId::Text,
         ToolbarId::Object,
+        ToolbarId::ObjectManager,
     ];
 
     /// Nom de la barre : entrée du menu View.
@@ -78,6 +80,7 @@ impl ToolbarId {
             ToolbarId::Tools => tr!("toolbar-tools"),
             ToolbarId::Text => tr!("toolbar-text"),
             ToolbarId::Object => tr!("toolbar-object"),
+            ToolbarId::ObjectManager => tr!("toolbar-object-manager"),
         }
     }
 
@@ -88,6 +91,7 @@ impl ToolbarId {
             ToolbarId::Tools => tr!("toolbar-tools", "hint"),
             ToolbarId::Text => tr!("toolbar-text", "hint"),
             ToolbarId::Object => tr!("toolbar-object", "hint"),
+            ToolbarId::ObjectManager => tr!("toolbar-object-manager", "hint"),
         }
     }
 }
@@ -477,6 +481,7 @@ pub struct BarEnv {
     /// Un graphe est au premier plan (sinon *Export* est grisé, comme le menu
     /// Graph est absent).
     pub export_enabled: bool,
+    pub object_manager_open: bool,
     pub shortcuts: ShortcutTexts,
     pub tools: ToolsContext,
     pub text_format: FormatTarget,
@@ -488,7 +493,7 @@ impl BarEnv {
     /// Une barre sans contenu pour cette fenêtre ne se peint pas.
     fn shows(&self, id: ToolbarId) -> bool {
         match id {
-            ToolbarId::File => true,
+            ToolbarId::File | ToolbarId::ObjectManager => true,
             ToolbarId::Tools => !matches!(self.tools, ToolsContext::None),
             ToolbarId::Text | ToolbarId::Object => {
                 matches!(self.tools, ToolsContext::Graph { .. })
@@ -506,6 +511,20 @@ pub fn bar_contents(
     requests: &mut Vec<ToolbarRequest>,
 ) {
     match id {
+        ToolbarId::ObjectManager => {
+            if tool_button(
+                ui,
+                Icon::Graph,
+                tr!("action-object-manager"),
+                Some(tr!("action-object-manager", "hint")),
+                true,
+                env.object_manager_open,
+            ) {
+                requests.push(ToolbarRequest::Action(Box::new(
+                    Action::SetObjectManagerOpen(!env.object_manager_open),
+                )));
+            }
+        }
         ToolbarId::File => {
             let button = |ui: &mut egui::Ui,
                           icon,
@@ -1363,7 +1382,7 @@ mod tests {
         assert_eq!(
             layout.docked_rows(),
             vec![
-                vec![ToolbarId::File, ToolbarId::Tools],
+                vec![ToolbarId::File, ToolbarId::Tools, ToolbarId::ObjectManager],
                 vec![ToolbarId::Text, ToolbarId::Object]
             ]
         );
@@ -1401,6 +1420,7 @@ mod tests {
     #[test]
     fn detacher_puis_reranger_garde_la_barre_visible_et_compacte_les_rangees() {
         let mut layout = ToolbarLayout::default();
+        layout.set_visible(ToolbarId::ObjectManager, false);
         layout.float(ToolbarId::File, Pos2::new(120.0, 80.0));
         assert_eq!(
             layout.docked_rows(),
@@ -1437,6 +1457,7 @@ mod tests {
     #[test]
     fn les_rangees_se_comptent_sans_les_barres_sans_contenu() {
         let mut layout = ToolbarLayout::default();
+        layout.set_visible(ToolbarId::ObjectManager, false);
         layout.set_visible(ToolbarId::Text, false);
         layout.set_visible(ToolbarId::Object, false);
         // Tools seule en rangée 0, File en rangée 1.
@@ -1462,6 +1483,7 @@ mod tests {
     #[test]
     fn une_barre_masquee_ne_se_peint_nulle_part() {
         let mut layout = ToolbarLayout::default();
+        layout.set_visible(ToolbarId::ObjectManager, false);
         layout.set_visible(ToolbarId::Text, false);
         layout.set_visible(ToolbarId::Object, false);
         layout.set_visible(ToolbarId::File, false);
@@ -1473,6 +1495,7 @@ mod tests {
     #[test]
     fn la_disposition_survit_a_l_ecriture() {
         let mut layout = ToolbarLayout::default();
+        layout.set_visible(ToolbarId::ObjectManager, false);
         layout.float(ToolbarId::File, Pos2::new(5.0, 6.0));
         layout.set_visible(ToolbarId::File, false);
         assert_eq!(ToolbarLayout::from_json(&layout.to_json()), layout);

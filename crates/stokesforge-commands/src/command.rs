@@ -281,6 +281,12 @@ pub enum Command {
         /// Nouvelle description du graphe.
         spec: PlotSpec,
     },
+    /// Même remplacement que SetPlotSpec, avec son motif d'historique en donnée.
+    EditPlotSpec {
+        graph: NodeId,
+        spec: PlotSpec,
+        kind: crate::label::PlotEditKind,
+    },
     /// Remplace les couleurs enregistrées dans le projet, en bloc (enregistrer
     /// ou retirer une couleur du sélecteur de couleur). Données, pas
     /// structure : aucun nœud ne bouge.
@@ -336,6 +342,7 @@ impl Command {
             Command::SetColumnMeta { column, .. } => HistoryLabel::SetColumnMeta {
                 column: column_ref(tree, *column),
             },
+            Command::EditPlotSpec { kind, .. } => HistoryLabel::EditPlotSpec(*kind),
             Command::SetPlotSpec { graph, .. } => HistoryLabel::SetPlotSpec { name: name(*graph) },
             Command::SetSavedColors { .. } => HistoryLabel::SetSavedColors,
         }

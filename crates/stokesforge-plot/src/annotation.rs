@@ -14,6 +14,8 @@ use crate::spec::PlotSpec;
 pub struct AnnotationSpec {
     /// Le texte, en markup Typst.
     pub text: String,
+    /// Visible au rendu ; masquer conserve le contenu et son adresse (#81).
+    pub visible: bool,
     /// Abscisse du centre du texte, en données.
     pub x: f64,
     /// Ordonnée du centre du texte, en données de l'axe [`Self::axis`].
@@ -45,6 +47,7 @@ impl AnnotationSpec {
     pub fn new(text: impl Into<String>, x: f64, y: f64) -> Self {
         Self {
             text: text.into(),
+            visible: true,
             x,
             y,
             axis: SeriesAxis::Left,

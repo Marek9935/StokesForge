@@ -797,3 +797,33 @@ format-font-system = Installées sur cet ordinateur
 format-size = Taille
     .hint = Règle la taille, en points, du texte sélectionné
 format-color = Couleur du texte
+
+action-object-manager = Gestionnaire d’objets
+    .hint = Afficher ou masquer les objets du graphique actif.
+action-object-manager-dock = Ancrer le gestionnaire d’objets
+action-object-manager-float = Faire flotter le gestionnaire d’objets
+action-object-manager-close = Fermer le gestionnaire d’objets
+object-manager-no-graph = Activer un graphique pour voir ses objets.
+object-manager-visibility = Afficher ou masquer ce contenu. Les séries masquées sont exclues de la légende et des bornes automatiques des axes.
+object-manager-layer = Calque { $index }
+object-manager-group = Groupe de tracés
+
+toolbar-object-manager = Barre du gestionnaire d’objets
+    .hint = Afficher ou masquer la barre du gestionnaire d’objets.
+
+menu-selected-content = Sélection
+action-rename-series = Renommer la série
+action-move-series-up = Déplacer vers le haut
+action-move-series-down = Déplacer vers le bas
+action-show-content = Afficher
+action-hide-content = Masquer
+action-delete-content = Supprimer
+object-properties-title = Propriétés de l'objet
+object-coordinate = { $coordinate }
+history-plot-visibility = Modifier la visibilité
+history-plot-rename-series = Renommer la série
+history-plot-reorder-series = Réordonner les séries
+history-plot-remove-series = Supprimer la série
+history-plot-remove-text = Supprimer le texte
+history-plot-remove-object = Supprimer l'objet
+history-plot-reorder-object = Réordonner les objets

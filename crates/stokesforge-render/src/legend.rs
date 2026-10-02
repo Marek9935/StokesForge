@@ -47,7 +47,7 @@ const MARGIN: i32 = 8;
 /// Marge intérieure du cadre.
 const PADDING: i32 = 6;
 /// Largeur de la vignette (le bout de trait, ou l'aplat).
-const KEY_WIDTH: i32 = 26;
+pub const KEY_WIDTH: i32 = 26;
 /// Écart entre la vignette et le texte.
 const KEY_GAP: i32 = 6;
 /// Écart vertical entre deux entrées.
@@ -226,9 +226,28 @@ fn key<DB: DrawingBackend>(
     (left, middle): BackendCoord,
     ink: (u8, u8, u8),
 ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
-    let spec = entry.spec;
-    if matches!(entry.geometry, Geometry::Bars(_)) {
-        let color = if entry.broken {
+    series_key(
+        area,
+        entry.spec,
+        entry.broken,
+        matches!(entry.geometry, Geometry::Bars(_)),
+        (left, middle),
+        ink,
+    )
+}
+
+/// Vignette de style sans préparation des valeurs (#82) : ouvrir le panneau
+/// ne doit ni parcourir une colonne ni calculer son histogramme à chaque image.
+pub fn series_key<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    spec: &stokesforge_plot::SeriesSpec,
+    broken: bool,
+    bars: bool,
+    (left, middle): BackendCoord,
+    ink: (u8, u8, u8),
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    if bars {
+        let color = if broken {
             BROKEN
         } else {
             crate::color::rgb_or(&spec.line.color, SERIES_FALLBACK)
@@ -252,22 +271,17 @@ fn key<DB: DrawingBackend>(
         ));
     }
 
-    let draws_line = spec.plot_type.draws_line() || entry.broken;
+    let draws_line = spec.plot_type.draws_line() || broken;
     if draws_line {
         paint::polyline(
             area,
             &[(left, middle), (left + KEY_WIDTH, middle)],
             &spec.line,
-            entry.broken,
+            broken,
         )?;
     }
     if spec.plot_type.draws_symbols() && !matches!(spec.plot_type, PlotType::Unknown(_)) {
-        paint::symbol_at(
-            area,
-            (left + KEY_WIDTH / 2, middle),
-            &spec.symbol,
-            entry.broken,
-        )?;
+        paint::symbol_at(area, (left + KEY_WIDTH / 2, middle), &spec.symbol, broken)?;
     }
     Ok(())
 }

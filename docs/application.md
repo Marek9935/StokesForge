@@ -916,7 +916,7 @@ déplace. L'aperçu vit dans la vue (`GraphView::set_annotation_preview`) et
 l'état de l'éditeur dans la mémoire d'egui, sous l'identifiant de la vue : même
 écriture pour la fenêtre flottante et la fenêtre détachée, rien dans
 `AppState`. Chaque geste validé est **une** `Action::SetAnnotation` ou
-`RemoveAnnotation`, donc un `SetPlotSpec`, une entrée d'historique. Les couleurs
+`RemoveAnnotation`, donc un `SetPlotSpec` ou `EditPlotSpec`, une entrée d'historique. Les couleurs
 enregistrées sont publiées chaque image dans la mémoire d'egui
 (`publish_saved_colors`) pour que le sélecteur de l'éditeur les propose aussi
 dans une fenêtre détachée.
@@ -928,7 +928,7 @@ sélectionne. Avec le Pointeur : un clic sélectionne (contour et poignées),
 glisser le corps déplace, glisser une poignée redimensionne, Suppr retire. Menu
 « Graph » et clic droit sur l'objet : « Bring to Front », « Send to Back »,
 « Delete Object » (`shape_order_buttons`). Chaque geste validé est **une**
-`Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec`. La
+`Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec` ou `EditPlotSpec`. La
 barre « Object format » (`ToolbarId::Object`, issue #64 ; `object_format.rs`)
 règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
 une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
@@ -1471,3 +1471,48 @@ la syntaxe des couleurs `#RRGGBB[AA]` (`stokesforge_plot::parse_hex`, dont
 (`stokesforge_core::series_label`, appelée par la légende **et** par la liste des
 séries des propriétés du graphe via `series_list_label`). Les transformations
 RGB/HSL restent propres au sélecteur.
+
+## Gestionnaire d'objets (Object Manager, #81–85)
+
+Affichage › Gestionnaire d'objets et la barre du même nom ouvrent l'arbre du
+graphique actif : graphique › calques (`PlotSpec::panels`) › groupe de tracés ›
+séries, ainsi que les titres, légendes, textes libres et objets graphiques
+(rectangle, ellipse, ligne, flèche). Le panneau est redimensionnable à droite ;
+son bouton Détacher le rend flottant, Ancrer le replace à droite. Il est
+visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
+`preferences.json`, hors du projet et de l'historique.
+
+Chaque série garde son nom dérivé de colonne et son échantillon de légende
+(trait, couleur, épaisseur, marqueur ou barre). Les cases des parents modifient
+ensemble leurs contenus ; le groupe commande seulement les séries. Une case
+indéterminée signale une visibilité partielle. Masquer conserve données,
+style, texte, position et rang ; une série masquée sort du tracé, de la légende
+et des bornes automatiques. Les titres ont leur propre `title_visible` :
+masquer un titre d'axe laisse l'axe en place. Une bascule écrit une seule
+commande `EditPlotSpec`, avec le motif d'historique `PlotEditKind::Visibility`.
+
+Cliquer un contenu dans l'arbre ou sur le tracé synchronise la sélection, en
+gras dans l'arbre ; la série est surlignée sur la figure. Un contenu masqué
+reste sélectionnable dans l'arbre. La barre de format d'objet règle le trait
+d'une série ou d'un objet ; celle de texte règle le texte sélectionné. Le
+panneau et ces barres suivent aussi une fenêtre de graphique détachée.
+
+Le clic droit et Graphique › Sélection partagent les mêmes actions :
+Propriétés, Renommer la série (F2), Déplacer vers le haut/bas (Ctrl+Haut/Bas),
+Afficher/Masquer et Supprimer (Suppr). Le glisser-déposer d'une série change
+son rang dans le groupe de son calque, avec un repère avant/après la ligne
+visée ; un dépôt sur un autre calque est refusé. Le relâchement envoie une
+seule action. La sélection suit le contenu déplacé, y compris après
+Annuler/Rétablir, et une suppression décale les adresses des voisins sélectionnés.
+
+Les propriétés choisissent la série et le calque exacts, même masqués ; le
+sélecteur de calque est commun aux pages de la fenêtre. Un texte libre
+réutilise son éditeur sur place. Un objet graphique ouvre un brouillon de
+propriétés (coordonnées, trait, remplissage) : Valider envoie une action,
+Annuler ne change rien. Les parents ont leurs propriétés et leur visibilité ;
+la suppression concerne les feuilles, et le renommage les séries.
+
+`object_manager.rs` porte la projection, la visibilité et les règles de
+réordonnancement ; `app.rs` porte le contenu commun ancré/flottant et la glu
+de sélection vers `GraphView`. Les décisions de mutation restent dans
+`AppState::dispatch`, avec les commandes de la session.

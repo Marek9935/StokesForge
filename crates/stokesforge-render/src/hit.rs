@@ -211,6 +211,7 @@ mod tests {
                 },
                 annotations: Vec::new(),
                 shapes: Vec::new(),
+                series_geometry: Vec::new(),
                 texts: Vec::new(),
                 legend_rows: Vec::new(),
             }],

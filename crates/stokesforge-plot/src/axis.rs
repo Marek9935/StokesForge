@@ -38,6 +38,8 @@ pub enum AxisSide {
 pub struct AxisSpec {
     /// Titre de l'axe, sans l'unité.
     pub label: String,
+    /// Visibilité du titre, indépendante de son contenu (#85).
+    pub title_visible: bool,
     /// Unité affichée entre parenthèses après le titre.
     pub unit: String,
     /// Échelle.
@@ -105,6 +107,7 @@ impl Default for AxisSpec {
             visible: true,
             inverted: false,
             title_color: String::new(),
+            title_visible: true,
             title_anchor: None,
             title_font: crate::TextFont::default(),
             tick_color: String::new(),

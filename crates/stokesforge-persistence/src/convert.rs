@@ -360,6 +360,7 @@ impl From<&AxisSpec> for AxisSpecRecord {
             visible: value.visible,
             inverted: value.inverted,
             title_color: value.title_color.clone(),
+            title_visible: value.title_visible,
             title_anchor: value.title_anchor.map(anchor_to_record),
             title_font: font_to_record(&value.title_font),
             tick_color: value.tick_color.clone(),
@@ -380,6 +381,7 @@ impl From<AxisSpecRecord> for AxisSpec {
             visible: value.visible,
             inverted: value.inverted,
             title_color: value.title_color,
+            title_visible: value.title_visible,
             title_anchor: value.title_anchor.map(record_to_anchor),
             title_font: record_to_font(value.title_font),
             tick_color: value.tick_color,
@@ -490,6 +492,7 @@ fn record_to_anchor(record: TextAnchorRecord) -> stokesforge_plot::TextAnchor {
 fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
     PanelSpecRecord {
         title: panel.title.clone(),
+        title_visible: panel.title_visible,
         title_anchor: panel.title_anchor.map(anchor_to_record),
         title_font: font_to_record(&panel.title_font),
         title_color: panel.title_color.clone(),
@@ -506,6 +509,7 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
             .iter()
             .map(|annotation| AnnotationSpecRecord {
                 text: annotation.text.clone(),
+                visible: annotation.visible,
                 x: annotation.x,
                 y: annotation.y,
                 axis: annotation.axis.into(),
@@ -535,6 +539,7 @@ fn shape_to_record(shape: &ShapeSpec) -> ShapeSpecRecord {
         line_color: shape.line_color.clone(),
         line_width: shape.line_width,
         fill_color: shape.fill_color.clone(),
+        visible: shape.visible,
     }
 }
 
@@ -554,6 +559,7 @@ fn record_to_shape(record: ShapeSpecRecord) -> ShapeSpec {
         line_color: record.line_color,
         line_width: record.line_width,
         fill_color: record.fill_color,
+        visible: record.visible,
     }
 }
 
@@ -576,6 +582,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PanelSpec {
         title: record.title,
+        title_visible: record.title_visible,
         title_anchor: record.title_anchor.map(record_to_anchor),
         title_font: record_to_font(record.title_font),
         title_color: record.title_color,
@@ -592,6 +599,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
             .into_iter()
             .map(|annotation| AnnotationSpec {
                 text: annotation.text,
+                visible: annotation.visible,
                 x: annotation.x,
                 y: annotation.y,
                 axis: annotation.axis.into(),
@@ -632,6 +640,7 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         panels: spec.panels.iter().map(panel_spec_to_record).collect(),
         background: spec.background.clone(),
         title_color: spec.title_color.clone(),
+        title_visible: spec.title_visible,
         title_anchor: spec.title_anchor.map(anchor_to_record),
         title_font: font_to_record(&spec.title_font),
         format_version: spec.format_version,
@@ -668,6 +677,7 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         panels: panels.into(),
         background: record.background,
         title_color: record.title_color,
+        title_visible: record.title_visible,
         title_anchor: record.title_anchor.map(record_to_anchor),
         title_font: record_to_font(record.title_font),
         format_version: record.format_version,

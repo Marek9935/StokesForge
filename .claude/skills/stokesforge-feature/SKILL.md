@@ -375,3 +375,19 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] changement visuel **regardé** (capture), pas seulement testé
 - [ ] `//!` du module mis à jour (le *pourquoi*) + page `docs/` (le *quoi*)
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts
+
+### Panneau d'objets et sélection des contenus (#81–85)
+
+Object Manager projette l'instantané (`object_manager::object_tree_with_selection`) et lit la
+sélection de `GraphView` : jamais de sélection parallèle dans le panneau.
+`with_graph_view` atteint la même vue flottante ou détachée. Les cases de
+visibilité passent par `Action::SetPlotVisibility`, puis `EditPlotSpec` (delta du spec partagé, motif `PlotEditKind`) ;
+ouverture et sélection restent hors historique. L'échantillon de série appelle
+`stokesforge_render_egui::series_swatch` (vignette partagée de la légende).
+
+Les textes et objets sélectionnés lisent aussi `with_graph_view` /
+`read_graph_view` (propriétés et barres de format incluses). Le menu
+contextuel et Graph › Selection partagent `object_node_menu`. Réordonner une
+série reste dans son groupe ; le rang final est décidé par `series_drop`,
+puis une seule `Action::ReorderSeries` part au relâchement. Les propriétés
+conservent le calque exact dans `PlotEdit::selected_panel`.

@@ -7242,3 +7242,380 @@ fn un_titre_et_un_nom_de_legende_se_modifient_en_un_pas() {
     });
     assert_eq!(state.snapshot().revision, avant);
 }
+
+#[test]
+fn object_manager_visibilite_groupe_annulable_et_persistante() {
+    use stokesforge_app::object_manager::{object_tree, VisibilityTarget};
+    use stokesforge_plot::{
+        AnnotationSpec, PanelSpec, PlotSpec, SeriesRef, SeriesSpec, ShapeKind, ShapeSpec,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = demo_project();
+    let root = project.root();
+    let book = project
+        .tree()
+        .child_by_name(root, "Book1")
+        .unwrap()
+        .unwrap();
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .unwrap()
+        .unwrap();
+    let column = project
+        .tree()
+        .child_by_name(sheet, "Signal")
+        .unwrap()
+        .unwrap();
+    let mut first = PanelSpec::at(0, 0);
+    first.series = vec![SeriesSpec::new(column), SeriesSpec::new(column)];
+    first.series[1].name = "Référence".into();
+    first
+        .annotations
+        .push(AnnotationSpec::new("Pic", 0.5, 10.0));
+    first
+        .shapes
+        .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 20.0));
+    let mut second = PanelSpec::at(1, 0);
+    second.series.push(SeriesSpec::new(column));
+    let spec = PlotSpec::empty("Mesures").with_panels(vec![first, second]);
+    let graph = project.add_graph(root, None, spec.clone()).unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
+    let target = SeriesRef::new(0, 1);
+    let tree = object_tree(state.tree(), graph, Some(target)).unwrap();
+    assert_eq!(tree.layers.len(), 2);
+    assert_eq!(tree.layers[0].series[1].label, "Référence");
+    assert!(tree.layers[0].series[1].selected);
+    assert!(!tree.layers[1].series[0].selected);
+
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Series(target),
+        visible: false,
+    });
+    let hidden = graph_spec(&state, graph);
+    assert!(!hidden.series_at(target).unwrap().visible);
+    assert_eq!(hidden.series_at(target).unwrap().name, "Référence");
+    assert!(VisibilityTarget::Group(0).visibility(&hidden).mixed);
+    let revision = state.revision();
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Series(target),
+        visible: false,
+    });
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Series(SeriesRef::new(9, 9)),
+        visible: false,
+    });
+    assert_eq!(
+        state.revision(),
+        revision,
+        "ni commande identique, ni cible périmée"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), spec);
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), hidden);
+
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Panel(0),
+        visible: false,
+    });
+    let panel_hidden = graph_spec(&state, graph);
+    assert!(!panel_hidden.panels[0].annotations[0].visible);
+    assert!(!panel_hidden.panels[0].shapes[0].visible);
+    assert!(
+        panel_hidden.panels[1].series[0].visible,
+        "l'autre calque reste visible"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        graph_spec(&state, graph),
+        hidden,
+        "le calque entier s'annule en une entrée"
+    );
+    state.dispatch(Action::Redo);
+    state.dispatch(Action::Save);
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: VisibilityTarget::Graph,
+        visible: true,
+    });
+    state.dispatch(Action::Load);
+    assert_eq!(graph_spec(&state, graph), panel_hidden);
+}
+
+// -- Object Manager : gestes et contenus non-série (#84–85) --
+
+fn object_manager_project() -> (Project, NodeId, stokesforge_plot::PlotSpec) {
+    use stokesforge_plot::{AnnotationSpec, PanelSpec, PlotSpec, SeriesSpec, ShapeKind, ShapeSpec};
+    let mut project = Project::new("Objets").unwrap();
+    let mut first = PanelSpec::at(0, 0);
+    first.title = "Calque A".into();
+    first.bottom.label = "Temps".into();
+    first.bottom.unit = "s".into();
+    first.left.label = "Signal".into();
+    for name in ["A", "B", "C"] {
+        let mut series = SeriesSpec::new(NodeId::from_raw(900));
+        series.name = name.into();
+        first.series.push(series);
+    }
+    first.annotations.push(AnnotationSpec::new("Pic", 1.0, 2.0));
+    for kind in [
+        ShapeKind::Rectangle,
+        ShapeKind::Ellipse,
+        ShapeKind::Line,
+        ShapeKind::Arrow,
+    ] {
+        first.shapes.push(ShapeSpec::new(kind, 0.0, 0.0, 1.0, 1.0));
+    }
+    let mut second = PanelSpec::at(1, 2);
+    second.series = first.series.clone();
+    second.series[1].visible = false;
+    let spec = PlotSpec::empty("Titre").with_panels(vec![first, second]);
+    let root = project.root();
+    let graph = project.add_graph(root, None, spec.clone()).unwrap();
+    (project, graph, spec)
+}
+
+#[test]
+fn object_manager_series_renommage_ordre_suppression_undo_redo() {
+    use stokesforge_app::object_manager::{series_drop, VisibilityTarget as T};
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_plot::SeriesRef;
+    let dir = tempfile::tempdir().unwrap();
+    let (project, graph, before) = object_manager_project();
+    let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
+    let source = SeriesRef::new(1, 1); // Série masquée, second calque.
+    state.dispatch(Action::SetLegendEntryName {
+        graph,
+        series: source,
+        name: "Référence".into(),
+    });
+    let renamed = graph_spec(&state, graph);
+    assert_eq!(renamed.series_at(source).unwrap().name, "Référence");
+    assert!(!renamed.series_at(source).unwrap().visible);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::RenameSeries))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), renamed);
+
+    let index = series_drop(&renamed, source, SeriesRef::new(1, 2), true).unwrap();
+    state.dispatch(Action::ReorderSeries {
+        graph,
+        source,
+        index,
+    });
+    let moved = graph_spec(&state, graph);
+    assert_eq!(
+        moved.panels[1]
+            .series
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>(),
+        ["A", "C", "Référence"]
+    );
+    assert_eq!(moved.panels[0], before.panels[0]);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::ReorderSeries))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), renamed);
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), moved);
+    assert!(series_drop(&moved, SeriesRef::new(1, 2), SeriesRef::new(0, 0), false).is_none());
+    assert_eq!(
+        series_drop(&moved, SeriesRef::new(1, 2), SeriesRef::new(1, 0), false),
+        Some(0)
+    );
+    assert!(series_drop(&moved, SeriesRef::new(1, 0), SeriesRef::new(1, 1), false).is_none());
+
+    let revision = state.revision();
+    state.dispatch(Action::ReorderSeries {
+        graph,
+        source: SeriesRef::new(1, 2),
+        index: 2,
+    });
+    state.dispatch(Action::ReorderSeries {
+        graph,
+        source,
+        index: 99,
+    });
+    state.dispatch(Action::SetLegendEntryName {
+        graph,
+        series: SeriesRef::new(9, 9),
+        name: "Absent".into(),
+    });
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::Series(SeriesRef::new(9, 9)),
+    });
+    assert_eq!(
+        state.revision(),
+        revision,
+        "aucune commande pour une cible périmée ou un geste sans effet"
+    );
+
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::Series(SeriesRef::new(1, 2)),
+    });
+    assert_eq!(graph_spec(&state, graph).panels[1].series.len(), 2);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::RemoveSeries))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), moved);
+    state.dispatch(Action::Redo);
+    for index in [1, 0] {
+        state.dispatch(Action::RemovePlotObject {
+            graph,
+            target: T::Series(SeriesRef::new(1, index)),
+        });
+    }
+    assert!(graph_spec(&state, graph).panels[1].series.is_empty());
+    assert_eq!(
+        graph_spec(&state, graph).panels.len(),
+        2,
+        "la dernière série ne supprime pas le calque"
+    );
+}
+
+#[test]
+fn object_manager_proprietes_ouvrent_la_serie_du_bon_calque_et_annulent() {
+    use stokesforge_app::object_manager::VisibilityTarget as T;
+    use stokesforge_plot::SeriesRef;
+    let dir = tempfile::tempdir().unwrap();
+    let (project, graph, before) = object_manager_project();
+    let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
+    state.dispatch(Action::OpenObjectProperties {
+        graph,
+        target: T::Series(SeriesRef::new(1, 1)),
+    });
+    assert_eq!(state.plot_settings().unwrap().tab, PlotSettingsTab::Series);
+    let edit = state.plot_edit_mut().unwrap();
+    assert_eq!((edit.selected_panel, edit.selected_series), (1, 1));
+    edit.spec.panels.get_mut(1).unwrap().series[1].line.width = 4.0;
+    state.commit_plot_edit();
+    assert_eq!(
+        graph_spec(&state, graph).panels[1].series[1].line.width,
+        4.0
+    );
+    state.cancel_plot_settings();
+    assert_eq!(graph_spec(&state, graph), before);
+    let revision = state.revision();
+    state.dispatch(Action::OpenObjectProperties {
+        graph,
+        target: T::Series(SeriesRef::new(99, 0)),
+    });
+    assert!(state.plot_settings().is_none());
+    assert_eq!(state.revision(), revision);
+}
+
+#[test]
+fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
+    use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
+    use stokesforge_plot::{AnnotationRef, AxisSide, ShapeRef, TextTarget};
+    let dir = tempfile::tempdir().unwrap();
+    let (project, graph, before) = object_manager_project();
+    let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
+    let text = AnnotationRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+    let arrow = ShapeRef {
+        row: 0,
+        column: 0,
+        index: 3,
+    };
+    let model = object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow))).unwrap();
+    assert_eq!(model.objects[0].target, T::Text(TextTarget::Title));
+    assert_eq!(
+        model.layers[0].objects.len(),
+        9,
+        "titre, deux axes, légende, texte et quatre objets"
+    );
+    assert_eq!(
+        model.layers[0]
+            .objects
+            .iter()
+            .filter(|o| o.selected)
+            .count(),
+        1
+    );
+    assert!(model.layers[0]
+        .objects
+        .iter()
+        .any(|o| o.target == T::Shape(arrow) && o.selected));
+    let target = TextTarget::AxisTitle {
+        row: 0,
+        column: 0,
+        side: AxisSide::Bottom,
+    };
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::Text(target),
+        visible: false,
+    });
+    let hidden_title = graph_spec(&state, graph);
+    assert_eq!(target.text(&hidden_title).as_deref(), Some("Temps (s)"));
+    assert_eq!(target.visible(&hidden_title), Some(false));
+    assert!(T::Panel(0).visibility(&hidden_title).mixed);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::Graph,
+        visible: false,
+    });
+    let hidden = graph_spec(&state, graph);
+    assert!(!hidden.title_visible);
+    assert!(!hidden.panels[0].title_visible);
+    assert!(!hidden.panels[0].bottom.title_visible);
+    assert!(
+        hidden.panels[0].bottom.visible,
+        "masquer un titre ne masque pas l'axe"
+    );
+    assert!(!text.get(&hidden).unwrap().visible);
+    assert!(!arrow.get(&hidden).unwrap().visible);
+    assert!(!T::Graph.visibility(&hidden).checked);
+    assert!(!T::Graph.visibility(&hidden).mixed);
+    let model = object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text))).unwrap();
+    assert!(model.layers[0]
+        .objects
+        .iter()
+        .any(|o| o.target == T::Annotation(text) && o.selected));
+    state.dispatch(Action::Save);
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::Graph,
+        visible: true,
+    });
+    state.dispatch(Action::Load);
+    assert_eq!(graph_spec(&state, graph), hidden);
+
+    for target in [
+        T::Annotation(text),
+        T::Shape(arrow),
+        T::Text(TextTarget::Title),
+    ] {
+        let before = graph_spec(&state, graph);
+        state.dispatch(Action::RemovePlotObject { graph, target });
+        assert_ne!(graph_spec(&state, graph), before);
+        state.dispatch(Action::Undo);
+        assert_eq!(graph_spec(&state, graph), before);
+        state.dispatch(Action::Redo);
+        assert_ne!(graph_spec(&state, graph), before);
+        state.dispatch(Action::Undo);
+    }
+}
