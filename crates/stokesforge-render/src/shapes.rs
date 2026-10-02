@@ -208,6 +208,25 @@ fn rounded(point: (f64, f64)) -> BackendCoord {
     (point.0.round() as i32, point.1.round() as i32)
 }
 
+/// Le chemin qui boucle sur `polygon`, prêt pour un `PathElement`.
+///
+/// Un chemin dont le dernier point répète le premier reste une polyligne
+/// **ouverte** pour les backends : au point de départ, deux extrémités à bout
+/// plat se touchent sans jointure, d'où une encoche au coin (#92). On pose donc
+/// la couture au **milieu du premier côté**, où les deux extrémités sont
+/// alignées et se recollent sans trou.
+fn closed_path(polygon: &[(f64, f64)]) -> Vec<BackendCoord> {
+    let [first, second, ..] = polygon else {
+        return polygon.iter().copied().map(rounded).collect();
+    };
+    let seam = rounded(((first.0 + second.0) / 2.0, (first.1 + second.1) / 2.0));
+    let mut path = vec![seam];
+    path.extend(polygon[1..].iter().copied().map(rounded));
+    path.push(rounded(*first));
+    path.push(seam);
+    path
+}
+
 /// Trace un objet entre les pixels `p1` et `p2`, rogné à `bounds` s'il y en a
 /// un. `ink` est la couleur d'un trait automatique.
 pub fn draw_shape<DB: DrawingBackend>(
@@ -242,10 +261,7 @@ pub fn draw_shape<DB: DrawingBackend>(
                 ))?;
             }
         }
-        let mut closed: Vec<BackendCoord> = polygon.into_iter().map(rounded).collect();
-        if let Some(&first) = closed.first() {
-            closed.push(first);
-        }
+        let closed = closed_path(&polygon);
         match bounds {
             Some(bounds) => {
                 for run in clip_polyline(bounds, &closed) {
@@ -336,6 +352,22 @@ mod tests {
         assert!(line.contains(30.0, 28.0));
         assert!(!line.contains(30.0, 40.0));
         assert!(!line.contains(80.0, 55.0), "au-delà de l'extrémité");
+    }
+
+    #[test]
+    fn la_couture_du_contour_est_au_milieu_d_un_cote_pas_dans_un_coin() {
+        // #92 : départ et arrivée au même sommet = deux bouts plats sans
+        // jointure, donc une encoche au coin haut gauche.
+        let rect = outline(ShapeKind::Rectangle, (10.0, 10.0), (50.0, 30.0));
+        let path = closed_path(&rect);
+        assert_eq!(path.first(), path.last(), "chemin refermé");
+        assert_eq!(path[0], (30, 10), "couture au milieu du côté haut");
+        for corner in &rect {
+            assert!(
+                path[1..path.len() - 1].contains(&rounded(*corner)),
+                "les quatre coins restent des sommets intérieurs (jointure)"
+            );
+        }
     }
 
     #[test]
