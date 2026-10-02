@@ -20,6 +20,12 @@ qui les affiche est `crates/stokesforge-app/src/icons.rs` ; son `//!` dit le
   l'exige.
 - **Jamais un emoji ni un glyphe Unicode** (« × », « ↗ », « 📁 ») comme icône.
 
+### Icônes retouchées
+
+Une icône Phosphor peut être retouchée : le fichier de `src/` porte alors un
+commentaire qui dit ce qui change (notice MIT du `LICENSE` voisin inchangée).
+Actuellement : `text-a-underline` (soulignement épaissi, couleur du texte, #89).
+
 ## Couleur : neutre par défaut, couleur rare
 
 Le trait est foncé et commun ; la couleur ne vient que du **rôle** (`IconRole`),

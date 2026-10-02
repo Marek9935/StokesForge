@@ -346,7 +346,7 @@ pub fn color_field(
 }
 
 /// Taille de l'échantillon du bouton : un petit carré (#89).
-const BUTTON_SWATCH: Vec2 = Vec2::new(12.0, 12.0);
+const BUTTON_SWATCH: Vec2 = Vec2::new(14.5, 12.0);
 /// Le trait en travers d'une couleur non définie (automatique), même rouge
 /// que le rôle `Danger` des icônes.
 const AUTO_SLASH: Color32 = Color32::from_rgb(0xe5, 0x45, 0x3b);
