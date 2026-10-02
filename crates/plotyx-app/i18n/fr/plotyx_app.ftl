@@ -67,6 +67,7 @@ action-properties = Propriétés…
     .hint = Ouvre les propriétés du graphique sur cet élément
 action-export-graph = Exporter le graphique…
     .hint = SVG, PDF ou PNG, au zoom courant
+    .disabled = Mettez d'abord une fenêtre de graphique au premier plan
 
 menu-window-show-metadata-row = Afficher la ligne Métadonnées
     .hint = Affiche les métadonnées des fichiers importés dans les en-têtes de colonnes

@@ -379,7 +379,7 @@ use crate::state::{
     PlotTarget, ProjectTreeNode, SaveTarget, WindowKind,
 };
 use crate::theme;
-use crate::toolbar::{ToolbarId, ToolbarLayout, ToolbarState};
+use crate::toolbar::{BarEnv, ToolbarId, ToolbarLayout, ToolbarRequest, ToolbarState};
 use crate::tr;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 use plotyx_render_egui::{AxisSide, PlotComponent};
@@ -454,7 +454,7 @@ pub const SHORTCUT_IMPORT_QWERTY: egui::KeyboardShortcut = egui::KeyboardShortcu
 );
 /// Rappel affiché dans le menu : le caractère, pas le nom de la touche
 /// physique.
-const SHORTCUT_IMPORT_TEXT: &str = "Ctrl+\"";
+pub(crate) const SHORTCUT_IMPORT_TEXT: &str = "Ctrl+\"";
 /// Ctrl+Entrée — exécuter le script de la console.
 pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
@@ -1571,6 +1571,34 @@ impl PlotyxApp {
         }
     }
 
+    /// Exécute ce qu'un bouton de barre d'outils a demandé : les mêmes
+    /// chemins que les entrées de menu correspondantes, jamais une seconde
+    /// écriture.
+    fn run_toolbar_request(
+        &mut self,
+        request: ToolbarRequest,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        match request {
+            ToolbarRequest::AddWorkbook => actions.push(Action::AddWorkbook),
+            ToolbarRequest::Save => actions.push(Action::Save),
+            ToolbarRequest::Import => self.open_import_dialog(),
+            ToolbarRequest::Open => self.choose_open_path(actions),
+            ToolbarRequest::SaveAs => self.choose_save_path(actions),
+            ToolbarRequest::ExportGraph => {
+                if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+                    request_graph_export(
+                        self.graph_views.get(&graph),
+                        self.state.tree(),
+                        graph,
+                        actions,
+                    );
+                }
+            }
+        }
+    }
+
     fn choose_language(&mut self, language: i18n::Language) {
         i18n::set_language(language);
         if let Err(err) = Preferences::load().save_language(language.tag()) {
@@ -2438,7 +2466,21 @@ impl eframe::App for PlotyxApp {
         publish_saved_colors(&ctx, &self.state);
         self.collect_shortcuts(&ctx, &mut actions);
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
-        self.toolbars.show(ui, &mut actions);
+        let bar_env = BarEnv {
+            export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
+            shortcuts: crate::toolbar::ShortcutTexts {
+                open: ctx.format_shortcut(&SHORTCUT_OPEN),
+                save: ctx.format_shortcut(&SHORTCUT_SAVE),
+                save_as: ctx.format_shortcut(&SHORTCUT_SAVE_AS),
+                import: SHORTCUT_IMPORT_TEXT.to_string(),
+                export: ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH),
+            },
+        };
+        let mut bar_requests = Vec::new();
+        self.toolbars.show(ui, &bar_env, &mut bar_requests);
+        for request in bar_requests {
+            self.run_toolbar_request(request, active_tab, &mut actions);
+        }
         if self.toolbars.take_changed() {
             self.save_toolbar_layout();
         }

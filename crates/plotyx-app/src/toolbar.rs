@@ -38,7 +38,6 @@ use eframe::egui::{self, Pos2, Rect, Vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::icons::{icon_image, Icon, IconRole};
-use crate::state::Action;
 use crate::tr;
 
 /// Les barres existantes — un enum fermé : ajouter une barre, c'est ajouter une
@@ -341,21 +340,138 @@ impl ToolbarButton {
     }
 }
 
-/// Le contenu d'une barre. Chaque bouton répond à une `Action` que les menus
-/// offrent déjà.
-pub fn bar_contents(ui: &mut egui::Ui, id: ToolbarId, actions: &mut Vec<Action>) {
+/// Ce qu'un bouton demande à l'application. Les gestes qui ouvrent un
+/// sélecteur de fichier ou un assistant ne sont pas des `Action` : l'application
+/// les exécute par les mêmes méthodes que les entrées de menu.
+#[derive(Debug, Clone)]
+pub enum ToolbarRequest {
+    AddWorkbook,
+    Save,
+    Import,
+    Open,
+    SaveAs,
+    ExportGraph,
+}
+
+/// Les raccourcis tels que les menus les écrivent (rappel dans l'info-bulle).
+#[derive(Debug, Clone, Default)]
+pub struct ShortcutTexts {
+    pub open: String,
+    pub save: String,
+    pub save_as: String,
+    pub import: String,
+    pub export: String,
+}
+
+/// Ce que les barres lisent de l'application, calculé une fois par image.
+#[derive(Debug, Clone, Default)]
+pub struct BarEnv {
+    /// Un graphe est au premier plan (sinon *Export* est grisé, comme le menu
+    /// Graph est absent).
+    pub export_enabled: bool,
+    pub shortcuts: ShortcutTexts,
+}
+
+/// Le contenu d'une barre. Chaque bouton répond à un geste que les menus
+/// offrent déjà, avec le même libellé (`action-*`).
+pub fn bar_contents(
+    ui: &mut egui::Ui,
+    id: ToolbarId,
+    env: &BarEnv,
+    requests: &mut Vec<ToolbarRequest>,
+) {
     match id {
         ToolbarId::File => {
-            let add_workbook = ToolbarButton {
-                icon: Icon::Workbook,
-                role: IconRole::Workbook,
-                label: tr!("action-add-workbook"),
-                hint: Some(tr!("action-add-workbook", "hint")),
-                shortcut: None,
-                enabled: true,
+            let button = |ui: &mut egui::Ui,
+                          icon,
+                          role,
+                          label: String,
+                          hint: Option<String>,
+                          shortcut: &str,
+                          enabled| {
+                ToolbarButton {
+                    icon,
+                    role,
+                    label,
+                    hint,
+                    shortcut: (!shortcut.is_empty()).then(|| shortcut.to_string()),
+                    enabled,
+                }
+                .show(ui)
             };
-            if add_workbook.show(ui) {
-                actions.push(Action::AddWorkbook);
+            let shortcuts = &env.shortcuts;
+            if button(
+                ui,
+                Icon::Workbook,
+                IconRole::Workbook,
+                tr!("action-add-workbook"),
+                Some(tr!("action-add-workbook", "hint")),
+                "",
+                true,
+            ) {
+                requests.push(ToolbarRequest::AddWorkbook);
+            }
+            if button(
+                ui,
+                Icon::Import,
+                IconRole::Neutral,
+                tr!("action-import"),
+                Some(tr!("action-import", "hint")),
+                &shortcuts.import,
+                true,
+            ) {
+                requests.push(ToolbarRequest::Import);
+            }
+            ui.separator();
+            if button(
+                ui,
+                Icon::Open,
+                IconRole::Neutral,
+                tr!("action-open"),
+                None,
+                &shortcuts.open,
+                true,
+            ) {
+                requests.push(ToolbarRequest::Open);
+            }
+            if button(
+                ui,
+                Icon::Save,
+                IconRole::Neutral,
+                tr!("action-save"),
+                None,
+                &shortcuts.save,
+                true,
+            ) {
+                requests.push(ToolbarRequest::Save);
+            }
+            if button(
+                ui,
+                Icon::SaveAs,
+                IconRole::Neutral,
+                tr!("action-save-as"),
+                None,
+                &shortcuts.save_as,
+                true,
+            ) {
+                requests.push(ToolbarRequest::SaveAs);
+            }
+            ui.separator();
+            let (export_hint, export_enabled) = if env.export_enabled {
+                (tr!("action-export-graph", "hint"), true)
+            } else {
+                (tr!("action-export-graph", "disabled"), false)
+            };
+            if button(
+                ui,
+                Icon::Export,
+                IconRole::Neutral,
+                tr!("action-export-graph"),
+                Some(export_hint),
+                &shortcuts.export,
+                export_enabled,
+            ) {
+                requests.push(ToolbarRequest::ExportGraph);
             }
         }
     }
@@ -407,7 +523,7 @@ impl ToolbarState {
 
     /// Peint la zone d'accueil (panneau sous la barre de menu) et les barres
     /// flottantes, et mène le glisser-déposer.
-    pub fn show(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    pub fn show(&mut self, ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
         let ctx = ui.ctx().clone();
         self.finish_drag_if_released(&ctx);
 
@@ -427,7 +543,7 @@ impl ToolbarState {
                                 ui.allocate_space(size);
                                 continue;
                             }
-                            let (rect, grip) = bar(ui, id, actions);
+                            let (rect, grip) = bar(ui, id, env, requests);
                             self.bar_rects.insert(id, rect);
                             rects.push(rect);
                             if grip.drag_started() {
@@ -461,7 +577,7 @@ impl ToolbarState {
                 .order(egui::Order::Foreground)
                 .fixed_pos(pos)
                 .show(&ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| bar(ui, id, actions))
+                    egui::Frame::popup(ui.style()).show(ui, |ui| bar(ui, id, env, requests))
                 });
             let (rect, grip) = area.inner.inner;
             self.bar_rects.insert(id, rect);
@@ -543,7 +659,7 @@ impl ToolbarState {
             .show(ctx, |ui| {
                 ui.set_opacity(0.85);
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.add_enabled_ui(false, |ui| bar(ui, drag.id, &mut sink));
+                    ui.add_enabled_ui(false, |ui| bar(ui, drag.id, &BarEnv::default(), &mut sink));
                 });
             });
         ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -555,10 +671,15 @@ const EMPTY_ROW_HEIGHT: f32 = 24.0;
 
 /// Une barre : sa poignée puis son contenu. Rend son cadre et la réponse de la
 /// poignée.
-fn bar(ui: &mut egui::Ui, id: ToolbarId, actions: &mut Vec<Action>) -> (Rect, egui::Response) {
+fn bar(
+    ui: &mut egui::Ui,
+    id: ToolbarId,
+    env: &BarEnv,
+    requests: &mut Vec<ToolbarRequest>,
+) -> (Rect, egui::Response) {
     let inner = ui.horizontal(|ui| {
         let grip = grip(ui);
-        bar_contents(ui, id, actions);
+        bar_contents(ui, id, env, requests);
         grip
     });
     (inner.response.rect, inner.inner)
@@ -693,7 +814,7 @@ mod tests {
         let ctx = egui::Context::default();
         egui_extras::install_image_loaders(&ctx);
         let mut state = ToolbarState::default();
-        let mut actions = Vec::new();
+        let mut requests = Vec::new();
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
         macro_rules! frame {
             ($events:expr) => {{
@@ -702,7 +823,9 @@ mod tests {
                     events: $events,
                     ..Default::default()
                 };
-                let mut output = ctx.run_ui(input, |ui| state.show(ui, &mut actions));
+                let mut output = ctx.run_ui(input, |ui| {
+                    state.show(ui, &BarEnv::default(), &mut requests)
+                });
                 output.textures_delta.clear();
             }};
         }

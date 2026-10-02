@@ -57,6 +57,11 @@ pub enum Icon {
     Graph,
     Matrix,
     Note,
+    Open,
+    Save,
+    SaveAs,
+    Import,
+    Export,
 }
 
 macro_rules! svg {
@@ -131,6 +136,27 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     (Icon::Graph, IconRole::Graph, svg!("chart-line.graph.svg")),
     (Icon::Matrix, IconRole::Matrix, svg!("grid-nine.matrix.svg")),
     (Icon::Note, IconRole::Note, svg!("note.note.svg")),
+    (
+        Icon::Open,
+        IconRole::Neutral,
+        svg!("folder-open.neutral.svg"),
+    ),
+    (
+        Icon::Save,
+        IconRole::Neutral,
+        svg!("floppy-disk.neutral.svg"),
+    ),
+    (
+        Icon::SaveAs,
+        IconRole::Neutral,
+        svg!("floppy-disk-back.neutral.svg"),
+    ),
+    (
+        Icon::Import,
+        IconRole::Neutral,
+        svg!("download-simple.neutral.svg"),
+    ),
+    (Icon::Export, IconRole::Neutral, svg!("export.neutral.svg")),
 ];
 
 /// Inatteignable tant que chaque icône a une variante (test `le_tableau_…`).

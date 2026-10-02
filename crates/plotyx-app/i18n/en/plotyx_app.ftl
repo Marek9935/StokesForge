@@ -72,6 +72,7 @@ action-properties = Properties…
     .hint = Opens Graph Properties on this item
 action-export-graph = Export Graph…
     .hint = SVG, PDF or PNG, at the current zoom
+    .disabled = Bring a graph window to the front first
 
 menu-window-show-metadata-row = Show Metadata Row
     .hint = Shows the metadata of imported files in the column headers

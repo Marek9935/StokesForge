@@ -429,7 +429,11 @@ accueil en haut seulement.
 - Un bouton est un `ToolbarButton` : icône du composant commun, info-bulle
   (libellé + raccourci + `.hint`), grisage. Il pousse la même `Action` que le
   menu — jamais une seconde écriture. Le contenu de chaque barre est
-  `toolbar::bar_contents`.
+  `toolbar::bar_contents` ; un geste qui n'est pas une `Action` (sélecteur de
+  fichier, assistant d'import, export) remonte en `ToolbarRequest`, exécuté par
+  `PlotyxApp::run_toolbar_request` avec les méthodes mêmes des menus. Barre
+  Fichier (#61) : classeur, import, ouvrir, enregistrer, enregistrer sous,
+  exporter (grisé sans graphe au premier plan).
 - Visibilité : menu **View**, une case par barre. Emplacement et visibilité
   sont dans `preferences.json` (champ `toolbars`), pas dans le `.plx` ; la
   lecture ignore ce qu'elle ne comprend pas. `PlotyxApp::new` ne lit pas le
