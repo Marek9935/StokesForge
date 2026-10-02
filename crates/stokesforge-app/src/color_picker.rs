@@ -345,8 +345,11 @@ pub fn color_field(
     .inner
 }
 
-/// Taille de l'échantillon du bouton.
-const BUTTON_SWATCH: Vec2 = Vec2::new(44.0, 18.0);
+/// Taille de l'échantillon du bouton : un petit carré (#89).
+const BUTTON_SWATCH: Vec2 = Vec2::new(18.0, 18.0);
+/// Le trait en travers d'une couleur non définie (automatique), même rouge
+/// que le rôle `Danger` des icônes.
+const AUTO_SLASH: Color32 = Color32::from_rgb(0xe5, 0x45, 0x3b);
 /// Taille d'un échantillon de palette.
 const PALETTE_SWATCH: f32 = 18.0;
 /// Côté du carré du nuancier (et diamètre de la roue).
@@ -421,14 +424,14 @@ pub fn color_button(
         let stroke = ui.visuals().widgets.inactive.fg_stroke;
         match current {
             Some(rgba) => paint_swatch(painter, rect, rgba),
+            // Couleur non définie = automatique : carré clair barré d'un trait
+            // rouge en travers (#89).
             None => {
-                painter.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
-                painter.text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    tr!("common-auto"),
-                    egui::FontId::proportional(11.0),
-                    stroke.color,
+                painter.rect_filled(rect, 2.0, Color32::WHITE);
+                let inner = rect.shrink(2.0);
+                painter.line_segment(
+                    [inner.left_bottom(), inner.right_top()],
+                    egui::Stroke::new(1.5, AUTO_SLASH),
                 );
             }
         }
@@ -486,6 +489,29 @@ pub fn color_button(
     // Refermer la fenêtre surgissante valide ce qui a pu être modifié sans
     // geste de fin explicite (champ encore en saisie).
     commit || (was_open && !is_open)
+}
+
+/// Une icône qui dit *quelle* couleur on règle, suivie de son échantillon
+/// compact : la forme des barres d'outils (#89). Les formulaires, eux, gardent
+/// un libellé devant l'échantillon (`color_field`). `tooltip` vient de `tr!`.
+pub fn color_icon_button(
+    ui: &mut egui::Ui,
+    (icon, tooltip): (crate::icons::Icon, &str),
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    value: &mut String,
+    usage: ColorUsage,
+    auto_label: Option<&str>,
+    env: &mut PickerEnv,
+) -> bool {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.add(
+            crate::icons::icon_image(icon, crate::icons::IconRole::Neutral).sense(Sense::hover()),
+        )
+        .on_hover_text(tooltip);
+        color_button(ui, id_salt, value, usage, auto_label, env)
+    })
+    .inner
 }
 
 fn picker_is_open(ctx: &egui::Context, id: egui::Id) -> bool {

@@ -77,3 +77,13 @@ affichées coûtent.
 La réinitialisation du zoom (#74) utilise `arrows-out` : quatre flèches vers
 les limites du cadrage, distinctes des coins de maximisation. « New Project »
 (#73) utilise `file-plus` ; le nouveau graphique garde le rôle `Graph`.
+
+## Échantillons de couleur (#89)
+
+Un réglage de couleur est un **petit carré** (`color_picker::color_button`).
+Une couleur non définie (valeur vide = automatique, pour un remplissage :
+aucun) se peint en carré clair **barré d'un trait rouge en travers** ; une
+couleur transparente garde le damier. Dans une barre d'outils, le carré est
+précédé d'une icône qui dit *quelle* couleur (`color_icon_button` : `LineColor`
+pour le trait, `FillColor` pour le remplissage, `TextColor` pour le texte) ;
+dans un formulaire, d'un libellé (`color_field`). Jamais un échantillon seul.

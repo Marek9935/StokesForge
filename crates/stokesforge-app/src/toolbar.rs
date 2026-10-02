@@ -840,8 +840,9 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
         // Trait.
         let mut line_color = state.line_color.clone();
         ui.scope(|ui| {
-            crate::color_picker::color_button(
+            crate::color_picker::color_icon_button(
                 ui,
+                (Icon::LineColor, &tr!("format-object-line-color")),
                 "stokesforge_object_line_color_button",
                 &mut line_color,
                 ColorUsage::Curves,
@@ -865,8 +866,9 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
         let mut fill_color = state.fill_color.clone();
         ui.add_enabled_ui(state.closed || !enabled, |ui| {
             ui.scope(|ui| {
-                crate::color_picker::color_button(
+                crate::color_picker::color_icon_button(
                     ui,
+                    (Icon::FillColor, &tr!("format-object-fill-color")),
                     "stokesforge_object_fill_color_button",
                     &mut fill_color,
                     ColorUsage::Curves,
@@ -1024,8 +1026,9 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             requests: Vec::new(),
         };
         ui.add_enabled_ui(rich, |ui| {
-            crate::color_picker::color_button(
+            crate::color_picker::color_icon_button(
                 ui,
+                (Icon::TextColor, &tr!("format-color")),
                 "stokesforge_format_color_button",
                 &mut color,
                 ColorUsage::Text,

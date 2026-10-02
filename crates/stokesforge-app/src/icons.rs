@@ -82,6 +82,9 @@ pub enum Icon {
     ShapeEllipse,
     ShapeLine,
     ShapeArrow,
+    LineColor,
+    FillColor,
+    TextColor,
 }
 
 macro_rules! svg {
@@ -268,6 +271,21 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         Icon::Formula,
         IconRole::Neutral,
         svg!("function.neutral.svg"),
+    ),
+    (
+        Icon::LineColor,
+        IconRole::Neutral,
+        svg!("pen-nib.neutral.svg"),
+    ),
+    (
+        Icon::FillColor,
+        IconRole::Neutral,
+        svg!("paint-bucket.neutral.svg"),
+    ),
+    (
+        Icon::TextColor,
+        IconRole::Neutral,
+        svg!("text-a-underline.neutral.svg"),
     ),
 ];
 

@@ -8948,8 +8948,9 @@ fn annotation_editor_ui(
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    crate::color_picker::color_button(
+                    crate::color_picker::color_icon_button(
                         ui,
+                        (crate::icons::Icon::TextColor, &tr!("format-color")),
                         ("annotation_color", id),
                         &mut editor.draft.color,
                         ColorUsage::Text,
