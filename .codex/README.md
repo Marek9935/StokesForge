@@ -80,7 +80,7 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `plotyx-import/src/{recipe,parse,preview,store}.rs`, intégration dans `plotyx-app/src/state.rs` et `app.rs`, `plotyx-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyx` | `docs/python-et-script.md`, `crates/plotyx-python/README.md` | `plotyx-python`, `plotyx-script`, `scripts/python-*.sh` |
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `plotyx-robustesse/src/lib.rs`, puis batterie `bN` concernée |
-| Distribution | `crates/plotyx-python/README.md`, `docs/application.md` | `scripts/app-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
+| Distribution | `crates/plotyx-python/README.md`, `docs/application.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
 
 Les noms de crates désignent `crates/<nom>/`. Le manifeste racine inclut
 `plotyx-import`, même si certaines anciennes pages ne le recensent pas.
@@ -163,14 +163,14 @@ Pour Python, examiner d'abord l'interpréteur dans
 `vendor/python/extracted/python/` et lire les scripts. Si nécessaire,
 `scripts/python-vendor.sh` télécharge les versions déclarées dans
 `vendor/python/lock.env`. Puis `scripts/python-test.sh` configure PyO3, le
-rpath et le préfixe embarqué, et teste `plotyx-python`, `plotyx-script` et
-`plotyx-robustesse` avec `python`.
-
-Ce script ne teste pas directement `plotyx-app` avec sa feature `python`.
-Si l'intégration UI change, reprendre l'environnement du script pour tester
-aussi ce crate ; appliquer le même environnement aux vérifications Clippy
-avec `--features python`. Ne pas utiliser le Python système comme substitut
-implicite ni prétendre que la CI par défaut couvre ce pont.
+rpath et le préfixe embarqué, et teste `plotyx-python`, `plotyx-script`,
+`plotyx-robustesse` (en série), `plotyx-app` et `plotyx-cli` avec `python`.
+Le travail CI `test-python` exécute ce script automatiquement et bloque en
+cas d'échec. Les reproductions `#[ignore]` exigent encore `-- --ignored`.
+Appliquer le même environnement aux vérifications Clippy avec
+`--features python`. Ne pas utiliser le Python système comme substitut.
+Le spike optionnel Matplotlib se rejoue par `scripts/python-matplotlib-spike.sh`
+dans une copie distincte du runtime ; voir `docs/python-matplotlib-spike.md`.
 
 ### Contrôles spécifiques
 
@@ -185,7 +185,8 @@ implicite ni prétendre que la CI par défaut couvre ce pont.
   `ignore` sans vérifier que le test devient un garde-fou fiable.
 - Distribution : lire les scripts avant exécution ; ils reconstruisent leur
   sortie dans `dist/`. `app-dist.sh` exige un affichage X11/Xwayland pour sa
-  vérification de fenêtre. Utiliser ces scripts dans le cadre d'un travail
+  vérification de fenêtre ; `cli-dist.sh` vérifie le CLI empaqueté sans écran,
+  environnement vidé et piégé. Utiliser ces scripts dans le cadre d'un travail
   sur l'empaquetage, pas comme simple contrôle documentaire.
 
 ## 5. Laisser une base cohérente pour la session suivante

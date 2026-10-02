@@ -1,6 +1,6 @@
 ---
 name: plotyx-python
-description: Travailler sur le pont Python de PlotYx — interpréteur CPython embarqué (`plotyx-python`), fil de script et surface `pyx` offerte aux scripts (`plotyx-script`), console de script de l'application, tableaux numpy, interruption. À utiliser dès qu'il est question d'un script `pyx`, d'une API exposée aux scripts, de PyO3, du GIL, de numpy, de `PYO3_CONFIG_FILE`, ou d'un problème qui n'apparaît qu'avec la feature `python` — que `cargo test --workspace` ne compile même pas, ce qui rend ce domaine le seul où un pipeline vert ne prouve strictement rien.
+description: Travailler sur le pont Python de PlotYx — interpréteur CPython embarqué (`plotyx-python`), fil de script et surface `pyx` offerte aux scripts (`plotyx-script`), console de script de l'application, tableaux numpy, interruption. À utiliser dès qu'il est question d'un script `pyx`, d'une API exposée aux scripts, de PyO3, du GIL, de numpy, de `PYO3_CONFIG_FILE`, ou d'un problème qui n'apparaît qu'avec la feature `python` — les contrôles Cargo par défaut ne le valident pas ; le travail CI test-python l’exerce explicitement.
 ---
 
 # Le pont Python de PlotYx
@@ -18,7 +18,7 @@ commencer.
 ## La feature change tout
 
 Sans `python`, les deux crates compilent **vide**. `cargo build`,
-`cargo test --workspace`, `cargo clippy` et la CI restent verts sur une machine
+`cargo test --workspace` et `cargo clippy` restent verts sur une machine
 sans interpréteur vendorisé — **y compris si le code Python est cassé, ne
 compile pas, ou n'existe pas**.
 
@@ -29,12 +29,12 @@ scripts/python-test.sh                # pose PYO3_CONFIG_FILE et le reste
 scripts/python-test.sh -- --ignored   # + les reproductions de la frontière
 ```
 
-Ce script teste `plotyx-python`, `plotyx-script` et `plotyx-robustesse` ; il
-ne lance pas les tests propres à `plotyx-app`. Si la console ou son câblage
-change, tester aussi ce crate avec `--features python` en reprenant le même
-environnement (`PYO3_CONFIG_FILE`, rpath, `PLOTYX_PYTHON_HOME`) ; voir
-[`.codex/README.md`](../../../.codex/README.md), § « Fonctionnalités
-optionnelles ». Appliquer cet environnement aux vérifications Clippy.
+Ce script teste `plotyx-python`, `plotyx-script`, `plotyx-robustesse` (en
+série), `plotyx-app` et `plotyx-cli`. `test-python` l'exécute automatiquement
+en CI et bloque en cas d'échec. Les reproductions ignorées restent explicites.
+Appliquer le même environnement (`PYO3_CONFIG_FILE`, rpath,
+`PLOTYX_PYTHON_HOME`) aux vérifications Clippy ; voir
+[`.codex/README.md`](../../../.codex/README.md), § « Fonctionnalités optionnelles ».
 
 `scripts/python-config.sh` produit la `PYO3_CONFIG_FILE` ; sans elle, PyO3 ne
 compile pas. L'interpréteur est vendorisé dans `vendor/python/` et **n'est pas
@@ -66,7 +66,8 @@ D'où la formulation exacte : **ni à l'aller, ni au retour, ni comme champ**.
 
 | Sens | Mécanisme | Copie ? |
 |---|---|---|
-| Rust → Python (lecture) | tableau numpy **empruntant** le `Arc<Vec<f64>>`, `writeable = False` | **non** |
+| Rust → Python (`column`) | tableau numpy **empruntant** le `Arc<Vec<f64>>`, `writeable = False` | **non** |
+| Rust → Python (`values`) | tuple des cellules `float` / `str` / `None` | **oui** |
 | Python → Rust (écriture) | copie du tableau numpy dans un `Vec<f64>` neuf | **oui** |
 
 L'écriture copie par choix, pour deux raisons indépendantes : le modèle doit
@@ -77,6 +78,33 @@ détruire un objet Python exige le GIL, ce qui interdirait de faire traverser la
 valeur au fil qui possède le modèle.
 
 Ne pas « optimiser » cette copie sans avoir relu ces deux raisons.
+
+## Navigation et lecture du projet (#66)
+
+`root()`, `children(handle=None)` et `info(handle)` lisent les instantanés de
+la session, sans état de vue : ils fonctionnent aussi sans interface.
+`children` rend les enfants directs ordonnés ; `info` rend nom, nature, parent,
+nombre de lignes (feuille/colonne) et métadonnées de colonne. La forme exacte
+et les valeurs stables de `kind`, `type` et `role` sont dans
+`docs/python-et-script.md` ; ne pas reprendre un libellé humain pour un code
+stable de l'API.
+
+`values(handle)` copie les cellules stockées en un tuple Python. **Ne jamais
+réanalyser les textes**, ni confondre `MixedCell::Empty` (`None`), `Text("")`
+(`""`) et `Number(NaN)` (NaN). Le modèle n'a plus de type homogène `Text` :
+les colonnes texte sont `Mixed`. `column` conserve sa vue numpy sans copie sur
+les colonnes numériques/date-heure et refuse les mixtes ; ne pas matérialiser
+une vue numérique mixte en cachant son coût de copie.
+
+Chaque lecture valide l'époque de la poignée **avant** de chercher le nœud.
+Le parent et les enfants rendus héritent de l'époque de **ce même instantané**.
+Les dictionnaires, listes et tuples Python sont détachés du modèle ; les
+modifier ne constitue pas une écriture. Contrat :
+`plotyx-script/tests/navigation.rs` (dont suppression/undo et chargement d'un
+projet aux mêmes identifiants).
+
+L'ancienne API v1 de l'archive n'est plus la cible : le chantier #65 reformule
+la surface à partir du code. Étendre le pont existant, toujours GIL relâché.
 
 ## L'isolation de l'interpréteur
 
@@ -102,6 +130,22 @@ Un script passe par les **mêmes commandes annulables** que l'interface :
 `Ctrl+Z` annule ce qu'un script vient d'écrire. C'est le critère de fin du
 socle, rejoué en entier par `plotyx-script::run_selftest`.
 
+Le lot #67 ajoute `create_workbook`, `create_worksheet`, `create_column`,
+`rename`, `remove`, `set_values` et `set_column_meta` : réutiliser les
+commandes, pas un second mutateur. `set_column` garde sa longueur fixe ;
+`set_values` remplace longueur et cellules sans changer le type ni la
+provenance, par `SetCells` puis `DeleteCells`. Ne pas normaliser NaN en Empty
+pour une entrée numpy écrite dans une colonne mixte.
+
+Le moteur donne une identité de client distincte à son contexte. La première
+écriture réserve une macro `Script` ; les lectures seules n'en ouvrent pas.
+Revalider la poignée après cette acquisition (un Load a pu passer entre les
+deux instantanés). Succès = fermer ; erreur non rattrapée ou interruption
+demandée = avorter, GIL relâché et exception asynchrone désarmée. Les imports
+imbriquent leur macro. `undo()` termine puis annule le groupe courant ; les
+écritures ultérieures commencent un autre groupe. Contrat détaillé et bords :
+`docs/python-et-script.md`, `plotyx-script/tests/mutations.rs`.
+
 `pyx.import_file(path, recipe=None)` rend les poignées des feuilles d'un
 classeur neuf. Réutiliser `plotyx-importer` (plans et conversion communs au CLI
 et à l'application), puis les commandes dans une macro « Importer ». Aucun
@@ -113,6 +157,28 @@ elle exige que la version de la colonne n'ait pas bougé **au moment
 d'appliquer**, ce qui ferme la fenêtre entre l'instantané qu'un script a lu et
 la commande qu'il envoie. Une nouvelle écriture exposée aux scripts doit la
 porter aussi.
+
+## Tracé et exécution sans fenêtre
+
+`pyx.plot(y, x=None, *, graph=None, name=None, parent=None, **options)` crée
+un `PlotSpec` par `AddGraph`, ou ajoute une série au premier panneau par
+`SetPlotSpec`. Réutiliser `plotyx-plot` : palette, couleurs, axes et styles ;
+pas de dépendance de production à un moteur de rendu. Valider les poignées
+sur un seul instantané, puis de nouveau après acquisition de la macro.
+`add_shape` et `remove_shape` (#76) passent eux aussi par le contexte :
+valider le spec avant réservation puis le relire sous macro, même si l'objet
+est la première mutation. Aucun mutateur de graphe ne doit contourner la macro
+`Script`, sinon une exception laisserait son objet derrière elle.
+Conserver les autres panneaux et les options non fournies. Les titres et
+labels explicites sont du markup Typst ; les labels automatiques restent
+littéraux. Contrat et SVG témoins : `tests/graphs.rs`.
+
+`plotyx-cli run` utilise le même moteur et la même session, jamais une API
+Python parallèle. Il ne sauve `--out` qu'au succès ; erreurs et sorties du
+script sont préservées. Vérifier le paquet Linux par `scripts/cli-dist.sh`.
+Le spike Matplotlib est un exemple auto-vérifié, lancé uniquement par
+`scripts/python-matplotlib-spike.sh`, dans une copie isolée du runtime.
+Il ne modifie ni la surface native `pyx` ni le paquet habituel.
 
 ## Côté application : la console ne fige pas la fenêtre
 
@@ -158,6 +224,12 @@ voit un script — restent en anglais, ce ne sont pas des textes d'interface.
 ## Tests
 
 - `plotyx-script/tests/selftest.rs` — le critère de fin du socle, en entier ;
+- `plotyx-script/tests/graphs.rs` et `tests/mutations.rs` — tracé natif,
+  cellules exactes, commandes, rollback et undo/redo ;
+- `plotyx-cli/tests/run.rs` — exécution, `.plx`, erreurs et absence de feature ;
+- `plotyx-app/tests/script_panel.rs` — parcours numpy → colonnes → graphe ;
+- `plotyx-script/tests/navigation.rs` — navigation, métadonnées et lecture
+  exacte des cellules (lot #66), sans mutation ni dépendance à l'interface ;
 - `plotyx-app/tests/script_bridge_lazy.rs` — l'interpréteur ne démarre pas tout
   seul ;
 - `plotyx-robustesse` : `b7` (frontière Rust ↔ Python), `b9` (script sous

@@ -365,6 +365,7 @@ history-macro-refresh-from-file = Actualiser depuis le fichier
 history-macro-import = Importer
 history-macro-add-workbook = Ajouter un classeur
 history-macro-add-worksheet = Ajouter une feuille
+history-macro-script = Exécuter le script
 
 ## Annuler et rétablir
 

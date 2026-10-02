@@ -1,17 +1,22 @@
 //! Le CLI headless : pas d'interface, donc utilisable en lot. Une seule
-//! commande utile pour l'instant, `import` — lire des fichiers d'appareils avec
-//! un modèle (choisi d'après le fichier, ou nommé) et écrire un projet `.plx`.
+//! commande `import` lit des fichiers d'appareils avec un modèle (choisi
+//! d'après le fichier, ou nommé) et écrit un projet `.plx`. Avec la feature
+//! `python`, `run` exécute un script dans une session et sauve son résultat.
 //!
 //! ```text
 //! plotyx-cli import [--recipe NOM] [--layout per-file|side-by-side|shared-x]
 //!                   [--out projet.plx] FICHIER...
 //! plotyx-cli recipes            # liste les modèles connus
+//! plotyx-cli run [--project entree.plx] [--out sortie.plx] script.py
 //! ```
 //!
-//! Le projet est construit directement (`Project` neuf, primitives de
+//! Pour `import`, le projet est construit directement (`Project` neuf, primitives de
 //! `plotyx-core`) : pas de session ni d'historique, c'est la construction d'un
 //! projet avant toute édition (voir `docs/invariants.md` §1). La conversion des
 //! fichiers en colonnes est celle de l'application, `plotyx-importer`.
+//! `run` (feature python) démarre une session sans fenêtre : pyx conserve
+//! le même acteur, les commandes et l'annulation que dans la console. Le
+//! fichier de sortie n'est enregistré qu'après une exécution réussie.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -21,7 +26,8 @@ use plotyx_import::{choose_recipe, FilesLayout, ImportRecipe, RecipeStore};
 
 const USAGE: &str = "usage:
   plotyx-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x] [--out project.plx] FILE...
-  plotyx-cli recipes";
+  plotyx-cli recipes
+  plotyx-cli run [--project input.plx] [--out output.plx] SCRIPT.py";
 
 /// Exécute la ligne de commande `args` (sans le nom du programme), en écrivant
 /// les résultats dans `out`. `Err` : un message pour l'erreur standard (code de
@@ -37,6 +43,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             Ok(())
         }
         Some("import") => import(&args[1..], out),
+        Some("run") => run_script(&args[1..], out),
+        Some("--help" | "help") => writeln!(out, "{USAGE}").map_err(|err| err.to_string()),
         Some(other) => Err(format!("unknown command \"{other}\"\n{USAGE}")),
     }
 }
@@ -185,5 +193,81 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         plotyx_persistence::save(&project, path).map_err(|err| err.to_string())?;
         writeln!(out, "project written: {}", path.display()).map_err(|err| err.to_string())?;
     }
+    Ok(())
+}
+
+/// Le refus est détectable sans charger Python, et explique comment l'activer.
+#[cfg(not(feature = "python"))]
+fn run_script(_args: &[String], _out: &mut dyn Write) -> Result<(), String> {
+    Err("Python scripting is unavailable: build plotyx-cli with --features python".into())
+}
+
+#[cfg(feature = "python")]
+fn run_script(args: &[String], out: &mut dyn Write) -> Result<(), String> {
+    let mut input = None;
+    let mut output = None;
+    let mut script = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--project" | "--out" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| format!("{arg} expects a value\n{USAGE}"))?;
+                if arg == "--project" {
+                    input = Some(PathBuf::from(value));
+                } else {
+                    output = Some(PathBuf::from(value));
+                }
+            }
+            "--" => {
+                for arg in iter.by_ref() {
+                    if script.replace(PathBuf::from(arg)).is_some() {
+                        return Err("run expects exactly one script file".into());
+                    }
+                }
+            }
+            option if option.starts_with("--") => {
+                return Err(format!("unknown option \"{option}\"\n{USAGE}"))
+            }
+            path => {
+                if script.replace(PathBuf::from(path)).is_some() {
+                    return Err("run expects exactly one script file".into());
+                }
+            }
+        }
+    }
+    let path = script.ok_or_else(|| format!("run expects a script file\n{USAGE}"))?;
+    let source = std::fs::read_to_string(&path)
+        .map_err(|err| format!("cannot read script {}: {err}", path.display()))?;
+    let project = match input {
+        Some(path) => plotyx_persistence::load(&path).map_err(|err| err.to_string())?,
+        None => Project::new("Script").map_err(|err| err.to_string())?,
+    };
+    let actor = plotyx_session::Session::spawn(project, None).map_err(|err| err.to_string())?;
+    let session = actor.handle();
+    let engine = plotyx_script::ScriptEngine::spawn(
+        session.clone(),
+        plotyx_python::interpreter::EmbeddedPython::locate().map_err(|err| err.to_string())?,
+    )
+    .map_err(|err| err.to_string())?;
+    let outcome = engine.run(&source).map_err(|err| err.to_string())?;
+    engine.shutdown().map_err(|err| err.to_string())?;
+    out.write_all(outcome.stdout.as_bytes())
+        .map_err(|err| err.to_string())?;
+    std::io::stderr()
+        .write_all(outcome.stderr.as_bytes())
+        .map_err(|err| err.to_string())?;
+    if let Some(error) = outcome.error {
+        return Err(error);
+    }
+    if outcome.interrupted {
+        return Err("script interrupted".into());
+    }
+    if let Some(path) = output {
+        session.save(&path).map_err(|err| err.to_string())?;
+        writeln!(out, "saved {}", path.display()).map_err(|err| err.to_string())?;
+    }
+    actor.shutdown().map_err(|err| err.to_string())?;
     Ok(())
 }

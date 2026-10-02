@@ -1,5 +1,12 @@
 //! Le fil de script : un **service permanent** qui possède l'interpréteur.
 //!
+//! # Un script, un groupe d'écritures
+//!
+//! Le contexte ouvre une macro exclusive à la première mutation. Une lecture
+//! seule laisse la session disponible. À la fin, GIL relâché et interruption
+//! désarmée, le groupe est validé ou avorté (exception, arrêt demandé). Une
+//! annulation explicite depuis pyx est un point de validation du groupe.
+//!
 //! # Deux fils, pas un
 //!
 //! * le **fil de script** (`plotyx-script`) démarre CPython, en devient donc le
@@ -49,6 +56,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 
+use plotyx_commands::MacroKind;
 use plotyx_python::interpreter::EmbeddedPython;
 use plotyx_session::SessionHandle;
 use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError};
@@ -58,7 +66,7 @@ use pyo3::types::{PyDict, PyTracebackMethods};
 
 use crate::error::ScriptError;
 use crate::outcome::ScriptOutcome;
-use crate::{capture, surface};
+use crate::{bridge::HostError, capture, surface};
 
 /// État partagé entre le fil de script, le fil d'interruption et les clients.
 ///
@@ -85,12 +93,55 @@ pub(crate) struct ScriptContext {
     session: SessionHandle,
     /// Drapeaux partagés avec le moteur.
     shared: Arc<Shared>,
+    /// Ouverte seulement à la première écriture ; un script de lecture ne
+    /// réserve jamais la session. Atomique pour rester utilisable GIL relâché.
+    macro_open: AtomicBool,
 }
 
 impl ScriptContext {
     /// Poignée vers l'acteur.
     pub(crate) fn session(&self) -> &SessionHandle {
         &self.session
+    }
+
+    /// Ouvre le groupe exclusif du script. Rend vrai si l'appel vient de
+    /// l'ouvrir : le pont doit alors relire et valider son instantané, car un
+    /// chargement ou une écriture a pu précéder l'acquisition de la macro.
+    pub(crate) fn begin_write(&self) -> Result<bool, HostError> {
+        if self.macro_open.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        self.session
+            .begin_macro(MacroKind::Script)
+            .map_err(HostError::from_session)?;
+        self.macro_open.store(true, Ordering::Release);
+        Ok(true)
+    }
+
+    /// Termine le groupe GIL relâché, y compris après une exception Python.
+    /// Une interruption demandée entraîne l'abandon même si elle a été avalée
+    /// par le script. Les imports ferment leurs seules macros imbriquées.
+    pub(crate) fn finish_write(&self, commit: bool) -> Result<(), HostError> {
+        if !self.macro_open.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let result = if commit {
+            self.session.end_macro()
+        } else {
+            self.session.abort_macro()
+        };
+        match result {
+            Ok(_) => {
+                self.macro_open.store(false, Ordering::Release);
+                Ok(())
+            }
+            Err(error) => {
+                if commit && self.session.abort_macro().is_ok() {
+                    self.macro_open.store(false, Ordering::Release);
+                }
+                Err(HostError::from_session(error))
+            }
+        }
     }
 
     /// Première moitié du mécanisme d'interruption : chaque appel de la
@@ -184,6 +235,10 @@ impl ScriptEngine {
     /// [`ScriptError::Interpreter`] si CPython ne démarre pas,
     /// [`ScriptError::Install`] si la surface `pyx` n'a pas pu être posée.
     pub fn spawn(session: SessionHandle, python: EmbeddedPython) -> Result<Self, ScriptError> {
+        // Le moteur est toujours un émetteur distinct de son appelant : une
+        // simple clone fournie par l'hôte ne doit pas absorber ses écritures
+        // dans la macro du script (ni permettre au script d'avorter la sienne).
+        let session = session.with_new_identity();
         let shared = Arc::new(Shared::default());
         let (jobs_tx, jobs_rx) = mpsc::channel();
         let (init_tx, init_rx) = mpsc::channel();
@@ -385,6 +440,7 @@ fn start(
     let context = Arc::new(ScriptContext {
         session,
         shared: Arc::clone(shared),
+        macro_open: AtomicBool::new(false),
     });
     CONTEXT.with(|cell| *cell.borrow_mut() = Some(context));
 
@@ -427,7 +483,7 @@ fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome
         capture::begin();
         shared.running.store(true, Ordering::Release);
 
-        let result = match CString::new(source) {
+        let mut result = match CString::new(source) {
             Ok(code) => py.run(&code, Some(globals.bind(py)), None),
             Err(_) => Err(pyo3::exceptions::PyValueError::new_err(
                 "the script source contains a null byte",
@@ -450,8 +506,15 @@ fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome
         shared.running.store(false, Ordering::Release);
         clear_pending_async_exception(py, shared);
 
-        let (stdout, stderr) = capture::end();
         let interrupted = shared.interrupt_requested.load(Ordering::Acquire);
+        // Aucun appel Python pendant la fermeture : l'exception asynchrone
+        // est désarmée et l'acteur ne reçoit que des données Rust.
+        if let Ok(context) = current_context() {
+            if let Err(error) = py.detach(|| context.finish_write(result.is_ok() && !interrupted)) {
+                result = Err(surface::to_py_error(error));
+            }
+        }
+        let (stdout, stderr) = capture::end();
 
         ScriptOutcome {
             stdout,

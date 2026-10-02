@@ -614,7 +614,8 @@ impl PartialEq for Column {
 /// arbitraire mais documenté : très au-delà de tout projet réaliste, très en
 /// deçà de ce qui menace le processus (à 8 octets/valeur, l'allocation reste
 /// de l'ordre du gigaoctet).
-const MAX_COLUMN_ROWS: usize = 100_000_000;
+/// Plafond commun aux écritures du modèle et à la copie des entrées de script.
+pub const MAX_COLUMN_ROWS: usize = 100_000_000;
 
 /// Écrit `new_values` dans `vec` à partir de `start`, en étendant `vec` avec
 /// des valeurs manquantes (`missing`) si besoin. Rend les valeurs écrasées

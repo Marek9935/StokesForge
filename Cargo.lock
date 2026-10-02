@@ -3884,6 +3884,9 @@ dependencies = [
  "plotyx-import",
  "plotyx-importer",
  "plotyx-persistence",
+ "plotyx-python",
+ "plotyx-script",
+ "plotyx-session",
  "tempfile",
 ]
 
@@ -4054,6 +4057,8 @@ dependencies = [
  "plotyx-importer",
  "plotyx-plot",
  "plotyx-python",
+ "plotyx-render",
+ "plotyx-render-svg",
  "plotyx-session",
  "pyo3",
  "tempfile",

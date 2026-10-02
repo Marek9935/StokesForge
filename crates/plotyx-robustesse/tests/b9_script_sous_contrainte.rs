@@ -495,3 +495,62 @@ fn b9_erreur_de_lhote_ne_laisse_pas_le_moteur_dans_un_etat_bancal() {
     let out = run("print('toujours là')");
     assert_eq!(out.stdout.trim(), "toujours là");
 }
+
+#[test]
+fn b9_interruption_avalee_annule_aussi_le_graphe_et_les_valeurs() {
+    // Banc propre : ne pas tenir le verrou du banc partagé en attendant le moteur.
+    let mut project = Project::new("Arrêt").unwrap();
+    project.add_workbook(project.root(), Some("Book1")).unwrap();
+    let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
+    project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1., 2.]))
+        .unwrap();
+    let actor = Session::spawn(project, None).unwrap();
+    let handle = actor.handle();
+    let before = handle.snapshot().unwrap();
+    let engine =
+        Arc::new(ScriptEngine::spawn(handle.clone(), EmbeddedPython::locate().unwrap()).unwrap());
+    let worker = Arc::clone(&engine);
+    let job = std::thread::spawn(move || {
+        worker
+            .run(
+                r#"
+a = pyx.resolve('[Book1]Sheet1!A')
+try:
+    pyx.set_values(a, [9.,10.,11.])
+    g = pyx.plot(a, name='À annuler')
+    pyx.add_shape(g, 'rectangle', 0, 0, 1, 1)
+    while True: pass
+except KeyboardInterrupt:
+    print('interruption avalée')
+"#,
+            )
+            .unwrap()
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let snapshot = handle.snapshot().unwrap();
+        if snapshot.tree.resolve("[À annuler]").ok().is_some_and(|id| {
+            matches!(snapshot.tree.node(id).unwrap().kind(), plotyx_core::NodeKind::Graph { spec, .. } if !spec.panels[0].shapes.is_empty())
+        })        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "graphe et objet non créés"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    engine.interrupt();
+    let outcome = job.join().unwrap();
+    assert!(outcome.interrupted);
+    assert!(outcome.error.is_none(), "{:?}", outcome.error);
+    assert!(outcome.stdout.contains("interruption avalée"));
+    let after = handle.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert_eq!(after.history, before.history);
+    let followup = engine
+        .run("assert pyx.values(pyx.resolve('[Book1]Sheet1!A')) == (1.,2.)")
+        .unwrap();
+    assert!(followup.error.is_none());
+}

@@ -31,7 +31,7 @@ contre cet interpréteur. On ne change jamais l'une sans relancer
 
 ```bash
 scripts/python-vendor.sh     # interpréteur + numpy épinglé dans vendor/python/extracted/python
-scripts/python-test.sh       # tests d'intégration contre le préfixe vendorisé (embedded.rs + zerocopy.rs)
+scripts/python-test.sh       # pont, scripts, robustesse, application et CLI contre le préfixe vendorisé
 scripts/python-memcheck.sh   # zerocopy.rs sous valgrind memcheck — no-op explicite si valgrind est absent
 scripts/pyhello-dist.sh      # assemble dist/pyhello/ et le VALIDE en environnement nettoyé
 ```
@@ -44,8 +44,9 @@ cargo test    -p plotyx-python
 cargo clippy  -p plotyx-python --all-targets -- -D warnings
 ```
 
-La feature `python` **n'est pas** dans `default` : la CI reste verte sur une
-machine sans interpréteur vendorisé.
+La feature `python` **n'est pas** dans `default` : les contrôles Cargo
+ordinaires fonctionnent sans interpréteur vendorisé ; le travail CI Python
+prépare son propre runtime.
 
 ### Ce que la CI couvre, et ce qu'elle ne couvre pas
 
@@ -56,11 +57,11 @@ Un pipeline vert sur ces trois travaux ne dit donc rien du pont Python.
 
 Un quatrième travail, `test-python`, couvre ce pont : il vendorise
 l'interpréteur, génère la configuration PyO3 et lance `scripts/python-test.sh`
-— exactement la chaîne décrite ci-dessus. Il est **manuel**
-(`when: manual`) et **non bloquant** (`allow_failure: true`) : il télécharge
-une archive d'une centaine de mégaoctets à froid, et son échec ne doit pas
-faire passer au rouge un pipeline qui ne touche pas au pont Python. Voir le
-commentaire en tête de `.gitlab-ci.yml` pour le détail.
+— exactement la chaîne décrite ci-dessus. Il est **automatique et bloquant**
+(#70). L'archive et le préfixe sont gardés en cache selon le verrou de versions ;
+les compilations Python ont une clé de cache Cargo distincte. Le script teste
+également le fil de script, la robustesse, la console et le CLI. Les
+reproductions ignorées ne sont pas lancées dans ce travail.
 
 ## Vérifier le socle soi-même
 

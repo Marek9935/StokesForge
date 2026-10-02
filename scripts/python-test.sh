@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Lance les tests du pont Python et du fil de script contre l'interpréteur
-# vendorisé.
+# Lance les tests Python : pont, scripts, robustesse, application et CLI
+# contre le même interpréteur vendorisé.
 #
 # Trois choses à poser, et rien de plus :
 #   - PYO3_CONFIG_FILE : où PyO3 trouve libpython à la COMPILATION (piège n°1) ;
@@ -43,3 +43,7 @@ cargo test -p plotyx-script --features python "$@"
 # rejouer les reproductions de la frontière Python :
 #     scripts/python-test.sh -- --ignored
 RUST_TEST_THREADS=1 cargo test -p plotyx-robustesse --features python "$@"
+
+# Intégration de la console et CLI headless : mêmes variables, même runtime.
+cargo test -p plotyx-app --features python "$@"
+cargo test -p plotyx-cli --features python "$@"

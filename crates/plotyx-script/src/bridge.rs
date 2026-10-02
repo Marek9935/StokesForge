@@ -1,4 +1,4 @@
-//! Le côté **hôte** de la surface `pyx` : résolution de chemins, lecture et
+//! Le côté **hôte** de la surface `pyx` : navigation, métadonnées, lecture et
 //! écriture de colonnes, annulation — le tout **sans jamais toucher au GIL**.
 //!
 //! Tout ce module s'exécute à l'intérieur d'un `Python::detach`, c'est-à-dire
@@ -21,10 +21,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::engine::ScriptContext;
 use plotyx_commands::{Command, CommandError, MacroKind};
-use plotyx_core::{CoreError, NodeId, ValueBlock};
+use plotyx_core::{ColumnMeta, ColumnValues, CoreError, Node, NodeId, ValueBlock};
 use plotyx_plot::{PlotSpec, SeriesAxis, ShapeKind, ShapeRef, ShapeSpec};
-use plotyx_session::{SessionError, SessionHandle};
+use plotyx_session::{SessionError, SessionHandle, Snapshot};
 
 /// A2 (`guide-de-correction-robustesse.md` §F6, §4/§7 de
 /// `cahier-des-charges-api-script.md`) — nombre de tentatives que
@@ -60,7 +61,7 @@ impl HostError {
     /// Traduit une erreur du modèle. Le `match` est **exhaustif** à dessein :
     /// une nouvelle variante de `CoreError` forcera une décision de traduction
     /// plutôt que de tomber dans un fourre-tout.
-    fn from_core(error: CoreError) -> Self {
+    pub(crate) fn from_core(error: CoreError) -> Self {
         match error {
             CoreError::Path(message) => HostError::UnknownPath(message),
             CoreError::UnknownNode(id) => {
@@ -101,7 +102,7 @@ impl HostError {
     /// fermée, plus aucune poignée du script ne désigne quoi que ce soit. Le
     /// message le dit explicitement pour que la cause ne se confonde pas avec
     /// une colonne supprimée.
-    fn from_session(error: SessionError) -> Self {
+    pub(crate) fn from_session(error: SessionError) -> Self {
         match error {
             SessionError::Disconnected => HostError::BrokenReference(
                 "the PlotYx session is closed: no handle is valid anymore".to_owned(),
@@ -149,6 +150,76 @@ fn check_epoch(id: NodeId, expected_epoch: u64, current_epoch: u64) -> Result<()
     )))
 }
 
+/// Valide l'identité avant de chercher le nœud. Tous les nouveaux appels
+/// de lecture suivent le même ordre que les appels du socle : un identifiant
+/// réapparu après un chargement ne rend jamais une ancienne poignée valide.
+pub(crate) fn checked_node(
+    snapshot: &Snapshot,
+    id: NodeId,
+    epoch: u64,
+) -> Result<&Arc<Node>, HostError> {
+    check_epoch(id, epoch, snapshot.epoch)?;
+    snapshot
+        .tree
+        .node_arc(id)
+        .ok_or_else(|| HostError::BrokenReference(format!("{id} no longer exists in the project")))
+}
+
+/// Racine du projet courant, avec son identité.
+pub(crate) fn root(session: &SessionHandle) -> Result<(NodeId, u64), HostError> {
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    Ok((snapshot.tree.root(), snapshot.epoch))
+}
+
+/// Enfants directs, dans l'ordre du modèle. Sans poignée, part de la racine.
+/// Identifiants et époque proviennent du même instantané, même si un autre
+/// client charge un projet pendant que le script reçoit la réponse.
+pub(crate) fn children(
+    session: &SessionHandle,
+    handle: Option<(NodeId, u64)>,
+) -> Result<Vec<(NodeId, u64)>, HostError> {
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    let (id, epoch) = handle.unwrap_or((snapshot.tree.root(), snapshot.epoch));
+    let node = checked_node(&snapshot, id, epoch)?;
+    Ok(node.children().iter().map(|id| (*id, epoch)).collect())
+}
+
+/// Description du nœud et nombre de lignes éventuel, sur un seul instantané.
+/// Partager le nœud évite de recopier ses buffers ou ses métadonnées de fichier
+/// pour en extraire quelques champs, une fois le GIL repris.
+pub(crate) fn info(
+    session: &SessionHandle,
+    id: NodeId,
+    epoch: u64,
+) -> Result<(Arc<Node>, Option<usize>), HostError> {
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    let node = checked_node(&snapshot, id, epoch)?;
+    let row_count = if node.kind().is_worksheet() {
+        Some(snapshot.tree.row_count(id).map_err(HostError::from_core)?)
+    } else {
+        node.as_column().map(|column| column.len())
+    };
+    Ok((Arc::clone(node), row_count))
+}
+
+/// Cellules stockées, sans conversion : seul l'Arc est cloné ici. La copie
+/// en valeurs Python appartient au fil de script, après la reprise du GIL.
+pub(crate) fn column_values(
+    session: &SessionHandle,
+    id: NodeId,
+    epoch: u64,
+) -> Result<ColumnValues, HostError> {
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    let node = checked_node(&snapshot, id, epoch)?;
+    let column = node.as_column().ok_or_else(|| {
+        HostError::InvalidValue(format!(
+            "{id} is {}, not a column",
+            node.kind().with_article()
+        ))
+    })?;
+    Ok(column.values().clone())
+}
+
 /// `pyx.column` : le buffer `f64` partagé de la colonne, prêt à être emprunté
 /// sans copie par numpy.
 ///
@@ -161,10 +232,7 @@ pub(crate) fn float_buffer(
     epoch: u64,
 ) -> Result<Arc<Vec<f64>>, HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
-    check_epoch(id, epoch, snapshot.epoch)?;
-    let node = snapshot.tree.node(id).ok_or_else(|| {
-        HostError::BrokenReference(format!("{id} no longer exists in the project"))
-    })?;
+    let node = checked_node(&snapshot, id, epoch)?;
     let column = node.as_column().ok_or_else(|| {
         HostError::InvalidValue(format!(
             "{id} is {}, not a column",
@@ -193,28 +261,18 @@ pub(crate) fn float_buffer(
 /// surface pour la raison de cette restriction), **avant** d'envoyer quoi que
 /// ce soit à l'acteur : un refus ne fait pas bouger la révision.
 ///
-/// # Concurrence optimiste (A2)
-///
-/// Entre l'instantané lu ici et l'instant où l'acteur applique la commande,
-/// un autre client peut avoir modifié la même colonne — c'est exactement le
-/// scénario de `b6_toctou_entre_instantane_et_commande`. La commande porte
-/// donc `expected_version`, vérifié par `History::apply` au moment
-/// d'appliquer, jamais avant : si la version a bougé, l'acteur refuse sans
-/// toucher au modèle, et cette fonction relit un instantané frais et
-/// retente — jusqu'à [`MAX_SET_COLUMN_ATTEMPTS`] tentatives, exactement la
-/// politique documentée dans `cahier-des-charges-api-script.md` (§4, §7).
-/// « Recalculer » pour cette surface-témoin, qui n'écrit qu'une colonne
-/// entière de longueur fixe, veut dire : rejeter proprement
-/// (`InvalidValueError`) si la longueur attendue a changé entre-temps, ou
-/// renvoyer la même valeur contre la version fraîchement lue sinon. Au-delà
-/// de [`MAX_SET_COLUMN_ATTEMPTS`] échecs, `ConcurrentWriteError` (§7)
-/// plutôt que de retenter indéfiniment.
+/// La longueur est validée avant de réserver la macro du script. Si cette
+/// réservation est nouvelle, relire et revérifier l'époque et la longueur :
+/// une écriture ou un Load a pu passer avant la réservation. Sous la macro,
+/// les autres clients ne peuvent plus écrire ; `expected_version` et la borne
+/// historique de cinq tentatives restent des garde-fous au moment d'appliquer.
 pub(crate) fn set_column(
-    session: &SessionHandle,
+    context: &ScriptContext,
     id: NodeId,
     epoch: u64,
     values: Vec<f64>,
 ) -> Result<(), HostError> {
+    let session = context.session();
     for _ in 0..MAX_SET_COLUMN_ATTEMPTS {
         let snapshot = session.snapshot().map_err(HostError::from_session)?;
         check_epoch(id, epoch, snapshot.epoch)?;
@@ -244,6 +302,10 @@ pub(crate) fn set_column(
                 values.len()
             )));
         }
+        if context.begin_write()? {
+            // Valider à nouveau sous la macro exclusive, avant la commande.
+            continue;
+        }
         let expected_version = column.version();
         match session.execute(Command::SetCells {
             column: id,
@@ -272,8 +334,12 @@ pub(crate) fn set_column(
 ///
 /// Rend `false` quand il n'y a rien à annuler — une pile vide n'est pas une
 /// erreur, c'est le cas que l'interface traduit par un bouton grisé.
-pub(crate) fn undo(session: &SessionHandle) -> Result<bool, HostError> {
-    session
+pub(crate) fn undo(context: &ScriptContext) -> Result<bool, HostError> {
+    // L'annulation explicite est un point de validation : elle annule le
+    // groupe entier construit jusqu'ici, puis permet de nouvelles écritures.
+    context.finish_write(true)?;
+    context
+        .session()
         .undo()
         .map(|revision| revision.is_some())
         .map_err(HostError::from_session)
@@ -348,12 +414,8 @@ impl ShapeArgs {
 }
 
 /// Le spec du graphe `id`, après les contrôles d'époque et de nature.
-fn graph_spec(session: &SessionHandle, id: NodeId, epoch: u64) -> Result<PlotSpec, HostError> {
-    let snapshot = session.snapshot().map_err(HostError::from_session)?;
-    check_epoch(id, epoch, snapshot.epoch)?;
-    let node = snapshot.tree.node(id).ok_or_else(|| {
-        HostError::BrokenReference(format!("{id} no longer exists in the project"))
-    })?;
+fn graph_spec(snapshot: &Snapshot, id: NodeId, epoch: u64) -> Result<PlotSpec, HostError> {
+    let node = checked_node(snapshot, id, epoch)?;
     match node.kind() {
         plotyx_core::node::NodeKind::Graph { spec, .. } => Ok(spec.clone()),
         other => Err(HostError::InvalidValue(format!(
@@ -371,45 +433,69 @@ fn set_graph_spec(session: &SessionHandle, graph: NodeId, spec: PlotSpec) -> Res
 }
 
 /// `pyx.add_shape` : pose un objet graphique au-dessus des autres du panneau
-/// et rend son rang. Une commande `SetPlotSpec`, donc un Ctrl+Z.
+/// et rend son rang. `SetPlotSpec` rejoint le groupe d'écritures du script,
+/// même si l'objet est sa première mutation (#67 + #76).
 pub(crate) fn add_shape(
-    session: &SessionHandle,
+    context: &ScriptContext,
     id: NodeId,
     epoch: u64,
     args: &ShapeArgs,
 ) -> Result<usize, HostError> {
     let shape = args.build()?;
-    let mut spec = graph_spec(session, id, epoch)?;
-    let (row, column) = args.panel;
-    let target = ShapeRef::next_in(&spec, row, column).ok_or_else(|| {
-        HostError::InvalidValue(format!(
-            "the graph has no panel at row {row}, column {column}"
-        ))
-    })?;
-    target.set(&mut spec, shape);
+    let prepare = |snapshot: &Snapshot| {
+        let mut spec = graph_spec(snapshot, id, epoch)?;
+        let (row, column) = args.panel;
+        let target = ShapeRef::next_in(&spec, row, column).ok_or_else(|| {
+            HostError::InvalidValue(format!(
+                "the graph has no panel at row {row}, column {column}"
+            ))
+        })?;
+        target.set(&mut spec, shape.clone());
+        Ok::<_, HostError>((spec, target.index))
+    };
+    let session = context.session();
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    let (mut spec, mut index) = prepare(&snapshot)?;
+    if context.begin_write()? {
+        // Époque, panneau et rang viennent de l'instantané réservé : aucun
+        // autre client ne peut écraser le graphe entre cette lecture et l'écriture.
+        let snapshot = session.snapshot().map_err(HostError::from_session)?;
+        (spec, index) = prepare(&snapshot)?;
+    }
     set_graph_spec(session, id, spec)?;
-    Ok(target.index)
+    Ok(index)
 }
 
-/// `pyx.remove_shape` : retire l'objet de rang `index` du panneau.
+/// `pyx.remove_shape` : retire l'objet de rang `index` du panneau, dans le
+/// même groupe que les autres écritures de l'exécution.
 pub(crate) fn remove_shape(
-    session: &SessionHandle,
+    context: &ScriptContext,
     id: NodeId,
     epoch: u64,
     panel: (usize, usize),
     index: usize,
 ) -> Result<(), HostError> {
-    let mut spec = graph_spec(session, id, epoch)?;
-    let target = ShapeRef {
-        row: panel.0,
-        column: panel.1,
-        index,
+    let prepare = |snapshot: &Snapshot| {
+        let mut spec = graph_spec(snapshot, id, epoch)?;
+        let target = ShapeRef {
+            row: panel.0,
+            column: panel.1,
+            index,
+        };
+        if !target.remove(&mut spec) {
+            return Err(HostError::InvalidValue(format!(
+                "no shape {index} in the panel at row {}, column {}",
+                panel.0, panel.1
+            )));
+        }
+        Ok(spec)
     };
-    if !target.remove(&mut spec) {
-        return Err(HostError::InvalidValue(format!(
-            "no shape {index} in the panel at row {}, column {}",
-            panel.0, panel.1
-        )));
+    let session = context.session();
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    let mut spec = prepare(&snapshot)?;
+    if context.begin_write()? {
+        let snapshot = session.snapshot().map_err(HostError::from_session)?;
+        spec = prepare(&snapshot)?;
     }
     set_graph_spec(session, id, spec)
 }
@@ -421,10 +507,11 @@ pub(crate) fn remove_shape(
 /// La macro exclut les autres clients et les chargements de projet pendant
 /// la création : les identifiants rendus appartiennent à une seule époque.
 pub(crate) fn import_file(
-    session: &SessionHandle,
+    context: &ScriptContext,
     path: &Path,
     recipe_name: Option<&str>,
 ) -> Result<Vec<(NodeId, u64)>, HostError> {
+    let session = context.session();
     let store = plotyx_import::RecipeStore::load_with_builtins();
     let recipe = match recipe_name {
         Some(name) => store
@@ -449,6 +536,7 @@ pub(crate) fn import_file(
     if plans.is_empty() || plans.iter().all(|plan| plan.columns.is_empty()) {
         return Err(HostError::InvalidValue("no column to import".into()));
     }
+    context.begin_write()?;
     session
         .begin_macro(MacroKind::Import)
         .map_err(HostError::from_session)?;
@@ -456,7 +544,7 @@ pub(crate) fn import_file(
         let snapshot = session.snapshot().map_err(HostError::from_session)?;
         let root = snapshot.tree.root();
         let epoch = snapshot.epoch;
-        let book = add_import_node(
+        let book = add_created_node(
             session,
             root,
             Command::AddEmptyWorkbook {
@@ -468,7 +556,7 @@ pub(crate) fn import_file(
         for plan in plans {
             // Comme le CLI : si le nom du fichier n'est pas un nom de nœud
             // valide (ou s'il est pris), garder un nom automatique.
-            let sheet = add_import_node(
+            let sheet = add_created_node(
                 session,
                 book,
                 Command::AddWorksheet {
@@ -478,7 +566,7 @@ pub(crate) fn import_file(
             )
             .or_else(|error| match error {
                 HostError::InvalidValue(_) => {
-                    add_import_node(session, book, Command::AddWorksheet { book, name: None })
+                    add_created_node(session, book, Command::AddWorksheet { book, name: None })
                 }
                 _ => Err(error),
             })?;
@@ -512,7 +600,7 @@ pub(crate) fn import_file(
 
 /// Les commandes de création ne rendent pas d'identifiant : sous la macro
 /// exclusive, le dernier enfant de `parent` est celui qu'on vient de créer.
-fn add_import_node(
+pub(crate) fn add_created_node(
     session: &SessionHandle,
     parent: NodeId,
     command: Command,
@@ -523,5 +611,176 @@ fn add_import_node(
         .tree
         .node(parent)
         .and_then(|n| n.children().last().copied())
-        .ok_or_else(|| HostError::InvalidValue("imported node not found after creation".into()))
+        .ok_or_else(|| HostError::InvalidValue("created node not found after creation".into()))
+}
+
+/// Instantané de mutation : vérifier avant la réservation, puis revérifier
+/// sous la macro. Un Load entre ces deux gestes ne réhabilite jamais une
+/// poignée d'une ancienne époque, même si son identifiant existe à nouveau.
+fn write_snapshot(context: &ScriptContext, id: NodeId, epoch: u64) -> Result<Snapshot, HostError> {
+    let session = context.session();
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    checked_node(&snapshot, id, epoch)?;
+    if context.begin_write()? {
+        let snapshot = session.snapshot().map_err(HostError::from_session)?;
+        checked_node(&snapshot, id, epoch)?;
+        Ok(snapshot)
+    } else {
+        Ok(snapshot)
+    }
+}
+
+/// Crée en fin de parent ; la macro exclusive rend fiable la récupération
+/// du dernier enfant, comme pour l'import. Le parent absent désigne la racine.
+pub(crate) fn create_node(
+    context: &ScriptContext,
+    parent: Option<(NodeId, u64)>,
+    command: impl FnOnce(NodeId) -> Command,
+) -> Result<(NodeId, u64), HostError> {
+    let (parent, epoch) = match parent {
+        Some(handle) => handle,
+        None => root(context.session())?,
+    };
+    write_snapshot(context, parent, epoch)?;
+    let id = add_created_node(context.session(), parent, command(parent))?;
+    Ok((id, epoch))
+}
+
+/// Renommage et suppression réutilisent les commandes génériques du modèle.
+pub(crate) fn mutate_node(
+    context: &ScriptContext,
+    id: NodeId,
+    epoch: u64,
+    command: Command,
+) -> Result<(), HostError> {
+    write_snapshot(context, id, epoch)?;
+    context
+        .session()
+        .execute(command)
+        .map_err(HostError::from_session)?;
+    Ok(())
+}
+
+/// Remplace les valeurs, longueur comprise, sans changer le type, l'identité
+/// ni les métadonnées. Écrire d'abord ferme les refus (type, formule, plafond)
+/// avant de retirer la queue : un refus rattrapé ne laisse pas de troncature.
+/// Les autres colonnes de la feuille ne sont jamais redimensionnées.
+pub(crate) fn set_values(
+    context: &ScriptContext,
+    id: NodeId,
+    epoch: u64,
+    cells: ValueBlock,
+) -> Result<(), HostError> {
+    let snapshot = context
+        .session()
+        .snapshot()
+        .map_err(HostError::from_session)?;
+    let node = checked_node(&snapshot, id, epoch)?;
+    let column = node
+        .as_column()
+        .ok_or_else(|| HostError::InvalidValue("expected a column handle".into()))?;
+    let values = match (column.column_type().is_float_backed(), cells) {
+        (true, ValueBlock::Float(values)) => ValueBlock::Float(values),
+        (true, ValueBlock::Mixed(cells)) => {
+            let mut values = Vec::with_capacity(cells.len());
+            for cell in cells {
+                values.push(match cell {
+                    plotyx_core::MixedCell::Number(value) => value,
+                    plotyx_core::MixedCell::Empty => f64::NAN,
+                    plotyx_core::MixedCell::Text(_) => {
+                        return Err(HostError::InvalidValue(
+                            "text cannot be written to a numeric column: create a mixed column"
+                                .into(),
+                        ))
+                    }
+                });
+            }
+            ValueBlock::Float(values)
+        }
+        (false, ValueBlock::Mixed(cells)) => ValueBlock::Mixed(cells),
+        // into_mixed normalise NaN en Empty : ici, conserver le NaN explicite.
+        (false, ValueBlock::Float(values)) => ValueBlock::Mixed(
+            values
+                .into_iter()
+                .map(plotyx_core::MixedCell::Number)
+                .collect(),
+        ),
+    };
+    let length = values.len();
+    let snapshot = write_snapshot(context, id, epoch)?;
+    let column = checked_node(&snapshot, id, epoch)?
+        .as_column()
+        .ok_or_else(|| HostError::InvalidValue("expected a column handle".into()))?;
+    let previous_length = column.len();
+    context
+        .session()
+        .execute(Command::SetCells {
+            column: id,
+            start: 0,
+            values,
+            expected_version: Some(column.version()),
+        })
+        .map_err(HostError::from_session)?;
+    if length < previous_length {
+        context
+            .session()
+            .execute(Command::DeleteCells {
+                columns: vec![id],
+                at: length,
+                count: previous_length - length,
+            })
+            .map_err(HostError::from_session)?;
+    }
+    Ok(())
+}
+
+/// Modifie uniquement les champs demandés, en préservant provenance d'import
+/// et autres métadonnées. Le type et la version restent des lectures seules.
+pub(crate) fn set_column_meta(
+    context: &ScriptContext,
+    id: NodeId,
+    epoch: u64,
+    changes: Vec<(String, Option<String>)>,
+) -> Result<(), HostError> {
+    let snapshot = write_snapshot(context, id, epoch)?;
+    let column = checked_node(&snapshot, id, epoch)?
+        .as_column()
+        .ok_or_else(|| HostError::InvalidValue("expected a column handle".into()))?;
+    let mut meta: ColumnMeta = column.meta().clone();
+    for (key, value) in changes {
+        match key.as_str() {
+            "role" => {
+                meta.role = match value.as_deref() {
+                    Some("x") => plotyx_core::ColumnRole::X,
+                    Some("y") => plotyx_core::ColumnRole::Y,
+                    Some("z") => plotyx_core::ColumnRole::Z,
+                    Some("x_error") => plotyx_core::ColumnRole::XError,
+                    Some("y_error") => plotyx_core::ColumnRole::YError,
+                    Some("label") => plotyx_core::ColumnRole::Label,
+                    Some("none") => plotyx_core::ColumnRole::None,
+                    _ => {
+                        return Err(HostError::InvalidValue(
+                            "unknown column role: use x, y, z, x_error, y_error, label or none"
+                                .into(),
+                        ))
+                    }
+                }
+            }
+            "long_name" => meta.long_name = value.unwrap_or_default(),
+            "unit" => meta.unit = value.unwrap_or_default(),
+            "comment" => meta.comment = value.unwrap_or_default(),
+            "display_format" => meta.display_format = value.unwrap_or_default(),
+            "formula" => meta.formula = value,
+            _ => {
+                return Err(HostError::InvalidValue(format!(
+                    "unknown column metadata field: {key}"
+                )))
+            }
+        }
+    }
+    context
+        .session()
+        .execute(Command::SetColumnMeta { column: id, meta })
+        .map_err(HostError::from_session)?;
+    Ok(())
 }

@@ -29,6 +29,7 @@ page qui contredit le code a tort.
 | toucher à l'acteur, à la concurrence, aux instantanés | [`session.md`](session.md) |
 | toucher au tracé, aux axes, à l'export SVG/PDF/PNG, aux formules | [`rendu.md`](rendu.md) |
 | toucher au pont PyO3 ou à la surface `pyx` des scripts | [`python-et-script.md`](python-et-script.md) |
+| reproduire les mesures du prototype Matplotlib hors écran | [`python-matplotlib-spike.md`](python-matplotlib-spike.md) |
 | toucher à la fenêtre, aux raccourcis, à la grille | [`application.md`](application.md) |
 | ajouter ou afficher une icône (rôles de couleur, planche-contact) | [`icones.md`](icones.md) |
 | écrire ou modifier un texte visible (libellé, infobulle, message) | [`textes-interface.md`](textes-interface.md) |

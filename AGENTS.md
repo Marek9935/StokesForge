@@ -43,7 +43,11 @@ confirmation pour les choix courants couverts par la demande.
   décisions non évidentes au plus près du code.
 - Vérifier les features réellement exercées : les commandes Cargo par défaut
   ne valident pas le pont Python (feature `python`). Typst est compilé et testé
-  par défaut. Les commandes adaptées sont dans `.codex/README.md`.
+  par défaut. `scripts/python-test.sh` couvre aussi l'application et le CLI,
+  et le travail CI `test-python` est automatique et bloquant. La distribution
+  CLI se vérifie par `scripts/cli-dist.sh` ; Matplotlib reste un spike isolé
+  (`scripts/python-matplotlib-spike.sh`). Les commandes adaptées sont dans
+  `.codex/README.md`.
 
 ## Pour terminer une modification
 

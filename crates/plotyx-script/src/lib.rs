@@ -1,5 +1,5 @@
 //! Le **fil de script** de PlotYx : cycle de vie de l'interpréteur embarqué,
-//! interruption, et la **surface-témoin** `pyx` offerte aux scripts Python.
+//! interruption, et la surface `pyx` de navigation, lecture et écriture offerte aux scripts Python.
 //!
 //! C'est la dernière pièce du socle : elle rend vrai — ou non — le critère de
 //! fin du chantier.
@@ -45,6 +45,13 @@
 //! [`ScriptEngine::run`] pendant qu'un script tourne rend
 //! [`ScriptError::Busy`].
 //!
+//! # Écritures groupées (#67)
+//!
+//! Les créations, renommages, suppressions, métadonnées et valeurs passent
+//! par les commandes existantes. Une exécution réussie se défait en un seul
+//! Ctrl+Z ; erreur non rattrapée et interruption annulent le groupe courant.
+//! La réservation reste paresseuse : une exécution de lecture ne l'ouvre pas.
+//!
 //! # Feature `python`
 //!
 //! Tout est derrière la feature Cargo `python`, absente de `default`. Sans
@@ -65,6 +72,8 @@ mod capture;
 mod engine;
 #[cfg(feature = "python")]
 mod error;
+#[cfg(feature = "python")]
+mod graph;
 #[cfg(feature = "python")]
 mod outcome;
 #[cfg(feature = "python")]
