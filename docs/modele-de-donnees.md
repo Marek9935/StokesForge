@@ -1,7 +1,7 @@
 # Modèle de données
 
-Trois crates : `plotyx-id` (l'identité), `plotyx-plot` (la description d'un
-graphe) et `plotyx-core` (l'arbre, les colonnes, et la résolution qui met les
+Trois crates : `stokesforge-id` (l'identité), `stokesforge-plot` (la description d'un
+graphe) et `stokesforge-core` (l'arbre, les colonnes, et la résolution qui met les
 deux en présence).
 
 Aucun des trois ne connaît d'interface graphique, et aucun ne connaît de
@@ -26,10 +26,10 @@ Project
                   └── Unknown(RawVariant)       lu d'un fichier plus récent
 ```
 
-Les **couleurs enregistrées** du projet (`plotyx_plot::SavedColors`, rangées
+Les **couleurs enregistrées** du projet (`stokesforge_plot::SavedColors`, rangées
 par usage : courbes, texte, fonds) ne sont pas un nœud mais sont portées par
 `Tree` (`Tree::saved_colors`) : elles voyagent ainsi avec l'instantané de
-session, le retour arrière et le fichier `.plx` sans chemin à part, et se
+session, le retour arrière et le fichier `.stf` sans chemin à part, et se
 modifient par la commande `SetSavedColors`. Les couleurs enregistrées « pour
 l'utilisateur » ne sont, elles, pas dans le modèle (voir
 `docs/application.md`).
@@ -57,7 +57,7 @@ Les mutations de `Tree` sont `pub(crate)` : `Project` est la seule façade
 publique de mutation. Chacune **valide tout avant d'écrire quoi que ce soit**,
 pour qu'un échec laisse l'arbre inchangé.
 
-**À lire** : `plotyx-core/src/tree.rs`, `src/node.rs`, `src/project.rs`.
+**À lire** : `stokesforge-core/src/tree.rs`, `src/node.rs`, `src/project.rs`.
 
 ### Noms et chemins
 
@@ -71,7 +71,7 @@ optionnels en préfixe (`/Manips/[Book1]Sheet1!ColA`). Une seule
 implémentation dans le dépôt — `Tree::resolve` — et c'est celle que le pont
 Python appelle aussi.
 
-**À lire** : `plotyx-core/src/name.rs`, `src/path.rs`.
+**À lire** : `stokesforge-core/src/name.rs`, `src/path.rs`.
 
 ## Les colonnes
 
@@ -94,7 +94,7 @@ Trois décisions structurent le module :
 Types : `Numeric`, `DateTime`, `Text`, `Mixed`. Rôles de tracé : `X`, `Y`
 (défaut), `Z`, `XError`, `YError`, `Label`, aucun.
 
-**À lire** : `plotyx-core/src/column.rs`.
+**À lire** : `stokesforge-core/src/column.rs`.
 
 ### `Mixed` — le type porté par la cellule
 
@@ -203,12 +203,12 @@ renommer ou déplacer une colonne ne casse rien.
   calculées. C'est le levier — déjà présent, rien n'a été inventé pour lui —
   sur lequel le zoom/pan de l'écran s'appuie ([`rendu.md`](rendu.md)).
 
-**À lire** : `plotyx-plot/src/lib.rs` (tête), puis le module du sous-type visé.
+**À lire** : `stokesforge-plot/src/lib.rs` (tête), puis le module du sous-type visé.
 
 ## `resolve` — le seul point de contact
 
-`plotyx_core::resolve` est le **seul** module du crate à connaître
-`plotyx-plot`. Il traduit un spec contre l'arbre courant : `NodeId` → colonne
+`stokesforge_core::resolve` est le **seul** module du crate à connaître
+`stokesforge-plot`. Il traduit un spec contre l'arbre courant : `NodeId` → colonne
 → données prêtes à tracer. Tout le reste du crate ignore jusqu'à l'existence
 de `PlotSpec`.
 
@@ -226,17 +226,17 @@ Deux propriétés à connaître avant d'y toucher :
   Rien ne plante, la série n'est pas retirée du spec, elle reste visible et
   marquée (invariant 10).
 
-**À lire** : `plotyx-core/src/resolve.rs` (tête).
+**À lire** : `stokesforge-core/src/resolve.rs` (tête).
 
 ## Ce qu'il faut savoir avant de modifier
 
 - Ajouter une méthode `pub` mutante à `Project` sans commande correspondante
-  dans `plotyx-commands` ouvre un chemin d'écriture non annulable
+  dans `stokesforge-commands` ouvre un chemin d'écriture non annulable
   (invariant 1).
-- Ajouter une dépendance à `plotyx-core`, `plotyx-plot` ou `plotyx-id` fait
+- Ajouter une dépendance à `stokesforge-core`, `stokesforge-plot` ou `stokesforge-id` fait
   échouer leur `tests/no_ui_dependency.rs` tant qu'elle n'est pas ajoutée à la
   liste blanche — délibérément.
-- Ajouter un champ à un type du modèle ne suffit pas : le format `.plx` a ses
+- Ajouter un champ à un type du modèle ne suffit pas : le format `.stf` a ses
   **propres** structures de transport et des conversions écrites à la main
   ([`persistance.md`](persistance.md)).
 - Certains plafonds ressemblent à des bugs et n'en sont pas (longueur de nom,

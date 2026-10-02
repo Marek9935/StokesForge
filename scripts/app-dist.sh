@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Assemble et VALIDE la distribution autonome de la fenêtre `plotyx-app`, pont
-# Python compris, **et** le binaire d'auto-vérification `plotyx-selftest`.
+# Assemble et VALIDE la distribution autonome de la fenêtre `stokesforge-app`, pont
+# Python compris, **et** le binaire d'auto-vérification `stokesforge-selftest`.
 #
 # C'est le verrou de la tâche 5.6, côté empaquetage : si ce script sort 0,
 # TROIS choses sont vraies depuis un binaire empaqueté — pas depuis
 # `cargo run`, ni contre l'interpréteur vendorisé du dépôt :
-#   1. la fenêtre `plotyx-app` s'ouvre et se ferme proprement ;
-#   2. `plotyx-selftest` — construit et lié exactement comme `plotyx-app`,
+#   1. la fenêtre `stokesforge-app` s'ouvre et se ferme proprement ;
+#   2. `stokesforge-selftest` — construit et lié exactement comme `stokesforge-app`,
 #      même rpath relatif, même disposition `lib/python` — REJOUE le critère
 #      de fin du socle entier : édition/annulation/rétablissement,
 #      aller-retour disque, et un script Python qui lit une colonne sans
@@ -16,16 +16,16 @@
 #
 # Les deux binaires sont construits sur le même modèle que
 # `scripts/pyhello-dist.sh` (mêmes pièges n°1/n°2, même disposition
-# `lib/python`) et copiés CÔTE À CÔTE dans `dist/plotyx-app/`, pour que les
+# `lib/python`) et copiés CÔTE À CÔTE dans `dist/stokesforge-app/`, pour que les
 # deux trouvent `lib/python` par le même chemin relatif
 # (`<dossier de l'exécutable>/lib/python`, cf. `EmbeddedPython::locate`).
 #
 # # Ce que ce script NE prouve PAS
 #
-# `plotyx-app` démarre l'interpréteur **paresseusement**, au premier script
-# (voir `plotyx_app::state`) : son ouverture-fermeture par auto-fermeture ne
+# `stokesforge-app` démarre l'interpréteur **paresseusement**, au premier script
+# (voir `stokesforge_app::state`) : son ouverture-fermeture par auto-fermeture ne
 # lance donc aucun script et ne touche jamais Python. C'est exactement le
-# trou que `plotyx-selftest` comble : lui seul, dans ce script, exécute
+# trou que `stokesforge-selftest` comble : lui seul, dans ce script, exécute
 # réellement un script Python depuis le paquet.
 set -euo pipefail
 
@@ -34,9 +34,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/vendor/python/lock.env"
 
 PREFIX="$REPO_ROOT/vendor/python/extracted/python"
-DIST="$REPO_ROOT/dist/plotyx-app"
+DIST="$REPO_ROOT/dist/stokesforge-app"
 SOFILE="libpython${PYTHON_XY}.so.1.0"
-AUTOQUIT_MS="${PLOTYX_APP_DIST_AUTOQUIT_MS:-1500}"
+AUTOQUIT_MS="${STOKESFORGE_APP_DIST_AUTOQUIT_MS:-1500}"
 
 # --- 1. Construction --------------------------------------------------------
 # PYO3_CONFIG_FILE : trouver libpython à la COMPILATION (piège n°1).
@@ -48,23 +48,23 @@ export PYO3_CONFIG_FILE
 # hors du dépôt — d'où le besoin de les copier au MÊME endroit (étape 2).
 export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/lib'
 
-echo "[dist] construction release de plotyx-app (feature python)"
+echo "[dist] construction release de stokesforge-app (feature python)"
 cd "$REPO_ROOT"
-cargo build -p plotyx-app --features python --release --bin plotyx-app
+cargo build -p stokesforge-app --features python --release --bin stokesforge-app
 
-echo "[dist] construction release de plotyx-selftest (feature python)"
-cargo build -p plotyx-script --features python --release --bin plotyx-selftest
+echo "[dist] construction release de stokesforge-selftest (feature python)"
+cargo build -p stokesforge-script --features python --release --bin stokesforge-selftest
 
 # --- 2. Assemblage ----------------------------------------------------------
 echo "[dist] assemblage de $DIST"
 rm -rf "$DIST"
 mkdir -p "$DIST/lib/python/lib"
 
-cp "$REPO_ROOT/target/release/plotyx-app" "$DIST/plotyx-app"
-# À CÔTÉ de plotyx-app, pas dans un sous-dossier : c'est ce qui lui fait
+cp "$REPO_ROOT/target/release/stokesforge-app" "$DIST/stokesforge-app"
+# À CÔTÉ de stokesforge-app, pas dans un sous-dossier : c'est ce qui lui fait
 # trouver lib/python par le même chemin relatif qu'EmbeddedPython::locate()
-# résout pour plotyx-app (<dossier de l'exécutable>/lib/python).
-cp "$REPO_ROOT/target/release/plotyx-selftest" "$DIST/plotyx-selftest"
+# résout pour stokesforge-app (<dossier de l'exécutable>/lib/python).
+cp "$REPO_ROOT/target/release/stokesforge-selftest" "$DIST/stokesforge-selftest"
 
 # Même disposition que dist/pyhello : libpython une seule fois dans lib/, là
 # où pointe le rpath ; le préfixe embarqué sous lib/python/lib, là où
@@ -83,17 +83,17 @@ TAILLE="$(du -sm "$DIST" | cut -f1)"
 echo "[dist] taille de $DIST : ${TAILLE} Mo"
 
 # --- 3. Preuve de liaison ---------------------------------------------------
-echo "[dist] ldd | grep python (plotyx-app) :"
-ldd "$DIST/plotyx-app" | grep -i python
-if ! ldd "$DIST/plotyx-app" | grep -q "$DIST/lib/$SOFILE"; then
-    echo "[dist] ERREUR : $SOFILE n'est pas résolue depuis $DIST/lib pour plotyx-app" >&2
+echo "[dist] ldd | grep python (stokesforge-app) :"
+ldd "$DIST/stokesforge-app" | grep -i python
+if ! ldd "$DIST/stokesforge-app" | grep -q "$DIST/lib/$SOFILE"; then
+    echo "[dist] ERREUR : $SOFILE n'est pas résolue depuis $DIST/lib pour stokesforge-app" >&2
     exit 1
 fi
 
-echo "[dist] ldd | grep python (plotyx-selftest) :"
-ldd "$DIST/plotyx-selftest" | grep -i python
-if ! ldd "$DIST/plotyx-selftest" | grep -q "$DIST/lib/$SOFILE"; then
-    echo "[dist] ERREUR : $SOFILE n'est pas résolue depuis $DIST/lib pour plotyx-selftest" >&2
+echo "[dist] ldd | grep python (stokesforge-selftest) :"
+ldd "$DIST/stokesforge-selftest" | grep -i python
+if ! ldd "$DIST/stokesforge-selftest" | grep -q "$DIST/lib/$SOFILE"; then
+    echo "[dist] ERREUR : $SOFILE n'est pas résolue depuis $DIST/lib pour stokesforge-selftest" >&2
     exit 1
 fi
 
@@ -106,13 +106,13 @@ fi
 #
 # `WAYLAND_DISPLAY` et `XDG_RUNTIME_DIR` sont délibérément ABSENTS de cet
 # environnement : sur ce poste (session GNOME/Wayland), la fermeture
-# programmée par `PLOTYX_APP_AUTOQUIT_MS` ne réveille jamais la boucle
+# programmée par `STOKESFORGE_APP_AUTOQUIT_MS` ne réveille jamais la boucle
 # d'événements de `winit` sous son greffon Wayland — le processus reste
 # indéfiniment dans `ep_poll`, constaté par `cargo run` direct (`timeout 90`
 # sans sortie). Le même binaire, sous Xwayland (`DISPLAY` sans
 # `WAYLAND_DISPLAY`), s'ouvre et se ferme normalement (code 0, quelques
 # secondes) : c'est donc une limite du greffon Wayland de `winit`/`eframe`
-# sur CE compositeur, pas un défaut de `plotyx-app`. Forcer Xwayland ici est
+# sur CE compositeur, pas un défaut de `stokesforge-app`. Forcer Xwayland ici est
 # le contournement le plus honnête tant que ce n'est pas creusé côté
 # `eframe` ; voir le rapport de la tâche 5.6 pour le détail.
 if [[ -z "${DISPLAY:-}" ]]; then
@@ -120,12 +120,12 @@ if [[ -z "${DISPLAY:-}" ]]; then
     exit 1
 fi
 
-echo "[dist] exécution en environnement nettoyé, PLOTYX_APP_AUTOQUIT_MS=$AUTOQUIT_MS"
+echo "[dist] exécution en environnement nettoyé, STOKESFORGE_APP_AUTOQUIT_MS=$AUTOQUIT_MS"
 set +e
 env -i PATH=/usr/bin:/bin HOME=/tmp \
        DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-}" \
-       PLOTYX_APP_AUTOQUIT_MS="$AUTOQUIT_MS" \
-       "$DIST/plotyx-app" 2>&1 | tee "$DIST/../plotyx-app-run.log"
+       STOKESFORGE_APP_AUTOQUIT_MS="$AUTOQUIT_MS" \
+       "$DIST/stokesforge-app" 2>&1 | tee "$DIST/../stokesforge-app-run.log"
 CODE="${PIPESTATUS[0]}"
 set -e
 
@@ -143,17 +143,17 @@ echo "[dist] OK — fenêtre empaquetée ouverte puis fermée proprement (code 0
 # comme pour pyhello-dist.sh : si la résolution du préfixe embarqué ou son
 # isolation fuyaient vers un Python système, le faux PYTHONPATH/PYTHONHOME le
 # révélerait plutôt que de passer inaperçu. Aucun DISPLAY nécessaire :
-# plotyx-selftest est un programme console, pas une fenêtre.
+# stokesforge-selftest est un programme console, pas une fenêtre.
 echo "[dist] auto-vérification depuis le paquet, environnement nettoyé et piégé"
 set +e
 env -i PATH=/usr/bin:/bin HOME=/tmp \
        PYTHONPATH=/tmp/piege PYTHONHOME=/tmp/piege2 \
-       "$DIST/plotyx-selftest" 2>&1 | tee "$DIST/../plotyx-selftest-run.log"
+       "$DIST/stokesforge-selftest" 2>&1 | tee "$DIST/../stokesforge-selftest-run.log"
 CODE_SELFTEST="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$CODE_SELFTEST" -ne 0 ]]; then
-    echo "[dist] ERREUR : plotyx-selftest est sorti en code $CODE_SELFTEST (attendu 0) — le critère de fin du socle n'est PAS vérifié depuis le paquet" >&2
+    echo "[dist] ERREUR : stokesforge-selftest est sorti en code $CODE_SELFTEST (attendu 0) — le critère de fin du socle n'est PAS vérifié depuis le paquet" >&2
     exit 1
 fi
 

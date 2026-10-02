@@ -10,34 +10,34 @@ Flèche = « dépend de » (manifestes `Cargo.toml`, vérifiés par
 `cargo metadata --no-deps --format-version 1 --offline`).
 
 ```text
-plotyx-id            NodeId seul, zéro dépendance
+stokesforge-id            NodeId seul, zéro dépendance
    ↑
-plotyx-plot          PlotSpec : quoi tracer, sans savoir comment
+stokesforge-plot          PlotSpec : quoi tracer, sans savoir comment
    ↑
-plotyx-core          arbre de projet, colonnes, résolution d'un spec
+stokesforge-core          arbre de projet, colonnes, résolution d'un spec
    ↑            ↑            ↑
-plotyx-commands  plotyx-persistence  plotyx-render ← plotyx-render-svg
+stokesforge-commands  stokesforge-persistence  stokesforge-render ← stokesforge-render-svg
 (core, plot)     (core, plot)        (core, plot)     (core, plot, render)
    ↑       ↑
-plotyx-session       l'acteur : le &mut Project de la session
+stokesforge-session       l'acteur : le &mut Project de la session
 (commands, persistence, core)
    ↑            ↑
-plotyx-script   plotyx-render-egui (core, plot, render, session)
+stokesforge-script   stokesforge-render-egui (core, plot, render, session)
 (commands, core, import, importer, plot, python, session)
-+ plotyx-python (aucune dépendance plotyx)
++ stokesforge-python (aucune dépendance stokesforge)
 
-plotyx-cli    (core, commands, import, importer, persistence)
-               import : un `Project` neuf construit directement, puis `.plx`
+stokesforge-cli    (core, commands, import, importer, persistence)
+               import : un `Project` neuf construit directement, puis `.stf`
                run (python) : script, python, session ; même acteur que la console
-plotyx-import (aucune dépendance plotyx) — lecture des fichiers d'appareil
-plotyx-importer (core, import) — plan de feuilles et colonnes du modèle, sans
+stokesforge-import (aucune dépendance stokesforge) — lecture des fichiers d'appareil
+stokesforge-importer (core, import) — plan de feuilles et colonnes du modèle, sans
                commandes : partagé par l'application, le CLI et les scripts
-plotyx-app    (commands, core, import, importer, persistence, plot, python,
+stokesforge-app    (commands, core, import, importer, persistence, plot, python,
                render-egui, render-svg, script, session)
 ```
 
-`plotyx-robustesse` est à part : il dépend du socle et du pont Python, et ne
-contient aucun code de production ([`tests.md`](tests.md)). `plotyx-arch-guard`
+`stokesforge-robustesse` est à part : il dépend du socle et du pont Python, et ne
+contient aucun code de production ([`tests.md`](tests.md)). `stokesforge-arch-guard`
 est un outil de test : la lecture commune des manifestes pour les garde-fous de
 dépendances.
 
@@ -45,64 +45,64 @@ dépendances.
 
 | Crate | Rôle | Page |
 |---|---|---|
-| `plotyx-id` | `NodeId`, et rien d'autre | [modèle](modele-de-donnees.md) |
-| `plotyx-plot` | `PlotSpec` : la description d'un graphe, neutre vis-à-vis du renderer | [modèle](modele-de-donnees.md) |
-| `plotyx-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` | [modèle](modele-de-donnees.md) |
-| `plotyx-commands` | les commandes, la pile d'undo hybride, les macros | [commandes](commandes-et-historique.md) |
-| `plotyx-persistence` | `save`/`load`, schéma de transport, format `.plx` | [persistance](persistance.md) |
-| `plotyx-session` | l'acteur, les `Snapshot`, la `revision` | [session](session.md) |
-| `plotyx-import` | lecture des fichiers d'appareil (CSV/TXT/ASC), recettes, aperçu ; indépendant de core/UI | [application](application.md) |
-| `plotyx-render` | mesure de texte, pipeline Plotters, **tout le rendu** | [rendu](rendu.md) |
-| `plotyx-render-egui` | backend écran, cache de formes, zoom/pan, feathering | [rendu](rendu.md) |
-| `plotyx-render-svg` | export SVG, et par-dessus PDF et PNG | [rendu](rendu.md) |
-| `plotyx-python` | interpréteur CPython embarqué, aller-retour numpy | [python](python-et-script.md) |
-| `plotyx-script` | le fil de script, la surface `pyx`, l'interruption | [python](python-et-script.md) |
-| `plotyx-app` | la coquille UI eframe (banc d'essai) ; **seul** crate qui traduit l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application.md) |
-| `plotyx-cli` | import et scripts Python sans interface | [application](application.md) |
-| `plotyx-importer` | du résultat de `plotyx-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
-| `plotyx-robustesse` | 21 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
-| `plotyx-arch-guard` | lecture commune des `Cargo.toml` pour les garde-fous de dépendances (dev-dependency) | [tests](tests.md) |
+| `stokesforge-id` | `NodeId`, et rien d'autre | [modèle](modele-de-donnees.md) |
+| `stokesforge-plot` | `PlotSpec` : la description d'un graphe, neutre vis-à-vis du renderer | [modèle](modele-de-donnees.md) |
+| `stokesforge-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` | [modèle](modele-de-donnees.md) |
+| `stokesforge-commands` | les commandes, la pile d'undo hybride, les macros | [commandes](commandes-et-historique.md) |
+| `stokesforge-persistence` | `save`/`load`, schéma de transport, format `.stf` | [persistance](persistance.md) |
+| `stokesforge-session` | l'acteur, les `Snapshot`, la `revision` | [session](session.md) |
+| `stokesforge-import` | lecture des fichiers d'appareil (CSV/TXT/ASC), recettes, aperçu ; indépendant de core/UI | [application](application.md) |
+| `stokesforge-render` | mesure de texte, pipeline Plotters, **tout le rendu** | [rendu](rendu.md) |
+| `stokesforge-render-egui` | backend écran, cache de formes, zoom/pan, feathering | [rendu](rendu.md) |
+| `stokesforge-render-svg` | export SVG, et par-dessus PDF et PNG | [rendu](rendu.md) |
+| `stokesforge-python` | interpréteur CPython embarqué, aller-retour numpy | [python](python-et-script.md) |
+| `stokesforge-script` | le fil de script, la surface `pyst`, l'interruption | [python](python-et-script.md) |
+| `stokesforge-app` | la coquille UI eframe (banc d'essai) ; **seul** crate qui traduit l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application.md) |
+| `stokesforge-cli` | import et scripts Python sans interface | [application](application.md) |
+| `stokesforge-importer` | du résultat de `stokesforge-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
+| `stokesforge-robustesse` | 21 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
+| `stokesforge-arch-guard` | lecture commune des `Cargo.toml` pour les garde-fous de dépendances (dev-dependency) | [tests](tests.md) |
 
 ## Les trois lignes de séparation
 
 Le découpage n'est pas décoratif ; chacune de ces trois frontières est
 **vérifiée par un test** et non par la relecture.
 
-1. **Aucune dépendance UI sous `plotyx-session`.** `plotyx-core`,
-   `plotyx-plot`, `plotyx-commands`, `plotyx-persistence`, `plotyx-session`,
-   `plotyx-script`, `plotyx-import` et `plotyx-importer` portent chacun un
+1. **Aucune dépendance UI sous `stokesforge-session`.** `stokesforge-core`,
+   `stokesforge-plot`, `stokesforge-commands`, `stokesforge-persistence`, `stokesforge-session`,
+   `stokesforge-script`, `stokesforge-import` et `stokesforge-importer` portent chacun un
    `tests/no_ui_dependency.rs` : une liste blanche de dépendances, qui force
    une décision consciente à toute nouvelle arête plutôt que de compter sur une
-   relecture. La lecture du manifeste est commune (`plotyx-arch-guard`) :
+   relecture. La lecture du manifeste est commune (`stokesforge-arch-guard`) :
    dépendances normales, de build, conditionnelles (`[target.…]`) et renommées
    (`package = …`, jugées sur leur nom réel) comptent ; les `dev-dependencies`
-   non. `plotyx-render` a son propre `tests/frontiere.rs`, qui s'appuie sur la
+   non. `stokesforge-render` a son propre `tests/frontiere.rs`, qui s'appuie sur la
    même lecture.
-2. **Le `PlotSpec` ne connaît aucun moteur de rendu.** `plotyx-plot` ne
-   dépend que de `plotyx-id` : ni `plotters`, ni `egui`, ni `typst`, ni même
+2. **Le `PlotSpec` ne connaît aucun moteur de rendu.** `stokesforge-plot` ne
+   dépend que de `stokesforge-id` : ni `plotters`, ni `egui`, ni `typst`, ni même
    `serde`. C'est ce qui fait que changer de renderer ne touche pas la
    description des graphes.
 3. **Une fonctionnalité de tracé n'entre jamais dans un seul backend.** Elle
-   va dans `plotyx-render`, générique sur `DrawingBackend`. Les deux backends
+   va dans `stokesforge-render`, générique sur `DrawingBackend`. Les deux backends
    ne diffèrent que par la façon de poser des pixels. La seule exception
-   vivante est `plotyx-render-egui::feathering`, et elle est justifiée à
+   vivante est `stokesforge-render-egui::feathering`, et elle est justifiée à
    l'endroit où elle vit : la tessellation n'existe que pour l'écran.
 
 Le détail de ces règles et de ce qui les tient : [`invariants.md`](invariants.md).
 
 ## Un cycle Cargo évité, et la trace qu'il a laissée
 
-`plotyx-id` existe pour une seule raison, et elle explique une bizarrerie
-visible du graphe. Faire porter à `NodeKind::Graph` un `plotyx_plot::PlotSpec`
-crée l'arête `plotyx-core → plotyx-plot` ; `plotyx-plot` dépendait déjà de
-`plotyx-core` en entier, pour le seul type `NodeId`. Les deux arêtes ensemble
+`stokesforge-id` existe pour une seule raison, et elle explique une bizarrerie
+visible du graphe. Faire porter à `NodeKind::Graph` un `stokesforge_plot::PlotSpec`
+crée l'arête `stokesforge-core → stokesforge-plot` ; `stokesforge-plot` dépendait déjà de
+`stokesforge-core` en entier, pour le seul type `NodeId`. Les deux arêtes ensemble
 sont un cycle que Cargo refuse (*cyclic package dependency* — vérifié, pas
 supposé).
 
 `NodeId` a donc été descendu dans un crate minimal sans dépendance, sous les
-deux. `plotyx-core` le réexporte à l'identique (`pub use plotyx_id::NodeId`) :
-aucun appelant de `plotyx_core::NodeId` n'a eu à changer. Le raisonnement
-complet est en tête de `crates/plotyx-id/src/lib.rs`.
+deux. `stokesforge-core` le réexporte à l'identique (`pub use stokesforge_id::NodeId`) :
+aucun appelant de `stokesforge_core::NodeId` n'a eu à changer. Le raisonnement
+complet est en tête de `crates/stokesforge-id/src/lib.rs`.
 
 ## Les features
 
@@ -111,7 +111,7 @@ teste entièrement sans elle.
 
 | Feature | Crates | Ce qu'elle ajoute | Ce qu'elle exige |
 |---|---|---|---|
-| `python` | `plotyx-python`, `plotyx-script`, `plotyx-app`, `plotyx-robustesse` | PyO3, interpréteur embarqué, fil de script, console de script | `PYO3_CONFIG_FILE` (voir `scripts/python-config.sh`) et l'interpréteur vendorisé de `vendor/python/` |
+| `python` | `stokesforge-python`, `stokesforge-script`, `stokesforge-app`, `stokesforge-robustesse` | PyO3, interpréteur embarqué, fil de script, console de script | `PYO3_CONFIG_FILE` (voir `scripts/python-config.sh`) et l'interpréteur vendorisé de `vendor/python/` |
 
 Sans la feature `python`, les crates concernés compilent vides — c'est la
 condition du droit d'abandonner Python sans rien démonter. Conséquence
@@ -121,7 +121,7 @@ l'exercer, `scripts/python-test.sh` pose les variables d'environnement
 
 **Typst n'est pas une feature.** Depuis l'issue #29, `typst`, `typst-layout`,
 `typst-render` et `typst-svg` (tous `=0.15.1`) sont des dépendances fermes de
-`plotyx-render`, `plotyx-render-egui` et `plotyx-render-svg`, toujours
+`stokesforge-render`, `stokesforge-render-egui` et `stokesforge-render-svg`, toujours
 compilées : `cargo build` et `cargo test --workspace` les couvrent. Ce qui
 reste optionnel est le **chemin d'exécution** d'un backend (formules par Typst
 ou en texte brut), détaillé dans [`rendu.md`](rendu.md#typst-r8).
@@ -130,11 +130,11 @@ ou en texte brut), détaillé dans [`rendu.md`](rendu.md#typst-r8).
 
 | Binaire | Crate | À quoi il sert |
 |---|---|---|
-| `plotyx-app` | `plotyx-app` | la fenêtre — `plotyx-app [chemin]` |
-| `plotyx-cli` | `plotyx-cli` | `import` : appareils → `.plx`, projet neuf sans session ; `recipes` ; `run` (python) : script via session sans fenêtre |
-| `plotyx-selftest` | `plotyx-script` | rejouer le critère de fin du socle depuis une distribution empaquetée |
-| `plotyx-pyhello` | `plotyx-python` | prouver l'isolation de la pile Python empaquetée |
-| `plotyx-sonde-alloc`, `plotyx-sonde-pile` | `plotyx-robustesse` | deux sondes hors-processus (échec d'allocation, débordement de pile) |
+| `stokesforge-app` | `stokesforge-app` | la fenêtre — `stokesforge-app [chemin]` |
+| `stokesforge-cli` | `stokesforge-cli` | `import` : appareils → `.stf`, projet neuf sans session ; `recipes` ; `run` (python) : script via session sans fenêtre |
+| `stokesforge-selftest` | `stokesforge-script` | rejouer le critère de fin du socle depuis une distribution empaquetée |
+| `stokesforge-pyhello` | `stokesforge-python` | prouver l'isolation de la pile Python empaquetée |
+| `stokesforge-sonde-alloc`, `stokesforge-sonde-pile` | `stokesforge-robustesse` | deux sondes hors-processus (échec d'allocation, débordement de pile) |
 
 Les `scripts/*.sh` de la racine assemblent et relancent les distributions
 (`dist/`) dans un environnement nettoyé.
@@ -146,10 +146,10 @@ Les `scripts/*.sh` de la racine assemblent et relancent les distributions
 - **Fenêtre** (*window*) — un nœud affichable en sous-fenêtre : classeur,
   graphe, matrice, note. `Tree::windows()` les liste ; leurs noms sont uniques
   à l'échelle du projet entier, pas seulement du parent.
-- **Révision** — le compteur monotone de `plotyx-session`, incrémenté à chaque
+- **Révision** — le compteur monotone de `stokesforge-session`, incrémenté à chaque
   mutation acceptée. Un client sait que son instantané est périmé en comparant
   la révision, jamais les arbres.
-- **Spec** — un `plotyx_plot::PlotSpec` : ce qu'il faut tracer.
+- **Spec** — un `stokesforge_plot::PlotSpec` : ce qu'il faut tracer.
 - **Instantané** (*snapshot*) — une vue figée et immuable du projet, rendue
   par l'acteur : un `Arc<Tree>` plus la révision et l'état de l'historique.
 - **Macro** — un groupe de commandes qui s'annule d'un seul `Ctrl+Z`.

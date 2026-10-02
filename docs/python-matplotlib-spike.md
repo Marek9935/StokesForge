@@ -1,9 +1,9 @@
 # Évaluation de Matplotlib — spike #69
 
 Le prototype fonctionne sur Linux x86_64 : Matplotlib s'importe dans CPython
-isolé, lit les colonnes `pyx` via numpy et produit du SVG et du PNG hors écran.
+isolé, lit les colonnes `pyst` via numpy et produit du SVG et du PNG hors écran.
 Le SVG passe aussi par les convertisseurs PNG/PDF déjà utilisés par les exports
-PlotYx. Ce résultat est un fichier exporté, pas un `PlotSpec` éditable.
+StokesForge. Ce résultat est un fichier exporté, pas un `PlotSpec` éditable.
 
 ## Reproduction
 
@@ -20,7 +20,7 @@ La copie est renouvelée quand `vendor/python/lock.env` change ; `pip check`
 contrôle la cohérence. Le runtime habituel et les paquets de distribution
 restent ceux de base, sans Matplotlib.
 
-Le test exécutable est `plotyx-script/examples/matplotlib-spike.rs`, lancé
+Le test exécutable est `stokesforge-script/examples/matplotlib-spike.rs`, lancé
 explicitement par le script. Il vérifie :
 
 - version 3.11.2, import depuis la copie et `sys.flags.isolated == 1` ;
@@ -32,8 +32,8 @@ explicitement par le script. Il vérifie :
 
 Les fichiers exportés restent sur disque après undo : l'historique annule le
 modèle, pas les écritures de fichiers arbitraires d'un script. Les artefacts de
-contrôle sont `/tmp/plotyx69-spike.svg`, `/tmp/plotyx69-spike.png` et
-`/tmp/plotyx69-measurements.json`. Aucun artefact généré n'est versionné.
+contrôle sont `/tmp/stokesforge69-spike.svg`, `/tmp/stokesforge69-spike.png` et
+`/tmp/stokesforge69-measurements.json`. Aucun artefact généré n'est versionné.
 
 ## Mesures du 2 octobre 2026
 
@@ -65,13 +65,13 @@ situent le coût sur ce poste, sans promettre un temps universel.
 Matplotlib convient à un export libre issu d'un script : l'utilisateur
 scientifique peut réutiliser son code de tracé et les backends standards. Le
 coût en taille est sensible, et l'import doit rester paresseux. Le prototype
-n'ajoute pas de fenêtre Matplotlib ni de nouvelle surface native `pyx`.
+n'ajoute pas de fenêtre Matplotlib ni de nouvelle surface native `pyst`.
 
-Les graphes créés par `pyx.plot` gardent leurs séries et références de colonnes
-dans un `PlotSpec`, modifiable dans les propriétés de PlotYx. Un SVG Matplotlib
+Les graphes créés par `pyst.plot` gardent leurs séries et références de colonnes
+dans un `PlotSpec`, modifiable dans les propriétés de StokesForge. Un SVG Matplotlib
 est un résultat figé ; il n'offre pas cet historique d'édition. Les deux voies
 ont donc des usages distincts. Le titre du prototype utilise le mathtext de
-Matplotlib ; le rendu Typst des graphes natifs reste celui de PlotYx.
+Matplotlib ; le rendu Typst des graphes natifs reste celui de StokesForge.
 
 L'essai démontre la voie « export » demandée dans #69. Un affichage dans une
 note, la gestion de figures persistantes ou une fenêtre dédiée ne sont pas

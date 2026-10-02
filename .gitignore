@@ -2,7 +2,7 @@
 /target/
 crates/*/target/
 
-# Distributions assemblées (scripts/pyhello-dist.sh, cf. crates/plotyx-python/README.md)
+# Distributions assemblées (scripts/pyhello-dist.sh, cf. crates/stokesforge-python/README.md)
 /dist/
 
 # Python (legacy-python/ — gardé comme référence, cf. docs/rustrewrite/roadmap.md)
@@ -39,10 +39,10 @@ htmlcov/
 /sandbox/
 *.h5
 *.hdf5
-*.pyx-project
-# Projets enregistrés par le banc (`plotyx-app [chemin]`) : des sauvegardes de
+*.pyst-project
+# Projets enregistrés par le banc (`stokesforge-app [chemin]`) : des sauvegardes de
 # travail, pas des fixtures — les jeux d'essai versionnés vivent dans `test/`.
-*.plotyx
+*.stokesforge
 
 # Interpréteur Python vendored (python-build-standalone, cf. cahier-des-charges-technique.md §8.6.1)
 /vendor/python/*.tar.gz

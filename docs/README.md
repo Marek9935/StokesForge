@@ -1,6 +1,6 @@
-# Documentation PlotYx — branche `rewriterust`
+# Documentation StokesForge — branche `rewriterust`
 
-Portage de PlotYx (analyse et tracé de données scientifiques, façon OriginLab)
+Portage de StokesForge (analyse et tracé de données scientifiques, façon OriginLab)
 de Python/Qt vers Rust. Tout le code vit dans le workspace Cargo à la racine.
 
 ## Ce que cette documentation est, et ce qu'elle n'est pas
@@ -25,10 +25,10 @@ page qui contredit le code a tort.
 | savoir ce que je n'ai pas le droit de casser | [`invariants.md`](invariants.md) |
 | toucher à l'arbre de projet, aux colonnes, au `PlotSpec` | [`modele-de-donnees.md`](modele-de-donnees.md) |
 | toucher à l'undo/redo, aux macros | [`commandes-et-historique.md`](commandes-et-historique.md) |
-| toucher au format `.plx`, à `save`/`load` | [`persistance.md`](persistance.md) |
+| toucher au format `.stf`, à `save`/`load` | [`persistance.md`](persistance.md) |
 | toucher à l'acteur, à la concurrence, aux instantanés | [`session.md`](session.md) |
 | toucher au tracé, aux axes, à l'export SVG/PDF/PNG, aux formules | [`rendu.md`](rendu.md) |
-| toucher au pont PyO3 ou à la surface `pyx` des scripts | [`python-et-script.md`](python-et-script.md) |
+| toucher au pont PyO3 ou à la surface `pyst` des scripts | [`python-et-script.md`](python-et-script.md) |
 | reproduire les mesures du prototype Matplotlib hors écran | [`python-matplotlib-spike.md`](python-matplotlib-spike.md) |
 | toucher à la fenêtre, aux raccourcis, à la grille | [`application.md`](application.md) |
 | ajouter ou afficher une icône (rôles de couleur, planche-contact) | [`icones.md`](icones.md) |
@@ -64,9 +64,9 @@ avant d'être repris.
 
 ```sh
 cargo build --workspace
-cargo test --workspace                        # inclut plotyx-robustesse, sauf #[ignore]
+cargo test --workspace                        # inclut stokesforge-robustesse, sauf #[ignore]
 cargo test -p <crate> <nom_test>              # un seul test
-cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
+cargo test -p stokesforge-robustesse -- --ignored  # reproductions et bancs coûteux
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
@@ -80,7 +80,7 @@ Les deux dernières sont obligatoires : la CI (`.gitlab-ci.yml`) les fait
 - Un commentaire de tête de module explique **pourquoi**, pas *quoi* : le
   *quoi* se lit dans la signature juste en dessous.
 - Toute mutation du modèle passe par une commande annulable de
-  `plotyx-commands`, jamais par une primitive de `plotyx-core` en direct.
+  `stokesforge-commands`, jamais par une primitive de `stokesforge-core` en direct.
 
 ## `docs/archive/` — l'historique, pas la référence
 

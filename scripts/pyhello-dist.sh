@@ -26,16 +26,16 @@ export PYO3_CONFIG_FILE
 # workspace et imposerait ce rpath à tous les autres binaires.
 export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/lib'
 
-echo "[dist] construction release de plotyx-pyhello"
+echo "[dist] construction release de stokesforge-pyhello"
 cd "$REPO_ROOT"
-cargo build -p plotyx-python --features python --release --bin plotyx-pyhello
+cargo build -p stokesforge-python --features python --release --bin stokesforge-pyhello
 
 # --- 2. Assemblage ----------------------------------------------------------
 echo "[dist] assemblage de $DIST"
 rm -rf "$DIST"
 mkdir -p "$DIST/lib/python/lib"
 
-cp "$REPO_ROOT/target/release/plotyx-pyhello" "$DIST/pyhello"
+cp "$REPO_ROOT/target/release/stokesforge-pyhello" "$DIST/pyhello"
 
 # libpython vit UNE SEULE FOIS, dans dist/pyhello/lib, là où pointe le rpath.
 # Elle pèse ~209 Mo (distribution non strippée) : la dupliquer sous

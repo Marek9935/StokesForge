@@ -1,0 +1,58 @@
+[package]
+name = "stokesforge-render"
+version = "0.0.0"
+edition.workspace = true
+description = "Socle des deux backends de rendu : la source unique de mesure de texte (epaint) et le pipeline Plotters neutre vis-à-vis du backend."
+
+[lints]
+workspace = true
+
+[dependencies]
+stokesforge-core = { path = "../stokesforge-core" }
+stokesforge-plot = { path = "../stokesforge-plot" }
+# Plotters sans ses fonts (`architecture-choisie.md` §4.4) : ni font-kit, ni
+# image, ni chrono, ni ttf-parser, ni scan des fonts système. Le retrait n'est
+# sûr que parce que les DEUX backends surchargent `estimate_text_size` sur la
+# mesure de ce crate — c'est le seul point du chantier où un bug est
+# silencieux.
+plotters = { version = "0.3", default-features = false, features = [
+    "all_series",
+    "all_elements",
+] }
+plotters-backend = "0.3"
+# `epaint` seul, pas `egui` : ce crate n'a besoin que de la mise en page du
+# texte (`Fonts`, `FontDefinitions`, `TextOptions`), pas d'une pile UI. C'est
+# ce qui permet à `stokesforge-render-svg` de mesurer comme l'écran sans faire
+# entrer egui/eframe/winit dans son arbre.
+epaint = { version = "0.36.2", default-features = false, features = [
+    "default_fonts",
+] }
+# Résolution d'une police système par son nom (`fonts.rs`, embed de polices
+# du 2026-09-13) : le même mécanisme, en substance, que celui que
+# `stokesforge-render-svg::pdf` utilise déjà côté export (R6) pour ne pas perdre
+# le texte silencieusement. Version alignée sur celle qu'`usvg` verrouille
+# déjà dans `Cargo.lock`, pour ne pas en faire coexister une deuxième.
+fontdb = "0.23"
+# R8 (Typst). Dépendance ferme depuis l'issue #29 : la feature `typst`, hors
+# défaut à l'origine (`architecture-choisie.md` §7), a été supprimée parce
+# que tout texte de titre et de légende passera par Typst (issue #28) — un
+# build sans elle dessinerait une autre figure. Versions épinglées exactement
+# (`=0.15.1`) comme le reste du dépôt le fait pour ses dépendances sensibles
+# (cf. `svg2pdf`, `eframe`) : l'API de Typst n'est pas stable d'une version
+# mineure à l'autre (vérifié en écrivant le `World`, R0).
+typst = "=0.15.1"
+# `PagedDocument` et la fonction de mise en page viennent de ce crate, pas de
+# `typst` (vérifié dans la source, pas supposé — R0 l'avait déjà noté).
+# `typst` réexporte tout `typst-library` (`Library`, `World`, `FontBook`,
+# `Font`, `Bytes`, `Datetime`…) et `typst-syntax` (`FileId`, `Source`,
+# `VirtualPath`…) sous `typst::` — pas besoin de ces crates en direct.
+typst-layout = "=0.15.1"
+
+[dev-dependencies]
+stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
+toml = "0.8"
+# Vérifie, dans les tests de `fonts.rs`, que les fichiers embarqués sont bien
+# des polices et que leurs noms de famille correspondent à ce que le fichier
+# déclare — la même bibliothèque qu'utilise `epaint` pour la mise en page
+# (`architecture-choisie.md` §4.3), à la version qu'il verrouille déjà.
+skrifa = "0.44"

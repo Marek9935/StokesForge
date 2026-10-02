@@ -1,0 +1,19 @@
+[package]
+name = "stokesforge-session"
+version = "0.0.0"
+edition.workspace = true
+description = "Acteur qui possède le Project de StokesForge et le sert à ses clients (UI, script) par un canal FIFO."
+
+[lints]
+workspace = true
+
+[dependencies]
+stokesforge-core = { path = "../stokesforge-core" }
+stokesforge-commands = { path = "../stokesforge-commands" }
+thiserror = "2"
+stokesforge-persistence = { version = "0.0.0", path = "../stokesforge-persistence" }
+
+[dev-dependencies]
+stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
+tempfile = "3"
+toml = "0.8"

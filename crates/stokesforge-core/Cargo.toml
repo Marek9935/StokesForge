@@ -1,0 +1,18 @@
+[package]
+name = "stokesforge-core"
+version = "0.0.0"
+edition.workspace = true
+description = "Modèle de données StokesForge (arbre de projet, colonnes) — zéro dépendance UI."
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+stokesforge-id = { path = "../stokesforge-id" }
+stokesforge-plot = { path = "../stokesforge-plot" }
+
+[dev-dependencies]
+stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
+proptest = "1"
+toml = "0.8"

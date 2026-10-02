@@ -28,22 +28,22 @@ Le besoin vient d'un import réel. Une colonne de mesures qui porte
   pour la première.
 
 La contrainte qui a guidé la conception : **minimiser la casse**. Le format
-`.plx` déjà écrit, les commandes existantes, le rendu qui suppose une colonne
+`.stf` déjà écrit, les commandes existantes, le rendu qui suppose une colonne
 homogène, et la vue numpy sans copie du pont Python devaient tous survivre.
 
 ## Ce qui est en place
 
 | Crate | Ce qui a changé |
 |---|---|
-| `plotyx-core` | `ColumnType::Mixed`, `MixedCell { Empty, Number, Text }`, `ColumnValues::Mixed`, `ValueBlock::Mixed`, les six mutateurs, les conversions dans les deux sens, `Column::cell`, `Column::numeric_view`, `ColumnValues::number_at` ; `accepts_child` corrigé (voir les bugs) |
-| `plotyx-commands` | `Command::SetCellsPromoting` et ses trois chemins ; `check_writable_cells`/`write_cells` factorisés ; empreinte mémoire d'un buffer mixte |
-| `plotyx-persistence` | `TypeRecord::Mixed`, `ValuesRecord::Mixed` en trois tableaux parallèles, et les deux erreurs de cohérence qui vont avec |
-| `plotyx-session` | `write_formula_column` conforme son bloc au type de la colonne |
-| `plotyx-app` | saisie tolérante, affichage d'une cellule mixte, collage TSV, suffixe de type |
-| `plotyx-script` | messages d'erreur qui nomment le vrai type |
-| `plotyx-render` | **rien** — c'est le résultat, pas un oubli |
+| `stokesforge-core` | `ColumnType::Mixed`, `MixedCell { Empty, Number, Text }`, `ColumnValues::Mixed`, `ValueBlock::Mixed`, les six mutateurs, les conversions dans les deux sens, `Column::cell`, `Column::numeric_view`, `ColumnValues::number_at` ; `accepts_child` corrigé (voir les bugs) |
+| `stokesforge-commands` | `Command::SetCellsPromoting` et ses trois chemins ; `check_writable_cells`/`write_cells` factorisés ; empreinte mémoire d'un buffer mixte |
+| `stokesforge-persistence` | `TypeRecord::Mixed`, `ValuesRecord::Mixed` en trois tableaux parallèles, et les deux erreurs de cohérence qui vont avec |
+| `stokesforge-session` | `write_formula_column` conforme son bloc au type de la colonne |
+| `stokesforge-app` | saisie tolérante, affichage d'une cellule mixte, collage TSV, suffixe de type |
+| `stokesforge-script` | messages d'erreur qui nomment le vrai type |
+| `stokesforge-render` | **rien** — c'est le résultat, pas un oubli |
 
-Le fait que `plotyx-render` soit vide dans ce tableau est la propriété qui
+Le fait que `stokesforge-render` soit vide dans ce tableau est la propriété qui
 compte : la traduction « cellule mixte → `f64` traçable » a lieu une fois, dans
 `Column::numeric_view`, et le pipeline — donc les deux backends — n'a rien
 appris de nouveau (invariant 5).
@@ -56,7 +56,7 @@ là avant, et c'est le chantier qui les a mis en lumière.
 ### 1. Une nature non reconnue sous une feuille perdait tout le fichier
 
 **Sérieux, corrigé.** C5 (niveau 2) promet qu'une variante inconnue lue d'un
-`.plx` borne sa perte à *ce nœud* (invariant 10). La promesse ne tenait que
+`.stf` borne sa perte à *ce nœud* (invariant 10). La promesse ne tenait que
 pour un nœud rangé dans un **dossier** : `NodeKind::Unknown` compte comme
 fenêtre, donc `Folder::accepts_child` l'acceptait — mais `Workbook` et
 `Worksheet`, non. `unknown.rs` faisait correctement son travail, rangeait le
@@ -81,7 +81,7 @@ est maintenant conformé au type de la colonne avant l'écriture.
 
 ### 3. « la colonne est de type texte » pour une colonne qui ne l'est pas
 
-**Cosmétique, corrigé.** `pyx.column` et `pyx.set_column` refusaient toute
+**Cosmétique, corrigé.** `pyst.column` et `pyst.set_column` refusaient toute
 colonne sans buffer `f64` avec le message « est de type texte ». Exact tant que
 `Text` était le seul cas ; faux ensuite. Les deux messages nomment le vrai
 type, via un `ColumnType::type_name` ajouté au cœur.
@@ -118,8 +118,8 @@ traité cette tâche). Le détail, gardé pour mémoire :
 | `memory_pinning` | aucun scénario avec une colonne mixte ; `mixed_buffer_bytes` est une estimation calquée sur `text_buffer_bytes`, non éprouvée | **comblé** — scénario 8 : une colonne mixte supprimée reste retenue tant que son entrée est sur la pile puis libérée à l'éviction (même schéma que le scénario 6), et `History::retained_bytes()` correspond exactement à l'estimation de `mixed_buffer_bytes`, recalculée indépendamment dans le test |
 | `b10` (compteur de version) | pas de cas mixte | **comblé** — la saisie tolérante qui promeut une colonne, puis une seconde saisie sur une colonne déjà mixte, avancent toutes deux le compteur |
 | `b2` (persistance) | le cas mixte vit dans `roundtrip.rs`, pas dans la batterie | **comblé** — ajouté à `b2_aller_retour_preserve_tout`, qui compare déjà type/méta/version/cellules nœud par nœud |
-| feature `python` | **non compilée par défaut, donc non vérifiée.** `float_values()` rend `None` pour une colonne mixte, ce qui *devrait* donner le refus attendu côté `pyx`, mais aucun test ne l'exerce. À lancer avec `scripts/python-test.sh` | **toujours ouvert** — voir la note dédiée ci-dessous |
-| feature `typst` (supprimée depuis : Typst est une dépendance ferme, issue #29) | non compilée non plus. Aucun code sous `typst` ne touche aux colonnes (vérifié), donc risque faible — mais non nul | **vérifié** — `cargo build`/`cargo test` avec `--features typst` sur `plotyx-render`, `plotyx-render-svg` et `plotyx-render-egui` passent tous, sans aucun changement de code requis : confirme que rien sous `typst` ne touche aux colonnes |
+| feature `python` | **non compilée par défaut, donc non vérifiée.** `float_values()` rend `None` pour une colonne mixte, ce qui *devrait* donner le refus attendu côté `pyst`, mais aucun test ne l'exerce. À lancer avec `scripts/python-test.sh` | **toujours ouvert** — voir la note dédiée ci-dessous |
+| feature `typst` (supprimée depuis : Typst est une dépendance ferme, issue #29) | non compilée non plus. Aucun code sous `typst` ne touche aux colonnes (vérifié), donc risque faible — mais non nul | **vérifié** — `cargo build`/`cargo test` avec `--features typst` sur `stokesforge-render`, `stokesforge-render-svg` et `stokesforge-render-egui` passent tous, sans aucun changement de code requis : confirme que rien sous `typst` ne touche aux colonnes |
 
 **Note sur la feature `python`.** `scripts/python-test.sh` exige un
 interpréteur CPython embarqué que `scripts/python-vendor.sh` télécharge
@@ -131,34 +131,34 @@ l'archive de release) était de l'ordre de 100 à 150 Ko/s — l'archive seule
 n'a pas fini de télécharger après plusieurs minutes, et le script échoue si
 interrompu à mi-chemin (pas de reprise : il réécrit `$ARCHIVE.part` depuis
 zéro). Le test qui manque (`float_values()` rend `None` pour une colonne
-mixte → `pyx.column`/`pyx.set_column` doivent le refuser en nommant le bon
+mixte → `pyst.column`/`pyst.set_column` doivent le refuser en nommant le bon
 type, comme les deux autres refus déjà couverts pour `Text`) **n'a donc pas
 pu être écrit ni exécuté sous cette feature dans cette tâche.** Le code visé
-(`plotyx-python`/`plotyx-script`) n'a pas changé depuis la clôture du
+(`stokesforge-python`/`stokesforge-script`) n'a pas changé depuis la clôture du
 chantier ; rien n'indique un problème de correction, seulement une lacune de
 couverture qui reste à combler dès qu'un environnement avec un débit réseau
 suffisant (ou l'interpréteur déjà vendorisé) est disponible.
 
 ### Côté fonctionnalité
 
-- **L'import ne produit jamais de colonne mixte.** `plotyx_import::ParsedColumn`
+- **L'import ne produit jamais de colonne mixte.** `stokesforge_import::ParsedColumn`
   porte un `Vec<f64>` : un jeton illisible y devient `NaN`, exactement la perte
   que ce chantier existe pour éviter. C'est **le** cas d'usage motivant, et il
   n'en profite pas encore — il relève du chantier 2 (prévisualisation d'import),
   délibérément hors périmètre ici. C'est la première chose à faire.
 - **Aucune UI pour changer le type d'une colonne.** `Command::SetColumnType`
-  n'est dispatché nulle part dans `plotyx-app` ; on ne peut rendre une colonne
+  n'est dispatché nulle part dans `stokesforge-app` ; on ne peut rendre une colonne
   mixte que par la saisie tolérante, un script ou un fichier. Antérieur à ce
   chantier, mais plus visible maintenant qu'il y a un quatrième type.
-- **`format_f64_for_display` existe en double** — dans `plotyx-core::column` et
-  dans `plotyx-app::state`, avec des seuils différents. Le guide de robustesse
+- **`format_f64_for_display` existe en double** — dans `stokesforge-core::column` et
+  dans `stokesforge-app::state`, avec des seuils différents. Le guide de robustesse
   (§F8, « une seule table, deux directions ») demandait leur unification une
   fois les deux moitiés du correctif C4 fusionnées ; elles le sont, l'unification
   ne l'est pas. Sans rapport avec les colonnes mixtes, mais c'est le moment de
   le noter.
 - **Le pont Python refuse les colonnes mixtes**, délibérément (voir plus bas).
   Si un besoin apparaît, la bonne réponse est une surface distincte qui dit
-  qu'elle copie, pas un assouplissement de `pyx.column`.
+  qu'elle copie, pas un assouplissement de `pyst.column`.
 
 ## Décisions à ne pas rouvrir sans raison nouvelle
 
@@ -176,7 +176,7 @@ suffisant (ou l'interpréteur déjà vendorisé) est disponible.
   (`Column::get`) ou telle qu'elle est stockée (`Column::cell`) ; ajouter une
   troisième variante à `Cell` aurait touché tous ses lecteurs pour une
   distinction dont un seul a besoin.
-- **`pyx.column` refuse une colonne mixte.** Elle rend une vue *sans copie* ;
+- **`pyst.column` refuse une colonne mixte.** Elle rend une vue *sans copie* ;
   lui rendre la copie matérialisée de `numeric_view` serait une vue qui ne suit
   plus la colonne — un piège silencieux pour un script qui croirait tenir le
   buffer.

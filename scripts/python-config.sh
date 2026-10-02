@@ -2,7 +2,7 @@
 # Génère la configuration PyO3 pointant sur l'interpréteur embarqué (piège n°1).
 #
 # Écrit target/pyo3-config.txt à partir du gabarit versionné
-# crates/plotyx-python/pyo3-config.template.txt, puis affiche sur stdout le
+# crates/stokesforge-python/pyo3-config.template.txt, puis affiche sur stdout le
 # chemin absolu du fichier produit — de sorte qu'un appelant puisse faire :
 #     export PYO3_CONFIG_FILE="$(scripts/python-config.sh)"
 # Les messages d'avancement partent sur stderr pour ne pas polluer cette sortie.
@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFIX="$REPO_ROOT/vendor/python/extracted/python"
-TEMPLATE="$REPO_ROOT/crates/plotyx-python/pyo3-config.template.txt"
+TEMPLATE="$REPO_ROOT/crates/stokesforge-python/pyo3-config.template.txt"
 OUT="$REPO_ROOT/target/pyo3-config.txt"
 
 if [[ ! -x "$PREFIX/bin/python3" ]]; then

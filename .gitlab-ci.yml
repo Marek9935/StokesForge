@@ -4,8 +4,8 @@
 # ATTENTION — ce que `fmt`, `clippy` et `test` ne prouvent PAS :
 #
 # Ces trois travaux n'activent jamais la feature Cargo `python`. Tout ce qui
-# touche à PyO3 (crates `plotyx-python`, `plotyx-script`, et l'intégration
-# côté `plotyx-app`) est donc compilé **vide** ici : le pont Python — la
+# touche à PyO3 (crates `stokesforge-python`, `stokesforge-script`, et l'intégration
+# côté `stokesforge-app`) est donc compilé **vide** ici : le pont Python — la
 # partie la plus risquée de toute l'architecture — n'est ni compilé, ni
 # vérifié par clippy, ni testé par ces trois travaux. Un pipeline vert sur ces
 # trois travaux dit seulement que le cœur Rust pur compile et passe ses
@@ -44,7 +44,7 @@ clippy:
     - rustup component add clippy
     - cargo clippy --workspace --all-targets -- -D warnings
 
-# `cargo test --workspace` couvre désormais aussi `plotyx-robustesse` (banc de
+# `cargo test --workspace` couvre désormais aussi `stokesforge-robustesse` (banc de
 # robustesse, ajouté le 2026-09-11). Attention à ce que cela recouvre : ce
 # crate porte DEUX natures de test, et celle-ci n'en lance qu'une.
 #
@@ -61,7 +61,7 @@ test:
     - cargo test --workspace
 
 # Reproductions d'anomalies du banc de robustesse — les `#[ignore]` de
-# `plotyx-robustesse`, une par anomalie consignée dans les rapports
+# `stokesforge-robustesse`, une par anomalie consignée dans les rapports
 # `docs/rustrewrite/rapport-robustesse-2026-09-11.md` (A1 à C2) et
 # `docs/rustrewrite/rapport-robustesse-2026-09-11-suite.md` (A7 à D2, seize
 # anomalies), sous
@@ -89,7 +89,7 @@ robustesse:
   <<: *rust-cache
   allow_failure: true
   script:
-    - cargo test -p plotyx-robustesse -- --ignored
+    - cargo test -p stokesforge-robustesse -- --ignored
 
 # Python #70 : automatique et bloquant, runtime et compilations en cache.
 # scripts/python-test.sh couvre pont, scripts, robustesse, application et CLI.

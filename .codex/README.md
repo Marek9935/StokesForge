@@ -1,4 +1,4 @@
-# Développer et maintenir PlotYx avec Codex
+# Développer et maintenir StokesForge avec Codex
 
 Ce guide est le contexte durable du projet. Le fichier `AGENTS.md` à la
 racine demande de le lire avant toute implémentation. Un document placé
@@ -41,24 +41,24 @@ ci-dessus ; ne pas charger les onze systématiquement.
 
 | Besoin | Skill à consulter |
 |---|---|
-| Ajouter une fonctionnalité | [`plotyx-feature`](../.agents/skills/plotyx-feature/SKILL.md) |
-| Diagnostiquer un symptôme, trier des retours | [`plotyx-bug-report`](../.agents/skills/plotyx-bug-report/SKILL.md) |
-| Corriger un bug reproduit | [`plotyx-bug-fix`](../.agents/skills/plotyx-bug-fix/SKILL.md) |
-| Modifier le modèle ou ajouter une action annulable | [`plotyx-commande`](../.agents/skills/plotyx-commande/SKILL.md) |
-| Tracé, axes, légendes et exports | [`plotyx-rendu`](../.agents/skills/plotyx-rendu/SKILL.md) |
-| Import CSV/TXT/ASC et prévisualisation | [`plotyx-import`](../.agents/skills/plotyx-import/SKILL.md) |
-| Pont PyO3, scripts et console Python | [`plotyx-python`](../.agents/skills/plotyx-python/SKILL.md) |
-| Tests, vérification finale et commit | [`plotyx-verification`](../.agents/skills/plotyx-verification/SKILL.md) |
-| Expliquer le découpage du logiciel | [`plotyx-architecture`](../.agents/skills/plotyx-architecture/SKILL.md) |
-| Expliquer ce que le logiciel sait faire | [`plotyx-fonctionnalites`](../.agents/skills/plotyx-fonctionnalites/SKILL.md) |
-| Écrire ou modifier un texte visible | [`plotyx-textes-interface`](../.agents/skills/plotyx-textes-interface/SKILL.md) |
+| Ajouter une fonctionnalité | [`stokesforge-feature`](../.agents/skills/stokesforge-feature/SKILL.md) |
+| Diagnostiquer un symptôme, trier des retours | [`stokesforge-bug-report`](../.agents/skills/stokesforge-bug-report/SKILL.md) |
+| Corriger un bug reproduit | [`stokesforge-bug-fix`](../.agents/skills/stokesforge-bug-fix/SKILL.md) |
+| Modifier le modèle ou ajouter une action annulable | [`stokesforge-commande`](../.agents/skills/stokesforge-commande/SKILL.md) |
+| Tracé, axes, légendes et exports | [`stokesforge-rendu`](../.agents/skills/stokesforge-rendu/SKILL.md) |
+| Import CSV/TXT/ASC et prévisualisation | [`stokesforge-import`](../.agents/skills/stokesforge-import/SKILL.md) |
+| Pont PyO3, scripts et console Python | [`stokesforge-python`](../.agents/skills/stokesforge-python/SKILL.md) |
+| Tests, vérification finale et commit | [`stokesforge-verification`](../.agents/skills/stokesforge-verification/SKILL.md) |
+| Expliquer le découpage du logiciel | [`stokesforge-architecture`](../.agents/skills/stokesforge-architecture/SKILL.md) |
+| Expliquer ce que le logiciel sait faire | [`stokesforge-fonctionnalites`](../.agents/skills/stokesforge-fonctionnalites/SKILL.md) |
+| Écrire ou modifier un texte visible | [`stokesforge-textes-interface`](../.agents/skills/stokesforge-textes-interface/SKILL.md) |
 
-Les skills s'enchaînent selon le besoin : `plotyx-feature` ou
-`plotyx-bug-report` → `plotyx-bug-fix` si une correction est demandée →
-`plotyx-verification` après une modification. Ajouter `plotyx-commande`,
-`plotyx-rendu`, `plotyx-import` ou `plotyx-python` seulement pour les domaines
+Les skills s'enchaînent selon le besoin : `stokesforge-feature` ou
+`stokesforge-bug-report` → `stokesforge-bug-fix` si une correction est demandée →
+`stokesforge-verification` après une modification. Ajouter `stokesforge-commande`,
+`stokesforge-rendu`, `stokesforge-import` ou `stokesforge-python` seulement pour les domaines
 touchés. Dans Codex, on peut invoquer explicitement un skill avec
-`$plotyx-feature` (et non la syntaxe `/plotyx-feature` de Claude).
+`$stokesforge-feature` (et non la syntaxe `/stokesforge-feature` de Claude).
 Les mentions d'outils propres à Claude, comme `AskUserQuestion`, désignent
 l'intention du workflow : utiliser l'outil de question disponible dans Codex
 si un arbitrage utilisateur est réellement nécessaire. En cas de divergence,
@@ -71,20 +71,20 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Domaine | Documentation de départ | Code à examiner |
 |---|---|---|
 | Découpage et dépendances | `docs/architecture.md` | `Cargo.toml`, manifestes des crates |
-| Arbre, colonnes, identifiants, description de graphe | `docs/modele-de-donnees.md` | `plotyx-core`, `plotyx-id`, `plotyx-plot` |
-| Undo/redo et macros | `docs/commandes-et-historique.md` | `plotyx-commands`, méthodes de `plotyx-core` appelées |
-| Sauvegarde, chargement et format `.plx` | `docs/persistance.md` | `plotyx-persistence`, types du modèle et du graphe |
-| Acteur, concurrence, instantanés | `docs/session.md` | `plotyx-session`, commandes et persistance appelées |
-| Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `plotyx-render` d'abord, puis `plotyx-render-egui` / `plotyx-render-svg`, `plotyx-core/src/resolve.rs` |
-| Fenêtre, grille, raccourcis | `docs/application.md` | `plotyx-app/src/state.rs`, `app.rs`, `selection.rs`, `theme.rs` ; `plotyx-session` |
-| Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `plotyx-import/src/{recipe,parse,preview,store}.rs`, intégration dans `plotyx-app/src/state.rs` et `app.rs`, `plotyx-import/tests/fixtures.rs` |
-| Python embarqué et scripts `pyx` | `docs/python-et-script.md`, `crates/plotyx-python/README.md` | `plotyx-python`, `plotyx-script`, `scripts/python-*.sh` |
-| Tests et robustesse | `docs/tests.md` | tests du crate ; index `plotyx-robustesse/src/lib.rs`, puis batterie `bN` concernée |
-| Distribution | `crates/plotyx-python/README.md`, `docs/application.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
+| Arbre, colonnes, identifiants, description de graphe | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` |
+| Undo/redo et macros | `docs/commandes-et-historique.md` | `stokesforge-commands`, méthodes de `stokesforge-core` appelées |
+| Sauvegarde, chargement et format `.stf` | `docs/persistance.md` | `stokesforge-persistence`, types du modèle et du graphe |
+| Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, commandes et persistance appelées |
+| Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `stokesforge-render` d'abord, puis `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
+| Fenêtre, grille, raccourcis | `docs/application.md` | `stokesforge-app/src/state.rs`, `app.rs`, `selection.rs`, `theme.rs` ; `stokesforge-session` |
+| Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app/src/state.rs` et `app.rs`, `stokesforge-import/tests/fixtures.rs` |
+| Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
+| Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
+| Distribution | `crates/stokesforge-python/README.md`, `docs/application.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
 
 Les noms de crates désignent `crates/<nom>/`. Le manifeste racine inclut
-`plotyx-import`, même si certaines anciennes pages ne le recensent pas.
-Le CLI `plotyx-cli` permet aussi de vérifier le socle sans interface.
+`stokesforge-import`, même si certaines anciennes pages ne le recensent pas.
+Le CLI `stokesforge-cli` permet aussi de vérifier le socle sans interface.
 
 Les documents de `docs/archive/` expliquent les arbitrages historiques.
 Les références anciennes à `architecture-choisie.md`, `format-fichier-plx.md`
@@ -102,12 +102,12 @@ la cible active Rust.
   actions concernées. Garder la logique testable dans `state.rs` et la
   traduction des événements et l'affichage dans `app.rs`.
 - L'import reste indépendant de l'UI, de `core`, des commandes et de la
-  session. `plotyx-importer` convertit ses résultats vers les colonnes du modèle
-  pour l'application, le CLI et `pyx.import_file` ; les scripts écrivent via
+  session. `stokesforge-importer` convertit ses résultats vers les colonnes du modèle
+  pour l'application, le CLI et `pyst.import_file` ; les scripts écrivent via
   les commandes de leur session, GIL relâché, dans une macro annulable.
   Réutiliser recettes, parseur et aperçu avant de créer un second chemin.
-- Les fonctionnalités de tracé partagées vont dans `plotyx-render`, générique
-  sur le backend. Les mesures de texte passent par `plotyx_render::text`.
+- Les fonctionnalités de tracé partagées vont dans `stokesforge-render`, générique
+  sur le backend. Les mesures de texte passent par `stokesforge_render::text`.
   Plotters sans ses polices exige les surcharges `draw_text` et
   `estimate_text_size` ; ses helpers de légende peuvent contourner ces mesures.
 - Zoom/pan relèvent de `ViewState`, pas d'une mutation du `PlotSpec`.
@@ -163,8 +163,8 @@ Pour Python, examiner d'abord l'interpréteur dans
 `vendor/python/extracted/python/` et lire les scripts. Si nécessaire,
 `scripts/python-vendor.sh` télécharge les versions déclarées dans
 `vendor/python/lock.env`. Puis `scripts/python-test.sh` configure PyO3, le
-rpath et le préfixe embarqué, et teste `plotyx-python`, `plotyx-script`,
-`plotyx-robustesse` (en série), `plotyx-app` et `plotyx-cli` avec `python`.
+rpath et le préfixe embarqué, et teste `stokesforge-python`, `stokesforge-script`,
+`stokesforge-robustesse` (en série), `stokesforge-app` et `stokesforge-cli` avec `python`.
 Le travail CI `test-python` exécute ce script automatiquement et bloque en
 cas d'échec. Les reproductions `#[ignore]` exigent encore `-- --ignored`.
 Appliquer le même environnement aux vérifications Clippy avec
@@ -180,7 +180,7 @@ dans une copie distincte du runtime ; voir `docs/python-matplotlib-spike.md`.
   présentation, compléter par une vérification visuelle si un affichage est
   disponible. Sinon préciser ce qui reste non vérifié.
 - Robustesse : lire le motif de chaque `#[ignore]` avant de le lancer.
-  `cargo test -p plotyx-robustesse -- --ignored` rejoue ces cas ; certains
+  `cargo test -p stokesforge-robustesse -- --ignored` rejoue ces cas ; certains
   peuvent être coûteux ou dépendre de l'ordonnancement. Ne pas retirer un
   `ignore` sans vérifier que le test devient un garde-fou fiable.
 - Distribution : lire les scripts avant exécution ; ils reconstruisent leur

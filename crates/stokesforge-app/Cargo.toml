@@ -1,0 +1,85 @@
+[package]
+name = "stokesforge-app"
+version = "0.0.0"
+edition.workspace = true
+description = "Coquille UI minimale (banc d'essai eframe) : fait tourner une fois la boucle modèle → commande → annulation → sauvegarde → rechargement."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Le pont Python (fil de script + interpréteur embarqué) est optionnel :
+# sans cette feature, stokesforge-app compile, teste et s'exécute exactement comme
+# avant cette tâche, sans tirer PyO3 ni exiger d'interpréteur vendorisé. La
+# console de script reste visible mais désactivée (cf. `state::AppState::
+# script_available`).
+python = ["dep:stokesforge-script", "dep:stokesforge-python"]
+
+[dependencies]
+stokesforge-core = { path = "../stokesforge-core" }
+stokesforge-commands = { path = "../stokesforge-commands" }
+stokesforge-import = { path = "../stokesforge-import" }
+stokesforge-importer = { path = "../stokesforge-importer" }
+stokesforge-session = { path = "../stokesforge-session" }
+stokesforge-persistence = { path = "../stokesforge-persistence" }
+stokesforge-plot = { path = "../stokesforge-plot" }
+stokesforge-render-egui = { path = "../stokesforge-render-egui" }
+# Export du graphe en SVG, PDF ou PNG (issue #34) : le même pipeline que
+# l'écran, texte Typst compris. Aucune commande : l'export ne touche pas le
+# modèle.
+stokesforge-render-svg = { path = "../stokesforge-render-svg" }
+# Chemins optionnels, activés uniquement par la feature `python` de CE crate :
+# c'est elle qui active la feature `python` de chacun (dont dépend l'existence
+# même de leurs types publics, cf. la doc de tête de leurs `lib.rs`).
+stokesforge-script = { path = "../stokesforge-script", optional = true, features = ["python"] }
+stokesforge-python = { path = "../stokesforge-python", optional = true, features = ["python"] }
+eframe = "0.36.2"
+# Choix explicite du backend de fenêtre sous Linux : winit 0.30 n'implémente
+# PAS le glisser-déposer de fichiers sous Wayland (seulement X11, Windows et
+# macOS). Voir `main.rs` (`prefer_x11`). Même version que celle d'eframe.
+winit = { version = "0.30", default-features = false, features = ["x11", "wayland"] }
+# `svg` : chargeur des icônes embarquées (`icons.rs`) ; resvg est déjà dans l'arbre
+# (stokesforge-render-svg), aucune dépendance nouvelle.
+egui_extras = { version = "0.36.2", features = ["svg"] }
+# Sélecteur de fichiers natif pour Save/Load (remplace le champ texte de
+# saisie manuelle du chemin, cf. `docs/application.md` § « Limites assumées
+# du banc »). `xdg-portal` (feature par défaut) est une dépendance runtime
+# sous Wayland, pas une dépendance de lien : ce crate compile sans portail
+# système présent.
+rfd = "0.17.2"
+# Lecture du presse-papier système pour « Coller » pris dans un menu
+# contextuel : egui n'expose que l'écriture (`Context::copy_text`), et Ctrl+V
+# ne marche que parce qu'`egui-winit` lit le presse-papier lui-même avant de
+# pousser l'`Event::Paste`. `arboard` est précisément la bibliothèque qu'il
+# emploie en interne — elle était déjà dans l'arbre de dépendances, la citer
+# ici n'ajoute rien à compiler. Voir `app::system_clipboard_text`.
+arboard = "3.6.1"
+anyhow = "1"
+# Couleurs enregistrées « pour l'utilisateur » (tous les projets) : un
+# fichier JSON dans le dossier de configuration de StokesForge, exactement comme
+# les recettes d'import (`stokesforge_import::RecipeStore`) — mêmes bibliothèques,
+# déjà dans l'arbre de dépendances. Voir `user_colors`.
+directories = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Interface multilingue (issue #41, chantier #39) : Fluent, uniquement ici —
+# aucun crate du dessous ne traduit ni ne dépend de ces bibliothèques (les
+# listes blanches de `no_ui_dependency` les refuseraient). `fl!` (i18n-embed-fl)
+# vérifie à la compilation qu'une clé et ses arguments existent dans le
+# catalogue `en` ; rust-embed embarque `i18n/` dans le binaire. `fluent-syntax`
+# sert à produire la pseudo-langue `en-XA` depuis le catalogue `en`
+# (`i18n::pseudo`). La feature `desktop-requester` suit la demande de l'issue
+# mais n'est pas employée : StokesForge ne suit pas la langue du système pour
+# l'instant.
+i18n-embed = { version = "0.16.0", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10.1"
+rust-embed = "8.12.0"
+fluent-syntax = "0.12"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "stokesforge-app"
+path = "src/main.rs"

@@ -1,9 +1,9 @@
-# Polices embarquées de PlotYx
+# Polices embarquées de StokesForge
 
 Trois paires de polices « texte sans-serif + Math », sous licence **SIL Open
 Font License 1.1** (vérifiée sur chaque fichier `OFL.txt` ci-dessous, pas
-supposée). Embarquées dans le binaire par `crates/plotyx-render/src/fonts.rs`
-via `include_bytes!`, pour que PlotYx sache toujours dessiner du texte lisible
+supposée). Embarquées dans le binaire par `crates/stokesforge-render/src/fonts.rs`
+via `include_bytes!`, pour que StokesForge sache toujours dessiner du texte lisible
 sans dépendre de ce qui est installé sur la machine — voir
 `docs/newarchitecture/architecture-choisie.md` §7 pour la décision et sa
 date (2026-09-13).
@@ -24,7 +24,7 @@ version déclarée. Rien de tout cela ne s'applique ici : six fichiers,
 plus une fois choisis (une mise à jour de version serait un choix conscient,
 pas un défaut de build). Un mécanisme de fetch aurait ajouté une dépendance
 réseau à la compilation pour un gain quasi nul, et aurait cassé la
-robustesse hors-ligne que `plotyx-robustesse` (et la CI) tiennent pour
+robustesse hors-ligne que `stokesforge-robustesse` (et la CI) tiennent pour
 acquise. D'où le choix : commiter les fichiers directement.
 
 ## Provenance
@@ -48,7 +48,7 @@ vendorisées de `vendor/python/`.
 
 - **Libertinus** : régulier statique choisi (pas la variable) — `alerque/libertinus`
   publie les deux formats dans la même release ; le statique suffit puisque
-  PlotYx n'a besoin que du poids régulier.
+  StokesForge n'a besoin que du poids régulier.
 - **Fira Sans** : statique régulier, pris sur `google/fonts` plutôt que sur le
   dépôt `googlefonts/FiraGFVersion` (archivé, sans release) — `google/fonts`
   est la distribution effectivement publiée et sert la licence à côté.
@@ -72,6 +72,6 @@ vendorisées de `vendor/python/`.
    commit, date de récupération).
 4. Si le nom de famille interne au fichier a changé, mettre à jour
    `FontSet::sans_family_name`/`math_family_name` dans
-   `crates/plotyx-render/src/fonts.rs` — un test
+   `crates/stokesforge-render/src/fonts.rs` — un test
    (`les_noms_de_famille_correspondent_au_contenu_du_fichier`) échouera
    sinon.

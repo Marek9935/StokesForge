@@ -8,9 +8,9 @@ rejoint `docs/archive/`. Le cahier des charges complet, verbatim, vit dans
 `docs/chantiers/prevision-import.md`.
 
 Le *quoi* et le *pourquoi* du résultat, eux, vivent au plus près du code :
-`crates/plotyx-import/src/preview.rs` (tête de module) pour le budget de
-coût de l'aperçu, `crates/plotyx-import/src/recipe.rs` pour le modèle
-(`HeaderLayout`, `SubheaderRoles`), `crates/plotyx-app/src/app.rs`
+`crates/stokesforge-import/src/preview.rs` (tête de module) pour le budget de
+coût de l'aperçu, `crates/stokesforge-import/src/recipe.rs` pour le modèle
+(`HeaderLayout`, `SubheaderRoles`), `crates/stokesforge-app/src/app.rs`
 (`import_window`, `grid_contents`) pour le panneau et le bug de champ de
 texte.
 
@@ -25,14 +25,14 @@ le fichier est découpé — pas seulement une fois l'import validé. Le reste
 
 | Crate | Ce qui a changé |
 |---|---|
-| `plotyx-import` | `ImportRecipe` gagne `header_layout` (`HeaderLayout` : lignes d'en-tête principal/sous-en-tête distinctes, détection auto), `subheader_roles` (`SubheaderRoles` : plages vers `long_name`/`unit`/`comment`, option même-ligne nom/unité), `skip_chars`, `preview_lines` — tous `#[serde(default)]`. `parse()` applique les rôles et garde, par cellule non numérique, le jeton d'origine (`ParsedColumn::texts`). Nouveau module `preview` : `preview()` classe chaque ligne montrée par rôle sans reparser tout le fichier ; `detect_header_layout()` est l'équivalent du bouton de réévaluation automatique d'OriginLab. |
-| `plotyx-app` | `import_window` : contrôles du découpage structuré, assignation des rôles, caractères à retirer, panneau d'aperçu ligne par ligne coloré par rôle (remplace l'ancienne grille de valeurs figée). `AppState::import_line_preview`, `AppState::auto_detect_import_header`. `AppState::import_files` construit une colonne `Mixed` plutôt que `Numeric` dès qu'une cellule porte un texte conservé, et peuple `unit`/`comment` de `ColumnMeta` en plus de `long_name`. `grid_contents` ne consomme plus Retour arrière/Suppr pendant que la fenêtre d'import est ouverte (le bug de champ de texte, voir plus bas). |
-| `plotyx-core`, `plotyx-commands`, `plotyx-render` | **rien** — le chantier consomme `ColumnType::Mixed`/`Column::from_mixed` déjà en place depuis le chantier « colonnes à types mixtes », il ne les étend pas. |
+| `stokesforge-import` | `ImportRecipe` gagne `header_layout` (`HeaderLayout` : lignes d'en-tête principal/sous-en-tête distinctes, détection auto), `subheader_roles` (`SubheaderRoles` : plages vers `long_name`/`unit`/`comment`, option même-ligne nom/unité), `skip_chars`, `preview_lines` — tous `#[serde(default)]`. `parse()` applique les rôles et garde, par cellule non numérique, le jeton d'origine (`ParsedColumn::texts`). Nouveau module `preview` : `preview()` classe chaque ligne montrée par rôle sans reparser tout le fichier ; `detect_header_layout()` est l'équivalent du bouton de réévaluation automatique d'OriginLab. |
+| `stokesforge-app` | `import_window` : contrôles du découpage structuré, assignation des rôles, caractères à retirer, panneau d'aperçu ligne par ligne coloré par rôle (remplace l'ancienne grille de valeurs figée). `AppState::import_line_preview`, `AppState::auto_detect_import_header`. `AppState::import_files` construit une colonne `Mixed` plutôt que `Numeric` dès qu'une cellule porte un texte conservé, et peuple `unit`/`comment` de `ColumnMeta` en plus de `long_name`. `grid_contents` ne consomme plus Retour arrière/Suppr pendant que la fenêtre d'import est ouverte (le bug de champ de texte, voir plus bas). |
+| `stokesforge-core`, `stokesforge-commands`, `stokesforge-render` | **rien** — le chantier consomme `ColumnType::Mixed`/`Column::from_mixed` déjà en place depuis le chantier « colonnes à types mixtes », il ne les étend pas. |
 
 ## Le bug de champ de texte : ce que c'était vraiment
 
 Il n'était pas dans la fenêtre d'import elle-même. `grid_contents`
-(`crates/plotyx-app/src/app.rs`) consomme Retour arrière/Suppr via
+(`crates/stokesforge-app/src/app.rs`) consomme Retour arrière/Suppr via
 `ui.input_mut(|input| input.consume_key(...))` pour son propre raccourci
 « effacer la sélection ». `input_mut` agit sur l'`InputState` du `Context`
 **entier**, pas sur celui d'une `Ui` — donc pas seulement sur cette grille.
@@ -41,7 +41,7 @@ state.header_editing().is_none()`, mais pas par
 `state.import_state().is_none()`.
 
 Or `import_window` (un `egui::Window` flottant) est peinte *après* le dock
-dans `PlotyxApp::update` — donc *après* que `grid_contents` (qui continue de
+dans `StokesForgeApp::update` — donc *après* que `grid_contents` (qui continue de
 tourner en dessous, à chaque image, tant qu'un classeur est ouvert) ait déjà
 consommé l'événement clavier. Résultat : taper Retour arrière ou Suppr dans
 un champ texte de la fenêtre d'import ne faisait plus rien, la touche ayant
@@ -68,17 +68,17 @@ d'un « paramètre système/utilisateur » libre que `comment`, et le fondre
 dedans aurait mélangé deux informations distinctes (un commentaire de
 colonne vs. un paramètre d'acquisition de l'appareil) sans bénéfice clair.
 Étendre `ColumnMeta` avec deux nouveaux champs aurait touché la persistance
-`.plx` pour un besoin que personne n'a encore exprimé côté PlotYx — pas
+`.stf` pour un besoin que personne n'a encore exprimé côté StokesForge — pas
 vérifié dans `docs/persistance.md` en détail parce que ce n'était pas
 nécessaire : `ImportRecipe`/`RecipeStore` ne touchent de toute façon jamais
-au format `.plx` (voir plus bas), la question ne se posait donc que pour
+au format `.stf` (voir plus bas), la question ne se posait donc que pour
 `ColumnMeta`, tranchée en amont. À rouvrir si un usage réel réclame ces deux
 rôles.
 
 ### Coût de l'aperçu en direct sur un gros fichier
 
 **Bornage à deux niveaux**, voir la doc de tête de
-`crates/plotyx-import/src/preview.rs` :
+`crates/stokesforge-import/src/preview.rs` :
 
 - découper le fichier en lignes (`str::split('\n')`) reste `O(taille du
   fichier)` — incompressible, et déjà le cas de l'ancien `import_preview`
@@ -127,17 +127,17 @@ si OriginLab appliquait sa détection en continu plutôt que sur un bouton.
 
 ### Persistance des nouveaux réglages dans `ImportRecipe`
 
-**Non concerné par le format `.plx`** — `ImportRecipe`/`RecipeStore`
+**Non concerné par le format `.stf`** — `ImportRecipe`/`RecipeStore`
 persistent dans un fichier JSON séparé
 (`ProjectDirs::config_dir()/import_recipes.json`, voir
-`crates/plotyx-import/src/store.rs`), jamais dans le fichier de projet.
+`crates/stokesforge-import/src/store.rs`), jamais dans le fichier de projet.
 `docs/persistance.md` ne les mentionne pas et n'avait pas besoin d'être lu
 en détail pour cette raison. La seule compatibilité qui comptait était
 JSON→JSON : tous les nouveaux champs portent `#[serde(default)]`
 (`header_layout`, `subheader_roles`, `skip_chars`, `preview_lines`), vérifié
 par un test dédié
 (`recette_json_anterieure_au_chantier_se_charge_avec_les_defauts`,
-`crates/plotyx-import/src/recipe.rs`) qui désérialise un JSON écrit avant ce
+`crates/stokesforge-import/src/recipe.rs`) qui désérialise un JSON écrit avant ce
 chantier et affirme que les nouveaux champs prennent leurs valeurs par
 défaut plutôt que de faire échouer le chargement.
 
@@ -165,7 +165,7 @@ défaut plutôt que de faire échouer le chargement.
   `Mixed`.** Seule une colonne qui rencontre réellement un jeton non
   numérique devient `Mixed` — vérifié par
   `importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text`
-  (`crates/plotyx-app/tests/shell.rs`), qui affirme aussi l'inverse sur la
+  (`crates/stokesforge-app/tests/shell.rs`), qui affirme aussi l'inverse sur la
   colonne numérique voisine dans le même fichier.
 - **Le correctif du bug de champ de texte vit dans `grid_contents`, pas dans
   `import_window`.** C'est là que le problème naissait (`consume_key` sur
@@ -185,7 +185,7 @@ défaut plutôt que de faire échouer le chargement.
   build/clippy, pas par un scénario de frappe simulée — voir la section
   dédiée ci-dessus).
 - `System Parameters`/`User Parameters` d'OriginLab restent sans équivalent
-  PlotYx, par choix (voir plus haut) — à revisiter si un usage réel les
+  StokesForge, par choix (voir plus haut) — à revisiter si un usage réel les
   réclame.
 - Les six plafonds de `docs/archive/rustrewrite/questions-ouvertes.md` §11
   ont été relus avant ce chantier ; aucun n'est concerné (`MAX_COLUMN_ROWS`
@@ -213,7 +213,7 @@ dans les métadonnées avec `keep_footer_metadata`.
 `ImportRecipe::keep_header_metadata` (vrai), `keep_footer_metadata` (faux) et
 `excluded_metadata` (clés ou sections écartées) pilotent `ParsedTable::metadata()`
 (`crate::metadata`, lignes clé / valeur, sections `[...]`, lignes sans clé
-gardées telles quelles). `plotyx-app` les copie dans `ColumnMeta::file_metadata`
+gardées telles quelles). `stokesforge-app` les copie dans `ColumnMeta::file_metadata`
 de chaque colonne importée — dans la macro « Importer », sans commande
 d'édition : lecture seule. Affichage : ligne « Metadata » de l'en-tête (« 📋 N
 clés »), clic → fenêtre modale de consultation (`column_metadata_window`).
@@ -224,7 +224,7 @@ La ligne se masque (menu Fenêtre) ; la sélection par clé est dans l'étape
 ## Assistant en étapes (issue #6)
 
 `import_window` est maintenant un assistant en six étapes (voir
-`docs/application.md` § « Assistant d'import »). Côté `plotyx-import` :
+`docs/application.md` § « Assistant d'import »). Côté `stokesforge-import` :
 `ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignorer retire la colonne à
 l'import), `unify_header`, `detect_encoding`. Le réglage d'en-tête n'expose
 plus la case « Détection automatique » : seul le bouton « Détecter depuis le

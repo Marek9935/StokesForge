@@ -4,7 +4,7 @@ Chantiers tirés des retours du 2026-09-23. Les défauts du même message,
 tous corrigés, ne sont plus suivis ici (voir les issues GitLab).
 
 Note de passation : elle rejoindra `docs/archive/` quand sa dernière case sera
-cochée. Chaque chantier passe par le skill `plotyx-feature` — les quatre
+cochée. Chaque chantier passe par le skill `stokesforge-feature` — les quatre
 surfaces d'une action (raccourci, menu, grisage, libellé) ne se tiennent en
 accord que si on y pense à chaque fois.
 
@@ -71,8 +71,8 @@ documenté. Le renversement est assumé (voir les décisions ci-dessus).
       clic sur un champ d'en-tête (`header_field_widget`, `app.rs:3350`)
       sélectionne la colonne entière ou seulement ce champ.
 - [ ] **Câbler la suppression de colonne — tout est à faire.**
-      `Command::DeleteColumn` existe dans `plotyx-commands`, mais
-      `rg DeleteColumn crates/plotyx-app/src/` ne renvoie **rien** : il faut
+      `Command::DeleteColumn` existe dans `stokesforge-commands`, mais
+      `rg DeleteColumn crates/stokesforge-app/src/` ne renvoie **rien** : il faut
       une variante d'`Action`, son traitement dans `AppState::dispatch`,
       l'entrée de menu, et un test dans `tests/shell.rs`. Ce n'est pas une
       ligne d'interface.
@@ -90,7 +90,7 @@ documenté. Le renversement est assumé (voir les décisions ci-dessus).
 **avant ou avec** F1, sinon l'import n'a plus aucun point d'entrée.
 
 *À préciser avant de concevoir* : les actions à inclure au-delà des trois
-citées ; le jeu d'icônes (en existe-t-il déjà dans `plotyx-app`, ou faut-il en
+citées ; le jeu d'icônes (en existe-t-il déjà dans `stokesforge-app`, ou faut-il en
 choisir ?) ; panneau permanent ou repliable.
 
 ### F6 — Contour de fenêtre, sans ombre
@@ -122,7 +122,7 @@ Vérifier l'effet sur B4 : des colonnes plus larges débordent plus tôt.
 
 Le bandeau d'actions reste hors de la zone défilable. La fenêtre flottante et
 la fenêtre détachée utilisent la même règle, et la même fonction
-(`sheet_tabs`, `crates/plotyx-app/src/app.rs`). Sélectionner une feuille dont
+(`sheet_tabs`, `crates/stokesforge-app/src/app.rs`). Sélectionner une feuille dont
 l'onglet est hors vue (clic, clavier, script) fait défiler la bande pour
 l'y ramener (`Response::scroll_to_me`, déclenché uniquement quand la
 sélection change réellement, pas à chaque image).
@@ -140,7 +140,7 @@ sélection change réellement, pas à chaque image).
 ### F10 — Réduire la hauteur de la bande d'en-tête
 
 - [ ] La bande d'en-tête des fenêtres flottantes/détachées (`window_header`,
-      `WINDOW_HEADER_HEIGHT = 28.0`, `crates/plotyx-app/src/app.rs`) est
+      `WINDOW_HEADER_HEIGHT = 28.0`, `crates/stokesforge-app/src/app.rs`) est
       perçue comme plus haute que nécessaire — retour du 2026-09-23, en
       référence à la zone grisée au survol du chevron de repli (« v »), qui
       elle occupe déjà toute la hauteur de la bande (`header_icon`, le
@@ -165,7 +165,7 @@ retouchent l'apparence de la même bande, éviter deux passages séparés.
       mode flottant et détaché (une seule fonction, `graph_view_contents`,
       couvre les deux).
 - [x] Implémenté dans `graph_view_contents`
-      (`crates/plotyx-app/src/app.rs`) ; test adapté
+      (`crates/stokesforge-app/src/app.rs`) ; test adapté
       (`le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible`) ;
       `docs/application.md` mis à jour.
 

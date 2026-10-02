@@ -6,11 +6,11 @@
 L'interface est **écrite d'abord en anglais** ; le français en est la
 traduction (#39). Ce guide est la source unique des termes et des règles : un
 texte visible qui s'en écarte est un défaut. Les chemins `app.rs:N` désignent
-`crates/plotyx-app/src/` au 2026-10-01.
+`crates/stokesforge-app/src/` au 2026-10-01.
 
 Colonne « Réf. » : **O** usage d'Origin · **G** terme générique des logiciels
 de bureau · **I** IUPAC · **D** usage courant de la discipline · **—** propre
-à PlotYx. Un `†` marque un terme **réservé** : il n'est pas encore dans
+à StokesForge. Un `†` marque un terme **réservé** : il n'est pas encore dans
 l'interface, mais son mot est déjà fixé.
 
 ## 1. Règles
@@ -40,7 +40,7 @@ l'interface, mais son mot est déjà fixé.
 
 | Anglais | Français | Définition | Refusés | Réf. |
 |---|---|---|---|---|
-| Project | Projet | Contenu d'un fichier `.plx` | Document, Espace de travail | O |
+| Project | Projet | Contenu d'un fichier `.stf` | Document, Espace de travail | O |
 | Project Manager | Gestionnaire de projet | Panneau qui montre l'arborescence du projet | Explorateur, Navigateur | O (Q15) |
 | Folder | Dossier | Conteneur d'objets dans le projet | Répertoire | O |
 | Workbook | Classeur | Fenêtre de données qui contient des feuilles | Book, Cahier, Tableur | O |
@@ -173,7 +173,7 @@ l'interface, mais son mot est déjà fixé.
 | Color | Couleur | Teinte d'un élément | — | G |
 | Opacity | Opacité | Part de couleur opaque (0-100 %) | Transparence, Alpha | G |
 | Background | Fond | Couleur derrière le graphique | Arrière-plan | G |
-| Auto | Auto | Valeur choisie par PlotYx d'après le contexte | Automatique, Défaut | G (Q9) |
+| Auto | Auto | Valeur choisie par StokesForge d'après le contexte | Automatique, Défaut | G (Q9) |
 | Text | Texte | Texte libre ancré aux données, posé sur le graphique | Annotation, Texte libre | O (Q21) |
 | Font size (pt) / Rotation (°) | Taille (pt) / Rotation (°) | Réglages d'un texte | Angle | G |
 | Object | Objet | Rectangle, ellipse, ligne ou flèche posé sur le graphique, ancré aux données (« forme » est réservé au symbole) | Forme, Dessin, Shape | O (#76) |

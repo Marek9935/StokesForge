@@ -1,4 +1,4 @@
-# Persistance — le format `.plx`
+# Persistance — le format `.stf`
 
 ## Frontière figée, format provisoire
 
@@ -18,7 +18,7 @@ partiel ni différé.
 La session utilise les variantes `save_with_geometries` et
 `load_with_geometries`, qui transportent aussi une table
 `NodeId -> WindowGeometry` (position et taille en points logiques). Ce bloc
-`window_geometries` appartient au même fichier `.plx` ou `.plotyx`, mais reste
+`window_geometries` appartient au même fichier `.stf` ou `.stokesforge`, mais reste
 séparé de l'arbre annulable. Un ancien fichier sans ce bloc se charge avec
 une table vide. L'application transmet les changements de géométrie à
 l'acteur et recharge cette table aussi bien depuis le menu Fichier qu'au
@@ -42,7 +42,7 @@ n'est exigée en développement.
 
 ## Le format ne s'écrit pas dans le modèle
 
-`plotyx-core` ne dérive aucun `Serialize`/`Deserialize`. Ce crate définit ses
+`stokesforge-core` ne dérive aucun `Serialize`/`Deserialize`. Ce crate définit ses
 **propres structures de transport** (`schema.rs`, privées au crate) et écrit à
 la main les conversions vers/depuis le modèle (`convert.rs`).
 
@@ -57,7 +57,7 @@ touchés. Ce n'est pas un oubli du format, c'est son point.
 ## Disposition du fichier
 
 ```text
-octets 0..4   signature "PLYX"
+octets 0..4   signature "STKF"
 octets 4..8   FORMAT_VERSION, u32 little-endian
 octets 8..    corps MessagePack (FileBody), rmp_serde::to_vec_named
 ```
@@ -81,7 +81,7 @@ Les rajouter après coup coûterait une migration.
    aucune trace sur la destination.
 2. **Numéro de version en premier**, lu et vérifié **avant** de toucher au
    corps. Fichier plus récent → `UnsupportedVersion` ; fichier qui n'est pas un
-   PlotYx → `NotAPlotyxFile`. Jamais de tentative de décoder un corps
+   StokesForge → `NotAStokesForgeFile`. Jamais de tentative de décoder un corps
    incompris.
 3. **Valeur manquante ≠ chaîne vide.** `None` contre `Some("")` pour le texte ;
    les `NaN` numériques sont écrits et relus **bit à bit**
@@ -102,16 +102,16 @@ tout ce qui suit, en retirer un est tout aussi cassant.
 
 ## L'historique n'est pas dans le fichier
 
-Le `.plx` ne porte **ni pile d'annulation ni libellés d'historique** :
-`plotyx-persistence` ne dépend même pas de `plotyx-commands`. Les champs
+Le `.stf` ne porte **ni pile d'annulation ni libellés d'historique** :
+`stokesforge-persistence` ne dépend même pas de `stokesforge-commands`. Les champs
 `label` du schéma sont ceux des *fenêtres* (`WindowMeta::label`), sans rapport.
 Un projet rouvert repart d'un historique vide, donc aucune phrase d'historique
 ne survit à la langue de la session qui l'a écrite (issue #46 : le constat
-« le `.plx` enregistre des phrases françaises » était inexact).
+« le `.stf` enregistre des phrases françaises » était inexact).
 
 Si l'historique est un jour écrit, le chemin est tracé : `HistoryLabel` est
 déjà une donnée structurée. Il faudra un type de transport dans `schema.rs`
-(sans `serde` dans `plotyx-commands`, comme pour `plotyx-plot`) et la même
+(sans `serde` dans `stokesforge-commands`, comme pour `stokesforge-plot`) et la même
 dégradation que `KindRecord` — un nom de variante inconnu capturé dans un
 `RawVariant`, rendu par un libellé générique, jamais un échec de lecture
 (invariant 10).
@@ -130,7 +130,7 @@ d'abord la valeur qui suit le nom de variante en un arbre générique
 variante connue — via `rmp_serde`, jamais `rmpv::ext::from_value` (ce dernier
 représente les enums par **indice**, convention différente de celle que ce
 format écrit). Si l'essai échoue, le nom et le contenu bruts sont conservés
-dans un `plotyx_plot::RawVariant`.
+dans un `stokesforge_plot::RawVariant`.
 
 C'est ce qui borne la perte à **ce seul nœud** (ou cette seule série) au lieu
 du fichier entier, et ce qui fait qu'une variante inconnue **survit à deux
@@ -143,7 +143,7 @@ tient : le nœud dégradé doit ensuite **passer la validation d'arbre**. Une
 nature non reconnue compte comme fenêtre, donc un dossier l'acceptait ; un
 classeur et une feuille, non — et une colonne dégradée sous sa feuille faisait
 donc échouer tout le fichier, exactement là où la dégradation devait servir.
-Les trois conteneurs l'acceptent depuis (`plotyx_core::NodeKind::accepts_child`,
+Les trois conteneurs l'acceptent depuis (`stokesforge_core::NodeKind::accepts_child`,
 batterie `b19`).
 
 Le compromis est assumé et documenté : le détour par `rmpv::Value` copie les
@@ -237,5 +237,5 @@ puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
   (bornes d'un `PlotSpec` venu du disque), `b19` (fichier écrit par une version
   plus récente), `b20` (deux écrivains sur un même fichier).
 
-**À lire** : `plotyx-persistence/src/lib.rs`, `src/schema.rs`,
+**À lire** : `stokesforge-persistence/src/lib.rs`, `src/schema.rs`,
 `src/unknown.rs` (têtes).

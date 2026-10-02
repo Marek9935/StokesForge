@@ -4,17 +4,17 @@ Trois crates, et une règle qui explique leur découpage : **une fonctionnalité
 de tracé n'entre jamais dans un seul backend** (invariant 5).
 
 ```text
-plotyx-render          tout le rendu, générique sur DrawingBackend
+stokesforge-render          tout le rendu, générique sur DrawingBackend
    ↑                        ↑
-plotyx-render-egui    plotyx-render-svg
+stokesforge-render-egui    stokesforge-render-svg
   (écran)              (SVG → PDF, PNG)
 ```
 
 Les deux backends ne diffèrent que par **la façon de poser des pixels**. Tout
 le reste — types de série, échelles, primitives, légende, décimation, rognage,
-formules — est dans `plotyx-render`.
+formules — est dans `stokesforge-render`.
 
-## `plotyx-render` — le socle commun
+## `stokesforge-render` — le socle commun
 
 | Module | Ce qu'il porte |
 |---|---|
@@ -29,7 +29,7 @@ formules — est dans `plotyx-render`.
 | `decimate` | LTTB |
 | `interact` | correspondance pixel ↔ données d'un panneau tracé |
 | `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
-| `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `plotyx_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
+| `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `stokesforge_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
 | `formula` | Typst (dépendance ferme, pas une feature) : le style « texte riche » des titres, titres d'axe et légende, la compilation, le cache |
 | `sample` | deux graphes de démonstration |
 
@@ -37,10 +37,10 @@ formules — est dans `plotyx-render`.
 
 Toute couleur du spec peut porter une opacité (`#RRGGBBAA`,
 `color::rgba_or`) : traits, marqueurs, barres, texte, échelles, fond. Le
-fond par défaut d'un graphe est sans couleur (`plotyx_plot::TRANSPARENT`).
+fond par défaut d'un graphe est sans couleur (`stokesforge_plot::TRANSPARENT`).
 Un fond d'opacité nulle n'est **pas peint** : l'export SVG, PNG ou PDF n'a pas
-de fond (`plotyx-render-svg`, test `un_fond_sans_couleur_donne_un_png_transparent`).
-À l'écran, `plotyx-app` peint un blanc sous la figure (`display_backdrop`) :
+de fond (`stokesforge-render-svg`, test `un_fond_sans_couleur_donne_un_png_transparent`).
+À l'écran, `stokesforge-app` peint un blanc sous la figure (`display_backdrop`) :
 ce blanc vit dans l'application, jamais dans ce crate, sinon il serait exporté.
 Pour choisir l'encre automatique, un fond (semi-)transparent est jugé
 composé sur du blanc (`color::over_white`).
@@ -56,20 +56,20 @@ ont leur couleur. Une chaîne vide veut dire **automatique** :
 du panneau, au cadre et au texte de la légende, et au contour des barres. Un
 fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
 automatique — à l'écran comme à l'export, puisque le pipeline est commun
-(`plotyx-render-svg/tests/couleurs.rs`).
+(`stokesforge-render-svg/tests/couleurs.rs`).
 
 Police d'une zone de texte (issues #77, #78) : la police et le corps d'un
 titre, d'un titre d'axe, de la légende et d'un texte libre sont des champs de la
-zone (`plotyx_plot::TextFont`), pas du contenu. Le pipeline en tire le style
+zone (`stokesforge_plot::TextFont`), pas du contenu. Le pipeline en tire le style
 (`pipeline::font_style`, corps borné à 4-200) et la police voyage dans la
-**famille du style** (`formula::rich_style_font` : `plotyx-typst|Fira Sans`, comme
+**famille du style** (`formula::rich_style_font` : `stokesforge-typst|Fira Sans`, comme
 l'angle d'un texte tourné) ; `formula::source` pose alors `#set text(font: …)`
 et `#show math.equation: set text(font: …)` avant le texte, les deux backends
 l'ignorant. La police Math suit (`math_family_for`) : Libertinus Sans →
 Libertinus Math, Fira Sans → Fira Math, Noto Sans → Noto Sans Math, une police
 système → Noto Sans Math (repli). Tests : `formula.rs`
 (`la_police_d_une_zone_est_posee_dans_le_source_avec_sa_math`), `geometrie.rs`
-(`le_corps_d_une_zone_de_texte_change_sa_taille`), `plotyx-render-svg/tests/typst.rs`.
+(`le_corps_d_une_zone_de_texte_change_sa_taille`), `stokesforge-render-svg/tests/typst.rs`.
 
 Le titre et la légende se **sélectionnent** au clic (`GraphView::selected_text`,
 cadre bleu comme un texte libre, issue #77) ; une entrée de légende désigne la
@@ -119,9 +119,9 @@ appris.
 Rien de tout cela ne connaît le type des colonnes tracées : le pipeline reçoit
 des `ResolvedValues`, c'est-à-dire des `f64`, et il écarte déjà les points non
 finis. C'est ce qui a permis aux **colonnes à types mixtes** d'entrer sans
-qu'une ligne de rendu bouge : `plotyx_core::Column::numeric_view` donne `NaN`
+qu'une ligne de rendu bouge : `stokesforge_core::Column::numeric_view` donne `NaN`
 pour une cellule texte ou vide, et une colonne mixte trace donc exactement ses
-cellules numériques (`plotyx-render/tests/geometrie.rs`,
+cellules numériques (`stokesforge-render/tests/geometrie.rs`,
 `une_colonne_mixte_ne_trace_que_ses_cellules_numeriques`). L'endroit correct
 pour ce genre de traduction est toujours celui-là — en amont, une fois — et
 jamais un backend (invariant 5).
@@ -222,7 +222,7 @@ d'entrée `fonts::resolve`, et non deux fonctions « pour l'écran » / « pour
 l'export » — un appelant qui changerait de police d'un seul côté reproduirait
 exactement le défaut que `text.rs` existe pour empêcher.
 
-## `plotyx-render-egui` — l'écran
+## `stokesforge-render-egui` — l'écran
 
 `GraphView` est ce que l'UI tient réellement : un cache, plus la mise en
 relation d'un `Snapshot` de session et d'un nœud `Graph`.
@@ -240,7 +240,7 @@ résultat se met en cache et une image sans changement coûte un
 
 `(revision, rect, pixels_per_point, view_generation)`
 
-- **`revision`** — le compteur de `plotyx-session` ; le renderer devient un
+- **`revision`** — le compteur de `stokesforge-session` ; le renderer devient un
   client de plus du même protocole, il n'y avait rien à inventer ;
 - **`rect`** — le rectangle logique passé au pipeline ; un appel direct peut
   changer sa taille, alors que l'application garde `DEFAULT_FIGURE_SIZE` et
@@ -293,7 +293,7 @@ ne se voit pas sur une image qui bouge, et c'est exactement pendant le
 déplacement que les 22,1 ms font mal. Ce n'est donc pas un réglage exposé à
 l'utilisateur, c'est un **état du rendu**.
 
-`plotyx-render-egui::feathering` est la seule exception vivante à l'invariant 5,
+`stokesforge-render-egui::feathering` est la seule exception vivante à l'invariant 5,
 et elle n'en est pas vraiment une : `TessellationOptions` est un réglage de la
 pile egui, en aval de la collecte des `Shape`, et un SVG ne triangule rien. Il
 n'y a rien à mettre de l'autre côté.
@@ -302,7 +302,7 @@ C'est une fonction libre prenant le `Context` — et non une méthode de
 `GraphView` — parce que `TessellationOptions` vaut pour **toute la fenêtre** :
 deux vues qui le poseraient chacune poseraient deux valeurs contradictoires.
 
-## `plotyx-render-svg` — l'export
+## `stokesforge-render-svg` — l'export
 
 > « L'export est au `PlotSpec` ce que la persistance était au modèle : la seule
 > chose qui prouve que la couche neutre est réellement neutre. »
@@ -311,7 +311,7 @@ C'est pourquoi il est écrit **en même temps** que le backend écran, pas aprè
 
 Ce crate ne connaît ni `egui`, ni `eframe`, ni `winit` (`tests/frontiere.rs`),
 et mesure pourtant le texte exactement comme l'écran — la mesure vient
-d'`epaint`, tiré par `plotyx-render`. Conséquence pratique : **le rendu se teste
+d'`epaint`, tiré par `stokesforge-render`. Conséquence pratique : **le rendu se teste
 sans serveur graphique**, donc en intégration continue.
 
 `MeasuredSvgBackend` est une **enveloppe** autour de `plotters-svg::SVGBackend`,
@@ -350,9 +350,9 @@ d'un graphe à texte Typst (`un_graphe_typst_sexporte_en_svg_pdf_et_png`).
 légende passe par Typst, avec ou sans `$` ; les graduations jamais (issue #32).
 Deux moteurs de texte côte à côte ne s'alignaient pas. Le rôle est décidé par
 le pipeline, dans le style : `formula::rich_style` pose la famille réservée
-`plotyx-typst`, et les deux backends aiguillent sur `formula::is_rich`, à la
-mesure comme au dessin. Aucun champ n'est ajouté à `plotyx_plot` : **pas de
-migration du format `.plx`**. Le texte est donc compilé comme du **markup
+`stokesforge-typst`, et les deux backends aiguillent sur `formula::is_rich`, à la
+mesure comme au dessin. Aucun champ n'est ajouté à `stokesforge_plot` : **pas de
+migration du format `.stf`**. Le texte est donc compilé comme du **markup
 Typst** : `$…$` pour le mode mathématique, `*gras*`, `\$` pour un dollar.
 
 Pour que des libellés voisins s'alignent, `compile` fait précéder le texte d'un
@@ -368,8 +368,8 @@ série (`scale::forward`, même axe secondaire) ; un point hors du cadrage, ou
 ≤ 0 sur un axe log, n'est pas tracé, mais un texte dont le point est visible
 peut déborder sur les graduations (décision du 2026-10-01). Un angle libre ne
 passe pas par Plotters (`FontTransform` : quarts de tour seulement) : il voyage
-dans le style (`formula::rotated_family`, famille `plotyx-typst@<degrés>`) et
-`formula::source` enveloppe le texte dans `#plotyx-rotate` (Typst
+dans le style (`formula::rotated_family`, famille `stokesforge-typst@<degrés>`) et
+`formula::source` enveloppe le texte dans `#stokesforge-rotate` (Typst
 `rotate(reflow: true)`, l'étai dans la rotation), dont la page épouse la boîte
 tournée — l'ancrage centré reste le centre du texte. `DrawnPanel::annotations`
 rapporte centre, taille du texte droit et rotation : `hit` désigne le rectangle
@@ -385,7 +385,7 @@ Typst valide (`formula::source`, issue #36 — l'hypothèse d'un format `1e-7deg
 était fausse : le format décimal de Rust n'a pas d'exposant). Sans Typst (témoin, repli), le texte est brut et non tourné.
 
 **Objets graphiques** (issue #76) : rectangle, ellipse, ligne, flèche
-(`plotyx_render::shapes`), tracés par le pipeline commun entre la légende et
+(`stokesforge_render::shapes`), tracés par le pipeline commun entre la légende et
 les textes libres (étape « 6 bis »), donc identiques à l'écran et à l'export.
 Les deux points sont projetés **sans** test d'appartenance au cadrage
 (`Ranges::forward`) puis rognés en pixels : trait par `clip_polyline`
@@ -403,7 +403,7 @@ pixel).
 
 **Titres et légende déplaçables** (issue #53) : titre du graphe, titre de
 panneau, titres d'axe et cadre de la légende portent une `TextAnchor` optionnelle
-(`plotyx-plot::text_anchor`, centre en **données** du panneau, pas bornée au
+(`stokesforge-plot::text_anchor`, centre en **données** du panneau, pas bornée au
 cadrage : un titre vit hors de la zone de tracé). Sans ancre, Plotters pose le
 texte (bande du titre, aire de graduation, coin de la légende) ; avec une
 ancre, le pipeline le trace lui-même, centré sur le point projeté
@@ -428,7 +428,7 @@ double-clic émet `GraphEvent::EditText` / `EditLegendEntry`.
 reprend le nom long ou le nom de la colonne, souvent importé d'un appareil
 (`Abs_280 #1`). Lu comme du markup, `_` ouvrirait de l'italique et `#` du code.
 La légende lui donne donc `formula::literal_style` (famille
-`plotyx-typst-litteral`), comme à la ligne « … et N autres » : la branche Typst
+`stokesforge-typst-litteral`), comme à la ligne « … et N autres » : la branche Typst
 des backends le passe par `formula::source`, qui l'enveloppe en chaîne Typst
 `#"…"` (`formula::escape`) — composé par Typst, affiché tel quel, sans
 guillemets typographiques ni `...` changé en points de suspension. Le chemin
@@ -439,9 +439,9 @@ Le partage suit la même règle que le reste :
 
 | Où | Quoi |
 |---|---|
-| `plotyx-render/formula.rs` | le `World` Typst minimal, la compilation, le cache qui l'amortit entre deux images |
-| `plotyx-render-egui/typst_screen.rs` | `typst-render` → RGBA → texture → `Shape::Mesh` |
-| `plotyx-render-svg/typst_export.rs` | fragments `typst-svg` inlinés |
+| `stokesforge-render/formula.rs` | le `World` Typst minimal, la compilation, le cache qui l'amortit entre deux images |
+| `stokesforge-render-egui/typst_screen.rs` | `typst-render` → RGBA → texture → `Shape::Mesh` |
+| `stokesforge-render-svg/typst_export.rs` | fragments `typst-svg` inlinés |
 
 Côté export, le mécanisme mérite d'être connu avant d'y toucher : `SVGBackend`
 écrit directement dans sa `String` cible et son champ est privé, donc
@@ -470,7 +470,7 @@ pas composé par Typst.
 
 ### Côté écran : `GraphView` passe toujours par Typst
 
-`GraphView` (donc `plotyx-app`) appelle toujours `collect_shapes_with_typst`. Il
+`GraphView` (donc `stokesforge-app`) appelle toujours `collect_shapes_with_typst`. Il
 résout les polices Typst **une fois**, à sa création (`TypstScreen::with_fonts`) ;
 si cette résolution échoue, tout reste en texte brut. Il tient un
 `FormulaCache<FormulaTexture>` entre deux reconstructions de la figure, borné par
@@ -505,16 +505,16 @@ voir « Agrandir un graphe sans flouter le texte » ci-dessous.
 ## Ce qu'il faut savoir avant de modifier
 
 - **Le seul endroit du chantier où un bug est silencieux est la mesure de
-  texte.** Avant d'y toucher, lire `plotyx-render/src/text.rs` et l'invariant 4.
-- Le filet est `plotyx-render-egui/tests/accord.rs`. S'il change, lire ses deux
+  texte.** Avant d'y toucher, lire `stokesforge-render/src/text.rs` et l'invariant 4.
+- Le filet est `stokesforge-render-egui/tests/accord.rs`. S'il change, lire ses deux
   familles de **témoins** avant : sans elles, un test d'égalité entre deux
   chemins passe aussi bien parce que les deux sont justes que parce que les deux
   sont faux de la même façon.
-- Les graphes d'exemple vivent dans `plotyx-render::sample`, donc dans un crate
+- Les graphes d'exemple vivent dans `stokesforge-render::sample`, donc dans un crate
   de production, parce que le test d'accord (dans `render-egui`) et l'exemple
   visuel (dans `render-svg`) doivent porter sur **le même** graphe et que les
   deux crates ne peuvent pas dépendre l'un de l'autre. Le regarder :
-  `cargo run -p plotyx-render-svg --example figure`.
+  `cargo run -p stokesforge-render-svg --example figure`.
 - Les tests : `render/tests/{mesure,geometrie,frontiere}.rs`,
   `render-egui/tests/{accord,formes,cache_session,feathering,interaction,typst}.rs`,
   `render-svg/tests/{export,frontiere,pdf,typst}.rs`. Côté Typst :
@@ -541,7 +541,7 @@ voir « Agrandir un graphe sans flouter le texte » ci-dessous.
 `GraphView::paint_scaled` pose la figure à `DEFAULT_FIGURE_SIZE` puis la met à
 l'échelle de la fenêtre. `Shape::transform` d'epaint étire le maillage d'un
 texte déjà rastérisé à la taille logique : agrandi, il devient flou (issue
-#18). `plotyx_render_egui::scaled` remet donc chaque `Shape::Text` en page à la
+#18). `stokesforge_render_egui::scaled` remet donc chaque `Shape::Text` en page à la
 taille affichée (police × échelle) et garde le résultat par
 `(clé du cache, rectangle affiché)`. Les positions restent celles de la mise
 en page logique : la mesure du texte (invariant 4) n'est pas refaite.

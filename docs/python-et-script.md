@@ -2,10 +2,10 @@
 
 Deux crates, derrière la feature `python` (absente de `default`) :
 
-- **`plotyx-python`** — l'interpréteur CPython **embarqué**. Il ne connaît pas
-  le modèle de PlotYx : il ne manipule que des scalaires et des tranches de
+- **`stokesforge-python`** — l'interpréteur CPython **embarqué**. Il ne connaît pas
+  le modèle de StokesForge : il ne manipule que des scalaires et des tranches de
   `f64`.
-- **`plotyx-script`** — le fil de script, l'interruption, et la surface `pyx`
+- **`stokesforge-script`** — le fil de script, l'interruption, et la surface `pyst`
   offerte aux scripts. Lui connaît le modèle, et parle à l'acteur.
 
 Sans la feature, les deux compilent vide : `cargo build` et `cargo test`
@@ -18,8 +18,8 @@ exige `PYO3_CONFIG_FILE`, produite par `scripts/python-config.sh`.
 > Un script Python lit une colonne **sans copie**, en écrit une autre **via le
 > bus**, et `Ctrl+Z` annule ce que le script vient d'écrire.
 
-C'est le critère de fin du socle, et `plotyx-script::run_selftest` le rejoue en
-entier — depuis une distribution empaquetée pour le binaire `plotyx-selftest`,
+C'est le critère de fin du socle, et `stokesforge-script::run_selftest` le rejoue en
+entier — depuis une distribution empaquetée pour le binaire `stokesforge-selftest`,
 sous `cargo test` pour `tests/selftest.rs`. Toute défaillance, y compris le
 démarrage de l'interpréteur, devient une étape en échec : jamais un panic.
 
@@ -43,7 +43,7 @@ activée). `Py_Finalize` n'est **jamais** appelé : source connue de plantages e
 sortie, sans bénéfice pour un processus qui se termine. Conséquence assumée :
 les `atexit` Python ne s'exécutent pas.
 
-`plotyx-pyhello` existe pour prouver que cette isolation tient une fois
+`stokesforge-pyhello` existe pour prouver que cette isolation tient une fois
 empaquetée (`scripts/pyhello-dist.sh`, environnement nettoyé).
 
 ## Tableaux : l'asymétrie est une décision
@@ -84,7 +84,7 @@ vrai ne peut plus être effacée par la remise à zéro de début d'exécution.
 L'interpréteur démarre **sans gestion des signaux** : aucun `KeyboardInterrupt`
 ne sera levé tout seul.
 
-1. un **drapeau atomique** vérifié par chaque appel de la surface `pyx` — il
+1. un **drapeau atomique** vérifié par chaque appel de la surface `pyst` — il
    attrape un script qui boucle en appelant l'API, sans surcoût ;
 2. **`PyThreadState_SetAsyncExc`** depuis le fil d'interruption, qui lève un
    `KeyboardInterrupt` au prochain point de contrôle de l'interpréteur — il
@@ -97,9 +97,9 @@ permanence, pour une granularité dont on n'a pas besoin.
 long. Une opération numpy sur dix millions de points ira à son terme ;
 l'exception ne sera levée qu'en revenant dans l'interpréteur. Un script qui
 avale les exceptions (`except: pass` en boucle pure) résiste à la seconde
-moitié — la première le rattrape dès qu'il touche à `pyx`.
+moitié — la première le rattrape dès qu'il touche à `pyst`.
 
-## La surface `pyx`
+## La surface `pyst`
 
 Le chantier Python (#65) reformule l'API à partir du code ; la spécification
 v1 de l'archive est historique. Les lots #66 à #68 ajoutent navigation,
@@ -148,7 +148,7 @@ identité de client distincte de son appelant, même si celui-ci lui transmet
 un clone de sa poignée. Les mutations revalident l'époque après acquisition
 de la macro ; les écritures de cellules portent encore `expected_version`.
 
-`pyx.undo()` reste utilisable pendant un script : il termine le groupe en
+`pyst.undo()` reste utilisable pendant un script : il termine le groupe en
 cours puis l'annule entièrement. C'est un point de validation explicite ;
 une écriture ultérieure ouvre un nouveau groupe, et un échec ultérieur
 n'annule pas les opérations d'historique déjà demandées. Deux écritures
@@ -188,21 +188,21 @@ retirer la formule ne reconvertit pas ce type automatiquement.
 ```python
 import numpy as np
 
-x = pyx.column(pyx.resolve("[Book1]Sheet1!A"))
-book = pyx.create_workbook("Résultats")
-sheet = pyx.create_worksheet(book, "Calcul")
-result = pyx.create_column(sheet, "Signal")
-pyx.set_values(result, np.asarray(x * 2, dtype=np.float64))
-pyx.set_column_meta(result, role="y", long_name="Signal doublé", unit="mV")
+x = pyst.column(pyst.resolve("[Book1]Sheet1!A"))
+book = pyst.create_workbook("Résultats")
+sheet = pyst.create_worksheet(book, "Calcul")
+result = pyst.create_column(sheet, "Signal")
+pyst.set_values(result, np.asarray(x * 2, dtype=np.float64))
+pyst.set_column_meta(result, role="y", long_name="Signal doublé", unit="mV")
 # Un seul Ctrl+Z retire ce classeur et toutes ses données.
 ```
 
-Contrat : `crates/plotyx-script/tests/mutations.rs` (création, longueurs,
+Contrat : `crates/stokesforge-script/tests/mutations.rs` (création, longueurs,
 cellules exactes, undo/redo, refus, époques, interruption et imports).
 
 ### Graphes natifs (#68)
 
-`pyx.plot(y, x)` référence les colonnes du modèle et crée un graphe à la
+`pyst.plot(y, x)` référence les colonnes du modèle et crée un graphe à la
 racine ; sans `x`, l'abscisse est l'indice de ligne. `parent` accepte un
 dossier, `name` choisit le nom (automatique `GraphN` sinon). `graph=g` ajoute
 une série au premier panneau d'un graphe existant et conserve ses autres
@@ -230,11 +230,11 @@ cassées sont détectées avec leur époque. Les commandes `AddGraph` et
 `SetPlotSpec` rejoignent le même groupe `Script` que les écritures de colonnes.
 
 ```python
-x = pyx.resolve('[Book1]Sheet1!A')
-y = pyx.resolve('[Book1]Sheet1!B')
-g = pyx.plot(y, x, name='Graph1', title='$x^2$',
+x = pyst.resolve('[Book1]Sheet1!A')
+y = pyst.resolve('[Book1]Sheet1!B')
+g = pyst.plot(y, x, name='Graph1', title='$x^2$',
              plot_type='line_scatter', color='#123456', x_title='Temps (s)')
-pyx.plot(y, x, graph=g, line_style='dash', label='Deuxième série')
+pyst.plot(y, x, graph=g, line_style='dash', label='Deuxième série')
 ```
 
 Contrat : `tests/graphs.rs` compare le `PlotSpec` exact et le SVG partagé,
@@ -242,7 +242,7 @@ avec un témoin différent et du Typst ; il couvre aussi ajout, rollback,
 persistance et références invalidées. Matplotlib est évalué séparément par
 le [spike #69](python-matplotlib-spike.md), sans changer le rendu natif.
 
-`pyx.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311")` pose un objet
+`pyst.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311")` pose un objet
 (`rectangle`, `ellipse`, `line` ou `arrow`, pointe en `(x2, y2)`) en coordonnées
 de données du panneau `panel=(ligne, colonne)`, au-dessus des autres, et rend
 son rang. `axis` vaut `left` ou `right`. La couleur du trait vide est
@@ -259,8 +259,8 @@ sont refusés sans mutation. Contrat : `tests/script.rs` et `tests/graphs.rs`.
 ### CLI sans fenêtre (#71)
 
 ```sh
-plotyx-cli run --out resultat.plx calcul.py
-plotyx-cli run --project resultat.plx --out suite.plx suite.py
+stokesforge-cli run --out resultat.stf calcul.pyst
+stokesforge-cli run --project resultat.stf --out suite.stf suite.pyst
 ```
 
 La feature `python` est requise ; sans elle, `run` explique comment l'activer.
@@ -270,10 +270,10 @@ sont préservées ; une exception affiche sa trace complète et rend un code
 non nul. `--out` n'est écrit qu'après succès. Les scripts passent par le
 même `ScriptEngine`, l'acteur et les commandes que la console.
 
-`scripts/cli-dist.sh` construit le paquet Linux `dist/plotyx-cli/`, avec le
+`scripts/cli-dist.sh` construit le paquet Linux `dist/stokesforge-cli/`, avec le
 runtime de base (sans Matplotlib), un rpath relatif et aucun pip. Il vérifie
 numpy, écritures, graphe, sauvegarde/rechargement et undo depuis ce paquet,
-sans écran ni `PLOTYX_PYTHON_HOME`, avec `PYTHONHOME`/`PYTHONPATH` piégés.
+sans écran ni `STOKESFORGE_PYTHON_HOME`, avec `PYTHONHOME`/`PYTHONPATH` piégés.
 
 ### Navigation et métadonnées
 
@@ -299,12 +299,12 @@ Les métadonnées `column` portent `type` (`numeric`, `datetime`, `mixed`),
 modèle. Relire `info` après une modification pour obtenir l'état courant.
 
 ```python
-for objet in pyx.children():
-    print(pyx.info(objet)["name"], pyx.info(objet)["kind"])
+for objet in pyst.children():
+    print(pyst.info(objet)["name"], pyst.info(objet)["kind"])
 
-feuille = pyx.resolve("[Book1]Sheet1")
-for colonne in pyx.children(feuille):
-    description = pyx.info(colonne)
+feuille = pyst.resolve("[Book1]Sheet1")
+for colonne in pyst.children(feuille):
+    description = pyst.info(colonne)
     print(description["name"], description["column"]["unit"],
           description["row_count"])
 ```
@@ -318,11 +318,11 @@ vide devient `None`, une chaîne vide reste `""`, et un nombre NaN reste un
 `float` NaN. Les dates restent des timestamps POSIX en secondes.
 
 ```python
-cellules = pyx.values(pyx.resolve("[Book1]Sheet1!Etiquette"))
+cellules = pyst.values(pyst.resolve("[Book1]Sheet1!Etiquette"))
 # Exemple : ("échantillon A", None, "", "12.5")
 
 import numpy as np
-numerique = pyx.column(pyx.resolve("[Book1]Sheet1!A"))  # sans copie
+numerique = pyst.column(pyst.resolve("[Book1]Sheet1!A"))  # sans copie
 mixte = np.array(cellules, dtype=object)                # copie explicite
 ```
 
@@ -334,13 +334,13 @@ l'historique. Une cible autre qu'une colonne fait échouer `values` avec
 `InvalidValueError` ; toute poignée supprimée ou d'un projet rechargé est
 refusée avec `BrokenReferenceError`, avant de regarder sa nature.
 
-`pyx.import_file("spectre.csv", recipe="Jasco (point-virgule)")` accepte un
+`pyst.import_file("spectre.csv", recipe="Jasco (point-virgule)")` accepte un
 chemin texte ou `pathlib.Path` et rend la liste des poignées des feuilles
 créées. Sans nom de modèle, il applique le choix automatique, sinon la recette
 permissive. Il respecte les réglages du modèle (colonnes ignorées, types,
 métadonnées, blocs et répartition en feuilles) et crée toujours un classeur
 neuf ; les modes de modification d'une feuille active concernent l'assistant.
-Un seul `pyx.undo()` ou Ctrl+Z retire tout l'import. Un modèle inconnu ou un
+Un seul `pyst.undo()` ou Ctrl+Z retire tout l'import. Un modèle inconnu ou un
 fichier illisible lève `InvalidValueError` avant toute mutation ; une erreur
 pendant la création avorte la macro. L'analyse et les commandes se déroulent
 GIL relâché, comme les autres appels au modèle.
@@ -371,7 +371,7 @@ l'intérieur d'un `Python::detach`, GIL relâché, et **rien n'y nomme un type
 PyO3** — c'est ce qui permet au marqueur `Ungil` de vérifier à la compilation
 qu'aucune valeur liée au GIL ne traverse l'attente de l'acteur.
 
-La résolution de chemin n'est plus réécrite dans le pont : `plotyx-core` expose
+La résolution de chemin n'est plus réécrite dans le pont : `stokesforge-core` expose
 `Tree::resolve`, seule implémentation de la grammaire `[Book1]Sheet1!ColA` du
 dépôt, et le pont l'appelle sur l'arbre de son instantané.
 
@@ -393,7 +393,7 @@ hors script continue d'aller sur la sortie du processus.
 - Une erreur *du script* n'est pas une erreur du moteur : elle atterrit dans
   `ScriptOutcome::error` avec sa trace Python. `ScriptError` est réservé aux
   pannes de l'**hôte** (démarrage du fil, moteur occupé).
-- `plotyx-script/tests/navigation.rs` vérifie le contrat du lot #66 : ordre,
+- `stokesforge-script/tests/navigation.rs` vérifie le contrat du lot #66 : ordre,
   métadonnées, longueurs, valeurs exactes, absence de mutation et identité des
   poignées après renommage, déplacement, suppression/annulation et chargement.
 - Lancer les tests Python : `scripts/python-test.sh`, qui pose les trois
@@ -403,5 +403,5 @@ hors script continue d'aller sur la sortie du processus.
   Rust ↔ Python dans les deux sens) et `b9` (script sous contrainte) sont
   derrière la même feature.
 
-**À lire** : `plotyx-script/src/lib.rs`, `src/engine.rs`, `src/surface.rs`,
-`src/bridge.rs`, `plotyx-python/src/interpreter.rs`, `src/array.rs` (têtes).
+**À lire** : `stokesforge-script/src/lib.rs`, `src/engine.rs`, `src/surface.rs`,
+`src/bridge.rs`, `stokesforge-python/src/interpreter.rs`, `src/array.rs` (têtes).

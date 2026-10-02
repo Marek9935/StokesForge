@@ -19,7 +19,7 @@
 #
 # `miri` n'est PAS une alternative ici : miri n'exécute pas d'appel de
 # bibliothèque étrangère (FFI), donc rien de ce qui traverse PyO3 (tout ce
-# module). Il reste l'outil pertinent pour le reste du modèle PlotYx, qui est
+# module). Il reste l'outil pertinent pour le reste du modèle StokesForge, qui est
 # du Rust pur sans FFI.
 #
 # `valgrind` n'est PAS installé sur cette machine de développement (vérifié :
@@ -49,7 +49,7 @@ fi
 PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
 export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,$PREFIX/lib"
-export PLOTYX_PYTHON_HOME="$PREFIX"
+export STOKESFORGE_PYTHON_HOME="$PREFIX"
 
 cd "$REPO_ROOT"
 
@@ -62,7 +62,7 @@ mkdir -p "$REPO_ROOT/target"
 touch "$REPERE"
 
 echo "[memcheck] construction du binaire de tests/zerocopy.rs" >&2
-cargo test -p plotyx-python --features python --test zerocopy --no-run
+cargo test -p stokesforge-python --features python --test zerocopy --no-run
 
 BINARY="$(find "$REPO_ROOT/target/debug/deps" -maxdepth 1 -type f -executable \
     -name 'zerocopy-*' -newer "$REPERE" -print | head -n1)"
@@ -80,7 +80,7 @@ echo "[memcheck] binaire : $BINARY" >&2
 # change rien à la couverture ; en série, un rapport valgrind qui pointe une
 # erreur reste lisible pile sur le test qui l'a déclenchée.
 #
-# PLOTYX_UNDER_VALGRIND=1 : posée pour le binaire de tests, pas pour valgrind
+# STOKESFORGE_UNDER_VALGRIND=1 : posée pour le binaire de tests, pas pour valgrind
 # lui-même. Le test de mesure (emprunt vs copie) la lit pour savoir qu'il
 # tourne sous instrumentation : valgrind ralentit l'emprunt (dominé par
 # quelques appels) et la copie (dominée par un transfert mémoire) de façons
@@ -93,7 +93,7 @@ echo "[memcheck] binaire : $BINARY" >&2
 # emprunt_au_moins_vingt_fois_plus_rapide_que_la_copie, pas seulement savoir
 # qu'il est passé.
 echo "[memcheck] lancement sous valgrind (PYTHONMALLOC=malloc, sans --leak-check)" >&2
-PYTHONMALLOC=malloc PLOTYX_UNDER_VALGRIND=1 valgrind \
+PYTHONMALLOC=malloc STOKESFORGE_UNDER_VALGRIND=1 valgrind \
     --error-exitcode=1 \
     --track-origins=yes \
     "$BINARY" --test-threads=1 --nocapture

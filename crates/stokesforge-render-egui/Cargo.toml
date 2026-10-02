@@ -1,0 +1,40 @@
+[package]
+name = "stokesforge-render-egui"
+version = "0.0.0"
+edition.workspace = true
+description = "Backend egui de plotters : collecte des egui::Shape dans un Vec, cache sur (revision, rect, pixels_per_point)."
+
+[lints]
+workspace = true
+
+[dependencies]
+stokesforge-core = { path = "../stokesforge-core" }
+stokesforge-plot = { path = "../stokesforge-plot" }
+stokesforge-session = { path = "../stokesforge-session" }
+stokesforge-render = { path = "../stokesforge-render" }
+plotters = { version = "0.3", default-features = false, features = [
+    "all_series",
+    "all_elements",
+] }
+plotters-backend = "0.3"
+# Alignée sur `stokesforge-app`, qui est sur eframe 0.36.2 : `egui-plotter` a été
+# écarté précisément parce qu'aucune de ses versions ne suit
+# (`architecture-choisie.md` §4).
+egui = "0.36.2"
+# R8, chemin écran (8.3) : le type `Font`/`Bytes` de `TypstScreen` et le
+# rendu RGBA d'une page compilée (`typst-render` → texture → `Shape::Mesh`).
+# `stokesforge-render` apporte le `World`, la compilation et le cache générique ;
+# ce crate n'ajoute que ce qui est propre à l'écran. Dépendance ferme depuis
+# l'issue #29 (plus de feature `typst`). Version épinglée exactement, comme
+# dans `stokesforge-render` — même raison (API non stabilisée entre versions
+# mineures).
+typst = "=0.15.1"
+typst-render = "=0.15.1"
+
+[dev-dependencies]
+stokesforge-commands = { path = "../stokesforge-commands" }
+# Le test d'accord (R4.5) vit ici et non dans `stokesforge-render-svg` : en
+# dépendance de développement, il ferait entrer egui dans l'arbre du crate
+# d'export, ce que `cargo tree -p stokesforge-render-svg` doit continuer à
+# démentir.
+stokesforge-render-svg = { path = "../stokesforge-render-svg" }

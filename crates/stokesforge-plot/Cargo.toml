@@ -1,0 +1,15 @@
+[package]
+name = "stokesforge-plot"
+version = "0.0.0"
+edition.workspace = true
+description = "Description d'un graphe (PlotSpec) indépendante de tout moteur de rendu — ni plotters, ni egui, ni typst."
+
+[lints]
+workspace = true
+
+[dependencies]
+stokesforge-id = { path = "../stokesforge-id" }
+
+[dev-dependencies]
+stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
+toml = "0.8"

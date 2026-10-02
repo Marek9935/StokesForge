@@ -1,13 +1,13 @@
 # Session — l'acteur et la concurrence
 
-`plotyx-session` rend concrète la décision qui tient tout le socle : **le
+`stokesforge-session` rend concrète la décision qui tient tout le socle : **le
 `Project` vit sur son propre thread**.
 
 L'acteur détient le `&mut Project` **de la session** : un client n'a qu'un
 `Arc<Tree>` figé et ne peut muter que par `SessionHandle::execute(Command)`.
 « Aucune mutation hors d'une commande » est donc une propriété de propriété
 **pour les clients d'une session**, pas une garantie du compilateur pour tout le
-code : les primitives publiques de `plotyx-core` servent aussi à *construire* un
+code : les primitives publiques de `stokesforge-core` servent aussi à *construire* un
 projet avant `Session::spawn`, aux tests, et au CLI (qui manipule un `Project`
 avec un `History`, sans session). Hors historique **par choix** : le recalcul des
 colonnes-formule (`Project::set_length`/`set_values` dans l'acteur), la
@@ -51,14 +51,14 @@ peut pas trancher : **est-ce encore le même projet ?** C'est un compteur local
 à l'acteur, jamais persisté, incrémenté **uniquement** quand un `Load` réussit.
 `Load` incrémente **aussi** `revision` : elle reste monotone sur toute la vie de
 la session. Ce qu'elle ne dit pas, c'est que le projet a été remplacé ; `epoch`,
-lui, a changé. `plotyx-script` s'en
+lui, a changé. `stokesforge-script` s'en
 sert pour détecter qu'une poignée désigne un `NodeId` d'un projet qui n'est plus
 celui qui l'a produite — avant même de chercher ce `NodeId` dans l'arbre, où il
 pourrait, par coïncidence, désigner un autre objet.
 
 ## `save` et `load`
 
-Les deux passent par `plotyx-persistence` ([`persistance.md`](persistance.md)).
+Les deux passent par `stokesforge-persistence` ([`persistance.md`](persistance.md)).
 
 - `save` écrit le projet courant **sans toucher** à la révision ni à
   l'historique ;
@@ -105,7 +105,7 @@ qu'elles soient jamais devenues une entrée annulable. Une macro ouverte à
 l'arrêt est donc désormais annulée.
 
 La table complète, avec ce qu'elle corrige et pourquoi, est en tête de
-`plotyx-session/src/lib.rs`.
+`stokesforge-session/src/lib.rs`.
 
 ## Deux invariants tenus par construction
 
@@ -135,5 +135,5 @@ côté client, tout vérifier côté acteur.
   (concurrence entre clients) et `b18` (ce qui reste possible pendant qu'une
   macro est ouverte).
 
-**À lire** : `plotyx-session/src/lib.rs` (tête, et sa table), `src/actor.rs`,
+**À lire** : `stokesforge-session/src/lib.rs` (tête, et sa table), `src/actor.rs`,
 `src/snapshot.rs`.

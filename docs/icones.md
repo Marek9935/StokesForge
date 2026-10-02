@@ -1,8 +1,8 @@
 # Icônes de l'interface
 
-Les icônes de `plotyx-app` sont des **Phosphor Icons, variante duotone**
-(licence MIT, copiée dans `crates/plotyx-app/assets/icons/LICENSE`). Le code
-qui les affiche est `crates/plotyx-app/src/icons.rs` ; son `//!` dit le
+Les icônes de `stokesforge-app` sont des **Phosphor Icons, variante duotone**
+(licence MIT, copiée dans `crates/stokesforge-app/assets/icons/LICENSE`). Le code
+qui les affiche est `crates/stokesforge-app/src/icons.rs` ; son `//!` dit le
 *pourquoi*, cette page dit le *quoi* et le *comment ajouter*.
 
 ## Quand mettre une icône — et quand non
@@ -16,7 +16,7 @@ qui les affiche est `crates/plotyx-app/src/icons.rs` ; son `//!` dit le
   Pas d'icône dans chaque menu par principe : une icône qui ne distingue
   rien est du bruit.
 - **Toujours une info-bulle** : une icône seule ne dit pas ce qu'elle fait.
-  Le texte vient de `tr!` (voir `plotyx-textes-interface`) ; `icon_button`
+  Le texte vient de `tr!` (voir `stokesforge-textes-interface`) ; `icon_button`
   l'exige.
 - **Jamais un emoji ni un glyphe Unicode** (« × », « ↗ », « 📁 ») comme icône.
 

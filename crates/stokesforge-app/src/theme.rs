@@ -1,0 +1,253 @@
+//! Thème visuel propre à StokesForge.
+//!
+//! L'application ne suit **pas** le thème clair/sombre du système : elle
+//! impose sa propre palette, dérivée de [`egui::Visuals::light`] (jamais du
+//! sombre — cf. `docs/application.md` § « Thème »). Deux raisons à ce choix :
+//!
+//! - une appli scientifique se juge sur ses graphes, pas sur son chrome —
+//!   `stokesforge-render`/`stokesforge-render-egui` dessinent les tracés sur un fond
+//!   clair implicite (axes, grilles, texte noir) ; laisser l'utilisateur
+//!   basculer en sombre romprait ce contraste sans qu'aucun code de rendu
+//!   n'en soit informé ;
+//! - un thème qui change avec le système est un thème qu'on ne peut pas
+//!   garantir en capture d'écran ni en support (« chez moi c'est gris, chez
+//!   vous c'est bleu nuit »). Fixer la palette une fois pour toutes rend
+//!   l'appli identique sur toutes les machines.
+//!
+//! [`install`] pose cette palette une seule fois, à la construction de la
+//! fenêtre (`main.rs`, avant [`crate::app::StokesForgeApp::new`]) — jamais depuis
+//! [`crate::app::StokesForgeApp::ui`], qui tournerait sinon à chaque image pour
+//! rien.
+//!
+//! # Barres de défilement : un seul standard
+//!
+//! Toutes les barres de défilement de l'application ont le même aspect
+//! (largeur, couleur, contraste), fixé par [`scroll_style`] et posé une fois
+//! pour toutes par [`install`] sur le style global d'egui — donc hérité par
+//! chaque `egui::ScrollArea`, `TableBuilder` compris, dans toutes les
+//! fenêtres (flottantes et détachées). Pour changer l'aspect de toutes les
+//! barres d'un coup, on modifie les constantes `SCROLL_BAR_*` ci-dessous,
+//! et nulle part ailleurs.
+//!
+//! Règle pour le code futur : **ne jamais construire ni modifier un
+//! `ScrollStyle` hors de ce module** (`ScrollStyle::solid()`,
+//! `spacing_mut().scroll = …`). Une zone qui a besoin de connaître la place
+//! prise par une barre (bande réservée, barre déportée) la lit par
+//! [`scroll_bar_allocated_width`]. Le test
+//! `aucun_scroll_style_hors_du_theme` le verrouille.
+
+use eframe::egui::{self, Color32, Context, CornerRadius, Theme};
+
+/// Teinte d'accent de la marque StokesForge : un vert forêt plutôt que le bleu
+/// par défaut d'egui, utilisé pour la sélection, les liens et les éléments
+/// actifs — assez sombre pour rester lisible en texte sur fond clair.
+const ACCENT: Color32 = Color32::from_rgb(0x1E, 0x7A, 0x3C);
+
+/// Texte de la gouttière de la grille (lettres de colonne, « # », numéros de
+/// ligne, libellés de champ d'en-tête) — nettement plus sombre qu'[`ACCENT`]
+/// : la gouttière porte déjà un fond teinté ([`header_letter_row_fill`] et
+/// consorts), un texte à la même saturation que son propre fond s'y lit mal.
+/// Volontairement indépendant de `Visuals::strong_text_color()` (qui vaut
+/// `widgets.active.fg_stroke.color`, donc littéralement [`ACCENT`]) plutôt
+/// que de foncer cette teinte globale : elle sert aussi au texte « actif »
+/// d'éléments sans rapport avec la gouttière (boutons, onglets).
+const GUTTER_TEXT: Color32 = Color32::from_rgb(0x0F, 0x4A, 0x24);
+
+/// Couleur de texte de la gouttière — voir [`GUTTER_TEXT`].
+pub fn gutter_text_color() -> Color32 {
+    GUTTER_TEXT
+}
+
+/// Rouge foncé et discret du contour d'un dialogue modal qui vient de
+/// refuser un clic ([`crate::app`], `modal_dialog`).
+pub fn blocked_flash_color() -> Color32 {
+    Color32::from_rgb(150, 28, 28)
+}
+
+/// Fond de repos de la gouttière de la grille (lettres de colonnes, « # »,
+/// numéros de ligne, libellés de champ d'en-tête) — la distingue visuellement
+/// des données elles-mêmes. Dérivé de [`ACCENT`] comme le reste de la
+/// palette de sélection, mais très dilué : une teinte discrète plutôt qu'une
+/// vraie case pleine couleur, qui écraserait le reste de la grille.
+pub fn header_letter_row_fill() -> Color32 {
+    ACCENT.gamma_multiply(0.10)
+}
+
+/// Fond de la gouttière quand elle est *concernée* par la sélection en cours
+/// sans être elle-même la cible du clic — la colonne ou la ligne d'une ou
+/// plusieurs cellules de données sélectionnées, par exemple. Un cran plus
+/// soutenu que [`header_letter_row_fill`] (le repos), sans atteindre
+/// l'intensité d'une sélection directe de la gouttière elle-même (voir
+/// [`header_letter_row_selected_fill`]) — trois paliers, comme un tableur :
+/// rien, « ta ligne/colonne est concernée », « c'est *toi* qui es
+/// sélectionné(e) ».
+pub fn header_letter_row_touched_fill() -> Color32 {
+    ACCENT.gamma_multiply(0.24)
+}
+
+/// Fond de la gouttière quand elle est elle-même directement sélectionnée
+/// (clic sur une lettre de colonne, un numéro de ligne, un libellé de champ
+/// d'en-tête, ou sur « # » pour tout le tableau) — le palier le plus soutenu
+/// des trois, voir [`header_letter_row_touched_fill`].
+pub fn header_letter_row_selected_fill() -> Color32 {
+    ACCENT.gamma_multiply(0.42)
+}
+
+/// Épaisseur de toutes les barres de défilement, en points. Le défaut
+/// d'egui (6 pt en barre pleine, 2 pt en barre flottante au repos) se
+/// visait mal et se voyait peu.
+const SCROLL_BAR_WIDTH: f32 = 10.0;
+
+/// Espace laissé entre le contenu et la barre, en points.
+const SCROLL_BAR_MARGIN: f32 = 2.0;
+
+/// Opacité de la poignée au repos : la poignée prend la couleur du texte
+/// des widgets (gris foncé, `widgets.inactive.fg_stroke`), atténuée — bien
+/// plus contrastée que le gris très clair (`widgets.inactive.bg_fill`) des
+/// barres pleines d'egui, sans être aussi lourde qu'un texte.
+const SCROLL_BAR_HANDLE_OPACITY: f32 = 0.45;
+
+/// Opacité de la poignée survolée ou saisie (elle prend alors la couleur de
+/// survol, puis l'[`ACCENT`] pendant le glisser).
+const SCROLL_BAR_HANDLE_INTERACT_OPACITY: f32 = 0.8;
+
+/// Opacité du fond de la piste (`extreme_bg_color`).
+const SCROLL_BAR_TRACK_OPACITY: f32 = 1.0;
+
+/// Le style de **toutes** les barres de défilement de StokesForge — voir la
+/// section « Barres de défilement » en tête de module.
+///
+/// Construit en mode « flottant » d'egui, mais figé : largeur constante
+/// (pas d'élargissement au survol), place réservée égale à la barre plus sa
+/// marge (elle ne recouvre donc jamais le contenu), et opacités non nulles
+/// au repos (elle reste visible sans survol). C'est le seul mode d'egui qui
+/// laisse régler l'opacité de la poignée ; en mode « plein », elle est
+/// toujours opaque et de la couleur de fond des boutons, qu'on ne peut pas
+/// foncer sans foncer aussi tous les boutons.
+pub fn scroll_style() -> egui::style::ScrollStyle {
+    egui::style::ScrollStyle {
+        floating: true,
+        bar_width: SCROLL_BAR_WIDTH,
+        floating_width: SCROLL_BAR_WIDTH,
+        floating_allocated_width: SCROLL_BAR_WIDTH + SCROLL_BAR_MARGIN,
+        bar_inner_margin: SCROLL_BAR_MARGIN,
+        bar_outer_margin: 0.0,
+        handle_min_length: 16.0,
+        foreground_color: true,
+        dormant_background_opacity: SCROLL_BAR_TRACK_OPACITY,
+        active_background_opacity: SCROLL_BAR_TRACK_OPACITY,
+        interact_background_opacity: SCROLL_BAR_TRACK_OPACITY,
+        dormant_handle_opacity: SCROLL_BAR_HANDLE_OPACITY,
+        active_handle_opacity: SCROLL_BAR_HANDLE_OPACITY,
+        interact_handle_opacity: SCROLL_BAR_HANDLE_INTERACT_OPACITY,
+        ..egui::style::ScrollStyle::floating()
+    }
+}
+
+/// Place qu'occupe une barre de défilement du standard [`scroll_style`],
+/// perpendiculairement à son sens (largeur d'une barre verticale, hauteur
+/// d'une barre horizontale), marge comprise.
+pub fn scroll_bar_allocated_width() -> f32 {
+    scroll_style().allocated_width()
+}
+
+/// Pose le thème StokesForge sur `ctx` : verrouille la préférence sur
+/// [`Theme::Light`] (empêche egui de re-suivre le système à la moindre
+/// notification `winit`), applique la palette maison par-dessus
+/// [`egui::Visuals::light`], puis le standard des barres de défilement
+/// ([`scroll_style`]).
+pub fn install(ctx: &Context) {
+    ctx.set_theme(Theme::Light);
+    ctx.set_visuals(visuals());
+    ctx.all_styles_mut(|style| style.spacing.scroll = scroll_style());
+    // Chargeurs d'images (SVG des icônes, `icons.rs`).
+    egui_extras::install_image_loaders(ctx);
+}
+
+/// Construit la palette StokesForge : un `Visuals::light()` standard, avec juste
+/// les teintes qui portent l'identité de l'appli (sélection, liens, contour
+/// des widgets actifs) redéfinies — le reste (gris de fond, contrastes de
+/// texte, tailles) vient tel quel d'egui, pour ne pas réinventer ce que la
+/// bibliothèque a déjà calibré pour la lisibilité.
+fn visuals() -> egui::Visuals {
+    let mut visuals = egui::Visuals::light();
+
+    visuals.hyperlink_color = ACCENT;
+    visuals.selection.bg_fill = ACCENT.gamma_multiply(0.35);
+    visuals.selection.stroke.color = ACCENT;
+
+    // Contour des boutons/onglets actifs (dont la fenêtre flottante
+    // focalisée) : reprend l'accent plutôt que le bleu par défaut, pour que
+    // la disposition ressemble au reste de l'appli.
+    visuals.widgets.active.bg_stroke.color = ACCENT;
+    visuals.widgets.active.fg_stroke.color = ACCENT;
+    visuals.widgets.hovered.bg_stroke.color = ACCENT;
+
+    // Coins légèrement moins arrondis que le défaut egui (2px) : plus proche
+    // de l'esthétique dense et tabulaire d'un logiciel d'analyse de données
+    // que d'une appli mobile.
+    let corner_radius = CornerRadius::same(3);
+    visuals.window_corner_radius = corner_radius;
+    visuals.menu_corner_radius = corner_radius;
+    visuals.widgets.noninteractive.corner_radius = corner_radius;
+    visuals.widgets.inactive.corner_radius = corner_radius;
+    visuals.widgets.hovered.corner_radius = corner_radius;
+    visuals.widgets.active.corner_radius = corner_radius;
+    visuals.widgets.open.corner_radius = corner_radius;
+
+    visuals
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Garde-fou : si un jour quelqu'un fait dériver [`visuals`] de
+    /// `Visuals::dark()` par erreur (copier-coller, refactor...), ce test
+    /// échoue plutôt que de laisser le thème partir en sombre en silence.
+    #[test]
+    fn base_theme_is_light() {
+        assert!(
+            !visuals().dark_mode,
+            "le thème StokesForge doit rester clair"
+        );
+    }
+
+    #[test]
+    fn install_pose_le_standard_des_barres_de_defilement() {
+        let ctx = Context::default();
+        install(&ctx);
+        assert_eq!(ctx.style_of(Theme::Light).spacing.scroll, scroll_style());
+        assert_eq!(
+            scroll_bar_allocated_width(),
+            SCROLL_BAR_WIDTH + SCROLL_BAR_MARGIN
+        );
+    }
+
+    /// Garde-fou du standard : aucun fichier de `stokesforge-app` hors de ce
+    /// module ne construit ni ne modifie un `ScrollStyle`. Une barre au style
+    /// local échapperait au réglage unique des constantes `SCROLL_BAR_*`.
+    #[test]
+    fn aucun_scroll_style_hors_du_theme() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut fautifs = Vec::new();
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|ext| ext != "rs") || path.ends_with("theme.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (index, line) in text.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                if code.contains("ScrollStyle") || code.contains(".scroll =") {
+                    fautifs.push(format!("{}:{}", path.display(), index + 1));
+                }
+            }
+        }
+        assert!(
+            fautifs.is_empty(),
+            "style de barre de défilement construit hors de theme.rs — passer par \
+             theme::scroll_style / theme::scroll_bar_allocated_width : {fautifs:?}"
+        );
+    }
+}

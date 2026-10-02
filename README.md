@@ -1,6 +1,6 @@
-# PlotYx — branche `rewriterust`
+# StokesForge — branche `rewriterust`
 
-Cette branche est dédiée au portage de PlotYx vers Rust. PyQt/PySide n'est
+Cette branche est dédiée au portage de StokesForge vers Rust. PyQt/PySide n'est
 plus à l'ordre du jour ici — le développement actif se fait dans le
 workspace Cargo à la racine.
 

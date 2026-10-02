@@ -19,9 +19,9 @@ PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
 # Même libpython ABI que la base : conserver son rpath évite un second build.
 export RUSTFLAGS="-C link-arg=-Wl,-rpath,$BASE/lib"
-export PLOTYX_PYTHON_HOME="$PREFIX"
+export STOKESFORGE_PYTHON_HOME="$PREFIX"
 cd "$REPO_ROOT"
-cargo run -p plotyx-script --features python --example matplotlib-spike
+cargo run -p stokesforge-script --features python --example matplotlib-spike
 # Coût d'import en processus frais : premier échantillon puis médiane des suivants.
 "$BASE/bin/python3" -I - "$BASE" "$PREFIX" <<'PY'
 import json, pathlib, statistics, subprocess, sys, tempfile
@@ -37,7 +37,7 @@ def size(p):
     return int(subprocess.check_output(['du', '-sb', str(p)], text=True).split()[0])
 b, s = size(base), size(spike)
 report = dict(base_bytes=b, spike_bytes=s, added_bytes=s-b, samples_numpy_then_matplotlib_ms=samples, matplotlib_first_ms=samples[0][1], matplotlib_median_fresh_process_ms=statistics.median(x[1] for x in samples[1:]))
-path = pathlib.Path('/tmp/plotyx69-measurements.json')
+path = pathlib.Path('/tmp/stokesforge69-measurements.json')
 path.write_text(json.dumps(report, indent=2)+'\n')
 print(json.dumps(report, indent=2))
 PY

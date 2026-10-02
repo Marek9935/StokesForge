@@ -1,4 +1,4 @@
-# Skills PlotYx
+# Skills StokesForge
 
 Compétences de projet chargées automatiquement par Claude Code depuis
 `.claude/skills/`. Chacune est un `SKILL.md` : un en-tête (nom + quand la
@@ -17,28 +17,28 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
 
 | Skill | Pour quoi | Se déclenche sur |
 |---|---|---|
-| [`plotyx-feature`](plotyx-feature/SKILL.md) | implémenter une fonctionnalité de bout en bout : couche, menu contextuel, raccourci, tests, doc | « ajoute », « implémente », « je voudrais pouvoir… » |
-| [`plotyx-bug-report`](plotyx-bug-report/SKILL.md) | transformer un symptôme en rapport rejouable, avec test de reproduction | « ça plante », « c'est bizarre », « la valeur est fausse » |
-| [`plotyx-bug-fix`](plotyx-bug-fix/SKILL.md) | corriger : reproduire d'abord, réparer à la couche de la cause, sans affaiblir un test | « corrige », « répare », après un rapport |
-| [`plotyx-commande`](plotyx-commande/SKILL.md) | ajouter une commande annulable — la seule voie de mutation du modèle | toute création / suppression / modification dans le projet |
-| [`plotyx-rendu`](plotyx-rendu/SKILL.md) | tracé, axes, légende, export ; les deux pièges silencieux du dépôt | figure décalée, écran ≠ export, nouvelle série |
-| [`plotyx-import`](plotyx-import/SKILL.md) | recettes d'appareil, prévisualisation façon Origin, fichiers mal découpés | CSV/TXT/ASC, nouvel instrument, aperçu faux |
-| [`plotyx-python`](plotyx-python/SKILL.md) | pont PyO3, surface `pyx`, console de script ; le seul domaine où un CI vert ne prouve rien | script, GIL, numpy, `PYO3_CONFIG_FILE` |
-| [`plotyx-verification`](plotyx-verification/SKILL.md) | écrire un test au bon endroit, puis vérifier et committer | « teste », « vérifie », « c'est bon ? », « commit » |
-| [`plotyx-architecture`](plotyx-architecture/SKILL.md) | répondre sur l'architecture — **pour un chimiste**, par analogies Python | « comment ça marche », « pourquoi ce découpage », « où vit X » |
-| [`plotyx-fonctionnalites`](plotyx-fonctionnalites/SKILL.md) | répondre sur ce que le logiciel sait faire — **pour un chimiste** venu d'Origin | « est-ce que je peux… », « comment je fais pour… » |
-| [`plotyx-textes-interface`](plotyx-textes-interface/SKILL.md) | écrire un texte visible : glossaire anglais ↔ français, majuscules, ton, messages | tout libellé, infobulle, message ou titre ajouté ou modifié |
+| [`stokesforge-feature`](stokesforge-feature/SKILL.md) | implémenter une fonctionnalité de bout en bout : couche, menu contextuel, raccourci, tests, doc | « ajoute », « implémente », « je voudrais pouvoir… » |
+| [`stokesforge-bug-report`](stokesforge-bug-report/SKILL.md) | transformer un symptôme en rapport rejouable, avec test de reproduction | « ça plante », « c'est bizarre », « la valeur est fausse » |
+| [`stokesforge-bug-fix`](stokesforge-bug-fix/SKILL.md) | corriger : reproduire d'abord, réparer à la couche de la cause, sans affaiblir un test | « corrige », « répare », après un rapport |
+| [`stokesforge-commande`](stokesforge-commande/SKILL.md) | ajouter une commande annulable — la seule voie de mutation du modèle | toute création / suppression / modification dans le projet |
+| [`stokesforge-rendu`](stokesforge-rendu/SKILL.md) | tracé, axes, légende, export ; les deux pièges silencieux du dépôt | figure décalée, écran ≠ export, nouvelle série |
+| [`stokesforge-import`](stokesforge-import/SKILL.md) | recettes d'appareil, prévisualisation façon Origin, fichiers mal découpés | CSV/TXT/ASC, nouvel instrument, aperçu faux |
+| [`stokesforge-python`](stokesforge-python/SKILL.md) | pont PyO3, surface `pyst`, console de script ; le seul domaine où un CI vert ne prouve rien | script, GIL, numpy, `PYO3_CONFIG_FILE` |
+| [`stokesforge-verification`](stokesforge-verification/SKILL.md) | écrire un test au bon endroit, puis vérifier et committer | « teste », « vérifie », « c'est bon ? », « commit » |
+| [`stokesforge-architecture`](stokesforge-architecture/SKILL.md) | répondre sur l'architecture — **pour un chimiste**, par analogies Python | « comment ça marche », « pourquoi ce découpage », « où vit X » |
+| [`stokesforge-fonctionnalites`](stokesforge-fonctionnalites/SKILL.md) | répondre sur ce que le logiciel sait faire — **pour un chimiste** venu d'Origin | « est-ce que je peux… », « comment je fais pour… » |
+| [`stokesforge-textes-interface`](stokesforge-textes-interface/SKILL.md) | écrire un texte visible : glossaire anglais ↔ français, majuscules, ton, messages | tout libellé, infobulle, message ou titre ajouté ou modifié |
 
 ## Ressources partagées
 
-- [`rust-pour-pythonistes.md`](plotyx-architecture/references/rust-pour-pythonistes.md)
+- [`rust-pour-pythonistes.md`](stokesforge-architecture/references/rust-pour-pythonistes.md)
   — table de traduction Rust → Python, avec pour chaque entrée **ce que
   l'analogie a de faux**. Utilisée par les deux skills de réponse.
-- [`voir-l-interface.md`](plotyx-bug-report/references/voir-l-interface.md)
-  — comment *regarder* la fenêtre (`PLOTYX_APP_SCREENSHOT`, conversion
+- [`voir-l-interface.md`](stokesforge-bug-report/references/voir-l-interface.md)
+  — comment *regarder* la fenêtre (`STOKESFORGE_APP_SCREENSHOT`, conversion
   PPM → PNG) et ce que la capture ne peut pas montrer. Utilisée par
-  `plotyx-bug-report`, `plotyx-bug-fix`, `plotyx-feature` et
-  `plotyx-verification` : les tests couvrent la géométrie, **pas
+  `stokesforge-bug-report`, `stokesforge-bug-fix`, `stokesforge-feature` et
+  `stokesforge-verification` : les tests couvrent la géométrie, **pas
   l'apparence**.
 
 ## Quatre règles transversales, apprises à l'usage
@@ -65,7 +65,7 @@ seul produit une cause fausse et convaincante. C'est arrivé.
 correctif ou un chantier qui installe une règle nouvelle — un standard
 d'interface (barres de défilement, sélecteur de couleur), un motif à suivre
 (une fenêtre, une commande), une frontière — met à jour **au besoin** le ou
-les skills concernés (`plotyx-feature`, `plotyx-bug-fix`, etc.), ainsi que
+les skills concernés (`stokesforge-feature`, `stokesforge-bug-fix`, etc.), ainsi que
 `CLAUDE.md`, dans le même commit que le code. Sans cela, le prochain
 développement repart de l'ancienne règle et réintroduit l'incohérence. Les
 issues GitLab le rappellent dans une ligne « **Cohérence** ».
@@ -73,25 +73,25 @@ issues GitLab le rappellent dans une ligne « **Cohérence** ».
 ## Comment ils s'enchaînent
 
 ```text
-question ──► plotyx-architecture  (comment c'est construit)
-         └─► plotyx-fonctionnalites (ce que ça sait faire)
+question ──► stokesforge-architecture  (comment c'est construit)
+         └─► stokesforge-fonctionnalites (ce que ça sait faire)
 
-symptôme ──► plotyx-bug-report ──► plotyx-bug-fix ──┐
-                                                     ├──► plotyx-verification ──► commit
-demande  ──► plotyx-feature ──┬─► plotyx-commande ──┤
-                              ├─► plotyx-rendu ─────┤
-                              ├─► plotyx-import ────┤
-                              └─► plotyx-python ────┘
+symptôme ──► stokesforge-bug-report ──► stokesforge-bug-fix ──┐
+                                                     ├──► stokesforge-verification ──► commit
+demande  ──► stokesforge-feature ──┬─► stokesforge-commande ──┤
+                              ├─► stokesforge-rendu ─────┤
+                              ├─► stokesforge-import ────┤
+                              └─► stokesforge-python ────┘
 ```
 
-`plotyx-verification` est le passage obligé avant tout commit : c'est lui qui
+`stokesforge-verification` est le passage obligé avant tout commit : c'est lui qui
 porte ce qu'un `cargo test --workspace` vert **ne prouve pas** (ni `python`, ni
 rien qui exige une vraie fenêtre).
 
 ## Les invoquer à la main
 
 Claude et Codex les déclenchent quand la tâche correspond. Pour forcer :
-`/plotyx-feature` dans Claude, `$plotyx-feature` dans Codex, et de même pour
+`/stokesforge-feature` dans Claude, `$stokesforge-feature` dans Codex, et de même pour
 les autres skills.
 
 ## En ajouter un

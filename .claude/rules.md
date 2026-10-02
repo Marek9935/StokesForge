@@ -15,15 +15,15 @@ l'historique ou à l'acteur.
 
 | Tâche | Lire d'abord | Charger | Ne pas ouvrir |
 |---|---|---|---|
-| Arbre, colonnes, `PlotSpec` | `docs/modele-de-donnees.md` | `plotyx-core`, `plotyx-id`, `plotyx-plot` | `commands`, `session`, `persistence`, `app` |
-| Undo/redo, macros | `docs/commandes-et-historique.md` | `plotyx-commands` + `plotyx-core` en lecture | `session`, `persistence`, `app` |
-| Format `.plx`, `save`/`load` | `docs/persistance.md` | `plotyx-persistence`, `plotyx-core`, `plotyx-plot` | `session`, `render*`, `app` |
-| Acteur, concurrence, instantanés | `docs/session.md` | `plotyx-session`, `plotyx-core`, `plotyx-commands`, `plotyx-persistence` | `python`, `script`, `app` |
-| Tracé, axes, export, formules | `docs/rendu.md` | `plotyx-render` **d'abord**, puis le backend visé, + `plotyx-plot` et `plotyx-core::resolve` en lecture | `commands`, `persistence`, `python`, `script` |
-| Pont PyO3, surface `pyx` | `docs/python-et-script.md` | `plotyx-python`, `plotyx-script` | `render*`, `persistence` |
-| Fenêtre, raccourcis, grille | `docs/application.md` | `plotyx-app`, `plotyx-session` ; `plotyx-render-egui` si la tâche touche au graphe | `render-svg`, `persistence` |
-| Texte d'interface (libellé, infobulle, message) | `docs/textes-interface.md` + skill `plotyx-textes-interface` | le seul fichier de `plotyx-app` qui porte le texte | le reste du crate, les autres crates |
-| Test de robustesse `bN` | `docs/tests.md` | `plotyx-robustesse/src/lib.rs` (index) + le **seul** fichier `bN` visé + le crate qu'il éprouve | les 20 autres fichiers de `tests/` |
+| Arbre, colonnes, `PlotSpec` | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` | `commands`, `session`, `persistence`, `app` |
+| Undo/redo, macros | `docs/commandes-et-historique.md` | `stokesforge-commands` + `stokesforge-core` en lecture | `session`, `persistence`, `app` |
+| Format `.stf`, `save`/`load` | `docs/persistance.md` | `stokesforge-persistence`, `stokesforge-core`, `stokesforge-plot` | `session`, `render*`, `app` |
+| Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, `stokesforge-core`, `stokesforge-commands`, `stokesforge-persistence` | `python`, `script`, `app` |
+| Tracé, axes, export, formules | `docs/rendu.md` | `stokesforge-render` **d'abord**, puis le backend visé, + `stokesforge-plot` et `stokesforge-core::resolve` en lecture | `commands`, `persistence`, `python`, `script` |
+| Pont PyO3, surface `pyst` | `docs/python-et-script.md` | `stokesforge-python`, `stokesforge-script` | `render*`, `persistence` |
+| Fenêtre, raccourcis, grille | `docs/application.md` | `stokesforge-app`, `stokesforge-session` ; `stokesforge-render-egui` si la tâche touche au graphe | `render-svg`, `persistence` |
+| Texte d'interface (libellé, infobulle, message) | `docs/textes-interface.md` + skill `stokesforge-textes-interface` | le seul fichier de `stokesforge-app` qui porte le texte | le reste du crate, les autres crates |
+| Test de robustesse `bN` | `docs/tests.md` | `stokesforge-robustesse/src/lib.rs` (index) + le **seul** fichier `bN` visé + le crate qu'il éprouve | les 20 autres fichiers de `tests/` |
 | Question transverse (« où vit X ? ») | `docs/README.md` | rien encore | tout |
 
 ## Les pièges qui coûtent le plus cher
@@ -34,15 +34,15 @@ en relisant son propre diff.
 **Mesure de texte (rendu).** `plotters` est pris sans ses fonts. Un backend qui
 ne surcharge pas `draw_text` panique ; un qui ne surcharge pas
 `estimate_text_size` mesure le texte au nombre d'octets UTF-8, **silencieusement**.
-Toute mesure passe par `plotyx_render::text` et par nulle part ailleurs. Le
-filet est `plotyx-render-egui/tests/accord.rs` : s'il change, lire ses deux
+Toute mesure passe par `stokesforge_render::text` et par nulle part ailleurs. Le
+filet est `stokesforge-render-egui/tests/accord.rs` : s'il change, lire ses deux
 familles de **témoins** avant — sans elles, un test d'égalité passe aussi bien
 parce que les deux chemins sont justes que parce qu'ils sont faux de la même
 façon.
 
 **Une fonctionnalité de tracé ne s'écrit pas dans un backend.** Elle va dans
-`plotyx-render`, générique sur `DrawingBackend`. Seule exception vivante :
-`plotyx-render-egui::feathering` (la tessellation n'existe que pour l'écran).
+`stokesforge-render`, générique sur `DrawingBackend`. Seule exception vivante :
+`stokesforge-render-egui::feathering` (la tessellation n'existe que pour l'écran).
 Et le feathering n'entre **pas** dans la clé de cache.
 
 **Zoom et pan ne sont pas des mutations du modèle.** `ViewState` vit à côté, sur

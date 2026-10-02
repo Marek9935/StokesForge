@@ -1,6 +1,6 @@
 # Commandes et historique
 
-`plotyx-commands` est la **seule** couche qui mute un `Project` en dehors des
+`stokesforge-commands` est la **seule** couche qui mute un `Project` en dehors des
 tests. C'est la règle d'or du socle (invariant 1), et ce crate en est le point
 de passage obligé.
 
@@ -13,7 +13,7 @@ quelle, de l'UI vers l'acteur qui détient l'unique `&mut Project`.
 Tout ce qu'il faut pour annuler est calculé **à l'application**, par
 `History`, jamais porté par la commande.
 
-Liste faisant foi : `plotyx-commands/src/command.rs` (`Command`,
+Liste faisant foi : `stokesforge-commands/src/command.rs` (`Command`,
 `Command::is_structural`). Résumé :
 
 | Commande | Nature |
@@ -75,7 +75,7 @@ comportement de l'UI, qui n'a pas cette discipline) ; `Some(v)` exige que
 `Column::version` vaille encore exactement `v` au **moment d'appliquer**,
 jamais avant — sans quoi la commande est refusée
 (`CoreError::ConcurrentModification`) sans toucher au modèle ni à
-l'historique. C'est ce que `plotyx-script` remplit pour fermer le TOCTOU entre
+l'historique. C'est ce que `stokesforge-script` remplit pour fermer le TOCTOU entre
 l'instantané qu'un script a lu et la commande qu'il envoie.
 
 ## L'historique est hybride, et c'est une décision de coût
@@ -128,7 +128,7 @@ Trois règles d'éviction à connaître, toutes délibérées :
 
 ## Libellés d'historique : une donnée, pas une phrase
 
-Chaque entrée porte un `HistoryLabel` (`plotyx-commands/src/label.rs`) : une
+Chaque entrée porte un `HistoryLabel` (`stokesforge-commands/src/label.rs`) : une
 énumération — l'action et ses paramètres (`InsertRows { count }`,
 `Rename { from, to }`, `SetCells { column: Option<ColumnRef> }`…), plus
 `Macro(MacroKind)` pour un groupe. `Command::label(&Tree)` le calcule sur
@@ -141,16 +141,16 @@ Le crate ne met **rien** en phrase et ne dépend pas de Fluent :
 
 | Où | Rôle |
 |---|---|
-| `plotyx-commands` | rend la donnée ; `Display` en **anglais** pour les journaux et le CLI |
-| `plotyx-app/src/history_text.rs` | `history_text` : la variante en phrase, par `tr!` et les clés `history-*` du catalogue `en`, pluriels Fluent ; `match` exhaustif |
-| `plotyx-app/tests/history_text.rs` | le catalogue `en` et le `Display` disent la même chose, variante par variante |
+| `stokesforge-commands` | rend la donnée ; `Display` en **anglais** pour les journaux et le CLI |
+| `stokesforge-app/src/history_text.rs` | `history_text` : la variante en phrase, par `tr!` et les clés `history-*` du catalogue `en`, pluriels Fluent ; `match` exhaustif |
+| `stokesforge-app/tests/history_text.rs` | le catalogue `en` et le `Display` disent la même chose, variante par variante |
 
 `begin_macro` prend un `MacroKind`, énumération **fermée** (coller, effacer la
 sélection, propriétés du graphe, actualiser, importer, créer un classeur ou une
 feuille, exécuter un script) : un groupe est une valeur qui se compare (`undo_label ==
 Some(HistoryLabel::Macro(MacroKind::Import))`), pas un texte à relire. Un
 nouveau groupe ajoute une variante de `MacroKind`, sa clé `history-macro-*` et
-sa ligne de `Display`. L'historique n'est pas écrit dans le `.plx`
+sa ligne de `Display`. L'historique n'est pas écrit dans le `.stf`
 ([`persistance.md`](persistance.md)).
 
 ## Macros
@@ -167,7 +167,7 @@ macro ouverte, et pourquoi une macro encore ouverte à l'arrêt de l'acteur est
 
 Ce que l'identité du client change pendant une macro ouverte — qui peut
 exécuter, fermer, avorter — appartient à l'acteur et se lit dans la table de
-`plotyx-session/src/lib.rs`.
+`stokesforge-session/src/lib.rs`.
 
 ## Les erreurs
 
@@ -188,4 +188,4 @@ propres à la pile : macro ouverte, pas de macro, pile non vide, macro
   `b18` (ce qui reste possible pendant qu'une macro est ouverte), `b21`
   (coût et identité sur le chemin d'écriture).
 
-**À lire** : `plotyx-commands/src/lib.rs` et `src/history.rs` (têtes).
+**À lire** : `stokesforge-commands/src/lib.rs` et `src/history.rs` (têtes).

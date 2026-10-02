@@ -1,0 +1,10 @@
+[package]
+name = "stokesforge-id"
+version = "0.0.0"
+edition.workspace = true
+description = "Identité opaque des nœuds (NodeId) — crate minimal, sans dépendance, extrait de stokesforge-core en phase R3 pour que stokesforge-plot et stokesforge-core puissent tous deux la référencer sans dépendance circulaire."
+
+[lints]
+workspace = true
+
+[dependencies]

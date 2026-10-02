@@ -3838,248 +3838,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "plotyx-app"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "arboard",
- "directories",
- "eframe",
- "egui_extras",
- "fluent-syntax",
- "i18n-embed",
- "i18n-embed-fl",
- "plotyx-commands",
- "plotyx-core",
- "plotyx-import",
- "plotyx-importer",
- "plotyx-persistence",
- "plotyx-plot",
- "plotyx-python",
- "plotyx-render-egui",
- "plotyx-render-svg",
- "plotyx-script",
- "plotyx-session",
- "rfd",
- "rust-embed",
- "serde",
- "serde_json",
- "tempfile",
- "winit",
-]
-
-[[package]]
-name = "plotyx-arch-guard"
-version = "0.0.0"
-dependencies = [
- "toml 0.8.23",
-]
-
-[[package]]
-name = "plotyx-cli"
-version = "0.0.0"
-dependencies = [
- "plotyx-commands",
- "plotyx-core",
- "plotyx-import",
- "plotyx-importer",
- "plotyx-persistence",
- "plotyx-python",
- "plotyx-script",
- "plotyx-session",
- "tempfile",
-]
-
-[[package]]
-name = "plotyx-commands"
-version = "0.0.0"
-dependencies = [
- "plotyx-arch-guard",
- "plotyx-core",
- "plotyx-plot",
- "proptest",
- "thiserror 2.0.20",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "plotyx-core"
-version = "0.0.0"
-dependencies = [
- "plotyx-arch-guard",
- "plotyx-id",
- "plotyx-plot",
- "proptest",
- "thiserror 2.0.20",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "plotyx-id"
-version = "0.0.0"
-
-[[package]]
-name = "plotyx-import"
-version = "0.0.0"
-dependencies = [
- "directories",
- "plotyx-arch-guard",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "plotyx-importer"
-version = "0.0.0"
-dependencies = [
- "plotyx-arch-guard",
- "plotyx-core",
- "plotyx-import",
-]
-
-[[package]]
-name = "plotyx-persistence"
-version = "0.0.0"
-dependencies = [
- "plotyx-arch-guard",
- "plotyx-core",
- "plotyx-plot",
- "rmp-serde",
- "rmpv",
- "serde",
- "serde_bytes",
- "tempfile",
- "thiserror 2.0.20",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "plotyx-plot"
-version = "0.0.0"
-dependencies = [
- "plotyx-arch-guard",
- "plotyx-id",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "plotyx-python"
-version = "0.0.0"
-dependencies = [
- "numpy",
- "pyo3",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "plotyx-render"
-version = "0.0.0"
-dependencies = [
- "epaint",
- "fontdb",
- "plotters",
- "plotters-backend",
- "plotyx-arch-guard",
- "plotyx-core",
- "plotyx-plot",
- "skrifa 0.44.0",
- "toml 0.8.23",
- "typst",
- "typst-layout",
-]
-
-[[package]]
-name = "plotyx-render-egui"
-version = "0.0.0"
-dependencies = [
- "egui",
- "plotters",
- "plotters-backend",
- "plotyx-commands",
- "plotyx-core",
- "plotyx-plot",
- "plotyx-render",
- "plotyx-render-svg",
- "plotyx-session",
- "typst",
- "typst-render",
-]
-
-[[package]]
-name = "plotyx-render-svg"
-version = "0.0.0"
-dependencies = [
- "lopdf",
- "plotters",
- "plotters-backend",
- "plotyx-core",
- "plotyx-plot",
- "plotyx-render",
- "resvg 0.45.1",
- "svg2pdf",
- "tempfile",
- "thiserror 2.0.20",
- "toml 0.8.23",
- "typst",
- "typst-svg",
-]
-
-[[package]]
-name = "plotyx-robustesse"
-version = "0.0.0"
-dependencies = [
- "plotyx-app",
- "plotyx-commands",
- "plotyx-core",
- "plotyx-persistence",
- "plotyx-plot",
- "plotyx-python",
- "plotyx-script",
- "plotyx-session",
- "proptest",
- "rmp-serde",
- "serde",
- "serde_bytes",
- "tempfile",
-]
-
-[[package]]
-name = "plotyx-script"
-version = "0.0.0"
-dependencies = [
- "numpy",
- "plotyx-arch-guard",
- "plotyx-commands",
- "plotyx-core",
- "plotyx-import",
- "plotyx-importer",
- "plotyx-plot",
- "plotyx-python",
- "plotyx-render",
- "plotyx-render-svg",
- "plotyx-session",
- "pyo3",
- "tempfile",
- "thiserror 2.0.20",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "plotyx-session"
-version = "0.0.0"
-dependencies = [
- "plotyx-arch-guard",
- "plotyx-commands",
- "plotyx-core",
- "plotyx-persistence",
- "tempfile",
- "thiserror 2.0.20",
- "toml 0.8.23",
-]
-
-[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5246,6 +5004,248 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "stokesforge-app"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "directories",
+ "eframe",
+ "egui_extras",
+ "fluent-syntax",
+ "i18n-embed",
+ "i18n-embed-fl",
+ "rfd",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "stokesforge-commands",
+ "stokesforge-core",
+ "stokesforge-import",
+ "stokesforge-importer",
+ "stokesforge-persistence",
+ "stokesforge-plot",
+ "stokesforge-python",
+ "stokesforge-render-egui",
+ "stokesforge-render-svg",
+ "stokesforge-script",
+ "stokesforge-session",
+ "tempfile",
+ "winit",
+]
+
+[[package]]
+name = "stokesforge-arch-guard"
+version = "0.0.0"
+dependencies = [
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "stokesforge-cli"
+version = "0.0.0"
+dependencies = [
+ "stokesforge-commands",
+ "stokesforge-core",
+ "stokesforge-import",
+ "stokesforge-importer",
+ "stokesforge-persistence",
+ "stokesforge-python",
+ "stokesforge-script",
+ "stokesforge-session",
+ "tempfile",
+]
+
+[[package]]
+name = "stokesforge-commands"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "stokesforge-arch-guard",
+ "stokesforge-core",
+ "stokesforge-plot",
+ "thiserror 2.0.20",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "stokesforge-core"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "stokesforge-arch-guard",
+ "stokesforge-id",
+ "stokesforge-plot",
+ "thiserror 2.0.20",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "stokesforge-id"
+version = "0.0.0"
+
+[[package]]
+name = "stokesforge-import"
+version = "0.0.0"
+dependencies = [
+ "directories",
+ "serde",
+ "serde_json",
+ "stokesforge-arch-guard",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "stokesforge-importer"
+version = "0.0.0"
+dependencies = [
+ "stokesforge-arch-guard",
+ "stokesforge-core",
+ "stokesforge-import",
+]
+
+[[package]]
+name = "stokesforge-persistence"
+version = "0.0.0"
+dependencies = [
+ "rmp-serde",
+ "rmpv",
+ "serde",
+ "serde_bytes",
+ "stokesforge-arch-guard",
+ "stokesforge-core",
+ "stokesforge-plot",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "stokesforge-plot"
+version = "0.0.0"
+dependencies = [
+ "stokesforge-arch-guard",
+ "stokesforge-id",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "stokesforge-python"
+version = "0.0.0"
+dependencies = [
+ "numpy",
+ "pyo3",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "stokesforge-render"
+version = "0.0.0"
+dependencies = [
+ "epaint",
+ "fontdb",
+ "plotters",
+ "plotters-backend",
+ "skrifa 0.44.0",
+ "stokesforge-arch-guard",
+ "stokesforge-core",
+ "stokesforge-plot",
+ "toml 0.8.23",
+ "typst",
+ "typst-layout",
+]
+
+[[package]]
+name = "stokesforge-render-egui"
+version = "0.0.0"
+dependencies = [
+ "egui",
+ "plotters",
+ "plotters-backend",
+ "stokesforge-commands",
+ "stokesforge-core",
+ "stokesforge-plot",
+ "stokesforge-render",
+ "stokesforge-render-svg",
+ "stokesforge-session",
+ "typst",
+ "typst-render",
+]
+
+[[package]]
+name = "stokesforge-render-svg"
+version = "0.0.0"
+dependencies = [
+ "lopdf",
+ "plotters",
+ "plotters-backend",
+ "resvg 0.45.1",
+ "stokesforge-core",
+ "stokesforge-plot",
+ "stokesforge-render",
+ "svg2pdf",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 0.8.23",
+ "typst",
+ "typst-svg",
+]
+
+[[package]]
+name = "stokesforge-robustesse"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "stokesforge-app",
+ "stokesforge-commands",
+ "stokesforge-core",
+ "stokesforge-persistence",
+ "stokesforge-plot",
+ "stokesforge-python",
+ "stokesforge-script",
+ "stokesforge-session",
+ "tempfile",
+]
+
+[[package]]
+name = "stokesforge-script"
+version = "0.0.0"
+dependencies = [
+ "numpy",
+ "pyo3",
+ "stokesforge-arch-guard",
+ "stokesforge-commands",
+ "stokesforge-core",
+ "stokesforge-import",
+ "stokesforge-importer",
+ "stokesforge-plot",
+ "stokesforge-python",
+ "stokesforge-render",
+ "stokesforge-render-svg",
+ "stokesforge-session",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "stokesforge-session"
+version = "0.0.0"
+dependencies = [
+ "stokesforge-arch-guard",
+ "stokesforge-commands",
+ "stokesforge-core",
+ "stokesforge-persistence",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 0.8.23",
+]
 
 [[package]]
 name = "strict-num"

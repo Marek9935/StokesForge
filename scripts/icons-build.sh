@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Produit les SVG d'icônes de plotyx-app (une variante par icône et par rôle de
+# Produit les SVG d'icônes de stokesforge-app (une variante par icône et par rôle de
 # couleur) et la planche-contact. Voir docs/icones.md.
 #
 #   scripts/icons-build.sh            # variantes seules
@@ -10,7 +10,7 @@
 # palette.tsv (rôles), icons.tsv (icône → rôles). Sortie : assets/icons/<nom>.<rôle>.svg.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-dir=crates/plotyx-app/assets/icons
+dir=crates/stokesforge-app/assets/icons
 out=${ICON_SHEET_DIR:-target/icons}
 
 if [[ ${1:-} == --add ]]; then

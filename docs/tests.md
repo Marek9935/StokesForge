@@ -6,7 +6,7 @@
 |---|---|---|
 | **tests unitaires** | `#[cfg(test)]` dans `src/` | un comportement local, au plus près de son code |
 | **tests d'intégration** | `crates/*/tests/` | une propriété de crate : contrat public, frontière, accord entre chemins |
-| **banc de robustesse** | `plotyx-robustesse/tests/` | le socle aux limites — 21 batteries `b1`…`b21` |
+| **banc de robustesse** | `stokesforge-robustesse/tests/` | le socle aux limites — 21 batteries `b1`…`b21` |
 
 ## Les garde-fous à ne pas casser
 
@@ -16,15 +16,15 @@ par inadvertance, et ce sont eux qu'il faut comprendre avant de les modifier.
 
 | Test | Ce qu'il tient |
 |---|---|
-| `*/tests/no_ui_dependency.rs` | liste blanche de dépendances : toute addition au `Cargo.toml` doit y être ajoutée explicitement (invariant 2). Lecture commune `plotyx-arch-guard` : dépendances normales, de build, `target.*` et renommées (`package`) ; `dev-dependencies` exclues ; témoins négatifs dans `plotyx-arch-guard/src/lib.rs` |
-| `plotyx-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
-| `plotyx-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
-| `plotyx-render-egui/tests/accord.rs` | écran et export placent les mêmes primitives aux mêmes pixels |
-| `plotyx-render-egui/tests/feathering.rs` | le feathering n'entre pas dans la clé de cache (invariant 6) |
-| `plotyx-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
-| `plotyx-app/tests/libelles.rs` | aucun texte d'interface en dur (`aucun_libelle_en_dur`, garde absolue, sans dérogation, #48) ; les dépendances de traduction restent dans `plotyx-app` ; les témoins qui prouvent que la garde voit un littéral |
-| `plotyx-app/src/i18n.rs` (tests) | toute clé de `fr` existe dans `en` avec les mêmes arguments ; la pseudo-langue entoure et allonge chaque message ; complétude bloquante (toute clé de `en` existe dans `fr`) ; pluriels et typographie françaises ; une préférence `fr` ouvre l'interface en français ; choix de la langue sans panique ; `tests/language_switch.rs` : la langue change sans redémarrer |
-| `plotyx-commands/tests/memory_pinning.rs` | l'historique n'épingle pas indéfiniment de gros buffers |
+| `*/tests/no_ui_dependency.rs` | liste blanche de dépendances : toute addition au `Cargo.toml` doit y être ajoutée explicitement (invariant 2). Lecture commune `stokesforge-arch-guard` : dépendances normales, de build, `target.*` et renommées (`package`) ; `dev-dependencies` exclues ; témoins négatifs dans `stokesforge-arch-guard/src/lib.rs` |
+| `stokesforge-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
+| `stokesforge-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
+| `stokesforge-render-egui/tests/accord.rs` | écran et export placent les mêmes primitives aux mêmes pixels |
+| `stokesforge-render-egui/tests/feathering.rs` | le feathering n'entre pas dans la clé de cache (invariant 6) |
+| `stokesforge-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
+| `stokesforge-app/tests/libelles.rs` | aucun texte d'interface en dur (`aucun_libelle_en_dur`, garde absolue, sans dérogation, #48) ; les dépendances de traduction restent dans `stokesforge-app` ; les témoins qui prouvent que la garde voit un littéral |
+| `stokesforge-app/src/i18n.rs` (tests) | toute clé de `fr` existe dans `en` avec les mêmes arguments ; la pseudo-langue entoure et allonge chaque message ; complétude bloquante (toute clé de `en` existe dans `fr`) ; pluriels et typographie françaises ; une préférence `fr` ouvre l'interface en français ; choix de la langue sans panique ; `tests/language_switch.rs` : la langue change sans redémarrer |
+| `stokesforge-commands/tests/memory_pinning.rs` | l'historique n'épingle pas indéfiniment de gros buffers |
 
 ### Le témoin, sans lequel un test d'égalité ne prouve rien
 
@@ -45,11 +45,11 @@ d'abord.
 
 ## Le banc de robustesse
 
-`plotyx-robustesse` ne contient **aucun code de production**. Il dépend de tout
+`stokesforge-robustesse` ne contient **aucun code de production**. Il dépend de tout
 le workspace et porte deux choses :
 
 - **21 batteries** (`tests/b1…b21`) qui éprouvent le socle aux limites :
-  valeurs numériques extrêmes (`b1`), persistance (`b2`), fichiers `.plx`
+  valeurs numériques extrêmes (`b1`), persistance (`b2`), fichiers `.stf`
   malformés puis sémantiquement hostiles (`b3`), allocateur d'identifiants
   (`b4`), macros (`b5`), concurrence entre clients (`b6`), frontière
   Rust ↔ Python (`b7`), propriétés tirées au sort par proptest (`b8`), script
@@ -98,19 +98,19 @@ pas croître avec X » et reste vraie sur n'importe quelle machine.
 ```sh
 cargo test --workspace                        # tout, sauf #[ignore]
 cargo test -p <crate> --test <fichier>        # un fichier de tests
-cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
+cargo test -p stokesforge-robustesse -- --ignored  # reproductions et bancs coûteux
 # (Typst est compilé et testé par `cargo test --workspace` ; `--all-features` n'active plus que Python : voir .codex/README.md)
 scripts/python-test.sh                        # pont Python, scripts, robustesse, application et CLI
 scripts/python-test.sh -- --ignored           # + les reproductions de la frontière Python
 ```
 
 Les tests de console `script_panel` et de démarrage paresseux
-`script_bridge_lazy` exigent aussi la feature Python de `plotyx-app`.
+`script_bridge_lazy` exigent aussi la feature Python de `stokesforge-app`.
 Avec l'environnement embarqué décrit dans [`.codex/README.md`](../.codex/README.md),
 `scripts/python-test.sh` les inclut ; pour les isoler :
 
 ```sh
-cargo test -p plotyx-app --features python --test script_panel --test script_bridge_lazy
+cargo test -p stokesforge-app --features python --test script_panel --test script_bridge_lazy
 ```
 
 ## CI (`.gitlab-ci.yml`)
@@ -122,7 +122,7 @@ Un seul étage, `check`, et cinq travaux :
 | `fmt` | oui | `cargo fmt --all -- --check` |
 | `clippy` | oui | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `test` | oui | `cargo test --workspace` |
-| `robustesse` | non | `cargo test -p plotyx-robustesse -- --ignored` |
+| `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
@@ -152,5 +152,5 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   `docs/archive/rustrewrite/questions-ouvertes.md` §11.
 - Les tests et leurs commentaires sont en français, comme le reste.
 
-**À lire** : `plotyx-robustesse/src/lib.rs` (l'index des batteries), puis la
+**À lire** : `stokesforge-robustesse/src/lib.rs` (l'index des batteries), puis la
 tête du fichier `b*` visé.

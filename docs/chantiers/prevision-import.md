@@ -12,7 +12,7 @@ OriginLab, options de configuration détaillées) est secondaire à ce
 principe et négociable ; ce principe ne l'est pas.
 
 Concrètement : refaire le panneau de prévisualisation de la fenêtre d'import
-(`import_window`, `crates/plotyx-app/src/app.rs`) pour qu'il affiche ce
+(`import_window`, `crates/stokesforge-app/src/app.rs`) pour qu'il affiche ce
 découpage en direct, à mesure que l'utilisateur ajuste les paramètres
 d'import, sur le modèle de l'assistant d'import ASCII d'OriginLab.
 
@@ -65,22 +65,22 @@ Le panneau qu'elle montre se découpe en trois zones :
    aperçu immédiatement**, sans étape de validation intermédiaire — c'est le
    comportement central à reproduire, plus que tel ou tel widget précis.
 
-## Ce qui existe déjà côté PlotYx (point de départ, pas à rejeter en bloc)
+## Ce qui existe déjà côté StokesForge (point de départ, pas à rejeter en bloc)
 
-- `crates/plotyx-import` : crate pur (zéro dépendance UI/core), qui modélise
+- `crates/stokesforge-import` : crate pur (zéro dépendance UI/core), qui modélise
   déjà une **recette** (`ImportRecipe`) inspirée du même assistant OriginLab
-  — voir le commentaire de tête de `crates/plotyx-import/src/lib.rs`. Champs
+  — voir le commentaire de tête de `crates/stokesforge-import/src/lib.rs`. Champs
   actuels : `separator` (`Separator`), `decimal` (`DecimalStyle`), `header`
   (`HeaderSkip` : aucun saut, `N` lignes fixes, ou jusqu'à un marqueur),
   `footer_skip_lines`, `has_column_header_row`, `name_source` (nom de fichier
   ou clé lue en en-tête).
-- `crates/plotyx-core/src/column.rs` : `ColumnMeta { unit, long_name,
+- `crates/stokesforge-core/src/column.rs` : `ColumnMeta { unit, long_name,
   comment }` existe déjà par colonne — les rôles `Long Names`/`Units`/
   `Comments` d'OriginLab ont donc une destination naturelle dans le modèle
   actuel. Rien d'équivalent à `System Parameters`/`User Parameters`
   d'OriginLab n'existe : à trancher (les ignorer, ou les faire atterrir dans
   `comment` faute de mieux — voir « Questions ouvertes »).
-- `crates/plotyx-app/src/app.rs`, fonction `import_window` : la fenêtre
+- `crates/stokesforge-app/src/app.rs`, fonction `import_window` : la fenêtre
   d'import actuelle (dialogue transitoire tant que `AppState::import_state`
   est `Some`), avec ses champs de texte simples (dont le bug noté) et pas
   d'aperçu en direct du découpage.
@@ -120,10 +120,10 @@ sémantiques par colonne — c'est tout l'apport attendu de ce chantier.
   numérique dans une colonne par ailleurs numérique doit s'annoter dans
   l'aperçu, pas faire échouer le parsing).
 - Ne pas copier le vocabulaire d'OriginLab tel quel si un rôle n'a pas
-  d'équivalent dans le modèle PlotYx (`System Parameters`/`User Parameters`
+  d'équivalent dans le modèle StokesForge (`System Parameters`/`User Parameters`
   notamment) sans décision explicite — voir ci-dessous.
 - Rien de tout ceci ne passe par une commande annulable de
-  `plotyx-commands` **tant que l'import n'est pas validé** : le panneau de
+  `stokesforge-commands` **tant que l'import n'est pas validé** : le panneau de
   prévisualisation travaille sur un état local transitoire de la fenêtre
   d'import, comme aujourd'hui — seule l'application finale du résultat au
   classeur doit passer par une commande (c'est déjà le cas, à ne pas
@@ -133,7 +133,7 @@ sémantiques par colonne — c'est tout l'apport attendu de ce chantier.
 
 - **`System Parameters`/`User Parameters` d'OriginLab** : les ignorer (pas
   de champ équivalent dans `ColumnMeta`), les fondre dans `comment`, ou
-  étendre `ColumnMeta` ? Impact sur le format `.plx` si extension — lire
+  étendre `ColumnMeta` ? Impact sur le format `.stf` si extension — lire
   `docs/persistance.md` avant de trancher.
 - **Coût de l'aperçu en direct** sur un gros fichier (des dizaines de
   milliers de lignes) : reparser tout le fichier à chaque frappe dans un
@@ -146,4 +146,4 @@ sémantiques par colonne — c'est tout l'apport attendu de ce chantier.
   comportement de bord qui semble étrange n'est pas déjà un choix assumé).
 - **Persistance de ces nouveaux réglages dans `ImportRecipe`** : rétro-
   compatibilité du format JSON des recettes déjà enregistrées par
-  `RecipeStore` (`crates/plotyx-import/src/store.rs`) à vérifier.
+  `RecipeStore` (`crates/stokesforge-import/src/store.rs`) à vérifier.

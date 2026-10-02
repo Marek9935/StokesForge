@@ -1,6 +1,6 @@
 # Application
 
-## `plotyx-app` — la coquille UI
+## `stokesforge-app` — la coquille UI
 
 **Ce que ce crate n'est pas** : une ébauche de l'interface finale. La grille
 éditable à délégués, le panneau de propriétés et un système de graphes complet
@@ -27,7 +27,7 @@ Le Project Manager et la console de script sont deux panneaux fixes
 natures de fenêtre de contenu — `Tab::Book` (classeur), `Tab::Graph`,
 `Tab::Matrix`, `Tab::Note`, chacune portant un `NodeId` — s'ouvrent par défaut
 en fenêtres flottantes à l'intérieur du `CentralPanel`, une par
-`PlotyxApp::floating_tabs`, dans `app.rs`. Chacune est une `egui::Area` nue
+`StokesForgeApp::floating_tabs`, dans `app.rs`. Chacune est une `egui::Area` nue
 (`show_floating_window`), pas une `egui::Window` : l'application possède seule
 sa géométrie, et le cadre, le contour actif, le rognage, les poignées et la
 géométrie persistée viennent du même rectangle. Les `egui::Window` d'avant
@@ -38,7 +38,7 @@ d'où les bugs de contour décalé et de débordement sur les panneaux
 
 L'aire qui les porte a une taille logique **fixe** (`WORKSPACE_SIZE`,
 1920×1080), indépendante de la taille de la fenêtre principale : en dessous,
-elle défile (`PlotyxApp::workspace_scroll`) plutôt que d'écraser les fenêtres
+elle défile (`StokesForgeApp::workspace_scroll`) plutôt que d'écraser les fenêtres
 qu'elle contient contre ses bords. `window_positions`/`window_sizes` et la
 géométrie persistée dans le projet sont exprimées dans ces coordonnées
 logiques, bornées à l'espace de travail par `clamp_to_workspace` (la seule
@@ -54,12 +54,12 @@ plutôt que superposée à elle. La taille fixe est pour l'instant une constante
 du code, pas encore réglable par l'utilisateur (persistance, UI de réglage) —
 à faire.
 
-Un onglet par fenêtre **ouverte**, quelle que soit sa nature : `PlotyxApp::
+Un onglet par fenêtre **ouverte**, quelle que soit sa nature : `StokesForgeApp::
 open_tab` est le seul endroit qui décide « ouvrir » vs « focaliser » (cliquer
 une seconde fois la même entrée du Project Manager ne duplique jamais son
 onglet, elle est ramenée au premier plan). Un onglet `Tab::Graph` par graphe
-ouvert garde son propre `plotyx_render_egui::GraphView` (donc son propre
-cache de formes — `PlotyxApp::graph_views` est une table indexée par
+ouvert garde son propre `stokesforge_render_egui::GraphView` (donc son propre
+cache de formes — `StokesForgeApp::graph_views` est une table indexée par
 `NodeId`). Son contenu réserve la hauteur des commandes sous la figure : le
 rectangle rendu reste stable au survol, donc le
 cache ne se reconstruit pas et la fenêtre ne dérive pas en hauteur. Une
@@ -80,8 +80,8 @@ seul contenu de ce graphe, sans modifier le projet, la géométrie enregistrée
 ni les autres fenêtres.
 
 Chaque fenêtre flottante peut aussi être maximisée (plein cadre du
-`CentralPanel`, `PlotyxApp::maximized_tab`) ou détachée dans une vraie fenêtre
-OS séparée (`PlotyxApp::detach_tab`/`reattach_tab`, pour le multi-écran).
+`CentralPanel`, `StokesForgeApp::maximized_tab`) ou détachée dans une vraie fenêtre
+OS séparée (`StokesForgeApp::detach_tab`/`reattach_tab`, pour le multi-écran).
 
 Le menu File propose la création d'un nouveau classeur (Add Workbook) et l'import de
 fichiers. La position et
@@ -93,9 +93,9 @@ la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 Déposer des fichiers sur la fenêtre principale émet `Action::DropFiles`. Le
 classeur flottant sous le curseur réclame le dépôt en se peignant
 (`claim_file_drop`) : il reçoit une feuille par fichier, sinon un nouveau
-classeur est créé. Les `.plx` ne sont jamais importés : `AppState` les met en
+classeur est créé. Les `.stf` ne sont jamais importés : `AppState` les met en
 file (`take_projects_to_open`) et `app.rs` lance un second processus
-`plotyx-app <chemin>`. Chaque fichier utilise le modèle qui le reconnaît,
+`stokesforge-app <chemin>`. Chaque fichier utilise le modèle qui le reconnaît,
 sinon le dernier modèle utilisé dans cette session, sinon la recette permissive.
 Il passe par la conversion et l'application communes à l'assistant — une
 seule entrée « Importer » ; un fichier qui ne donne aucune valeur numérique
@@ -138,7 +138,7 @@ progression « Import en cours… k/n », `AppState::poll_import` appelé à cha
 image) et les feuilles se créent à la fin, en une seule entrée « Importer ».
 Raccourci : **Ctrl+"** (`SHORTCUT_IMPORT` : touche du 3 sans Maj sur AZERTY,
 `SHORTCUT_IMPORT_QWERTY` : Ctrl+Maj+' sur QWERTY). Fichiers récents et dossier
-mémorisé : `plotyx_import::RecentFiles` (`import_recent.json`, à côté des
+mémorisé : `stokesforge_import::RecentFiles` (`import_recent.json`, à côté des
 recettes). « File › Reopen Last Import… » (`Action::ReopenLastImport`)
 rouvre l'assistant sur les fichiers et le modèle du dernier import — en
 l'annulant d'abord s'il est encore au sommet de l'historique, jamais un travail
@@ -167,7 +167,7 @@ séparateur espaces, X est le premier jeton non vide. L'étape « En-tête et fi
 des données » propose aussi « Aucune coupure », première ligne vide, marqueur,
 N lignes après l'en-tête ou N lignes avant la fin. Le clic droit sur l'aperçu
 permet d'annuler la coupure automatique ; l'aperçu et l'import utilisent le
-même découpage (`plotyx_import::layout`, `data_end`).
+même découpage (`stokesforge_import::layout`, `data_end`).
 
 **Plusieurs blocs.** `BlockSplit` découpe un fichier qui enchaîne plusieurs
 spectres (à chaque ligne commençant par un texte comme `TITLE`, ou aux lignes
@@ -188,7 +188,7 @@ colonnes sont actualisées.
 **winit 0.30 n'émet aucun dépôt de fichier sous Wayland** (seulement X11,
 Windows, macOS) : sous une session Wayland, rien ne se passait au lâcher.
 `main.rs` (`prefer_x11`) demande donc le backend X11 (XWayland) sous Linux dès
-que `DISPLAY` existe ; `PLOTYX_WAYLAND=1` garde le Wayland natif (sans dépôt de
+que `DISPLAY` existe ; `STOKESFORGE_WAYLAND=1` garde le Wayland natif (sans dépôt de
 fichiers). La logique de dépôt elle-même est testée sans fenêtre
 (`un_depot_est_reclame_par_le_classeur_sous_le_curseur`) ; le geste réel depuis
 un gestionnaire de fichiers reste à valider à la main.
@@ -213,7 +213,7 @@ avant la construction de la grille, qui ne peut donc plus la repousser hors du
 cadre (`book_contents`) ; ce découpage n'utilise pas `egui::Panel`, qui
 remplace le rognage de son parent au lieu de le combiner et dessinait les
 onglets sous la vue d'une fenêtre coupée. Les onglets
-gardent leur taille naturelle (`sheet_tabs`, enveloppe de `tab_strip`, `crates/plotyx-app/src/app.rs`) —
+gardent leur taille naturelle (`sheet_tabs`, enveloppe de `tab_strip`, `crates/stokesforge-app/src/app.rs`) —
 ils ne rétrécissent pas et ne se replient pas dans un menu « … ». La bande n'a
 **pas** de barre de défilement : quand des onglets sont cachés, deux boutons
 « < » et « > » apparaissent à sa gauche et font apparaître l'onglet caché
@@ -224,8 +224,8 @@ entièrement l'onglet sélectionné et ses deux voisins — cliquer sur le derni
 onglet visible ne révèle qu'un onglet de plus (`scroll_tab_strip_to_selected`,
 issue #1). Les notes et matrices restent bornées au rectangle commun. Dans un
 graphe (`graph_view_contents`,
-`crates/plotyx-app/src/app.rs`), la figure garde le ratio de
-`DEFAULT_FIGURE_SIZE` (`plotyx-render::pipeline`, 4:3) mais se met à l'échelle
+`crates/stokesforge-app/src/app.rs`), la figure garde le ratio de
+`DEFAULT_FIGURE_SIZE` (`stokesforge-render::pipeline`, 4:3) mais se met à l'échelle
 « contain » dans l'espace disponible — maximisée en prenant la dimension
 limitante, largeur ou hauteur, aussi bien en agrandissant qu'en rétrécissant
 (F11). Aucun rognage ni défilement pour le graphe : la figure entière reste
@@ -233,7 +233,7 @@ toujours visible. C'est un **zoom** : la disposition (graduations, marges,
 légende, mesures de texte) est toujours calculée à la taille de référence
 `DEFAULT_FIGURE_SIZE` (480×360), puis le résultat entier, texte et épaisseurs
 compris, est agrandi ou réduit uniformément (`GraphView::paint_scaled`,
-`plotyx-render-egui`). Redimensionner la fenêtre ne redispose donc rien, et
+`stokesforge-render-egui`). Redimensionner la fenêtre ne redispose donc rien, et
 ne reconstruit pas le cache de formes. La règle est identique en fenêtre
 flottante et détachée, qui partagent la même fonction.
 
@@ -242,7 +242,7 @@ définir avec l'utilisateur quelles zones défilent et quelles zones sont
 rognées avant de brancher son contenu.
 
 Le `Frame` de ces fenêtres n'a pas de marge verticale
-(`WINDOW_CONTENT_MARGIN`, `crates/plotyx-app/src/app.rs`) : la bande d'en-tête
+(`WINDOW_CONTENT_MARGIN`, `crates/stokesforge-app/src/app.rs`) : la bande d'en-tête
 et les séparateurs du contenu fournissent déjà leur propre espacement, une
 marge par défaut n'ajoutait qu'un bandeau blanc mort au-dessus et en dessous.
 La marge horizontale reste. Toutes les barres de défilement suivent le
@@ -267,19 +267,19 @@ table à l'image suivante (`grid_contents`, `pending_vertical_offset`).
 
 ### Géométrie et état des fenêtres
 
-Pour chaque fenêtre de contenu, la session retient (et le `.plotyx`
+Pour chaque fenêtre de contenu, la session retient (et le `.stokesforge`
 enregistre) sa **géométrie flottante** — position et taille dans l'espace de
 travail — et son **état** : ouverte, maximisée ou fermée, repliée, rang
 d'empilement (`WindowGeometry::view`, voir `docs/persistance.md`). Les deux
-partent ensemble à la fin de chaque image (`PlotyxApp::sync_window_views`),
+partent ensemble à la fin de chaque image (`StokesForgeApp::sync_window_views`),
 seulement quand ils changent. La géométrie flottante ne bouge jamais quand la
-fenêtre est fermée, maximisée ou détachée : `PlotyxApp::floating_rects` la
+fenêtre est fermée, maximisée ou détachée : `StokesForgeApp::floating_rects` la
 conserve et prime sur l'instantané, que `AppState::set_window_geometry` ne
 rafraîchit pas.
 
 Le **détachement ne se retient pas** : une fenêtre détachée est enregistrée
 ouverte et revient flottante au rechargement ; la position et la taille de sa
-fenêtre OS ne sont ni écrites ni relues. Au démarrage, `PlotyxApp::new`
+fenêtre OS ne sont ni écrites ni relues. Au démarrage, `StokesForgeApp::new`
 rétablit les fenêtres ouvertes (dans l'ordre d'empilement), la maximisée et
 les repliées ; sans état enregistré, il ouvre le premier classeur et le
 premier graphe.
@@ -309,14 +309,14 @@ Cliquer une fenêtre l'ouvre ou la focalise, pour les quatre natures :
   seulement scopée à « la feuille actuellement choisie dans ce classeur »
   plutôt qu'à une sélection globale — `AppState::visible_columns` et
   `AppState::row_count` prennent désormais un `NodeId` de feuille explicite.
-- **`Tab::Note`** est réellement éditable : `plotyx-core` expose déjà le texte
+- **`Tab::Note`** est réellement éditable : `stokesforge-core` expose déjà le texte
   d'une note (`NodeKind::Note::text`) et une commande annulable
   (`Command::SetNoteText`). L'éditeur suit le même principe de saisie
   différée qu'une cellule de grille (`AppState::NoteEdit`, symétrique de
   `CellEdit` : le tampon n'atteint le modèle qu'à la perte de focus).
 - **`Tab::Matrix`** est un **espace réservé documenté** : la fenêtre s'ouvre et
   se focalise comme les trois autres, mais ne montre qu'un message explicite
-  — `plotyx-core::NodeKind::Matrix` n'a aujourd'hui aucun contenu à éditer, et
+  — `stokesforge-core::NodeKind::Matrix` n'a aujourd'hui aucun contenu à éditer, et
   l'éditeur de matrice complet est explicitement hors périmètre de cette
   tâche.
 
@@ -344,7 +344,7 @@ principale pour être traitées même quand elle est inactive.
 
 ### Détachement générique des onglets de contenu
 
-`PlotyxApp::detach_tab`/`reattach_tab`/`show_detached_tabs` généralisent le
+`StokesForgeApp::detach_tab`/`reattach_tab`/`show_detached_tabs` généralisent le
 mécanisme ci-dessus à `Tab::Book`, `Tab::Graph`, `Tab::Matrix` et `Tab::Note` :
 l'icône de détachement ouvre une fenêtre OS ; celle-ci propose une icône de
 réattachement. Fermer une fenêtre de contenu détachée ferme uniquement sa
@@ -400,7 +400,7 @@ détaché.
 
 `Tab::Graph` échappe à cette limite : `GraphView` n'a pas de verrou global à
 `AppState` à respecter (son cache de formes et sa navigation zoom/pan sont
-déjà scopés par graphe, dans `PlotyxApp::graph_views`) — `graph_view_contents`
+déjà scopés par graphe, dans `StokesForgeApp::graph_views`) — `graph_view_contents`
 est donc **littéralement** la même fonction pour une fenêtre flottante et une fenêtre
 détachée ; la vue elle-même migre simplement hors de `graph_views` le temps
 du détachement pour rester capturable par la fermeture sans dupliquer le
@@ -418,7 +418,7 @@ d'exécution du script, hors périmètre de cette tâche.
 `src/toolbar.rs`. Des barres de boutons-icônes, **déplaçables à la souris** :
 chaque barre porte une poignée à gauche ; la saisir la détache dans une
 `egui::Area` (calque Foreground) qui suit le pointeur. Relâchée sur la zone
-d'accueil (le panneau `plotyx_toolbars`, sous la barre de menu, plus une
+d'accueil (le panneau `stokesforge_toolbars`, sous la barre de menu, plus une
 demi-rangée qui ouvre une nouvelle rangée) elle s'y range ; ailleurs elle
 devient flottante. Le *pourquoi* du conteneur maison (ni `Panel`, ni `Window`
 brute, ni `show_window_in_layer`) est dans le `//!` du module. Version 1 :
@@ -431,11 +431,11 @@ accueil en haut seulement.
   menu — jamais une seconde écriture. Le contenu de chaque barre est
   `toolbar::bar_contents` ; un geste qui n'est pas une `Action` (sélecteur de
   fichier, assistant d'import, export) remonte en `ToolbarRequest`, exécuté par
-  `PlotyxApp::run_toolbar_request` avec les méthodes mêmes des menus. Barre
+  `StokesForgeApp::run_toolbar_request` avec les méthodes mêmes des menus. Barre
   Fichier (#61) : classeur, import, ouvrir, enregistrer, enregistrer sous,
   exporter (grisé sans graphe au premier plan).
 - Barre contextuelle `Tools` (#62) : son contenu suit la fenêtre au premier
-  plan (`ToolsContext`, calculé par `PlotyxApp::tools_context`). Graphe : les
+  plan (`ToolsContext`, calculé par `StokesForgeApp::tools_context`). Graphe : les
   outils Pointeur / Zoom / Texte (`GraphTool` de la vue, bouton enfoncé pour
   l'outil actif), réinitialiser le zoom, propriétés. Classeur : ajouter
   feuille, ajouter colonne, tracer la sélection (courbe, nuage, barres ; grisé
@@ -448,12 +448,12 @@ accueil en haut seulement.
   markup Typst, gras, italique, indice, exposant, formule, couleur et corps
   d'un passage **écrivent des balises dans le texte** (`text_format::apply`,
   pur). La **police** n'est plus une balise (#78) : c'est un champ de la zone
-  entière (`TextFont`, `AnnotationSpec::font`), posé par `PlotyxApp::format_zone`
+  entière (`TextFont`, `AnnotationSpec::font`), posé par `StokesForgeApp::format_zone`
   — brouillon de l'éditeur pour un texte libre en édition
   (`pending_zone_font_id`), `Action::SetTextFont` pour un titre ou la légende,
   `Action::SetAnnotation` pour un texte libre sélectionné. Un titre, un titre
   d'axe ou la légende **sélectionné** (`FormatTarget::Zone`, #77) ne prend que
-  la police et le corps (les autres boutons sont grisés). Cible (`FormatTarget`, `PlotyxApp::format_target`) : un champ en
+  la police et le corps (les autres boutons sont grisés). Cible (`FormatTarget`, `StokesForgeApp::format_target`) : un champ en
   édition sur place (texte libre, titre, titre d'axe, légende) → la demande
   attend dans la mémoire d'egui (`pending_format_id`) et le champ la pose à
   son prochain tracé sur le surlignage qu'egui a gardé, ou insère les balises
@@ -464,15 +464,15 @@ accueil en haut seulement.
   pas l'éditeur (`toolbar::over_format_bar`). Le formateur ne pose pas
   d'alignement : les textes tiennent sur une ligne.
 - Visibilité : menu **View**, une case par barre. Emplacement et visibilité
-  sont dans `preferences.json` (champ `toolbars`), pas dans le `.plx` ; la
-  lecture ignore ce qu'elle ne comprend pas. `PlotyxApp::new` ne lit pas le
+  sont dans `preferences.json` (champ `toolbars`), pas dans le `.stf` ; la
+  lecture ignore ce qu'elle ne comprend pas. `StokesForgeApp::new` ne lit pas le
   fichier (les tests), `main` appelle `load_toolbar_layout`.
 - Les barres ne sont peintes que dans la fenêtre principale, pas dans les
   fenêtres OS détachées.
 
 ### Thème
 
-L'appli **ne suit pas** le thème clair/sombre du système : `plotyx_app::theme`
+L'appli **ne suit pas** le thème clair/sombre du système : `stokesforge_app::theme`
 pose, une seule fois au démarrage (`main.rs`, dans la fermeture de création
 d'`eframe::run_native`, aux côtés du réglage des polices), une palette maison
 dérivée de `egui::Visuals::light()` — jamais du sombre. `Context::set_theme`
@@ -483,7 +483,7 @@ liens, contours des widgets actifs/survolés), coins légèrement moins arrondis
 que le défaut egui. Le reste (gris de fond, contrastes de texte) vient tel
 quel du thème clair d'egui, déjà calibré pour la lisibilité.
 
-Deux raisons à ce choix, documentées en tête de `theme.rs` : `plotyx-render`
+Deux raisons à ce choix, documentées en tête de `theme.rs` : `stokesforge-render`
 dessine les tracés sur un fond clair implicite (axes, grilles, texte noir) —
 un thème sombre romprait ce contraste sans qu'aucun code de rendu n'en soit
 informé ; et un thème qui change avec le système est un thème qu'on ne peut
@@ -512,16 +512,16 @@ ailleurs.
 L'interface s'écrit **d'abord en anglais** ; le français en est une traduction
 (chantier #39). Seule l'application traduit : Fluent (`i18n-embed`,
 `i18n-embed-fl`, `rust-embed`, plus `fluent-syntax` pour la pseudo-langue) est
-une dépendance de `plotyx-app` et d'aucun autre crate — `core`, `commands`,
+une dépendance de `stokesforge-app` et d'aucun autre crate — `core`, `commands`,
 `session` et les autres rendent des données structurées que l'application met
 en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifiés
 à la compilation) est en tête de `src/i18n.rs`.
 
 | Où | Quoi |
 |---|---|
-| `crates/plotyx-app/i18n/en/plotyx_app.ftl` | le catalogue de référence ; une clé absente d'ici n'existe pas |
-| `crates/plotyx-app/i18n/fr/plotyx_app.ftl` | la traduction française, complète (#49) : même ensemble de clés que `en`, même commit |
-| `crates/plotyx-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues |
+| `crates/stokesforge-app/i18n/en/stokesforge_app.ftl` | le catalogue de référence ; une clé absente d'ici n'existe pas |
+| `crates/stokesforge-app/i18n/fr/stokesforge_app.ftl` | la traduction française, complète (#49) : même ensemble de clés que `en`, même commit |
+| `crates/stokesforge-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues |
 | `src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
 | `src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
 | `src/history_text.rs` | les libellés d'historique (`HistoryLabel`) en phrases, clés `history-*` (#46) |
@@ -531,7 +531,7 @@ en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifi�
 nommés `tr!("history-insert-rows", count = n)`. Il enveloppe `fl!` ; une clé ou un
 argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Pour l'infobulle d'un contrôle (attribut `.hint` de sa clé) : `tr!("project-manager-show", "hint")`. Un test
 qui compare une langue précise passe son chargeur : `tr!(in loader; "clé")`
-(`build_loader`), pour ne pas dépendre de `PLOTYX_LANG` ; un test qui cherche un texte peint le demande à `tr!`, jamais un littéral.
+(`build_loader`), pour ne pas dépendre de `STOKESFORGE_LANG` ; un test qui cherche un texte peint le demande à `tr!`, jamais un littéral.
 
 **Menus et actions (#42)** : une action a **un** libellé, la clé `action-*`, partagé
 par la barre de menus, les menus contextuels, la barre d'état et le bouton de
@@ -541,16 +541,16 @@ menu dessine déjà) est l'attribut `.hint` (`tr!("action-save", "hint")`) ;
 l'infobulle d'une entrée grisée, qui dit pourquoi, est `.disabled`. Les noms
 de touches (`shortcut-backspace`, `shortcut-delete`) sont aussi des clés. 
 
-**Langue** : la variable `PLOTYX_LANG` (`en`, `fr`, `en-XA`), puis la
+**Langue** : la variable `STOKESFORGE_LANG` (`en`, `fr`, `en-XA`), puis la
 préférence `language` de `preferences.json`, sinon l'anglais. La langue du
 système n'est **pas** suivie (décision du 2026-10-01). Une valeur inconnue ou
 un fichier corrompu passe au niveau suivant, sans panique (invariant 10).
 Menu **Fichier › Langue** : change la langue tout de suite (`set_language`, les
 textes se redessinent à l'image suivante) et l'écrit dans `preferences.json` ;
-`PLOTYX_LANG` l'emporte encore au prochain démarrage.
+`STOKESFORGE_LANG` l'emporte encore au prochain démarrage.
 
 **Pseudo-langue `en-XA`** : fabriquée à la volée depuis `en` (accents, `[[ ]]`,
-+30 %), sans fichier. `PLOTYX_LANG=en-XA` : un texte sans `[[ ]]` n'est pas passé
++30 %), sans fichier. `STOKESFORGE_LANG=en-XA` : un texte sans `[[ ]]` n'est pas passé
 par le catalogue, un `]]` manquant signale un texte tronqué.
 
 **Garde `aucun_libelle_en_dur`** (`tests/libelles.rs`) : aucun littéral textuel
@@ -565,11 +565,11 @@ dialogues, export) reste gardée plus strictement (`ZONE_43` : aucun littéral
 textuel dans ses fonctions, quelle que soit la forme de l'appel). Une clé du
 catalogue `en` qu'aucun source de `src/` n'emploie fait échouer
 `aucune_cle_du_catalogue_n_est_morte`. Mécanique détaillée : skill
-`plotyx-textes-interface`.
+`stokesforge-textes-interface`.
 
 **Erreurs affichées (#47).** Les crates du dessous rendent des erreurs
 structurées dont le `Display` (`#[error(...)]`) est en **anglais brut** — ce que
-lisent le CLI, `pyx` et les journaux — et que personne ne traduit. L'application
+lisent le CLI, `pyst` et les journaux — et que personne ne traduit. L'application
 les met en phrase par `src/errors.rs` : une fonction `error_message` par
 famille (`model` pour `CoreError`, `commands`, `session`, `file` pour
 `PersistenceError`, `import`, `formula`, `render`, `export`, et `script` avec la
@@ -581,7 +581,7 @@ famille construit une valeur de chaque variante et vérifie que la phrase n'est
 pas vide, sans jargon interne, sans point final. Toute erreur montrée à
 l'utilisateur passe par ces fonctions, jamais par `to_string()` ni `{err}`.
 Les champs `detail` (cause décrite par le crate d'origine) et les messages du
-système restent en anglais dans la phrase. `plotyx-importer` rend un
+système restent en anglais dans la phrase. `stokesforge-importer` rend un
 `ImportFailure` structuré (fichier + cause) pour la même raison.
 
 ### Sélecteur de fichiers natif
@@ -653,7 +653,7 @@ nulle part ailleurs :
 
 Sans la feature `python`, la console reste visible mais désactivée
 (`AppState::script_available`). `ScriptOutput` est une copie **volontairement
-indépendante** de `plotyx_script::ScriptOutcome`, pour que la surface publique
+indépendante** de `stokesforge_script::ScriptOutcome`, pour que la surface publique
 de `state` soit la même avec et sans la feature.
 
 Une exception de script n'est pas une erreur d'application : sa trace Python
@@ -748,7 +748,7 @@ vide. Chaque série prend la couleur de palette de son rang
 (`SeriesSpec::from_palette`).
 
 Cette règle vit dans `AppState::plot_columns`/`series_from_columns`
-(`plotyx-app/src/state.rs`), pas dans `app.rs` : le menu contextuel ne fait
+(`stokesforge-app/src/state.rs`), pas dans `app.rs` : le menu contextuel ne fait
 que choisir le type de tracé et pousser `Action::PlotColumns`. Une seconde
 action, `Action::AddSeriesToGraph`, applique la même règle d'appariement mais
 relit le `PlotSpec` courant d'un graphe existant pour y **ajouter** des
@@ -799,7 +799,7 @@ contenu dans le rectangle du graphe au moment du relâchement.
 
 **Onglet détaché.** Comme `graph_drop_target` opère via `tab_contents`,
 identique pour le dock et pour une fenêtre détachée (voir la doc de tête de
-`PlotyxApp::show_detached_tabs`), le dépôt marche dans les deux cas sans code
+`StokesForgeApp::show_detached_tabs`), le dépôt marche dans les deux cas sans code
 séparé à maintenir — testé manuellement, `egui::DragAndDrop` étant un état
 global du `Context` plutôt que scopé à une fenêtre OS.
 
@@ -817,7 +817,7 @@ d'historique** ouverte à l'ouverture de la fenêtre : OK la ferme — une
 seule entrée, un Ctrl+Z défait tout (`AppState::close_plot_settings`) ;
 Cancel l'avorte et restaure le graphe d'avant
 (`AppState::cancel_plot_settings`). Pendant la macro, annuler/rétablir et
-enregistrer sont refusés (`plotyx-commands`), ainsi que les écritures d'une
+enregistrer sont refusés (`stokesforge-commands`), ainsi que les écritures d'une
 fenêtre détachée (autre identité d'émetteur : refusées par la session) et les
 actions qu'elle remonte à la racine (`reject_detached_actions`). Toute
 opération groupée se clôt par `AppState::end_grouped_macro`, qui rafraîchit
@@ -848,7 +848,7 @@ que le texte est à sa place), et « Graph » → « Reset Text Positions » rem
 d'un coup. Chaque geste validé est **une** `Action` (`SetTextAnchor`,
 `ResetTextAnchors`, `SetTextContent`, `SetLegendEntryName`), donc un
 `SetPlotSpec`, une entrée d'historique ; la position est enregistrée dans le
-`.plx` et vaut à l'export.
+`.stf` et vaut à l'export.
 
 **Textes libres** (issue #35) : clic droit dans une zone de tracé →
 « Add Text » au point cliqué, ou « Graph » → « Add Text »
@@ -858,7 +858,7 @@ sur le texte, et au-dessus une barre couleur / taille / rotation
 Le champ s'écrit **dans le cadre du rendu** (issue #37) : centré sur le centre
 du texte rendu, à la taille de police du texte (corps × échelle d'affichage de
 la figure), droit même si le texte est tourné — son placement est la fonction
-pure `plotyx_render_egui::annotation_field`. Un texte vidé n'étant plus tracé,
+pure `stokesforge_render_egui::annotation_field`. Un texte vidé n'étant plus tracé,
 l'éditeur garde le dernier cadre connu. Tant qu'on tape, le champ a un léger
 fond ; dès qu'il perd le focus (on règle la rotation ou la taille), il devient
 transparent et l'aperçu **tourné** se voit (issue #36) ; un clic dans son cadre
@@ -887,7 +887,7 @@ barre « Object format » (`ToolbarId::Object`, issue #64 ; `object_format.rs`)
 règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
 une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
 épaisseur. Chaque réglage est un champ du modèle posé par une `Action::SetShape`
-(`App::format_object`). Côté script : `pyx.add_shape` / `pyx.remove_shape` (`docs/python-et-script.md`).
+(`App::format_object`). Côté script : `pyst.add_shape` / `pyst.remove_shape` (`docs/python-et-script.md`).
 
 **Exporter le graphe** (issue #34) : menu « Graph » → « Export
 Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
@@ -895,7 +895,7 @@ compris dans une fenêtre détachée). Un sélecteur `rfd` (SVG, PDF, PNG) propo
 le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
 `.svg` si elle manque. `app::request_graph_export` lit le zoom de la vue
 (`GraphView::framed_spec`) et pousse `Action::ExportGraph { path, spec }` ;
-`AppState` écrit le fichier (`plotyx-render-svg`, texte Typst compris) et le dit
+`AppState` écrit le fichier (`stokesforge-render-svg`, texte Typst compris) et le dit
 dans la barre d'état. Aucune commande : le modèle n'est pas touché. La
 résolution PNG (×1, ×2, ×4 ; ×4 par défaut, soit 1920 × 1440 px) se règle dans
 « Graph » → « PNG Resolution » (`Action::SetPngExportScale`,
@@ -919,13 +919,13 @@ d'aide : la fenêtre est un dialogue modal (issue #9). Le test
 `chaque_exemple_du_memo_compile` vérifie que chaque exemple compile. Un nom de
 série laissé vide reprend celui de la colonne, affiché tel quel.
 
-**Onglet « Thème »** : deux thèmes prédéfinis (`plotyx_plot::THEMES` : Clair,
+**Onglet « Thème »** : deux thèmes prédéfinis (`stokesforge_plot::THEMES` : Clair,
 Sombre) et trois couleurs globales — fond, texte, axes. Une
 couleur globale est **écrite dans tous les champs locaux** (titre du graphe,
 titre et échelle de chaque axe de chaque panneau ;
 `PlotSpec::set_text_color`/`set_axes_color`/`apply_theme`) : le dernier
 réglage écrase ce qui avait été réglé une à une, et rien n'est mémorisé en
-plus (le format `.plx` ne change pas). Le tout reste dans le brouillon de la
+plus (le format `.stf` ne change pas). Le tout reste dans le brouillon de la
 fenêtre : un seul pas d'historique à la validation. Les thèmes laissent le
 texte et les axes en automatique, donc ils suivent le fond.
 
@@ -941,17 +941,17 @@ replié (`color_picker::custom_id`). Cette fenêtre est une `egui::Area` gérée
 par `color_button` (et non un `egui::Popup`, dont egui n'autorise qu'un
 exemplaire ouvert : la liste d'un menu déroulant le refermerait) ; elle
 se ferme sur Échap ou sur un clic hors d'elle et de ses listes. Une couleur transparente se montre sur un
-damier (dans l'échantillon du sélecteur). **Une palette par usage** (`plotyx_plot::ColorUsage`) :
+damier (dans l'échantillon du sélecteur). **Une palette par usage** (`stokesforge_plot::ColorUsage`) :
 
 - **courbes** : un outil à part, avec un choix de palettes nommées
-  (`plotyx_plot::CURVE_PALETTES` : PlotYx, Tableau 10, Okabe-Ito lisible par
+  (`stokesforge_plot::CURVE_PALETTES` : StokesForge, Tableau 10, Okabe-Ito lisible par
   les daltoniens, ColorBrewer Set1/Dark2/Paired, dégradés Viridis, Plasma,
   gris), chacune avec ses nuances foncées et claires. Les palettes vivent
-  dans `plotyx-plot`, pour qu'une évolution future colore plusieurs courbes
+  dans `stokesforge-plot`, pour qu'une évolution future colore plusieurs courbes
   d'un coup (palette ou dégradé) ;
 - **texte** : encres lisibles ;
 - **fonds** : en premier **« No color »** (`#ffffff00`,
-  `plotyx_plot::TRANSPARENT`), qui est aussi le **fond par défaut** d'un
+  `stokesforge_plot::TRANSPARENT`), qui est aussi le **fond par défaut** d'un
   graphe neuf (`PlotSpec::default`) : la figure exportée n'a pas de fond,
   pour s'intégrer à une autre présentation ; à l'écran, elle se montre sur
   un fond **blanc** peint par l'application sous la figure
@@ -961,8 +961,8 @@ damier (dans l'échantillon du sélecteur). **Une palette par usage** (`plotyx_p
 
 **Couleurs enregistrées** : « Enregistrer » garde la couleur courante
 **dans le projet** (par défaut — commande annulable `SetSavedColors`,
-enregistrée dans le `.plx`) ou **pour l'utilisateur** (fichier
-`couleurs.json` du dossier de configuration de PlotYx, à côté des recettes
+enregistrée dans le `.stf`) ou **pour l'utilisateur** (fichier
+`couleurs.json` du dossier de configuration de StokesForge, à côté des recettes
 d'import, hors historique — `crate::user_colors`), au choix
 (`state::SaveTarget`). Une couleur enregistrée ne réapparaît que dans la
 palette de son usage ; clic droit dessus pour la retirer
@@ -980,7 +980,7 @@ réglage de couleur passe par ce sélecteur, avec l'usage qui lui correspond.
   titre, zone de tracé, axe, titre d'axe. Le menu propose « Properties… »,
   qui ouvre l'onglet qui règle ce composant (`state::PlotTarget::
   settings_page`), et « Reset Zoom ». Le composant sous le
-  pointeur est trouvé par `plotyx_render::hit::component_at`, sur la
+  pointeur est trouvé par `stokesforge_render::hit::component_at`, sur la
   géométrie réellement allouée par Plotters (zone de tracé, aires de
   graduation, bande du titre), pas sur une reconstitution. Le clic droit
   **sans** glisser ouvre le menu ; le glisser secondaire reste le zoom
@@ -1045,7 +1045,7 @@ finir une interaction ; `commit_plot_edit` n'est appelé qu'une seule fois, à
 la toute fin de la fonction, jamais widget par widget.
 
 **Ce qu'édite la fenêtre**, en ne touchant que des champs qui existent
-réellement dans `plotyx-plot` (lu avant d'écrire, comme demandé) :
+réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
 
 - **Graphe** : `PlotSpec::title`, `background` ;
 - **Zone de tracé** — `PlotSpec::panels`[0] seulement, voir plus bas — :
@@ -1060,7 +1060,7 @@ réellement dans `plotyx-plot` (lu avant d'écrire, comme demandé) :
   `selectable_label` par série, libellé `state::series_list_label` : le nom
   de la série s'il est renseigné, sinon le nom long de la colonne Y, sinon
   son nom de nœud, sinon « (référence rompue) » — le même calcul que
-  `label_for` en privé dans `plotyx-core/src/resolve.rs`, dupliqué plutôt
+  `label_for` en privé dans `stokesforge-core/src/resolve.rs`, dupliqué plutôt
   que rendu public parce que c'est une règle d'affichage, pas une règle de
   résolution) — puis, pour la série choisie : `SeriesSpec::name`,
   `plot_type` (`PlotType`, toutes les variantes sauf `Unknown`, voir plus
@@ -1080,7 +1080,7 @@ ne connaît que le nom et des octets bruts (C5, niveau 2,
 
 **Ce qui n'est pas fait**, explicitement hors périmètre de ce chantier :
 
-- **pas de multi-panneaux** — `plotyx-plot` autorise plusieurs `PanelSpec`
+- **pas de multi-panneaux** — `stokesforge-plot` autorise plusieurs `PanelSpec`
   par graphe (`row`/`column` dans une grille), mais aucune UI de ce banc
   n'en crée encore un second ; la fenêtre n'édite donc que
   `PlotSpec::panels`[0], ce qui revient, pour l'instant, à éditer *le*
@@ -1092,13 +1092,13 @@ ne connaît que le nom et des octets bruts (C5, niveau 2,
   quatrième mécanisme de débounce pour un widget qui déclenche `changed()`
   en continu pendant qu'on le glisse ;
 - **pas de largeur de barre ni de nombre de classes d'histogramme** —
-  `SeriesSpec::bar_width`/`histogram_bins` existent dans `plotyx-plot` mais
+  `SeriesSpec::bar_width`/`histogram_bins` existent dans `stokesforge-plot` mais
   n'ont pas de widget ici, laissé à une itération suivante ;
 - **pas d'ajout/suppression de série ou de panneau depuis la fenêtre** —
   ça reste le rôle du sous-menu « Plot » et du glisser-déposer déjà
   décrits plus haut ;
 - **zoom/pan n'y entrent pas, et ne doivent jamais y entrer** —
-  `plotyx_render_egui::ViewState` vit sur `GraphView`, hors du `PlotSpec`
+  `stokesforge_render_egui::ViewState` vit sur `GraphView`, hors du `PlotSpec`
   (`docs/invariants.md`, `.claude/rules.md`) : cette fenêtre n'a et n'aura
   aucun champ de navigation, une confusion entre les deux romprait la
   frontière rendu/modèle que tout le reste du chantier de rendu tient.
@@ -1107,13 +1107,13 @@ ne connaît que le nom et des octets bruts (C5, niveau 2,
 
 Son **nom de nœud** (`Node::name` — « Temps », « Signal », ou le « A »/« B »
 automatique de `Project::next_column_name`) est une clé du modèle : il résout
-une colonne depuis un script (`pyx.resolve("[Book1]Sheet1!Temps")`), l'adresse
-dans une spec de graphe, la retrouve dans un `.plx`. La grille ne l'affiche
+une colonne depuis un script (`pyst.resolve("[Book1]Sheet1!Temps")`), l'adresse
+dans une spec de graphe, la retrouve dans un `.stf`. La grille ne l'affiche
 **nulle part** : elle montre la lettre de **position** (A, B, C…) et les
 quatre champs de `ColumnMeta` (Nom long, Unité, Commentaire, Formule), qui
 sont encore autre chose.
 
-`plotyx_commands::Command::label` construisait ses libellés d'historique sur
+`stokesforge_commands::Command::label` construisait ses libellés d'historique sur
 le nom de nœud, et annonçait donc « Saisie dans Temps » pour une colonne que
 l'utilisateur ne connaît que comme « A » — un mot introuvable à l'écran, et
 carrément trompeur quand les deux divergent (un nœud nommé `T` en troisième
@@ -1123,7 +1123,7 @@ in Column A ». Les autres natures de nœud
 (feuille, classeur, graphe, note) gardent leur nom réel — celui-là *est*
 affiché, dans le Project Manager.
 
-La correspondance position → lettre est `plotyx_core::spreadsheet_name`,
+La correspondance position → lettre est `stokesforge_core::spreadsheet_name`,
 rendue publique pour l'occasion : c'est la même fonction qui nomme les
 colonnes créées sans nom explicite, qui peint l'en-tête de la grille
 (`app::column_letter` n'en est plus qu'un alias) et qui écrit les libellés
@@ -1223,7 +1223,7 @@ aux bords).
 L'asymétrie entre les deux axes tient à l'identité de la cible : une ligne
 n'est qu'un indice, donc sélectionner `(colonne existante, row + 1)` *avant*
 que la commande d'ajout ne soit appliquée (elle ne l'est qu'après le rendu de
-l'image, voir `app::PlotyxApp::update`) est sûr — la ligne existera à temps.
+l'image, voir `app::StokesForgeApp::update`) est sûr — la ligne existera à temps.
 Une colonne neuve, elle, n'a pas encore de `NodeId` tant que `Command::
 AddColumn` n'a pas tourné : la sélectionner à l'avance n'a pas de sens.
 `Action::AddColumnAndSelect { sheet, row }` fait donc les deux d'un coup
@@ -1279,7 +1279,7 @@ Limite : le filtre ne s'applique qu'à l'image qui suit la prise de focus
 (`set_focus_lock_filter` exige `had_focus_last_frame`) — une touche tombant
 dans l'image même du clic n'est pas une frappe réaliste. Verrouillé par
 `app::grid_keyboard_tests`. Le focus d'egui ne se voit pas dans une capture
-(`PLOTYX_APP_SCREENSHOT`) : à confirmer sur une vraie fenêtre.
+(`STOKESFORGE_APP_SCREENSHOT`) : à confirmer sur une vraie fenêtre.
 
 ### Alignement du corps : nombres à droite, texte à gauche
 
@@ -1394,12 +1394,12 @@ un nombre tapé y reste un nombre.
 
 ### Binaire
 
-`plotyx-app [chemin]`. Si `chemin` existe, le projet est chargé depuis ce
+`stokesforge-app [chemin]`. Si `chemin` existe, le projet est chargé depuis ce
 fichier ; sinon un projet de démonstration est construit et `chemin` devient la
 cible d'un futur enregistrement.
 
 Deux variables d'environnement servent aux tests et aux captures :
-`PLOTYX_APP_AUTOQUIT_MS` et `PLOTYX_APP_SCREENSHOT`.
+`STOKESFORGE_APP_AUTOQUIT_MS` et `STOKESFORGE_APP_SCREENSHOT`.
 
 ### Tests
 
@@ -1408,11 +1408,11 @@ Deux variables d'environnement servent aux tests et aux captures :
 `tests/perf_write_under_snapshot.rs`, `tests/libelles.rs` (la garde de
 traduction, voir « Interface multilingue »).
 
-## `plotyx-cli`
+## `stokesforge-cli`
 
 Binaire sans fenêtre : `import` construit un projet neuf depuis des fichiers
 d'appareil, `recipes` liste les modèles et `run` (feature `python`) exécute
-un fichier Python via une session headless. Les mêmes appels `pyx`, commandes
+un fichier Python via une session headless. Les mêmes appels `pyst`, commandes
 et groupes annulables sont disponibles dans le CLI et la console ; voir
 [`python-et-script.md`](python-et-script.md). Le paquet Linux autonome se
 construit et se vérifie par `scripts/cli-dist.sh`.
@@ -1420,8 +1420,8 @@ construit et se vérifie par `scripts/cli-dist.sh`.
 ## Règles communes avec le rendu
 
 Deux règles ne sont **pas** réécrites dans l'interface (issue #25) :
-la syntaxe des couleurs `#RRGGBB[AA]` (`plotyx_plot::parse_hex`, dont
+la syntaxe des couleurs `#RRGGBB[AA]` (`stokesforge_plot::parse_hex`, dont
 `color_picker::parse_hex` n'est qu'un adaptateur) et le nom affiché d'une série
-(`plotyx_core::series_label`, appelée par la légende **et** par la liste des
+(`stokesforge_core::series_label`, appelée par la légende **et** par la liste des
 séries des propriétés du graphe via `series_list_label`). Les transformations
 RGB/HSL restent propres au sélecteur.
