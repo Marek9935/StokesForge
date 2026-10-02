@@ -60,12 +60,80 @@ pub fn transform_shape(
             }
         }
         Shape::Mesh(mesh) => {
-            if let Some(id) = retexture(mesh.texture_id) {
+            let formula = retexture(mesh.texture_id);
+            if let Some(id) = formula {
                 Arc::make_mut(mesh).texture_id = id;
             }
             shape.transform(transform);
+            if let (Some(id), Shape::Mesh(mesh)) = (formula, &mut *shape) {
+                let size = context.tex_manager().read().meta(id).map(|meta| meta.size);
+                if let Some(size) = size {
+                    snap_to_pixels(Arc::make_mut(mesh), size, context.pixels_per_point());
+                }
+            }
         }
         other => other.transform(transform),
+    }
+}
+
+/// Cale le maillage d'une formule sur la grille des pixels physiques, à la
+/// taille exacte de sa texture (issue #86).
+///
+/// Une formule est une image : posée à une fraction de pixel, ou étirée
+/// d'une fraction de pixel, le filtrage linéaire la mélange avec ses voisins
+/// et les traits fins deviennent flous — sensible surtout sur un petit texte
+/// (une figure réduite dans une petite fenêtre), peu visible sur un grand.
+/// Le coin haut-gauche de la boîte tombe donc sur un pixel entier et la
+/// boîte mesure exactement `size` pixels (la texture est rastérisée à
+/// l'arrondi supérieur, d'où l'écart). Le décalage est inférieur à un pixel.
+///
+/// Sans effet sur un maillage qui n'est pas un quadrilatère aligné sur les
+/// axes (une formule tournée d'un angle quelconque ne se cale pas).
+fn snap_to_pixels(mesh: &mut egui::epaint::Mesh, size: [usize; 2], pixels_per_point: f32) {
+    let bounds = mesh.calc_bounds();
+    if mesh.vertices.len() != 4 || !bounds.is_positive() || pixels_per_point <= 0.0 {
+        return;
+    }
+    let axis_aligned = mesh.vertices.iter().all(|vertex| {
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        (near(vertex.pos.x, bounds.min.x) || near(vertex.pos.x, bounds.max.x))
+            && (near(vertex.pos.y, bounds.min.y) || near(vertex.pos.y, bounds.max.y))
+    });
+    if !axis_aligned {
+        return;
+    }
+    // Un quart de tour échange largeur et hauteur de la texture.
+    let (w, h) = (size[0] as f32, size[1] as f32);
+    let (physical_w, physical_h) = (
+        bounds.width() * pixels_per_point,
+        bounds.height() * pixels_per_point,
+    );
+    let (target_w, target_h) = if (physical_w - w).abs() + (physical_h - h).abs()
+        <= (physical_w - h).abs() + (physical_h - w).abs()
+    {
+        (w, h)
+    } else {
+        (h, w)
+    };
+    let min = egui::pos2(
+        (bounds.min.x * pixels_per_point).round() / pixels_per_point,
+        (bounds.min.y * pixels_per_point).round() / pixels_per_point,
+    );
+    let max = min + egui::vec2(target_w, target_h) / pixels_per_point;
+    let middle = bounds.center();
+    for vertex in &mut mesh.vertices {
+        vertex.pos = egui::pos2(
+            if vertex.pos.x < middle.x {
+                min.x
+            } else {
+                max.x
+            },
+            if vertex.pos.y < middle.y {
+                min.y
+            } else {
+                max.y
+            },
+        );
     }
 }
 
@@ -134,27 +202,27 @@ impl ScaledShapes {
             let unscaled = (transform.scaling - 1.0).abs() < f32::EPSILON;
             let previous = std::mem::take(&mut self.formulas);
             let mut kept = HashMap::new();
-            // Construit à la première formule rencontrée seulement : une
+            // Construit au premier maillage rencontré seulement : une
             // figure sans formule ne parcourt pas le cache.
             let mut by_id: Option<HashMap<TextureId, Arc<FormulaTexture>>> = None;
             let mut retexture = |id: TextureId| -> Option<TextureId> {
+                let by_id = by_id.get_or_insert_with(|| {
+                    formulas
+                        .values()
+                        .into_iter()
+                        .map(|texture| (texture.id(), texture))
+                        .collect()
+                });
                 if unscaled {
-                    return None;
+                    // Pas de nouvelle texture, mais la formule est reconnue :
+                    // son maillage est calé sur les pixels (#86).
+                    return by_id.contains_key(&id).then_some(id);
                 }
                 let sharp = match previous.get(&id) {
                     Some(texture) if texture.pixels_per_point() == pixels_per_point => {
                         Arc::clone(texture)
                     }
-                    _ => {
-                        let by_id = by_id.get_or_insert_with(|| {
-                            formulas
-                                .values()
-                                .into_iter()
-                                .map(|texture| (texture.id(), texture))
-                                .collect()
-                        });
-                        Arc::new(by_id.get(&id)?.rerender(context, pixels_per_point)?)
-                    }
+                    _ => Arc::new(by_id.get(&id)?.rerender(context, pixels_per_point)?),
                 };
                 let sharp_id = sharp.id();
                 kept.insert(id, sharp);
@@ -322,7 +390,14 @@ mod tests {
         let agrandi = &cache.get(&context, cle(200.0), &[source], transform, &formules)[0];
 
         let (avant, apres) = (maillage(&etire), maillage(agrandi));
-        assert_eq!(avant.calc_bounds(), apres.calc_bounds(), "la boîte a bougé");
+        // Le maillage est calé sur les pixels (#86) : la boîte ne bouge que
+        // de moins d'un pixel physique (ppp 1 ici), pas de mise en page.
+        let (avant, apres_boite) = (avant.calc_bounds(), apres.calc_bounds());
+        assert!(
+            (avant.min - apres_boite.min).abs().max_elem() <= 1.0
+                && (avant.size() - apres_boite.size()).abs().max_elem() <= 1.0,
+            "la boîte a bougé : {avant:?} -> {apres_boite:?}"
+        );
         assert_ne!(apres.texture_id, base.id(), "texture d'origine étirée");
         let fine = context
             .tex_manager()
@@ -383,5 +458,30 @@ mod tests {
             premier, second,
             "même échelle : la texture agrandie est reprise"
         );
+    }
+
+    /// Issue #86 : à l'écran, le maillage d'une formule tombe sur un pixel
+    /// physique entier et mesure exactement sa texture, y compris quand la
+    /// figure est réduite à une échelle qui ne tombe pas juste.
+    #[test]
+    fn une_formule_reduite_est_calee_sur_les_pixels() {
+        let context = contexte();
+        let formules = FormulaCache::new();
+        let (_, source) = formule(&context, &formules);
+        let transform = TSTransform::new(egui::vec2(5.3, 7.7), 0.63);
+        let mut cache = ScaledShapes::default();
+        let formes = cache.get(&context, cle(63.0), &[source], transform, &formules);
+        let boite = maillage(&formes[0]).calc_bounds();
+        let ppp = context.pixels_per_point();
+        let entier = |v: f32| ((v * ppp) - (v * ppp).round()).abs() < 1e-3;
+        assert!(entier(boite.min.x) && entier(boite.min.y), "{boite:?}");
+        let taille = context
+            .tex_manager()
+            .read()
+            .meta(maillage(&formes[0]).texture_id)
+            .expect("texture")
+            .size;
+        assert!((boite.width() * ppp - taille[0] as f32).abs() < 1e-3);
+        assert!((boite.height() * ppp - taille[1] as f32).abs() < 1e-3);
     }
 }

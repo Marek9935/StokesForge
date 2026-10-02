@@ -682,6 +682,8 @@ note-deleted = Cette note a été supprimée
 # Console de script
 script-title = Script Python
 script-unavailable = — Indisponible dans cette version
+script-expand = Déplier la console de script
+script-collapse = Replier la console de script
 script-run = Exécuter
 script-stop = Arrêter
 script-running = Exécution…

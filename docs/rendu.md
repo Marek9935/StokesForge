@@ -541,3 +541,13 @@ tout le pipeline rejoué à chaque pas d'un redimensionnement. Tests :
 `scaled.rs` (`une_formule_agrandie_est_rasterisee_a_la_taille_affichee`,
 `deplacer_sans_agrandir_ne_rasterise_rien`) et `cache_session.rs`
 (`un_graphe_agrandi_peint_ses_formules_a_la_taille_affichee`).
+
+Le maillage d'une formule est en outre **calé sur la grille des pixels
+physiques** (`scaled::snap_to_pixels`, issue #86) : coin haut-gauche sur un pixel
+entier, boîte à la taille exacte de la texture. Posée ou étirée à une fraction de
+pixel, l'image était mélangée à ses voisines par le filtrage linéaire — flou
+surtout visible sur un petit texte (figure réduite), à peine sur un grand. Le
+décalage reste inférieur à un pixel ; la mise en page n'est pas touchée
+(`une_formule_reduite_est_calee_sur_les_pixels`). Hors du chemin `scaled`
+(`paint` avec rectangle logique = rectangle affiché) le calage n'est pas
+appliqué.

@@ -747,6 +747,11 @@ pub struct PlotyxApp {
     /// la doc de tête du module, § détachement). Dans cet état,
     /// [`PlotyxApp::project_manager_panel`] n'est simplement pas peint.
     pm_detached: bool,
+    /// Vrai quand la console de script est repliée sur sa seule barre de
+    /// titre (issue #79). Repliée au démarrage, et non mémorisée : ce n'est
+    /// pas une préférence mais un état de la session ; lancer un script la
+    /// déplie, pour qu'on voie la sortie.
+    script_collapsed: bool,
     /// Ce que la fenêtre OS détachée du Project Manager peint, resynchronisé
     /// depuis `self.state` à chaque image par
     /// [`PlotyxApp::show_detached_project_manager`] — voir sa doc de tête.
@@ -1037,6 +1042,7 @@ impl PlotyxApp {
             collapsed_tabs,
             maximized_tab,
             pm_detached: false,
+            script_collapsed: true,
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
@@ -1867,11 +1873,35 @@ impl PlotyxApp {
     /// hauteur. Contrairement au Project
     /// Manager, aucun mode détaché en fenêtre OS séparée ni bascule de
     /// position : la console de script a toujours été en bas, et le reste.
+    ///
+    /// Repliée (issue #79), la console se réduit à sa barre de titre — un
+    /// panneau distinct, non redimensionnable, pour que la hauteur mémorisée
+    /// du panneau déplié ne soit pas écrasée.
     fn script_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        if actions
+            .iter()
+            .any(|action| matches!(action, Action::RunScript))
+        {
+            self.script_collapsed = false;
+        }
+        if self.script_collapsed {
+            egui::Panel::bottom("plotyx_script_collapsed")
+                .resizable(false)
+                .show(ui, |ui| {
+                    if script_header(ui, &self.state, true) {
+                        self.script_collapsed = false;
+                    }
+                });
+            return;
+        }
         egui::Panel::bottom("plotyx_script")
             .resizable(true)
             .default_size(SCRIPT_PANEL_HEIGHT)
             .show(ui, |ui| {
+                if script_header(ui, &self.state, false) {
+                    self.script_collapsed = true;
+                }
+                ui.separator();
                 script_contents(ui, ctx, &mut self.state, actions);
             });
     }
@@ -4066,6 +4096,11 @@ const FLOATING_WINDOW_ORDER: egui::Order = egui::Order::Middle;
 /// la fenêtre par [`show_floating_window`].
 const RESIZE_BORDER: f32 = 6.0;
 
+/// Longueur, le long de chaque côté, des deux branches d'une poignée de coin
+/// (voir [`floating_resize_handles`]) : le coin se vise sur ~18 points
+/// au lieu de 6.
+const CORNER_REACH: f32 = 12.0;
+
 /// Borne un rectangle logique à l'espace de travail : taille ramenée à
 /// [`WORKSPACE_SIZE`] au plus, puis position glissée pour qu'il y tienne en
 /// entier. C'est la seule borne appliquée aux fenêtres flottantes — egui
@@ -4200,9 +4235,9 @@ fn floating_resize_handles(
     const BORDER: f32 = RESIZE_BORDER;
     // (source, zone, curseur, ouest, est, nord, sud) — les quatre derniers
     // indiquent quels côtés ce glissé affecte, combinés pour les coins.
-    let zones: [(&str, egui::Rect, egui::CursorIcon, bool, bool, bool, bool); 8] = [
+    let mut zones: Vec<(String, egui::Rect, egui::CursorIcon, bool, bool, bool, bool)> = vec![
         (
-            "n",
+            "n".into(),
             egui::Rect::from_min_max(
                 egui::pos2(rect.left(), rect.top() - BORDER),
                 egui::pos2(rect.right(), rect.top()),
@@ -4214,7 +4249,7 @@ fn floating_resize_handles(
             false,
         ),
         (
-            "s",
+            "s".into(),
             egui::Rect::from_min_max(
                 egui::pos2(rect.left(), rect.bottom()),
                 egui::pos2(rect.right(), rect.bottom() + BORDER),
@@ -4226,7 +4261,7 @@ fn floating_resize_handles(
             true,
         ),
         (
-            "w",
+            "w".into(),
             egui::Rect::from_min_max(
                 egui::pos2(rect.left() - BORDER, rect.top()),
                 egui::pos2(rect.left(), rect.bottom()),
@@ -4238,7 +4273,7 @@ fn floating_resize_handles(
             false,
         ),
         (
-            "e",
+            "e".into(),
             egui::Rect::from_min_max(
                 egui::pos2(rect.right(), rect.top()),
                 egui::pos2(rect.right() + BORDER, rect.bottom()),
@@ -4249,52 +4284,69 @@ fn floating_resize_handles(
             false,
             false,
         ),
+    ];
+    // Coins : un carré de 6 × 6 hors du cadre est trop petit à viser (#75).
+    // Chaque coin est donc un « L » posé le long des deux côtés voisins,
+    // `CORNER_REACH` de long, toujours hors du cadre (les barres de
+    // défilement du contenu ne sont pas disputées). Ajoutés après les côtés,
+    // ils l'emportent là où ils se recouvrent.
+    for (name, x, y, cursor, west, north) in [
         (
             "nw",
-            egui::Rect::from_min_size(
-                rect.left_top() - egui::vec2(BORDER, BORDER),
-                egui::vec2(BORDER, BORDER),
-            ),
+            rect.left(),
+            rect.top(),
             egui::CursorIcon::ResizeNwSe,
             true,
-            false,
             true,
-            false,
         ),
         (
             "ne",
-            egui::Rect::from_min_size(
-                egui::pos2(rect.right(), rect.top() - BORDER),
-                egui::vec2(BORDER, BORDER),
-            ),
+            rect.right(),
+            rect.top(),
             egui::CursorIcon::ResizeNeSw,
             false,
             true,
-            true,
-            false,
         ),
         (
             "sw",
-            egui::Rect::from_min_size(
-                egui::pos2(rect.left() - BORDER, rect.bottom()),
-                egui::vec2(BORDER, BORDER),
-            ),
+            rect.left(),
+            rect.bottom(),
             egui::CursorIcon::ResizeNeSw,
             true,
             false,
-            false,
-            true,
         ),
         (
             "se",
-            egui::Rect::from_min_size(rect.right_bottom(), egui::vec2(BORDER, BORDER)),
+            rect.right(),
+            rect.bottom(),
             egui::CursorIcon::ResizeNwSe,
             false,
-            true,
             false,
-            true,
         ),
-    ];
+    ] {
+        // Sens du coin : -1 vers l'extérieur, +1 vers l'intérieur, par axe.
+        let sx = if west { 1.0 } else { -1.0 };
+        let sy = if north { 1.0 } else { -1.0 };
+        let horizontal = egui::Rect::from_two_pos(
+            egui::pos2(x - sx * BORDER, y - sy * BORDER),
+            egui::pos2(x + sx * CORNER_REACH, y),
+        );
+        let vertical = egui::Rect::from_two_pos(
+            egui::pos2(x - sx * BORDER, y - sy * BORDER),
+            egui::pos2(x, y + sy * CORNER_REACH),
+        );
+        for (suffix, zone) in [("h", horizontal), ("v", vertical)] {
+            zones.push((
+                format!("{name}-{suffix}"),
+                zone,
+                cursor,
+                west,
+                !west,
+                north,
+                !north,
+            ));
+        }
+    }
     let base_id = egui::Id::new(("floating_resize_handle", tab));
     for (source, zone, cursor, west, east, north, south) in zones {
         let response = ui.interact(zone, base_id.with(source), egui::Sense::drag());
@@ -7678,6 +7730,25 @@ fn grid_contents(
 /// quelle autre action, appliquées après le rendu par la boucle
 /// principale — c'est [`AppState::dispatch`] qui garantit qu'elles ne
 /// bloquent pas.
+/// Barre de titre de la console de script, avec le bouton qui la replie ou la
+/// déplie (issue #79). Rend `true` si ce bouton a été cliqué.
+fn script_header(ui: &mut egui::Ui, state: &AppState, collapsed: bool) -> bool {
+    ui.horizontal(|ui| {
+        let (icon, tooltip) = if collapsed {
+            (Icon::CaretUp, tr!("script-expand"))
+        } else {
+            (Icon::CaretDown, tr!("script-collapse"))
+        };
+        let toggled = icon_button(ui, icon, IconRole::Neutral, tooltip).clicked();
+        ui.heading(tr!("script-title"));
+        if !state.script_available() {
+            ui.weak(tr!("script-unavailable"));
+        }
+        toggled
+    })
+    .inner
+}
+
 fn script_contents(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -7690,14 +7761,6 @@ fn script_contents(
         // script n'apparaîtrait qu'au prochain geste de l'utilisateur.
         ctx.request_repaint();
     }
-
-    ui.horizontal(|ui| {
-        ui.heading(tr!("script-title"));
-        if !state.script_available() {
-            ui.weak(tr!("script-unavailable"));
-        }
-    });
-    ui.separator();
 
     let available = state.script_available() && !running;
     let mut source = state.script_source().to_string();
@@ -12250,7 +12313,9 @@ mod graph_layout_tests {
                     // même transformation que `GraphView::paint_scaled`. Un
                     // texte Typst (titres, légende : #32) y change de
                     // texture, rastérisée à la taille affichée (#31) : un
-                    // maillage se compare donc sur sa géométrie seule.
+                    // maillage se compare donc sur sa géométrie seule, à un
+                    // pixel près : il est calé sur la grille des pixels
+                    // physiques à l'écran (#86).
                     plotyx_render_egui::scaled::transform_shape(
                         &context,
                         &mut displayed,
@@ -12259,7 +12324,11 @@ mod graph_layout_tests {
                     );
                     let same = |painted: &egui::Shape| match (painted, &displayed) {
                         (egui::Shape::Mesh(a), egui::Shape::Mesh(b)) => {
-                            a.vertices == b.vertices && a.indices == b.indices
+                            a.indices == b.indices
+                                && a.vertices.len() == b.vertices.len()
+                                && a.vertices.iter().zip(&b.vertices).all(|(p, q)| {
+                                    (p.pos - q.pos).abs().max_elem() <= 1.0 && p.uv == q.uv
+                                })
                         }
                         (a, b) => a == b,
                     };

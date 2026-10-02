@@ -686,6 +686,8 @@ note-deleted = This note was deleted
 # Script console
 script-title = Python Script
 script-unavailable = — Not available in this build
+script-expand = Expand the script console
+script-collapse = Collapse the script console
 script-run = Run
 script-stop = Stop
 script-running = Running…
