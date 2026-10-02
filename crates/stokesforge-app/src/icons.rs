@@ -66,6 +66,7 @@ pub enum Icon {
     ZoomTool,
     TextTool,
     ResetZoom,
+    NewProject,
     Properties,
     AddColumn,
     AddSheet,
@@ -210,7 +211,12 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     (
         Icon::ResetZoom,
         IconRole::Neutral,
-        svg!("arrow-counter-clockwise.neutral.svg"),
+        svg!("arrows-out.neutral.svg"),
+    ),
+    (
+        Icon::NewProject,
+        IconRole::Neutral,
+        svg!("file-plus.neutral.svg"),
     ),
     (
         Icon::Properties,

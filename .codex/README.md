@@ -98,6 +98,9 @@ la cible active Rust.
 - Les clients soumettent les mutations métier via
   `SessionHandle::execute(Command)` ; l'acteur possède le modèle, les clients
   lisent des instantanés. Préserver undo/redo, macros, révisions et identifiants.
+- `SessionHandle::new_project`, comme `load`, remplace l'identité du projet
+  et vide l'historique et les géométries ; il refuse une macro ouverte.
+  La confirmation avant perte de travail appartient à `AppState`.
 - Dans l'application, réutiliser `Action` / `AppState::dispatch` pour les
   actions concernées. Garder la logique testable dans `state.rs` et la
   traduction des événements et l'affichage dans `app.rs`.
@@ -179,6 +182,14 @@ dans une copie distincte du runtime ; voir `docs/python-matplotlib-spike.md`.
 - UI : tester la logique via `AppState` ; pour le clavier, le focus ou la
   présentation, compléter par une vérification visuelle si un affichage est
   disponible. Sinon préciser ce qui reste non vérifié.
+- Wayland (#72) : les patches `vendor/winit` et `vendor/smithay-clipboard`
+  partagent le récepteur de dépôt et de presse-papiers entre les viewports.
+  Les deux copies sont hors workspace. Le parseur et le canal exacts sont
+  testés par `stokesforge-app/tests/wayland_{uri,bridge}.rs`. Compléter `fmt`
+  par les commandes ciblées de `vendor/winit/STOKESFORGE.md` ; ne pas
+  reformater les fichiers amont sans rapport avec le correctif.
+  Wayland est le défaut ; `STOKESFORGE_X11=1` force le secours X11. Le protocole
+  manuel, les alternatives et le retrait sont dans `vendor/winit/STOKESFORGE.md`.
 - Robustesse : lire le motif de chaque `#[ignore]` avant de le lancer.
   `cargo test -p stokesforge-robustesse -- --ignored` rejoue ces cas ; certains
   peuvent être coûteux ou dépendre de l'ordonnancement. Ne pas retirer un

@@ -16,6 +16,12 @@ Corollaire à connaître avant de commencer : ajouter une méthode `pub` mutante
 `stokesforge-core` **sans** commande correspondante ouvre un chemin d'écriture non
 annulable. La batterie `b21` de `stokesforge-robustesse` le vérifie et échouera.
 
+Cycle de vie (#73) : `SessionHandle::new_project`, comme `load`, remplace
+l'identité et vide historique/géométries ; ce n'est pas une commande de
+mutation du projet courant. Refus d'une macro ouverte, nouvelle époque pour
+invalider les références Python ; confirmation par `AppState`. Un graphique
+vide, lui, est une mutation annulable : `Command::AddGraph` existe déjà.
+
 ## Lire avant d'écrire
 
 `docs/commandes-et-historique.md` d'abord, puis

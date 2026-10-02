@@ -4948,12 +4948,12 @@ dependencies = [
 [[package]]
 name = "smithay-clipboard"
 version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71704c03f739f7745053bde45fa203a46c58d25bc5c4efba1d9a60e9dba81226"
 dependencies = [
  "libc",
  "smithay-client-toolkit 0.20.0",
+ "url",
  "wayland-backend",
+ "winit",
 ]
 
 [[package]]
@@ -5011,6 +5011,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "calloop 0.13.0",
  "directories",
  "eframe",
  "egui_extras",
@@ -5033,6 +5034,7 @@ dependencies = [
  "stokesforge-script",
  "stokesforge-session",
  "tempfile",
+ "url",
  "winit",
 ]
 
@@ -7242,8 +7244,6 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d"
 dependencies = [
  "ahash",
  "android-activity",

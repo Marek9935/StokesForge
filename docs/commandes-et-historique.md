@@ -41,6 +41,12 @@ Liste faisant foi : `stokesforge-commands/src/command.rs` (`Command`,
 | `SetPlotSpec { graph, spec }` | données |
 | `SetSavedColors { colors }` | données |
 
+Le graphique vide de « File › Add Graph » (#73) réutilise `AddGraph` avec
+`PlotSpec::empty("")` : une zone de tracé, aucune série, même annulation et
+persistance qu’un graphique construit depuis des colonnes. « New Project »
+remplace l’identité du projet via la session, comme `load` ; il vide
+l’historique après confirmation et ne représente pas une commande annulable.
+
 Une commande de création par nature de nœud plutôt qu'un `AddNode` générique
 (voir la doc de tête de `command.rs`) ; `RemoveNode` reste générique, comme
 `Project::remove`. Les quatre commandes d'édition de contenu

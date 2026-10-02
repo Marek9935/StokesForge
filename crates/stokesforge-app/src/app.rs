@@ -435,6 +435,9 @@ pub const SHORTCUT_SAVE_AS: egui::KeyboardShortcut = egui::KeyboardShortcut::new
 /// Ctrl+O — choisir un projet à ouvrir.
 pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
+/// Ctrl+N — nouveau projet (confirmation si des changements seraient perdus).
+pub const SHORTCUT_NEW_PROJECT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
 /// Ctrl+E — exporter le graphe actif en SVG, PDF ou PNG (issue #34). Sans
 /// effet quand l'onglet actif n'est pas un graphe.
 pub const SHORTCUT_EXPORT_GRAPH: egui::KeyboardShortcut =
@@ -1110,11 +1113,19 @@ impl StokesForgeApp {
 
     /// Consomme les raccourcis au niveau du contexte et en fait des actions.
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        if self.state.new_project_pending() {
+            return;
+        }
         let mut save_as = false;
         let mut open = false;
         let mut import = false;
         let mut export = false;
         ctx.input_mut(|input| {
+            if input.consume_shortcut(&SHORTCUT_NEW_PROJECT) && self.state.can_new_project() {
+                actions.push(Action::NewProject {
+                    pending_edits: false,
+                });
+            }
             // Ctrl+Maj+S doit être testé avant Ctrl+S : les modificateurs
             // supplémentaires restent compatibles avec ce dernier.
             if input.consume_shortcut(&SHORTCUT_SAVE_AS) {
@@ -1187,11 +1198,33 @@ impl StokesForgeApp {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(tr!("menu-file"), |ui| {
                     if ui
+                        .add_enabled(
+                            self.state.can_new_project(),
+                            egui::Button::new(tr!("action-new-project"))
+                                .shortcut_text(ctx.format_shortcut(&SHORTCUT_NEW_PROJECT)),
+                        )
+                        .on_hover_text(tr!("action-new-project", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::NewProject {
+                            pending_edits: false,
+                        });
+                        ui.close();
+                    }
+                    if ui
                         .button(tr!("action-add-workbook"))
                         .on_hover_text(tr!("action-add-workbook", "hint"))
                         .clicked()
                     {
                         actions.push(Action::AddWorkbook);
+                        ui.close();
+                    }
+                    if ui
+                        .button(tr!("action-add-graph"))
+                        .on_hover_text(tr!("action-add-graph", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::AddGraph);
                         ui.close();
                     }
                     if ui
@@ -2810,11 +2843,13 @@ impl eframe::App for StokesForgeApp {
         self.collect_shortcuts(&ctx, &mut actions);
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
         let bar_env = BarEnv {
+            new_project_enabled: self.state.can_new_project(),
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
             tools: self.tools_context(active_tab),
             text_format: self.format_target(&ctx, active_tab),
             object_format: self.object_format_state(active_tab),
             shortcuts: crate::toolbar::ShortcutTexts {
+                new_project: ctx.format_shortcut(&SHORTCUT_NEW_PROJECT),
                 open: ctx.format_shortcut(&SHORTCUT_OPEN),
                 save: ctx.format_shortcut(&SHORTCUT_SAVE),
                 save_as: ctx.format_shortcut(&SHORTCUT_SAVE_AS),
@@ -3255,7 +3290,68 @@ impl eframe::App for StokesForgeApp {
                 self.maximized_tab = None;
             }
         }
+        if self.state.new_project_pending() {
+            // Seule la confirmation peut agir sur cette image : clavier,
+            // dépôts et requêtes des viewports détachés sont aussi bloqués.
+            actions.clear();
+            let label = tr!("new-project-discard");
+            let hint = tr!("new-project-discard", "hint");
+            match modal_dialog_with(
+                &ctx,
+                egui::Id::new("stokesforge_new_project"),
+                &tr!("action-new-project"),
+                egui::vec2(480.0, 160.0),
+                DialogFooter {
+                    accept_label: &label,
+                    accept_hint: &hint,
+                    accept_enabled: self.state.can_new_project(),
+                },
+                |_| {},
+                |ui| {
+                    ui.label(tr!("new-project-confirm"));
+                },
+            ) {
+                DialogOutcome::Accept => actions.push(Action::ConfirmNewProject(true)),
+                DialogOutcome::Cancel => actions.push(Action::ConfirmNewProject(false)),
+                DialogOutcome::Open => {}
+            }
+        }
         for action in actions {
+            let action = if matches!(action, Action::Save) && self.state.path().is_empty() {
+                let mut chosen = Vec::new();
+                self.choose_save_path(&mut chosen);
+                let Some(action) = chosen.pop() else { continue };
+                action
+            } else {
+                action
+            };
+            let action = if let Action::NewProject { pending_edits } = action {
+                // Une saisie dans un viewport détaché, ou un texte du graphe,
+                // n'est pas encore dans l'instantané d'AppState. La signaler
+                // pour demander confirmation même si le modèle est enregistré.
+                let graph_editing = |view: &GraphView| {
+                    ctx.data(|data| {
+                        data.get_temp::<TextEditor>(text_editor_id(view)).is_some()
+                            || data
+                                .get_temp::<AnnotationEditor>(annotation_editor_id(view))
+                                .is_some()
+                    })
+                };
+                let pending_edits = pending_edits
+                    || self.graph_views.values().any(&graph_editing)
+                    || self.detached_tabs.values().any(|detached| {
+                        detached.view_model.lock().map_or(true, |model| {
+                            model.view_state.as_ref().is_some_and(|state| {
+                                state.editing().is_some()
+                                    || state.header_editing().is_some()
+                                    || state.note_editing().is_some()
+                            }) || model.graph_view.as_ref().is_some_and(&graph_editing)
+                        })
+                    });
+                Action::NewProject { pending_edits }
+            } else {
+                action
+            };
             // `Action::PlotColumns` doit ouvrir le graphe qu'elle crée
             // (chantier « tracer depuis un classeur »). `dispatch` ne rend
             // jamais l'identifiant créé — même contrainte que l'import
@@ -3265,7 +3361,9 @@ impl eframe::App for StokesForgeApp {
             // `Project::add_graph` l'y insère en dernière position, et
             // `AppState::dispatch` a déjà rafraîchi `self.state`
             // (`AppState::refresh`) au retour de cet appel.
-            let plotted_from = if let Action::PlotColumns { sheet, .. } = &action {
+            let plotted_from = if matches!(action, Action::AddGraph) {
+                Some(self.state.tree().root())
+            } else if let Action::PlotColumns { sheet, .. } = &action {
                 self.state
                     .tree()
                     .node(*sheet)
@@ -3295,7 +3393,58 @@ impl eframe::App for StokesForgeApp {
                 None
             };
             let revision_before = self.state.revision();
+            let epoch_before = self.state.snapshot().epoch;
+            let replaces_project = matches!(
+                action,
+                Action::NewProject { .. } | Action::ConfirmNewProject(true)
+            );
             self.state.dispatch(action);
+            if replaces_project && self.state.snapshot().epoch != epoch_before {
+                // Les NodeId peuvent être réemployés : oublier toutes les
+                // vues et géométries de l'ancienne identité avant de peindre.
+                for tab in self.detached_tabs.keys() {
+                    ctx.send_viewport_cmd_to(
+                        egui::ViewportId::from_hash_of(tab),
+                        egui::ViewportCommand::Close,
+                    );
+                }
+                self.detached_tabs.clear();
+                self.floating_tabs.clear();
+                self.cascade_rank.clear();
+                self.next_cascade = 0;
+                self.focus_next = None;
+                self.graph_views.clear();
+                self.collapsed_tabs.clear();
+                self.maximized_tab = None;
+                self.window_positions.clear();
+                self.window_sizes.clear();
+                self.workspace_scroll = egui::Vec2::ZERO;
+                self.saved_window_geometries.clear();
+                self.floating_rects.clear();
+                self.pm_selection.clear();
+                self.pm_requests = Arc::new(Mutex::new(DetachedProjectManagerRequests::default()));
+                self.hidden_tabs.clear();
+                ctx.memory_mut(|memory| {
+                    // Les éditeurs sur place et formats différés ne doivent
+                    // pas survivre à la fenêtre qu'ils visaient. Garder les
+                    // préférences et dimensions des panneaux de l'application.
+                    memory.data.remove_by_type::<TextEditor>();
+                    memory.data.remove_by_type::<AnnotationEditor>();
+                    memory
+                        .data
+                        .remove::<Option<crate::text_format::TextFormat>>(pending_format_id());
+                    memory.data.remove::<Option<String>>(pending_zone_font_id());
+                    memory.data.remove_by_type::<egui::scroll_area::State>();
+                    if let Some(focused) = memory.focused() {
+                        memory.surrender_focus(focused);
+                    }
+                });
+                ctx.request_repaint();
+            }
+            if self.state.new_project_pending() {
+                ctx.request_repaint();
+                break;
+            }
             if creates_workbook && self.state.revision() != revision_before {
                 let root = self.state.tree().root();
                 if let Some(book) = self
@@ -10458,6 +10607,73 @@ mod graph_layout_tests {
             .window_geometries
             .get(&node)
             .expect("géométrie envoyée à la session")
+    }
+
+    #[test]
+    fn ctrl_n_confirme_et_oublie_les_vues_du_projet_precedent() {
+        use eframe::App as _;
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.detach_tab(Tab::Graph(graph));
+        let context = egui::Context::default();
+        set_metadata_row_visible(&context, false);
+        context.set_embed_viewports(false);
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        let mut frame = eframe::Frame::_new_kittest();
+        {
+            let mut paint = |events| {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100.0, 700.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| app.ui(ui, &mut frame));
+                output.textures_delta.clear();
+            };
+            paint(vec![egui::Event::Key {
+                key: egui::Key::N,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            }]);
+            paint(Vec::new()); // le dialogue est maintenant peint et peut recevoir Entrée
+        }
+        assert!(app.state.new_project_pending());
+        assert!(app.state.tree().node(graph).is_some());
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            events: vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, |ui| app.ui(ui, &mut frame));
+        output.textures_delta.clear();
+        assert_eq!(app.state.tree().len(), 1);
+        assert!(app.floating_tabs.is_empty());
+        assert!(app.detached_tabs.is_empty());
+        assert!(app.graph_views.is_empty());
+        assert!(app.floating_rects.is_empty());
+        assert!(!metadata_row_visible(&context));
+        assert!(
+            output.viewport_output[&egui::ViewportId::from_hash_of(Tab::Graph(graph))]
+                .commands
+                .contains(&egui::ViewportCommand::Close)
+        );
+        session.shutdown().unwrap();
     }
 
     /// Issue #16 : l'état de chaque fenêtre (ouverte/maximisée/fermée, repliée,

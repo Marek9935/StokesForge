@@ -61,6 +61,8 @@ l'interface, mais son mot est déjà fixé.
 
 | Anglais | Français | Définition | Refusés | Réf. |
 |---|---|---|---|---|
+| New Project | Nouveau projet | Remplacer le projet courant par un projet vide, après confirmation si nécessaire | Nouvelle session, Nouveau document | #73 |
+| Discard Changes | Abandonner les modifications | Confirmer la perte du travail non enregistré lors du remplacement du projet | Supprimer le projet, Effacer | #73 |
 | Open / Save / Save As / Quit | Ouvrir / Enregistrer / Enregistrer sous / Quitter | Commandes de fichier | Sauvegarder, Fermer (pour Quitter) | G |
 | Undo / Redo | Annuler / Rétablir | Défaire / refaire la dernière action | Refaire, Répéter | G |
 | Import / Export | Importer / Exporter | Lire un fichier d'appareil / écrire un graphique | Charger, Sauvegarder | O |

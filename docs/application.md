@@ -88,6 +88,31 @@ fichiers. La position et
 la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 « Géométrie des fenêtres »). L'éditeur de matrice reste un espace réservé.
 
+### Nouveau projet et graphique vide (#73)
+
+**File › New Project** (« Fichier › Nouveau projet », Ctrl+N) remplace le
+projet courant dans la même fenêtre. La barre Fichier offre le même geste.
+Un projet contenant du travail non enregistré, y compris une saisie locale
+dans une fenêtre détachée ou un texte du graphique, demande confirmation ; Annuler,
+Échap ou la croix conservent le projet. Le repère est conservateur : toute
+révision depuis l'enregistrement, y compris une annulation, ou une géométrie
+modifiée demande confirmation. Il ne conserve aucun ancien arbre en mémoire.
+Un nouveau projet encore vide ne demande pas de confirmation.
+
+Le remplacement passe par `SessionHandle::new_project`, vide l'historique et
+les géométries et change l'époque pour invalider les anciennes références
+Python. Les fenêtres de contenu, caches et sélections du projet précédent
+sont oubliés, et ses fenêtres détachées se ferment. La disposition des barres
+et la langue sont conservées. Le geste est grisé pendant un script, un import
+en cours ou une macro ouverte. Le premier **Save** (« Enregistrer ») demande
+une destination, puis les suivants utilisent ce fichier.
+
+**File › Add Graph** (« Fichier › Ajouter un graphique ») et la barre Fichier
+créent un graphique vide à la racine : une zone de tracé, aucune série. Sa
+fenêtre s'ouvre au premier plan. Il passe par la commande `AddGraph` existante :
+Annuler le retire, Rétablir retrouve la même identité, et le `.stf` le conserve.
+Ce geste n'a pas de raccourci supplémentaire ; il reste accessible au menu.
+
 ### Glisser-déposer de fichiers
 
 Déposer des fichiers sur la fenêtre principale émet `Action::DropFiles`. Le
@@ -111,8 +136,9 @@ Project Manager, un nouveau classeur. Les dépôts sont isolés par viewport et
 leurs actions reviennent à la session principale. Un dépôt est refusé tant
 que les propriétés du graphe sont ouvertes, pour garder leur macro
 d'historique indépendante de l'import. Les événements de dépôt sont
-testés sans fenêtre ; le glisser-déposer réel (X11/Wayland, fenêtres OS
-détachées) reste à valider manuellement.
+testés sans fenêtre. Le dépôt réel depuis Fichiers en Wayland natif est
+confirmé par l'utilisateur le 2026-10-02 ; les fenêtres OS détachées et
+les autres cas du protocole ci-dessous restent à valider manuellement.
 
 ### Assistant d'import
 
@@ -185,13 +211,31 @@ colonnes sont actualisées.
 
 ### Glisser-déposer : le backend de fenêtre
 
-**winit 0.30 n'émet aucun dépôt de fichier sous Wayland** (seulement X11,
-Windows, macOS) : sous une session Wayland, rien ne se passait au lâcher.
-`main.rs` (`prefer_x11`) demande donc le backend X11 (XWayland) sous Linux dès
-que `DISPLAY` existe ; `STOKESFORGE_WAYLAND=1` garde le Wayland natif (sans dépôt de
-fichiers). La logique de dépôt elle-même est testée sans fenêtre
-(`un_depot_est_reclame_par_le_classeur_sous_le_curseur`) ; le geste réel depuis
-un gestionnaire de fichiers reste à valider à la main.
+Sous Linux, winit choisit désormais **Wayland natif par défaut** lorsqu'il
+est disponible (#72). `STOKESFORGE_X11=1` force X11/XWayland en secours.
+`STOKESFORGE_WAYLAND=1` n'est plus nécessaire. eframe/egui-winit restent en
+0.36.2 ; les patches Cargo sélectionnent winit 0.30.13 et smithay-clipboard
+0.7.3 dans `vendor/` en attendant le support amont stable.
+
+Le module transitoire reçoit `text/uri-list` sur **le même récepteur que le
+presse-papiers**. Ce worker est partagé par tous les viewports : créer un
+second récepteur vole le dépôt au premier sur Mutter, comme l'a montré le
+premier prototype. Un canal faible remet à winit les chemins et la position,
+sans objet Wayland ni nouveau fil. Il émet les événements habituels pour chaque
+fenêtre native, donc le chemin de dépôt de l'application et des fenêtres
+détachées reste commun. Le pipe est lu sans attente bloquante, avec une liste
+d'URI limitée à 1 Mio et un délai de 10 secondes. La position au lâcher reste
+celle utilisée pour choisir le classeur. Voir
+[`vendor/winit/STOKESFORGE.md`](../vendor/winit/STOKESFORGE.md) pour le choix
+technique, les alternatives, le protocole manuel GNOME/KDE/wlroots et le
+retrait lors du passage à winit 0.31.
+
+Le défaut du premier prototype a été reproduit avec un dépôt réel depuis
+Fichiers sur GNOME. Après correction, l'utilisateur confirme le fonctionnement
+du dépôt en Wayland natif le 2026-10-02.
+**Les fenêtres détachées et KDE/wlroots restent à valider manuellement** ;
+les tests automatiques couvrent le parseur, le canal, sa durée de vie et la
+décision d'import, pas le compositeur.
 
 ### Ligne « Metadata » de l'en-tête
 
@@ -432,7 +476,8 @@ accueil en haut seulement.
   `toolbar::bar_contents` ; un geste qui n'est pas une `Action` (sélecteur de
   fichier, assistant d'import, export) remonte en `ToolbarRequest`, exécuté par
   `StokesForgeApp::run_toolbar_request` avec les méthodes mêmes des menus. Barre
-  Fichier (#61) : classeur, import, ouvrir, enregistrer, enregistrer sous,
+  Fichier (#61, #73) : nouveau projet, classeur, graphique vide, import,
+  ouvrir, enregistrer, enregistrer sous,
   exporter (grisé sans graphe au premier plan).
 - Barre contextuelle `Tools` (#62) : son contenu suit la fenêtre au premier
   plan (`ToolsContext`, calculé par `StokesForgeApp::tools_context`). Graphe : les

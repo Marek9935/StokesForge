@@ -73,3 +73,7 @@ SVG** par `scripts/icons-build.sh`.
 SVG embarqués, rastérisés à la demande par `egui_extras` (resvg) une fois par
 taille × `pixels_per_point`, puis gardés en texture : seules les icônes
 affichées coûtent.
+
+La réinitialisation du zoom (#74) utilise `arrows-out` : quatre flèches vers
+les limites du cadrage, distinctes des coins de maximisation. « New Project »
+(#73) utilise `file-plus` ; le nouveau graphique garde le rôle `Graph`.

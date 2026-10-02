@@ -86,6 +86,15 @@ pub enum Action {
     Save,
     /// Recharge le projet depuis le fichier courant.
     Load,
+    /// Demande un projet vide ; attend une confirmation si du travail serait perdu.
+    NewProject {
+        /// Saisie encore locale à une vue, notamment une fenêtre détachée.
+        pending_edits: bool,
+    },
+    /// Valide ou abandonne la demande de remplacement du projet.
+    ConfirmNewProject(bool),
+    /// Ajoute un graphique vide à la racine, annulable comme un tracé.
+    AddGraph,
     /// Ajoute un classeur et sa feuille initiale à la racine du projet.
     ///
     /// Le menu Fichier ne porte pas de destination ambiguë : un nouveau
@@ -1781,6 +1790,10 @@ pub struct AppState {
     selected_sheets: std::collections::HashMap<NodeId, NodeId>,
     /// Chemin du fichier de travail (saisi à la main, cf. `crate::app`).
     path: String,
+    /// Repère conservateur de l'enregistrement, sans épingler les buffers
+    /// d'un ancien arbre. Une annulation demande aussi confirmation.
+    saved_revision: Option<(u64, u64)>,
+    new_project_pending: bool,
     /// Agrandissement des exports PNG (issue #34), un de
     /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
     png_export_scale: f32,
@@ -1901,9 +1914,14 @@ impl AppState {
     /// script Python » en tête de ce module.
     pub fn new(handle: SessionHandle, path: String) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
+        let saved_revision = std::path::Path::new(&path)
+            .is_file()
+            .then_some((snapshot.revision, snapshot.geometry_revision));
         Ok(Self {
             handle,
             snapshot,
+            saved_revision,
+            new_project_pending: false,
             selected_sheets: std::collections::HashMap::new(),
             path,
             png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
@@ -3356,6 +3374,17 @@ impl AppState {
             Action::Redo => self.redo(),
             Action::Save => self.save(),
             Action::Load => self.load(),
+            Action::NewProject { pending_edits } => self.request_new_project(pending_edits),
+            Action::ConfirmNewProject(accept) => {
+                if std::mem::take(&mut self.new_project_pending) && accept {
+                    self.new_project();
+                }
+            }
+            Action::AddGraph => self.execute(Command::AddGraph {
+                parent: self.snapshot.tree.root(),
+                name: None,
+                spec: PlotSpec::empty(""),
+            }),
             Action::AddWorkbook => self.add_workbook(),
             Action::SelectSheet(id) => self.select_sheet(id),
             Action::CommitCell { column, row, text } => {
@@ -4651,6 +4680,9 @@ impl AppState {
         let path = PathBuf::from(&self.path);
         match self.handle.save(&path) {
             Ok(()) => {
+                self.refresh();
+                self.saved_revision =
+                    Some((self.snapshot.revision, self.snapshot.geometry_revision));
                 let text = crate::tr!("status-saved", path = self.path.as_str());
                 self.notice(text);
             }
@@ -4717,6 +4749,73 @@ impl AppState {
                 let text = crate::tr!("status-loaded", path = self.path.as_str());
                 self.notice(text);
                 self.refresh();
+                self.saved_revision =
+                    Some((self.snapshot.revision, self.snapshot.geometry_revision));
+            }
+            Err(err) => self.fail(errors::session::error_message(&err)),
+        }
+    }
+
+    /// Le changement de projet ne doit pas recueillir un résultat d'import
+    /// ou de script lancé sur l'ancien projet, ni interrompre une macro.
+    pub fn can_new_project(&self) -> bool {
+        !self.script_running() && self.import_job.is_none() && !self.snapshot.history.in_macro
+    }
+
+    pub fn new_project_pending(&self) -> bool {
+        self.new_project_pending
+    }
+
+    fn request_new_project(&mut self, pending_edits: bool) {
+        self.refresh();
+        if !self.can_new_project() {
+            return;
+        }
+        let has_content = self
+            .snapshot
+            .tree
+            .node(self.snapshot.tree.root())
+            .is_some_and(|node| !node.children().is_empty());
+        let changed = self
+            .saved_revision
+            .map_or(has_content || self.snapshot.revision != 0, |saved| {
+                saved != (self.snapshot.revision, self.snapshot.geometry_revision)
+            });
+        if changed
+            || pending_edits
+            || self.editing.is_some()
+            || self.note_editing.is_some()
+            || self.header_editing.is_some()
+        {
+            self.new_project_pending = true;
+        } else {
+            self.new_project();
+        }
+    }
+
+    fn new_project(&mut self) {
+        if !self.can_new_project() {
+            return;
+        }
+        match self.handle.new_project() {
+            Ok(_) => {
+                self.path.clear();
+                self.saved_revision = None;
+                self.selected_sheets.clear();
+                self.selection.clear();
+                self.editing = None;
+                self.header_editing = None;
+                self.note_editing = None;
+                self.plot_edit = None;
+                self.plot_settings = None;
+                self.metadata_view = None;
+                self.import_state = None;
+                self.last_import = None;
+                self.delete_repeat = None;
+                self.refresh();
+                self.saved_revision =
+                    Some((self.snapshot.revision, self.snapshot.geometry_revision));
+                self.notice(tr!("action-new-project"));
             }
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
@@ -5836,8 +5935,8 @@ impl AppState {
     /// [`Action::PlotColumns`]. Le graphe est ajouté dans le dossier qui
     /// contient le classeur de `sheet` (le parent du classeur, pas de la
     /// feuille). Pas de commande envoyée si aucune colonne Y n'est présente
-    /// dans `columns` : un graphe vide n'a pas de sens à créer, et n'a donc
-    /// pas d'entrée d'historique à annuler.
+    /// dans `columns` : cette action de tracé ne crée rien sans Y. Un graphique
+    /// vide se crée explicitement par [`Action::AddGraph`].
     fn plot_columns(&mut self, sheet: NodeId, columns: Vec<NodeId>, plot_type: PlotType) {
         let series = series_from_columns(&self.snapshot.tree, sheet, &columns, &plot_type, 0);
         if series.is_empty() {

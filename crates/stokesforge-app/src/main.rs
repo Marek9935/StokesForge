@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title(stokesforge_app::tr!("window-title"))
             .with_inner_size([1100.0, 700.0]),
-        event_loop_builder: Some(Box::new(prefer_x11)),
+        event_loop_builder: Some(Box::new(configure_window_backend)),
         // egui-wgpu met par défaut deux images en file d'attente (débit
         // maximal) ; une seule (faible latence) retire une image de retard
         // entre le pointeur et ce qui est peint — sensible au déplacement
@@ -82,23 +82,21 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Sous Linux, fenêtre X11 (XWayland sous une session Wayland) plutôt que
-/// Wayland natif : **winit 0.30 n'implémente pas le glisser-déposer de fichiers
-/// sous Wayland** — aucun `DroppedFile`/`HoveredFile` n'y est émis, donc rien ne
-/// se passe quand on lâche un fichier sur la fenêtre (issue #8). Avec X11 il
-/// fonctionne. `STOKESFORGE_WAYLAND=1` garde le backend Wayland natif (rendu net sur
-/// écran à forte densité, mais sans dépôt de fichiers) ; sans `DISPLAY`, winit
-/// choisit seul.
+/// Wayland natif par défaut (#72). Les correctifs winit/smithay-clipboard
+/// partagent le récepteur de dépôt avec le presse-papiers, pour chaque viewport.
+/// STOKESFORGE_X11=1 conserve une échappatoire X11/XWayland ; sans override,
+/// winit choisit Wayland puis X11 selon les connexions disponibles. L'ancien
+/// STOKESFORGE_WAYLAND n'est plus nécessaire.
 #[cfg(target_os = "linux")]
-fn prefer_x11(builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>) {
+fn configure_window_backend(builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>) {
     use winit::platform::x11::EventLoopBuilderExtX11;
-    if std::env::var_os("STOKESFORGE_WAYLAND").is_none() && std::env::var_os("DISPLAY").is_some() {
+    if std::env::var_os("STOKESFORGE_X11").is_some_and(|value| value == "1") {
         builder.with_x11();
     }
 }
 
 #[cfg(not(target_os = "linux"))]
-fn prefer_x11(_builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>) {}
+fn configure_window_backend(_builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>) {}
 
 /// Le chargement passe par l'acteur pour restaurer aussi les géométries,
 /// conservées à côté du modèle. Charger seulement `Project` les perdrait.

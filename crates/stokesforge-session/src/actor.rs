@@ -121,6 +121,10 @@ pub(crate) enum Request {
         /// `Command(MacroOpen)` si une macro est ouverte).
         reply: Sender<SessionResult<Revision>>,
     },
+    /// Remplace le projet par un projet vide, avec les mêmes gardes que Load.
+    NewProject {
+        reply: Sender<SessionResult<Revision>>,
+    },
     /// Demande l'arrêt de l'acteur.
     Shutdown,
 }
@@ -141,7 +145,7 @@ pub(crate) fn run(
     let mut revision: Revision = 0;
     // A3 (`guide-de-correction-robustesse.md` §F2/F6) — époque du projet
     // courant : locale à ce fil, **jamais persistée** (voir la doc de
-    // `Snapshot::epoch`). N'avance que sur un `Load` qui réussit : ni
+    // `Snapshot::epoch`). Avance sur `Load` ou `NewProject` réussi : ni
     // `Execute`/`Undo`/`Redo`, qui font déjà avancer `revision`, ni les
     // macros ne changent l'identité du projet.
     let mut epoch: u64 = 0;
@@ -364,6 +368,29 @@ pub(crate) fn run(
                         geometry_revision += 1;
                         revision
                     });
+                let _ = reply.send(outcome);
+            }
+            Request::NewProject { reply } => {
+                // Cycle de vie, comme Load : aucune entrée annulable ne peut
+                // survivre au remplacement de l'identité du projet.
+                let outcome = if history.in_macro() {
+                    Err(SessionError::Command(CommandError::MacroOpen(
+                        "new project",
+                    )))
+                } else {
+                    Project::new("Project1")
+                        .map_err(CommandError::from)
+                        .map_err(SessionError::from)
+                        .map(|empty| {
+                            project = empty;
+                            let _ = history.clear();
+                            geometries.clear();
+                            revision += 1;
+                            epoch += 1;
+                            geometry_revision += 1;
+                            revision
+                        })
+                };
                 let _ = reply.send(outcome);
             }
             Request::Shutdown => {

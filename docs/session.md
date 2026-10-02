@@ -32,7 +32,7 @@ session.shutdown()                     -> Project        // rend le projet
 ```
 
 `SessionHandle` : `execute`, `undo`, `redo`, `begin_macro`, `end_macro`,
-`abort_macro`, `snapshot`, `save`, `load`.
+`abort_macro`, `snapshot`, `save`, `load`, `new_project`.
 
 ## Ce qu'un instantané porte
 
@@ -48,17 +48,18 @@ jamais recopié, seulement partagé.**
 
 `epoch` est distinct de `revision` et répond à une question que `revision` ne
 peut pas trancher : **est-ce encore le même projet ?** C'est un compteur local
-à l'acteur, jamais persisté, incrémenté **uniquement** quand un `Load` réussit.
-`Load` incrémente **aussi** `revision` : elle reste monotone sur toute la vie de
+à l'acteur, jamais persisté, incrémenté quand un `Load` ou `NewProject` réussit.
+Les deux incrémentent **aussi** `revision` : elle reste monotone sur toute la vie de
 la session. Ce qu'elle ne dit pas, c'est que le projet a été remplacé ; `epoch`,
 lui, a changé. `stokesforge-script` s'en
 sert pour détecter qu'une poignée désigne un `NodeId` d'un projet qui n'est plus
 celui qui l'a produite — avant même de chercher ce `NodeId` dans l'arbre, où il
 pourrait, par coïncidence, désigner un autre objet.
 
-## `save` et `load`
+## `save`, `load` et `new_project`
 
-Les deux passent par `stokesforge-persistence` ([`persistance.md`](persistance.md)).
+`save` et `load` passent par `stokesforge-persistence`
+([`persistance.md`](persistance.md)).
 
 - `save` écrit le projet courant **sans toucher** à la révision ni à
   l'historique ;
@@ -67,7 +68,12 @@ Les deux passent par `stokesforge-persistence` ([`persistance.md`](persistance.m
   rapport avec l'arbre courant, y compris ses identifiants de nœud, qui
   repartent de la valeur persistée dans le fichier.
 
-Les deux sont refusés pendant une macro ouverte. En cas d'échec, ni le projet
+`new_project` remplace le projet par `Project1` vide, sans entrée annulable.
+Comme `load`, il vide l'historique et les géométries, et avance révision,
+époque et révision de géométrie. La confirmation appartient à l'application,
+pas à l'acteur.
+
+Les trois sont refusés pendant une macro ouverte. En cas d'échec, ni le projet
 ni l'historique ne sont modifiés.
 
 ## Une macro ouverte, et l'identité de l'émetteur
@@ -94,7 +100,7 @@ défaire silencieusement le travail déjà validé de quelqu'un d'autre.
 | `BeginMacro` | **refusée** si une macro est déjà ouverte par un *autre* émetteur ; un même émetteur peut imbriquer la sienne |
 | `EndMacro` | **refusée** si l'émetteur n'est pas le propriétaire (`NotInMacro` reste réservé au cas où aucune macro n'est ouverte) |
 | `AbortMacro` | **refusée** si l'émetteur n'est pas le propriétaire |
-| `Save` / `Load` | refusées pour quiconque — écrire l'état intermédiaire d'une macro que quelqu'un pourrait encore avorter reste interdit à tous |
+| `Save` / `Load` / `NewProject` | refusées pour quiconque — écrire l'état intermédiaire d'une macro que quelqu'un pourrait encore avorter reste interdit à tous |
 | `Snapshot` | toujours servie : lecture pure |
 | `Shutdown` | annule (plutôt que de commettre) toute macro encore ouverte, niveau par niveau |
 

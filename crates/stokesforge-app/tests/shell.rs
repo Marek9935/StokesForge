@@ -125,6 +125,91 @@ fn start_demo(dir: &Path) -> (Session, AppState) {
     start(demo_project(), &dir.join("projet.stokesforge"))
 }
 
+#[test]
+fn graphique_vide_annulable_retabli_et_enregistre() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let before = state.tree().len();
+    state.dispatch(Action::AddGraph);
+    let graph = *state
+        .tree()
+        .node(state.tree().root())
+        .unwrap()
+        .children()
+        .last()
+        .unwrap();
+    let spec = state.plot_spec(graph).unwrap();
+    assert_eq!(spec.panels.len(), 1);
+    assert!(spec.panels.iter().all(|panel| panel.series.is_empty()));
+    state.dispatch(Action::Undo);
+    assert_eq!(state.tree().len(), before);
+    state.dispatch(Action::Redo);
+    assert!(state.tree().node(graph).is_some());
+    state.dispatch(Action::Save);
+    state.dispatch(Action::Load);
+    assert!(state.plot_spec(graph).unwrap().panels[0].series.is_empty());
+    session.shutdown().unwrap();
+}
+
+#[test]
+fn nouveau_projet_attend_confirmation_et_annulation_preserve_le_travail() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let before = state.tree().len();
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    assert!(state.new_project_pending());
+    assert_eq!(state.tree().len(), before);
+    state.dispatch(Action::ConfirmNewProject(false));
+    assert!(!state.new_project_pending());
+    assert_eq!(state.tree().len(), before);
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmNewProject(true));
+    assert_eq!(state.tree().len(), 1);
+    assert!(state.path().is_empty());
+    assert!(!state.can_undo());
+    // Pas de confirmation pour un second projet encore vide.
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    assert!(!state.new_project_pending());
+    state.dispatch(Action::AddWorkbook);
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    assert!(state.new_project_pending());
+    session.shutdown().unwrap();
+}
+
+#[test]
+fn nouveau_projet_apres_enregistrement_et_apres_echec() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::Save);
+    state.dispatch(Action::NewProject {
+        pending_edits: true,
+    });
+    assert!(state.new_project_pending());
+    state.dispatch(Action::ConfirmNewProject(false));
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    assert!(!state.new_project_pending());
+    assert_eq!(state.tree().len(), 1);
+    state.dispatch(Action::AddGraph);
+    state.set_path(dir.path().display().to_string()); // une destination qui est un dossier
+    state.dispatch(Action::Save);
+    assert!(state.status().unwrap().is_error);
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    assert!(state.new_project_pending());
+    session.shutdown().unwrap();
+}
+
 /// Identifiant de la colonne `name` dans `sheet`.
 fn column_id(state: &AppState, sheet: NodeId, name: &str) -> NodeId {
     state

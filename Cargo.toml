@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["vendor/winit", "vendor/smithay-clipboard"]
 members = [
     "crates/stokesforge-id",
     "crates/stokesforge-core",
@@ -25,3 +26,9 @@ edition = "2021"
 
 [workspace.lints.clippy]
 all = "warn"
+
+# Transition #72 : dépôt Wayland sans migration bêta de toute la pile egui.
+# Diff et retrait : vendor/winit/STOKESFORGE.md.
+[patch.crates-io]
+winit = { path = "vendor/winit" }
+smithay-clipboard = { path = "vendor/smithay-clipboard" }

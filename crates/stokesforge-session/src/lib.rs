@@ -72,6 +72,7 @@
 //! | `AbortMacro` | annule le niveau courant et tout son contenu, quel que soit l'émetteur — **y compris le travail déjà validé d'un autre client, silencieusement** : c'était exactement A4 | **refusée** (`ForeignMacro("abort_macro")`) si l'émetteur n'est pas le propriétaire : un `abort_macro` ne peut plus défaire le travail de quelqu'un d'autre |
 //! | `Save` | refusée pour quiconque pendant une macro ouverte (A11, **palliatif déclaré** en vague 1 : la garde de `load_project` recopiée sans plus de nuance) | inchangé — le refus ne dépend pas de qui a ouvert la macro ; écrire sur le disque l'état intermédiaire d'une macro que *quelqu'un* pourrait encore avorter reste interdit à tous |
 //! | `Load` | refusée pour quiconque pendant une macro ouverte, avant même de toucher au disque | inchangé, même raison que `Save` |
+//! | `NewProject` | mêmes gardes que `Load` ; remplace l'identité, l'historique et les géométries | refusée pour quiconque pendant une macro |
 //!
 //! `Snapshot` et `Shutdown` ne mutent rien : `Snapshot` est une lecture pure,
 //! toujours servie ; `Shutdown` ne passe pas par ce tableau mais par le
@@ -338,6 +339,12 @@ impl SessionHandle {
             path: path.to_path_buf(),
             reply,
         })?
+    }
+
+    /// Crée un projet vide et remplace l'identité courante. Vide l'historique
+    /// et les géométries ; refuse une macro ouverte, comme [`Self::load`].
+    pub fn new_project(&self) -> SessionResult<Revision> {
+        self.request(|reply| Request::NewProject { reply })?
     }
 }
 

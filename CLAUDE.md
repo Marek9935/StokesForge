@@ -33,6 +33,15 @@ Rendu (phases R0-R8 closes) : `stokesforge-render` (mesure de texte unique via `
 
 Feature hors `default` : `python` (pont PyO3, exige `PYO3_CONFIG_FILE` — voir `scripts/python-test.sh`), seule du dépôt ; `cargo build --workspace` ne la compile pas. `scripts/python-test.sh` teste pont, scripts, robustesse, application et CLI ; le travail CI `test-python` est automatique et bloquant. Typst (notations scientifiques) est une dépendance ferme des trois crates de rendu : `cargo build/test --workspace` le compilent et le testent.
 
+Transitions #72–#73 : Wayland natif est le défaut, `STOKESFORGE_X11=1` force
+X11 ; les patches `vendor/winit` et `vendor/smithay-clipboard`, hors workspace,
+partagent le récepteur de dépôt et le presse-papiers entre les viewports.
+Choix, commandes `rustfmt` ciblées, vérification manuelle et retrait :
+`vendor/winit/STOKESFORGE.md`. Le parseur et le canal exacts sont testés par
+`stokesforge-app/tests/wayland_{uri,bridge}.rs`.
+Le graphique vide passe par `AddGraph` ; `SessionHandle::new_project`, comme
+`load`, remplace l'identité et vide l'historique après confirmation dans l'UI.
+
 Règles de chargement par domaine (quel crate/doc charger selon la tâche) : `.claude/rules.md`.
 
 Skills de projet : `.claude/skills/` — onze compétences par type de tâche

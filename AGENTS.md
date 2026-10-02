@@ -33,6 +33,13 @@ confirmation pour les choix courants couverts par la demande.
 - Les mutations métier passent par les commandes annulables et l'acteur de
   session. Respecter les exceptions documentées pour l'état de vue et la
   géométrie ; ne pas créer de voie d'écriture métier parallèle.
+- `new_project`, comme `load`, est un remplacement d'identité par l'acteur,
+  avec historique vidé et macro ouverte refusée ; la confirmation vit dans
+  l'application. Le graphique vide réutilise `Command::AddGraph`.
+- Le dépôt Wayland partage le récepteur du presse-papiers via les patches
+  `vendor/winit` et `vendor/smithay-clipboard` (#72), hors workspace : lire
+  `vendor/winit/STOKESFORGE.md` avant de modifier ou mettre à jour ces
+  dépendances/eframe. `STOKESFORGE_X11=1` force le secours X11.
 - L'import de l'application, du CLI et des scripts partage les plans et la
   conversion de `stokesforge-importer` ; `pyst.import_file` écrit par les commandes
   de sa session, GIL relâché, dans une macro annulable.

@@ -303,6 +303,31 @@ for action in (lambda: pyst.rename(a, 'Périmée'), lambda: pyst.remove(a), lamb
 }
 
 #[test]
+fn nouveau_projet_invalide_une_poignee_meme_si_l_identifiant_est_reutilise() {
+    let banc = banc();
+    run(&banc, "a = pyst.resolve('[Book1]Sheet1!A')");
+    banc.session.new_project().unwrap();
+    run(&banc, "book = pyst.create_workbook('Book1')\ns = pyst.create_worksheet(book, 'Sheet1')\nc = pyst.create_column(s, 'A')\npyst.set_values(c, [1.])");
+    let before = banc.session.snapshot().unwrap();
+    assert!(before.tree.node(banc.a).is_some()); // identifiant réellement réemployé
+    assert_eq!(floats(&banc, banc.a), vec![1.]);
+    run(
+        &banc,
+        r#"
+try:
+    pyst.set_values(a, [99.])
+except pyst.BrokenReferenceError:
+    pass
+else:
+    raise AssertionError('ancienne époque acceptée après nouveau projet')
+"#,
+    );
+    let after = banc.session.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert_eq!(after.revision, before.revision);
+}
+
+#[test]
 fn metadonnees_partielles_preservent_les_champs_et_la_formule_est_protegee() {
     let banc = banc();
     banc.session

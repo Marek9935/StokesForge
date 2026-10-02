@@ -416,6 +416,7 @@ pub enum ToolbarRequest {
 /// Les raccourcis tels que les menus les écrivent (rappel dans l'info-bulle).
 #[derive(Debug, Clone, Default)]
 pub struct ShortcutTexts {
+    pub new_project: String,
     pub open: String,
     pub save: String,
     pub save_as: String,
@@ -471,6 +472,8 @@ pub enum ToolsContext {
 /// Ce que les barres lisent de l'application, calculé une fois par image.
 #[derive(Debug, Clone, Default)]
 pub struct BarEnv {
+    /// Même garde que File > New Project et Ctrl+N.
+    pub new_project_enabled: bool,
     /// Un graphe est au premier plan (sinon *Export* est grisé, comme le menu
     /// Graph est absent).
     pub export_enabled: bool,
@@ -524,6 +527,19 @@ pub fn bar_contents(
             let shortcuts = &env.shortcuts;
             if button(
                 ui,
+                Icon::NewProject,
+                IconRole::Neutral,
+                tr!("action-new-project"),
+                Some(tr!("action-new-project", "hint")),
+                &shortcuts.new_project,
+                env.new_project_enabled,
+            ) {
+                requests.push(ToolbarRequest::Action(Box::new(Action::NewProject {
+                    pending_edits: false,
+                })));
+            }
+            if button(
+                ui,
                 Icon::Workbook,
                 IconRole::Workbook,
                 tr!("action-add-workbook"),
@@ -532,6 +548,17 @@ pub fn bar_contents(
                 true,
             ) {
                 requests.push(ToolbarRequest::Action(Box::new(Action::AddWorkbook)));
+            }
+            if button(
+                ui,
+                Icon::Graph,
+                IconRole::Graph,
+                tr!("action-add-graph"),
+                Some(tr!("action-add-graph", "hint")),
+                "",
+                true,
+            ) {
+                requests.push(ToolbarRequest::Action(Box::new(Action::AddGraph)));
             }
             if button(
                 ui,

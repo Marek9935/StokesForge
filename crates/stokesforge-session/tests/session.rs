@@ -51,6 +51,58 @@ fn set_one(column: NodeId, start: usize, value: f64) -> Command {
 }
 
 #[test]
+fn nouveau_projet_vide_historique_geometries_et_change_identite() {
+    let (project, _, a) = fixture();
+    let session = Session::spawn(project, None).unwrap();
+    let handle = session.handle();
+    handle.execute(set_one(a, 0, 42.0)).unwrap();
+    handle
+        .set_window_geometry(
+            a,
+            stokesforge_session::WindowGeometry {
+                x: 1.0,
+                y: 2.0,
+                width: 300.0,
+                height: 200.0,
+                view: None,
+            },
+        )
+        .unwrap();
+    let before = handle.snapshot().unwrap();
+    handle.new_project().unwrap();
+    let after = handle.snapshot().unwrap();
+    assert_eq!(after.tree.len(), 1);
+    assert!(!after.history.can_undo);
+    assert!(!after.history.can_redo);
+    assert!(after.window_geometries.is_empty());
+    assert_eq!(after.epoch, before.epoch + 1);
+    assert!(after.revision > before.revision);
+    assert!(after.geometry_revision > before.geometry_revision);
+    assert!(handle.undo().unwrap().is_none());
+    session.shutdown().unwrap();
+}
+
+#[test]
+fn nouveau_projet_refuse_une_macro_meme_etrangere() {
+    let (project, _, a) = fixture();
+    let session = Session::spawn(project, None).unwrap();
+    let handle = session.handle();
+    handle.begin_macro(MacroKind::Script).unwrap();
+    handle.execute(set_one(a, 0, 42.0)).unwrap();
+    let before = handle.snapshot().unwrap();
+    assert!(matches!(
+        handle.with_new_identity().new_project(),
+        Err(SessionError::Command(CommandError::MacroOpen(_)))
+    ));
+    let after = handle.snapshot().unwrap();
+    assert_eq!(after.epoch, before.epoch);
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(read_a(&after, a)[0], 42.0);
+    handle.abort_macro().unwrap();
+    session.shutdown().unwrap();
+}
+
+#[test]
 fn round_trip_execute_undo_redo() {
     let (project, _sheet, a) = fixture();
     let initial_len = project.tree().len();

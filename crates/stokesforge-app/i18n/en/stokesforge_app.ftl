@@ -28,6 +28,13 @@ menu-language = Language
 
 action-add-workbook = Add Workbook
     .hint = Adds a workbook with X and Y columns
+action-new-project = New Project
+    .hint = Creates an empty project in this window
+action-add-graph = Add Graph
+    .hint = Adds an empty graph with one plot area
+new-project-confirm = Discard unsaved changes and create an empty project?
+new-project-discard = Discard Changes
+    .hint = Replaces the current project; this cannot be undone
 action-import = Import…
     .hint = Reads instrument files into worksheets
 action-refresh-from-source = Refresh from Source

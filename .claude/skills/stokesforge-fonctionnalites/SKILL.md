@@ -54,6 +54,16 @@ n'existe pas encore » aussi — c'est la plus facile à se tromper.
 
 ## Ce qui n'existe pas — le dire clairement
 
+Repères #72–#74 : File › New Project (Ctrl+N, confirmation si travail non
+enregistré), File › Add Graph (graphique vide annulable) et leurs boutons de
+barre Fichier existent. Wayland natif est le défaut avec le correctif
+transitoire `vendor/winit` / `vendor/smithay-clipboard` : même récepteur de
+dépôt et de presse-papiers, partagé entre les viewports. Un second récepteur
+perd les offres sur Mutter. `STOKESFORGE_X11=1` force le secours X11. Les tests
+du parseur/canal et le démarrage natif ne prouvent pas le geste réel de dépôt :
+consulter le statut et le protocole de `vendor/winit/STOKESFORGE.md` avant
+d'affirmer sa validation sur un compositeur.
+
 `stokesforge-app` est explicitement un **banc d'intégration**, pas l'interface
 finale : la grille éditable à délégués, le panneau de propriétés et un système
 de graphes complet seront repris entièrement plus tard. Plusieurs manques sont

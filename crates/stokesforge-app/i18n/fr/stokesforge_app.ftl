@@ -24,6 +24,13 @@ menu-language = Langue
 
 action-add-workbook = Ajouter un classeur
     .hint = Ajoute un classeur avec des colonnes X et Y
+action-new-project = Nouveau projet
+    .hint = Crée un projet vide dans cette fenêtre
+action-add-graph = Ajouter un graphique
+    .hint = Ajoute un graphique vide avec une zone de tracé
+new-project-confirm = Abandonner les modifications non enregistrées et créer un projet vide ?
+new-project-discard = Abandonner les modifications
+    .hint = Remplace le projet courant ; cette action ne peut pas être annulée
 action-import = Importer…
     .hint = Lit des fichiers d'appareil dans des feuilles
 action-refresh-from-source = Actualiser depuis la source

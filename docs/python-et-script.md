@@ -350,7 +350,7 @@ exposé ; la résolution, la navigation, les créations et l'import en produisen
 valide après un renommage, un déplacement, et même après une suppression
 **suivie d'une annulation** — c'est
 le contrat de l'identité, assuré par le modèle (identifiants monotones, jamais
-réutilisés). Elle est invalidée par un `Load`, détecté via l'`epoch` de
+réutilisés). Elle est invalidée par un `Load` ou un `NewProject`, détecté via l'`epoch` de
 l'instantané avant même de chercher le `NodeId` dans l'arbre courant
 ([`session.md`](session.md)).
 
