@@ -12726,6 +12726,160 @@ mod graph_layout_tests {
         assert_eq!(state.get(), settled);
     }
 
+    /// Mesure (pas une vérification) : temps d'une image complète — passe
+    /// egui + tessellation — au repos puis pendant le déplacement d'une
+    /// fenêtre flottante par sa barre de titre.
+    /// `cargo test -p plotyx-app --release --lib mesure_deplacement -- --ignored --nocapture`
+    #[test]
+    #[ignore = "mesure de performance, à lancer à la main"]
+    fn mesure_deplacement_de_fenetre() {
+        use eframe::App as _;
+        let mut project = Project::new("Mesure").unwrap();
+        let root = project.root();
+        let book = project.add_workbook(root, Some("Book1")).unwrap();
+        let sheet = project
+            .tree()
+            .child_by_name(book, "Sheet1")
+            .unwrap()
+            .unwrap();
+        let xs: Vec<f64> = (0..=120).map(|i| 400.0 + i as f64 * 2.5).collect();
+        let ys: Vec<f64> = xs
+            .iter()
+            .map(|x| 0.85 * (-((x - 520.0) / 38.0).powi(2)).exp() + 0.04)
+            .collect();
+        let x = project
+            .add_column(sheet, None, Some("Lambda"), Column::from_f64(&xs))
+            .unwrap();
+        let y = project
+            .add_column(sheet, None, Some("Absorbance"), Column::from_f64(&ys))
+            .unwrap();
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new_xy(x, y));
+        let graph = project
+            .add_graph(
+                root,
+                Some("Graph1"),
+                PlotSpec::empty("Spectre").with_panels(panel),
+            )
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "mesure.plotyx".to_string()).unwrap();
+        let mut app = PlotyxApp::new(state);
+        app.open_tab(Tab::Book(book));
+        app.open_tab(Tab::Graph(graph));
+
+        let context = egui::Context::default();
+        context.set_fonts(plotyx_render_egui::font_definitions());
+        egui_extras::install_image_loaders(&context);
+        crate::theme::install(&context);
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut events: Vec<egui::Event> = Vec::new();
+        let mut now = 0.0;
+        let mut frame_ms = |events: Vec<egui::Event>| -> (f64, f64, egui::FullOutput) {
+            now += 1.0 / 60.0;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 900.0),
+                )),
+                time: Some(now),
+                events,
+                ..Default::default()
+            };
+            let t0 = std::time::Instant::now();
+            let mut output = context.run_ui(input, |ui| app.ui(ui, &mut frame));
+            let t1 = std::time::Instant::now();
+            let primitives = context.tessellate(output.shapes.clone(), output.pixels_per_point);
+            let t2 = std::time::Instant::now();
+            std::hint::black_box(&primitives);
+            output.textures_delta.clear();
+            (
+                (t1 - t0).as_secs_f64() * 1e3,
+                (t2 - t1).as_secs_f64() * 1e3,
+                output,
+            )
+        };
+        let report = |label: &str, mut samples: Vec<(f64, f64)>| {
+            samples.sort_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1)));
+            let n = samples.len() as f64;
+            let ui_avg = samples.iter().map(|s| s.0).sum::<f64>() / n;
+            let tess_avg = samples.iter().map(|s| s.1).sum::<f64>() / n;
+            let (median, worst) = (samples[samples.len() / 2], samples[samples.len() - 1]);
+            eprintln!(
+                "{label:<28} ui moy {ui_avg:6.2} ms | tessellation moy {tess_avg:6.2} ms | \
+                 médiane {:6.2} | pire {:6.2}",
+                median.0 + median.1,
+                worst.0 + worst.1
+            );
+        };
+
+        // Chauffe (chargement des textures, caches de rendu).
+        let mut last = frame_ms(Vec::new()).2;
+        for _ in 0..10 {
+            last = frame_ms(Vec::new()).2;
+        }
+        let idle: Vec<(f64, f64)> = (0..60)
+            .map(|_| {
+                let (a, b, _) = frame_ms(Vec::new());
+                (a, b)
+            })
+            .collect();
+        report("au repos", idle);
+
+        // Déplacement de la fenêtre du graphe (au premier plan) par son titre.
+        // Le titre de la fenêtre, pas l'entrée du Project Manager (à gauche).
+        let grab = last
+            .shapes
+            .iter()
+            .filter_map(|painted| match &painted.shape {
+                egui::Shape::Text(shape) if shape.galley.job.text == "Graph1" => {
+                    Some(shape.pos + shape.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .find(|pos| pos.x > 300.0)
+            .expect("titre de fenêtre peint");
+        events.push(egui::Event::PointerMoved(grab));
+        frame_ms(std::mem::take(&mut events));
+        events.push(egui::Event::PointerButton {
+            pos: grab,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        frame_ms(std::mem::take(&mut events));
+        let mut pos = grab;
+        let moving: Vec<(f64, f64)> = (0..60)
+            .map(|i| {
+                pos += egui::vec2(if i < 30 { 6.0 } else { -6.0 }, 2.0);
+                let (a, b, _) = frame_ms(vec![egui::Event::PointerMoved(pos)]);
+                (a, b)
+            })
+            .collect();
+        report("fenêtre graphe en mouvement", moving);
+        let after = frame_ms(Vec::new()).2;
+        eprintln!(
+            "formes peintes : {} ; titre {grab:?} -> {:?}",
+            after.shapes.len(),
+            after
+                .shapes
+                .iter()
+                .filter_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == "Graph1" => {
+                        Some(shape.pos + shape.galley.rect.center().to_vec2())
+                    }
+                    _ => None,
+                })
+                .find(|pos| pos.x > 300.0)
+        );
+        frame_ms(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+    }
+
     /// Centres des icônes peintes (images : rectangles à texture), de gauche à
     /// droite. Les chargeurs d'images
     /// doivent être installés sur le contexte, et l'image avoir déjà tourné
