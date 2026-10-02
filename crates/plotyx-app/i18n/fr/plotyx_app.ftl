@@ -18,6 +18,7 @@ window-title-detached = PlotYx — { $name }
 menu-file = Fichier
 menu-edit = Édition
 menu-graph = Graphique
+menu-view = Affichage
 menu-window = Fenêtre
 menu-language = Langue
 
@@ -719,3 +720,10 @@ color-palette-brewer-paired = ColorBrewer Paired
 color-palette-viridis = Viridis (dégradé)
 color-palette-plasma = Plasma (dégradé)
 color-palette-grayscale = Niveaux de gris (dégradé)
+
+## Toolbars (#60)
+
+toolbar-file = Fichier
+    .hint = Affiche ou masque la barre Fichier
+toolbar-move = Glisser pour déplacer cette barre d'outils
+status-toolbars-not-saved = Impossible d'enregistrer la disposition des barres d'outils : { $detail }

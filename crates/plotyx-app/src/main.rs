@@ -68,7 +68,9 @@ fn main() -> anyhow::Result<()> {
             // côtés des polices : les deux relèvent du même geste (« ce que
             // l'appli impose sur le `Context` avant le premier rendu »).
             plotyx_app::theme::install(&cc.egui_ctx);
-            Ok(Box::new(PlotyxApp::new(state)))
+            let mut app = PlotyxApp::new(state);
+            app.load_toolbar_layout(&plotyx_app::preferences::Preferences::load());
+            Ok(Box::new(app))
         }),
     );
 

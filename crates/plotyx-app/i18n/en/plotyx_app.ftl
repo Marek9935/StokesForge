@@ -22,6 +22,7 @@ window-title-detached = PlotYx — { $name }
 menu-file = File
 menu-edit = Edit
 menu-graph = Graph
+menu-view = View
 menu-window = Window
 menu-language = Language
 
@@ -723,3 +724,10 @@ color-palette-brewer-paired = ColorBrewer Paired
 color-palette-viridis = Viridis (gradient)
 color-palette-plasma = Plasma (gradient)
 color-palette-grayscale = Grayscale (gradient)
+
+## Toolbars (#60)
+
+toolbar-file = File
+    .hint = Shows or hides the File toolbar
+toolbar-move = Drag to move this toolbar
+status-toolbars-not-saved = Could not save the toolbar layout: { $detail }

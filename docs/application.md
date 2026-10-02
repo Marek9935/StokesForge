@@ -413,6 +413,30 @@ appeler image après image) est bien plus couplé à `AppState` que les quatre
 autres natures — le généraliser demanderait de faire voyager aussi l'état
 d'exécution du script, hors périmètre de cette tâche.
 
+### Barres d'outils (#59, #60)
+
+`src/toolbar.rs`. Des barres de boutons-icônes, **déplaçables à la souris** :
+chaque barre porte une poignée à gauche ; la saisir la détache dans une
+`egui::Area` (calque Foreground) qui suit le pointeur. Relâchée sur la zone
+d'accueil (le panneau `plotyx_toolbars`, sous la barre de menu, plus une
+demi-rangée qui ouvre une nouvelle rangée) elle s'y range ; ailleurs elle
+devient flottante. Le *pourquoi* du conteneur maison (ni `Panel`, ni `Window`
+brute, ni `show_window_in_layer`) est dans le `//!` du module. Version 1 :
+accueil en haut seulement.
+
+- `ToolbarLayout` (pur, testé) : barres, visibilité, emplacement ;
+  `drop_target` décide du dépôt. `ToolbarState` n'est que la glu egui.
+- Un bouton est un `ToolbarButton` : icône du composant commun, info-bulle
+  (libellé + raccourci + `.hint`), grisage. Il pousse la même `Action` que le
+  menu — jamais une seconde écriture. Le contenu de chaque barre est
+  `toolbar::bar_contents`.
+- Visibilité : menu **View**, une case par barre. Emplacement et visibilité
+  sont dans `preferences.json` (champ `toolbars`), pas dans le `.plx` ; la
+  lecture ignore ce qu'elle ne comprend pas. `PlotyxApp::new` ne lit pas le
+  fichier (les tests), `main` appelle `load_toolbar_layout`.
+- Les barres ne sont peintes que dans la fenêtre principale, pas dans les
+  fenêtres OS détachées.
+
 ### Thème
 
 L'appli **ne suit pas** le thème clair/sombre du système : `plotyx_app::theme`

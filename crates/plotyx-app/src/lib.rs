@@ -50,4 +50,5 @@ pub mod preferences;
 pub mod selection;
 pub mod state;
 pub mod theme;
+pub mod toolbar;
 pub mod user_colors;

@@ -1,5 +1,6 @@
 //! Préférences de l'utilisateur, gardées sur cette machine : pour l'instant la
-//! seule langue de l'interface (issue #41).
+//! langue de l'interface (issue #41) et la disposition des barres d'outils
+//! (issue #60).
 //!
 //! Même stockage que les couleurs de l'utilisateur ([`crate::user_colors`]) et
 //! que les recettes d'import : un fichier JSON — `preferences.json` — dans le
@@ -21,12 +22,17 @@ use std::path::{Path, PathBuf};
 struct PreferencesFile {
     #[serde(default)]
     language: Option<String>,
+    /// Gardée brute : c'est `toolbar::ToolbarLayout::from_json` qui la lit, en
+    /// tolérant ce qu'une autre version y a écrit.
+    #[serde(default)]
+    toolbars: Option<serde_json::Value>,
 }
 
 /// Les préférences de l'utilisateur, et le fichier d'où elles viennent.
 #[derive(Debug, Clone, Default)]
 pub struct Preferences {
     language: Option<String>,
+    toolbars: Option<serde_json::Value>,
     path: Option<PathBuf>,
 }
 
@@ -39,12 +45,16 @@ impl Preferences {
 
     /// Charge depuis `path` (`None` : rien à charger).
     pub fn load_from(path: Option<PathBuf>) -> Self {
-        let language = path
+        let file = path
             .as_deref()
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|content| serde_json::from_str::<PreferencesFile>(&content).ok())
-            .and_then(|file| file.language);
-        Self { language, path }
+            .unwrap_or_default();
+        Self {
+            language: file.language,
+            toolbars: file.toolbars,
+            path,
+        }
     }
 
     /// La langue enregistrée, telle qu'écrite (`"fr"`, `"en"`…), si le fichier
@@ -59,6 +69,22 @@ impl Preferences {
     /// l'appelant la montre, et la langue reste appliquée pour la session.
     pub fn save_language(&mut self, tag: &str) -> std::io::Result<()> {
         self.language = Some(tag.to_string());
+        self.save_field("language", serde_json::Value::from(tag))
+    }
+
+    /// La disposition des barres d'outils enregistrée, telle qu'écrite.
+    pub fn toolbars(&self) -> Option<&serde_json::Value> {
+        self.toolbars.as_ref()
+    }
+
+    /// Enregistre la disposition des barres d'outils (mêmes garanties que
+    /// [`Preferences::save_language`]).
+    pub fn save_toolbars(&mut self, layout: serde_json::Value) -> std::io::Result<()> {
+        self.toolbars = Some(layout.clone());
+        self.save_field("toolbars", layout)
+    }
+
+    fn save_field(&self, key: &str, value: serde_json::Value) -> std::io::Result<()> {
         let Some(path) = self.path.as_deref() else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -73,7 +99,7 @@ impl Preferences {
                 _ => None,
             })
             .unwrap_or_default();
-        document.insert("language".to_string(), serde_json::Value::from(tag));
+        document.insert(key.to_string(), value);
         if let Some(folder) = path.parent() {
             std::fs::create_dir_all(folder)?;
         }
@@ -111,6 +137,18 @@ mod tests {
     fn la_langue_enregistree_est_relue() {
         let (_dir, path) = written(r#"{ "language": "fr" }"#);
         assert_eq!(Preferences::load_from(Some(path)).language(), Some("fr"));
+    }
+
+    #[test]
+    fn la_disposition_des_barres_est_ecrite_sans_perdre_la_langue() {
+        let (_dir, path) = written(r#"{ "language": "fr" }"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences
+            .save_toolbars(serde_json::json!({ "bars": [] }))
+            .expect("écriture");
+        let relues = Preferences::load_from(Some(path));
+        assert_eq!(relues.language(), Some("fr"));
+        assert_eq!(relues.toolbars(), Some(&serde_json::json!({ "bars": [] })));
     }
 
     #[test]

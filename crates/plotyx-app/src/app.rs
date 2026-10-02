@@ -379,6 +379,7 @@ use crate::state::{
     PlotTarget, ProjectTreeNode, SaveTarget, WindowKind,
 };
 use crate::theme;
+use crate::toolbar::{ToolbarId, ToolbarLayout, ToolbarState};
 use crate::tr;
 use plotyx_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 use plotyx_render_egui::{AxisSide, PlotComponent};
@@ -701,6 +702,9 @@ enum Tab {
 pub struct PlotyxApp {
     /// L'état, seul dépositaire de la logique.
     state: AppState,
+    /// Les barres d'outils : disposition, visibilité et glisser en cours
+    /// (issue #60).
+    toolbars: ToolbarState,
     /// Les onglets de contenu actuellement ouverts en fenêtre flottante, dans
     /// l'ordre où ils ont été focalisés pour la dernière fois — le dernier
     /// élément est le plus récemment focalisé (voir la doc de tête du
@@ -1024,6 +1028,7 @@ impl PlotyxApp {
 
         Self {
             state,
+            toolbars: ToolbarState::default(),
             floating_tabs,
             cascade_rank,
             next_cascade,
@@ -1445,6 +1450,18 @@ impl PlotyxApp {
                         });
                     });
                 }
+                ui.menu_button(tr!("menu-view"), |ui| {
+                    for id in ToolbarId::ALL {
+                        let mut visible = self.toolbars.layout().is_visible(id);
+                        if ui
+                            .checkbox(&mut visible, id.label())
+                            .on_hover_text(id.hint())
+                            .changed()
+                        {
+                            self.toolbars.set_visible(id, visible);
+                        }
+                    }
+                });
                 ui.menu_button(tr!("menu-window"), |ui| {
                     let mut show_metadata = metadata_row_visible(ctx);
                     if ui
@@ -1534,6 +1551,26 @@ impl PlotyxApp {
     /// Applique la langue tout de suite (les textes se redessinent à l'image
     /// suivante) et l'enregistre dans `preferences.json`. Un enregistrement
     /// qui échoue se dit dans la barre d'état ; la langue reste appliquée.
+    /// Reprend la disposition des barres d'outils des préférences de
+    /// l'utilisateur. Séparé de [`PlotyxApp::new`] pour que les tests ne lisent
+    /// pas le fichier de la machine.
+    pub fn load_toolbar_layout(&mut self, preferences: &Preferences) {
+        let layout = preferences
+            .toolbars()
+            .map_or_else(ToolbarLayout::default, ToolbarLayout::from_json);
+        self.toolbars = ToolbarState::new(layout);
+    }
+
+    /// Enregistre la disposition des barres dans `preferences.json` ; un échec
+    /// se dit dans la barre d'état, la disposition reste appliquée.
+    fn save_toolbar_layout(&mut self) {
+        let layout = self.toolbars.layout().to_json();
+        if let Err(err) = Preferences::load().save_toolbars(layout) {
+            self.state
+                .notice(tr!("status-toolbars-not-saved", detail = err.to_string()));
+        }
+    }
+
     fn choose_language(&mut self, language: i18n::Language) {
         i18n::set_language(language);
         if let Err(err) = Preferences::load().save_language(language.tag()) {
@@ -2401,6 +2438,10 @@ impl eframe::App for PlotyxApp {
         publish_saved_colors(&ctx, &self.state);
         self.collect_shortcuts(&ctx, &mut actions);
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
+        self.toolbars.show(ui, &mut actions);
+        if self.toolbars.take_changed() {
+            self.save_toolbar_layout();
+        }
         self.status_bar(ui, &mut actions);
         // Panneau fixe, peint *avant* `PlotyxApp::project_manager_panel` —
         // voir la doc de tête du module, § Console de script, et la doc de
