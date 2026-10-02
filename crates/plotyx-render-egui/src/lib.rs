@@ -104,10 +104,12 @@ pub use feathering::Feathering;
 // Réexportés pour que l'UI n'ait pas à déclarer une arête vers
 // `plotyx-render` pour lire ce que la figure a tracé : ce crate est déjà sa
 // façade de rendu écran.
-pub use plotyx_render::pipeline::{DrawnAnnotation, DrawnPanel, DrawnPlot, DEFAULT_FIGURE_SIZE};
+pub use plotyx_render::pipeline::{
+    DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText, DEFAULT_FIGURE_SIZE,
+};
 // L'adresse et le modèle d'un texte libre : l'application les manipule avec
 // les signaux de la vue ([`GraphEvent`]).
-pub use plotyx_plot::{AnnotationRef, AnnotationSpec};
+pub use plotyx_plot::{AnnotationRef, AnnotationSpec, TextAnchor, TextTarget};
 pub use plotyx_render::text::{font_definitions, font_definitions_for, TextMeasurer, TextSource};
 // Le choix de police (embed du 2026-09-13, `plotyx_render::fonts`) : une UI
 // qui veut proposer Fira/Libertinus/Noto ou une police système n'a pas à
@@ -139,6 +141,40 @@ pub enum GraphEvent {
         /// Sa version déplacée.
         annotation: AnnotationSpec,
     },
+    /// Double-clic sur un titre : l'éditer sur place (issue #53).
+    EditText(TextTarget),
+    /// Double-clic sur une entrée de la légende : renommer la série du
+    /// panneau `(row, column)` (issue #53).
+    EditLegendEntry {
+        /// Ligne du panneau.
+        row: usize,
+        /// Colonne du panneau.
+        column: usize,
+        /// Rang de la série dans `PanelSpec::series`.
+        series: usize,
+    },
+    /// Un titre ou une légende a été glissé puis relâché : sa nouvelle
+    /// ancre, à valider en **une** modification du modèle. L'aperçu reste
+    /// affiché jusqu'à ce que le modèle change ([`GraphView::hold_preview`]).
+    TextMoved {
+        /// Le texte déplacé.
+        target: TextTarget,
+        /// Sa nouvelle ancre.
+        anchor: TextAnchor,
+    },
+}
+
+/// Un glisser de titre ou de légende en cours (issue #53).
+#[derive(Debug, Clone)]
+struct TextDrag {
+    target: TextTarget,
+    /// L'ancre au début du geste (`None` : le texte était à sa place par
+    /// défaut).
+    original: Option<TextAnchor>,
+    /// Centre tracé du texte au début du geste, en repère de la figure.
+    start_center: Pos2,
+    /// Point d'appui du geste, en repère de la figure.
+    press: Pos2,
 }
 
 /// Un glisser de texte libre en cours.
@@ -319,6 +355,10 @@ pub struct GraphView {
     /// position entre la validation et la mise à jour du modèle.
     preview_until: Option<Revision>,
     annotation_drag: Option<AnnotationDrag>,
+    /// Aperçu d'un titre ou d'une légende en cours de glisser (issue #53),
+    /// sur le même principe que `annotation_preview`.
+    text_preview: Option<(TextTarget, TextAnchor)>,
+    text_drag: Option<TextDrag>,
     /// Texte libre sélectionné (clic), cible de Suppr.
     selected_annotation: Option<AnnotationRef>,
     events: Vec<GraphEvent>,
@@ -379,6 +419,8 @@ impl GraphView {
             preview_generation: 0,
             preview_until: None,
             annotation_drag: None,
+            text_preview: None,
+            text_drag: None,
             selected_annotation: None,
             events: Vec::new(),
         }
@@ -454,7 +496,28 @@ impl GraphView {
     pub fn hold_preview(&mut self) {
         match self.cache.key() {
             Some(key) => self.preview_until = Some(key.revision),
-            None => self.set_annotation_preview(None),
+            None => self.clear_previews(),
+        }
+    }
+
+    /// Efface les aperçus (texte libre et titre déplacé).
+    fn clear_previews(&mut self) {
+        self.set_annotation_preview(None);
+        self.set_text_preview(None);
+    }
+
+    /// L'aperçu d'un titre ou d'une légende déplacé, s'il y en a un.
+    pub fn text_preview(&self) -> Option<&(TextTarget, TextAnchor)> {
+        self.text_preview.as_ref()
+    }
+
+    /// Pose (ou retire) l'aperçu d'un titre ou d'une légende déplacé : la
+    /// figure le montre à la prochaine image, sans toucher au modèle.
+    pub fn set_text_preview(&mut self, preview: Option<(TextTarget, TextAnchor)>) {
+        self.preview_until = None;
+        if self.text_preview != preview {
+            self.text_preview = preview;
+            self.preview_generation += 1;
         }
     }
 
@@ -471,6 +534,72 @@ impl GraphView {
                 })
             }
             _ => None,
+        }
+    }
+
+    /// Où un titre ou la légende est tracé à l'écran : centre, taille du
+    /// texte droit et rotation (degrés, antihoraire) — pour poser l'éditeur
+    /// sur place (issue #53).
+    pub fn text_screen_box(&self, target: TextTarget) -> Option<(Pos2, egui::Vec2, f32)> {
+        let drawn = self.drawn_text(target)?;
+        let (center, size) = self.figure_box_to_screen(drawn.center, drawn.size)?;
+        Some((center, size, drawn.rotation as f32))
+    }
+
+    /// Où la ligne de légende de la série `series` (rang dans
+    /// `PanelSpec::series`) du panneau `(row, column)` est tracée à l'écran :
+    /// centre et taille de la ligne, sur toute la largeur du cadre.
+    pub fn legend_entry_screen_box(
+        &self,
+        row: usize,
+        column: usize,
+        series: usize,
+    ) -> Option<(Pos2, egui::Vec2)> {
+        let panel = self
+            .last
+            .as_ref()?
+            .panels
+            .iter()
+            .find(|panel| panel.row == row && panel.column == column)?;
+        let frame = panel
+            .texts
+            .iter()
+            .find(|text| matches!(text.target, TextTarget::Legend { .. }))?;
+        let line = panel
+            .legend_rows
+            .iter()
+            .find(|line| line.series == series)?;
+        self.figure_box_to_screen(
+            (frame.center.0, line.center_y),
+            (frame.size.0, line.height.round() as u32),
+        )
+    }
+
+    fn figure_box_to_screen(
+        &self,
+        center: (f64, f64),
+        size: (u32, u32),
+    ) -> Option<(Pos2, egui::Vec2)> {
+        let display = self.display_rect?;
+        let scale = self.display_scale()?;
+        Some((
+            display.min + egui::vec2(center.0 as f32, center.1 as f32) * scale,
+            egui::vec2(size.0 as f32, size.1 as f32) * scale,
+        ))
+    }
+
+    /// Le titre ou la légende tracé pour `target`, dans la dernière figure.
+    fn drawn_text(&self, target: TextTarget) -> Option<&DrawnText> {
+        let last = self.last.as_ref()?;
+        match target.panel_position() {
+            None => last.title.as_ref(),
+            Some((row, column)) => last
+                .panels
+                .iter()
+                .find(|panel| panel.row == row && panel.column == column)?
+                .texts
+                .iter()
+                .find(|text| text.target == target),
         }
     }
 
@@ -640,7 +769,7 @@ impl GraphView {
             .preview_until
             .is_some_and(|revision| revision != snapshot.revision)
         {
-            self.set_annotation_preview(None);
+            self.clear_previews();
         }
 
         self.handle_navigation(&response, &context, &spec);
@@ -657,6 +786,7 @@ impl GraphView {
         let measurer = &self.measurer;
         let view = &self.view;
         let preview = &self.annotation_preview;
+        let text_preview = &self.text_preview;
         let formulas = &self.formulas;
         let font_choice = &self.font_choice;
         let typst_fonts = &self.typst_fonts;
@@ -667,6 +797,9 @@ impl GraphView {
             view.apply(&mut framed);
             if let Some((target, annotation)) = preview {
                 target.set(&mut framed, annotation.clone());
+            }
+            if let Some((target, anchor)) = text_preview {
+                target.set_anchor(&mut framed, Some(*anchor));
             }
             let plot = resolve_spec(&tree, &framed);
             let text = ScreenText::new(&context, measurer);
@@ -797,15 +930,35 @@ impl GraphView {
             self.selected_annotation = pointer.and_then(|pos| self.annotation_at(pos));
         }
         if response.double_clicked() {
-            match pointer.and_then(|pos| self.annotation_at(pos)) {
-                Some(target) => {
+            let component = pointer.and_then(|pos| self.component_at(pos));
+            match (pointer.and_then(|pos| self.annotation_at(pos)), component) {
+                (Some(target), _) => {
                     self.selected_annotation = Some(target);
                     self.events.push(GraphEvent::EditAnnotation(target));
                 }
-                None => self.view.reset(),
+                // Issue #53 : un titre s'édite sur place, comme un texte libre.
+                (None, Some(PlotComponent::Text(target))) => {
+                    self.events.push(match target {
+                        // La légende n'a pas de texte à elle : ce sont les
+                        // noms des séries, un par ligne.
+                        TextTarget::Legend { .. } => return,
+                        _ => GraphEvent::EditText(target),
+                    });
+                }
+                (None, Some(PlotComponent::LegendEntry { panel, series })) => {
+                    if let Some(drawn) = self.last.as_ref().and_then(|last| last.panels.get(panel))
+                    {
+                        self.events.push(GraphEvent::EditLegendEntry {
+                            row: drawn.row,
+                            column: drawn.column,
+                            series,
+                        });
+                    }
+                }
+                _ => self.view.reset(),
             }
         }
-        if self.handle_annotation_drag(response, spec) {
+        if self.handle_annotation_drag(response, spec) || self.handle_text_drag(response, spec) {
             return;
         }
 
@@ -977,6 +1130,88 @@ impl GraphView {
                 ..drag.original.clone()
             };
             self.set_annotation_preview(Some((drag.target, annotation)));
+        }
+        true
+    }
+
+    /// Glisser un titre ou la légende (issue #53) : un glisser principal
+    /// **parti d'un titre** le déplace au lieu de faire défiler la vue.
+    /// L'aperçu suit le pointeur ; au relâchement, un seul
+    /// [`GraphEvent::TextMoved`]. Même principe que
+    /// [`Self::handle_annotation_drag`] — le centre du texte suit le
+    /// pointeur, converti en données du panneau (donc ancré aux données, il
+    /// suit ensuite le zoom).
+    fn handle_text_drag(&mut self, response: &Response, spec: &PlotSpec) -> bool {
+        if response.drag_stopped_by(PointerButton::Primary) {
+            if let Some(drag) = self.text_drag.take() {
+                match self.text_preview {
+                    Some((target, anchor)) if drag.original != Some(anchor) => {
+                        self.events.push(GraphEvent::TextMoved { target, anchor });
+                        self.hold_preview();
+                    }
+                    _ => self.set_text_preview(None),
+                }
+                return true;
+            }
+            return false;
+        }
+        if !response.dragged_by(PointerButton::Primary) {
+            return false;
+        }
+        let Some(pos) = response.interact_pointer_pos() else {
+            return self.text_drag.is_some();
+        };
+        if self.text_drag.is_none() {
+            let origin = pos - response.drag_delta();
+            let Some(PlotComponent::Text(target)) = self.component_at(origin) else {
+                return false;
+            };
+            let (Some(drawn), Some(press)) = (
+                self.drawn_text(target).copied(),
+                self.figure_position(origin),
+            ) else {
+                return false;
+            };
+            self.text_drag = Some(TextDrag {
+                target,
+                original: target.anchor(spec),
+                start_center: Pos2::new(drawn.center.0 as f32, drawn.center.1 as f32),
+                press,
+            });
+        }
+        let Some(drag) = self.text_drag.clone() else {
+            return false;
+        };
+        let Some(current) = self.figure_position(pos) else {
+            return true;
+        };
+        let center = drag.start_center + (current - drag.press);
+        // Le repère de l'ancre : le panneau du texte, ou le premier panneau
+        // tracé pour le titre du graphe ; l'ordonnée de droite si l'ancre
+        // existante y était déjà.
+        let right = drag
+            .original
+            .is_some_and(|anchor| anchor.axis == SeriesAxis::Right);
+        let panel = self
+            .last
+            .as_ref()
+            .and_then(|last| match drag.target.panel_position() {
+                None => last.panels.first(),
+                Some((row, column)) => last
+                    .panels
+                    .iter()
+                    .find(|panel| panel.row == row && panel.column == column),
+            });
+        let moved = panel
+            .and_then(|panel| PanelTransform::of_axis(panel, right))
+            .and_then(|transform| transform.pixel_to_data(center.x as f64, center.y as f64));
+        if let Some((x, y)) = moved {
+            let axis = if right {
+                SeriesAxis::Right
+            } else {
+                SeriesAxis::Left
+            };
+            self.set_text_preview(Some((drag.target, TextAnchor { x, y, axis })));
         }
         true
     }

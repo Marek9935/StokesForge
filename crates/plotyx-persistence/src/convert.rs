@@ -17,8 +17,8 @@ use crate::schema::{
     AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord,
     LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord,
     PlotTypeRecord, RoleRecord, SavedColorsRecord, SeriesAxisRecord, SeriesSpecRecord,
-    SymbolShapeRecord, SymbolSpecRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY,
-    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord, TypeRecord, ValuesRecord,
+    MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -346,6 +346,7 @@ impl From<&AxisSpec> for AxisSpecRecord {
             visible: value.visible,
             inverted: value.inverted,
             title_color: value.title_color.clone(),
+            title_anchor: value.title_anchor.map(anchor_to_record),
             tick_color: value.tick_color.clone(),
         }
     }
@@ -364,6 +365,7 @@ impl From<AxisSpecRecord> for AxisSpec {
             visible: value.visible,
             inverted: value.inverted,
             title_color: value.title_color,
+            title_anchor: value.title_anchor.map(record_to_anchor),
             tick_color: value.tick_color,
         }
     }
@@ -374,6 +376,7 @@ impl From<&LegendSpec> for LegendSpecRecord {
         Self {
             visible: value.visible,
             position: value.position.into(),
+            anchor: value.anchor.map(anchor_to_record),
         }
     }
 }
@@ -383,6 +386,7 @@ impl From<LegendSpecRecord> for LegendSpec {
         Self {
             visible: value.visible,
             position: value.position.into(),
+            anchor: value.anchor.map(record_to_anchor),
         }
     }
 }
@@ -443,10 +447,30 @@ fn record_to_series_spec(record: SeriesSpecRecord) -> Result<SeriesSpec, Convert
     })
 }
 
+/// `TextAnchor` → enregistrement. Infaillible.
+fn anchor_to_record(anchor: plotyx_plot::TextAnchor) -> TextAnchorRecord {
+    TextAnchorRecord {
+        x: anchor.x,
+        y: anchor.y,
+        axis: anchor.axis.into(),
+    }
+}
+
+/// Enregistrement → `TextAnchor`. Infaillible : une ancre non finie est
+/// gardée telle quelle, c'est le rendu qui l'ignore (`TextAnchor::is_finite`).
+fn record_to_anchor(record: TextAnchorRecord) -> plotyx_plot::TextAnchor {
+    plotyx_plot::TextAnchor {
+        x: record.x,
+        y: record.y,
+        axis: record.axis.into(),
+    }
+}
+
 /// `PanelSpec` → enregistrement. Infaillible.
 fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
     PanelSpecRecord {
         title: panel.title.clone(),
+        title_anchor: panel.title_anchor.map(anchor_to_record),
         series: panel.series.iter().map(series_spec_to_record).collect(),
         bottom: (&panel.bottom).into(),
         left: (&panel.left).into(),
@@ -490,6 +514,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PanelSpec {
         title: record.title,
+        title_anchor: record.title_anchor.map(record_to_anchor),
         series,
         bottom: record.bottom.into(),
         left: record.left.into(),
@@ -541,6 +566,7 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         panels: spec.panels.iter().map(panel_spec_to_record).collect(),
         background: spec.background.clone(),
         title_color: spec.title_color.clone(),
+        title_anchor: spec.title_anchor.map(anchor_to_record),
         format_version: spec.format_version,
     }
 }
@@ -575,6 +601,7 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         panels: panels.into(),
         background: record.background,
         title_color: record.title_color,
+        title_anchor: record.title_anchor.map(record_to_anchor),
         format_version: record.format_version,
     })
 }

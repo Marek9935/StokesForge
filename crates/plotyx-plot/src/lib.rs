@@ -92,6 +92,7 @@ pub mod saved;
 pub mod series;
 pub mod spec;
 pub mod style;
+pub mod text_anchor;
 pub mod theme;
 
 pub use annotation::{AnnotationRef, AnnotationSpec};
@@ -108,4 +109,5 @@ pub use spec::{Panels, PlotSpec, SeriesRef, SPEC_FORMAT_VERSION, TRANSPARENT};
 pub use style::{
     palette_color, parse_hex, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE,
 };
+pub use text_anchor::{TextAnchor, TextTarget};
 pub use theme::{Theme, THEMES};

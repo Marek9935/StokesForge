@@ -23,6 +23,7 @@
 //! axe.
 
 use crate::pipeline::{AxisArea, DrawnPanel, DrawnPlot, AXIS_DESC_SIZE};
+use plotyx_plot::TextTarget;
 
 /// Épaisseur attribuée au titre d'un axe dans son aire de graduation : la
 /// hauteur d'une ligne de [`AXIS_DESC_SIZE`], interligne compris.
@@ -54,6 +55,14 @@ pub enum PlotComponent {
     /// Un texte libre (issue #35) : `index` dans `PanelSpec::annotations`.
     /// Prioritaire sur tout le reste — il est tracé par-dessus.
     Annotation { panel: usize, index: usize },
+    /// Un titre ou une légende (issue #53) : double-clic pour l'éditer,
+    /// glisser pour le déplacer. Tracé par-dessus la zone de tracé comme les
+    /// textes libres, donc prioritaire sur elle et sur les axes.
+    Text(TextTarget),
+    /// Une entrée de la légende : la série du panneau `panel` (rang dans
+    /// `PanelSpec::series`) qu'elle montre. Prioritaire sur [`Self::Text`]
+    /// de la même légende.
+    LegendEntry { panel: usize, series: usize },
 }
 
 /// Le composant sous le pixel `(x, y)` (repère du backend, celui de
@@ -68,6 +77,36 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
                 index: annotation.index,
             });
         }
+    }
+    // Les titres et légendes (issue #53), du dernier panneau au premier ; la
+    // légende d'abord par ses lignes, puis par son cadre.
+    for (panel, drawn) in plot.panels.iter().enumerate().rev() {
+        let on_legend = drawn
+            .texts
+            .iter()
+            .any(|text| matches!(text.target, TextTarget::Legend { .. }) && text.contains(x, y));
+        if on_legend {
+            let row = drawn
+                .legend_rows
+                .iter()
+                .find(|row| (y - row.center_y).abs() <= row.height / 2.0);
+            return Some(match row {
+                Some(row) => PlotComponent::LegendEntry {
+                    panel,
+                    series: row.series,
+                },
+                None => PlotComponent::Text(TextTarget::Legend {
+                    row: drawn.row,
+                    column: drawn.column,
+                }),
+            });
+        }
+        if let Some(text) = drawn.texts.iter().rev().find(|text| text.contains(x, y)) {
+            return Some(PlotComponent::Text(text.target));
+        }
+    }
+    if let Some(title) = plot.title.filter(|title| title.contains(x, y)) {
+        return Some(PlotComponent::Text(title.target));
     }
     if y >= 0.0 && y < plot.title_height as f64 {
         return Some(PlotComponent::Title);
@@ -149,6 +188,8 @@ mod tests {
                     right: AxisArea::default(),
                 },
                 annotations: Vec::new(),
+                texts: Vec::new(),
+                legend_rows: Vec::new(),
             }],
             omitted_panels: 0,
             drawn_series: 0,
@@ -156,6 +197,7 @@ mod tests {
             unknown_series: 0,
             decimated_points: 0,
             title_height: 40,
+            title: None,
         }
     }
 
@@ -252,6 +294,91 @@ mod tests {
             component_at(&plot, 270.0, 120.0),
             annotation,
             "le long du texte"
+        );
+    }
+
+    /// Issue #53 : un titre, un titre d'axe tourné ou une légende se désignent
+    /// sur leur rectangle (tourné), avant la zone de tracé qu'ils recouvrent,
+    /// et une ligne de légende avant le cadre entier.
+    #[test]
+    fn un_titre_ou_une_legende_se_designent_avant_la_zone_de_trace() {
+        use crate::pipeline::{DrawnLegendRow, DrawnText};
+        use plotyx_plot::AxisSide as Side;
+        let mut plot = figure();
+        let left = TextTarget::AxisTitle {
+            row: 0,
+            column: 0,
+            side: Side::Left,
+        };
+        plot.panels[0].texts = vec![
+            // Titre d'axe vertical, déplacé en plein dans la zone de tracé.
+            DrawnText {
+                target: left,
+                center: (200.0, 150.0),
+                size: (120, 20),
+                rotation: 90.0,
+                anchored: true,
+            },
+            DrawnText {
+                target: TextTarget::Legend { row: 0, column: 0 },
+                center: (380.0, 100.0),
+                size: (100, 60),
+                rotation: 0.0,
+                anchored: false,
+            },
+        ];
+        plot.panels[0].legend_rows = vec![
+            DrawnLegendRow {
+                series: 0,
+                center_y: 85.0,
+                height: 20.0,
+            },
+            DrawnLegendRow {
+                series: 3,
+                center_y: 110.0,
+                height: 20.0,
+            },
+        ];
+        assert_eq!(
+            component_at(&plot, 200.0, 100.0),
+            Some(PlotComponent::Text(left)),
+            "haut du titre vertical"
+        );
+        assert_eq!(
+            component_at(&plot, 230.0, 150.0),
+            Some(PlotComponent::PlotArea { panel: 0 }),
+            "à côté du titre tourné : la zone de tracé"
+        );
+        assert_eq!(
+            component_at(&plot, 380.0, 112.0),
+            Some(PlotComponent::LegendEntry {
+                panel: 0,
+                series: 3
+            })
+        );
+        assert_eq!(
+            component_at(&plot, 380.0, 72.0),
+            Some(PlotComponent::Text(TextTarget::Legend {
+                row: 0,
+                column: 0
+            })),
+            "le cadre, hors des lignes"
+        );
+        plot.title = Some(DrawnText {
+            target: TextTarget::Title,
+            center: (240.0, 20.0),
+            size: (100, 24),
+            rotation: 0.0,
+            anchored: false,
+        });
+        assert_eq!(
+            component_at(&plot, 240.0, 20.0),
+            Some(PlotComponent::Text(TextTarget::Title))
+        );
+        assert_eq!(
+            component_at(&plot, 40.0, 20.0),
+            Some(PlotComponent::Title),
+            "la bande du titre, hors du texte, garde ses propriétés"
         );
     }
 

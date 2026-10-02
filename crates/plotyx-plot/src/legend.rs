@@ -1,5 +1,7 @@
 //! Légende d'un panneau.
 
+use crate::text_anchor::TextAnchor;
+
 /// Coin du panneau où s'ancre la légende.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LegendPosition {
@@ -15,12 +17,15 @@ pub enum LegendPosition {
 }
 
 /// Légende d'un panneau : visible ou non, et où.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LegendSpec {
     /// Légende affichée.
     pub visible: bool,
     /// Coin d'ancrage.
     pub position: LegendPosition,
+    /// Position du cadre (son centre) s'il a été déplacé (issue #53) ;
+    /// prime sur [`Self::position`]. `None` = le coin d'ancrage.
+    pub anchor: Option<TextAnchor>,
 }
 
 impl Default for LegendSpec {
@@ -28,6 +33,7 @@ impl Default for LegendSpec {
         Self {
             visible: true,
             position: LegendPosition::TopRight,
+            anchor: None,
         }
     }
 }

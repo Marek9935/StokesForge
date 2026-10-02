@@ -6,6 +6,7 @@ use plotyx_id::NodeId;
 
 use crate::panel::PanelSpec;
 use crate::series::SeriesSpec;
+use crate::text_anchor::TextAnchor;
 
 /// Version du *format* du spec, indépendante de la version de schéma du
 /// fichier projet : un [`PlotSpec`] peut aussi voyager par presse-papiers ou
@@ -137,6 +138,9 @@ pub struct PlotSpec {
     /// qui contraste avec le fond (sombre sur fond clair, blanche sur fond
     /// sombre), comme tout le texte et les axes laissés en automatique.
     pub title_color: String,
+    /// Position du titre du graphe s'il a été déplacé (issue #53), dans le
+    /// repère de données du premier panneau ; `None` = sa place par défaut.
+    pub title_anchor: Option<TextAnchor>,
     /// Version du format de ce spec.
     pub format_version: u32,
 }
@@ -242,6 +246,7 @@ impl Default for PlotSpec {
             panels: Panels::default(),
             background: TRANSPARENT.to_string(),
             title_color: String::new(),
+            title_anchor: None,
             format_version: SPEC_FORMAT_VERSION,
         }
     }

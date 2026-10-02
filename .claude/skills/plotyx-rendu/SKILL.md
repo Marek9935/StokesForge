@@ -167,6 +167,11 @@ posé sur la figure se place par une fonction pure (`annotation_field` : centre
 du rendu, corps × échelle d'affichage, jamais tourné) et devient transparent
 quand il n'a pas le focus, pour que l'aperçu reste visible (issues #36, #37).
 
+Un titre ou la légende déplacé (issue #53) suit le même motif
+(`set_text_preview`) ; sa position est une `TextAnchor` du modèle, tracée par le
+pipeline (donc à l'export), et **la mise en page ne dépend pas de cette
+position** : la bande du titre et l'aire de graduation restent réservées, vides.
+
 ## Checklist
 
 - [ ] `docs/rendu.md` lu ; `plotyx-render` chargé avant le backend

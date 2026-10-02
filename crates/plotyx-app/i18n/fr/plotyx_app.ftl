@@ -56,6 +56,11 @@ action-add-text = Ajouter un texte
     .hint = Ajoute un texte dans la zone de tracé
     .disabled = Clic droit dans une zone de tracé
 action-edit-text = Modifier le texte
+action-reset-text-position = Réinitialiser la position
+    .hint = Remet ce titre ou cette légende à sa place par défaut
+action-reset-text-positions = Réinitialiser la position des textes
+    .hint = Remet tous les titres et la légende à leur place par défaut
+    .disabled = Aucun titre ni aucune légende n'a été déplacé
 action-delete-text = Supprimer le texte
 action-properties = Propriétés…
     .hint = Ouvre les propriétés du graphique sur cet élément
@@ -475,6 +480,7 @@ plot-target-plot-area = Zone de tracé
 plot-target-axis = Axe { $axis }
 plot-target-axis-title = Titre de l'axe { $axis }
 plot-target-text = Texte
+plot-target-legend = Légende
 
 # Valeurs automatiques des champs de couleur
 

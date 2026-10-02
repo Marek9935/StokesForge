@@ -71,8 +71,10 @@ d'egui, pour le dessin comme pour les interactions. Elle ne recouvre donc
 ni l'en-tête ni les commandes placées sous elle. Les compteurs de cache et
 le résumé technique de la figure ne sont plus affichés.
 
-La barre de titre maison centre le nom du contenu dans la place laissée par les
-icônes réellement peintes (un dialogue ne réserve que la croix, #50). Celle d'un graphe garde à
+La barre de titre maison centre le nom du contenu ; il n'est rogné que
+symétriquement, par la plus large des réserves réellement occupées — flèche de
+repli à gauche, icônes peintes à droite (un dialogue ne réserve que la croix,
+#50). Celle d'un graphe garde à
 gauche la flèche de repli d'une fenêtre egui : elle masque ou réaffiche le
 seul contenu de ce graphe, sans modifier le projet, la géométrie enregistrée
 ni les autres fenêtres.
@@ -771,6 +773,19 @@ Elle remplace l'ancien panneau fixe à droite de l'espace de travail, affiché
 en permanence dès qu'un graphe était actif. Son état (quel graphe, quel
 onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
 par `Action::OpenPlotSettings { graph, tab, axis }`.
+
+**Titres, titres d'axe et légende** (issue #53) : se désignent comme un texte
+libre. Double-clic sur un titre ou un titre d'axe → éditeur sur place
+(`app::text_editor_ui`, un champ ; Entrée ou clic ailleurs valide, Échap
+annule) ; sur une entrée de légende → renomme la série (`SetLegendEntryName`,
+vide = nom dérivé de la colonne) ; sur le cadre de la légende, rien (elle n'a
+pas de texte à elle). Un glisser déplace le texte (ancré aux données : il suit
+le zoom) ; un clic droit propose « Edit Text » et « Reset Position » (grisé tant
+que le texte est à sa place), et « Graph » → « Reset Text Positions » remet tout
+d'un coup. Chaque geste validé est **une** `Action` (`SetTextAnchor`,
+`ResetTextAnchors`, `SetTextContent`, `SetLegendEntryName`), donc un
+`SetPlotSpec`, une entrée d'historique ; la position est enregistrée dans le
+`.plx` et vaut à l'export.
 
 **Textes libres** (issue #35) : clic droit dans une zone de tracé →
 « Add Text » au point cliqué, ou « Graph » → « Add Text »

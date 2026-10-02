@@ -61,12 +61,18 @@ const ROW_GAP: i32 = 4;
 const MAX_ENTRIES: usize = 24;
 
 /// Ce que la légende a effectivement inscrit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct DrawnLegend {
     /// Nombre d'entrées dessinées, la ligne de débordement non comprise.
     pub entries: usize,
     /// Nombre d'entrées laissées de côté faute de place.
     pub omitted: usize,
+    /// Le cadre tracé, en pixels de backend : coin haut-gauche et taille
+    /// (issue #53 : désigner la légende sous le pointeur).
+    pub frame: Option<((i32, i32), (u32, u32))>,
+    /// Pour chaque entrée dessinée, dans l'ordre : milieu vertical et
+    /// hauteur de sa ligne, en pixels de backend.
+    pub rows: Vec<(f64, f64)>,
 }
 
 /// Les deux styles de texte de la légende : celui d'un nom saisi (markup
@@ -99,6 +105,10 @@ pub struct LegendColors {
 /// (`plotting_area().use_screen_coord()`), et `origin`/`size` sa position et
 /// sa taille : la légende se place par rapport à la zone de tracé, pas par
 /// rapport au panneau, pour ne pas chevaucher les graduations.
+///
+/// `center` (issue #53) : le centre où poser le cadre, en pixels de backend,
+/// quand la légende a été déplacée ; il prime sur le coin d'ancrage.
+#[allow(clippy::too_many_arguments)]
 pub fn draw<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     origin: BackendCoord,
@@ -107,6 +117,7 @@ pub fn draw<DB: DrawingBackend>(
     entries: &[&Prepared<'_>],
     styles: &LegendText<'_>,
     colors: LegendColors,
+    center: Option<BackendCoord>,
 ) -> Result<DrawnLegend, DrawingAreaErrorKind<DB::ErrorType>> {
     let LegendColors { background, ink } = colors;
     if !spec.visible || entries.is_empty() {
@@ -157,8 +168,10 @@ pub fn draw<DB: DrawingBackend>(
     // Une légende plus large que sa zone de tracé reste ancrée en haut à
     // gauche plutôt que de sortir par le côté opposé : le rognage de
     // Plotters s'occupe du reste.
-    let x0 = origin.0 + left.max(0);
-    let y0 = origin.1 + top.max(0);
+    let (x0, y0) = match center {
+        Some((cx, cy)) => (cx - box_width / 2, cy - box_height / 2),
+        None => (origin.0 + left.max(0), origin.1 + top.max(0)),
+    };
 
     let frame = [(x0, y0), (x0 + box_width, y0 + box_height)];
     area.draw(&Rectangle::new(
@@ -192,9 +205,17 @@ pub fn draw<DB: DrawingBackend>(
         ))?;
     }
 
+    let row_boxes = (0..shown.len())
+        .map(|index| {
+            let row_top = y0 + PADDING + index as i32 * (row_height + ROW_GAP);
+            (row_top as f64 + row_height as f64 / 2.0, row_height as f64)
+        })
+        .collect();
     Ok(DrawnLegend {
         entries: shown.len(),
         omitted,
+        frame: Some(((x0, y0), (box_width as u32, box_height as u32))),
+        rows: row_boxes,
     })
 }
 

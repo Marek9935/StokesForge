@@ -370,6 +370,7 @@ fn une_serie_invisible_ne_compte_ni_dans_le_trace_ni_dans_le_cadrage() {
 /// Plotters a allouée, pas une reconstitution.
 #[test]
 fn un_pixel_designe_le_composant_du_graphe_qui_est_dessous() {
+    use plotyx_plot::{AxisSide as PlotAxisSide, TextTarget};
     use plotyx_render::{component_at, AxisSide, PlotComponent};
     let drawn = geometrie(
         &[("X", vec![0.0, 1.0, 2.0]), ("Y", vec![10.0, 20.0, 30.0])],
@@ -402,6 +403,16 @@ fn un_pixel_designe_le_composant_du_graphe_qui_est_dessous() {
     );
     assert_eq!(
         component_at(&drawn, cx, oy + h + bottom - 2.0),
+        Some(PlotComponent::Text(TextTarget::AxisTitle {
+            row: 0,
+            column: 0,
+            side: PlotAxisSide::Bottom
+        })),
+        "le texte du titre d'axe (issue #53) passe avant sa bande"
+    );
+    // Dans la bande mais loin du texte : les propriétés de l'axe, comme avant.
+    assert_eq!(
+        component_at(&drawn, ox + 2.0, oy + h + bottom - 2.0),
         Some(PlotComponent::AxisTitle {
             panel: 0,
             side: AxisSide::Bottom
@@ -416,9 +427,125 @@ fn un_pixel_designe_le_composant_du_graphe_qui_est_dessous() {
     );
     assert_eq!(
         component_at(&drawn, ox - left + 2.0, cy),
-        Some(PlotComponent::AxisTitle {
-            panel: 0,
-            side: AxisSide::Left
-        })
+        Some(PlotComponent::Text(TextTarget::AxisTitle {
+            row: 0,
+            column: 0,
+            side: PlotAxisSide::Left
+        }))
     );
+}
+
+/// Issue #53 : un titre déplacé est tracé centré sur son ancre, sans changer
+/// la mise en page — et, sans ancre, à sa place par défaut.
+#[test]
+fn un_titre_deplace_est_trace_sur_son_ancre_sans_changer_la_mise_en_page() {
+    use plotyx_plot::{AxisSide as PlotAxisSide, TextAnchor, TextTarget};
+    use plotyx_render::PanelTransform;
+    let colonnes = [("X", vec![0.0, 1.0, 2.0]), ("Y", vec![10.0, 20.0, 30.0])];
+    let construire = |ancres: bool| {
+        move |ids: &[NodeId]| {
+            un_panneau(SeriesSpec::new_xy(ids[0], ids[1]), |panel| {
+                panel.title = "Panneau".to_string();
+                panel.bottom.label = "Temps".to_string();
+                panel.left.label = "Signal".to_string();
+                if ancres {
+                    panel.title_anchor = Some(TextAnchor::new(1.5, 25.0));
+                    panel.bottom.title_anchor = Some(TextAnchor::new(0.5, 12.0));
+                    panel.left.title_anchor = Some(TextAnchor::new(0.25, 20.0));
+                    panel.legend.anchor = Some(TextAnchor::new(1.0, 15.0));
+                }
+            })
+        }
+    };
+    let defaut = geometrie(&colonnes, construire(false));
+    let deplace = geometrie(&colonnes, construire(true));
+
+    let panneau = deplace.panel(0).expect("un panneau");
+    let transform = PanelTransform::of(panneau).expect("zone de tracé");
+    let attendu = |x: f64, y: f64| transform.data_to_pixel(x, y).expect("projetable");
+    let texte = |cible: TextTarget| {
+        panneau
+            .texts
+            .iter()
+            .find(|t| t.target == cible)
+            .copied()
+            .unwrap_or_else(|| panic!("{cible:?} n'est pas dans {:?}", panneau.texts))
+    };
+    for (cible, (x, y)) in [
+        (TextTarget::PanelTitle { row: 0, column: 0 }, (1.5, 25.0)),
+        (
+            TextTarget::AxisTitle {
+                row: 0,
+                column: 0,
+                side: PlotAxisSide::Bottom,
+            },
+            (0.5, 12.0),
+        ),
+        (
+            TextTarget::AxisTitle {
+                row: 0,
+                column: 0,
+                side: PlotAxisSide::Left,
+            },
+            (0.25, 20.0),
+        ),
+        (TextTarget::Legend { row: 0, column: 0 }, (1.0, 15.0)),
+    ] {
+        let drawn = texte(cible);
+        let (px, py) = attendu(x, y);
+        assert!(drawn.anchored, "{cible:?} est posé sur son ancre");
+        assert!(
+            (drawn.center.0 - px).abs() <= 1.5 && (drawn.center.1 - py).abs() <= 1.5,
+            "{cible:?} centré en {:?}, attendu {:?}",
+            drawn.center,
+            (px, py)
+        );
+    }
+    // La mise en page ne dépend pas de la place du titre : la zone de tracé
+    // est la même qu'avec les titres à leur place (sinon le titre sauterait
+    // au lâcher).
+    assert_eq!(
+        deplace.panel(0).unwrap().pixel_size,
+        defaut.panel(0).unwrap().pixel_size
+    );
+    assert_eq!(
+        deplace.panel(0).unwrap().pixel_origin,
+        defaut.panel(0).unwrap().pixel_origin
+    );
+    // Sans ancre, les titres sont à leur place par défaut, dans leur bande.
+    let par_defaut = defaut.panel(0).expect("un panneau");
+    assert!(par_defaut.texts.iter().all(|t| !t.anchored));
+    assert!(par_defaut.axis_areas.bottom.titled && !panneau.axis_areas.bottom.titled);
+    assert_eq!(par_defaut.texts.len(), 4, "titre, deux axes, légende");
+    // Les lignes de la légende pointent la série.
+    assert_eq!(par_defaut.legend_rows.len(), 1);
+    assert_eq!(par_defaut.legend_rows[0].series, 0);
+}
+
+/// Issue #53 : le titre du graphe déplacé garde sa bande (vide), et une
+/// ancre non finie le laisse à sa place.
+#[test]
+fn le_titre_du_graphe_deplace_garde_sa_bande_vide() {
+    use plotyx_plot::{TextAnchor, TextTarget};
+    let colonnes = [("X", vec![0.0, 1.0, 2.0]), ("Y", vec![10.0, 20.0, 30.0])];
+    let avec = |ancre: Option<TextAnchor>| {
+        geometrie(&colonnes, move |ids| {
+            let mut spec = un_panneau(SeriesSpec::new_xy(ids[0], ids[1]), |_| {});
+            spec.title_anchor = ancre;
+            spec
+        })
+    };
+    let defaut = avec(None);
+    assert!(defaut.title_height > 0);
+    let titre = defaut.title.expect("titre tracé");
+    assert_eq!(titre.target, TextTarget::Title);
+    assert!(!titre.anchored);
+
+    let deplace = avec(Some(TextAnchor::new(1.0, 30.0)));
+    assert_eq!(deplace.title_height, defaut.title_height, "bande réservée");
+    assert!(deplace.title.expect("titre tracé").anchored);
+
+    let abime = avec(Some(TextAnchor::new(f64::NAN, 30.0)));
+    assert_eq!(abime.title_height, defaut.title_height, "ancre ignorée");
+    assert!(!abime.title.expect("titre tracé").anchored);
 }

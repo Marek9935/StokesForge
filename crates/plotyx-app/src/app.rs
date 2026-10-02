@@ -364,7 +364,7 @@ use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
 use plotyx_core::{ColumnRole, ColumnType, Node, NodeId, Tree};
 use plotyx_plot::{AxisSpec, LegendPosition, LineStyle, PlotType, SymbolShape};
-use plotyx_render_egui::{GraphView, DEFAULT_FIGURE_SIZE};
+use plotyx_render_egui::{GraphView, TextTarget, DEFAULT_FIGURE_SIZE};
 use plotyx_session::{Snapshot, WindowGeometry};
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
@@ -1355,6 +1355,20 @@ impl PlotyxApp {
                             if let Some(view) = self.graph_views.get_mut(&graph) {
                                 view.reset_view();
                             }
+                            ui.close();
+                        }
+                        let moved = crate::state::current_plot_spec(self.state.tree(), graph)
+                            .is_some_and(|spec| spec.has_text_anchors());
+                        if ui
+                            .add_enabled(
+                                moved,
+                                egui::Button::new(tr!("action-reset-text-positions")),
+                            )
+                            .on_hover_text(tr!("action-reset-text-positions", "hint"))
+                            .on_disabled_hover_text(tr!("action-reset-text-positions", "disabled"))
+                            .clicked()
+                        {
+                            actions.push(Action::ResetTextAnchors { graph });
                             ui.close();
                         }
                         ui.separator();
@@ -4250,15 +4264,23 @@ fn window_header(
             actions.maximize = true;
         }
     }
+    // La zone de glisser va de la flèche de repli aux icônes réellement
+    // peintes (#50) ; le titre, lui, reste centré dans l'en-tête et n'est
+    // rogné que **symétriquement**, par la plus large des deux réserves (la
+    // flèche à gauche, les icônes à droite) — centré sur `rect`, un rognage
+    // asymétrique le couperait d'un seul côté.
+    let actions_width = header_actions_width(show_detach_and_maximize);
     let title_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + collapse_width, rect.top()),
-        egui::pos2(
-            rect.right() - header_actions_width(show_detach_and_maximize),
-            rect.bottom(),
-        ),
+        egui::pos2(rect.right() - actions_width, rect.bottom()),
     );
-    header.painter().with_clip_rect(title_rect).text(
-        title_rect.center(),
+    let reserved = collapse_width.max(actions_width);
+    let clip_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + reserved, rect.top()),
+        egui::pos2(rect.right() - reserved, rect.bottom()),
+    );
+    header.painter().with_clip_rect(clip_rect).text(
+        rect.center(),
         egui::Align2::CENTER_CENTER,
         title,
         egui::TextStyle::Heading.resolve(header.style()),
@@ -7590,6 +7612,7 @@ fn graph_context_menu(
     };
     let target_id = response.id.with("plot_target");
     let point_id = response.id.with("plot_point");
+    let text_id = response.id.with("plot_text");
     if response.secondary_clicked() {
         let pos = response.interact_pointer_pos();
         let target = pos.map_or(PlotTarget::Background, |pos| {
@@ -7599,9 +7622,25 @@ fn graph_context_menu(
             )
         });
         let point = pos.and_then(|pos| view.data_at(pos));
+        // Titre, titre d'axe, légende ou entrée de légende visé (issue #53) :
+        // lu au clic, comme la cible, pour que le menu reste cohérent pendant
+        // que le pointeur bouge.
+        let text = pos.and_then(|pos| match view.component_at(pos) {
+            Some(PlotComponent::Text(target)) => Some(ContextText::Title(target)),
+            Some(PlotComponent::LegendEntry { panel, series }) => view
+                .last_drawn()
+                .and_then(|last| last.panels.get(panel))
+                .map(|panel| ContextText::LegendEntry {
+                    row: panel.row,
+                    column: panel.column,
+                    series,
+                }),
+            _ => None,
+        });
         ui.memory_mut(|memory| {
             memory.data.insert_temp(target_id, target);
             memory.data.insert_temp(point_id, point);
+            memory.data.insert_temp(text_id, text);
         });
     }
     response.context_menu(|ui| {
@@ -7610,8 +7649,53 @@ fn graph_context_menu(
             .unwrap_or(PlotTarget::Background);
         let point: Option<(usize, usize, f64, f64)> =
             ui.memory(|memory| memory.data.get_temp(point_id)).flatten();
+        let text: Option<ContextText> = ui.memory(|memory| memory.data.get_temp(text_id)).flatten();
         ui.weak(target.label());
         ui.separator();
+        // Titres, légende et entrées de légende (issue #53) : modifier le
+        // texte, remettre à sa place — le pendant du double-clic et du
+        // glisser, et du menu *Graph* pour la remise à zéro générale.
+        if let Some(text) = text {
+            let editable = !matches!(text, ContextText::Title(TextTarget::Legend { .. }));
+            if editable && ui.button(tr!("action-edit-text")).clicked() {
+                match text {
+                    ContextText::Title(target) => {
+                        open_text_editor(ui.ctx(), view, tree, graph_id, target)
+                    }
+                    ContextText::LegendEntry {
+                        row,
+                        column,
+                        series,
+                    } => open_legend_entry_editor(
+                        ui.ctx(),
+                        view,
+                        tree,
+                        graph_id,
+                        row,
+                        column,
+                        series,
+                    ),
+                }
+                ui.close();
+            }
+            if let ContextText::Title(target) = text {
+                let moved = crate::state::current_plot_spec(tree, graph_id)
+                    .is_some_and(|spec| target.anchor(&spec).is_some());
+                if ui
+                    .add_enabled(moved, egui::Button::new(tr!("action-reset-text-position")))
+                    .on_hover_text(tr!("action-reset-text-position", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::SetTextAnchor {
+                        graph: graph_id,
+                        target,
+                        anchor: None,
+                    });
+                    ui.close();
+                }
+            }
+            ui.separator();
+        }
         // Textes libres (issue #35) : les mêmes gestes que la barre de menus
         // et le clavier (double-clic, Suppr).
         if let PlotTarget::Annotation(annotation) = target {
@@ -7697,6 +7781,202 @@ struct AnnotationEditor {
     /// Le dernier centre et la dernière taille (écran) du texte droit rendu :
     /// un texte vidé n'est plus tracé, mais le champ doit rester où il est.
     anchor: Option<(egui::Pos2, egui::Vec2)>,
+}
+
+/// Un titre ou une entrée de légende visé par le clic droit (issue #53).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextText {
+    /// Un titre, un titre d'axe ou la légende entière.
+    Title(TextTarget),
+    /// La ligne de légende de la série `series` du panneau `(row, column)`.
+    LegendEntry {
+        row: usize,
+        column: usize,
+        series: usize,
+    },
+}
+
+/// Ce que l'éditeur sur place d'un titre modifie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextEditTarget {
+    /// Le texte saisi d'un titre.
+    Title(TextTarget),
+    /// Le nom, en légende, d'une série.
+    LegendEntry(plotyx_plot::SeriesRef, (usize, usize)),
+}
+
+/// L'éditeur sur place d'un titre ou d'un nom de légende (issue #53) : un
+/// champ posé sur le texte. Entrée ou clic ailleurs valide, Échap annule —
+/// comme l'éditeur d'un texte libre, sans barre de réglages (couleur et
+/// taille d'un titre se règlent dans les propriétés du graphe).
+#[derive(Debug, Clone)]
+struct TextEditor {
+    target: TextEditTarget,
+    buffer: String,
+    /// Le texte tel qu'il était à l'ouverture : valider sans l'avoir changé
+    /// n'envoie rien (et ne fige pas un nom dérivé de la colonne).
+    original: String,
+    /// Donner le focus au champ à la prochaine image (ouverture).
+    focus: bool,
+    /// Centre et taille (écran) du texte tracé à l'ouverture.
+    anchor: (egui::Pos2, egui::Vec2),
+}
+
+fn text_editor_id(view: &GraphView) -> egui::Id {
+    view.id().with("text_editor")
+}
+
+/// Ouvre l'éditeur sur le texte d'un titre ; sans effet si le titre n'est
+/// pas tracé ou n'existe plus (la légende n'a pas de texte à elle).
+fn open_text_editor(
+    ctx: &egui::Context,
+    view: &GraphView,
+    tree: &Tree,
+    graph: NodeId,
+    target: TextTarget,
+) {
+    let Some(original) = crate::state::current_plot_spec(tree, graph)
+        .and_then(|spec| target.text(&spec).map(str::to_owned))
+    else {
+        return;
+    };
+    let Some((center, size, _)) = view.text_screen_box(target) else {
+        return;
+    };
+    start_text_editor(
+        ctx,
+        view,
+        TextEditTarget::Title(target),
+        original,
+        (center, size),
+    );
+}
+
+/// Ouvre l'éditeur sur le nom, en légende, d'une série.
+fn open_legend_entry_editor(
+    ctx: &egui::Context,
+    view: &GraphView,
+    tree: &Tree,
+    graph: NodeId,
+    row: usize,
+    column: usize,
+    series: usize,
+) {
+    let Some(spec) = crate::state::current_plot_spec(tree, graph) else {
+        return;
+    };
+    let Some(panel) = spec
+        .panels
+        .iter()
+        .position(|panel| panel.row == row && panel.column == column)
+    else {
+        return;
+    };
+    let address = plotyx_plot::SeriesRef::new(panel, series);
+    let Some(spec_series) = spec.series_at(address) else {
+        return;
+    };
+    let Some(anchor) = view.legend_entry_screen_box(row, column, series) else {
+        return;
+    };
+    let original = crate::state::series_list_label(tree, spec_series);
+    start_text_editor(
+        ctx,
+        view,
+        TextEditTarget::LegendEntry(address, (row, column)),
+        original,
+        anchor,
+    );
+}
+
+fn start_text_editor(
+    ctx: &egui::Context,
+    view: &GraphView,
+    target: TextEditTarget,
+    original: String,
+    anchor: (egui::Pos2, egui::Vec2),
+) {
+    let editor = TextEditor {
+        target,
+        buffer: original.clone(),
+        original,
+        focus: true,
+        anchor,
+    };
+    ctx.data_mut(|data| data.insert_temp(text_editor_id(view), editor));
+}
+
+/// Peint l'éditeur d'un titre ou d'un nom de légende, et traduit sa
+/// validation en **une** action.
+fn text_editor_ui(
+    ctx: &egui::Context,
+    view: &GraphView,
+    graph: NodeId,
+    mut editor: TextEditor,
+    actions: &mut Vec<Action>,
+) {
+    let id = text_editor_id(view);
+    let (center, size) = editor.anchor;
+    let field = egui::Rect::from_center_size(
+        center,
+        egui::vec2((size.x + 32.0).max(180.0), (size.y + 8.0).max(24.0)),
+    );
+    let mut accept = false;
+    let field_id = id.with("field");
+    let area = egui::Area::new(id.with("area"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(field.min)
+        .constrain(true)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut editor.buffer)
+                        .id(field_id)
+                        .desired_width(field.width())
+                        .hint_text(tr!("plot-text-placeholder")),
+                );
+                if editor.focus {
+                    response.request_focus();
+                    editor.focus = false;
+                }
+                if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                    accept = true;
+                }
+            });
+        });
+    let cancel = ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let outside = ctx
+        .input(|input| {
+            input
+                .pointer
+                .any_pressed()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+        })
+        .is_some_and(|pos| !area.response.rect.contains(pos));
+    if cancel {
+        ctx.data_mut(|data| data.remove::<TextEditor>(id));
+        return;
+    }
+    if accept || outside {
+        if editor.buffer != editor.original {
+            actions.push(match editor.target {
+                TextEditTarget::Title(target) => Action::SetTextContent {
+                    graph,
+                    target,
+                    text: editor.buffer.clone(),
+                },
+                TextEditTarget::LegendEntry(series, _) => Action::SetLegendEntryName {
+                    graph,
+                    series,
+                    name: editor.buffer.clone(),
+                },
+            });
+        }
+        ctx.data_mut(|data| data.remove::<TextEditor>(id));
+        return;
+    }
+    ctx.data_mut(|data| data.insert_temp(id, editor));
 }
 
 fn annotation_editor_id(view: &GraphView) -> egui::Id {
@@ -7792,7 +8072,28 @@ fn annotation_interactions(
                     annotation: Box::new(annotation),
                 });
             }
+            plotyx_render_egui::GraphEvent::EditText(target) => {
+                open_text_editor(ui.ctx(), view, tree, graph, target);
+            }
+            plotyx_render_egui::GraphEvent::EditLegendEntry {
+                row,
+                column,
+                series,
+            } => open_legend_entry_editor(ui.ctx(), view, tree, graph, row, column, series),
+            plotyx_render_egui::GraphEvent::TextMoved { target, anchor } => {
+                actions.push(Action::SetTextAnchor {
+                    graph,
+                    target,
+                    anchor: Some(anchor),
+                });
+            }
         }
+    }
+    // L'éditeur d'un titre ou d'un nom de légende, s'il y en a un d'ouvert.
+    let text_editor: Option<TextEditor> = ui.ctx().data(|data| data.get_temp(text_editor_id(view)));
+    if let Some(editor) = text_editor {
+        text_editor_ui(ui.ctx(), view, graph, editor, actions);
+        return;
     }
     let id = annotation_editor_id(view);
     let editor: Option<AnnotationEditor> = ui.ctx().data(|data| data.get_temp(id));
@@ -8076,6 +8377,18 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
         // Le menu contextuel lit le texte libre par `GraphView::annotation_at`,
         // qui donne son adresse dans le spec ; ce repli ne sert pas.
         Some(PlotComponent::Annotation { .. }) => PlotTarget::PlotArea,
+        // Titres et légende (issue #53) : leurs propriétés sont celles du
+        // composant, comme avant qu'ils soient désignables en propre.
+        Some(PlotComponent::Text(target)) => match target {
+            TextTarget::Title | TextTarget::PanelTitle { .. } => PlotTarget::Title,
+            TextTarget::AxisTitle { side, .. } => PlotTarget::AxisTitle(match side {
+                plotyx_plot::AxisSide::Bottom => PlotAxis::Bottom,
+                plotyx_plot::AxisSide::Left => PlotAxis::Left,
+                plotyx_plot::AxisSide::Right | plotyx_plot::AxisSide::Top => PlotAxis::Right,
+            }),
+            TextTarget::Legend { .. } => PlotTarget::Legend,
+        },
+        Some(PlotComponent::LegendEntry { .. }) => PlotTarget::Legend,
     }
 }
 

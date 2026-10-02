@@ -175,6 +175,14 @@ renommer ou déplacer une colonne ne casse rien.
   `PlotSpec` (`get`, `set` qui remplace ou ajoute, `remove`) : pas de commande
   dédiée, tout passe par `SetPlotSpec`. `PlotSpec::set_text_color` (thème)
   écrit aussi leur couleur.
+- `TextAnchor { x, y, axis }` (issue #53) : la position d'un titre déplacé,
+  **centre en données** comme un texte libre mais non bornée au cadrage. Elle
+  vit dans `PlotSpec::title_anchor`, `PanelSpec::title_anchor`,
+  `AxisSpec::title_anchor` et `LegendSpec::anchor` ; `None` = la place par
+  défaut. `TextTarget` (`Title`, `PanelTitle`, `AxisTitle`, `Legend`) l'adresse
+  dans un `PlotSpec` (`anchor`, `set_anchor`, `text`, `set_text`) ;
+  `PlotSpec::reset_text_anchors` les retire toutes. Pas de commande dédiée :
+  tout passe par `SetPlotSpec`.
 - `AxisSpec::has_explicit_range` : un cadrage explicite prime sur les données
   calculées. C'est le levier — déjà présent, rien n'a été inventé pour lui —
   sur lequel le zoom/pan de l'écran s'appuie ([`rendu.md`](rendu.md)).

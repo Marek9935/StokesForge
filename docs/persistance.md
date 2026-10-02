@@ -176,6 +176,13 @@ panneau (issue #35) : `PanelSpecRecord::annotations`, un champ
 plus ancien ignore le champ (il le perd à la ré-écriture). Aller-retour tenu
 par `a_non_trivial_plot_spec_round_trips_intact`.
 
+Idem pour les **textes déplacés** (issue #53) : `TextAnchorRecord` en champ
+`#[serde(default)]` sur `PlotSpecRecord` (titre), `PanelSpecRecord` (titre du
+panneau), `AxisSpecRecord` (titre d'axe) et `LegendSpecRecord` (légende) —
+absent d'un fichier plus ancien = le texte reste à sa place par défaut. Une
+ancre non finie lue du fichier est gardée telle quelle ; c'est le rendu qui
+l'ignore. Aller-retour tenu par `a_non_trivial_plot_spec_round_trips_intact`.
+
 ### Pourquoi trois tableaux parallèles et pas un tableau d'énumérations
 
 `ValuesRecord::Mixed` porte `{ tags, numbers, texts }` : un octet d'étiquette

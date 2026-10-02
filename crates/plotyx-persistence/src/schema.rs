@@ -593,7 +593,19 @@ pub(crate) struct PlotSpecRecord {
     /// chaîne vide (couleur automatique) par `#[serde(default)]`.
     #[serde(default)]
     pub(crate) title_color: String,
+    /// Titre déplacé (issue #53) : absent d'un fichier plus ancien, donc à sa
+    /// place par défaut.
+    #[serde(default)]
+    pub(crate) title_anchor: Option<TextAnchorRecord>,
     pub(crate) format_version: u32,
+}
+
+/// [`plotyx_plot::TextAnchor`], à plat.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TextAnchorRecord {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) axis: SeriesAxisRecord,
 }
 
 impl Default for PlotSpecRecord {
@@ -603,6 +615,7 @@ impl Default for PlotSpecRecord {
             panels: vec![PanelSpecRecord::default()],
             background: "#ffffff00".to_string(), // plotyx_plot::TRANSPARENT
             title_color: String::new(),
+            title_anchor: None,
             format_version: 1, // plotyx_plot::SPEC_FORMAT_VERSION
         }
     }
@@ -612,6 +625,9 @@ impl Default for PlotSpecRecord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PanelSpecRecord {
     pub(crate) title: String,
+    /// Titre déplacé (issue #53), comme `PlotSpecRecord::title_anchor`.
+    #[serde(default)]
+    pub(crate) title_anchor: Option<TextAnchorRecord>,
     pub(crate) series: Vec<SeriesSpecRecord>,
     pub(crate) bottom: AxisSpecRecord,
     pub(crate) left: AxisSpecRecord,
@@ -642,6 +658,7 @@ impl Default for PanelSpecRecord {
     fn default() -> Self {
         Self {
             title: String::new(),
+            title_anchor: None,
             series: Vec::new(),
             bottom: AxisSpecRecord::default(),
             left: AxisSpecRecord::default(),
@@ -670,6 +687,9 @@ pub(crate) struct AxisSpecRecord {
     /// Ajouté après coup, comme `PlotSpecRecord::title_color`.
     #[serde(default)]
     pub(crate) title_color: String,
+    /// Titre déplacé (issue #53), comme `PlotSpecRecord::title_anchor`.
+    #[serde(default)]
+    pub(crate) title_anchor: Option<TextAnchorRecord>,
     /// Ajouté après coup, comme `PlotSpecRecord::title_color`.
     #[serde(default)]
     pub(crate) tick_color: String,
@@ -699,6 +719,7 @@ impl Default for AxisSpecRecord {
             visible: true,
             inverted: false,
             title_color: String::new(),
+            title_anchor: None,
             tick_color: String::new(),
         }
     }
@@ -856,10 +877,13 @@ pub(crate) enum SymbolShapeRecord {
 }
 
 /// [`plotyx_plot::LegendSpec`], à plat.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LegendSpecRecord {
     pub(crate) visible: bool,
     pub(crate) position: LegendPositionRecord,
+    /// Légende déplacée (issue #53), comme `PlotSpecRecord::title_anchor`.
+    #[serde(default)]
+    pub(crate) anchor: Option<TextAnchorRecord>,
 }
 
 impl Default for LegendSpecRecord {
@@ -870,6 +894,7 @@ impl Default for LegendSpecRecord {
         Self {
             visible: true,
             position: LegendPositionRecord::default(),
+            anchor: None,
         }
     }
 }

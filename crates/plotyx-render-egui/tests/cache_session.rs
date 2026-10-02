@@ -552,3 +552,113 @@ fn double_cliquer_un_texte_demande_a_lediter() {
         "le texte est sélectionné"
     );
 }
+
+// -- Issue #53 : glisser et double-cliquer un titre, une légende --
+
+/// Glisser le titre du graphe : l'aperçu suit le pointeur sans toucher au
+/// modèle, **un seul** signal sort au relâchement, et la vue ne défile pas.
+#[test]
+fn glisser_un_titre_ne_signale_quau_relachement() {
+    use plotyx_render_egui::{GraphEvent, TextTarget};
+    let banc = Banc::with_title("Titre");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    assert!(image_avec(&context, &mut view, &banc, rect, vec![], 0.0).is_empty());
+    let (centre, _, _) = view
+        .text_screen_box(TextTarget::Title)
+        .expect("titre tracé");
+    let revision = banc.snapshot().revision;
+    let generation = view.view().generation();
+
+    let mut signaux = image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![egui::Event::PointerMoved(centre), bouton(centre, true)],
+        0.1,
+    );
+    for pas in 1..=5 {
+        let pos = centre + egui::vec2(0.0, 20.0 * pas as f32);
+        signaux.extend(image_avec(
+            &context,
+            &mut view,
+            &banc,
+            rect,
+            vec![egui::Event::PointerMoved(pos)],
+            0.1 + 0.05 * pas as f64,
+        ));
+        assert!(signaux.is_empty(), "un signal avant le relâchement");
+    }
+    let (cible, apercu) = *view.text_preview().expect("aperçu pendant le glisser");
+    assert_eq!(cible, TextTarget::Title);
+    assert_eq!(banc.snapshot().revision, revision, "le modèle a bougé");
+
+    signaux.extend(image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![bouton(centre + egui::vec2(0.0, 100.0), false)],
+        0.5,
+    ));
+    let [GraphEvent::TextMoved { target, anchor }] = &signaux[..] else {
+        panic!("un seul signal attendu : {signaux:?}")
+    };
+    assert_eq!(*target, TextTarget::Title);
+    assert_eq!(*anchor, apercu, "l'ancre validée est celle de l'aperçu");
+    assert_eq!(view.view().generation(), generation, "le glisser a défilé");
+    // Poser l'ancre dans le modèle : le titre est alors tracé dessus.
+    let mut spec = match banc
+        .snapshot()
+        .tree
+        .node(banc.graph)
+        .expect("graphe")
+        .kind()
+    {
+        plotyx_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => panic!("pas un graphe"),
+    };
+    assert!(TextTarget::Title.set_anchor(&mut spec, Some(*anchor)));
+    banc.handle()
+        .execute(Command::SetPlotSpec {
+            graph: banc.graph,
+            spec,
+        })
+        .expect("spec posé");
+    image_avec(&context, &mut view, &banc, rect, vec![], 1.0);
+    image_avec(&context, &mut view, &banc, rect, vec![], 1.1);
+    let (apres, _, _) = view.text_screen_box(TextTarget::Title).expect("tracé");
+    assert!(
+        (apres.y - (centre.y + 100.0)).abs() < 3.0,
+        "le titre est là où on l'a lâché : {apres:?}"
+    );
+}
+
+/// Un double-clic sur le titre demande à l'éditer, et ne réinitialise pas le
+/// zoom.
+#[test]
+fn double_cliquer_un_titre_demande_a_lediter() {
+    use plotyx_render_egui::{GraphEvent, TextTarget};
+    let banc = Banc::with_title("Titre");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    let (centre, _, _) = view
+        .text_screen_box(TextTarget::Title)
+        .expect("titre tracé");
+    let mut signaux = Vec::new();
+    for (index, (pressed, time)) in [(true, 0.1), (false, 0.12), (true, 0.2), (false, 0.22)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut events = vec![bouton(centre, pressed)];
+        if index == 0 {
+            events.insert(0, egui::Event::PointerMoved(centre));
+        }
+        signaux.extend(image_avec(&context, &mut view, &banc, rect, events, time));
+    }
+    assert_eq!(signaux, vec![GraphEvent::EditText(TextTarget::Title)]);
+}

@@ -154,7 +154,7 @@ l'interface, mais son mot est déjà fixé.
 | Reverse axis | Axe inversé | Valeurs décroissantes dans le sens de lecture | Axe retourné | O |
 | Legend | Légende | Liste des séries avec leur style | — | G |
 | Legend entry | Entrée de légende | Une ligne de la légende | Libellé de légende | G |
-| Position | Position | Coin de la légende : Top left… | Emplacement | G |
+| Position | Position | Coin de la légende : Top left… ; Reset Position / Réinitialiser la position : remet un titre ou la légende à sa place par défaut | Emplacement | G |
 | Series | Série | Données tracées d'une colonne Y | Courbe, Trace, Plot, Jeu de données | G (Q3) |
 | Plot type | Type de tracé | Façon de tracer une série | Mode | O |
 | Scatter | Points | Symboles seuls | Nuage de points | O (Q6) |

@@ -7,6 +7,7 @@ use crate::annotation::AnnotationSpec;
 use crate::axis::{AxisSide, AxisSpec};
 use crate::legend::LegendSpec;
 use crate::series::{SeriesAxis, SeriesSpec};
+use crate::text_anchor::TextAnchor;
 
 /// Un panneau et ses quatre axes.
 ///
@@ -18,6 +19,8 @@ use crate::series::{SeriesAxis, SeriesSpec};
 pub struct PanelSpec {
     /// Titre du panneau.
     pub title: String,
+    /// Position du titre du panneau s'il a été déplacé (issue #53).
+    pub title_anchor: Option<TextAnchor>,
     /// Séries tracées, dans l'ordre de superposition.
     pub series: Vec<SeriesSpec>,
     /// Axe du bas.
@@ -99,6 +102,7 @@ impl Default for PanelSpec {
     fn default() -> Self {
         Self {
             title: String::new(),
+            title_anchor: None,
             series: Vec::new(),
             bottom: AxisSpec::default(),
             left: AxisSpec::default(),

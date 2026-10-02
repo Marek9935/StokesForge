@@ -1,5 +1,7 @@
 //! Les quatre axes d'un panneau : échelle, limites, grille.
 
+use crate::text_anchor::TextAnchor;
+
 /// Échelle d'un axe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AxisScale {
@@ -55,6 +57,8 @@ pub struct AxisSpec {
     /// Couleur du titre de l'axe (`#RRGGBB`). Vide = automatique, voir
     /// [`crate::PlotSpec::title_color`].
     pub title_color: String,
+    /// Position du titre de l'axe s'il a été déplacé (issue #53).
+    pub title_anchor: Option<TextAnchor>,
     /// Couleur de l'échelle — ligne d'axe, graduations et leurs libellés, et
     /// la grille, atténuée (`#RRGGBB`). Vide = automatique.
     pub tick_color: String,
@@ -99,6 +103,7 @@ impl Default for AxisSpec {
             visible: true,
             inverted: false,
             title_color: String::new(),
+            title_anchor: None,
             tick_color: String::new(),
         }
     }

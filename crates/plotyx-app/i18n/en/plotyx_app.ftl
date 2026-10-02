@@ -61,6 +61,11 @@ action-add-text = Add Text
     .hint = Adds a text in the plot area
     .disabled = Right-click inside a plot area
 action-edit-text = Edit Text
+action-reset-text-position = Reset Position
+    .hint = Puts this title or legend back in its default place
+action-reset-text-positions = Reset Text Positions
+    .hint = Puts every title and the legend back in their default places
+    .disabled = No title or legend has been moved
 action-delete-text = Delete Text
 action-properties = Properties…
     .hint = Opens Graph Properties on this item
@@ -483,6 +488,7 @@ plot-target-plot-area = Plot Area
 plot-target-axis = { $axis } Axis
 plot-target-axis-title = { $axis } Axis Title
 plot-target-text = Text
+plot-target-legend = Legend
 
 # Automatic values of the color fields
 

@@ -767,11 +767,18 @@ fn non_trivial_spec(
             visible: true,
             inverted: true,
             title_color: "#aa3311".to_string(),
+            // Issue #53 : textes déplacés, une ancre par sorte de texte.
+            title_anchor: Some(plotyx_plot::TextAnchor::new(3.5, -0.75)),
             tick_color: "#fefefe".to_string(),
         },
+        title_anchor: Some(plotyx_plot::TextAnchor {
+            axis: SeriesAxis::Right,
+            ..plotyx_plot::TextAnchor::new(0.5, 4.25)
+        }),
         legend: LegendSpec {
             visible: true,
             position: LegendPosition::BottomLeft,
+            anchor: Some(plotyx_plot::TextAnchor::new(-2.0, 8.0)),
         },
         // Issue #35 : textes libres, tous champs non défaut.
         annotations: vec![
@@ -792,6 +799,7 @@ fn non_trivial_spec(
         legend: LegendSpec {
             visible: false,
             position: LegendPosition::TopLeft,
+            anchor: None,
         },
         ..PanelSpec::at(1, 0)
     };
@@ -799,6 +807,7 @@ fn non_trivial_spec(
     PlotSpec {
         background: "#0a0a0a".to_string(),
         title_color: "#ffcc00".to_string(),
+        title_anchor: Some(plotyx_plot::TextAnchor::new(1.0, 9.5)),
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }

@@ -6851,3 +6851,143 @@ fn un_texte_libre_sajoute_se_deplace_et_se_retire_en_un_pas_chacun() {
     });
     assert!(graph_spec(&state, graph).panels[0].annotations.is_empty());
 }
+
+// -- Issue #53 : titres, titres d'axe et légende déplaçables --
+
+/// Déplacer un titre, un titre d'axe ou la légende, puis les remettre : chaque
+/// geste est **une** modification du modèle (un seul Ctrl+Z), et un geste sans
+/// effet n'empile rien.
+#[test]
+fn un_titre_se_deplace_et_se_reinitialise_en_un_pas_chacun() {
+    use plotyx_plot::{AxisSide, TextAnchor, TextTarget};
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let cibles = [
+        TextTarget::Title,
+        TextTarget::AxisTitle {
+            row: 0,
+            column: 0,
+            side: AxisSide::Left,
+        },
+        TextTarget::Legend { row: 0, column: 0 },
+    ];
+    let ancre = |state: &AppState, cible: TextTarget| cible.anchor(&graph_spec(state, graph));
+    let revision = |state: &AppState| state.snapshot().revision;
+
+    for cible in cibles {
+        let avant = revision(&state);
+        state.dispatch(Action::SetTextAnchor {
+            graph,
+            target: cible,
+            anchor: Some(TextAnchor::new(1.0, 2.0)),
+        });
+        assert_eq!(ancre(&state, cible), Some(TextAnchor::new(1.0, 2.0)));
+        let apres = revision(&state);
+        assert_ne!(apres, avant);
+
+        // La même ancre : rien n'est empilé.
+        state.dispatch(Action::SetTextAnchor {
+            graph,
+            target: cible,
+            anchor: Some(TextAnchor::new(1.0, 2.0)),
+        });
+        assert_eq!(revision(&state), apres, "un geste sans effet a été empilé");
+
+        // Un seul Ctrl+Z défait le déplacement.
+        state.dispatch(Action::Undo);
+        assert_eq!(ancre(&state, cible), None);
+        state.dispatch(Action::Redo);
+        assert_eq!(ancre(&state, cible), Some(TextAnchor::new(1.0, 2.0)));
+
+        // « Reset Position » d'un seul texte : une entrée.
+        state.dispatch(Action::SetTextAnchor {
+            graph,
+            target: cible,
+            anchor: None,
+        });
+        assert_eq!(ancre(&state, cible), None);
+        state.dispatch(Action::Undo);
+        assert_eq!(ancre(&state, cible), Some(TextAnchor::new(1.0, 2.0)));
+    }
+
+    // Tout remettre d'un coup : une entrée pour l'ensemble.
+    assert!(graph_spec(&state, graph).has_text_anchors());
+    state.dispatch(Action::ResetTextAnchors { graph });
+    assert!(!graph_spec(&state, graph).has_text_anchors());
+    let apres_reset = revision(&state);
+    state.dispatch(Action::ResetTextAnchors { graph });
+    assert_eq!(
+        revision(&state),
+        apres_reset,
+        "tout remettre quand rien n'est déplacé n'empile rien"
+    );
+    state.dispatch(Action::Undo);
+    for cible in cibles {
+        assert!(ancre(&state, cible).is_some(), "{cible:?} rendu par Ctrl+Z");
+    }
+}
+
+/// Éditer un titre au double-clic, renommer une entrée de légende : une
+/// modification chacun, et un texte inchangé ne fige rien.
+#[test]
+fn un_titre_et_un_nom_de_legende_se_modifient_en_un_pas() {
+    use plotyx_plot::{SeriesRef, TextTarget};
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let titre = TextTarget::AxisTitle {
+        row: 0,
+        column: 0,
+        side: plotyx_plot::AxisSide::Bottom,
+    };
+    state.dispatch(Action::SetTextContent {
+        graph,
+        target: titre,
+        text: "Temps $t$".to_owned(),
+    });
+    assert_eq!(
+        graph_spec(&state, graph).panels[0].bottom.label,
+        "Temps $t$"
+    );
+    state.dispatch(Action::SetTextContent {
+        graph,
+        target: TextTarget::Title,
+        text: "Courbe".to_owned(),
+    });
+    assert_eq!(graph_spec(&state, graph).title, "Courbe");
+    // La légende n'a pas de texte à elle : sans effet.
+    let avant = state.snapshot().revision;
+    state.dispatch(Action::SetTextContent {
+        graph,
+        target: TextTarget::Legend { row: 0, column: 0 },
+        text: "x".to_owned(),
+    });
+    assert_eq!(state.snapshot().revision, avant);
+
+    let serie = SeriesRef::new(0, 0);
+    state.dispatch(Action::SetLegendEntryName {
+        graph,
+        series: serie,
+        name: "Échantillon".to_owned(),
+    });
+    assert_eq!(
+        graph_spec(&state, graph)
+            .series_at(serie)
+            .map(|s| s.name.clone()),
+        Some("Échantillon".to_owned())
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        graph_spec(&state, graph)
+            .series_at(serie)
+            .map(|s| s.name.clone()),
+        Some(String::new())
+    );
+    // Une série qui n'existe pas : ignorée.
+    let avant = state.snapshot().revision;
+    state.dispatch(Action::SetLegendEntryName {
+        graph,
+        series: SeriesRef::new(0, 99),
+        name: "x".to_owned(),
+    });
+    assert_eq!(state.snapshot().revision, avant);
+}

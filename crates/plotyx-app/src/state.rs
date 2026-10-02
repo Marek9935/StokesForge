@@ -57,6 +57,7 @@ use plotyx_core::{
 use plotyx_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use plotyx_plot::{
     AnnotationRef, AnnotationSpec, ColorUsage, PanelSpec, Panels, PlotSpec, PlotType, SavedColors,
+    SeriesRef, TextAnchor, TextTarget,
 };
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
@@ -448,6 +449,43 @@ pub enum Action {
         graph: NodeId,
         /// Adresse du texte.
         target: AnnotationRef,
+    },
+    /// Pose la position d'un titre ou de la légende (issue #53) : le glisser
+    /// qui s'achève, ou, avec `anchor: None`, « Reset Position ». Une
+    /// modification du modèle ([`Command::SetPlotSpec`]), comme
+    /// [`Action::SetAnnotation`].
+    SetTextAnchor {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Le texte déplacé.
+        target: TextTarget,
+        /// Sa nouvelle ancre ; `None` le remet à sa place par défaut.
+        anchor: Option<TextAnchor>,
+    },
+    /// Remet **tous** les titres et la légende du graphe à leur place par
+    /// défaut (menu *Graph*).
+    ResetTextAnchors {
+        /// Graphe visé.
+        graph: NodeId,
+    },
+    /// Remplace le texte saisi d'un titre (double-clic, éditeur sur place).
+    SetTextContent {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Le titre édité.
+        target: TextTarget,
+        /// Son nouveau texte (markup Typst).
+        text: String,
+    },
+    /// Renomme une série telle qu'elle se lit en légende (double-clic sur
+    /// une entrée). Un nom vide rend la série à son nom dérivé de la colonne.
+    SetLegendEntryName {
+        /// Graphe visé.
+        graph: NodeId,
+        /// La série.
+        series: SeriesRef,
+        /// Son nouveau nom en légende.
+        name: String,
     },
 }
 
@@ -1344,6 +1382,8 @@ pub enum PlotTarget {
     AxisTitle(PlotAxis),
     /// Un texte libre (issue #35).
     Annotation(AnnotationRef),
+    /// La légende (cadre ou entrée, issue #53).
+    Legend,
 }
 
 impl PlotTarget {
@@ -1356,6 +1396,7 @@ impl PlotTarget {
             PlotTarget::Axis(axis) => tr!("plot-target-axis", axis = axis.label()),
             PlotTarget::AxisTitle(axis) => tr!("plot-target-axis-title", axis = axis.label()),
             PlotTarget::Annotation(_) => tr!("plot-target-text"),
+            PlotTarget::Legend => tr!("plot-target-legend"),
         }
     }
 
@@ -1365,6 +1406,7 @@ impl PlotTarget {
         match self {
             PlotTarget::Background | PlotTarget::Title => (PlotSettingsTab::Graph, None),
             PlotTarget::PlotArea | PlotTarget::Annotation(_) => (PlotSettingsTab::PlotArea, None),
+            PlotTarget::Legend => (PlotSettingsTab::Legend, None),
             PlotTarget::Axis(axis) | PlotTarget::AxisTitle(axis) => {
                 (PlotSettingsTab::Axes, Some(axis))
             }
@@ -3360,6 +3402,28 @@ impl AppState {
             Action::RemoveAnnotation { graph, target } => {
                 self.edit_annotations(graph, |spec| target.remove(spec))
             }
+            Action::SetTextAnchor {
+                graph,
+                target,
+                anchor,
+            } => self.edit_annotations(graph, |spec| target.set_anchor(spec, anchor)),
+            Action::ResetTextAnchors { graph } => {
+                self.edit_annotations(graph, |spec| spec.reset_text_anchors() > 0)
+            }
+            Action::SetTextContent {
+                graph,
+                target,
+                text,
+            } => self.edit_annotations(graph, |spec| target.set_text(spec, text)),
+            Action::SetLegendEntryName {
+                graph,
+                series,
+                name,
+            } => self.edit_annotations(graph, |spec| {
+                spec.series_at_mut(series)
+                    .map(|series| series.name = name)
+                    .is_some()
+            }),
             Action::SetPngExportScale(scale) => {
                 if PNG_EXPORT_SCALES.contains(&scale) {
                     self.png_export_scale = scale;

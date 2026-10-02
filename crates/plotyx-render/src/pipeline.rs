@@ -70,7 +70,9 @@
 use plotters::coord::Shift;
 use plotters::prelude::*;
 use plotyx_core::resolve::{ResolvedPanel, ResolvedPlot};
-use plotyx_plot::{AxisScale, AxisSpec, PlotSpec, SeriesAxis};
+use plotyx_plot::{
+    AxisScale, AxisSide as PlotAxisSide, AxisSpec, PlotSpec, SeriesAxis, TextAnchor, TextTarget,
+};
 
 use crate::clip::{self, PixelBounds};
 use crate::color::{auto_ink, over_white, rgba_or};
@@ -188,6 +190,48 @@ pub struct DrawnPanel {
     /// Les textes libres réellement tracés (issue #35), dans l'ordre du
     /// spec ; un texte hors du cadrage visible n'y figure pas.
     pub annotations: Vec<DrawnAnnotation>,
+    /// Les titres et la légende de ce panneau (issue #53) : titre du
+    /// panneau, titres d'axe, cadre de la légende. Un texte à sa place par
+    /// défaut y figure aussi, avec une position **approchée** (Plotters le
+    /// pose lui-même) ; c'est assez pour le désigner et pour partir de là
+    /// quand on le déplace.
+    pub texts: Vec<DrawnText>,
+    /// Les lignes de la légende, une par entrée dessinée.
+    pub legend_rows: Vec<DrawnLegendRow>,
+}
+
+/// Un titre ou une légende tel qu'il a été tracé (issue #53).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawnText {
+    /// Le texte désigné.
+    pub target: TextTarget,
+    /// Centre, en pixels de backend.
+    pub center: (f64, f64),
+    /// Taille du texte **non tourné**, en pixels de backend.
+    pub size: (u32, u32),
+    /// Rotation, en degrés, sens antihoraire (les titres d'axe vertical).
+    pub rotation: f64,
+    /// Vrai si le texte est posé sur son ancre ([`TextAnchor`]), faux s'il
+    /// est à sa place par défaut — alors `center` est approché.
+    pub anchored: bool,
+}
+
+impl DrawnText {
+    /// Vrai si le pixel `(x, y)` tombe dans le rectangle tourné du texte.
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        rotated_contains(self.center, self.size, self.rotation, x, y)
+    }
+}
+
+/// Une ligne de la légende : l'entrée qu'elle montre, et où.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawnLegendRow {
+    /// Rang de la série dans `PanelSpec::series`.
+    pub series: usize,
+    /// Milieu vertical de la ligne, en pixels de backend.
+    pub center_y: f64,
+    /// Hauteur de la ligne.
+    pub height: f64,
 }
 
 /// Un texte libre tel qu'il a été tracé — de quoi le désigner sous le
@@ -207,14 +251,20 @@ pub struct DrawnAnnotation {
 impl DrawnAnnotation {
     /// Vrai si le pixel `(x, y)` tombe dans le rectangle tourné du texte.
     pub fn contains(&self, x: f64, y: f64) -> bool {
-        let (dx, dy) = (x - self.center.0, y - self.center.1);
-        // Le texte est tourné dans le sens antihoraire à l'écran (axe y
-        // vers le bas) ; on ramène le point dans le repère du texte droit
-        // par la rotation inverse.
-        let (sin, cos) = self.rotation.to_radians().sin_cos();
-        let (u, v) = (dx * cos - dy * sin, dx * sin + dy * cos);
-        u.abs() <= self.size.0 as f64 / 2.0 && v.abs() <= self.size.1 as f64 / 2.0
+        rotated_contains(self.center, self.size, self.rotation, x, y)
     }
+}
+
+/// Le pixel `(x, y)` est-il dans le rectangle `size` centré en `center` et
+/// tourné de `rotation` degrés (antihoraire) ?
+fn rotated_contains(center: (f64, f64), size: (u32, u32), rotation: f64, x: f64, y: f64) -> bool {
+    let (dx, dy) = (x - center.0, y - center.1);
+    // Le texte est tourné dans le sens antihoraire à l'écran (axe y vers le
+    // bas) ; on ramène le point dans le repère du texte droit par la
+    // rotation inverse.
+    let (sin, cos) = rotation.to_radians().sin_cos();
+    let (u, v) = (dx * cos - dy * sin, dx * sin + dy * cos);
+    u.abs() <= size.0 as f64 / 2.0 && v.abs() <= size.1 as f64 / 2.0
 }
 
 /// Une aire de graduation : son épaisseur en pixels (0 si l'axe est masqué
@@ -258,6 +308,9 @@ pub struct DrawnPlot {
     /// Hauteur, en pixels de backend, de la bande du titre du graphe en haut
     /// de la figure (0 sans titre).
     pub title_height: u32,
+    /// Le titre du graphe tel qu'il a été tracé (issue #53) ; `None` sans
+    /// titre.
+    pub title: Option<DrawnText>,
 }
 
 impl DrawnPlot {
@@ -315,15 +368,35 @@ pub fn draw_on<DB: DrawingBackend>(
     // `titled` mesure le titre et rabaisse d'autant le haut de la zone : le
     // point où `estimate_text_size` entre dans la géométrie (voir la doc de
     // tête).
+    //
+    // Un titre déplacé (issue #53) garde sa bande, **vide** : la mise en page
+    // ne dépend pas de l'endroit où le titre est posé — sinon la zone de
+    // tracé changerait de taille au lâcher, et le titre, ancré aux données,
+    // sauterait. Il est tracé sur son ancre une fois les panneaux faits,
+    // par-dessus.
+    let title_color = rgba_or(&spec.title_color, opaque(ink));
+    let title_anchor = usable_anchor(spec.title_anchor).filter(|_| !spec.title.is_empty());
     let area = if spec.title.is_empty() {
         root.clone()
+    } else if title_anchor.is_some() {
+        reserve_title_band(root, &spec.title, &rich_style(TITLE_SIZE, title_color))?
     } else {
-        root.titled(
-            &spec.title,
-            rich_style(TITLE_SIZE, rgba_or(&spec.title_color, opaque(ink))),
-        )?
+        root.titled(&spec.title, rich_style(TITLE_SIZE, title_color))?
     };
     let title_height = (area.get_base_pixel().1 - root.get_base_pixel().1).max(0) as u32;
+    let (root_width, _) = root.dim_in_pixel();
+    let mut drawn_title = if spec.title.is_empty() || title_anchor.is_some() {
+        None
+    } else {
+        let size = root.estimate_text_size(&spec.title, &rich_style(TITLE_SIZE, title_color))?;
+        Some(DrawnText {
+            target: TextTarget::Title,
+            center: (root_width as f64 / 2.0, title_height as f64 / 2.0),
+            size,
+            rotation: 0.0,
+            anchored: false,
+        })
+    };
 
     let mut drawn = DrawnPlot {
         panels: Vec::with_capacity(plot.panels.len()),
@@ -333,7 +406,9 @@ pub fn draw_on<DB: DrawingBackend>(
         unknown_series: 0,
         decimated_points: 0,
         title_height,
+        title: None,
     };
+    let mut first_projection: Option<Projection> = None;
 
     let layout = grid_of(spec, plot.panels.len());
     let cells = area.split_evenly((layout.rows, layout.columns));
@@ -348,7 +423,10 @@ pub fn draw_on<DB: DrawingBackend>(
             drawn.omitted_panels += 1;
             continue;
         }
-        let panel_drawn = draw_panel(cell, panel, background)?;
+        let (panel_drawn, projection) = draw_panel(cell, panel, background)?;
+        if first_projection.is_none() {
+            first_projection = Some(projection);
+        }
         drawn.drawn_series += panel_drawn.drawn_series;
         drawn.broken_series += panel_drawn.broken_series;
         drawn.unknown_series += panel_drawn.unknown_series;
@@ -356,8 +434,109 @@ pub fn draw_on<DB: DrawingBackend>(
         drawn.panels.push(panel_drawn);
     }
 
+    if let Some(anchor) = title_anchor {
+        // Le titre du graphe n'appartient à aucun panneau : son ancre est
+        // lue dans le repère du premier panneau tracé. Sans projection
+        // possible (panneau omis, axe logarithmique ≤ 0), il retombe en haut
+        // et au centre de la figure plutôt que de disparaître.
+        let pixel = first_projection
+            .as_ref()
+            .and_then(|projection| projection.pixel(anchor))
+            .unwrap_or(((root_width / 2) as i32, (MARGIN + 12) as i32));
+        let size = draw_centered_text(root, &spec.title, TITLE_SIZE, title_color, 0.0, pixel)?;
+        drawn_title = Some(DrawnText {
+            target: TextTarget::Title,
+            center: (pixel.0 as f64, pixel.1 as f64),
+            size,
+            rotation: 0.0,
+            anchored: true,
+        });
+    }
+    drawn.title = drawn_title;
+
     root.present()?;
     Ok(drawn)
+}
+
+/// La zone sous la bande qu'un titre occuperait, **sans** écrire le titre :
+/// la même hauteur que `DrawingArea::titled` de Plotters (hauteur du texte
+/// plus deux marges de 5 px au plus), mesurée par le même chemin.
+fn reserve_title_band<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    text: &str,
+    style: &TextStyle<'_>,
+) -> Result<DrawingArea<DB, Shift>, DrawingAreaErrorKind<DB::ErrorType>> {
+    let (_, text_height) = area.estimate_text_size(text, style)?;
+    let band = text_height + (text_height / 2).min(5) * 2;
+    let (width, height) = area.dim_in_pixel();
+    Ok(area
+        .clone()
+        .shrink((0, band as i32), (width, height.saturating_sub(band))))
+}
+
+/// L'ancre, si elle est exploitable ([`TextAnchor::is_finite`]) : une ancre
+/// abîmée laisse le texte à sa place par défaut.
+fn usable_anchor(anchor: Option<TextAnchor>) -> Option<TextAnchor> {
+    anchor.filter(TextAnchor::is_finite)
+}
+
+/// La zone de tracé d'un panneau et ses cadrages : de quoi poser une
+/// [`TextAnchor`] en pixels — la même correspondance que
+/// `crate::interact::PanelTransform`, qui sert au glisser.
+struct Projection {
+    origin: (i32, i32),
+    size: (u32, u32),
+    ranges: Ranges,
+    right_active: bool,
+}
+
+impl Projection {
+    /// Le pixel de l'ancre — **sans** exiger qu'elle tombe dans le cadrage :
+    /// un titre vit hors de la zone de tracé. `None` si l'échelle n'a pas
+    /// d'image de cette valeur (≤ 0 sur un axe logarithmique) ou si le
+    /// cadrage est dégénéré.
+    fn pixel(&self, anchor: TextAnchor) -> Option<(i32, i32)> {
+        let right = anchor.axis == SeriesAxis::Right && self.right_active;
+        let (y_scale, y_range) = if right {
+            self.ranges.y2?
+        } else {
+            self.ranges.y
+        };
+        let fraction = |scale: AxisScale, (low, high): (f64, f64), value: f64| {
+            let t = scale::forward(scale, value)?;
+            (high != low).then(|| (t - low) / (high - low))
+        };
+        let fx = fraction(self.ranges.x.0, self.ranges.x.1, anchor.x)?;
+        let fy = fraction(y_scale, y_range, anchor.y)?;
+        Some((
+            self.origin.0 + (fx * self.size.0 as f64).round() as i32,
+            self.origin.1 + ((1.0 - fy) * self.size.1 as f64).round() as i32,
+        ))
+    }
+}
+
+/// Trace `text` (Typst) centré sur `pixel`, tourné de `rotation` degrés
+/// (antihoraire), et rend la taille du texte **droit**, mesurée par le même
+/// chemin que tout le reste.
+fn draw_centered_text<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    text: &str,
+    size: f64,
+    color: (u8, u8, u8, u8),
+    rotation: f64,
+    pixel: plotters_backend::BackendCoord,
+) -> Result<(u32, u32), DrawingAreaErrorKind<DB::ErrorType>> {
+    use plotters::style::text_anchor::{HPos, Pos, VPos};
+    let centered = Pos::new(HPos::Center, VPos::Center);
+    let straight = rich_style(size, color).pos(centered);
+    let family = crate::formula::rotated_family(rotation);
+    let turned = (family.as_str(), size)
+        .into_font()
+        .color(&rgba(color))
+        .pos(centered);
+    let measured = area.estimate_text_size(text, &straight)?;
+    area.draw(&Text::new(text, pixel, &turned))?;
+    Ok(measured)
 }
 
 /// La grille de panneaux : combien de lignes, combien de colonnes, et dans
@@ -422,7 +601,7 @@ fn draw_panel<DB: DrawingBackend>(
     cell: &DrawingArea<DB, Shift>,
     panel: &ResolvedPanel<'_>,
     background: (u8, u8, u8, u8),
-) -> Result<DrawnPanel, DrawingAreaErrorKind<DB::ErrorType>> {
+) -> Result<(DrawnPanel, Projection), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
     // Encre automatique du panneau, voir `draw_on`.
     let ink = auto_ink(over_white(background));
@@ -432,19 +611,22 @@ fn draw_panel<DB: DrawingBackend>(
 
     // 1 — préparation. Une série invisible ne figure nulle part : ni tracée,
     // ni cadrée, ni en légende.
-    let mut prepared: Vec<Prepared<'_>> = panel
+    // `source` garde le rang de chaque série dans `PanelSpec::series` : la
+    // légende désigne ses lignes par ce rang (issue #53).
+    let (source, mut prepared): (Vec<usize>, Vec<Prepared<'_>>) = panel
         .series
         .iter()
-        .filter(|series| series.spec.visible)
-        .map(|series| {
+        .enumerate()
+        .filter(|(_, series)| series.spec.visible)
+        .map(|(rank, series)| {
             let scale = if series.spec.axis == SeriesAxis::Right {
                 y2_scale
             } else {
                 y_scale
             };
-            series::prepare(series, x_scale, scale)
+            (rank, series::prepare(series, x_scale, scale))
         })
-        .collect();
+        .unzip();
 
     let right_active = spec.right.visible
         && prepared
@@ -475,11 +657,35 @@ fn draw_panel<DB: DrawingBackend>(
 
     // 3 — la zone de tracé. Le titre du panneau la rabaisse, comme celui du
     // graphe rabaisse la figure entière.
+    // Un titre déplacé (issue #53) garde sa bande vide, voir `draw_on`.
+    let panel_title_anchor = usable_anchor(spec.title_anchor).filter(|_| !spec.title.is_empty());
+    let title_style = rich_style(PANEL_TITLE_SIZE, opaque(ink));
     let area = if spec.title.is_empty() {
         cell.clone()
+    } else if panel_title_anchor.is_some() {
+        reserve_title_band(cell, &spec.title, &title_style)?
     } else {
-        cell.titled(&spec.title, rich_style(PANEL_TITLE_SIZE, opaque(ink)))?
+        cell.titled(&spec.title, title_style.clone())?
     };
+    let mut texts: Vec<DrawnText> = Vec::new();
+    if !spec.title.is_empty() && panel_title_anchor.is_none() {
+        let band = (area.get_base_pixel().1 - cell.get_base_pixel().1).max(0);
+        let cell_origin = cell.get_base_pixel();
+        let (cell_w, _) = cell.dim_in_pixel();
+        texts.push(DrawnText {
+            target: TextTarget::PanelTitle {
+                row: spec.row,
+                column: spec.column,
+            },
+            center: (
+                cell_origin.0 as f64 + cell_w as f64 / 2.0,
+                cell_origin.1 as f64 + band as f64 / 2.0,
+            ),
+            size: cell.estimate_text_size(&spec.title, &title_style)?,
+            rotation: 0.0,
+            anchored: false,
+        });
+    }
     let (width, height) = area.dim_in_pixel();
     // Les aires de graduation sont plafonnées à un tiers de la cellule :
     // dans une grille, 64 px de libellés sur un panneau de 150 px ne
@@ -510,13 +716,28 @@ fn draw_panel<DB: DrawingBackend>(
     // donc tracés en deux passes, chacune coupant l'autre axe. La géométrie
     // n'en dépend pas — les aires de graduation sont fixées par le
     // `ChartBuilder` plus haut.
+    // Un titre d'axe déplacé n'est plus écrit par Plotters (l'aire de
+    // graduation reste réservée) : il est posé sur son ancre plus bas.
+    let axis_anchor = |axis: &AxisSpec| {
+        usable_anchor(axis.title_anchor).filter(|_| !axis.display_label().is_empty())
+    };
+    let bottom_anchor = axis_anchor(&spec.bottom);
+    let left_anchor = axis_anchor(&spec.left);
+    let right_anchor = axis_anchor(&spec.right);
+    let plotters_desc = |axis: &AxisSpec, anchor: Option<TextAnchor>| {
+        if anchor.is_some() {
+            String::new()
+        } else {
+            axis.display_label()
+        }
+    };
     let format_x = |value: &f64| scale::format_tick(x_scale, *value);
     let format_y = |value: &f64| scale::format_tick(y_scale, *value);
     {
         let colors = AxisColors::of(&spec.bottom, ink);
         let mut mesh = chart.configure_mesh();
         colors.apply(&mut mesh);
-        mesh.x_desc(spec.bottom.display_label())
+        mesh.x_desc(plotters_desc(&spec.bottom, bottom_anchor))
             .disable_y_mesh()
             .disable_y_axis();
         if !spec.bottom.grid {
@@ -535,7 +756,7 @@ fn draw_panel<DB: DrawingBackend>(
         let colors = AxisColors::of(&spec.left, ink);
         let mut mesh = chart.configure_mesh();
         colors.apply(&mut mesh);
-        mesh.y_desc(spec.left.display_label())
+        mesh.y_desc(plotters_desc(&spec.left, left_anchor))
             .disable_x_mesh()
             .disable_x_axis();
         if !spec.left.grid {
@@ -558,7 +779,7 @@ fn draw_panel<DB: DrawingBackend>(
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
             .axis_desc_style(rich_style(AXIS_DESC_SIZE, colors.title))
             .axis_style(rgba(colors.ticks))
-            .y_desc(spec.right.display_label());
+            .y_desc(plotters_desc(&spec.right, right_anchor));
         if scale::needs_formatter(y2_scale) {
             mesh.y_label_formatter(&format_y2)
                 .y_labels(scale::decade_label_count(range));
@@ -592,19 +813,74 @@ fn draw_panel<DB: DrawingBackend>(
         axis_areas: AxisAreas {
             bottom: AxisArea {
                 size: x_label_area,
-                titled: !spec.bottom.display_label().is_empty(),
+                titled: !spec.bottom.display_label().is_empty() && bottom_anchor.is_none(),
             },
             left: AxisArea {
                 size: y_label_area,
-                titled: !spec.left.display_label().is_empty(),
+                titled: !spec.left.display_label().is_empty() && left_anchor.is_none(),
             },
             right: AxisArea {
                 size: right_label_area,
-                titled: !spec.right.display_label().is_empty(),
+                titled: !spec.right.display_label().is_empty() && right_anchor.is_none(),
             },
         },
         annotations: Vec::new(),
+        texts: Vec::new(),
+        legend_rows: Vec::new(),
     };
+
+    // Les titres d'axe à leur place par défaut : position approchée (Plotters
+    // les pose contre le bord extérieur de l'aire de graduation), de quoi les
+    // désigner et partir de là quand on les déplace (issue #53).
+    let (plot_x, plot_y) = (origin.0 as f64, origin.1 as f64);
+    let (plot_w, plot_h) = (size.0 as f64, size.1 as f64);
+    for (axis, anchor, side, area_size) in [
+        (
+            &spec.bottom,
+            bottom_anchor,
+            PlotAxisSide::Bottom,
+            x_label_area,
+        ),
+        (&spec.left, left_anchor, PlotAxisSide::Left, y_label_area),
+        (
+            &spec.right,
+            right_anchor,
+            PlotAxisSide::Right,
+            right_label_area,
+        ),
+    ] {
+        let label = axis.display_label();
+        if label.is_empty() || anchor.is_some() || area_size == 0 {
+            continue;
+        }
+        let colors = AxisColors::of(axis, ink);
+        let text_size =
+            area.estimate_text_size(&label, &rich_style(AXIS_DESC_SIZE, colors.title))?;
+        let half = text_size.1 as f64 / 2.0;
+        let area_size = area_size as f64;
+        let (center, rotation) = match side {
+            PlotAxisSide::Left => ((plot_x - area_size + half, plot_y + plot_h / 2.0), 90.0),
+            PlotAxisSide::Right => (
+                (plot_x + plot_w + area_size - half, plot_y + plot_h / 2.0),
+                -90.0,
+            ),
+            _ => (
+                (plot_x + plot_w / 2.0, plot_y + plot_h + area_size - half),
+                0.0,
+            ),
+        };
+        texts.push(DrawnText {
+            target: TextTarget::AxisTitle {
+                row: spec.row,
+                column: spec.column,
+                side,
+            },
+            center,
+            size: text_size,
+            rotation,
+            anchored: false,
+        });
+    }
 
     // Le rectangle de tracé, en pixels : c'est contre lui que les segments
     // d'une courbe sont rognés avant `paint::polyline` (voir `crate::clip`),
@@ -646,6 +922,25 @@ fn draw_panel<DB: DrawingBackend>(
     }
 
     // 6 — la légende, par-dessus, et mesurée comme les axes.
+    let projection = Projection {
+        origin,
+        size,
+        ranges: Ranges {
+            x: (x_scale, x_range),
+            y: (y_scale, y_range),
+            y2: y2_range.map(|range| (y2_scale, range)),
+        },
+        right_active,
+    };
+    let legend_center = usable_anchor(spec.legend.anchor)
+        .and_then(|anchor| projection.pixel(anchor))
+        .filter(|_| spec.legend.visible);
+    let entry_ranks: Vec<usize> = prepared
+        .iter()
+        .enumerate()
+        .filter(|(_, series)| series.in_legend())
+        .map(|(index, _)| source[index])
+        .collect();
     let entries: Vec<&Prepared<'_>> = prepared.iter().filter(|s| s.in_legend()).collect();
     let inscribed = legend::draw(
         &screen,
@@ -658,8 +953,93 @@ fn draw_panel<DB: DrawingBackend>(
             literal: literal_style(LABEL_SIZE, opaque(ink)),
         },
         legend::LegendColors { background, ink },
+        legend_center,
     )?;
     drawn.legend_entries = inscribed.entries;
+    if let Some(((left, top), (frame_w, frame_h))) = inscribed.frame {
+        texts.push(DrawnText {
+            target: TextTarget::Legend {
+                row: spec.row,
+                column: spec.column,
+            },
+            center: (
+                left as f64 + frame_w as f64 / 2.0,
+                top as f64 + frame_h as f64 / 2.0,
+            ),
+            size: (frame_w, frame_h),
+            rotation: 0.0,
+            anchored: legend_center.is_some(),
+        });
+        drawn.legend_rows = inscribed
+            .rows
+            .iter()
+            .zip(&entry_ranks)
+            .map(|(&(center_y, height), &series)| DrawnLegendRow {
+                series,
+                center_y,
+                height,
+            })
+            .collect();
+    }
+
+    // Les titres déplacés, posés sur leur ancre (issue #53) : par-dessus les
+    // séries et la légende, comme les textes libres juste après.
+    let centered = |anchor: TextAnchor| {
+        projection.pixel(anchor).unwrap_or((
+            origin.0 + (size.0 / 2) as i32,
+            origin.1 + (size.1 / 2) as i32,
+        ))
+    };
+    if let Some(anchor) = panel_title_anchor {
+        let pixel = centered(anchor);
+        let measured = draw_centered_text(
+            &screen,
+            &spec.title,
+            PANEL_TITLE_SIZE,
+            opaque(ink),
+            0.0,
+            pixel,
+        )?;
+        texts.push(DrawnText {
+            target: TextTarget::PanelTitle {
+                row: spec.row,
+                column: spec.column,
+            },
+            center: (pixel.0 as f64, pixel.1 as f64),
+            size: measured,
+            rotation: 0.0,
+            anchored: true,
+        });
+    }
+    for (axis, anchor, side, rotation) in [
+        (&spec.bottom, bottom_anchor, PlotAxisSide::Bottom, 0.0),
+        (&spec.left, left_anchor, PlotAxisSide::Left, 90.0),
+        (&spec.right, right_anchor, PlotAxisSide::Right, -90.0),
+    ] {
+        let Some(anchor) = anchor else { continue };
+        let pixel = centered(anchor);
+        let colors = AxisColors::of(axis, ink);
+        let measured = draw_centered_text(
+            &screen,
+            &axis.display_label(),
+            AXIS_DESC_SIZE,
+            colors.title,
+            rotation,
+            pixel,
+        )?;
+        texts.push(DrawnText {
+            target: TextTarget::AxisTitle {
+                row: spec.row,
+                column: spec.column,
+                side,
+            },
+            center: (pixel.0 as f64, pixel.1 as f64),
+            size: measured,
+            rotation,
+            anchored: true,
+        });
+    }
+    drawn.texts = texts;
 
     // 7 — les textes libres, par-dessus tout (issue #35).
     let ranges = Ranges {
@@ -687,7 +1067,7 @@ fn draw_panel<DB: DrawingBackend>(
     // le cache de `Shape` — donc pas ici, sous peine de rejouer tout le
     // pipeline à chaque mouvement de souris (`architecture-choisie.md`
     // §4.2, tâche 7.3).
-    Ok(drawn)
+    Ok((drawn, projection))
 }
 
 /// Les cadrages d'un panneau, dans l'espace transformé, avec leur échelle —
@@ -725,22 +1105,14 @@ fn draw_annotation<DB: DrawingBackend>(
     pixel: plotters_backend::BackendCoord,
     ink: (u8, u8, u8),
 ) -> Result<Option<DrawnAnnotation>, DrawingAreaErrorKind<DB::ErrorType>> {
-    use plotters::style::text_anchor::{HPos, Pos, VPos};
     if annotation.text.is_empty() {
         return Ok(None);
     }
     let color = rgba_or(&annotation.color, opaque(ink));
     let size = annotation.effective_size();
     let rotation = annotation.effective_rotation();
-    let centered = Pos::new(HPos::Center, VPos::Center);
-    let straight = rich_style(size, color).pos(centered);
-    let family = crate::formula::rotated_family(rotation);
-    let turned = (family.as_str(), size)
-        .into_font()
-        .color(&rgba(color))
-        .pos(centered);
-    let (width, height) = screen.estimate_text_size(&annotation.text, &straight)?;
-    screen.draw(&Text::new(annotation.text.as_str(), pixel, &turned))?;
+    let (width, height) =
+        draw_centered_text(screen, &annotation.text, size, color, rotation, pixel)?;
     Ok(Some(DrawnAnnotation {
         index,
         center: (pixel.0 as f64, pixel.1 as f64),

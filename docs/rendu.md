@@ -349,6 +349,29 @@ angle libre de `DragValue` (fractionnaire, minuscule, négatif) reste une durée
 Typst valide (`formula::source`, issue #36 — l'hypothèse d'un format `1e-7deg`
 était fausse : le format décimal de Rust n'a pas d'exposant). Sans Typst (témoin, repli), le texte est brut et non tourné.
 
+**Titres et légende déplaçables** (issue #53) : titre du graphe, titre de
+panneau, titres d'axe et cadre de la légende portent une `TextAnchor` optionnelle
+(`plotyx-plot::text_anchor`, centre en **données** du panneau, pas bornée au
+cadrage : un titre vit hors de la zone de tracé). Sans ancre, Plotters pose le
+texte (bande du titre, aire de graduation, coin de la légende) ; avec une
+ancre, le pipeline le trace lui-même, centré sur le point projeté
+(`Projection::pixel`, sans exiger qu'il soit dans le cadrage), par-dessus les
+séries — **les deux backends, donc l'export SVG/PDF/PNG**. **La mise en page ne
+change pas** : un titre déplacé garde sa bande, vide (`reserve_title_band`,
+même hauteur que `DrawingArea::titled`, verrouillé par un test d'égalité des
+zones de tracé), et un titre d'axe déplacé garde son aire de graduation —
+sinon la zone de tracé changerait au lâcher et le titre, ancré aux données,
+sauterait. Une ancre non finie est ignorée (`TextAnchor::is_finite`) ; si la
+projection échoue (≤ 0 sur un axe log), le texte retombe au centre de la zone
+de tracé. `DrawnPanel::texts`, `DrawnPlot::title` et `DrawnPanel::legend_rows`
+rapportent centre, taille et rotation de chaque texte — **approchés** pour un
+texte à sa place par défaut (Plotters le pose), exacts pour un texte ancré —
+et `hit::component_at` rend `PlotComponent::Text(TextTarget)` /
+`LegendEntry`, avant la zone de tracé qu'ils recouvrent. Côté écran,
+`GraphView::handle_text_drag` déplace le centre du texte avec le pointeur
+(aperçu `set_text_preview`, même motif que les textes libres) et le
+double-clic émet `GraphEvent::EditText` / `EditLegendEntry`.
+
 **Texte repris automatiquement** (issue #33) : un nom de série laissé vide
 reprend le nom long ou le nom de la colonne, souvent importé d'un appareil
 (`Abs_280 #1`). Lu comme du markup, `_` ouvrirait de l'italique et `#` du code.
