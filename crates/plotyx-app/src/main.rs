@@ -39,6 +39,14 @@ fn main() -> anyhow::Result<()> {
             .with_title(plotyx_app::tr!("window-title"))
             .with_inner_size([1100.0, 700.0]),
         event_loop_builder: Some(Box::new(prefer_x11)),
+        // egui-wgpu met par défaut deux images en file d'attente (débit
+        // maximal) ; une seule (faible latence) retire une image de retard
+        // entre le pointeur et ce qui est peint — sensible au déplacement
+        // d'une fenêtre, que rien ne masque. Le coût d'une image est ~0,3 ms
+        // en release (`mesure_deplacement_de_fenetre`) : le débit n'est pas
+        // ce qui manque.
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration::default()
+            .with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY),
         ..Default::default()
     };
     // `run_native` bloque jusqu'à la fermeture de la fenêtre ; `session` reste
