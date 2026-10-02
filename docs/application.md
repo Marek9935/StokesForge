@@ -1143,15 +1143,13 @@ d'édition de `cell_widget` — `app::is_last_visible_column` factorise la
 condition commune aux deux.
 
 Câblé aussi **côté en-tête** (`Action::AddColumnAndSelectHeaderField`,
-`AppState::add_column_and_select_header_field`), mais seulement au champ
-Formule — le dernier des quatre — de la dernière colonne : c'est le seul
-point où Tab, jusqu'ici, quittait l'en-tête (`GridCursor::Header(_,
-Formula)` → `Data(première colonne, 0)`, voir `move_selection_tab`). Les
-trois autres champs (Long Name, Units, Comments) gardent leur circulation
-normale même sur la dernière colonne — Tab y avance d'abord colonne par
-colonne pour un même champ ; les intercepter aussi aurait empêché d'atteindre
-les champs suivants de cette colonne, en ajoutant une colonne à chaque
-pression plutôt que d'y circuler.
+`AppState::add_column_and_select_header_field`), pour **chacun** des quatre
+champs (Long Name, Units, Comments, Formule) de la dernière colonne, en
+édition comme hors édition (#52) : Tab y ajoute une colonne et sélectionne le
+même champ dans la colonne neuve. Jusqu'à #52, seul Formule le faisait — Tab
+circulait d'abord colonne par colonne pour un même champ ; l'utilisateur a levé
+cette décision, au prix du retour automatique au champ suivant de la première
+colonne quand on remplit l'en-tête champ par champ.
 
 ### Tab et flèches appartiennent à la grille (#38)
 

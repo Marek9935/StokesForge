@@ -5169,13 +5169,9 @@ fn header_field_widget(
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
                     });
                     state.commit_header_edit();
-                    if tab
-                        && !shift
-                        && field == HeaderField::Formula
-                        && is_last_visible_column(state, sheet, column)
-                    {
-                        // Tab valide sur le champ Formule de la dernière
-                        // colonne : même geste que Tab en dernière colonne
+                    if tab && !shift && is_last_visible_column(state, sheet, column) {
+                        // Tab valide sur n'importe quel champ d'en-tête de
+                        // la dernière colonne (#52) : même geste que Tab en dernière colonne
                         // d'une ligne de données — ajoute une colonne plutôt
                         // que d'entrer dans les données (voir
                         // `Action::AddColumnAndSelectHeaderField`).
@@ -7204,26 +7200,22 @@ fn grid_contents(
             state.move_selection(sheet, MoveDirection::Right, shift);
         }
         if tab && !shift {
-            // Tab sur la dernière colonne d'une ligne de données, ou sur le
-            // champ Formule (le dernier des quatre) de la dernière colonne
-            // en en-tête : même geste — ajoute une colonne plutôt que de
+            // Tab sur la dernière colonne d'une ligne de données, ou sur
+            // n'importe quel champ d'en-tête de la dernière colonne : même geste — ajoute une colonne plutôt que de
             // revenir en début de ligne suivante ou d'entrer dans les
             // données, puis sélectionne tout de suite la case qui y
             // correspondra (voir `Action::AddColumnAndSelect`/
             // `Action::AddColumnAndSelectHeaderField`, qui ne peuvent la
             // poser qu'une fois la colonne réellement créée, contrairement à
-            // une ligne). Les trois autres champs d'en-tête (Long Name,
-            // Units, Comments) restent inchangés : Tab y circule d'abord
-            // colonne par colonne pour un même champ, y compris sur la
-            // dernière colonne — seul Formule marque la vraie fin de
-            // l'en-tête.
+            // une ligne). Valait seulement pour Formule avant #52 (Tab
+            // circulait d'abord colonne par colonne pour un même champ) ;
+            // décision levée par l'utilisateur.
             let cursor = state.selection(sheet).and_then(Selection::grid_cursor);
             let needs_new_column = match cursor {
-                Some(GridCursor::Data(column, _)) => is_last_visible_column(state, sheet, column),
-                Some(GridCursor::Header(column, HeaderField::Formula)) => {
+                Some(GridCursor::Data(column, _) | GridCursor::Header(column, _)) => {
                     is_last_visible_column(state, sheet, column)
                 }
-                _ => false,
+                None => false,
             };
             if needs_new_column {
                 match cursor {
@@ -12874,6 +12866,49 @@ mod grid_keyboard_tests {
             "après la validation, Tab continue d'avancer dans la grille"
         );
         assert!(!banc.voisin_focalise);
+    }
+
+    /// #52 : Tab sur la dernière colonne ajoute une colonne quel que soit le
+    /// champ d'en-tête, hors édition comme en édition — plus seulement Formule.
+    #[test]
+    fn tab_en_derniere_colonne_ajoute_une_colonne_pour_chaque_champ_d_en_tete() {
+        for editer in [false, true] {
+            for field in [
+                HeaderField::LongName,
+                HeaderField::Unit,
+                HeaderField::Comment,
+                HeaderField::Formula,
+            ] {
+                let mut banc = Banc::new();
+                let (sheet, derniere) = (banc.sheet, banc.columns[2]);
+                // Le clic donne le focus à la grille (sinon Tab n'est pas à elle).
+                banc.clic_sur("301");
+                banc.state.select_header_field(sheet, derniere, field);
+                if editer {
+                    banc.state.begin_header_edit(derniere, field);
+                }
+                for _ in 0..3 {
+                    banc.image(Vec::new());
+                }
+                banc.image(vec![
+                    egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                    egui::Event::Key {
+                        key: egui::Key::Tab,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]);
+                assert!(
+                    banc.actions.iter().any(|action| matches!(
+                        action,
+                        Action::AddColumnAndSelectHeaderField { field: f, .. } if *f == field
+                    )),
+                    "Tab sur {field:?} (édition : {editer}) doit ajouter une colonne"
+                );
+            }
+        }
     }
 
     #[test]

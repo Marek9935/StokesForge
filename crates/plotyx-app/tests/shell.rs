@@ -4329,7 +4329,7 @@ fn add_column_and_select_adds_a_column_and_selects_it_on_the_given_row() {
 
 /// `Action::AddColumnAndSelectHeaderField` — le pendant de
 /// [`add_column_and_select_adds_a_column_and_selects_it_on_the_given_row`]
-/// côté en-tête : Tab valide sur le champ Formule de la dernière colonne
+/// côté en-tête : Tab valide sur un champ d'en-tête de la dernière colonne
 /// ajoute une colonne plutôt que d'entrer dans les données.
 #[test]
 fn add_column_and_select_header_field_adds_a_column_and_selects_the_field_in_it() {
