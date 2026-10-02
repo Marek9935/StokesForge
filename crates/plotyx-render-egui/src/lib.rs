@@ -114,7 +114,9 @@ pub use plotyx_render::text::{font_definitions, font_definitions_for, TextMeasur
 // Le choix de police (embed du 2026-09-13, `plotyx_render::fonts`) : une UI
 // qui veut proposer Fira/Libertinus/Noto ou une police système n'a pas à
 // déclarer sa propre arête vers `plotyx-render` pour ça non plus.
-pub use plotyx_render::{FontChoice, FontSet, FontSource, ResolvedFonts};
+pub use plotyx_render::{
+    available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts,
+};
 // La correspondance pixel ↔ données (tâche R7) : `plotyx-render` la porte
 // (voir `plotyx_render::interact`, générique sur le backend), ce crate ne
 // fait que la consommer avec des types egui.

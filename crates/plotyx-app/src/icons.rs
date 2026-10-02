@@ -72,6 +72,11 @@ pub enum Icon {
     PlotLine,
     PlotScatter,
     PlotBar,
+    Bold,
+    Italic,
+    Subscript,
+    Superscript,
+    Formula,
 }
 
 macro_rules! svg {
@@ -212,6 +217,27 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         Icon::PlotBar,
         IconRole::Neutral,
         svg!("chart-bar.neutral.svg"),
+    ),
+    (Icon::Bold, IconRole::Neutral, svg!("text-b.neutral.svg")),
+    (
+        Icon::Italic,
+        IconRole::Neutral,
+        svg!("text-italic.neutral.svg"),
+    ),
+    (
+        Icon::Subscript,
+        IconRole::Neutral,
+        svg!("text-subscript.neutral.svg"),
+    ),
+    (
+        Icon::Superscript,
+        IconRole::Neutral,
+        svg!("text-superscript.neutral.svg"),
+    ),
+    (
+        Icon::Formula,
+        IconRole::Neutral,
+        svg!("function.neutral.svg"),
     ),
 ];
 

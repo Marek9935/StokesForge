@@ -263,8 +263,10 @@ struct FormulaWorld {
 impl FormulaWorld {
     /// Construit un monde pour une seule compilation, sur les deux polices
     /// (texte et Math) résolues par [`crate::fonts::resolve`].
-    fn new(markup: String, sans: Font, math: Font) -> Result<Self, String> {
-        let fonts = vec![sans, math];
+    fn new(markup: String, sans: Font, math: Font, extras: Vec<Font>) -> Result<Self, String> {
+        let mut fonts = vec![sans, math];
+        fonts.extend(noto_italic());
+        fonts.extend(extras);
         let book = FontBook::from_fonts(&fonts);
         let vpath = VirtualPath::new("/formule.typ")
             .map_err(|err| format!("chemin virtuel Typst invalide : {err}"))?;
@@ -429,12 +431,18 @@ pub fn compile(
          #let plotyx-rotate(angle, body) = rotate(angle, reflow: true, [#plotyx-strut#body])\n\
          {strut}{text}"
     );
-    compile_markup(markup, sans, math)
+    let extras = requested_fonts(text);
+    compile_markup(markup, sans, math, extras)
 }
 
 /// Compile un document Typst complet, réglages de page compris.
-fn compile_markup(markup: String, sans: Font, math: Font) -> Result<Compiled, String> {
-    let world = FormulaWorld::new(markup, sans, math)?;
+fn compile_markup(
+    markup: String,
+    sans: Font,
+    math: Font,
+    extras: Vec<Font>,
+) -> Result<Compiled, String> {
+    let world = FormulaWorld::new(markup, sans, math, extras)?;
     let warned = typst::compile::<PagedDocument>(&world);
     let document = warned.output.map_err(|diagnostics| {
         diagnostics
@@ -444,6 +452,83 @@ fn compile_markup(markup: String, sans: Font, math: Font) -> Result<Compiled, St
             .join("; ")
     })?;
     Ok(Compiled { document })
+}
+
+/// La face italique de Noto Sans, toujours connue du `World` : Typst ne
+/// fabrique pas d'italique, et le bouton « italique » de la barre de format
+/// de texte (issue #63) resterait sans effet avec la seule face droite.
+fn noto_italic() -> Option<Font> {
+    static ITALIC: OnceLock<Option<Font>> = OnceLock::new();
+    ITALIC
+        .get_or_init(|| {
+            Font::new(
+                Bytes::new(include_bytes!(
+                    "../../../vendor/fonts/noto-sans/NotoSans-Italic-Variable.ttf"
+                )),
+                0,
+            )
+        })
+        .clone()
+}
+
+/// Les noms de famille qu'un texte demande lui-même, par
+/// `#text(font: "Nom")` (la barre de format de texte, issue #63), dans
+/// l'ordre et sans doublon. Une lecture lexicale : on cherche `font:` suivi
+/// d'une chaîne entre guillemets.
+fn requested_families(text: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("font:") {
+        rest = &rest[at + "font:".len()..];
+        let trimmed = rest.trim_start();
+        let Some(quoted) = trimmed.strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = quoted.find('"') else {
+            break;
+        };
+        let name = &quoted[..end];
+        if !name.is_empty() && !names.iter().any(|known| known == name) {
+            names.push(name.to_owned());
+        }
+        rest = &quoted[end..];
+    }
+    names
+}
+
+/// Les polices que `text` nomme et que le `World` doit connaître en plus du
+/// texte et de la Math : une police embarquée par son nom de famille, sinon
+/// une police du système. Introuvable ⇒ absente : Typst retombe alors sur la
+/// police du document, sans erreur (le texte ne disparaît pas). Mémorisé
+/// par nom, car lire une police système coûte plus qu'une compilation.
+fn requested_fonts(text: &str) -> Vec<Font> {
+    static KNOWN: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<Font>>>> =
+        OnceLock::new();
+    let names = requested_families(text);
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let known = KNOWN.get_or_init(Default::default);
+    let mut known = known.lock().unwrap_or_else(|err| err.into_inner());
+    names
+        .into_iter()
+        .filter_map(|name| {
+            known
+                .entry(name.clone())
+                .or_insert_with(|| load_named_font(&name))
+                .clone()
+        })
+        .collect()
+}
+
+fn load_named_font(name: &str) -> Option<Font> {
+    if let Some(set) = FontSet::ALL
+        .iter()
+        .find(|set| set.sans_family_name() == name)
+    {
+        return embedded_font(set.sans_bytes(), "sans").ok();
+    }
+    crate::fonts::load_system_font(name).and_then(|data| system_font(data, "sans").ok())
 }
 
 /// Le nom de famille d'une `Font` Typst déjà chargée — pour l'écrire dans
@@ -811,6 +896,61 @@ mod tests {
     }
 
     const NOIR: Ink = [0, 0, 0, 255];
+
+    fn largeur_de(text: &str) -> f64 {
+        let (sans, math) = noto();
+        compile(text, 14.0, NOIR, sans, math)
+            .unwrap_or_else(|err| panic!("{text:?} ne compile pas : {err}"))
+            .size_pt()
+            .0
+    }
+
+    /// Issue #63 : `#text(font: "Nom")` choisit une police embarquée par son
+    /// nom de famille. Le témoin : le même texte sans la balise est plus
+    /// étroit ou plus large, jamais égal.
+    #[test]
+    fn une_police_embarquee_se_choisit_par_son_nom() {
+        let defaut = largeur_de("Absorbance (a.u.)");
+        let fira = largeur_de("#text(font: \"Fira Sans\")[Absorbance (a.u.)]");
+        let libertinus = largeur_de("#text(font: \"Libertinus Sans\")[Absorbance (a.u.)]");
+        assert!((defaut - fira).abs() > 1e-3, "Fira = défaut : {fira}");
+        assert!((fira - libertinus).abs() > 1e-3, "Libertinus = Fira");
+    }
+
+    /// Une police introuvable ne fait ni échouer ni disparaître le texte : il
+    /// retombe sur la police du document.
+    #[test]
+    fn une_police_introuvable_replie_sur_la_police_du_document() {
+        let defaut = largeur_de("Absorbance");
+        let absente = largeur_de("#text(font: \"Police PlotYx Inexistante\")[Absorbance]");
+        assert!((defaut - absente).abs() < 1e-6);
+    }
+
+    #[test]
+    fn les_familles_demandees_sont_lues_dans_le_markup() {
+        assert_eq!(
+            requested_families(
+                "#text(font: \"A B\")[x] et #text(size: 9pt, font:\"C\")[y] #text(font: \"A B\")[z]"
+            ),
+            ["A B", "C"]
+        );
+        assert!(requested_families("font: sans guillemets").is_empty());
+        assert!(requested_families("font: \"ouvert").is_empty());
+    }
+
+    /// Les boutons G et I de la barre (issue #63) doivent changer le rendu
+    /// avec la police par défaut, sinon ils ne servent à rien.
+    #[test]
+    fn gras_et_italique_changent_la_largeur_avec_la_police_par_defaut() {
+        let normal = largeur_de("Absorbance");
+        let gras = largeur_de("#strong[Absorbance]");
+        let italique = largeur_de("#emph[Absorbance]");
+        assert!((normal - gras).abs() > 1e-3, "gras = normal : {gras}");
+        assert!(
+            (normal - italique).abs() > 1e-3,
+            "italique = normal : {italique}"
+        );
+    }
 
     /// Un texte tourné (issue #35) : sa page épouse la boîte tournée, donc un
     /// quart de tour échange largeur et hauteur, et le texte d'origine compile

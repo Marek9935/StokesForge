@@ -1601,11 +1601,91 @@ impl PlotyxApp {
         }
     }
 
+    /// Sur quoi la barre de format agit : un champ en édition sur place, sinon
+    /// un texte libre sélectionné, sinon rien (issue #63).
+    fn format_target(
+        &self,
+        ctx: &egui::Context,
+        active_tab: Option<Tab>,
+    ) -> crate::toolbar::FormatTarget {
+        use crate::toolbar::FormatTarget;
+        let Some(view) = active_graph(active_tab_kind(active_tab))
+            .and_then(|graph| self.graph_views.get(&graph))
+        else {
+            return FormatTarget::None;
+        };
+        let editing = ctx.data(|data| {
+            data.get_temp::<TextEditor>(text_editor_id(view)).is_some()
+                || data
+                    .get_temp::<AnnotationEditor>(annotation_editor_id(view))
+                    .is_some()
+        });
+        if editing {
+            FormatTarget::Field
+        } else if view.selected_annotation().is_some() {
+            FormatTarget::Block
+        } else {
+            FormatTarget::None
+        }
+    }
+
+    /// Met en forme le texte visé : dans le champ en édition (le champ pose
+    /// les balises à son prochain tracé, voir [`apply_pending_format`]), ou
+    /// sur tout le texte libre sélectionné — une seule action annulable.
+    fn format_text(
+        &mut self,
+        ctx: &egui::Context,
+        format: crate::text_format::TextFormat,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        use crate::text_format::{apply, TextFormat};
+        match self.format_target(ctx, active_tab) {
+            crate::toolbar::FormatTarget::None => {}
+            crate::toolbar::FormatTarget::Field => {
+                ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(format)));
+            }
+            crate::toolbar::FormatTarget::Block => {
+                let Some(graph) = active_graph(active_tab_kind(active_tab)) else {
+                    return;
+                };
+                let Some(target) = self
+                    .graph_views
+                    .get(&graph)
+                    .and_then(GraphView::selected_annotation)
+                else {
+                    return;
+                };
+                let Some(mut annotation) =
+                    crate::state::current_plot_spec(self.state.tree(), graph)
+                        .and_then(|spec| target.get(&spec).cloned())
+                else {
+                    return;
+                };
+                // Couleur et corps d'un texte libre sont des champs du modèle.
+                match &format {
+                    TextFormat::Color(color) => annotation.color = color.clone(),
+                    TextFormat::Size(size) => annotation.size = *size,
+                    _ => {
+                        let length = annotation.text.chars().count();
+                        annotation.text = apply(&annotation.text, 0..length, &format).text;
+                    }
+                }
+                actions.push(Action::SetAnnotation {
+                    graph,
+                    target,
+                    annotation: Box::new(annotation),
+                });
+            }
+        }
+    }
+
     /// Exécute ce qu'un bouton de barre d'outils a demandé : les mêmes
     /// chemins que les entrées de menu correspondantes, jamais une seconde
     /// écriture.
     fn run_toolbar_request(
         &mut self,
+        ctx: &egui::Context,
         request: ToolbarRequest,
         active_tab: Option<Tab>,
         actions: &mut Vec<Action>,
@@ -1625,6 +1705,9 @@ impl PlotyxApp {
                 {
                     view.reset_view();
                 }
+            }
+            ToolbarRequest::FormatText(format) => {
+                self.format_text(ctx, format, active_tab, actions);
             }
             ToolbarRequest::Import => self.open_import_dialog(),
             ToolbarRequest::Open => self.choose_open_path(actions),
@@ -2512,6 +2595,7 @@ impl eframe::App for PlotyxApp {
         let bar_env = BarEnv {
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
             tools: self.tools_context(active_tab),
+            text_format: self.format_target(&ctx, active_tab),
             shortcuts: crate::toolbar::ShortcutTexts {
                 open: ctx.format_shortcut(&SHORTCUT_OPEN),
                 save: ctx.format_shortcut(&SHORTCUT_SAVE),
@@ -2523,7 +2607,7 @@ impl eframe::App for PlotyxApp {
         let mut bar_requests = Vec::new();
         self.toolbars.show(ui, &bar_env, &mut bar_requests);
         for request in bar_requests {
-            self.run_toolbar_request(request, active_tab, &mut actions);
+            self.run_toolbar_request(&ctx, request, active_tab, &mut actions);
         }
         if self.toolbars.take_changed() {
             self.save_toolbar_layout();
@@ -7962,6 +8046,41 @@ struct TextEditor {
     anchor: (egui::Pos2, egui::Vec2),
 }
 
+/// La mise en forme demandée par la barre, en attente du champ en édition.
+fn pending_format_id() -> egui::Id {
+    egui::Id::new("plotyx_pending_text_format")
+}
+
+/// Pose la mise en forme demandée par la barre de format sur `buffer`, selon
+/// la sélection que le champ `field` a gardée (egui la conserve quand le
+/// champ perd le focus au clic sur la barre), puis rend le focus au champ avec
+/// la sélection à l'intérieur des balises.
+fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut String) {
+    use egui::text::{CCursor, CCursorRange};
+    let Some(format) = ctx
+        .data_mut(|data| {
+            data.remove_temp::<Option<crate::text_format::TextFormat>>(pending_format_id())
+        })
+        .flatten()
+    else {
+        return;
+    };
+    let mut state = egui::TextEdit::load_state(ctx, field).unwrap_or_default();
+    let length = buffer.chars().count();
+    let selection = state.cursor.char_range().map_or(length..length, |range| {
+        let [start, end] = range.sorted_cursors();
+        start.index.0..end.index.0
+    });
+    let done = crate::text_format::apply(buffer, selection, &format);
+    *buffer = done.text;
+    state.cursor.set_char_range(Some(CCursorRange::two(
+        CCursor::new(done.selection.start),
+        CCursor::new(done.selection.end),
+    )));
+    state.store(ctx, field);
+    ctx.memory_mut(|memory| memory.request_focus(field));
+}
+
 fn text_editor_id(view: &GraphView) -> egui::Id {
     view.id().with("text_editor")
 }
@@ -8056,6 +8175,7 @@ fn text_editor_ui(
     actions: &mut Vec<Action>,
 ) {
     let id = text_editor_id(view);
+    apply_pending_format(ctx, id.with("field"), &mut editor.buffer);
     let (center, size) = editor.anchor;
     let field = egui::Rect::from_center_size(
         center,
@@ -8093,7 +8213,13 @@ fn text_editor_ui(
                 .then(|| input.pointer.interact_pos())
                 .flatten()
         })
-        .is_some_and(|pos| !area.response.rect.contains(pos));
+        .is_some_and(|pos| {
+            !area.response.rect.contains(pos)
+                && !crate::toolbar::over_format_bar(ctx, pos)
+                && ctx
+                    .layer_id_at(pos)
+                    .is_none_or(|layer| layer.order != egui::Order::Foreground)
+        });
     if cancel {
         ctx.data_mut(|data| data.remove::<TextEditor>(id));
         return;
@@ -8179,7 +8305,7 @@ fn start_annotation_editor(
 /// Les couleurs enregistrées, publiées chaque image par la racine pour que
 /// le sélecteur de couleur de l'éditeur sur place les propose aussi depuis
 /// une fenêtre détachée (qui n'a pas `AppState`).
-fn saved_colors_id() -> egui::Id {
+pub(crate) fn saved_colors_id() -> egui::Id {
     egui::Id::new("plotyx_saved_colors_for_graphs")
 }
 
@@ -8272,6 +8398,7 @@ fn annotation_editor_ui(
     actions: &mut Vec<Action>,
 ) {
     let id = annotation_editor_id(view);
+    apply_pending_format(ctx, id.with("field"), &mut editor.draft.text);
     // Le cadre du texte rendu ; à défaut (texte neuf, ou vidé donc plus
     // tracé), le dernier connu, puis le centre de la figure.
     if let Some((center, size, _)) = view.annotation_screen_box(editor.target) {
@@ -8418,6 +8545,7 @@ fn annotation_editor_ui(
     let outside = pressed_at.is_some_and(|pos| {
         !toolbar.response.rect.contains(pos)
             && !text.response.rect.contains(pos)
+            && !crate::toolbar::over_format_bar(ctx, pos)
             && ctx
                 .layer_id_at(pos)
                 .is_none_or(|layer| layer.order != egui::Order::Foreground)
@@ -13693,5 +13821,51 @@ mod window_header_tests {
         assert_eq!(trois, 80.0);
         assert_eq!(matrice, croix);
         assert!(shows_detach_and_maximize(HeaderPlacement::Detached, None));
+    }
+}
+
+#[cfg(test)]
+mod pending_format_tests {
+    use super::*;
+    use crate::text_format::TextFormat;
+    use egui::text::{CCursor, CCursorRange};
+
+    fn context_with_selection(field: egui::Id, range: std::ops::Range<usize>) -> egui::Context {
+        let ctx = egui::Context::default();
+        let mut state = egui::text_edit::TextEditState::default();
+        state.cursor.set_char_range(Some(CCursorRange::two(
+            CCursor::new(range.start),
+            CCursor::new(range.end),
+        )));
+        state.store(&ctx, field);
+        ctx
+    }
+
+    /// #63 : la mise en forme demandée par la barre s'applique au surlignage
+    /// que le champ a gardé, puis la sélection se place dans les balises.
+    #[test]
+    fn la_mise_en_forme_en_attente_s_applique_au_surlignage_du_champ() {
+        let field = egui::Id::new("champ");
+        let ctx = context_with_selection(field, 4..7);
+        ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(TextFormat::Bold)));
+        let mut buffer = "Abs 280 nm".to_owned();
+        apply_pending_format(&ctx, field, &mut buffer);
+        assert_eq!(buffer, "Abs #strong[280] nm");
+        let state = egui::text_edit::TextEditState::load(&ctx, field).unwrap();
+        let [start, end] = state.cursor.char_range().unwrap().sorted_cursors();
+        assert_eq!((start.index.0, end.index.0), (12, 15));
+        // La demande est consommée : une seconde image ne la rejoue pas.
+        apply_pending_format(&ctx, field, &mut buffer);
+        assert_eq!(buffer, "Abs #strong[280] nm");
+    }
+
+    #[test]
+    fn sans_surlignage_le_curseur_recoit_les_balises() {
+        let field = egui::Id::new("champ");
+        let ctx = context_with_selection(field, 3..3);
+        ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(TextFormat::Subscript)));
+        let mut buffer = "H2O".to_owned();
+        apply_pending_format(&ctx, field, &mut buffer);
+        assert_eq!(buffer, "H2O#sub[]");
     }
 }

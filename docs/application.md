@@ -442,6 +442,21 @@ accueil en haut seulement.
   sans colonne sélectionnée). Matrice, note, aucune fenêtre : la barre
   disparaît (jamais de bouton mort) et ses voisines se recalent
   (`ToolbarLayout::docked_rows_where`).
+- Barre `Text` (format du texte, #63) : visible avec un graphe au premier
+  plan, sur sa propre rangée par défaut. Police, corps, couleur, gras,
+  italique, indice, exposant, formule. Les textes du graphe étant déjà du
+  markup Typst, un bouton **écrit des balises dans le texte**
+  (`text_format::apply`, pur) : aucun champ de modèle, aucun changement du
+  `.plx`. Cible (`FormatTarget`, `PlotyxApp::format_target`) : un champ en
+  édition sur place (texte libre, titre, titre d'axe, légende) → la demande
+  attend dans la mémoire d'egui (`pending_format_id`) et le champ la pose à
+  son prochain tracé sur le surlignage qu'egui a gardé, ou insère les balises
+  au curseur (`apply_pending_format`) ; sinon un texte libre sélectionné →
+  tout le texte, en **une** `Action::SetAnnotation` (couleur et corps sont les
+  champs du modèle) ; sinon les boutons sont grisés. Gras, italique, indice,
+  exposant et formule se défont en les reposant. Un clic sur la barre ne ferme
+  pas l'éditeur (`toolbar::over_format_bar`). Le formateur ne pose pas
+  d'alignement : les textes tiennent sur une ligne.
 - Visibilité : menu **View**, une case par barre. Emplacement et visibilité
   sont dans `preferences.json` (champ `toolbars`), pas dans le `.plx` ; la
   lecture ignore ce qu'elle ne comprend pas. `PlotyxApp::new` ne lit pas le

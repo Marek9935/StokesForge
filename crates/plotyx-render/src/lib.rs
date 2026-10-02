@@ -88,7 +88,7 @@ pub mod text;
 
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
-pub use fonts::{FontChoice, FontSet, FontSource, ResolvedFonts};
+pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use hit::{component_at, AxisSide, PlotComponent};
 pub use interact::{nearest_on_curve, PanelTransform};
 pub use pipeline::{

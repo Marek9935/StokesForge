@@ -298,6 +298,25 @@ pub struct SavedColorRequest {
     pub color: String,
 }
 
+impl SavedColorRequest {
+    /// L'action qui exécute la demande.
+    pub fn into_action(self) -> crate::state::Action {
+        use crate::state::Action;
+        match self.edit {
+            SavedColorEdit::Save => Action::SaveColor {
+                usage: self.usage,
+                color: self.color,
+                target: self.target,
+            },
+            SavedColorEdit::Remove => Action::RemoveSavedColor {
+                usage: self.usage,
+                color: self.color,
+                target: self.target,
+            },
+        }
+    }
+}
+
 /// Ce que le sélecteur lit et écrit hors de la couleur éditée : les couleurs
 /// enregistrées, et les demandes qui les modifient.
 #[derive(Debug, Clone, Default)]

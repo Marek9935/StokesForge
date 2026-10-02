@@ -49,6 +49,7 @@ pub mod icons;
 pub mod preferences;
 pub mod selection;
 pub mod state;
+pub mod text_format;
 pub mod theme;
 pub mod toolbar;
 pub mod user_colors;

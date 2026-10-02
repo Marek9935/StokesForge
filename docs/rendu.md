@@ -58,6 +58,17 @@ fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
 automatique — à l'écran comme à l'export, puisque le pipeline est commun
 (`plotyx-render-svg/tests/couleurs.rs`).
 
+Polices dans le texte (issue #63) : un texte peut nommer sa police,
+`#text(font: "Fira Sans")[…]`. Le `World` Typst (`formula::requested_fonts`)
+lit ces noms dans le markup et charge la famille demandée, embarquée
+(Libertinus Sans, Fira Sans, Noto Sans) sinon installée sur la machine
+(`fonts::available_families`, base `fontdb` scannée une fois). Introuvable :
+Typst retombe sur la police du document, le texte ne disparaît pas — mais la
+figure change d'une machine à l'autre, puisque seules les polices embarquées
+voyagent. Le gras vient de l'axe `wght` de Noto Sans ; l'italique de la face
+italique de Noto Sans embarquée avec lui (Typst ne fabrique pas d'italique) ;
+Fira et Libertinus n'ont que le régulier.
+
 Une formule Typst suit la même couleur (issue #30) : les backends passent
 `style.color()` à la compilation (`formula::ink`), qui pose
 `#set text(fill: rgb(…))`. La couleur est donc **dans l'image rastérisée** ou

@@ -44,6 +44,9 @@ use plotyx_core::NodeId;
 use plotyx_plot::PlotType;
 use plotyx_render_egui::GraphTool;
 
+use crate::color_picker::{ColorUsage, PickerEnv};
+use crate::text_format::TextFormat;
+
 /// Les barres existantes — un enum fermé : ajouter une barre, c'est ajouter une
 /// variante, son nom (`toolbar-*`) et son contenu dans [`bar_contents`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -53,16 +56,19 @@ pub enum ToolbarId {
     /// La barre contextuelle (issue #62) : son contenu suit la fenêtre au
     /// premier plan.
     Tools,
+    /// Le format du texte (issue #63) : propre au graphe au premier plan.
+    Text,
 }
 
 impl ToolbarId {
-    pub const ALL: [ToolbarId; 2] = [ToolbarId::File, ToolbarId::Tools];
+    pub const ALL: [ToolbarId; 3] = [ToolbarId::File, ToolbarId::Tools, ToolbarId::Text];
 
     /// Nom de la barre : entrée du menu View.
     pub fn label(self) -> String {
         match self {
             ToolbarId::File => tr!("toolbar-file"),
             ToolbarId::Tools => tr!("toolbar-tools"),
+            ToolbarId::Text => tr!("toolbar-text"),
         }
     }
 
@@ -71,6 +77,7 @@ impl ToolbarId {
         match self {
             ToolbarId::File => tr!("toolbar-file", "hint"),
             ToolbarId::Tools => tr!("toolbar-tools", "hint"),
+            ToolbarId::Text => tr!("toolbar-text", "hint"),
         }
     }
 }
@@ -108,7 +115,10 @@ impl Default for ToolbarLayout {
                 .map(|&id| Entry {
                     id,
                     visible: true,
-                    placement: Placement::Docked { row: 0 },
+                    // La barre de format est large : elle a sa propre rangée.
+                    placement: Placement::Docked {
+                        row: usize::from(id == ToolbarId::Text),
+                    },
                 })
                 .collect(),
         }
@@ -387,6 +397,8 @@ pub enum ToolbarRequest {
     SetGraphTool(GraphTool),
     /// Réinitialise le zoom du graphe au premier plan.
     ResetZoom,
+    /// Met en forme le texte visé du graphe au premier plan.
+    FormatText(TextFormat),
 }
 
 /// Les raccourcis tels que les menus les écrivent (rappel dans l'info-bulle).
@@ -397,6 +409,18 @@ pub struct ShortcutTexts {
     pub save_as: String,
     pub import: String,
     pub export: String,
+}
+
+/// Sur quoi la barre de format agit (issue #63).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FormatTarget {
+    /// Rien n'est sélectionné ni en édition : les boutons sont grisés.
+    #[default]
+    None,
+    /// Un champ est en édition sur place : le surlignage, ou le curseur.
+    Field,
+    /// Un texte est sélectionné sans être édité : tout le texte.
+    Block,
 }
 
 /// Ce que la barre contextuelle montre : décidé par la fenêtre au premier plan.
@@ -426,6 +450,7 @@ pub struct BarEnv {
     pub export_enabled: bool,
     pub shortcuts: ShortcutTexts,
     pub tools: ToolsContext,
+    pub text_format: FormatTarget,
 }
 
 impl BarEnv {
@@ -434,6 +459,7 @@ impl BarEnv {
         match id {
             ToolbarId::File => true,
             ToolbarId::Tools => !matches!(self.tools, ToolsContext::None),
+            ToolbarId::Text => matches!(self.tools, ToolsContext::Graph { .. }),
         }
     }
 }
@@ -541,6 +567,7 @@ pub fn bar_contents(
             }
         }
         ToolbarId::Tools => tools_contents(ui, env, requests),
+        ToolbarId::Text => text_format_contents(ui, env, requests),
     }
 }
 
@@ -572,31 +599,34 @@ fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarReq
     match &env.tools {
         ToolsContext::None => {}
         ToolsContext::Graph { graph, tool } => {
-            for (kind, icon, label, hint) in [
-                (
-                    GraphTool::Pointer,
-                    Icon::Pointer,
-                    tr!("tool-pointer"),
-                    tr!("tool-pointer", "hint"),
-                ),
-                (
-                    GraphTool::ZoomBox,
-                    Icon::ZoomTool,
-                    tr!("tool-zoom"),
-                    tr!("tool-zoom", "hint"),
-                ),
-                (
-                    GraphTool::Text,
-                    Icon::TextTool,
-                    tr!("tool-text"),
-                    tr!("tool-text", "hint"),
-                ),
-            ] {
+            let mut tool_entry = |ui: &mut egui::Ui, kind, icon, label: String, hint: String| {
                 if tool_button(ui, icon, label, Some(hint), true, *tool == kind) {
                     requests.push(ToolbarRequest::SetGraphTool(kind));
                 }
-            }
+            };
+            tool_entry(
+                ui,
+                GraphTool::Pointer,
+                Icon::Pointer,
+                tr!("tool-pointer"),
+                tr!("tool-pointer", "hint"),
+            );
+            tool_entry(
+                ui,
+                GraphTool::Text,
+                Icon::TextTool,
+                tr!("tool-text"),
+                tr!("tool-text", "hint"),
+            );
             ui.separator();
+            // Le groupe zoom : l'outil et sa remise à zéro côte à côte.
+            tool_entry(
+                ui,
+                GraphTool::ZoomBox,
+                Icon::ZoomTool,
+                tr!("tool-zoom"),
+                tr!("tool-zoom", "hint"),
+            );
             if tool_button(
                 ui,
                 Icon::ResetZoom,
@@ -607,6 +637,7 @@ fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarReq
             ) {
                 requests.push(ToolbarRequest::ResetZoom);
             }
+            ui.separator();
             if tool_button(
                 ui,
                 Icon::Properties,
@@ -683,6 +714,169 @@ fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarReq
     }
 }
 
+/// Corps proposés par la barre de format, en points.
+const FORMAT_SIZES: [f64; 14] = [
+    6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0,
+];
+
+/// Où la barre de format s'est peinte à l'image précédente : un clic dessus ne
+/// ferme pas l'éditeur sur place, sinon le bouton n'agirait jamais.
+fn format_bar_id() -> egui::Id {
+    egui::Id::new("plotyx_text_format_bar_rect")
+}
+
+/// Le pointeur est-il sur la barre de format ? (cadre de l'image précédente)
+pub fn over_format_bar(ctx: &egui::Context, pos: Pos2) -> bool {
+    ctx.data(|data| data.get_temp::<Rect>(format_bar_id()))
+        .is_some_and(|rect| rect.contains(pos))
+}
+
+/// La barre de format du texte : polices, corps, couleur, puis les balises.
+fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
+    let enabled = env.text_format != FormatTarget::None;
+    let ctx = ui.ctx().clone();
+    ui.add_enabled_ui(enabled, |ui| {
+        let on_hover = |response: egui::Response, label: String, hint: Option<String>| {
+            let mut tooltip = label;
+            if let Some(hint) = hint {
+                tooltip.push('\n');
+                tooltip.push_str(&hint);
+            }
+            if !enabled {
+                tooltip.push('\n');
+                tooltip.push_str(&tr!("format-disabled"));
+            }
+            response.on_hover_text(tooltip)
+        };
+
+        // Police.
+        let chosen = egui::ComboBox::from_id_salt("plotyx_format_font")
+            .selected_text(tr!("format-font"))
+            .width(110.0)
+            .show_ui(ui, |ui| {
+                let mut chosen = None;
+                let mut shown_system_title = false;
+                ui.label(egui::RichText::new(tr!("format-font-embedded")).weak());
+                for family in plotyx_render_egui::available_families() {
+                    if !family.embedded && !shown_system_title {
+                        ui.separator();
+                        ui.label(egui::RichText::new(tr!("format-font-system")).weak());
+                        shown_system_title = true;
+                    }
+                    if ui.selectable_label(false, &family.name).clicked() {
+                        chosen = Some(family.name.clone());
+                    }
+                }
+                chosen
+            });
+        on_hover(
+            chosen.response.clone(),
+            tr!("format-font"),
+            Some(tr!("format-font", "hint")),
+        );
+        if let Some(name) = chosen.inner.flatten() {
+            requests.push(ToolbarRequest::FormatText(TextFormat::Font(name)));
+        }
+
+        // Corps.
+        let chosen = egui::ComboBox::from_id_salt("plotyx_format_size")
+            .selected_text(tr!("format-size"))
+            .width(54.0)
+            .show_ui(ui, |ui| {
+                let mut chosen = None;
+                for size in FORMAT_SIZES {
+                    if ui.selectable_label(false, format!("{size}")).clicked() {
+                        chosen = Some(size);
+                    }
+                }
+                chosen
+            });
+        on_hover(
+            chosen.response.clone(),
+            tr!("format-size"),
+            Some(tr!("format-size", "hint")),
+        );
+        if let Some(size) = chosen.inner.flatten() {
+            requests.push(ToolbarRequest::FormatText(TextFormat::Size(size)));
+        }
+
+        // Couleur : la dernière choisie est mémorisée pour la durée de la session.
+        let color_id = egui::Id::new("plotyx_format_color");
+        let mut color: String = ctx.data(|data| data.get_temp(color_id)).unwrap_or_default();
+        let before = color.clone();
+        let (project, user) = ctx
+            .data(|data| data.get_temp(crate::app::saved_colors_id()))
+            .unwrap_or_default();
+        let mut picker = PickerEnv {
+            project,
+            user,
+            requests: Vec::new(),
+        };
+        ui.scope(|ui| {
+            crate::color_picker::color_button(
+                ui,
+                "plotyx_format_color_button",
+                &mut color,
+                ColorUsage::Text,
+                Some(&tr!("plot-color-auto-contrast")),
+                &mut picker,
+            );
+        })
+        .response
+        .on_hover_text(tr!("format-color"));
+        for request in picker.requests {
+            requests.push(ToolbarRequest::Action(Box::new(request.into_action())));
+        }
+        if color != before {
+            ctx.data_mut(|data| data.insert_temp(color_id, color.clone()));
+            requests.push(ToolbarRequest::FormatText(TextFormat::Color(color)));
+        }
+
+        ui.separator();
+        for (icon, format, label, hint) in [
+            (
+                Icon::Bold,
+                TextFormat::Bold,
+                tr!("format-bold"),
+                tr!("format-bold", "hint"),
+            ),
+            (
+                Icon::Italic,
+                TextFormat::Italic,
+                tr!("format-italic"),
+                tr!("format-italic", "hint"),
+            ),
+            (
+                Icon::Subscript,
+                TextFormat::Subscript,
+                tr!("format-subscript"),
+                tr!("format-subscript", "hint"),
+            ),
+            (
+                Icon::Superscript,
+                TextFormat::Superscript,
+                tr!("format-superscript"),
+                tr!("format-superscript", "hint"),
+            ),
+            (
+                Icon::Formula,
+                TextFormat::Formula,
+                tr!("format-formula"),
+                tr!("format-formula", "hint"),
+            ),
+        ] {
+            let hint = if enabled {
+                hint
+            } else {
+                format!("{hint}\n{}", tr!("format-disabled"))
+            };
+            if tool_button(ui, icon, label, Some(hint), enabled, false) {
+                requests.push(ToolbarRequest::FormatText(format));
+            }
+        }
+    });
+}
+
 /// Barre en cours de déplacement : sa prise, relative à son coin haut-gauche.
 #[derive(Debug, Clone, Copy)]
 struct Drag {
@@ -757,6 +951,7 @@ impl ToolbarState {
                             }
                             let (rect, grip) = bar(ui, id, env, requests);
                             self.bar_rects.insert(id, rect);
+                            remember_format_bar(&ctx, id, rect);
                             rects.push(rect);
                             if grip.drag_started() {
                                 started = Some(self.grab(&ctx, id, rect));
@@ -793,6 +988,7 @@ impl ToolbarState {
                 });
             let (rect, grip) = area.inner.inner;
             self.bar_rects.insert(id, rect);
+            remember_format_bar(&ctx, id, rect);
             if grip.drag_started() {
                 self.drag = Some(self.grab(&ctx, id, rect));
             }
@@ -882,6 +1078,12 @@ impl ToolbarState {
     }
 }
 
+fn remember_format_bar(ctx: &egui::Context, id: ToolbarId, rect: Rect) {
+    if id == ToolbarId::Text {
+        ctx.data_mut(|data| data.insert_temp(format_bar_id(), rect));
+    }
+}
+
 /// Hauteur d'une rangée vide, pendant un glisser sans aucune barre rangée.
 const EMPTY_ROW_HEIGHT: f32 = 24.0;
 
@@ -942,7 +1144,13 @@ mod tests {
     #[test]
     fn par_defaut_toutes_les_barres_sont_rangees_et_visibles() {
         let layout = ToolbarLayout::default();
-        assert_eq!(layout.docked_rows(), vec![ToolbarId::ALL.to_vec()]);
+        assert_eq!(
+            layout.docked_rows(),
+            vec![
+                vec![ToolbarId::File, ToolbarId::Tools],
+                vec![ToolbarId::Text]
+            ]
+        );
         assert!(layout.floating().is_empty());
     }
 
@@ -978,7 +1186,10 @@ mod tests {
     fn detacher_puis_reranger_garde_la_barre_visible_et_compacte_les_rangees() {
         let mut layout = ToolbarLayout::default();
         layout.float(ToolbarId::File, Pos2::new(120.0, 80.0));
-        assert_eq!(layout.docked_rows(), vec![vec![ToolbarId::Tools]]);
+        assert_eq!(
+            layout.docked_rows(),
+            vec![vec![ToolbarId::Tools], vec![ToolbarId::Text]]
+        );
         assert_eq!(
             layout.floating(),
             vec![(ToolbarId::File, Pos2::new(120.0, 80.0))]
@@ -987,19 +1198,27 @@ mod tests {
         layout.dock(ToolbarId::File, 7, 0);
         assert_eq!(
             layout.docked_rows(),
-            vec![vec![ToolbarId::Tools], vec![ToolbarId::File]]
+            vec![
+                vec![ToolbarId::Tools],
+                vec![ToolbarId::Text],
+                vec![ToolbarId::File]
+            ]
         );
         // Rangée 0, avant la barre qui s'y trouve.
         layout.dock(ToolbarId::File, 0, 0);
         assert_eq!(
             layout.docked_rows(),
-            vec![vec![ToolbarId::File, ToolbarId::Tools]]
+            vec![
+                vec![ToolbarId::File, ToolbarId::Tools],
+                vec![ToolbarId::Text]
+            ]
         );
     }
 
     #[test]
     fn les_rangees_se_comptent_sans_les_barres_sans_contenu() {
         let mut layout = ToolbarLayout::default();
+        layout.set_visible(ToolbarId::Text, false);
         // Tools seule en rangée 0, File en rangée 1.
         layout.dock(ToolbarId::Tools, 0, 0);
         layout.dock(ToolbarId::File, 1, 0);
@@ -1023,6 +1242,7 @@ mod tests {
     #[test]
     fn une_barre_masquee_ne_se_peint_nulle_part() {
         let mut layout = ToolbarLayout::default();
+        layout.set_visible(ToolbarId::Text, false);
         layout.set_visible(ToolbarId::File, false);
         assert_eq!(layout.docked_rows(), vec![vec![ToolbarId::Tools]]);
         layout.set_visible(ToolbarId::File, true);
