@@ -285,7 +285,7 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     (
         Icon::TextColor,
         IconRole::Neutral,
-        svg!("text-a-underline.neutral.svg"),
+        svg!("text-a-underline-modify.neutral.svg"),
     ),
 ];
 

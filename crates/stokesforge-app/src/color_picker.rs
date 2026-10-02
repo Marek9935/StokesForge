@@ -345,8 +345,10 @@ pub fn color_field(
     .inner
 }
 
-/// Taille de l'échantillon du bouton : un petit carré (#89).
-const BUTTON_SWATCH: Vec2 = Vec2::new(14.5, 12.0);
+/// Côté de l'échantillon du bouton : un petit carré (#89).
+const SWATCH_SIDE: f32 = 12.0;
+/// Place réservée au bouton : le carré, plus un peu d'air sur les côtés.
+const BUTTON_SWATCH: Vec2 = Vec2::new(14.5, SWATCH_SIDE);
 /// Le trait en travers d'une couleur non définie (automatique), même rouge
 /// que le rôle `Danger` des icônes.
 const AUTO_SLASH: Color32 = Color32::from_rgb(0xe5, 0x45, 0x3b);
@@ -413,7 +415,8 @@ pub fn color_button(
     env: &mut PickerEnv,
 ) -> bool {
     let current = parse_hex(value);
-    let (rect, response) = ui.allocate_exact_size(BUTTON_SWATCH, Sense::click());
+    let (cell, response) = ui.allocate_exact_size(BUTTON_SWATCH, Sense::click());
+    let rect = Rect::from_center_size(cell.center(), Vec2::splat(SWATCH_SIDE));
     let response = response.on_hover_text(match current {
         Some([_, _, _, 0]) => tr!("color-none"),
         Some(rgba) => to_hex(rgba),
