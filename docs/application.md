@@ -1477,8 +1477,9 @@ Affichage › Gestionnaire d'objets et la barre du même nom ouvrent l'arbre du
 graphique actif : graphique › calques (`PlotSpec::panels`) › groupe de tracés ›
 séries, ainsi que les titres, légendes, textes libres et objets graphiques
 (rectangle, ellipse, ligne, flèche). Le panneau est redimensionnable à droite ;
-son bouton Détacher le rend flottant, Ancrer le replace à droite. Son ouverture
-se mémorise dans `preferences.json`, hors du projet et de l'historique.
+son bouton Détacher le rend flottant, Ancrer le replace à droite. Il est
+visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
+`preferences.json`, hors du projet et de l'historique.
 
 Chaque série garde son nom dérivé de colonne et son échantillon de légende
 (trait, couleur, épaisseur, marqueur ou barre). Les cases des parents modifient

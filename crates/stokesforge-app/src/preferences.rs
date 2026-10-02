@@ -6,7 +6,7 @@
 //! que les recettes d'import : un fichier JSON — `preferences.json` — dans le
 //! dossier de configuration de StokesForge. Jamais de panique s'il est absent,
 //! illisible ou corrompu (invariant 10) : on retombe sur les valeurs par défaut,
-//! donc sur l'anglais.
+//! donc sur l'anglais et le gestionnaire d'objets ouvert.
 //!
 //! La langue se choisit dans le menu Fichier › Langue, qui l'écrit ici
 //! ([`Preferences::save_language`]) ; le fichier se crée aussi à la main
@@ -23,7 +23,7 @@ struct PreferencesFile {
     #[serde(default)]
     language: Option<String>,
     #[serde(default)]
-    object_manager_open: bool,
+    object_manager_open: Option<bool>,
     /// Gardée brute : c'est `toolbar::ToolbarLayout::from_json` qui la lit, en
     /// tolérant ce qu'une autre version y a écrit.
     #[serde(default)]
@@ -31,12 +31,18 @@ struct PreferencesFile {
 }
 
 /// Les préférences de l'utilisateur, et le fichier d'où elles viennent.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Preferences {
     language: Option<String>,
     object_manager_open: bool,
     toolbars: Option<serde_json::Value>,
     path: Option<PathBuf>,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self::load_from(None)
+    }
 }
 
 impl Preferences {
@@ -55,7 +61,7 @@ impl Preferences {
             .unwrap_or_default();
         Self {
             language: file.language,
-            object_manager_open: file.object_manager_open,
+            object_manager_open: file.object_manager_open.unwrap_or(true),
             toolbars: file.toolbars,
             path,
         }
@@ -88,7 +94,7 @@ impl Preferences {
         self.save_field("toolbars", layout)
     }
 
-    /// Le panneau Object Manager était-il ouvert à la dernière fermeture ?
+    /// Ouverture mémorisée du panneau Object Manager ; ouvert par défaut.
     pub fn object_manager_open(&self) -> bool {
         self.object_manager_open
     }
@@ -170,8 +176,12 @@ mod tests {
     fn un_fichier_absent_ne_donne_aucune_preference() {
         let dir = tempfile::tempdir().expect("dossier temporaire");
         let path = dir.path().join("absent.json");
-        assert_eq!(Preferences::load_from(Some(path)).language(), None);
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(preferences.language(), None);
+        assert!(preferences.object_manager_open());
         assert_eq!(Preferences::load_from(None).language(), None);
+        assert!(Preferences::load_from(None).object_manager_open());
+        assert!(Preferences::default().object_manager_open());
     }
 
     #[test]
@@ -179,10 +189,11 @@ mod tests {
         for content in ["{ pas du json", "", "[1, 2]", r#"{ "language": 3 }"#] {
             let (_dir, path) = written(content);
             assert_eq!(
-                Preferences::load_from(Some(path)).language(),
+                Preferences::load_from(Some(path.clone())).language(),
                 None,
                 "{content:?}"
             );
+            assert!(Preferences::load_from(Some(path)).object_manager_open());
         }
     }
 
@@ -239,7 +250,7 @@ mod object_manager_tests {
         )
         .unwrap();
         let mut preferences = Preferences::load_from(Some(path.clone()));
-        assert!(!preferences.object_manager_open());
+        assert!(preferences.object_manager_open());
         preferences.save_object_manager_open(true).unwrap();
         preferences.save_language("en").unwrap();
         let relues = Preferences::load_from(Some(path.clone()));
