@@ -1,10 +1,10 @@
 # rôle	trait	fond (le fond reçoit l'opacité 0.2 du duotone Phosphor)
 # Principe (#54) : neutre par défaut, couleur rare — types d'objets, action
 # destructive, état à repérer.
-neutral	#47556B	#47556B
-workbook	#8A6A00	#E0A800
-graph	#1F5FA8	#2F80E0
-matrix	#6B3FA0	#8E5BD6
-note	#9A4A12	#E07A1F
-folder	#6B5A3A	#B08D57
-danger	#B3261E	#E5453B
+neutral	#1B2433	#5B7094
+workbook	#5E4600	#E0A800
+graph	#12427A	#2F80E0
+matrix	#46247A	#8E5BD6
+note	#6B3008	#E07A1F
+folder	#463A22	#B08D57
+danger	#8C1710	#E5453B
