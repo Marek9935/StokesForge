@@ -153,28 +153,31 @@ impl TextTarget {
         }
     }
 
-    /// Le texte saisi du titre — `None` pour la légende (ses textes sont les
-    /// noms des séries) ou si le panneau n'existe pas. Pour un titre d'axe,
-    /// c'est le titre **sans l'unité** ([`crate::AxisSpec::label`]).
-    pub fn text<'a>(&self, spec: &'a PlotSpec) -> Option<&'a str> {
+    /// Le texte du titre tel qu'il s'affiche — `None` pour la légende (ses
+    /// textes sont les noms des séries) ou si le panneau n'existe pas. Pour un
+    /// titre d'axe, l'unité est incluse (`Signal (u.a.)`,
+    /// [`crate::AxisSpec::display_label`]).
+    pub fn text(&self, spec: &PlotSpec) -> Option<String> {
         match *self {
-            Self::Title => Some(spec.title.as_str()),
+            Self::Title => Some(spec.title.clone()),
             Self::PanelTitle { .. } => {
-                Some(spec.panels.get(self.panel_index(spec)?)?.title.as_str())
+                Some(spec.panels.get(self.panel_index(spec)?)?.title.clone())
             }
             Self::AxisTitle { side, .. } => Some(
                 spec.panels
                     .get(self.panel_index(spec)?)?
                     .axis(side)
-                    .label
-                    .as_str(),
+                    .display_label(),
             ),
             Self::Legend { .. } => None,
         }
     }
 
-    /// Remplace le texte saisi du titre. Rend `false` sans rien changer pour
-    /// la légende ou un panneau absent.
+    /// Remplace le texte du titre. Rend `false` sans rien changer pour la
+    /// légende ou un panneau absent. Pour un titre d'axe, `text` est le texte
+    /// **affiché** ([`Self::text`]) : s'il se termine encore par l'unité entre
+    /// parenthèses, elle reste l'unité de l'axe et le reste devient le titre ;
+    /// sinon l'unité est vidée (le texte saisi est tout ce qui s'affiche).
     pub fn set_text(&self, spec: &mut PlotSpec, text: String) -> bool {
         match *self {
             Self::Title => {
@@ -198,7 +201,18 @@ impl TextTarget {
                 else {
                     return false;
                 };
-                panel.axis_mut(side).label = text;
+                let axis = panel.axis_mut(side);
+                let suffix = format!(" ({})", axis.unit);
+                if axis.unit.is_empty() {
+                    axis.label = text;
+                } else if let Some(label) = text.strip_suffix(suffix.as_str()) {
+                    axis.label = label.to_owned();
+                } else if text == format!("({})", axis.unit) {
+                    axis.label.clear();
+                } else {
+                    axis.label = text;
+                    axis.unit.clear();
+                }
                 true
             }
             Self::Legend { .. } => false,
@@ -289,11 +303,20 @@ mod tests {
             column: 0,
             side: AxisSide::Bottom,
         };
-        assert_eq!(TextTarget::Title.text(&spec), Some("A"));
+        assert_eq!(TextTarget::Title.text(&spec).as_deref(), Some("A"));
         assert!(TextTarget::Title.set_text(&mut spec, "B".into()));
         assert!(axe.set_text(&mut spec, "t".into()));
         assert_eq!(spec.title, "B");
         assert_eq!(spec.panels[0].bottom.label, "t");
+        // L'unité s'affiche avec le titre : la garder ou l'effacer à l'édition.
+        spec.panels.get_mut(0).expect("panneau").bottom.unit = "s".into();
+        assert_eq!(axe.text(&spec).as_deref(), Some("t (s)"));
+        assert!(axe.set_text(&mut spec, "temps (s)".into()));
+        assert_eq!(spec.panels[0].bottom.label, "temps");
+        assert_eq!(spec.panels[0].bottom.unit, "s");
+        assert!(axe.set_text(&mut spec, "durée".into()));
+        assert_eq!(spec.panels[0].bottom.label, "durée");
+        assert_eq!(spec.panels[0].bottom.unit, "");
         let legende = TextTarget::Legend { row: 0, column: 0 };
         assert_eq!(legende.text(&spec), None);
         assert!(!legende.set_text(&mut spec, "x".into()));

@@ -4265,20 +4265,15 @@ fn window_header(
         }
     }
     // La zone de glisser va de la flèche de repli aux icônes réellement
-    // peintes (#50) ; le titre, lui, reste centré dans l'en-tête et n'est
-    // rogné que **symétriquement**, par la plus large des deux réserves (la
-    // flèche à gauche, les icônes à droite) — centré sur `rect`, un rognage
-    // asymétrique le couperait d'un seul côté.
+    // peintes (#50) ; le titre reste centré dans l'en-tête et n'est rogné de
+    // chaque côté que par ce qui s'y trouve vraiment : la flèche à gauche, les
+    // icônes à droite (rien ne rogne un côté vide).
     let actions_width = header_actions_width(show_detach_and_maximize);
     let title_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + collapse_width, rect.top()),
         egui::pos2(rect.right() - actions_width, rect.bottom()),
     );
-    let reserved = collapse_width.max(actions_width);
-    let clip_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + reserved, rect.top()),
-        egui::pos2(rect.right() - reserved, rect.bottom()),
-    );
+    let clip_rect = title_rect;
     header.painter().with_clip_rect(clip_rect).text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -5505,6 +5500,10 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     let tabs_height = TAB_STRIP_HEIGHT.min(upper_area.height());
     let (grid_rect, tabs_rect) =
         upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height);
+    // Avec la barre, les onglets descendent de la moitié de la bande : l'espace
+    // sous eux est réduit de moitié et le même espace apparaît au-dessus
+    // (#51). Sans barre, aucune réserve ni décalage.
+    let tabs_rect = tabs_rect.translate(egui::vec2(0.0, horizontal_bar_height / 2.0));
     let mut bounded = |rect: egui::Rect| {
         let mut child = ui.new_child(
             egui::UiBuilder::new()
@@ -7835,8 +7834,8 @@ fn open_text_editor(
     graph: NodeId,
     target: TextTarget,
 ) {
-    let Some(original) = crate::state::current_plot_spec(tree, graph)
-        .and_then(|spec| target.text(&spec).map(str::to_owned))
+    let Some(original) =
+        crate::state::current_plot_spec(tree, graph).and_then(|spec| target.text(&spec))
     else {
         return;
     };
