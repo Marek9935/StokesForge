@@ -549,3 +549,54 @@ fn le_titre_du_graphe_deplace_garde_sa_bande_vide() {
     assert_eq!(abime.title_height, defaut.title_height, "ancre ignorée");
     assert!(!abime.title.expect("titre tracé").anchored);
 }
+
+/// Issues #77 et #78 : le corps réglé sur une zone de texte change la taille
+/// qu'elle occupe — titre du graphe, titre d'axe, légende — et rien d'autre ne
+/// bouge (la zone de tracé rétrécit seulement de ce que le texte prend).
+#[test]
+fn le_corps_d_une_zone_de_texte_change_sa_taille() {
+    use plotyx_plot::{AxisSide as PlotAxisSide, TextFont, TextTarget};
+    let colonnes = [("X", vec![0.0, 1.0, 2.0]), ("Y", vec![10.0, 20.0, 30.0])];
+    let construire = |gros: bool| {
+        move |ids: &[NodeId]| {
+            let mut series = SeriesSpec::new_xy(ids[0], ids[1]);
+            series.name = "Courbe".to_string();
+            un_panneau(series, |panel| {
+                panel.bottom.label = "Temps".to_string();
+                if gros {
+                    let font = TextFont {
+                        family: String::new(),
+                        size: Some(32.0),
+                    };
+                    panel.bottom.title_font = font.clone();
+                    panel.legend.font = font;
+                }
+            })
+        }
+    };
+    let defaut = geometrie(&colonnes, construire(false));
+    let gros = geometrie(&colonnes, construire(true));
+    let taille = |g: &plotyx_render::DrawnPlot, cible: TextTarget| {
+        g.panel(0)
+            .unwrap()
+            .texts
+            .iter()
+            .find(|t| t.target == cible)
+            .unwrap_or_else(|| panic!("{cible:?} absent"))
+            .size
+    };
+    for cible in [
+        TextTarget::AxisTitle {
+            row: 0,
+            column: 0,
+            side: PlotAxisSide::Bottom,
+        },
+        TextTarget::Legend { row: 0, column: 0 },
+    ] {
+        let (petit, grand) = (taille(&defaut, cible), taille(&gros, cible));
+        assert!(
+            grand.1 > petit.1,
+            "{cible:?} : corps 32 ({grand:?}) pas plus haut que le défaut ({petit:?})"
+        );
+    }
+}

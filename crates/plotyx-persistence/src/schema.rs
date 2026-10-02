@@ -597,7 +597,20 @@ pub(crate) struct PlotSpecRecord {
     /// place par défaut.
     #[serde(default)]
     pub(crate) title_anchor: Option<TextAnchorRecord>,
+    /// Police et corps du titre (issue #78) : absent d'un fichier plus
+    /// ancien, donc ceux du graphe.
+    #[serde(default)]
+    pub(crate) title_font: TextFontRecord,
     pub(crate) format_version: u32,
+}
+
+/// [`plotyx_plot::TextFont`], à plat.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TextFontRecord {
+    #[serde(default)]
+    pub(crate) family: String,
+    #[serde(default)]
+    pub(crate) size: Option<f64>,
 }
 
 /// [`plotyx_plot::TextAnchor`], à plat.
@@ -616,6 +629,7 @@ impl Default for PlotSpecRecord {
             background: "#ffffff00".to_string(), // plotyx_plot::TRANSPARENT
             title_color: String::new(),
             title_anchor: None,
+            title_font: TextFontRecord::default(),
             format_version: 1, // plotyx_plot::SPEC_FORMAT_VERSION
         }
     }
@@ -628,6 +642,9 @@ pub(crate) struct PanelSpecRecord {
     /// Titre déplacé (issue #53), comme `PlotSpecRecord::title_anchor`.
     #[serde(default)]
     pub(crate) title_anchor: Option<TextAnchorRecord>,
+    /// Police et corps du titre du panneau (issue #78).
+    #[serde(default)]
+    pub(crate) title_font: TextFontRecord,
     pub(crate) series: Vec<SeriesSpecRecord>,
     pub(crate) bottom: AxisSpecRecord,
     pub(crate) left: AxisSpecRecord,
@@ -680,6 +697,9 @@ pub(crate) struct AnnotationSpecRecord {
     pub(crate) color: String,
     pub(crate) size: f64,
     pub(crate) rotation: f64,
+    /// Police du texte (issue #78) ; absente d'un fichier plus ancien.
+    #[serde(default)]
+    pub(crate) font: String,
 }
 
 impl Default for PanelSpecRecord {
@@ -687,6 +707,7 @@ impl Default for PanelSpecRecord {
         Self {
             title: String::new(),
             title_anchor: None,
+            title_font: TextFontRecord::default(),
             series: Vec::new(),
             bottom: AxisSpecRecord::default(),
             left: AxisSpecRecord::default(),
@@ -719,6 +740,9 @@ pub(crate) struct AxisSpecRecord {
     /// Titre déplacé (issue #53), comme `PlotSpecRecord::title_anchor`.
     #[serde(default)]
     pub(crate) title_anchor: Option<TextAnchorRecord>,
+    /// Police et corps du titre de l'axe (issue #78).
+    #[serde(default)]
+    pub(crate) title_font: TextFontRecord,
     /// Ajouté après coup, comme `PlotSpecRecord::title_color`.
     #[serde(default)]
     pub(crate) tick_color: String,
@@ -749,6 +773,7 @@ impl Default for AxisSpecRecord {
             inverted: false,
             title_color: String::new(),
             title_anchor: None,
+            title_font: TextFontRecord::default(),
             tick_color: String::new(),
         }
     }
@@ -913,6 +938,9 @@ pub(crate) struct LegendSpecRecord {
     /// Légende déplacée (issue #53), comme `PlotSpecRecord::title_anchor`.
     #[serde(default)]
     pub(crate) anchor: Option<TextAnchorRecord>,
+    /// Police et corps de la légende (issue #77).
+    #[serde(default)]
+    pub(crate) font: TextFontRecord,
 }
 
 impl Default for LegendSpecRecord {
@@ -924,6 +952,7 @@ impl Default for LegendSpecRecord {
             visible: true,
             position: LegendPositionRecord::default(),
             anchor: None,
+            font: TextFontRecord::default(),
         }
     }
 }

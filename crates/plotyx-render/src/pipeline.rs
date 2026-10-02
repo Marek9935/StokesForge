@@ -77,7 +77,7 @@ use plotyx_plot::{
 use crate::clip::{self, PixelBounds};
 use crate::color::{auto_ink, over_white, parse_hex, rgba_or};
 use crate::decimate;
-use crate::formula::{literal_style, rich_style};
+use crate::formula::{literal_style_font, rich_style_font};
 use crate::legend;
 use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
@@ -380,20 +380,21 @@ pub fn draw_on<DB: DrawingBackend>(
     // sauterait. Il est tracé sur son ancre une fois les panneaux faits,
     // par-dessus.
     let title_color = rgba_or(&spec.title_color, opaque(ink));
+    let title_style = font_style(&spec.title_font, TITLE_SIZE, title_color);
     let title_anchor = usable_anchor(spec.title_anchor).filter(|_| !spec.title.is_empty());
     let area = if spec.title.is_empty() {
         root.clone()
     } else if title_anchor.is_some() {
-        reserve_title_band(root, &spec.title, &rich_style(TITLE_SIZE, title_color))?
+        reserve_title_band(root, &spec.title, &title_style)?
     } else {
-        root.titled(&spec.title, rich_style(TITLE_SIZE, title_color))?
+        root.titled(&spec.title, title_style.clone())?
     };
     let title_height = (area.get_base_pixel().1 - root.get_base_pixel().1).max(0) as u32;
     let (root_width, _) = root.dim_in_pixel();
     let mut drawn_title = if spec.title.is_empty() || title_anchor.is_some() {
         None
     } else {
-        let size = root.estimate_text_size(&spec.title, &rich_style(TITLE_SIZE, title_color))?;
+        let size = root.estimate_text_size(&spec.title, &title_style)?;
         Some(DrawnText {
             target: TextTarget::Title,
             center: (root_width as f64 / 2.0, title_height as f64 / 2.0),
@@ -448,7 +449,7 @@ pub fn draw_on<DB: DrawingBackend>(
             .as_ref()
             .and_then(|projection| projection.pixel(anchor))
             .unwrap_or(((root_width / 2) as i32, (MARGIN + 12) as i32));
-        let size = draw_centered_text(root, &spec.title, TITLE_SIZE, title_color, 0.0, pixel)?;
+        let size = draw_centered_text(root, &spec.title, &title_style, 0.0, pixel)?;
         drawn_title = Some(DrawnText {
             target: TextTarget::Title,
             center: (pixel.0 as f64, pixel.1 as f64),
@@ -526,19 +527,25 @@ impl Projection {
 fn draw_centered_text<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     text: &str,
-    size: f64,
-    color: (u8, u8, u8, u8),
+    style: &TextStyle<'static>,
     rotation: f64,
     pixel: plotters_backend::BackendCoord,
 ) -> Result<(u32, u32), DrawingAreaErrorKind<DB::ErrorType>> {
     use plotters::style::text_anchor::{HPos, Pos, VPos};
     let centered = Pos::new(HPos::Center, VPos::Center);
-    let straight = rich_style(size, color).pos(centered);
-    let family = crate::formula::rotated_family(rotation);
-    let turned = (family.as_str(), size)
-        .into_font()
-        .color(&rgba(color))
-        .pos(centered);
+    let straight = style.pos(centered);
+    // Le style d'un texte riche saisi porte la police de sa zone dans sa
+    // famille (`formula::rich_style_font`) : le style tourné la reprend.
+    let font = match style.font.get_family() {
+        FontFamily::Name(name) => name.split_once('|').map(|(_, font)| font),
+        _ => None,
+    };
+    let family = crate::formula::rotated_family_font(rotation, font);
+    let turned = TextStyle {
+        font: (family.as_str(), style.font.get_size()).into_font(),
+        color: style.color,
+        pos: centered,
+    };
     let measured = area.estimate_text_size(text, &straight)?;
     area.draw(&Text::new(text, pixel, &turned))?;
     Ok(measured)
@@ -664,7 +671,7 @@ fn draw_panel<DB: DrawingBackend>(
     // graphe rabaisse la figure entière.
     // Un titre déplacé (issue #53) garde sa bande vide, voir `draw_on`.
     let panel_title_anchor = usable_anchor(spec.title_anchor).filter(|_| !spec.title.is_empty());
-    let title_style = rich_style(PANEL_TITLE_SIZE, opaque(ink));
+    let title_style = font_style(&spec.title_font, PANEL_TITLE_SIZE, opaque(ink));
     let area = if spec.title.is_empty() {
         cell.clone()
     } else if panel_title_anchor.is_some() {
@@ -782,7 +789,7 @@ fn draw_panel<DB: DrawingBackend>(
         let colors = AxisColors::of(&spec.right, ink);
         let mut mesh = chart.configure_secondary_axes();
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
-            .axis_desc_style(rich_style(AXIS_DESC_SIZE, colors.title))
+            .axis_desc_style(colors.title_style.clone())
             .axis_style(rgba(colors.ticks))
             .y_desc(plotters_desc(&spec.right, right_anchor));
         if scale::needs_formatter(y2_scale) {
@@ -860,8 +867,7 @@ fn draw_panel<DB: DrawingBackend>(
             continue;
         }
         let colors = AxisColors::of(axis, ink);
-        let text_size =
-            area.estimate_text_size(&label, &rich_style(AXIS_DESC_SIZE, colors.title))?;
+        let text_size = area.estimate_text_size(&label, &colors.title_style)?;
         let half = text_size.1 as f64 / 2.0;
         let area_size = area_size as f64;
         let (center, rotation) = match side {
@@ -955,8 +961,12 @@ fn draw_panel<DB: DrawingBackend>(
         &spec.legend,
         &entries,
         &legend::LegendText {
-            typed: rich_style(LABEL_SIZE, opaque(ink)),
-            literal: literal_style(LABEL_SIZE, opaque(ink)),
+            typed: font_style(&spec.legend.font, LABEL_SIZE, opaque(ink)),
+            literal: literal_style_font(
+                spec.legend.font.effective_size(LABEL_SIZE),
+                opaque(ink),
+                spec.legend.font.family(),
+            ),
         },
         legend::LegendColors { background, ink },
         legend_center,
@@ -998,14 +1008,7 @@ fn draw_panel<DB: DrawingBackend>(
     };
     if let Some(anchor) = panel_title_anchor {
         let pixel = centered(anchor);
-        let measured = draw_centered_text(
-            &screen,
-            &spec.title,
-            PANEL_TITLE_SIZE,
-            opaque(ink),
-            0.0,
-            pixel,
-        )?;
+        let measured = draw_centered_text(&screen, &spec.title, &title_style, 0.0, pixel)?;
         texts.push(DrawnText {
             target: TextTarget::PanelTitle {
                 row: spec.row,
@@ -1028,8 +1031,7 @@ fn draw_panel<DB: DrawingBackend>(
         let measured = draw_centered_text(
             &screen,
             &axis.display_label(),
-            AXIS_DESC_SIZE,
-            colors.title,
+            &colors.title_style,
             rotation,
             pixel,
         )?;
@@ -1158,8 +1160,13 @@ fn draw_annotation<DB: DrawingBackend>(
     let color = rgba_or(&annotation.color, opaque(ink));
     let size = annotation.effective_size();
     let rotation = annotation.effective_rotation();
-    let (width, height) =
-        draw_centered_text(screen, &annotation.text, size, color, rotation, pixel)?;
+    let (width, height) = draw_centered_text(
+        screen,
+        &annotation.text,
+        &rich_style_font(size, color, Some(annotation.font.as_str())),
+        rotation,
+        pixel,
+    )?;
     Ok(Some(DrawnAnnotation {
         index,
         center: (pixel.0 as f64, pixel.1 as f64),
@@ -1373,6 +1380,17 @@ fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
     (FONT_FAMILY, size).into_font().color(&rgba(color))
 }
 
+/// Le style d'un texte riche saisi (titre, titre d'axe, légende) : la couleur
+/// donnée, le corps et la police de sa zone (issues #77, #78), `default_size`
+/// et la police du graphe quand ils ne sont pas réglés.
+fn font_style(
+    font: &plotyx_plot::TextFont,
+    default_size: f64,
+    color: (u8, u8, u8, u8),
+) -> TextStyle<'static> {
+    rich_style_font(font.effective_size(default_size), color, font.family())
+}
+
 /// Opacité des lignes principales de la grille, dans la couleur de
 /// l'échelle — celle que Plotters donne par défaut sur du noir.
 const GRID_BOLD_OPACITY: f64 = 0.2;
@@ -1382,15 +1400,17 @@ const GRID_LIGHT_OPACITY: f64 = 0.1;
 /// Couleurs effectives d'un axe : celles du spec, ou l'encre automatique
 /// quand elles sont vides.
 struct AxisColors {
-    title: (u8, u8, u8, u8),
     ticks: (u8, u8, u8, u8),
+    /// Le style du titre de l'axe : couleur, police et corps de sa zone.
+    title_style: TextStyle<'static>,
 }
 
 impl AxisColors {
     fn of(axis: &AxisSpec, ink: (u8, u8, u8)) -> Self {
+        let title = rgba_or(&axis.title_color, opaque(ink));
         Self {
-            title: rgba_or(&axis.title_color, opaque(ink)),
             ticks: rgba_or(&axis.tick_color, opaque(ink)),
+            title_style: font_style(&axis.title_font, AXIS_DESC_SIZE, title),
         }
     }
 
@@ -1407,7 +1427,7 @@ impl AxisColors {
     {
         let ticks = rgba(self.ticks);
         mesh.label_style(text_style(LABEL_SIZE, self.ticks))
-            .axis_desc_style(rich_style(AXIS_DESC_SIZE, self.title))
+            .axis_desc_style(self.title_style.clone())
             .axis_style(ticks)
             .bold_line_style(ticks.mix(GRID_BOLD_OPACITY))
             .light_line_style(ticks.mix(GRID_LIGHT_OPACITY));

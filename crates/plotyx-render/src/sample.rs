@@ -114,6 +114,7 @@ pub fn realistic() -> CoreResult<Sample> {
         visible: true,
         position: LegendPosition::TopRight,
         anchor: None,
+        ..LegendSpec::default()
     };
     spectres.series.push(SeriesSpec {
         name: "Échantillon µ1".to_string(),
@@ -146,6 +147,7 @@ pub fn realistic() -> CoreResult<Sample> {
         visible: true,
         position: LegendPosition::TopRight,
         anchor: None,
+        ..LegendSpec::default()
     };
     cinetique.series.push(SeriesSpec {
         name: "Concentration".to_string(),
@@ -180,6 +182,7 @@ pub fn realistic() -> CoreResult<Sample> {
         visible: true,
         position: LegendPosition::TopLeft,
         anchor: None,
+        ..LegendSpec::default()
     };
     etalonnage.series.push(SeriesSpec {
         name: "Série A".to_string(),
@@ -218,6 +221,7 @@ pub fn realistic() -> CoreResult<Sample> {
         visible: true,
         position: LegendPosition::TopLeft,
         anchor: None,
+        ..LegendSpec::default()
     };
     repartition.series.push(SeriesSpec {
         name: "Résidus".to_string(),
@@ -243,6 +247,7 @@ pub fn realistic() -> CoreResult<Sample> {
         visible: true,
         position: LegendPosition::BottomRight,
         anchor: None,
+        ..LegendSpec::default()
     };
     rendements.series.push(SeriesSpec {
         name: "Rendement".to_string(),

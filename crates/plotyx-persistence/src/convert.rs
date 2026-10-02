@@ -18,7 +18,7 @@ use crate::schema::{
     LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord,
     PlotTypeRecord, RoleRecord, SavedColorsRecord, SeriesAxisRecord, SeriesSpecRecord,
     ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord,
-    TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -333,6 +333,20 @@ impl From<SymbolSpecRecord> for SymbolSpec {
     }
 }
 
+fn font_to_record(font: &plotyx_plot::TextFont) -> TextFontRecord {
+    TextFontRecord {
+        family: font.family.clone(),
+        size: font.size,
+    }
+}
+
+fn record_to_font(record: TextFontRecord) -> plotyx_plot::TextFont {
+    plotyx_plot::TextFont {
+        family: record.family,
+        size: record.size,
+    }
+}
+
 impl From<&AxisSpec> for AxisSpecRecord {
     fn from(value: &AxisSpec) -> Self {
         Self {
@@ -347,6 +361,7 @@ impl From<&AxisSpec> for AxisSpecRecord {
             inverted: value.inverted,
             title_color: value.title_color.clone(),
             title_anchor: value.title_anchor.map(anchor_to_record),
+            title_font: font_to_record(&value.title_font),
             tick_color: value.tick_color.clone(),
         }
     }
@@ -366,6 +381,7 @@ impl From<AxisSpecRecord> for AxisSpec {
             inverted: value.inverted,
             title_color: value.title_color,
             title_anchor: value.title_anchor.map(record_to_anchor),
+            title_font: record_to_font(value.title_font),
             tick_color: value.tick_color,
         }
     }
@@ -377,6 +393,7 @@ impl From<&LegendSpec> for LegendSpecRecord {
             visible: value.visible,
             position: value.position.into(),
             anchor: value.anchor.map(anchor_to_record),
+            font: font_to_record(&value.font),
         }
     }
 }
@@ -387,6 +404,7 @@ impl From<LegendSpecRecord> for LegendSpec {
             visible: value.visible,
             position: value.position.into(),
             anchor: value.anchor.map(record_to_anchor),
+            font: record_to_font(value.font),
         }
     }
 }
@@ -471,6 +489,7 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
     PanelSpecRecord {
         title: panel.title.clone(),
         title_anchor: panel.title_anchor.map(anchor_to_record),
+        title_font: font_to_record(&panel.title_font),
         series: panel.series.iter().map(series_spec_to_record).collect(),
         bottom: (&panel.bottom).into(),
         left: (&panel.left).into(),
@@ -490,6 +509,7 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
                 color: annotation.color.clone(),
                 size: annotation.size,
                 rotation: annotation.rotation,
+                font: annotation.font.clone(),
             })
             .collect(),
         shapes: panel.shapes.iter().map(shape_to_record).collect(),
@@ -554,6 +574,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
     Ok(PanelSpec {
         title: record.title,
         title_anchor: record.title_anchor.map(record_to_anchor),
+        title_font: record_to_font(record.title_font),
         series,
         bottom: record.bottom.into(),
         left: record.left.into(),
@@ -573,6 +594,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
                 color: annotation.color,
                 size: annotation.size,
                 rotation: annotation.rotation,
+                font: annotation.font,
             })
             .collect(),
         shapes: record.shapes.into_iter().map(record_to_shape).collect(),
@@ -607,6 +629,7 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         background: spec.background.clone(),
         title_color: spec.title_color.clone(),
         title_anchor: spec.title_anchor.map(anchor_to_record),
+        title_font: font_to_record(&spec.title_font),
         format_version: spec.format_version,
     }
 }
@@ -642,6 +665,7 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         background: record.background,
         title_color: record.title_color,
         title_anchor: record.title_anchor.map(record_to_anchor),
+        title_font: record_to_font(record.title_font),
         format_version: record.format_version,
     })
 }

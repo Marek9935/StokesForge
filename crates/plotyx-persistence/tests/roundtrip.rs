@@ -769,6 +769,11 @@ fn non_trivial_spec(
             title_color: "#aa3311".to_string(),
             // Issue #53 : textes déplacés, une ancre par sorte de texte.
             title_anchor: Some(plotyx_plot::TextAnchor::new(3.5, -0.75)),
+            // Issues #77 et #78 : police et corps, un jeu par sorte de texte.
+            title_font: plotyx_plot::TextFont {
+                family: "Fira Sans".to_string(),
+                size: Some(18.0),
+            },
             tick_color: "#fefefe".to_string(),
         },
         title_anchor: Some(plotyx_plot::TextAnchor {
@@ -779,6 +784,10 @@ fn non_trivial_spec(
             visible: true,
             position: LegendPosition::BottomLeft,
             anchor: Some(plotyx_plot::TextAnchor::new(-2.0, 8.0)),
+            font: plotyx_plot::TextFont {
+                family: "Libertinus Sans".to_string(),
+                size: Some(11.0),
+            },
         },
         // Issue #35 : textes libres, tous champs non défaut.
         annotations: vec![
@@ -788,6 +797,7 @@ fn non_trivial_spec(
                 color: "#11223344".to_string(),
                 size: 22.0,
                 rotation: -30.0,
+                font: "Fira Sans".to_string(),
                 ..plotyx_plot::AnnotationSpec::new("*seuil*", -0.25, 1e-3)
             },
         ],
@@ -813,6 +823,11 @@ fn non_trivial_spec(
             visible: false,
             position: LegendPosition::TopLeft,
             anchor: None,
+            font: plotyx_plot::TextFont::default(),
+        },
+        title_font: plotyx_plot::TextFont {
+            family: "Noto Sans".to_string(),
+            size: None,
         },
         ..PanelSpec::at(1, 0)
     };
@@ -821,6 +836,10 @@ fn non_trivial_spec(
         background: "#0a0a0a".to_string(),
         title_color: "#ffcc00".to_string(),
         title_anchor: Some(plotyx_plot::TextAnchor::new(1.0, 9.5)),
+        title_font: plotyx_plot::TextFont {
+            family: "Libertinus Sans".to_string(),
+            size: Some(30.0),
+        },
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }

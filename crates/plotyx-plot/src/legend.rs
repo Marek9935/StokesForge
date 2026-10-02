@@ -26,6 +26,8 @@ pub struct LegendSpec {
     /// Position du cadre (son centre) s'il a été déplacé (issue #53) ;
     /// prime sur [`Self::position`]. `None` = le coin d'ancrage.
     pub anchor: Option<TextAnchor>,
+    /// Police et corps des noms de série de la légende (issue #77).
+    pub font: crate::TextFont,
 }
 
 impl Default for LegendSpec {
@@ -34,6 +36,7 @@ impl Default for LegendSpec {
             visible: true,
             position: LegendPosition::TopRight,
             anchor: None,
+            font: crate::TextFont::default(),
         }
     }
 }

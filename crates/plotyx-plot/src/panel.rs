@@ -21,6 +21,8 @@ pub struct PanelSpec {
     pub title: String,
     /// Position du titre du panneau s'il a été déplacé (issue #53).
     pub title_anchor: Option<TextAnchor>,
+    /// Police et corps du titre du panneau (issue #78).
+    pub title_font: crate::TextFont,
     /// Séries tracées, dans l'ordre de superposition.
     pub series: Vec<SeriesSpec>,
     /// Axe du bas.
@@ -107,6 +109,7 @@ impl Default for PanelSpec {
         Self {
             title: String::new(),
             title_anchor: None,
+            title_font: crate::TextFont::default(),
             series: Vec::new(),
             bottom: AxisSpec::default(),
             left: AxisSpec::default(),

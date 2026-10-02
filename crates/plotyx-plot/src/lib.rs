@@ -94,6 +94,7 @@ pub mod shape;
 pub mod spec;
 pub mod style;
 pub mod text_anchor;
+pub mod text_font;
 pub mod theme;
 
 pub use annotation::{AnnotationRef, AnnotationSpec};
@@ -112,4 +113,5 @@ pub use style::{
     palette_color, parse_hex, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE,
 };
 pub use text_anchor::{TextAnchor, TextTarget};
+pub use text_font::TextFont;
 pub use theme::{Theme, THEMES};

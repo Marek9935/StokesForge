@@ -115,6 +115,88 @@ pub fn rich_style(size: f64, color: (u8, u8, u8, u8)) -> plotters::style::TextSt
     family_style(RICH_FAMILY, size, color)
 }
 
+/// [`rich_style`] dans la police de la zone de texte (issues #77, #78) :
+/// `font` est le nom de famille choisi, vide ou `None` pour la police du
+/// graphe. La police voyage dans la famille du style, comme l'angle d'un
+/// texte tourné ([`family_with_font`]), et [`source`] la pose dans le
+/// markup — avec la police Math qui lui est associée ([`math_family_for`]).
+pub fn rich_style_font(
+    size: f64,
+    color: (u8, u8, u8, u8),
+    font: Option<&str>,
+) -> plotters::style::TextStyle<'static> {
+    family_style(interned(family_with_font(RICH_FAMILY, font)), size, color)
+}
+
+/// [`literal_style`] dans la police de la zone de texte.
+pub fn literal_style_font(
+    size: f64,
+    color: (u8, u8, u8, u8),
+    font: Option<&str>,
+) -> plotters::style::TextStyle<'static> {
+    family_style(
+        interned(family_with_font(LITERAL_FAMILY, font)),
+        size,
+        color,
+    )
+}
+
+/// Sépare la police du reste d'un nom de famille de style
+/// (`plotyx-typst|Fira Sans` → `("plotyx-typst", Some("Fira Sans"))`).
+fn split_font(name: &str) -> (&str, Option<&str>) {
+    match name.split_once(FONT_SEPARATOR) {
+        Some((base, font)) if !font.is_empty() => (base, Some(font)),
+        Some((base, _)) => (base, None),
+        None => (name, None),
+    }
+}
+
+/// Ajoute `font` (vide ou `None` : rien) à la famille de style `base`.
+pub fn family_with_font(base: &str, font: Option<&str>) -> String {
+    match font.map(str::trim).filter(|font| !font.is_empty()) {
+        Some(font) => format!("{base}{FONT_SEPARATOR}{font}"),
+        None => base.to_owned(),
+    }
+}
+
+/// Le séparateur entre la famille de rôle et la police dans un nom de
+/// famille de style. Un nom de police ne le contient pas.
+const FONT_SEPARATOR: char = '|';
+
+/// Un nom de famille de style de durée `'static` : Plotters veut un
+/// `&str` qui vive aussi longtemps que le style. Un nom par police
+/// distincte, retenu pour toujours — borné par le nombre de polices que
+/// l'utilisateur a choisies, pas par le nombre de textes.
+fn interned(family: String) -> &'static str {
+    static NAMES: OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
+        OnceLock::new();
+    let mut names = NAMES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    match names.get(family.as_str()) {
+        Some(known) => known,
+        None => {
+            let leaked: &'static str = Box::leak(family.into_boxed_str());
+            names.insert(leaked);
+            leaked
+        }
+    }
+}
+
+/// La famille Math associée à la police de texte `family` : la Math de la
+/// même paire embarquée (Libertinus Sans → Libertinus Math), sinon — une
+/// police système n'a pas de compagne — Noto Sans Math, le repli.
+pub fn math_family_for(family: &str) -> &'static str {
+    FontSet::ALL
+        .iter()
+        .find(|set| set.sans_family_name() == family)
+        .map_or_else(
+            || FontSet::Noto.math_family_name(),
+            |set| set.math_family_name(),
+        )
+}
+
 /// Le style d'un texte riche repris automatiquement — voir
 /// [`LITERAL_FAMILY`].
 pub fn literal_style(size: f64, color: (u8, u8, u8, u8)) -> plotters::style::TextStyle<'static> {
@@ -140,17 +222,24 @@ const ROTATED_PREFIX: &str = "plotyx-typst@";
 /// La famille d'un texte riche saisi tourné de `angle_deg` degrés, sens
 /// antihoraire — [`RICH_FAMILY`] pour un angle nul.
 pub fn rotated_family(angle_deg: f64) -> String {
-    if angle_deg == 0.0 || !angle_deg.is_finite() {
+    rotated_family_font(angle_deg, None)
+}
+
+/// [`rotated_family`] dans la police de la zone de texte ([`family_with_font`]).
+pub fn rotated_family_font(angle_deg: f64, font: Option<&str>) -> String {
+    let base = if angle_deg == 0.0 || !angle_deg.is_finite() {
         RICH_FAMILY.to_owned()
     } else {
         format!("{ROTATED_PREFIX}{angle_deg}")
-    }
+    };
+    family_with_font(&base, font)
 }
 
 /// L'angle porté par la famille de `style` ([`rotated_family`]), 0 sinon.
 fn rotation_of<S: plotters_backend::BackendTextStyle>(style: &S) -> f64 {
     match style.family() {
-        plotters_backend::FontFamily::Name(name) => name
+        plotters_backend::FontFamily::Name(name) => split_font(name)
+            .0
             .strip_prefix(ROTATED_PREFIX)
             .and_then(|angle| angle.parse::<f64>().ok())
             .filter(|angle| angle.is_finite())
@@ -167,7 +256,8 @@ pub fn is_rich<S: plotters_backend::BackendTextStyle>(style: &S) -> bool {
     matches!(
         style.family(),
         plotters_backend::FontFamily::Name(name)
-            if name == RICH_FAMILY || name == LITERAL_FAMILY || name.starts_with(ROTATED_PREFIX)
+            if matches!(split_font(name).0, RICH_FAMILY | LITERAL_FAMILY)
+                || split_font(name).0.starts_with(ROTATED_PREFIX)
     )
 }
 
@@ -191,14 +281,39 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
     style: &S,
 ) -> std::borrow::Cow<'a, str> {
     let angle = rotation_of(style);
+    let (literal, font) = match style.family() {
+        plotters_backend::FontFamily::Name(name) => {
+            let (base, font) = split_font(name);
+            (base == LITERAL_FAMILY, font)
+        }
+        _ => (false, None),
+    };
+    // La police de la zone (issues #77, #78), posée **dans** le texte : elle
+    // vaut pour toute la zone, et sa police Math suit. Un `#set` est limité
+    // au bloc qui le contient, donc à la rotation éventuelle.
+    let preamble = font.map_or_else(String::new, |font| {
+        let quoted = |name: &str| name.replace('\\', "\\\\").replace('"', "\\\"");
+        format!(
+            "#set text(font: \"{}\")\n#show math.equation: set text(font: \"{}\")\n",
+            quoted(font),
+            quoted(math_family_for(font)),
+        )
+    });
     if angle != 0.0 {
         // Typst tourne dans le sens horaire (repère écran) : l'angle
         // antihoraire du modèle change de signe.
-        return format!("{ROTATE_CALL}{}deg)[{text}]", -angle).into();
+        let body = if literal {
+            escape(text)
+        } else {
+            text.to_owned()
+        };
+        return format!("{ROTATE_CALL}{}deg)[{preamble}{body}]", -angle).into();
     }
-    match style.family() {
-        plotters_backend::FontFamily::Name(name) if name == LITERAL_FAMILY => escape(text).into(),
-        _ => text.into(),
+    match (literal, preamble.is_empty()) {
+        (true, true) => escape(text).into(),
+        (true, false) => format!("{preamble}{}", escape(text)).into(),
+        (false, true) => text.into(),
+        (false, false) => format!("{preamble}{text}").into(),
     }
 }
 
@@ -527,6 +642,13 @@ fn load_named_font(name: &str) -> Option<Font> {
         .find(|set| set.sans_family_name() == name)
     {
         return embedded_font(set.sans_bytes(), "sans").ok();
+    }
+    // Une police Math (celle qu'associe `math_family_for`).
+    if let Some(set) = FontSet::ALL
+        .iter()
+        .find(|set| set.math_family_name() == name)
+    {
+        return embedded_font(set.math_bytes(), "Math").ok();
     }
     crate::fonts::load_system_font(name).and_then(|data| system_font(data, "sans").ok())
 }
@@ -903,6 +1025,64 @@ mod tests {
             .unwrap_or_else(|err| panic!("{text:?} ne compile pas : {err}"))
             .size_pt()
             .0
+    }
+
+    /// Issues #77 et #78 : la police d'une zone voyage dans la famille du
+    /// style, et `source` la pose avec sa police Math — Libertinus Sans
+    /// amène Libertinus Math, une police système le repli Noto Sans Math.
+    #[test]
+    fn la_police_d_une_zone_est_posee_dans_le_source_avec_sa_math() {
+        let source_de = |style: plotters::style::TextStyle<'static>, text: &str| {
+            source(text, &style).into_owned()
+        };
+        let libertinus = source_de(
+            rich_style_font(16.0, (0, 0, 0, 255), Some("Libertinus Sans")),
+            "Pic $x$",
+        );
+        assert!(
+            libertinus.contains("font: \"Libertinus Sans\""),
+            "{libertinus}"
+        );
+        assert!(
+            libertinus.contains("font: \"Libertinus Math\""),
+            "{libertinus}"
+        );
+        assert!(libertinus.ends_with("Pic $x$"));
+        let systeme = source_de(
+            rich_style_font(16.0, (0, 0, 0, 255), Some("Calibri")),
+            "Pic",
+        );
+        assert!(systeme.contains("font: \"Noto Sans Math\""), "{systeme}");
+        // Sans police : le texte tel quel, comme avant.
+        assert_eq!(
+            source_de(rich_style_font(16.0, (0, 0, 0, 255), None), "Pic"),
+            "Pic"
+        );
+        // Un texte repris automatiquement reste échappé, police ou non.
+        let litteral = source_de(
+            literal_style_font(16.0, (0, 0, 0, 255), Some("Fira Sans")),
+            "a_b",
+        );
+        assert!(litteral.ends_with("#\"a_b\""), "{litteral}");
+        // Et la police fait toujours du texte riche.
+        assert!(is_rich(&rich_style_font(
+            16.0,
+            (0, 0, 0, 255),
+            Some("Fira Sans")
+        )));
+        // La mise en page change réellement avec la police.
+        let (sans, math) = noto();
+        let largeur = |texte: &str| {
+            compile(texte, 14.0, NOIR, sans.clone(), math.clone())
+                .expect("compile")
+                .size_pt()
+                .0
+        };
+        let fira = rich_style_font(14.0, (0, 0, 0, 255), Some("Fira Sans"));
+        assert!(
+            (largeur(&source_de(fira, "Absorbance (a.u.)")) - largeur("Absorbance (a.u.)")).abs()
+                > 1e-3
+        );
     }
 
     /// Issue #63 : `#text(font: "Nom")` choisit une police embarquée par son

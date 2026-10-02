@@ -59,6 +59,8 @@ pub struct AxisSpec {
     pub title_color: String,
     /// Position du titre de l'axe s'il a été déplacé (issue #53).
     pub title_anchor: Option<TextAnchor>,
+    /// Police et corps du titre de l'axe (issue #78).
+    pub title_font: crate::TextFont,
     /// Couleur de l'échelle — ligne d'axe, graduations et leurs libellés, et
     /// la grille, atténuée (`#RRGGBB`). Vide = automatique.
     pub tick_color: String,
@@ -104,6 +106,7 @@ impl Default for AxisSpec {
             inverted: false,
             title_color: String::new(),
             title_anchor: None,
+            title_font: crate::TextFont::default(),
             tick_color: String::new(),
         }
     }

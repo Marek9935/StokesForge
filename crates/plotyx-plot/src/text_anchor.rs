@@ -153,6 +153,49 @@ impl TextTarget {
         }
     }
 
+    /// La police et le corps du texte (issue #78), `None` si le panneau
+    /// n'existe pas.
+    pub fn font(&self, spec: &PlotSpec) -> Option<crate::TextFont> {
+        Some(match *self {
+            Self::Title => spec.title_font.clone(),
+            Self::PanelTitle { .. } => spec.panels.get(self.panel_index(spec)?)?.title_font.clone(),
+            Self::AxisTitle { side, .. } => spec
+                .panels
+                .get(self.panel_index(spec)?)?
+                .axis(side)
+                .title_font
+                .clone(),
+            Self::Legend { .. } => spec
+                .panels
+                .get(self.panel_index(spec)?)?
+                .legend
+                .font
+                .clone(),
+        })
+    }
+
+    /// Pose la police et le corps du texte. Rend `false` sans rien changer si
+    /// le panneau n'existe pas.
+    pub fn set_font(&self, spec: &mut PlotSpec, font: crate::TextFont) -> bool {
+        if let Self::Title = self {
+            spec.title_font = font;
+            return true;
+        }
+        let Some(index) = self.panel_index(spec) else {
+            return false;
+        };
+        let Some(panel) = spec.panels.get_mut(index) else {
+            return false;
+        };
+        match *self {
+            Self::Title => unreachable!(),
+            Self::PanelTitle { .. } => panel.title_font = font,
+            Self::AxisTitle { side, .. } => panel.axis_mut(side).title_font = font,
+            Self::Legend { .. } => panel.legend.font = font,
+        }
+        true
+    }
+
     /// Le texte du titre tel qu'il s'affiche — `None` pour la légende (ses
     /// textes sont les noms des séries) ou si le panneau n'existe pas. Pour un
     /// titre d'axe, l'unité est incluse (`Signal (u.a.)`,

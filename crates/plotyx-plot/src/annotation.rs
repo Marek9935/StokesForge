@@ -29,6 +29,8 @@ pub struct AnnotationSpec {
     /// Rotation en degrés, sens trigonométrique (antihoraire), autour du
     /// centre du texte.
     pub rotation: f64,
+    /// Nom de famille de la police (issue #78) ; vide = la police du graphe.
+    pub font: String,
 }
 
 impl AnnotationSpec {
@@ -49,6 +51,7 @@ impl AnnotationSpec {
             color: String::new(),
             size: Self::DEFAULT_SIZE,
             rotation: 0.0,
+            font: String::new(),
         }
     }
 
