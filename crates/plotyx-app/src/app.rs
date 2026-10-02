@@ -369,6 +369,7 @@ use plotyx_session::{Snapshot, WindowGeometry};
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
 use crate::i18n;
+use crate::icons::{icon_button, icon_image, Icon, IconRole, ICON_SIZE};
 use crate::preferences::Preferences;
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
@@ -3455,14 +3456,26 @@ fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         if overflow.hidden_left || overflow.hidden_right {
-            let arrow =
-                |label: &str| egui::Button::new(egui::RichText::new(label).size(12.0)).small();
             let previous = ui
-                .add_enabled(overflow.hidden_left, arrow("<"))
-                .on_hover_text(tr!("tabs-previous-worksheets"));
+                .add_enabled_ui(overflow.hidden_left, |ui| {
+                    icon_button(
+                        ui,
+                        Icon::CaretLeft,
+                        IconRole::Neutral,
+                        tr!("tabs-previous-worksheets"),
+                    )
+                })
+                .inner;
             let next = ui
-                .add_enabled(overflow.hidden_right, arrow(">"))
-                .on_hover_text(tr!("tabs-next-worksheets"));
+                .add_enabled_ui(overflow.hidden_right, |ui| {
+                    icon_button(
+                        ui,
+                        Icon::CaretRight,
+                        IconRole::Neutral,
+                        tr!("tabs-next-worksheets"),
+                    )
+                })
+                .inner;
             if previous.clicked() {
                 step = -1;
             }
@@ -3680,9 +3693,8 @@ fn header_icon(
     base_id: egui::Id,
     id_source: &str,
     rect: egui::Rect,
-    glyph: &str,
+    icon: Icon,
     tooltip: &str,
-    color: egui::Color32,
 ) -> bool {
     let response = header.interact(rect, base_id.with(id_source), egui::Sense::click());
     if response.hovered() {
@@ -3690,12 +3702,9 @@ fn header_icon(
             .painter()
             .rect_filled(rect, 4.0, header.visuals().widgets.hovered.bg_fill);
     }
-    header.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        egui::TextStyle::Button.resolve(header.style()),
-        color,
+    icon_image(icon, IconRole::Neutral).paint_at(
+        header,
+        egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(ICON_SIZE)),
     );
     response.on_hover_text(tooltip).clicked()
 }
@@ -4169,10 +4178,6 @@ fn window_header(
         egui::Sense::hover(),
     );
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    let icon_color = match placement {
-        HeaderPlacement::Floating | HeaderPlacement::Dialog => header.visuals().text_color(),
-        HeaderPlacement::Detached => theme::gutter_text_color(),
-    };
     // B5 (`retours-2026-09-23-bugs.md`) : l'icône de repli
     // était réservée à `Tab::Graph`, sans justification documentée — une
     // extension jamais faite plutôt qu'un choix. `Matrix`/`Note` restent
@@ -4190,19 +4195,17 @@ fn window_header(
             _ => "graphe",
         };
         let (icon, tooltip) = if collapsed {
-            (">", format!("Afficher le contenu du {content_label}"))
+            (
+                Icon::CaretRight,
+                format!("Afficher le contenu du {content_label}"),
+            )
         } else {
-            ("v", format!("Masquer le contenu du {content_label}"))
+            (
+                Icon::CaretDown,
+                format!("Masquer le contenu du {content_label}"),
+            )
         };
-        if header_icon(
-            &mut header,
-            id,
-            "collapse",
-            collapse_rect,
-            icon,
-            &tooltip,
-            icon_color,
-        ) {
+        if header_icon(&mut header, id, "collapse", collapse_rect, icon, &tooltip) {
             actions.toggle_collapse = true;
         }
     }
@@ -4220,9 +4223,8 @@ fn window_header(
         id,
         "close",
         action_rect(2.0),
-        "×",
+        Icon::Close,
         "Fermer la fenêtre",
-        icon_color,
     ) {
         actions.close = true;
     }
@@ -4235,20 +4237,19 @@ fn window_header(
     // capacité pour certains onglets.
     let show_detach_and_maximize = shows_detach_and_maximize(placement, tab);
     if show_detach_and_maximize {
-        let (detach_glyph, detach_tooltip) = match placement {
+        let (detach_icon, detach_tooltip) = match placement {
             HeaderPlacement::Floating | HeaderPlacement::Dialog => {
-                ("↗", "Détacher dans une fenêtre")
+                (Icon::Detach, "Détacher dans une fenêtre")
             }
-            HeaderPlacement::Detached => ("↩", "Réattacher à la fenêtre principale"),
+            HeaderPlacement::Detached => (Icon::Reattach, "Réattacher à la fenêtre principale"),
         };
         if header_icon(
             &mut header,
             id,
             "detach",
             action_rect(28.0),
-            detach_glyph,
+            detach_icon,
             detach_tooltip,
-            icon_color,
         ) {
             actions.detach = true;
         }
@@ -4257,9 +4258,8 @@ fn window_header(
             id,
             "maximize",
             action_rect(54.0),
-            "⛶",
+            Icon::Maximize,
             "Maximiser la fenêtre",
-            icon_color,
         ) {
             actions.maximize = true;
         }
@@ -4506,29 +4506,36 @@ fn project_tree_node_ui(
     interaction: &mut PmInteraction,
 ) {
     match node {
-        ProjectTreeNode::Folder { name, children, .. } => {
-            egui::CollapsingHeader::new(icon_label("📁", name))
-                .default_open(false)
-                .show(ui, |ui| {
-                    if children.is_empty() {
-                        ui.weak(tr!("project-folder-empty"));
-                    }
-                    for child in children {
-                        project_tree_node_ui(ui, child, interaction);
-                    }
-                });
+        ProjectTreeNode::Folder { id, name, children } => {
+            let state_id = ui.make_persistent_id(("project_tree_folder", id));
+            egui::collapsing_header::CollapsingState::load_with_default_open(
+                ui.ctx(),
+                state_id,
+                false,
+            )
+            .show_header(ui, |ui| {
+                ui.add(icon_image(Icon::Folder, IconRole::Folder));
+                ui.label(name);
+            })
+            .body(|ui| {
+                if children.is_empty() {
+                    ui.weak(tr!("project-folder-empty"));
+                }
+                for child in children {
+                    project_tree_node_ui(ui, child, interaction);
+                }
+            });
         }
         ProjectTreeNode::Window { id, name, kind } => {
             let icon = match kind {
-                WindowKind::Book => "📗",
-                WindowKind::Graph => "📈",
-                WindowKind::Matrix => "🔢",
-                WindowKind::Note => "📝",
+                WindowKind::Book => (Icon::Workbook, IconRole::Workbook),
+                WindowKind::Graph => (Icon::Graph, IconRole::Graph),
+                WindowKind::Matrix => (Icon::Matrix, IconRole::Matrix),
+                WindowKind::Note => (Icon::Note, IconRole::Note),
             };
             let tab = tab_for_window(*id, *kind);
             let selected = interaction.selection.contains(&tab);
             let is_hidden = interaction.hidden.contains(&tab);
-            let label = icon_label(icon, name);
             let fill = if selected {
                 ui.visuals().selection.bg_fill
             } else {
@@ -4549,11 +4556,15 @@ fn project_tree_node_ui(
                         .fill(fill)
                         .inner_margin(2.0)
                         .show(ui, |ui| {
-                            if is_hidden {
-                                ui.add(egui::Button::new(egui::RichText::new(&label).weak()))
+                            let text = if is_hidden {
+                                egui::RichText::new(name).weak()
                             } else {
-                                ui.button(&label)
-                            }
+                                egui::RichText::new(name)
+                            };
+                            ui.add(egui::Button::image_and_text(
+                                icon_image(icon.0, icon.1),
+                                text,
+                            ))
                         })
                         .inner
                 })
@@ -6072,10 +6083,13 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.colored_label(egui::Color32::RED, message);
                 }
             }
-            if ui
-                .small_button("×")
-                .on_hover_text(tr!("import-files-remove"))
-                .clicked()
+            if icon_button(
+                ui,
+                Icon::Close,
+                IconRole::Neutral,
+                tr!("import-files-remove"),
+            )
+            .clicked()
             {
                 remove = Some(i);
             }
@@ -11578,26 +11592,33 @@ mod graph_layout_tests {
     fn len_tete_du_graphe_garde_son_titre_au_centre_et_sa_fleche_a_gauche() {
         let (_session, graph) = graphe();
         let context = egui::Context::default();
-        let mut output = context.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(400.0, 120.0),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                let _ = window_header(
-                    ui,
-                    egui::Id::new("graph_header_centered_title"),
-                    "Graph1",
-                    Some(Tab::Graph(graph)),
-                    false,
-                    HeaderPlacement::Floating,
-                );
-            },
-        );
-        output.textures_delta.clear();
+        egui_extras::install_image_loaders(&context);
+        // Deux images : la seconde peint les icônes, dont la texture SVG est
+        // prête après la première.
+        let mut output = egui::FullOutput::default();
+        for _ in 0..2 {
+            output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 120.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = window_header(
+                        ui,
+                        egui::Id::new("graph_header_centered_title"),
+                        "Graph1",
+                        Some(Tab::Graph(graph)),
+                        false,
+                        HeaderPlacement::Floating,
+                    );
+                },
+            );
+            output.textures_delta.clear();
+        }
+        let icons = find_icon_centers(&output.shapes);
 
         let text_shape = |text: &str| {
             output
@@ -11614,9 +11635,9 @@ mod graph_layout_tests {
             (title_center - 200.0).abs() < f32::EPSILON,
             "le titre doit être centré dans l'en-tête, pas après la flèche"
         );
-        let collapse = text_shape("v").expect("la flèche de repli doit être peinte");
+        let collapse = icons.first().expect("la flèche de repli doit être peinte");
         assert!(
-            collapse.pos.x + collapse.galley.rect.center().x < 24.0,
+            collapse.x < 24.0,
             "la flèche de repli doit rester dans le coin supérieur gauche"
         );
 
@@ -11628,10 +11649,7 @@ mod graph_layout_tests {
         // `header_icon` peint désormais tout de la même façon : les centres
         // verticaux doivent coïncider exactement.
         let title_center_y = title.pos.y + title.galley.rect.center().y;
-        let close_center_y = {
-            let close = text_shape("×").expect("le bouton fermer doit être peint");
-            close.pos.y + close.galley.rect.center().y
-        };
+        let close_center_y = icons.last().expect("le bouton fermer doit être peint").y;
         assert!(
             (title_center_y - close_center_y).abs() < f32::EPSILON,
             "le titre et les icônes d'action doivent partager le même centre vertical"
@@ -11646,29 +11664,34 @@ mod graph_layout_tests {
     fn licone_de_repli_est_peinte_pour_les_classeurs_mais_pas_les_matrices() {
         let paint_and_find_collapse_arrow = |tab: Tab| -> bool {
             let context = egui::Context::default();
-            let mut output = context.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(400.0, 120.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| {
-                    let _ = window_header(
-                        ui,
-                        egui::Id::new("collapse_icon_presence"),
-                        "Titre",
-                        Some(tab),
-                        false,
-                        HeaderPlacement::Floating,
-                    );
-                },
-            );
-            output.textures_delta.clear();
-            output.shapes.iter().any(|painted| {
-                matches!(&painted.shape, egui::Shape::Text(shape) if shape.galley.job.text == "v")
-            })
+            egui_extras::install_image_loaders(&context);
+            let mut output = egui::FullOutput::default();
+            for _ in 0..2 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(400.0, 120.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let _ = window_header(
+                            ui,
+                            egui::Id::new("collapse_icon_presence"),
+                            "Titre",
+                            Some(tab),
+                            false,
+                            HeaderPlacement::Floating,
+                        );
+                    },
+                );
+                output.textures_delta.clear();
+            }
+            // Une icône dans le coin gauche (la croix, elle, est à droite).
+            find_icon_centers(&output.shapes)
+                .first()
+                .is_some_and(|center| center.x < 24.0)
         };
 
         let node = NodeId::from_raw(1);
@@ -12215,6 +12238,7 @@ mod graph_layout_tests {
         let context = egui::Context::default();
         context.set_embed_viewports(false);
         context.set_fonts(plotyx_render_egui::font_definitions());
+        egui_extras::install_image_loaders(&context);
 
         let root_input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -12276,8 +12300,12 @@ mod graph_layout_tests {
         // Image de stabilisation (Wayland, voir `needs_initial_repaint`) :
         // consomme le repaint initial et amorce `expanded_size` à la
         // taille de départ.
+        paint(Vec::new());
+        // Seconde image : les textures SVG des icônes sont prêtes.
         let first = paint(Vec::new());
-        let icon_pos = find_text_center(&first.shapes, "v");
+        let icon_pos = *find_icon_centers(&first.shapes)
+            .first()
+            .expect("la flèche de repli doit être peinte, en haut à gauche");
 
         // Un clic (glissé nul, pression puis relâchement) sur le chevron de
         // repli, réparti sur deux images comme le veut la détection de clic
@@ -12696,6 +12724,22 @@ mod graph_layout_tests {
         // appel pourrait écraser).
         paint(Vec::new());
         assert_eq!(state.get(), settled);
+    }
+
+    /// Centres des icônes peintes (images : rectangles à texture), de gauche à
+    /// droite. Les chargeurs d'images
+    /// doivent être installés sur le contexte, et l'image avoir déjà tourné
+    /// une fois pour que la texture soit prête.
+    fn find_icon_centers(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::Pos2> {
+        let mut centers: Vec<egui::Pos2> = shapes
+            .iter()
+            .filter_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect) if rect.brush.is_some() => Some(rect.rect.center()),
+                _ => None,
+            })
+            .collect();
+        centers.sort_by(|a, b| a.x.total_cmp(&b.x));
+        centers
     }
 
     /// Trouve le centre du texte peint contenant `needle` dans `shapes` —
