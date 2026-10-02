@@ -364,6 +364,7 @@ history-macro-refresh-from-file = Refresh from File
 history-macro-import = Import
 history-macro-add-workbook = Add Workbook
 history-macro-add-worksheet = Add Worksheet
+history-macro-script = Run Script
 
 ## Undo and Redo
 

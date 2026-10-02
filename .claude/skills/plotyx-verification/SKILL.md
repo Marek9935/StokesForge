@@ -1,6 +1,6 @@
 ---
 name: plotyx-verification
-description: Écrire un test PlotYx au bon endroit, et vérifier un changement avant de le livrer — `fmt`, `clippy -D warnings`, `cargo test --workspace`, plus la feature hors défaut (`python`) que la CI ne couvre pas, mise à jour de la doc, message de commit en français sur la branche `rewriterust`. À utiliser dès que la demande est « teste », « vérifie », « c'est bon ? », « commit », « pousse », « j'ai fini », ou en fin de toute tâche d'implémentation ou de correction — un `cargo test` vert ne prouve pas ce qu'on croit dans ce dépôt, et ce skill dit exactement ce qu'il ne prouve pas.
+description: Écrire un test PlotYx au bon endroit, et vérifier un changement avant de le livrer — `fmt`, `clippy -D warnings`, `cargo test --workspace`, plus la feature hors défaut (`python`) exercée par le travail CI test-python, mise à jour de la doc, message de commit en français sur la branche `rewriterust`. À utiliser dès que la demande est « teste », « vérifie », « c'est bon ? », « commit », « pousse », « j'ai fini », ou en fin de toute tâche d'implémentation ou de correction — un `cargo test` vert ne prouve pas ce qu'on croit dans ce dépôt, et ce skill dit exactement ce qu'il ne prouve pas.
 ---
 
 # Vérifier un changement PlotYx
@@ -13,11 +13,12 @@ cargo clippy --workspace --all-targets -- -D warnings   # bloquant en CI
 cargo test --workspace                        # tout, sauf #[ignore]
 cargo test -p <crate> --test <fichier>        # un fichier de tests
 cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
-scripts/python-test.sh                        # python, script, robustesse ; pas les tests de plotyx-app
+scripts/python-test.sh                        # pont, scripts, robustesse, application et CLI
 ```
 
-**Les travaux de CI par défaut n'activent pas `python`.** Le travail
-`test-python` est manuel et non bloquant : vérifier s'il a réellement tourné.
+**Les travaux `fmt`, `clippy` et `test` n'activent pas `python`.** Le travail
+`test-python` est automatique et bloquant ; il teste les cinq crates du chemin
+Python. Clippy Python exige encore l'environnement embarqué explicitement.
 `fmt` vérifie la mise en forme, pas la compilation de ce chemin. Typst, lui,
 n'est plus une feature (issue #29) : `cargo test --workspace` le couvre.
 `--all-features` n'active plus que Python et exige son environnement. Les commandes et
@@ -30,7 +31,7 @@ tester explicitement**, sinon elle valide du code mort.
 | Le changement touche… | Lancer en plus |
 |---|---|
 | `plotyx-python`, `plotyx-script`, la surface `pyx` | `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE`) |
-| l'intégration Python de `plotyx-app` | tester aussi `plotyx-app --features python`, avec l'environnement de `scripts/python-test.sh` ; appliquer cet environnement à Clippy |
+| l'intégration Python de `plotyx-app` ou le CLI `run` | `scripts/python-test.sh` couvre ces crates ; appliquer son environnement à Clippy ; `scripts/cli-dist.sh` si l'empaquetage CLI change |
 | les formules Typst, `plotyx-render::formula` | rien de plus : `cargo test --workspace` les couvre (dépendance ferme) ; l'export PDF/PNG reste hors Typst tant que l'issue #34 n'est pas faite |
 | une reproduction `#[ignore]` de robustesse | `cargo test -p plotyx-robustesse -- --ignored` |
 | l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `PLOTYX_APP_SCREENSHOT` + `PLOTYX_APP_AUTOQUIT_MS`, voir [`../plotyx-bug-report/references/voir-l-interface.md`](../plotyx-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence. Pour un texte d'interface (nouveau libellé, zone convertie), refaire la capture avec `PLOTYX_LANG=en-XA` : un texte sans `[[ ]]` a échappé au catalogue, un `]]` manquant est un texte tronqué |

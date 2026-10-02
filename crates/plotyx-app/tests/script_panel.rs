@@ -10,8 +10,8 @@
 //!
 //! Exige le préfixe vendorisé et l'environnement Python décrit dans
 //! `.codex/README.md`, puis `cargo test -p plotyx-app --features python
-//! --test script_panel`. `scripts/python-test.sh` teste le pont et la
-//! robustesse, mais ne lance pas ce fichier propre à l'application.
+//! --test script_panel`. `scripts/python-test.sh` lance aussi les tests de
+//! l'application, dont ce fichier et le parcours numpy → colonnes → graphe.
 //!
 //! # `Action::RunScript` ne bloque pas
 //!
@@ -245,4 +245,54 @@ fn a_script_exception_is_not_an_application_error() {
     state.dispatch(Action::AddColumn { sheet });
     assert!(state.status().is_some_and(|status| !status.is_error));
     assert_eq!(state.visible_columns(sheet).len(), columns_before + 1);
+}
+
+#[test]
+fn lecture_calcul_resultats_et_graphe_se_rafraichissent_et_sannulent_ensemble() {
+    let (_session, mut state, _sheet) = start();
+    let before = state.snapshot().tree.clone();
+    run_and_wait(
+        &mut state,
+        r#"
+import numpy as np
+source = pyx.column(pyx.resolve('[Book1]Sheet1!Temps'))
+book = pyx.create_workbook('Résultats')
+sheet = pyx.create_worksheet(book, 'Calcul')
+x = pyx.create_column(sheet, 'X')
+y = pyx.create_column(sheet, 'Y')
+pyx.set_values(x, np.asarray(source, dtype=np.float64))
+pyx.set_values(y, source**2)
+pyx.set_column_meta(y, unit='mV', role='y')
+pyx.plot(y, x, name='Graph1', title='$t^2$')
+"#,
+    );
+    assert!(
+        state.script_output().unwrap().error.is_none(),
+        "{:?}",
+        state.script_output()
+    );
+    assert!(state.snapshot().tree.resolve("[Graph1]").is_ok());
+    let y = state
+        .snapshot()
+        .tree
+        .resolve("[Résultats]Calcul!Y")
+        .unwrap();
+    assert_eq!(
+        state
+            .snapshot()
+            .tree
+            .node(y)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .float_values()
+            .unwrap()
+            .as_slice(),
+        &[0., 0.25, 1., 2.25, 4.]
+    );
+    let after = state.snapshot().tree.clone();
+    state.dispatch(Action::Undo);
+    assert_eq!(*state.snapshot().tree, *before);
+    state.dispatch(Action::Redo);
+    assert_eq!(*state.snapshot().tree, *after);
 }

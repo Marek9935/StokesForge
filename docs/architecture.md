@@ -23,11 +23,12 @@ plotyx-session       l'acteur : le &mut Project de la session
 (commands, persistence, core)
    ↑            ↑
 plotyx-script   plotyx-render-egui (core, plot, render, session)
-(commands, core, import, importer, python, session)
+(commands, core, import, importer, plot, python, session)
 + plotyx-python (aucune dépendance plotyx)
 
-plotyx-cli    (core, commands, import, importer, persistence) — sans session :
-               un `Project` construit directement, puis `.plx`
+plotyx-cli    (core, commands, import, importer, persistence)
+               import : un `Project` neuf construit directement, puis `.plx`
+               run (python) : script, python, session ; même acteur que la console
 plotyx-import (aucune dépendance plotyx) — lecture des fichiers d'appareil
 plotyx-importer (core, import) — plan de feuilles et colonnes du modèle, sans
                commandes : partagé par l'application, le CLI et les scripts
@@ -57,7 +58,7 @@ dépendances.
 | `plotyx-python` | interpréteur CPython embarqué, aller-retour numpy | [python](python-et-script.md) |
 | `plotyx-script` | le fil de script, la surface `pyx`, l'interruption | [python](python-et-script.md) |
 | `plotyx-app` | la coquille UI eframe (banc d'essai) ; **seul** crate qui traduit l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application.md) |
-| `plotyx-cli` | binaire headless de vérification du lien | [application](application.md) |
+| `plotyx-cli` | import et scripts Python sans interface | [application](application.md) |
 | `plotyx-importer` | du résultat de `plotyx-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
 | `plotyx-robustesse` | 21 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
 | `plotyx-arch-guard` | lecture commune des `Cargo.toml` pour les garde-fous de dépendances (dev-dependency) | [tests](tests.md) |
@@ -130,7 +131,7 @@ ou en texte brut), détaillé dans [`rendu.md`](rendu.md#typst-r8).
 | Binaire | Crate | À quoi il sert |
 |---|---|---|
 | `plotyx-app` | `plotyx-app` | la fenêtre — `plotyx-app [chemin]` |
-| `plotyx-cli` | `plotyx-cli` | `plotyx-cli import` : fichiers d'appareils → projet `.plx`, sans UI ni session ; `plotyx-cli recipes` |
+| `plotyx-cli` | `plotyx-cli` | `import` : appareils → `.plx`, projet neuf sans session ; `recipes` ; `run` (python) : script via session sans fenêtre |
 | `plotyx-selftest` | `plotyx-script` | rejouer le critère de fin du socle depuis une distribution empaquetée |
 | `plotyx-pyhello` | `plotyx-python` | prouver l'isolation de la pile Python empaquetée |
 | `plotyx-sonde-alloc`, `plotyx-sonde-pile` | `plotyx-robustesse` | deux sondes hors-processus (échec d'allocation, débordement de pile) |

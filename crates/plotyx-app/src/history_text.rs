@@ -101,6 +101,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             MacroKind::Import => tr!("history-macro-import"),
             MacroKind::AddWorkbook => tr!("history-macro-add-workbook"),
             MacroKind::AddWorksheet => tr!("history-macro-add-worksheet"),
+            MacroKind::Script => tr!("history-macro-script"),
         },
     }
 }

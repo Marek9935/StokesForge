@@ -1,17 +1,15 @@
-//! La surface `pyx` : quatre appels du socle, plus l'import de fichiers.
+//! La surface `pyx` : navigation et lecture du projet, puis les écritures du socle.
 //!
-//! Ce n'est **pas** l'API v1 destinée aux utilisateurs — celle-là est
-//! spécifiée ailleurs et reste le contrat pour plus tard. Les quatre appels du socle ne
-//! sont pas choisis pour leur utilité mais parce qu'**ensemble ils rendent le
-//! critère de fin du socle vérifiable** :
+//! Le chantier Python (#65, lots #66 et #67) étend l'existant ; l'ancienne API v1
+//! archivée n'est plus une cible à recopier. Les poignées et les lectures
+//! fonctionnent sans état de vue, aussi bien pour la console que pour une
+//! session sans interface.
 //!
-//! | Appel | Ce qu'il éprouve |
-//! |---|---|
-//! | [`resolve`] | poignées opaques, grammaire de chemins |
-//! | [`column`] | vue numpy **sans copie**, `Arc` maintenu vivant |
-//! | [`set_column`] | mutation via l'acteur et le bus, GIL relâché pendant l'attente |
-//! | [`undo`] | délégation à la pile d'historique depuis Python |
-//! | [`import_file`] | import commun au CLI et à l'application, en une macro annulable |
+//! Deux lectures distinctes évitent une conversion implicite : `column`
+//! conserve son vrai tableau numpy numérique sans copie ; `values` copie les
+//! cellules en un tuple Python, sans perdre les textes ni confondre `None`,
+//! une chaîne vide et un nombre NaN. Les métadonnées sont des dictionnaires
+//! détachés du modèle : les modifier ne constitue jamais une écriture.
 //!
 //! # Vocabulaire d'erreurs
 //!
@@ -34,11 +32,13 @@
 //! au GIL entre dans ce bloc ou en ressorte.
 
 use numpy::PyArray1;
-use plotyx_core::NodeId;
+use plotyx_commands::Command;
+use plotyx_core::{ColumnRole, ColumnType, ColumnValues, MixedCell, NodeId, NodeKind, ValueBlock};
 use plotyx_python::array::{borrowed_readonly_array, copy_array_to_vec};
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyDict, PyModule, PyTuple};
+use pyo3::IntoPyObjectExt;
 use pyo3::{create_exception, wrap_pyfunction};
 
 use crate::bridge::{self, HostError};
@@ -72,7 +72,7 @@ create_exception!(
 );
 
 /// Traduit une erreur de l'hôte, déjà classée, en exception Python.
-fn to_py_error(error: HostError) -> PyErr {
+pub(crate) fn to_py_error(error: HostError) -> PyErr {
     match error {
         HostError::UnknownPath(message) => UnknownPathError::new_err(message),
         HostError::BrokenReference(message) => BrokenReferenceError::new_err(message),
@@ -84,8 +84,8 @@ fn to_py_error(error: HostError) -> PyErr {
 /// Poignée **opaque** vers un objet du projet.
 ///
 /// Un script ne peut ni l'inspecter ni la fabriquer : elle n'a pas de
-/// constructeur Python et n'expose aucun entier. [`resolve`] et
-/// [`import_file`] en produisent.
+/// constructeur Python et n'expose aucun entier. [`resolve`], [`root`],
+/// [`children`], [`info`] et [`import_file`] en produisent.
 ///
 /// Une poignée reste valide après un renommage, après un déplacement, et après
 /// une suppression **suivie d'une annulation** : c'est le contrat de
@@ -104,9 +104,9 @@ fn to_py_error(error: HostError) -> PyErr {
 #[derive(Debug)]
 pub struct Handle {
     /// Nœud désigné. Champ privé : rien, depuis Python, n'y donne accès.
-    id: NodeId,
+    pub(crate) id: NodeId,
     /// Époque du projet au moment où [`resolve`] a produit cette poignée.
-    epoch: u64,
+    pub(crate) epoch: u64,
 }
 
 #[pymethods]
@@ -134,6 +134,138 @@ fn resolve(py: Python<'_>, chemin: &str) -> PyResult<Handle> {
         .detach(|| bridge::resolve(session, chemin))
         .map_err(to_py_error)?;
     Ok(Handle { id, epoch })
+}
+
+/// Rend la poignée du dossier racine du projet courant.
+#[pyfunction]
+fn root(py: Python<'_>) -> PyResult<Handle> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let (id, epoch) = py
+        .detach(|| bridge::root(context.session()))
+        .map_err(to_py_error)?;
+    Ok(Handle { id, epoch })
+}
+
+/// Rend les enfants directs dans leur ordre : dossiers et fenêtres d'un
+/// dossier, feuilles d'un classeur, colonnes d'une feuille. Sans poignée,
+/// part du dossier racine. Une colonne ou une autre feuille de l'arbre rend
+/// une liste vide. Une poignée périmée lève `BrokenReferenceError`.
+#[pyfunction]
+#[pyo3(signature = (handle=None))]
+fn children(py: Python<'_>, handle: Option<&Handle>) -> PyResult<Vec<Handle>> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let handle = handle.map(|handle| (handle.id, handle.epoch));
+    let children = py
+        .detach(|| bridge::children(context.session(), handle))
+        .map_err(to_py_error)?;
+    Ok(children
+        .into_iter()
+        .map(|(id, epoch)| Handle { id, epoch })
+        .collect())
+}
+
+/// Décrit un nœud par un dictionnaire indépendant du modèle : `name`, `kind`,
+/// `parent` (poignée ou None), `row_count` (feuille/colonne, sinon None),
+/// `column` (métadonnées d'une colonne, sinon None). Le nombre de lignes d'une
+/// feuille est le maximum des longueurs de ses colonnes, zéro si elle est vide.
+/// Les métadonnées comprennent `type`, `role`, `long_name`, `unit`, `comment`,
+/// `display_format`, `formula` et `version`. Une poignée périmée lève
+/// `BrokenReferenceError` ; aucune lecture ne change l'historique.
+#[pyfunction]
+fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let id = handle.id;
+    let epoch = handle.epoch;
+    let (node, row_count) = py
+        .detach(|| bridge::info(context.session(), id, epoch))
+        .map_err(to_py_error)?;
+    let result = PyDict::new(py);
+    result.set_item("name", node.name())?;
+    result.set_item(
+        "kind",
+        match node.kind() {
+            NodeKind::Folder { .. } => "folder",
+            NodeKind::Workbook { .. } => "workbook",
+            NodeKind::Worksheet { .. } => "worksheet",
+            NodeKind::Column(_) => "column",
+            NodeKind::Graph { .. } => "graph",
+            NodeKind::Matrix { .. } => "matrix",
+            NodeKind::Note { .. } => "note",
+            NodeKind::Unknown(_) => "unknown",
+        },
+    )?;
+    result.set_item("parent", node.parent().map(|id| Handle { id, epoch }))?;
+    result.set_item("row_count", row_count)?;
+    if let Some(column) = node.as_column() {
+        let meta = column.meta();
+        let description = PyDict::new(py);
+        description.set_item(
+            "type",
+            match column.column_type() {
+                ColumnType::Numeric => "numeric",
+                ColumnType::DateTime => "datetime",
+                ColumnType::Mixed => "mixed",
+            },
+        )?;
+        description.set_item(
+            "role",
+            match meta.role {
+                ColumnRole::X => "x",
+                ColumnRole::Y => "y",
+                ColumnRole::Z => "z",
+                ColumnRole::XError => "x_error",
+                ColumnRole::YError => "y_error",
+                ColumnRole::Label => "label",
+                ColumnRole::None => "none",
+            },
+        )?;
+        description.set_item("long_name", meta.long_name.as_str())?;
+        description.set_item("unit", meta.unit.as_str())?;
+        description.set_item("comment", meta.comment.as_str())?;
+        description.set_item("display_format", meta.display_format.as_str())?;
+        description.set_item("formula", meta.formula.as_deref())?;
+        description.set_item("version", column.version())?;
+        result.set_item("column", description)?;
+    } else {
+        result.set_item("column", py.None())?;
+    }
+    Ok(result)
+}
+
+/// Copie les cellules stockées d'une colonne en un tuple Python : `float`,
+/// `str` ou `None`. Ne réanalyse jamais un texte numérique et conserve les
+/// distinctions entre cellule vide, chaîne vide et nombre NaN. Les dates
+/// restent des timestamps POSIX en secondes. Le tuple est un instantané ;
+/// pour une lecture numérique sans copie, utiliser `column`.
+/// Lève `InvalidValueError` sur un autre nœud, `BrokenReferenceError` sur une
+/// poignée périmée.
+#[pyfunction]
+fn values<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyTuple>> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let id = handle.id;
+    let epoch = handle.epoch;
+    let values = py
+        .detach(|| bridge::column_values(context.session(), id, epoch))
+        .map_err(to_py_error)?;
+    let cells: Vec<Bound<'py, PyAny>> = match values {
+        ColumnValues::Float(values) => values
+            .iter()
+            .map(|value| value.into_bound_py_any(py))
+            .collect::<PyResult<_>>()?,
+        ColumnValues::Mixed(values) => values
+            .iter()
+            .map(|cell| match cell {
+                MixedCell::Empty => Ok(py.None().into_bound(py)),
+                MixedCell::Number(value) => value.into_bound_py_any(py),
+                MixedCell::Text(text) => text.into_bound_py_any(py),
+            })
+            .collect::<PyResult<_>>()?,
+    };
+    PyTuple::new(py, cells)
 }
 
 /// Rend une vue numpy **en lecture seule et sans copie** sur les valeurs de la
@@ -173,12 +305,9 @@ fn column<'py>(py: Python<'py>, poignee: &Handle) -> PyResult<Bound<'py, PyArray
 /// **copiées** vers Rust : le modèle possède ses buffers et ne dépend jamais
 /// de la durée de vie d'un objet Python.
 ///
-/// **Restriction assumée de la surface-témoin** : la longueur doit être
-/// **exactement** celle de la colonne. Cette surface n'allonge ni ne tronque —
-/// aucune des huit commandes du socle ne tronque une colonne, et en inventer
-/// une pour un banc d'essai serait un mauvais échange. La surface v1 fera
-/// mieux. Toute autre longueur lève `InvalidValueError`, **sans envoyer la
-/// moindre commande** : la révision du projet ne bouge pas.
+/// La longueur doit rester exactement celle de la colonne. Une autre
+/// longueur lève `InvalidValueError` avant toute commande. Pour remplacer la
+/// longueur et écrire du texte, utiliser `set_values`.
 #[pyfunction]
 #[pyo3(text_signature = "(poignee, valeurs)")]
 fn set_column(py: Python<'_>, poignee: &Handle, valeurs: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -189,10 +318,13 @@ fn set_column(py: Python<'_>, poignee: &Handle, valeurs: &Bound<'_, PyAny>) -> P
     // La copie se fait GIL en main ; le `Vec<f64>` obtenu est du Rust pur, il
     // peut traverser l'attente de l'acteur et se détruire sur n'importe quel
     // fil.
+    if let Ok(array) = valeurs.cast::<numpy::PyUntypedArray>() {
+        use numpy::PyUntypedArrayMethods;
+        check_value_count(array.len())?;
+    }
     let values = copy_array_to_vec(valeurs)
         .map_err(|error| InvalidValueError::new_err(error.to_string()))?;
-    let session = context.session();
-    py.detach(move || bridge::set_column(session, id, epoch, values))
+    py.detach(move || bridge::set_column(&context, id, epoch, values))
         .map_err(to_py_error)
 }
 
@@ -210,8 +342,7 @@ fn set_column(py: Python<'_>, poignee: &Handle, valeurs: &Bound<'_, PyAny>) -> P
 fn undo(py: Python<'_>) -> PyResult<bool> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
-    let session = context.session();
-    py.detach(|| bridge::undo(session)).map_err(to_py_error)
+    py.detach(|| bridge::undo(&context)).map_err(to_py_error)
 }
 
 /// Importe un fichier dans un classeur neuf et rend les poignées de ses
@@ -229,9 +360,8 @@ fn import_file(
 ) -> PyResult<Vec<Handle>> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
-    let session = context.session();
     let sheets = py
-        .detach(|| bridge::import_file(session, &path, recipe.as_deref()))
+        .detach(|| bridge::import_file(&context, &path, recipe.as_deref()))
         .map_err(to_py_error)?;
     Ok(sheets
         .into_iter()
@@ -239,13 +369,253 @@ fn import_file(
         .collect())
 }
 
+/// Crée un classeur vide dans `parent` (dossier), ou dans la racine.
+/// Sans nom, utilise le premier BookN libre. Rend une poignée stable.
+#[pyfunction]
+#[pyo3(signature = (name=None, parent=None))]
+fn create_workbook(
+    py: Python<'_>,
+    name: Option<String>,
+    parent: Option<&Handle>,
+) -> PyResult<Handle> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let parent = parent.map(|h| (h.id, h.epoch));
+    let (id, epoch) = py
+        .detach(|| {
+            bridge::create_node(&context, parent, |parent| Command::AddEmptyWorkbook {
+                parent,
+                name,
+            })
+        })
+        .map_err(to_py_error)?;
+    Ok(Handle { id, epoch })
+}
+
+/// Crée une feuille vide en fin de classeur. Sans nom, utilise SheetN.
+#[pyfunction]
+#[pyo3(signature = (workbook, name=None))]
+fn create_worksheet(py: Python<'_>, workbook: &Handle, name: Option<String>) -> PyResult<Handle> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let parent = (workbook.id, workbook.epoch);
+    let (id, epoch) = py
+        .detach(|| {
+            bridge::create_node(&context, Some(parent), |book| Command::AddWorksheet {
+                book,
+                name,
+            })
+        })
+        .map_err(to_py_error)?;
+    Ok(Handle { id, epoch })
+}
+
+/// Crée une colonne vide en fin de feuille, de type numeric, datetime ou
+/// mixed. Les colonnes texte utilisent mixed. Sans nom, utilise A, B, C…
+#[pyfunction]
+#[pyo3(signature = (worksheet, name=None, column_type="numeric"))]
+fn create_column(
+    py: Python<'_>,
+    worksheet: &Handle,
+    name: Option<String>,
+    column_type: &str,
+) -> PyResult<Handle> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let column_type = match column_type {
+        "numeric" => ColumnType::Numeric,
+        "datetime" => ColumnType::DateTime,
+        "mixed" => ColumnType::Mixed,
+        _ => {
+            return Err(InvalidValueError::new_err(
+                "unknown column type: use numeric, datetime or mixed",
+            ))
+        }
+    };
+    let parent = (worksheet.id, worksheet.epoch);
+    let (id, epoch) = py
+        .detach(|| {
+            bridge::create_node(&context, Some(parent), |sheet| Command::AddColumn {
+                sheet,
+                index: None,
+                name,
+                column: plotyx_core::Column::new(column_type),
+            })
+        })
+        .map_err(to_py_error)?;
+    Ok(Handle { id, epoch })
+}
+
+/// Renomme un objet sans changer sa poignée. Les règles de nom du modèle
+/// s'appliquent : nom non vide, au plus 255 caractères, unique dans le parent.
+#[pyfunction]
+fn rename(py: Python<'_>, handle: &Handle, name: String) -> PyResult<()> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let (id, epoch) = (handle.id, handle.epoch);
+    py.detach(|| bridge::mutate_node(&context, id, epoch, Command::Rename { id, name }))
+        .map_err(to_py_error)
+}
+
+/// Supprime l'objet et ses descendants. La poignée redevient valide après
+/// annulation. La racine du projet ne peut pas être supprimée.
+#[pyfunction]
+fn remove(py: Python<'_>, handle: &Handle) -> PyResult<()> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let (id, epoch) = (handle.id, handle.epoch);
+    py.detach(|| bridge::mutate_node(&context, id, epoch, Command::RemoveNode { id }))
+        .map_err(to_py_error)
+}
+
+/// Copie explicite des entrées avant toute attente d'acteur. La voie numpy
+/// garde les contrôles existants : float64, une dimension, masque refusé.
+/// La voie iterable conserve les textes tels quels, même "12" et "".
+fn copy_cells(values: &Bound<'_, PyAny>) -> PyResult<ValueBlock> {
+    let invalid = |message: String| InvalidValueError::new_err(message);
+    if let Ok(array) = values.cast::<numpy::PyUntypedArray>() {
+        use numpy::PyUntypedArrayMethods;
+        check_value_count(array.len())?;
+        return copy_array_to_vec(values)
+            .map(ValueBlock::Float)
+            .map_err(|err| invalid(err.to_string()));
+    }
+    if values.is_instance_of::<pyo3::types::PyString>() {
+        return Err(invalid(
+            "expected an iterable of cells, not a single string".into(),
+        ));
+    }
+    // Ne pas croire __len__ pour borner l'itération : un générateur n'en a
+    // pas, et un objet utilisateur peut mentir. Le comptage protège les deux.
+    if let Ok(length) = values.len() {
+        check_value_count(length)?;
+    }
+    let mut cells = Vec::new();
+    for value in values
+        .try_iter()
+        .map_err(|_| invalid("expected an iterable of float, int, str or None cells".into()))?
+    {
+        let value = value?;
+        check_value_count(cells.len() + 1)?;
+        let cell = if value.is_none() {
+            MixedCell::Empty
+        } else if value.is_instance_of::<pyo3::types::PyString>() {
+            MixedCell::Text(value.extract::<String>()?)
+        } else if value.is_instance_of::<pyo3::types::PyInt>()
+            || value.is_instance_of::<pyo3::types::PyFloat>()
+        {
+            let number = value
+                .extract::<f64>()
+                .map_err(|err| invalid(err.to_string()))?;
+            if value.is_instance_of::<pyo3::types::PyInt>()
+                && value
+                    .extract::<i64>()
+                    .map_or(true, |n| n.unsigned_abs() > 9_007_199_254_740_992)
+            {
+                return Err(invalid(
+                    "integer outside the exact float64 range: convert it explicitly before writing"
+                        .into(),
+                ));
+            }
+            MixedCell::Number(number)
+        } else {
+            return Err(invalid(
+                "expected a float, int, str or None cell; convert other values explicitly".into(),
+            ));
+        };
+        cells.push(cell);
+    }
+    Ok(ValueBlock::Mixed(cells))
+}
+
+/// Refuse avant de copier les gros tableaux ou de traverser l'acteur. Le
+/// plafond est celui du modèle, pas une seconde valeur à garder en accord.
+fn check_value_count(count: usize) -> PyResult<()> {
+    let limit = plotyx_core::column::MAX_COLUMN_ROWS;
+    if count > limit {
+        return Err(InvalidValueError::new_err(format!(
+            "column length {count} exceeds the limit of {limit} rows"
+        )));
+    }
+    Ok(())
+}
+
+/// Remplace toutes les cellules, en allongeant ou tronquant cette seule
+/// colonne. Accepte numpy float64 1D ou un iterable de float/int/str/None.
+/// Numeric/datetime refusent les textes et traduisent None en NaN ; mixed
+/// conserve None, texte vide, texte numérique, NaN et zéro signé distincts.
+/// Copie les entrées ; le type et les métadonnées restent inchangés.
+#[pyfunction]
+fn set_values(py: Python<'_>, handle: &Handle, values: &Bound<'_, PyAny>) -> PyResult<()> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let cells = copy_cells(values)?;
+    context.check_interrupt()?;
+    let (id, epoch) = (handle.id, handle.epoch);
+    py.detach(|| bridge::set_values(&context, id, epoch, cells))
+        .map_err(to_py_error)
+}
+
+/// Modifie les seuls champs nommés : role (x, y, z, x_error, y_error,
+/// label, none), long_name, unit, comment, display_format, formula.
+/// Les valeurs sont des str ; formula=None retire la formule. Type, version
+/// et provenance sont préservés. Une colonne-formule refuse les écritures.
+#[pyfunction]
+#[pyo3(signature = (handle, **metadata))]
+fn set_column_meta(
+    py: Python<'_>,
+    handle: &Handle,
+    metadata: Option<&Bound<'_, PyDict>>,
+) -> PyResult<()> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let mut changes = Vec::new();
+    if let Some(metadata) = metadata {
+        for (key, value) in metadata.iter() {
+            let key = key.extract::<String>()?;
+            if !matches!(
+                key.as_str(),
+                "role" | "long_name" | "unit" | "comment" | "display_format" | "formula"
+            ) {
+                return Err(InvalidValueError::new_err(format!(
+                    "unknown column metadata field: {key}"
+                )));
+            }
+            let value =
+                if key == "formula" && value.is_none() {
+                    None
+                } else {
+                    Some(value.extract::<String>().map_err(|_| {
+                        InvalidValueError::new_err(format!("{key} must be a string"))
+                    })?)
+                };
+            changes.push((key, value));
+        }
+    }
+    let (id, epoch) = (handle.id, handle.epoch);
+    py.detach(|| bridge::set_column_meta(&context, id, epoch, changes))
+        .map_err(to_py_error)
+}
+
 /// Documentation du module telle qu'un script la voit (`help(pyx)`).
 const MODULE_DOC: &str = "\
-Surface de script de PlotYx : lecture, écriture, annulation et import.
+Surface de script de PlotYx : navigation, lecture, écriture, annulation et import.
 
+    pyx.root()                     -> Handle (dossier racine)
+    pyx.children(handle=None)      -> list[Handle] (enfants directs ordonnés)
+    pyx.info(handle)               -> dict (nom, nature, parent, lignes, métadonnées)
+    pyx.values(handle)             -> tuple (copie des cellules float/str/None)
     pyx.resolve(chemin)            -> Handle
     pyx.column(poignee)            -> numpy.ndarray (lecture seule, sans copie)
     pyx.set_column(poignee, tab)   -> None (passe par l'historique)
+    pyx.create_workbook(name=None, parent=None) -> Handle (classeur vide)
+    pyx.create_worksheet(workbook, name=None) -> Handle
+    pyx.create_column(worksheet, name=None, column_type=\"numeric\") -> Handle
+    pyx.rename(handle, name)       -> None
+    pyx.remove(handle)             -> None
+    pyx.set_values(handle, values) -> None (remplacement, longueur comprise)
+    pyx.set_column_meta(handle, **metadata) -> None
+    pyx.plot(y, x=None, *, graph=None, name=None, parent=None, **options) -> Handle
     pyx.undo()                     -> bool (False si rien à annuler)
     pyx.import_file(path, recipe=None) -> list[Handle] (feuilles d'un nouveau classeur)
 
@@ -254,9 +624,11 @@ Erreurs : UnknownPathError, BrokenReferenceError, InvalidValueError,
 
 Limites connues de cette surface :
   - la sortie (print) n'est rendue qu'à la fin du script, pas au fil de l'eau ;
-  - set_column exige la longueur exacte de la colonne, et retente jusqu'à
-    cinq fois si un autre client modifie la colonne pendant l'écriture
-    (ConcurrentWriteError au-delà) ;
+  - un seul Ctrl+Z annule les écritures du script ;
+    une erreur non rattrapée ou un arrêt demandé annule le groupe courant ;
+  - undo() termine puis annule le groupe courant ;
+  - set_column exige la longueur exacte ; set_values remplace aussi la longueur ;
+  - les autres clients ne peuvent pas écrire pendant le groupe du script ;
   - une Handle ne survit pas à un rechargement de projet (BrokenReferenceError
     à la prochaine utilisation) ;
   - atexit ne s'exécute jamais (l'interpréteur n'est pas finalisé) : tout ce
@@ -277,8 +649,20 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     module.add("__doc__", MODULE_DOC)?;
     module.add_class::<Handle>()?;
     module.add_function(wrap_pyfunction!(resolve, &module)?)?;
+    module.add_function(wrap_pyfunction!(root, &module)?)?;
+    module.add_function(wrap_pyfunction!(children, &module)?)?;
+    module.add_function(wrap_pyfunction!(info, &module)?)?;
+    module.add_function(wrap_pyfunction!(values, &module)?)?;
     module.add_function(wrap_pyfunction!(column, &module)?)?;
     module.add_function(wrap_pyfunction!(set_column, &module)?)?;
+    module.add_function(wrap_pyfunction!(create_workbook, &module)?)?;
+    module.add_function(wrap_pyfunction!(create_worksheet, &module)?)?;
+    module.add_function(wrap_pyfunction!(create_column, &module)?)?;
+    module.add_function(wrap_pyfunction!(rename, &module)?)?;
+    module.add_function(wrap_pyfunction!(remove, &module)?)?;
+    module.add_function(wrap_pyfunction!(set_values, &module)?)?;
+    module.add_function(wrap_pyfunction!(set_column_meta, &module)?)?;
+    module.add_function(wrap_pyfunction!(crate::graph::plot, &module)?)?;
     module.add_function(wrap_pyfunction!(undo, &module)?)?;
     module.add_function(wrap_pyfunction!(import_file, &module)?)?;
     module.add("UnknownPathError", py.get_type::<UnknownPathError>())?;

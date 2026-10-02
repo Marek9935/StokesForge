@@ -100,14 +100,14 @@ cargo test --workspace                        # tout, sauf #[ignore]
 cargo test -p <crate> --test <fichier>        # un fichier de tests
 cargo test -p plotyx-robustesse -- --ignored  # reproductions et bancs coûteux
 # (Typst est compilé et testé par `cargo test --workspace` ; `--all-features` n'active plus que Python : voir .codex/README.md)
-scripts/python-test.sh                        # pont Python, scripts et robustesse ; pas plotyx-app
+scripts/python-test.sh                        # pont Python, scripts, robustesse, application et CLI
 scripts/python-test.sh -- --ignored           # + les reproductions de la frontière Python
 ```
 
 Les tests de console `script_panel` et de démarrage paresseux
 `script_bridge_lazy` exigent aussi la feature Python de `plotyx-app`.
 Avec l'environnement embarqué décrit dans [`.codex/README.md`](../.codex/README.md),
-les lancer explicitement :
+`scripts/python-test.sh` les inclut ; pour les isoler :
 
 ```sh
 cargo test -p plotyx-app --features python --test script_panel --test script_bridge_lazy
@@ -123,7 +123,7 @@ Un seul étage, `check`, et cinq travaux :
 | `clippy` | oui | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `test` | oui | `cargo test --workspace` |
 | `robustesse` | non | `cargo test -p plotyx-robustesse -- --ignored` |
-| `test-python` | non, manuel | vendorise CPython + numpy, puis `scripts/python-test.sh` |
+| `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
 `fmt`, `clippy` et `test` n'activent **jamais** la feature `python`. Tout ce qui
@@ -131,11 +131,12 @@ touche à PyO3 y est compilé **vide** — le pont Python, la partie la plus ris
 de l'architecture, n'est ni compilé, ni vérifié par clippy, ni testé par ces
 trois travaux.
 
-C'est en partie voulu (la CI reste verte sur une machine sans Python) et en
-partie une impossibilité matérielle : l'interpréteur vendorisé n'est pas
-versionné, donc un dépôt fraîchement cloné n'en a aucun. Seul `test-python`
-couvre ce chemin, et il est manuel parce qu'il télécharge une centaine de
-mégaoctets à froid.
+L'interpréteur n'est pas versionné. `test-python` le télécharge à froid et
+le garde en cache selon `vendor/python/lock.env` ; ses artefacts Cargo ont
+une clé distincte des travaux Rust purs. Il couvre automatiquement pont,
+scripts, robustesse, application et CLI. Les reproductions ignorées et le
+spike Matplotlib restent des essais explicites. Aucun Python système n'est
+requis.
 
 Typst, lui, n'est plus une feature (issue #29) : c'est une dépendance ferme des
 trois crates de rendu, donc `fmt`, `clippy` et `test` le compilent et le

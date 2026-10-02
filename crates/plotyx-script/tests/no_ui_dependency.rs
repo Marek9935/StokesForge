@@ -6,6 +6,7 @@
 //! une décision consciente plutôt qu'un import qui se glisse.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
+    "plotyx-plot",     // description native des graphes, sans moteur ni interface
     "plotyx-core",     // le modèle
     "plotyx-commands", // le bus de commandes : tout passe par lui
     "plotyx-session",  // l'acteur, seul détenteur du `&mut Project`

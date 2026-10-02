@@ -434,3 +434,23 @@ fn b7_sortie_massive_ne_fait_pas_exploser_la_capture() {
     println!("sortie capturée : {} octets", out.len());
     assert!(out.len() > 100, "la sortie a disparu");
 }
+
+#[test]
+fn b7_ecriture_mixte_et_plafond_numpy_preservent_les_distinctions() {
+    let (_, _, error) = run(r#"
+import math, numpy as np
+sheet = pyx.resolve('[Book1]Sheet1')
+t = pyx.create_column(sheet, 'Frontière67', column_type='mixed')
+pyx.set_values(t, [None, '', '12', float('nan'), -0.0, 2**53, -(2**53)])
+v = pyx.values(t)
+assert v[:3] == (None, '', '12') and math.isnan(v[3])
+assert math.copysign(1., v[4]) < 0 and v[5:] == (float(2**53), -float(2**53))
+for bad in ([2**53+1], [-(2**53)-1], np.broadcast_to(np.array([1.]), (100_000_001,))):
+    try: pyx.set_values(t, bad)
+    except pyx.InvalidValueError: pass
+    else: raise AssertionError('écriture non représentable acceptée')
+assert pyx.values(t)[:3] == v[:3]
+assert pyx.undo()
+"#);
+    assert!(error.is_none(), "{error:?}");
+}

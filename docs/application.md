@@ -1363,9 +1363,12 @@ traduction, voir « Interface multilingue »).
 
 ## `plotyx-cli`
 
-Binaire headless de vérification — **pas** l'UI. Il sert à valider que le
-workspace se lie de bout en bout sans dépendre d'un choix d'UI. C'est un
-squelette : il affiche une ligne et sort.
+Binaire sans fenêtre : `import` construit un projet neuf depuis des fichiers
+d'appareil, `recipes` liste les modèles et `run` (feature `python`) exécute
+un fichier Python via une session headless. Les mêmes appels `pyx`, commandes
+et groupes annulables sont disponibles dans le CLI et la console ; voir
+[`python-et-script.md`](python-et-script.md). Le paquet Linux autonome se
+construit et se vérifie par `scripts/cli-dist.sh`.
 
 ## Règles communes avec le rendu
 

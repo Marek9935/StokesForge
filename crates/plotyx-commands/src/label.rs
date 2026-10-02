@@ -62,11 +62,13 @@ pub enum MacroKind {
     AddWorkbook,
     /// Créer une feuille et la remplir.
     AddWorksheet,
+    /// Exécuter les écritures d’un script Python.
+    Script,
 }
 
 impl MacroKind {
     /// Toutes les natures de groupe, pour les tests exhaustifs.
-    pub const ALL: [MacroKind; 7] = [
+    pub const ALL: [MacroKind; 8] = [
         MacroKind::PasteCells,
         MacroKind::ClearSelection,
         MacroKind::GraphProperties,
@@ -74,6 +76,7 @@ impl MacroKind {
         MacroKind::Import,
         MacroKind::AddWorkbook,
         MacroKind::AddWorksheet,
+        MacroKind::Script,
     ];
 }
 
@@ -195,6 +198,7 @@ impl fmt::Display for MacroKind {
             MacroKind::Import => "Import",
             MacroKind::AddWorkbook => "Add Workbook",
             MacroKind::AddWorksheet => "Add Worksheet",
+            MacroKind::Script => "Run Script",
         })
     }
 }

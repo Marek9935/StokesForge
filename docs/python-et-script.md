@@ -8,8 +8,9 @@ Deux crates, derrière la feature `python` (absente de `default`) :
 - **`plotyx-script`** — le fil de script, l'interruption, et la surface `pyx`
   offerte aux scripts. Lui connaît le modèle, et parle à l'acteur.
 
-Sans la feature, les deux compilent vide : `cargo build`, `cargo test` et la CI
-restent verts sur une machine sans interpréteur vendorisé. Avec, la compilation
+Sans la feature, les deux compilent vide : `cargo build` et `cargo test`
+fonctionnent sans interpréteur vendorisé. Le travail CI `test-python` prépare
+son runtime et exerce ce chemin automatiquement. Avec, la compilation
 exige `PYO3_CONFIG_FILE`, produite par `scripts/python-config.sh`.
 
 ## Ce que ces crates rendent vrai
@@ -49,7 +50,8 @@ empaquetée (`scripts/pyhello-dist.sh`, environnement nettoyé).
 
 | Sens | Mécanisme | Copie ? |
 |---|---|---|
-| Rust → Python (lecture) | tableau numpy **empruntant** le `Arc<Vec<f64>>`, `writeable = False` | **non** |
+| Rust → Python (`column`) | tableau numpy **empruntant** le `Arc<Vec<f64>>`, `writeable = False` | **non** |
+| Rust → Python (`values`) | tuple de cellules `float` / `str` / `None` | **oui** |
 | Python → Rust (écriture) | copie du tableau numpy dans un `Vec<f64>` neuf | **oui** |
 
 L'écriture copie **par choix**, pour deux raisons indépendantes :
@@ -99,18 +101,222 @@ moitié — la première le rattrape dès qu'il touche à `pyx`.
 
 ## La surface `pyx`
 
-Ce n'est **pas** l'API v1 destinée aux utilisateurs (spécifiée dans
-`docs/archive/rustrewrite/cahier-des-charges-api-script.md`). Les quatre appels du socle
-ne sont pas choisis pour leur utilité mais parce qu'**ensemble ils rendent le
-critère de fin vérifiable** :
+Le chantier Python (#65) reformule l'API à partir du code ; la spécification
+v1 de l'archive est historique. Les lots #66 à #68 ajoutent navigation,
+lecture des cellules, manipulation du projet et graphes natifs par commandes
+annulables. Aucun
+appel ne dépend d'une feuille active ni d'une fenêtre : la surface s'emploie
+avec toute session, y compris une session sans interface.
 
-| Appel | Ce qu'il éprouve |
+| Appel | Résultat / effet |
 |---|---|
-| `resolve` | poignées opaques, grammaire de chemins |
-| `column` | vue numpy **sans copie**, `Arc` maintenu vivant |
-| `set_column` | mutation via l'acteur et le bus, GIL relâché pendant l'attente |
-| `undo` | délégation à la pile d'historique depuis Python |
-| `import_file(path, recipe=None)` | import dans un classeur neuf, conversion commune à l'application et au CLI, une macro annulable |
+| `root()` | poignée du dossier racine du projet courant |
+| `children(handle=None)` | liste des poignées des enfants directs, dans l'ordre du modèle ; sans poignée, enfants de la racine |
+| `info(handle)` | dictionnaire détaché : nom, nature, parent, nombre de lignes et métadonnées de colonne |
+| `values(handle)` | tuple copié des cellules stockées, en `float`, `str` ou `None` |
+| `resolve(chemin)` | poignée opaque résolue par la grammaire de chemins du modèle |
+| `column(poignee)` | tableau numpy numérique/date-heure, sans copie et en lecture seule |
+| `set_column(poignee, tab)` | écriture numérique de même longueur par les commandes, annulable |
+| `create_workbook(name=None, parent=None)` | classeur vide dans le dossier demandé, racine par défaut ; poignée |
+| `create_worksheet(workbook, name=None)` | feuille vide en fin de classeur ; poignée |
+| `create_column(worksheet, name=None, column_type="numeric")` | colonne vide en fin de feuille ; poignée ; types `numeric`, `datetime`, `mixed` |
+| `rename(handle, name)` | renomme le nœud en conservant sa poignée |
+| `remove(handle)` | supprime le nœud et ses descendants, sauf la racine |
+| `set_values(handle, values)` | remplace les valeurs et la longueur de cette seule colonne |
+| `set_column_meta(handle, **metadata)` | modifie les seuls champs nommés, en préservant la provenance |
+| `plot(y, x=None, *, graph=None, name=None, parent=None, **options)` | crée un graphe natif ou ajoute une série à un graphe ; poignée |
+| `undo()` | termine puis annule le groupe courant, ou annule le dernier groupe déjà terminé ; `False` si l'historique est vide |
+| `import_file(path, recipe=None)` | import dans un classeur neuf, une macro annulable ; poignées des feuilles créées |
+
+### Écritures et annulation d'un script (#67)
+
+Les écritures passent par les commandes déjà utilisées par l'application.
+La première mutation ouvre une macro exclusive `MacroKind::Script` ; les
+mutations suivantes, imports compris, rejoignent ce groupe. Au succès, un
+seul Ctrl+Z annule toute l'exécution (libellé « Exécuter le script »). Une
+exception non rattrapée ou une interruption demandée annule les mutations du
+groupe en cours et préserve l'historique précédent, y compris le rétablissement.
+Une erreur rattrapée permet au script de poursuivre et de valider ses autres
+écritures.
+
+Un script de lecture n'ouvre aucune macro. Dès la première mutation, les
+autres clients ne peuvent plus écrire, sauvegarder ou charger pendant le
+groupe ; les lectures restent possibles. Le moteur possède toujours une
+identité de client distincte de son appelant, même si celui-ci lui transmet
+un clone de sa poignée. Les mutations revalident l'époque après acquisition
+de la macro ; les écritures de cellules portent encore `expected_version`.
+
+`pyx.undo()` reste utilisable pendant un script : il termine le groupe en
+cours puis l'annule entièrement. C'est un point de validation explicite ;
+une écriture ultérieure ouvre un nouveau groupe, et un échec ultérieur
+n'annule pas les opérations d'historique déjà demandées. Deux écritures
+successives avant `undo()` s'annulent donc ensemble.
+
+`set_column` conserve son contrat numpy strict : float64, une dimension,
+longueur inchangée, tableaux non contigus acceptés et masque non vide refusé.
+`set_values` remplace aussi la longueur, par composition de `SetCells` puis
+`DeleteCells` pour retirer la queue ; l'identité, le type, les métadonnées et
+les autres colonnes restent inchangés. Aucune suppression de queue ne
+précède la validation de l'écriture.
+
+`set_values` accepte un tableau numpy float64 1D (mêmes contrôles) ou un
+itérable de `float`, `int`, `str`, `None`. Les entiers Python hors de
+[-2⁵³, 2⁵³] sont refusés : convertir explicitement si la perte de précision
+est voulue. Une colonne numérique/date-heure refuse les textes et traduit
+`None` en NaN ; une colonne mixte conserve chaque cellule telle quelle
+(`None`, `""`, `"12"`, NaN et -0.0 sont distincts). Les entrées sont copiées.
+Les dates sont des timestamps POSIX en secondes.
+
+Les noms automatiques viennent du modèle (`BookN`, `SheetN`, lettres de
+colonne). La longueur des noms (255 caractères), les caractères réservés,
+l'unicité et les types de parent gardent les règles du modèle. Le plafond
+de 100 000 000 lignes est partagé avec le modèle et vérifié avant la copie
+d'un tableau numpy ; un itérable est également borné pendant sa copie.
+Les créations rendent des objets vides ; pour des données texte, créer une
+colonne `mixed`, puis appeler `set_values`.
+
+`set_column_meta` accepte `role`, `long_name`, `unit`, `comment`,
+`display_format` et `formula`. Les valeurs sont des chaînes, sauf
+`formula=None` qui retire la formule ; les rôles sont ceux de `info`.
+`type` et `version` restent en lecture seule. Une colonne-formule refuse
+les écritures directes. Poser une formule déclenche le recalcul existant,
+qui peut changer le type de la colonne pour porter les échecs de calcul ;
+retirer la formule ne reconvertit pas ce type automatiquement.
+
+```python
+import numpy as np
+
+x = pyx.column(pyx.resolve("[Book1]Sheet1!A"))
+book = pyx.create_workbook("Résultats")
+sheet = pyx.create_worksheet(book, "Calcul")
+result = pyx.create_column(sheet, "Signal")
+pyx.set_values(result, np.asarray(x * 2, dtype=np.float64))
+pyx.set_column_meta(result, role="y", long_name="Signal doublé", unit="mV")
+# Un seul Ctrl+Z retire ce classeur et toutes ses données.
+```
+
+Contrat : `crates/plotyx-script/tests/mutations.rs` (création, longueurs,
+cellules exactes, undo/redo, refus, époques, interruption et imports).
+
+### Graphes natifs (#68)
+
+`pyx.plot(y, x)` référence les colonnes du modèle et crée un graphe à la
+racine ; sans `x`, l'abscisse est l'indice de ligne. `parent` accepte un
+dossier, `name` choisit le nom (automatique `GraphN` sinon). `graph=g` ajoute
+une série au premier panneau d'un graphe existant et conserve ses autres
+panneaux, séries et réglages ; `name` et `parent` sont alors refusés.
+
+| Option | Valeurs |
+|---|---|
+| `plot_type` | `line`, `scatter`, `line_scatter`, `bar`, `histogram`, `error_bar` |
+| `color` | `#RRGGBB` ou `#RRGGBBAA`, trait et symbole ; palette partagée sinon |
+| `line_style`, `line_width` | `none`, `solid`, `dash`, `dot`, `dash_dot` ; largeur finie positive |
+| `symbol`, `symbol_size` | `none`, `circle`, `square`, `triangle`, `diamond`, `plus`, `cross` ; taille finie positive |
+| `label`, `title`, `x_title`, `y_title` | chaînes avec markup Typst explicite |
+| `x_scale`, `y_scale` | `linear` ou `log` |
+| `x_range`, `y_range` | couple `(min, max)` fini croissant, positif sur un axe log ; plage automatique sinon sur un graphe neuf |
+| `axis` | `left` ou `right` pour la série et ses options Y ; rend l'axe droit visible |
+| `x_error`, `y_error` | poignées des colonnes d'erreurs |
+| `histogram_bins` | entier de 1 à 65 536 |
+
+Le label automatique vient de la colonne et reste du texte littéral : une
+métadonnée contenant du markup n'est pas interprétée. Les titres et labels
+fournis explicitement utilisent Typst, comme les propriétés de l'application.
+Une option inconnue, une plage invalide ou une cible incorrecte est refusée.
+Les poignées et les paramètres sont validés avant la mutation ; les références
+cassées sont détectées avec leur époque. Les commandes `AddGraph` et
+`SetPlotSpec` rejoignent le même groupe `Script` que les écritures de colonnes.
+
+```python
+x = pyx.resolve('[Book1]Sheet1!A')
+y = pyx.resolve('[Book1]Sheet1!B')
+g = pyx.plot(y, x, name='Graph1', title='$x^2$',
+             plot_type='line_scatter', color='#123456', x_title='Temps (s)')
+pyx.plot(y, x, graph=g, line_style='dash', label='Deuxième série')
+```
+
+Contrat : `tests/graphs.rs` compare le `PlotSpec` exact et le SVG partagé,
+avec un témoin différent et du Typst ; il couvre aussi ajout, rollback,
+persistance et références invalidées. Matplotlib est évalué séparément par
+le [spike #69](python-matplotlib-spike.md), sans changer le rendu natif.
+
+### CLI sans fenêtre (#71)
+
+```sh
+plotyx-cli run --out resultat.plx calcul.py
+plotyx-cli run --project resultat.plx --out suite.plx suite.py
+```
+
+La feature `python` est requise ; sans elle, `run` explique comment l'activer.
+Sans `--project`, le script reçoit un projet vide ; sans `--out`, il n'y a
+pas de sauvegarde finale. Le fichier Python est lu en UTF-8. stdout et stderr
+sont préservées ; une exception affiche sa trace complète et rend un code
+non nul. `--out` n'est écrit qu'après succès. Les scripts passent par le
+même `ScriptEngine`, l'acteur et les commandes que la console.
+
+`scripts/cli-dist.sh` construit le paquet Linux `dist/plotyx-cli/`, avec le
+runtime de base (sans Matplotlib), un rpath relatif et aucun pip. Il vérifie
+numpy, écritures, graphe, sauvegarde/rechargement et undo depuis ce paquet,
+sans écran ni `PLOTYX_PYTHON_HOME`, avec `PYTHONHOME`/`PYTHONPATH` piégés.
+
+### Navigation et métadonnées
+
+`children` suit les dossiers, classeurs puis feuilles ; une colonne, un graphe,
+une note ou une matrice rend une liste vide. Une liste rendue ne se met pas à
+jour toute seule. Chaque appel lit un seul instantané du projet, et toute
+poignée rendue conserve l'époque de cet instantané.
+
+`info` rend toujours les cinq clés suivantes :
+
+| Clé | Valeur |
+|---|---|
+| `name` | nom court du nœud, ou nom du projet pour sa racine |
+| `kind` | `folder`, `workbook`, `worksheet`, `column`, `graph`, `matrix`, `note` ou `unknown` |
+| `parent` | poignée du parent ; `None` à la racine |
+| `row_count` | longueur d'une colonne ; maximum des longueurs pour une feuille (zéro si vide) ; `None` ailleurs |
+| `column` | dictionnaire ci-dessous pour une colonne ; `None` ailleurs |
+
+Les métadonnées `column` portent `type` (`numeric`, `datetime`, `mixed`),
+`role` (`x`, `y`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
+`unit`, `comment`, `display_format`, `formula` (texte ou `None`) et `version`
+(compteur de modification). Modifier ce dictionnaire ne touche jamais au
+modèle. Relire `info` après une modification pour obtenir l'état courant.
+
+```python
+for objet in pyx.children():
+    print(pyx.info(objet)["name"], pyx.info(objet)["kind"])
+
+feuille = pyx.resolve("[Book1]Sheet1")
+for colonne in pyx.children(feuille):
+    description = pyx.info(colonne)
+    print(description["name"], description["column"]["unit"],
+          description["row_count"])
+```
+
+### Cellules texte et mixtes
+
+Le modèle actuel ne porte plus de type homogène `Text` : une colonne texte
+est une colonne `mixed` contenant des cellules texte. `values` préserve le
+type stocké de chaque cellule : un texte `"12.5"` reste une chaîne, une cellule
+vide devient `None`, une chaîne vide reste `""`, et un nombre NaN reste un
+`float` NaN. Les dates restent des timestamps POSIX en secondes.
+
+```python
+cellules = pyx.values(pyx.resolve("[Book1]Sheet1!Etiquette"))
+# Exemple : ("échantillon A", None, "", "12.5")
+
+import numpy as np
+numerique = pyx.column(pyx.resolve("[Book1]Sheet1!A"))  # sans copie
+mixte = np.array(cellules, dtype=object)                # copie explicite
+```
+
+`values` copie en temps et mémoire proportionnels au nombre de cellules,
+y compris pour une colonne numérique ; son tuple est un instantané immuable.
+`column` conserve son contrat numérique sans copie et refuse une colonne
+mixte avec `InvalidValueError`. Les lectures ne changent ni la révision ni
+l'historique. Une cible autre qu'une colonne fait échouer `values` avec
+`InvalidValueError` ; toute poignée supprimée ou d'un projet rechargé est
+refusée avec `BrokenReferenceError`, avant de regarder sa nature.
 
 `pyx.import_file("spectre.csv", recipe="Jasco (point-virgule)")` accepte un
 chemin texte ou `pathlib.Path` et rend la liste des poignées des feuilles
@@ -124,8 +330,9 @@ pendant la création avorte la macro. L'analyse et les commandes se déroulent
 GIL relâché, comme les autres appels au modèle.
 
 Une poignée (`Handle`) est **opaque** : pas de constructeur Python, aucun entier
-exposé ; `resolve` et `import_file` en produisent. Elle reste valide après un
-renommage, un déplacement, et même après une suppression **suivie d'une annulation** — c'est
+exposé ; la résolution, la navigation, les créations et l'import en produisent. Elle reste
+valide après un renommage, un déplacement, et même après une suppression
+**suivie d'une annulation** — c'est
 le contrat de l'identité, assuré par le modèle (identifiants monotones, jamais
 réutilisés). Elle est invalidée par un `Load`, détecté via l'`epoch` de
 l'instantané avant même de chercher le `NodeId` dans l'arbre courant
@@ -170,8 +377,13 @@ hors script continue d'aller sur la sortie du processus.
 - Une erreur *du script* n'est pas une erreur du moteur : elle atterrit dans
   `ScriptOutcome::error` avec sa trace Python. `ScriptError` est réservé aux
   pannes de l'**hôte** (démarrage du fil, moteur occupé).
+- `plotyx-script/tests/navigation.rs` vérifie le contrat du lot #66 : ordre,
+  métadonnées, longueurs, valeurs exactes, absence de mutation et identité des
+  poignées après renommage, déplacement, suppression/annulation et chargement.
 - Lancer les tests Python : `scripts/python-test.sh`, qui pose les trois
-  variables d'environnement nécessaires. Côté robustesse, `b7` (frontière
+  variables d'environnement nécessaires et teste pont, scripts, robustesse,
+  application et CLI. Le parcours `script_panel` lit numpy, crée les résultats
+  et un graphe, puis annule/rétablit l'ensemble depuis `AppState`. Côté robustesse, `b7` (frontière
   Rust ↔ Python dans les deux sens) et `b9` (script sous contrainte) sont
   derrière la même feature.
 

@@ -200,7 +200,7 @@ fn import_python_par_modele_se_lit_et_sannule_en_un_geste() {
     assert!(y.meta().import_source.is_some());
     assert_eq!(
         imported.history.undo_label,
-        Some(HistoryLabel::Macro(MacroKind::Import))
+        Some(HistoryLabel::Macro(MacroKind::Script))
     );
     executer(
         &banc,
@@ -711,8 +711,8 @@ print(pyx.undo())
         vec![
             "[7.0, 8.0, 9.0]".to_owned(),
             "True".to_owned(),
-            "[1.0, 2.0, 3.0]".to_owned(),
-            "True".to_owned(),
+            "[10.0, 20.0, 30.0]".to_owned(),
+            "False".to_owned(),
             "[10.0, 20.0, 30.0]".to_owned(),
             // Pile vide : `False`, jamais une exception.
             "False".to_owned(),
@@ -1008,13 +1008,13 @@ except pyx.BrokenReferenceError:
 // --- Compléments : la surface reste minuscule et documentée -----------------
 
 #[test]
-fn la_surface_expose_cinq_appels_et_quatre_erreurs() {
+fn la_surface_expose_dix_sept_appels_et_quatre_erreurs() {
     // A2 (`guide-de-correction-robustesse.md` §F6) a ajouté une quatrième
     // exception, `ConcurrentWriteError` — ce test s'appelait
     // « ...et_trois_erreurs » et n'énumérait que les trois premières ; son
     // nom et sa liste attendue suivent le vocabulaire d'erreurs à jour.
-    // L'import (issue #7) ajoute un cinquième appel ; la liste reste exacte
-    // et sa documentation est éprouvée comme celle des appels du socle.
+    // Les lots Python #66 et #67 étendent navigation, lectures et mutations.
+    // La liste reste exacte et chaque appel doit être documenté.
     let banc = banc();
     let outcome = executer(
         &banc,
@@ -1022,7 +1022,7 @@ fn la_surface_expose_cinq_appels_et_quatre_erreurs() {
 import pyx as importe
 print(sorted(nom for nom in dir(importe) if not nom.startswith("_")))
 print(importe.__doc__ is not None)
-print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, importe.set_column, importe.undo, importe.import_file)))
+print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, importe.set_column, importe.undo, importe.import_file, importe.root, importe.children, importe.info, importe.values, importe.create_workbook, importe.create_worksheet, importe.create_column, importe.rename, importe.remove, importe.set_values, importe.set_column_meta, importe.plot)))
 "#,
     );
 
@@ -1030,10 +1030,12 @@ print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, imp
     assert_eq!(
         lignes[0],
         "['BrokenReferenceError', 'ConcurrentWriteError', 'Handle', 'InvalidValueError', \
-         'UnknownPathError', 'column', 'import_file', 'resolve', 'set_column', 'undo']"
+         'UnknownPathError', 'children', 'column', 'create_column', 'create_workbook', \
+         'create_worksheet', 'import_file', 'info', 'plot', 'remove', 'rename', 'resolve', 'root', \
+         'set_column', 'set_column_meta', 'set_values', 'undo', 'values']"
     );
     assert_eq!(lignes[1], "True", "le module est documenté");
-    assert_eq!(lignes[2], "True", "les cinq appels sont documentés");
+    assert_eq!(lignes[2], "True", "les dix-sept appels sont documentés");
 }
 
 #[test]

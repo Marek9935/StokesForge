@@ -147,7 +147,7 @@ Le crate ne met **rien** en phrase et ne dépend pas de Fluent :
 
 `begin_macro` prend un `MacroKind`, énumération **fermée** (coller, effacer la
 sélection, propriétés du graphe, actualiser, importer, créer un classeur ou une
-feuille) : un groupe est une valeur qui se compare (`undo_label ==
+feuille, exécuter un script) : un groupe est une valeur qui se compare (`undo_label ==
 Some(HistoryLabel::Macro(MacroKind::Import))`), pas un texte à relire. Un
 nouveau groupe ajoute une variante de `MacroKind`, sa clé `history-macro-*` et
 sa ligne de `Display`. L'historique n'est pas écrit dans le `.plx`
