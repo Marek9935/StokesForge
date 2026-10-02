@@ -197,7 +197,7 @@ impl fmt::Display for MacroKind {
             MacroKind::RefreshFromFile => "Refresh from File",
             MacroKind::Import => "Import",
             MacroKind::AddWorkbook => "Add Workbook",
-            MacroKind::AddWorksheet => "Add Worksheet",
+            MacroKind::AddWorksheet => "Add Sheet",
             MacroKind::Script => "Run Script",
         })
     }
@@ -236,7 +236,7 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::AddFolder { name } => write!(f, "Add Folder “{name}”"),
             HistoryLabel::AddWorkbook => f.write_str("Add Workbook"),
             HistoryLabel::AddEmptyWorkbook => f.write_str("Add Empty Workbook"),
-            HistoryLabel::AddWorksheet => f.write_str("Add Worksheet"),
+            HistoryLabel::AddWorksheet => f.write_str("Add Sheet"),
             HistoryLabel::AddGraph => f.write_str("Add Graph"),
             HistoryLabel::AddMatrix => f.write_str("Add Matrix"),
             HistoryLabel::AddNote => f.write_str("Add Note"),

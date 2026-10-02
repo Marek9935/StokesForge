@@ -36,9 +36,9 @@ new-project-confirm = Discard unsaved changes and create an empty project?
 new-project-discard = Discard Changes
     .hint = Replaces the current project; this cannot be undone
 action-import = Import…
-    .hint = Reads instrument files into worksheets
+    .hint = Reads instrument files into sheets
 action-refresh-from-source = Refresh from Source
-    .hint = Re-reads the source files of the active worksheet's columns
+    .hint = Re-reads the source files of the active sheet's columns
 action-reopen-last-import = Reopen Last Import…
     .hint = Reopens the Import Wizard with the last files and template
 action-open = Open…
@@ -115,8 +115,8 @@ action-delete-shift-up = Delete and Shift Up
 shortcut-backspace = Backspace
 shortcut-delete = Del
 
-tabs-previous-worksheets = Show previous worksheets
-tabs-next-worksheets = Show next worksheets
+tabs-previous-worksheets = Show previous sheets
+tabs-next-worksheets = Show next sheets
 
 detached-workbook-unavailable = Workbook unavailable in this window. Reattach it to the main window
 detached-note-unavailable = Note unavailable in this window. Reattach it to the main window
@@ -278,19 +278,19 @@ import-metadata-none = No metadata with the current settings
 
 # Step 6: destination and template.
 import-destination = Destination
-import-destination-active = Active workbook (one worksheet per file)
+import-destination-active = Active workbook (one sheet per file)
 import-destination-active-none = Active workbook (none)
 import-destination-new-per-file = New workbook per file
 import-destination-new-all = New workbook for all files
 import-destination-mode = In active workbook
-import-mode-new-sheet = New worksheet
-import-mode-replace = Replace active worksheet
-import-mode-add-columns = Add columns to active worksheet
-import-mode-add-rows = Add rows to active worksheet
+import-mode-new-sheet = New sheet
+import-mode-replace = Replace active sheet
+import-mode-add-columns = Add columns to active sheet
+import-mode-add-rows = Add rows to active sheet
 import-destination-multiple = Multiple files
-import-layout-per-file = One worksheet per file
-import-layout-side-by-side = One worksheet, side by side (X Y X Y…)
-import-layout-shared-x = One worksheet, X of first file shared
+import-layout-per-file = One sheet per file
+import-layout-side-by-side = One sheet, side by side (X Y X Y…)
+import-layout-shared-x = One sheet, X of first file shared
 import-destination-template-name = Template name
 import-destination-save = Save Template
 import-destination-saved-note = Saved templates are offered at the next import
@@ -357,7 +357,7 @@ history-delete-cells =
 history-add-folder = Add Folder “{ $name }”
 history-add-workbook = Add Workbook
 history-add-empty-workbook = Add Empty Workbook
-history-add-worksheet = Add Worksheet
+history-add-worksheet = Add Sheet
 history-add-graph = Add Graph
 history-add-matrix = Add Matrix
 history-add-note = Add Note
@@ -378,7 +378,7 @@ history-macro-graph-properties = Edit Graph Properties
 history-macro-refresh-from-file = Refresh from File
 history-macro-import = Import
 history-macro-add-workbook = Add Workbook
-history-macro-add-worksheet = Add Worksheet
+history-macro-add-worksheet = Add Sheet
 history-macro-script = Run Script
 
 ## Undo and Redo
@@ -437,7 +437,7 @@ error-import-file = { $path }: { $detail }
 
 # Formulas
 error-formula-invalid = Invalid formula: { $detail }
-error-formula-unknown-column = Column { $letter } does not exist in this worksheet
+error-formula-unknown-column = Column { $letter } does not exist in this sheet
 error-formula-self-reference = A formula cannot refer to its own column ({ $letter })
 error-formula-cycle = Formulas refer to each other in a loop. Remove one of the references
 
@@ -682,11 +682,11 @@ workbook-role-label = Label
 workbook-role-none = None
 workbook-plot-menu = Plot
 
-# Workbook: grid, worksheet tabs, empty states
+# Workbook: grid, sheet tabs, empty states
 workbook-column-add = Add Column
-workbook-grid-no-columns = No columns in this worksheet
-workbook-no-worksheets = This workbook has no worksheets
-workbook-worksheet-add = Add Worksheet
+workbook-grid-no-columns = No columns in this sheet
+workbook-no-worksheets = This workbook has no sheets
+workbook-worksheet-add = Add Sheet
 matrix-unavailable = Matrix editing is not available yet
 note-deleted = This note was deleted
 
@@ -769,7 +769,7 @@ tool-arrow = Arrow
     .hint = Drag in the plot area to draw an arrow; the head is where you release
 toolbar-plot-selection = Plot Selection
     .hint = Plots the selected columns in a new graph
-    .disabled = Select columns in the worksheet first
+    .disabled = Select columns in the sheet first
 toolbar-text = Text format
     .hint = Shows or hides the text format toolbar of the active graph
 format-disabled = Select a text in the graph, or edit one, to format it. Titles and the legend only take a font and a size

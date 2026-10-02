@@ -44,7 +44,7 @@ l'interface, mais son mot est déjà fixé.
 | Project Manager | Gestionnaire de projet | Panneau qui montre l'arborescence du projet | Explorateur, Navigateur | O (Q15) |
 | Folder | Dossier | Conteneur d'objets dans le projet | Répertoire | O |
 | Workbook | Classeur | Fenêtre de données qui contient des feuilles | Book, Cahier, Tableur | O |
-| Worksheet | Feuille | Grille de colonnes d'un classeur | Sheet, Onglet, Table, Feuille de calcul | O (Q4) |
+| Sheet | Feuille | Grille de colonnes d'un classeur | Worksheet, Onglet, Table, Feuille de calcul | O (Q4) |
 | Matrix | Matrice | Fenêtre de données en grille régulière | Tableau | O |
 | Graph | Graphique | Fenêtre qui trace des séries | Graphe, Chart, Figure, Plot | O (Q1, Q2) |
 | Note | Note | Fenêtre de texte libre | Mémo | G |
@@ -253,7 +253,7 @@ glossaire.
 | 18 | « Vider » (`app.rs:4609`) ; « Effacer la sélection » (`state.rs:4740`) | Clear ; Clear Selection | Effacer ; Effacer la sélection | R2 |
 | 19 | « Supprimer et décaler » + « Suppr vide à la première pression et ne supprime qu'à la seconde ; cette entrée supprime tout de suite. » (`app.rs:4619-4622`) | Delete and Shift Up + tip “Deletes now and shifts cells up. The Del key first clears, then deletes” | Supprimer et remonter + « Supprime tout de suite et remonte les cellules. La touche Suppr efface d'abord, puis supprime » | R7 |
 | 20 | « Session injoignable : {err} » (`state.rs:3430`) ; « Le fil de script a disparu sans répondre (a-t-il paniqué ?) » (`state.rs:3453`) | Internal error: {$error} ; The script engine stopped unexpectedly. Run the script again | Erreur interne : {$error} ; Le moteur de script s'est arrêté. Relancer le script | R9 |
-| 21 | « {id} n'est pas une feuille de ce projet » (`state.rs:4562`) ; « Impossible de grouper l'effacement de la sélection » (`state.rs:4741`) | This worksheet is no longer in the project ; Could not clear the selection | Cette feuille n'est plus dans le projet ; Effacement impossible | R9 |
+| 21 | « {id} n'est pas une feuille de ce projet » (`state.rs:4562`) ; « Impossible de grouper l'effacement de la sélection » (`state.rs:4741`) | This sheet is no longer in the project ; Could not clear the selection | Cette feuille n'est plus dans le projet ; Effacement impossible | R9 |
 | 22 | « Aucune colonne de rôle Y dans la sélection : rien à tracer » (`state.rs:5674`) | No Y column selected. Select a Y column to plot | Aucune colonne Y sélectionnée. Sélectionner une colonne Y à tracer | R9 |
 | 23 | « Import en cours… 0/{total} fichier(s) » (`state.rs:3645`) ; « {} sélectionné(s) » (`app.rs:4353`) | Importing… {$done} of {$total} files ; {$count} selected | Import en cours… {$done}/{$total} fichiers ; {$count} sélectionné / {$count} sélectionnés (accord par Fluent) | R10 |
 | 24 | « Axe affiché », « Légende affichée », « Présente dans la légende » (`app.rs:8451, 8628, 8526`) | Show axis, Show legend, Show in legend | Afficher l'axe, Afficher la légende, Afficher dans la légende | R5 |
@@ -265,7 +265,7 @@ glossaire.
 | 30 | « Grille », « Lignes verticales (graduations X) » (`app.rs:8182-8184`) | Gridlines, Vertical (X ticks) | Quadrillage, Verticales (graduations X) | Grille ≠ Quadrillage |
 | 31 | « Nom vide = celui de la colonne tracée, affiché tel quel. » (`app.rs:8487`) | Empty: uses the plotted column's name as is | Vide : reprend le nom de la colonne tracée tel quel | R7 |
 | 32 | « Clic droit : retirer » (`color_picker.rs:559`) | Right-click to remove | Clic droit pour retirer | R7 |
-| 33 | « Classeur actif (une feuille par fichier) » (`app.rs:6388`) | Active workbook (one worksheet per file) | Classeur actif (une feuille par fichier) | R3 |
+| 33 | « Classeur actif (une feuille par fichier) » (`app.rs:6388`) | Active workbook (one sheet per file) | Classeur actif (une feuille par fichier) | R3 |
 | 34 | « Fichiers et modèle », « En-tête et fin des données » (`state.rs:1584-1586`) | Files and Template, Header and Data End | Fichiers et modèle, En-tête et fin des données | R3 |
 
 ## 4. Décisions
@@ -278,7 +278,7 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | Q1 | Anglais : **Graph**, **Chart** ou **Plot** pour la fenêtre de tracé ? | **Graph** (Origin ; le code dit déjà `Graph1`) | *Chart* (générique, Excel) ; *Plot* (matplotlib, mais Origin l'emploie pour la série) |
 | Q2 | Français : **Graphique** ou **Graphe** ? | **Graphique** (générique bureautique ; « graphe » évoque la théorie des graphes) | *Graphe* (usage d'Origin en français, mot du code et des docs actuels) |
 | Q3 | La donnée tracée : **Series**, **Plot** (Origin) ou **Curve** ? | **Series / Série** (générique, jamais ambigu avec « tracé » ni avec « graphique ») | *Plot* (Origin) ; *Curve / Courbe* (usage des spectroscopistes, faux pour un nuage de points) |
-| Q4 | **Worksheet** partout, ou **Sheet** (plus court) ? | **Worksheet** partout (décision #39) | *Sheet* : plus court, et c'est le nom par défaut (`Sheet1`) ; Origin emploie les deux |
+| Q4 | **Worksheet** partout, ou **Sheet** (plus court) ? | **Sheet** partout (décision #94, 2026-10-03 : « Worksheet » prêtait à confusion avec le nom par défaut `Sheet1`) ; remplace la décision #39 | *Worksheet* : le terme d'Origin pour les classeurs, plus long |
 | Q5 | **Symbol** ou **Marker** ? (français : Symbole ou Marqueur) | **Symbol / Symbole** (Origin ; cohérent avec *Line + Symbol*) | *Marker / Marqueur* (matplotlib, Excel ; terme actuel de l'interface) |
 | Q6 | Français de *Scatter* : **Points** ou **Nuage de points** ? | **Points** (un mot, déjà en place) | *Nuage de points* (terme statistique, 3 mots) |
 | Q7 | **Bar** ou **Column** pour les barres verticales ? | **Bar / Barres** (*Column* est déjà « colonne de données ») | *Column* (Origin : Column = vertical, Bar = horizontal) |
