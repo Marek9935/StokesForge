@@ -645,6 +645,10 @@ pub(crate) struct PanelSpecRecord {
     /// Police et corps du titre du panneau (issue #78).
     #[serde(default)]
     pub(crate) title_font: TextFontRecord,
+    /// Couleur du titre du panneau (issue #90) ; absente d'un fichier plus
+    /// ancien, donc automatique.
+    #[serde(default)]
+    pub(crate) title_color: String,
     pub(crate) series: Vec<SeriesSpecRecord>,
     pub(crate) bottom: AxisSpecRecord,
     pub(crate) left: AxisSpecRecord,
@@ -708,6 +712,7 @@ impl Default for PanelSpecRecord {
             title: String::new(),
             title_anchor: None,
             title_font: TextFontRecord::default(),
+            title_color: String::new(),
             series: Vec::new(),
             bottom: AxisSpecRecord::default(),
             left: AxisSpecRecord::default(),
@@ -941,6 +946,10 @@ pub(crate) struct LegendSpecRecord {
     /// Police et corps de la légende (issue #77).
     #[serde(default)]
     pub(crate) font: TextFontRecord,
+    /// Couleur des noms de série (issue #90) ; absente d'un fichier plus
+    /// ancien, donc automatique.
+    #[serde(default)]
+    pub(crate) color: String,
 }
 
 impl Default for LegendSpecRecord {
@@ -953,6 +962,7 @@ impl Default for LegendSpecRecord {
             position: LegendPositionRecord::default(),
             anchor: None,
             font: TextFontRecord::default(),
+            color: String::new(),
         }
     }
 }

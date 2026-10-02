@@ -671,7 +671,11 @@ fn draw_panel<DB: DrawingBackend>(
     // graphe rabaisse la figure entière.
     // Un titre déplacé (issue #53) garde sa bande vide, voir `draw_on`.
     let panel_title_anchor = usable_anchor(spec.title_anchor).filter(|_| !spec.title.is_empty());
-    let title_style = font_style(&spec.title_font, PANEL_TITLE_SIZE, opaque(ink));
+    let title_style = font_style(
+        &spec.title_font,
+        PANEL_TITLE_SIZE,
+        rgba_or(&spec.title_color, opaque(ink)),
+    );
     let area = if spec.title.is_empty() {
         cell.clone()
     } else if panel_title_anchor.is_some() {
@@ -954,6 +958,7 @@ fn draw_panel<DB: DrawingBackend>(
         .map(|(index, _)| source[index])
         .collect();
     let entries: Vec<&Prepared<'_>> = prepared.iter().filter(|s| s.in_legend()).collect();
+    let legend_ink = rgba_or(&spec.legend.color, opaque(ink));
     let inscribed = legend::draw(
         &screen,
         origin,
@@ -961,10 +966,10 @@ fn draw_panel<DB: DrawingBackend>(
         &spec.legend,
         &entries,
         &legend::LegendText {
-            typed: font_style(&spec.legend.font, LABEL_SIZE, opaque(ink)),
+            typed: font_style(&spec.legend.font, LABEL_SIZE, legend_ink),
             literal: literal_style_font(
                 spec.legend.font.effective_size(LABEL_SIZE),
-                opaque(ink),
+                legend_ink,
                 spec.legend.font.family(),
             ),
         },

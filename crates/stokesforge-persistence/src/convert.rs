@@ -394,6 +394,7 @@ impl From<&LegendSpec> for LegendSpecRecord {
             position: value.position.into(),
             anchor: value.anchor.map(anchor_to_record),
             font: font_to_record(&value.font),
+            color: value.color.clone(),
         }
     }
 }
@@ -405,6 +406,7 @@ impl From<LegendSpecRecord> for LegendSpec {
             position: value.position.into(),
             anchor: value.anchor.map(record_to_anchor),
             font: record_to_font(value.font),
+            color: value.color,
         }
     }
 }
@@ -490,6 +492,7 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
         title: panel.title.clone(),
         title_anchor: panel.title_anchor.map(anchor_to_record),
         title_font: font_to_record(&panel.title_font),
+        title_color: panel.title_color.clone(),
         series: panel.series.iter().map(series_spec_to_record).collect(),
         bottom: (&panel.bottom).into(),
         left: (&panel.left).into(),
@@ -575,6 +578,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
         title: record.title,
         title_anchor: record.title_anchor.map(record_to_anchor),
         title_font: record_to_font(record.title_font),
+        title_color: record.title_color,
         series,
         bottom: record.bottom.into(),
         left: record.left.into(),

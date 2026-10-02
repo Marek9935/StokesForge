@@ -498,7 +498,8 @@ accueil en haut seulement.
   (`pending_zone_font_id`), `Action::SetTextFont` pour un titre ou la légende,
   `Action::SetAnnotation` pour un texte libre sélectionné. Un titre, un titre
   d'axe ou la légende **sélectionné** (`FormatTarget::Zone`, #77) ne prend que
-  la police et le corps (les autres boutons sont grisés). Cible (`FormatTarget`, `StokesForgeApp::format_target`) : un champ en
+  la police, le corps et la **couleur de la zone entière** (`Action::SetTextColor`, #90 ;
+  les autres boutons sont grisés). Cible (`FormatTarget`, `StokesForgeApp::format_target`) : un champ en
   édition sur place (texte libre, titre, titre d'axe, légende) → la demande
   attend dans la mémoire d'egui (`pending_format_id`) et le champ la pose à
   son prochain tracé sur le surlignage qu'egui a gardé, ou insère les balises

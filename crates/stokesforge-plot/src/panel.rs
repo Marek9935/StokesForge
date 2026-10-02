@@ -23,6 +23,9 @@ pub struct PanelSpec {
     pub title_anchor: Option<TextAnchor>,
     /// Police et corps du titre du panneau (issue #78).
     pub title_font: crate::TextFont,
+    /// Couleur du titre du panneau (issue #90) ; vide = automatique, comme
+    /// [`crate::PlotSpec::title_color`].
+    pub title_color: String,
     /// Séries tracées, dans l'ordre de superposition.
     pub series: Vec<SeriesSpec>,
     /// Axe du bas.
@@ -110,6 +113,7 @@ impl Default for PanelSpec {
             title: String::new(),
             title_anchor: None,
             title_font: crate::TextFont::default(),
+            title_color: String::new(),
             series: Vec::new(),
             bottom: AxisSpec::default(),
             left: AxisSpec::default(),

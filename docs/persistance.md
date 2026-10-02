@@ -183,7 +183,8 @@ tenu par `a_non_trivial_plot_spec_round_trips_intact`.
 Idem pour la **police et le corps des zones de texte** (issues #77, #78) :
 `TextFontRecord` (`family`, `size`) en champ `#[serde(default)]` de
 `PlotSpecRecord`, `PanelSpecRecord`, `AxisSpecRecord` (`title_font`) et
-`LegendSpecRecord` (`font`), et `font` sur `AnnotationSpecRecord` — absent d'un
+`LegendSpecRecord` (`font`), et les couleurs `PanelSpecRecord::title_color` et
+`LegendSpecRecord::color` (#90, `#[serde(default)]` : absentes = automatique), et `font` sur `AnnotationSpecRecord` — absent d'un
 fichier plus ancien = la police du graphe. Aller-retour tenu par
 `a_non_trivial_plot_spec_round_trips_intact`.
 

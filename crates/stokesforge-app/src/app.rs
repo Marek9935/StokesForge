@@ -1753,7 +1753,9 @@ impl StokesForgeApp {
     ///   directement ;
     /// - un titre, un titre d'axe ou la légende sélectionné : idem, police et
     ///   corps ;
-    /// - un texte libre sélectionné : sa police.
+    /// - un texte libre sélectionné : sa police ;
+    /// - la couleur d'un titre, d'un titre d'axe ou de la légende sélectionné :
+    ///   celle de la zone entière (#90) ; en édition, un passage (balise).
     fn format_zone(
         &mut self,
         ctx: &egui::Context,
@@ -1809,6 +1811,18 @@ impl StokesForgeApp {
                 return true;
             }
             return false;
+        }
+        // La couleur : celle de la zone d'un titre sélectionné ; dans un champ
+        // en édition elle reste une balise sur le passage surligné (#90).
+        if let (TextFormat::Color(color), Some(target), None, false) =
+            (format, zone, &title_editing, annotation_editing)
+        {
+            actions.push(Action::SetTextColor {
+                graph,
+                target,
+                color: color.clone(),
+            });
+            return true;
         }
         // Le corps : celui de la zone d'un titre sélectionné ; dans un champ
         // en édition il reste une balise sur le passage surligné.
@@ -8006,7 +8020,15 @@ fn script_header(ui: &mut egui::Ui, state: &AppState, collapsed: bool) -> bool {
         } else {
             (Icon::CaretDown, tr!("script-collapse"))
         };
-        let toggled = icon_button(ui, icon, IconRole::Neutral, tooltip).clicked();
+        // Même cellule de `HEADER_ACTION_WIDTH` que les icônes des fenêtres,
+        // l'icône centrée dedans et la cellule centrée sur la ligne du titre
+        // (#95) : un `icon_button` collait le chevron à gauche, sans cellule.
+        let row_height = ui.text_style_height(&egui::TextStyle::Heading);
+        let (cell, _) = ui.allocate_exact_size(
+            egui::vec2(HEADER_ACTION_WIDTH, row_height),
+            egui::Sense::hover(),
+        );
+        let toggled = header_icon(ui, ui.id(), "script-toggle", cell, icon, &tooltip);
         ui.heading(tr!("script-title"));
         if !state.script_available() {
             ui.weak(tr!("script-unavailable"));

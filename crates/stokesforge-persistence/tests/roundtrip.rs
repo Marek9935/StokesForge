@@ -788,7 +788,9 @@ fn non_trivial_spec(
                 family: "Libertinus Sans".to_string(),
                 size: Some(11.0),
             },
+            color: "#118899".to_string(),
         },
+        title_color: "#aa8811".to_string(),
         // Issue #35 : textes libres, tous champs non défaut.
         annotations: vec![
             stokesforge_plot::AnnotationSpec::new("Pic $lambda_\"max\"$", 1.5, 2.5),
@@ -842,11 +844,14 @@ fn non_trivial_spec(
             position: LegendPosition::TopLeft,
             anchor: None,
             font: stokesforge_plot::TextFont::default(),
+            // Issue #90 : couleur de la légende et du titre du panneau.
+            color: "#228833".to_string(),
         },
         title_font: stokesforge_plot::TextFont {
             family: "Noto Sans".to_string(),
             size: None,
         },
+        title_color: "#8833aa".to_string(),
         ..PanelSpec::at(1, 0)
     };
 

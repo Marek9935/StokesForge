@@ -1025,7 +1025,9 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             user,
             requests: Vec::new(),
         };
-        ui.add_enabled_ui(rich, |ui| {
+        // Aussi sur une zone sélectionnée (titre, axe, légende) : sa couleur
+        // entière, pas un passage (#90).
+        ui.add_enabled_ui(enabled, |ui| {
             crate::color_picker::color_icon_button(
                 ui,
                 (Icon::TextColor, &tr!("format-color")),

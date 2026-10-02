@@ -199,6 +199,11 @@ renommer ou déplacer une colonne ne casse rien.
   libre garde son corps dans `AnnotationSpec::size` et reçoit `font`.
   `TextTarget::font` / `set_font` l'adressent. Pas de commande dédiée :
   `SetPlotSpec` (`Action::SetTextFont` côté application).
+- **Couleur d'une zone** (#90) : `PlotSpec::title_color`, `AxisSpec::title_color`,
+  `PanelSpec::title_color`, `LegendSpec::color` (vide = automatique).
+  `TextTarget::color` / `set_color` les adressent ; `Action::SetTextColor`
+  côté application. En édition du texte, la couleur reste une balise Typst sur
+  le passage surligné.
 - `AxisSpec::has_explicit_range` : un cadrage explicite prime sur les données
   calculées. C'est le levier — déjà présent, rien n'a été inventé pour lui —
   sur lequel le zoom/pan de l'écran s'appuie ([`rendu.md`](rendu.md)).

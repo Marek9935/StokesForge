@@ -7080,6 +7080,35 @@ fn la_police_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
 }
 
 #[test]
+fn la_couleur_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
+    use stokesforge_plot::{AxisSide, TextTarget};
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let cibles = [
+        TextTarget::Title,
+        TextTarget::PanelTitle { row: 0, column: 0 },
+        TextTarget::AxisTitle {
+            row: 0,
+            column: 0,
+            side: AxisSide::Left,
+        },
+        TextTarget::Legend { row: 0, column: 0 },
+    ];
+    let couleur = |state: &AppState, cible: TextTarget| cible.color(&graph_spec(state, graph));
+    for cible in cibles {
+        let avant = couleur(&state, cible);
+        state.dispatch(Action::SetTextColor {
+            graph,
+            target: cible,
+            color: "#ff0000".to_string(),
+        });
+        assert_eq!(couleur(&state, cible), Some("#ff0000".to_string()));
+        state.dispatch(Action::Undo);
+        assert_eq!(couleur(&state, cible), avant, "{cible:?}");
+    }
+}
+
+#[test]
 fn un_titre_se_deplace_et_se_reinitialise_en_un_pas_chacun() {
     use stokesforge_plot::{AxisSide, TextAnchor, TextTarget};
     let dir = tempfile::tempdir().expect("dossier temporaire");

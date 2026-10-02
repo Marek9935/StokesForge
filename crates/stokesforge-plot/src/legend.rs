@@ -28,6 +28,9 @@ pub struct LegendSpec {
     pub anchor: Option<TextAnchor>,
     /// Police et corps des noms de série de la légende (issue #77).
     pub font: crate::TextFont,
+    /// Couleur des noms de série de la légende (issue #90) ; vide =
+    /// automatique, comme [`crate::PlotSpec::title_color`].
+    pub color: String,
 }
 
 impl Default for LegendSpec {
@@ -37,6 +40,7 @@ impl Default for LegendSpec {
             position: LegendPosition::TopRight,
             anchor: None,
             font: crate::TextFont::default(),
+            color: String::new(),
         }
     }
 }

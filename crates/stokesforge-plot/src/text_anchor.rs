@@ -196,6 +196,53 @@ impl TextTarget {
         true
     }
 
+    /// La couleur de toute la zone (issue #90), vide = automatique ; `None`
+    /// si le panneau n'existe pas.
+    pub fn color(&self, spec: &PlotSpec) -> Option<String> {
+        Some(match *self {
+            Self::Title => spec.title_color.clone(),
+            Self::PanelTitle { .. } => spec
+                .panels
+                .get(self.panel_index(spec)?)?
+                .title_color
+                .clone(),
+            Self::AxisTitle { side, .. } => spec
+                .panels
+                .get(self.panel_index(spec)?)?
+                .axis(side)
+                .title_color
+                .clone(),
+            Self::Legend { .. } => spec
+                .panels
+                .get(self.panel_index(spec)?)?
+                .legend
+                .color
+                .clone(),
+        })
+    }
+
+    /// Pose la couleur de toute la zone. Rend `false` sans rien changer si le
+    /// panneau n'existe pas.
+    pub fn set_color(&self, spec: &mut PlotSpec, color: String) -> bool {
+        if let Self::Title = self {
+            spec.title_color = color;
+            return true;
+        }
+        let Some(index) = self.panel_index(spec) else {
+            return false;
+        };
+        let Some(panel) = spec.panels.get_mut(index) else {
+            return false;
+        };
+        match *self {
+            Self::Title => unreachable!(),
+            Self::PanelTitle { .. } => panel.title_color = color,
+            Self::AxisTitle { side, .. } => panel.axis_mut(side).title_color = color,
+            Self::Legend { .. } => panel.legend.color = color,
+        }
+        true
+    }
+
     /// Le texte du titre tel qu'il s'affiche — `None` pour la légende (ses
     /// textes sont les noms des séries) ou si le panneau n'existe pas. Pour un
     /// titre d'axe, l'unité est incluse (`Signal (u.a.)`,

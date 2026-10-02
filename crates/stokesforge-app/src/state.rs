@@ -510,6 +510,17 @@ pub enum Action {
         /// Sa nouvelle police et son nouveau corps.
         font: stokesforge_plot::TextFont,
     },
+    /// Pose la couleur d'un titre, d'un titre d'axe ou de la légende (issue
+    /// #90) : un attribut de la zone entière, comme la police. Vide =
+    /// automatique. Une modification du modèle ([`Command::SetPlotSpec`]).
+    SetTextColor {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Le texte réglé.
+        target: TextTarget,
+        /// Sa nouvelle couleur (`#RRGGBB[AA]`), vide pour l'automatique.
+        color: String,
+    },
     /// Remet **tous** les titres et la légende du graphe à leur place par
     /// défaut (menu *Graph*).
     ResetTextAnchors {
@@ -3515,6 +3526,11 @@ impl AppState {
                 target,
                 font,
             } => self.edit_annotations(graph, |spec| target.set_font(spec, font)),
+            Action::SetTextColor {
+                graph,
+                target,
+                color,
+            } => self.edit_annotations(graph, |spec| target.set_color(spec, color)),
             Action::ResetTextAnchors { graph } => {
                 self.edit_annotations(graph, |spec| spec.reset_text_anchors() > 0)
             }
