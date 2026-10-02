@@ -12,7 +12,7 @@ plus	neutral
 trash	danger
 folder-simple	folder
 table	workbook
-chart-line	graph
+chart-line	graph,neutral
 grid-nine	matrix
 note	note
 folder-open	neutral
@@ -20,3 +20,12 @@ floppy-disk	neutral
 floppy-disk-back	neutral
 download-simple	neutral
 export	neutral
+cursor	neutral
+magnifying-glass-plus	neutral
+text-t	neutral
+arrow-counter-clockwise	neutral
+sliders-horizontal	neutral
+columns-plus-right	neutral
+rows-plus-bottom	neutral
+chart-scatter	neutral
+chart-bar	neutral

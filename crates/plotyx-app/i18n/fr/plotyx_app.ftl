@@ -728,3 +728,15 @@ toolbar-file = Fichier
     .hint = Affiche ou masque la barre Fichier
 toolbar-move = Glisser pour déplacer cette barre d'outils
 status-toolbars-not-saved = Impossible d'enregistrer la disposition des barres d'outils : { $detail }
+
+toolbar-tools = Outils
+    .hint = Affiche ou masque la barre d'outils de la fenêtre active
+tool-pointer = Pointeur
+    .hint = Glisser pour déplacer la vue ou les textes ; Ctrl + molette pour zoomer
+tool-zoom = Zoom
+    .hint = Tracer un rectangle pour zoomer dessus
+tool-text = Texte
+    .hint = Cliquer dans la zone de tracé pour ajouter un texte
+toolbar-plot-selection = Tracer la sélection
+    .hint = Trace les colonnes sélectionnées dans un nouveau graphique
+    .disabled = Sélectionnez d'abord des colonnes dans la feuille

@@ -242,9 +242,14 @@ Un panneau est identifié par `(row, column)`, **pas par son indice** :
 `DrawnPlot::panels` omet les panneaux trop petits pour être tracés (`MIN_CELL`),
 ce qui décale les indices.
 
-Gestes câblés : molette (zoom), glisser principal (pan), glisser secondaire
-(rectangle de zoom élastique), double-clic (réinitialisation), plus réticule et
-désignation de point (`PointHit`, rayon `HIT_RADIUS`).
+Gestes câblés : Ctrl+molette (zoom ; la molette seule ne fait rien), double-clic
+(réinitialisation), plus réticule et désignation de point (`PointHit`, rayon
+`HIT_RADIUS`). Le glisser principal dépend de l'**outil** de la vue
+(`GraphTool`, issue #62, réglage de vue comme le cadrage, jamais annulable) :
+`Pointer` (défaut) fait défiler la vue et déplace les textes, `ZoomBox` trace le
+rectangle de zoom élastique, `Text` pose un texte au clic
+(`GraphEvent::PlaceText`, puis retour au pointeur). Le clic droit n'est plus un
+geste de zoom : il ouvre le menu contextuel.
 
 ### Le levier d'anticrénelage
 

@@ -38,7 +38,11 @@ use eframe::egui::{self, Pos2, Rect, Vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::icons::{icon_image, Icon, IconRole};
+use crate::state::Action;
 use crate::tr;
+use plotyx_core::NodeId;
+use plotyx_plot::PlotType;
+use plotyx_render_egui::GraphTool;
 
 /// Les barres existantes — un enum fermé : ajouter une barre, c'est ajouter une
 /// variante, son nom (`toolbar-*`) et son contenu dans [`bar_contents`].
@@ -46,15 +50,19 @@ use crate::tr;
 #[serde(rename_all = "snake_case")]
 pub enum ToolbarId {
     File,
+    /// La barre contextuelle (issue #62) : son contenu suit la fenêtre au
+    /// premier plan.
+    Tools,
 }
 
 impl ToolbarId {
-    pub const ALL: [ToolbarId; 1] = [ToolbarId::File];
+    pub const ALL: [ToolbarId; 2] = [ToolbarId::File, ToolbarId::Tools];
 
     /// Nom de la barre : entrée du menu View.
     pub fn label(self) -> String {
         match self {
             ToolbarId::File => tr!("toolbar-file"),
+            ToolbarId::Tools => tr!("toolbar-tools"),
         }
     }
 
@@ -62,6 +70,7 @@ impl ToolbarId {
     pub fn hint(self) -> String {
         match self {
             ToolbarId::File => tr!("toolbar-file", "hint"),
+            ToolbarId::Tools => tr!("toolbar-tools", "hint"),
         }
     }
 }
@@ -179,8 +188,18 @@ impl ToolbarLayout {
     /// Les barres visibles rangées dans la zone d'accueil, rangée par rangée.
     /// Une rangée sans barre visible n'apparaît pas.
     pub fn docked_rows(&self) -> Vec<Vec<ToolbarId>> {
+        self.docked_rows_where(|_| true)
+    }
+
+    /// Comme [`ToolbarLayout::docked_rows`], sans les barres que `shown`
+    /// écarte (une barre contextuelle sans contenu pour la fenêtre active).
+    pub fn docked_rows_where(&self, shown: impl Fn(ToolbarId) -> bool) -> Vec<Vec<ToolbarId>> {
         let mut rows: std::collections::BTreeMap<usize, Vec<ToolbarId>> = Default::default();
-        for entry in self.entries.iter().filter(|entry| entry.visible) {
+        for entry in self
+            .entries
+            .iter()
+            .filter(|entry| entry.visible && shown(entry.id))
+        {
             if let Placement::Docked { row } = entry.placement {
                 rows.entry(row).or_default().push(entry.id);
             }
@@ -203,12 +222,24 @@ impl ToolbarLayout {
     /// Range `id` dans la rangée visible `row` (à `index` parmi ses barres
     /// visibles). `row` égal au nombre de rangées visibles ouvre une rangée.
     pub fn dock(&mut self, id: ToolbarId, row: usize, index: usize) {
+        self.dock_where(id, row, index, |_| true);
+    }
+
+    /// [`ToolbarLayout::dock`] quand `row` compte les rangées sans les barres
+    /// que `shown` écarte — c'est ainsi que l'écran les a numérotées.
+    pub fn dock_where(
+        &mut self,
+        id: ToolbarId,
+        row: usize,
+        index: usize,
+        shown: impl Fn(ToolbarId) -> bool,
+    ) {
         let Some(position) = self.entries.iter().position(|entry| entry.id == id) else {
             return;
         };
         // Les rangées se comptent avec la barre encore en place : c'est ainsi
         // que la zone d'accueil les a numérotées (le trou garde la place).
-        let rows = self.docked_rows();
+        let rows = self.docked_rows_where(|bar| bar == id || shown(bar));
         let mut moved = self.entries.remove(position);
         let neighbours: Vec<ToolbarId> = rows
             .get(row)
@@ -341,16 +372,21 @@ impl ToolbarButton {
 }
 
 /// Ce qu'un bouton demande à l'application. Les gestes qui ouvrent un
-/// sélecteur de fichier ou un assistant ne sont pas des `Action` : l'application
-/// les exécute par les mêmes méthodes que les entrées de menu.
+/// sélecteur de fichier ou un assistant, ou qui règlent la vue d'un graphe,
+/// ne sont pas des `Action` : l'application les exécute par les mêmes méthodes
+/// que les entrées de menu.
 #[derive(Debug, Clone)]
 pub enum ToolbarRequest {
-    AddWorkbook,
-    Save,
+    /// Une action du modèle ou de l'état, la même que celle du menu.
+    Action(Box<Action>),
     Import,
     Open,
     SaveAs,
     ExportGraph,
+    /// Change l'outil du graphe au premier plan.
+    SetGraphTool(GraphTool),
+    /// Réinitialise le zoom du graphe au premier plan.
+    ResetZoom,
 }
 
 /// Les raccourcis tels que les menus les écrivent (rappel dans l'info-bulle).
@@ -363,6 +399,25 @@ pub struct ShortcutTexts {
     pub export: String,
 }
 
+/// Ce que la barre contextuelle montre : décidé par la fenêtre au premier plan.
+#[derive(Debug, Clone, Default)]
+pub enum ToolsContext {
+    /// Matrice, note, ou aucune fenêtre : pas de barre (jamais de bouton mort).
+    #[default]
+    None,
+    Graph {
+        graph: NodeId,
+        tool: GraphTool,
+    },
+    Book {
+        book: NodeId,
+        /// La feuille affichée, si le classeur en a une.
+        sheet: Option<NodeId>,
+        /// Les colonnes sélectionnées de cette feuille.
+        columns: Vec<NodeId>,
+    },
+}
+
 /// Ce que les barres lisent de l'application, calculé une fois par image.
 #[derive(Debug, Clone, Default)]
 pub struct BarEnv {
@@ -370,6 +425,17 @@ pub struct BarEnv {
     /// Graph est absent).
     pub export_enabled: bool,
     pub shortcuts: ShortcutTexts,
+    pub tools: ToolsContext,
+}
+
+impl BarEnv {
+    /// Une barre sans contenu pour cette fenêtre ne se peint pas.
+    fn shows(&self, id: ToolbarId) -> bool {
+        match id {
+            ToolbarId::File => true,
+            ToolbarId::Tools => !matches!(self.tools, ToolsContext::None),
+        }
+    }
 }
 
 /// Le contenu d'une barre. Chaque bouton répond à un geste que les menus
@@ -409,7 +475,7 @@ pub fn bar_contents(
                 "",
                 true,
             ) {
-                requests.push(ToolbarRequest::AddWorkbook);
+                requests.push(ToolbarRequest::Action(Box::new(Action::AddWorkbook)));
             }
             if button(
                 ui,
@@ -443,7 +509,7 @@ pub fn bar_contents(
                 &shortcuts.save,
                 true,
             ) {
-                requests.push(ToolbarRequest::Save);
+                requests.push(ToolbarRequest::Action(Box::new(Action::Save)));
             }
             if button(
                 ui,
@@ -474,6 +540,146 @@ pub fn bar_contents(
                 requests.push(ToolbarRequest::ExportGraph);
             }
         }
+        ToolbarId::Tools => tools_contents(ui, env, requests),
+    }
+}
+
+/// Bouton d'outil (pour les barres sans raccourci à rappeler).
+fn tool_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: String,
+    hint: Option<String>,
+    enabled: bool,
+    selected: bool,
+) -> bool {
+    let mut tooltip = label;
+    if let Some(hint) = hint {
+        tooltip.push('\n');
+        tooltip.push_str(&hint);
+    }
+    let button = egui::Button::image(icon_image(icon, IconRole::Neutral))
+        .frame_when_inactive(selected)
+        .selected(selected);
+    ui.add_enabled(enabled, button)
+        .on_hover_text(tooltip)
+        .clicked()
+}
+
+/// La barre contextuelle : chaque bouton répond à un geste que les menus ou
+/// le menu contextuel offrent déjà.
+fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
+    match &env.tools {
+        ToolsContext::None => {}
+        ToolsContext::Graph { graph, tool } => {
+            for (kind, icon, label, hint) in [
+                (
+                    GraphTool::Pointer,
+                    Icon::Pointer,
+                    tr!("tool-pointer"),
+                    tr!("tool-pointer", "hint"),
+                ),
+                (
+                    GraphTool::ZoomBox,
+                    Icon::ZoomTool,
+                    tr!("tool-zoom"),
+                    tr!("tool-zoom", "hint"),
+                ),
+                (
+                    GraphTool::Text,
+                    Icon::TextTool,
+                    tr!("tool-text"),
+                    tr!("tool-text", "hint"),
+                ),
+            ] {
+                if tool_button(ui, icon, label, Some(hint), true, *tool == kind) {
+                    requests.push(ToolbarRequest::SetGraphTool(kind));
+                }
+            }
+            ui.separator();
+            if tool_button(
+                ui,
+                Icon::ResetZoom,
+                tr!("action-reset-zoom"),
+                Some(tr!("action-reset-zoom", "hint")),
+                true,
+                false,
+            ) {
+                requests.push(ToolbarRequest::ResetZoom);
+            }
+            if tool_button(
+                ui,
+                Icon::Properties,
+                tr!("menu-graph-properties"),
+                Some(tr!("menu-graph-properties", "hint")),
+                true,
+                false,
+            ) {
+                requests.push(ToolbarRequest::Action(Box::new(Action::OpenPlotSettings {
+                    graph: *graph,
+                    tab: crate::state::PlotSettingsTab::Graph,
+                    axis: None,
+                })));
+            }
+        }
+        ToolsContext::Book {
+            book,
+            sheet,
+            columns,
+        } => {
+            if tool_button(
+                ui,
+                Icon::AddSheet,
+                tr!("workbook-worksheet-add"),
+                None,
+                true,
+                false,
+            ) {
+                requests.push(ToolbarRequest::Action(Box::new(Action::AddWorksheet {
+                    book: *book,
+                })));
+            }
+            if tool_button(
+                ui,
+                Icon::AddColumn,
+                tr!("workbook-column-add"),
+                None,
+                sheet.is_some(),
+                false,
+            ) {
+                if let Some(sheet) = sheet {
+                    requests.push(ToolbarRequest::Action(Box::new(Action::AddColumn {
+                        sheet: *sheet,
+                    })));
+                }
+            }
+            ui.separator();
+            for (icon, plot_type, label) in [
+                (Icon::PlotLine, PlotType::Line, tr!("plot-type-line")),
+                (
+                    Icon::PlotScatter,
+                    PlotType::Scatter,
+                    tr!("plot-type-scatter"),
+                ),
+                (Icon::PlotBar, PlotType::Bar, tr!("plot-type-bar")),
+            ] {
+                let enabled = sheet.is_some() && !columns.is_empty();
+                let hint = if enabled {
+                    tr!("toolbar-plot-selection", "hint")
+                } else {
+                    tr!("toolbar-plot-selection", "disabled")
+                };
+                if tool_button(ui, icon, label, Some(hint), enabled, false) {
+                    if let Some(sheet) = sheet {
+                        requests.push(ToolbarRequest::Action(Box::new(Action::PlotColumns {
+                            sheet: *sheet,
+                            columns: columns.clone(),
+                            plot_type,
+                        })));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -493,6 +699,8 @@ pub struct ToolbarState {
     /// Dernier cadre de chaque barre rangée, pour la prise et le dépôt.
     bar_rects: HashMap<ToolbarId, Rect>,
     geometry: DockGeometry,
+    /// Les barres sans contenu pour la fenêtre active, à l'image précédente.
+    not_shown: Vec<ToolbarId>,
     changed: bool,
 }
 
@@ -527,7 +735,11 @@ impl ToolbarState {
         let ctx = ui.ctx().clone();
         self.finish_drag_if_released(&ctx);
 
-        let rows = self.layout.docked_rows();
+        let rows = self.layout.docked_rows_where(|id| env.shows(id));
+        self.not_shown = ToolbarId::ALL
+            .into_iter()
+            .filter(|&id| !env.shows(id))
+            .collect();
         if !rows.is_empty() || self.drag.is_some() {
             let mut started: Option<Drag> = None;
             let mut row_rects: Vec<Vec<Rect>> = Vec::new();
@@ -570,7 +782,7 @@ impl ToolbarState {
         }
 
         for (id, pos) in self.layout.floating() {
-            if self.drag.is_some_and(|drag| drag.id == id) {
+            if !env.shows(id) || self.drag.is_some_and(|drag| drag.id == id) {
                 continue;
             }
             let area = egui::Area::new(egui::Id::new(("plotyx_toolbar", id)))
@@ -618,7 +830,11 @@ impl ToolbarState {
         self.drag = None;
         let Some(pointer) = pointer else { return };
         match drop_target(pointer, &self.geometry) {
-            DropTarget::Docked { row, index } => self.layout.dock(drag.id, row, index),
+            DropTarget::Docked { row, index } => {
+                let not_shown = self.not_shown.clone();
+                self.layout
+                    .dock_where(drag.id, row, index, |bar| !not_shown.contains(&bar));
+            }
             DropTarget::Floating => {
                 let screen = ctx.content_rect();
                 let top_left = pointer - drag.grab;
@@ -762,17 +978,45 @@ mod tests {
     fn detacher_puis_reranger_garde_la_barre_visible_et_compacte_les_rangees() {
         let mut layout = ToolbarLayout::default();
         layout.float(ToolbarId::File, Pos2::new(120.0, 80.0));
-        assert!(layout.docked_rows().is_empty());
+        assert_eq!(layout.docked_rows(), vec![vec![ToolbarId::Tools]]);
         assert_eq!(
             layout.floating(),
             vec![(ToolbarId::File, Pos2::new(120.0, 80.0))]
         );
-        // Une rangée « 7 » inexistante revient à la rangée 0.
+        // Une rangée « 7 » inexistante ouvre une nouvelle rangée, numérotée sans trou.
         layout.dock(ToolbarId::File, 7, 0);
-        assert_eq!(layout.docked_rows(), vec![vec![ToolbarId::File]]);
         assert_eq!(
-            layout.placement(ToolbarId::File),
-            Some(Placement::Docked { row: 0 })
+            layout.docked_rows(),
+            vec![vec![ToolbarId::Tools], vec![ToolbarId::File]]
+        );
+        // Rangée 0, avant la barre qui s'y trouve.
+        layout.dock(ToolbarId::File, 0, 0);
+        assert_eq!(
+            layout.docked_rows(),
+            vec![vec![ToolbarId::File, ToolbarId::Tools]]
+        );
+    }
+
+    #[test]
+    fn les_rangees_se_comptent_sans_les_barres_sans_contenu() {
+        let mut layout = ToolbarLayout::default();
+        // Tools seule en rangée 0, File en rangée 1.
+        layout.dock(ToolbarId::Tools, 0, 0);
+        layout.dock(ToolbarId::File, 1, 0);
+        assert_eq!(
+            layout.docked_rows(),
+            vec![vec![ToolbarId::Tools], vec![ToolbarId::File]]
+        );
+        // Tools n'a rien à montrer : File est alors la rangée 0 à l'écran.
+        let not_tools = |id| id != ToolbarId::Tools;
+        assert_eq!(
+            layout.docked_rows_where(not_tools),
+            vec![vec![ToolbarId::File]]
+        );
+        layout.dock_where(ToolbarId::File, 0, 0, not_tools);
+        assert_eq!(
+            layout.docked_rows(),
+            vec![vec![ToolbarId::Tools], vec![ToolbarId::File]]
         );
     }
 
@@ -780,8 +1024,7 @@ mod tests {
     fn une_barre_masquee_ne_se_peint_nulle_part() {
         let mut layout = ToolbarLayout::default();
         layout.set_visible(ToolbarId::File, false);
-        assert!(layout.docked_rows().is_empty());
-        assert!(layout.floating().is_empty());
+        assert_eq!(layout.docked_rows(), vec![vec![ToolbarId::Tools]]);
         layout.set_visible(ToolbarId::File, true);
         assert!(layout.is_visible(ToolbarId::File));
     }

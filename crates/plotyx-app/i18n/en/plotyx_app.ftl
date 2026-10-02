@@ -732,3 +732,15 @@ toolbar-file = File
     .hint = Shows or hides the File toolbar
 toolbar-move = Drag to move this toolbar
 status-toolbars-not-saved = Could not save the toolbar layout: { $detail }
+
+toolbar-tools = Tools
+    .hint = Shows or hides the toolbar of the active window
+tool-pointer = Pointer
+    .hint = Drag to pan, move texts; Ctrl + wheel zooms
+tool-zoom = Zoom
+    .hint = Drag a rectangle to zoom in on it
+tool-text = Text
+    .hint = Click in the plot area to add a text
+toolbar-plot-selection = Plot Selection
+    .hint = Plots the selected columns in a new graph
+    .disabled = Select columns in the worksheet first

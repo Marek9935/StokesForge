@@ -62,6 +62,16 @@ pub enum Icon {
     SaveAs,
     Import,
     Export,
+    Pointer,
+    ZoomTool,
+    TextTool,
+    ResetZoom,
+    Properties,
+    AddColumn,
+    AddSheet,
+    PlotLine,
+    PlotScatter,
+    PlotBar,
 }
 
 macro_rules! svg {
@@ -157,6 +167,52 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         svg!("download-simple.neutral.svg"),
     ),
     (Icon::Export, IconRole::Neutral, svg!("export.neutral.svg")),
+    (Icon::Pointer, IconRole::Neutral, svg!("cursor.neutral.svg")),
+    (
+        Icon::ZoomTool,
+        IconRole::Neutral,
+        svg!("magnifying-glass-plus.neutral.svg"),
+    ),
+    (
+        Icon::TextTool,
+        IconRole::Neutral,
+        svg!("text-t.neutral.svg"),
+    ),
+    (
+        Icon::ResetZoom,
+        IconRole::Neutral,
+        svg!("arrow-counter-clockwise.neutral.svg"),
+    ),
+    (
+        Icon::Properties,
+        IconRole::Neutral,
+        svg!("sliders-horizontal.neutral.svg"),
+    ),
+    (
+        Icon::AddColumn,
+        IconRole::Neutral,
+        svg!("columns-plus-right.neutral.svg"),
+    ),
+    (
+        Icon::AddSheet,
+        IconRole::Neutral,
+        svg!("rows-plus-bottom.neutral.svg"),
+    ),
+    (
+        Icon::PlotLine,
+        IconRole::Neutral,
+        svg!("chart-line.neutral.svg"),
+    ),
+    (
+        Icon::PlotScatter,
+        IconRole::Neutral,
+        svg!("chart-scatter.neutral.svg"),
+    ),
+    (
+        Icon::PlotBar,
+        IconRole::Neutral,
+        svg!("chart-bar.neutral.svg"),
+    ),
 ];
 
 /// Inatteignable tant que chaque icône a une variante (test `le_tableau_…`).

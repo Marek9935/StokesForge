@@ -434,6 +434,14 @@ accueil en haut seulement.
   `PlotyxApp::run_toolbar_request` avec les méthodes mêmes des menus. Barre
   Fichier (#61) : classeur, import, ouvrir, enregistrer, enregistrer sous,
   exporter (grisé sans graphe au premier plan).
+- Barre contextuelle `Tools` (#62) : son contenu suit la fenêtre au premier
+  plan (`ToolsContext`, calculé par `PlotyxApp::tools_context`). Graphe : les
+  outils Pointeur / Zoom / Texte (`GraphTool` de la vue, bouton enfoncé pour
+  l'outil actif), réinitialiser le zoom, propriétés. Classeur : ajouter
+  feuille, ajouter colonne, tracer la sélection (courbe, nuage, barres ; grisé
+  sans colonne sélectionnée). Matrice, note, aucune fenêtre : la barre
+  disparaît (jamais de bouton mort) et ses voisines se recalent
+  (`ToolbarLayout::docked_rows_where`).
 - Visibilité : menu **View**, une case par barre. Emplacement et visibilité
   sont dans `preferences.json` (champ `toolbars`), pas dans le `.plx` ; la
   lecture ignore ce qu'elle ne comprend pas. `PlotyxApp::new` ne lit pas le

@@ -1571,6 +1571,36 @@ impl PlotyxApp {
         }
     }
 
+    /// Ce que la barre contextuelle montre pour la fenêtre au premier plan.
+    fn tools_context(&self, active_tab: Option<Tab>) -> crate::toolbar::ToolsContext {
+        use crate::toolbar::ToolsContext;
+        match active_tab_kind(active_tab) {
+            ActiveTabKind::Graph(graph) => ToolsContext::Graph {
+                graph,
+                tool: self
+                    .graph_views
+                    .get(&graph)
+                    .map_or_else(Default::default, GraphView::tool),
+            },
+            ActiveTabKind::Book(book) => {
+                let sheet = self.state.selected_sheet_in(book);
+                let columns = sheet
+                    .and_then(|sheet| {
+                        self.state
+                            .selection(sheet)
+                            .map(|selection| selection.columns(self.state.tree(), sheet))
+                    })
+                    .unwrap_or_default();
+                ToolsContext::Book {
+                    book,
+                    sheet,
+                    columns,
+                }
+            }
+            _ => ToolsContext::None,
+        }
+    }
+
     /// Exécute ce qu'un bouton de barre d'outils a demandé : les mêmes
     /// chemins que les entrées de menu correspondantes, jamais une seconde
     /// écriture.
@@ -1581,8 +1611,21 @@ impl PlotyxApp {
         actions: &mut Vec<Action>,
     ) {
         match request {
-            ToolbarRequest::AddWorkbook => actions.push(Action::AddWorkbook),
-            ToolbarRequest::Save => actions.push(Action::Save),
+            ToolbarRequest::Action(action) => actions.push(*action),
+            ToolbarRequest::SetGraphTool(tool) => {
+                if let Some(view) = active_graph(active_tab_kind(active_tab))
+                    .and_then(|graph| self.graph_views.get_mut(&graph))
+                {
+                    view.set_tool(tool);
+                }
+            }
+            ToolbarRequest::ResetZoom => {
+                if let Some(view) = active_graph(active_tab_kind(active_tab))
+                    .and_then(|graph| self.graph_views.get_mut(&graph))
+                {
+                    view.reset_view();
+                }
+            }
             ToolbarRequest::Import => self.open_import_dialog(),
             ToolbarRequest::Open => self.choose_open_path(actions),
             ToolbarRequest::SaveAs => self.choose_save_path(actions),
@@ -2468,6 +2511,7 @@ impl eframe::App for PlotyxApp {
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
         let bar_env = BarEnv {
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
+            tools: self.tools_context(active_tab),
             shortcuts: crate::toolbar::ShortcutTexts {
                 open: ctx.format_shortcut(&SHORTCUT_OPEN),
                 save: ctx.format_shortcut(&SHORTCUT_SAVE),
@@ -8158,6 +8202,10 @@ fn annotation_interactions(
 ) {
     for event in view.take_events() {
         match event {
+            plotyx_render_egui::GraphEvent::PlaceText { row, column, x, y } => {
+                add_annotation_at(ui.ctx(), view, tree, graph, (row, column, x, y));
+                view.set_tool(plotyx_render_egui::GraphTool::Pointer);
+            }
             plotyx_render_egui::GraphEvent::EditAnnotation(target) => {
                 open_annotation_editor(ui.ctx(), view, tree, graph, target);
             }
