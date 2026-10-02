@@ -86,6 +86,7 @@ pub mod scale;
 pub mod series;
 pub mod series_selection;
 pub mod shapes;
+pub mod subpixel;
 pub mod text;
 
 pub use color::{parse_hex, rgb_or};

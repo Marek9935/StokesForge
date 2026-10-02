@@ -49,6 +49,7 @@ pub mod backend;
 pub mod export;
 pub mod pdf;
 pub mod png;
+pub mod subpixel;
 pub mod typst_export;
 
 use std::path::Path;
@@ -127,7 +128,7 @@ pub fn render_to_string(
         let backend = MeasuredSvgBackend::with_string(&mut buffer, size, measurer);
         pipeline::draw(backend, plot)?;
     }
-    Ok(buffer)
+    Ok(subpixel::resolve(buffer))
 }
 
 /// Comme [`render_to_string`], avec le chemin Typst de la tâche R8.4 activé
@@ -155,7 +156,7 @@ pub fn render_to_string_with_typst(
             MeasuredSvgBackend::with_string(&mut buffer, size, measurer).with_typst(&typst);
         pipeline::draw(backend, plot)?;
     }
-    Ok(typst_export::splice(&buffer, &typst))
+    Ok(typst_export::splice(&subpixel::resolve(buffer), &typst))
 }
 
 /// Exporte un graphe déjà résolu, et rend en plus la géométrie retenue.
@@ -173,7 +174,7 @@ pub fn render_to_string_with_geometry(
         let backend = MeasuredSvgBackend::with_string(&mut buffer, size, measurer);
         pipeline::draw(backend, plot)?
     };
-    Ok((buffer, drawn))
+    Ok((subpixel::resolve(buffer), drawn))
 }
 
 /// Résout un spec contre un arbre, puis l'exporte.

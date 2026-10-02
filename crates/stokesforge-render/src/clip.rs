@@ -156,6 +156,25 @@ pub fn clip_polyline(bounds: PixelBounds, points: &[BackendCoord]) -> Vec<Vec<Ba
     runs
 }
 
+/// Comme [`clip_polyline`], sur des sommets en pixels **flottants** : rien
+/// n'est arrondi, pour les chemins sous-pixel ([`crate::subpixel`]).
+pub fn clip_polyline_f64(bounds: PixelBounds, points: &[(f64, f64)]) -> Vec<Vec<(f64, f64)>> {
+    let mut runs: Vec<Vec<(f64, f64)>> = Vec::new();
+    for pair in points.windows(2) {
+        let Some((ca, cb)) = clip_segment(bounds, pair[0], pair[1]) else {
+            continue;
+        };
+        if ca == cb {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(run) if run.last() == Some(&ca) => run.push(cb),
+            _ => runs.push(vec![ca, cb]),
+        }
+    }
+    runs
+}
+
 fn round((x, y): (f64, f64)) -> BackendCoord {
     (x.round() as i32, y.round() as i32)
 }

@@ -320,3 +320,35 @@ fn un_cadrage_etroit_ne_plaque_plus_la_courbe_sur_un_bord() {
          l'intersection géométrique réelle"
     );
 }
+
+/// #91 : l'ellipse est un chemin au sous-pixel — ses sommets ne sont pas tous
+/// à des pixels entiers, et aucun n'est resté en point fixe (seize fois trop
+/// loin) faute d'avoir été décodé.
+#[test]
+fn une_ellipse_est_tracee_au_sous_pixel_sur_l_ecran() {
+    use stokesforge_plot::{ShapeKind, ShapeSpec};
+    let formes = figure_avec(|panel| {
+        panel.shapes = vec![ShapeSpec::new(ShapeKind::Ellipse, 10.0, -0.5, 50.0, 0.5)];
+    });
+    let sans = figure();
+    let points: Vec<Pos2> = formes
+        .iter()
+        .skip(sans.len().saturating_sub(1))
+        .filter_map(|shape| match shape {
+            Shape::Path(path) if path.points.len() > 40 => Some(path.points.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(!points.is_empty(), "aucun contour d'ellipse");
+    let fractionnaire = points
+        .iter()
+        .any(|p| p.x.fract().abs() > 0.01 || p.y.fract().abs() > 0.01);
+    assert!(fractionnaire, "tous les sommets sont entiers");
+    for p in &points {
+        assert!(
+            (0.0..=SIZE.0).contains(&p.x) && (0.0..=SIZE.1).contains(&p.y),
+            "sommet hors figure : {p:?}"
+        );
+    }
+}

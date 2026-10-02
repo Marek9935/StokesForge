@@ -16,14 +16,15 @@
 //!   est hors cadre.
 
 use plotters::coord::Shift;
-use plotters::element::{PathElement, Polygon};
+use plotters::element::Polygon;
 use plotters::prelude::*;
 use plotters_backend::{BackendCoord, DrawingBackend};
 use stokesforge_plot::{ShapeKind, ShapeSpec};
 
-use crate::clip::{clip_polyline, clip_segment, PixelBounds};
+use crate::clip::{clip_polyline_f64, clip_segment, PixelBounds};
 use crate::color::{parse_hex, rgba_or};
 use crate::paint::{opaque, rgba, stroke_width};
+use crate::subpixel;
 
 /// Bornes du nombre de côtés du polygone qui approche une ellipse.
 const ELLIPSE_SEGMENTS_RANGE: (usize, usize) = (24, 2048);
@@ -227,23 +228,32 @@ fn rounded(point: (f64, f64)) -> BackendCoord {
     (point.0.round() as i32, point.1.round() as i32)
 }
 
-/// Le chemin qui boucle sur `polygon`, prêt pour un `PathElement`.
+/// Le chemin qui boucle sur `polygon`, en pixels flottants.
 ///
 /// Un chemin dont le dernier point répète le premier reste une polyligne
 /// **ouverte** pour les backends : au point de départ, deux extrémités à bout
 /// plat se touchent sans jointure, d'où une encoche au coin (#92). On pose donc
 /// la couture au **milieu du premier côté**, où les deux extrémités sont
 /// alignées et se recollent sans trou.
-fn closed_path(polygon: &[(f64, f64)]) -> Vec<BackendCoord> {
+fn closed_path(polygon: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let [first, second, ..] = polygon else {
-        return polygon.iter().copied().map(rounded).collect();
+        return polygon.to_vec();
     };
-    let seam = rounded(((first.0 + second.0) / 2.0, (first.1 + second.1) / 2.0));
+    let seam = ((first.0 + second.0) / 2.0, (first.1 + second.1) / 2.0);
     let mut path = vec![seam];
-    path.extend(polygon[1..].iter().copied().map(rounded));
-    path.push(rounded(*first));
+    path.extend_from_slice(&polygon[1..]);
+    path.push(*first);
     path.push(seam);
     path
+}
+
+/// Trace un chemin au sous-pixel ([`crate::subpixel`], #91).
+fn draw_subpixel_path<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    points: &[(f64, f64)],
+    stroke: ShapeStyle,
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    area.draw(&subpixel::SubpixelPath::new(points, stroke))
 }
 
 /// Trace un objet entre les pixels `p1` et `p2`, rogné à `bounds` s'il y en a
@@ -283,11 +293,11 @@ pub fn draw_shape<DB: DrawingBackend>(
         let closed = closed_path(&polygon);
         match bounds {
             Some(bounds) => {
-                for run in clip_polyline(bounds, &closed) {
-                    area.draw(&PathElement::new(run, stroke))?;
+                for run in clip_polyline_f64(bounds, &closed) {
+                    draw_subpixel_path(area, &run, stroke)?;
                 }
             }
-            None => area.draw(&PathElement::new(closed, stroke))?,
+            None => draw_subpixel_path(area, &closed, stroke)?,
         }
         return Ok(());
     }
@@ -298,7 +308,7 @@ pub fn draw_shape<DB: DrawingBackend>(
     };
     if let Some((a, b)) = segment {
         if rounded(a) != rounded(b) {
-            area.draw(&PathElement::new(vec![rounded(a), rounded(b)], stroke))?;
+            draw_subpixel_path(area, &[a, b], stroke)?;
         }
     }
     if shape.kind == ShapeKind::Arrow {
@@ -400,10 +410,10 @@ mod tests {
         let rect = outline(ShapeKind::Rectangle, (10.0, 10.0), (50.0, 30.0));
         let path = closed_path(&rect);
         assert_eq!(path.first(), path.last(), "chemin refermé");
-        assert_eq!(path[0], (30, 10), "couture au milieu du côté haut");
+        assert_eq!(path[0], (30.0, 10.0), "couture au milieu du côté haut");
         for corner in &rect {
             assert!(
-                path[1..path.len() - 1].contains(&rounded(*corner)),
+                path[1..path.len() - 1].contains(corner),
                 "les quatre coins restent des sommets intérieurs (jointure)"
             );
         }

@@ -391,6 +391,7 @@ Les deux points sont projetés **sans** test d'appartenance au cadrage
 (`Ranges::forward`) puis rognés en pixels : trait par `clip_polyline`
 (contour fermé), remplissage par Sutherland-Hodgman (`clip_polygon`), pointe de
 flèche omise si elle est hors cadre. L'ellipse est un polygone convexe dont le nombre de côtés suit le rayon en pixels (`ellipse_segments` : corde à moins de 0,1 px de l'arc, #91).
+Le contour (rectangle, ellipse, ligne, hampe de flèche) est tracé **au sous-pixel** : Plotters n'accepte que des coordonnées entières, qui crénelaient le cercle quel que soit le nombre de côtés. Convention lue par les deux backends (`stokesforge_render::subpixel`) : points fixes ×16 et drapeau dans l'épaisseur ; l'écran décode dans `draw_path`, l'export réécrit les `<polyline>` marquées (`stokesforge-render-svg::subpixel::resolve`, appelé par chaque point d'entrée de l'export). `SubpixelPath` passe par un `CoordMapper` sans `Rect::truncate`, qui écraserait les points fixes. Un backend qui ignore la convention trace ces chemins seize fois trop grands.
 `DrawnPanel::shapes` (`DrawnShape`, pixels non rognés) sert à `hit` :
 `PlotComponent::Shape`, désigné **sur son trait** (ou dedans s'il est rempli)
 dans la zone de tracé, sous les textes libres. Côté écran, `GraphView`

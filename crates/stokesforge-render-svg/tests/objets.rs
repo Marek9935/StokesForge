@@ -67,3 +67,23 @@ fn un_trait_automatique_suit_l_encre_du_fond() {
     let encre = |s: &str| s.to_uppercase().matches("#202020").count();
     assert!(encre(&clair) > encre(&sans_clair));
 }
+
+/// #91 : l'ellipse est tracée au sous-pixel. Le document ne garde aucune trace
+/// de la convention interne (drapeau d'épaisseur, points fixes), et ses
+/// sommets ne sont pas tous entiers — sinon le cercle redevient crénelé.
+#[test]
+fn une_ellipse_est_exportee_au_sous_pixel_sans_trace_de_la_convention() {
+    let svg = exporte(
+        vec![ShapeSpec::new(ShapeKind::Ellipse, 1.0, 1.0, 9.0, 9.0)],
+        "#ffffff",
+    );
+    assert!(!svg.contains("stroke-width=\"1677"), "drapeau resté");
+    let fractionnaire = svg
+        .split("points=\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .flat_map(str::split_whitespace)
+        .flat_map(|pair| pair.split(','))
+        .any(|value| value.contains('.'));
+    assert!(fractionnaire, "tous les sommets sont entiers");
+}

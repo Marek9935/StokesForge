@@ -276,12 +276,29 @@ impl DrawingBackend for EguiBackend<'_> {
         if style.color().alpha == 0.0 {
             return Ok(());
         }
-        let points: Vec<Pos2> = path.into_iter().map(|point| self.at(point)).collect();
+        // Un chemin sous-pixel (`stokesforge_render::subpixel`, #91) arrive en
+        // points fixes avec un drapeau dans l'épaisseur.
+        let (width, fixed) = stokesforge_render::subpixel::split_width(style.stroke_width());
+        let points: Vec<Pos2> = path
+            .into_iter()
+            .map(|point| {
+                if fixed {
+                    let (x, y) = stokesforge_render::subpixel::decode(point);
+                    Pos2::new(self.origin.x + x as f32, self.origin.y + y as f32)
+                } else {
+                    self.at(point)
+                }
+            })
+            .collect();
         if points.len() < 2 {
             return Ok(());
         }
+        let stroke = Stroke {
+            width: width.max(1) as f32,
+            color: color(style.color()),
+        };
         self.shapes
-            .push(Shape::Path(PathShape::line(points, Self::stroke(style))));
+            .push(Shape::Path(PathShape::line(points, stroke)));
         Ok(())
     }
 
