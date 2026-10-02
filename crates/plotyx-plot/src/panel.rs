@@ -40,6 +40,10 @@ pub struct PanelSpec {
     /// Textes libres posés sur le panneau, ancrés aux données (issue #35),
     /// dans l'ordre de superposition.
     pub annotations: Vec<AnnotationSpec>,
+    /// Objets graphiques (rectangle, ellipse, ligne, flèche — issue #76),
+    /// ancrés aux données, du dessous au dessus. Tracés sous les textes
+    /// libres.
+    pub shapes: Vec<crate::ShapeSpec>,
 }
 
 impl PanelSpec {
@@ -112,6 +116,7 @@ impl Default for PanelSpec {
             row: 0,
             column: 0,
             annotations: Vec::new(),
+            shapes: Vec::new(),
         }
     }
 }

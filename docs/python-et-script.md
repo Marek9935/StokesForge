@@ -111,6 +111,17 @@ critère de fin vérifiable** :
 | `set_column` | mutation via l'acteur et le bus, GIL relâché pendant l'attente |
 | `undo` | délégation à la pile d'historique depuis Python |
 | `import_file(path, recipe=None)` | import dans un classeur neuf, conversion commune à l'application et au CLI, une macro annulable |
+| `add_shape(graph, kind, x1, y1, x2, y2, *, panel, axis, line_color, line_width, fill_color)` / `remove_shape(graph, index, *, panel)` | objets graphiques (issue #76) : lecture du spec puis `SetPlotSpec`, un Ctrl+Z par appel |
+
+`pyx.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311")` pose l'objet
+(`"rectangle"`, `"ellipse"`, `"line"` ou `"arrow"`, pointe en `(x2, y2)`) en
+**coordonnées de données** du panneau `panel=(ligne, colonne)`, au-dessus des
+autres, et rend son rang. `g` est la poignée d'un graphe (`pyx.resolve("[Graph1]")`).
+Genre, axe, couleur ou épaisseur invalides, coordonnée non finie, panneau ou
+rang absent, nœud qui n'est pas un graphe : `InvalidValueError`, rien n'est
+modifié. Le spec entier est relu puis réécrit (`SetPlotSpec` n'a pas de
+version attendue) : un autre client qui éditerait le même graphe dans la même
+fraction de seconde verrait sa modification écrasée, comme dans l'interface.
 
 `pyx.import_file("spectre.csv", recipe="Jasco (point-virgule)")` accepte un
 chemin texte ou `pathlib.Path` et rend la liste des poignées des feuilles

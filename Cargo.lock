@@ -4052,6 +4052,7 @@ dependencies = [
  "plotyx-core",
  "plotyx-import",
  "plotyx-importer",
+ "plotyx-plot",
  "plotyx-python",
  "plotyx-session",
  "pyo3",

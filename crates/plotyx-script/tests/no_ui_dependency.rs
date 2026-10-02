@@ -8,6 +8,7 @@
 const ALLOWED_DEPENDENCIES: &[&str] = &[
     "plotyx-core",     // le modèle
     "plotyx-commands", // le bus de commandes : tout passe par lui
+    "plotyx-plot",     // description de graphe : les objets graphiques de `pyx.add_shape`
     "plotyx-session",  // l'acteur, seul détenteur du `&mut Project`
     "plotyx-python",   // l'interpréteur embarqué et le pont de tableaux
     "plotyx-import",   // recettes et choix du modèle, sans interface

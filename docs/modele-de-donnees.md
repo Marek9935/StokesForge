@@ -175,6 +175,15 @@ renommer ou déplacer une colonne ne casse rien.
   `PlotSpec` (`get`, `set` qui remplace ou ajoute, `remove`) : pas de commande
   dédiée, tout passe par `SetPlotSpec`. `PlotSpec::set_text_color` (thème)
   écrit aussi leur couleur.
+- `ShapeSpec` (issue #76) : un **objet graphique** — rectangle, ellipse, ligne
+  ou flèche (`ShapeKind`) — ancré aux données par deux points `(x1, y1)` /
+  `(x2, y2)` (coins opposés, ou queue et pointe) de l'ordonnée `axis`.
+  Couleur de trait (vide = encre automatique), épaisseur, couleur de
+  remplissage (vide = aucun ; l'opacité est l'alpha de `#RRGGBBAA`).
+  `PanelSpec::shapes` est **une seule liste ordonnée** : l'ordre d'empilement
+  est le rang (le dernier est dessus) ; `ShapeRef { row, column, index }`
+  l'adresse (`get`, `set`, `remove`, `bring_to_front`, `send_to_back`). Comme
+  les textes libres, aucune commande dédiée : tout passe par `SetPlotSpec`.
 - `TextAnchor { x, y, axis }` (issue #53) : la position d'un titre déplacé,
   **centre en données** comme un texte libre mais non bornée au cadrage. Elle
   vit dans `PlotSpec::title_anchor`, `PanelSpec::title_anchor`,

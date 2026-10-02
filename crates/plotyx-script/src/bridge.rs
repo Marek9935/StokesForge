@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use plotyx_commands::{Command, CommandError, MacroKind};
 use plotyx_core::{CoreError, NodeId, ValueBlock};
+use plotyx_plot::{PlotSpec, SeriesAxis, ShapeKind, ShapeRef, ShapeSpec};
 use plotyx_session::{SessionError, SessionHandle};
 
 /// A2 (`guide-de-correction-robustesse.md` §F6, §4/§7 de
@@ -276,6 +277,141 @@ pub(crate) fn undo(session: &SessionHandle) -> Result<bool, HostError> {
         .undo()
         .map(|revision| revision.is_some())
         .map_err(HostError::from_session)
+}
+
+/// Les arguments de `pyx.add_shape`, tels qu'un script les écrit : du texte et
+/// des nombres, validés ici en Rust pur.
+#[derive(Debug, Clone)]
+pub(crate) struct ShapeArgs {
+    pub(crate) kind: String,
+    pub(crate) points: (f64, f64, f64, f64),
+    pub(crate) panel: (usize, usize),
+    pub(crate) axis: String,
+    pub(crate) line_color: String,
+    pub(crate) line_width: f64,
+    pub(crate) fill_color: String,
+}
+
+impl ShapeArgs {
+    fn build(&self) -> Result<ShapeSpec, HostError> {
+        let kind = match self.kind.as_str() {
+            "rectangle" => ShapeKind::Rectangle,
+            "ellipse" => ShapeKind::Ellipse,
+            "line" => ShapeKind::Line,
+            "arrow" => ShapeKind::Arrow,
+            other => {
+                return Err(HostError::InvalidValue(format!(
+                    "unknown shape kind \"{other}\": use \"rectangle\", \"ellipse\", \"line\" \
+                     or \"arrow\""
+                )))
+            }
+        };
+        let axis = match self.axis.as_str() {
+            "left" => SeriesAxis::Left,
+            "right" => SeriesAxis::Right,
+            other => {
+                return Err(HostError::InvalidValue(format!(
+                    "unknown axis \"{other}\": use \"left\" or \"right\""
+                )))
+            }
+        };
+        for (name, color) in [
+            ("line_color", &self.line_color),
+            ("fill_color", &self.fill_color),
+        ] {
+            if !color.is_empty() && plotyx_plot::parse_hex(color).is_none() {
+                return Err(HostError::InvalidValue(format!(
+                    "{name} \"{color}\" is not a color: use \"#RRGGBB\" or \"#RRGGBBAA\", or \"\""
+                )));
+            }
+        }
+        if !self.line_width.is_finite() || self.line_width <= 0.0 {
+            return Err(HostError::InvalidValue(
+                "line_width must be a positive number".to_owned(),
+            ));
+        }
+        let (x1, y1, x2, y2) = self.points;
+        let shape = ShapeSpec {
+            axis,
+            line_color: self.line_color.clone(),
+            line_width: self.line_width,
+            fill_color: self.fill_color.clone(),
+            ..ShapeSpec::new(kind, x1, y1, x2, y2)
+        };
+        if !shape.is_finite() {
+            return Err(HostError::InvalidValue(
+                "shape coordinates must be finite numbers".to_owned(),
+            ));
+        }
+        Ok(shape)
+    }
+}
+
+/// Le spec du graphe `id`, après les contrôles d'époque et de nature.
+fn graph_spec(session: &SessionHandle, id: NodeId, epoch: u64) -> Result<PlotSpec, HostError> {
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    check_epoch(id, epoch, snapshot.epoch)?;
+    let node = snapshot.tree.node(id).ok_or_else(|| {
+        HostError::BrokenReference(format!("{id} no longer exists in the project"))
+    })?;
+    match node.kind() {
+        plotyx_core::node::NodeKind::Graph { spec, .. } => Ok(spec.clone()),
+        other => Err(HostError::InvalidValue(format!(
+            "{id} is {}, not a graph",
+            other.with_article()
+        ))),
+    }
+}
+
+fn set_graph_spec(session: &SessionHandle, graph: NodeId, spec: PlotSpec) -> Result<(), HostError> {
+    session
+        .execute(Command::SetPlotSpec { graph, spec })
+        .map(|_| ())
+        .map_err(HostError::from_session)
+}
+
+/// `pyx.add_shape` : pose un objet graphique au-dessus des autres du panneau
+/// et rend son rang. Une commande `SetPlotSpec`, donc un Ctrl+Z.
+pub(crate) fn add_shape(
+    session: &SessionHandle,
+    id: NodeId,
+    epoch: u64,
+    args: &ShapeArgs,
+) -> Result<usize, HostError> {
+    let shape = args.build()?;
+    let mut spec = graph_spec(session, id, epoch)?;
+    let (row, column) = args.panel;
+    let target = ShapeRef::next_in(&spec, row, column).ok_or_else(|| {
+        HostError::InvalidValue(format!(
+            "the graph has no panel at row {row}, column {column}"
+        ))
+    })?;
+    target.set(&mut spec, shape);
+    set_graph_spec(session, id, spec)?;
+    Ok(target.index)
+}
+
+/// `pyx.remove_shape` : retire l'objet de rang `index` du panneau.
+pub(crate) fn remove_shape(
+    session: &SessionHandle,
+    id: NodeId,
+    epoch: u64,
+    panel: (usize, usize),
+    index: usize,
+) -> Result<(), HostError> {
+    let mut spec = graph_spec(session, id, epoch)?;
+    let target = ShapeRef {
+        row: panel.0,
+        column: panel.1,
+        index,
+    };
+    if !target.remove(&mut spec) {
+        return Err(HostError::InvalidValue(format!(
+            "no shape {index} in the panel at row {}, column {}",
+            panel.0, panel.1
+        )));
+    }
+    set_graph_spec(session, id, spec)
 }
 
 /// Importe un fichier dans un classeur neuf, une feuille par plan. Toute

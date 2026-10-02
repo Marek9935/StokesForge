@@ -376,7 +376,7 @@ use crate::state::{
     active_graph, drop_payload_action, export_file_name, node_title_in, series_list_label, Action,
     ActiveTabKind, AppState, ColumnDragPayload, GridMenu, HeaderField, ImportDestination,
     ImportLineAction, ImportStep, MoveDirection, PlotAxis, PlotSettings, PlotSettingsTab,
-    PlotTarget, ProjectTreeNode, SaveTarget, WindowKind,
+    PlotTarget, ProjectTreeNode, SaveTarget, ShapeOrder, WindowKind,
 };
 use crate::theme;
 use crate::toolbar::{BarEnv, ToolbarId, ToolbarLayout, ToolbarRequest, ToolbarState};
@@ -1412,6 +1412,24 @@ impl PlotyxApp {
                                 view.clear_annotation_selection();
                             }
                             ui.close();
+                        }
+                        ui.separator();
+                        // Objets graphiques (issue #76) : l'ordre
+                        // d'empilement et la suppression de l'objet
+                        // sélectionné ; les outils de tracé sont dans la barre
+                        // d'outils, comme l'outil Texte.
+                        let object = self
+                            .graph_views
+                            .get(&graph)
+                            .and_then(GraphView::selected_shape);
+                        if let Some(view) = self.graph_views.get_mut(&graph) {
+                            let tree = self.state.tree().clone();
+                            match object {
+                                Some(object) => {
+                                    shape_order_buttons(ui, view, &tree, graph, object, actions)
+                                }
+                                None => disabled_shape_order_buttons(ui),
+                            }
                         }
                         ui.separator();
                         if ui
@@ -7841,7 +7859,10 @@ fn graph_context_menu(
         let pos = response.interact_pointer_pos();
         let target = pos.map_or(PlotTarget::Background, |pos| {
             view.annotation_at(pos).map_or_else(
-                || plot_target(view.component_at(pos)),
+                || {
+                    view.shape_at(pos)
+                        .map_or_else(|| plot_target(view.component_at(pos)), PlotTarget::Object)
+                },
                 PlotTarget::Annotation,
             )
         });
@@ -7941,6 +7962,12 @@ fn graph_context_menu(
                 view.clear_annotation_selection();
                 ui.close();
             }
+            ui.separator();
+        } else if let PlotTarget::Object(object) = target {
+            // Objets graphiques (issue #76) : les mêmes gestes que la barre
+            // de menus et le clavier (Suppr).
+            view.select_shape(Some(object));
+            shape_order_buttons(ui, view, tree, graph_id, object, actions);
             ui.separator();
         } else if ui
             .add_enabled(point.is_some(), egui::Button::new(tr!("action-add-text")))
@@ -8319,6 +8346,73 @@ fn publish_saved_colors(ctx: &egui::Context, state: &AppState) {
 
 /// Signaux de la vue, éditeur sur place et Suppr — après la peinture de la
 /// figure, dans la fenêtre flottante comme dans la fenêtre détachée.
+/// Les trois entrées d'un objet graphique sélectionné : premier plan,
+/// arrière-plan, suppression (barre de menus et menu contextuel).
+fn shape_order_buttons(
+    ui: &mut egui::Ui,
+    view: &mut GraphView,
+    tree: &Tree,
+    graph: NodeId,
+    object: plotyx_render_egui::ShapeRef,
+    actions: &mut Vec<Action>,
+) {
+    let count = crate::state::current_plot_spec(tree, graph)
+        .and_then(|spec| {
+            spec.panels
+                .iter()
+                .find(|panel| panel.row == object.row && panel.column == object.column)
+                .map(|panel| panel.shapes.len())
+        })
+        .unwrap_or(0);
+    for order in [ShapeOrder::ToFront, ShapeOrder::ToBack] {
+        let label = match order {
+            ShapeOrder::ToFront => tr!("action-bring-to-front"),
+            ShapeOrder::ToBack => tr!("action-send-to-back"),
+        };
+        let hint = match order {
+            ShapeOrder::ToFront => tr!("action-bring-to-front", "hint"),
+            ShapeOrder::ToBack => tr!("action-send-to-back", "hint"),
+        };
+        if ui.button(label).on_hover_text(hint).clicked() {
+            actions.push(Action::ReorderShape {
+                graph,
+                target: object,
+                order,
+            });
+            // Le rang change : la sélection suit l'objet.
+            let index = match order {
+                ShapeOrder::ToFront => count.saturating_sub(1),
+                ShapeOrder::ToBack => 0,
+            };
+            view.select_shape(Some(plotyx_render_egui::ShapeRef { index, ..object }));
+            ui.close();
+        }
+    }
+    if ui
+        .add(egui::Button::new(tr!("action-delete-object")).shortcut_text(shortcut_text_delete()))
+        .clicked()
+    {
+        actions.push(Action::RemoveShape {
+            graph,
+            target: object,
+        });
+        view.select_shape(None);
+        ui.close();
+    }
+}
+
+/// Les mêmes entrées, grisées, quand aucun objet n'est sélectionné.
+fn disabled_shape_order_buttons(ui: &mut egui::Ui) {
+    ui.add_enabled(false, egui::Button::new(tr!("action-bring-to-front")))
+        .on_disabled_hover_text(tr!("action-bring-to-front", "disabled"));
+    ui.add_enabled(false, egui::Button::new(tr!("action-send-to-back")))
+        .on_disabled_hover_text(tr!("action-send-to-back", "disabled"));
+    ui.add_enabled(
+        false,
+        egui::Button::new(tr!("action-delete-object")).shortcut_text(shortcut_text_delete()),
+    );
+}
+
 fn annotation_interactions(
     ui: &egui::Ui,
     view: &mut GraphView,
@@ -8340,6 +8434,13 @@ fn annotation_interactions(
                     graph,
                     target,
                     annotation: Box::new(annotation),
+                });
+            }
+            plotyx_render_egui::GraphEvent::ShapeChanged { target, shape } => {
+                actions.push(Action::SetShape {
+                    graph,
+                    target,
+                    shape: Box::new(shape),
                 });
             }
             plotyx_render_egui::GraphEvent::EditText(target) => {
@@ -8381,6 +8482,16 @@ fn annotation_interactions(
                 {
                     actions.push(Action::RemoveAnnotation { graph, target });
                     view.clear_annotation_selection();
+                }
+            } else if let Some(target) = view.selected_shape() {
+                // Objets graphiques (issue #76) : même geste.
+                if !typing
+                    && ui.ctx().input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                    })
+                {
+                    actions.push(Action::RemoveShape { graph, target });
+                    view.select_shape(None);
                 }
             }
         }
@@ -8649,6 +8760,8 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
         // Le menu contextuel lit le texte libre par `GraphView::annotation_at`,
         // qui donne son adresse dans le spec ; ce repli ne sert pas.
         Some(PlotComponent::Annotation { .. }) => PlotTarget::PlotArea,
+        // Idem pour un objet graphique (`GraphView::shape_at`).
+        Some(PlotComponent::Shape { .. }) => PlotTarget::PlotArea,
         // Titres et légende (issue #53) : leurs propriétés sont celles du
         // composant, comme avant qu'ils soient désignables en propre.
         Some(PlotComponent::Text(target)) => match target {

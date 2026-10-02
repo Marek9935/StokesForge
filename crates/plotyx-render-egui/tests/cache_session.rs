@@ -662,3 +662,234 @@ fn double_cliquer_un_titre_demande_a_lediter() {
     }
     assert_eq!(signaux, vec![GraphEvent::EditText(TextTarget::Title)]);
 }
+
+// -- Issue #76 : objets graphiques (rectangle, ellipse, ligne, flèche) --
+
+/// Un banc dont le panneau porte un rectangle **rempli** au milieu des
+/// données (le remplissage le rend désignable en son milieu).
+fn banc_avec_forme() -> Banc {
+    let banc = Banc::with_title("Forme");
+    let snapshot = banc.snapshot();
+    let mut spec = match snapshot.tree.node(banc.graph).expect("graphe").kind() {
+        plotyx_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => panic!("pas un graphe"),
+    };
+    if let Some(panel) = spec.panels.get_mut(0) {
+        panel.shapes.push(plotyx_plot::ShapeSpec {
+            fill_color: "#3366cc66".to_string(),
+            ..plotyx_plot::ShapeSpec::new(plotyx_plot::ShapeKind::Rectangle, 10.0, 15.0, 20.0, 35.0)
+        });
+    }
+    banc.handle()
+        .execute(Command::SetPlotSpec {
+            graph: banc.graph,
+            spec,
+        })
+        .expect("spec posé");
+    banc
+}
+
+/// Glisse de `from` à `to` en cinq pas ; rend les signaux sortis, dont aucun
+/// ne doit précéder le relâchement.
+fn glisser(
+    context: &egui::Context,
+    view: &mut GraphView,
+    banc: &Banc,
+    rect: Rect,
+    from: Pos2,
+    to: Pos2,
+    mut time: f64,
+) -> Vec<plotyx_render_egui::GraphEvent> {
+    let mut signaux = image_avec(
+        context,
+        view,
+        banc,
+        rect,
+        vec![egui::Event::PointerMoved(from), bouton(from, true)],
+        time,
+    );
+    for pas in 1..=5 {
+        time += 0.05;
+        let pos = from + (to - from) * (pas as f32 / 5.0);
+        signaux.extend(image_avec(
+            context,
+            view,
+            banc,
+            rect,
+            vec![egui::Event::PointerMoved(pos)],
+            time,
+        ));
+        assert!(signaux.is_empty(), "un signal avant le relâchement");
+    }
+    signaux.extend(image_avec(
+        context,
+        view,
+        banc,
+        rect,
+        vec![bouton(to, false)],
+        time + 0.05,
+    ));
+    signaux
+}
+
+/// Le centre, à l'écran, de l'objet `index` du premier panneau.
+fn forme_a_l_ecran(view: &GraphView, index: usize) -> (Pos2, Pos2) {
+    let drawn = view
+        .drawn_shape(plotyx_plot::ShapeRef {
+            row: 0,
+            column: 0,
+            index,
+        })
+        .expect("objet tracé");
+    let origin = view.display_rect().expect("rect").min.to_vec2();
+    (
+        Pos2::new(drawn.p1.0 as f32, drawn.p1.1 as f32) + origin,
+        Pos2::new(drawn.p2.0 as f32, drawn.p2.1 as f32) + origin,
+    )
+}
+
+/// Tracer avec l'outil Rectangle : l'aperçu suit le pointeur sans toucher au
+/// modèle, **un seul** signal sort au relâchement (un ajout, au rang qui suit
+/// le dernier), et l'outil rend la main au Pointeur.
+#[test]
+fn tracer_un_rectangle_ne_signale_quau_relachement() {
+    let banc = Banc::with_title("Trace");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    assert!(image_avec(&context, &mut view, &banc, rect, vec![], 0.0).is_empty());
+    view.set_tool(plotyx_render_egui::GraphTool::Rectangle);
+    let revision = banc.snapshot().revision;
+
+    let signaux = glisser(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        Pos2::new(250.0, 150.0),
+        Pos2::new(380.0, 260.0),
+        0.1,
+    );
+    let [plotyx_render_egui::GraphEvent::ShapeChanged { target, shape }] = &signaux[..] else {
+        panic!("un seul signal attendu : {signaux:?}")
+    };
+    assert_eq!(target.index, 0, "ajout au rang qui suit le dernier");
+    assert_eq!(shape.kind, plotyx_plot::ShapeKind::Rectangle);
+    assert!((shape.x2 - shape.x1).abs() > 0.0 && (shape.y2 - shape.y1).abs() > 0.0);
+    assert_eq!(banc.snapshot().revision, revision, "le modèle a bougé");
+    assert_eq!(view.tool(), plotyx_render_egui::GraphTool::Pointer);
+    assert_eq!(view.selected_shape(), Some(*target));
+}
+
+/// Un tremblement de main avec un outil de tracé ne crée rien.
+#[test]
+fn un_tremblement_avec_un_outil_de_trace_ne_cree_rien() {
+    let banc = Banc::with_title("Trace");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    view.set_tool(plotyx_render_egui::GraphTool::Arrow);
+    let signaux = glisser(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        Pos2::new(300.0, 200.0),
+        Pos2::new(302.0, 201.0),
+        0.1,
+    );
+    assert!(signaux.is_empty(), "{signaux:?}");
+    assert!(view.shape_preview().is_none());
+}
+
+/// Glisser un objet rempli le déplace d'un bloc (les deux points, même
+/// écart) ; un seul signal, au relâchement ; le cadrage n'a pas bougé.
+#[test]
+fn glisser_une_forme_la_deplace_en_un_seul_signal() {
+    let banc = banc_avec_forme();
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    let (a, b) = forme_a_l_ecran(&view, 0);
+    let centre = a.lerp(b, 0.5);
+    let generation = view.view().generation();
+
+    let signaux = glisser(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        centre,
+        centre + egui::vec2(60.0, 0.0),
+        0.1,
+    );
+    let [plotyx_render_egui::GraphEvent::ShapeChanged { target, shape }] = &signaux[..] else {
+        panic!("un seul signal attendu : {signaux:?}")
+    };
+    assert_eq!(target.index, 0, "remplacement, pas ajout");
+    assert!(shape.x1 > 10.0 && shape.x2 > 20.0, "{shape:?}");
+    assert!(
+        ((shape.x2 - shape.x1) - 10.0).abs() < 1e-6 && ((shape.y2 - shape.y1) - 20.0).abs() < 1e-6,
+        "déplacé d'un bloc : la taille ne change pas ({shape:?})"
+    );
+    assert_eq!(
+        view.view().generation(),
+        generation,
+        "le glisser a fait défiler"
+    );
+}
+
+/// Une poignée de coin redimensionne : le coin opposé reste en place.
+#[test]
+fn glisser_une_poignee_redimensionne_la_forme() {
+    let banc = banc_avec_forme();
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    let (a, b) = forme_a_l_ecran(&view, 0);
+    // Un clic au centre sélectionne l'objet, ce qui fait apparaître ses poignées.
+    let centre = a.lerp(b, 0.5);
+    let mut time = 0.1;
+    for pressed in [true, false] {
+        image_avec(
+            &context,
+            &mut view,
+            &banc,
+            rect,
+            vec![egui::Event::PointerMoved(centre), bouton(centre, pressed)],
+            time,
+        );
+        time += 0.05;
+    }
+    assert_eq!(view.selected_shape().map(|t| t.index), Some(0));
+
+    let coin_bas_droite = Pos2::new(a.x.max(b.x), a.y.max(b.y));
+    let signaux = glisser(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        coin_bas_droite,
+        coin_bas_droite + egui::vec2(40.0, 30.0),
+        time + 0.2,
+    );
+    let [plotyx_render_egui::GraphEvent::ShapeChanged { shape, .. }] = &signaux[..] else {
+        panic!("un seul signal attendu : {signaux:?}")
+    };
+    let (gauche, haut) = (shape.x1.min(shape.x2), shape.y1.max(shape.y2));
+    assert!(
+        (gauche - 10.0).abs() < 0.2,
+        "le coin opposé a bougé : {shape:?}"
+    );
+    assert!(
+        (haut - 35.0).abs() < 0.5,
+        "le coin opposé a bougé : {shape:?}"
+    );
+    assert!(
+        (shape.x2 - shape.x1).abs() > 10.5,
+        "pas agrandi : {shape:?}"
+    );
+}

@@ -57,7 +57,7 @@ use plotyx_core::{
 use plotyx_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use plotyx_plot::{
     AnnotationRef, AnnotationSpec, ColorUsage, PanelSpec, Panels, PlotSpec, PlotType, SavedColors,
-    SeriesRef, TextAnchor, TextTarget,
+    SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
 };
 #[cfg(feature = "python")]
 use plotyx_python::interpreter::EmbeddedPython;
@@ -449,6 +449,34 @@ pub enum Action {
         graph: NodeId,
         /// Adresse du texte.
         target: AnnotationRef,
+    },
+    /// Pose un objet graphique (issue #76) : remplace celui de `target`, ou
+    /// l'ajoute si `target` est le rang qui suit le dernier
+    /// ([`ShapeRef::set`]). Comme [`Action::SetAnnotation`], **une** entrée
+    /// d'historique quel que soit le nombre d'images du geste.
+    SetShape {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Adresse de l'objet.
+        target: ShapeRef,
+        /// Sa nouvelle version.
+        shape: Box<ShapeSpec>,
+    },
+    /// Retire un objet graphique (Suppr, menu).
+    RemoveShape {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Adresse de l'objet.
+        target: ShapeRef,
+    },
+    /// Change le rang d'empilement d'un objet graphique.
+    ReorderShape {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Adresse de l'objet.
+        target: ShapeRef,
+        /// Où le mettre.
+        order: ShapeOrder,
     },
     /// Pose la position d'un titre ou de la légende (issue #53) : le glisser
     /// qui s'achève, ou, avec `anchor: None`, « Reset Position ». Une
@@ -1366,6 +1394,16 @@ impl PlotAxis {
     }
 }
 
+/// Où mettre un objet graphique dans l'ordre d'empilement
+/// ([`Action::ReorderShape`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapeOrder {
+    /// Au-dessus de tous les autres objets du panneau.
+    ToFront,
+    /// Sous tous les autres objets du panneau.
+    ToBack,
+}
+
 /// Un composant d'un graphe visé par un clic droit — traduit par
 /// `crate::app` depuis ce que le rendu désigne sous le pointeur.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1384,6 +1422,8 @@ pub enum PlotTarget {
     Annotation(AnnotationRef),
     /// La légende (cadre ou entrée, issue #53).
     Legend,
+    /// Un objet graphique : rectangle, ellipse, ligne ou flèche (issue #76).
+    Object(ShapeRef),
 }
 
 impl PlotTarget {
@@ -1397,6 +1437,7 @@ impl PlotTarget {
             PlotTarget::AxisTitle(axis) => tr!("plot-target-axis-title", axis = axis.label()),
             PlotTarget::Annotation(_) => tr!("plot-target-text"),
             PlotTarget::Legend => tr!("plot-target-legend"),
+            PlotTarget::Object(_) => tr!("plot-target-object"),
         }
     }
 
@@ -1405,7 +1446,9 @@ impl PlotTarget {
     pub fn settings_page(self) -> (PlotSettingsTab, Option<PlotAxis>) {
         match self {
             PlotTarget::Background | PlotTarget::Title => (PlotSettingsTab::Graph, None),
-            PlotTarget::PlotArea | PlotTarget::Annotation(_) => (PlotSettingsTab::PlotArea, None),
+            PlotTarget::PlotArea | PlotTarget::Annotation(_) | PlotTarget::Object(_) => {
+                (PlotSettingsTab::PlotArea, None)
+            }
             PlotTarget::Legend => (PlotSettingsTab::Legend, None),
             PlotTarget::Axis(axis) | PlotTarget::AxisTitle(axis) => {
                 (PlotSettingsTab::Axes, Some(axis))
@@ -3402,6 +3445,22 @@ impl AppState {
             Action::RemoveAnnotation { graph, target } => {
                 self.edit_annotations(graph, |spec| target.remove(spec))
             }
+            Action::SetShape {
+                graph,
+                target,
+                shape,
+            } => self.edit_annotations(graph, |spec| target.set(spec, *shape)),
+            Action::RemoveShape { graph, target } => {
+                self.edit_annotations(graph, |spec| target.remove(spec))
+            }
+            Action::ReorderShape {
+                graph,
+                target,
+                order,
+            } => self.edit_annotations(graph, |spec| match order {
+                ShapeOrder::ToFront => target.bring_to_front(spec).is_some(),
+                ShapeOrder::ToBack => target.send_to_back(spec).is_some(),
+            }),
             Action::SetTextAnchor {
                 graph,
                 target,

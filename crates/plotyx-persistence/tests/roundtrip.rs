@@ -791,6 +791,19 @@ fn non_trivial_spec(
                 ..plotyx_plot::AnnotationSpec::new("*seuil*", -0.25, 1e-3)
             },
         ],
+        // Issue #76 : objets graphiques, un de chaque sorte, dans l'ordre.
+        shapes: vec![
+            plotyx_plot::ShapeSpec {
+                axis: SeriesAxis::Right,
+                line_color: "#aa221188".to_string(),
+                line_width: 3.0,
+                fill_color: "#33669955".to_string(),
+                ..plotyx_plot::ShapeSpec::new(plotyx_plot::ShapeKind::Rectangle, 0.5, 1.0, 2.5, 3.0)
+            },
+            plotyx_plot::ShapeSpec::new(plotyx_plot::ShapeKind::Ellipse, -1.0, -2.0, 4.0, 6.0),
+            plotyx_plot::ShapeSpec::new(plotyx_plot::ShapeKind::Line, 0.0, 0.0, 1.0, 1.0),
+            plotyx_plot::ShapeSpec::new(plotyx_plot::ShapeKind::Arrow, 2.0, 2.0, 1.0, 0.5),
+        ],
         ..PanelSpec::at(0, 0)
     };
     let panel_b = PanelSpec {

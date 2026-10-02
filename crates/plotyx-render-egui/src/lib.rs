@@ -79,8 +79,9 @@ pub mod backend;
 pub mod cache;
 pub mod feathering;
 pub mod scaled;
+mod shape_tools;
 pub mod typst_screen;
-pub mod view;
+mod view;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -109,7 +110,9 @@ pub use plotyx_render::pipeline::{
 };
 // L'adresse et le modèle d'un texte libre : l'application les manipule avec
 // les signaux de la vue ([`GraphEvent`]).
-pub use plotyx_plot::{AnnotationRef, AnnotationSpec, TextAnchor, TextTarget};
+pub use plotyx_plot::{
+    AnnotationRef, AnnotationSpec, ShapeKind, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+};
 pub use plotyx_render::text::{font_definitions, font_definitions_for, TextMeasurer, TextSource};
 // Le choix de police (embed du 2026-09-13, `plotyx_render::fonts`) : une UI
 // qui veut proposer Fira/Libertinus/Noto ou une police système n'a pas à
@@ -155,6 +158,17 @@ pub enum GraphEvent {
         /// Sa version déplacée.
         annotation: AnnotationSpec,
     },
+    /// Un objet graphique a été tracé, déplacé ou redimensionné (issue #76) :
+    /// sa nouvelle version, à valider en **une** modification du modèle
+    /// (`target.index` égal au nombre d'objets du panneau : un ajout).
+    /// L'aperçu reste affiché jusqu'à ce que le modèle change
+    /// ([`GraphView::hold_preview`]).
+    ShapeChanged {
+        /// L'objet concerné.
+        target: ShapeRef,
+        /// Sa nouvelle version.
+        shape: ShapeSpec,
+    },
     /// Double-clic sur un titre : l'éditer sur place (issue #53).
     EditText(TextTarget),
     /// Double-clic sur une entrée de la légende : renommer la série du
@@ -190,6 +204,27 @@ pub enum GraphTool {
     ZoomBox,
     /// Un clic dans la zone de tracé pose un texte libre.
     Text,
+    /// Glisser trace un rectangle (issue #76).
+    Rectangle,
+    /// Glisser trace une ellipse (issue #76).
+    Ellipse,
+    /// Glisser trace une ligne (issue #76).
+    Line,
+    /// Glisser trace une flèche, pointe au relâchement (issue #76).
+    Arrow,
+}
+
+impl GraphTool {
+    /// La sorte d'objet que l'outil trace, s'il en trace une.
+    pub fn shape_kind(self) -> Option<ShapeKind> {
+        match self {
+            Self::Rectangle => Some(ShapeKind::Rectangle),
+            Self::Ellipse => Some(ShapeKind::Ellipse),
+            Self::Line => Some(ShapeKind::Line),
+            Self::Arrow => Some(ShapeKind::Arrow),
+            Self::Pointer | Self::ZoomBox | Self::Text => None,
+        }
+    }
 }
 
 /// Un glisser de titre ou de légende en cours (issue #53).
@@ -390,6 +425,13 @@ pub struct GraphView {
     text_drag: Option<TextDrag>,
     /// Texte libre sélectionné (clic), cible de Suppr.
     selected_annotation: Option<AnnotationRef>,
+    /// Aperçu d'un objet graphique en cours de tracé, de déplacement ou de
+    /// redimensionnement (issue #76), sur le même principe que
+    /// `annotation_preview`.
+    shape_preview: Option<(ShapeRef, ShapeSpec)>,
+    shape_drag: Option<shape_tools::ShapeDrag>,
+    /// Objet graphique sélectionné (clic), cible de Suppr et des poignées.
+    selected_shape: Option<ShapeRef>,
     events: Vec<GraphEvent>,
 }
 
@@ -452,6 +494,9 @@ impl GraphView {
             text_preview: None,
             text_drag: None,
             selected_annotation: None,
+            shape_preview: None,
+            shape_drag: None,
+            selected_shape: None,
             events: Vec::new(),
         }
     }
@@ -534,6 +579,7 @@ impl GraphView {
     fn clear_previews(&mut self) {
         self.set_annotation_preview(None);
         self.set_text_preview(None);
+        self.set_shape_preview(None);
     }
 
     /// L'aperçu d'un titre ou d'une légende déplacé, s'il y en a un.
@@ -643,6 +689,7 @@ impl GraphView {
         if self.tool != tool {
             self.tool = tool;
             self.drag_box = None;
+            self.abort_shape_drag();
         }
     }
 
@@ -830,6 +877,7 @@ impl GraphView {
         let view = &self.view;
         let preview = &self.annotation_preview;
         let text_preview = &self.text_preview;
+        let shape_preview = &self.shape_preview;
         let formulas = &self.formulas;
         let font_choice = &self.font_choice;
         let typst_fonts = &self.typst_fonts;
@@ -840,6 +888,9 @@ impl GraphView {
             view.apply(&mut framed);
             if let Some((target, annotation)) = preview {
                 target.set(&mut framed, annotation.clone());
+            }
+            if let Some((target, shape)) = shape_preview {
+                target.set(&mut framed, shape.clone());
             }
             if let Some((target, anchor)) = text_preview {
                 target.set_anchor(&mut framed, Some(*anchor));
@@ -971,6 +1022,10 @@ impl GraphView {
         let pointer = response.interact_pointer_pos();
         if response.clicked() {
             self.selected_annotation = pointer.and_then(|pos| self.annotation_at(pos));
+            self.selected_shape = match self.selected_annotation {
+                Some(_) => None,
+                None => pointer.and_then(|pos| self.shape_at(pos)),
+            };
         }
         if response.double_clicked() {
             let component = pointer.and_then(|pos| self.component_at(pos));
@@ -1003,10 +1058,12 @@ impl GraphView {
         }
         if self.tool == GraphTool::Pointer
             && (self.handle_annotation_drag(response, spec)
+                || self.handle_shape_drag(response, spec)
                 || self.handle_text_drag(response, spec))
         {
             return;
         }
+        self.handle_shape_draw(response, spec);
 
         // Outil Texte : un clic dans la zone de tracé pose le texte.
         if self.tool == GraphTool::Text && response.clicked() {
@@ -1309,6 +1366,8 @@ impl GraphView {
                 Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
             ));
         }
+
+        self.paint_shape_selection(painter);
 
         let pos = response.hover_pos()?;
         let figure_pos = self.figure_position(pos)?;

@@ -77,6 +77,10 @@ pub enum Icon {
     Subscript,
     Superscript,
     Formula,
+    ShapeRectangle,
+    ShapeEllipse,
+    ShapeLine,
+    ShapeArrow,
 }
 
 macro_rules! svg {
@@ -182,6 +186,26 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         Icon::TextTool,
         IconRole::Neutral,
         svg!("text-t.neutral.svg"),
+    ),
+    (
+        Icon::ShapeRectangle,
+        IconRole::Neutral,
+        svg!("rectangle.neutral.svg"),
+    ),
+    (
+        Icon::ShapeEllipse,
+        IconRole::Neutral,
+        svg!("circle.neutral.svg"),
+    ),
+    (
+        Icon::ShapeLine,
+        IconRole::Neutral,
+        svg!("line-segment.neutral.svg"),
+    ),
+    (
+        Icon::ShapeArrow,
+        IconRole::Neutral,
+        svg!("arrow-up-right.neutral.svg"),
     ),
     (
         Icon::ResetZoom,

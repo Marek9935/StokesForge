@@ -84,6 +84,7 @@ pub mod pipeline;
 pub mod sample;
 pub mod scale;
 pub mod series;
+pub mod shapes;
 pub mod text;
 
 pub use color::{parse_hex, rgb_or};
@@ -96,4 +97,5 @@ pub use pipeline::{
     DrawnText,
 };
 pub use series::{Geometry, Prepared};
+pub use shapes::DrawnShape;
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};

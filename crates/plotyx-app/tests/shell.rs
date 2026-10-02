@@ -6852,6 +6852,85 @@ fn un_texte_libre_sajoute_se_deplace_et_se_retire_en_un_pas_chacun() {
     assert!(graph_spec(&state, graph).panels[0].annotations.is_empty());
 }
 
+// -- Issue #76 : objets graphiques --
+
+/// Ajouter, déplacer, empiler et retirer un objet : chaque geste est **une**
+/// modification du modèle (un seul Ctrl+Z), un geste sans effet n'empile rien,
+/// et passer au premier plan un objet déjà dessus non plus.
+#[test]
+fn un_objet_graphique_sajoute_sempile_et_se_retire_en_un_pas_chacun() {
+    use plotyx_app::state::ShapeOrder;
+    use plotyx_plot::{ShapeKind, ShapeRef, ShapeSpec};
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let at = |index| ShapeRef {
+        row: 0,
+        column: 0,
+        index,
+    };
+    let formes = |state: &AppState| graph_spec(state, graph).panels[0].shapes.clone();
+    let revision = |state: &AppState| state.snapshot().revision;
+    let rect = |x: f64| ShapeSpec::new(ShapeKind::Rectangle, x, 0.0, x + 1.0, 1.0);
+
+    for (index, x) in [(0, 1.0), (1, 5.0)] {
+        state.dispatch(Action::SetShape {
+            graph,
+            target: at(index),
+            shape: Box::new(rect(x)),
+        });
+    }
+    assert_eq!(formes(&state).len(), 2);
+
+    // Le même objet : rien n'est empilé.
+    let apres_ajout = revision(&state);
+    state.dispatch(Action::SetShape {
+        graph,
+        target: at(1),
+        shape: Box::new(rect(5.0)),
+    });
+    assert_eq!(revision(&state), apres_ajout);
+
+    // Déjà au premier plan : rien n'est empilé.
+    state.dispatch(Action::ReorderShape {
+        graph,
+        target: at(1),
+        order: ShapeOrder::ToFront,
+    });
+    assert_eq!(revision(&state), apres_ajout);
+
+    // Au premier plan : l'ordre change, un Ctrl+Z le défait.
+    state.dispatch(Action::ReorderShape {
+        graph,
+        target: at(0),
+        order: ShapeOrder::ToFront,
+    });
+    assert_eq!(
+        formes(&state).iter().map(|s| s.x1).collect::<Vec<_>>(),
+        [5.0, 1.0]
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        formes(&state).iter().map(|s| s.x1).collect::<Vec<_>>(),
+        [1.0, 5.0]
+    );
+
+    state.dispatch(Action::RemoveShape {
+        graph,
+        target: at(0),
+    });
+    assert_eq!(formes(&state).len(), 1);
+    state.dispatch(Action::Undo);
+    assert_eq!(formes(&state).len(), 2, "Ctrl+Z rend l'objet retiré");
+
+    // Une adresse au-delà du dernier rang est ignorée.
+    state.dispatch(Action::SetShape {
+        graph,
+        target: at(9),
+        shape: Box::new(rect(0.0)),
+    });
+    assert_eq!(formes(&state).len(), 2);
+}
+
 // -- Issue #53 : titres, titres d'axe et légende déplaçables --
 
 /// Déplacer un titre, un titre d'axe ou la légende, puis les remettre : chaque

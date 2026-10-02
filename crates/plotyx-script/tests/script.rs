@@ -1022,7 +1022,7 @@ fn la_surface_expose_cinq_appels_et_quatre_erreurs() {
 import pyx as importe
 print(sorted(nom for nom in dir(importe) if not nom.startswith("_")))
 print(importe.__doc__ is not None)
-print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, importe.set_column, importe.undo, importe.import_file)))
+print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, importe.set_column, importe.undo, importe.import_file, importe.add_shape, importe.remove_shape)))
 "#,
     );
 
@@ -1030,7 +1030,8 @@ print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, imp
     assert_eq!(
         lignes[0],
         "['BrokenReferenceError', 'ConcurrentWriteError', 'Handle', 'InvalidValueError', \
-         'UnknownPathError', 'column', 'import_file', 'resolve', 'set_column', 'undo']"
+         'UnknownPathError', 'add_shape', 'column', 'import_file', 'remove_shape', 'resolve', \
+         'set_column', 'undo']"
     );
     assert_eq!(lignes[1], "True", "le module est documenté");
     assert_eq!(lignes[2], "True", "les cinq appels sont documentés");
@@ -1057,4 +1058,78 @@ print(resultat[0])
 "#,
     );
     assert_eq!(lignes(&outcome), vec!["REFUSE".to_owned()]);
+}
+
+/// `pyx.add_shape` / `pyx.remove_shape` (issue #76) passent par `SetPlotSpec` :
+/// chaque appel est un Ctrl+Z, l'objet est posé au-dessus des autres, et un
+/// refus (genre inconnu, couleur invalide, non-graphe) ne touche à rien.
+#[test]
+fn les_objets_graphiques_se_posent_se_retirent_et_sannulent_depuis_python() {
+    let banc = banc();
+    let root = banc.session.snapshot().unwrap().tree.root();
+    banc.session
+        .execute(plotyx_commands::Command::AddGraph {
+            parent: root,
+            name: Some("Graph1".to_owned()),
+            spec: plotyx_plot::PlotSpec::empty("G").with_panels(plotyx_plot::Panels::new(vec![
+                plotyx_plot::PanelSpec::at(0, 0),
+            ])),
+        })
+        .expect("graphe");
+    let formes = |banc: &Banc| -> Vec<plotyx_plot::ShapeSpec> {
+        let snapshot = banc.session.snapshot().unwrap();
+        let id = snapshot.tree.resolve("[Graph1]").unwrap();
+        match snapshot.tree.node(id).unwrap().kind() {
+            plotyx_core::node::NodeKind::Graph { spec, .. } => spec.panels[0].shapes.clone(),
+            _ => panic!("pas un graphe"),
+        }
+    };
+
+    executer(
+        &banc,
+        r##"
+g = pyx.resolve("[Graph1]")
+assert pyx.add_shape(g, "rectangle", 1, 2, 3, 4, fill_color="#33669980", line_width=2) == 0
+assert pyx.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311") == 1
+"##,
+    );
+    let posees = formes(&banc);
+    assert_eq!(posees.len(), 2);
+    assert_eq!(posees[0].kind, plotyx_plot::ShapeKind::Rectangle);
+    assert_eq!(posees[0].fill_color, "#33669980");
+    assert_eq!(posees[0].line_width, 2.0);
+    assert_eq!(posees[1].kind, plotyx_plot::ShapeKind::Arrow);
+    assert_eq!((posees[1].x2, posees[1].y2), (5.0, 5.0));
+
+    // Un refus ne change rien et lève InvalidValueError.
+    let avant = banc.session.snapshot().unwrap().revision;
+    executer(
+        &banc,
+        r##"
+g = pyx.resolve("[Graph1]")
+for appel in (
+    lambda: pyx.add_shape(g, "triangle", 0, 0, 1, 1),
+    lambda: pyx.add_shape(g, "line", 0, 0, 1, 1, line_color="rouge"),
+    lambda: pyx.add_shape(g, "line", 0, 0, float("nan"), 1),
+    lambda: pyx.add_shape(g, "line", 0, 0, 1, 1, panel=(4, 4)),
+    lambda: pyx.add_shape(g, "line", 0, 0, 1, 1, axis="top"),
+    lambda: pyx.remove_shape(g, 9),
+    lambda: pyx.add_shape(pyx.resolve("[Book1]Sheet1!A"), "line", 0, 0, 1, 1),
+):
+    try:
+        appel()
+    except pyx.InvalidValueError:
+        pass
+    else:
+        raise AssertionError("refus attendu")
+"##,
+    );
+    assert_eq!(banc.session.snapshot().unwrap().revision, avant);
+
+    executer(&banc, "pyx.remove_shape(pyx.resolve('[Graph1]'), 0)\n");
+    let restantes = formes(&banc);
+    assert_eq!(restantes.len(), 1);
+    assert_eq!(restantes[0].kind, plotyx_plot::ShapeKind::Arrow);
+    executer(&banc, "assert pyx.undo()\n");
+    assert_eq!(formes(&banc).len(), 2, "Ctrl+Z rend l'objet retiré");
 }

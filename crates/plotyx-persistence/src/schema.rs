@@ -640,6 +640,34 @@ pub(crate) struct PanelSpecRecord {
     /// `#[serde(default)]` les ramène à une liste vide.
     #[serde(default)]
     pub(crate) annotations: Vec<AnnotationSpecRecord>,
+    /// Objets graphiques (issue #76) : absents d'un fichier plus ancien.
+    #[serde(default)]
+    pub(crate) shapes: Vec<ShapeSpecRecord>,
+}
+
+/// [`plotyx_plot::ShapeKind`], à plat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum ShapeKindRecord {
+    Rectangle,
+    Ellipse,
+    Line,
+    Arrow,
+}
+
+/// [`plotyx_plot::ShapeSpec`], à plat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShapeSpecRecord {
+    pub(crate) kind: ShapeKindRecord,
+    pub(crate) x1: f64,
+    pub(crate) y1: f64,
+    pub(crate) x2: f64,
+    pub(crate) y2: f64,
+    pub(crate) axis: SeriesAxisRecord,
+    #[serde(default)]
+    pub(crate) line_color: String,
+    pub(crate) line_width: f64,
+    #[serde(default)]
+    pub(crate) fill_color: String,
 }
 
 /// [`plotyx_plot::AnnotationSpec`], à plat.
@@ -668,6 +696,7 @@ impl Default for PanelSpecRecord {
             row: 0,
             column: 0,
             annotations: Vec::new(),
+            shapes: Vec::new(),
         }
     }
 }

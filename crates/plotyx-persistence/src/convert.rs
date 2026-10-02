@@ -9,16 +9,16 @@ use plotyx_core::{
 };
 use plotyx_plot::{
     AnnotationSpec, AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,
-    PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec,
-    SPEC_FORMAT_VERSION,
+    PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec, ShapeKind, ShapeSpec, SymbolShape,
+    SymbolSpec, SPEC_FORMAT_VERSION,
 };
 
 use crate::schema::{
     AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord,
     LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord,
     PlotTypeRecord, RoleRecord, SavedColorsRecord, SeriesAxisRecord, SeriesSpecRecord,
-    SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord, TypeRecord, ValuesRecord,
-    MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord,
+    TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -492,6 +492,45 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
                 rotation: annotation.rotation,
             })
             .collect(),
+        shapes: panel.shapes.iter().map(shape_to_record).collect(),
+    }
+}
+
+fn shape_to_record(shape: &ShapeSpec) -> ShapeSpecRecord {
+    ShapeSpecRecord {
+        kind: match shape.kind {
+            ShapeKind::Rectangle => ShapeKindRecord::Rectangle,
+            ShapeKind::Ellipse => ShapeKindRecord::Ellipse,
+            ShapeKind::Line => ShapeKindRecord::Line,
+            ShapeKind::Arrow => ShapeKindRecord::Arrow,
+        },
+        x1: shape.x1,
+        y1: shape.y1,
+        x2: shape.x2,
+        y2: shape.y2,
+        axis: shape.axis.into(),
+        line_color: shape.line_color.clone(),
+        line_width: shape.line_width,
+        fill_color: shape.fill_color.clone(),
+    }
+}
+
+fn record_to_shape(record: ShapeSpecRecord) -> ShapeSpec {
+    ShapeSpec {
+        kind: match record.kind {
+            ShapeKindRecord::Rectangle => ShapeKind::Rectangle,
+            ShapeKindRecord::Ellipse => ShapeKind::Ellipse,
+            ShapeKindRecord::Line => ShapeKind::Line,
+            ShapeKindRecord::Arrow => ShapeKind::Arrow,
+        },
+        x1: record.x1,
+        y1: record.y1,
+        x2: record.x2,
+        y2: record.y2,
+        axis: record.axis.into(),
+        line_color: record.line_color,
+        line_width: record.line_width,
+        fill_color: record.fill_color,
     }
 }
 
@@ -536,6 +575,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
                 rotation: annotation.rotation,
             })
             .collect(),
+        shapes: record.shapes.into_iter().map(record_to_shape).collect(),
     })
 }
 

@@ -869,6 +869,15 @@ enregistrées sont publiées chaque image dans la mémoire d'egui
 (`publish_saved_colors`) pour que le sélecteur de l'éditeur les propose aussi
 dans une fenêtre détachée.
 
+**Objets graphiques** (issue #76) : quatre outils de la barre « Outils »
+(`GraphTool::Rectangle`, `Ellipse`, `Line`, `Arrow`) ; glisser trace l'objet
+(aperçu dans la vue), le relâchement rend la main à l'outil Pointeur et le
+sélectionne. Avec le Pointeur : un clic sélectionne (contour et poignées),
+glisser le corps déplace, glisser une poignée redimensionne, Suppr retire. Menu
+« Graph » et clic droit sur l'objet : « Bring to Front », « Send to Back »,
+« Delete Object » (`shape_order_buttons`). Chaque geste validé est **une**
+`Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec`. Côté script : `pyx.add_shape` / `pyx.remove_shape` (`docs/python-et-script.md`).
+
 **Exporter le graphe** (issue #34) : menu « Graph » → « Export
 Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
 compris dans une fenêtre détachée). Un sélecteur `rfd` (SVG, PDF, PNG) propose

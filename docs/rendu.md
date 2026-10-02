@@ -365,6 +365,23 @@ angle libre de `DragValue` (fractionnaire, minuscule, négatif) reste une durée
 Typst valide (`formula::source`, issue #36 — l'hypothèse d'un format `1e-7deg`
 était fausse : le format décimal de Rust n'a pas d'exposant). Sans Typst (témoin, repli), le texte est brut et non tourné.
 
+**Objets graphiques** (issue #76) : rectangle, ellipse, ligne, flèche
+(`plotyx_render::shapes`), tracés par le pipeline commun entre la légende et
+les textes libres (étape « 6 bis »), donc identiques à l'écran et à l'export.
+Les deux points sont projetés **sans** test d'appartenance au cadrage
+(`Ranges::forward`) puis rognés en pixels : trait par `clip_polyline`
+(contour fermé), remplissage par Sutherland-Hodgman (`clip_polygon`), pointe de
+flèche omise si elle est hors cadre. L'ellipse est un polygone à 72 côtés.
+`DrawnPanel::shapes` (`DrawnShape`, pixels non rognés) sert à `hit` :
+`PlotComponent::Shape`, désigné **sur son trait** (ou dedans s'il est rempli)
+dans la zone de tracé, sous les textes libres. Côté écran, `GraphView`
+(`shape_tools.rs`) porte l'aperçu (`set_shape_preview`, même mécanisme que les
+textes), la sélection, les huit poignées d'un rectangle ou d'une ellipse (deux
+extrémités pour une ligne), les outils de tracé (`GraphTool::Rectangle`…) et
+le signal unique `GraphEvent::ShapeChanged` au relâchement. Un déplacement sur
+axes linéaires se fait **en données** (les points tracés sont arrondis au
+pixel).
+
 **Titres et légende déplaçables** (issue #53) : titre du graphe, titre de
 panneau, titres d'axe et cadre de la légende portent une `TextAnchor` optionnelle
 (`plotyx-plot::text_anchor`, centre en **données** du panneau, pas bornée au

@@ -90,6 +90,7 @@ pub mod panel;
 pub mod raw;
 pub mod saved;
 pub mod series;
+pub mod shape;
 pub mod spec;
 pub mod style;
 pub mod text_anchor;
@@ -105,6 +106,7 @@ pub use saved::{ColorUsage, SavedColors, MAX_SAVED_COLORS};
 pub use series::{
     BinCount, PlotType, SeriesAxis, SeriesSpec, DEFAULT_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS,
 };
+pub use shape::{ShapeKind, ShapeRef, ShapeSpec};
 pub use spec::{Panels, PlotSpec, SeriesRef, SPEC_FORMAT_VERSION, TRANSPARENT};
 pub use style::{
     palette_color, parse_hex, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE,

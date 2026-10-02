@@ -618,6 +618,36 @@ fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarReq
                 tr!("tool-text"),
                 tr!("tool-text", "hint"),
             );
+            // Objets graphiques (issue #76) : un outil par sorte, comme
+            // Origin.
+            for (kind, icon, label, hint) in [
+                (
+                    GraphTool::Rectangle,
+                    Icon::ShapeRectangle,
+                    tr!("tool-rectangle"),
+                    tr!("tool-rectangle", "hint"),
+                ),
+                (
+                    GraphTool::Ellipse,
+                    Icon::ShapeEllipse,
+                    tr!("tool-ellipse"),
+                    tr!("tool-ellipse", "hint"),
+                ),
+                (
+                    GraphTool::Line,
+                    Icon::ShapeLine,
+                    tr!("tool-line"),
+                    tr!("tool-line", "hint"),
+                ),
+                (
+                    GraphTool::Arrow,
+                    Icon::ShapeArrow,
+                    tr!("tool-arrow"),
+                    tr!("tool-arrow", "hint"),
+                ),
+            ] {
+                tool_entry(ui, kind, icon, label, hint);
+            }
             ui.separator();
             // Le groupe zoom : l'outil et sa remise à zéro côte à côte.
             tool_entry(
