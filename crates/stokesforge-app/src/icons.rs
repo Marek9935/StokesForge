@@ -275,12 +275,12 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     (
         Icon::LineColor,
         IconRole::Neutral,
-        svg!("pen-nib.neutral.svg"),
+        svg!("pen-nib-modify.neutral.svg"),
     ),
     (
         Icon::FillColor,
         IconRole::Neutral,
-        svg!("paint-bucket.neutral.svg"),
+        svg!("paint-bucket-modify.neutral.svg"),
     ),
     (
         Icon::TextColor,

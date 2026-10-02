@@ -24,7 +24,7 @@ qui les affiche est `crates/stokesforge-app/src/icons.rs` ; son `//!` dit le
 
 Une icône Phosphor peut être retouchée : le fichier de `src/` porte alors un
 commentaire qui dit ce qui change (notice MIT du `LICENSE` voisin inchangée).
-Le nom du fichier porte `-modify` pour le signaler. Actuellement : `text-a-underline-modify` (soulignement épaissi, couleur du texte, #89).
+Le nom du fichier porte `-modify` pour le signaler. Actuellement : `text-a-underline-modify` (soulignement épaissi, couleur du texte), `pen-nib-modify` (couleur du trait) et `paint-bucket-modify` (couleur du remplissage), #89.
 
 ## Couleur : neutre par défaut, couleur rare
 
