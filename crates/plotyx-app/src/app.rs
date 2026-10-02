@@ -4194,7 +4194,10 @@ fn window_header(
     }
     let action_rect = |offset: f32| {
         egui::Rect::from_min_size(
-            egui::pos2(rect.right() - offset - HEADER_ACTION_WIDTH, rect.top() + 2.0),
+            egui::pos2(
+                rect.right() - offset - HEADER_ACTION_WIDTH,
+                rect.top() + 2.0,
+            ),
             egui::vec2(HEADER_ACTION_WIDTH, rect.height() - 4.0),
         )
     };
@@ -5467,8 +5470,20 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     let bar_width = theme::scroll_bar_allocated_width();
     let (main_area, vertical_bar_strip) =
         area.split_left_right_at_x(area.right() - bar_width.min(area.width()));
-    let (upper_area, horizontal_bar_strip) =
-        main_area.split_top_bottom_at_y(main_area.bottom() - bar_width.min(main_area.height()));
+    // #51 : la bande de la barre horizontale n'est réservée que si la grille
+    // déborde en largeur — l'état vient de l'image précédente (la hauteur de
+    // la bande ne change pas la largeur du contenu : pas d'oscillation).
+    let horizontal_bar_present_id = ui.id().with("grid_horizontal_bar_present");
+    let horizontal_bar_present = ui
+        .memory(|memory| memory.data.get_temp::<bool>(horizontal_bar_present_id))
+        .unwrap_or(false);
+    let horizontal_bar_height = if horizontal_bar_present {
+        bar_width
+    } else {
+        0.0
+    };
+    let (upper_area, horizontal_bar_strip) = main_area
+        .split_top_bottom_at_y(main_area.bottom() - horizontal_bar_height.min(main_area.height()));
     let tabs_height = TAB_STRIP_HEIGHT.min(upper_area.height());
     let (grid_rect, tabs_rect) =
         upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height);
@@ -5505,6 +5520,15 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
             show_horizontally_scrollable_grid(&mut grid_ui, pending_horizontal_offset, |ui| {
                 grid_contents(ui, state, actions, selected, pending_offset)
             });
+        let overflows = scroll.content_size.x > scroll.inner_rect.width() + 0.5;
+        if overflows != horizontal_bar_present {
+            grid_ui.memory_mut(|memory| {
+                memory
+                    .data
+                    .insert_temp(horizontal_bar_present_id, overflows)
+            });
+            grid_ui.ctx().request_repaint();
+        }
         let mut horizontal_bar_ui = bounded(horizontal_bar_strip);
         show_grid_horizontal_bar(
             &mut horizontal_bar_ui,
