@@ -26,6 +26,8 @@ struct PreferencesFile {
     object_manager_open: Option<bool>,
     #[serde(default)]
     object_manager_show_texts: Option<bool>,
+    #[serde(default)]
+    object_manager_show_scales: Option<bool>,
     /// Gardée brute : c'est `toolbar::ToolbarLayout::from_json` qui la lit, en
     /// tolérant ce qu'une autre version y a écrit.
     #[serde(default)]
@@ -38,6 +40,7 @@ pub struct Preferences {
     language: Option<String>,
     object_manager_open: bool,
     object_manager_show_texts: bool,
+    object_manager_show_scales: bool,
     toolbars: Option<serde_json::Value>,
     path: Option<PathBuf>,
 }
@@ -66,6 +69,7 @@ impl Preferences {
             language: file.language,
             object_manager_open: file.object_manager_open.unwrap_or(true),
             object_manager_show_texts: file.object_manager_show_texts.unwrap_or(false),
+            object_manager_show_scales: file.object_manager_show_scales.unwrap_or(false),
             toolbars: file.toolbars,
             path,
         }
@@ -119,6 +123,17 @@ impl Preferences {
     pub fn save_object_manager_show_texts(&mut self, show: bool) -> std::io::Result<()> {
         self.object_manager_show_texts = show;
         self.save_field("object_manager_show_texts", show.into())
+    }
+
+    /// Échelles (axes) listées dans l'Object Manager ; cachées par défaut (#111).
+    pub fn object_manager_show_scales(&self) -> bool {
+        self.object_manager_show_scales
+    }
+
+    /// Mémorise la bascule sans remplacer les autres préférences.
+    pub fn save_object_manager_show_scales(&mut self, show: bool) -> std::io::Result<()> {
+        self.object_manager_show_scales = show;
+        self.save_field("object_manager_show_scales", show.into())
     }
 
     fn save_field(&self, key: &str, value: serde_json::Value) -> std::io::Result<()> {
@@ -303,5 +318,20 @@ mod object_manager_tests {
         assert!(std::fs::read_to_string(&path).unwrap().contains("avenir"));
         // L'ouverture du panneau reste indépendante.
         assert!(relues.object_manager_open());
+    }
+
+    #[test]
+    fn echelles_cachees_par_defaut_et_bascule_memorisee() {
+        assert!(!Preferences::load_from(None).object_manager_show_scales());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        std::fs::write(&path, r#"{"object_manager_show_texts":true}"#).unwrap();
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        assert!(!preferences.object_manager_show_scales());
+        preferences.save_object_manager_show_scales(true).unwrap();
+        let relues = Preferences::load_from(Some(path));
+        assert!(relues.object_manager_show_scales());
+        // Indépendante de la bascule des textes.
+        assert!(relues.object_manager_show_texts());
     }
 }

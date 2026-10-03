@@ -385,6 +385,8 @@ pub enum Action {
     SetObjectManagerOpen(bool),
     /// Bascule unique « Show graph texts » (menu View et menu contextuel).
     SetObjectManagerShowTexts(bool),
+    /// Liste ou cache les échelles (axes) dans l'Object Manager (#111).
+    SetObjectManagerShowScales(bool),
     /// Visibilité d'un contenu ou d'un ensemble de contenus (#81–82).
     SetPlotVisibility {
         graph: NodeId,
@@ -1838,6 +1840,7 @@ pub struct AppState {
     png_export_scale: f32,
     object_manager_open: bool,
     object_manager_show_texts: bool,
+    object_manager_show_scales: bool,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
     /// Saisie de cellule en cours, s'il y en a une.
@@ -1969,6 +1972,8 @@ impl AppState {
             object_manager_open: crate::preferences::Preferences::load().object_manager_open(),
             object_manager_show_texts: crate::preferences::Preferences::load()
                 .object_manager_show_texts(),
+            object_manager_show_scales: crate::preferences::Preferences::load()
+                .object_manager_show_scales(),
             status: None,
             editing: None,
             note_editing: None,
@@ -3416,6 +3421,11 @@ impl AppState {
         self.object_manager_show_texts
     }
 
+    /// Échelles (axes) listées dans l'Object Manager (#111), hors projet.
+    pub fn object_manager_show_scales(&self) -> bool {
+        self.object_manager_show_scales
+    }
+
     /// Applique une action. Ne rend jamais d'erreur : toute erreur devient un
     /// [`StatusMessage`]. Rafraîchit l'instantané après toute action qui a pu
     /// changer le modèle.
@@ -3529,6 +3539,14 @@ impl AppState {
                     self.fail(error.to_string());
                 }
             }
+            Action::SetObjectManagerShowScales(show) => {
+                self.object_manager_show_scales = show;
+                if let Err(error) =
+                    crate::preferences::Preferences::load().save_object_manager_show_scales(show)
+                {
+                    self.fail(error.to_string());
+                }
+            }
             Action::SetPlotVisibility {
                 graph,
                 target,
@@ -3575,7 +3593,7 @@ impl AppState {
                             target.set_text(spec, String::new())
                         })
                     }
-                    T::Graph | T::Panel(_) | T::Group(_) => {}
+                    T::Graph | T::Panel(_) | T::Group(_) | T::Axis(_) => {}
                 }
             }
             Action::OpenObjectProperties { graph, target } => {
@@ -3611,6 +3629,21 @@ impl AppState {
                         spec.panels
                             .iter()
                             .position(|p| p.row == row && p.column == column)
+                            .unwrap_or(0),
+                        None,
+                    ),
+                    T::Axis(axis) => (
+                        PlotSettingsTab::Axes,
+                        Some(match axis.side {
+                            stokesforge_plot::AxisSide::Bottom => PlotAxis::Bottom,
+                            // Axe réservé dans le modèle, sans page ni rendu.
+                            stokesforge_plot::AxisSide::Top => return,
+                            stokesforge_plot::AxisSide::Left => PlotAxis::Left,
+                            stokesforge_plot::AxisSide::Right => PlotAxis::Right,
+                        }),
+                        spec.panels
+                            .iter()
+                            .position(|p| p.row == axis.row && p.column == axis.column)
                             .unwrap_or(0),
                         None,
                     ),

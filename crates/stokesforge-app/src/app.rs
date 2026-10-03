@@ -1568,6 +1568,14 @@ impl StokesForgeApp {
                     {
                         actions.push(Action::SetObjectManagerShowTexts(show_texts));
                     }
+                    let mut show_scales = self.state.object_manager_show_scales();
+                    if ui
+                        .checkbox(&mut show_scales, tr!("object-manager-show-scales"))
+                        .on_hover_text(tr!("object-manager-show-scales", "hint"))
+                        .changed()
+                    {
+                        actions.push(Action::SetObjectManagerShowScales(show_scales));
+                    }
                     ui.separator();
                     for id in ToolbarId::ALL {
                         let mut visible = self.toolbars.layout().is_visible(id);
@@ -2380,6 +2388,7 @@ impl StokesForgeApp {
         let graph = active_graph(active_tab_kind(active_tab));
         let tree = self.state.snapshot().tree.clone();
         let show_texts = self.state.object_manager_show_texts();
+        let show_scales = self.state.object_manager_show_scales();
         let spec = graph.and_then(|graph| crate::state::current_plot_spec(&tree, graph));
         let model = graph.and_then(|graph| {
             crate::object_manager::object_tree_with_selection(
@@ -2388,6 +2397,7 @@ impl StokesForgeApp {
                 self.read_graph_view(graph, selected_manager_target)
                     .flatten(),
                 show_texts,
+                show_scales,
             )
         });
         let mut requests = Vec::new();
@@ -2428,6 +2438,7 @@ impl StokesForgeApp {
                 model.as_ref(),
                 spec.as_ref(),
                 show_texts,
+                show_scales,
                 actions,
             );
         };
@@ -5816,6 +5827,7 @@ fn object_manager_contents(
     model: Option<&crate::object_manager::ObjectTree>,
     spec: Option<&stokesforge_plot::PlotSpec>,
     show_texts: bool,
+    show_scales: bool,
     actions: &mut Vec<Action>,
 ) -> Vec<ObjectManagerRequest> {
     use crate::object_manager::VisibilityTarget as T;
@@ -5841,6 +5853,15 @@ fn object_manager_contents(
             .changed()
         {
             actions.push(Action::SetObjectManagerShowTexts(show));
+            ui.close();
+        }
+        let mut show = show_scales;
+        if ui
+            .checkbox(&mut show, tr!("object-manager-show-scales"))
+            .on_hover_text(tr!("object-manager-show-scales", "hint"))
+            .changed()
+        {
+            actions.push(Action::SetObjectManagerShowScales(show));
             ui.close();
         }
     });
@@ -6207,6 +6228,7 @@ fn object_manager_object_row(
             object_visibility(ui, graph, object.target, spec, actions);
             let icon = match object.kind {
                 crate::object_manager::ObjectKind::Text => Icon::TextTool,
+                crate::object_manager::ObjectKind::Axis => Icon::Axis,
                 crate::object_manager::ObjectKind::Shape(kind) => match kind {
                     stokesforge_plot::ShapeKind::Rectangle => Icon::ShapeRectangle,
                     stokesforge_plot::ShapeKind::Ellipse => Icon::ShapeEllipse,
@@ -16560,6 +16582,7 @@ mod object_manager_tests {
                         project.tree(),
                         Some(&model),
                         Some(&spec),
+                        false,
                         false,
                         &mut actions,
                     );

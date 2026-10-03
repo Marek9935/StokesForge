@@ -7548,7 +7548,7 @@ fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
     };
     // Cachés : ni titre du graphique, ni titre de calque, ni axes, ni légende ;
     // le texte libre et les quatre formes restent.
-    let hidden = object_tree_with_selection(state.tree(), graph, None, false).unwrap();
+    let hidden = object_tree_with_selection(state.tree(), graph, None, false, false).unwrap();
     assert!(hidden.objects.is_empty());
     assert_eq!(hidden.layers[0].objects.len(), 5);
     assert!(hidden.layers[0]
@@ -7568,13 +7568,18 @@ fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
         "séries toujours listées"
     );
     // Pas de révélation à la sélection : un texte caché sélectionné n'apparaît pas.
-    let selected =
-        object_tree_with_selection(state.tree(), graph, Some(T::Text(TextTarget::Title)), false)
-            .unwrap();
+    let selected = object_tree_with_selection(
+        state.tree(),
+        graph,
+        Some(T::Text(TextTarget::Title)),
+        false,
+        false,
+    )
+    .unwrap();
     assert!(selected.objects.is_empty());
     assert!(selected.layers[0].objects.iter().all(|o| !o.selected));
     // Bascule active : les textes reviennent (même total que l'ancienne vue).
-    let shown = object_tree_with_selection(state.tree(), graph, None, true).unwrap();
+    let shown = object_tree_with_selection(state.tree(), graph, None, true, false).unwrap();
     assert_eq!(shown.objects.len(), 1);
     assert_eq!(shown.layers[0].objects.len(), 9);
     // La case du graphique commande toujours les textes cachés.
@@ -7589,6 +7594,74 @@ fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
     assert!(!T::Graph.visibility(&spec).checked);
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
+}
+
+#[test]
+fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
+    use stokesforge_app::object_manager::{
+        object_tree_with_selection, AxisRef, ObjectKind, VisibilityTarget as T,
+    };
+    use stokesforge_plot::AxisSide;
+    let dir = tempfile::tempdir().unwrap();
+    let (project, graph, before) = object_manager_project();
+    let (_session, mut state) = start(project, &dir.path().join("cache.stf"));
+    let axes = |tree: &stokesforge_app::object_manager::ObjectTree| -> Vec<T> {
+        tree.layers[0]
+            .objects
+            .iter()
+            .filter(|o| matches!(o.kind, ObjectKind::Axis))
+            .map(|o| o.target)
+            .collect()
+    };
+    // Cachées par défaut, même textes affichés.
+    let hidden = object_tree_with_selection(state.tree(), graph, None, true, false).unwrap();
+    assert!(axes(&hidden).is_empty());
+    // Bascule active : les quatre axes, masqués par défaut compris, à plat.
+    let shown = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
+    let axis = |side| {
+        T::Axis(AxisRef {
+            row: 0,
+            column: 0,
+            side,
+        })
+    };
+    assert_eq!(
+        axes(&shown),
+        [
+            AxisSide::Bottom,
+            AxisSide::Left,
+            AxisSide::Right,
+            AxisSide::Top
+        ]
+        .map(axis)
+    );
+    assert_eq!(shown.layers[0].objects.len(), 4 + 5);
+    // Une case par axe : `AxisSpec::visible`, une seule entrée d'historique.
+    let top = axis(AxisSide::Top);
+    assert!(!top.visibility(&before).checked);
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: top,
+        visible: true,
+    });
+    let spec = graph_spec(&state, graph);
+    assert!(spec.panels[0].top.visible);
+    assert!(top.visibility(&spec).checked);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+    // Les cases du graphique et du calque ne touchent pas aux axes.
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::Graph,
+        visible: true,
+    });
+    let spec = graph_spec(&state, graph);
+    for side in [AxisSide::Bottom, AxisSide::Right, AxisSide::Top] {
+        assert_eq!(
+            spec.panels[0].axis(side).visible,
+            before.panels[0].axis(side).visible
+        );
+    }
 }
 
 #[test]
@@ -7608,8 +7681,8 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
         column: 0,
         index: 3,
     };
-    let model =
-        object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), true).unwrap();
+    let model = object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), true, false)
+        .unwrap();
     assert_eq!(model.objects[0].target, T::Text(TextTarget::Title));
     assert_eq!(
         model.layers[0].objects.len(),
@@ -7663,7 +7736,8 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
     assert!(!T::Graph.visibility(&hidden).checked);
     assert!(!T::Graph.visibility(&hidden).mixed);
     let model =
-        object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text)), true).unwrap();
+        object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text)), true, false)
+            .unwrap();
     assert!(model.layers[0]
         .objects
         .iter()

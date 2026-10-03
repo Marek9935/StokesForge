@@ -85,6 +85,7 @@ pub enum Icon {
     LineColor,
     FillColor,
     TextColor,
+    Axis,
 }
 
 macro_rules! svg {
@@ -287,6 +288,7 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         IconRole::Neutral,
         svg!("text-a-underline-modify.neutral.svg"),
     ),
+    (Icon::Axis, IconRole::Neutral, svg!("ruler.neutral.svg")),
 ];
 
 /// Inatteignable tant que chaque icône a une variante (test `le_tableau_…`).

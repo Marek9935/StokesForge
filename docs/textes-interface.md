@@ -309,4 +309,5 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | Layer | Calque | Un panneau de tracé (`PlotSpec::panels`) |
 | Plot Group | Groupe de tracés | Les séries d'un calque |
 | Graph texts | Textes du graphique | Titres du graphique, des calques et des axes, et légende : listés dans l'Object Manager si la bascule « Show graph texts » est active (#102) |
+| Scales | Échelles | Les axes d'un calque (ligne, graduations, libellés), listés dans l'Object Manager si la bascule « Show scales » est active (#111) ; une ligne « X (bottom) Axis » / « Axe X (bas) » par axe, dont Secondary X (top) / X secondaire (haut) |
 | Dock / Float | Ancrer / Faire flotter | Replacer le gestionnaire à droite / le placer dans l'espace de travail |

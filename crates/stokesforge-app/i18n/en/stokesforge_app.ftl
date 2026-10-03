@@ -496,6 +496,7 @@ plot-tab-theme = Theme
 plot-axis-bottom = X (bottom)
 plot-axis-left = Y (left)
 plot-axis-right = Secondary Y (right)
+plot-axis-top = Secondary X (top)
 
 # What a right-click designates (head of the context menu)
 
@@ -811,6 +812,8 @@ object-manager-layer = Layer { $index }
 object-manager-group = Plot Group
 object-manager-show-texts = Show graph texts
     .hint = Lists the graph title, layer titles, axis titles and legend in the Object Manager. Hidden by default; the visibility checkboxes still control them.
+object-manager-show-scales = Show scales
+    .hint = Lists the axes of each layer in the Object Manager, with one checkbox that shows or hides the axis line, ticks and tick labels together. Hidden by default.
 
 toolbar-object-manager = Object Manager Toolbar
     .hint = Show or hide the Object Manager toolbar.

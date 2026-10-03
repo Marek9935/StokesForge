@@ -7,6 +7,15 @@
 //! clic. Les adresses restent locales au spec : un déplacement suit le contenu,
 //! une suppression efface la sélection plutôt que de viser son voisin.
 //!
+//! Échelles (#111) : une ligne par axe — les quatre, masqués par défaut compris —
+//! sous chaque calque, cachées par défaut et listées par leur propre bascule
+//! « Show scales » (même motif que les textes, `object_manager_show_scales`).
+//! Une case unique commande `AxisSpec::visible` (ligne, graduations et libellés
+//! d'un coup). Les cases du graphique, du calque et du groupe **ne commandent
+//! pas** les axes : Right et Top sont masqués par défaut, donc le parent
+//! serait indéterminé dès l'ouverture, et « tout afficher » ferait apparaître
+//! deux axes que l'utilisateur n'a pas demandés.
+//!
 //! Vue par défaut (#102) : calques, groupes de tracés et séries, plus les
 //! objets rares (formes, textes libres). Les textes automatiques — titre du
 //! graphique et des calques, titres d'axes, légende — ne sont listés que si la
@@ -29,7 +38,40 @@ pub enum VisibilityTarget {
     Text(TextTarget),
     Annotation(AnnotationRef),
     Shape(ShapeRef),
+    /// Une échelle (ligne d'axe, graduations et libellés) : `AxisSpec::visible`.
+    Axis(AxisRef),
 }
+
+/// Un axe d'un calque, adressé par la position du calque dans la grille.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AxisRef {
+    pub row: usize,
+    pub column: usize,
+    pub side: AxisSide,
+}
+
+impl AxisRef {
+    fn get(self, spec: &PlotSpec) -> Option<&stokesforge_plot::AxisSpec> {
+        spec.panels
+            .iter()
+            .find(|p| (p.row, p.column) == (self.row, self.column))
+            .map(|p| p.axis(self.side))
+    }
+    fn get_mut(self, spec: &mut PlotSpec) -> Option<&mut stokesforge_plot::AxisSpec> {
+        spec.panels
+            .iter_mut()
+            .find(|p| (p.row, p.column) == (self.row, self.column))
+            .map(|p| p.axis_mut(self.side))
+    }
+}
+
+/// Les quatre axes, dans l'ordre d'affichage de l'arbre.
+pub const AXIS_SIDES: [AxisSide; 4] = [
+    AxisSide::Bottom,
+    AxisSide::Left,
+    AxisSide::Right,
+    AxisSide::Top,
+];
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Visibility {
     pub checked: bool,
@@ -85,6 +127,7 @@ impl VisibilityTarget {
             Self::Text(t) => t.visible(spec),
             Self::Annotation(t) => t.get(spec).map(|a| a.visible),
             Self::Shape(t) => t.get(spec).map(|s| s.visible),
+            Self::Axis(t) => t.get(spec).map(|a| a.visible),
             Self::Graph | Self::Panel(_) | Self::Group(_) => None,
         }
     }
@@ -127,6 +170,11 @@ impl VisibilityTarget {
                     if let Some(mut s) = t.get(spec).cloned() {
                         s.visible = visible;
                         t.set(spec, s);
+                    }
+                }
+                Self::Axis(t) => {
+                    if let Some(axis) = t.get_mut(spec) {
+                        axis.visible = visible;
                     }
                 }
                 Self::Graph | Self::Panel(_) | Self::Group(_) => {}
@@ -344,6 +392,7 @@ pub struct SeriesRow {
 pub enum ObjectKind {
     Text,
     Shape(ShapeKind),
+    Axis,
 }
 #[derive(Debug, Clone)]
 pub struct ObjectRow {
@@ -366,18 +415,38 @@ pub struct ObjectTree {
     pub objects: Vec<ObjectRow>,
 }
 
+fn axis_label(side: AxisSide) -> String {
+    let axis = match side {
+        AxisSide::Bottom => crate::tr!("plot-axis-bottom"),
+        AxisSide::Left => crate::tr!("plot-axis-left"),
+        AxisSide::Right => crate::tr!("plot-axis-right"),
+        AxisSide::Top => crate::tr!("plot-axis-top"),
+    };
+    crate::tr!("plot-target-axis", axis = axis)
+}
+
 pub fn object_tree(tree: &Tree, graph: NodeId, selected: Option<SeriesRef>) -> Option<ObjectTree> {
-    object_tree_with_selection(tree, graph, selected.map(VisibilityTarget::Series), false)
+    object_tree_with_selection(
+        tree,
+        graph,
+        selected.map(VisibilityTarget::Series),
+        false,
+        false,
+    )
 }
 /// `show_texts` : lister les textes automatiques (titre du graphique et des
 /// calques, titres d'axes, légende). Faux par défaut (#102) ; les textes libres
 /// et les formes sont toujours listés. Un texte caché n'apparaît pas même
 /// sélectionné : la sélection ne le révèle pas.
+///
+/// `show_scales` : lister une ligne par axe (les quatre, y compris ceux
+/// masqués par défaut) sous chaque calque (#111). Faux par défaut, même motif.
 pub fn object_tree_with_selection(
     tree: &Tree,
     graph: NodeId,
     selected: Option<VisibilityTarget>,
     show_texts: bool,
+    show_scales: bool,
 ) -> Option<ObjectTree> {
     let node = tree.node(graph)?;
     let spec = crate::state::current_plot_spec(tree, graph)?;
@@ -416,6 +485,21 @@ pub fn object_tree_with_selection(
                 } else {
                     Vec::new()
                 };
+                if show_scales {
+                    objects.extend(AXIS_SIDES.into_iter().map(|side| {
+                        let target = VisibilityTarget::Axis(AxisRef {
+                            row: panel.row,
+                            column: panel.column,
+                            side,
+                        });
+                        ObjectRow {
+                            target,
+                            label: axis_label(side),
+                            kind: ObjectKind::Axis,
+                            selected: selected == Some(target),
+                        }
+                    }));
+                }
                 objects.extend(panel.annotations.iter().enumerate().map(|(rank, a)| {
                     let target = VisibilityTarget::Annotation(AnnotationRef {
                         row: panel.row,
