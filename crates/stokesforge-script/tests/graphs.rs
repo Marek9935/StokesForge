@@ -57,6 +57,24 @@ fn graph_spec(b: &Banc) -> PlotSpec {
 }
 const HANDLES: &str = "x = pyst.resolve('[Book1]Sheet1!X')\ny = pyst.resolve('[Book1]Sheet1!Y')\n";
 
+/// #103 : ni le nom du graphe ni celui de la colonne ne devient un titre implicite.
+#[test]
+fn un_graphe_python_sans_option_title_reste_sans_titre() {
+    for expression in [
+        "pyst.plot(y, x, name='Graph1')",
+        "pyst.plot(y, name='Graph1')",
+    ] {
+        let b = banc();
+        run(&b, &format!("{HANDLES}g = {expression}"));
+        let spec = graph_spec(&b);
+        assert!(
+            spec.title.is_empty(),
+            "{expression} doit laisser le titre vide"
+        );
+        assert_eq!(spec.panels[0].series.len(), 1, "le graphe a bien été tracé");
+    }
+}
+
 #[test]
 fn spec_exact_export_stable_et_temoin_de_style() {
     let b = banc();

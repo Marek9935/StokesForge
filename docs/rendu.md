@@ -31,7 +31,14 @@ formules — est dans `stokesforge-render`.
 | `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
 | `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `stokesforge_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
 | `formula` | Typst (dépendance ferme, pas une feature) : le style « texte riche » des titres, titres d'axe et légende, la compilation, le cache |
-| `sample` | deux graphes de démonstration |
+| `sample` | deux figures témoins à titres explicites |
+
+Les titres de `sample::minimal()` et `sample::realistic()` sont conservés
+pour exercer les bandes de titre et la mesure du texte dans les tests
+d'accord écran/export et les bancs de rendu (#103). Ces exemples n'installent
+pas un titre par défaut : les graphes créés par l'application, démo comprise,
+ou par `pyst.plot` sans option `title` sont sans titre. Le pipeline ne réserve
+aucune bande quand `PlotSpec::title` est vide.
 
 ### Transparence
 

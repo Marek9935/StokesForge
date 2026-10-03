@@ -71,6 +71,12 @@ en CI (`tests/shell.rs`) ; `app` ne fait que traduire clavier et souris en
 c'est toute la raison du découpage. Si une règle métier se retrouve dans
 `app.rs`, elle devient invérifiable.
 
+Un graphe neuf n'a aucun titre par défaut (#103), démo de l'application
+comprise : garder `PlotSpec::title` vide, sans masquer `title_visible` ni
+reprendre le nom du nœud comme titre. Le titre reste saisissable par les
+propriétés. Les titres explicites de `stokesforge-render::sample` servent
+aux tests et bancs de rendu ; ils ne définissent pas le défaut utilisateur.
+
 ## 2 bis. Le doublon docké / détaché — à vérifier avant de chiffrer
 
 Les contenus de `stokesforge-app` ont longtemps existé **en deux écritures** : une

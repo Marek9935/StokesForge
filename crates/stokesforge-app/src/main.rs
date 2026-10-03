@@ -234,9 +234,9 @@ fn demo_project() -> anyhow::Result<Project> {
     Ok(project)
 }
 
-/// Le `PlotSpec` du graphe de démonstration : une `LineSeries`, axes
-/// linéaires, pas de légende — exactement le « graphe minimal » de la phase
-/// R4 (`docs/archive/newarchitecture/roadmap-rendu.md`).
+/// Une courbe et deux axes linéaires pour juger le rendu à l'œil.
+/// Comme les graphes créés par l'utilisateur, la démo n'ajoute aucun titre
+/// par défaut (#103) ; les libellés d'axe et le nom de série restent explicites.
 fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
     let mut panel = PanelSpec::at(0, 0);
     panel.bottom = AxisSpec {
@@ -257,17 +257,55 @@ fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
         ..LineSpec::default()
     };
     panel.series.push(serie);
-    PlotSpec {
-        title: "Spectre d'absorption — λ_max".into(),
-        ..PlotSpec::empty("")
-    }
-    .with_panels(panel)
+    PlotSpec::empty("").with_panels(panel)
 }
 
 #[cfg(test)]
 mod startup_tests {
     use super::*;
     use stokesforge_session::WindowGeometry;
+
+    /// #103 : la démo suit le même défaut que les graphes créés par l'utilisateur.
+    #[test]
+    fn la_demo_ne_reserve_pas_de_titre_mais_un_titre_explicite_reste_possible() {
+        let project = demo_project().unwrap();
+        let graph = project.resolve_path("[Graph1]").unwrap();
+        let stokesforge_core::NodeKind::Graph { spec, .. } =
+            project.tree().node(graph).unwrap().kind()
+        else {
+            panic!("Graph1 doit être un graphe");
+        };
+        assert!(
+            spec.title.is_empty(),
+            "la démo ne donne pas de titre par défaut"
+        );
+
+        let measurer = stokesforge_render_egui::TextMeasurer::default();
+        let rect = eframe::egui::Rect::from_min_size(
+            eframe::egui::Pos2::ZERO,
+            eframe::egui::vec2(640.0, 480.0),
+        );
+        let draw = |spec: &PlotSpec| {
+            stokesforge_render_egui::collect_shapes(
+                &mut Vec::new(),
+                rect,
+                &measurer,
+                &stokesforge_core::resolve_spec(project.tree(), spec),
+            )
+            .unwrap()
+        };
+        let empty = draw(spec);
+        assert_eq!(empty.title_height, 0);
+        assert!(empty.title.is_none());
+
+        // Témoin : le retrait du défaut ne désactive pas le rendu d'un titre choisi.
+        let mut titled = spec.clone();
+        titled.title = "Spectre choisi".into();
+        let explicit = draw(&titled);
+        assert!(explicit.title_height > 0);
+        assert!(explicit.title.is_some());
+        assert!(explicit.panels[0].pixel_origin.1 > empty.panels[0].pixel_origin.1);
+    }
 
     #[test]
     fn le_demarrage_restaure_les_geometries_du_fichier() {

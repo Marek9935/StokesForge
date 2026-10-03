@@ -71,6 +71,7 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 
 ## Pièges connus
 
+- Graphes neufs (#103) : aucun titre par défaut, démo comprise ; `name` nomme le nœud et sa fenêtre, jamais la figure. Garder la possibilité de saisir un titre, sans masquer `title_visible`. Les titres explicites de `stokesforge-render::sample` sont des témoins de rendu, pas des défauts utilisateur.
 - Fenêtres détachées (#104) : publier un instantané ne réveille pas le callback `show_viewport_deferred`. `app.rs` compare époque, révision métier et révision des géométries, puis demande le redessin du viewport lecteur ; une mutation appliquée après peinture programme l'image racine de publication. Le Project Manager suit aussi sa sélection, son masquage et l'onglet actif. Aucun réveil périodique au repos.
 - Avant undo/historique ou format `.stf` : `docs/commandes-et-historique.md`, `docs/persistance.md`, puis `docs/archive/rustrewrite/format-fichier-plx.md` pour les options déjà écartées.
 - `docs/archive/rustrewrite/questions-ouvertes.md` §11 : plafonds/compteurs documentés — vérifier avant de "corriger" un comportement qui ressemble à un bug.

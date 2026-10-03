@@ -139,6 +139,10 @@ fn graphique_vide_annulable_retabli_et_enregistre() {
         .last()
         .unwrap();
     let spec = state.plot_spec(graph).unwrap();
+    assert!(
+        spec.title.is_empty(),
+        "#103 : un graphique vide n'a pas de titre"
+    );
     assert_eq!(spec.panels.len(), 1);
     assert!(spec.panels.iter().all(|panel| panel.series.is_empty()));
     state.dispatch(Action::Undo);
@@ -147,6 +151,7 @@ fn graphique_vide_annulable_retabli_et_enregistre() {
     assert!(state.tree().node(graph).is_some());
     state.dispatch(Action::Save);
     state.dispatch(Action::Load);
+    assert!(state.plot_spec(graph).unwrap().title.is_empty());
     assert!(state.plot_spec(graph).unwrap().panels[0].series.is_empty());
     session.shutdown().unwrap();
 }
@@ -4549,6 +4554,10 @@ fn plot_columns_pairs_each_y_with_the_nearest_x_to_its_left() {
         .and_then(|node| node.children().last().copied())
         .expect("le graphe a été créé dans le dossier du classeur");
     let spec = state.plot_spec(graph).expect("spec du graphe créé");
+    assert!(
+        spec.title.is_empty(),
+        "#103 : tracer des colonnes n'ajoute pas de titre"
+    );
     assert_eq!(spec.panels.len(), 1);
     let series = &spec.panels[0].series;
     assert_eq!(

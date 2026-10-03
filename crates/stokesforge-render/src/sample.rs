@@ -29,6 +29,11 @@
 //! logarithmique, un axe secondaire, trois styles de trait, quatre formes de
 //! marqueur, des barres d'erreur, une légende dans chaque coin, et une
 //! **référence brisée** — qui doit se voir, pas disparaître.
+//!
+//! Les titres sont explicites sur ces figures témoins : ils éprouvent leurs
+//! bandes et la mesure du texte non ASCII dans les deux backends. Ce ne sont
+//! pas des défauts de création de graphe ; la démo de l'application, elle,
+//! suit le défaut sans titre des créations utilisateur (#103).
 
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
 use stokesforge_core::{CoreResult, NodeId, Project};

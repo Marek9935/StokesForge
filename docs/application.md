@@ -108,8 +108,8 @@ en cours ou une macro ouverte. Le premier **Save** (« Enregistrer ») demande
 une destination, puis les suivants utilisent ce fichier.
 
 **File › Add Graph** (« Fichier › Ajouter un graphique ») et la barre Fichier
-créent un graphique vide à la racine : une zone de tracé, aucune série. Sa
-fenêtre s'ouvre au premier plan. Il passe par la commande `AddGraph` existante :
+créent un graphique vide à la racine : une zone de tracé, aucune série ni titre.
+Sa fenêtre s'ouvre au premier plan. Il passe par la commande `AddGraph` existante :
 Annuler le retire, Rétablir retrouve la même identité, et le `.stf` le conserve.
 Ce geste n'a pas de raccourci supplémentaire ; il reste accessible au menu.
 
@@ -800,8 +800,8 @@ sous-menu « Role », un sous-menu « Plot » (Line, Scatter, Line + Symbol, Bar
 partir de la sélection de colonnes courante — même cible que les deux autres
 sous-menus (`target_columns` : toute la plage sélectionnée si la colonne
 cliquée en fait partie, sinon cette colonne seule). Le graphe créé est
-ajouté dans le dossier qui contient le classeur (`Command::AddGraph`, pas
-d'entrée séparée pour la feuille) et s'ouvre aussitôt dans son propre onglet.
+ajouté sans titre dans le dossier qui contient le classeur (`Command::AddGraph`,
+pas d'entrée séparée pour la feuille) et s'ouvre aussitôt dans son propre onglet.
 
 L'appariement des colonnes en séries suit la convention Origin plutôt qu'un
 choix arbitraire : parmi les colonnes visées, chacune de rôle Y
@@ -1467,6 +1467,12 @@ un nombre tapé y reste un nombre.
 `stokesforge-app [chemin]`. Si `chemin` existe, le projet est chargé depuis ce
 fichier ; sinon un projet de démonstration est construit et `chemin` devient la
 cible d'un futur enregistrement.
+
+Le graphe de démonstration suit le même défaut que les créations par le menu,
+le tracé de colonnes et `pyst.plot` sans option `title` : aucun titre (#103).
+Un titre vide n'est pas dessiné et ne réserve aucune bande au-dessus du tracé.
+Le titre reste saisissable dans **Graph › Graph Properties… › General** ; un titre
+présent reste éditable au double-clic sur la figure.
 
 Deux variables d'environnement servent aux tests et aux captures :
 `STOKESFORGE_APP_AUTOQUIT_MS` et `STOKESFORGE_APP_SCREENSHOT`.

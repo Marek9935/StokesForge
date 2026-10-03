@@ -4,6 +4,8 @@
 //! Les noms de série vides restent automatiques : le rendu partagé les lit
 //! comme du texte littéral, sans interpréter le markup d'une colonne. Les
 //! titres et labels explicitement fournis, eux, sont du markup Typst.
+//! Sans option `title`, un nouveau graphe reste sans titre (#103) ; ajouter
+//! une série à un graphe existant conserve son titre.
 //! Le premier panneau est étendu sans réécrire les autres ni ses réglages.
 
 use pyo3::prelude::*;
