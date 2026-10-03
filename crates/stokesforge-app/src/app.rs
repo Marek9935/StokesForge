@@ -1767,6 +1767,14 @@ impl StokesForgeApp {
                 if let Some(annotation) = annotation {
                     return Some(
                         TextFormatState {
+                            source: Some(egui::Id::new((
+                                graph,
+                                annotation_editor
+                                    .as_ref()
+                                    .map(|e| e.target)
+                                    .or_else(|| view.selected_annotation()),
+                                annotation_editor.is_some(),
+                            ))),
                             family: Some(if annotation.font.trim().is_empty() {
                                 stokesforge_render_egui::FontSet::default()
                                     .sans_family_name()
@@ -1775,6 +1783,7 @@ impl StokesForgeApp {
                                 annotation.font.trim().into()
                             }),
                             size: Some(annotation.effective_size()),
+                            color: Some(annotation.color.clone()),
                             auto_family: annotation.font.trim().is_empty(),
                             auto_size: annotation.size
                                 == stokesforge_plot::AnnotationSpec::DEFAULT_SIZE,
@@ -1806,6 +1815,11 @@ impl StokesForgeApp {
                     .unwrap_or_default();
                 Some(
                     TextFormatState {
+                        source: Some(egui::Id::new((
+                            graph,
+                            target,
+                            editor.as_ref().map(|editor| editor.target),
+                        ))),
                         family: Some(
                             font.family()
                                 .unwrap_or(
@@ -1814,6 +1828,7 @@ impl StokesForgeApp {
                                 .into(),
                         ),
                         size: Some(font.effective_size(default_size)),
+                        color: target.color(&spec),
                         auto_family: font.family().is_none(),
                         auto_size: font.size.is_none(),
                     }
@@ -9550,7 +9565,7 @@ enum ContextText {
 }
 
 /// Ce que l'éditeur sur place d'un titre modifie.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum TextEditTarget {
     /// Le texte saisi d'un titre.
     Title(TextTarget),
@@ -11818,6 +11833,100 @@ mod graph_layout_tests {
         output.textures_delta.clear();
         find_text_center(&output.shapes, "Fira Sans");
         find_text_center(&output.shapes, "28");
+        session.shutdown().unwrap();
+    }
+
+    /// #99 : le même choix dans le sélecteur agit sur deux zones successives.
+    #[test]
+    fn la_meme_couleur_s_applique_a_deux_zones_successives_par_la_barre() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        egui_extras::install_image_loaders(&ctx);
+        let paint = |app: &mut StokesForgeApp, ctx: &egui::Context, events| {
+            let env = BarEnv {
+                text_format: app.format_target(ctx, Some(Tab::Graph(graph))),
+                text_style: app.text_format_state(ctx, Some(Tab::Graph(graph))),
+                ..Default::default()
+            };
+            let mut requests = Vec::new();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.horizontal(|ui| {
+                        crate::toolbar::bar_contents(ui, ToolbarId::Text, &env, &mut requests)
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            let mut actions = Vec::new();
+            for request in requests {
+                app.run_toolbar_request(ctx, request, Some(Tab::Graph(graph)), &mut actions);
+            }
+            for action in actions {
+                app.state.dispatch(action);
+            }
+            output
+        };
+        let swatch = |output: &egui::FullOutput, palette: bool| {
+            output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Rect(rect)
+                        if if palette {
+                            rect.fill == egui::Color32::from_rgb(0x8b, 0x1a, 0x1a)
+                                && rect.rect.width() > 12.0
+                        } else {
+                            (rect.rect.width() - 12.0).abs() < 0.01 && rect.fill.a() > 0
+                        } =>
+                    {
+                        Some(rect.rect.center())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("échantillon peint (palette={palette})"))
+        };
+        for target in [
+            TextTarget::Title,
+            TextTarget::AxisTitle {
+                row: 0,
+                column: 0,
+                side: stokesforge_plot::AxisSide::Bottom,
+            },
+        ] {
+            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+            app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
+            paint(&mut app, &ctx, Vec::new());
+            paint(&mut app, &ctx, Vec::new());
+            let output = paint(&mut app, &ctx, Vec::new());
+            let button = swatch(&output, false);
+            click_at(&ctx, button, egui::Modifiers::NONE, |ctx, events| {
+                paint(&mut app, ctx, events)
+            });
+            paint(&mut app, &ctx, Vec::new());
+            let output = paint(&mut app, &ctx, Vec::new());
+            let red = swatch(&output, true);
+            click_at(&ctx, red, egui::Modifiers::NONE, |ctx, events| {
+                paint(&mut app, ctx, events)
+            });
+            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+            assert_eq!(
+                target.color(&spec).as_deref(),
+                Some("#8b1a1a"),
+                "la zone {target:?} reçoit le rouge"
+            );
+        }
         session.shutdown().unwrap();
     }
 
@@ -15810,6 +15919,7 @@ mod text_format_state_tests {
         let style = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
         assert_eq!(style.family.as_deref(), Some("Libertinus Sans"));
         assert_eq!(style.size, Some(36.0));
+        assert_eq!(style.color.as_deref(), Some(""));
         let mut actions = Vec::new();
         app.format_text(
             &ctx,
@@ -15839,7 +15949,7 @@ mod text_format_state_tests {
         app.state.dispatch(Action::SetTextContent {
             graph,
             target: TextTarget::Title,
-            text: "Titre #text(size: 28pt, font: \"Fira Sans\")[local]".into(),
+            text: "Titre #text(size: 28pt, font: \"Fira Sans\", fill: red)[local]".into(),
         });
         let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
@@ -15847,6 +15957,7 @@ mod text_format_state_tests {
         });
         let style = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
         assert!(style.family.is_none() && style.size.is_none());
+        assert!(style.color.is_none());
         assert!(!style.auto_family && !style.auto_size);
         session.shutdown().unwrap();
     }

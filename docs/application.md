@@ -521,6 +521,10 @@ accueil en haut seulement.
   neutre « Font » ou « Size » : la barre résume la zone sans interpréter les
   expressions Typst calculées. Le parseur distingue ces réglages du texte
   brut, des commentaires et des blocs de code brut.
+  Le sélecteur affiche aussi la couleur de cette zone (#99), jamais le dernier
+  choix fait sur une autre zone. Un passage portant une couleur locale donne
+  un échantillon neutre. En édition, le brouillon du sélecteur dure seulement
+  jusqu'à la validation du geste, qui pose une seule balise sur le passage.
 - Visibilité : menu **View**, une case par barre. Emplacement et visibilité
   sont dans `preferences.json` (champ `toolbars`), pas dans le `.stf` ; la
   lecture ignore ce qu'elle ne comprend pas. `StokesForgeApp::new` ne lit pas le

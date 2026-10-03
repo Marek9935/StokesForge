@@ -458,8 +458,12 @@ pub struct ObjectFormatState {
 /// Une valeur absente laisse le libellé neutre pour un format non uniforme.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TextFormatState {
+    /// Identité de la zone, pour borner le brouillon du sélecteur pendant une saisie.
+    pub source: Option<egui::Id>,
     pub family: Option<String>,
     pub size: Option<f64>,
+    /// `None` = couleur locale/mixte ; chaîne vide = automatique.
+    pub color: Option<String>,
     pub auto_family: bool,
     pub auto_size: bool,
 }
@@ -475,6 +479,9 @@ impl TextFormatState {
         if overrides.size {
             self.size = None;
             self.auto_size = false;
+        }
+        if overrides.color {
+            self.color = None;
         }
         self
     }
@@ -1088,9 +1095,22 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             requests.push(ToolbarRequest::FormatText(format));
         }
 
-        // Couleur : la dernière choisie est mémorisée pour la durée de la session.
-        let color_id = egui::Id::new("stokesforge_format_color");
-        let mut color: String = ctx.data(|data| data.get_temp(color_id)).unwrap_or_default();
+        // #99 : la couleur vient de la zone sélectionnée. Seul un champ en
+        // édition garde un brouillon jusqu'à la fin du geste : le poser à
+        // chaque caractère empilerait des balises Typst dans le passage.
+        let draft_id = egui::Id::new("stokesforge_text_color_picker_draft");
+        let mut color = env.text_style.color.clone().unwrap_or_default();
+        if env.text_format == FormatTarget::Field {
+            if let Some((source, draft)) =
+                ctx.data(|data| data.get_temp::<(Option<egui::Id>, String)>(draft_id))
+            {
+                if source == env.text_style.source {
+                    color = draft;
+                }
+            }
+        } else {
+            ctx.data_mut(|data| data.remove::<(Option<egui::Id>, String)>(draft_id));
+        }
         let before = color.clone();
         let (project, user) = ctx
             .data(|data| data.get_temp(crate::app::saved_colors_id()))
@@ -1102,7 +1122,7 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
         };
         // Aussi sur une zone sélectionnée (titre, axe, légende) : sa couleur
         // entière, pas un passage (#90).
-        ui.add_enabled_ui(enabled, |ui| {
+        let chosen = ui.add_enabled_ui(enabled, |ui| {
             crate::color_picker::color_icon_button(
                 ui,
                 (Icon::TextColor, &tr!("format-color")),
@@ -1111,15 +1131,26 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
                 ColorUsage::Text,
                 Some(&tr!("plot-color-auto-contrast")),
                 &mut picker,
-            );
-        })
-        .response
-        .on_hover_text(tr!("format-color"));
+            )
+        });
+        let committed = chosen.inner;
+        chosen.response.on_hover_text(tr!("format-color"));
         for request in picker.requests {
             requests.push(ToolbarRequest::Action(Box::new(request.into_action())));
         }
-        if color != before {
-            ctx.data_mut(|data| data.insert_temp(color_id, color.clone()));
+        let field = env.text_format == FormatTarget::Field;
+        if field {
+            ctx.data_mut(|data| {
+                if committed {
+                    data.remove::<(Option<egui::Id>, String)>(draft_id);
+                } else {
+                    data.insert_temp(draft_id, (env.text_style.source, color.clone()));
+                }
+            });
+        }
+        if (field && committed)
+            || (!field && (color != before || (committed && env.text_style.color.is_none())))
+        {
             requests.push(ToolbarRequest::FormatText(TextFormat::Color(color)));
         }
 
