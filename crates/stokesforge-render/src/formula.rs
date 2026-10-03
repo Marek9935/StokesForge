@@ -88,6 +88,51 @@ use crate::fonts::{FontChoice, FontSet};
 /// pas. [`ink`] fait la conversion, une fois, pour les deux backends.
 pub type Ink = [u8; 4];
 
+/// Réglages locaux d'un texte : la barre ne peut alors résumer la zone par
+/// une valeur héritée unique. Lire la syntaxe évite de compiler le document
+/// à chaque image et de prendre du texte brut pour un réglage (#97).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TextOverrides {
+    pub font: bool,
+    pub size: bool,
+    pub color: bool,
+}
+
+/// Attributs de `text(...)` et `set text(...)`, y compris imbriqués.
+/// Une expression calculée reste locale : l'interface affiche un état neutre
+/// plutôt que de prétendre en connaître la valeur effective.
+pub fn local_text_overrides(text: &str) -> TextOverrides {
+    use typst::syntax::ast;
+    let source = Source::detached(text);
+    let mut overrides = TextOverrides::default();
+    let mut nodes = vec![source.root()];
+    while let Some(node) = nodes.pop() {
+        let call = node
+            .cast::<ast::FuncCall>()
+            .map(|call| (call.callee(), call.args()))
+            .or_else(|| {
+                node.cast::<ast::SetRule>()
+                    .map(|rule| (rule.target(), rule.args()))
+            });
+        if let Some((ast::Expr::Ident(name), args)) = call {
+            if name.as_str() == "text" {
+                for arg in args.items() {
+                    if let ast::Arg::Named(named) = arg {
+                        match named.name().as_str() {
+                            "font" => overrides.font = true,
+                            "size" => overrides.size = true,
+                            "fill" => overrides.color = true,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        nodes.extend(node.children());
+    }
+    overrides
+}
+
 /// L'encre Typst d'une couleur de Plotters — celle que `draw_text` reçoit
 /// par `style.color()`, déjà résolue par le pipeline (couleur explicite ou
 /// `color::auto_ink`). Même arrondi de l'opacité que le chemin `epaint`
@@ -1011,6 +1056,22 @@ pub fn rotation_degrees(transform: FontTransform) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn les_reglages_locaux_se_lisent_dans_la_syntaxe_pas_dans_le_texte_brut() {
+        use super::{local_text_overrides, TextOverrides};
+        assert_eq!(
+            local_text_overrides("font: x, size: 28pt, fill: red"),
+            TextOverrides::default()
+        );
+        assert_eq!(
+            local_text_overrides("`#text(size: 28pt)[x]` // #text(fill: red)[x]"),
+            TextOverrides::default()
+        );
+        let local = local_text_overrides("#strong[#text(size: 28pt, fill: rgb(\"#ff0000\"))[x]]\n#set text(font: \"Fira Sans\")\ny");
+        assert!(local.font && local.size && local.color, "{local:?}");
+        assert!(!local_text_overrides("#box(fill: red)[x]").color);
+    }
+
     use super::*;
 
     fn noto() -> (Font, Font) {

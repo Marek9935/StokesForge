@@ -29,6 +29,8 @@ pub enum TextFormat {
     Color(String),
     /// Corps en points Typst.
     Size(f64),
+    /// Retire le corps explicite de la zone (héritage du rendu).
+    AutoSize,
     /// Nom de famille d'une police, embarquée ou du système.
     Font(String),
 }
@@ -57,7 +59,7 @@ impl TextFormat {
             TextFormat::Size(size) if size.is_finite() && *size > 0.0 => {
                 call(format!("text(size: {size}pt)"))
             }
-            TextFormat::Color(_) | TextFormat::Size(_) => None,
+            TextFormat::Color(_) | TextFormat::Size(_) | TextFormat::AutoSize => None,
             TextFormat::Font(name) => {
                 let name = name.trim();
                 if name.is_empty() {

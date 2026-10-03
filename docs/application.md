@@ -509,6 +509,18 @@ accueil en haut seulement.
   exposant et formule se défont en les reposant. Un clic sur la barre ne ferme
   pas l'éditeur (`toolbar::over_format_bar`). Le formateur ne pose pas
   d'alignement : les textes tiennent sur une ligne.
+  Les listes affichent la police et le corps de la zone sélectionnée (#97),
+  ou ceux du brouillon pendant l'édition, y compris en fenêtre détachée.
+  Un corps hérité affiche sa taille effective issue du pipeline partagé ;
+  l'entrée « Auto » est alors cochée. La choisir retire le corps explicite
+  d'un titre ou de la légende, et rétablit le corps par défaut d'un texte libre.
+  L'entrée « Graph font » est cochée pour une police héritée, tandis que le
+  champ affiche le nom de la police du graphe. « Auto » réutilise la clé
+  commune `common-auto` des deux langues.
+  Un réglage local de police ou de corps dans le markup affiche le libellé
+  neutre « Font » ou « Size » : la barre résume la zone sans interpréter les
+  expressions Typst calculées. Le parseur distingue ces réglages du texte
+  brut, des commentaires et des blocs de code brut.
 - Visibilité : menu **View**, une case par barre. Emplacement et visibilité
   sont dans `preferences.json` (champ `toolbars`), pas dans le `.stf` ; la
   lecture ignore ce qu'elle ne comprend pas. `StokesForgeApp::new` ne lit pas le

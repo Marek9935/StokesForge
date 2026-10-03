@@ -454,6 +454,32 @@ pub struct ObjectFormatState {
     pub line_width: f64,
 }
 
+/// Format lu sur la sélection, jamais la dernière valeur choisie (#97).
+/// Une valeur absente laisse le libellé neutre pour un format non uniforme.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TextFormatState {
+    pub family: Option<String>,
+    pub size: Option<f64>,
+    pub auto_family: bool,
+    pub auto_size: bool,
+}
+
+impl TextFormatState {
+    /// Un passage réglé dans le markup ne se résume pas au format de la zone.
+    pub fn with_markup(mut self, text: &str) -> Self {
+        let overrides = stokesforge_render_egui::formula::local_text_overrides(text);
+        if overrides.font {
+            self.family = None;
+            self.auto_family = false;
+        }
+        if overrides.size {
+            self.size = None;
+            self.auto_size = false;
+        }
+        self
+    }
+}
+
 /// Ce que la barre contextuelle montre : décidé par la fenêtre au premier plan.
 #[derive(Debug, Clone, Default)]
 pub enum ToolsContext {
@@ -485,6 +511,7 @@ pub struct BarEnv {
     pub shortcuts: ShortcutTexts,
     pub tools: ToolsContext,
     pub text_format: FormatTarget,
+    pub text_style: TextFormatState,
     /// L'objet graphique sélectionné, s'il y en a un (issue #64).
     pub object_format: Option<ObjectFormatState>,
 }
@@ -976,13 +1003,18 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
         // Police.
         let rich = matches!(env.text_format, FormatTarget::Field | FormatTarget::Block);
         let chosen = egui::ComboBox::from_id_salt("stokesforge_format_font")
-            .selected_text(tr!("format-font"))
+            .selected_text(
+                env.text_style
+                    .family
+                    .clone()
+                    .unwrap_or_else(|| tr!("format-font")),
+            )
             .width(110.0)
             .show_ui(ui, |ui| {
                 let mut chosen = None;
                 let mut shown_system_title = false;
                 if ui
-                    .selectable_label(false, tr!("format-font-default"))
+                    .selectable_label(env.text_style.auto_family, tr!("format-font-default"))
                     .clicked()
                 {
                     chosen = Some(String::new());
@@ -995,7 +1027,14 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
                         ui.label(egui::RichText::new(tr!("format-font-system")).weak());
                         shown_system_title = true;
                     }
-                    if ui.selectable_label(false, &family.name).clicked() {
+                    if ui
+                        .selectable_label(
+                            !env.text_style.auto_family
+                                && env.text_style.family.as_ref() == Some(&family.name),
+                            &family.name,
+                        )
+                        .clicked()
+                    {
                         chosen = Some(family.name.clone());
                     }
                 }
@@ -1012,13 +1051,30 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
 
         // Corps.
         let chosen = egui::ComboBox::from_id_salt("stokesforge_format_size")
-            .selected_text(tr!("format-size"))
+            .selected_text(
+                env.text_style
+                    .size
+                    .map_or_else(|| tr!("format-size"), |size| format!("{size}")),
+            )
             .width(54.0)
             .show_ui(ui, |ui| {
                 let mut chosen = None;
+                if ui
+                    .selectable_label(env.text_style.auto_size, tr!("common-auto"))
+                    .clicked()
+                {
+                    chosen = Some(TextFormat::AutoSize);
+                }
+                ui.separator();
                 for size in FORMAT_SIZES {
-                    if ui.selectable_label(false, format!("{size}")).clicked() {
-                        chosen = Some(size);
+                    if ui
+                        .selectable_label(
+                            !env.text_style.auto_size && env.text_style.size == Some(size),
+                            format!("{size}"),
+                        )
+                        .clicked()
+                    {
+                        chosen = Some(TextFormat::Size(size));
                     }
                 }
                 chosen
@@ -1028,8 +1084,8 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             tr!("format-size"),
             Some(tr!("format-size", "hint")),
         );
-        if let Some(size) = chosen.inner.flatten() {
-            requests.push(ToolbarRequest::FormatText(TextFormat::Size(size)));
+        if let Some(format) = chosen.inner.flatten() {
+            requests.push(ToolbarRequest::FormatText(format));
         }
 
         // Couleur : la dernière choisie est mémorisée pour la durée de la session.

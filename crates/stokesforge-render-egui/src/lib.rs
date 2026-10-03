@@ -106,7 +106,8 @@ pub use feathering::Feathering;
 // `stokesforge-render` pour lire ce que la figure a tracé : ce crate est déjà sa
 // façade de rendu écran.
 pub use stokesforge_render::pipeline::{
-    DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText, DEFAULT_FIGURE_SIZE,
+    DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText, AXIS_DESC_SIZE,
+    DEFAULT_FIGURE_SIZE, LABEL_SIZE, PANEL_TITLE_SIZE, TITLE_SIZE,
 };
 // L'adresse et le modèle d'un texte libre : l'application les manipule avec
 // les signaux de la vue ([`GraphEvent`]).

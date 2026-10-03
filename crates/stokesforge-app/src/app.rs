@@ -1739,6 +1739,91 @@ impl StokesForgeApp {
         .unwrap_or(FormatTarget::None)
     }
 
+    /// Lit les réglages de la zone visée et les défauts du pipeline partagé.
+    /// Le brouillon en édition prime sur le modèle, aussi en fenêtre détachée.
+    fn text_format_state(
+        &self,
+        ctx: &egui::Context,
+        active_tab: Option<Tab>,
+    ) -> crate::toolbar::TextFormatState {
+        use crate::toolbar::TextFormatState;
+        let Some(graph) = active_graph(active_tab_kind(active_tab)) else {
+            return TextFormatState::default();
+        };
+        let Some(spec) = crate::state::current_plot_spec(self.state.tree(), graph) else {
+            return TextFormatState::default();
+        };
+        let state = self
+            .read_graph_view(graph, |view| {
+                let annotation_editor =
+                    ctx.data(|data| data.get_temp::<AnnotationEditor>(annotation_editor_id(view)));
+                let annotation = annotation_editor
+                    .as_ref()
+                    .map(|editor| &editor.draft)
+                    .or_else(|| {
+                        view.selected_annotation()
+                            .and_then(|target| target.get(&spec))
+                    });
+                if let Some(annotation) = annotation {
+                    return Some(
+                        TextFormatState {
+                            family: Some(if annotation.font.trim().is_empty() {
+                                stokesforge_render_egui::FontSet::default()
+                                    .sans_family_name()
+                                    .into()
+                            } else {
+                                annotation.font.trim().into()
+                            }),
+                            size: Some(annotation.effective_size()),
+                            auto_family: annotation.font.trim().is_empty(),
+                            auto_size: annotation.size
+                                == stokesforge_plot::AnnotationSpec::DEFAULT_SIZE,
+                        }
+                        .with_markup(&annotation.text),
+                    );
+                }
+                let editor = ctx.data(|data| data.get_temp::<TextEditor>(text_editor_id(view)));
+                let target = editor
+                    .as_ref()
+                    .map(|editor| match editor.target {
+                        TextEditTarget::Title(target) => target,
+                        TextEditTarget::LegendEntry(_, (row, column)) => {
+                            TextTarget::Legend { row, column }
+                        }
+                    })
+                    .or_else(|| view.selected_text())?;
+                let font = target.font(&spec)?;
+                let default_size = match target {
+                    TextTarget::Title => stokesforge_render_egui::TITLE_SIZE,
+                    TextTarget::PanelTitle { .. } => stokesforge_render_egui::PANEL_TITLE_SIZE,
+                    TextTarget::AxisTitle { .. } => stokesforge_render_egui::AXIS_DESC_SIZE,
+                    TextTarget::Legend { .. } => stokesforge_render_egui::LABEL_SIZE,
+                };
+                let text = editor
+                    .as_ref()
+                    .map(|editor| editor.buffer.clone())
+                    .or_else(|| target.text(&spec))
+                    .unwrap_or_default();
+                Some(
+                    TextFormatState {
+                        family: Some(
+                            font.family()
+                                .unwrap_or(
+                                    stokesforge_render_egui::FontSet::default().sans_family_name(),
+                                )
+                                .into(),
+                        ),
+                        size: Some(font.effective_size(default_size)),
+                        auto_family: font.family().is_none(),
+                        auto_size: font.size.is_none(),
+                    }
+                    .with_markup(&text),
+                )
+            })
+            .flatten();
+        state.unwrap_or_default()
+    }
+
     /// L'objet graphique sélectionné du graphe au premier plan, avec son
     /// adresse (issue #64).
     fn selected_object(
@@ -1867,6 +1952,23 @@ impl StokesForgeApp {
             (None, selected) if !annotation_editing => selected,
             _ => None,
         };
+        if matches!(format, TextFormat::AutoSize) {
+            if annotation_editing {
+                self.read_graph_view(graph, |view| {
+                    let id = annotation_editor_id(view);
+                    ctx.data_mut(|data| {
+                        if let Some(mut editor) = data.get_temp::<AnnotationEditor>(id) {
+                            editor.draft.size = stokesforge_plot::AnnotationSpec::DEFAULT_SIZE;
+                            data.insert_temp(id, editor);
+                        }
+                    });
+                });
+                return true;
+            }
+            if let Some(target) = zone {
+                return self.set_zone_font(graph, target, actions, |font| font.size = None);
+            }
+        }
         if let TextFormat::Font(name) = format {
             let name = name.trim().to_owned();
             if annotation_editing {
@@ -1983,6 +2085,9 @@ impl StokesForgeApp {
                 match &format {
                     TextFormat::Color(color) => annotation.color = color.clone(),
                     TextFormat::Size(size) => annotation.size = *size,
+                    TextFormat::AutoSize => {
+                        annotation.size = stokesforge_plot::AnnotationSpec::DEFAULT_SIZE
+                    }
                     _ => {
                         let length = annotation.text.chars().count();
                         annotation.text = apply(&annotation.text, 0..length, &format).text;
@@ -3156,6 +3261,7 @@ impl eframe::App for StokesForgeApp {
             object_manager_open: self.state.object_manager_open(),
             tools: self.tools_context(active_tab),
             text_format: self.format_target(&ctx, active_tab),
+            text_style: self.text_format_state(&ctx, active_tab),
             object_format: self.object_format_state(active_tab),
             shortcuts: crate::toolbar::ShortcutTexts {
                 new_project: ctx.format_shortcut(&SHORTCUT_NEW_PROJECT),
@@ -11670,6 +11776,51 @@ mod graph_layout_tests {
             .expect("géométrie envoyée à la session")
     }
 
+    /// #97 : les champs de la barre affichent le format de la zone visée.
+    #[test]
+    fn la_barre_affiche_la_police_et_le_corps_du_titre_selectionne() {
+        use eframe::App as _;
+        let (session, graph) = graphe();
+        let mut state = AppState::new(session.handle(), String::new()).unwrap();
+        state.dispatch(Action::SetTextFont {
+            graph,
+            target: TextTarget::Title,
+            font: stokesforge_plot::TextFont {
+                family: "Fira Sans".into(),
+                size: Some(28.0),
+            },
+        });
+        let mut app = StokesForgeApp::new(state);
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.open_tab(Tab::Graph(graph));
+        app.with_graph_view(graph, |view| {
+            view.select_text(Some(TextTarget::Title), &spec)
+        });
+        let ctx = egui::Context::default();
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut output = egui::FullOutput::default();
+        for _ in 0..3 {
+            output.textures_delta.clear();
+            output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.ui(ui, &mut frame),
+            );
+        }
+        output.textures_delta.clear();
+        find_text_center(&output.shapes, "Fira Sans");
+        find_text_center(&output.shapes, "28");
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn ctrl_n_confirme_et_oublie_les_vues_du_projet_precedent() {
         use eframe::App as _;
@@ -15522,6 +15673,182 @@ mod pending_format_tests {
         let mut buffer = "H2O".to_owned();
         apply_pending_format(&ctx, field, &mut buffer);
         assert_eq!(buffer, "H2O#sub[]");
+    }
+}
+
+#[cfg(test)]
+mod text_format_state_tests {
+    use super::*;
+    use crate::text_format::TextFormat;
+    use stokesforge_core::Project;
+    use stokesforge_plot::{AnnotationRef, AnnotationSpec, AxisSide, PlotSpec, TextFont};
+    use stokesforge_session::Session;
+
+    fn setup() -> (Session, StokesForgeApp, NodeId, egui::Context) {
+        let mut project = Project::new("Formats").unwrap();
+        let mut spec = PlotSpec::empty("Titre");
+        spec.panels
+            .get_mut(0)
+            .unwrap()
+            .annotations
+            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+        let graph = project.add_graph(project.root(), None, spec).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        (
+            session,
+            StokesForgeApp::new(state),
+            graph,
+            egui::Context::default(),
+        )
+    }
+
+    #[test]
+    fn les_corps_herites_et_auto_suivent_la_selection_flottante_et_detachee() {
+        for detached in [false, true] {
+            let (session, mut app, graph, ctx) = setup();
+            if detached {
+                app.detach_tab(Tab::Graph(graph));
+            }
+            for (target, size) in [
+                (TextTarget::Title, stokesforge_render_egui::TITLE_SIZE),
+                (
+                    TextTarget::PanelTitle { row: 0, column: 0 },
+                    stokesforge_render_egui::PANEL_TITLE_SIZE,
+                ),
+                (
+                    TextTarget::AxisTitle {
+                        row: 0,
+                        column: 0,
+                        side: AxisSide::Bottom,
+                    },
+                    stokesforge_render_egui::AXIS_DESC_SIZE,
+                ),
+                (
+                    TextTarget::Legend { row: 0, column: 0 },
+                    stokesforge_render_egui::LABEL_SIZE,
+                ),
+            ] {
+                let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+                app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
+                let inherited = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+                assert_eq!(inherited.size, Some(size));
+                assert_eq!(
+                    inherited.family.as_deref(),
+                    Some(stokesforge_render_egui::FontSet::default().sans_family_name())
+                );
+                assert!(inherited.auto_size && inherited.auto_family);
+                app.state.dispatch(Action::SetTextFont {
+                    graph,
+                    target,
+                    font: TextFont {
+                        family: "Fira Sans".into(),
+                        size: Some(28.0),
+                    },
+                });
+                let explicit = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+                assert_eq!(explicit.size, Some(28.0));
+                assert_eq!(explicit.family.as_deref(), Some("Fira Sans"));
+                assert!(!explicit.auto_size && !explicit.auto_family);
+                let mut actions = Vec::new();
+                app.format_text(
+                    &ctx,
+                    TextFormat::AutoSize,
+                    Some(Tab::Graph(graph)),
+                    &mut actions,
+                );
+                assert_eq!(actions.len(), 1);
+                app.state.dispatch(actions.pop().unwrap());
+                let reset = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+                assert_eq!(reset.size, Some(size));
+                assert!(reset.auto_size);
+                assert_eq!(
+                    reset.family, explicit.family,
+                    "Auto ne change pas la police"
+                );
+                app.state.dispatch(Action::Undo);
+                assert_eq!(
+                    app.text_format_state(&ctx, Some(Tab::Graph(graph))),
+                    explicit
+                );
+                app.state.dispatch(Action::Undo);
+            }
+            session.shutdown().unwrap();
+        }
+    }
+
+    #[test]
+    fn la_barre_lit_le_brouillon_et_auto_retablit_le_corps_du_texte_libre() {
+        let (session, mut app, graph, ctx) = setup();
+        let target = AnnotationRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let mut draft = target.get(&spec).unwrap().clone();
+        draft.font = "Libertinus Sans".into();
+        draft.size = 36.0;
+        let id = app
+            .with_graph_view(graph, |view| {
+                view.select_annotation(Some(target), &spec);
+                annotation_editor_id(view)
+            })
+            .unwrap();
+        ctx.data_mut(|data| {
+            data.insert_temp(
+                id,
+                AnnotationEditor {
+                    target,
+                    draft,
+                    original: target.get(&spec).cloned(),
+                    focus: false,
+                    anchor: None,
+                },
+            )
+        });
+        let style = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+        assert_eq!(style.family.as_deref(), Some("Libertinus Sans"));
+        assert_eq!(style.size, Some(36.0));
+        let mut actions = Vec::new();
+        app.format_text(
+            &ctx,
+            TextFormat::AutoSize,
+            Some(Tab::Graph(graph)),
+            &mut actions,
+        );
+        assert!(
+            actions.is_empty(),
+            "seul le brouillon change avant validation"
+        );
+        assert_eq!(
+            app.text_format_state(&ctx, Some(Tab::Graph(graph))).size,
+            Some(AnnotationSpec::DEFAULT_SIZE)
+        );
+        ctx.data_mut(|data| data.remove::<AnnotationEditor>(id));
+        assert!(
+            app.text_format_state(&ctx, Some(Tab::Graph(graph)))
+                .auto_family
+        );
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn les_formats_locaux_affichent_un_etat_neutre() {
+        let (session, mut app, graph, ctx) = setup();
+        app.state.dispatch(Action::SetTextContent {
+            graph,
+            target: TextTarget::Title,
+            text: "Titre #text(size: 28pt, font: \"Fira Sans\")[local]".into(),
+        });
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| {
+            view.select_text(Some(TextTarget::Title), &spec)
+        });
+        let style = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+        assert!(style.family.is_none() && style.size.is_none());
+        assert!(!style.auto_family && !style.auto_size);
+        session.shutdown().unwrap();
     }
 }
 
