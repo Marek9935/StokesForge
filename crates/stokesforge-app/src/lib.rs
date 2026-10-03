@@ -54,4 +54,5 @@ pub mod state;
 pub mod text_format;
 pub mod theme;
 pub mod toolbar;
+pub mod tree_lines;
 pub mod user_colors;

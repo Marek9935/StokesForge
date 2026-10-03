@@ -373,6 +373,21 @@ graphe utilisent les mêmes commandes. La maximisation remplit le
 Restaurer rend à la fenêtre sa disposition flottante. Le menu Window
 permet aussi de maximiser ou restaurer la fenêtre active.
 
+### Connecteurs d'arbre en L (#112)
+
+Les arbres du Project Manager et de l'Object Manager n'utilisent plus la ligne
+d'indentation d'egui (qui descendait jusqu'en bas du corps d'un nœud). Ils
+passent par un seul composant, `tree_lines.rs` : `begin_tree` coupe
+`indent_has_left_vline` à la racine, chaque corps de nœud s'écrit dans
+`tree_children`, et chaque enfant direct déclare le centre de sa rangée
+(`TreeBranch::mark`). Le trait vertical va du haut du corps au dernier enfant
+direct (`└`), chaque enfant reçoit un trait horizontal (`├`/`└`), et le trait
+continue à travers le sous-arbre d'un enfant tant qu'un frère suit. Les
+traits sont peints au `Painter` (couleur `noninteractive.bg_stroke`, alignés
+sur le pixel). Un nœud qui contient un arbre doit renvoyer le centre de sa
+rangée à son parent ; limite : le vertical part du haut du corps, pas du bas
+de la flèche du parent.
+
 ### Détachement du Project Manager
 
 Le Project Manager est un panneau fixe à gauche. Le menu Window permet de

@@ -5845,6 +5845,7 @@ fn object_manager_contents(
         }
     });
     egui::ScrollArea::both().show(ui, |ui| {
+        crate::tree_lines::begin_tree(ui);
         let id = ui.make_persistent_id(("object_manager_graph", model.graph));
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
             .show_header(ui, |ui| {
@@ -5854,9 +5855,9 @@ fn object_manager_contents(
                     object_node_menu(ui, model.graph, T::Graph, spec, actions, &mut requests)
                 });
             })
-            .body(|ui| {
+            .body(|ui| crate::tree_lines::tree_children(ui, |ui, branch| {
                 for object in &model.objects {
-                    object_manager_object_row(
+                    let y = object_manager_object_row(
                         ui,
                         model.graph,
                         object,
@@ -5865,13 +5866,14 @@ fn object_manager_contents(
                         actions,
                         &mut requests,
                     );
+                    branch.mark(y);
                     if object.selected {
                         selected = Some(object.target);
                     }
                 }
                 for layer in &model.layers {
                     let id = ui.make_persistent_id((model.graph, layer.index));
-                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                    let (layer_toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
                         ui.ctx(),
                         id,
                         true,
@@ -5890,9 +5892,9 @@ fn object_manager_contents(
                                 )
                             });
                     })
-                    .body(|ui| {
+                    .body(|ui| crate::tree_lines::tree_children(ui, |ui, branch| {
                         let id = ui.make_persistent_id((model.graph, layer.index, "group"));
-                        egui::collapsing_header::CollapsingState::load_with_default_open(
+                        let (group_toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
                             ui.ctx(),
                             id,
                             true,
@@ -5916,12 +5918,12 @@ fn object_manager_contents(
                                 )
                             });
                         })
-                        .body(|ui| {
+                        .body(|ui| crate::tree_lines::tree_children(ui, |ui, branch| {
                             for series in &layer.series {
                                 if series.selected {
                                     selected = Some(T::Series(series.target));
                                 }
-                                ui.push_id(series.target, |ui| {
+                                let y = ui.push_id(series.target, |ui| {
                                     ui.horizontal(|ui| {
                                         object_visibility(
                                             ui,
@@ -6017,11 +6019,18 @@ fn object_manager_contents(
                                             )
                                         });
                                     })
-                                });
+                                    .response
+                                    .rect
+                                    .center()
+                                    .y
+                                })
+                                .inner;
+                                branch.mark(y);
                             }
-                        });
+                        }));
+                        branch.mark(group_toggle.rect.center().y);
                         for object in &layer.objects {
-                            object_manager_object_row(
+                            let y = object_manager_object_row(
                                 ui,
                                 model.graph,
                                 object,
@@ -6030,13 +6039,15 @@ fn object_manager_contents(
                                 actions,
                                 &mut requests,
                             );
+                            branch.mark(y);
                             if object.selected {
                                 selected = Some(object.target);
                             }
                         }
-                    });
+                    }));
+                    branch.mark(layer_toggle.rect.center().y);
                 }
-            });
+            }));
     });
     // L'ancrage appartient au panneau ; aucun champ d'édition ne perd ses touches.
     ui.interact(
@@ -6190,7 +6201,7 @@ fn object_manager_object_row(
     focus: egui::Id,
     actions: &mut Vec<Action>,
     requests: &mut Vec<ObjectManagerRequest>,
-) {
+) -> f32 {
     ui.push_id(object.target, |ui| {
         ui.horizontal(|ui| {
             object_visibility(ui, graph, object.target, spec, actions);
@@ -6219,7 +6230,12 @@ fn object_manager_object_row(
                 object_node_menu(ui, graph, object.target, spec, actions, requests)
             });
         })
-    });
+        .response
+        .rect
+        .center()
+        .y
+    })
+    .inner
 }
 
 /// Le corps du Project Manager, à partir d'un arbre déjà construit plutôt
@@ -6267,22 +6283,24 @@ fn project_manager_contents_from_tree(
         ui.separator();
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
+        crate::tree_lines::begin_tree(ui);
         for node in tree {
             project_tree_node_ui(ui, node, interaction);
         }
     });
 }
 
-/// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants.
+/// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants ; rend
+/// le centre vertical de sa rangée, pour les connecteurs de son parent.
 fn project_tree_node_ui(
     ui: &mut egui::Ui,
     node: &ProjectTreeNode,
     interaction: &mut PmInteraction,
-) {
+) -> f32 {
     match node {
         ProjectTreeNode::Folder { id, name, children } => {
             let state_id = ui.make_persistent_id(("project_tree_folder", id));
-            egui::collapsing_header::CollapsingState::load_with_default_open(
+            let (toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
                 ui.ctx(),
                 state_id,
                 false,
@@ -6292,13 +6310,16 @@ fn project_tree_node_ui(
                 ui.label(name);
             })
             .body(|ui| {
-                if children.is_empty() {
-                    ui.weak(tr!("project-folder-empty"));
-                }
-                for child in children {
-                    project_tree_node_ui(ui, child, interaction);
-                }
+                crate::tree_lines::tree_children(ui, |ui, branch| {
+                    if children.is_empty() {
+                        branch.mark(ui.weak(tr!("project-folder-empty")).rect.center().y);
+                    }
+                    for child in children {
+                        branch.mark(project_tree_node_ui(ui, child, interaction));
+                    }
+                });
             });
+            toggle.rect.center().y
         }
         ProjectTreeNode::Window { id, name, kind } => {
             let icon = match kind {
@@ -6355,6 +6376,7 @@ fn project_tree_node_ui(
             if response.double_clicked() && interaction.active_tab == Some(tab) {
                 interaction.close_requests.push(tab);
             }
+            response.rect.center().y
         }
     }
 }
