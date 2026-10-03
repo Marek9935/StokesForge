@@ -209,8 +209,16 @@ l'import) plutôt que de la contourner. Un code existant qui déroge n'est
 
 Une icône s'affiche par `icons::icon_image` / `icon_button` (taille unique,
 info-bulle `tr!` obligatoire), jamais par un glyphe Unicode ni un emoji. **N'en
-mettre que si elle apporte quelque chose** (action répétée reconnaissable, type
-d'objet) ; un mot vaut mieux qu'une icône ambiguë. Couleur : `IconRole::Neutral`
+*afficher* que si elle apporte quelque chose** (action répétée reconnaissable,
+type d'objet) ; un mot vaut mieux qu'une icône ambiguë.
+
+**Mais chaque action a son logo** (règle de #110, `docs/icones.md`) : une
+action nouvelle, affichée ou non, a une identité visuelle prévue — pour la
+future barre personnalisée. Action d'une **barre fixe** : icône Phosphor
+soignée (procédure de `docs/icones.md`). **Autre action** : logo standard de sa
+famille avec **deux lettres** en surimpression (gabarit à venir avec le
+registre d'actions) ; tant qu'il n'existe pas, **nommer le logo prévu dans le
+compte rendu** au lieu de l'omettre. Ça ne force pas à l'afficher dans les menus. Couleur : `IconRole::Neutral`
 par défaut, un rôle coloré seulement pour un type d'objet, une action
 destructive ou un état à repérer. Une icône nouvelle : `docs/icones.md`
 (planche-contact à faire valider). Verrou : `aucune_icone_hors_du_composant`.

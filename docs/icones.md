@@ -20,6 +20,31 @@ qui les affiche est `crates/stokesforge-app/src/icons.rs` ; son `//!` dit le
   l'exige.
 - **Jamais un emoji ni un glyphe Unicode** (« × », « ↗ », « 📁 ») comme icône.
 
+## Chaque action a son logo (règle posée avec #110)
+
+Toute **action** de l'application — ce qui s'atteint par un menu, un raccourci
+ou une barre — **possède un logo**, même quand elle n'en affiche pas. Le logo
+est une donnée de l'action (son identité visuelle) : c'est ce qui permettra,
+plus tard, de la poser dans une barre personnalisée (#110) sans en attendre un.
+Ça ne change pas où l'icône **s'affiche** : les menus n'ont pas à en montrer
+(règle ci-dessus), et un mot reste préférable là où il est plus clair.
+
+Deux niveaux de qualité :
+
+- **Action d'une barre fixe** : une icône Phosphor soignée, ajoutée comme
+  ci-dessous (planche-contact validée, rôle de couleur, info-bulle `tr!`).
+- **Autre action** (par exemple une manipulation de données qu'aucune barre
+  fixe ne porte) : un **logo standard par famille** — un gabarit commun à la
+  famille (manipulation de données, par exemple) avec **deux lettres** de la
+  fonctionnalité en surimpression. Pas de dessin sur mesure : le coût d'une
+  action nouvelle reste proche de zéro.
+
+État : la règle est posée, **pas encore verrouillée par un test** et le gabarit
+de logo standard n'existe pas encore (il viendra avec le registre d'actions,
+#110). D'ici là, une action nouvelle d'une barre fixe reçoit son icône ; pour
+les autres, le skill `stokesforge-feature` demande de **nommer le logo prévu**
+dans le compte rendu plutôt que de l'omettre en silence.
+
 ### Icônes retouchées
 
 Une icône Phosphor peut être retouchée : le fichier de `src/` porte alors un
