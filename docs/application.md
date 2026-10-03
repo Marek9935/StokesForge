@@ -385,6 +385,14 @@ instantané de lecture et des requêtes avec celle-ci, via deux
 `Arc<Mutex<_>>`, sans déplacer `AppState` ni créer une seconde voie de
 mutation métier. Les requêtes réveillent explicitement la fenêtre
 principale pour être traitées même quand elle est inactive.
+Dans l'autre sens, publier un instantané modifié réveille explicitement le
+viewport lecteur (#104) : époque du projet, révision du modèle ou révision
+des géométries. Le Project Manager est aussi réveillé si sa sélection, son
+masquage ou l'onglet actif change. Une commande appliquée en fin d'image
+programme l'image racine qui publiera son résultat ; aucun réveil périodique
+n'est ajouté au repos. Les tests sans fenêtre vérifient la demande ciblée
+et le retour au repos ; le redessin réel des fenêtres OS reste à vérifier
+manuellement.
 
 ### Détachement générique des onglets de contenu
 

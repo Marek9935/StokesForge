@@ -71,6 +71,7 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 
 ## Pièges connus
 
+- Fenêtres détachées (#104) : publier un instantané ne réveille pas le callback `show_viewport_deferred`. `app.rs` compare époque, révision métier et révision des géométries, puis demande le redessin du viewport lecteur ; une mutation appliquée après peinture programme l'image racine de publication. Le Project Manager suit aussi sa sélection, son masquage et l'onglet actif. Aucun réveil périodique au repos.
 - Avant undo/historique ou format `.stf` : `docs/commandes-et-historique.md`, `docs/persistance.md`, puis `docs/archive/rustrewrite/format-fichier-plx.md` pour les options déjà écartées.
 - `docs/archive/rustrewrite/questions-ouvertes.md` §11 : plafonds/compteurs documentés — vérifier avant de "corriger" un comportement qui ressemble à un bug.
 - Rendu : `plotters` est pris **sans ses fonts** (`default-features = false`). Un `DrawingBackend` qui ne surcharge pas `draw_text` **panique** à la première graduation, et un qui ne surcharge pas `estimate_text_size` mesure le texte au nombre d'octets UTF-8 — silencieusement. Toute mesure passe par `stokesforge_render::text` et par nulle part ailleurs (`architecture-choisie.md` §4.3/§4.4).

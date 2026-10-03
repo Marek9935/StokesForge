@@ -50,6 +50,7 @@ Le réflexe coûteux est de réparer là où le symptôme se voit. Table de renv
 | état perdu après enregistrement + rechargement | `stokesforge-persistence` (`convert.rs`, `schema.rs`) — un champ ajouté au modèle sans transport |
 | écran ≠ export SVG/PDF/PNG | mesure de texte (invariant 4) ou fonctionnalité écrite dans un seul backend (invariant 5) — voir **stokesforge-rendu** |
 | figure qui ne se met pas à jour | clé de cache `(revision, rect, pixels_per_point, view_generation)` de `stokesforge-render-egui` |
+| fenêtre détachée à jour seulement au survol | publication dans `app.rs` : `show_viewport_deferred` ne redessine pas en recevant un nouvel instantané. Comparer époque, révision et révision des géométries, puis `request_repaint_of` du lecteur ; une commande appliquée après peinture doit programmer l'image racine de publication (#104). Tester aussi le retour au repos, sans rafraîchissement périodique |
 | action grisée à tort, libellé faux, menu incohérent | `AppState` (`grid_menu`, `undo_label`…), jamais le code egui |
 | comportement présent en flottant, absent en fenêtre détachée | deux écritures là où il en faudrait une (`rg "fn detached_" crates/stokesforge-app/src/`). Factoriser si la contrainte `'static` de `show_viewport_deferred` ne s'y oppose pas, sinon corriger **les deux** |
 | blocage de l'interface | quelque chose de bloquant appelé depuis la boucle de rendu (cf. `ScriptEngine::run`, résolu par un fil détaché + `poll_script`) |

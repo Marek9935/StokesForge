@@ -277,6 +277,11 @@
 //! [`stokesforge_session::Snapshot`] (bon marché — deux `Arc`, voir sa doc), est
 //! resynchronisé depuis `self.state` à chaque image, **avant** l'appel à
 //! `show_viewport_deferred` — même schéma que `ProjectManagerViewModel::tree`.
+//! Une publication dont l'époque, la révision métier ou celle des géométries
+//! change réveille le viewport destinataire (#104) : publier l'instantané
+//! seul ne déclenche pas le callback différé. Au repos, aucun réveil périodique.
+//! Une mutation appliquée après la peinture programme aussi une nouvelle
+//! image racine pour publier cet état avant le redessin des lecteurs.
 //! Toute lecture pure (texte de cellule, colonnes visibles, feuilles d'un
 //! classeur, texte d'une note) passe par les fonctions libres de
 //! `crate::state` factorisées sur un `&Tree` pour l'occasion
@@ -830,6 +835,8 @@ pub struct StokesForgeApp {
 /// plutôt que de mettre `AppState` entière derrière un verrou.
 #[derive(Debug, Default, Clone)]
 struct ProjectManagerViewModel {
+    /// Dernier instantané publié ; une publication modifiée réveille le viewport.
+    snapshot_stamp: Option<(u64, u64, u64)>,
     /// Copie de [`AppState::project_tree`], resynchronisée à chaque image
     /// par [`StokesForgeApp::show_detached_project_manager`] avant l'appel à
     /// `show_viewport_deferred` — `AppState` reste la seule source de
@@ -2608,16 +2615,23 @@ impl StokesForgeApp {
     ///   [`StokesForgeApp::reattach_project_manager`] depuis l'intérieur d'un
     ///   callback qui n'a pas accès à `&mut self`.
     fn show_detached_project_manager(&mut self, ctx: &egui::Context, active_tab: Option<Tab>) {
-        {
+        let changed = {
             let mut model = self
                 .pm_view_model
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
+            let stamp = snapshot_stamp(self.state.snapshot());
+            let changed = model.snapshot_stamp != Some(stamp)
+                || model.selected != self.pm_selection
+                || model.hidden != self.hidden_tabs
+                || model.active_tab != active_tab;
+            model.snapshot_stamp = Some(stamp);
             model.tree = self.state.project_tree();
             model.selected = self.pm_selection.clone();
             model.hidden = self.hidden_tabs.clone();
             model.active_tab = active_tab;
-        }
+            changed
+        };
         let view_model = Arc::clone(&self.pm_view_model);
         let requests = Arc::clone(&self.pm_requests);
         let root_context = ctx.clone();
@@ -2685,6 +2699,11 @@ impl StokesForgeApp {
                 }
             },
         );
+        if changed {
+            ctx.request_repaint_of(egui::ViewportId::from_hash_of(
+                "stokesforge_project_manager_window",
+            ));
+        }
     }
 
     /// Retire `tab` des fenêtres flottantes et le détache en fenêtre OS
@@ -2863,16 +2882,19 @@ impl StokesForgeApp {
             ..
         } = self;
         for (tab, detached) in detached_tabs.iter() {
-            {
+            let changed = {
                 let mut model = detached
                     .view_model
                     .lock()
                     .unwrap_or_else(|err| err.into_inner());
+                let changed = model.snapshot.as_ref().map(snapshot_stamp)
+                    != Some(snapshot_stamp(state.snapshot()));
                 model.snapshot = Some(state.snapshot().clone());
                 if let Some(view_state) = model.view_state.as_mut() {
                     view_state.sync_detached_snapshot(state.snapshot().clone());
                 }
-            }
+                changed
+            };
             let view_model = Arc::clone(&detached.view_model);
             let requests = Arc::clone(&detached.requests);
             let root_context = ctx.clone();
@@ -3133,6 +3155,9 @@ impl StokesForgeApp {
                     }
                 },
             );
+            if changed {
+                ctx.request_repaint_of(egui::ViewportId::from_hash_of(tab));
+            }
         }
     }
 
@@ -3217,6 +3242,7 @@ impl eframe::App for StokesForgeApp {
         // `Context` est un `Arc` : le cloner coûte un compteur, et évite
         // d'emprunter `ui` en lecture pendant qu'on le peint.
         let ctx = ui.ctx().clone();
+        let published_stamp = snapshot_stamp(self.state.snapshot());
         let mut actions: Vec<Action> = Vec::new();
         // Onglets demandés par un clic dans le Project Manager (panneau fixe
         // ou détaché en fenêtre OS) : appliqués après le rendu, comme
@@ -4016,9 +4042,24 @@ impl eframe::App for StokesForgeApp {
         }
 
         self.sync_window_views();
+        if snapshot_stamp(self.state.snapshot()) != published_stamp {
+            // Les commandes sont appliquées après la publication des viewports.
+            // Garantir l'image qui leur transmettra ce nouvel instantané.
+            ctx.request_repaint();
+        }
         self.screenshot(&ctx);
         self.autoquit(&ctx);
     }
+}
+
+/// Les deux compteurs ne suffisent pas après un remplacement de projet :
+/// l'époque appartient aussi à l'identité de l'instantané publié.
+fn snapshot_stamp(snapshot: &Snapshot) -> (u64, u64, u64) {
+    (
+        snapshot.epoch,
+        snapshot.revision,
+        snapshot.geometry_revision,
+    )
 }
 
 /// Un clic ne réactive le contenu que sur son calque : Object Manager
@@ -11927,6 +11968,195 @@ mod graph_layout_tests {
                 "la zone {target:?} reçoit le rouge"
             );
         }
+        session.shutdown().unwrap();
+    }
+
+    /// #104 : aucune entrée de souris dans les viewports lecteurs ; la
+    /// publication d'un nouvel instantané suffit à demander leur redessin.
+    #[test]
+    fn une_mutation_reveille_les_fenetres_detachees_au_repos() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let column = app.state.visible_columns(sheet)[0].0;
+        app.detach_tab(Tab::Book(book));
+        app.detach_tab(Tab::Graph(graph));
+        app.detach_project_manager();
+        let ids = [
+            egui::ViewportId::from_hash_of(Tab::Book(book)),
+            egui::ViewportId::from_hash_of(Tab::Graph(graph)),
+            egui::ViewportId::from_hash_of("stokesforge_project_manager_window"),
+        ];
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let paint = |app: &mut StokesForgeApp| {
+            let mut output = ctx.run_ui(input.clone(), |ui| {
+                app.show_detached_tabs(ui.ctx());
+                app.show_detached_project_manager(ui.ctx(), None);
+            });
+            output.textures_delta.clear();
+            output
+        };
+        let settle = |app: &mut StokesForgeApp| {
+            for _ in 0..8 {
+                let output = paint(app);
+                for id in ids {
+                    let callback = output.viewport_output[&id].viewport_ui_cb.as_ref().unwrap();
+                    let mut child = input.clone();
+                    child.viewport_id = id;
+                    child.viewports.insert(
+                        id,
+                        egui::ViewportInfo {
+                            parent: Some(egui::ViewportId::ROOT),
+                            ..Default::default()
+                        },
+                    );
+                    ctx.run_ui(child, |ui| callback(ui)).textures_delta.clear();
+                }
+            }
+            let output = paint(app);
+            for id in ids {
+                assert_eq!(
+                    output.viewport_output[&id].repaint_delay,
+                    Duration::MAX,
+                    "le viewport {id:?} doit dormir au repos"
+                );
+            }
+        };
+        settle(&mut app);
+        app.state.dispatch(Action::CommitCell {
+            column,
+            row: 0,
+            text: "42".into(),
+        });
+        let output = paint(&mut app);
+        for id in ids {
+            assert_eq!(
+                output.viewport_output[&id].repaint_delay,
+                Duration::ZERO,
+                "la mutation doit réveiller {id:?}"
+            );
+        }
+        settle(&mut app);
+        app.state.set_window_geometry(
+            graph,
+            WindowGeometry {
+                x: 10.0,
+                y: 20.0,
+                width: 500.0,
+                height: 400.0,
+                view: None,
+            },
+        );
+        app.state.refresh();
+        let output = paint(&mut app);
+        for id in ids {
+            assert_eq!(
+                output.viewport_output[&id].repaint_delay,
+                Duration::ZERO,
+                "la géométrie doit réveiller {id:?}"
+            );
+        }
+        settle(&mut app);
+        app.pm_selection.insert(Tab::Book(book));
+        let output = paint(&mut app);
+        assert_eq!(
+            output.viewport_output[&ids[2]].repaint_delay,
+            Duration::ZERO,
+            "une sélection de navigation réveille le Project Manager"
+        );
+        for id in &ids[..2] {
+            assert_eq!(output.viewport_output[id].repaint_delay, Duration::MAX);
+        }
+        settle(&mut app);
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn une_commande_detachee_programme_la_publication_de_son_resultat() {
+        use eframe::App as _;
+        let (session, _graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let column = app.state.visible_columns(sheet)[0].0;
+        let tab = Tab::Book(book);
+        app.detach_tab(tab);
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        egui_extras::install_image_loaders(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        for _ in 0..8 {
+            ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame))
+                .textures_delta
+                .clear();
+        }
+        let mut idle = ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame));
+        idle.textures_delta.clear();
+        assert_eq!(
+            idle.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
+            Duration::MAX
+        );
+        app.detached_tabs[&tab]
+            .requests
+            .lock()
+            .unwrap()
+            .actions
+            .push(Action::CommitCell {
+                column,
+                row: 0,
+                text: "42".into(),
+            });
+        let mut output = ctx.run_ui(input.clone(), |ui| app.ui(ui, &mut frame));
+        output.textures_delta.clear();
+        assert_eq!(
+            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
+            Duration::ZERO,
+            "la commande a changé l'instantané après la peinture"
+        );
+        assert_eq!(app.state.cell_text(column, 0), "42");
+        let mut output = ctx.run_ui(input, |ui| app.ui(ui, &mut frame));
+        output.textures_delta.clear();
+        assert_eq!(
+            output.viewport_output[&egui::ViewportId::from_hash_of(tab)].repaint_delay,
+            Duration::ZERO
+        );
+        assert_eq!(
+            app.detached_tabs[&tab]
+                .view_model
+                .lock()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .revision,
+            app.state.revision(),
+            "l'image programmée publie le résultat"
+        );
         session.shutdown().unwrap();
     }
 
