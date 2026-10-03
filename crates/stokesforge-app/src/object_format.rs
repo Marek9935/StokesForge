@@ -1,4 +1,4 @@
-//! Format d'objet : ce que la barre « Object format » règle sur un objet
+//! Format d'objet : ce que la partie « format d'objet » de la barre « Tools » règle sur un objet
 //! graphique sélectionné (issue #64, après #76), ou le trait d’une série
 //! sélectionnée depuis Object Manager (#83).
 //!

@@ -55,21 +55,19 @@ use crate::text_format::TextFormat;
 pub enum ToolbarId {
     File,
     /// La barre contextuelle (issue #62) : son contenu suit la fenêtre au
-    /// premier plan.
+    /// premier plan. Toujours affichée (#93) ; elle porte aussi le format de
+    /// l'objet graphique sélectionné (issue #64), fusionné avec elle.
     Tools,
     /// Le format du texte (issue #63) : propre au graphe au premier plan.
     Text,
-    /// Le format de l'objet graphique sélectionné (issue #64).
-    Object,
     ObjectManager,
 }
 
 impl ToolbarId {
-    pub const ALL: [ToolbarId; 5] = [
+    pub const ALL: [ToolbarId; 4] = [
         ToolbarId::File,
         ToolbarId::Tools,
         ToolbarId::Text,
-        ToolbarId::Object,
         ToolbarId::ObjectManager,
     ];
 
@@ -79,7 +77,6 @@ impl ToolbarId {
             ToolbarId::File => tr!("toolbar-file"),
             ToolbarId::Tools => tr!("toolbar-tools"),
             ToolbarId::Text => tr!("toolbar-text"),
-            ToolbarId::Object => tr!("toolbar-object"),
             ToolbarId::ObjectManager => tr!("toolbar-object-manager"),
         }
     }
@@ -90,7 +87,6 @@ impl ToolbarId {
             ToolbarId::File => tr!("toolbar-file", "hint"),
             ToolbarId::Tools => tr!("toolbar-tools", "hint"),
             ToolbarId::Text => tr!("toolbar-text", "hint"),
-            ToolbarId::Object => tr!("toolbar-object", "hint"),
             ToolbarId::ObjectManager => tr!("toolbar-object-manager", "hint"),
         }
     }
@@ -131,7 +127,7 @@ impl Default for ToolbarLayout {
                     visible: true,
                     // Les barres de format sont larges : elles ont leur propre rangée.
                     placement: Placement::Docked {
-                        row: usize::from(matches!(id, ToolbarId::Text | ToolbarId::Object)),
+                        row: usize::from(matches!(id, ToolbarId::Text)),
                     },
                 })
                 .collect(),
@@ -490,7 +486,7 @@ impl TextFormatState {
 /// Ce que la barre contextuelle montre : décidé par la fenêtre au premier plan.
 #[derive(Debug, Clone, Default)]
 pub enum ToolsContext {
-    /// Matrice, note, ou aucune fenêtre : pas de barre (jamais de bouton mort).
+    /// Matrice, note, ou aucune fenêtre : les outils du graphe, grisés.
     #[default]
     None,
     Graph {
@@ -524,14 +520,13 @@ pub struct BarEnv {
 }
 
 impl BarEnv {
-    /// Une barre sans contenu pour cette fenêtre ne se peint pas.
+    /// Une barre sans contenu pour cette fenêtre ne se peint pas. La barre
+    /// « Outils » se peint toujours (#93) : sans fenêtre pour l'employer, ses
+    /// boutons sont grisés plutôt que la barre absente.
     fn shows(&self, id: ToolbarId) -> bool {
         match id {
-            ToolbarId::File | ToolbarId::ObjectManager => true,
-            ToolbarId::Tools => !matches!(self.tools, ToolsContext::None),
-            ToolbarId::Text | ToolbarId::Object => {
-                matches!(self.tools, ToolsContext::Graph { .. })
-            }
+            ToolbarId::File | ToolbarId::Tools | ToolbarId::ObjectManager => true,
+            ToolbarId::Text => matches!(self.tools, ToolsContext::Graph { .. }),
         }
     }
 }
@@ -678,7 +673,6 @@ pub fn bar_contents(
         }
         ToolbarId::Tools => tools_contents(ui, env, requests),
         ToolbarId::Text => text_format_contents(ui, env, requests),
-        ToolbarId::Object => object_format_contents(ui, env, requests),
     }
 }
 
@@ -708,92 +702,8 @@ fn tool_button(
 /// le menu contextuel offrent déjà.
 fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
     match &env.tools {
-        ToolsContext::None => {}
-        ToolsContext::Graph { graph, tool } => {
-            let mut tool_entry = |ui: &mut egui::Ui, kind, icon, label: String, hint: String| {
-                if tool_button(ui, icon, label, Some(hint), true, *tool == kind) {
-                    requests.push(ToolbarRequest::SetGraphTool(kind));
-                }
-            };
-            tool_entry(
-                ui,
-                GraphTool::Pointer,
-                Icon::Pointer,
-                tr!("tool-pointer"),
-                tr!("tool-pointer", "hint"),
-            );
-            tool_entry(
-                ui,
-                GraphTool::Text,
-                Icon::TextTool,
-                tr!("tool-text"),
-                tr!("tool-text", "hint"),
-            );
-            // Objets graphiques (issue #76) : un outil par sorte, comme
-            // Origin.
-            for (kind, icon, label, hint) in [
-                (
-                    GraphTool::Rectangle,
-                    Icon::ShapeRectangle,
-                    tr!("tool-rectangle"),
-                    tr!("tool-rectangle", "hint"),
-                ),
-                (
-                    GraphTool::Ellipse,
-                    Icon::ShapeEllipse,
-                    tr!("tool-ellipse"),
-                    tr!("tool-ellipse", "hint"),
-                ),
-                (
-                    GraphTool::Line,
-                    Icon::ShapeLine,
-                    tr!("tool-line"),
-                    tr!("tool-line", "hint"),
-                ),
-                (
-                    GraphTool::Arrow,
-                    Icon::ShapeArrow,
-                    tr!("tool-arrow"),
-                    tr!("tool-arrow", "hint"),
-                ),
-            ] {
-                tool_entry(ui, kind, icon, label, hint);
-            }
-            ui.separator();
-            // Le groupe zoom : l'outil et sa remise à zéro côte à côte.
-            tool_entry(
-                ui,
-                GraphTool::ZoomBox,
-                Icon::ZoomTool,
-                tr!("tool-zoom"),
-                tr!("tool-zoom", "hint"),
-            );
-            if tool_button(
-                ui,
-                Icon::ResetZoom,
-                tr!("action-reset-zoom"),
-                Some(tr!("action-reset-zoom", "hint")),
-                true,
-                false,
-            ) {
-                requests.push(ToolbarRequest::ResetZoom);
-            }
-            ui.separator();
-            if tool_button(
-                ui,
-                Icon::Properties,
-                tr!("menu-graph-properties"),
-                Some(tr!("menu-graph-properties", "hint")),
-                true,
-                false,
-            ) {
-                requests.push(ToolbarRequest::Action(Box::new(Action::OpenPlotSettings {
-                    graph: *graph,
-                    tab: crate::state::PlotSettingsTab::Graph,
-                    axis: None,
-                })));
-            }
-        }
+        ToolsContext::None => graph_tools(ui, None, None, requests),
+        ToolsContext::Graph { graph, tool } => graph_tools(ui, Some(*graph), Some(*tool), requests),
         ToolsContext::Book {
             book,
             sheet,
@@ -853,9 +763,122 @@ fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarReq
             }
         }
     }
+    ui.separator();
+    object_format_contents(ui, env, requests);
 }
 
-/// La barre de format d'objet : couleur de trait, couleur de remplissage
+/// Les outils du graphe. Sans graphe au premier plan (`graph` vide), ils
+/// restent affichés mais grisés, avec l'info-bulle qui dit comment les
+/// employer (#93) : la barre ne change pas de forme quand on change de fenêtre.
+fn graph_tools(
+    ui: &mut egui::Ui,
+    graph: Option<NodeId>,
+    tool: Option<GraphTool>,
+    requests: &mut Vec<ToolbarRequest>,
+) {
+    let enabled = graph.is_some();
+    let hint = |hint: String| {
+        if enabled {
+            hint
+        } else {
+            tr!("toolbar-tools", "disabled")
+        }
+    };
+    let mut tool_entry = |ui: &mut egui::Ui, kind, icon, label: String, tip: String| {
+        if tool_button(
+            ui,
+            icon,
+            label,
+            Some(hint(tip)),
+            enabled,
+            tool == Some(kind),
+        ) {
+            requests.push(ToolbarRequest::SetGraphTool(kind));
+        }
+    };
+    tool_entry(
+        ui,
+        GraphTool::Pointer,
+        Icon::Pointer,
+        tr!("tool-pointer"),
+        tr!("tool-pointer", "hint"),
+    );
+    tool_entry(
+        ui,
+        GraphTool::Text,
+        Icon::TextTool,
+        tr!("tool-text"),
+        tr!("tool-text", "hint"),
+    );
+    // Objets graphiques (issue #76) : un outil par sorte, comme
+    // Origin.
+    for (kind, icon, label, hint) in [
+        (
+            GraphTool::Rectangle,
+            Icon::ShapeRectangle,
+            tr!("tool-rectangle"),
+            tr!("tool-rectangle", "hint"),
+        ),
+        (
+            GraphTool::Ellipse,
+            Icon::ShapeEllipse,
+            tr!("tool-ellipse"),
+            tr!("tool-ellipse", "hint"),
+        ),
+        (
+            GraphTool::Line,
+            Icon::ShapeLine,
+            tr!("tool-line"),
+            tr!("tool-line", "hint"),
+        ),
+        (
+            GraphTool::Arrow,
+            Icon::ShapeArrow,
+            tr!("tool-arrow"),
+            tr!("tool-arrow", "hint"),
+        ),
+    ] {
+        tool_entry(ui, kind, icon, label, hint);
+    }
+    ui.separator();
+    // Le groupe zoom : l'outil et sa remise à zéro côte à côte.
+    tool_entry(
+        ui,
+        GraphTool::ZoomBox,
+        Icon::ZoomTool,
+        tr!("tool-zoom"),
+        tr!("tool-zoom", "hint"),
+    );
+    if tool_button(
+        ui,
+        Icon::ResetZoom,
+        tr!("action-reset-zoom"),
+        Some(hint(tr!("action-reset-zoom", "hint"))),
+        enabled,
+        false,
+    ) {
+        requests.push(ToolbarRequest::ResetZoom);
+    }
+    ui.separator();
+    if tool_button(
+        ui,
+        Icon::Properties,
+        tr!("menu-graph-properties"),
+        Some(hint(tr!("menu-graph-properties", "hint"))),
+        enabled,
+        false,
+    ) {
+        if let Some(graph) = graph {
+            requests.push(ToolbarRequest::Action(Box::new(Action::OpenPlotSettings {
+                graph,
+                tab: crate::state::PlotSettingsTab::Graph,
+                axis: None,
+            })));
+        }
+    }
+}
+
+/// Le format d'objet, à la fin de la barre « Outils » (#93) : couleur de trait, couleur de remplissage
 /// (l'opacité se règle dans le sélecteur, `#RRGGBBAA`), épaisseur. Grisée tant
 /// qu'aucun objet n'est sélectionné.
 fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
@@ -1470,7 +1493,7 @@ mod tests {
             layout.docked_rows(),
             vec![
                 vec![ToolbarId::File, ToolbarId::Tools, ToolbarId::ObjectManager],
-                vec![ToolbarId::Text, ToolbarId::Object]
+                vec![ToolbarId::Text]
             ]
         );
         assert!(layout.floating().is_empty());
@@ -1511,10 +1534,7 @@ mod tests {
         layout.float(ToolbarId::File, Pos2::new(120.0, 80.0));
         assert_eq!(
             layout.docked_rows(),
-            vec![
-                vec![ToolbarId::Tools],
-                vec![ToolbarId::Text, ToolbarId::Object]
-            ]
+            vec![vec![ToolbarId::Tools], vec![ToolbarId::Text]]
         );
         assert_eq!(
             layout.floating(),
@@ -1526,7 +1546,7 @@ mod tests {
             layout.docked_rows(),
             vec![
                 vec![ToolbarId::Tools],
-                vec![ToolbarId::Text, ToolbarId::Object],
+                vec![ToolbarId::Text],
                 vec![ToolbarId::File]
             ]
         );
@@ -1536,7 +1556,7 @@ mod tests {
             layout.docked_rows(),
             vec![
                 vec![ToolbarId::File, ToolbarId::Tools],
-                vec![ToolbarId::Text, ToolbarId::Object]
+                vec![ToolbarId::Text]
             ]
         );
     }
@@ -1545,26 +1565,65 @@ mod tests {
     fn les_rangees_se_comptent_sans_les_barres_sans_contenu() {
         let mut layout = ToolbarLayout::default();
         layout.set_visible(ToolbarId::ObjectManager, false);
-        layout.set_visible(ToolbarId::Text, false);
-        layout.set_visible(ToolbarId::Object, false);
-        // Tools seule en rangée 0, File en rangée 1.
-        layout.dock(ToolbarId::Tools, 0, 0);
+        layout.set_visible(ToolbarId::Tools, false);
+        // Text seule en rangée 0, File en rangée 1.
+        layout.dock(ToolbarId::Text, 0, 0);
         layout.dock(ToolbarId::File, 1, 0);
         assert_eq!(
             layout.docked_rows(),
-            vec![vec![ToolbarId::Tools], vec![ToolbarId::File]]
+            vec![vec![ToolbarId::Text], vec![ToolbarId::File]]
         );
-        // Tools n'a rien à montrer : File est alors la rangée 0 à l'écran.
-        let not_tools = |id| id != ToolbarId::Tools;
+        // Text n'a rien à montrer (pas de graphe) : File est alors la rangée 0
+        // à l'écran.
+        let not_text = |id| id != ToolbarId::Text;
         assert_eq!(
-            layout.docked_rows_where(not_tools),
+            layout.docked_rows_where(not_text),
             vec![vec![ToolbarId::File]]
         );
-        layout.dock_where(ToolbarId::File, 0, 0, not_tools);
+        layout.dock_where(ToolbarId::File, 0, 0, not_text);
         assert_eq!(
             layout.docked_rows(),
-            vec![vec![ToolbarId::Tools], vec![ToolbarId::File]]
+            vec![vec![ToolbarId::Text], vec![ToolbarId::File]]
         );
+    }
+
+    #[test]
+    fn la_barre_outils_se_peint_toujours_celle_du_texte_seulement_avec_un_graphe() {
+        let none = BarEnv::default();
+        assert!(none.shows(ToolbarId::Tools));
+        assert!(!none.shows(ToolbarId::Text));
+        let book = BarEnv {
+            tools: ToolsContext::Book {
+                book: NodeId::from_raw(1),
+                sheet: None,
+                columns: Vec::new(),
+            },
+            ..BarEnv::default()
+        };
+        assert!(book.shows(ToolbarId::Tools));
+        assert!(!book.shows(ToolbarId::Text));
+        let graph = BarEnv {
+            tools: ToolsContext::Graph {
+                graph: NodeId::from_raw(2),
+                tool: GraphTool::default(),
+            },
+            ..BarEnv::default()
+        };
+        assert!(graph.shows(ToolbarId::Tools));
+        assert!(graph.shows(ToolbarId::Text));
+    }
+
+    #[test]
+    fn une_ancienne_disposition_avec_la_barre_objet_se_relit_sans_elle() {
+        // Les préférences d'avant la fusion (#93) portent une entrée « object » :
+        // elle est ignorée, les autres barres gardent leur place.
+        let value = serde_json::json!({ "entries": [
+            { "id": "object", "visible": false, "placement": { "kind": "docked", "row": 1 } },
+            { "id": "tools", "visible": true, "placement": { "kind": "docked", "row": 0 } },
+        ]});
+        let layout = ToolbarLayout::from_json(&value);
+        assert!(layout.is_visible(ToolbarId::Tools));
+        assert_eq!(layout.entries.len(), ToolbarId::ALL.len());
     }
 
     #[test]
@@ -1572,7 +1631,6 @@ mod tests {
         let mut layout = ToolbarLayout::default();
         layout.set_visible(ToolbarId::ObjectManager, false);
         layout.set_visible(ToolbarId::Text, false);
-        layout.set_visible(ToolbarId::Object, false);
         layout.set_visible(ToolbarId::File, false);
         assert_eq!(layout.docked_rows(), vec![vec![ToolbarId::Tools]]);
         layout.set_visible(ToolbarId::File, true);

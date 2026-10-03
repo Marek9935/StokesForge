@@ -487,14 +487,17 @@ accueil en haut seulement.
   Fichier (#61, #73) : nouveau projet, classeur, graphique vide, import,
   ouvrir, enregistrer, enregistrer sous,
   exporter (grisé sans graphe au premier plan).
-- Barre contextuelle `Tools` (#62) : son contenu suit la fenêtre au premier
-  plan (`ToolsContext`, calculé par `StokesForgeApp::tools_context`). Graphe : les
-  outils Pointeur / Zoom / Texte (`GraphTool` de la vue, bouton enfoncé pour
-  l'outil actif), réinitialiser le zoom, propriétés. Classeur : ajouter
-  feuille, ajouter colonne, tracer la sélection (courbe, nuage, barres ; grisé
-  sans colonne sélectionnée). Matrice, note, aucune fenêtre : la barre
-  disparaît (jamais de bouton mort) et ses voisines se recalent
-  (`ToolbarLayout::docked_rows_where`).
+- Barre contextuelle `Tools` (#62), **toujours affichée** (#93) : son contenu
+  suit la fenêtre au premier plan (`ToolsContext`, calculé par
+  `StokesForgeApp::tools_context`). Graphe : les outils Pointeur / Zoom / Texte
+  (`GraphTool` de la vue, bouton enfoncé pour l'outil actif), réinitialiser le
+  zoom, propriétés. Classeur : ajouter feuille, ajouter colonne, tracer la
+  sélection (courbe, nuage, barres ; grisé sans colonne sélectionnée). Matrice,
+  note, aucune fenêtre : les outils du graphe restent là, **grisés**, avec
+  l'info-bulle `toolbar-tools.disabled` (la barre ne change pas de forme).
+  Après un séparateur, elle porte le **format de l'objet** sélectionné (#64,
+  fusionné avec elle par #93 ; `object_format_contents`), grisé sans objet
+  sélectionné. Elle se masque encore par le menu View.
 - Barre `Text` (format du texte, #63) : visible avec un graphe au premier
   plan, sur sa propre rangée par défaut. Police, corps, couleur, gras,
   italique, indice, exposant, formule. Les textes du graphe étant déjà du
@@ -953,8 +956,8 @@ glisser le corps déplace, glisser une poignée redimensionne, Suppr retire. Men
 « Graph » et clic droit sur l'objet : « Bring to Front », « Send to Back »,
 « Delete Object » (`shape_order_buttons`). Chaque geste validé est **une**
 `Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec` ou `EditPlotSpec`. La
-barre « Object format » (`ToolbarId::Object`, issue #64 ; `object_format.rs`)
-règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
+partie « format d'objet » de la barre `Tools` (issue #64, fusionnée par #93 ;
+`object_format.rs`) règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
 une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
 épaisseur. Chaque réglage est un champ du modèle posé par une `Action::SetShape`
 (`App::format_object`). Côté script : `pyst.add_shape` / `pyst.remove_shape` (`docs/python-et-script.md`).
@@ -1523,7 +1526,7 @@ commande `EditPlotSpec`, avec le motif d'historique `PlotEditKind::Visibility`.
 
 Cliquer un contenu dans l'arbre ou sur le tracé synchronise la sélection, en
 gras dans l'arbre ; la série est surlignée sur la figure. Un contenu masqué
-reste sélectionnable dans l'arbre. La barre de format d'objet règle le trait
+reste sélectionnable dans l'arbre. La partie format d'objet de la barre `Tools` règle le trait
 d'une série ou d'un objet ; celle de texte règle le texte sélectionné. Le
 panneau et ces barres suivent aussi une fenêtre de graphique détachée.
 

@@ -753,6 +753,7 @@ status-toolbars-not-saved = Could not save the toolbar layout: { $detail }
 
 toolbar-tools = Tools
     .hint = Shows or hides the toolbar of the active window
+    .disabled = Bring a graph window to the front first
 tool-pointer = Pointer
     .hint = Drag to pan, or to move and resize texts and objects; Ctrl + wheel zooms
 tool-zoom = Zoom
@@ -773,8 +774,6 @@ toolbar-plot-selection = Plot Selection
 toolbar-text = Text format
     .hint = Shows or hides the text format toolbar of the active graph
 format-disabled = Select a text in the graph, or edit one, to format it. Titles and the legend only take a font and a size
-toolbar-object = Object format
-    .hint = Shows or hides the object format toolbar of the active graph
 format-object-disabled = Select an object in the graph to format it
 format-object-line-color = Line color
     .hint = Sets the color of the selected object's line

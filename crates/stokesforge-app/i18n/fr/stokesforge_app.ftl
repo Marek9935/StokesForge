@@ -749,6 +749,7 @@ status-toolbars-not-saved = Impossible d'enregistrer la disposition des barres d
 
 toolbar-tools = Outils
     .hint = Affiche ou masque la barre d'outils de la fenêtre active
+    .disabled = Mettez d'abord une fenêtre de graphique au premier plan
 tool-pointer = Pointeur
     .hint = Glisser pour déplacer la vue, ou pour déplacer et redimensionner textes et objets ; Ctrl + molette pour zoomer
 tool-zoom = Zoom
@@ -768,8 +769,6 @@ toolbar-plot-selection = Tracer la sélection
     .disabled = Sélectionnez d'abord des colonnes dans la feuille
 toolbar-text = Format du texte
     .hint = Affiche ou masque la barre de format du texte du graphique actif
-toolbar-object = Format de l'objet
-    .hint = Affiche ou masque la barre de format de l'objet du graphique actif
 format-object-disabled = Sélectionnez un objet du graphique pour le mettre en forme
 format-object-line-color = Couleur du trait
     .hint = Règle la couleur du trait de l'objet sélectionné
