@@ -748,7 +748,6 @@ color-palette-grayscale = Grayscale (gradient)
 
 toolbar-file = File
     .hint = Shows or hides the File toolbar
-toolbar-move = Drag to move this toolbar
 status-toolbars-not-saved = Could not save the toolbar layout: { $detail }
 
 toolbar-tools = Tools

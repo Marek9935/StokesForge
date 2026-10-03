@@ -744,7 +744,6 @@ color-palette-grayscale = Niveaux de gris (dégradé)
 
 toolbar-file = Fichier
     .hint = Affiche ou masque la barre Fichier
-toolbar-move = Glisser pour déplacer cette barre d'outils
 status-toolbars-not-saved = Impossible d'enregistrer la disposition des barres d'outils : { $detail }
 
 toolbar-tools = Outils

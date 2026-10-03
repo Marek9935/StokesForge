@@ -102,7 +102,7 @@ Un nouveau projet encore vide ne demande pas de confirmation.
 Le remplacement passe par `SessionHandle::new_project`, vide l'historique et
 les géométries et change l'époque pour invalider les anciennes références
 Python. Les fenêtres de contenu, caches et sélections du projet précédent
-sont oubliés, et ses fenêtres détachées se ferment. La disposition des barres
+sont oubliés, et ses fenêtres détachées se ferment. La visibilité des barres
 et la langue sont conservées. Le geste est grisé pendant un script, un import
 en cours ou une macro ouverte. Le premier **Save** (« Enregistrer ») demande
 une destination, puis les suivants utilisent ce fichier.
@@ -467,17 +467,19 @@ d'exécution du script, hors périmètre de cette tâche.
 
 ### Barres d'outils (#59, #60)
 
-`src/toolbar.rs`. Des barres de boutons-icônes, **déplaçables à la souris** :
-chaque barre porte une poignée à gauche ; la saisir la détache dans une
-`egui::Area` (calque Foreground) qui suit le pointeur. Relâchée sur la zone
-d'accueil (le panneau `stokesforge_toolbars`, sous la barre de menu, plus une
-demi-rangée qui ouvre une nouvelle rangée) elle s'y range ; ailleurs elle
-devient flottante. Le *pourquoi* du conteneur maison (ni `Panel`, ni `Window`
-brute, ni `show_window_in_layer`) est dans le `//!` du module. Version 1 :
-accueil en haut seulement.
+`src/toolbar.rs`. Des barres de boutons-icônes, **fixes** (#108) : leur
+contenu et leur place sont figés dans le logiciel, dans le panneau
+`stokesforge_toolbars` sous la barre de menu. Ni poignée, ni glisser-déposer,
+ni barre flottante ou verticale, ni logique de fenêtre étroite. Disposition en
+dur (`ToolbarId::row`) : rangée 0 = Fichier, Outils (puis Object Manager,
+jusqu'à #109) ; rangée 1 = Texte, large, seule sur sa rangée. Chaque barre se
+masque par le menu View ; seule cette **visibilité** est une préférence
+(`preferences.json`), jamais une donnée du `.stf`. Un ancien champ `placement`
+est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un
+`egui::Panel::top` (ni `Window` brute, ni `show_window_in_layer`).
 
-- `ToolbarLayout` (pur, testé) : barres, visibilité, emplacement ;
-  `drop_target` décide du dépôt. `ToolbarState` n'est que la glu egui.
+- `ToolbarLayout` (pur, testé) : visibilité par barre et rangées visibles.
+  `ToolbarState` n'est que la glu egui.
 - Un bouton est un `ToolbarButton` : icône du composant commun, info-bulle
   (libellé + raccourci + `.hint`), grisage. Il pousse la même `Action` que le
   menu — jamais une seconde écriture. Le contenu de chaque barre est
@@ -498,8 +500,9 @@ accueil en haut seulement.
   Après un séparateur, elle porte le **format de l'objet** sélectionné (#64,
   fusionné avec elle par #93 ; `object_format_contents`), grisé sans objet
   sélectionné. Elle se masque encore par le menu View.
-- Barre `Text` (format du texte, #63) : visible avec un graphe au premier
-  plan, sur sa propre rangée par défaut. Police, corps, couleur, gras,
+- Barre `Text` (format du texte, #63), **toujours affichée** (#108) sur sa
+  propre rangée : sans graphe au premier plan ses boutons sont grisés, avec
+  l'info-bulle `toolbar-tools.disabled` (comme `Tools`, #93). Police, corps, couleur, gras,
   italique, indice, exposant, formule. Les textes du graphe étant déjà du
   markup Typst, gras, italique, indice, exposant, formule, couleur et corps
   d'un passage **écrivent des balises dans le texte** (`text_format::apply`,
