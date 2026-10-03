@@ -602,3 +602,77 @@ fn le_corps_d_une_zone_de_texte_change_sa_taille() {
         );
     }
 }
+
+/// Poignées de sélection (#98) : une barre négative porte la sienne en bas,
+/// côté valeur, pas sur la ligne de base ; une barre positive en haut.
+#[test]
+fn l_extremite_libre_d_une_barre_est_du_cote_de_sa_valeur() {
+    use stokesforge_plot::PlotType;
+    let drawn = geometrie(&[("X", vec![1.0, 2.0]), ("Y", vec![10.0, -10.0])], |ids| {
+        let mut series = SeriesSpec::new_xy(ids[0], ids[1]);
+        series.plot_type = PlotType::Bar;
+        un_panneau(series, |_| {})
+    });
+    let bars = &drawn.panels[0].series_geometry[0];
+    assert_eq!(bars.bars.len(), 2);
+    assert_eq!(bars.bar_tips.len(), 2);
+    let (positive, negative) = (bars.bars[0], bars.bars[1]);
+    // Pixels : y croît vers le bas.
+    assert_eq!(bars.bar_tips[0].1, positive.0 .1, "{bars:?}");
+    assert_eq!(bars.bar_tips[1].1, negative.1 .1, "{bars:?}");
+    assert_eq!(bars.bar_tips[0].0, (positive.0 .0 + positive.1 .0) / 2);
+}
+
+/// Les moustaches d'une série à barres d'erreur se désignent, mais ne
+/// forment pas un tronçon de la ligne : elles ne portent pas de poignée.
+#[test]
+fn les_moustaches_ne_sont_pas_des_troncons_de_la_ligne() {
+    use stokesforge_plot::PlotType;
+    let drawn = geometrie(
+        &[
+            ("X", vec![1.0, 2.0, 3.0]),
+            ("Y", vec![10.0, 20.0, 15.0]),
+            ("E", vec![1.0, 2.0, 1.0]),
+        ],
+        |ids| {
+            let mut series = SeriesSpec::new_xy(ids[0], ids[1]);
+            series.y_error = Some(ids[2]);
+            series.plot_type = PlotType::ErrorBar;
+            un_panneau(series, |_| {})
+        },
+    );
+    let series = &drawn.panels[0].series_geometry[0];
+    assert_eq!(series.paths.len(), 1, "{series:?}");
+    assert_eq!(series.paths[0].len(), 3);
+    assert!(!series.whiskers.is_empty());
+    let handles = series.handle_centers(|(x, y)| (f64::from(x), f64::from(y)));
+    assert!(!handles.is_empty());
+    // Toutes les poignées sont sur la ligne, aucune sur une moustache.
+    for handle in handles {
+        let on_line = series.paths[0].windows(2).any(|s| {
+            let (a, b) = (s[0], s[1]);
+            let (dx, dy) = (f64::from(b.0 - a.0), f64::from(b.1 - a.1));
+            let cross = dx * (handle.1 - f64::from(a.1)) - dy * (handle.0 - f64::from(a.0));
+            (cross / dx.hypot(dy)).abs() < 1e-6
+                && handle.0 >= f64::from(a.0.min(b.0)) - 1e-6
+                && handle.0 <= f64::from(a.0.max(b.0)) + 1e-6
+        });
+        assert!(on_line, "poignée hors de la ligne : {handle:?}");
+    }
+}
+
+/// L'encre des poignées est l'encre automatique du fond de la figure :
+/// sombre sur le fond par défaut (transparent, jugé sur du blanc), blanche
+/// sur un fond sombre.
+#[test]
+fn l_encre_des_poignees_suit_le_fond_de_la_figure() {
+    use stokesforge_render::color::{auto_ink, DARK_INK, LIGHT_INK};
+    use stokesforge_render::pipeline::figure_ink;
+    let mut spec = PlotSpec::empty("Encre");
+    assert_eq!(figure_ink(&spec), DARK_INK);
+    spec.background = "#101828".to_owned();
+    assert_eq!(figure_ink(&spec), LIGHT_INK);
+    assert_eq!(figure_ink(&spec), auto_ink((0x10, 0x18, 0x28)));
+    spec.background = "#ffffff".to_owned();
+    assert_eq!(figure_ink(&spec), DARK_INK);
+}

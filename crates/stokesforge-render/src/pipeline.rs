@@ -338,6 +338,19 @@ impl DrawnPlot {
     }
 }
 
+/// Le fond de la figure, blanc s'il n'est pas lisible.
+fn figure_background(spec: &PlotSpec) -> (u8, u8, u8, u8) {
+    rgba_or(&spec.background, opaque(PAPER))
+}
+
+/// Encre automatique de la figure : celle de tout texte et de toute échelle
+/// dont la couleur est laissée vide, et des poignées d'une série
+/// sélectionnée (#98) — blanche sur un fond sombre, sombre sinon. Un fond
+/// (semi-)transparent est jugé composé sur du blanc, comme l'écran le peint.
+pub fn figure_ink(spec: &PlotSpec) -> (u8, u8, u8) {
+    auto_ink(over_white(figure_background(spec)))
+}
+
 /// Trace le graphe résolu sur le backend donné.
 ///
 /// Consomme le backend — c'est la convention de Plotters
@@ -360,11 +373,8 @@ pub fn draw_on<DB: DrawingBackend>(
     plot: &ResolvedPlot<'_>,
 ) -> Result<DrawnPlot, DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = plot.spec;
-    let background = rgba_or(&spec.background, opaque(PAPER));
-    // Encre automatique : celle de tout texte et de toute échelle dont la
-    // couleur est laissée vide — blanche sur un fond sombre, sombre sinon.
-    // Un fond (semi-)transparent est jugé composé sur du blanc.
-    let ink = auto_ink(over_white(background));
+    let background = figure_background(spec);
+    let ink = figure_ink(spec);
     // Un fond d'opacité nulle n'est pas peint du tout : la figure exportée
     // (SVG, PNG, PDF) n'a pas de fond, pour s'intégrer à une autre
     // présentation.
@@ -1223,7 +1233,10 @@ fn paint_series<DB: DrawingBackend>(
                 .map(|(left, right, top)| (map((*left, *top)), map((*right, baseline))))
                 .collect();
             paint::bars(screen, &rects, &spec.line, ink)?;
-            geometry.bars = rects
+            // `a` est le coin côté valeur, `b` le coin côté ligne de base :
+            // l'extrémité libre de la barre (la place de sa poignée de
+            // sélection, #98) se lit avant que le rectangle soit normalisé.
+            (geometry.bars, geometry.bar_tips) = rects
                 .into_iter()
                 .filter_map(|(a, b)| {
                     let (mut left, mut right) = (a.0.min(b.0), a.0.max(b.0));
@@ -1234,9 +1247,14 @@ fn paint_series<DB: DrawingBackend>(
                         top = top.max(bounds.y_min as i32);
                         bottom = bottom.min(bounds.y_max as i32);
                     }
-                    (left <= right && top <= bottom).then_some(((left, top), (right, bottom)))
+                    // `clamp` seulement une fois le rectangle jugé non vide :
+                    // il panique sur des bornes inversées.
+                    (left <= right && top <= bottom).then(|| {
+                        let tip = ((left + right) / 2, a.1.clamp(top, bottom));
+                        (((left, top), (right, bottom)), tip)
+                    })
                 })
-                .collect();
+                .unzip();
             Ok((0, geometry))
         }
         Geometry::Curve { points, whiskers } => {
@@ -1287,13 +1305,13 @@ fn paint_series<DB: DrawingBackend>(
                                 (a.0 as f64, a.1 as f64),
                                 (b.0 as f64, b.1 as f64),
                             ) {
-                                geometry.paths.push(vec![
+                                geometry.whiskers.push((
                                     (a.0.round() as i32, a.1.round() as i32),
                                     (b.0.round() as i32, b.1.round() as i32),
-                                ]);
+                                ));
                             }
                         }
-                        None => geometry.paths.push(vec![a, b]),
+                        None => geometry.whiskers.push((a, b)),
                     }
                 }
             }

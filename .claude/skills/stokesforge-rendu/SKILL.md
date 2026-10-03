@@ -79,6 +79,14 @@ Corollaire pratique : une traduction de donnée (une cellule mixte qui devient
   figure à chaque pression de bouton — payer cher exactement au moment qu'on
   voulait alléger. `view_generation`, lui, **doit** y être : un zoom change la
   géométrie tracée, pas seulement sa finition.
+- **Une sélection n'entre ni dans la clé ni dans le pipeline.** Les poignées
+  d'une série sélectionnée (#98 : carrés de `HANDLE_SIDE` tous les
+  `HANDLE_SPACING` pixels d'affichage le long du tracé, encre
+  `pipeline::figure_ink`, jamais de surlignage qui masquerait le style) sont
+  placées et dessinées par `stokesforge_render::series_selection`
+  (`paint_handles`, générique sur le backend), puis posées par `GraphView`
+  **par-dessus** la figure en cache : sélectionner ne reconstruit rien, et
+  l'export ne les voit pas. Un futur repère de sélection suit ce motif.
 - **Zoom et pan ne sont pas des mutations du modèle.** `ViewState` vit sur
   `GraphView`, à côté du `PlotSpec`, et n'y touche jamais : personne ne veut
   annuler un zoom par Ctrl+Z. La règle « toute mutation passe par une

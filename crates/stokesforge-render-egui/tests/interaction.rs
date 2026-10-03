@@ -700,3 +700,140 @@ fn object_manager_selectionne_les_contenus_masques_sans_deux_selections() {
     );
     assert_eq!(view.selected_annotation(), None);
 }
+
+/// Peint une image sans événement et rend les formes produites, aplaties,
+/// et si la figure venait du cache.
+fn formes(
+    context: &egui::Context,
+    view: &mut GraphView,
+    snapshot: &Snapshot,
+    graph: NodeId,
+) -> (Vec<egui::Shape>, bool) {
+    let mut depuis_le_cache = false;
+    let mut sortie = context.run_ui(egui::RawInput::default(), |ui| {
+        depuis_le_cache = view.paint(ui, RECT, snapshot, graph).expect("peinture");
+    });
+    sortie.textures_delta.clear();
+    fn aplatir(shape: egui::Shape, out: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.into_iter().for_each(|s| aplatir(s, out)),
+            shape => out.push(shape),
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in sortie.shapes {
+        aplatir(clipped.shape, &mut out);
+    }
+    (out, depuis_le_cache)
+}
+
+/// Les poignées : carrés pleins de côté `HANDLE_SIDE`, couleur `ink`.
+fn poignees(shapes: &[egui::Shape], ink: (u8, u8, u8)) -> Vec<Rect> {
+    let side = stokesforge_render::series_selection::HANDLE_SIDE as f32;
+    let ink = egui::Color32::from_rgb(ink.0, ink.1, ink.2);
+    shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Rect(rect)
+                if rect.fill == ink
+                    && (rect.rect.width() - side).abs() < 1e-3
+                    && (rect.rect.height() - side).abs() < 1e-3 =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// #98 : une série sélectionnée porte de petits carrés posés le long de son
+/// tracé, à l'encre automatique du fond, sans que la figure (le tracé de la
+/// courbe compris) change ni soit reconstruite.
+#[test]
+fn une_serie_selectionnee_porte_des_poignees_sans_changer_son_trace() {
+    use stokesforge_commands::Command;
+    use stokesforge_plot::SeriesRef;
+    use stokesforge_render::color::{DARK_INK, LIGHT_INK};
+    use stokesforge_render::series_selection::HANDLE_SPACING;
+    let (session, graph) = banc();
+    let handle = session.handle();
+    let snapshot = handle.snapshot().unwrap();
+    let stokesforge_core::node::NodeKind::Graph { spec, .. } =
+        snapshot.tree.node(graph).unwrap().kind()
+    else {
+        panic!("graphe")
+    };
+    let mut spec = spec.clone();
+    let context = contexte();
+    let mut view = GraphView::new();
+    let (sans, _) = formes(&context, &mut view, &snapshot, graph);
+    assert!(poignees(&sans, DARK_INK).is_empty());
+
+    view.select_series(Some(SeriesRef::new(0, 0)), &spec);
+    let (avec, depuis_le_cache) = formes(&context, &mut view, &snapshot, graph);
+    assert!(depuis_le_cache, "sélectionner a reconstruit la figure");
+    let carres = poignees(&avec, DARK_INK);
+    // La diagonale fait plusieurs centaines de pixels : plusieurs poignées,
+    // chacune posée sur la courbe tracée.
+    assert!(carres.len() >= 5, "{carres:?}");
+    let scale = view.display_scale().unwrap();
+    let origin = view.display_rect().unwrap().min;
+    let path = &view.last_drawn().unwrap().panels[0].series_geometry[0].paths[0];
+    let (first, last) = (path[0], path[path.len() - 1]);
+    let a = origin + Vec2::new(first.0 as f32, first.1 as f32) * scale;
+    let b = origin + Vec2::new(last.0 as f32, last.1 as f32) * scale;
+    let direction = (b - a).normalized();
+    for carre in &carres {
+        let c = carre.center() - a;
+        let ecart = (c.x * direction.y - c.y * direction.x).abs();
+        assert!(ecart < 2.0, "poignée hors de la courbe : {carre:?}");
+    }
+    // Espacées de HANDLE_SPACING à l'écran (à l'arrondi au pixel près).
+    let pas = carres[0].center().distance(carres[1].center());
+    assert!((pas - HANDLE_SPACING as f32).abs() <= 1.5, "pas : {pas}");
+    // Le reste de l'image est exactement celui d'avant : la courbe n'est ni
+    // repeinte ni surlignée.
+    let reste: Vec<_> = avec
+        .iter()
+        .filter(|shape| !matches!(shape, egui::Shape::Rect(r) if carres.contains(&r.rect)))
+        .cloned()
+        .collect();
+    assert_eq!(reste, sans);
+
+    // Fond sombre : les poignées passent en blanc.
+    spec.background = "#101828".to_owned();
+    handle
+        .execute(Command::SetPlotSpec {
+            graph,
+            spec: spec.clone(),
+        })
+        .unwrap();
+    let snapshot = handle.snapshot().unwrap();
+    let (sombre, _) = formes(&context, &mut view, &snapshot, graph);
+    assert!(poignees(&sombre, DARK_INK).is_empty());
+    assert_eq!(poignees(&sombre, LIGHT_INK).len(), carres.len());
+
+    // Désélectionner les retire.
+    view.select_series(None, &spec);
+    let (apres, _) = formes(&context, &mut view, &snapshot, graph);
+    assert!(poignees(&apres, LIGHT_INK).is_empty());
+}
+
+/// #98 : les poignées sont un état de la vue, pas du modèle — le spec que
+/// l'application exporte (`framed_spec`) est le même, sélection ou non.
+#[test]
+fn la_selection_n_entre_pas_dans_le_spec_exporte() {
+    use stokesforge_plot::SeriesRef;
+    let (session, graph) = banc();
+    let snapshot = session.handle().snapshot().unwrap();
+    let stokesforge_core::node::NodeKind::Graph { spec, .. } =
+        snapshot.tree.node(graph).unwrap().kind()
+    else {
+        panic!("graphe")
+    };
+    let mut view = GraphView::new();
+    let avant = view.framed_spec(spec);
+    view.select_series(Some(SeriesRef::new(0, 0)), spec);
+    assert!(view.selected_series().is_some());
+    assert_eq!(view.framed_spec(spec), avant);
+}

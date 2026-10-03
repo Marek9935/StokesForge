@@ -29,6 +29,7 @@ formules — est dans `stokesforge-render`.
 | `decimate` | LTTB |
 | `interact` | correspondance pixel ↔ données d'un panneau tracé |
 | `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
+| `series_selection` | série sous un pixel, sur ses pixels réellement tracés, et poignées de la série sélectionnée (#98) |
 | `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `stokesforge_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
 | `formula` | Typst (dépendance ferme, pas une feature) : le style « texte riche » des titres, titres d'axe et légende, la compilation, le cache |
 | `sample` | deux figures témoins à titres explicites |
@@ -590,9 +591,33 @@ conservent leur aire de graduation quand seul leur titre est masqué. Cette
 règle vit dans le pipeline partagé, donc vaut aussi en SVG, PDF et PNG.
 
 `DrawnPanel::series_geometry` conserve les pixels des séries après décimation,
-projection sur l'axe gauche ou droit et rognage. `series_selection` les
+projection sur l'axe gauche ou droit et rognage (tronçons de ligne, moustaches,
+marqueurs, barres et extrémité libre de chaque barre). `series_selection` les
 désigne ; `GraphView` y peint la sélection sans modifier le cache de figure ni
 le modèle. Les rangs restent ceux du spec, même quand une série est masquée.
+
+Une série sélectionnée n'est **pas surlignée** (#98) : son tracé reste
+intact, et de petits carrés pleins la signalent, comme dans OriginLab —
+`HANDLE_SIDE` (5 px de côté) tous les `HANDLE_SPACING` (50 px), mesurés **le
+long du tracé** et **en pixels d'affichage**, donc indépendants de la densité
+des données, du LTTB, du zoom et de la taille de la fenêtre
+(`series_selection::along_path`, départ et arrivée de chaque tronçon marqués).
+Un nuage sans ligne reçoit ses carrés sur un sous-ensemble régulier de ses
+marqueurs, des barres au milieu de leur extrémité libre, côté valeur
+(`thinned`, même espacement) ; les moustaches n'en portent pas. Couleur :
+`pipeline::figure_ink`, l'encre automatique du fond de la figure (noire sur
+fond clair, blanche sur fond sombre). Le placement et le dessin
+(`paint_handles`, générique sur `DrawingBackend`) vivent dans
+`stokesforge-render` ; `GraphView` les appelle par-dessus la figure en cache,
+avec un `EguiBackend` posé sur le rectangle affiché. Les poignées ne sont donc
+ni dans la clé de cache (sélectionner ne reconstruit rien) ni dans le pipeline
+(l'export SVG/PDF/PNG ne les voit pas) : la sélection est un état de vue,
+comme le zoom. Tests : `series_selection.rs` (espacement, arrivée, échelle
+d'affichage, nuage et barres), `geometrie.rs` (extrémité libre d'une barre
+négative, moustaches hors des tronçons, encre), `render-egui/tests/interaction.rs`
+(`une_serie_selectionnee_porte_des_poignees_sans_changer_son_trace`). La
+sélection d'un objet graphique garde son cadre et ses poignées propres
+(`shape_tools.rs`).
 Object Manager utilise `series_swatch`, qui appelle la vignette de légende
 partagée (`legend::series_key`), sans redessiner le style dans l'application.
 

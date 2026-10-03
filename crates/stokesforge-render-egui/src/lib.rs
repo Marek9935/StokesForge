@@ -575,26 +575,24 @@ impl GraphView {
         let Some(scale) = self.display_scale() else {
             return;
         };
-        let pixel = |p: (i32, i32)| rect.min + egui::vec2(p.0 as f32 * scale, p.1 as f32 * scale);
-        let color = Color32::from_rgb(90, 150, 255);
-        let stroke = Stroke::new(3.0, color.gamma_multiply(0.6));
-        for path in &series.paths {
-            painter.add(Shape::line(
-                path.iter().copied().map(pixel).collect(),
-                stroke,
-            ));
-        }
-        for &point in &series.points {
-            painter.circle_stroke(pixel(point), 5.0, stroke);
-        }
-        for &(a, b) in &series.bars {
-            painter.rect_stroke(
-                Rect::from_two_pos(pixel(a), pixel(b)),
-                0.0,
-                stroke,
-                StrokeKind::Inside,
-            );
-        }
+        // Poignées de sélection (#98) : placées et peintes par
+        // `stokesforge_render::series_selection`, en pixels d'affichage pour
+        // que leur taille et leur espacement ne suivent pas l'agrandissement
+        // de la figure. Peintes par-dessus la figure en cache, jamais dedans :
+        // sélectionner ne reconstruit rien, et l'export n'en sait rien.
+        let scale = f64::from(scale);
+        let centers = series.handle_centers(|(x, y)| (f64::from(x) * scale, f64::from(y) * scale));
+        let mut shapes = Vec::with_capacity(centers.len());
+        let size = (rect.width().max(1.0) as u32, rect.height().max(1.0) as u32);
+        let mut backend = EguiBackend::new(&mut shapes, rect.min, size, &self.measurer);
+        // `draw_rect` de ce backend n'échoue jamais (`EguiBackendError` est
+        // vide, et un carré ne passe pas par les polices).
+        let _ = stokesforge_render::series_selection::paint_handles(
+            &mut backend,
+            &centers,
+            stokesforge_render::pipeline::figure_ink(spec),
+        );
+        painter.extend(shapes);
     }
 
     /// Le cache, pour l'inspecter (compteurs de la tâche R4.3).
