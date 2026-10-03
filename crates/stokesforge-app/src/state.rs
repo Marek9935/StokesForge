@@ -3593,7 +3593,7 @@ impl AppState {
                             target.set_text(spec, String::new())
                         })
                     }
-                    T::Graph | T::Panel(_) | T::Group(_) | T::Axis(_) => {}
+                    T::Graph | T::Panel(_) | T::Group(_) | T::Axis(_) | T::Axes(_) => {}
                 }
             }
             Action::OpenObjectProperties { graph, target } => {
@@ -3608,6 +3608,7 @@ impl AppState {
                     T::Series(s) => (PlotSettingsTab::Series, None, s.panel, Some(s.index)),
                     T::Panel(i) => (PlotSettingsTab::PlotArea, None, i, None),
                     T::Group(i) => (PlotSettingsTab::Series, None, i, None),
+                    T::Axes(i) => (PlotSettingsTab::Axes, None, i, None),
                     T::Text(TextTarget::Legend { row, column }) => (
                         PlotSettingsTab::Legend,
                         None,

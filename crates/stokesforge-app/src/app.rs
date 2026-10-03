@@ -6050,6 +6050,54 @@ fn object_manager_contents(
                             }
                         }));
                         branch.mark(group_toggle.rect.center().y);
+                        if !layer.axes.is_empty() {
+                            let id = ui.make_persistent_id((model.graph, layer.index, "axes"));
+                            let (axes_toggle, _, _) =
+                                egui::collapsing_header::CollapsingState::load_with_default_open(
+                                    ui.ctx(),
+                                    id,
+                                    true,
+                                )
+                                .show_header(ui, |ui| {
+                                    object_visibility(
+                                        ui,
+                                        model.graph,
+                                        T::Axes(layer.index),
+                                        spec,
+                                        actions,
+                                    );
+                                    ui.label(tr!("object-manager-axes")).context_menu(|ui| {
+                                        object_node_menu(
+                                            ui,
+                                            model.graph,
+                                            T::Axes(layer.index),
+                                            spec,
+                                            actions,
+                                            &mut requests,
+                                        )
+                                    });
+                                })
+                                .body(|ui| {
+                                    crate::tree_lines::tree_children(ui, |ui, branch| {
+                                        for object in &layer.axes {
+                                            let y = object_manager_object_row(
+                                                ui,
+                                                model.graph,
+                                                object,
+                                                spec,
+                                                focus,
+                                                actions,
+                                                &mut requests,
+                                            );
+                                            branch.mark(y);
+                                            if object.selected {
+                                                selected = Some(object.target);
+                                            }
+                                        }
+                                    })
+                                });
+                            branch.mark(axes_toggle.rect.center().y);
+                        }
                         for object in &layer.objects {
                             let y = object_manager_object_row(
                                 ui,

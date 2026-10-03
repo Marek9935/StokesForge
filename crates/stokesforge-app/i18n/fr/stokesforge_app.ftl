@@ -806,6 +806,7 @@ object-manager-no-graph = Activer un graphique pour voir ses objets.
 object-manager-visibility = Afficher ou masquer ce contenu. Les séries masquées sont exclues de la légende et des bornes automatiques des axes.
 object-manager-layer = Calque { $index }
 object-manager-group = Groupe de tracés
+object-manager-axes = Axes
 object-manager-show-texts = Afficher les textes du graphique
     .hint = Liste dans le gestionnaire d’objets le titre du graphique, les titres des calques et des axes et la légende. Masqués par défaut ; les cases de visibilité les commandent toujours.
 object-manager-show-scales = Afficher les échelles

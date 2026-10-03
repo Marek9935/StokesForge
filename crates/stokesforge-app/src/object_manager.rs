@@ -7,14 +7,16 @@
 //! clic. Les adresses restent locales au spec : un déplacement suit le contenu,
 //! une suppression efface la sélection plutôt que de viser son voisin.
 //!
-//! Échelles (#111) : une ligne par axe — les quatre, masqués par défaut compris —
-//! sous chaque calque, cachées par défaut et listées par leur propre bascule
-//! « Show scales » (même motif que les textes, `object_manager_show_scales`).
-//! Une case unique commande `AxisSpec::visible` (ligne, graduations et libellés
-//! d'un coup). Les cases du graphique, du calque et du groupe **ne commandent
-//! pas** les axes : Right et Top sont masqués par défaut, donc le parent
-//! serait indéterminé dès l'ouverture, et « tout afficher » ferait apparaître
-//! deux axes que l'utilisateur n'a pas demandés.
+//! Échelles (#111) : sous chaque calque, un groupe « Axes » réunit une ligne
+//! par axe — les quatre, masqués par défaut compris. Il est caché par défaut et
+//! listé par sa propre bascule « Show scales » (même motif que les textes,
+//! `object_manager_show_scales`). La case d'un axe commande `AxisSpec::visible`
+//! (ligne, graduations et libellés d'un coup) ; celle du groupe
+//! ([`VisibilityTarget::Axes`]) commande ses quatre axes et se montre mixte
+//! tant que Right et Top restent masqués. Les cases du graphique, du calque et
+//! du groupe de tracés **ne commandent pas** les axes : le parent serait
+//! indéterminé dès l'ouverture, et « tout afficher » ferait apparaître deux
+//! axes que l'utilisateur n'a pas demandés.
 //!
 //! Vue par défaut (#102) : calques, groupes de tracés et séries, plus les
 //! objets rares (formes, textes libres). Les textes automatiques — titre du
@@ -40,6 +42,8 @@ pub enum VisibilityTarget {
     Shape(ShapeRef),
     /// Une échelle (ligne d'axe, graduations et libellés) : `AxisSpec::visible`.
     Axis(AxisRef),
+    /// Le groupe des quatre axes d'un calque : il ne commande que ces axes.
+    Axes(usize),
 }
 
 /// Un axe d'un calque, adressé par la position du calque dans la grille.
@@ -82,6 +86,21 @@ pub struct Visibility {
 impl VisibilityTarget {
     /// Feuilles concernées ; un titre vide ne rend pas un parent indéterminé.
     pub fn contents(self, spec: &PlotSpec) -> Vec<Self> {
+        if let Self::Axes(index) = self {
+            let Some(panel) = spec.panels.get(index) else {
+                return Vec::new();
+            };
+            return AXIS_SIDES
+                .into_iter()
+                .map(|side| {
+                    Self::Axis(AxisRef {
+                        row: panel.row,
+                        column: panel.column,
+                        side,
+                    })
+                })
+                .collect();
+        }
         if !matches!(self, Self::Graph | Self::Panel(_) | Self::Group(_)) {
             return vec![self];
         }
@@ -128,7 +147,7 @@ impl VisibilityTarget {
             Self::Annotation(t) => t.get(spec).map(|a| a.visible),
             Self::Shape(t) => t.get(spec).map(|s| s.visible),
             Self::Axis(t) => t.get(spec).map(|a| a.visible),
-            Self::Graph | Self::Panel(_) | Self::Group(_) => None,
+            Self::Graph | Self::Panel(_) | Self::Group(_) | Self::Axes(_) => None,
         }
     }
     pub fn visibility(self, spec: &PlotSpec) -> Visibility {
@@ -177,7 +196,7 @@ impl VisibilityTarget {
                         axis.visible = visible;
                     }
                 }
-                Self::Graph | Self::Panel(_) | Self::Group(_) => {}
+                Self::Graph | Self::Panel(_) | Self::Group(_) | Self::Axes(_) => {}
             }
         }
         changed
@@ -185,7 +204,7 @@ impl VisibilityTarget {
     pub fn exists(self, spec: &PlotSpec) -> bool {
         match self {
             Self::Graph => true,
-            Self::Panel(i) | Self::Group(i) => spec.panels.get(i).is_some(),
+            Self::Panel(i) | Self::Group(i) | Self::Axes(i) => spec.panels.get(i).is_some(),
             _ => self.value(spec).is_some(),
         }
     }
@@ -405,6 +424,8 @@ pub struct ObjectRow {
 pub struct LayerRow {
     pub index: usize,
     pub series: Vec<SeriesRow>,
+    /// Les lignes du groupe « Axes » (#111) ; vide sans la bascule.
+    pub axes: Vec<ObjectRow>,
     pub objects: Vec<ObjectRow>,
 }
 #[derive(Debug, Clone)]
@@ -439,8 +460,9 @@ pub fn object_tree(tree: &Tree, graph: NodeId, selected: Option<SeriesRef>) -> O
 /// et les formes sont toujours listés. Un texte caché n'apparaît pas même
 /// sélectionné : la sélection ne le révèle pas.
 ///
-/// `show_scales` : lister une ligne par axe (les quatre, y compris ceux
-/// masqués par défaut) sous chaque calque (#111). Faux par défaut, même motif.
+/// `show_scales` : lister sous chaque calque le groupe « Axes », une ligne par
+/// axe (les quatre, y compris ceux masqués par défaut) (#111). Faux par
+/// défaut, même motif.
 pub fn object_tree_with_selection(
     tree: &Tree,
     graph: NodeId,
@@ -485,21 +507,26 @@ pub fn object_tree_with_selection(
                 } else {
                     Vec::new()
                 };
-                if show_scales {
-                    objects.extend(AXIS_SIDES.into_iter().map(|side| {
-                        let target = VisibilityTarget::Axis(AxisRef {
-                            row: panel.row,
-                            column: panel.column,
-                            side,
-                        });
-                        ObjectRow {
-                            target,
-                            label: axis_label(side),
-                            kind: ObjectKind::Axis,
-                            selected: selected == Some(target),
-                        }
-                    }));
-                }
+                let axes: Vec<ObjectRow> = if !show_scales {
+                    Vec::new()
+                } else {
+                    AXIS_SIDES
+                        .into_iter()
+                        .map(|side| {
+                            let target = VisibilityTarget::Axis(AxisRef {
+                                row: panel.row,
+                                column: panel.column,
+                                side,
+                            });
+                            ObjectRow {
+                                target,
+                                label: axis_label(side),
+                                kind: ObjectKind::Axis,
+                                selected: selected == Some(target),
+                            }
+                        })
+                        .collect()
+                };
                 objects.extend(panel.annotations.iter().enumerate().map(|(rank, a)| {
                     let target = VisibilityTarget::Annotation(AnnotationRef {
                         row: panel.row,
@@ -534,6 +561,7 @@ pub fn object_tree_with_selection(
                 }));
                 LayerRow {
                     index,
+                    axes,
                     objects,
                     series: panel
                         .series

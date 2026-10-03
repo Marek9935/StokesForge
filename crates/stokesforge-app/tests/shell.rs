@@ -7607,7 +7607,7 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     let (_session, mut state) = start(project, &dir.path().join("cache.stf"));
     let axes = |tree: &stokesforge_app::object_manager::ObjectTree| -> Vec<T> {
         tree.layers[0]
-            .objects
+            .axes
             .iter()
             .filter(|o| matches!(o.kind, ObjectKind::Axis))
             .map(|o| o.target)
@@ -7616,7 +7616,8 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     // Cachées par défaut, même textes affichés.
     let hidden = object_tree_with_selection(state.tree(), graph, None, true, false).unwrap();
     assert!(axes(&hidden).is_empty());
-    // Bascule active : les quatre axes, masqués par défaut compris, à plat.
+    // Bascule active : le groupe « Axes » et ses quatre axes, masqués par
+    // défaut compris ; les autres objets du calque n'en contiennent aucun.
     let shown = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
     let axis = |side| {
         T::Axis(AxisRef {
@@ -7635,7 +7636,10 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
         ]
         .map(axis)
     );
-    assert_eq!(shown.layers[0].objects.len(), 4 + 5);
+    assert!(shown.layers[0]
+        .objects
+        .iter()
+        .all(|o| !matches!(o.kind, ObjectKind::Axis)));
     // Une case par axe : `AxisSpec::visible`, une seule entrée d'historique.
     let top = axis(AxisSide::Top);
     assert!(!top.visibility(&before).checked);
@@ -7647,6 +7651,26 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     let spec = graph_spec(&state, graph);
     assert!(spec.panels[0].top.visible);
     assert!(top.visibility(&spec).checked);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+    // La case du groupe commande ses quatre axes en une écriture ; mixte tant
+    // que droite et haut sont masqués.
+    assert!(T::Axes(0).visibility(&before).mixed);
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::Axes(0),
+        visible: true,
+    });
+    let spec = graph_spec(&state, graph);
+    assert!([
+        AxisSide::Bottom,
+        AxisSide::Left,
+        AxisSide::Right,
+        AxisSide::Top
+    ]
+    .iter()
+    .all(|side| spec.panels[0].axis(*side).visible));
+    assert!(T::Axes(0).visibility(&spec).checked);
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
     // Les cases du graphique et du calque ne touchent pas aux axes.

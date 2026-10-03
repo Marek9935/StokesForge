@@ -1539,11 +1539,14 @@ pas même sélectionné dans la figure. Les **échelles** (#111) suivent le mêm
 motif avec leur propre bascule, « Afficher les échelles »
 (`Action::SetObjectManagerShowScales`, préférence `object_manager_show_scales`,
 même place dans Affichage et dans le menu du fond) : cachées par défaut, elles
-ajoutent sous chaque calque une ligne par axe — les quatre, bas, gauche, droite
-et haut, y compris ceux masqués par défaut — avec une seule case qui commande
-`AxisSpec::visible` (ligne d'axe, graduations et libellés d'un coup ; le titre
-garde son `title_visible`). Les cases du graphique, du calque et du groupe ne
-commandent **pas** les axes : Droite et Haut sont masqués par défaut, le parent
+ajoutent sous chaque calque, après le groupe de tracés, un groupe « Axes »
+(`VisibilityTarget::Axes`, `LayerRow::axes`) qui réunit une ligne par axe — les
+quatre, bas, gauche, droite et haut, y compris ceux masqués par défaut — avec
+une seule case qui commande `AxisSpec::visible` (ligne d'axe, graduations et
+libellés d'un coup ; le titre garde son `title_visible`). La case du groupe
+« Axes » commande ses quatre axes et reste mixte tant que droite et haut sont
+masqués ; ses Propriétés ouvrent l'onglet Axes. Les cases du graphique, du
+calque et du groupe de tracés ne commandent **pas** les axes : Droite et Haut sont masqués par défaut, le parent
 serait indéterminé dès l'ouverture et « tout afficher » ferait apparaître deux
 axes non demandés. Le panneau est redimensionnable à droite ;
 son bouton Détacher le rend flottant, Ancrer le replace à droite. Il est
