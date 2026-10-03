@@ -1512,8 +1512,15 @@ RGB/HSL restent propres au sélecteur.
 
 Affichage › Gestionnaire d'objets et la barre du même nom ouvrent l'arbre du
 graphique actif : graphique › calques (`PlotSpec::panels`) › groupe de tracés ›
-séries, ainsi que les titres, légendes, textes libres et objets graphiques
-(rectangle, ellipse, ligne, flèche). Le panneau est redimensionnable à droite ;
+séries, ainsi que les objets rares, textes libres et objets graphiques
+(rectangle, ellipse, ligne, flèche), quand il y en a. Les **textes
+automatiques** (titre du graphique et des calques, titres d'axes, légende) sont
+cachés par défaut (#102) : une seule bascule, « Afficher les textes du
+graphique » (Affichage et clic droit sur le fond du panneau, même
+`Action::SetObjectManagerShowTexts`), les liste. C'est une préférence
+d'interface (`object_manager_show_texts` dans `preferences.json`, hors `.stf`),
+et le filtre vit dans `object_tree_with_selection`. Un texte caché n'apparaît
+pas même sélectionné dans la figure. Le panneau est redimensionnable à droite ;
 son bouton Détacher le rend flottant, Ancrer le replace à droite. Il est
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.
@@ -1523,7 +1530,8 @@ Chaque série garde son nom dérivé de colonne et son échantillon de légende
 ensemble leurs contenus ; le groupe commande seulement les séries. Une case
 indéterminée signale une visibilité partielle. Masquer conserve données,
 style, texte, position et rang ; une série masquée sort du tracé, de la légende
-et des bornes automatiques. Les titres ont leur propre `title_visible` :
+et des bornes automatiques. Les cases du graphique et du calque commandent toujours le contenu complet,
+textes cachés compris. Les titres ont leur propre `title_visible` :
 masquer un titre d'axe laisse l'axe en place. Une bascule écrit une seule
 commande `EditPlotSpec`, avec le motif d'historique `PlotEditKind::Visibility`.
 

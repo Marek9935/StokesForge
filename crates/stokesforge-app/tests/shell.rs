@@ -7530,6 +7530,68 @@ fn object_manager_proprietes_ouvrent_la_serie_du_bon_calque_et_annulent() {
 }
 
 #[test]
+fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
+    use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
+    use stokesforge_plot::{AnnotationRef, ShapeRef, TextTarget};
+    let dir = tempfile::tempdir().unwrap();
+    let (project, graph, before) = object_manager_project();
+    let (_session, mut state) = start(project, &dir.path().join("cache.stf"));
+    let text = AnnotationRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+    let arrow = ShapeRef {
+        row: 0,
+        column: 0,
+        index: 3,
+    };
+    // Cachés : ni titre du graphique, ni titre de calque, ni axes, ni légende ;
+    // le texte libre et les quatre formes restent.
+    let hidden = object_tree_with_selection(state.tree(), graph, None, false).unwrap();
+    assert!(hidden.objects.is_empty());
+    assert_eq!(hidden.layers[0].objects.len(), 5);
+    assert!(hidden.layers[0]
+        .objects
+        .iter()
+        .all(|o| matches!(o.target, T::Annotation(_) | T::Shape(_))));
+    assert!(hidden.layers[0]
+        .objects
+        .iter()
+        .any(|o| o.target == T::Annotation(text)));
+    assert!(hidden.layers[0]
+        .objects
+        .iter()
+        .any(|o| o.target == T::Shape(arrow)));
+    assert!(
+        !hidden.layers[0].series.is_empty(),
+        "séries toujours listées"
+    );
+    // Pas de révélation à la sélection : un texte caché sélectionné n'apparaît pas.
+    let selected =
+        object_tree_with_selection(state.tree(), graph, Some(T::Text(TextTarget::Title)), false)
+            .unwrap();
+    assert!(selected.objects.is_empty());
+    assert!(selected.layers[0].objects.iter().all(|o| !o.selected));
+    // Bascule active : les textes reviennent (même total que l'ancienne vue).
+    let shown = object_tree_with_selection(state.tree(), graph, None, true).unwrap();
+    assert_eq!(shown.objects.len(), 1);
+    assert_eq!(shown.layers[0].objects.len(), 9);
+    // La case du graphique commande toujours les textes cachés.
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::Graph,
+        visible: false,
+    });
+    let spec = graph_spec(&state, graph);
+    assert!(!spec.title_visible);
+    assert!(!spec.panels[0].bottom.title_visible);
+    assert!(!T::Graph.visibility(&spec).checked);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+}
+
+#[test]
 fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
     use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
     use stokesforge_plot::{AnnotationRef, AxisSide, ShapeRef, TextTarget};
@@ -7546,7 +7608,8 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
         column: 0,
         index: 3,
     };
-    let model = object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow))).unwrap();
+    let model =
+        object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), true).unwrap();
     assert_eq!(model.objects[0].target, T::Text(TextTarget::Title));
     assert_eq!(
         model.layers[0].objects.len(),
@@ -7599,7 +7662,8 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
     assert!(!arrow.get(&hidden).unwrap().visible);
     assert!(!T::Graph.visibility(&hidden).checked);
     assert!(!T::Graph.visibility(&hidden).mixed);
-    let model = object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text))).unwrap();
+    let model =
+        object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text)), true).unwrap();
     assert!(model.layers[0]
         .objects
         .iter()

@@ -383,6 +383,8 @@ pub enum Action {
     },
     /// Ouvre ou ferme le panneau ; préférence de la personne, hors historique.
     SetObjectManagerOpen(bool),
+    /// Bascule unique « Show graph texts » (menu View et menu contextuel).
+    SetObjectManagerShowTexts(bool),
     /// Visibilité d'un contenu ou d'un ensemble de contenus (#81–82).
     SetPlotVisibility {
         graph: NodeId,
@@ -1835,6 +1837,7 @@ pub struct AppState {
     /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
     png_export_scale: f32,
     object_manager_open: bool,
+    object_manager_show_texts: bool,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
     /// Saisie de cellule en cours, s'il y en a une.
@@ -1964,6 +1967,8 @@ impl AppState {
             path,
             png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
             object_manager_open: crate::preferences::Preferences::load().object_manager_open(),
+            object_manager_show_texts: crate::preferences::Preferences::load()
+                .object_manager_show_texts(),
             status: None,
             editing: None,
             note_editing: None,
@@ -3406,6 +3411,11 @@ impl AppState {
         self.object_manager_open
     }
 
+    /// Textes automatiques listés dans l'Object Manager (#102), hors projet.
+    pub fn object_manager_show_texts(&self) -> bool {
+        self.object_manager_show_texts
+    }
+
     /// Applique une action. Ne rend jamais d'erreur : toute erreur devient un
     /// [`StatusMessage`]. Rafraîchit l'instantané après toute action qui a pu
     /// changer le modèle.
@@ -3507,6 +3517,14 @@ impl AppState {
                 self.object_manager_open = open;
                 if let Err(error) =
                     crate::preferences::Preferences::load().save_object_manager_open(open)
+                {
+                    self.fail(error.to_string());
+                }
+            }
+            Action::SetObjectManagerShowTexts(show) => {
+                self.object_manager_show_texts = show;
+                if let Err(error) =
+                    crate::preferences::Preferences::load().save_object_manager_show_texts(show)
                 {
                     self.fail(error.to_string());
                 }

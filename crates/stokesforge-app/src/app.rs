@@ -1560,6 +1560,14 @@ impl StokesForgeApp {
                         self.object_manager_floating = !self.object_manager_floating;
                         ui.close();
                     }
+                    let mut show_texts = self.state.object_manager_show_texts();
+                    if ui
+                        .checkbox(&mut show_texts, tr!("object-manager-show-texts"))
+                        .on_hover_text(tr!("object-manager-show-texts", "hint"))
+                        .changed()
+                    {
+                        actions.push(Action::SetObjectManagerShowTexts(show_texts));
+                    }
                     ui.separator();
                     for id in ToolbarId::ALL {
                         let mut visible = self.toolbars.layout().is_visible(id);
@@ -2371,6 +2379,7 @@ impl StokesForgeApp {
         let ctx = ui.ctx().clone();
         let graph = active_graph(active_tab_kind(active_tab));
         let tree = self.state.snapshot().tree.clone();
+        let show_texts = self.state.object_manager_show_texts();
         let spec = graph.and_then(|graph| crate::state::current_plot_spec(&tree, graph));
         let model = graph.and_then(|graph| {
             crate::object_manager::object_tree_with_selection(
@@ -2378,6 +2387,7 @@ impl StokesForgeApp {
                 graph,
                 self.read_graph_view(graph, selected_manager_target)
                     .flatten(),
+                show_texts,
             )
         });
         let mut requests = Vec::new();
@@ -2412,7 +2422,14 @@ impl StokesForgeApp {
                 .clicked();
             });
             ui.separator();
-            requests = object_manager_contents(ui, &tree, model.as_ref(), spec.as_ref(), actions);
+            requests = object_manager_contents(
+                ui,
+                &tree,
+                model.as_ref(),
+                spec.as_ref(),
+                show_texts,
+                actions,
+            );
         };
         if self.object_manager_floating {
             let viewport = ctx.input(|input| input.content_rect());
@@ -5798,6 +5815,7 @@ fn object_manager_contents(
     tree: &Tree,
     model: Option<&crate::object_manager::ObjectTree>,
     spec: Option<&stokesforge_plot::PlotSpec>,
+    show_texts: bool,
     actions: &mut Vec<Action>,
 ) -> Vec<ObjectManagerRequest> {
     use crate::object_manager::VisibilityTarget as T;
@@ -5808,6 +5826,24 @@ fn object_manager_contents(
     };
     let focus = ui.make_persistent_id(("object_manager_keys", model.graph));
     let mut selected = None;
+    // Fond du panneau, posé sous les lignes : son menu contextuel porte la
+    // bascule des textes automatiques (même action que le menu View).
+    let background = ui.interact(
+        ui.available_rect_before_wrap(),
+        ui.make_persistent_id(("object_manager_background", model.graph)),
+        egui::Sense::click(),
+    );
+    background.context_menu(|ui| {
+        let mut show = show_texts;
+        if ui
+            .checkbox(&mut show, tr!("object-manager-show-texts"))
+            .on_hover_text(tr!("object-manager-show-texts", "hint"))
+            .changed()
+        {
+            actions.push(Action::SetObjectManagerShowTexts(show));
+            ui.close();
+        }
+    });
     egui::ScrollArea::both().show(ui, |ui| {
         let id = ui.make_persistent_id(("object_manager_graph", model.graph));
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
@@ -16502,6 +16538,7 @@ mod object_manager_tests {
                         project.tree(),
                         Some(&model),
                         Some(&spec),
+                        false,
                         &mut actions,
                     );
                 },

@@ -6,6 +6,14 @@
 //! place. Le groupe ne commande que les séries. Un parent mixte se révèle au
 //! clic. Les adresses restent locales au spec : un déplacement suit le contenu,
 //! une suppression efface la sélection plutôt que de viser son voisin.
+//!
+//! Vue par défaut (#102) : calques, groupes de tracés et séries, plus les
+//! objets rares (formes, textes libres). Les textes automatiques — titre du
+//! graphique et des calques, titres d'axes, légende — ne sont listés que si la
+//! bascule « Show graph texts » est active (préférence d'interface, hors `.stf`) ;
+//! le filtre vit dans [`object_tree_with_selection`]. Les cases du graphique et
+//! du calque commandent toujours le contenu complet, textes cachés compris
+//! ([`VisibilityTarget::contents`]).
 
 use stokesforge_core::{series_label, NodeId, Tree};
 use stokesforge_plot::{
@@ -359,12 +367,17 @@ pub struct ObjectTree {
 }
 
 pub fn object_tree(tree: &Tree, graph: NodeId, selected: Option<SeriesRef>) -> Option<ObjectTree> {
-    object_tree_with_selection(tree, graph, selected.map(VisibilityTarget::Series))
+    object_tree_with_selection(tree, graph, selected.map(VisibilityTarget::Series), false)
 }
+/// `show_texts` : lister les textes automatiques (titre du graphique et des
+/// calques, titres d'axes, légende). Faux par défaut (#102) ; les textes libres
+/// et les formes sont toujours listés. Un texte caché n'apparaît pas même
+/// sélectionné : la sélection ne le révèle pas.
 pub fn object_tree_with_selection(
     tree: &Tree,
     graph: NodeId,
     selected: Option<VisibilityTarget>,
+    show_texts: bool,
 ) -> Option<ObjectTree> {
     let node = tree.node(graph)?;
     let spec = crate::state::current_plot_spec(tree, graph)?;
@@ -385,7 +398,7 @@ pub fn object_tree_with_selection(
     Some(ObjectTree {
         graph,
         title: node.name().to_string(),
-        objects: if spec.title.is_empty() {
+        objects: if !show_texts || spec.title.is_empty() {
             Vec::new()
         } else {
             vec![text_row(TextTarget::Title)]
@@ -395,10 +408,14 @@ pub fn object_tree_with_selection(
             .iter()
             .enumerate()
             .map(|(index, panel)| {
-                let mut objects: Vec<ObjectRow> = panel_texts(&spec, index)
-                    .into_iter()
-                    .map(&text_row)
-                    .collect();
+                let mut objects: Vec<ObjectRow> = if show_texts {
+                    panel_texts(&spec, index)
+                        .into_iter()
+                        .map(&text_row)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 objects.extend(panel.annotations.iter().enumerate().map(|(rank, a)| {
                     let target = VisibilityTarget::Annotation(AnnotationRef {
                         row: panel.row,

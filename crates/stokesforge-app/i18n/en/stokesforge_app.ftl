@@ -809,6 +809,8 @@ object-manager-no-graph = Activate a graph to see its objects.
 object-manager-visibility = Show or hide this content. Hidden series are excluded from the legend and automatic axis limits.
 object-manager-layer = Layer { $index }
 object-manager-group = Plot Group
+object-manager-show-texts = Show graph texts
+    .hint = Lists the graph title, layer titles, axis titles and legend in the Object Manager. Hidden by default; the visibility checkboxes still control them.
 
 toolbar-object-manager = Object Manager Toolbar
     .hint = Show or hide the Object Manager toolbar.

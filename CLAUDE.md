@@ -81,6 +81,9 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 - Rendu : le levier `TessellationOptions::feathering` vit dans `stokesforge_render_egui::feathering`, en fonction libre sur le `Context`. Il n'est **pas** dans la clé de cache et ne doit pas y entrer (`architecture-choisie.md` §4.2, verrouillé par `stokesforge-render-egui/tests/feathering.rs`). Son déclencheur, le glisser, est câblé dans `stokesforge-render-egui/src/lib.rs` depuis R7.3.
 
 Object Manager (#81–85) : `object_manager.rs` projette le graphe, la sélection
-reste dans `GraphView` (même vue en fenêtre détachée). Les bascules réutilisent
+reste dans `GraphView` (même vue en fenêtre détachée). Les textes automatiques
+(titres, légende) sont cachés par défaut ; une bascule unique
+(`Action::SetObjectManagerShowTexts`, préférence hors `.stf`, #102) les liste,
+le filtre vit dans `object_tree_with_selection`. Les bascules réutilisent
 `EditPlotSpec`, dont le motif d'historique reste une donnée. Les échantillons
 appellent `series_swatch`, partagé avec la légende.
