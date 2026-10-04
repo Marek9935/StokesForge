@@ -326,6 +326,10 @@ fn aucun_libelle_en_dur() {
 const ZONE_43: &[&str] = &[
     "plot_settings_window",
     "plot_settings_contents",
+    "graph_settings_page",
+    "plot_area_settings_page",
+    "axes_settings_page",
+    "series_settings_page",
     "theme_editor",
     "formula_memo",
     "text_field",
@@ -451,6 +455,25 @@ fn la_garde_de_la_zone_43_voit_les_formes_que_appels_ignore() {
         "fn page(ui: &mut Ui) { let _ = \"→\"; }",
     ] {
         assert!(nus(code, zone).is_empty(), "faux positif : {code}");
+    }
+}
+
+/// Une page extraite ne doit pas perdre la garde stricte de son ancien corps.
+#[test]
+fn la_zone_43_garde_les_pages_extraites_des_proprietes() {
+    for page in [
+        "graph_settings_page",
+        "plot_area_settings_page",
+        "axes_settings_page",
+        "series_settings_page",
+    ] {
+        let code =
+            format!("fn {page}(ui: &mut Ui) {{ champ(ui, \"Titre non traduit\", &mut x); }}");
+        assert_eq!(
+            nus(&code, ZONE_43).len(),
+            1,
+            "page sortie de la garde : {page}"
+        );
     }
 }
 

@@ -4,11 +4,16 @@
 //! Points d'entrée pour `app.rs` : [`plot_settings_window`] et
 //! [`column_metadata_window`].
 //!
-//! Sorti d'`app.rs` tel quel (#119).
+//! Sorti d'`app.rs` (#119), puis découpé par page (#124). Les fonctions de
+//! page empruntent seulement le brouillon utile et rendent la demande de
+//! validation ; le corps commun conserve les sous-Ui, leurs identifiants et
+//! l'ordre validation → couleurs enregistrées → sélection de page/axe.
 
 use eframe::egui;
 use stokesforge_core::Tree;
-use stokesforge_plot::{AxisSpec, LegendPosition, LineStyle, PlotType, SymbolShape};
+use stokesforge_plot::{
+    AxisSpec, LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, SymbolShape,
+};
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
 use crate::state::{
@@ -197,107 +202,26 @@ fn plot_settings_contents(
             .auto_shrink([false, false])
             .show(ui, |ui| match chosen_tab {
                 PlotSettingsTab::Graph => {
-                    commit |= text_field(
-                        ui,
-                        &tr!("plot-general-title"),
-                        &tr!("plot-general-title", "hint"),
-                        &mut spec.title,
-                    );
-                    formula_memo(ui, "plot_settings_memo_graph");
-                    commit |= color_field(
-                        ui,
-                        &tr!("plot-title-color"),
-                        &mut spec.title_color,
-                        ColorUsage::Text,
-                        Some(&tr!("plot-color-auto-contrast")),
-                        &mut env,
-                    );
-                    ui.add_space(6.0);
-                    commit |= color_field(
-                        ui,
-                        &tr!("plot-general-background"),
-                        &mut spec.background,
-                        ColorUsage::Background,
-                        Some(&tr!("plot-color-auto-white")),
-                        &mut env,
-                    );
-                    ui.weak(tr!("plot-general-dark-note"));
+                    commit |= graph_settings_page(ui, spec, &mut env);
                 }
                 PlotSettingsTab::PlotArea => {
                     let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                         return;
                     };
-                    commit |= text_field(
-                        ui,
-                        &tr!("plot-area-layer-title"),
-                        &tr!("plot-area-layer-title", "hint"),
-                        &mut panel.title,
-                    );
-                    formula_memo(ui, "plot_settings_memo_panel");
-                    ui.add_space(4.0);
-                    ui.strong(tr!("plot-area-gridlines"));
-                    commit |= ui
-                        .checkbox(&mut panel.bottom.grid, tr!("plot-area-gridlines-vertical"))
-                        .changed();
-                    commit |= ui
-                        .checkbox(&mut panel.left.grid, tr!("plot-area-gridlines-horizontal"))
-                        .changed();
+                    commit |= plot_area_settings_page(ui, panel);
                 }
                 PlotSettingsTab::Axes => {
                     let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                         return;
                     };
-                    let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
-                    if panel.uses_right_axis() || chosen_axis == PlotAxis::Right {
-                        axes.push(PlotAxis::Right);
-                    }
-                    ui.horizontal(|ui| {
-                        for axis in axes {
-                            if ui
-                                .selectable_label(chosen_axis == axis, axis.label())
-                                .clicked()
-                            {
-                                chosen_axis = axis;
-                            }
-                        }
-                    });
-                    ui.separator();
-                    let axis = match chosen_axis {
-                        PlotAxis::Bottom => &mut panel.bottom,
-                        PlotAxis::Left => &mut panel.left,
-                        PlotAxis::Right => &mut panel.right,
-                    };
-                    commit |= axis_editor(ui, axis, &mut env);
+                    commit |= axes_settings_page(ui, panel, &mut chosen_axis, &mut env);
                 }
                 PlotSettingsTab::Series => {
                     let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                         return;
                     };
-                    if panel.series.is_empty() {
-                        ui.weak(tr!("plot-series-empty"));
-                        return;
-                    }
-                    if edit.selected_series >= panel.series.len() {
-                        edit.selected_series = panel.series.len() - 1;
-                    }
-                    egui::ScrollArea::vertical()
-                        .id_salt("plot_settings_series_list")
-                        .max_height(140.0)
-                        .show(ui, |ui| {
-                            for (index, series) in panel.series.iter().enumerate() {
-                                let label = series_list_label(tree, series);
-                                if ui
-                                    .selectable_label(edit.selected_series == index, label)
-                                    .clicked()
-                                {
-                                    edit.selected_series = index;
-                                }
-                            }
-                        });
-                    ui.separator();
-                    if let Some(series) = panel.series.get_mut(edit.selected_series) {
-                        commit |= series_editor(ui, series, &mut env);
-                    }
+                    commit |=
+                        series_settings_page(ui, panel, tree, &mut edit.selected_series, &mut env);
                 }
                 PlotSettingsTab::Theme => {
                     commit |= theme_editor(ui, spec, &mut env);
@@ -331,6 +255,127 @@ fn plot_settings_contents(
         current.tab = chosen_tab;
         current.axis = chosen_axis;
     }
+}
+
+/// Page du graphe : titre et fond, sans ajouter de sous-Ui aux widgets.
+fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
+    let mut commit = false;
+    commit |= text_field(
+        ui,
+        &tr!("plot-general-title"),
+        &tr!("plot-general-title", "hint"),
+        &mut spec.title,
+    );
+    formula_memo(ui, "plot_settings_memo_graph");
+    commit |= color_field(
+        ui,
+        &tr!("plot-title-color"),
+        &mut spec.title_color,
+        ColorUsage::Text,
+        Some(&tr!("plot-color-auto-contrast")),
+        env,
+    );
+    ui.add_space(6.0);
+    commit |= color_field(
+        ui,
+        &tr!("plot-general-background"),
+        &mut spec.background,
+        ColorUsage::Background,
+        Some(&tr!("plot-color-auto-white")),
+        env,
+    );
+    ui.weak(tr!("plot-general-dark-note"));
+    commit
+}
+
+/// Page du calque : titre et lignes de grille.
+fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
+    let mut commit = false;
+    commit |= text_field(
+        ui,
+        &tr!("plot-area-layer-title"),
+        &tr!("plot-area-layer-title", "hint"),
+        &mut panel.title,
+    );
+    formula_memo(ui, "plot_settings_memo_panel");
+    ui.add_space(4.0);
+    ui.strong(tr!("plot-area-gridlines"));
+    commit |= ui
+        .checkbox(&mut panel.bottom.grid, tr!("plot-area-gridlines-vertical"))
+        .changed();
+    commit |= ui
+        .checkbox(&mut panel.left.grid, tr!("plot-area-gridlines-horizontal"))
+        .changed();
+    commit
+}
+
+/// Page des axes : choix local de l'axe, puis éditeur partagé.
+fn axes_settings_page(
+    ui: &mut egui::Ui,
+    panel: &mut PanelSpec,
+    chosen_axis: &mut PlotAxis,
+    env: &mut PickerEnv,
+) -> bool {
+    let mut commit = false;
+    let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
+    if panel.uses_right_axis() || *chosen_axis == PlotAxis::Right {
+        axes.push(PlotAxis::Right);
+    }
+    ui.horizontal(|ui| {
+        for axis in axes {
+            if ui
+                .selectable_label(*chosen_axis == axis, axis.label())
+                .clicked()
+            {
+                *chosen_axis = axis;
+            }
+        }
+    });
+    ui.separator();
+    let axis = match *chosen_axis {
+        PlotAxis::Bottom => &mut panel.bottom,
+        PlotAxis::Left => &mut panel.left,
+        PlotAxis::Right => &mut panel.right,
+    };
+    commit |= axis_editor(ui, axis, env);
+    commit
+}
+
+/// Page des séries : liste et éditeur de la sélection, sans valider le choix seul.
+fn series_settings_page(
+    ui: &mut egui::Ui,
+    panel: &mut PanelSpec,
+    tree: &Tree,
+    selected_series: &mut usize,
+    env: &mut PickerEnv,
+) -> bool {
+    let mut commit = false;
+    if panel.series.is_empty() {
+        ui.weak(tr!("plot-series-empty"));
+        return false;
+    }
+    if *selected_series >= panel.series.len() {
+        *selected_series = panel.series.len() - 1;
+    }
+    egui::ScrollArea::vertical()
+        .id_salt("plot_settings_series_list")
+        .max_height(140.0)
+        .show(ui, |ui| {
+            for (index, series) in panel.series.iter().enumerate() {
+                let label = series_list_label(tree, series);
+                if ui
+                    .selectable_label(*selected_series == index, label)
+                    .clicked()
+                {
+                    *selected_series = index;
+                }
+            }
+        });
+    ui.separator();
+    if let Some(series) = panel.series.get_mut(*selected_series) {
+        commit |= series_editor(ui, series, env);
+    }
+    commit
 }
 
 /// Onglet « Thème » : fond, couleur du texte et couleur des axes, réglés
@@ -1231,6 +1276,111 @@ mod tests {
         banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Right));
         let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
         assert!(est_peint(&peints, &PlotAxis::Right.label()));
+    }
+
+    /// #124 : la page choisit le calque du brouillon ; le premier calque
+    /// sert de témoin qui doit rester inchangé après le clic sur la grille.
+    #[test]
+    fn la_page_du_calque_valide_uniquement_le_calque_choisi() {
+        let mut banc = banc(|spec| {
+            panneau(spec).bottom.grid = false;
+            let mut second = PanelSpec::at(0, 1);
+            second.title = "Calque choisi".into();
+            second.bottom.grid = false;
+            spec.panels.push(second);
+        });
+        banc.ouvrir(PlotSettingsTab::PlotArea, None);
+        banc.state.plot_edit_mut().unwrap().selected_panel = usize::MAX;
+        let original = banc.modele();
+        let context = contexte();
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(est_peint(&peints, "Calque choisi"));
+        assert_eq!(banc.state.plot_edit().unwrap().selected_panel, 1);
+        assert_eq!(banc.modele(), original, "le choix seul ne valide rien");
+
+        cliquer_libelle(
+            &context,
+            &mut banc.state,
+            &tr!("plot-area-gridlines-vertical"),
+        );
+        let apres = banc.modele();
+        assert_eq!(apres.panels[0], original.panels[0]);
+        assert!(
+            apres.panels[1].bottom.grid,
+            "le clic a validé le calque choisi"
+        );
+        banc.state.close_plot_settings();
+        banc.state.dispatch(Action::Undo);
+        assert_eq!(banc.modele(), original, "la validation reste annulable");
+    }
+
+    /// #124 : le retour anticipé sur une liste vide doit laisser le
+    /// dialogue ouvert ; une liste non vide borne la sélection sans écrire
+    /// le graphe, puis son éditeur ne modifie que la série choisie.
+    #[test]
+    fn la_page_des_series_borne_la_selection_et_garde_le_cas_vide() {
+        let mut vide = banc(|spec| panneau(spec).series.clear());
+        vide.ouvrir(PlotSettingsTab::Series, None);
+        vide.state.plot_edit_mut().unwrap().selected_series = usize::MAX;
+        let original = vide.modele();
+        let peints = peindre_fenetre(&contexte(), &mut vide.state, Vec::new());
+        assert!(est_peint(&peints, &tr!("plot-series-empty")));
+        assert!(!est_peint(&peints, &tr!("plot-series-show")));
+        assert_eq!(vide.modele(), original);
+        assert!(vide.state.plot_settings().is_some());
+        assert_eq!(vide.state.plot_edit().unwrap().selected_series, usize::MAX);
+
+        let mut banc = banc(|spec| {
+            let panel = panneau(spec);
+            panel.series[0].name = "Première".into();
+            let mut seconde = panel.series[0].clone();
+            seconde.name = "Seconde".into();
+            panel.series.push(seconde);
+        });
+        banc.ouvrir(PlotSettingsTab::Series, None);
+        banc.state.plot_edit_mut().unwrap().selected_series = usize::MAX;
+        let original = banc.modele();
+        let context = contexte();
+        peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert_eq!(banc.state.plot_edit().unwrap().selected_series, 1);
+        assert_eq!(banc.modele(), original);
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-series-show"));
+        let apres = banc.modele();
+        assert_eq!(apres.panels[0].series[0], original.panels[0].series[0]);
+        assert!(!apres.panels[0].series[1].visible);
+        assert_eq!(apres.panels[0].series[1].name, "Seconde");
+    }
+
+    /// #124 : vérifie le retour de la page du graphe jusqu'à la validation
+    /// commune, en plus du test local de `text_field`. Une frappe doit
+    /// seulement changer le brouillon, puis un clic ailleurs dans la page
+    /// doit atteindre le modèle sans fermer le dialogue.
+    #[test]
+    fn le_titre_du_graphe_se_valide_apres_la_perte_de_focus() {
+        let mut banc = banc(|spec| spec.title = "Titre initial".into());
+        banc.ouvrir(PlotSettingsTab::Graph, None);
+        let original = banc.modele();
+        let context = contexte();
+        cliquer_libelle(&context, &mut banc.state, "Titre initial");
+        image(&context, vec![egui::Event::Text("Z".into())], |ui| {
+            plot_settings_window(ui.ctx(), &mut banc.state);
+        });
+        let saisi = banc.brouillon().title;
+        assert!(saisi.contains('Z'), "la frappe a atteint le brouillon");
+        assert_eq!(
+            banc.modele(),
+            original,
+            "aucune validation pendant la frappe"
+        );
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-general-dark-note"));
+        assert_eq!(banc.modele().title, saisi);
+        assert!(
+            banc.state.plot_settings().is_some(),
+            "la validation vient de la page ouverte"
+        );
+        banc.state.close_plot_settings();
+        banc.state.dispatch(Action::Undo);
+        assert_eq!(banc.modele(), original);
     }
 
     // -- Quand le brouillon est validé --------------------------------------
