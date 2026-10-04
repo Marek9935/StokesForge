@@ -5,7 +5,9 @@
 //!
 //! Sorti d'`app.rs` tel quel (#117). La bande des feuilles d'un classeur
 //! (`sheet_tabs`) et le menu Classeur vivent avec le classeur, dans
-//! `workbook.rs` (#120).
+//! `workbook.rs` (#120). Les menus, flèches, onglets et renommage sont
+//! des sections de peinture privées (#124) ; leurs appels ne créent aucune
+//! portée egui supplémentaire et les callbacks restent différés après le dessin.
 
 use eframe::egui;
 
@@ -92,65 +94,24 @@ pub(super) fn tab_strip_with<K: Copy + PartialEq + Send + Sync + 'static>(
     ops: Option<&TabOps<K>>,
     mut on_event: impl FnMut(TabEvent<K>),
 ) -> TabStripOutput {
-    let mut events: Vec<TabEvent<K>> = Vec::new();
-    let add_menu = |ui: &mut egui::Ui, requested_add: &mut bool| {
-        if let Some(label) = add_label {
-            if ui.button(label).clicked() {
-                *requested_add = true;
-                ui.close();
-            }
-        }
+    let config = TabStripConfig {
+        tabs,
+        selected,
+        add_label,
+        ops,
     };
-    let tab_menu =
-        |ui: &mut egui::Ui, id: K, events: &mut Vec<TabEvent<K>>, requested_add: &mut bool| {
-            if let Some(ops) = ops {
-                let ctx = ui.ctx().clone();
-                if ui
-                    .add(
-                        egui::Button::new(tr!("action-rename-sheet"))
-                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_RENAME_SHEET)),
-                    )
-                    .on_hover_text(tr!("action-rename-sheet", "hint"))
-                    .clicked()
-                {
-                    events.push(TabEvent::BeginRename(id));
-                    ui.close();
-                }
-                if ui
-                    .add(
-                        egui::Button::new(tr!("action-duplicate-sheet"))
-                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
-                    )
-                    .on_hover_text(tr!("action-duplicate-sheet", "hint"))
-                    .clicked()
-                {
-                    events.push(TabEvent::Duplicate(id));
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        ops.can_delete,
-                        egui::Button::new(tr!("action-delete-sheet")),
-                    )
-                    .on_hover_text(tr!("action-delete-sheet", "hint"))
-                    .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"))
-                    .clicked()
-                {
-                    events.push(TabEvent::Delete(id));
-                    ui.close();
-                }
-                ui.separator();
-            }
-            add_menu(ui, requested_add);
-        };
+    let mut requests = TabStripRequests {
+        select: None,
+        add: false,
+        events: Vec::new(),
+    };
     if tabs.is_empty() {
-        let mut requested_add = false;
         ui.allocate_response(
             egui::vec2(ui.available_width(), TAB_STRIP_HEIGHT),
             egui::Sense::click(),
         )
-        .context_menu(|ui| add_menu(ui, &mut requested_add));
-        if requested_add {
+        .context_menu(|ui| tab_strip_add_menu(ui, add_label, &mut requests.add));
+        if requests.add {
             on_add();
         }
         return TabStripOutput::default();
@@ -170,45 +131,14 @@ pub(super) fn tab_strip_with<K: Copy + PartialEq + Send + Sync + 'static>(
         .memory(|memory| memory.data.get_temp(overflow_id))
         .unwrap_or_default();
 
-    let mut requested = None;
-    let mut requested_add = false;
     // -1 : faire apparaître l'onglet caché à gauche ; +1 : à droite.
     let mut step: i8 = 0;
-    let mut new_overflow = TabStripOverflow::default();
+    let mut content = TabStripContent::default();
     let mut arrows = None;
     let mut offset = 0.0;
-    let mut fully_visible: Option<(usize, usize)> = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        if overflow.hidden_left || overflow.hidden_right {
-            let previous = ui
-                .add_enabled_ui(overflow.hidden_left, |ui| {
-                    icon_button(
-                        ui,
-                        Icon::CaretLeft,
-                        IconRole::Neutral,
-                        tr!("tabs-previous-worksheets"),
-                    )
-                })
-                .inner;
-            let next = ui
-                .add_enabled_ui(overflow.hidden_right, |ui| {
-                    icon_button(
-                        ui,
-                        Icon::CaretRight,
-                        IconRole::Neutral,
-                        tr!("tabs-next-worksheets"),
-                    )
-                })
-                .inner;
-            if previous.clicked() {
-                step = -1;
-            }
-            if next.clicked() {
-                step = 1;
-            }
-            arrows = Some([previous.rect, next.rect]);
-        }
+        (step, arrows) = tab_strip_arrows(ui, overflow);
         let band_width = ui.available_width();
         offset = egui::ScrollArea::horizontal()
             .id_salt("tab_strip_scroll")
@@ -217,140 +147,294 @@ pub(super) fn tab_strip_with<K: Copy + PartialEq + Send + Sync + 'static>(
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
-                    let visible = ui.clip_rect();
-                    let mut last_hidden_left = None;
-                    let mut first_hidden_right = None;
-                    let mut tab_rects = Vec::with_capacity(tabs.len());
-                    let mut selected_index = None;
-                    for (index, (id, name)) in tabs.iter().enumerate() {
-                        let renaming = ops.is_some_and(|ops| ops.renaming == Some(*id));
-                        let response = if renaming {
-                            let buffer_id = ui.id().with("tab_rename_buffer");
-                            let fresh = ui
-                                .memory(|memory| memory.data.get_temp::<String>(buffer_id))
-                                .is_none();
-                            let mut text = ui
-                                .memory(|memory| memory.data.get_temp::<String>(buffer_id))
-                                .unwrap_or_else(|| name.clone());
-                            let width = (name.chars().count().max(6) as f32 * 8.0).min(240.0);
-                            let edit_id = buffer_id.with("edit");
-                            let output = egui::TextEdit::singleline(&mut text)
-                                .id(edit_id)
-                                .font(egui::FontId::proportional(12.0))
-                                .desired_width(width)
-                                .show(ui);
-                            if fresh {
-                                output.response.request_focus();
-                                let mut state = output.state;
-                                state
-                                    .cursor
-                                    .set_char_range(Some(egui::text::CCursorRange::two(
-                                        egui::text::CCursor::new(0),
-                                        egui::text::CCursor::new(text.chars().count()),
-                                    )));
-                                state.store(ui.ctx(), edit_id);
-                            }
-                            let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-                            if escape {
-                                ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
-                                events.push(TabEvent::CancelRename);
-                            } else if !fresh && output.response.lost_focus() {
-                                ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
-                                events.push(TabEvent::CommitRename(*id, text));
-                            } else {
-                                ui.memory_mut(|memory| memory.data.insert_temp(buffer_id, text));
-                            }
-                            output.response.response
-                        } else {
-                            let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
-                                .small()
-                                .fill(if selected == *id {
-                                    ui.visuals().selection.bg_fill
-                                } else {
-                                    egui::Color32::TRANSPARENT
-                                });
-                            let response = ui.add(tab);
-                            response.context_menu(|ui| {
-                                tab_menu(ui, *id, &mut events, &mut requested_add)
-                            });
-                            if response.clicked() {
-                                requested = Some(*id);
-                            }
-                            if ops.is_some() && response.double_clicked() {
-                                events.push(TabEvent::BeginRename(*id));
-                            }
-                            response
-                        };
-                        tab_rects.push(response.rect);
-                        if selected == *id {
-                            selected_index = Some(index);
-                        }
-                        if response.rect.left() >= visible.left() - 0.5
-                            && response.rect.right() <= visible.right() + 0.5
-                        {
-                            let first = fully_visible.map_or(index, |(first, _)| first);
-                            fully_visible = Some((first, index));
-                        }
-                        if response.rect.left() < visible.left() - 0.5 {
-                            last_hidden_left = Some(response.clone());
-                        }
-                        if first_hidden_right.is_none()
-                            && response.rect.right() > visible.right() + 0.5
-                        {
-                            first_hidden_right = Some(response.clone());
-                        }
-                    }
-                    new_overflow = TabStripOverflow {
-                        hidden_left: last_hidden_left.is_some(),
-                        hidden_right: first_hidden_right.is_some(),
-                    };
-                    if should_scroll_to_selected {
-                        if let Some(index) = selected_index {
-                            scroll_tab_strip_to_selected(ui, &tab_rects, index, visible);
-                        }
-                    }
-                    match step {
-                        -1 => {
-                            if let Some(tab) = &last_hidden_left {
-                                tab.scroll_to_me(Some(egui::Align::Min));
-                            }
-                        }
-                        1 => {
-                            if let Some(tab) = &first_hidden_right {
-                                tab.scroll_to_me(Some(egui::Align::Max));
-                            }
-                        }
-                        _ => {}
-                    }
-                    let used = ui.cursor().left() - ui.min_rect().left();
-                    let empty = ui.allocate_response(
-                        egui::vec2((band_width - used).max(1.0), TAB_STRIP_HEIGHT),
-                        egui::Sense::click(),
+                    content = tab_strip_contents(
+                        ui,
+                        &config,
+                        &mut requests,
+                        should_scroll_to_selected,
+                        step,
+                        band_width,
                     );
-                    empty.context_menu(|ui| add_menu(ui, &mut requested_add));
                 });
             })
             .state
             .offset
             .x;
     });
-    ui.memory_mut(|memory| memory.data.insert_temp(overflow_id, new_overflow));
+    ui.memory_mut(|memory| memory.data.insert_temp(overflow_id, content.overflow));
     if step != 0 {
         ui.ctx().request_repaint();
     }
-    if let Some(id) = requested {
+    if let Some(id) = requests.select {
         on_select(id);
     }
-    if requested_add {
+    if requests.add {
         on_add();
     }
-    for event in events {
+    for event in requests.events {
         on_event(event);
     }
     TabStripOutput {
         offset,
-        overflow: new_overflow,
+        overflow: content.overflow,
         arrows,
+        fully_visible: content.fully_visible,
+    }
+}
+
+// Données et demandes d'une image, sans Ui ni identifiant propre : les
+// extractions conservent les portées egui et l'ordre des callbacks de la bande.
+struct TabStripConfig<'a, K> {
+    tabs: &'a [(K, String)],
+    selected: K,
+    add_label: Option<&'a str>,
+    ops: Option<&'a TabOps<K>>,
+}
+
+struct TabStripRequests<K> {
+    select: Option<K>,
+    add: bool,
+    events: Vec<TabEvent<K>>,
+}
+
+#[derive(Default)]
+struct TabStripContent {
+    overflow: TabStripOverflow,
+    fully_visible: Option<(usize, usize)>,
+}
+
+fn tab_strip_add_menu(ui: &mut egui::Ui, add_label: Option<&str>, requested_add: &mut bool) {
+    if let Some(label) = add_label {
+        if ui.button(label).clicked() {
+            *requested_add = true;
+            ui.close();
+        }
+    }
+}
+
+fn tab_strip_tab_menu<K: Copy>(
+    ui: &mut egui::Ui,
+    id: K,
+    config: &TabStripConfig<'_, K>,
+    requests: &mut TabStripRequests<K>,
+) {
+    if let Some(ops) = config.ops {
+        let ctx = ui.ctx().clone();
+        if ui
+            .add(
+                egui::Button::new(tr!("action-rename-sheet"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_RENAME_SHEET)),
+            )
+            .on_hover_text(tr!("action-rename-sheet", "hint"))
+            .clicked()
+        {
+            requests.events.push(TabEvent::BeginRename(id));
+            ui.close();
+        }
+        if ui
+            .add(
+                egui::Button::new(tr!("action-duplicate-sheet"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+            )
+            .on_hover_text(tr!("action-duplicate-sheet", "hint"))
+            .clicked()
+        {
+            requests.events.push(TabEvent::Duplicate(id));
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                ops.can_delete,
+                egui::Button::new(tr!("action-delete-sheet")),
+            )
+            .on_hover_text(tr!("action-delete-sheet", "hint"))
+            .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"))
+            .clicked()
+        {
+            requests.events.push(TabEvent::Delete(id));
+            ui.close();
+        }
+        ui.separator();
+    }
+    tab_strip_add_menu(ui, config.add_label, &mut requests.add);
+}
+
+fn tab_strip_arrows(
+    ui: &mut egui::Ui,
+    overflow: TabStripOverflow,
+) -> (i8, Option<[egui::Rect; 2]>) {
+    let mut step = 0;
+    let mut arrows = None;
+    if overflow.hidden_left || overflow.hidden_right {
+        let previous = ui
+            .add_enabled_ui(overflow.hidden_left, |ui| {
+                icon_button(
+                    ui,
+                    Icon::CaretLeft,
+                    IconRole::Neutral,
+                    tr!("tabs-previous-worksheets"),
+                )
+            })
+            .inner;
+        let next = ui
+            .add_enabled_ui(overflow.hidden_right, |ui| {
+                icon_button(
+                    ui,
+                    Icon::CaretRight,
+                    IconRole::Neutral,
+                    tr!("tabs-next-worksheets"),
+                )
+            })
+            .inner;
+        if previous.clicked() {
+            step = -1;
+        }
+        if next.clicked() {
+            step = 1;
+        }
+        arrows = Some([previous.rect, next.rect]);
+    }
+
+    (step, arrows)
+}
+
+fn tab_strip_rename<K: Copy>(
+    ui: &mut egui::Ui,
+    id: K,
+    name: &str,
+    requests: &mut TabStripRequests<K>,
+) -> egui::Response {
+    let buffer_id = ui.id().with("tab_rename_buffer");
+    let fresh = ui
+        .memory(|memory| memory.data.get_temp::<String>(buffer_id))
+        .is_none();
+    let mut text = ui
+        .memory(|memory| memory.data.get_temp::<String>(buffer_id))
+        .unwrap_or_else(|| name.to_owned());
+    let width = (name.chars().count().max(6) as f32 * 8.0).min(240.0);
+    let edit_id = buffer_id.with("edit");
+    let output = egui::TextEdit::singleline(&mut text)
+        .id(edit_id)
+        .font(egui::FontId::proportional(12.0))
+        .desired_width(width)
+        .show(ui);
+    if fresh {
+        output.response.request_focus();
+        let mut state = output.state;
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(text.chars().count()),
+            )));
+        state.store(ui.ctx(), edit_id);
+    }
+    let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    if escape {
+        ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
+        requests.events.push(TabEvent::CancelRename);
+    } else if !fresh && output.response.lost_focus() {
+        ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
+        requests.events.push(TabEvent::CommitRename(id, text));
+    } else {
+        ui.memory_mut(|memory| memory.data.insert_temp(buffer_id, text));
+    }
+    output.response.response
+}
+
+fn tab_strip_tab<K: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    id: K,
+    name: &str,
+    config: &TabStripConfig<'_, K>,
+    requests: &mut TabStripRequests<K>,
+) -> egui::Response {
+    let renaming = config.ops.is_some_and(|ops| ops.renaming == Some(id));
+    if renaming {
+        tab_strip_rename(ui, id, name, requests)
+    } else {
+        let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
+            .small()
+            .fill(if config.selected == id {
+                ui.visuals().selection.bg_fill
+            } else {
+                egui::Color32::TRANSPARENT
+            });
+        let response = ui.add(tab);
+        response.context_menu(|ui| tab_strip_tab_menu(ui, id, config, requests));
+        if response.clicked() {
+            requests.select = Some(id);
+        }
+        if config.ops.is_some() && response.double_clicked() {
+            requests.events.push(TabEvent::BeginRename(id));
+        }
+        response
+    }
+}
+
+fn tab_strip_contents<K: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    config: &TabStripConfig<'_, K>,
+    requests: &mut TabStripRequests<K>,
+    should_scroll_to_selected: bool,
+    step: i8,
+    band_width: f32,
+) -> TabStripContent {
+    let mut fully_visible: Option<(usize, usize)> = None;
+    let visible = ui.clip_rect();
+    let mut last_hidden_left = None;
+    let mut first_hidden_right = None;
+    let mut tab_rects = Vec::with_capacity(config.tabs.len());
+    let mut selected_index = None;
+    for (index, (id, name)) in config.tabs.iter().enumerate() {
+        let response = tab_strip_tab(ui, *id, name, config, requests);
+        tab_rects.push(response.rect);
+        if config.selected == *id {
+            selected_index = Some(index);
+        }
+        if response.rect.left() >= visible.left() - 0.5
+            && response.rect.right() <= visible.right() + 0.5
+        {
+            let first = fully_visible.map_or(index, |(first, _)| first);
+            fully_visible = Some((first, index));
+        }
+        if response.rect.left() < visible.left() - 0.5 {
+            last_hidden_left = Some(response.clone());
+        }
+        if first_hidden_right.is_none() && response.rect.right() > visible.right() + 0.5 {
+            first_hidden_right = Some(response.clone());
+        }
+    }
+    let new_overflow = TabStripOverflow {
+        hidden_left: last_hidden_left.is_some(),
+        hidden_right: first_hidden_right.is_some(),
+    };
+    if should_scroll_to_selected {
+        if let Some(index) = selected_index {
+            scroll_tab_strip_to_selected(ui, &tab_rects, index, visible);
+        }
+    }
+    match step {
+        -1 => {
+            if let Some(tab) = &last_hidden_left {
+                tab.scroll_to_me(Some(egui::Align::Min));
+            }
+        }
+        1 => {
+            if let Some(tab) = &first_hidden_right {
+                tab.scroll_to_me(Some(egui::Align::Max));
+            }
+        }
+        _ => {}
+    }
+    let used = ui.cursor().left() - ui.min_rect().left();
+    let empty = ui.allocate_response(
+        egui::vec2((band_width - used).max(1.0), TAB_STRIP_HEIGHT),
+        egui::Sense::click(),
+    );
+    empty.context_menu(|ui| tab_strip_add_menu(ui, config.add_label, &mut requests.add));
+    TabStripContent {
+        overflow: new_overflow,
         fully_visible,
     }
 }
@@ -813,6 +897,72 @@ mod tests {
             "sans gestes, pas de renommage : {demandes:?}"
         );
         assert!(!choisis.is_empty() && choisis.iter().all(|&tab| tab == 1));
+    }
+
+    /// Le double-clic demande d'abord la sélection, puis le renommage :
+    /// les callbacks restent différés et ordonnés après les extractions.
+    #[test]
+    fn le_double_clic_notifie_la_selection_avant_le_renommage() {
+        #[derive(Debug, PartialEq)]
+        enum Appel {
+            Selection(u32),
+            Ajout,
+            Geste(TabEvent<u32>),
+        }
+        let context = contexte();
+        let tabs = vec![(0, "Première".into()), (1, "Seconde".into())];
+        let ops = TabOps {
+            renaming: None,
+            can_delete: true,
+        };
+        let appels = std::cell::RefCell::new(Vec::new());
+        let paint = |events| {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 60.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    tab_strip_with(
+                        ui,
+                        &tabs,
+                        0,
+                        |id| appels.borrow_mut().push(Appel::Selection(id)),
+                        Some("Ajouter"),
+                        || appels.borrow_mut().push(Appel::Ajout),
+                        Some(&ops),
+                        |event| appels.borrow_mut().push(Appel::Geste(event)),
+                    );
+                },
+            );
+            output.textures_delta.clear();
+            output
+        };
+        paint(Vec::new());
+        let output = paint(Vec::new());
+        assert!(
+            appels.borrow().is_empty(),
+            "témoin : peindre ne notifie aucun choix"
+        );
+        let pos = position(&output, "Seconde").unwrap();
+        paint(vec![egui::Event::PointerMoved(pos)]);
+        paint(vec![clic(pos, true)]);
+        paint(vec![clic(pos, false)]);
+        assert_eq!(
+            appels.take(),
+            [Appel::Selection(1)],
+            "un clic choisit seulement l'onglet"
+        );
+        paint(vec![clic(pos, true)]);
+        paint(vec![clic(pos, false)]);
+        assert_eq!(
+            appels.take(),
+            [Appel::Selection(1), Appel::Geste(TabEvent::BeginRename(1))]
+        );
     }
 
     /// Le renommage en place : le champ s'ouvre avec le nom entier
