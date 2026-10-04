@@ -58,10 +58,10 @@ use crate::state::{visible_columns_in, HeaderField};
 /// Maj-clic sur la gouttière des numéros de ligne), ou une plage d'un champ
 /// d'en-tête entier ([`SelectionKind::HeaderRows`], glisser/Maj-clic sur son
 /// libellé dans la gouttière) — même comportement clic-sélectionne/
-/// glisser-étende/double-clic-édite pour toutes, voir [`crate::app::grid::
-/// header_field_widget`], [`crate::app::grid::cell_widget`], [`crate::app::grid::
-/// column_header_widget`], [`crate::app::grid::row_number_widget`] et
-/// [`crate::app::grid::header_row_label_widget`].
+/// glisser-étende/double-clic-édite pour toutes, voir
+/// `app::grid::header_field_widget`, `app::grid::cell_widget`,
+/// `app::grid::column_header_widget`, `app::grid::row_number_widget` et
+/// `app::grid::header_row_label_widget`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selection {
     kind: SelectionKind,
@@ -89,7 +89,7 @@ enum SelectionKind {
     /// Plage de lignes entières, entre `anchor` et `cursor` (mêmes règles que
     /// `Columns::anchor`/`cursor`, mais en indices de ligne plutôt qu'en
     /// identifiants de colonne) — glisser ou Maj-clic sur la gouttière des
-    /// numéros de ligne ([`crate::app::grid::row_number_widget`]). Symétrique de
+    /// numéros de ligne (`app::grid::row_number_widget`). Symétrique de
     /// `Columns` : elle touche toutes les colonnes visibles de la feuille et,
     /// comme elle, ne touche jamais l'en-tête (une ligne entière est une
     /// sélection de données pures, voir la doc de tête du module).
@@ -97,7 +97,7 @@ enum SelectionKind {
     /// Plage d'un champ d'en-tête entier, entre `anchor` et `cursor` (mêmes
     /// règles que `FullRows::anchor`/`cursor`, mais en champs plutôt qu'en
     /// indices de ligne) — glisser ou Maj-clic sur le libellé du champ dans
-    /// la gouttière ([`crate::app::grid::header_row_label_widget`]). Pendant de
+    /// la gouttière (`app::grid::header_row_label_widget`). Pendant de
     /// `FullRows` pour la zone d'en-tête, comme `FullRows` l'est de
     /// `Columns` : elle touche toutes les colonnes visibles de la feuille et,
     /// symétriquement, ne touche jamais les données — c'est une sélection
@@ -265,8 +265,8 @@ impl Selection {
     /// et un glisser peut ensuite l'étendre à d'autres colonnes (voir
     /// [`Selection::extend_row_to`]) sans jamais couvrir *toutes* les
     /// colonnes d'un même geste — les deux widgets qui posent l'une ou
-    /// l'autre sont distincts ([`crate::app::grid::header_field_widget`] pour
-    /// celle-ci, [`crate::app::grid::header_row_label_widget`] pour
+    /// l'autre sont distincts (`app::grid::header_field_widget` pour
+    /// celle-ci, `app::grid::header_row_label_widget` pour
     /// [`Selection::header_row`]).
     pub fn header_field(column: NodeId, field: HeaderField) -> Self {
         let cursor = GridCursor::Header(column, field);
@@ -615,7 +615,7 @@ impl Selection {
     /// Vrai si `row` fait partie de la plage de lignes sélectionnée (clic,
     /// glisser ou Maj-clic sur la gouttière des numéros de ligne) — pendant
     /// de [`Selection::is_column_selected`], pour la surbrillance de
-    /// [`crate::app::grid::row_number_widget`]. Ne prend ni `tree` ni `sheet` :
+    /// `app::grid::row_number_widget`. Ne prend ni `tree` ni `sheet` :
     /// contrairement à une colonne, une ligne n'a pas besoin de l'arbre pour
     /// savoir si elle est dans la plage.
     pub fn is_row_selected(&self, row: usize) -> bool {
@@ -642,8 +642,8 @@ impl Selection {
     /// Vrai si `field` fait partie de la plage de champ d'en-tête entier
     /// sélectionnée (clic, glisser ou Maj-clic sur le libellé du champ dans
     /// la gouttière) — pendant de [`Selection::is_row_selected`], côté
-    /// en-tête, pour la surbrillance de [`crate::app::grid::
-    /// header_row_label_widget`]. Ne prend ni `tree` ni `sheet`, pour la même
+    /// en-tête, pour la surbrillance de `app::grid::header_row_label_widget`.
+    /// Ne prend ni `tree` ni `sheet`, pour la même
     /// raison que [`Selection::is_row_selected`].
     pub fn is_header_row_selected(&self, field: HeaderField) -> bool {
         match &self.kind {
@@ -762,7 +762,7 @@ impl Selection {
     /// qui, elle, mémorise directement la colonne cliquée. `None` seulement
     /// si `sheet` n'a plus aucune colonne visible, ce qui ne devrait jamais
     /// arriver en pratique tant qu'une telle plage est affichée
-    /// ([`crate::app::grid::grid_contents`] n'affiche pas de grille sans colonne)
+    /// (`app::grid::grid_contents` n'affiche pas de grille sans colonne)
     /// — traité proprement plutôt que par un identifiant arbitraire. Sert de
     /// point de départ au collage ([`crate::state::AppState::paste`]/
     /// [`crate::state::AppState::paste_absolute`] collent à partir de

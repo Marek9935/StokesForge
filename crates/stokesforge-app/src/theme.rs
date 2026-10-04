@@ -16,7 +16,7 @@
 //!
 //! [`install`] pose cette palette une seule fois, à la construction de la
 //! fenêtre (`main.rs`, avant [`crate::app::StokesForgeApp::new`]) — jamais depuis
-//! [`crate::app::StokesForgeApp::ui`], qui tournerait sinon à chaque image pour
+//! [`crate::app::StokesForgeApp::ui`](eframe::App::ui), qui tournerait sinon à chaque image pour
 //! rien.
 //!
 //! # Barres de défilement : un seul standard

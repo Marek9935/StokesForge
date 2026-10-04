@@ -16,7 +16,7 @@ use stokesforge_core::NodeId;
 use crate::state::{Action, AppState};
 use crate::{theme, tr};
 
-use super::claim_file_drop;
+use super::file_drop::claim_file_drop;
 use super::grid::{
     grid_contents, show_grid_horizontal_bar, show_grid_vertical_bar,
     show_horizontally_scrollable_grid,
@@ -72,7 +72,7 @@ pub(super) fn workbook_menu(
     }
 }
 
-/// Bande d'onglets des feuilles d'un classeur : [`tab_strip`] avec, en plus,
+/// Bande d'onglets des feuilles d'un classeur : [`tab_strip`](crate::app::tab_strip::tab_strip) avec, en plus,
 /// « Ajouter une feuille » au clic droit.
 fn sheet_tabs(
     ui: &mut egui::Ui,
@@ -96,7 +96,7 @@ fn sheet_tabs(
     )
 }
 
-/// Contenu commun d'un [`Tab::Book`] flottant ou détaché : la grille
+/// Contenu commun d'un [`Tab::Book`](crate::app::tab::Tab::Book) flottant ou détaché : la grille
 /// ([`grid_contents`]) scopée à la feuille choisie *dans ce classeur*, et
 /// la sous-navigation entre les feuilles — des onglets compacts en **bas**
 /// de la grille (choix assumé, pas une convention préexistante du crate :

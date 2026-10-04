@@ -32,7 +32,7 @@ pub(super) struct TabStripOverflow {
     pub(super) hidden_right: bool,
 }
 
-/// Ce que [`sheet_tabs`] a dessiné : décalage de la bande, onglets cachés,
+/// Ce que `sheet_tabs` (`workbook.rs`) a dessiné : décalage de la bande, onglets cachés,
 /// et rectangles des boutons « < » et « > » s'ils sont affichés. Seuls les
 /// tests le lisent ; l'interface n'en a pas besoin.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -356,7 +356,7 @@ pub(super) fn tab_strip_with<K: Copy + PartialEq + Send + Sync + 'static>(
 }
 
 /// Ce que la bande d'onglets demande sur une feuille ; l'appelant en fait des
-/// [`Action`].
+/// [`Action`](crate::state::Action).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum TabEvent<K> {
     BeginRename(K),

@@ -7,13 +7,13 @@
 //! ([`grid_grip_side`]).
 //!
 //! Sorti d'`app.rs` tel quel (#120). Le classeur qui l'entoure (onglets de
-//! feuille, menu Classeur) vit dans `workbook.rs` ; `app.rs` ne lit d'ici que
-//! [`keyboard_focus_outside_grid`] (raccourcis globaux) et la visibilité de la
-//! ligne « Metadata » (menu Fenêtre) ; [`role_label`] est aussi lu par un test
-//! du classeur détaché resté dans `app.rs`. Deux dépendances vers `app.rs`
-//! restent à reprendre quand leurs voisins déménageront :
-//! `paint_drag_handle_icon` (pictogramme de la zone de prise) et, côté
-//! `workbook.rs`, `claim_file_drop` (dépôt de fichiers, #121).
+//! feuille, menu Classeur) vit dans `workbook.rs`. Les autres modules ne lisent
+//! d'ici que [`keyboard_focus_outside_grid`] (`app.rs` pour les raccourcis
+//! globaux, `dialogs.rs`, `graph_window.rs`) et la visibilité de la ligne
+//! « Metadata » (`menus.rs`) ; [`role_label`] sert aussi au test du classeur
+//! détaché (`window_detach.rs`). Une dépendance à rebours vers `app.rs` reste
+//! à reprendre : `paint_drag_handle_icon` (pictogramme de la zone de prise),
+//! qui n'a pas d'autre utilisateur que ce module.
 //!
 //! Les tests sont en fin de fichier : ils peignent le classeur sans fenêtre,
 //! injectent clavier et souris, et lisent ce qui est peint (textes,
@@ -100,12 +100,12 @@ const COLUMN_GRIP_WIDTH: f32 = 10.0;
 /// graphe.
 ///
 /// Fonction pure sur des coordonnées brutes (`(gauche, haut, droite, bas)`,
-/// `(x, y)`), pas sur `egui::Rect`/`egui::Pos2` : testable dans
-/// `tests/shell.rs` sans dépendre d'une fenêtre ni d'une passe de rendu —
-/// même esprit que le reste de ce module, où la décision est toujours
-/// séparée du code de peinture qui l'utilise ([`grid_contents`]).
+/// `(x, y)`), pas sur `egui::Rect`/`egui::Pos2` : testable seule, en fin de
+/// module, sans dépendre d'une fenêtre ni d'une passe de rendu — même esprit
+/// que le reste de ce module, où la décision est toujours séparée du code de
+/// peinture qui l'utilise ([`grid_contents`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GripSide {
+enum GripSide {
     /// Bord gauche de la grille.
     Left,
     /// Bord droit de la grille.
@@ -113,7 +113,7 @@ pub enum GripSide {
 }
 
 /// Voir [`GripSide`].
-pub fn grid_grip_side(
+fn grid_grip_side(
     grid: (f32, f32, f32, f32),
     pointer: (f32, f32),
     margin: f32,
@@ -712,7 +712,7 @@ fn column_header_widget(
 
 /// Case « Métadonnées » de l'en-tête : le résumé des métadonnées du fichier
 /// d'origine (« 23 clés »), en lecture seule. Un clic ouvre la fenêtre qui les
-/// liste ([`column_metadata_window`]). Hors sélection de champ : il n'y a rien
+/// liste ([`column_metadata_window`](crate::app::plot_settings::column_metadata_window)). Hors sélection de champ : il n'y a rien
 /// à copier, effacer ni éditer.
 fn metadata_cell_widget(
     ui: &mut egui::Ui,
@@ -1170,7 +1170,7 @@ pub(super) fn keyboard_focus_outside_grid(ctx: &egui::Context) -> bool {
 
 /// La grille, en lignes **virtualisées** : seules les lignes visibles sont
 /// construites, sans quoi une feuille d'un million de lignes bloquerait
-/// chaque image. Scopée à `sheet` — voir [`book_contents`], son seul
+/// chaque image. Scopée à `sheet` — voir [`book_contents`](crate::app::workbook::book_contents), son seul
 /// appelant.
 ///
 /// En-tête empilée (lettre A/B/C, nom long, unité, commentaire, formule —
@@ -1406,7 +1406,7 @@ pub(super) fn grid_contents(
     // ci-dessous agit sur l'`InputState` du `Context` entier, pas sur celui
     // d'une `Ui` — donc pas seulement sur cette grille. Tant que la fenêtre
     // d'import (un `egui::Window` flottant, peint *après* les fenêtres
-    // flottantes de contenu — voir `StokesForgeApp::update`) est ouverte, cette
+    // flottantes de contenu — voir `StokesForgeApp::ui`) est ouverte, cette
     // grille continue d'être peinte
     // dessous à chaque image ; sans cette condition, Retour arrière/Suppr
     // tapés dans un champ texte de la fenêtre d'import étaient retirés d'ici
@@ -1970,6 +1970,88 @@ mod tests {
     use super::*;
     use stokesforge_core::{Column, Project};
     use stokesforge_session::Session;
+
+    /// La zone de prise du glisser-déposer de colonnes est une mince bande sur
+    /// le bord *extérieur* gauche ou droit de la grille — [`grid_grip_side`] est
+    /// la fonction pure qui en décide, hors de tout code de peinture. À
+    /// l'intérieur des bornes verticales de la grille, un pointeur à `margin`
+    /// points ou moins du bord gauche rend `Left`, du bord droit `Right`.
+    #[test]
+    fn grid_grip_side_detects_the_outer_edges_of_the_grid() {
+        let grid = (100.0, 50.0, 300.0, 250.0); // (gauche, haut, droite, bas)
+        let margin = 10.0;
+
+        assert_eq!(
+            grid_grip_side(grid, (100.0, 150.0), margin),
+            Some(GripSide::Left),
+            "tout contre le bord gauche"
+        );
+        assert_eq!(
+            grid_grip_side(grid, (108.0, 150.0), margin),
+            Some(GripSide::Left),
+            "à l'intérieur de la marge, encore le bord gauche"
+        );
+        assert_eq!(
+            grid_grip_side(grid, (300.0, 150.0), margin),
+            Some(GripSide::Right),
+            "tout contre le bord droit"
+        );
+        assert_eq!(
+            grid_grip_side(grid, (293.0, 150.0), margin),
+            Some(GripSide::Right),
+            "à l'intérieur de la marge, encore le bord droit"
+        );
+        // Les bornes de la marge sont incluses, et s'arrêtent là : témoin
+        // d'une comparaison stricte qui raccourcirait la zone de prise.
+        assert_eq!(
+            grid_grip_side(grid, (110.0, 150.0), margin),
+            Some(GripSide::Left),
+            "pile à `margin` du bord gauche"
+        );
+        assert_eq!(
+            grid_grip_side(grid, (290.0, 150.0), margin),
+            Some(GripSide::Right),
+            "pile à `margin` du bord droit"
+        );
+        assert_eq!(grid_grip_side(grid, (110.5, 150.0), margin), None);
+        assert_eq!(grid_grip_side(grid, (289.5, 150.0), margin), None);
+        assert_eq!(
+            grid_grip_side(grid, (100.0, 50.0), margin),
+            Some(GripSide::Left),
+            "le bord haut de la grille compte"
+        );
+        assert_eq!(
+            grid_grip_side(grid, (100.0, 250.0), margin),
+            Some(GripSide::Left),
+            "le bord bas de la grille compte"
+        );
+    }
+
+    /// Hors de la marge (au milieu de la grille) ou hors de ses bornes
+    /// verticales, la zone de prise ne se déclenche pas — c'est ce qui garde le
+    /// glisser d'extension de sélection de `cell_widget` intact ailleurs dans la
+    /// grille.
+    #[test]
+    fn grid_grip_side_ignores_the_interior_and_outside_the_vertical_bounds() {
+        let grid = (100.0, 50.0, 300.0, 250.0);
+        let margin = 10.0;
+
+        assert_eq!(
+            grid_grip_side(grid, (200.0, 150.0), margin),
+            None,
+            "milieu de la grille : pas la zone de prise"
+        );
+        assert_eq!(
+            grid_grip_side(grid, (105.0, 30.0), margin),
+            None,
+            "au-dessus de la grille, même proche du bord gauche en x"
+        );
+        assert_eq!(
+            grid_grip_side(grid, (105.0, 260.0), margin),
+            None,
+            "en dessous de la grille"
+        );
+    }
 
     /// Un bouton voisin (« avant », premier widget focalisable venu de
     /// l'image, donc celui qu'egui choisirait sur un Tab) puis un classeur de

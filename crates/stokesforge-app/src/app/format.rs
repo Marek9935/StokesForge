@@ -271,7 +271,7 @@ impl StokesForgeApp {
     /// d'un passage du champ en édition, la couleur, le gras…).
     ///
     /// - un texte libre en édition : le brouillon de l'éditeur
-    ///   ([`apply_pending_zone_font`]) ;
+    ///   (`apply_pending_zone_font` (`graph_text_edit.rs`)) ;
     /// - un titre ou un nom de légende en édition : le titre, ou la légende,
     ///   directement ;
     /// - un titre, un titre d'axe ou la légende sélectionné : idem, police et
@@ -409,7 +409,7 @@ impl StokesForgeApp {
     }
 
     /// Met en forme le texte visé : dans le champ en édition (le champ pose
-    /// les balises à son prochain tracé, voir [`apply_pending_format`]), ou
+    /// les balises à son prochain tracé, voir `apply_pending_format` (`graph_text_edit.rs`)), ou
     /// sur tout le texte libre sélectionné — une seule action annulable.
     fn format_text(
         &mut self,
@@ -510,6 +510,7 @@ impl StokesForgeApp {
 mod tests {
     use super::super::graph_text_edit::open_text_editor;
     use super::super::graph_window::graph_drop_target;
+    use super::super::graph_window::tests::graphe;
     use super::super::object_manager_ui::{selected_manager_target, ObjectManagerRequest};
     use super::super::project_manager::tests::{click_at, find_text_center};
     use super::*;
@@ -518,34 +519,13 @@ mod tests {
     use crate::text_format::{apply, TextFormat};
     use crate::theme;
     use crate::toolbar::{BarEnv, FormatTarget, ToolbarId, ToolsContext};
-    use stokesforge_core::{Column, Project};
+    use stokesforge_core::Project;
     use stokesforge_plot::{
         AnnotationRef, AnnotationSpec, AxisSide, PanelSpec, PlotSpec, SeriesRef, SeriesSpec,
         ShapeKind, ShapeRef, ShapeSpec, TextFont,
     };
     use stokesforge_render_egui::GraphTool;
     use stokesforge_session::Session;
-
-    /// Un classeur (deux colonnes) et un graphe titré « Figure » qui les
-    /// trace — le graphe de `app.rs` que les tests de la barre employaient.
-    fn graphe() -> (Session, NodeId) {
-        let mut project = Project::new("Découpage").unwrap();
-        let root = project.root();
-        let book = project.add_empty_workbook(root, None).unwrap();
-        let sheet = project.add_worksheet(book, None).unwrap();
-        let x = project
-            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
-            .unwrap();
-        let y = project
-            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
-            .unwrap();
-        let mut panel = PanelSpec::at(0, 0);
-        panel.series.push(SeriesSpec::new_xy(x, y));
-        let graph = project
-            .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
-            .unwrap();
-        (Session::spawn(project, None).unwrap(), graph)
-    }
 
     /// Le texte libre du graphe de [`setup`].
     const TEXTE: AnnotationRef = AnnotationRef {

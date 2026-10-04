@@ -26,7 +26,6 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use stokesforge_app::app::{grid_grip_side, GripSide};
 use stokesforge_app::history_text::history_text;
 use stokesforge_app::selection::Selection;
 use stokesforge_app::state::{
@@ -2027,7 +2026,7 @@ fn another_grid_mutation_between_two_delete_presses_forgets_the_first() {
     state.dispatch(action);
 
     // Une autre mutation de la grille se glisse entre les deux pressions,
-    // sur la même sélection — comme le ferait l'appelant (`app.rs`) avant
+    // sur la même sélection — comme le ferait l'appelant (`app/grid.rs`) avant
     // de dispatcher `Action::ClearSelectedCells` pour Retour arrière.
     state.forget_delete_repeat(sheet1);
     state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
@@ -4697,64 +4696,6 @@ fn add_series_to_graph_appends_without_overwriting_existing_series() {
 }
 
 // -- 23. Glisser une sélection de colonnes vers un graphe --
-
-/// La zone de prise du glisser-déposer de colonnes est une mince bande sur
-/// le bord *extérieur* gauche ou droit de la grille — [`grid_grip_side`] est
-/// la fonction pure qui en décide, hors de tout code de peinture. À
-/// l'intérieur des bornes verticales de la grille, un pointeur à `margin`
-/// points ou moins du bord gauche rend `Left`, du bord droit `Right`.
-#[test]
-fn grid_grip_side_detects_the_outer_edges_of_the_grid() {
-    let grid = (100.0, 50.0, 300.0, 250.0); // (gauche, haut, droite, bas)
-    let margin = 10.0;
-
-    assert_eq!(
-        grid_grip_side(grid, (100.0, 150.0), margin),
-        Some(GripSide::Left),
-        "tout contre le bord gauche"
-    );
-    assert_eq!(
-        grid_grip_side(grid, (108.0, 150.0), margin),
-        Some(GripSide::Left),
-        "à l'intérieur de la marge, encore le bord gauche"
-    );
-    assert_eq!(
-        grid_grip_side(grid, (300.0, 150.0), margin),
-        Some(GripSide::Right),
-        "tout contre le bord droit"
-    );
-    assert_eq!(
-        grid_grip_side(grid, (293.0, 150.0), margin),
-        Some(GripSide::Right),
-        "à l'intérieur de la marge, encore le bord droit"
-    );
-}
-
-/// Hors de la marge (au milieu de la grille) ou hors de ses bornes
-/// verticales, la zone de prise ne se déclenche pas — c'est ce qui garde le
-/// glisser d'extension de sélection de `cell_widget` intact ailleurs dans la
-/// grille.
-#[test]
-fn grid_grip_side_ignores_the_interior_and_outside_the_vertical_bounds() {
-    let grid = (100.0, 50.0, 300.0, 250.0);
-    let margin = 10.0;
-
-    assert_eq!(
-        grid_grip_side(grid, (200.0, 150.0), margin),
-        None,
-        "milieu de la grille : pas la zone de prise"
-    );
-    assert_eq!(
-        grid_grip_side(grid, (105.0, 30.0), margin),
-        None,
-        "au-dessus de la grille, même proche du bord gauche en x"
-    );
-    assert_eq!(
-        grid_grip_side(grid, (105.0, 260.0), margin),
-        None,
-        "en dessous de la grille"
-    );
-}
 
 /// [`AppState::column_drag_payload`] rend `None` tant que `sheet` n'a pas de
 /// sélection couvrant une colonne — pas de glisser possible sans colonne,

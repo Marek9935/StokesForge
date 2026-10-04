@@ -861,7 +861,7 @@ pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
 
 /// Vrai si la cellule `(column, row)` porte une valeur **numérique** — sert
 /// à aligner le corps de la grille comme un tableur (nombres à droite, texte
-/// à gauche, voir [`crate::app::grid::cell_widget`]). Pour une colonne `Mixed`, le
+/// à gauche, voir `app::grid::cell_widget`). Pour une colonne `Mixed`, le
 /// type se lit par cellule (`Column::cell`), pas par colonne : deux lignes
 /// voisines peuvent s'aligner différemment. `false` pour une cellule vide
 /// (numérique manquante ou texte manquant) : un vide n'a pas de sens à
@@ -1108,7 +1108,7 @@ pub enum GridZone {
 
 /// Ce qu'un menu contextuel de la grille doit proposer pour la sélection
 /// courante — construit par [`AppState::grid_menu`], rendu par
-/// [`crate::app::grid::grid_edit_menu`].
+/// `app::grid::grid_edit_menu`.
 ///
 /// Ce type ne porte **que la décision** (quels gestes ont un sens ici,
 /// comment les nommer, lesquels sont grisés) et jamais de widget : c'est ce
@@ -1117,7 +1117,7 @@ pub enum GridZone {
 ///
 /// Les gestes listés sont exactement les raccourcis clavier de la grille
 /// (voir la doc de tête de ce module, section copier/coller, et le bloc
-/// clavier de [`crate::app::grid::grid_contents`]) : aucun menu n'offre ici
+/// clavier de `app::grid::grid_contents`) : aucun menu n'offre ici
 /// d'action qui n'aurait pas d'équivalent au clavier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridMenu {
@@ -1847,7 +1847,7 @@ pub struct AppState {
     snapshot: Snapshot,
     /// Feuille affichée dans la grille de chaque classeur **ouvert** —
     /// `Workbook -> Worksheet` sélectionnée dans son propre onglet
-    /// [`crate::app::Tab::Book`]. Un classeur qui n'a pas d'entrée ici (ou
+    /// `app::tab::Tab::Book`. Un classeur qui n'a pas d'entrée ici (ou
     /// dont l'entrée est devenue invalide) retombe sur sa première feuille,
     /// voir [`AppState::selected_sheet_in`] — la carte n'a donc jamais besoin
     /// d'être pré-remplie.
@@ -2800,8 +2800,8 @@ impl AppState {
     /// ouvrir, plutôt qu'un menu dont chaque entrée serait sans effet.
     ///
     /// Un clic droit pose toujours une sélection avant d'arriver ici (voir
-    /// [`crate::app::grid::cell_widget`]/[`crate::app::grid::header_field_widget`]/
-    /// [`crate::app::grid::column_header_widget`], qui réduisent la sélection à la
+    /// `app::grid::cell_widget`/`app::grid::header_field_widget`/
+    /// `app::grid::column_header_widget`, qui réduisent la sélection à la
     /// case visée si le clic droit tombe en dehors) : le `None` ne se
     /// produit en pratique que sur une feuille vidée sous le curseur.
     pub fn grid_menu(&self, sheet: NodeId) -> Option<GridMenu> {
@@ -2987,7 +2987,7 @@ impl AppState {
     }
 
     /// Texte affiché d'un champ d'en-tête (hors édition) — même détail que
-    /// [`crate::app::grid::header_field_widget`], factorisé ici pour être partagé
+    /// `app::grid::header_field_widget`, factorisé ici pour être partagé
     /// avec [`AppState::copy_selection`]/[`AppState::copy_full_columns`].
     pub(crate) fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
         let meta = self.column_meta(column);
@@ -3295,7 +3295,7 @@ impl AppState {
     }
 
     /// Les feuilles de `book`, dans l'ordre des onglets internes
-    /// [`crate::app::Tab::Book`] : `(NodeId, nom)`. Vide si `book` n'existe
+    /// `app::tab::Tab::Book` : `(NodeId, nom)`. Vide si `book` n'existe
     /// plus ou n'est pas un classeur.
     pub fn worksheets_of(&self, book: NodeId) -> Vec<(NodeId, String)> {
         worksheets_of_in(&self.snapshot.tree, book)
@@ -4873,7 +4873,7 @@ impl AppState {
     /// Enregistre un message informatif. `pub(crate)` pour que la couche
     /// fenêtre puisse signaler ce qu'elle seule sait — un presse-papier
     /// système illisible au moment d'un « Coller » pris dans un menu
-    /// contextuel (voir [`crate::app::grid::system_clipboard_text`]) : cet échec
+    /// contextuel (voir `app::grid::system_clipboard_text`) : cet échec
     /// naît côté plateforme, jamais dans le modèle.
     pub(crate) fn notice(&mut self, text: String) {
         self.status = Some(StatusMessage {

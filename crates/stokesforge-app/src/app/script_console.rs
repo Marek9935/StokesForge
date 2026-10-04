@@ -140,7 +140,7 @@ impl StokesForgeApp {
     /// Peint la console de script dans son panneau fixe, ancré en bas — voir
     /// la doc de tête d'`app.rs`, § Ce qui reste ici (l'ordre des panneaux).
     /// Appelé par
-    /// [`StokesForgeApp::ui`] *avant* [`StokesForgeApp::project_manager_panel`]
+    /// [`StokesForgeApp::ui`](eframe::App::ui) *avant* [`StokesForgeApp::project_manager_panel`]
     /// (`egui::Panel::left`) : avec `egui::Panel`, le premier panneau ajouté
     /// est le plus extérieur, donc celui-ci, posé en premier, réserve sa
     /// bande sur toute la largeur de la fenêtre — y compris sous le Project

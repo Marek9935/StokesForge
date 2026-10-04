@@ -46,7 +46,7 @@ pub(super) struct PmInteraction<'a> {
 /// Le corps du Project Manager, à partir d'un arbre déjà construit plutôt
 /// que d'un `&AppState` vivant — seul le callback `show_viewport_deferred`
 /// de [`StokesForgeApp::show_detached_project_manager`] a besoin de cette forme :
-/// il ne porte qu'une copie de l'arbre ([`ProjectManagerViewModel`]), jamais
+/// il ne porte qu'une copie de l'arbre ([`ProjectManagerViewModel`](crate::app::window_detach::ProjectManagerViewModel)), jamais
 /// `AppState` elle-même. Le panneau fixe ([`StokesForgeApp::project_manager_panel`])
 /// passe directement `&self.state.project_tree()` — même fonction, deux
 /// sources d'arbre.
@@ -194,7 +194,7 @@ impl StokesForgeApp {
     /// Peint le Project Manager dans son panneau fixe, ancré à gauche — voir
     /// la doc de tête d'`app.rs`, § Ce qui reste ici (l'ordre des panneaux).
     /// Appelé par
-    /// [`StokesForgeApp::ui`] *avant* le `CentralPanel`, mais
+    /// [`StokesForgeApp::ui`](eframe::App::ui) *avant* le `CentralPanel`, mais
     /// *après* [`StokesForgeApp::script_panel`] — voir sa doc de tête pour
     /// pourquoi cet ordre précis. Comme [`StokesForgeApp::menu_bar`]
     /// (`egui::Panel::top`) : peindre un panneau ancré avant le reste
@@ -231,7 +231,7 @@ impl StokesForgeApp {
 }
 
 /// `pub(super)` : [`tests::find_text_center`] et [`tests::click_at`] servent
-/// aussi aux tests d'`app.rs` qui cliquent un texte peint.
+/// aussi aux tests des autres modules d'`app` qui cliquent un texte peint.
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
@@ -245,7 +245,8 @@ pub(super) mod tests {
 
     /// Trouve le centre du texte peint contenant `needle` dans `shapes` —
     /// utilisé pour cliquer une entrée du Project Manager sans supposer sa
-    /// position exacte (mise en page auto), et par les tests d'`app.rs`. Même
+    /// position exacte (mise en page auto), et par les tests des autres
+    /// modules d'`app` (`graph_window.rs`, `format.rs`, `menus.rs`…). Même
     /// technique que
     /// `window_chrome::tests::len_tete_du_graphe_garde_son_titre_au_centre_et_sa_fleche_a_gauche`.
     pub(in crate::app) fn find_text_center(

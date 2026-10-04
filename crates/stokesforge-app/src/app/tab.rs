@@ -15,10 +15,10 @@ use crate::state::WindowKind;
 /// Ni le Project Manager ni la console de script n'en sont — voir la doc de
 /// tête du module, §§ Project Manager et Console de script : ce sont deux
 /// `egui::Panel` fixes, peints respectivement par
-/// [`StokesForgeApp::project_manager_panel`] et [`StokesForgeApp::script_panel`].
+/// [`StokesForgeApp::project_manager_panel`](crate::app::StokesForgeApp::project_manager_panel) et [`StokesForgeApp::script_panel`](crate::app::StokesForgeApp::script_panel).
 /// [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] portent un
 /// [`NodeId`] : une instance par fenêtre **ouverte**, focalisée plutôt que
-/// dupliquée si on la rouvre — voir [`StokesForgeApp::open_tab`].
+/// dupliquée si on la rouvre — voir [`StokesForgeApp::open_tab`](crate::app::StokesForgeApp::open_tab).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Tab {
     /// Un classeur ouvert, identifié par son nœud. Contient la grille,
@@ -27,7 +27,7 @@ pub(super) enum Tab {
     /// Un graphe ouvert, identifié par son nœud.
     Graph(NodeId),
     /// Une matrice ouverte, identifiée par son nœud. Contenu **espace
-    /// réservé** — voir [`matrix_contents`].
+    /// réservé** — voir [`matrix_contents`](crate::app::contents::matrix_contents).
     Matrix(NodeId),
     /// Une note ouverte, identifiée par son nœud.
     Note(NodeId),

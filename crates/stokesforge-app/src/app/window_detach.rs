@@ -81,7 +81,7 @@
 //!
 //! # Le classeur partage son rendu entre les deux modes
 //!
-//! [`tab_contents`] (la fonction déjà partagée par les fenêtres flottantes et
+//! [`tab_contents`](crate::app::contents::tab_contents) (la fonction déjà partagée par les fenêtres flottantes et
 //! la zone de maximisation) prend `&mut AppState` — un onglet détaché ne peut
 //! pourtant pas capturer `&mut AppState` dans la fermeture `'static`,
 //! `Send + Sync`, exigée par `show_viewport_deferred`, exactement le
@@ -110,7 +110,7 @@
 //! Le classeur détaché possède une vue [`AppState`] locale construite par
 //! [`AppState::fork_for_detached_view`]. Elle conserve sélection, presse-papier
 //! et tampons de saisie, mais lit le même instantané de session que la racine.
-//! Ainsi [`book_contents`] et [`grid_contents`] sont appelées à l'identique
+//! Ainsi [`book_contents`] et [`grid_contents`](crate::app::grid::grid_contents) sont appelées à l'identique
 //! dans les deux modes : onglets, en-têtes, largeurs et gestes ne peuvent
 //! plus dériver dans deux implémentations. Les actions mutantes rejoignent
 //! la boucle principale après [`AppState::adopt_detached_book_view`] ; elles
@@ -165,7 +165,8 @@ use super::window_chrome::{
 };
 use super::window_placement::{floating_window_display_size, GRAPH_WINDOW_SIZE};
 use super::window_stack::toggle_collapse_to;
-use super::{book_contents, snapshot_stamp, tab_title, tab_title_from_tree, StokesForgeApp};
+use super::workbook::book_contents;
+use super::{snapshot_stamp, tab_title, tab_title_from_tree, StokesForgeApp};
 
 /// Ce que la fenêtre OS détachée du Project Manager a besoin de peindre —
 /// strictement ça, et rien de plus. Voir la doc de tête de
@@ -196,7 +197,7 @@ pub(super) struct ProjectManagerViewModel {
 /// boucle principale (seule à porter `&mut AppState` et `&mut
 /// StokesForgeApp::floating_tabs`) les applique après le rendu — même schéma que
 /// les `open_requests`/
-/// `actions` locaux à [`StokesForgeApp::ui`], juste posés par un callback différé
+/// `actions` locaux à [`StokesForgeApp::ui`](eframe::App::ui), juste posés par un callback différé
 /// (potentiellement rappelé à une image où la fenêtre mère ne peint pas)
 /// plutôt que collectés en direct pendant la peinture.
 #[derive(Debug, Default)]
@@ -204,7 +205,7 @@ pub(super) struct DetachedProjectManagerRequests {
     /// Dépôts de fichiers, traités par la même session que la fenêtre principale.
     pub(super) actions: Vec<Action>,
     /// Onglets demandés par un clic dans l'arbre depuis la dernière
-    /// vidange ; [`StokesForgeApp::ui`] les transfère dans son propre
+    /// vidange ; [`StokesForgeApp::ui`](eframe::App::ui) les transfère dans son propre
     /// `open_requests` puis les vide.
     pub(super) open: Vec<Tab>,
     /// Onglets fermés par un double-clic depuis la dernière vidange (§4) —
@@ -232,7 +233,7 @@ pub(super) struct DetachedTab {
     /// [`StokesForgeApp::show_detached_tabs`].
     pub(super) view_model: Arc<Mutex<DetachedTabViewModel>>,
     /// Ce que la fenêtre détachée écrit, drainé chaque image par
-    /// [`StokesForgeApp::ui`].
+    /// [`StokesForgeApp::ui`](eframe::App::ui).
     pub(super) requests: Arc<Mutex<DetachedTabRequests>>,
 }
 
@@ -282,7 +283,7 @@ pub(super) struct DetachedTabViewModel {
     pub(super) focused: bool,
 }
 
-/// Ce qu'une fenêtre détachée écrit, pour que [`StokesForgeApp::ui`] (seule à
+/// Ce qu'une fenêtre détachée écrit, pour que [`StokesForgeApp::ui`](eframe::App::ui) (seule à
 /// porter `&mut AppState`) les applique après le rendu — même rôle que
 /// [`DetachedProjectManagerRequests`].
 #[derive(Debug, Default)]
@@ -364,7 +365,7 @@ impl StokesForgeApp {
     ///   image, **avant** l'appel à `show_viewport_deferred` ;
     /// - [`DetachedProjectManagerRequests`] recueille dans l'autre sens ce
     ///   que le callback produit (clics d'ouverture, réattachement demandé) ;
-    ///   [`StokesForgeApp::ui`] la draine juste après cet appel pour produire les
+    ///   [`StokesForgeApp::ui`](eframe::App::ui) la draine juste après cet appel pour produire les
     ///   mêmes `open_requests`/`Action` qu'avant, sans dupliquer la logique
     ///   de [`StokesForgeApp::open_tab`] ni appeler
     ///   [`StokesForgeApp::reattach_project_manager`] depuis l'intérieur d'un
@@ -631,7 +632,7 @@ impl StokesForgeApp {
     /// show_detached_project_manager`] pour la justification du choix
     /// `_deferred`/`Fn` déjà faite pour le Project Manager (identique ici).
     ///
-    /// Ne draine **pas** les requêtes produites : [`StokesForgeApp::ui`] le fait
+    /// Ne draine **pas** les requêtes produites : [`StokesForgeApp::ui`](eframe::App::ui) le fait
     /// juste après, une fois cette fonction revenue, exactement comme pour
     /// `pm_requests`.
     pub(super) fn show_detached_tabs(&mut self, ctx: &egui::Context) {
@@ -918,5 +919,883 @@ impl StokesForgeApp {
                 ctx.request_repaint_of(egui::ViewportId::from_hash_of(tab));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Le détachement en fenêtres OS, piloté par les callbacks de viewport
+    //! qu'egui publie : la publication de l'instantané qui réveille les
+    //! lecteurs (#104), l'état des fenêtres envoyé à la session (#16), les
+    //! dépôts de fichiers isolés de la racine, la figure reconstruite dans le
+    //! viewport, le rognage (B8), le repli du viewport OS (B9) et le contour
+    //! de focus (B7). Déplacés d'`app.rs` avec leur code (#123).
+    use std::time::Duration;
+
+    use super::super::graph_window::graph_drop_target;
+    use super::super::graph_window::tests::graphe;
+    use super::super::grid::role_label;
+    use super::super::window_chrome::tests::find_icon_centers;
+    use super::*;
+    use crate::theme;
+    use stokesforge_core::{Column, ColumnRole, Project};
+    use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
+    use stokesforge_session::Session;
+
+    fn vue_persistee(session: &Session, node: NodeId) -> WindowGeometry {
+        *session
+            .handle()
+            .snapshot()
+            .unwrap()
+            .window_geometries
+            .get(&node)
+            .expect("géométrie envoyée à la session")
+    }
+
+    /// #104 : aucune entrée de souris dans les viewports lecteurs ; la
+    /// publication d'un nouvel instantané suffit à demander leur redessin.
+    #[test]
+    fn une_mutation_reveille_les_fenetres_detachees_au_repos() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let column = app.state.visible_columns(sheet)[0].0;
+        app.detach_tab(Tab::Book(book));
+        app.detach_tab(Tab::Graph(graph));
+        app.detach_project_manager();
+        let ids = [
+            egui::ViewportId::from_hash_of(Tab::Book(book)),
+            egui::ViewportId::from_hash_of(Tab::Graph(graph)),
+            egui::ViewportId::from_hash_of("stokesforge_project_manager_window"),
+        ];
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let paint = |app: &mut StokesForgeApp| {
+            let mut output = ctx.run_ui(input.clone(), |ui| {
+                app.show_detached_tabs(ui.ctx());
+                app.show_detached_project_manager(ui.ctx(), None);
+            });
+            output.textures_delta.clear();
+            output
+        };
+        let settle = |app: &mut StokesForgeApp| {
+            for _ in 0..8 {
+                let output = paint(app);
+                for id in ids {
+                    let callback = output.viewport_output[&id].viewport_ui_cb.as_ref().unwrap();
+                    let mut child = input.clone();
+                    child.viewport_id = id;
+                    child.viewports.insert(
+                        id,
+                        egui::ViewportInfo {
+                            parent: Some(egui::ViewportId::ROOT),
+                            ..Default::default()
+                        },
+                    );
+                    ctx.run_ui(child, |ui| callback(ui)).textures_delta.clear();
+                }
+            }
+            let output = paint(app);
+            for id in ids {
+                assert_eq!(
+                    output.viewport_output[&id].repaint_delay,
+                    Duration::MAX,
+                    "le viewport {id:?} doit dormir au repos"
+                );
+            }
+        };
+        settle(&mut app);
+        app.state.dispatch(Action::CommitCell {
+            column,
+            row: 0,
+            text: "42".into(),
+        });
+        let output = paint(&mut app);
+        for id in ids {
+            assert_eq!(
+                output.viewport_output[&id].repaint_delay,
+                Duration::ZERO,
+                "la mutation doit réveiller {id:?}"
+            );
+        }
+        settle(&mut app);
+        app.state.set_window_geometry(
+            graph,
+            WindowGeometry {
+                x: 10.0,
+                y: 20.0,
+                width: 500.0,
+                height: 400.0,
+                view: None,
+            },
+        );
+        app.state.refresh();
+        let output = paint(&mut app);
+        for id in ids {
+            assert_eq!(
+                output.viewport_output[&id].repaint_delay,
+                Duration::ZERO,
+                "la géométrie doit réveiller {id:?}"
+            );
+        }
+        settle(&mut app);
+        app.pm_selection.insert(Tab::Book(book));
+        let output = paint(&mut app);
+        assert_eq!(
+            output.viewport_output[&ids[2]].repaint_delay,
+            Duration::ZERO,
+            "une sélection de navigation réveille le Project Manager"
+        );
+        for id in &ids[..2] {
+            assert_eq!(output.viewport_output[id].repaint_delay, Duration::MAX);
+        }
+        settle(&mut app);
+        session.shutdown().unwrap();
+    }
+
+    /// Issue #16 : l'état de chaque fenêtre (ouverte/maximisée/fermée, repliée,
+    /// rang d'empilement) part à la session avec sa géométrie flottante, et
+    /// cette dernière ne bouge ni à la maximisation, ni à la fermeture, ni au
+    /// détachement.
+    #[test]
+    fn l_etat_des_fenetres_est_envoye_a_la_session_sans_toucher_a_la_geometrie_flottante() {
+        use stokesforge_session::WindowMode;
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let rect = egui::Rect::from_min_size(egui::pos2(40.0, 60.0), egui::vec2(500.0, 300.0));
+        app.remember_window_geometry(Tab::Graph(graph), rect);
+        app.remember_window_geometry(Tab::Book(book), rect.translate(egui::vec2(9.0, 9.0)));
+        app.sync_window_views();
+
+        let open = vue_persistee(&session, graph);
+        assert_eq!(
+            (open.x, open.y, open.width, open.height),
+            (40.0, 60.0, 500.0, 300.0)
+        );
+        let view = open.view.unwrap();
+        assert_eq!(view.mode, WindowMode::Open);
+        assert!(!view.collapsed);
+        // Le graphe est ouvert après le classeur : il est au-dessus.
+        assert!(view.stack > vue_persistee(&session, book).view.unwrap().stack);
+
+        // Replié + maximisé : état retenu, rectangle inchangé.
+        app.collapsed_tabs.insert(Tab::Graph(graph));
+        app.maximized_tab = Some(Tab::Graph(graph));
+        app.sync_window_views();
+        let maximized = vue_persistee(&session, graph);
+        assert_eq!(maximized.view.unwrap().mode, WindowMode::Maximized);
+        assert!(maximized.view.unwrap().collapsed);
+        assert_eq!((maximized.x, maximized.width), (open.x, open.width));
+
+        // Détachée : toujours « ouverte », rectangle flottant intact.
+        app.maximized_tab = None;
+        app.detach_tab(Tab::Graph(graph));
+        app.sync_window_views();
+        let detached = vue_persistee(&session, graph);
+        assert_eq!(detached.view.unwrap().mode, WindowMode::Open);
+        assert_eq!((detached.x, detached.y), (open.x, open.y));
+
+        // Fermée : la géométrie flottante reste celle d'avant.
+        app.detached_tabs.clear();
+        app.sync_window_views();
+        let closed = vue_persistee(&session, graph);
+        assert_eq!(closed.view.unwrap().mode, WindowMode::Closed);
+        assert_eq!(
+            (closed.x, closed.y, closed.width, closed.height),
+            (40.0, 60.0, 500.0, 300.0)
+        );
+        // Rouverte : c'est ce rectangle-là que la boucle de peinture relit.
+        assert_eq!(app.floating_rects[&graph], rect);
+    }
+
+    /// Les callbacks détachés émettent la même action et ne consomment pas
+    /// le dépôt en attente dans le viewport racine (mémoire egui partagée).
+    #[test]
+    fn les_depots_detaches_gardent_leur_destination_et_sont_isoles_de_la_racine() {
+        #[derive(Debug)]
+        struct FakeFile(std::path::PathBuf);
+        impl egui::DroppedFile for FakeFile {
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                Ok(Vec::new())
+            }
+        }
+        for kind in ["classeur", "graphe", "explorateur"] {
+            let (session, graph) = graphe();
+            let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            let book = app.state.books()[0].0;
+            let tab = if kind == "classeur" {
+                Tab::Book(book)
+            } else {
+                Tab::Graph(graph)
+            };
+            let viewport = if kind == "explorateur" {
+                app.detach_project_manager();
+                egui::ViewportId::from_hash_of("stokesforge_project_manager_window")
+            } else {
+                app.detach_tab(tab);
+                egui::ViewportId::from_hash_of(tab)
+            };
+            let context = egui::Context::default();
+            context.set_embed_viewports(false);
+            crate::theme::install(&context);
+            let mut root_input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800., 600.),
+                )),
+                ..Default::default()
+            };
+            root_input.dropped_files = vec![Arc::new(FakeFile("racine.csv".into()))];
+            let mut output = context.run_ui(root_input.clone(), |ui| {
+                begin_file_drop(ui.ctx());
+                if kind == "explorateur" {
+                    app.show_detached_project_manager(ui.ctx(), None);
+                } else {
+                    app.show_detached_tabs(ui.ctx());
+                }
+            });
+            let callback = output.viewport_output[&viewport]
+                .viewport_ui_cb
+                .clone()
+                .unwrap();
+            output.textures_delta.clear();
+            let mut detached_input = root_input.clone();
+            detached_input.viewport_id = viewport;
+            detached_input.viewports.insert(
+                viewport,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    ..Default::default()
+                },
+            );
+            detached_input.dropped_files = vec![Arc::new(FakeFile("detache.csv".into()))];
+            context
+                .run_ui(detached_input, |ui| callback(ui))
+                .textures_delta
+                .clear();
+            let actions = if kind == "explorateur" {
+                std::mem::take(&mut app.pm_requests.lock().unwrap().actions)
+            } else {
+                std::mem::take(&mut app.detached_tabs[&tab].requests.lock().unwrap().actions)
+            };
+            let target = (kind == "classeur").then_some(book);
+            assert_eq!(
+                actions,
+                vec![Action::DropFiles {
+                    paths: vec!["detache.csv".into()],
+                    target_book: target
+                }]
+            );
+            let mut root_action = None;
+            root_input.dropped_files.clear();
+            context
+                .run_ui(root_input, |ui| {
+                    root_action = finish_file_drop(ui.ctx());
+                })
+                .textures_delta
+                .clear();
+            assert_eq!(
+                root_action,
+                Some(Action::DropFiles {
+                    paths: vec!["racine.csv".into()],
+                    target_book: None
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn un_graphe_detache_reconstruit_ses_formes_dans_son_viewport() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        assert!(app.floating_tabs.contains(&Tab::Graph(graph)));
+
+        // Peindre d'abord la vue flottante : le détachement doit transférer
+        // une `GraphView` déjà remplie, puis la reconstruire dans les
+        // coordonnées du viewport OS distinct.
+        let mut root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                graph_drop_target(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
+            });
+        });
+        output.textures_delta.clear();
+        assert!(
+            !app.graph_views[&graph].cache().shapes().is_empty(),
+            "la vue flottante de départ doit avoir construit sa figure"
+        );
+
+        app.detach_tab(Tab::Graph(graph));
+        let viewport_id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
+        output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output
+            .viewport_output
+            .get(&viewport_id)
+            .and_then(|viewport| viewport.viewport_ui_cb.clone());
+        output.textures_delta.clear();
+        let callback = callback.expect("le détachement doit publier un callback de viewport");
+
+        root_input.viewport_id = viewport_id;
+        root_input.viewports.insert(
+            viewport_id,
+            egui::ViewportInfo {
+                parent: Some(egui::ViewportId::ROOT),
+                ..Default::default()
+            },
+        );
+        root_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            GRAPH_WINDOW_SIZE,
+        ));
+        output = context.run_ui(root_input, |ui| callback(ui));
+        output.textures_delta.clear();
+        assert_eq!(
+            output.viewport_output[&viewport_id].repaint_delay,
+            Duration::ZERO,
+            "le premier callback doit programmer l'image de stabilisation du viewport"
+        );
+
+        let model = app.detached_tabs[&Tab::Graph(graph)]
+            .view_model
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        assert!(
+            !model.needs_initial_repaint,
+            "le premier callback doit demander une unique image de stabilisation"
+        );
+        let view = model.graph_view.as_ref().unwrap();
+        assert!(
+            !view.cache().shapes().is_empty(),
+            "le viewport détaché ne doit pas servir le cache vidé du viewport racine"
+        );
+        let display = view.display_rect().unwrap();
+        let transform = egui::emath::TSTransform::new(
+            display.min.to_vec2(),
+            display.width() / DEFAULT_FIGURE_SIZE.0 as f32,
+        );
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|painted| view.cache().shapes().iter().any(|shape| {
+                    let mut expected = shape.clone();
+                    expected.transform(transform);
+                    painted.shape == expected
+                })),
+            "le viewport détaché doit réellement recevoir les formes du graphe"
+        );
+        // Régression : le bouton « ↩ » de réattachement, non borné en
+        // hauteur, pouvait consommer toute la fenêtre détachée (voir la
+        // doc de tête de la ligne qui l'alloue) — la figure se retrouvait
+        // alors hors du rectangle visible, invisible bien que son cache
+        // fût rempli (ce que les deux assertions ci-dessus ne détectent
+        // pas : un `Shape` reste dans la liste même hors clip).
+        let figure_rect = display;
+        assert!(
+            figure_rect.max.y <= GRAPH_WINDOW_SIZE.y,
+            "la figure doit rester dans la fenêtre détachée, pas {figure_rect:?} pour une fenêtre de {GRAPH_WINDOW_SIZE:?}"
+        );
+    }
+
+    // B8 (`retours-2026-09-23-bugs.md`) : même mécanisme que
+    // B4 (`le_contenu_qui_deborde_est_rogne_au_rectangle_de_la_fenetre`),
+    // jamais porté à `show_detached_tabs` — un classeur détaché à plusieurs
+    // colonnes déborde du viewport OS sans rognage contrôlé, tronqué au pixel
+    // par la fenêtre OS elle-même plutôt que par le code applicatif.
+    // Scaffolding calqué sur `un_graphe_detache_reconstruit_ses_formes_dans_
+    // son_viewport` : détacher pour de vrai, peindre le callback de viewport
+    // publié par `show_detached_tabs` dans un `screen_rect` volontairement
+    // plus petit que le contenu, puis vérifier le `clip_rect` réellement
+    // envoyé à egui pour chaque en-tête de colonne peint.
+    #[test]
+    fn le_classeur_detache_est_rogne_au_rectangle_du_viewport() {
+        let mut project = Project::new("Débordement").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        for i in 0..10 {
+            project
+                .add_column(
+                    sheet,
+                    None,
+                    Some(&format!("Colonne {i}")),
+                    Column::from_f64(&[0.0, 1.0]),
+                )
+                .unwrap();
+        }
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+
+        let book_tab = Tab::Book(book);
+        assert!(
+            app.floating_tabs.contains(&book_tab),
+            "StokesForgeApp::new doit ouvrir le premier classeur en fenêtre flottante"
+        );
+        app.detach_tab(book_tab);
+
+        let viewport_id = egui::ViewportId::from_hash_of(book_tab);
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output
+            .viewport_output
+            .get(&viewport_id)
+            .and_then(|viewport| viewport.viewport_ui_cb.clone())
+            .expect("le détachement doit publier un callback de viewport");
+        output.textures_delta.clear();
+
+        // Fenêtre OS volontairement plus étroite que les dix colonnes
+        // nommées et leurs en-têtes — comme le rétrécissement natif de la
+        // reproduction du rapport de bug.
+        let window_size = egui::vec2(200.0, 150.0);
+        let window_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, window_size);
+        let mut viewport_input = root_input;
+        viewport_input.viewport_id = viewport_id;
+        viewport_input.viewports.insert(
+            viewport_id,
+            egui::ViewportInfo {
+                parent: Some(egui::ViewportId::ROOT),
+                ..Default::default()
+            },
+        );
+        viewport_input.screen_rect = Some(window_rect);
+        let mut output = context.run_ui(viewport_input, |ui| callback(ui));
+        output.textures_delta.clear();
+
+        // La partie sur laquelle egui n'offre aucune garantie propre, c'est
+        // le rectangle de rognage *logique* : le backend borne de toute façon
+        // le tampon au viewport OS, donc même sans le correctif, aucune forme
+        // n'a un `clip_rect` qui déborde `window_rect`. La régression que B8
+        // corrige est plus fine mais tout aussi réelle : sans
+        // `ui.set_clip_rect(...)` posé sur le `Ui` du `CentralPanel`, tout le
+        // contenu (en-têtes de colonne, grille, onglets) hérite du rognage
+        // *par défaut* du panneau — le rectangle plein du viewport, marge du
+        // `Frame` comprise — au lieu du rectangle de contenu réellement
+        // disponible une fois cette marge retirée. Un en-tête tout au bord
+        // droit se retrouve alors rogné pile au bord du viewport plutôt qu'au
+        // bord du panneau, ce qui le fait empiéter sur la bordure/marge du
+        // `Frame` — la même famille de symptôme que la capture du rapport de
+        // bug (troncature qui ignore la géométrie du contenu). Ce test
+        // verrouille donc : le rognage logique de tout contenu doit être
+        // strictement plus petit que `window_rect`, pas égal à lui.
+        //
+        // Ce qu'il ne prouve pas (relu par mutation, #123) : le classeur pose
+        // aujourd'hui son propre rognage (zone défilable de la grille, bande
+        // d'onglets), si bien que retirer celui de
+        // `show_window_contents_bounded` ne change rien ici. La borne commune
+        // a son témoin à part, sans contenu qui se rogne lui-même :
+        // `le_contenu_borne_est_rogne_sous_l_en_tete_et_ne_repousse_pas_le_cadre`
+        // (`window_chrome.rs`).
+        let letter_label = format!("A({})", role_label(ColumnRole::Y));
+        let content_labels = [
+            "#".to_string(),
+            tr!("column-long-name"),
+            tr!("column-units"),
+            letter_label.clone(),
+            "Sheet1".to_string(),
+        ];
+        let mut checked = 0;
+        for painted in &output.shapes {
+            let egui::Shape::Text(shape) = &painted.shape else {
+                continue;
+            };
+            if !content_labels.contains(&shape.galley.job.text) {
+                continue;
+            }
+            checked += 1;
+            assert!(
+                window_rect.contains_rect(painted.clip_rect),
+                "« {} » a un rectangle de découpe ({:?}) qui déborde du viewport \
+                 ({window_rect:?}) — B8 n'est pas corrigé",
+                shape.galley.job.text,
+                painted.clip_rect,
+            );
+            assert!(
+                painted.clip_rect.width() < window_rect.width()
+                    && painted.clip_rect.height() < window_rect.height(),
+                "« {} » a un rectangle de découpe ({:?}) égal au viewport complet \
+                 ({window_rect:?}) — rien ne distingue ce rognage de son absence : \
+                 B8 n'est pas corrigé",
+                shape.galley.job.text,
+                painted.clip_rect,
+            );
+        }
+        assert_eq!(
+            checked,
+            content_labels.len(),
+            "le classeur détaché doit avoir peint tous les libellés attendus \
+             (en-tête empilé et onglet de feuille) : {:?}",
+            output
+                .shapes
+                .iter()
+                .filter_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) => Some(shape.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        );
+        let position_of = |label: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == label => {
+                        let center = shape.pos + shape.galley.rect.center().to_vec2();
+                        painted.clip_rect.contains(center).then_some(center)
+                    }
+                    _ => None,
+                })
+        };
+        let tab_y = position_of("Sheet1")
+            .expect("l'onglet détaché doit être visible")
+            .y;
+        let header_y = position_of(&letter_label)
+            .expect("l'en-tête détaché doit être visible")
+            .y;
+        assert!(
+            tab_y > header_y,
+            "l'onglet doit rester sous la grille détachée"
+        );
+    }
+
+    // B9 (`retours-2026-09-23-bugs.md`) : le correctif B3
+    // réduit la taille demandée à egui pour une fenêtre flottante interne
+    // pendant un repli, mais une fenêtre détachée est un viewport OS réel —
+    // rien n'envoyait de `ViewportCommand::InnerSize` quand son chevron de
+    // repli bascule, donc l'OS gardait la grande taille dépliée. Ce test
+    // pilote le callback du viewport détaché (même schéma que
+    // `un_graphe_detache_reconstruit_ses_formes_dans_son_viewport`), clique
+    // le chevron de repli, et vérifie la géométrie/l'état — pas
+    // l'apparence : les tests de rendu ne couvrent pas ce mécanisme (voir
+    // le rapport, § « Dans ton rapport final »).
+    #[test]
+    fn une_fenetre_detachee_repliee_reduit_puis_restaure_son_viewport_os() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        egui_extras::install_image_loaders(&context);
+
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        context
+            .run_ui(root_input.clone(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    graph_drop_target(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
+                });
+            })
+            .textures_delta
+            .clear();
+
+        app.detach_tab(Tab::Graph(graph));
+        let tab = Tab::Graph(graph);
+        let viewport_id = egui::ViewportId::from_hash_of(tab);
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output.viewport_output[&viewport_id]
+            .viewport_ui_cb
+            .clone()
+            .expect("le détachement doit publier un callback de viewport");
+        output.textures_delta.clear();
+
+        // Rectangle « OS » simulé : le test en a la main, comme le ferait
+        // le vrai backend en rapportant, image après image, la taille
+        // réellement appliquée par la fenêtre native.
+        let outer_rect = std::cell::Cell::new(egui::Rect::from_min_size(
+            egui::pos2(100.0, 80.0),
+            GRAPH_WINDOW_SIZE,
+        ));
+
+        let paint = |events: Vec<egui::Event>| -> egui::FullOutput {
+            let mut input = root_input.clone();
+            input.viewport_id = viewport_id;
+            input.viewports.insert(
+                viewport_id,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    outer_rect: Some(outer_rect.get()),
+                    ..Default::default()
+                },
+            );
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                outer_rect.get().size(),
+            ));
+            input.events = events;
+            let mut output = context.run_ui(input, |ui| callback(ui));
+            output.textures_delta.clear();
+            output
+        };
+
+        // Image de stabilisation (Wayland, voir `needs_initial_repaint`) :
+        // consomme le repaint initial et amorce `expanded_size` à la
+        // taille de départ.
+        paint(Vec::new());
+        // Seconde image : les textures SVG des icônes sont prêtes.
+        let first = paint(Vec::new());
+        let icon_pos = *find_icon_centers(&first.shapes)
+            .first()
+            .expect("la flèche de repli doit être peinte, en haut à gauche");
+
+        // Un clic (glissé nul, pression puis relâchement) sur le chevron de
+        // repli, réparti sur deux images comme le veut la détection de clic
+        // d'egui — voir `click_at`.
+        paint(vec![egui::Event::PointerMoved(icon_pos)]);
+        paint(vec![egui::Event::PointerButton {
+            pos: icon_pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let collapsed_output = paint(vec![egui::Event::PointerButton {
+            pos: icon_pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+
+        let expected_collapsed_height = WINDOW_HEADER_HEIGHT + WINDOW_CONTENT_MARGIN.sum().y;
+        let commands = &collapsed_output.viewport_output[&viewport_id].commands;
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                egui::ViewportCommand::InnerSize(size)
+                    if (size.x - GRAPH_WINDOW_SIZE.x).abs() < f32::EPSILON
+                        && (size.y - expected_collapsed_height).abs() < f32::EPSILON
+            )),
+            "le repli doit réduire le viewport OS à la hauteur de sa bande d'en-tête, \
+             commandes={commands:?}"
+        );
+        {
+            let model = app.detached_tabs[&tab]
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            assert!(model.collapsed, "le repli doit être appliqué au modèle");
+        }
+
+        // L'OS applique la commande : l'image suivante rapporte le petit
+        // rectangle. Plus rien n'en est persisté depuis l'issue #16 : la
+        // fenêtre OS détachée n'a pas de géométrie retenue (seule la
+        // géométrie flottante l'est, voir `sync_window_views`).
+        outer_rect.set(egui::Rect::from_min_size(
+            outer_rect.get().min,
+            egui::vec2(GRAPH_WINDOW_SIZE.x, expected_collapsed_height),
+        ));
+        paint(Vec::new());
+
+        // Dépli : même chevron (glyphe différent, même rectangle), même
+        // schéma de clic — doit retrouver exactement la taille d'avant
+        // repli, pas une taille par défaut.
+        paint(vec![egui::Event::PointerMoved(icon_pos)]);
+        paint(vec![egui::Event::PointerButton {
+            pos: icon_pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let expanded_output = paint(vec![egui::Event::PointerButton {
+            pos: icon_pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let commands = &expanded_output.viewport_output[&viewport_id].commands;
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                egui::ViewportCommand::InnerSize(size)
+                    if (size.x - GRAPH_WINDOW_SIZE.x).abs() < f32::EPSILON
+                        && (size.y - GRAPH_WINDOW_SIZE.y).abs() < f32::EPSILON
+            )),
+            "le dépli doit restaurer exactement la taille d'avant repli, commandes={commands:?}"
+        );
+        {
+            let model = app.detached_tabs[&tab]
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            assert!(!model.collapsed, "le dépli doit être appliqué au modèle");
+        }
+    }
+
+    // B1/B3 suite, puis B7 (`retours-2026-09-23-bugs.md`) :
+    // les fenêtres détachées (viewports OS séparés) n'avaient aucun contour
+    // de surbrillance — `active_tab`/`floating_tabs` ne les couvrent pas,
+    // seul le focus OS du viewport a un sens pour elles. Même logique que
+    // les fenêtres flottantes (`active_window_stroke`), câblée sur
+    // `RawInput::focused` plutôt que sur `active_tab`. B7 a changé *où* ce
+    // contour actif est peint : plus sur le trait du `Frame` (dont la
+    // géométrie suit le contenu et se faisait rogner par
+    // `CentralPanel::show_inside_dyn` sur les bords qui débordent), mais à
+    // part, sur `input.content_rect()` — ce test vérifie maintenant la
+    // couleur *et* la géométrie de ce contour.
+    #[test]
+    fn la_fenetre_detachee_recolore_son_contour_selon_le_focus_os() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        context
+            .run_ui(root_input.clone(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    graph_drop_target(ui, &app.state, &mut Vec::new(), &mut app.graph_views, graph);
+                });
+            })
+            .textures_delta
+            .clear();
+
+        app.detach_tab(Tab::Graph(graph));
+        let viewport_id = egui::ViewportId::from_hash_of(Tab::Graph(graph));
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output.viewport_output[&viewport_id]
+            .viewport_ui_cb
+            .clone()
+            .expect("le détachement doit publier un callback de viewport");
+        output.textures_delta.clear();
+
+        // Toutes les formes rectangulaires dont le trait n'est pas de
+        // largeur nulle — depuis B7, il peut y en avoir deux : le trait par
+        // défaut du `Frame` du panneau central, et le contour actif peint à
+        // part par-dessus (`paint_active_window_outline`) quand la fenêtre a
+        // le focus OS.
+        fn stroke_shapes(
+            shapes: &[egui::epaint::ClippedShape],
+        ) -> Vec<(egui::Color32, egui::Rect)> {
+            fn find(shape: &egui::Shape, out: &mut Vec<(egui::Color32, egui::Rect)>) {
+                match shape {
+                    egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => {
+                        out.push((rect.stroke.color, rect.rect));
+                    }
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| find(s, out)),
+                    _ => {}
+                }
+            }
+            let mut out = Vec::new();
+            shapes
+                .iter()
+                .for_each(|painted| find(&painted.shape, &mut out));
+            out
+        }
+
+        let paint_focused = |focused: bool| {
+            let mut input = root_input.clone();
+            input.viewport_id = viewport_id;
+            input.focused = focused;
+            input.viewports.insert(
+                viewport_id,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    ..Default::default()
+                },
+            );
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                GRAPH_WINDOW_SIZE,
+            ));
+            let mut output = context.run_ui(input, |ui| callback(ui));
+            output.textures_delta.clear();
+            stroke_shapes(&output.shapes)
+        };
+
+        let style = egui::Style::default();
+        let content_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, GRAPH_WINDOW_SIZE);
+
+        // D'autres formes de la fenêtre (bordure du graphe tracé, etc.) ont
+        // leur propre trait, sans rapport avec l'activité — on cherche donc
+        // la présence du bon contour plutôt que l'exclusivité de sa couleur.
+        let inactive_strokes = paint_focused(false);
+        assert!(
+            inactive_strokes.iter().any(|(color, rect)| *color
+                == style.visuals.window_stroke().color
+                && *rect == content_rect),
+            "sans focus OS, le Frame du panneau central doit peindre le trait par défaut \
+             d'egui sur {content_rect:?} : {inactive_strokes:?}"
+        );
+        assert!(
+            !inactive_strokes
+                .iter()
+                .any(|(color, _)| *color == style.visuals.selection.stroke.color),
+            "sans focus OS, aucun contour ne doit reprendre la couleur de sélection du thème : \
+             {inactive_strokes:?}"
+        );
+
+        let active_strokes = paint_focused(true);
+        let active_outline = active_strokes
+            .iter()
+            .find(|(color, _)| *color == style.visuals.selection.stroke.color)
+            .expect(
+                "avec le focus OS, la fenêtre détachée doit peindre un contour reprenant la \
+                 couleur de sélection du thème",
+            );
+        assert_eq!(
+            active_outline.1, content_rect,
+            "le contour actif doit longer exactement le rectangle du viewport OS \
+             (`input.content_rect()`, {content_rect:?}), pas un rectangle recalculé par egui \
+             depuis le contenu — B7 n'est pas corrigé (trouvé {:?})",
+            active_outline.1,
+        );
     }
 }

@@ -1,4 +1,4 @@
-//! Pile des fenêtres de contenu : l'onglet [`Tab`] qui désigne une fenêtre,
+//! Pile des fenêtres de contenu (désignées par l'onglet [`Tab`], de `tab.rs`) :
 //! l'ordre de pile `floating_tabs` (le dernier est l'onglet actif), son
 //! alignement sur les calques d'egui, le masquage, le repli, la maximisation
 //! et le dessin de l'espace de travail (`show_workspace`).
@@ -32,7 +32,7 @@
 //! du `CentralPanel`, donc rétrécissait avec la fenêtre principale et
 //! écrasait les fenêtres flottantes contre ses bords. `window_positions`/
 //! `window_sizes` (ci-dessous) et la géométrie persistée dans le projet sont
-//! exprimées dans ces coordonnées logiques ; [`StokesForgeApp::ui`] les convertit
+//! exprimées dans ces coordonnées logiques ; [`StokesForgeApp::ui`](eframe::App::ui) les convertit
 //! en coordonnées écran juste avant la peinture (`workspace_to_screen`), à
 //! partir de `viewport_rect` (ce que laissent les panneaux fixes et les
 //! barres de défilement) et de [`StokesForgeApp::workspace_scroll`] (0,0 au
@@ -73,7 +73,7 @@
 //! source d'`active_tab` (donc du contour de surbrillance). Sans
 //! synchronisation, un clic direct dans une fenêtre la faisait passer au
 //! premier plan sans jamais la surligner (B2,
-//! `retours-2026-09-23-bugs.md`). [`StokesForgeApp::ui`] relit donc
+//! `retours-2026-09-23-bugs.md`). [`StokesForgeApp::ui`](eframe::App::ui) relit donc
 //! `Context::top_layer_id` juste après avoir peint les fenêtres flottantes
 //! et ramène le tab trouvé en fin de `floating_tabs` via
 //! `sync_floating_tabs_order_to_top_layer` — un cadre de retard tout au plus,
@@ -92,7 +92,7 @@
 //!
 //! [`StokesForgeApp::maximized_tab`] est un état **à côté** de
 //! [`StokesForgeApp::floating_tabs`], qui ne le touche jamais : quand il vaut
-//! `Some`, [`StokesForgeApp::ui`] ne peint aucune fenêtre flottante cette
+//! `Some`, [`StokesForgeApp::ui`](eframe::App::ui) ne peint aucune fenêtre flottante cette
 //! image-là — à la place, une zone séparée montre uniquement l'onglet
 //! maximisé, plein cadre du `CentralPanel`. Restaurer (`maximized_tab =
 //! None`) revient à peindre les fenêtres flottantes normalement : leurs

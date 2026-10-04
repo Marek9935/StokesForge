@@ -15,17 +15,17 @@ use stokesforge_render_egui::GraphView;
 use crate::state::{Action, AppState};
 use crate::tr;
 
-use super::book_contents;
 use super::graph_window::graph_drop_target;
 use super::tab::Tab;
+use super::workbook::book_contents;
 
 /// Peint le contenu de l'onglet `tab`, quelle que soit sa provenance — la
 /// boucle des fenêtres flottantes ou la zone de maximisation
-/// ([`StokesForgeApp::ui`]) l'appellent toutes les deux : **une seule** fonction
+/// ([`StokesForgeApp::ui`](eframe::App::ui)) l'appellent toutes les deux : **une seule** fonction
 /// qui sait peindre un onglet, jamais deux implémentations à tenir en
 /// accord. Ne prend plus de `&egui::Context` depuis que la console de script
 /// (seule nature à en avoir eu besoin, pour son `request_repaint`) est
-/// devenue un panneau fixe — voir [`StokesForgeApp::script_panel`].
+/// devenue un panneau fixe — voir [`StokesForgeApp::script_panel`](crate::app::StokesForgeApp::script_panel).
 pub(super) fn tab_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -59,7 +59,7 @@ pub(super) fn matrix_contents(ui: &mut egui::Ui, _tree: &Tree, _matrix: NodeId) 
 }
 
 /// Contenu d'un [`Tab::Note`] : un éditeur multi-lignes, sur le même principe
-/// de saisie différée que [`cell_widget`] — le tampon ([`crate::state::
+/// de saisie différée que `cell_widget` (`grid.rs`) — le tampon ([`crate::state::
 /// NoteEdit`]) n'atteint le modèle qu'à la perte de focus, jamais à chaque
 /// frappe (sinon l'historique compterait une entrée par caractère). Échap
 /// abandonne la saisie sans rien écrire, comme pour une cellule.

@@ -21,13 +21,13 @@ pub(super) const FLOATING_WINDOW_SIZE: egui::Vec2 = egui::vec2(560.0, 420.0);
 /// entrent tous dès l'ouverture.
 pub(super) const GRAPH_WINDOW_SIZE: egui::Vec2 = egui::vec2(560.0, 460.0);
 
-/// Largeur par défaut d'une fenêtre flottante [`Tab::Book`] — le tiers de
+/// Largeur par défaut d'une fenêtre flottante [`Tab::Book`](crate::app::tab::Tab::Book) — le tiers de
 /// moins que [`FLOATING_WINDOW_SIZE`] : une grille n'a pas besoin d'être
 /// aussi large qu'un graphe pour rester lisible, demande explicite.
 pub(super) const BOOK_WINDOW_WIDTH: f32 = FLOATING_WINDOW_SIZE.x * 2.0 / 3.0;
 
 /// Décalage, en points, entre deux fenêtres flottantes ouvertes l'une après
-/// l'autre (cascade) — voir [`StokesForgeApp::next_cascade`].
+/// l'autre (cascade) — voir [`StokesForgeApp::next_cascade`](crate::app::StokesForgeApp::next_cascade).
 pub(super) const CASCADE_STEP: f32 = 24.0;
 
 /// Nombre de crans de cascade avant de reboucler à zéro, pour qu'une
@@ -44,15 +44,15 @@ pub(super) fn geometry_rect(geometry: &WindowGeometry) -> egui::Rect {
 
 /// Taille à peindre pour une fenêtre flottante cette image. La taille logique (`current_size`) telle quelle, sauf le temps
 /// d'un repli (B3, `retours-2026-09-23-bugs.md`) : le contenu
-/// n'est alors plus peint (seule [`window_header`] l'est), et forcer la
+/// n'est alors plus peint (seule [`window_header`](crate::app::window_chrome::window_header) l'est), et forcer la
 /// taille dépliée peindrait un cadre — et un contour de surbrillance —
 /// autour d'une zone vide.
 ///
-/// Réutilisée telle quelle par [`StokesForgeApp::show_detached_tabs`] (B9) pour
+/// Réutilisée telle quelle par [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs) (B9) pour
 /// calculer la taille à envoyer au viewport OS via
 /// `ViewportCommand::InnerSize` : même bande d'en-tête, même hauteur
 /// repliée — seul change ce qui porte cette taille (le cadre peint par
-/// [`show_floating_window`] côté flottant, un viewport OS réel côté détaché).
+/// [`show_floating_window`](crate::app::window_chrome::show_floating_window) côté flottant, un viewport OS réel côté détaché).
 pub(super) fn floating_window_display_size(
     current_size: egui::Vec2,
     was_collapsed: bool,
@@ -74,7 +74,7 @@ pub(super) fn floating_window_display_size(
 /// réapparaître la fenêtre repliée — y compris une fois dépliée à nouveau —
 /// à la prochaine ouverture du projet.
 ///
-/// Réutilisée telle quelle par [`StokesForgeApp::show_detached_tabs`] (B9,
+/// Réutilisée telle quelle par [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs) (B9,
 /// `retours-2026-09-23-bugs.md`) avec
 /// `DetachedTabViewModel::expanded_size` en guise de taille logique : le
 /// rectangle rapporté par le viewport OS pendant un repli est, là aussi,
@@ -93,8 +93,8 @@ pub(super) fn floating_window_geometry_to_persist(
 /// avec la fenêtre `eframe` et écrasait les fenêtres flottantes contre ses
 /// bords. Un banc « généreux » plutôt qu'ajusté à un écran précis ; devenir
 /// réellement réglable par l'utilisateur (persistance, UI de réglage) reste à
-/// faire — voir `docs/chantiers`. Sous cette taille, [`StokesForgeApp::ui`] fait
-/// défiler l'espace de travail ([`StokesForgeApp::workspace_scroll`]) plutôt que de
+/// faire — voir `docs/chantiers`. Sous cette taille, [`StokesForgeApp::ui`](eframe::App::ui) fait
+/// défiler l'espace de travail ([`StokesForgeApp::workspace_scroll`](crate::app::StokesForgeApp::workspace_scroll)) plutôt que de
 /// rétrécir ou tronquer les fenêtres qu'il contient.
 pub(super) const WORKSPACE_SIZE: egui::Vec2 = egui::vec2(1920.0, 1080.0);
 
@@ -121,7 +121,7 @@ pub(super) fn workspace_to_screen(
 /// taille `viewport_size` — inchangé si `target` l'est déjà. Utilisé pour
 /// ramener à l'écran une fenêtre déjà ouverte mais actuellement défilée hors
 /// vue (clic dans le Project Manager) : contrairement à
-/// [`Response::scroll_to_me`] côté grille/onglets de feuille, l'espace de
+/// [`Response::scroll_to_me`](egui::Response::scroll_to_me) côté grille/onglets de feuille, l'espace de
 /// travail n'est pas un `egui::ScrollArea` classique (les fenêtres qu'il
 /// porte peignent sur leur propre calque, indépendant de toute zone de
 /// défilement ambiante), donc pas de mécanisme natif à réutiliser ici.
@@ -146,7 +146,7 @@ pub(super) fn workspace_scroll_to_reveal(
 /// Borne un rectangle logique à l'espace de travail : taille ramenée à
 /// [`WORKSPACE_SIZE`] au plus, puis position glissée pour qu'il y tienne en
 /// entier. C'est la seule borne appliquée aux fenêtres flottantes — egui
-/// n'en ajoute pas d'autre (voir [`show_floating_window`]), donc ce que
+/// n'en ajoute pas d'autre (voir [`show_floating_window`](crate::app::window_chrome::show_floating_window)), donc ce que
 /// cette fonction rend est exactement ce qui est peint, entouré et persisté.
 pub(super) fn clamp_to_workspace(rect: egui::Rect) -> egui::Rect {
     let size = rect.size().min(WORKSPACE_SIZE);

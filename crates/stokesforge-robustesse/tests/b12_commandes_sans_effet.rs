@@ -138,7 +138,8 @@ fn b12_une_commande_sans_effet_noccupe_pas_un_cran_dannulation() {
     // feuille avec une seule colonne neuve, donc vide, à `at: 0` — testait
     // en réalité l'AUTRE moitié de B5 (`row_targets` refusait `at == len`) :
     // avec cette moitié-là corrigée (voir `Project::insert_rows`) et
-    // `stokesforge-app/src/app.rs` qui ne code plus `at: 0` en dur, cette
+    // `stokesforge-app/src/app.rs` (la grille vit depuis dans `src/app/grid.rs`)
+    // qui ne code plus `at: 0` en dur, cette
     // commande a désormais un effet réel — une ligne est ajoutée — et
     // MÉRITE son entrée d'historique ; ce n'est donc plus le bon scénario
     // pour ce test.

@@ -23,7 +23,7 @@ pub(super) const WINDOW_HEADER_HEIGHT: f32 = 28.0;
 
 /// Marge intérieure du `Frame` d'une fenêtre de contenu, flottante ou
 /// détachée — voir [`floating_window_frame`] et le `Frame` construit dans
-/// [`StokesForgeApp::show_detached_tabs`]. Sans marge verticale : la bande
+/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs). Sans marge verticale : la bande
 /// d'en-tête (`WINDOW_HEADER_HEIGHT`) et les séparateurs du contenu
 /// fournissent déjà leur propre espacement, la marge par défaut d'egui
 /// (`Frame::window`/`Frame::central_panel`) n'ajoutait donc qu'un bandeau
@@ -112,7 +112,7 @@ pub(super) enum HeaderPlacement {
     /// la déplacer, la redimensionner par ses icônes de maximisation, ou la
     /// fermer/réattacher.
     Detached,
-    /// Dialogue modal ([`modal_dialog`]) : ni repli, ni détachement, ni
+    /// Dialogue modal ([`modal_dialog`](crate::app::dialogs::modal_dialog)) : ni repli, ni détachement, ni
     /// maximisation — le titre, la croix, et le glisser.
     Dialog,
 }
@@ -176,7 +176,7 @@ const CORNER_REACH: f32 = 12.0;
 /// `egui::Window` est une boîte de dialogue : barre de titre, glisser,
 /// redimensionnement, repli et bornage à elle. Toutes ces fonctions avaient
 /// été coupées une à une puis refaites à la main ([`window_header`],
-/// [`floating_resize_handles`], [`workspace_to_screen`]…), et chaque image
+/// [`floating_resize_handles`], [`workspace_to_screen`](crate::app::window_placement::workspace_to_screen)…), et chaque image
 /// devait accorder deux rectangles : celui qu'on demandait et celui
 /// qu'egui recalait. Les bugs 1 et 2 de
 /// `retours-2026-09-24-bugs.md` (contour décalé d'une
@@ -219,7 +219,7 @@ pub(super) fn show_floating_window<R>(
 /// [`show_floating_window`] dans l'ordre de calque `order` : la seule
 /// écriture du cadre, du contour et du rognage d'une fenêtre, que se
 /// partagent les fenêtres de l'espace de travail (`Order::Middle`) et les
-/// dialogues modaux ([`modal_dialog`], au-dessus).
+/// dialogues modaux ([`modal_dialog`](crate::app::dialogs::modal_dialog), au-dessus).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn show_window_in_layer<R>(
     ctx: &egui::Context,
@@ -431,7 +431,7 @@ pub(super) fn floating_resize_handles(
 
 /// Bordure invisible de redimensionnement pour une fenêtre détachée sans
 /// décoration (`.with_decorations(false)`, voir la doc de tête de
-/// [`StokesForgeApp::show_detached_tabs`]) : huit zones fines aux bords/coins du
+/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs)) : huit zones fines aux bords/coins du
 /// viewport, qui délèguent le redimensionnement à l'OS dès que le glissé
 /// démarre (`ViewportCommand::BeginResize`) — même principe que
 /// `ViewportCommand::StartDrag` pour le déplacement du titre : aucun calcul
@@ -703,7 +703,7 @@ pub(super) fn show_window_contents_bounded(
     ui.advance_cursor_after_rect(rect);
 }
 
-/// `pub(super)` : [`tests::find_icon_centers`] sert aussi aux tests d'`app.rs`
+/// `pub(super)` : [`tests::find_icon_centers`] sert aussi aux tests de `window_detach.rs`
 /// qui peignent l'en-tête d'une fenêtre détachée.
 #[cfg(test)]
 pub(super) mod tests {
@@ -1376,5 +1376,58 @@ pub(super) mod tests {
         );
         assert_eq!(position, egui::pos2(300.0, 270.0), "bord nord seul");
         assert_eq!(size, egui::vec2(400.0, 330.0), "bord nord seul");
+    }
+
+    /// [`show_window_contents_bounded`], la borne commune des fenêtres
+    /// flottantes, détachées (B8) et des dialogues : le contenu est rogné à
+    /// l'espace qui reste sous l'en-tête et ne repousse pas le cadre, même
+    /// s'il réclame plus de place que l'écran. Le témoin : le `Ui` parent, lui,
+    /// rogne plus haut (il couvre l'en-tête) — un contenu qui hériterait de
+    /// son rognage serait vu. Les contenus réels (classeur, graphe) posent
+    /// souvent leur propre rognage, qui masquerait l'oubli de celui-ci.
+    #[test]
+    fn le_contenu_borne_est_rogne_sous_l_en_tete_et_ne_repousse_pas_le_cadre() {
+        let context = egui::Context::default();
+        let ecran = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 150.0));
+        let mut mesures = None;
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(ecran),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.label("en-tête");
+                    let espace = ui.available_rect_before_wrap();
+                    let parent = ui.clip_rect();
+                    show_window_contents_bounded(ui, |ui| {
+                        ui.label("contenu");
+                        ui.allocate_space(egui::vec2(1000.0, 1000.0));
+                    });
+                    mesures = Some((espace, parent, ui.min_rect()));
+                });
+            },
+        );
+        output.textures_delta.clear();
+        let (espace, parent, cadre) = mesures.expect("panneau peint");
+        assert!(
+            parent.top() < espace.top(),
+            "témoin : le parent couvre l'en-tête ({parent:?} / {espace:?})"
+        );
+        let rognage = output
+            .shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Text(text) if text.galley.job.text == "contenu" => {
+                    Some(painted.clip_rect)
+                }
+                _ => None,
+            })
+            .expect("contenu peint");
+        assert_eq!(rognage, parent.intersect(espace), "rogné sous l'en-tête");
+        assert!(
+            ecran.contains_rect(cadre),
+            "le contenu trop grand ne repousse pas le cadre : {cadre:?}"
+        );
     }
 }

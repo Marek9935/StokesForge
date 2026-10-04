@@ -3,7 +3,7 @@
 //! « Graphique », « Affichage », « Fenêtre ») et [`StokesForgeApp::status_bar`].
 //!
 //! Le grisage de chaque entrée se décide ici, d'après l'état et l'onglet
-//! actif que [`StokesForgeApp::ui`] calcule une fois par image ; les entrées
+//! actif que [`StokesForgeApp::ui`](eframe::App::ui) calcule une fois par image ; les entrées
 //! poussent des [`Action`], appliquées après la peinture par la boucle de
 //! dispatch d'`app.rs`. L'ordre des panneaux (la barre de menu est le premier
 //! `egui::Panel::top`, la barre d'état le premier `egui::Panel::bottom`) reste
@@ -38,8 +38,8 @@ impl StokesForgeApp {
     /// « Affichage » et « Fenêtre ».
     ///
     /// « Graphique » ouvre la fenêtre des propriétés du graphe sur chacun de
-    /// ses onglets ([`plot_settings_window`]) — les mêmes pages que le clic
-    /// droit sur un composant du graphe ([`graph_view_contents`]), pour
+    /// ses onglets ([`plot_settings_window`](crate::app::plot_settings::plot_settings_window)) — les mêmes pages que le clic
+    /// droit sur un composant du graphe ([`graph_view_contents`](crate::app::graph_window::graph_view_contents)), pour
     /// qu'aucun réglage ne soit atteignable **seulement** au clic droit — et
     /// réinitialise le zoom.
     ///
@@ -529,7 +529,7 @@ impl StokesForgeApp {
     ///
     /// Les dimensions (lignes × colonnes) qu'elle affichait ont disparu avec
     /// « la » feuille sélectionnée globale : chaque onglet de classeur les
-    /// montre pour sa propre feuille, dans [`book_contents`].
+    /// montre pour sa propre feuille, dans [`book_contents`](crate::app::workbook::book_contents).
     pub(super) fn status_bar(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         egui::Panel::bottom("stokesforge_status")
             .resizable(false)

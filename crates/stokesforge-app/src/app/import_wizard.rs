@@ -1237,7 +1237,7 @@ fn import_step_destination(
 /// fichiers sont choisis, avec le modèle tel qu'il est — import en deux clics
 /// pour un format connu. **Dialogue modal de la brique commune**
 /// ([`modal_dialog_with`], comme les propriétés du graphe), peint depuis
-/// [`StokesForgeApp::ui`] tant que [`AppState::import_state`] est `Some` ; la croix
+/// [`StokesForgeApp::ui`](eframe::App::ui) tant que [`AppState::import_state`] est `Some` ; la croix
 /// et Échap valent « Annuler », Entrée « Terminer ».
 pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
     let Some(step) = state.import_state().map(|import| import.step) else {

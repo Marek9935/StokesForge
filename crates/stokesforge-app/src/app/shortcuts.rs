@@ -96,7 +96,7 @@ pub(super) const SHORTCUT_DUPLICATE_SHEET: egui::KeyboardShortcut =
 /// événements de la fenêtre et n'en laisse jamais passer de `Event::Key`
 /// — un essai précédent, fondé sur l'hypothèse inverse, produisait des
 /// raccourcis qui ne se déclenchaient jamais. Le bloc clavier de
-/// [`grid_contents`] lit les `Event::Copy`/`Event::Cut`/`Event::Paste`
+/// [`grid_contents`](crate::app::grid::grid_contents) lit les `Event::Copy`/`Event::Cut`/`Event::Paste`
 /// correspondants, et c'est là que vit la vraie logique.
 pub(super) const SHORTCUT_COPY: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);

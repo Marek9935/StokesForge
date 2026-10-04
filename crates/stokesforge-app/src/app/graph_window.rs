@@ -31,9 +31,10 @@ use super::graph_text_edit::{
     open_legend_entry_editor, open_series_name_editor, open_text_editor, text_editor_id,
     text_editor_ui, AnnotationEditor, ContextText, TextEditor,
 };
+use super::grid::keyboard_focus_outside_grid;
 use super::object_manager_ui::{series_shortcuts, ObjectManagerRequest};
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_EXPORT_GRAPH};
-use super::{color_request_action, keyboard_focus_outside_grid, saved_colors_id};
+use super::{color_request_action, saved_colors_id};
 
 /// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
 /// initial. Réserver sa hauteur garde le rectangle de la figure stable d'une
@@ -43,9 +44,9 @@ const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
 
 /// Enrobe [`graph_contents`] d'une zone de dépôt pour le glisser d'une
 /// sélection de colonnes de classeur — pendant, côté cible, de la zone de
-/// prise posée par [`grid_contents`] en bord de grille. Appelée par
-/// [`tab_contents`], donc identiquement pour un onglet en fenêtre flottante
-/// et pour un onglet détaché ([`StokesForgeApp::show_detached_tabs`]) : c'est le
+/// prise posée par [`grid_contents`](crate::app::grid::grid_contents) en bord de grille. Appelée par
+/// [`tab_contents`](crate::app::contents::tab_contents), donc identiquement pour un onglet en fenêtre flottante
+/// et pour un onglet détaché ([`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs)) : c'est le
 /// seul point
 /// d'entrée que les deux utilisent, voir la doc de tête de ce dernier — pas
 /// de code de dépôt séparé à maintenir pour le cas détaché.
@@ -201,7 +202,7 @@ fn shape_properties_ui(
 }
 
 /// Un graphe ouvert — le **rendu visible** de la phase R4 (tâche 4.6).
-/// Contenu d'un [`Tab::Graph`].
+/// Contenu d'un [`Tab::Graph`](crate::app::tab::Tab::Graph).
 ///
 /// Ce n'est pas une ébauche de la fenêtre de graphe finale : comme tout ce
 /// banc, c'est la preuve que l'intégration bout en bout tient. Ce qu'il
@@ -223,14 +224,14 @@ fn graph_contents(
 
 /// Corps de [`graph_contents`], factorisé sur une [`GraphView`] et un
 /// [`Snapshot`] déjà en main plutôt que sur `&AppState`/la table
-/// [`StokesForgeApp::graph_views`] : c'est ce qui permet à
-/// [`StokesForgeApp::show_detached_tabs`] de peindre un `Tab::Graph` détaché avec
+/// [`StokesForgeApp::graph_views`](crate::app::StokesForgeApp::graph_views) : c'est ce qui permet à
+/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs) de peindre un `Tab::Graph` détaché avec
 /// **exactement** cette fonction — pas de version dégradée, voir la doc de
 /// tête de `window_detach.rs`. `GraphView` n'a pas le problème de verrou global à
 /// `AppState` qu'ont les tampons de saisie de cellule/note (son cache et sa
 /// navigation sont déjà scopés par graphe) : nul besoin d'une variante
-/// « détachée » séparée, à la différence de [`grid_contents`]/
-/// [`note_contents`].
+/// « détachée » séparée, à la différence de [`grid_contents`](crate::app::grid::grid_contents)/
+/// [`note_contents`](crate::app::contents::note_contents).
 pub(super) fn graph_view_contents(
     ui: &mut egui::Ui,
     view: &mut GraphView,
@@ -749,7 +750,7 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     use stokesforge_core::{Column, Project};
@@ -761,8 +762,10 @@ mod tests {
     use super::super::window_chrome::{show_floating_window, window_header, HeaderPlacement};
     use super::super::window_placement::GRAPH_WINDOW_SIZE;
 
-    /// Un classeur de deux colonnes et un graphe qui les trace.
-    fn graphe() -> (Session, NodeId) {
+    /// Un classeur de deux colonnes et un graphe titré « Figure » qui les
+    /// trace — le projet commun des tests de `app` qui ont besoin d'un
+    /// graphe tracé (`format.rs`, `window_detach.rs`, `app.rs`).
+    pub(in crate::app) fn graphe() -> (Session, NodeId) {
         let mut project = Project::new("Graphe").unwrap();
         let root = project.root();
         let book = project.add_empty_workbook(root, None).unwrap();
