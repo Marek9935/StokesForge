@@ -47,3 +47,9 @@ htmlcov/
 # Interpréteur Python vendored (python-build-standalone, cf. cahier-des-charges-technique.md §8.6.1)
 /vendor/python/*.tar.gz
 /vendor/python/extracted/
+
+# Icônes Phosphor : seuls `SVGs/` (source des icônes embarquées, cf. docs/icones.md)
+# et `LICENSE` sont versionnés ; le reste du paquet téléchargé est local.
+/vendor/phosphor-icons/Fonts/
+/vendor/phosphor-icons/PNGs/
+/vendor/phosphor-icons/SVGs Flat/
