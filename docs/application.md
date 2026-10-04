@@ -20,6 +20,49 @@ définitifs qu'elles accueilleront.
 Toolkit : `eframe` / `egui` (disposition et rendu), `rfd` (sélecteur de
 fichiers natif).
 
+### Découpage du code : `app.rs` et `src/app/` (#115)
+
+`app.rs` ne garde que l'**orchestration** de l'image ; chaque surface
+d'interface est un vrai module de `src/app/` (chantier #115, #116–#123) :
+imports explicites, visibilité minimale (`pub(super)` entre modules d'`app`),
+aucun `use …::*` hors du code de test (garde `aucun_import_global_hors_des_tests`),
+une doc de tête par module. Sens des dépendances : `app.rs` → modules de
+surface → briques communes (`dialogs`, `tab_strip`, `window_chrome`,
+`crate::icons`…). Les tests internes suivent le code qu'ils éprouvent : un
+test vit dans le module de sa surface, et le module `tests` d'`app.rs`
+n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
+`src/`, sous-dossiers compris, et cherchent leurs fonctions par leur nom
+(#116) : voir `docs/tests.md`.
+
+| Fichier | Rôle |
+|---|---|
+| `app.rs` | orchestration : `StokesForgeApp` et ses champs, `new` (disposition initiale, restauration de l'état des fenêtres), `ui()` et l'**ordre des panneaux**, `collect_shortcuts` (raccourcis globaux, consommés avant les widgets), application différée des actions et ouvertures après la peinture, confirmations bloquantes (nouveau projet, suppression de feuille), drainage des fenêtres détachées, capture et auto-fermeture de vérification. Y restent aussi des aides que des modules relisent par `super::` (`tab_title`, `tab_title_from_tree`, `snapshot_stamp`, `active_tab_kind`, `saved_colors_id`, `color_request_action`, `paint_drag_handle_icon`) : des dépendances à rebours, à reprendre |
+| `app/menus.rs` | barre de menu (`menu_bar` : File, Edit, Workbook, Graph, View, Window) et barre d'état (`status_bar`) |
+| `app/format.rs` | barres de format de texte et d'objet, barre contextuelle : `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (les barres elles-mêmes : `crate::toolbar`) |
+| `app/project_manager.rs` | Project Manager : `project_manager_panel` (panneau fixe) et l'arbre `project_manager_contents_from_tree`, commun au panneau et à la fenêtre détachée |
+| `app/object_manager_ui.rs` | Object Manager peint : `object_manager_panel`, `run_object_manager_request`, lignes, cases, menus, glisser des séries (le modèle : `crate::object_manager`) |
+| `app/script_console.rs` | console de script : `script_panel`, saisie, Exécuter/Arrêter, sortie |
+| `app/tab.rs` | `Tab`, l'onglet d'une fenêtre de contenu (classeur, graphe, matrice, note), et ses traductions vers le modèle (`tab_for_window`, `tab_node`) |
+| `app/contents.rs` | contenus partagés flottant/détaché : `tab_contents`, `note_contents`, `matrix_contents` (espace réservé) |
+| `app/workbook.rs` | classeur : `book_contents` (contenu commun flottant/détaché), `sheet_tabs`, `workbook_menu` |
+| `app/grid.rs` | grille d'une feuille : table virtualisée, en-tête empilé, gouttière, cellules, `grid_edit_menu`, focus clavier (`GRID_KEYS`, `keyboard_focus_outside_grid`), barres déportées, `grid_grip_side`, libellés de type et de rôle |
+| `app/graph_window.rs` | fenêtre de graphe : `graph_view_contents` (commun flottant/détaché), `graph_drop_target`, menu contextuel de la figure, `annotation_interactions`, ordre et propriétés des objets, `request_graph_export` |
+| `app/graph_text_edit.rs` | éditeurs sur place (texte libre, titre, nom de légende) et mise en forme en attente demandée par la barre de format |
+| `app/file_drop.rs` | dépôt de fichiers : `begin_file_drop`, `claim_file_drop`, `finish_file_drop` (un emplacement par viewport), `open_project_in_new_window` |
+| `app/import_wizard.rs` | assistant d'import : `import_window`, ses six étapes, l'aperçu coloré par rôle, les libellés des choix |
+| `app/plot_settings.rs` | propriétés du graphe : `plot_settings_window`, ses onglets et éditeurs, le mémo des formules ; `column_metadata_window` |
+| `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with` |
+| `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
+| `app/shortcuts.rs` | constantes `SHORTCUT_*` et leurs rappels, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
+| `app/window_chrome.rs` | cadre commun des fenêtres : `window_header`, `floating_window_frame`, contour actif, poignées, `show_window_in_layer`, `show_window_contents_bounded` |
+| `app/window_placement.rs` | placement : tailles par défaut, cascade, espace de travail fixe (`WORKSPACE_SIZE`), `clamp_to_workspace`, conversion logique → écran |
+| `app/window_stack.rs` | pile des fenêtres flottantes : `open_tab` (seul endroit qui décide ouvrir ou focaliser), ordre et calques egui, masquage, repli, maximisation, `show_workspace` |
+| `app/window_detach.rs` | détachement en fenêtres OS : `show_detached_project_manager`, `detach_tab`/`reattach_tab`, `show_detached_tabs` et la publication de l'instantané qui réveille les viewports (#104), `sync_window_views` (état des fenêtres envoyé à la session, #16) |
+
+Une nouvelle surface volumineuse s'écrit dans son propre module, sur ce
+modèle ; `app.rs` n'y gagne que l'appel. La redécoupe des fonctions géantes
+(`menu_bar`, `ui()`…) est l'issue #124, chacune dans son propre commit.
+
 ### Fenêtres flottantes confinées
 
 Le Project Manager et la console de script sont deux panneaux fixes
@@ -37,7 +80,7 @@ par les rectangles des panneaux. Les quatre autres
 natures de fenêtre de contenu — `Tab::Book` (classeur), `Tab::Graph`,
 `Tab::Matrix`, `Tab::Note`, chacune portant un `NodeId` — s'ouvrent par défaut
 en fenêtres flottantes à l'intérieur du `CentralPanel`, une par
-`StokesForgeApp::floating_tabs`, dans `app.rs`. Chacune est une `egui::Area` nue
+`StokesForgeApp::floating_tabs` (ordre de pile : `app/window_stack.rs`). Chacune est une `egui::Area` nue
 (`show_floating_window`), pas une `egui::Window` : l'application possède seule
 sa géométrie, et le cadre, le contour actif, le rognage, les poignées et la
 géométrie persistée viennent du même rectangle. Les `egui::Window` d'avant
@@ -292,52 +335,6 @@ compris, est agrandi ou réduit uniformément (`GraphView::paint_scaled`,
 `stokesforge-render-egui`). Redimensionner la fenêtre ne redispose donc rien, et
 ne reconstruit pas le cache de formes. La règle est identique en fenêtre
 flottante et détachée, qui partagent la même fonction.
-
-`app.rs` se découpe en vrais modules dans `src/app/` (chantier #115), à imports
-explicites ; chacun porte la doc de tête de sa partie. Les fenêtres de contenu
-(#100, #101, déménagées par #117) : `app/window_chrome.rs` (cadre commun :
-`window_header`, `show_window_in_layer`, `floating_window_frame`, poignées,
-`HeaderPlacement`, `show_window_contents_bounded`), `app/window_placement.rs` (cascade,
-espace de travail, bornage), `app/window_stack.rs` (ordre de pile, masquage, repli,
-maximisation, `show_workspace`) et `app/window_detach.rs` (viewports OS du Project
-Manager et des onglets). Les briques communes (#117) : `app/tab.rs` (`Tab`, l'onglet
-d'une fenêtre ouverte), `app/dialogs.rs` (`modal_dialog`, `modal_dialog_with`),
-`app/tab_strip.rs` (la bande d'onglets, `tab_strip`) et `app/shortcuts.rs` (les
-constantes `SHORTCUT_*` ; leur consommation, `collect_shortcuts`, reste dans `app.rs`).
-L'assistant d'import (#118) : `app/import_wizard.rs` (`import_window`, ses six
-étapes, l'aperçu coloré par rôle, les tables de libellés). Les propriétés du
-graphe (#119) : `app/plot_settings.rs` (`plot_settings_window`, ses onglets et
-leurs éditeurs, le mémo des formules, les libellés des choix, et
-`column_metadata_window`, même famille de dialogue) ; ses tests peignent chaque
-onglet sans rien modifier, en `en` et en `en-XA` (sous-processus, la langue
-étant globale), et tiennent la validation au relâchement et à la perte de
-focus. La grille et le classeur (#120) : `app/grid.rs` (table, en-tête empilé,
-gouttière, cellules, `grid_edit_menu`, focus clavier
-`GRID_KEYS`/`keyboard_focus_outside_grid`, barres déportées, `grid_grip_side`,
-constantes et libellés de la grille) et `app/workbook.rs` (`book_contents`,
-contenu commun flottant/détaché, `sheet_tabs`, `workbook_menu`). Les surfaces de
-contenu (#121) : `app/graph_window.rs` (la figure `graph_view_contents`, sa
-zone de dépôt, son menu contextuel, `annotation_interactions`, l'ordre et les
-propriétés des objets, `request_graph_export`), `app/graph_text_edit.rs` (les
-éditeurs sur place et la mise en forme en attente de la barre),
-`app/object_manager_ui.rs` (l'arbre peint de l'Object Manager, à côté du modèle
-`object_manager.rs`), `app/project_manager.rs` (l'arbre du Project Manager),
-`app/script_console.rs`, `app/file_drop.rs` (dépôt de fichiers) et
-`app/contents.rs` (`tab_contents`, `note_contents`, `matrix_contents`). Les
-méthodes de `StokesForgeApp` qui ne sont pas de l'orchestration (#122), en
-blocs `impl StokesForgeApp` dans leur module : `app/menus.rs` (`menu_bar`,
-`status_bar`), `app/format.rs` (barres de format et barre contextuelle :
-`format_target`, `text_format_state`, `object_format_state`, `tools_context`,
-`format_zone`, `format_text`, `format_object`, `run_toolbar_request`), et les
-panneaux avec leur contenu (`project_manager_panel` dans
-`app/project_manager.rs`, `object_manager_panel` et
-`run_object_manager_request` dans `app/object_manager_ui.rs`, `script_panel`
-dans `app/script_console.rs`). `app.rs` ne garde que l'orchestration de
-l'image : `ui()`, l'ordre des panneaux, `collect_shortcuts`, l'application
-différée des actions, les confirmations bloquantes et le détachement. La suite
-est #123 (relecture d'ensemble des tests, passe finale doc et skills) ; la
-redécoupe de `menu_bar` et de `ui()` est #124. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
-et cherchent leurs fonctions par leur nom (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
 Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou
@@ -940,8 +937,8 @@ sélection couvrant au moins une colonne (`AppState::column_drag_payload`).
 Le survol y affiche un curseur « attraper » et un petit pictogramme (une
 grille de points, peinte à la main plutôt qu'un glyphe de police — voir
 `app::paint_drag_handle_icon`) à côté du pointeur. `app::grid::grid_grip_side`
-(réexportée en `app::grid_grip_side`) est la fonction pure qui décide si un
-point est dans cette bande, testée dans `tests/shell.rs` sans fenêtre ; `grid_contents` s'en sert pour peindre
+est la fonction pure qui décide si un point est dans cette bande, testée seule
+dans `app/grid.rs` (bornes de la marge comprises) ; `grid_contents` s'en sert pour peindre
 l'icône et interagit séparément sur deux rectangles confinés (gauche, droite)
 pour démarrer le glisser, afin de ne jamais intercepter le reste de la
 grille.
@@ -1401,7 +1398,7 @@ aux bords).
 L'asymétrie entre les deux axes tient à l'identité de la cible : une ligne
 n'est qu'un indice, donc sélectionner `(colonne existante, row + 1)` *avant*
 que la commande d'ajout ne soit appliquée (elle ne l'est qu'après le rendu de
-l'image, voir `app::StokesForgeApp::update`) est sûr — la ligne existera à temps.
+l'image, voir `StokesForgeApp::ui`, `app.rs`) est sûr — la ligne existera à temps.
 Une colonne neuve, elle, n'a pas encore de `NodeId` tant que `Command::
 AddColumn` n'a pas tourné : la sélectionner à l'avance n'a pas de sens.
 `Action::AddColumnAndSelect { sheet, row }` fait donc les deux d'un coup

@@ -76,8 +76,8 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Sauvegarde, chargement et format `.stf` | `docs/persistance.md` | `stokesforge-persistence`, types du modèle et du graphe |
 | Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, commandes et persistance appelées |
 | Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `stokesforge-render` d'abord, puis `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
-| Fenêtre, grille, raccourcis | `docs/application.md` | `stokesforge-app/src/state.rs`, `app.rs`, `selection.rs`, `object_manager.rs`, `theme.rs` ; `stokesforge-session` |
-| Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app/src/state.rs` et `app.rs`, `stokesforge-import/tests/fixtures.rs` |
+| Fenêtre, grille, raccourcis | `docs/application.md` (§ Découpage du code) | `stokesforge-app/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs`, `theme.rs` ; `stokesforge-session` |
+| Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
 | Distribution | `crates/stokesforge-python/README.md`, `docs/application.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
@@ -103,7 +103,8 @@ la cible active Rust.
   La confirmation avant perte de travail appartient à `AppState`.
 - Dans l'application, réutiliser `Action` / `AppState::dispatch` pour les
   actions concernées. Garder la logique testable dans `state.rs` et la
-  traduction des événements et l'affichage dans `app.rs`.
+  traduction des événements et l'affichage dans le module de la surface
+  (`src/app/`), `app.rs` ne gardant que l'orchestration de l'image.
 - L'import reste indépendant de l'UI, de `core`, des commandes et de la
   session. `stokesforge-importer` convertit ses résultats vers les colonnes du modèle
   pour l'application, le CLI et `pyst.import_file` ; les scripts écrivent via

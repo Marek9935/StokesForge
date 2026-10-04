@@ -80,7 +80,8 @@ volontaire » **ne suffit pas** à classer la demande en évolution. Il faut lir
 *quelle alternative* a été rejetée, et *pourquoi*.
 
 Cas réel : la zone de prise du glisser-déposer est confinée au bord de la
-grille, et le commentaire (`app.rs:4308-4319`) explique que couvrir **tout**
+grille, et le commentaire (`grid_contents`, `src/app/grid.rs`, près de
+`COLUMN_GRIP_WIDTH` ; `app.rs:4308-4319` à l'époque) explique que couvrir **tout**
 `grid_rect` écraserait le glisser d'extension de sélection. L'utilisateur
 demandait une bande autour de **la sélection** — une troisième option, que le
 commentaire n'examine pas, et qui reste possible puisqu'une cellule fait plus

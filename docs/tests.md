@@ -163,6 +163,16 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   `platform_output.accesskit_update`) : libellé, grisage, case cochée et
   rectangle de chaque entrée, sans supposer de position ni comparer de
   couleur (modèle : `entrees`, `src/app/menus.rs`, #122).
+- Dans `stokesforge-app`, un test suit le code qu'il éprouve (#115) : une
+  décision d'`AppState` dans `tests/shell.rs`, un geste peint dans le module
+  `tests` de sa surface (`src/app/<surface>.rs`) ; celui d'`app.rs` n'éprouve
+  que l'orchestration (ordre des panneaux, application différée,
+  confirmations, raccourcis globaux, restauration des fenêtres). Une aide de
+  test partagée est `pub(in crate::app)` dans le module de tests qui la porte
+  (`graph_window::tests::graphe`, `project_manager::tests::click_at`). Une
+  assertion de vide (« la table est vidée ») a besoin du témoin qui montre que
+  la table était pleine avant (modèle :
+  `ctrl_n_confirme_et_oublie_les_vues_du_projet_precedent`, #123).
 - Un test ne dispatche pas une action qui écrit le `preferences.json` de la
   machine (`SetObjectManagerOpen`, `SetObjectManagerShowTexts`…) : il pose
   l'état en mémoire (`AppState::set_object_manager_open_for_test`), ou ne

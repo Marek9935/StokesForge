@@ -15,7 +15,7 @@ clignotement, rafraîchissement.
 ## Le mécanisme intégré
 
 `stokesforge-app` sait se photographier lui-même. Deux variables d'environnement,
-déclarées à `crates/stokesforge-app/src/app.rs:341-344` :
+déclarées dans `crates/stokesforge-app/src/app.rs` (`SCREENSHOT_ENV`, `AUTOQUIT_ENV`) :
 
 ```sh
 STOKESFORGE_APP_SCREENSHOT=/tmp/stokesforge.ppm \

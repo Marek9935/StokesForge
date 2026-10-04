@@ -12,7 +12,7 @@ OriginLab, options de configuration détaillées) est secondaire à ce
 principe et négociable ; ce principe ne l'est pas.
 
 Concrètement : refaire le panneau de prévisualisation de la fenêtre d'import
-(`import_window`, `crates/stokesforge-app/src/app.rs`) pour qu'il affiche ce
+(`import_window`, aujourd'hui `crates/stokesforge-app/src/app/import_wizard.rs`) pour qu'il affiche ce
 découpage en direct, à mesure que l'utilisateur ajuste les paramètres
 d'import, sur le modèle de l'assistant d'import ASCII d'OriginLab.
 
@@ -80,7 +80,7 @@ Le panneau qu'elle montre se découpe en trois zones :
   actuel. Rien d'équivalent à `System Parameters`/`User Parameters`
   d'OriginLab n'existe : à trancher (les ignorer, ou les faire atterrir dans
   `comment` faute de mieux — voir « Questions ouvertes »).
-- `crates/stokesforge-app/src/app.rs`, fonction `import_window` : la fenêtre
+- `crates/stokesforge-app/src/app.rs` (aujourd'hui `src/app/import_wizard.rs`), fonction `import_window` : la fenêtre
   d'import actuelle (dialogue transitoire tant que `AppState::import_state`
   est `Some`), avec ses champs de texte simples (dont le bug noté) et pas
   d'aperçu en direct du découpage.

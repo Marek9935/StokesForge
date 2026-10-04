@@ -33,7 +33,7 @@ le fichier est découpé — pas seulement une fois l'import validé. Le reste
 ## Le bug de champ de texte : ce que c'était vraiment
 
 Il n'était pas dans la fenêtre d'import elle-même. `grid_contents`
-(`crates/stokesforge-app/src/app.rs`) consomme Retour arrière/Suppr via
+(`crates/stokesforge-app/src/app.rs` à l'époque, `src/app/grid.rs` depuis #120) consomme Retour arrière/Suppr via
 `ui.input_mut(|input| input.consume_key(...))` pour son propre raccourci
 « effacer la sélection ». `input_mut` agit sur l'`InputState` du `Context`
 **entier**, pas sur celui d'une `Ui` — donc pas seulement sur cette grille.
@@ -42,7 +42,7 @@ state.header_editing().is_none()`, mais pas par
 `state.import_state().is_none()`.
 
 Or `import_window` (un `egui::Window` flottant) est peinte *après* le dock
-dans `StokesForgeApp::update` — donc *après* que `grid_contents` (qui continue de
+dans `StokesForgeApp::update` (aujourd'hui `ui`) — donc *après* que `grid_contents` (qui continue de
 tourner en dessous, à chaque image, tant qu'un classeur est ouvert) ait déjà
 consommé l'événement clavier. Résultat : taper Retour arrière ou Suppr dans
 un champ texte de la fenêtre d'import ne faisait plus rien, la touche ayant

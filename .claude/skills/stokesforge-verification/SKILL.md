@@ -48,7 +48,14 @@ tester explicitement**, sinon elle valide du code mort.
 Logique d'interface : `stokesforge-app/tests/shell.rs`, sans fenêtre. Si une
 décision doit vivre près de l'UI, l'extraire en **fonction pure** puis la
 tester — c'est l'idiome du dépôt (`app::grid::grid_grip_side`,
-`state::active_graph`, `state::drop_payload_action`).
+`state::active_graph`, `state::drop_payload_action`). Un geste **peint** (clic,
+touche, disposition lue dans les formes) se teste dans le module `tests` de sa
+surface (`src/app/<surface>.rs`), sans fenêtre ; le module `tests` d'`app.rs`
+n'éprouve que l'orchestration (ordre des panneaux, application différée,
+confirmations, raccourcis globaux). Les tests suivent leur code : déplacer une
+fonction, c'est déplacer ses tests. Une aide de test partagée entre modules
+d'`app` est `pub(in crate::app)` dans le module de tests qui la porte
+(`graph_window::tests::graphe`).
 
 ### Le témoin — sans lui, un test d'égalité ne prouve rien
 

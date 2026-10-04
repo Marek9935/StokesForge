@@ -4,7 +4,9 @@ Chantiers tirés des retours du 2026-09-23. Les défauts du même message,
 tous corrigés, ne sont plus suivis ici (voir les issues GitLab).
 
 Note de passation : elle rejoindra `docs/archive/` quand sa dernière case sera
-cochée. Chaque chantier passe par le skill `stokesforge-feature` — les quatre
+cochée. Les références `app.rs:N` datent du 2026-09-23, avant le découpage
+d'`app.rs` en modules (#115) : le code vit depuis dans `src/app/` (table
+module → rôle dans `docs/application.md`). Chaque chantier passe par le skill `stokesforge-feature` — les quatre
 surfaces d'une action (raccourci, menu, grisage, libellé) ne se tiennent en
 accord que si on y pense à chaque fois.
 

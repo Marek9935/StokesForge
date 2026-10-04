@@ -41,7 +41,7 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
   `stokesforge-verification` : les tests couvrent la géométrie, **pas
   l'apparence**.
 
-## Quatre règles transversales, apprises à l'usage
+## Cinq règles transversales, apprises à l'usage
 
 **Demander plutôt que trancher.** L'utilisateur n'est pas développeur : il
 arbitre des comportements observables, jamais des structures de code. Un
@@ -57,6 +57,15 @@ Quand la brique manque d'un réglage, on l'étend ; on ne la réécrit pas à c�
 L'assistant d'import a été écrit en `egui::Window` brute parce qu'un skill
 décrivait cette dérogation comme « encore brute » : un skill qui constate une
 dérogation doit dire qu'elle est à corriger, pas qu'elle existe.
+
+**Un module par surface, et les tests avec leur code.** Dans
+`stokesforge-app`, le code d'une surface d'interface vit dans son module de
+`src/app/` (table dans `docs/application.md`, § Découpage du code), à imports
+explicites ; `app.rs` ne garde que l'orchestration de l'image. Un test suit le
+code qu'il éprouve : déplacer une fonction, c'est déplacer ses tests, puis les
+relire (ce qu'ils prouvent, leur témoin vérifié par mutation) — travail confié
+à un agent Opus à chaque restructuration (#115). Un skill qui cite un chemin
+le cite là où le code vit, pas là où il vivait.
 
 **Regarder avant de conclure.** Un symptôme visuel diagnostiqué depuis le code
 seul produit une cause fausse et convaincante. C'est arrivé.

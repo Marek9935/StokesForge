@@ -6,7 +6,9 @@
 L'interface est **écrite d'abord en anglais** ; le français en est la
 traduction (#39). Ce guide est la source unique des termes et des règles : un
 texte visible qui s'en écarte est un défaut. Les chemins `app.rs:N` désignent
-`crates/stokesforge-app/src/` au 2026-10-01.
+`crates/stokesforge-app/src/` au 2026-10-01, avant le découpage d'`app.rs` en
+modules (#115) : le code de chaque surface vit depuis dans `src/app/` (table
+module → rôle dans `docs/application.md`).
 
 Colonne « Réf. » : **O** usage d'Origin · **G** terme générique des logiciels
 de bureau · **I** IUPAC · **D** usage courant de la discipline · **—** propre

@@ -99,8 +99,8 @@ est en tête de `crates/stokesforge-app/src/i18n.rs` ; la vue d'ensemble dans
    Title Case pour menus, boutons, onglets et titres ; Sentence case pour champs,
    cases à cocher, infobulles, messages.
 2. **L'employer par `tr!`** : `tr!("menu-file")`, ou avec arguments nommés
-   `tr!("witness-count", count = n)`. Renvoie un `String`. Dans `app.rs` :
-   `use crate::tr;` ; dans `main.rs` : `stokesforge_app::tr!(…)`.
+   `tr!("witness-count", count = n)`. Renvoie un `String`. Dans `app.rs` et les modules
+   de `src/app/` : `use crate::tr;` (import explicite, jamais de glob) ; dans `main.rs` : `stokesforge_app::tr!(…)`.
    L'infobulle se lit par `tr!("clé", "hint")` (attribut `.hint` de la clé).
    Un nom choisi par l'utilisateur (*Book1*, une colonne) se passe en
    argument ou se concatène : jamais dans le catalogue (R15). Un test qui

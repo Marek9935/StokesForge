@@ -44,13 +44,13 @@ qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
 | change le **modèle** (colonnes, arbre, `PlotSpec`, texte de note…) | une `Command` de `stokesforge-commands` | jamais une primitive `stokesforge-core` en direct (invariant 1) ; voir le skill **stokesforge-commande** |
 | change le **cadrage de vue** (zoom, pan) | `ViewState` sur `GraphView` | ce n'est **pas** une mutation du modèle : personne ne veut annuler un zoom par Ctrl+Z |
 | est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `stokesforge-app/src/state.rs` | doit rester testable sans fenêtre |
-| est du **dessin ou de l'événement** egui | `stokesforge-app/src/app.rs` et ses sous-modules de `src/app/` (fenêtres `window_*.rs`, voir § 2 octies ; surfaces `graph_window.rs`, `graph_text_edit.rs`, `object_manager_ui.rs`, `project_manager.rs`, `script_console.rs`, `contents.rs`, #121 ; méthodes de `StokesForgeApp` `menus.rs`, `format.rs` et les panneaux, #122) | rien de ce qu'ils contiennent n'est une décision de produit |
+| est du **dessin ou de l'événement** egui | le module de **la surface** dans `stokesforge-app/src/app/` (grille `grid.rs`, classeur `workbook.rs`, graphe `graph_window.rs`, menus `menus.rs`, barres de format `format.rs`, dialogue `plot_settings.rs`…, table complète dans `docs/application.md`, § Découpage du code ; voir § 2 octies) — `app.rs` n'en reçoit que l'appel | rien de ce qu'ils contiennent n'est une décision de produit ; jamais une logique de surface dans `app.rs` |
 | est une **fonctionnalité de tracé** | `stokesforge-render` (générique sur le backend) | jamais dans un seul backend (invariant 5) ; voir le skill **stokesforge-rendu** |
 | lit un **fichier de données** | `stokesforge-import` | reste indépendant de l'UI, de `core`, des commandes et de la session |
 
 Une action qui a besoin de l'**état de vue** (le zoom d'une `GraphView`, qui
-vit dans `app.rs`, jamais dans `AppState`) : `app.rs` le lit et le **met dans
-l'`Action`**, `state.rs` fait le travail et le dit dans la barre d'état. Modèle :
+vit dans `StokesForgeApp::graph_views` ou la vue détachée, jamais dans
+`AppState`) : la couche `app` le lit et le **met dans l'`Action`**, `state.rs` fait le travail et le dit dans la barre d'état. Modèle :
 `Action::ExportGraph { path, spec }`, dont le spec est déjà cadré par
 `GraphView::framed_spec` (issue #34) — testable dans `tests/shell.rs` sans
 fenêtre, et identique depuis une fenêtre détachée.
@@ -65,12 +65,12 @@ et une seule action part à la validation. Modèle : textes libres, issue #35
 placement, testée sans fenêtre — `stokesforge_render_egui::annotation_field`, issue
 #37), et ne masque pas l'aperçu quand on règle autre chose que le texte (#36).
 
-La ligne de partage `state.rs` / `app.rs` est la colonne vertébrale du crate
-UI : `state` porte toute la logique, pilotée par un enum `Action`, et se teste
-en CI (`tests/shell.rs`) ; `app` ne fait que traduire clavier et souris en
-`Action` et peindre. Une fenêtre ne se teste pas en intégration continue —
-c'est toute la raison du découpage. Si une règle métier se retrouve dans
-`app.rs`, elle devient invérifiable.
+La ligne de partage `state.rs` / `app` (`app.rs` et `src/app/`) est la colonne
+vertébrale du crate UI : `state` porte toute la logique, pilotée par un enum
+`Action`, et se teste en CI (`tests/shell.rs`) ; `app` ne fait que traduire
+clavier et souris en `Action` et peindre. Une fenêtre ne se teste pas en
+intégration continue — c'est toute la raison du découpage. Si une règle
+métier se retrouve dans `app`, elle devient invérifiable.
 
 Un graphe neuf n'a aucun titre par défaut (#103), démo de l'application
 comprise : garder `PlotSpec::title` vide, sans masquer `title_visible` ni
@@ -120,59 +120,52 @@ factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
 
 ## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
 
-`app.rs` est en cours de découpage (chantier #115, sous-tickets #116–#124,
-chacun **sur feu vert seulement** ; #116 à #122 faits). Cible décidée le 2026-10-04 : de vrais
-modules dans `src/app/` (imports explicites, interface `pub(crate)` minimale,
-pas de `use super::*` hors des modules de tests), des tests qui suivent leur
-code et sont relus et améliorés à chaque déplacement par un agent Opus
-(outil `Agent`, modèle `opus`, briefé avec le contexte du module), et les
-fonctions géantes redécoupées à part (#124), jamais dans le même commit
-qu'un déplacement. État actuel, dans `src/app/` (vrais modules, imports
-explicites, `pub(super)` pour ce que partagent les modules d'`app`) :
-- briques communes (#117) : `dialogs.rs` (`modal_dialog`, `modal_dialog_with`,
-  `DialogFooter`), `tab_strip.rs` (`tab_strip`, `tab_strip_with`, `TabOps`),
-  `shortcuts.rs` (`SHORTCUT_*`, `shortcut_text_*`), `tab.rs` (`Tab`) ;
-- fenêtres de contenu : `window_chrome.rs` (cadre commun, `show_window_in_layer`),
-  `window_placement.rs`, `window_stack.rs` (pile, repli, maximisation),
-  `window_detach.rs` ;
-- dialogues : `import_wizard.rs` (#118, `import_window`), `plot_settings.rs`
-  (#119, `plot_settings_window`, ses onglets et éditeurs, `column_metadata_window`) ;
-- grille et classeur (#120) : `grid.rs`, `workbook.rs` ; surfaces de contenu
-  (#121) : `graph_window.rs`, `graph_text_edit.rs`, `object_manager_ui.rs`,
-  `project_manager.rs`, `script_console.rs`, `file_drop.rs`, `contents.rs` ;
-- méthodes de `StokesForgeApp` (#122), en blocs `impl StokesForgeApp` dans
-  leur module : `menus.rs` (`menu_bar`, `status_bar`), `format.rs` (barres de
-  format et barre contextuelle : `format_target`, `text_format_state`,
-  `object_format_state`, `tools_context`, `format_zone`, `format_text`,
-  `format_object`, `run_toolbar_request`), et les panneaux dans le module de
-  leur contenu (`project_manager_panel`, `object_manager_panel` et
-  `run_object_manager_request`, `script_panel`). Un champ d'`StokesForgeApp`
-  reste privé : un module enfant d'`app` le voit sans `pub(super)` ; seule une
-  méthode appelée depuis `app.rs` (ou un autre module) devient `pub(super)`.
+`app.rs` a été découpé en **vrais modules** dans `src/app/` (chantier #115,
+#116–#123 ; reste #124, la redécoupe des fonctions géantes, chacune dans son
+propre commit et jamais avec un déplacement). La table module → rôle est dans
+`docs/application.md`, § Découpage du code. Les règles, tenues par des gardes
+ou par la relecture :
 
-D'ici la fin du chantier :
-- du code de fenêtre (placement, pile, détachement) va dans le
-  `app/window_*.rs` concerné, pas dans `app.rs` ; une brique commune nouvelle
-  rejoint `src/app/` avec ses tests ;
-- une nouvelle surface d'interface **volumineuse** (assistant, dialogue,
-  panneau) s'écrit d'emblée dans son propre module à imports explicites, sur
-  le modèle de `object_manager.rs` ou `toolbar.rs`, plutôt que d'allonger
-  `app.rs` ;
-- restent dans `app.rs` : l'ordre des panneaux dans `ui()` (tenu par
-  `les_panneaux_fixes_se_posent_dans_l_ordre_de_ui`), les emprunts
-  disjoints de `StokesForgeApp`, l'application différée des actions après la
-  peinture, les confirmations bloquantes, `collect_shortcuts` et le
-  détachement (liste et raisons dans #115) ; une entrée de menu ou un bouton
-  de barre s'écrit dans `app/menus.rs` ou `app/format.rs`, jamais dans `ui()` ;
+- **un module par surface** : grille `grid.rs`, classeur `workbook.rs`,
+  graphe `graph_window.rs` et `graph_text_edit.rs`, Object Manager peint
+  `object_manager_ui.rs`, Project Manager `project_manager.rs`, console
+  `script_console.rs`, dépôt `file_drop.rs`, contenus partagés `contents.rs`,
+  menus et barre d'état `menus.rs`, barres de format `format.rs`, dialogues
+  `import_wizard.rs` et `plot_settings.rs` ; fenêtres : `window_chrome.rs`
+  (cadre commun), `window_placement.rs`, `window_stack.rs` (pile, repli,
+  maximisation, `open_tab`), `window_detach.rs` ; briques communes :
+  `dialogs.rs`, `tab_strip.rs`, `shortcuts.rs`, `tab.rs`. Une entrée de menu
+  s'écrit dans `menus.rs`, un bouton de barre dans `crate::toolbar` /
+  `format.rs`, du code de fenêtre dans le `window_*.rs` concerné — jamais dans
+  `ui()` ;
+- **imports explicites**, aucun `use …::*` hors du code de test
+  (`aucun_import_global_hors_des_tests`, `tests/gardes.rs`, absolue) ;
+  visibilité minimale : `pub(super)` pour ce que partagent les modules
+  d'`app`. Un champ de `StokesForgeApp` reste privé (un module enfant d'`app`
+  le voit) ; seule une méthode appelée depuis un autre module devient
+  `pub(super)`. Sens des dépendances : `app.rs` → surfaces → briques communes ;
+- **restent dans `app.rs`** (l'orchestration, liste et raisons dans #115) :
+  `StokesForgeApp` et `new`, l'ordre des panneaux dans `ui()` (tenu par
+  `les_panneaux_fixes_se_posent_dans_l_ordre_de_ui`), les emprunts disjoints,
+  l'application différée des actions après la peinture, les confirmations
+  bloquantes, `collect_shortcuts` et le drainage des fenêtres détachées ;
+- **une surface nouvelle** s'écrit d'emblée dans son propre module à imports
+  explicites et doc de tête (modèle : `object_manager.rs`, `toolbar.rs`,
+  `app/dialogs.rs`), puis s'ajoute à la table de `docs/application.md` ;
+- **les tests suivent leur code** : le test d'une surface vit dans le module
+  `tests` de son fichier (accès au privé par `use super::*`, seul endroit où
+  il est permis) ; celui d'`app.rs` n'éprouve que l'orchestration. Une aide de
+  test partagée est `pub(in crate::app)` dans le module de tests qui la porte
+  (`graph_window::tests::graphe`, `project_manager::tests::click_at`,
+  `window_chrome::tests::find_icon_centers`). À chaque restructuration, les
+  tests sont écrits et relus par un agent Opus (outil `Agent`, modèle `opus`),
+  avec témoins vérifiés par mutation ;
 - les gardes qui lisent le code parcourent tout `src/`, sous-dossiers
   compris (lecteur unique `tests/support/sources.rs`, #116) : un module
   déplacé reste gardé sans rien déclarer. Une fonction qu'une garde attend
   (`import_window`, `modal_dialog_with`, une entrée de `ZONE_43`…) et qu'on
   renomme fait échouer la garde : mettre la garde à jour, ne pas la
-  contourner ;
-- aucun `use …::*` hors du code de test (`aucun_import_global_hors_des_tests`,
-  `tests/gardes.rs`, garde absolue depuis #117) : un module nouveau nomme ce
-  qu'il importe.
+  contourner.
 
 ## 2 ter. Barres de défilement : le standard du thème
 
@@ -312,7 +305,7 @@ vérifier quand une action est ajoutée :
    `shortcut_text` pour rappeler le raccourci à droite ;
 3. **le grisage** (`add_enabled`), calculé depuis `AppState` ;
 4. **le libellé**, qui vient de `state` (`AppState::undo_label`,
-   `GridMenu::target_label`…), jamais écrit en dur dans `app.rs` quand une
+   `GridMenu::target_label`…), jamais écrit en dur dans la couche `app` quand une
    contextualisation existe déjà. **Tout libellé est une clé du catalogue
    `en`** (`crates/stokesforge-app/i18n/en/stokesforge_app.ftl`), lue par `tr!("clé")` —
    jamais un littéral, même pour un bouton de passage (verrouillé par
@@ -453,18 +446,18 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] ce n'est pas un plafond déjà arbitré (`questions-ouvertes.md` §11)
 - [ ] doublon docké/détaché vérifié (`rg "fn <nom>|fn detached_<nom>"`)
 - [ ] état d'`AppState` nouveau recopié dans la vue détachée s'il doit y valoir ; raccourci global essayé avec un graphe actif et un classeur détaché
-- [ ] code de fenêtre dans le `window_*.rs` concerné ; surface volumineuse dans son propre module (§2 octies, chantier #115)
+- [ ] dessin et événements dans le module de la surface (`src/app/<surface>.rs`), code de fenêtre dans le `window_*.rs` concerné, rien de nouveau dans `app.rs` hors orchestration ; surface nouvelle dans son propre module, à imports explicites, ajoutée à la table de `docs/application.md` (§2 octies)
 - [ ] barres de défilement : aucun style local, place lue via `theme::scroll_bar_allocated_width`
 - [ ] icônes : composant `icons.rs`, info-bulle `tr!`, seulement si elle apporte quelque chose (`docs/icones.md`)
 - [ ] couleurs : `color_picker::color_field` avec l'usage et le `PickerEnv`, vide = automatique
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **stokesforge-commande**)
-- [ ] logique dans `state.rs`, glu egui seulement dans `app.rs`
+- [ ] logique dans `state.rs`, glu egui seulement dans la couche `app` (`app.rs` et `src/app/`)
 - [ ] place dans la barre de menus **et** les menus contextuels étudiée (§2 quater) ; rien n'est accessible seulement au clic droit
 - [ ] les quatre surfaces en accord : raccourci, menu, grisage, libellé
 - [ ] libellés : clés du catalogue `en` + `tr!`, aucun littéral (`aucun_libelle_en_dur`) ; un changement visuel est regardé aussi en `STOKESFORGE_LANG=en-XA`
 - [ ] menu contextuel = miroir du clavier, décision dans `GridMenu`
-- [ ] test dans `tests/shell.rs` (ou le crate concerné)
+- [ ] test au bon endroit : décision d'`AppState` dans `tests/shell.rs`, geste peint dans le module `tests` de la surface (`src/app/<surface>.rs`), autre crate sinon
 - [ ] changement visuel **regardé** (capture), pas seulement testé
 - [ ] `//!` du module mis à jour (le *pourquoi*) + page `docs/` (le *quoi*)
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts
