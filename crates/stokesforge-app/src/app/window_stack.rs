@@ -3,7 +3,9 @@
 //! alignement sur les calques d'egui, le masquage, le repli, la maximisation
 //! et le dessin de l'espace de travail (`show_workspace`).
 //!
-//! Déplacé tel quel d'`app.rs` (#101), sans changement de comportement.
+//! Déplacé tel quel d'`app.rs` (#101), puis redécoupé sur place (#124) :
+//! maximisation, défilement et peinture d’une fenêtre partagent uniquement
+//! les emprunts disjoints de l’image, sans ajouter de sous-Ui.
 //!
 //! # Repris de la doc de tête d'`app.rs`
 //!
@@ -109,12 +111,13 @@
 //! jamais dédoublé, n'a besoin d'aucun cas particulier ici.
 //!
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use eframe::egui;
 use stokesforge_core::NodeId;
+use stokesforge_render_egui::GraphView;
 
-use crate::state::{Action, WindowKind};
+use crate::state::{Action, AppState, WindowKind};
 use crate::tr;
 
 use super::contents::tab_contents;
@@ -208,6 +211,311 @@ pub(super) fn sync_floating_tabs_order_to_top_layer(
     }
 }
 
+/// Emprunts disjoints limités à une peinture : ni nouvel état ni nouvelle Ui.
+/// L’extraction de chaque fenêtre ne peut prendre `&mut StokesForgeApp`
+/// pendant que les contenus empruntent déjà son AppState et ses GraphView.
+struct Workspace<'a> {
+    state: &'a mut AppState,
+    floating_tabs: &'a mut Vec<Tab>,
+    cascade_rank: &'a mut HashMap<Tab, u32>,
+    next_cascade: &'a mut u32,
+    focus_next: &'a mut Option<Tab>,
+    active_detached: &'a mut Option<Tab>,
+    graph_views: &'a mut HashMap<NodeId, GraphView>,
+    collapsed_tabs: &'a mut HashSet<Tab>,
+    maximized_tab: &'a mut Option<Tab>,
+    window_positions: &'a mut HashMap<Tab, egui::Pos2>,
+    window_sizes: &'a mut HashMap<Tab, egui::Vec2>,
+    workspace_scroll: &'a mut egui::Vec2,
+    hidden_tabs: &'a mut HashSet<Tab>,
+    floating_rects: &'a mut HashMap<NodeId, egui::Rect>,
+    actions: &'a mut Vec<Action>,
+    detach_requests: &'a mut Vec<Tab>,
+    close_requests: &'a mut Vec<Tab>,
+    geometry_updates: &'a mut Vec<(Tab, egui::Rect)>,
+}
+
+impl Workspace<'_> {
+    fn show_maximized(&mut self, ui: &mut egui::Ui, tab: Tab) {
+        // § maximiser (doc de tête du module) : aucune fenêtre
+        // flottante n'est peinte du tout cette image-ci. Le Project
+        // Manager n'a besoin d'aucun traitement particulier ici : son
+        // panneau fixe est peint plus haut, avant ce `CentralPanel`,
+        // qu'un autre onglet soit maximisé ou non.
+        ui.horizontal(|ui| {
+            ui.heading(tab_title(self.state, tab));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button(tr!(
+                        "action-restore-window",
+                        title = tab_title(self.state, tab)
+                    ))
+                    .on_hover_text(tr!("action-restore-window", "hint"))
+                    .clicked()
+                {
+                    *self.maximized_tab = None;
+                }
+            });
+        });
+        ui.separator();
+        if window_pointer_pressed(ui.ctx(), ui.layer_id(), ui.max_rect()) {
+            *self.active_detached = None;
+        }
+        tab_contents(ui, self.state, self.actions, self.graph_views, tab);
+    }
+
+    fn show_floating(&mut self, ui: &mut egui::Ui, active_tab: Option<Tab>) {
+        // Ce que les panneaux fixes peints plus haut (menu, outils,
+        // statut, script, Project Manager) laissent — voir la doc de
+        // tête du module, § Fenêtres flottantes confinées. L'espace
+        // de travail a une taille fixe (`WORKSPACE_SIZE`), indépendante
+        // de `viewport_rect` : sous cette taille, il défile
+        // (`self.workspace_scroll`) plutôt que d'écraser les fenêtres
+        // qu'il porte contre les bords du `CentralPanel`.
+        // `self.window_positions`/`self.window_sizes`, et la géométrie
+        // persistée dans le projet, sont donc en coordonnées
+        // logiques de cet espace — bornées à lui par
+        // `clamp_to_workspace`, puis converties en coordonnées écran
+        // juste avant la peinture (`workspace_to_screen`). Une
+        // fenêtre ne sort donc jamais de l'espace de travail ; elle
+        // peut sortir de sa portion visible, auquel cas elle est
+        // rognée au bord de la vue, ou pas peinte du tout si elle
+        // en sort entièrement (`show_floating_window`).
+        let viewport_rect = ui.max_rect();
+
+        // Une fenêtre déjà ouverte mais actuellement défilée hors vue
+        // redevient visible au clic qui la refocalise (Project
+        // Manager, double-clic…) — lu avant le défilement de cette
+        // image pour que ça prenne effet dès maintenant, pas à la
+        // suivante.
+        if let Some(tab) = *self.focus_next {
+            if let (Some(&position), Some(&size)) =
+                (self.window_positions.get(&tab), self.window_sizes.get(&tab))
+            {
+                let target = egui::Rect::from_min_size(position, size);
+                *self.workspace_scroll = workspace_scroll_to_reveal(
+                    *self.workspace_scroll,
+                    viewport_rect.size(),
+                    target,
+                );
+            }
+        }
+
+        // Un `egui::ScrollArea` invisible (rien n'est peint dans son
+        // contenu, juste réservé à `WORKSPACE_SIZE`) plutôt qu'un
+        // défilement maison : il donne gratuitement poignées de
+        // glissement, molette et bornage, au style commun des barres
+        // de défilement (`theme::scroll_style`, posé globalement). Les fenêtres flottantes ne sont
+        // **pas** peintes à l'intérieur de sa fermeture : chacune
+        // peint sur son propre calque (`show_floating_window`),
+        // indépendant de toute zone de défilement ambiante — seul le
+        // décalage qui en résulte sert, appliqué à la main ci-dessous.
+        let workspace_scroll_output = egui::ScrollArea::both()
+            .id_salt("stokesforge_workspace")
+            .auto_shrink([false, false])
+            .scroll_offset(*self.workspace_scroll)
+            .show(ui, |ui| {
+                ui.allocate_exact_size(WORKSPACE_SIZE, egui::Sense::hover());
+            });
+        *self.workspace_scroll = workspace_scroll_output.state.offset;
+        // Ce qui reste visible une fois les barres de défilement
+        // posées : les fenêtres flottantes sont rognées à ce
+        // rectangle, pour ne jamais recouvrir ces barres.
+        let viewport_rect = workspace_scroll_output.inner_rect;
+
+        for index in 0..self.floating_tabs.len() {
+            // La pile n’est réordonnée qu’après son parcours, comme avant #124.
+            let tab = self.floating_tabs[index];
+            self.show_floating_tab(ui, tab, active_tab, viewport_rect);
+        }
+        *self.focus_next = None;
+
+        // B2 (`retours-2026-09-23-bugs.md`) :
+        // `egui::Area` amène déjà la fenêtre cliquée au premier plan
+        // de son propre ordre de calques dès qu'on clique dedans
+        // (`Sense::CLICK`, indépendamment du Project Manager) — mais
+        // `self.floating_tabs`, seule source de `active_tab` (donc de
+        // `is_active`/la surbrillance, voir plus haut), ne le sait
+        // pas : un clic direct amenait la fenêtre au premier plan
+        // sans jamais la surligner. On resynchronise ici sur ce
+        // qu'egui vient d'établir, une fois la mutation de
+        // `self.floating_tabs` de nouveau sûre (la boucle qui l'itère est
+        // refermée).
+        let top_layer_tab = ui.ctx().top_layer_id().and_then(|top| {
+            self.floating_tabs
+                .iter()
+                .copied()
+                .find(|&tab| egui::Id::new(tab) == top.id)
+        });
+        sync_floating_tabs_order_to_top_layer(self.floating_tabs, top_layer_tab);
+    }
+
+    fn show_floating_tab(
+        &mut self,
+        ui: &mut egui::Ui,
+        tab: Tab,
+        active_tab: Option<Tab>,
+        viewport_rect: egui::Rect,
+    ) {
+        if self.hidden_tabs.contains(&tab) {
+            // Masqué depuis le Project Manager (§6) : l'onglet
+            // reste dans `self.floating_tabs` (cascade/position/
+            // géométrie conservées), seul son rendu est sauté.
+            return;
+        }
+        let id = egui::Id::new(tab);
+        if *self.focus_next == Some(tab) {
+            ui.ctx()
+                .move_to_top(egui::LayerId::new(FLOATING_WINDOW_ORDER, id));
+        }
+        let rank = self.cascade_rank.entry(tab).or_insert_with(|| {
+            let rank = *self.next_cascade;
+            *self.next_cascade = self.next_cascade.wrapping_add(1);
+            rank
+        });
+        let cascade = CASCADE_STEP * (*rank % CASCADE_WRAP) as f32;
+        // Coordonnées logiques de l'espace de travail, pas
+        // coordonnées écran — voir la doc juste au-dessus.
+        let default_pos = egui::pos2(cascade, cascade);
+        let natural_size = match tab {
+            Tab::Book(_) => egui::vec2(BOOK_WINDOW_WIDTH, FLOATING_WINDOW_SIZE.y),
+            Tab::Graph(_) => GRAPH_WINDOW_SIZE,
+            _ => FLOATING_WINDOW_SIZE,
+        };
+        let default_size = natural_size.min(WORKSPACE_SIZE);
+        // Le dernier rectangle flottant connu de l'application
+        // prime sur l'instantané (périmé après un déplacement).
+        let saved_rect = self
+            .floating_rects
+            .get(&tab_node(tab))
+            .copied()
+            .or_else(|| {
+                self.state
+                    .snapshot()
+                    .window_geometries
+                    .get(&tab_node(tab))
+                    .map(geometry_rect)
+            });
+        let saved_pos = saved_rect.map_or(default_pos, |rect| rect.min);
+        let saved_size = saved_rect
+            .map_or(default_size, |rect| rect.size())
+            .max(MIN_CONTENT_WINDOW_SIZE)
+            .min(WORKSPACE_SIZE);
+        self.window_positions.entry(tab).or_insert(saved_pos);
+        let current_size = *self.window_sizes.entry(tab).or_insert(saved_size);
+        // Seule source de vérité de la position : bornée ici, à
+        // l'espace de travail, et réécrite telle quelle. egui ne
+        // recale plus rien de son côté (plus de `constrain_to` sur
+        // l'espace de travail), donc le rectangle peint, le
+        // contour, les poignées et la géométrie persistée
+        // viennent tous du même rectangle — c'est l'écart entre
+        // un rectangle demandé et un rectangle recalé par egui
+        // qui produisait le bug 1 de
+        // `retours-2026-09-24-bugs.md`.
+        let logical_rect = clamp_to_workspace(egui::Rect::from_min_size(
+            self.window_positions[&tab],
+            current_size,
+        ));
+        self.window_positions.insert(tab, logical_rect.min);
+        let mut header_actions = WindowHeaderActions::default();
+        let was_collapsed = self.collapsed_tabs.contains(&tab);
+        let is_active = Some(tab) == active_tab;
+        // Fenêtre repliée (B3) : `window_header` ne peint que sa
+        // bande d'en-tête, `tab_contents` est sauté — peindre la
+        // fenêtre à `current_size` dessinerait un cadre (et un
+        // contour) à la taille dépliée autour d'une zone vide.
+        // `current_size` reste la taille logique conservée dans
+        // `self.window_sizes`/persistée ; seul le rectangle peint
+        // cette image se réduit.
+        let frame = floating_window_frame(ui.style());
+        let display_size = floating_window_display_size(
+            current_size,
+            was_collapsed,
+            WINDOW_HEADER_HEIGHT,
+            frame.inner_margin.sum(),
+        );
+        let window_rect = egui::Rect::from_min_size(
+            workspace_to_screen(logical_rect.min, viewport_rect.min, *self.workspace_scroll),
+            display_size,
+        );
+        let title = tab_title(self.state, tab);
+        // Hors de la portion visible : `None`, ni peinte ni
+        // interactive — « cachée », pas écrasée. Partiellement
+        // visible : rognée au bord de `viewport_rect`, pour le
+        // dessin comme pour les clics (bug 2 du même rapport).
+        let shown = show_floating_window(
+            ui.ctx(),
+            id,
+            window_rect,
+            viewport_rect,
+            is_active,
+            |ui| {
+                header_actions = window_header(
+                    ui,
+                    id,
+                    &title,
+                    Some(tab),
+                    was_collapsed,
+                    HeaderPlacement::Floating,
+                );
+                if !(was_collapsed ^ header_actions.toggle_collapse) {
+                    // Le sous-Ui borné empêche le contenu de
+                    // déborder de la fenêtre. La grille seule
+                    // reçoit un défilement horizontal (F8).
+                    show_window_contents_bounded(ui, |ui| {
+                        tab_contents(ui, self.state, self.actions, self.graph_views, tab);
+                    });
+                }
+            },
+            |ui, rect| {
+                // Poignées maison (§3) : mutent `self.window_positions`/
+                // `self.window_sizes` directement ; la prochaine image
+                // les bornera puis les peindra.
+                if let (Some(position), Some(size)) = (
+                    self.window_positions.get_mut(&tab),
+                    self.window_sizes.get_mut(&tab),
+                ) {
+                    floating_resize_handles(ui, tab, rect, position, size);
+                }
+            },
+        );
+        if shown.is_none() {
+            return;
+        }
+        if window_pointer_pressed(
+            ui.ctx(),
+            egui::LayerId::new(FLOATING_WINDOW_ORDER, id),
+            window_rect.intersect(viewport_rect),
+        ) {
+            *self.active_detached = None;
+        }
+        if header_actions.toggle_collapse {
+            toggle_collapse(self.collapsed_tabs, tab);
+        }
+        if header_actions.maximize {
+            *self.maximized_tab = Some(tab);
+        }
+        if header_actions.detach {
+            self.detach_requests.push(tab);
+        }
+        if header_actions.drag_delta != egui::Vec2::ZERO {
+            if let Some(position) = self.window_positions.get_mut(&tab) {
+                *position += header_actions.drag_delta;
+            }
+        }
+        // Géométrie persistée : le rectangle logique borné de
+        // cette image, taille logique comprise (pas la taille
+        // repliée, voir `floating_window_geometry_to_persist`).
+        self.geometry_updates.push((
+            tab,
+            floating_window_geometry_to_persist(logical_rect, current_size),
+        ));
+        if header_actions.close {
+            self.close_requests.push(tab);
+        }
+    }
+}
+
 impl StokesForgeApp {
     /// Ouvre l'onglet `tab`, ou le focalise s'il est déjà ouvert.
     ///
@@ -274,262 +582,31 @@ impl StokesForgeApp {
             ..
         } = self;
 
+        let mut workspace = Workspace {
+            state,
+            floating_tabs,
+            cascade_rank,
+            next_cascade,
+            focus_next,
+            active_detached,
+            graph_views,
+            collapsed_tabs,
+            maximized_tab,
+            window_positions,
+            window_sizes,
+            workspace_scroll,
+            hidden_tabs,
+            floating_rects,
+            actions,
+            detach_requests,
+            close_requests,
+            geometry_updates,
+        };
         egui::CentralPanel::default().show(ui, |ui| {
-            if let Some(tab) = *maximized_tab {
-                // § maximiser (doc de tête du module) : aucune fenêtre
-                // flottante n'est peinte du tout cette image-ci. Le Project
-                // Manager n'a besoin d'aucun traitement particulier ici : son
-                // panneau fixe est peint plus haut, avant ce `CentralPanel`,
-                // qu'un autre onglet soit maximisé ou non.
-                ui.horizontal(|ui| {
-                    ui.heading(tab_title(state, tab));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .button(tr!("action-restore-window", title = tab_title(state, tab)))
-                            .on_hover_text(tr!("action-restore-window", "hint"))
-                            .clicked()
-                        {
-                            *maximized_tab = None;
-                        }
-                    });
-                });
-                ui.separator();
-                if window_pointer_pressed(ui.ctx(), ui.layer_id(), ui.max_rect()) {
-                    *active_detached = None;
-                }
-                tab_contents(ui, state, actions, graph_views, tab);
+            if let Some(tab) = *workspace.maximized_tab {
+                workspace.show_maximized(ui, tab);
             } else {
-                // Ce que les panneaux fixes peints plus haut (menu, outils,
-                // statut, script, Project Manager) laissent — voir la doc de
-                // tête du module, § Fenêtres flottantes confinées. L'espace
-                // de travail a une taille fixe (`WORKSPACE_SIZE`), indépendante
-                // de `viewport_rect` : sous cette taille, il défile
-                // (`workspace_scroll`) plutôt que d'écraser les fenêtres
-                // qu'il porte contre les bords du `CentralPanel`.
-                // `window_positions`/`window_sizes`, et la géométrie
-                // persistée dans le projet, sont donc en coordonnées
-                // logiques de cet espace — bornées à lui par
-                // `clamp_to_workspace`, puis converties en coordonnées écran
-                // juste avant la peinture (`workspace_to_screen`). Une
-                // fenêtre ne sort donc jamais de l'espace de travail ; elle
-                // peut sortir de sa portion visible, auquel cas elle est
-                // rognée au bord de la vue, ou pas peinte du tout si elle
-                // en sort entièrement (`show_floating_window`).
-                let viewport_rect = ui.max_rect();
-
-                // Une fenêtre déjà ouverte mais actuellement défilée hors vue
-                // redevient visible au clic qui la refocalise (Project
-                // Manager, double-clic…) — lu avant le défilement de cette
-                // image pour que ça prenne effet dès maintenant, pas à la
-                // suivante.
-                if let Some(tab) = *focus_next {
-                    if let (Some(&position), Some(&size)) =
-                        (window_positions.get(&tab), window_sizes.get(&tab))
-                    {
-                        let target = egui::Rect::from_min_size(position, size);
-                        *workspace_scroll = workspace_scroll_to_reveal(
-                            *workspace_scroll,
-                            viewport_rect.size(),
-                            target,
-                        );
-                    }
-                }
-
-                // Un `egui::ScrollArea` invisible (rien n'est peint dans son
-                // contenu, juste réservé à `WORKSPACE_SIZE`) plutôt qu'un
-                // défilement maison : il donne gratuitement poignées de
-                // glissement, molette et bornage, au style commun des barres
-                // de défilement (`theme::scroll_style`, posé globalement). Les fenêtres flottantes ne sont
-                // **pas** peintes à l'intérieur de sa fermeture : chacune
-                // peint sur son propre calque (`show_floating_window`),
-                // indépendant de toute zone de défilement ambiante — seul le
-                // décalage qui en résulte sert, appliqué à la main ci-dessous.
-                let workspace_scroll_output = egui::ScrollArea::both()
-                    .id_salt("stokesforge_workspace")
-                    .auto_shrink([false, false])
-                    .scroll_offset(*workspace_scroll)
-                    .show(ui, |ui| {
-                        ui.allocate_exact_size(WORKSPACE_SIZE, egui::Sense::hover());
-                    });
-                *workspace_scroll = workspace_scroll_output.state.offset;
-                // Ce qui reste visible une fois les barres de défilement
-                // posées : les fenêtres flottantes sont rognées à ce
-                // rectangle, pour ne jamais recouvrir ces barres.
-                let viewport_rect = workspace_scroll_output.inner_rect;
-
-                for &tab in floating_tabs.iter() {
-                    if hidden_tabs.contains(&tab) {
-                        // Masqué depuis le Project Manager (§6) : l'onglet
-                        // reste dans `floating_tabs` (cascade/position/
-                        // géométrie conservées), seul son rendu est sauté.
-                        continue;
-                    }
-                    let id = egui::Id::new(tab);
-                    if *focus_next == Some(tab) {
-                        ui.ctx()
-                            .move_to_top(egui::LayerId::new(FLOATING_WINDOW_ORDER, id));
-                    }
-                    let rank = cascade_rank.entry(tab).or_insert_with(|| {
-                        let rank = *next_cascade;
-                        *next_cascade = next_cascade.wrapping_add(1);
-                        rank
-                    });
-                    let cascade = CASCADE_STEP * (*rank % CASCADE_WRAP) as f32;
-                    // Coordonnées logiques de l'espace de travail, pas
-                    // coordonnées écran — voir la doc juste au-dessus.
-                    let default_pos = egui::pos2(cascade, cascade);
-                    let natural_size = match tab {
-                        Tab::Book(_) => egui::vec2(BOOK_WINDOW_WIDTH, FLOATING_WINDOW_SIZE.y),
-                        Tab::Graph(_) => GRAPH_WINDOW_SIZE,
-                        _ => FLOATING_WINDOW_SIZE,
-                    };
-                    let default_size = natural_size.min(WORKSPACE_SIZE);
-                    // Le dernier rectangle flottant connu de l'application
-                    // prime sur l'instantané (périmé après un déplacement).
-                    let saved_rect = floating_rects.get(&tab_node(tab)).copied().or_else(|| {
-                        state
-                            .snapshot()
-                            .window_geometries
-                            .get(&tab_node(tab))
-                            .map(geometry_rect)
-                    });
-                    let saved_pos = saved_rect.map_or(default_pos, |rect| rect.min);
-                    let saved_size = saved_rect
-                        .map_or(default_size, |rect| rect.size())
-                        .max(MIN_CONTENT_WINDOW_SIZE)
-                        .min(WORKSPACE_SIZE);
-                    window_positions.entry(tab).or_insert(saved_pos);
-                    let current_size = *window_sizes.entry(tab).or_insert(saved_size);
-                    // Seule source de vérité de la position : bornée ici, à
-                    // l'espace de travail, et réécrite telle quelle. egui ne
-                    // recale plus rien de son côté (plus de `constrain_to` sur
-                    // l'espace de travail), donc le rectangle peint, le
-                    // contour, les poignées et la géométrie persistée
-                    // viennent tous du même rectangle — c'est l'écart entre
-                    // un rectangle demandé et un rectangle recalé par egui
-                    // qui produisait le bug 1 de
-                    // `retours-2026-09-24-bugs.md`.
-                    let logical_rect = clamp_to_workspace(egui::Rect::from_min_size(
-                        window_positions[&tab],
-                        current_size,
-                    ));
-                    window_positions.insert(tab, logical_rect.min);
-                    let mut header_actions = WindowHeaderActions::default();
-                    let was_collapsed = collapsed_tabs.contains(&tab);
-                    let is_active = Some(tab) == active_tab;
-                    // Fenêtre repliée (B3) : `window_header` ne peint que sa
-                    // bande d'en-tête, `tab_contents` est sauté — peindre la
-                    // fenêtre à `current_size` dessinerait un cadre (et un
-                    // contour) à la taille dépliée autour d'une zone vide.
-                    // `current_size` reste la taille logique conservée dans
-                    // `window_sizes`/persistée ; seul le rectangle peint
-                    // cette image se réduit.
-                    let frame = floating_window_frame(ui.style());
-                    let display_size = floating_window_display_size(
-                        current_size,
-                        was_collapsed,
-                        WINDOW_HEADER_HEIGHT,
-                        frame.inner_margin.sum(),
-                    );
-                    let window_rect = egui::Rect::from_min_size(
-                        workspace_to_screen(logical_rect.min, viewport_rect.min, *workspace_scroll),
-                        display_size,
-                    );
-                    let title = tab_title(state, tab);
-                    // Hors de la portion visible : `None`, ni peinte ni
-                    // interactive — « cachée », pas écrasée. Partiellement
-                    // visible : rognée au bord de `viewport_rect`, pour le
-                    // dessin comme pour les clics (bug 2 du même rapport).
-                    let shown = show_floating_window(
-                        ui.ctx(),
-                        id,
-                        window_rect,
-                        viewport_rect,
-                        is_active,
-                        |ui| {
-                            header_actions = window_header(
-                                ui,
-                                id,
-                                &title,
-                                Some(tab),
-                                was_collapsed,
-                                HeaderPlacement::Floating,
-                            );
-                            if !(was_collapsed ^ header_actions.toggle_collapse) {
-                                // Le sous-Ui borné empêche le contenu de
-                                // déborder de la fenêtre. La grille seule
-                                // reçoit un défilement horizontal (F8).
-                                show_window_contents_bounded(ui, |ui| {
-                                    tab_contents(ui, state, actions, graph_views, tab);
-                                });
-                            }
-                        },
-                        |ui, rect| {
-                            // Poignées maison (§3) : mutent `window_positions`/
-                            // `window_sizes` directement ; la prochaine image
-                            // les bornera puis les peindra.
-                            if let (Some(position), Some(size)) =
-                                (window_positions.get_mut(&tab), window_sizes.get_mut(&tab))
-                            {
-                                floating_resize_handles(ui, tab, rect, position, size);
-                            }
-                        },
-                    );
-                    if shown.is_none() {
-                        continue;
-                    }
-                    if window_pointer_pressed(
-                        ui.ctx(),
-                        egui::LayerId::new(FLOATING_WINDOW_ORDER, id),
-                        window_rect.intersect(viewport_rect),
-                    ) {
-                        *active_detached = None;
-                    }
-                    if header_actions.toggle_collapse {
-                        toggle_collapse(collapsed_tabs, tab);
-                    }
-                    if header_actions.maximize {
-                        *maximized_tab = Some(tab);
-                    }
-                    if header_actions.detach {
-                        detach_requests.push(tab);
-                    }
-                    if header_actions.drag_delta != egui::Vec2::ZERO {
-                        if let Some(position) = window_positions.get_mut(&tab) {
-                            *position += header_actions.drag_delta;
-                        }
-                    }
-                    // Géométrie persistée : le rectangle logique borné de
-                    // cette image, taille logique comprise (pas la taille
-                    // repliée, voir `floating_window_geometry_to_persist`).
-                    geometry_updates.push((
-                        tab,
-                        floating_window_geometry_to_persist(logical_rect, current_size),
-                    ));
-                    if header_actions.close {
-                        close_requests.push(tab);
-                    }
-                }
-                *focus_next = None;
-
-                // B2 (`retours-2026-09-23-bugs.md`) :
-                // `egui::Area` amène déjà la fenêtre cliquée au premier plan
-                // de son propre ordre de calques dès qu'on clique dedans
-                // (`Sense::CLICK`, indépendamment du Project Manager) — mais
-                // `floating_tabs`, seule source de `active_tab` (donc de
-                // `is_active`/la surbrillance, voir plus haut), ne le sait
-                // pas : un clic direct amenait la fenêtre au premier plan
-                // sans jamais la surligner. On resynchronise ici sur ce
-                // qu'egui vient d'établir, une fois la mutation de
-                // `floating_tabs` de nouveau sûre (la boucle qui l'itère est
-                // refermée).
-                let top_layer_tab = ui.ctx().top_layer_id().and_then(|top| {
-                    floating_tabs
-                        .iter()
-                        .copied()
-                        .find(|&tab| egui::Id::new(tab) == top.id)
-                });
-                sync_floating_tabs_order_to_top_layer(floating_tabs, top_layer_tab);
+                workspace.show_floating(ui, active_tab);
             }
         });
     }
@@ -559,6 +636,67 @@ mod tests {
     use super::super::window_chrome::show_window_in_layer;
     use super::*;
     use crate::state::ProjectTreeNode;
+
+    #[test]
+    fn une_fenetre_masquee_ne_peint_rien_et_conserve_sa_place_dans_la_pile() {
+        let (session, graph) = crate::app::graph_window::tests::graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let tab = Tab::Graph(graph);
+        app.floating_tabs = vec![tab];
+        app.hidden_tabs.insert(tab);
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        crate::theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        let mut actions = Vec::new();
+        let mut detach = Vec::new();
+        let mut close = Vec::new();
+        let mut geometries = Vec::new();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        for hidden in [true, false] {
+            if !hidden {
+                app.hidden_tabs.remove(&tab);
+            }
+            geometries.clear();
+            for _ in 0..4 {
+                context
+                    .run_ui(input.clone(), |ui| {
+                        app.show_workspace(
+                            ui,
+                            Some(tab),
+                            &mut actions,
+                            &mut detach,
+                            &mut close,
+                            &mut geometries,
+                        );
+                    })
+                    .textures_delta
+                    .clear();
+            }
+            assert_eq!(app.floating_tabs, vec![tab], "le masquage garde la pile");
+            assert_eq!(
+                geometries.is_empty(),
+                hidden,
+                "témoin : visible, la fenêtre publie sa géométrie"
+            );
+            assert_eq!(
+                app.graph_views.contains_key(&graph),
+                !hidden,
+                "le contenu n'est peint que visible"
+            );
+        }
+        assert!(actions.is_empty());
+        assert!(detach.is_empty());
+        assert!(close.is_empty());
+        session.shutdown().unwrap();
+    }
 
     #[test]
     fn le_repli_ne_concerne_que_longlet_vise() {
