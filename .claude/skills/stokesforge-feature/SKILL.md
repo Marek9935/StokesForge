@@ -44,7 +44,7 @@ qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
 | change le **modèle** (colonnes, arbre, `PlotSpec`, texte de note…) | une `Command` de `stokesforge-commands` | jamais une primitive `stokesforge-core` en direct (invariant 1) ; voir le skill **stokesforge-commande** |
 | change le **cadrage de vue** (zoom, pan) | `ViewState` sur `GraphView` | ce n'est **pas** une mutation du modèle : personne ne veut annuler un zoom par Ctrl+Z |
 | est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `stokesforge-app/src/state.rs` | doit rester testable sans fenêtre |
-| est du **dessin ou de l'événement** egui | `stokesforge-app/src/app.rs` et ses sous-modules de `src/app/` (fenêtres `window_*.rs`, voir § 2 octies ; surfaces `graph_window.rs`, `graph_text_edit.rs`, `object_manager_ui.rs`, `project_manager.rs`, `script_console.rs`, `contents.rs`, #121) | rien de ce qu'ils contiennent n'est une décision de produit |
+| est du **dessin ou de l'événement** egui | `stokesforge-app/src/app.rs` et ses sous-modules de `src/app/` (fenêtres `window_*.rs`, voir § 2 octies ; surfaces `graph_window.rs`, `graph_text_edit.rs`, `object_manager_ui.rs`, `project_manager.rs`, `script_console.rs`, `contents.rs`, #121 ; méthodes de `StokesForgeApp` `menus.rs`, `format.rs` et les panneaux, #122) | rien de ce qu'ils contiennent n'est une décision de produit |
 | est une **fonctionnalité de tracé** | `stokesforge-render` (générique sur le backend) | jamais dans un seul backend (invariant 5) ; voir le skill **stokesforge-rendu** |
 | lit un **fichier de données** | `stokesforge-import` | reste indépendant de l'UI, de `core`, des commandes et de la session |
 
@@ -121,7 +121,7 @@ factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
 ## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
 
 `app.rs` est en cours de découpage (chantier #115, sous-tickets #116–#124,
-chacun **sur feu vert seulement** ; #116 à #119 faits). Cible décidée le 2026-10-04 : de vrais
+chacun **sur feu vert seulement** ; #116 à #122 faits). Cible décidée le 2026-10-04 : de vrais
 modules dans `src/app/` (imports explicites, interface `pub(crate)` minimale,
 pas de `use super::*` hors des modules de tests), des tests qui suivent leur
 code et sont relus et améliorés à chaque déplacement par un agent Opus
@@ -136,7 +136,19 @@ explicites, `pub(super)` pour ce que partagent les modules d'`app`) :
   `window_placement.rs`, `window_stack.rs` (pile, repli, maximisation),
   `window_detach.rs` ;
 - dialogues : `import_wizard.rs` (#118, `import_window`), `plot_settings.rs`
-  (#119, `plot_settings_window`, ses onglets et éditeurs, `column_metadata_window`).
+  (#119, `plot_settings_window`, ses onglets et éditeurs, `column_metadata_window`) ;
+- grille et classeur (#120) : `grid.rs`, `workbook.rs` ; surfaces de contenu
+  (#121) : `graph_window.rs`, `graph_text_edit.rs`, `object_manager_ui.rs`,
+  `project_manager.rs`, `script_console.rs`, `file_drop.rs`, `contents.rs` ;
+- méthodes de `StokesForgeApp` (#122), en blocs `impl StokesForgeApp` dans
+  leur module : `menus.rs` (`menu_bar`, `status_bar`), `format.rs` (barres de
+  format et barre contextuelle : `format_target`, `text_format_state`,
+  `object_format_state`, `tools_context`, `format_zone`, `format_text`,
+  `format_object`, `run_toolbar_request`), et les panneaux dans le module de
+  leur contenu (`project_manager_panel`, `object_manager_panel` et
+  `run_object_manager_request`, `script_panel`). Un champ d'`StokesForgeApp`
+  reste privé : un module enfant d'`app` le voit sans `pub(super)` ; seule une
+  méthode appelée depuis `app.rs` (ou un autre module) devient `pub(super)`.
 
 D'ici la fin du chantier :
 - du code de fenêtre (placement, pile, détachement) va dans le
@@ -146,10 +158,12 @@ D'ici la fin du chantier :
   panneau) s'écrit d'emblée dans son propre module à imports explicites, sur
   le modèle de `object_manager.rs` ou `toolbar.rs`, plutôt que d'allonger
   `app.rs` ;
-- restent dans `app.rs` : l'ordre des panneaux dans `ui()`, les emprunts
+- restent dans `app.rs` : l'ordre des panneaux dans `ui()` (tenu par
+  `les_panneaux_fixes_se_posent_dans_l_ordre_de_ui`), les emprunts
   disjoints de `StokesForgeApp`, l'application différée des actions après la
-  peinture, les confirmations bloquantes, `collect_shortcuts` (liste et
-  raisons dans #115) ;
+  peinture, les confirmations bloquantes, `collect_shortcuts` et le
+  détachement (liste et raisons dans #115) ; une entrée de menu ou un bouton
+  de barre s'écrit dans `app/menus.rs` ou `app/format.rs`, jamais dans `ui()` ;
 - les gardes qui lisent le code parcourent tout `src/`, sous-dossiers
   compris (lecteur unique `tests/support/sources.rs`, #116) : un module
   déplacé reste gardé sans rien déclarer. Une fonction qu'une garde attend
@@ -178,9 +192,13 @@ celui de StokesForge.
 Avant de coder, décider explicitement où l'utilisateur **trouvera** la
 fonctionnalité, et le dire dans le compte rendu. Deux familles de menus :
 
-- **la barre de menus** (`StokesForgeApp::menu_bar`) : *File*, *Edit*,
-  *Graph* (présent seulement quand un graphe est l'onglet actif,
-  `state::active_graph`) et *Window* (noms anglais, clés `menu-*`). Une action qui porte sur l'objet
+- **la barre de menus** (`StokesForgeApp::menu_bar`, `app/menus.rs`, #122) :
+  *File*, *Edit*, *Workbook* (présent seulement quand un classeur est au
+  premier plan), *Graph* (présent seulement quand un graphe est l'onglet
+  actif, `state::active_graph`), *View* et *Window* (noms anglais, clés
+  `menu-*`). Une entrée nouvelle se teste dans le `mod tests` de
+  `app/menus.rs` : chaque menu de haut niveau y est ouvert pour de vrai, et
+  son grisage lu par l'arbre d'accessibilité d'egui (`entrees`, AccessKit). Une action qui porte sur l'objet
   actif (le graphe, le classeur…) y a presque toujours sa place : c'est là
   qu'un utilisateur d'Origin la cherche. Si aucun menu existant ne convient
   (un menu *Workbook* quand un classeur est actif, par exemple), le créer

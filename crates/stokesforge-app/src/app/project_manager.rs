@@ -4,7 +4,8 @@
 //! fermer, sélectionner, afficher, masquer) s'accumule dans
 //! [`PmInteraction`], appliqué par `StokesForgeApp` après la peinture.
 //!
-//! Sorti d'`app.rs` tel quel (#121).
+//! Sorti d'`app.rs` tel quel (#121) ; le panneau fixe qui le porte,
+//! [`StokesForgeApp::project_manager_panel`], l'a rejoint (#122).
 
 use std::collections::HashSet;
 
@@ -191,7 +192,8 @@ pub(super) const PROJECT_MANAGER_WIDTH: f32 = 260.0;
 
 impl StokesForgeApp {
     /// Peint le Project Manager dans son panneau fixe, ancré à gauche — voir
-    /// la doc de tête du module, § Project Manager. Appelé par
+    /// la doc de tête d'`app.rs`, § Ce qui reste ici (l'ordre des panneaux).
+    /// Appelé par
     /// [`StokesForgeApp::ui`] *avant* le `CentralPanel`, mais
     /// *après* [`StokesForgeApp::script_panel`] — voir sa doc de tête pour
     /// pourquoi cet ordre précis. Comme [`StokesForgeApp::menu_bar`]
@@ -203,7 +205,7 @@ impl StokesForgeApp {
     /// tient lieu. Reste redimensionnable en largeur par glisser du bord
     /// (comportement par défaut d'`egui::Panel::left`) mais figé en
     /// position : pas de bascule vers la droite ni de repositionnement par
-    /// glisser, voir la doc de tête du module, § attacher à gauche ou à
+    /// glisser, voir la doc de tête d'`app.rs`, § attacher à gauche ou à
     /// droite.
     pub(super) fn project_manager_panel(
         &mut self,
@@ -410,6 +412,61 @@ pub(super) mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("aucun texte contenant {needle:?} n'a été peint"))
+    }
+
+    /// Le panneau fixe ([`StokesForgeApp::project_manager_panel`]) occupe le
+    /// bord gauche et relie l'arbre aux champs de l'application : un
+    /// Ctrl-clic sélectionne dans `pm_selection`, un clic simple demande
+    /// l'ouverture, appliquée plus tard par `ui()`.
+    #[test]
+    fn le_panneau_fixe_relie_l_arbre_aux_champs_de_l_application() {
+        let (session, book_tab, _graph_tab, _tree) = project_manager_fixture();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let app = RefCell::new(StokesForgeApp::new(state));
+        let open = RefCell::new(Vec::new());
+        let close = RefCell::new(Vec::new());
+        let context = egui::Context::default();
+        let paint = |context: &egui::Context, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 500.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                app.borrow_mut().project_manager_panel(
+                    ui,
+                    &mut open.borrow_mut(),
+                    &mut close.borrow_mut(),
+                    None,
+                );
+            });
+            output.textures_delta.clear();
+            output
+        };
+        paint(&context, Vec::new());
+        let output = paint(&context, Vec::new());
+        assert!(painted(&output.shapes, &tr!("project-manager-title")));
+        let panel =
+            egui::containers::panel::PanelState::load(&context, egui::Id::new("stokesforge_pm"))
+                .expect("le panneau est posé")
+                .outer_rect;
+        assert_eq!(panel.left(), 0.0, "ancré à gauche");
+        assert!(panel.width() < 800.0, "il laisse la place au reste");
+
+        let book = find_text_center(&output.shapes, "Book");
+        click_at(&context, book, egui::Modifiers::COMMAND, paint);
+        assert!(app.borrow().pm_selection.contains(&book_tab));
+        assert!(
+            open.borrow().is_empty(),
+            "Ctrl-clic sélectionne sans ouvrir"
+        );
+        click_at(&context, book, egui::Modifiers::NONE, paint);
+        assert!(open.borrow().contains(&book_tab));
+        assert!(close.borrow().is_empty());
+        session.shutdown().unwrap();
     }
 
     #[test]

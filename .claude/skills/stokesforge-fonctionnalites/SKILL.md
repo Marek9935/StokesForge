@@ -44,7 +44,7 @@ n'existe pas encore » aussi — c'est la plus facile à se tromper.
 
 | La question porte sur | Page | Code |
 |---|---|---|
-| grille, saisie, sélection, copier/coller, menus contextuels, raccourcis, fenêtres, thème, console de script | `docs/application.md` | `stokesforge-app/src/state.rs`, `app.rs`, `selection.rs` |
+| grille, saisie, sélection, copier/coller, menus contextuels, raccourcis, fenêtres, thème, console de script | `docs/application.md` | `stokesforge-app/src/state.rs`, `app.rs` et `src/app/` (barre de menus : `app/menus.rs`), `selection.rs` |
 | types de colonnes, valeurs manquantes, colonnes mixtes, noms et champs d'en-tête | `docs/modele-de-donnees.md` | `stokesforge-core` |
 | annulation, macros, ce qu'un Ctrl+Z ramène | `docs/commandes-et-historique.md` | `stokesforge-commands/src/command.rs` |
 | enregistrement, format de fichier, compatibilité | `docs/persistance.md` | `stokesforge-persistence` |

@@ -3445,6 +3445,15 @@ impl AppState {
         self.object_manager_open
     }
 
+    /// Ouvre ou ferme le panneau pour un test, sans écrire le
+    /// `preferences.json` de la machine (ce que fait
+    /// `Action::SetObjectManagerOpen`) : un test ne dépend ainsi ni ne
+    /// modifie la préférence de l'utilisateur.
+    #[cfg(test)]
+    pub(crate) fn set_object_manager_open_for_test(&mut self, open: bool) {
+        self.object_manager_open = open;
+    }
+
     /// Textes automatiques listés dans l'Object Manager (#102), hors projet.
     pub fn object_manager_show_texts(&self) -> bool {
         self.object_manager_show_texts

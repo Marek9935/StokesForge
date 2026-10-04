@@ -23,7 +23,17 @@ fichiers natif).
 ### Fenêtres flottantes confinées
 
 Le Project Manager et la console de script sont deux panneaux fixes
-(`egui::Panel::left`/`egui::Panel::bottom`), jamais fermés. Les quatre autres
+(`egui::Panel::left`/`egui::Panel::bottom`), jamais fermés. L'ordre des
+panneaux fait la mise en page egui (le premier posé est le plus extérieur) ;
+il est décidé dans `StokesForgeApp::ui`, et nulle part ailleurs : barre de
+menu (`Panel::top`, `app/menus.rs`), barres d'outils (`toolbar.rs`), barre
+d'état (`Panel::bottom`, `app/menus.rs`), console de script (`Panel::bottom`,
+`app/script_console.rs`, posée avant le Project Manager pour courir sous lui
+sur toute la largeur), Project Manager (`Panel::left`,
+`app/project_manager.rs`, sauf détaché), Object Manager (`Panel::right` ou
+flottant, `app/object_manager_ui.rs`), puis le `CentralPanel`. Le test
+`les_panneaux_fixes_se_posent_dans_l_ordre_de_ui` (`app.rs`) tient cet ordre
+par les rectangles des panneaux. Les quatre autres
 natures de fenêtre de contenu — `Tab::Book` (classeur), `Tab::Graph`,
 `Tab::Matrix`, `Tab::Note`, chacune portant un `NodeId` — s'ouvrent par défaut
 en fenêtres flottantes à l'intérieur du `CentralPanel`, une par
@@ -313,9 +323,20 @@ propriétés des objets, `request_graph_export`), `app/graph_text_edit.rs` (les
 `app/object_manager_ui.rs` (l'arbre peint de l'Object Manager, à côté du modèle
 `object_manager.rs`), `app/project_manager.rs` (l'arbre du Project Manager),
 `app/script_console.rs`, `app/file_drop.rs` (dépôt de fichiers) et
-`app/contents.rs` (`tab_contents`, `note_contents`, `matrix_contents`) ; les
-méthodes de `StokesForgeApp` qui portent ces panneaux restent dans `app.rs`
-jusqu'à #122. La suite (méthodes de `StokesForgeApp`, relecture) est #122 et #123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
+`app/contents.rs` (`tab_contents`, `note_contents`, `matrix_contents`). Les
+méthodes de `StokesForgeApp` qui ne sont pas de l'orchestration (#122), en
+blocs `impl StokesForgeApp` dans leur module : `app/menus.rs` (`menu_bar`,
+`status_bar`), `app/format.rs` (barres de format et barre contextuelle :
+`format_target`, `text_format_state`, `object_format_state`, `tools_context`,
+`format_zone`, `format_text`, `format_object`, `run_toolbar_request`), et les
+panneaux avec leur contenu (`project_manager_panel` dans
+`app/project_manager.rs`, `object_manager_panel` et
+`run_object_manager_request` dans `app/object_manager_ui.rs`, `script_panel`
+dans `app/script_console.rs`). `app.rs` ne garde que l'orchestration de
+l'image : `ui()`, l'ordre des panneaux, `collect_shortcuts`, l'application
+différée des actions, les confirmations bloquantes et le détachement. La suite
+est #123 (relecture d'ensemble des tests, passe finale doc et skills) ; la
+redécoupe de `menu_bar` et de `ui()` est #124. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
 et cherchent leurs fonctions par leur nom (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
@@ -548,13 +569,14 @@ est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un
   menu — jamais une seconde écriture. Le contenu de chaque barre est
   `toolbar::bar_contents` ; un geste qui n'est pas une `Action` (sélecteur de
   fichier, assistant d'import, export) remonte en `ToolbarRequest`, exécuté par
-  `StokesForgeApp::run_toolbar_request` avec les méthodes mêmes des menus. Barre
+  `StokesForgeApp::run_toolbar_request` (`app/format.rs`) avec les méthodes
+  mêmes des menus. Barre
   Fichier (#61, #73) : nouveau projet, classeur, graphique vide, import,
   ouvrir, enregistrer, enregistrer sous,
   exporter (grisé sans graphe au premier plan).
 - Barre contextuelle `Tools` (#62), **toujours affichée** (#93) : son contenu
   suit la fenêtre au premier plan (`ToolsContext`, calculé par
-  `StokesForgeApp::tools_context`). Graphe : les outils Pointeur / Zoom / Texte
+  `StokesForgeApp::tools_context`, `app/format.rs`). Graphe : les outils Pointeur / Zoom / Texte
   (`GraphTool` de la vue, bouton enfoncé pour l'outil actif), réinitialiser le
   zoom, propriétés. Classeur : ajouter feuille, ajouter colonne, tracer la
   sélection (courbe, nuage, barres ; grisé sans colonne sélectionnée). Matrice,
@@ -571,7 +593,7 @@ est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un
   d'un passage **écrivent des balises dans le texte** (`text_format::apply`,
   pur). La **police** n'est plus une balise (#78) : c'est un champ de la zone
   entière (`TextFont`, `AnnotationSpec::font`), posé par `StokesForgeApp::format_zone`
-  — brouillon de l'éditeur pour un texte libre en édition
+  (`app/format.rs`) — brouillon de l'éditeur pour un texte libre en édition
   (`pending_zone_font_id`), `Action::SetTextFont` pour un titre ou la légende,
   `Action::SetAnnotation` pour un texte libre sélectionné. Un titre, un titre
   d'axe ou la légende **sélectionné** (`FormatTarget::Zone`, #77) ne prend que
@@ -679,6 +701,11 @@ menus eux-mêmes sont `menu-*`. L'infobulle (l'effet, pas le raccourci, que le
 menu dessine déjà) est l'attribut `.hint` (`tr!("action-save", "hint")`) ;
 l'infobulle d'une entrée grisée, qui dit pourquoi, est `.disabled`. Les noms
 de touches (`shortcut-backspace`, `shortcut-delete`) sont aussi des clés. 
+La barre de menus et la barre d'état sont `StokesForgeApp::menu_bar` et
+`StokesForgeApp::status_bar` (`app/menus.rs`, #122) ; leurs tests ouvrent
+chaque menu de haut niveau pour de vrai et lisent libellés, grisage et cases
+à cocher dans l'arbre d'accessibilité qu'egui publie (AccessKit), sans
+supposer de position.
 
 **Langue** : la variable `STOKESFORGE_LANG` (`en`, `fr`, `en-XA`), puis la
 préférence `language` de `preferences.json`, sinon l'anglais. La langue du
@@ -1038,7 +1065,7 @@ partie « format d'objet » de la barre `Tools` (issue #64, fusionnée par #93 ;
 `object_format.rs`) règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
 une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
 épaisseur. Chaque réglage est un champ du modèle posé par une `Action::SetShape`
-(`App::format_object`). Côté script : `pyst.add_shape` / `pyst.remove_shape` (`docs/python-et-script.md`).
+(`StokesForgeApp::format_object`, `app/format.rs`). Côté script : `pyst.add_shape` / `pyst.remove_shape` (`docs/python-et-script.md`).
 
 **Exporter le graphe** (issue #34) : menu « Graph » → « Export
 Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
@@ -1649,5 +1676,8 @@ réordonnancement ; `app/object_manager_ui.rs` (#121) peint le contenu commun
 ancré/flottant (`object_manager_contents`, menus, cases, glisser, raccourcis)
 et porte la glu de sélection vers `GraphView` (`select_manager_target`,
 `selected_manager_target`) ; ce qu'il demande à la vue remonte en
-`ObjectManagerRequest`, exécuté par `StokesForgeApp` dans `app.rs`. Les décisions de mutation restent dans
+`ObjectManagerRequest`, exécuté après la peinture par
+`StokesForgeApp::run_object_manager_request` (même module, #122, qui porte
+aussi le panneau `object_manager_panel`) — le menu « Graph › Selected
+Content » passe par le même chemin. Les décisions de mutation restent dans
 `AppState::dispatch`, avec les commandes de la session.

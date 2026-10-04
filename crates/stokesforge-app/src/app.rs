@@ -1,91 +1,77 @@
-//! La glu `eframe` : traduit clavier et souris en [`Action`] et peint
-//! l'[`AppState`]. Aucune logique de modèle ne vit ici — tout ce qui décide
-//! est dans [`crate::state`], qui se teste sans fenêtre. Ce module choisit
-//! en revanche la **disposition** (fenêtres flottantes confinées, voir § du
-//! même nom plus bas) et le **cadre** (menus, raccourcis, sélecteur de
-//! fichiers `rfd`) qui l'entourent — des décisions de présentation, pas de
-//! modèle, donc légitimement hors de `state`.
+//! La glu `eframe` : l'**orchestration** d'une image. [`StokesForgeApp`]
+//! porte l'état de présentation (fenêtres flottantes et détachées, vues de
+//! graphe, sélection du Project Manager) autour de l'[`AppState`], seul
+//! dépositaire de la logique : tout ce qui décide est dans [`crate::state`],
+//! qui se teste sans fenêtre. Ce module ne garde que ce qu'un déplacement
+//! casserait (#115, #122) ; chaque surface vit dans son module de `src/app/`,
+//! avec sa doc de tête.
+//!
+//! # Ce qui reste ici
+//!
+//! [`StokesForgeApp::ui`], et avec elle :
+//!
+//! - **l'ordre des panneaux**, qui fait la mise en page : avec `egui::Panel`,
+//!   le premier panneau posé est le plus extérieur, chaque suivant s'insère
+//!   dans ce que les précédents laissent. L'ordre est : barre de menu
+//!   (`Panel::top`) → barres d'outils → barre d'état (`Panel::bottom`) →
+//!   console de script (`Panel::bottom`) → Project Manager (`Panel::left`,
+//!   sauf détaché) → Object Manager (`Panel::right`, ou flottant) →
+//!   `CentralPanel` en dernier. La console, posée avant le Project Manager,
+//!   court sous lui sur toute la largeur ; le Project Manager, posé avant le
+//!   `CentralPanel`, n'est jamais recouvert par les fenêtres flottantes ni ne
+//!   les recouvre. C'est aussi cet ordre qui donne à `viewport_rect` son
+//!   étendue : ce que les panneaux fixes laissent — la portion *visible* de
+//!   l'espace de travail, à distinguer de sa taille logique fixe
+//!   (`WORKSPACE_SIZE`). Tenu par `les_panneaux_fixes_se_posent_dans_l_ordre_de_ui` ;
+//! - **les emprunts disjoints** : une méthode `&mut self` appelée dans une
+//!   fermeture qui emprunte déjà des champs ne compile plus, d'où les champs
+//!   passés un à un (`show_workspace`) ;
+//! - **l'application différée** : ouvertures, détachements, fermetures et
+//!   actions récoltées pendant la peinture ne s'appliquent qu'une fois
+//!   l'image peinte (muter `floating_tabs` en plein parcours l'invaliderait),
+//!   dans la boucle de dispatch et ses cas liés à l'application
+//!   (Enregistrer sans chemin, Nouveau projet avec saisies en cours,
+//!   ouverture du graphe tracé ou du classeur importé) ;
+//! - **les confirmations bloquantes** (nouveau projet, suppression de
+//!   feuille) : elles vident les actions de l'image et coupent les
+//!   raccourcis, en un seul endroit ;
+//! - **les raccourcis globaux** ([`StokesForgeApp::collect_shortcuts`]),
+//!   consommés au niveau du contexte, avant les widgets ;
+//! - le **drainage des fenêtres détachées** (Project Manager et onglets de
+//!   contenu) et la publication de l'instantané qui les réveille.
+//!
+//! # Où vit le reste
+//!
+//! - menus et barre d'état : `menus.rs` ([`StokesForgeApp::menu_bar`],
+//!   [`StokesForgeApp::status_bar`]) ; barres de format et barre
+//!   contextuelle : `format.rs` ; les barres elles-mêmes : `crate::toolbar` ;
+//! - panneaux fixes, avec leur contenu : `project_manager.rs`
+//!   (`project_manager_panel`, l'arbre `project_manager_contents_from_tree`),
+//!   `script_console.rs` (`script_panel`), `object_manager_ui.rs`
+//!   (`object_manager_panel`, `run_object_manager_request`) ;
+//! - fenêtres de contenu : `tab.rs` (les quatre natures, [`Tab::Book`],
+//!   [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`]), `contents.rs`
+//!   (`tab_contents`, la note, et `matrix_contents`, espace réservé
+//!   documenté), `workbook.rs`, `grid.rs`, `graph_window.rs`,
+//!   `graph_text_edit.rs`, `file_drop.rs` ; placement, pile, maximisation et
+//!   cadre : `window_placement.rs`, `window_stack.rs`, `window_chrome.rs` ;
+//!   détachement en fenêtres OS : `window_detach.rs` ;
+//! - dialogues : `dialogs.rs` (brique commune), `import_wizard.rs`,
+//!   `plot_settings.rs` ; raccourcis déclarés : `shortcuts.rs`.
+//!
+//! [`StokesForgeApp::open_tab`] (`window_stack.rs`) est le seul endroit qui
+//! décide « ouvrir » vs « focaliser » un onglet, quelle que soit sa nature.
 //!
 //! # Ce que Qt donnait gratuitement et qu'il faut écrire ici
 //!
 //! Une `QAction` reliée à un `QUndoStack` portait d'un coup le raccourci
 //! clavier, l'entrée de menu, son grisage et son libellé (« Annuler
-//! *Renommer* »). Ici les quatre sont séparés : le raccourci est déclaré et
-//! consommé à la main ([`SHORTCUT_UNDO`] et compagnie), le grisage passe par
-//! `add_enabled`, le libellé vient de [`AppState::undo_label`], et rien ne
-//! garantit leur cohérence sinon la relecture.
-//!
-//! # Project Manager, et une fenêtre par contenu
-//!
-//! Le panneau qui liste l'arbre du projet **n'est pas une fenêtre de
-//! contenu** : c'est un [`egui::Panel::left`] fixe, peint par
-//! [`StokesForgeApp::project_manager_panel`], toujours à gauche, jamais recouvert
-//! par ni ne recouvrant le [`egui::CentralPanel`] qui porte les fenêtres
-//! flottantes (§ Fenêtres flottantes confinées plus bas) — garanti par
-//! construction en le peignant *avant* lui dans [`StokesForgeApp::ui`], comme la
-//! barre de menu (`egui::Panel::top`). Il reste redimensionnable en largeur
-//! par glisser du bord (comportement par défaut d'`egui::Panel::left`), mais
-//! **figé en position** : pas de bascule vers la droite, pas de
-//! repositionnement par glisser — voir § Attacher à gauche ou à droite
-//! ci-dessous pour pourquoi, et pour ce qui reste volontairement hors
-//! périmètre. Le contenu lui-même ([`project_manager_contents`], l'arbre
-//! cliquable du projet) reste un panneau fixe, à part des fenêtres de
-//! contenu qu'il ouvre.
-//!
-//! # Console de script, et l'ordre des panneaux
-//!
-//! La console de script (édition de [`AppState::script_source`], boutons
-//! Exécuter/Arrêter, sortie) suit le même patron que le Project Manager :
-//! ce n'est pas une fenêtre de contenu, mais un [`egui::Panel::bottom`] fixe,
-//! peint par [`StokesForgeApp::script_panel`].
-//!
-//! Point d'ordre important avec `egui::Panel` : **le premier panneau ajouté
-//! est le plus extérieur**, chaque panneau suivant est inséré à l'intérieur
-//! de ce que les précédents laissent. Pour que la console de script coure sur
-//! toute la largeur de la fenêtre — y compris sous le Project Manager, pas
-//! seulement sous la zone du `CentralPanel` — [`StokesForgeApp::script_panel`] doit
-//! donc être appelé *avant* [`StokesForgeApp::project_manager_panel`] dans
-//! [`StokesForgeApp::ui`]. L'ordre d'appel complet y est : barre de menu
-//! (`egui::Panel::top`) → console de script (`egui::Panel::bottom`) → Project
-//! Manager (`egui::Panel::left`) → `CentralPanel` en dernier ; un panneau
-//! posé plus tôt réserve sa bande sur toute la largeur/hauteur restante, donc
-//! la console de script, postée avant le Project Manager, s'étend bien sous
-//! lui plutôt que d'être resserrée entre lui et le bord droit. C'est aussi
-//! cet ordre qui donne à `viewport_rect` (§ Fenêtres flottantes confinées)
-//! son étendue exacte : ce que ces panneaux fixes laissent, rien de plus —
-//! la portion actuellement *visible* de l'espace de travail, à distinguer
-//! de sa taille logique fixe (`WORKSPACE_SIZE`).
-//!
-//! `egui::Panel::bottom` (comme `Panel::top`) **n'est pas redimensionnable
-//! par défaut**, à la différence de `left`/`right` — contrairement au Project
-//! Manager, [`StokesForgeApp::script_panel`] appelle donc explicitement
-//! `.resizable(true)` pour retrouver le glisser du bord en hauteur.
-//!
-//! Comme pour le Project Manager, aucune bascule de position n'existe ici (il
-//! n'y en a jamais eu à basculer : la console a toujours été en bas), et le
-//! panneau ne montre aucun mécanisme d'onglet.
-//!
-//! Les quatre natures de fenêtre que le Project Manager ouvre — [`Tab::Book`],
-//! [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] — sont, elles, des fenêtres
-//! flottantes (§ suivant). La grille unique d'avant une tâche antérieure
-//! (`Tab::Grid`, une seule feuille affichée à la fois pour tout le projet) a
-//! disparu : chaque classeur ouvert a désormais son propre onglet
-//! [`Tab::Book`], avec sa propre sous-navigation interne entre ses feuilles
-//! ([`AppState::worksheets_of`], [`AppState::selected_sheet_in`]) — un
-//! classeur peut avoir plusieurs feuilles, la grille d'un onglet ne montre
-//! jamais que celle actuellement choisie *dans ce classeur*. [`Tab::Matrix`]
-//! et [`Tab::Note`] existent aussi : la matrice est un **espace réservé
-//! documenté** (édition hors périmètre, voir [`matrix_contents`]), la note
-//! est réellement éditable (`stokesforge-core` expose déjà son texte).
-//!
-//! [`StokesForgeApp::open_tab`] est le seul endroit qui décide « ouvrir » vs
-//! « focaliser » un onglet, quelle que soit sa nature — le même geste que
-//! l'ancien `open_graph_tab`, généralisé.
-//!
-//! # Fenêtres flottantes, pile, maximisation
-//!
-//! Placement, confinement, cascade, ordre de pile, calques et maximisation :
-//! voir la doc de tête de `window_placement.rs` et `window_stack.rs` (#101).
+//! *Renommer* »). Ici les quatre sont séparés : le raccourci est déclaré
+//! (`shortcuts.rs`) et consommé à la main ([`StokesForgeApp::collect_shortcuts`]),
+//! l'entrée et son grisage (`add_enabled`) sont dans `menus.rs`, le libellé
+//! vient de [`AppState::undo_label`], et rien ne garantit leur cohérence sinon
+//! la relecture — et les tests de `menus.rs`, qui lisent le grisage de chaque
+//! menu de haut niveau.
 //!
 //! # Attacher le Project Manager à gauche ou à droite
 //!
@@ -94,12 +80,8 @@
 //! et clic droit sur son onglet) ; elle a disparu avec le passage à un
 //! panneau fixe. Le côté droit et le repositionnement par glisser sont un
 //! travail futur volontairement laissé de côté par cette tâche-ci — pas
-//! implémentés, même partiellement.
-//!
-//! # Détachement en fenêtres OS
-//!
-//! Project Manager et fenêtres de contenu : voir la doc de tête de
-//! `window_detach.rs` (#101).
+//! implémentés, même partiellement. La console de script n'a jamais eu de
+//! bascule : elle a toujours été en bas.
 //!
 //! # Sélecteur de fichiers natif
 //!
@@ -235,8 +217,8 @@ pub struct StokesForgeApp {
     active_detached: Option<Tab>,
     /// Les onglets de contenu actuellement ouverts en fenêtre flottante, dans
     /// l'ordre où ils ont été focalisés pour la dernière fois — le dernier
-    /// élément est le plus récemment focalisé (voir la doc de tête du
-    /// module, § Fenêtres flottantes confinées, sous-section z-order).
+    /// élément est le plus récemment focalisé (voir la doc de tête de
+    /// `window_stack.rs`, § Fenêtres flottantes confinées).
     /// Absent le temps d'être maximisé ou détaché en fenêtre OS séparée
     /// (même invariant que `detached_tabs` pour ce second cas).
     floating_tabs: Vec<Tab>,
@@ -253,7 +235,7 @@ pub struct StokesForgeApp {
     next_cascade: u32,
     /// Onglet à ramener au premier plan au prochain rendu — posé par
     /// [`StokesForgeApp::open_tab`] quand l'onglet rouvert était déjà une fenêtre
-    /// flottante existante (voir la doc de tête du module, § z-order).
+    /// flottante existante (voir la doc de tête de `window_stack.rs`).
     focus_next: Option<Tab>,
     /// Une vue de graphe (et son cache de formes, phase R4) par graphe
     /// **ouvert** — c'est-à-dire ayant eu un onglet au moins une fois,
@@ -266,13 +248,13 @@ pub struct StokesForgeApp {
     /// à l'application : il ne modifie ni le nœud, ni sa géométrie
     /// enregistrée, ni les autres fenêtres.
     collapsed_tabs: HashSet<Tab>,
-    /// Onglet actuellement maximisé, s'il y en a un — voir la doc de tête du
-    /// module, § maximiser. Ne peut plus valoir le Project Manager depuis
+    /// Onglet actuellement maximisé, s'il y en a un — voir la doc de tête de
+    /// `window_stack.rs`, § Maximiser un onglet. Ne peut plus valoir le Project Manager depuis
     /// cette tâche : ce n'est plus un onglet, et un panneau fixe toujours
     /// entièrement visible n'a rien à gagner à être « maximisé ».
     maximized_tab: Option<Tab>,
     /// Vrai quand le Project Manager est détaché en fenêtre OS séparée (voir
-    /// la doc de tête du module, § détachement). Dans cet état,
+    /// la doc de tête de `window_detach.rs`, § Détachement du Project Manager). Dans cet état,
     /// [`StokesForgeApp::project_manager_panel`] n'est simplement pas peint.
     pm_detached: bool,
     /// Vrai quand la console de script est repliée sur sa seule barre de
@@ -295,8 +277,8 @@ pub struct StokesForgeApp {
     /// en direct.
     pm_requests: Arc<Mutex<DetachedProjectManagerRequests>>,
     /// Onglets de contenu (`Book`/`Graph`/`Matrix`/`Note`) actuellement
-    /// détachés en fenêtre OS séparée — voir la doc de tête du module,
-    /// § détachement générique. Une entrée par onglet détaché ; absent de
+    /// détachés en fenêtre OS séparée — voir la doc de tête de
+    /// `window_detach.rs`, § Détachement générique des onglets de contenu. Une entrée par onglet détaché ; absent de
     /// `floating_tabs` tant qu'il l'est (même invariant que `pm_detached`
     /// pour le Project Manager, généralisé à plusieurs onglets simultanés).
     detached_tabs: HashMap<Tab, DetachedTab>,
@@ -594,11 +576,6 @@ impl StokesForgeApp {
         }
     }
 
-    /// Demande la destination de sauvegarde, puis confie l'écriture à
-    /// [`AppState::dispatch`] par l'action habituelle.
-    /// Applique la langue tout de suite (les textes se redessinent à l'image
-    /// suivante) et l'enregistre dans `preferences.json`. Un enregistrement
-    /// qui échoue se dit dans la barre d'état ; la langue reste appliquée.
     /// Reprend la disposition des barres d'outils des préférences de
     /// l'utilisateur. Séparé de [`StokesForgeApp::new`] pour que les tests ne lisent
     /// pas le fichier de la machine.
@@ -619,6 +596,9 @@ impl StokesForgeApp {
         }
     }
 
+    /// Applique la langue tout de suite (les textes se redessinent à l'image
+    /// suivante) et l'enregistre dans `preferences.json`. Un enregistrement
+    /// qui échoue se dit dans la barre d'état ; la langue reste appliquée.
     fn choose_language(&mut self, language: i18n::Language) {
         i18n::set_language(language);
         if let Err(err) = Preferences::load().save_language(language.tag()) {
@@ -627,6 +607,8 @@ impl StokesForgeApp {
         }
     }
 
+    /// Demande la destination de sauvegarde, puis confie l'écriture à
+    /// [`AppState::dispatch`] par l'action habituelle.
     fn choose_save_path(&mut self, actions: &mut Vec<Action>) {
         if let Some(path) = rfd::FileDialog::new()
             .set_title("Enregistrer le projet")
@@ -857,8 +839,9 @@ impl eframe::App for StokesForgeApp {
         }
         self.status_bar(ui, &mut actions);
         // Panneau fixe, peint *avant* `StokesForgeApp::project_manager_panel` —
-        // voir la doc de tête du module, § Console de script, et la doc de
-        // tête de `StokesForgeApp::script_panel` : c'est cet ordre précis qui lui
+        // voir la doc de tête du module, § Ce qui reste ici (l'ordre des
+        // panneaux), et la doc de `StokesForgeApp::script_panel`
+        // (`script_console.rs`) : c'est cet ordre précis qui lui
         // garantit de courir sur toute la largeur de la fenêtre, y compris
         // sous le Project Manager, plutôt que d'être resserré entre lui et
         // le bord droit.
@@ -896,7 +879,7 @@ impl eframe::App for StokesForgeApp {
             }
         } else {
             // Panneau fixe, peint *avant* le `CentralPanel` — voir la doc de
-            // tête du module, § Project Manager : c'est ce qui garantit par
+            // tête du module, § Ce qui reste ici : c'est ce qui garantit par
             // construction qu'il n'est jamais recouvert par lui ni ne le
             // recouvre, comme la barre de menu (`egui::Panel::top`) peinte
             // plus haut.
@@ -1372,8 +1355,7 @@ fn tab_title(state: &AppState, tab: Tab) -> String {
 /// [`tab_title`], à partir d'un `Tree` déjà en main plutôt que d'un
 /// `&AppState` vivant — pour l'en-tête peint par une fenêtre détachée, qui
 /// n'a que le [`Snapshot`] resynchronisé dans `DetachedTabViewModel`
-/// (voir la doc de tête du module, § « la lecture du modèle est
-/// factorisée »).
+/// (voir `window_detach.rs`, § « la lecture du modèle est factorisée »).
 fn tab_title_from_tree(tree: &Tree, tab: Tab) -> String {
     match tab {
         Tab::Book(id) => node_title_in(tree, id, || tr!("window-kind-workbook")),
@@ -1458,16 +1440,14 @@ fn publish_saved_colors(ctx: &egui::Context, state: &AppState) {
 mod graph_layout_tests {
     use super::graph_window::graph_drop_target;
     use super::grid::{metadata_row_visible, role_label, set_metadata_row_visible};
-    use super::project_manager::tests::{click_at, find_text_center};
     use super::window_chrome::tests::find_icon_centers;
     use super::window_chrome::{WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT};
     use super::window_placement::GRAPH_WINDOW_SIZE;
     use super::*;
     use crate::theme;
-    use crate::toolbar::ToolbarId;
     use stokesforge_core::{Column, ColumnRole, Project};
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
-    use stokesforge_render_egui::{TextTarget, DEFAULT_FIGURE_SIZE};
+    use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
     use stokesforge_session::Session;
 
     fn graphe() -> (Session, NodeId) {
@@ -1499,142 +1479,76 @@ mod graph_layout_tests {
             .expect("géométrie envoyée à la session")
     }
 
-    /// #97 : les champs de la barre affichent le format de la zone visée.
+    /// Piège 1 de #115 : l'ordre des panneaux dans `ui()` fait la mise en
+    /// page. Barre de menu en haut et barre d'état en bas, sur toute la
+    /// largeur ; la console de script, posée avant le Project Manager, court
+    /// sous lui sur toute la largeur ; Project Manager à gauche et Object
+    /// Manager à droite s'arrêtent au-dessus d'elle.
     #[test]
-    fn la_barre_affiche_la_police_et_le_corps_du_titre_selectionne() {
+    fn les_panneaux_fixes_se_posent_dans_l_ordre_de_ui() {
         use eframe::App as _;
-        let (session, graph) = graphe();
-        let mut state = AppState::new(session.handle(), String::new()).unwrap();
-        state.dispatch(Action::SetTextFont {
-            graph,
-            target: TextTarget::Title,
-            font: stokesforge_plot::TextFont {
-                family: "Fira Sans".into(),
-                size: Some(28.0),
-            },
-        });
+        use egui::containers::panel::PanelState;
+        let (session, _graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
-        app.open_tab(Tab::Graph(graph));
-        app.with_graph_view(graph, |view| {
-            view.select_text(Some(TextTarget::Title), &spec)
-        });
+        app.script_collapsed = false;
+        app.state.set_object_manager_open_for_test(true);
         let ctx = egui::Context::default();
         ctx.set_fonts(stokesforge_render_egui::font_definitions());
         theme::install(&ctx);
         egui_extras::install_image_loaders(&ctx);
         let mut frame = eframe::Frame::_new_kittest();
-        let mut output = egui::FullOutput::default();
-        for _ in 0..3 {
-            output.textures_delta.clear();
-            output = ctx.run_ui(
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+        for _ in 0..4 {
+            ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1400.0, 900.0),
-                    )),
+                    screen_rect: Some(screen),
                     ..Default::default()
                 },
                 |ui| app.ui(ui, &mut frame),
+            )
+            .textures_delta
+            .clear();
+        }
+        let rect = |id: &str| {
+            PanelState::load(&ctx, egui::Id::new(id))
+                .unwrap_or_else(|| panic!("panneau {id} absent"))
+                .outer_rect
+        };
+        let near = |a: f32, b: f32| (a - b).abs() <= 1.0;
+        let menu = rect("stokesforge_menu_bar");
+        let status = rect("stokesforge_status");
+        let script = rect("stokesforge_script");
+        let pm = rect("stokesforge_pm");
+        let om = rect("stokesforge_object_manager");
+        for (name, panel) in [("menu", menu), ("état", status), ("console", script)] {
+            assert!(
+                near(panel.left(), screen.left()) && near(panel.right(), screen.right()),
+                "{name} sur toute la largeur : {panel:?}"
             );
         }
-        output.textures_delta.clear();
-        find_text_center(&output.shapes, "Fira Sans");
-        find_text_center(&output.shapes, "28");
-        session.shutdown().unwrap();
-    }
-
-    /// #99 : le même choix dans le sélecteur agit sur deux zones successives.
-    #[test]
-    fn la_meme_couleur_s_applique_a_deux_zones_successives_par_la_barre() {
-        let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let ctx = egui::Context::default();
-        theme::install(&ctx);
-        ctx.all_styles_mut(|style| style.animation_time = 0.0);
-        egui_extras::install_image_loaders(&ctx);
-        let paint = |app: &mut StokesForgeApp, ctx: &egui::Context, events| {
-            let env = BarEnv {
-                text_format: app.format_target(ctx, Some(Tab::Graph(graph))),
-                text_style: app.text_format_state(ctx, Some(Tab::Graph(graph))),
-                ..Default::default()
-            };
-            let mut requests = Vec::new();
-            let mut output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1000.0, 600.0),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    ui.horizontal(|ui| {
-                        crate::toolbar::bar_contents(ui, ToolbarId::Text, &env, &mut requests)
-                    });
-                },
+        assert!(near(menu.top(), screen.top()));
+        assert!(near(status.bottom(), screen.bottom()));
+        assert!(
+            script.bottom() <= status.top() + 1.0,
+            "console sur la barre d'état"
+        );
+        assert!(
+            near(pm.left(), screen.left()),
+            "Project Manager à gauche : {pm:?}"
+        );
+        assert!(
+            near(om.right(), screen.right()),
+            "Object Manager à droite : {om:?}"
+        );
+        for (name, panel) in [("Project Manager", pm), ("Object Manager", om)] {
+            assert!(
+                panel.bottom() <= script.top() + 1.0,
+                "{name} au-dessus de la console : {panel:?} / {script:?}"
             );
-            output.textures_delta.clear();
-            let mut actions = Vec::new();
-            for request in requests {
-                app.run_toolbar_request(ctx, request, Some(Tab::Graph(graph)), &mut actions);
-            }
-            for action in actions {
-                app.state.dispatch(action);
-            }
-            output
-        };
-        let swatch = |output: &egui::FullOutput, palette: bool| {
-            output
-                .shapes
-                .iter()
-                .find_map(|painted| match &painted.shape {
-                    egui::Shape::Rect(rect)
-                        if if palette {
-                            rect.fill == egui::Color32::from_rgb(0x8b, 0x1a, 0x1a)
-                                && rect.rect.width() > 12.0
-                        } else {
-                            (rect.rect.width() - 12.0).abs() < 0.01 && rect.fill.a() > 0
-                        } =>
-                    {
-                        Some(rect.rect.center())
-                    }
-                    _ => None,
-                })
-                .unwrap_or_else(|| panic!("échantillon peint (palette={palette})"))
-        };
-        for target in [
-            TextTarget::Title,
-            TextTarget::AxisTitle {
-                row: 0,
-                column: 0,
-                side: stokesforge_plot::AxisSide::Bottom,
-            },
-        ] {
-            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
-            app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
-            paint(&mut app, &ctx, Vec::new());
-            paint(&mut app, &ctx, Vec::new());
-            let output = paint(&mut app, &ctx, Vec::new());
-            let button = swatch(&output, false);
-            click_at(&ctx, button, egui::Modifiers::NONE, |ctx, events| {
-                paint(&mut app, ctx, events)
-            });
-            paint(&mut app, &ctx, Vec::new());
-            let output = paint(&mut app, &ctx, Vec::new());
-            let red = swatch(&output, true);
-            click_at(&ctx, red, egui::Modifiers::NONE, |ctx, events| {
-                paint(&mut app, ctx, events)
-            });
-            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
-            assert_eq!(
-                target.color(&spec).as_deref(),
-                Some("#8b1a1a"),
-                "la zone {target:?} reçoit le rouge"
-            );
+            assert!(panel.top() >= menu.bottom() - 1.0, "{name} sous le menu");
         }
+        assert!(pm.right() <= om.left(), "{pm:?} puis {om:?}");
         session.shutdown().unwrap();
     }
 
@@ -2092,52 +2006,6 @@ mod graph_layout_tests {
                 })
             );
         }
-    }
-
-    /// Le lien de la barre d'état produit exactement l'action du menu Fichier.
-    #[test]
-    fn le_lien_de_statut_reprend_le_dernier_import() {
-        let (session, _) = graphe();
-        let mut state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("mesure.csv");
-        std::fs::write(&file, "1,10\n2,20\n").unwrap();
-        state.dispatch(Action::ImportFiles {
-            destination: crate::state::ImportDestination::NewBookForAll,
-            recipe: stokesforge_import::ImportRecipe::new("Sans titre"),
-            paths: vec![file],
-        });
-        let app = StokesForgeApp::new(state);
-        let context = egui::Context::default();
-        crate::theme::install(&context);
-        let mut actions = Vec::new();
-        let mut paint = |events| {
-            let mut output = context.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1000., 600.),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |ui| app.status_bar(ui, &mut actions),
-            );
-            output.textures_delta.clear();
-            output
-        };
-        let output = paint(Vec::new());
-        let pos = find_text_center(&output.shapes, &tr!("action-reopen-last-import"));
-        paint(vec![egui::Event::PointerMoved(pos)]);
-        for pressed in [true, false] {
-            paint(vec![egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: egui::Modifiers::default(),
-            }]);
-        }
-        assert_eq!(actions, vec![Action::ReopenLastImport]);
     }
 
     /// Ctrl+" ouvre l'assistant d'import, sur un clavier AZERTY (touche du 3
@@ -2898,352 +2766,5 @@ mod graph_layout_tests {
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }]);
-    }
-}
-
-#[cfg(test)]
-mod text_format_state_tests {
-    use super::*;
-    use crate::text_format::TextFormat;
-    use stokesforge_core::Project;
-    use stokesforge_plot::{AnnotationRef, AnnotationSpec, AxisSide, PlotSpec, TextFont};
-    use stokesforge_render_egui::TextTarget;
-    use stokesforge_session::Session;
-
-    fn setup() -> (Session, StokesForgeApp, NodeId, egui::Context) {
-        let mut project = Project::new("Formats").unwrap();
-        let mut spec = PlotSpec::empty("Titre");
-        spec.panels
-            .get_mut(0)
-            .unwrap()
-            .annotations
-            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
-        let graph = project.add_graph(project.root(), None, spec).unwrap();
-        let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        (
-            session,
-            StokesForgeApp::new(state),
-            graph,
-            egui::Context::default(),
-        )
-    }
-
-    #[test]
-    fn les_corps_herites_et_auto_suivent_la_selection_flottante_et_detachee() {
-        for detached in [false, true] {
-            let (session, mut app, graph, ctx) = setup();
-            if detached {
-                app.detach_tab(Tab::Graph(graph));
-            }
-            for (target, size) in [
-                (TextTarget::Title, stokesforge_render_egui::TITLE_SIZE),
-                (
-                    TextTarget::PanelTitle { row: 0, column: 0 },
-                    stokesforge_render_egui::PANEL_TITLE_SIZE,
-                ),
-                (
-                    TextTarget::AxisTitle {
-                        row: 0,
-                        column: 0,
-                        side: AxisSide::Bottom,
-                    },
-                    stokesforge_render_egui::AXIS_DESC_SIZE,
-                ),
-                (
-                    TextTarget::Legend { row: 0, column: 0 },
-                    stokesforge_render_egui::LABEL_SIZE,
-                ),
-            ] {
-                let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
-                app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
-                let inherited = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
-                assert_eq!(inherited.size, Some(size));
-                assert_eq!(
-                    inherited.family.as_deref(),
-                    Some(stokesforge_render_egui::FontSet::default().sans_family_name())
-                );
-                assert!(inherited.auto_size && inherited.auto_family);
-                app.state.dispatch(Action::SetTextFont {
-                    graph,
-                    target,
-                    font: TextFont {
-                        family: "Fira Sans".into(),
-                        size: Some(28.0),
-                    },
-                });
-                let explicit = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
-                assert_eq!(explicit.size, Some(28.0));
-                assert_eq!(explicit.family.as_deref(), Some("Fira Sans"));
-                assert!(!explicit.auto_size && !explicit.auto_family);
-                let mut actions = Vec::new();
-                app.format_text(
-                    &ctx,
-                    TextFormat::AutoSize,
-                    Some(Tab::Graph(graph)),
-                    &mut actions,
-                );
-                assert_eq!(actions.len(), 1);
-                app.state.dispatch(actions.pop().unwrap());
-                let reset = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
-                assert_eq!(reset.size, Some(size));
-                assert!(reset.auto_size);
-                assert_eq!(
-                    reset.family, explicit.family,
-                    "Auto ne change pas la police"
-                );
-                app.state.dispatch(Action::Undo);
-                assert_eq!(
-                    app.text_format_state(&ctx, Some(Tab::Graph(graph))),
-                    explicit
-                );
-                app.state.dispatch(Action::Undo);
-            }
-            session.shutdown().unwrap();
-        }
-    }
-
-    #[test]
-    fn la_barre_lit_le_brouillon_et_auto_retablit_le_corps_du_texte_libre() {
-        let (session, mut app, graph, ctx) = setup();
-        let target = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
-        let mut draft = target.get(&spec).unwrap().clone();
-        draft.font = "Libertinus Sans".into();
-        draft.size = 36.0;
-        let id = app
-            .with_graph_view(graph, |view| {
-                view.select_annotation(Some(target), &spec);
-                annotation_editor_id(view)
-            })
-            .unwrap();
-        ctx.data_mut(|data| {
-            data.insert_temp(
-                id,
-                AnnotationEditor {
-                    target,
-                    draft,
-                    original: target.get(&spec).cloned(),
-                    focus: false,
-                    anchor: None,
-                },
-            )
-        });
-        let style = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
-        assert_eq!(style.family.as_deref(), Some("Libertinus Sans"));
-        assert_eq!(style.size, Some(36.0));
-        assert_eq!(style.color.as_deref(), Some(""));
-        let mut actions = Vec::new();
-        app.format_text(
-            &ctx,
-            TextFormat::AutoSize,
-            Some(Tab::Graph(graph)),
-            &mut actions,
-        );
-        assert!(
-            actions.is_empty(),
-            "seul le brouillon change avant validation"
-        );
-        assert_eq!(
-            app.text_format_state(&ctx, Some(Tab::Graph(graph))).size,
-            Some(AnnotationSpec::DEFAULT_SIZE)
-        );
-        ctx.data_mut(|data| data.remove::<AnnotationEditor>(id));
-        assert!(
-            app.text_format_state(&ctx, Some(Tab::Graph(graph)))
-                .auto_family
-        );
-        session.shutdown().unwrap();
-    }
-
-    #[test]
-    fn les_formats_locaux_affichent_un_etat_neutre() {
-        let (session, mut app, graph, ctx) = setup();
-        app.state.dispatch(Action::SetTextContent {
-            graph,
-            target: TextTarget::Title,
-            text: "Titre #text(size: 28pt, font: \"Fira Sans\", fill: red)[local]".into(),
-        });
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
-        app.with_graph_view(graph, |view| {
-            view.select_text(Some(TextTarget::Title), &spec)
-        });
-        let style = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
-        assert!(style.family.is_none() && style.size.is_none());
-        assert!(style.color.is_none());
-        assert!(!style.auto_family && !style.auto_size);
-        session.shutdown().unwrap();
-    }
-}
-
-#[cfg(test)]
-mod object_manager_tests {
-    use super::object_manager_ui::ObjectManagerRequest;
-    use super::*;
-    use stokesforge_core::Project;
-    use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};
-    use stokesforge_session::Session;
-
-    #[test]
-    fn la_selection_et_le_format_rejoignent_la_meme_vue_detachee() {
-        let mut project = Project::new("Objets").unwrap();
-        let root = project.root();
-        let mut panel = PanelSpec::default();
-        panel.series.push(SeriesSpec::new(NodeId::from_raw(100)));
-        let spec = PlotSpec::empty("Objets").with_panels(panel);
-        let graph = project.add_graph(root, None, spec.clone()).unwrap();
-        let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let target = SeriesRef::new(0, 0);
-        app.with_graph_view(graph, |view| view.select_series(Some(target), &spec));
-        app.detach_tab(Tab::Graph(graph));
-        assert!(!app.graph_views.contains_key(&graph));
-        assert_eq!(app.selected_series(graph), Some(target));
-        let ctx = egui::Context::default();
-        app.detached_tabs[&Tab::Graph(graph)]
-            .view_model
-            .lock()
-            .unwrap()
-            .focused = true;
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                focused: false,
-                ..Default::default()
-            },
-            |_| {
-                assert_eq!(app.active_content_tab(&ctx), Some(Tab::Graph(graph)));
-            },
-        );
-        output.textures_delta.clear();
-        // Revenir dans le panneau conserve la cible native du graphe.
-        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {
-            assert_eq!(app.active_content_tab(&ctx), Some(Tab::Graph(graph)));
-        });
-        output.textures_delta.clear();
-        let mut actions = Vec::new();
-        app.format_object(
-            &crate::object_format::ObjectFormat::LineWidth(4.0),
-            Some(Tab::Graph(graph)),
-            &mut actions,
-        );
-        assert_eq!(actions.len(), 1);
-        app.state.dispatch(actions.pop().unwrap());
-        assert_eq!(
-            app.object_format_state(Some(Tab::Graph(graph)))
-                .unwrap()
-                .line_width,
-            4.0
-        );
-        app.state.dispatch(Action::Undo);
-        assert_eq!(
-            crate::state::current_plot_spec(app.state.tree(), graph).unwrap(),
-            spec
-        );
-        app.reattach_tab(Tab::Graph(graph));
-        assert_eq!(app.selected_series(graph), Some(target));
-        assert_eq!(app.graph_views[&graph].selected_series(), Some(target));
-    }
-    #[test]
-    fn les_objets_masques_et_le_format_suivent_la_vue_detachee() {
-        use crate::object_manager::VisibilityTarget as T;
-        use stokesforge_plot::{
-            AnnotationRef, AnnotationSpec, ShapeKind, ShapeRef, ShapeSpec, TextTarget,
-        };
-        let mut project = Project::new("Objets").unwrap();
-        let root = project.root();
-        let mut spec = PlotSpec::empty("Titre");
-        spec.title_visible = false;
-        let panel = spec.panels.get_mut(0).unwrap();
-        panel
-            .annotations
-            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
-        panel.annotations[0].visible = false;
-        panel
-            .shapes
-            .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
-        panel.shapes[0].visible = false;
-        let graph = project.add_graph(root, None, spec).unwrap();
-        let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        app.detach_tab(Tab::Graph(graph));
-        let ctx = egui::Context::default();
-        let text = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
-        let shape = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
-        let mut actions = Vec::new();
-        for target in [
-            T::Annotation(text),
-            T::Shape(shape),
-            T::Text(TextTarget::Title),
-        ] {
-            app.run_object_manager_request(
-                &ctx,
-                graph,
-                ObjectManagerRequest::Select(target),
-                &mut actions,
-            );
-            assert_eq!(
-                app.read_graph_view(graph, selected_manager_target)
-                    .flatten(),
-                Some(target)
-            );
-            assert!(
-                !app.graph_views.contains_key(&graph),
-                "aucune seconde vue créée"
-            );
-        }
-        assert_eq!(
-            app.format_target(&ctx, Some(Tab::Graph(graph))),
-            crate::toolbar::FormatTarget::Zone
-        );
-        app.format_text(
-            &ctx,
-            crate::text_format::TextFormat::Size(28.0),
-            Some(Tab::Graph(graph)),
-            &mut actions,
-        );
-        assert!(matches!(
-            actions.pop(),
-            Some(Action::SetTextFont {
-                target: TextTarget::Title,
-                ..
-            })
-        ));
-        app.run_object_manager_request(
-            &ctx,
-            graph,
-            ObjectManagerRequest::Select(T::Shape(shape)),
-            &mut actions,
-        );
-        assert!(app.object_format_state(Some(Tab::Graph(graph))).is_some());
-        app.run_object_manager_request(
-            &ctx,
-            graph,
-            ObjectManagerRequest::Select(T::Annotation(text)),
-            &mut actions,
-        );
-        assert_eq!(
-            app.format_target(&ctx, Some(Tab::Graph(graph))),
-            crate::toolbar::FormatTarget::Block
-        );
-        app.reattach_tab(Tab::Graph(graph));
-        assert_eq!(
-            selected_manager_target(&app.graph_views[&graph]),
-            Some(T::Annotation(text))
-        );
-        assert!(actions.is_empty(), "la sélection n'envoie aucune commande");
     }
 }

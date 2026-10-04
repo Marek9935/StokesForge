@@ -234,7 +234,7 @@ impl StokesForgeApp {
 
     /// Règle l'objet sélectionné : une seule action annulable, comme un
     /// déplacement (`ObjectFormat::apply` dit si quelque chose a changé).
-    pub(super) fn format_object(
+    fn format_object(
         &mut self,
         format: &crate::object_format::ObjectFormat,
         active_tab: Option<Tab>,
@@ -411,7 +411,7 @@ impl StokesForgeApp {
     /// Met en forme le texte visé : dans le champ en édition (le champ pose
     /// les balises à son prochain tracé, voir [`apply_pending_format`]), ou
     /// sur tout le texte libre sélectionné — une seule action annulable.
-    pub(super) fn format_text(
+    fn format_text(
         &mut self,
         ctx: &egui::Context,
         format: crate::text_format::TextFormat,
@@ -503,5 +503,880 @@ impl StokesForgeApp {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::graph_text_edit::open_text_editor;
+    use super::super::graph_window::graph_drop_target;
+    use super::super::object_manager_ui::{selected_manager_target, ObjectManagerRequest};
+    use super::super::project_manager::tests::{click_at, find_text_center};
+    use super::*;
+    use crate::object_format::ObjectFormat;
+    use crate::state::AppState;
+    use crate::text_format::{apply, TextFormat};
+    use crate::theme;
+    use crate::toolbar::{BarEnv, FormatTarget, ToolbarId, ToolsContext};
+    use stokesforge_core::{Column, Project};
+    use stokesforge_plot::{
+        AnnotationRef, AnnotationSpec, AxisSide, PanelSpec, PlotSpec, SeriesRef, SeriesSpec,
+        ShapeKind, ShapeRef, ShapeSpec, TextFont,
+    };
+    use stokesforge_render_egui::GraphTool;
+    use stokesforge_session::Session;
+
+    /// Un classeur (deux colonnes) et un graphe titré « Figure » qui les
+    /// trace — le graphe de `app.rs` que les tests de la barre employaient.
+    fn graphe() -> (Session, NodeId) {
+        let mut project = Project::new("Découpage").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        let x = project
+            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
+            .unwrap();
+        let y = project
+            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
+            .unwrap();
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new_xy(x, y));
+        let graph = project
+            .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
+            .unwrap();
+        (Session::spawn(project, None).unwrap(), graph)
+    }
+
+    /// Le texte libre du graphe de [`setup`].
+    const TEXTE: AnnotationRef = AnnotationRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+
+    /// Les actions d'une demande de format, sans les envoyer.
+    fn formate(
+        app: &mut StokesForgeApp,
+        ctx: &egui::Context,
+        graph: NodeId,
+        format: TextFormat,
+    ) -> Vec<Action> {
+        let mut actions = Vec::new();
+        app.format_text(ctx, format, Some(Tab::Graph(graph)), &mut actions);
+        actions
+    }
+
+    fn format_en_attente(ctx: &egui::Context) -> Option<TextFormat> {
+        ctx.data(|data| data.get_temp::<Option<TextFormat>>(pending_format_id()))
+            .flatten()
+    }
+
+    fn police_en_attente(ctx: &egui::Context) -> Option<String> {
+        ctx.data(|data| data.get_temp::<Option<String>>(pending_zone_font_id()))
+            .flatten()
+    }
+
+    /// Ouvre l'éditeur sur place du titre, comme un double-clic : le graphe
+    /// est d'abord peint, pour que le titre ait une boîte à l'écran.
+    fn edite_le_titre(app: &mut StokesForgeApp, ctx: &egui::Context, graph: NodeId) {
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 700.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        graph_drop_target(
+                            ui,
+                            &app.state,
+                            &mut Vec::new(),
+                            &mut app.graph_views,
+                            graph,
+                        );
+                    });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        let tree = app.state.tree().clone();
+        app.with_graph_view(graph, |view| {
+            open_text_editor(ctx, view, &tree, graph, TextTarget::Title)
+        });
+        assert_eq!(
+            app.format_target(ctx, Some(Tab::Graph(graph))),
+            FormatTarget::Field,
+            "l'éditeur du titre doit être ouvert"
+        );
+    }
+
+    /// #97 : les champs de la barre affichent le format de la zone visée.
+    #[test]
+    fn la_barre_affiche_la_police_et_le_corps_du_titre_selectionne() {
+        use eframe::App as _;
+        let (session, graph) = graphe();
+        let mut state = AppState::new(session.handle(), String::new()).unwrap();
+        state.dispatch(Action::SetTextFont {
+            graph,
+            target: TextTarget::Title,
+            font: stokesforge_plot::TextFont {
+                family: "Fira Sans".into(),
+                size: Some(28.0),
+            },
+        });
+        let mut app = StokesForgeApp::new(state);
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.open_tab(Tab::Graph(graph));
+        app.with_graph_view(graph, |view| {
+            view.select_text(Some(TextTarget::Title), &spec)
+        });
+        let ctx = egui::Context::default();
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut output = egui::FullOutput::default();
+        for _ in 0..3 {
+            output.textures_delta.clear();
+            output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.ui(ui, &mut frame),
+            );
+        }
+        output.textures_delta.clear();
+        find_text_center(&output.shapes, "Fira Sans");
+        find_text_center(&output.shapes, "28");
+        session.shutdown().unwrap();
+    }
+
+    /// #99 : le même choix dans le sélecteur agit sur deux zones successives.
+    #[test]
+    fn la_meme_couleur_s_applique_a_deux_zones_successives_par_la_barre() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        egui_extras::install_image_loaders(&ctx);
+        let paint = |app: &mut StokesForgeApp, ctx: &egui::Context, events| {
+            let env = BarEnv {
+                text_format: app.format_target(ctx, Some(Tab::Graph(graph))),
+                text_style: app.text_format_state(ctx, Some(Tab::Graph(graph))),
+                ..Default::default()
+            };
+            let mut requests = Vec::new();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.horizontal(|ui| {
+                        crate::toolbar::bar_contents(ui, ToolbarId::Text, &env, &mut requests)
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            let mut actions = Vec::new();
+            for request in requests {
+                app.run_toolbar_request(ctx, request, Some(Tab::Graph(graph)), &mut actions);
+            }
+            for action in actions {
+                app.state.dispatch(action);
+            }
+            output
+        };
+        let swatch = |output: &egui::FullOutput, palette: bool| {
+            output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Rect(rect)
+                        if if palette {
+                            rect.fill == egui::Color32::from_rgb(0x8b, 0x1a, 0x1a)
+                                && rect.rect.width() > 12.0
+                        } else {
+                            (rect.rect.width() - 12.0).abs() < 0.01 && rect.fill.a() > 0
+                        } =>
+                    {
+                        Some(rect.rect.center())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("échantillon peint (palette={palette})"))
+        };
+        for target in [
+            TextTarget::Title,
+            TextTarget::AxisTitle {
+                row: 0,
+                column: 0,
+                side: stokesforge_plot::AxisSide::Bottom,
+            },
+        ] {
+            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+            app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
+            paint(&mut app, &ctx, Vec::new());
+            paint(&mut app, &ctx, Vec::new());
+            let output = paint(&mut app, &ctx, Vec::new());
+            let button = swatch(&output, false);
+            click_at(&ctx, button, egui::Modifiers::NONE, |ctx, events| {
+                paint(&mut app, ctx, events)
+            });
+            paint(&mut app, &ctx, Vec::new());
+            let output = paint(&mut app, &ctx, Vec::new());
+            let red = swatch(&output, true);
+            click_at(&ctx, red, egui::Modifiers::NONE, |ctx, events| {
+                paint(&mut app, ctx, events)
+            });
+            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+            assert_eq!(
+                target.color(&spec).as_deref(),
+                Some("#8b1a1a"),
+                "la zone {target:?} reçoit le rouge"
+            );
+        }
+        session.shutdown().unwrap();
+    }
+
+    fn setup() -> (Session, StokesForgeApp, NodeId, egui::Context) {
+        let mut project = Project::new("Formats").unwrap();
+        let mut spec = PlotSpec::empty("Titre");
+        spec.panels
+            .get_mut(0)
+            .unwrap()
+            .annotations
+            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+        let graph = project.add_graph(project.root(), None, spec).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        (
+            session,
+            StokesForgeApp::new(state),
+            graph,
+            egui::Context::default(),
+        )
+    }
+
+    #[test]
+    fn les_corps_herites_et_auto_suivent_la_selection_flottante_et_detachee() {
+        for detached in [false, true] {
+            let (session, mut app, graph, ctx) = setup();
+            if detached {
+                app.detach_tab(Tab::Graph(graph));
+            }
+            for (target, size) in [
+                (TextTarget::Title, stokesforge_render_egui::TITLE_SIZE),
+                (
+                    TextTarget::PanelTitle { row: 0, column: 0 },
+                    stokesforge_render_egui::PANEL_TITLE_SIZE,
+                ),
+                (
+                    TextTarget::AxisTitle {
+                        row: 0,
+                        column: 0,
+                        side: AxisSide::Bottom,
+                    },
+                    stokesforge_render_egui::AXIS_DESC_SIZE,
+                ),
+                (
+                    TextTarget::Legend { row: 0, column: 0 },
+                    stokesforge_render_egui::LABEL_SIZE,
+                ),
+            ] {
+                let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+                app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
+                let inherited = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+                assert_eq!(inherited.size, Some(size));
+                assert_eq!(
+                    inherited.family.as_deref(),
+                    Some(stokesforge_render_egui::FontSet::default().sans_family_name())
+                );
+                assert!(inherited.auto_size && inherited.auto_family);
+                app.state.dispatch(Action::SetTextFont {
+                    graph,
+                    target,
+                    font: TextFont {
+                        family: "Fira Sans".into(),
+                        size: Some(28.0),
+                    },
+                });
+                let explicit = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+                assert_eq!(explicit.size, Some(28.0));
+                assert_eq!(explicit.family.as_deref(), Some("Fira Sans"));
+                assert!(!explicit.auto_size && !explicit.auto_family);
+                let mut actions = Vec::new();
+                app.format_text(
+                    &ctx,
+                    TextFormat::AutoSize,
+                    Some(Tab::Graph(graph)),
+                    &mut actions,
+                );
+                assert_eq!(actions.len(), 1);
+                app.state.dispatch(actions.pop().unwrap());
+                let reset = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+                assert_eq!(reset.size, Some(size));
+                assert!(reset.auto_size);
+                assert_eq!(
+                    reset.family, explicit.family,
+                    "Auto ne change pas la police"
+                );
+                app.state.dispatch(Action::Undo);
+                assert_eq!(
+                    app.text_format_state(&ctx, Some(Tab::Graph(graph))),
+                    explicit
+                );
+                app.state.dispatch(Action::Undo);
+            }
+            session.shutdown().unwrap();
+        }
+    }
+
+    #[test]
+    fn la_barre_lit_le_brouillon_et_auto_retablit_le_corps_du_texte_libre() {
+        let (session, mut app, graph, ctx) = setup();
+        let target = AnnotationRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let mut draft = target.get(&spec).unwrap().clone();
+        draft.font = "Libertinus Sans".into();
+        draft.size = 36.0;
+        let id = app
+            .with_graph_view(graph, |view| {
+                view.select_annotation(Some(target), &spec);
+                annotation_editor_id(view)
+            })
+            .unwrap();
+        ctx.data_mut(|data| {
+            data.insert_temp(
+                id,
+                AnnotationEditor {
+                    target,
+                    draft,
+                    original: target.get(&spec).cloned(),
+                    focus: false,
+                    anchor: None,
+                },
+            )
+        });
+        let style = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+        assert_eq!(style.family.as_deref(), Some("Libertinus Sans"));
+        assert_eq!(style.size, Some(36.0));
+        assert_eq!(style.color.as_deref(), Some(""));
+        let mut actions = Vec::new();
+        app.format_text(
+            &ctx,
+            TextFormat::AutoSize,
+            Some(Tab::Graph(graph)),
+            &mut actions,
+        );
+        assert!(
+            actions.is_empty(),
+            "seul le brouillon change avant validation"
+        );
+        assert_eq!(
+            app.text_format_state(&ctx, Some(Tab::Graph(graph))).size,
+            Some(AnnotationSpec::DEFAULT_SIZE)
+        );
+        ctx.data_mut(|data| data.remove::<AnnotationEditor>(id));
+        assert!(
+            app.text_format_state(&ctx, Some(Tab::Graph(graph)))
+                .auto_family
+        );
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn les_formats_locaux_affichent_un_etat_neutre() {
+        let (session, mut app, graph, ctx) = setup();
+        app.state.dispatch(Action::SetTextContent {
+            graph,
+            target: TextTarget::Title,
+            text: "Titre #text(size: 28pt, font: \"Fira Sans\", fill: red)[local]".into(),
+        });
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| {
+            view.select_text(Some(TextTarget::Title), &spec)
+        });
+        let style = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+        assert!(style.family.is_none() && style.size.is_none());
+        assert!(style.color.is_none());
+        assert!(!style.auto_family && !style.auto_size);
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn la_selection_et_le_format_rejoignent_la_meme_vue_detachee() {
+        let mut project = Project::new("Objets").unwrap();
+        let root = project.root();
+        let mut panel = PanelSpec::default();
+        panel.series.push(SeriesSpec::new(NodeId::from_raw(100)));
+        let spec = PlotSpec::empty("Objets").with_panels(panel);
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let target = SeriesRef::new(0, 0);
+        app.with_graph_view(graph, |view| view.select_series(Some(target), &spec));
+        app.detach_tab(Tab::Graph(graph));
+        assert!(!app.graph_views.contains_key(&graph));
+        assert_eq!(app.selected_series(graph), Some(target));
+        let ctx = egui::Context::default();
+        app.detached_tabs[&Tab::Graph(graph)]
+            .view_model
+            .lock()
+            .unwrap()
+            .focused = true;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: false,
+                ..Default::default()
+            },
+            |_| {
+                assert_eq!(app.active_content_tab(&ctx), Some(Tab::Graph(graph)));
+            },
+        );
+        output.textures_delta.clear();
+        // Revenir dans le panneau conserve la cible native du graphe.
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {
+            assert_eq!(app.active_content_tab(&ctx), Some(Tab::Graph(graph)));
+        });
+        output.textures_delta.clear();
+        let mut actions = Vec::new();
+        app.format_object(
+            &crate::object_format::ObjectFormat::LineWidth(4.0),
+            Some(Tab::Graph(graph)),
+            &mut actions,
+        );
+        assert_eq!(actions.len(), 1);
+        app.state.dispatch(actions.pop().unwrap());
+        assert_eq!(
+            app.object_format_state(Some(Tab::Graph(graph)))
+                .unwrap()
+                .line_width,
+            4.0
+        );
+        app.state.dispatch(Action::Undo);
+        assert_eq!(
+            crate::state::current_plot_spec(app.state.tree(), graph).unwrap(),
+            spec
+        );
+        app.reattach_tab(Tab::Graph(graph));
+        assert_eq!(app.selected_series(graph), Some(target));
+        assert_eq!(app.graph_views[&graph].selected_series(), Some(target));
+    }
+    #[test]
+    fn les_objets_masques_et_le_format_suivent_la_vue_detachee() {
+        use crate::object_manager::VisibilityTarget as T;
+        use stokesforge_plot::{
+            AnnotationRef, AnnotationSpec, ShapeKind, ShapeRef, ShapeSpec, TextTarget,
+        };
+        let mut project = Project::new("Objets").unwrap();
+        let root = project.root();
+        let mut spec = PlotSpec::empty("Titre");
+        spec.title_visible = false;
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel
+            .annotations
+            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+        panel.annotations[0].visible = false;
+        panel
+            .shapes
+            .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
+        panel.shapes[0].visible = false;
+        let graph = project.add_graph(root, None, spec).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.detach_tab(Tab::Graph(graph));
+        let ctx = egui::Context::default();
+        let text = AnnotationRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let shape = ShapeRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let mut actions = Vec::new();
+        for target in [
+            T::Annotation(text),
+            T::Shape(shape),
+            T::Text(TextTarget::Title),
+        ] {
+            app.run_object_manager_request(
+                &ctx,
+                graph,
+                ObjectManagerRequest::Select(target),
+                &mut actions,
+            );
+            assert_eq!(
+                app.read_graph_view(graph, selected_manager_target)
+                    .flatten(),
+                Some(target)
+            );
+            assert!(
+                !app.graph_views.contains_key(&graph),
+                "aucune seconde vue créée"
+            );
+        }
+        assert_eq!(
+            app.format_target(&ctx, Some(Tab::Graph(graph))),
+            crate::toolbar::FormatTarget::Zone
+        );
+        app.format_text(
+            &ctx,
+            crate::text_format::TextFormat::Size(28.0),
+            Some(Tab::Graph(graph)),
+            &mut actions,
+        );
+        assert!(matches!(
+            actions.pop(),
+            Some(Action::SetTextFont {
+                target: TextTarget::Title,
+                ..
+            })
+        ));
+        app.run_object_manager_request(
+            &ctx,
+            graph,
+            ObjectManagerRequest::Select(T::Shape(shape)),
+            &mut actions,
+        );
+        assert!(app.object_format_state(Some(Tab::Graph(graph))).is_some());
+        app.run_object_manager_request(
+            &ctx,
+            graph,
+            ObjectManagerRequest::Select(T::Annotation(text)),
+            &mut actions,
+        );
+        assert_eq!(
+            app.format_target(&ctx, Some(Tab::Graph(graph))),
+            crate::toolbar::FormatTarget::Block
+        );
+        app.reattach_tab(Tab::Graph(graph));
+        assert_eq!(
+            selected_manager_target(&app.graph_views[&graph]),
+            Some(T::Annotation(text))
+        );
+        assert!(actions.is_empty(), "la sélection n'envoie aucune commande");
+    }
+
+    /// Un texte libre sélectionné (sans éditeur ouvert) : gras et italique
+    /// sont des balises posées sur **tout** son texte par
+    /// `text_format::apply`, couleur et corps des champs du modèle ; chaque
+    /// demande est une seule action annulable.
+    #[test]
+    fn gras_italique_couleur_et_corps_d_un_texte_libre_selectionne() {
+        let (session, mut app, graph, ctx) = setup();
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
+        assert_eq!(
+            app.format_target(&ctx, Some(Tab::Graph(graph))),
+            FormatTarget::Block
+        );
+        let annotation = |actions: Vec<Action>| match actions.as_slice() {
+            [Action::SetAnnotation {
+                graph: g,
+                target,
+                annotation,
+            }] if *g == graph && *target == TEXTE => (**annotation).clone(),
+            other => panic!("une seule SetAnnotation attendue, pas {other:?}"),
+        };
+        for format in [TextFormat::Bold, TextFormat::Italic] {
+            let posee = annotation(formate(&mut app, &ctx, graph, format.clone()));
+            assert_eq!(posee.text, apply("Texte", 0..5, &format).text);
+            assert_ne!(posee.text, "Texte", "{format:?} pose une balise");
+        }
+        let colore = annotation(formate(
+            &mut app,
+            &ctx,
+            graph,
+            TextFormat::Color("#8b1a1a".into()),
+        ));
+        assert_eq!(
+            (colore.color.as_str(), colore.text.as_str()),
+            ("#8b1a1a", "Texte")
+        );
+        let agrandi = annotation(formate(&mut app, &ctx, graph, TextFormat::Size(30.0)));
+        assert_eq!((agrandi.size, agrandi.text.as_str()), (30.0, "Texte"));
+        assert_eq!(format_en_attente(&ctx), None, "rien n'attend de champ");
+        session.shutdown().unwrap();
+    }
+
+    /// Un champ en édition (#63) : la barre n'envoie rien, elle dépose le
+    /// format pour que le champ pose la balise sur le passage surligné à son
+    /// prochain tracé (`apply_pending_format`) — couleur et corps compris,
+    /// qui ne visent la zone entière que hors édition (#90).
+    #[test]
+    fn dans_un_champ_en_edition_le_format_attend_le_prochain_trace() {
+        let (session, mut app, graph, ctx) = setup();
+        edite_le_titre(&mut app, &ctx, graph);
+        for format in [
+            TextFormat::Bold,
+            TextFormat::Italic,
+            TextFormat::Color("#8b1a1a".into()),
+            TextFormat::Size(30.0),
+        ] {
+            assert!(
+                formate(&mut app, &ctx, graph, format.clone()).is_empty(),
+                "{format:?} n'envoie rien avant la validation du champ"
+            );
+            assert_eq!(format_en_attente(&ctx), Some(format));
+        }
+        session.shutdown().unwrap();
+    }
+
+    /// Hors édition, couleur et corps d'un titre sélectionné vont à la zone
+    /// entière (#77, #90) ; un corps invalide n'envoie rien.
+    #[test]
+    fn la_couleur_et_le_corps_d_un_titre_selectionne_vont_a_la_zone() {
+        let (session, mut app, graph, ctx) = setup();
+        let target = TextTarget::AxisTitle {
+            row: 0,
+            column: 0,
+            side: AxisSide::Bottom,
+        };
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
+        assert_eq!(
+            formate(&mut app, &ctx, graph, TextFormat::Color("#8b1a1a".into())),
+            vec![Action::SetTextColor {
+                graph,
+                target,
+                color: "#8b1a1a".into(),
+            }]
+        );
+        match formate(&mut app, &ctx, graph, TextFormat::Size(30.0)).as_slice() {
+            [Action::SetTextFont {
+                target: t, font, ..
+            }] => {
+                assert_eq!(*t, target);
+                assert_eq!(font.size, Some(30.0));
+            }
+            other => panic!("une seule SetTextFont attendue, pas {other:?}"),
+        }
+        for invalide in [0.0, -4.0, f64::NAN] {
+            assert!(formate(&mut app, &ctx, graph, TextFormat::Size(invalide)).is_empty());
+        }
+        assert_eq!(format_en_attente(&ctx), None);
+        session.shutdown().unwrap();
+    }
+
+    /// La police est un champ de la zone (#78), jamais une balise
+    /// `#text(font: …)` dans le contenu : titre sélectionné ou en édition,
+    /// texte libre sélectionné ou en édition.
+    #[test]
+    fn la_police_est_un_champ_de_la_zone_jamais_une_balise() {
+        let police = || TextFormat::Font("  Fira Sans ".into());
+        let sans_balise = |actions: &[Action]| {
+            assert!(
+                !format!("{actions:?}").contains("#text(font"),
+                "aucune balise de police dans {actions:?}"
+            );
+        };
+        let titre = |actions: Vec<Action>| match actions.as_slice() {
+            [Action::SetTextFont { target, font, .. }] => {
+                assert_eq!(*target, TextTarget::Title);
+                assert_eq!(font.family, "Fira Sans");
+            }
+            other => panic!("une seule SetTextFont attendue, pas {other:?}"),
+        };
+
+        // Titre sélectionné.
+        let (session, mut app, graph, ctx) = setup();
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| {
+            view.select_text(Some(TextTarget::Title), &spec)
+        });
+        let actions = formate(&mut app, &ctx, graph, police());
+        sans_balise(&actions);
+        titre(actions);
+
+        // Texte libre sélectionné : son champ `font`, texte inchangé.
+        app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
+        let actions = formate(&mut app, &ctx, graph, police());
+        sans_balise(&actions);
+        match actions.as_slice() {
+            [Action::SetAnnotation { annotation, .. }] => {
+                assert_eq!(annotation.font, "Fira Sans");
+                assert_eq!(annotation.text, "Texte");
+            }
+            other => panic!("une seule SetAnnotation attendue, pas {other:?}"),
+        }
+
+        // Texte libre en édition : le brouillon recevra la police.
+        let id = app
+            .with_graph_view(graph, |view| annotation_editor_id(view))
+            .unwrap();
+        ctx.data_mut(|data| {
+            data.insert_temp(
+                id,
+                AnnotationEditor {
+                    target: TEXTE,
+                    draft: TEXTE.get(&spec).unwrap().clone(),
+                    original: TEXTE.get(&spec).cloned(),
+                    focus: false,
+                    anchor: None,
+                },
+            )
+        });
+        assert!(formate(&mut app, &ctx, graph, police()).is_empty());
+        assert_eq!(police_en_attente(&ctx).as_deref(), Some("Fira Sans"));
+        assert_eq!(format_en_attente(&ctx), None, "pas de balise en attente");
+        session.shutdown().unwrap();
+
+        // Titre en édition : la zone directement, rien en attente.
+        let (session, mut app, graph, ctx) = setup();
+        edite_le_titre(&mut app, &ctx, graph);
+        let actions = formate(&mut app, &ctx, graph, police());
+        sans_balise(&actions);
+        titre(actions);
+        assert_eq!(format_en_attente(&ctx), None, "pas de balise en attente");
+        session.shutdown().unwrap();
+    }
+
+    /// La barre contextuelle suit la fenêtre au premier plan, et l'outil
+    /// choisi par un bouton est celui de la vue du graphe, flottante ou
+    /// détachée.
+    #[test]
+    fn la_barre_d_outils_suit_la_fenetre_active_et_son_outil() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let ctx = egui::Context::default();
+        assert!(matches!(app.tools_context(None), ToolsContext::None));
+
+        for detached in [false, true] {
+            if detached {
+                app.detach_tab(Tab::Graph(graph));
+            }
+            let mut actions = Vec::new();
+            app.run_toolbar_request(
+                &ctx,
+                ToolbarRequest::SetGraphTool(GraphTool::Pointer),
+                Some(Tab::Graph(graph)),
+                &mut actions,
+            );
+            assert!(matches!(
+                app.tools_context(Some(Tab::Graph(graph))),
+                ToolsContext::Graph { graph: g, tool: GraphTool::Pointer } if g == graph
+            ));
+            app.run_toolbar_request(
+                &ctx,
+                ToolbarRequest::SetGraphTool(GraphTool::Text),
+                Some(Tab::Graph(graph)),
+                &mut actions,
+            );
+            assert!(matches!(
+                app.tools_context(Some(Tab::Graph(graph))),
+                ToolsContext::Graph {
+                    tool: GraphTool::Text,
+                    ..
+                }
+            ));
+            assert!(
+                actions.is_empty(),
+                "choisir un outil n'est pas une commande"
+            );
+            assert_eq!(
+                app.read_graph_view(graph, GraphView::tool),
+                Some(GraphTool::Text),
+                "détachée = {detached}"
+            );
+        }
+
+        // Classeur : la feuille affichée et ses colonnes sélectionnées.
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let column = app.state.visible_columns(sheet)[1].0;
+        let ToolsContext::Book { columns, .. } = app.tools_context(Some(Tab::Book(book))) else {
+            panic!("contexte de classeur attendu");
+        };
+        assert!(columns.is_empty());
+        app.state.select_column(sheet, column);
+        match app.tools_context(Some(Tab::Book(book))) {
+            ToolsContext::Book {
+                book: b,
+                sheet: s,
+                columns,
+            } => assert_eq!((b, s, columns), (book, Some(sheet), vec![column])),
+            other => panic!("contexte de classeur attendu, pas {other:?}"),
+        }
+
+        // Un bouton qui porte une action la pousse telle quelle.
+        let mut actions = Vec::new();
+        app.run_toolbar_request(
+            &ctx,
+            ToolbarRequest::Action(Box::new(Action::AddWorkbook)),
+            None,
+            &mut actions,
+        );
+        assert_eq!(actions, vec![Action::AddWorkbook]);
+        session.shutdown().unwrap();
+    }
+
+    /// Le format d'objet vise l'objet graphique sélectionné : une seule
+    /// action, et rien sans sélection.
+    #[test]
+    fn le_format_d_objet_vise_l_objet_selectionne() {
+        let mut project = Project::new("Objets").unwrap();
+        let mut spec = PlotSpec::empty("Objets");
+        spec.panels.get_mut(0).unwrap().shapes.push(ShapeSpec::new(
+            ShapeKind::Rectangle,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+        ));
+        let graph = project.add_graph(project.root(), None, spec).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let tab = Some(Tab::Graph(graph));
+        let mut actions = Vec::new();
+        app.format_object(&ObjectFormat::LineWidth(3.0), tab, &mut actions);
+        assert!(actions.is_empty(), "sans sélection, rien");
+        assert!(app.object_format_state(tab).is_none());
+
+        let target = ShapeRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        app.with_graph_view(graph, |view| view.select_shape(Some(target)));
+        let state = app.object_format_state(tab).unwrap();
+        assert!(state.closed, "un rectangle se remplit");
+        app.format_object(&ObjectFormat::LineWidth(3.0), tab, &mut actions);
+        match actions.as_slice() {
+            [Action::SetShape {
+                graph: g,
+                target: t,
+                shape,
+            }] => {
+                assert_eq!((*g, *t), (graph, target));
+                assert_eq!(shape.line_width, 3.0);
+            }
+            other => panic!("une seule SetShape attendue, pas {other:?}"),
+        }
+        session.shutdown().unwrap();
     }
 }

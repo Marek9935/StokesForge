@@ -158,6 +158,15 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   posé, et vérifie que le fils a bien peint dans cette langue (modèle :
   `chaque_onglet_se_peint_en_anglais_et_en_pseudo_langue`,
   `src/app/plot_settings.rs`, #119).
+- Un menu egui se teste ouvert pour de vrai (clic sur son titre), et se lit
+  dans l'arbre d'accessibilité qu'egui publie (`ctx.enable_accesskit()`,
+  `platform_output.accesskit_update`) : libellé, grisage, case cochée et
+  rectangle de chaque entrée, sans supposer de position ni comparer de
+  couleur (modèle : `entrees`, `src/app/menus.rs`, #122).
+- Un test ne dispatche pas une action qui écrit le `preferences.json` de la
+  machine (`SetObjectManagerOpen`, `SetObjectManagerShowTexts`…) : il pose
+  l'état en mémoire (`AppState::set_object_manager_open_for_test`), ou ne
+  vérifie que l'action poussée.
 - Les tests et leurs commentaires sont en français, comme le reste.
 
 **À lire** : `stokesforge-robustesse/src/lib.rs` (l'index des batteries), puis la

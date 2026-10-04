@@ -4,10 +4,14 @@
 //! Ctrl+flèches). Le modèle (projection du `PlotSpec`, filtres) reste dans
 //! `crate::object_manager` ; la sélection vit dans la `GraphView`. Ce qui
 //! touche la vue (sélection, propriétés, renommage) remonte en
-//! [`ObjectManagerRequest`], exécuté par `StokesForgeApp` après la peinture.
-//! Une seule écriture pour le panneau fixe et la fenêtre détachée.
+//! [`ObjectManagerRequest`], exécuté après la peinture par
+//! [`StokesForgeApp::run_object_manager_request`], qui sert aussi le menu
+//! « Graph › Selected Content ». Une seule écriture pour le panneau fixe et la
+//! fenêtre détachée.
 //!
-//! Sorti d'`app.rs` tel quel (#121).
+//! Sorti d'`app.rs` tel quel (#121) ; le panneau ancré ou flottant,
+//! [`StokesForgeApp::object_manager_panel`], et l'exécution des demandes l'ont
+//! rejoint (#122).
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
@@ -1034,6 +1038,72 @@ mod tests {
     }
 
     /// Sans graphe actif, le panneau le dit et ne demande rien.
+    /// Le panneau ([`StokesForgeApp::object_manager_panel`]) ne se peint
+    /// qu'ouvert : ancré au bord droit, ou flottant sans quitter l'écran.
+    #[test]
+    fn l_object_manager_ne_se_peint_qu_ouvert_ancre_a_droite_ou_flottant() {
+        use egui::containers::panel::PanelState;
+        let (project, graph, _, _) = trois_series();
+        let session = stokesforge_session::Session::spawn(project, None).unwrap();
+        let state = crate::state::AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let paint = |app: &mut StokesForgeApp, context: &egui::Context| {
+            let mut actions = Vec::new();
+            let mut output = egui::FullOutput::default();
+            for _ in 0..2 {
+                output.textures_delta.clear();
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ui| app.object_manager_panel(ui, Some(Tab::Graph(graph)), &mut actions),
+                );
+            }
+            output.textures_delta.clear();
+            assert!(actions.is_empty(), "peindre ne demande rien");
+            output
+        };
+        let peint = |output: &egui::FullOutput, needle: &str| {
+            output.shapes.iter().any(|painted| {
+                matches!(&painted.shape,
+                    egui::Shape::Text(shape) if shape.galley.job.text.contains(needle))
+            })
+        };
+        let id = egui::Id::new("stokesforge_object_manager");
+
+        app.state.set_object_manager_open_for_test(false);
+        let context = egui::Context::default();
+        egui_extras::install_image_loaders(&context);
+        let output = paint(&mut app, &context);
+        assert!(!peint(&output, "Premier"), "fermé : rien n'est peint");
+        assert!(PanelState::load(&context, id).is_none());
+
+        app.state.set_object_manager_open_for_test(true);
+        let output = paint(&mut app, &context);
+        assert!(peint(&output, &tr!("action-object-manager")));
+        assert!(peint(&output, "Premier"), "témoin : l'arbre est peint");
+        let docked = PanelState::load(&context, id).unwrap().outer_rect;
+        assert_eq!(docked.right(), screen.right(), "ancré au bord droit");
+
+        app.object_manager_floating = true;
+        let context = egui::Context::default();
+        egui_extras::install_image_loaders(&context);
+        let output = paint(&mut app, &context);
+        assert!(peint(&output, "Premier"));
+        assert!(
+            PanelState::load(&context, id).is_none(),
+            "plus de panneau ancré"
+        );
+        let floating = app.object_manager_rect.expect("rectangle flottant retenu");
+        assert!(
+            screen.contains_rect(floating),
+            "{floating:?} dans {screen:?}"
+        );
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn sans_graphe_le_panneau_le_dit_et_ne_demande_rien() {
         let (project, _, spec, model) = trois_series();

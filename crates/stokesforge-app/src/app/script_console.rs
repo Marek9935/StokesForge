@@ -8,7 +8,8 @@
 //! principale — c'est [`AppState::dispatch`] qui garantit qu'elles ne
 //! bloquent pas.
 //!
-//! Sorti d'`app.rs` tel quel (#121).
+//! Sorti d'`app.rs` tel quel (#121) ; le panneau qui la porte,
+//! [`StokesForgeApp::script_panel`], l'a rejoint (#122).
 
 use eframe::egui;
 
@@ -137,7 +138,8 @@ const SCRIPT_PANEL_HEIGHT: f32 = 220.0;
 
 impl StokesForgeApp {
     /// Peint la console de script dans son panneau fixe, ancré en bas — voir
-    /// la doc de tête du module, § Console de script. Appelé par
+    /// la doc de tête d'`app.rs`, § Ce qui reste ici (l'ordre des panneaux).
+    /// Appelé par
     /// [`StokesForgeApp::ui`] *avant* [`StokesForgeApp::project_manager_panel`]
     /// (`egui::Panel::left`) : avec `egui::Panel`, le premier panneau ajouté
     /// est le plus extérieur, donc celui-ci, posé en premier, réserve sa
@@ -305,5 +307,36 @@ mod tests {
             expected,
             "interpréteur présent : {available}"
         );
+    }
+
+    /// Repliée au démarrage, la console n'a que sa barre de titre (#79) ;
+    /// une exécution demandée dans l'image la déplie, pour qu'on en voie la
+    /// sortie, et le panneau déplié peint le contenu.
+    #[test]
+    fn lancer_un_script_deplie_la_console() {
+        let (_session, state) = state();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        egui_extras::install_image_loaders(&context);
+        let paint = |app: &mut StokesForgeApp, mut actions: Vec<Action>| {
+            let mut output = context.run_ui(input(Vec::new()), |ui| {
+                let ctx = ui.ctx().clone();
+                app.script_panel(ui, &ctx, &mut actions);
+            });
+            output.textures_delta.clear();
+            output
+        };
+        assert!(app.script_collapsed, "repliée au démarrage");
+        let output = paint(&mut app, Vec::new());
+        assert!(app.script_collapsed, "sans exécution, elle reste repliée");
+        assert!(painted(&output, &tr!("script-title")));
+        assert!(
+            !painted(&output, &tr!("script-not-run")),
+            "repliée : pas de contenu"
+        );
+
+        let output = paint(&mut app, vec![Action::RunScript]);
+        assert!(!app.script_collapsed, "une exécution la déplie");
+        assert!(painted(&output, &tr!("script-not-run")));
     }
 }
