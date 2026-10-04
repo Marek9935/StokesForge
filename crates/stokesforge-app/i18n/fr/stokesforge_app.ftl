@@ -13,6 +13,12 @@ window-title = StokesForge
 window-title-project-manager = StokesForge — Gestionnaire de projet
 window-title-detached = StokesForge — { $name }
 
+## Boîtes de fichier du projet (#127)
+
+project-open-title = Ouvrir un projet
+project-save-title = Enregistrer le projet
+project-file-filter = Projet StokesForge
+
 ## Menus et actions (#42)
 
 menu-file = Fichier

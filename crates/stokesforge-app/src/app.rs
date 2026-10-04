@@ -573,8 +573,8 @@ impl StokesForgeApp {
     /// [`AppState::dispatch`] par l'action habituelle.
     fn choose_open_path(&mut self, actions: &mut Vec<Action>) {
         if let Some(path) = rfd::FileDialog::new()
-            .set_title("Ouvrir un projet")
-            .add_filter("Projet StokesForge", &["stf", "stokesforge"])
+            .set_title(tr!("project-open-title"))
+            .add_filter(tr!("project-file-filter"), &["stf", "stokesforge"])
             .pick_file()
         {
             self.state.set_path(path.display().to_string());
@@ -617,8 +617,8 @@ impl StokesForgeApp {
     /// [`AppState::dispatch`] par l'action habituelle.
     fn choose_save_path(&mut self, actions: &mut Vec<Action>) {
         if let Some(path) = rfd::FileDialog::new()
-            .set_title("Enregistrer le projet")
-            .add_filter("Projet StokesForge", &["stf", "stokesforge"])
+            .set_title(tr!("project-save-title"))
+            .add_filter(tr!("project-file-filter"), &["stf", "stokesforge"])
             .set_file_name(suggested_file_name(self.state.path()))
             .save_file()
         {

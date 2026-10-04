@@ -13,6 +13,12 @@ window-title = StokesForge
 window-title-project-manager = StokesForge — Project Manager
 window-title-detached = StokesForge — { $name }
 
+## Boîtes de fichier du projet (#127)
+
+project-open-title = Open Project
+project-save-title = Save Project
+project-file-filter = StokesForge project
+
 ## Menus and actions (#42)
 ## One label per action, shared by the menu bar, the context menus and the
 ## tooltips (`action-*`). `.hint` is the tooltip (the effect); `.disabled` is the

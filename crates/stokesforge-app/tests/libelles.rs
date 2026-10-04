@@ -3,7 +3,7 @@
 //! # `aucun_libelle_en_dur`
 //!
 //! Aucun littéral de chaîne dans les appels qui posent un texte à l'écran
-//! (`label`, `button`, `menu_button`, `checkbox`, `radio_value`,
+//! (`label`, `button`, `menu_button`, `checkbox`, `radio_value`, `set_title`,
 //! `selectable_value`, `selectable_label`, `on_hover_text`, `heading`…), ni dans
 //! les widgets bâtis par `Button::new("…")` / `RichText::new("…")`, ni dans les
 //! tables `fn label()` / `fn title()` : tout texte passe par `tr!` avec une clé
@@ -13,6 +13,8 @@
 //!
 //! Un littéral sans aucune lettre (`"→"`, `" · "`, `"{}"`) n'est pas un texte à
 //! traduire et passe ; la clé d'un `tr!("…")` non plus.
+//! Pour `add_filter` (#127), seul le premier argument est un libellé : les
+//! extensions sont techniques, comme les sigles de format (`SVG`, `PDF`, `PNG`).
 //!
 //! Les sources sont lues par `support/sources.rs` (#116) : tout `src/`,
 //! sous-dossiers compris, et le code de test retiré item par item — un
@@ -62,6 +64,8 @@ const APPELS: &[&str] = &[
     "hint_text",
     "selected_text",
     "with_title",
+    "set_title",
+    "add_filter",
     "strong",
     "weak",
     "small",
@@ -153,6 +157,22 @@ fn extrait(source: &Masque, ouverture: usize) -> String {
         .collect()
 }
 
+/// La virgule qui termine le nom d'un filtre, sans confondre celles d'un
+/// `tr!`, `format!` ou bloc imbriqué avec la séparation des arguments.
+/// Dans le masque, les virgules des chaînes sont déjà effacées.
+fn fin_premier_argument(masque: &[char], debut: usize, fin: usize) -> usize {
+    let mut i = debut;
+    while i < fin {
+        match masque[i] {
+            ',' => return i,
+            '(' | '[' | '{' => i = fermante(masque, i).unwrap_or(fin),
+            _ => {}
+        }
+        i += 1;
+    }
+    fin
+}
+
 /// Toutes les infractions d'un fichier, code de test exclu.
 fn infractions(
     fichier: &Fichier,
@@ -196,14 +216,30 @@ fn infractions(
         let Some(f) = fermante(masque, parenthese) else {
             continue;
         };
-        for ouverture in litteraux_textuels(masque, parenthese + 1, f) {
+        let filtre = appel == ".add_filter(";
+        let fin = if filtre {
+            fin_premier_argument(masque, parenthese + 1, f)
+        } else {
+            f
+        };
+        for ouverture in litteraux_textuels(masque, parenthese + 1, fin) {
+            let extrait = extrait(&source, ouverture);
+            // Même distinction que dans la zone #43 : un sigle de format
+            // n'a pas de traduction. Cela ne vaut pas pour un titre de boîte.
+            if filtre
+                && extrait[1..extrait.len() - 1]
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            {
+                continue;
+            }
             if vus.insert(ouverture) {
                 trouvees.push(Infraction {
                     fichier: chemin.clone(),
                     fonction: fonction_a(position),
                     ligne: ligne_de(&source.original, ouverture),
                     appel: appel.clone(),
-                    extrait: extrait(&source, ouverture),
+                    extrait,
                 });
             }
         }
@@ -460,6 +496,59 @@ fn la_zone_43_suit_ses_fonctions_hors_d_app_rs() {
 
 fn trouve(code: &str) -> Vec<Infraction> {
     infractions(&fichier("t.rs", code), APPELS, CONSTRUCTEURS, TABLES)
+}
+
+/// #127 : les titres et noms de filtres natifs sont des textes d'interface,
+/// même dans un sous-module ; les extensions sont des données techniques.
+#[test]
+fn la_garde_voit_les_titres_et_noms_de_filtres_des_boites_de_fichier() {
+    for (code, attendu) in [
+        (
+            r#"fn ouvrir() { dialog.set_title("Ouvrir un projet"); }"#,
+            1,
+        ),
+        (
+            r#"fn ouvrir() { dialog.add_filter("Projet StokesForge", &["stf", "stokesforge"]); }"#,
+            1,
+        ),
+        (
+            r#"fn ouvrir() { dialog.add_filter("SVG images, PDF documents", &["svg", "pdf"]); }"#,
+            1,
+        ),
+        (
+            r#"fn ouvrir() { dialog.add_filter(format!("Projet {}", nom), &["stf"]); }"#,
+            1,
+        ),
+        (
+            r#"fn ouvrir() { dialog.add_filter(format!("{} {}", tr!("filter"), "projets"), &["stf"]); }"#,
+            1,
+        ),
+        (
+            r#"fn ouvrir() { dialog.add_filter(if a { "Projets" } else { "Tous les fichiers" }, &["stf"]); }"#,
+            2,
+        ),
+    ] {
+        let rapport = ecarts(&[fichier("app/fichiers.rs", code)]);
+        assert_eq!(rapport.len(), attendu, "non vu : {code}\n{rapport:?}");
+        assert!(rapport.iter().all(|e| e.contains("src/app/fichiers.rs:1")));
+    }
+}
+
+#[test]
+fn la_garde_des_filtres_accepte_les_traductions_et_les_formats_techniques() {
+    for code in [
+        r#"fn ouvrir() { dialog.set_title(tr!("project-open-title")); }"#,
+        r#"fn ouvrir() { dialog.add_filter(tr!("project-file-filter"), &["stf", "stokesforge"]); }"#,
+        r#"fn ouvrir() { dialog.add_filter(tr!("filter", count = f(a, b)), &["stf"]); }"#,
+        r#"fn exporter() { dialog.add_filter("SVG", &["svg"]).add_filter("PDF", &["pdf"]).add_filter("PNG", &["png"]); }"#,
+    ] {
+        assert!(trouve(code).is_empty(), "faux positif : {code}");
+    }
+    // Un titre n'est pas un nom de format : même un texte en capitales est gardé.
+    assert_eq!(
+        trouve(r#"fn ouvrir() { dialog.set_title("OUVRIR"); }"#).len(),
+        1
+    );
 }
 
 #[test]

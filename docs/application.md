@@ -723,7 +723,12 @@ dans `label`, `button`, `menu_button`, `checkbox`, `radio_value`,
 Elle est **absolue** : aucune dérogation (les 213 littéraux d'avant #41 ont été
 convertis, #42 à #45, et la liste supprimée à #48). Elle voit aussi `strong`,
 `weak`, `small`, `monospace`, `colored_label`, et ignore les champs de format
-(`{code}`). La zone #43 (propriétés du graphe, éditeur de texte, pied des
+(`{code}`). Les boîtes de fichier natives sont gardées aussi (#127) :
+`set_title` pour le titre, `add_filter` pour le nom visible du filtre ; les
+extensions et les sigles de format (`SVG`, `PDF`, `PNG`) restent techniques.
+Les titres d'ouverture et d'enregistrement ainsi que le filtre du projet
+passent par `tr!`, dans la langue courante au moment d'ouvrir la boîte.
+La zone #43 (propriétés du graphe, éditeur de texte, pied des
 dialogues, export) reste gardée plus strictement (`ZONE_43` : aucun littéral
 textuel dans ses fonctions, quelle que soit la forme de l'appel). Une clé du
 catalogue `en` qu'aucun source de `src/` n'emploie fait échouer

@@ -193,11 +193,16 @@ se lirait comme une clé de variante).
 `crates/stokesforge-app/tests/libelles.rs` lit toutes les sources de `src/` et refuse
 un littéral textuel dans `label`, `button`, `menu_button`, `checkbox`, `radio`,
 `radio_value`, `selectable_value`, `selectable_label`, `toggle_value`,
-`on_hover_text`, `heading`, `hint_text`, `selected_text`, `with_title`, dans les
+`on_hover_text`, `heading`, `hint_text`, `selected_text`, `with_title`, `set_title`,
+dans le nom visible des filtres `add_filter` (#127), dans les
 `Button::new(…)`, `RichText::new(…)`, `Label::new(…)`, `Checkbox::new(…)`,
 `CollapsingHeader::new(…)`, et dans les tables `fn label()` / `fn title()`. Un
-littéral sans lettre (`"→"`, `"{}"`) ou la clé d'un `tr!` ne compte pas. Elle ne
-voit pas un `&str` passé en variable ni un titre de `modal_dialog_with` : les
+littéral sans lettre (`"→"`, `"{}"`) ou la clé d'un `tr!` ne compte pas. Dans
+`add_filter`, seul le premier argument est un libellé : les extensions et les
+sigles de format (`SVG`, `PDF`, `PNG`) sont techniques. Le titre et le nom
+visible d'un filtre traduit passent par `tr!` au moment d'ouvrir la boîte,
+comme le reste de l'interface. Elle ne voit pas un `&str` passé en variable ni
+un titre de `modal_dialog_with` : les
 tickets de conversion étendent la garde quand ils traitent ces zones. #43 l'a
 fait pour les propriétés du graphe : `ZONE_43` (même fichier) interdit **tout**
 littéral textuel dans ses fonctions (`strong`, `weak`, `color_field`,
