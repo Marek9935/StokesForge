@@ -135,3 +135,271 @@ pub(super) fn open_project_in_new_window(path: &std::path::Path) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct FakeFile(std::path::PathBuf);
+
+    impl egui::DroppedFile for FakeFile {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+        fn bytes(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn fichier(name: &str) -> egui::DroppedFileHandle {
+        std::sync::Arc::new(FakeFile(name.into()))
+    }
+
+    /// Ce qu'une image injecte : pointeur, fichiers lâchés, fichiers qui
+    /// survolent la fenêtre.
+    struct Image {
+        pointer: egui::Pos2,
+        dropped: Vec<egui::DroppedFileHandle>,
+        hovered: bool,
+    }
+
+    fn input(image: &Image) -> egui::RawInput {
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events: vec![egui::Event::PointerMoved(image.pointer)],
+            ..Default::default()
+        };
+        input.dropped_files = image.dropped.clone();
+        if image.hovered {
+            input.hovered_files = vec![egui::HoveredFile::default()];
+        }
+        input
+    }
+
+    /// Un faux classeur `book` posé en (`at`, 300 × 300), qui réclame le dépôt
+    /// en se peignant comme le fait le vrai.
+    fn classeur(ctx: &egui::Context, name: &str, at: egui::Pos2, book: NodeId) {
+        egui::Area::new(egui::Id::new(name))
+            .fixed_pos(at)
+            .show(ctx, |ui| {
+                ui.allocate_ui(egui::vec2(300.0, 300.0), |ui| {
+                    ui.set_min_size(egui::vec2(300.0, 300.0));
+                    claim_file_drop(ui, book);
+                });
+            });
+    }
+
+    /// Issue #8 : un fichier lâché sur un classeur est réclamé par ce classeur
+    /// (et seulement lui), un fichier lâché ailleurs n'a pas de classeur, et un
+    /// survol sans dépôt n'émet aucune action. Sans fenêtre : les événements
+    /// `hovered_files`/`dropped_files` sont injectés dans l'entrée d'egui.
+    #[test]
+    fn un_depot_est_reclame_par_le_classeur_sous_le_curseur() {
+        let book = NodeId::from_raw(42);
+        let context = egui::Context::default();
+        // Un classeur occupe (100,100)-(400,400) ; le curseur est dedans ou dehors.
+        let frame = |image: Image| -> (Option<Action>, egui::FullOutput) {
+            let mut result = None;
+            let mut output = context.run_ui(input(&image), |ui| {
+                let ctx = ui.ctx().clone();
+                begin_file_drop(&ctx);
+                classeur(&ctx, "faux_classeur", egui::pos2(100.0, 100.0), book);
+                result = finish_file_drop(&ctx);
+            });
+            output.textures_delta.clear();
+            (result, output)
+        };
+        let on_book = egui::pos2(200.0, 200.0);
+        let image = |pointer, dropped: &[&str], hovered| Image {
+            pointer,
+            dropped: dropped.iter().map(|name| fichier(name)).collect(),
+            hovered,
+        };
+        // Deux images de chauffe (l'Area n'est interactive qu'après la première).
+        frame(image(on_book, &[], false));
+        frame(image(on_book, &[], false));
+        assert_eq!(frame(image(on_book, &[], false)).0, None, "pas de dépôt");
+        assert_eq!(
+            frame(image(on_book, &[], true)).0,
+            None,
+            "un survol sans dépôt n'émet rien"
+        );
+        let on_book = frame(image(on_book, &["mesure.csv"], false)).0;
+        assert!(
+            matches!(&on_book, Some(Action::DropFiles { target_book: Some(b), paths }) if *b == book && paths.len() == 1),
+            "{on_book:?}"
+        );
+        let elsewhere = frame(image(egui::pos2(700.0, 500.0), &["mesure.csv"], false)).0;
+        assert!(
+            matches!(
+                &elsewhere,
+                Some(Action::DropFiles {
+                    target_book: None,
+                    ..
+                })
+            ),
+            "{elsewhere:?}"
+        );
+    }
+
+    /// Le survol d'un fichier se voit : un contour autour de la fenêtre
+    /// (destination « nouveau classeur »), plus épais autour du classeur
+    /// survolé. Sans survol, aucun contour.
+    #[test]
+    fn le_survol_d_un_fichier_entoure_la_fenetre_et_le_classeur_survole() {
+        let book = NodeId::from_raw(42);
+        let context = egui::Context::default();
+        let strokes = |pointer: egui::Pos2, hovered: bool| -> Vec<f32> {
+            let mut widths = Vec::new();
+            for _ in 0..3 {
+                let image = Image {
+                    pointer,
+                    dropped: Vec::new(),
+                    hovered,
+                };
+                let mut output = context.run_ui(input(&image), |ui| {
+                    let ctx = ui.ctx().clone();
+                    begin_file_drop(&ctx);
+                    classeur(&ctx, "faux_classeur", egui::pos2(100.0, 100.0), book);
+                    finish_file_drop(&ctx);
+                });
+                output.textures_delta.clear();
+                widths = output
+                    .shapes
+                    .iter()
+                    .filter_map(|painted| match &painted.shape {
+                        egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => {
+                            Some(rect.stroke.width)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+            }
+            widths.sort_by(f32::total_cmp);
+            widths
+        };
+        assert!(
+            strokes(egui::pos2(200.0, 200.0), false).is_empty(),
+            "sans survol, rien"
+        );
+        assert_eq!(
+            strokes(egui::pos2(700.0, 500.0), true),
+            vec![2.0],
+            "la fenêtre seule"
+        );
+        assert_eq!(
+            strokes(egui::pos2(200.0, 200.0), true),
+            vec![2.0, 3.0],
+            "la fenêtre et le classeur survolé"
+        );
+    }
+
+    /// Deux classeurs superposés : le dépôt va à celui du dessus, seul à
+    /// répondre au pointeur (`rect_contains_pointer` tient compte de
+    /// l'empilement). Et si deux classeurs le réclament, le premier le garde.
+    #[test]
+    fn le_depot_va_au_classeur_du_dessus_et_au_premier_qui_le_reclame() {
+        let dessous = NodeId::from_raw(1);
+        let dessus = NodeId::from_raw(2);
+        let context = egui::Context::default();
+        let frame = |dropped: Vec<egui::DroppedFileHandle>| -> Option<Action> {
+            let image = Image {
+                pointer: egui::pos2(250.0, 250.0),
+                dropped,
+                hovered: false,
+            };
+            let mut result = None;
+            let mut output = context.run_ui(input(&image), |ui| {
+                let ctx = ui.ctx().clone();
+                begin_file_drop(&ctx);
+                // Peint en second, le classeur « dessus » est au premier plan.
+                classeur(&ctx, "dessous", egui::pos2(100.0, 100.0), dessous);
+                classeur(&ctx, "dessus", egui::pos2(200.0, 200.0), dessus);
+                result = finish_file_drop(&ctx);
+            });
+            output.textures_delta.clear();
+            result
+        };
+        frame(Vec::new());
+        frame(Vec::new());
+        assert_eq!(
+            frame(vec![fichier("mesure.csv")]),
+            Some(Action::DropFiles {
+                paths: vec!["mesure.csv".into()],
+                target_book: Some(dessus),
+            })
+        );
+
+        // Deux réclamations dans la même zone (aucun empilement entre elles,
+        // contexte neuf sans les fenêtres d'avant) : la première l'emporte.
+        let context = egui::Context::default();
+        let image = Image {
+            pointer: egui::pos2(200.0, 200.0),
+            dropped: vec![fichier("mesure.csv")],
+            hovered: false,
+        };
+        let mut result = None;
+        let mut output = context.run_ui(input(&image), |ui| {
+            begin_file_drop(ui.ctx());
+            claim_file_drop(ui, dessous);
+            claim_file_drop(ui, dessus);
+            result = finish_file_drop(ui.ctx());
+        });
+        output.textures_delta.clear();
+        assert_eq!(
+            result,
+            Some(Action::DropFiles {
+                paths: vec!["mesure.csv".into()],
+                target_book: Some(dessous),
+            })
+        );
+    }
+
+    /// Un dépôt ne sert qu'une fois : `finish_file_drop` le consomme, et une
+    /// image sans fichier efface un dépôt qu'on n'aurait pas consommé.
+    #[test]
+    fn un_depot_ne_sert_qu_une_fois_et_ne_survit_pas_a_l_image_suivante() {
+        let context = egui::Context::default();
+        let run = |dropped: Vec<egui::DroppedFileHandle>, finish: bool| -> Option<Action> {
+            let image = Image {
+                pointer: egui::pos2(10.0, 10.0),
+                dropped,
+                hovered: false,
+            };
+            let mut result = None;
+            let mut output = context.run_ui(input(&image), |ui| {
+                begin_file_drop(ui.ctx());
+                if finish {
+                    result = finish_file_drop(ui.ctx());
+                    // Un second appel dans la même image ne rejoue rien.
+                    assert_eq!(finish_file_drop(ui.ctx()), None);
+                }
+            });
+            output.textures_delta.clear();
+            result
+        };
+        assert!(run(vec![fichier("a.csv")], true).is_some());
+        // Dépôt non consommé, puis une image sans fichier : il est oublié.
+        run(vec![fichier("b.csv")], false);
+        let mut output = context.run_ui(
+            input(&Image {
+                pointer: egui::pos2(10.0, 10.0),
+                dropped: Vec::new(),
+                hovered: false,
+            }),
+            |ui| {
+                begin_file_drop(ui.ctx());
+                assert_eq!(
+                    finish_file_drop(ui.ctx()),
+                    None,
+                    "le dépôt d'avant ne revient pas"
+                );
+            },
+        );
+        output.textures_delta.clear();
+    }
+}

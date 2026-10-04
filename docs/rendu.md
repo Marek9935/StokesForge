@@ -48,7 +48,8 @@ Toute couleur du spec peut porter une opacité (`#RRGGBBAA`,
 fond par défaut d'un graphe est sans couleur (`stokesforge_plot::TRANSPARENT`).
 Un fond d'opacité nulle n'est **pas peint** : l'export SVG, PNG ou PDF n'a pas
 de fond (`stokesforge-render-svg`, test `un_fond_sans_couleur_donne_un_png_transparent`).
-À l'écran, `stokesforge-app` peint un blanc sous la figure (`display_backdrop`) :
+À l'écran, `stokesforge-app` peint un blanc sous la figure
+(`app::graph_window::display_backdrop`) :
 ce blanc vit dans l'application, jamais dans ce crate, sinon il serait exporté.
 Pour choisir l'encre automatique, un fond (semi-)transparent est jugé
 composé sur du blanc (`color::over_white`).
@@ -433,7 +434,7 @@ et `hit::component_at` rend `PlotComponent::Text(TextTarget)` /
 (aperçu `set_text_preview`, même motif que les textes libres) et le
 double-clic émet `GraphEvent::EditText` / `EditLegendEntry`. Sur un objet graphique, une courbe ou un axe (#113), il
 émet `OpenShapeProperties` / `OpenSeriesProperties` / `OpenAxisProperties` — l'application
-les traduit en `Action::OpenObjectProperties` / `OpenPlotSettings`, les mêmes que le
+(`app::graph_window::annotation_interactions`) les traduit en `Action::OpenObjectProperties` / `OpenPlotSettings`, les mêmes que le
 double-clic d'une ligne de l'Object Manager ; ailleurs, il réinitialise le zoom.
 
 **Texte repris automatiquement** (issue #33) : un nom de série laissé vide

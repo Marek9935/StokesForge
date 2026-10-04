@@ -117,9 +117,10 @@ Ce geste n'a pas de raccourci supplémentaire ; il reste accessible au menu.
 
 Déposer des fichiers sur la fenêtre principale émet `Action::DropFiles`. Le
 classeur flottant sous le curseur réclame le dépôt en se peignant
-(`claim_file_drop`) : il reçoit une feuille par fichier, sinon un nouveau
+(`app::file_drop::claim_file_drop`) : il reçoit une feuille par fichier, sinon un nouveau
 classeur est créé. Les `.stf` ne sont jamais importés : `AppState` les met en
 file (`take_projects_to_open`) et `app.rs` lance un second processus
+(`file_drop::open_project_in_new_window`)
 `stokesforge-app <chemin>`. Chaque fichier utilise le modèle qui le reconnaît,
 sinon le dernier modèle utilisé dans cette session, sinon la recette permissive.
 Il passe par la conversion et l'application communes à l'assistant — une
@@ -269,7 +270,7 @@ entièrement l'onglet sélectionné et ses deux voisins — cliquer sur le derni
 onglet visible ne révèle qu'un onglet de plus (`scroll_tab_strip_to_selected`,
 issue #1). Les notes et matrices restent bornées au rectangle commun. Dans un
 graphe (`graph_view_contents`,
-`crates/stokesforge-app/src/app.rs`), la figure garde le ratio de
+`crates/stokesforge-app/src/app/graph_window.rs`), la figure garde le ratio de
 `DEFAULT_FIGURE_SIZE` (`stokesforge-render::pipeline`, 4:3) mais se met à l'échelle
 « contain » dans l'espace disponible — maximisée en prenant la dimension
 limitante, largeur ou hauteur, aussi bien en agrandissant qu'en rétrécissant
@@ -294,8 +295,18 @@ d'une fenêtre ouverte), `app/dialogs.rs` (`modal_dialog`, `modal_dialog_with`),
 `app/tab_strip.rs` (la bande d'onglets, `tab_strip`) et `app/shortcuts.rs` (les
 constantes `SHORTCUT_*` ; leur consommation, `collect_shortcuts`, reste dans `app.rs`).
 L'assistant d'import (#118) : `app/import_wizard.rs` (`import_window`, ses six
-étapes, l'aperçu coloré par rôle, les tables de libellés). La suite (propriétés
-du graphe, grille, graphe, menus) est #119–#123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
+étapes, l'aperçu coloré par rôle, les tables de libellés). Les surfaces de
+contenu (#121) : `app/graph_window.rs` (la figure `graph_view_contents`, sa
+zone de dépôt, son menu contextuel, `annotation_interactions`, l'ordre et les
+propriétés des objets, `request_graph_export`), `app/graph_text_edit.rs` (les
+éditeurs sur place et la mise en forme en attente de la barre),
+`app/object_manager_ui.rs` (l'arbre peint de l'Object Manager, à côté du modèle
+`object_manager.rs`), `app/project_manager.rs` (l'arbre du Project Manager),
+`app/script_console.rs`, `app/file_drop.rs` (dépôt de fichiers) et
+`app/contents.rs` (`tab_contents`, `note_contents`, `matrix_contents`) ; les
+méthodes de `StokesForgeApp` qui portent ces panneaux restent dans `app.rs`
+jusqu'à #122. La suite (propriétés du graphe, grille, menus) est #119, #120,
+#122 et #123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
 et cherchent leurs fonctions par leur nom (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
@@ -464,7 +475,8 @@ onglets détachés — les champs inutilisés pour la nature du `Tab` servi
 restent à leur valeur par défaut.
 
 **La lecture du modèle est factorisée, l'édition transitoire ne l'est pas.**
-`tab_contents` (partagée par les fenêtres flottantes et la zone de maximisation)
+`tab_contents` (`app/contents.rs`, avec `note_contents` et `matrix_contents` ;
+partagée par les fenêtres flottantes et la zone de maximisation)
 prend `&mut AppState`, que la fermeture `'static`, `Send + Sync` de
 `show_viewport_deferred` ne peut pas capturer — le même problème déjà résolu
 pour le PM (mettre `AppState` entière derrière un verrou déborderait le
@@ -904,7 +916,7 @@ portée par le mécanisme natif d'egui 0.36
 (`egui::Response::dnd_set_drag_payload`/`dnd_hover_payload`/
 `dnd_release_payload`, `Any + Send + Sync`).
 
-**Cible.** Chaque `Tab::Graph` est enrobé par `app::graph_drop_target`
+**Cible.** Chaque `Tab::Graph` est enrobé par `app::graph_window::graph_drop_target`
 (appelée par `tab_contents`, seul point d'entrée commun au dock et aux
 onglets détachés — voir sa doc de tête) : un survol avec une
 `ColumnDragPayload` active dessine un contour sobre autour du graphe, à la
@@ -913,7 +925,9 @@ palette inventée) ; un relâchement au-dessus convertit la charge utile en
 `Action::AddSeriesToGraph` via `state::drop_payload_action`, une fonction
 pure elle aussi testée directement. Relâcher ailleurs qu'au-dessus d'un
 graphe ne fait rien — `dnd_release_payload` ne répond que si le pointeur est
-contenu dans le rectangle du graphe au moment du relâchement.
+contenu dans le rectangle du graphe au moment du relâchement. Contour, dépôt
+et relâchement ailleurs sont testés sans fenêtre
+(`graph_window::tests::deposer_des_colonnes_sur_le_graphe_ajoute_une_serie_et_ailleurs_rien`).
 
 **Onglet détaché.** Comme `graph_drop_target` opère via `tab_contents`,
 identique pour le dock et pour une fenêtre détachée (voir la doc de tête de
@@ -958,7 +972,7 @@ par `Action::OpenPlotSettings { graph, tab, axis }`.
 **Double-clic sur la figure** (#113) : sur un axe, une courbe ou un objet
 graphique, il ouvre leurs paramètres (`GraphEvent::OpenAxisProperties`,
 `OpenSeriesProperties`, `OpenShapeProperties`, traduits par
-`annotation_interactions`) ; sur un texte, il garde l'édition sur place ;
+`graph_window::annotation_interactions`) ; sur un texte, il garde l'édition sur place ;
 dans la zone de tracé nue, il réinitialise le zoom. Dans l'Object Manager,
 toute ligne (graphe, calque, groupes, séries, axes, objets) ouvre ses
 paramètres au double-clic. Limite connue : sur un graphe à plusieurs calques,
@@ -967,7 +981,7 @@ l'axe double-cliqué ouvre l'onglet Axes du calque déjà choisi (commentaire de
 
 **Titres, titres d'axe et légende** (issue #53) : se désignent comme un texte
 libre. Double-clic sur un titre ou un titre d'axe → éditeur sur place
-(`app::text_editor_ui`, un champ ; Entrée ou clic ailleurs valide, Échap
+(`app::graph_text_edit::text_editor_ui`, un champ ; Entrée ou clic ailleurs valide, Échap
 annule) ; sur une entrée de légende → renomme la série (`SetLegendEntryName`,
 vide = nom dérivé de la colonne) ; sur le cadre de la légende, rien (elle n'a
 pas de texte à elle). Un glisser déplace le texte (ancré aux données : il suit
@@ -982,7 +996,7 @@ d'un coup. Chaque geste validé est **une** `Action` (`SetTextAnchor`,
 « Add Text » au point cliqué, ou « Graph » → « Add Text »
 (au centre du premier panneau). Le texte s'édite **sur place** : un champ posé
 sur le texte, et au-dessus une barre couleur / taille / rotation
-(`app::annotation_editor_ui`) ; Entrée ou clic ailleurs valide, Échap annule.
+(`app::graph_text_edit::annotation_editor_ui`) ; Entrée ou clic ailleurs valide, Échap annule.
 Le champ s'écrit **dans le cadre du rendu** (issue #37) : centré sur le centre
 du texte rendu, à la taille de police du texte (corps × échelle d'affichage de
 la figure), droit même si le texte est tourné — son placement est la fonction
@@ -1009,7 +1023,7 @@ dans une fenêtre détachée.
 sélectionne. Avec le Pointeur : un clic sélectionne (contour et poignées),
 glisser le corps déplace, glisser une poignée redimensionne, Suppr retire. Menu
 « Graph » et clic droit sur l'objet : « Bring to Front », « Send to Back »,
-« Delete Object » (`shape_order_buttons`). Chaque geste validé est **une**
+« Delete Object » (`graph_window::shape_order_buttons`). Chaque geste validé est **une**
 `Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec` ou `EditPlotSpec`. La
 partie « format d'objet » de la barre `Tools` (issue #64, fusionnée par #93 ;
 `object_format.rs`) règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
@@ -1021,7 +1035,7 @@ une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
 Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
 compris dans une fenêtre détachée). Un sélecteur `rfd` (SVG, PDF, PNG) propose
 le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
-`.svg` si elle manque. `app::request_graph_export` lit le zoom de la vue
+`.svg` si elle manque. `app::graph_window::request_graph_export` lit le zoom de la vue
 (`GraphView::framed_spec`) et pousse `Action::ExportGraph { path, spec }` ;
 `AppState` écrit le fichier (`stokesforge-render-svg`, texte Typst compris) et le dit
 dans la barre d'état. Aucune commande : le modèle n'est pas touché. La
@@ -1083,7 +1097,7 @@ damier (dans l'échantillon du sélecteur). **Une palette par usage** (`stokesfo
   graphe neuf (`PlotSpec::default`) : la figure exportée n'a pas de fond,
   pour s'intégrer à une autre présentation ; à l'écran, elle se montre sur
   un fond **blanc** peint par l'application sous la figure
-  (`app::display_backdrop`), jamais exporté. Puis des fonds clairs, et des fonds
+  (`app::graph_window::display_backdrop`), jamais exporté. Puis des fonds clairs, et des fonds
   sombres (le texte automatique passe en blanc, voir `docs/rendu.md`). Un
   fond vide (fichiers écrits avant ce défaut) reste blanc.
 
@@ -1104,7 +1118,7 @@ réglage de couleur passe par ce sélecteur, avec l'usage qui lui correspond.
 
 **Trois façons de l'ouvrir** :
 
-- **clic droit sur un composant du graphe** (`app::graph_context_menu`) :
+- **clic droit sur un composant du graphe** (`app::graph_window::graph_context_menu`) :
   titre, zone de tracé, axe, titre d'axe. Le menu propose « Properties… »,
   qui ouvre l'onglet qui règle ce composant (`state::PlotTarget::
   settings_page`), et « Reset Zoom ». Le composant sous le
@@ -1622,6 +1636,9 @@ Annuler ne change rien. Les parents ont leurs propriétés et leur visibilité ;
 la suppression concerne les feuilles, et le renommage les séries.
 
 `object_manager.rs` porte la projection, la visibilité et les règles de
-réordonnancement ; `app.rs` porte le contenu commun ancré/flottant et la glu
-de sélection vers `GraphView`. Les décisions de mutation restent dans
+réordonnancement ; `app/object_manager_ui.rs` (#121) peint le contenu commun
+ancré/flottant (`object_manager_contents`, menus, cases, glisser, raccourcis)
+et porte la glu de sélection vers `GraphView` (`select_manager_target`,
+`selected_manager_target`) ; ce qu'il demande à la vue remonte en
+`ObjectManagerRequest`, exécuté par `StokesForgeApp` dans `app.rs`. Les décisions de mutation restent dans
 `AppState::dispatch`, avec les commandes de la session.

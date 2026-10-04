@@ -612,3 +612,314 @@ fn object_manager_object_row(
     })
     .inner
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stokesforge_core::Project;
+    use stokesforge_plot::{
+        AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesRef, SeriesSpec, ShapeKind,
+        ShapeRef, ShapeSpec, TextTarget,
+    };
+
+    use crate::object_manager::VisibilityTarget as T;
+
+    /// Un graphe de trois séries (« Premier », « Deuxième », « Dernier »), la
+    /// première sélectionnée, et son arbre d'Object Manager.
+    fn trois_series() -> (Project, NodeId, PlotSpec, crate::object_manager::ObjectTree) {
+        let mut project = Project::new("Objets").unwrap();
+        let root = project.root();
+        let mut panel = PanelSpec::default();
+        for name in ["Premier", "Deuxième", "Dernier"] {
+            let mut series = SeriesSpec::new(NodeId::from_raw(900));
+            series.name = name.into();
+            panel.series.push(series);
+        }
+        let spec = PlotSpec::default().with_panels(panel);
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
+        let model =
+            crate::object_manager::object_tree(project.tree(), graph, Some(SeriesRef::new(0, 0)))
+                .unwrap();
+        (project, graph, spec, model)
+    }
+
+    /// Une image de l'Object Manager sur un écran de 600 × 500 : la sortie,
+    /// les actions et les demandes de l'image.
+    fn image(
+        ctx: &egui::Context,
+        tree: &Tree,
+        model: Option<&crate::object_manager::ObjectTree>,
+        spec: Option<&PlotSpec>,
+        events: Vec<egui::Event>,
+    ) -> (egui::FullOutput, Vec<Action>, Vec<ObjectManagerRequest>) {
+        let mut actions = Vec::new();
+        let mut requests = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 500.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                requests =
+                    object_manager_contents(ui, tree, model, spec, false, false, &mut actions);
+            },
+        );
+        output.textures_delta.clear();
+        (output, actions, requests)
+    }
+
+    fn text_center(output: &egui::FullOutput, text: &str) -> egui::Pos2 {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(shape) if shape.galley.text() == text => {
+                    Some(shape.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("texte absent : {text}"))
+    }
+
+    fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+    #[test]
+    fn glisser_une_serie_emet_un_seul_deplacement_au_rang_final() {
+        let (project, _graph, spec, model) = trois_series();
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let image = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        image(Vec::new());
+        let (output, _, _) = image(Vec::new());
+        let from = text_center(&output, "Premier");
+        let to = text_center(&output, "Dernier") + egui::vec2(0.0, 7.0);
+        image(vec![egui::Event::PointerMoved(from)]);
+        image(vec![pointer(from, true)]);
+        let (_, actions, _) = image(vec![egui::Event::PointerMoved(from + egui::vec2(0.0, 8.0))]);
+        assert!(actions.is_empty(), "l'aperçu n'écrit pas le modèle");
+        image(vec![egui::Event::PointerMoved(to)]);
+        let (_, actions, _) = image(vec![pointer(to, false)]);
+        assert_eq!(actions.len(), 1, "une commande au relâchement");
+        assert!(matches!(
+            actions[0],
+            Action::ReorderSeries {
+                source: SeriesRef { panel: 0, index: 0 },
+                index: 2,
+                ..
+            }
+        ));
+        let (_, actions, _) = image(Vec::new());
+        assert!(
+            actions.is_empty(),
+            "le dépôt ne se répète pas à l'image suivante"
+        );
+        let (_, actions, requests) = image(vec![key(egui::Key::F2, egui::Modifiers::NONE)]);
+        assert!(actions.is_empty());
+        assert!(requests.iter().any(|r| matches!(
+            r,
+            ObjectManagerRequest::Rename(SeriesRef { panel: 0, index: 0 })
+        )));
+        let (_, actions, _) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::CTRL)]);
+        assert!(matches!(
+            actions.as_slice(),
+            [Action::ReorderSeries {
+                source: SeriesRef { panel: 0, index: 0 },
+                index: 1,
+                ..
+            }]
+        ));
+    }
+
+    /// Suppr retire l'objet sélectionné, mais seulement quand le panneau a le
+    /// focus clavier (un clic sur une ligne le lui donne) : sans lui, la touche
+    /// appartient à un autre widget. Le double-clic demande les propriétés.
+    #[test]
+    fn suppr_n_agit_que_sur_le_panneau_focalise_et_le_double_clic_ouvre_les_proprietes() {
+        let (project, graph, spec, model) = trois_series();
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let image = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        image(Vec::new());
+        let (output, _, _) = image(Vec::new());
+        let (_, actions, _) = image(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
+        assert!(actions.is_empty(), "sans focus, Suppr n'est pas pour nous");
+
+        // Le focus est pris au début d'un glisser sur la ligne (relâché sur
+        // elle-même : aucun déplacement), comme dans le test du glisser. Un
+        // simple clic le demande aussi, mais dans l'image du clic l'ancre du
+        // panneau, jamais survolée, le rend aussitôt (egui lâche au clic le
+        // focus d'un widget non survolé) : ce chemin-là n'est pas éprouvé ici.
+        let row = text_center(&output, "Premier");
+        let nudged = row + egui::vec2(0.0, 8.0);
+        image(vec![egui::Event::PointerMoved(row)]);
+        image(vec![pointer(row, true)]);
+        let (_, _, requests) = image(vec![egui::Event::PointerMoved(nudged)]);
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r, ObjectManagerRequest::Select(T::Series(s)) if *s == SeriesRef::new(0, 0))));
+        let (_, actions, _) = image(vec![pointer(nudged, false)]);
+        assert!(
+            actions.is_empty(),
+            "relâchée sur elle-même, la série ne bouge pas"
+        );
+        let (_, actions, _) = image(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
+        assert_eq!(
+            actions,
+            vec![Action::RemovePlotObject {
+                graph,
+                target: T::Series(SeriesRef::new(0, 0)),
+            }]
+        );
+
+        // Double-clic : deux clics rapprochés sur la même ligne.
+        let mut properties = false;
+        for _ in 0..2 {
+            image(vec![pointer(row, true)]);
+            let (_, _, requests) = image(vec![pointer(row, false)]);
+            properties |= requests.iter().any(|r| {
+                matches!(r, ObjectManagerRequest::Properties(T::Series(s)) if *s == SeriesRef::new(0, 0))
+            });
+        }
+        assert!(
+            properties,
+            "le double-clic demande les propriétés de la série"
+        );
+    }
+
+    /// La case d'une ligne bascule la visibilité de son objet : une action,
+    /// vers l'état inverse de celui affiché.
+    #[test]
+    fn la_case_d_une_ligne_bascule_la_visibilite_de_son_objet() {
+        for visible in [true, false] {
+            let mut project = Project::new("Objets").unwrap();
+            let root = project.root();
+            let mut panel = PanelSpec::default();
+            for name in ["Premier", "Deuxième"] {
+                let mut series = SeriesSpec::new(NodeId::from_raw(900));
+                series.name = name.into();
+                panel.series.push(series);
+            }
+            panel.series[1].visible = visible;
+            let spec = PlotSpec::default().with_panels(panel);
+            let graph = project.add_graph(root, None, spec.clone()).unwrap();
+            let model = crate::object_manager::object_tree(project.tree(), graph, None);
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let image = |events| image(&ctx, project.tree(), model.as_ref(), Some(&spec), events);
+            image(Vec::new());
+            let (output, _, _) = image(Vec::new());
+            // La case est le carré peint sur la ligne, à gauche du libellé.
+            let label = text_center(&output, "Deuxième");
+            let at = output
+                .shapes
+                .iter()
+                .filter_map(|painted| match &painted.shape {
+                    egui::Shape::Rect(rect)
+                        if (rect.rect.width() - rect.rect.height()).abs() < 1.0
+                            && (8.0..=24.0).contains(&rect.rect.width())
+                            && (rect.rect.center().y - label.y).abs() < 4.0
+                            && rect.rect.center().x < label.x =>
+                    {
+                        Some(rect.rect.center())
+                    }
+                    _ => None,
+                })
+                .min_by(|a, b| a.x.total_cmp(&b.x))
+                .expect("case de visibilité peinte sur la ligne");
+            image(vec![egui::Event::PointerMoved(at)]);
+            image(vec![pointer(at, true)]);
+            let (_, actions, _) = image(vec![pointer(at, false)]);
+            assert_eq!(
+                actions,
+                vec![Action::SetPlotVisibility {
+                    graph,
+                    target: T::Series(SeriesRef::new(0, 1)),
+                    visible: !visible,
+                }],
+                "visible = {visible}"
+            );
+        }
+    }
+
+    /// Sans graphe actif, le panneau le dit et ne demande rien.
+    #[test]
+    fn sans_graphe_le_panneau_le_dit_et_ne_demande_rien() {
+        let (project, _, spec, model) = trois_series();
+        let ctx = egui::Context::default();
+        let (output, actions, requests) =
+            image(&ctx, project.tree(), None, Some(&spec), Vec::new());
+        assert!(actions.is_empty() && requests.is_empty());
+        text_center(&output, &tr!("object-manager-no-graph"));
+        // Témoin : avec un graphe, le message n'est pas peint.
+        let (output, _, _) = image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == tr!("object-manager-no-graph"))));
+    }
+
+    /// La sélection de l'Object Manager et celle de la vue sont la même :
+    /// sélectionner une cible puis la relire rend la même cible, pour chaque
+    /// nature d'objet ; une cible disparue ne sélectionne rien.
+    #[test]
+    fn selectionner_puis_relire_une_cible_rend_la_meme_cible() {
+        let mut spec = PlotSpec::empty("Titre");
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.series.push(SeriesSpec::new(NodeId::from_raw(900)));
+        panel
+            .annotations
+            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+        panel
+            .shapes
+            .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
+        let annotation = AnnotationRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let shape = ShapeRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let mut view = GraphView::new();
+        for target in [
+            T::Series(SeriesRef::new(0, 0)),
+            T::Annotation(annotation),
+            T::Shape(shape),
+            T::Text(TextTarget::Title),
+        ] {
+            select_manager_target(&mut view, Some(target), &spec);
+            assert_eq!(selected_manager_target(&view), Some(target));
+        }
+        select_manager_target(&mut view, None, &spec);
+        assert_eq!(selected_manager_target(&view), None, "None désélectionne");
+
+        select_manager_target(&mut view, Some(T::Shape(shape)), &spec);
+        let gone = ShapeRef { index: 5, ..shape };
+        select_manager_target(&mut view, Some(T::Shape(gone)), &spec);
+        assert_eq!(
+            selected_manager_target(&view),
+            None,
+            "un objet disparu ne reste pas sélectionné"
+        );
+    }
+}

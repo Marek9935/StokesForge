@@ -976,7 +976,7 @@ pub struct ColumnDragPayload {
 /// L'[`Action`] produite par le dépôt de `payload` sur le graphe `graph` —
 /// toujours [`Action::AddSeriesToGraph`] avec [`PlotType::Line`] par défaut,
 /// comme demandé pour ce chantier. Fonction pure, séparée du code de peinture
-/// de `crate::app::graph_drop_target` pour être testable sans fenêtre.
+/// de `crate::app::graph_window::graph_drop_target` pour être testable sans fenêtre.
 pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId) -> Action {
     Action::AddSeriesToGraph {
         graph,

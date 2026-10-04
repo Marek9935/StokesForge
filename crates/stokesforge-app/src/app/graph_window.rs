@@ -39,7 +39,7 @@ use super::{color_request_action, keyboard_focus_outside_grid, saved_colors_id};
 /// initial. Réserver sa hauteur garde le rectangle de la figure stable d'une
 /// image à l'autre — sans quoi le cache de formes serait invalidé au moindre
 /// survol.
-pub(super) const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
+const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
 
 /// Enrobe [`graph_contents`] d'une zone de dépôt pour le glisser d'une
 /// sélection de colonnes de classeur — pendant, côté cible, de la zone de
@@ -210,7 +210,7 @@ fn shape_properties_ui(
 /// - la figure elle-même, avec ses vraies polices et son vrai HiDPI ;
 /// - le retour au cadrage initial, pour abandonner un zoom ou un pan sans
 ///   modifier les données ni la description du graphe.
-pub(super) fn graph_contents(
+fn graph_contents(
     ui: &mut egui::Ui,
     state: &AppState,
     actions: &mut Vec<Action>,
@@ -226,7 +226,7 @@ pub(super) fn graph_contents(
 /// [`StokesForgeApp::graph_views`] : c'est ce qui permet à
 /// [`StokesForgeApp::show_detached_tabs`] de peindre un `Tab::Graph` détaché avec
 /// **exactement** cette fonction — pas de version dégradée, voir la doc de
-/// tête du module. `GraphView` n'a pas le problème de verrou global à
+/// tête de `window_detach.rs`. `GraphView` n'a pas le problème de verrou global à
 /// `AppState` qu'ont les tampons de saisie de cellule/note (son cache et sa
 /// navigation sont déjà scopés par graphe) : nul besoin d'une variante
 /// « détachée » séparée, à la différence de [`grid_contents`]/
@@ -328,7 +328,7 @@ pub(super) fn graph_view_contents(
 /// `None` sous un fond opaque, qui couvre déjà tout. Le fond transparent
 /// est donc vu composé sur du blanc, comme l'encre automatique le juge
 /// (`stokesforge_render::color::over_white`).
-pub(super) fn display_backdrop(background: &str) -> Option<egui::Color32> {
+fn display_backdrop(background: &str) -> Option<egui::Color32> {
     crate::color_picker::parse_hex(background)
         .is_some_and(|[_, _, _, alpha]| alpha < 255)
         .then_some(egui::Color32::WHITE)
@@ -745,5 +745,696 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
             TextTarget::Legend { .. } => PlotTarget::Legend,
         },
         Some(PlotComponent::LegendEntry { .. }) => PlotTarget::Legend,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use stokesforge_core::{Column, Project};
+    use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec, ShapeKind, ShapeRef, ShapeSpec};
+    use stokesforge_session::Session;
+
+    use super::super::project_manager::tests::{click_at, find_text_center};
+    use super::super::tab::Tab;
+    use super::super::window_chrome::{show_floating_window, window_header, HeaderPlacement};
+    use super::super::window_placement::GRAPH_WINDOW_SIZE;
+
+    /// Un classeur de deux colonnes et un graphe qui les trace.
+    fn graphe() -> (Session, NodeId) {
+        let mut project = Project::new("Graphe").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        let x = project
+            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
+            .unwrap();
+        let y = project
+            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
+            .unwrap();
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new_xy(x, y));
+        let graph = project
+            .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
+            .unwrap();
+        (Session::spawn(project, None).unwrap(), graph)
+    }
+    /// #12 : un fond sans couleur ou semi-transparent s'affiche sur du
+    /// blanc ; un fond opaque n'a pas besoin de dessous.
+    #[test]
+    fn le_blanc_d_affichage_ne_double_que_les_fonds_transparents() {
+        assert_eq!(
+            display_backdrop(stokesforge_plot::TRANSPARENT),
+            Some(egui::Color32::WHITE)
+        );
+        assert_eq!(display_backdrop("#12345680"), Some(egui::Color32::WHITE));
+        assert_eq!(display_backdrop("#123456"), None);
+    }
+
+    #[test]
+    fn le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible() {
+        // F11 : le graphe conserve le ratio de `DEFAULT_FIGURE_SIZE` mais est
+        // mis à l'échelle « contain » — maximisé dans la zone disponible, en
+        // prenant la dimension limitante (largeur ou hauteur) — plutôt que
+        // peint à taille fixe et rogné. Point 3 du rapport du 2026-09-24 :
+        // c'est un **zoom** du rendu de référence, jamais une nouvelle mise
+        // en page à la taille affichée — les formes mises en cache doivent
+        // être identiques quelle que soit la taille de la fenêtre.
+        let (session, graph) = graphe();
+        let snapshot = session.handle().snapshot().unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let mut view = GraphView::new();
+        let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
+        let mut reference_shapes: Option<Vec<egui::Shape>> = None;
+
+        for size in [
+            GRAPH_WINDOW_SIZE,
+            egui::vec2(320.0, 260.0),
+            egui::vec2(200.0, 100.0),
+        ] {
+            let contents = egui::Rect::from_min_size(egui::pos2(300.0, 300.0), size);
+            let visible = egui::Rect::from_min_max(
+                contents.min,
+                contents.max - egui::vec2(0.0, GRAPH_CONTROLS_HEIGHT),
+            );
+            let scale = (visible.width() / fig_w as f32).min(visible.height() / fig_h as f32);
+            let expected_size = egui::vec2(fig_w as f32 * scale, fig_h as f32 * scale);
+            for frame in 0..3 {
+                // La molette se trouve sous la zone visible, hors de la
+                // figure et de ses contrôles : elle ne doit pas la zoomer.
+                let pos = egui::pos2(visible.center().x, visible.bottom() + 10.0);
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 1200.0),
+                    )),
+                    events: vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, 4.0),
+                            modifiers: egui::Modifiers::NONE,
+                            phase: egui::TouchPhase::Move,
+                        },
+                    ],
+                    ..Default::default()
+                };
+                let misses = view.cache().misses();
+                let mut output = context.run_ui(input, |ui| {
+                    let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(contents));
+                    content_ui.set_clip_rect(contents);
+                    graph_view_contents(
+                        &mut content_ui,
+                        &mut view,
+                        &snapshot,
+                        graph,
+                        &mut Vec::new(),
+                    );
+                });
+                output.textures_delta.clear();
+                let rect = view.cache().key().unwrap().rect;
+                assert!(
+                    (rect.size() - egui::vec2(fig_w as f32, fig_h as f32)).length() < 0.1,
+                    "la disposition doit rester à la taille de référence, obtenu {:?} pour une \
+                     zone de {size:?}",
+                    rect.size()
+                );
+                let display = view.display_rect().unwrap();
+                assert!(
+                    (display.size() - expected_size).length() < 0.1,
+                    "taille affichée attendue pour une zone de {size:?} : {expected_size:?}, \
+                     obtenu {:?}",
+                    display.size()
+                );
+                assert!(
+                    visible.contains_rect(display),
+                    "la figure mise à l'échelle doit tenir dans la zone visible"
+                );
+                assert_eq!(
+                    view.view().generation(),
+                    0,
+                    "interaction hors de la figure et de ses contrôles"
+                );
+                if frame > 0 {
+                    assert_eq!(view.cache().misses(), misses, "recalcul sans changement");
+                }
+                // Vérifier les formes réellement envoyées à egui, pas
+                // seulement le rectangle calculé avant le rendu.
+                assert!(!view.cache().shapes().is_empty());
+                if let Some(reference) = &reference_shapes {
+                    assert_eq!(
+                        view.cache().shapes(),
+                        reference.as_slice(),
+                        "la taille affichée ne doit pas redisposer la figure (zone de {size:?})"
+                    );
+                } else {
+                    reference_shapes = Some(view.cache().shapes().to_vec());
+                }
+                let transform = egui::emath::TSTransform::new(
+                    display.min.to_vec2(),
+                    display.width() / fig_w as f32,
+                );
+                for shape in view.cache().shapes() {
+                    let mut displayed = shape.clone();
+                    // Le texte est remis en page à la taille affichée (#18) :
+                    // même transformation que `GraphView::paint_scaled`. Un
+                    // texte Typst (titres, légende : #32) y change de
+                    // texture, rastérisée à la taille affichée (#31) : un
+                    // maillage se compare donc sur sa géométrie seule, à un
+                    // pixel près : il est calé sur la grille des pixels
+                    // physiques à l'écran (#86).
+                    stokesforge_render_egui::scaled::transform_shape(
+                        &context,
+                        &mut displayed,
+                        transform,
+                        &mut |_| None,
+                    );
+                    let same = |painted: &egui::Shape| match (painted, &displayed) {
+                        (egui::Shape::Mesh(a), egui::Shape::Mesh(b)) => {
+                            a.indices == b.indices
+                                && a.vertices.len() == b.vertices.len()
+                                && a.vertices.iter().zip(&b.vertices).all(|(p, q)| {
+                                    (p.pos - q.pos).abs().max_elem() <= 1.0 && p.uv == q.uv
+                                })
+                        }
+                        (a, b) => a == b,
+                    };
+                    assert!(
+                        output.shapes.iter().any(|painted| same(&painted.shape)
+                            && visible.contains_rect(painted.clip_rect)),
+                        "forme du graphe hors de la zone visible"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn le_pan_principal_atteint_la_figure_sous_la_zone_de_depot() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let mut graph_views = HashMap::new();
+        let mut actions = Vec::new();
+        let contents =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(560.0, 540.0));
+
+        let mut paint = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(contents));
+                content_ui.set_clip_rect(contents);
+                graph_drop_target(
+                    &mut content_ui,
+                    &state,
+                    &mut actions,
+                    &mut graph_views,
+                    graph,
+                );
+            });
+            output.textures_delta.clear();
+        };
+
+        let start = egui::pos2(380.0, 322.0);
+        paint(vec![egui::Event::PointerMoved(start)]);
+        let end = start + egui::vec2(30.0, -20.0);
+        paint(vec![egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        paint(vec![egui::Event::PointerMoved(end)]);
+        paint(vec![egui::Event::PointerMoved(
+            end + egui::vec2(20.0, -10.0),
+        )]);
+
+        assert!(
+            graph_views.get(&graph).unwrap().view().generation() > 0,
+            "la cible de dépôt ne doit pas intercepter le pan de la figure"
+        );
+    }
+
+    #[test]
+    fn le_pan_principal_atteint_la_figure_dans_la_fenetre_flottante() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let mut graph_views = HashMap::new();
+        let mut actions = Vec::new();
+        let tab = Tab::Graph(graph);
+        let id = egui::Id::new(("content_window", tab));
+        let panel_center = std::cell::Cell::new(None);
+
+        let mut paint = |events: Vec<egui::Event>| {
+            let is_initial_frame = events.is_empty();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                show_floating_window(
+                    ui.ctx(),
+                    id,
+                    egui::Rect::from_min_size(egui::pos2(100.0, 100.0), GRAPH_WINDOW_SIZE),
+                    ui.ctx().content_rect(),
+                    true,
+                    |ui| {
+                        let _ = window_header(
+                            ui,
+                            id,
+                            "Figure",
+                            Some(tab),
+                            false,
+                            HeaderPlacement::Floating,
+                        );
+                        graph_drop_target(ui, &state, &mut actions, &mut graph_views, graph);
+                    },
+                    |_, _| {},
+                );
+            });
+            output.textures_delta.clear();
+            if is_initial_frame {
+                let view = graph_views.get(&graph).unwrap();
+                let panel = &view.last_drawn().unwrap().panels[0];
+                let figure = view.display_rect().unwrap();
+                let scale = figure.width() / DEFAULT_FIGURE_SIZE.0 as f32;
+                panel_center.set(Some(egui::pos2(
+                    figure.min.x
+                        + (panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0) * scale,
+                    figure.min.y
+                        + (panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0) * scale,
+                )));
+            }
+        };
+
+        paint(Vec::new());
+        let start = panel_center.get().unwrap();
+        paint(vec![egui::Event::PointerMoved(start)]);
+        let end = start + egui::vec2(30.0, -20.0);
+        paint(vec![egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        paint(vec![egui::Event::PointerMoved(end)]);
+        paint(vec![egui::Event::PointerMoved(
+            end + egui::vec2(20.0, -10.0),
+        )]);
+
+        assert!(
+            graph_views.get(&graph).unwrap().view().generation() > 0,
+            "la fenetre flottante ne doit pas intercepter le pan de la figure"
+        );
+    }
+
+    /// Chaque composant désigné par le rendu ouvre l'onglet de propriétés qui
+    /// le règle ; un clic dans le vide ouvre le fond.
+    #[test]
+    fn plot_target_traduit_chaque_composant_vers_ses_proprietes() {
+        use stokesforge_render_egui::TextTarget as T;
+        assert_eq!(plot_target(None), PlotTarget::Background);
+        assert_eq!(plot_target(Some(PlotComponent::Title)), PlotTarget::Title);
+        assert_eq!(
+            plot_target(Some(PlotComponent::PlotArea { panel: 0 })),
+            PlotTarget::PlotArea
+        );
+        for (side, axis) in [
+            (AxisSide::Bottom, PlotAxis::Bottom),
+            (AxisSide::Left, PlotAxis::Left),
+            (AxisSide::Right, PlotAxis::Right),
+        ] {
+            assert_eq!(
+                plot_target(Some(PlotComponent::Axis { panel: 0, side })),
+                PlotTarget::Axis(axis)
+            );
+            assert_eq!(
+                plot_target(Some(PlotComponent::AxisTitle { panel: 0, side })),
+                PlotTarget::AxisTitle(axis)
+            );
+        }
+        assert_eq!(
+            plot_target(Some(PlotComponent::Text(T::Title))),
+            PlotTarget::Title
+        );
+        assert_eq!(
+            plot_target(Some(PlotComponent::Text(T::PanelTitle {
+                row: 0,
+                column: 0
+            }))),
+            PlotTarget::Title
+        );
+        for (side, axis) in [
+            (stokesforge_plot::AxisSide::Bottom, PlotAxis::Bottom),
+            (stokesforge_plot::AxisSide::Left, PlotAxis::Left),
+            (stokesforge_plot::AxisSide::Right, PlotAxis::Right),
+        ] {
+            assert_eq!(
+                plot_target(Some(PlotComponent::Text(T::AxisTitle {
+                    row: 0,
+                    column: 0,
+                    side
+                }))),
+                PlotTarget::AxisTitle(axis)
+            );
+        }
+        assert_eq!(
+            plot_target(Some(PlotComponent::Text(T::Legend { row: 0, column: 0 }))),
+            PlotTarget::Legend
+        );
+        assert_eq!(
+            plot_target(Some(PlotComponent::LegendEntry {
+                panel: 0,
+                series: 0
+            })),
+            PlotTarget::Legend
+        );
+    }
+
+    /// Le glisser de colonnes depuis un classeur : relâché sur le graphe, il
+    /// ajoute une série (une action) ; relâché ailleurs, rien. Le survol avec
+    /// une charge entoure le graphe d'un contour, absent sans charge.
+    #[test]
+    fn deposer_des_colonnes_sur_le_graphe_ajoute_une_serie_et_ailleurs_rien() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let contents =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(560.0, 540.0));
+        let payload = ColumnDragPayload {
+            sheet: NodeId::from_raw(7),
+            columns: vec![NodeId::from_raw(8), NodeId::from_raw(9)],
+        };
+        let mut graph_views = HashMap::new();
+        // Une image ; `drag` pose la charge du glisser (le classeur le fait
+        // quand le geste commence, hors de ce banc).
+        let mut paint = |events: Vec<egui::Event>, drag: bool| {
+            let mut actions = Vec::new();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                if drag {
+                    egui::DragAndDrop::set_payload(ui.ctx(), payload.clone());
+                }
+                let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(contents));
+                content_ui.set_clip_rect(contents);
+                graph_drop_target(
+                    &mut content_ui,
+                    &state,
+                    &mut actions,
+                    &mut graph_views,
+                    graph,
+                );
+            });
+            output.textures_delta.clear();
+            (output, actions)
+        };
+        let outline = |output: &egui::FullOutput| {
+            output.shapes.iter().any(|painted| {
+                matches!(&painted.shape,
+                    egui::Shape::Rect(rect) if rect.rect == contents && rect.stroke.width == 2.5)
+            })
+        };
+        let release = |pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        let inside = egui::pos2(380.0, 322.0);
+        let (output, actions) = paint(vec![egui::Event::PointerMoved(inside)], false);
+        assert!(!outline(&output), "pas de contour sans glisser en cours");
+        assert!(actions.is_empty());
+        let (output, actions) = paint(vec![egui::Event::PointerMoved(inside)], true);
+        assert!(
+            outline(&output),
+            "le survol avec une charge entoure le graphe"
+        );
+        assert!(actions.is_empty(), "le survol seul n'ajoute rien");
+        let (_, actions) = paint(vec![release(inside)], false);
+        assert_eq!(
+            actions,
+            vec![drop_payload_action(&payload, graph)],
+            "un relâchement sur le graphe ajoute la série"
+        );
+
+        let outside = egui::pos2(900.0, 900.0);
+        paint(vec![egui::Event::PointerMoved(outside)], true);
+        let (_, actions) = paint(vec![release(outside)], false);
+        assert!(actions.is_empty(), "relâché hors du graphe, rien");
+    }
+
+    /// Premier plan, arrière-plan et suppression d'un objet graphique :
+    /// une action chacun, et la sélection suit l'objet à son nouveau rang.
+    #[test]
+    fn l_ordre_et_la_suppression_d_un_objet_font_suivre_la_selection() {
+        let mut project = Project::new("Objets").unwrap();
+        let root = project.root();
+        let mut spec = PlotSpec::empty("Objets");
+        for _ in 0..3 {
+            spec.panels.get_mut(0).unwrap().shapes.push(ShapeSpec::new(
+                ShapeKind::Rectangle,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+            ));
+        }
+        let graph = project.add_graph(root, None, spec).unwrap();
+        let tree = project.tree().clone();
+        let object = ShapeRef {
+            row: 0,
+            column: 0,
+            index: 1,
+        };
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let mut view = GraphView::new();
+        let mut actions = Vec::new();
+        let mut paint = |context: &egui::Context, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 300.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                shape_order_buttons(ui, &mut view, &tree, graph, object, &mut actions);
+            });
+            output.textures_delta.clear();
+            output
+        };
+        let first = paint(&context, Vec::new());
+        let front = find_text_center(&first.shapes, &tr!("action-bring-to-front"));
+        let back = find_text_center(&first.shapes, &tr!("action-send-to-back"));
+        let delete = find_text_center(&first.shapes, &tr!("action-delete-object"));
+
+        click_at(&context, front, egui::Modifiers::NONE, &mut paint);
+        click_at(&context, back, egui::Modifiers::NONE, &mut paint);
+        click_at(&context, delete, egui::Modifiers::NONE, &mut paint);
+        assert_eq!(
+            actions,
+            vec![
+                Action::ReorderShape {
+                    graph,
+                    target: object,
+                    order: ShapeOrder::ToFront,
+                },
+                Action::ReorderShape {
+                    graph,
+                    target: object,
+                    order: ShapeOrder::ToBack,
+                },
+                Action::RemoveShape {
+                    graph,
+                    target: object,
+                },
+            ]
+        );
+        assert_eq!(
+            view.selected_shape(),
+            None,
+            "l'objet supprimé n'est plus sélectionné"
+        );
+    }
+
+    /// Le rang que la sélection prend après « premier plan » (le dernier) et
+    /// « arrière-plan » (le premier), vérifié bouton par bouton.
+    #[test]
+    fn la_selection_prend_le_rang_du_premier_ou_de_l_arriere_plan() {
+        let mut project = Project::new("Objets").unwrap();
+        let root = project.root();
+        let mut spec = PlotSpec::empty("Objets");
+        for _ in 0..3 {
+            spec.panels.get_mut(0).unwrap().shapes.push(ShapeSpec::new(
+                ShapeKind::Ellipse,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+            ));
+        }
+        let graph = project.add_graph(root, None, spec).unwrap();
+        let tree = project.tree().clone();
+        let object = ShapeRef {
+            row: 0,
+            column: 0,
+            index: 1,
+        };
+        for (label, expected) in [
+            (tr!("action-bring-to-front"), 2),
+            (tr!("action-send-to-back"), 0),
+        ] {
+            let context = egui::Context::default();
+            context.set_fonts(stokesforge_render_egui::font_definitions());
+            let mut view = GraphView::new();
+            view.select_shape(Some(object));
+            let mut paint = |context: &egui::Context, events: Vec<egui::Event>| {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| {
+                    shape_order_buttons(ui, &mut view, &tree, graph, object, &mut Vec::new());
+                });
+                output.textures_delta.clear();
+                output
+            };
+            let first = paint(&context, Vec::new());
+            let at = find_text_center(&first.shapes, &label);
+            click_at(&context, at, egui::Modifiers::NONE, &mut paint);
+            assert_eq!(
+                view.selected_shape(),
+                Some(ShapeRef {
+                    index: expected,
+                    ..object
+                }),
+                "{label}"
+            );
+        }
+    }
+
+    /// Suppr retire le texte libre ou l'objet sélectionné quand aucun champ
+    /// n'a le focus ; pendant une saisie, la touche appartient au champ.
+    #[test]
+    fn suppr_retire_la_selection_sauf_pendant_une_saisie() {
+        use stokesforge_render_egui::AnnotationRef;
+        let mut project = Project::new("Objets").unwrap();
+        let root = project.root();
+        let mut spec = PlotSpec::empty("Objets");
+        spec.panels.get_mut(0).unwrap().annotations.push(
+            stokesforge_render_egui::AnnotationSpec::new("Pic", 0.0, 0.0),
+        );
+        spec.panels.get_mut(0).unwrap().shapes.push(ShapeSpec::new(
+            ShapeKind::Line,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+        ));
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
+        let tree = project.tree().clone();
+        let text = AnnotationRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let shape = ShapeRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let delete = egui::Event::Key {
+            key: egui::Key::Delete,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // Deux images : la première pose (ou non) le focus sur un champ, la
+        // seconde envoie Suppr.
+        let run = |view: &mut GraphView, typing: bool| {
+            let context = egui::Context::default();
+            let mut actions = Vec::new();
+            let mut buffer = String::new();
+            for events in [Vec::new(), vec![delete.clone()]] {
+                let first = events.is_empty();
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| {
+                    let field = ui.text_edit_singleline(&mut buffer);
+                    if typing && first {
+                        field.request_focus();
+                    }
+                    annotation_interactions(ui, view, &tree, graph, &mut actions);
+                });
+                output.textures_delta.clear();
+            }
+            actions
+        };
+
+        let mut view = GraphView::new();
+        view.select_annotation(Some(text), &spec);
+        assert!(run(&mut view, true).is_empty(), "Suppr appartient au champ");
+        assert_eq!(view.selected_annotation(), Some(text));
+        assert_eq!(
+            run(&mut view, false),
+            vec![Action::RemoveAnnotation {
+                graph,
+                target: text
+            }]
+        );
+        assert_eq!(view.selected_annotation(), None);
+
+        let mut view = GraphView::new();
+        view.select_shape(Some(shape));
+        assert!(run(&mut view, true).is_empty(), "Suppr appartient au champ");
+        assert_eq!(
+            run(&mut view, false),
+            vec![Action::RemoveShape {
+                graph,
+                target: shape
+            }]
+        );
+        assert_eq!(view.selected_shape(), None);
+
+        // Témoin : sans sélection, Suppr ne retire rien.
+        assert!(run(&mut GraphView::new(), false).is_empty());
     }
 }

@@ -1,7 +1,8 @@
 //! Console de script : zone de saisie, boutons « Exécuter »/« Arrêter »,
 //! sortie. Contenu de [`StokesForgeApp::script_panel`].
 //!
-//! Ne bloque jamais la fenêtre : voir la doc de tête de ce module.
+//! Ne bloque jamais la fenêtre : voir la doc de tête d'`app.rs`, § « La
+//! console de script ne fige pas la fenêtre ».
 //! `Action::RunScript`/`InterruptScript` sont poussées comme n'importe
 //! quelle autre action, appliquées après le rendu par la boucle
 //! principale — c'est [`AppState::dispatch`] qui garantit qu'elles ne
@@ -126,4 +127,124 @@ pub(super) fn script_contents(
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stokesforge_core::Project;
+    use stokesforge_session::Session;
+
+    use super::super::project_manager::tests::{click_at, find_text_center};
+    use super::super::window_chrome::tests::find_icon_centers;
+
+    fn state() -> (Session, AppState) {
+        let project = Project::new("Console").unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        (session, state)
+    }
+
+    fn painted(output: &egui::FullOutput, needle: &str) -> bool {
+        output.shapes.iter().any(|painted| {
+            matches!(&painted.shape,
+                egui::Shape::Text(shape) if shape.galley.job.text.contains(needle))
+        })
+    }
+
+    fn input(events: Vec<egui::Event>) -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(700.0, 400.0),
+            )),
+            events,
+            ..Default::default()
+        }
+    }
+
+    /// La barre de titre (#79) : un clic sur son chevron le signale, une image
+    /// sans clic non ; elle dit quand l'interpréteur manque à ce binaire.
+    #[test]
+    fn la_barre_de_titre_signale_le_clic_du_chevron_et_l_absence_d_interpreteur() {
+        let (_session, state) = state();
+        for collapsed in [true, false] {
+            let context = egui::Context::default();
+            egui_extras::install_image_loaders(&context);
+            let toggled = std::cell::Cell::new(false);
+            let paint = |context: &egui::Context, events| {
+                let mut output = context.run_ui(input(events), |ui| {
+                    toggled.set(toggled.get() | script_header(ui, &state, collapsed));
+                });
+                output.textures_delta.clear();
+                output
+            };
+            paint(&context, Vec::new());
+            let output = paint(&context, Vec::new());
+            assert!(!toggled.get(), "sans clic, pas de bascule");
+            assert!(painted(&output, &tr!("script-title")));
+            assert_eq!(
+                painted(&output, &tr!("script-unavailable")),
+                !state.script_available(),
+                "l'absence d'interpréteur se dit, et seulement elle"
+            );
+            let chevron = find_icon_centers(&output.shapes)[0];
+            click_at(&context, chevron, egui::Modifiers::NONE, paint);
+            assert!(
+                toggled.get(),
+                "le clic sur le chevron bascule (replié : {collapsed})"
+            );
+        }
+    }
+
+    /// « Exécuter » n'émet `RunScript` que si un interpréteur est là ;
+    /// « Arrêter » est grisé tant qu'aucun script ne tourne. Avant toute
+    /// exécution, la sortie le dit.
+    #[test]
+    fn executer_n_emet_que_si_un_interpreteur_est_la_et_arreter_reste_grise() {
+        let (_session, mut state) = state();
+        let context = egui::Context::default();
+        let actions = std::cell::RefCell::new(Vec::new());
+        let state = std::cell::RefCell::new(&mut state);
+        let paint = |context: &egui::Context, events| {
+            let mut output = context.run_ui(input(events), |ui| {
+                let ctx = ui.ctx().clone();
+                script_contents(ui, &ctx, &mut state.borrow_mut(), &mut actions.borrow_mut());
+            });
+            output.textures_delta.clear();
+            output
+        };
+        paint(&context, Vec::new());
+        let output = paint(&context, Vec::new());
+        assert!(painted(&output, &tr!("script-not-run")));
+        let available = state.borrow().script_available();
+
+        click_at(
+            &context,
+            find_text_center(&output.shapes, &tr!("script-stop")),
+            egui::Modifiers::NONE,
+            paint,
+        );
+        assert!(
+            actions.borrow().is_empty(),
+            "Arrêter est grisé sans script en cours"
+        );
+
+        click_at(
+            &context,
+            find_text_center(&output.shapes, &tr!("script-run")),
+            egui::Modifiers::NONE,
+            paint,
+        );
+        let expected = if available {
+            vec![Action::RunScript]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(
+            *actions.borrow(),
+            expected,
+            "interpréteur présent : {available}"
+        );
+    }
 }

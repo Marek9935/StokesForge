@@ -582,3 +582,76 @@ pub fn object_tree_with_selection(
             .collect(),
     })
 }
+
+/// Les décisions pures de la projection, sans fenêtre (venues d'`app.rs` avec
+/// #121 ; le contrat bout en bout, annulable et persistant, est dans
+/// `tests/shell.rs`).
+#[cfg(test)]
+mod tests {
+    use stokesforge_core::NodeId;
+    use stokesforge_plot::{PlotSpec, SeriesRef, SeriesSpec};
+    #[test]
+    fn supprimer_un_voisin_ne_selectionne_pas_le_suivant() {
+        use crate::object_manager::{selection_after_remove, VisibilityTarget as T};
+        use stokesforge_plot::{AnnotationRef, ShapeRef};
+        let a = AnnotationRef {
+            row: 1,
+            column: 2,
+            index: 3,
+        };
+        let s = ShapeRef {
+            row: 1,
+            column: 2,
+            index: 3,
+        };
+        for (selected, removed, expected) in [
+            (
+                T::Series(SeriesRef::new(1, 3)),
+                T::Series(SeriesRef::new(1, 0)),
+                Some(T::Series(SeriesRef::new(1, 2))),
+            ),
+            (
+                T::Annotation(a),
+                T::Annotation(AnnotationRef { index: 0, ..a }),
+                Some(T::Annotation(AnnotationRef { index: 2, ..a })),
+            ),
+            (
+                T::Shape(s),
+                T::Shape(ShapeRef { index: 0, ..s }),
+                Some(T::Shape(ShapeRef { index: 2, ..s })),
+            ),
+        ] {
+            assert_eq!(selection_after_remove(Some(selected), removed), expected);
+            assert_eq!(selection_after_remove(Some(selected), selected), None);
+        }
+    }
+
+    #[test]
+    fn undo_redo_suit_la_serie_reordonnee_et_garde_une_edition_de_style() {
+        use crate::object_manager::{
+            reorder_series, selection_after_history, VisibilityTarget as T,
+        };
+        let mut before = PlotSpec::default();
+        for name in ["A", "B", "C"] {
+            let mut series = SeriesSpec::new(NodeId::from_raw(900));
+            series.name = name.into();
+            before.panels.get_mut(0).unwrap().series.push(series);
+        }
+        let mut after = before.clone();
+        assert!(reorder_series(&mut after, SeriesRef::new(0, 0), 2));
+        assert_eq!(
+            selection_after_history(&after, &before, Some(T::Series(SeriesRef::new(0, 2)))),
+            Some(T::Series(SeriesRef::new(0, 0)))
+        );
+        assert_eq!(
+            selection_after_history(&before, &after, Some(T::Series(SeriesRef::new(0, 0)))),
+            Some(T::Series(SeriesRef::new(0, 2)))
+        );
+        let mut formatted = after.clone();
+        formatted.panels.get_mut(0).unwrap().series[2].line.width = 4.0;
+        assert_eq!(
+            selection_after_history(&formatted, &after, Some(T::Series(SeriesRef::new(0, 2)))),
+            Some(T::Series(SeriesRef::new(0, 2)))
+        );
+    }
+}

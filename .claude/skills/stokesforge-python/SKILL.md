@@ -217,8 +217,12 @@ elle, met `ScriptError` en phrase par `errors::script::error_message` (feature
 nouveau suit la même rédaction (ce qui s'est passé, puis quoi faire) et un test qui
 l'asserte compare l'anglais.
 
-Les textes de la console (titre, Run/Stop, sorties, trace d'appels) passent
-par `tr!` (clés `script-*`) ; les messages de la surface `pyst` — ce que
+La console peinte (barre de titre repliable, zone de saisie, Run/Stop,
+sortie) vit dans `stokesforge-app/src/app/script_console.rs` (#121 :
+`script_header`, `script_contents`, testés sans fenêtre avec et sans
+interpréteur) ; le panneau qui la porte, `StokesForgeApp::script_panel`, reste
+dans `app.rs` jusqu'à #122. Les textes de la console (titre, Run/Stop,
+sorties, trace d'appels) passent par `tr!` (clés `script-*`) ; les messages de la surface `pyst` — ce que
 voit un script — restent en anglais, ce ne sont pas des textes d'interface.
 
 ## Tests

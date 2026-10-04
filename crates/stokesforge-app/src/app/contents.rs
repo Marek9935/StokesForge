@@ -118,3 +118,176 @@ pub(super) fn note_contents(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    use stokesforge_core::Project;
+    use stokesforge_session::Session;
+
+    use super::super::project_manager::tests::find_text_center;
+
+    /// Une note « Journal » au texte « Début » et une matrice.
+    fn projet() -> (Session, AppState, NodeId, NodeId) {
+        let mut project = Project::new("Contenus").unwrap();
+        let root = project.root();
+        let note = project.add_note(root, Some("Journal"), "Début").unwrap();
+        let matrix = project.add_matrix(root, Some("Carte")).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        (session, state, note, matrix)
+    }
+
+    fn painted(output: &egui::FullOutput, needle: &str) -> bool {
+        output.shapes.iter().any(|painted| {
+            matches!(&painted.shape,
+                egui::Shape::Text(shape) if shape.galley.job.text.contains(needle))
+        })
+    }
+
+    /// Une image de `tab` sur un écran de 800 × 800.
+    fn paint(
+        context: &egui::Context,
+        state: &mut AppState,
+        actions: &mut Vec<Action>,
+        tab: Tab,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut graph_views = HashMap::new();
+        let mut output = context.run_ui(input, |ui| {
+            tab_contents(ui, state, actions, &mut graph_views, tab);
+        });
+        output.textures_delta.clear();
+        output
+    }
+
+    /// `tab_contents` aiguille selon la nature de l'onglet : une note montre
+    /// son nom et son texte, une matrice son message d'attente, et une note
+    /// disparue le dit au lieu de paniquer.
+    #[test]
+    fn chaque_onglet_peint_son_contenu_et_une_note_disparue_le_dit() {
+        let (_session, mut state, note, matrix) = projet();
+        let context = egui::Context::default();
+        let mut actions = Vec::new();
+        let output = paint(
+            &context,
+            &mut state,
+            &mut actions,
+            Tab::Note(note),
+            Vec::new(),
+        );
+        assert!(painted(&output, "Journal") && painted(&output, "Début"));
+        assert!(!painted(&output, &tr!("matrix-unavailable")));
+
+        let output = paint(
+            &context,
+            &mut state,
+            &mut actions,
+            Tab::Matrix(matrix),
+            Vec::new(),
+        );
+        assert!(painted(&output, &tr!("matrix-unavailable")));
+        assert!(!painted(&output, "Journal"));
+
+        let gone = NodeId::from_raw(9999);
+        let output = paint(
+            &context,
+            &mut state,
+            &mut actions,
+            Tab::Note(gone),
+            Vec::new(),
+        );
+        assert!(painted(&output, &tr!("note-deleted")));
+        assert!(actions.is_empty(), "peindre n'écrit rien");
+    }
+
+    fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Saisie différée d'une note : la frappe n'atteint pas le modèle, la
+    /// perte de focus valide en **une** action, Échap abandonne sans rien
+    /// écrire — comme une cellule.
+    #[test]
+    fn la_note_n_ecrit_le_modele_qu_a_la_perte_de_focus_et_echap_abandonne() {
+        let (_session, state, note, _) = projet();
+        let state = RefCell::new(state);
+        let actions = RefCell::new(Vec::new());
+        let context = egui::Context::default();
+        let image = |events| {
+            paint(
+                &context,
+                &mut state.borrow_mut(),
+                &mut actions.borrow_mut(),
+                Tab::Note(note),
+                events,
+            )
+        };
+        let first = image(Vec::new());
+        // À droite du texte, sur sa ligne : le curseur se pose en fin de texte.
+        let at = find_text_center(&first.shapes, "Début") + egui::vec2(200.0, 0.0);
+        let outside = egui::pos2(400.0, 790.0);
+        let edit = |text: &str| {
+            image(vec![egui::Event::PointerMoved(at), pointer(at, true)]);
+            image(vec![pointer(at, false)]);
+            image(vec![egui::Event::Text(text.to_owned())]);
+        };
+
+        edit(" suite");
+        assert!(
+            actions.borrow().is_empty(),
+            "la frappe n'écrit pas le modèle"
+        );
+        assert_eq!(
+            state
+                .borrow()
+                .note_editing()
+                .map(|edit| edit.buffer.clone()),
+            Some("Début suite".to_owned())
+        );
+        image(vec![
+            egui::Event::PointerMoved(outside),
+            pointer(outside, true),
+        ]);
+        image(vec![pointer(outside, false)]);
+        assert_eq!(
+            *actions.borrow(),
+            vec![Action::SetNoteText {
+                note,
+                text: "Début suite".to_owned(),
+            }],
+            "la perte de focus valide en une action"
+        );
+        assert!(state.borrow().note_editing().is_none());
+
+        actions.borrow_mut().clear();
+        edit(" jetée");
+        image(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(actions.borrow().is_empty(), "Échap n'écrit rien");
+        assert!(
+            state.borrow().note_editing().is_none(),
+            "Échap abandonne la saisie"
+        );
+    }
+}
