@@ -141,21 +141,36 @@
 //! tourne — sans quoi, egui ne redessinant que sur événement d'entrée, la fin
 //! du script n'apparaîtrait qu'au prochain mouvement de souris.
 
-#[path = "window_chrome.rs"]
+mod dialogs;
+mod shortcuts;
+mod tab;
+mod tab_strip;
 mod window_chrome;
+mod window_detach;
+mod window_placement;
+mod window_stack;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use window_chrome::*;
-#[path = "window_detach.rs"]
-mod window_detach;
-use window_detach::*;
-#[path = "window_placement.rs"]
-mod window_placement;
-use window_placement::*;
-#[path = "window_stack.rs"]
-mod window_stack;
-use window_stack::*;
+
+use dialogs::{modal_dialog, modal_dialog_with, DialogFooter, DialogOutcome};
+use shortcuts::{
+    collect_undo_redo_shortcuts, shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY,
+    SHORTCUT_COPY_FULL_COLUMNS, SHORTCUT_CUT, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_EXPORT_GRAPH,
+    SHORTCUT_IMPORT, SHORTCUT_IMPORT_QWERTY, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT,
+    SHORTCUT_OPEN, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_REDO_Y, SHORTCUT_RENAME_SHEET,
+    SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_UNDO,
+};
+use tab::{tab_for_window, tab_node, Tab};
+use tab_strip::{tab_strip, tab_strip_with, TabEvent, TabOps, TabStripOutput, TAB_STRIP_HEIGHT};
+use window_chrome::{
+    floating_resize_handles, header_icon, show_window_in_layer, window_header, HeaderPlacement,
+    WindowHeaderActions, HEADER_ACTION_WIDTH,
+};
+use window_detach::{DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel};
+use window_placement::geometry_rect;
+use window_stack::window_nodes;
 
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
@@ -166,7 +181,7 @@ use stokesforge_session::{Snapshot, WindowGeometry};
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
 use crate::i18n;
-use crate::icons::{icon_button, icon_image, Icon, IconRole, ICON_SIZE};
+use crate::icons::{icon_button, icon_image, Icon, IconRole};
 use crate::preferences::Preferences;
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
@@ -195,130 +210,6 @@ pub const SCREENSHOT_ENV: &str = "STOKESFORGE_APP_SCREENSHOT";
 /// servir une image inchangée. On regarde le régime établi, pas le
 /// démarrage.
 const SCREENSHOT_SETTLE_FRAMES: u32 = 8;
-
-/// Ctrl+Z — annuler.
-pub const SHORTCUT_UNDO: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
-/// Ctrl+Y — rétablir (convention Windows).
-pub const SHORTCUT_REDO_Y: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
-/// Ctrl+Maj+Z — rétablir (convention Unix / macOS). Les deux sont acceptées.
-pub const SHORTCUT_REDO_Z: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::Z,
-);
-
-/// Annuler/rétablir dans le viewport actif, racine ou classeur détaché.
-fn collect_undo_redo_shortcuts(ctx: &egui::Context, actions: &mut Vec<Action>) {
-    ctx.input_mut(|input| {
-        // Le rétablissement se teste avant l'annulation : Ctrl+Maj+Z
-        // matcherait également Ctrl+Z avec les modificateurs en surplus.
-        if input.consume_shortcut(&SHORTCUT_REDO_Z) || input.consume_shortcut(&SHORTCUT_REDO_Y) {
-            actions.push(Action::Redo);
-        } else if input.consume_shortcut(&SHORTCUT_UNDO) {
-            actions.push(Action::Undo);
-        }
-    });
-}
-
-/// Ctrl+S — enregistrer (dans le fichier déjà connu, sans dialogue).
-pub const SHORTCUT_SAVE: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
-/// Ctrl+Maj+S — choisir une destination et y enregistrer.
-pub const SHORTCUT_SAVE_AS: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::S,
-);
-/// Ctrl+O — choisir un projet à ouvrir.
-pub const SHORTCUT_OPEN: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
-/// Ctrl+N — nouveau projet (confirmation si des changements seraient perdus).
-pub const SHORTCUT_NEW_PROJECT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
-/// Ctrl+E — exporter le graphe actif en SVG, PDF ou PNG (issue #34). Sans
-/// effet quand l'onglet actif n'est pas un graphe.
-pub const SHORTCUT_EXPORT_GRAPH: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
-/// Ctrl+" — ouvrir l'assistant d'import. Sur un clavier AZERTY, `"` est la
-/// touche du chiffre 3 **sans** Maj : egui ne connaît pas de touche `"` et
-/// retombe sur la touche physique, donc le raccourci se consomme comme
-/// Ctrl+3. Sur un clavier QWERTY, `"` est Maj+apostrophe
-/// ([`SHORTCUT_IMPORT_QWERTY`]).
-pub const SHORTCUT_IMPORT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num3);
-/// Ctrl+Maj+' — le même raccourci d'import sur un clavier QWERTY, où `"`
-/// s'obtient avec Maj.
-pub const SHORTCUT_IMPORT_QWERTY: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::Quote,
-);
-/// Rappel affiché dans le menu : le caractère, pas le nom de la touche
-/// physique.
-pub(crate) const SHORTCUT_IMPORT_TEXT: &str = "Ctrl+\"";
-/// Ctrl+Entrée — exécuter le script de la console.
-pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
-
-/// F2 — renommer la feuille affichée du classeur actif (édition en place de
-/// son onglet).
-pub const SHORTCUT_RENAME_SHEET: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F2);
-/// Ctrl+D — dupliquer la feuille affichée du classeur actif. Pas de Suppr
-/// pour supprimer une feuille : trop de faux positifs, le menu seul suffit.
-pub const SHORTCUT_DUPLICATE_SHEET: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
-
-/// Ctrl+C — copier la sélection de la grille.
-///
-/// # Ces cinq raccourcis-ci ne sont **jamais** consommés
-///
-/// Contrairement à [`SHORTCUT_UNDO`] et compagnie, les cinq constantes qui
-/// suivent sont purement **décoratives** : elles n'existent que pour écrire
-/// le rappel de raccourci à droite d'une entrée de menu contextuel
-/// (`Context::format_shortcut`, qui rend « Ctrl+C » ou « ⌘C » selon la
-/// plateforme). Aucun appel à `consume_shortcut` ne les prend, et il ne faut
-/// pas essayer : `egui-winit` intercepte Ctrl+C/X/V à la traduction des
-/// événements de la fenêtre et n'en laisse jamais passer de `Event::Key`
-/// — un essai précédent, fondé sur l'hypothèse inverse, produisait des
-/// raccourcis qui ne se déclenchaient jamais. Le bloc clavier de
-/// [`grid_contents`] lit les `Event::Copy`/`Event::Cut`/`Event::Paste`
-/// correspondants, et c'est là que vit la vraie logique.
-pub const SHORTCUT_COPY: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
-/// Ctrl+Maj+C — copier en entier les colonnes touchées (décoratif, voir
-/// [`SHORTCUT_COPY`]).
-pub const SHORTCUT_COPY_FULL_COLUMNS: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::C,
-);
-/// Ctrl+X — couper (décoratif, voir [`SHORTCUT_COPY`]).
-pub const SHORTCUT_CUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::X);
-/// Ctrl+V — coller à partir de l'ancre (décoratif, voir [`SHORTCUT_COPY`]).
-pub const SHORTCUT_PASTE: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::V);
-/// Ctrl+Maj+V — coller à l'identique (décoratif, voir [`SHORTCUT_COPY`]).
-pub const SHORTCUT_PASTE_ABSOLUTE: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
-    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-    egui::Key::V,
-);
-
-/// Rappel de raccourci pour Retour arrière, écrit en toutes lettres plutôt
-/// que via `Context::format_shortcut`.
-///
-/// egui nomme ses touches en anglais (« Backspace », « Delete ») : les
-/// passer par `format_shortcut` mettrait deux mots anglais au milieu d'un
-/// menu entièrement français. Les raccourcis à modificateur, eux, se rendent
-/// identiquement dans toutes les langues (« Ctrl+C ») et gagnent à passer
-/// par `format_shortcut`, qui sait les adapter à macOS.
-fn shortcut_text_backspace() -> String {
-    tr!("shortcut-backspace")
-}
-
-/// Pendant de [`shortcut_text_backspace`] pour Suppr.
-fn shortcut_text_delete() -> String {
-    tr!("shortcut-delete")
-}
 
 /// Hauteur d'une ligne de la grille, en points.
 const ROW_HEIGHT: f32 = 20.0;
@@ -373,13 +264,6 @@ fn set_metadata_row_visible(ctx: &egui::Context, visible: bool) {
         data.insert_temp(egui::Id::new("stokesforge_show_metadata_row"), visible);
     });
 }
-/// Hauteur fixe du panneau des onglets de feuille sous la grille.
-/// [`book_contents`] la réserve avant de construire la table : la hauteur
-/// intrinsèque de cette dernière ne peut plus repousser les onglets hors
-/// de la fenêtre. Juste la hauteur d'un onglet et un filet : la bande n'a
-/// plus de barre de défilement à loger (boutons « < » « > », voir
-/// [`sheet_tabs`]), et la barre horizontale de la grille est en dessous.
-const TAB_STRIP_HEIGHT: f32 = 24.0;
 /// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
 /// initial. Réserver sa hauteur garde le rectangle de la figure stable d'une
 /// image à l'autre — sans quoi le cache de formes serait invalidé au moindre
@@ -3004,14 +2888,6 @@ fn suggested_file_name(path: &str) -> String {
         .unwrap_or_else(|| "demo.stokesforge".to_string())
 }
 
-fn show_window_contents_bounded(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
-    let rect = ui.available_rect_before_wrap();
-    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    content.set_clip_rect(ui.clip_rect().intersect(rect));
-    add_contents(&mut content);
-    ui.advance_cursor_after_rect(rect);
-}
-
 /// Zone de défilement horizontale de la grille. Sa propre barre est masquée :
 /// la barre visible est déportée **sous les onglets de feuille**
 /// ([`show_grid_horizontal_bar`]), comme dans un tableur. Le défilement
@@ -3123,339 +2999,6 @@ fn show_grid_vertical_bar(
     }
 }
 
-/// Mémoire d'une image à l'autre de la bande d'onglets de feuille : de quoi
-/// savoir, **avant** de la dessiner (donc avant de placer les boutons « < »
-/// et « > »), si des onglets sont cachés à gauche ou à droite — ce qui ne se
-/// constate qu'en dessinant les onglets.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct TabStripOverflow {
-    hidden_left: bool,
-    hidden_right: bool,
-}
-
-/// Ce que [`sheet_tabs`] a dessiné : décalage de la bande, onglets cachés,
-/// et rectangles des boutons « < » et « > » s'ils sont affichés. Seuls les
-/// tests le lisent ; l'interface n'en a pas besoin.
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Clone, Copy, Debug, Default)]
-struct TabStripOutput {
-    offset: f32,
-    overflow: TabStripOverflow,
-    arrows: Option<[egui::Rect; 2]>,
-    /// Indices du premier et du dernier onglet entièrement visibles.
-    fully_visible: Option<(usize, usize)>,
-}
-
-/// **La** bande d'onglets de l'application (standard du projet, issue #19) :
-/// tout jeu d'onglets — feuilles d'un classeur, pages de la fenêtre des
-/// propriétés du graphe — passe par elle, jamais par une rangée de
-/// `selectable_label`. Style d'origine (bouton pleine taille, sans
-/// troncature) : quand elle ne tient pas dans la largeur disponible, elle
-/// défile horizontalement plutôt que de rétrécir ses onglets ou de replier
-/// les feuilles cachées dans un menu « … ». Elle n'a **pas** de barre de
-/// défilement : deux boutons « < » et « > », à gauche de la bande, font
-/// apparaître l'onglet caché suivant de ce côté — et n'apparaissent que si
-/// des onglets sont cachés. Changer de feuille sélectionnée (au clavier, par
-/// script, ou par clic) fait défiler la bande juste assez pour montrer
-/// l'onglet actif et ses voisins ([`scroll_tab_strip_to_selected`]).
-fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
-    ui: &mut egui::Ui,
-    tabs: &[(K, String)],
-    selected: K,
-    on_select: impl FnMut(K),
-    add_label: Option<&str>,
-    on_add: impl FnMut(),
-) -> TabStripOutput {
-    tab_strip_with(
-        ui,
-        tabs,
-        selected,
-        on_select,
-        add_label,
-        on_add,
-        None,
-        |_| {},
-    )
-}
-
-/// [`tab_strip`] avec, en option, les gestes sur une feuille : double-clic
-/// (renommage en place, validé par Entrée ou en quittant le champ, abandonné
-/// par Échap), menu contextuel Renommer / Dupliquer / Supprimer. Les demandes
-/// remontent par `on_event` ; la bande ne touche jamais au modèle.
-#[allow(clippy::too_many_arguments)]
-fn tab_strip_with<K: Copy + PartialEq + Send + Sync + 'static>(
-    ui: &mut egui::Ui,
-    tabs: &[(K, String)],
-    selected: K,
-    mut on_select: impl FnMut(K),
-    add_label: Option<&str>,
-    mut on_add: impl FnMut(),
-    ops: Option<&TabOps<K>>,
-    mut on_event: impl FnMut(TabEvent<K>),
-) -> TabStripOutput {
-    let mut events: Vec<TabEvent<K>> = Vec::new();
-    let add_menu = |ui: &mut egui::Ui, requested_add: &mut bool| {
-        if let Some(label) = add_label {
-            if ui.button(label).clicked() {
-                *requested_add = true;
-                ui.close();
-            }
-        }
-    };
-    let tab_menu =
-        |ui: &mut egui::Ui, id: K, events: &mut Vec<TabEvent<K>>, requested_add: &mut bool| {
-            if let Some(ops) = ops {
-                let ctx = ui.ctx().clone();
-                if ui
-                    .add(
-                        egui::Button::new(tr!("action-rename-sheet"))
-                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_RENAME_SHEET)),
-                    )
-                    .on_hover_text(tr!("action-rename-sheet", "hint"))
-                    .clicked()
-                {
-                    events.push(TabEvent::BeginRename(id));
-                    ui.close();
-                }
-                if ui
-                    .add(
-                        egui::Button::new(tr!("action-duplicate-sheet"))
-                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
-                    )
-                    .on_hover_text(tr!("action-duplicate-sheet", "hint"))
-                    .clicked()
-                {
-                    events.push(TabEvent::Duplicate(id));
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        ops.can_delete,
-                        egui::Button::new(tr!("action-delete-sheet")),
-                    )
-                    .on_hover_text(tr!("action-delete-sheet", "hint"))
-                    .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"))
-                    .clicked()
-                {
-                    events.push(TabEvent::Delete(id));
-                    ui.close();
-                }
-                ui.separator();
-            }
-            add_menu(ui, requested_add);
-        };
-    if tabs.is_empty() {
-        let mut requested_add = false;
-        ui.allocate_response(
-            egui::vec2(ui.available_width(), TAB_STRIP_HEIGHT),
-            egui::Sense::click(),
-        )
-        .context_menu(|ui| add_menu(ui, &mut requested_add));
-        if requested_add {
-            on_add();
-        }
-        return TabStripOutput::default();
-    }
-    // Mémorisée par instance de bande (scopée par la pile d'`Id` du parent,
-    // donc distincte entre fenêtre flottante et fenêtre détachée) : ne
-    // redéclenche le défilement automatique que lorsque la sélection change
-    // réellement d'une image à l'autre, pas à chaque image où elle est
-    // simplement reconduite — sinon un défilement manuel de l'utilisateur
-    // serait annulé en continu.
-    let last_selected_id = ui.id().with("tab_strip_last_selected");
-    let last_selected: Option<K> = ui.memory(|memory| memory.data.get_temp(last_selected_id));
-    let should_scroll_to_selected = last_selected != Some(selected);
-    ui.memory_mut(|memory| memory.data.insert_temp(last_selected_id, selected));
-    let overflow_id = ui.id().with("tab_strip_overflow");
-    let overflow: TabStripOverflow = ui
-        .memory(|memory| memory.data.get_temp(overflow_id))
-        .unwrap_or_default();
-
-    let mut requested = None;
-    let mut requested_add = false;
-    // -1 : faire apparaître l'onglet caché à gauche ; +1 : à droite.
-    let mut step: i8 = 0;
-    let mut new_overflow = TabStripOverflow::default();
-    let mut arrows = None;
-    let mut offset = 0.0;
-    let mut fully_visible: Option<(usize, usize)> = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        if overflow.hidden_left || overflow.hidden_right {
-            let previous = ui
-                .add_enabled_ui(overflow.hidden_left, |ui| {
-                    icon_button(
-                        ui,
-                        Icon::CaretLeft,
-                        IconRole::Neutral,
-                        tr!("tabs-previous-worksheets"),
-                    )
-                })
-                .inner;
-            let next = ui
-                .add_enabled_ui(overflow.hidden_right, |ui| {
-                    icon_button(
-                        ui,
-                        Icon::CaretRight,
-                        IconRole::Neutral,
-                        tr!("tabs-next-worksheets"),
-                    )
-                })
-                .inner;
-            if previous.clicked() {
-                step = -1;
-            }
-            if next.clicked() {
-                step = 1;
-            }
-            arrows = Some([previous.rect, next.rect]);
-        }
-        let band_width = ui.available_width();
-        offset = egui::ScrollArea::horizontal()
-            .id_salt("tab_strip_scroll")
-            .auto_shrink([false, true])
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    let visible = ui.clip_rect();
-                    let mut last_hidden_left = None;
-                    let mut first_hidden_right = None;
-                    let mut tab_rects = Vec::with_capacity(tabs.len());
-                    let mut selected_index = None;
-                    for (index, (id, name)) in tabs.iter().enumerate() {
-                        let renaming = ops.is_some_and(|ops| ops.renaming == Some(*id));
-                        let response = if renaming {
-                            let buffer_id = ui.id().with("tab_rename_buffer");
-                            let fresh = ui
-                                .memory(|memory| memory.data.get_temp::<String>(buffer_id))
-                                .is_none();
-                            let mut text = ui
-                                .memory(|memory| memory.data.get_temp::<String>(buffer_id))
-                                .unwrap_or_else(|| name.clone());
-                            let width = (name.chars().count().max(6) as f32 * 8.0).min(240.0);
-                            let edit_id = buffer_id.with("edit");
-                            let output = egui::TextEdit::singleline(&mut text)
-                                .id(edit_id)
-                                .font(egui::FontId::proportional(12.0))
-                                .desired_width(width)
-                                .show(ui);
-                            if fresh {
-                                output.response.request_focus();
-                                let mut state = output.state;
-                                state
-                                    .cursor
-                                    .set_char_range(Some(egui::text::CCursorRange::two(
-                                        egui::text::CCursor::new(0),
-                                        egui::text::CCursor::new(text.chars().count()),
-                                    )));
-                                state.store(ui.ctx(), edit_id);
-                            }
-                            let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-                            if escape {
-                                ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
-                                events.push(TabEvent::CancelRename);
-                            } else if !fresh && output.response.lost_focus() {
-                                ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
-                                events.push(TabEvent::CommitRename(*id, text));
-                            } else {
-                                ui.memory_mut(|memory| memory.data.insert_temp(buffer_id, text));
-                            }
-                            output.response.response
-                        } else {
-                            let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
-                                .small()
-                                .fill(if selected == *id {
-                                    ui.visuals().selection.bg_fill
-                                } else {
-                                    egui::Color32::TRANSPARENT
-                                });
-                            let response = ui.add(tab);
-                            response.context_menu(|ui| {
-                                tab_menu(ui, *id, &mut events, &mut requested_add)
-                            });
-                            if response.clicked() {
-                                requested = Some(*id);
-                            }
-                            if ops.is_some() && response.double_clicked() {
-                                events.push(TabEvent::BeginRename(*id));
-                            }
-                            response
-                        };
-                        tab_rects.push(response.rect);
-                        if selected == *id {
-                            selected_index = Some(index);
-                        }
-                        if response.rect.left() >= visible.left() - 0.5
-                            && response.rect.right() <= visible.right() + 0.5
-                        {
-                            let first = fully_visible.map_or(index, |(first, _)| first);
-                            fully_visible = Some((first, index));
-                        }
-                        if response.rect.left() < visible.left() - 0.5 {
-                            last_hidden_left = Some(response.clone());
-                        }
-                        if first_hidden_right.is_none()
-                            && response.rect.right() > visible.right() + 0.5
-                        {
-                            first_hidden_right = Some(response.clone());
-                        }
-                    }
-                    new_overflow = TabStripOverflow {
-                        hidden_left: last_hidden_left.is_some(),
-                        hidden_right: first_hidden_right.is_some(),
-                    };
-                    if should_scroll_to_selected {
-                        if let Some(index) = selected_index {
-                            scroll_tab_strip_to_selected(ui, &tab_rects, index, visible);
-                        }
-                    }
-                    match step {
-                        -1 => {
-                            if let Some(tab) = &last_hidden_left {
-                                tab.scroll_to_me(Some(egui::Align::Min));
-                            }
-                        }
-                        1 => {
-                            if let Some(tab) = &first_hidden_right {
-                                tab.scroll_to_me(Some(egui::Align::Max));
-                            }
-                        }
-                        _ => {}
-                    }
-                    let used = ui.cursor().left() - ui.min_rect().left();
-                    let empty = ui.allocate_response(
-                        egui::vec2((band_width - used).max(1.0), TAB_STRIP_HEIGHT),
-                        egui::Sense::click(),
-                    );
-                    empty.context_menu(|ui| add_menu(ui, &mut requested_add));
-                });
-            })
-            .state
-            .offset
-            .x;
-    });
-    ui.memory_mut(|memory| memory.data.insert_temp(overflow_id, new_overflow));
-    if step != 0 {
-        ui.ctx().request_repaint();
-    }
-    if let Some(id) = requested {
-        on_select(id);
-    }
-    if requested_add {
-        on_add();
-    }
-    for event in events {
-        on_event(event);
-    }
-    TabStripOutput {
-        offset,
-        overflow: new_overflow,
-        arrows,
-        fully_visible,
-    }
-}
-
 /// Menu « Classeur » : les gestes sur la feuille affichée, miroir du menu
 /// contextuel des onglets et des raccourcis F2 / Ctrl+D.
 fn workbook_menu(
@@ -3504,26 +3047,6 @@ fn workbook_menu(
     }
 }
 
-/// Ce que la bande d'onglets demande sur une feuille ; l'appelant en fait des
-/// [`Action`].
-#[derive(Debug, Clone, PartialEq)]
-enum TabEvent<K> {
-    BeginRename(K),
-    CommitRename(K, String),
-    CancelRename,
-    Duplicate(K),
-    Delete(K),
-}
-
-/// Gestes de renommage, de duplication et de suppression d'une bande d'onglets
-/// de feuilles.
-struct TabOps<K> {
-    /// Onglet dont le nom est en cours d'édition.
-    renaming: Option<K>,
-    /// Faux sur la dernière feuille d'un classeur : « Supprimer » grisé.
-    can_delete: bool,
-}
-
 /// Bande d'onglets des feuilles d'un classeur : [`tab_strip`] avec, en plus,
 /// « Ajouter une feuille » au clic droit.
 fn sheet_tabs(
@@ -3546,35 +3069,6 @@ fn sheet_tabs(
         ops,
         on_event,
     )
-}
-
-/// Défilement automatique de la bande d'onglets quand la feuille
-/// sélectionnée change : **le plus petit décalage** qui rend entièrement
-/// visibles l'onglet sélectionné et ses deux voisins immédiats (pour qu'on
-/// voie toujours ce qui vient ensuite). Rien ne bouge s'ils le sont déjà ; sinon
-/// la bande s'aligne sur le bord dépassé. Si la bande est trop étroite pour
-/// ces trois onglets, l'onglet sélectionné est centré.
-///
-/// Issue #1 : la bande centrait auparavant l'onglet sélectionné à chaque
-/// changement — cliquer sur le dernier onglet visible décalait alors de deux
-/// onglets ou plus au lieu d'un.
-fn scroll_tab_strip_to_selected(
-    ui: &egui::Ui,
-    tab_rects: &[egui::Rect],
-    selected: usize,
-    visible: egui::Rect,
-) {
-    let current = tab_rects[selected];
-    let first = tab_rects[selected.saturating_sub(1)];
-    let last = tab_rects[(selected + 1).min(tab_rects.len() - 1)];
-    let target = first.union(last);
-    if target.width() > visible.width() {
-        ui.scroll_to_rect(current, Some(egui::Align::Center));
-    } else if target.right() > visible.right() + 0.5 {
-        ui.scroll_to_rect(target, Some(egui::Align::Max));
-    } else if target.left() < visible.left() - 0.5 {
-        ui.scroll_to_rect(target, Some(egui::Align::Min));
-    }
 }
 
 /// Titre d'un onglet : le nom du nœud qu'il porte, ou un texte « supprimé »
@@ -8769,260 +8263,6 @@ fn column_metadata_window(ctx: &egui::Context, state: &AppState, actions: &mut V
     }
 }
 
-/// Issue d'une image de [`modal_dialog`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DialogOutcome {
-    /// Toujours ouvert.
-    Open,
-    /// « Valider » (bouton par défaut : Entrée).
-    Accept,
-    /// « Annuler », croix ou Échap.
-    Cancel,
-}
-
-/// Hauteur de la bande des boutons « Valider » / « Annuler ».
-const DIALOG_FOOTER_HEIGHT: f32 = 38.0;
-
-/// Durée d'une alerte de clic bloqué ([`modal_dialog`]) : deux impulsions.
-const MODAL_FLASH_SECONDS: f64 = 0.6;
-
-/// Position et taille d'un dialogue modal, gardées en mémoire egui le temps
-/// qu'il est ouvert.
-#[derive(Clone, Copy)]
-struct DialogGeometry {
-    pos: egui::Pos2,
-    size: egui::Vec2,
-}
-
-/// Dialogue **modal** : au premier plan, le reste de l'interface ne reçoit
-/// plus aucun clic, et un clic ailleurs fait clignoter le contour du
-/// dialogue en rouge foncé ([`theme::blocked_flash_color`]) pour le
-/// désigner. Il se ferme par « Valider » (bouton par défaut, Entrée hors
-/// saisie de texte) ou par « Annuler » (croix, Échap) : voir [`DialogOutcome`].
-///
-/// Même brique que les fenêtres de contenu : [`show_window_in_layer`] (cadre,
-/// contour actif, rognage), [`window_header`] (placement
-/// [`HeaderPlacement::Dialog`]) et [`floating_resize_handles`]. Ne diffère
-/// que par l'ordre de calque (`Foreground`, au-dessus des fenêtres en
-/// `Middle`) et par le calque plein écran qui capte les clics. Les menus
-/// déroulants et le sélecteur de couleur ouverts depuis le dialogue restent
-/// utilisables : ils sont créés après lui, donc au-dessus.
-///
-/// Limite : les fenêtres OS détachées sont d'autres viewports, que ce calque
-/// ne couvre pas.
-fn modal_dialog(
-    ctx: &egui::Context,
-    id: egui::Id,
-    title: &str,
-    default_size: egui::Vec2,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) -> DialogOutcome {
-    // Le pied par défaut : « OK », toujours actif — ce que les propriétés du
-    // graphe emploient. Les textes viennent du catalogue ; le pied les emprunte.
-    let accept_label = tr!("dialog-ok");
-    let accept_hint = tr!("dialog-ok", "hint");
-    modal_dialog_with(
-        ctx,
-        id,
-        title,
-        default_size,
-        DialogFooter {
-            accept_label: &accept_label,
-            accept_hint: &accept_hint,
-            accept_enabled: true,
-        },
-        |_| {},
-        add_contents,
-    )
-}
-
-/// Le pied de page d'un [`modal_dialog_with`] : libellé et grisage du bouton par
-/// défaut. [`modal_dialog`] y met « OK », toujours actif — ce que les propriétés
-/// du graphe emploient.
-struct DialogFooter<'a> {
-    accept_label: &'a str,
-    accept_hint: &'a str,
-    accept_enabled: bool,
-}
-
-/// [`modal_dialog`] avec un bouton par défaut personnalisé (`footer`) et des
-/// boutons supplémentaires à gauche d'« Annuler » (`extra_buttons`, ajoutés
-/// de droite à gauche comme les autres) : c'est ainsi que l'assistant d'import
-/// garde « Précédent / Suivant » tout en étant **la même fenêtre** que les
-/// propriétés du graphe — même cadre, même barre de titre, même blocage du
-/// reste de l'interface.
-fn modal_dialog_with(
-    ctx: &egui::Context,
-    id: egui::Id,
-    title: &str,
-    default_size: egui::Vec2,
-    footer_spec: DialogFooter<'_>,
-    extra_buttons: impl FnOnce(&mut egui::Ui),
-    add_contents: impl FnOnce(&mut egui::Ui),
-) -> DialogOutcome {
-    let screen = ctx.input(|input| input.content_rect());
-    let geometry_id = id.with("geometry");
-    let flash_id = id.with("flash_start");
-    let stored = ctx.data(|data| data.get_temp::<DialogGeometry>(geometry_id));
-    let just_opened = stored.is_none();
-    let mut geometry = stored.unwrap_or_else(|| {
-        let size = default_size.min(screen.size());
-        DialogGeometry {
-            pos: screen.center() - size / 2.0,
-            size,
-        }
-    });
-    geometry.size = geometry
-        .size
-        .max(MIN_CONTENT_WINDOW_SIZE)
-        .min(screen.size());
-    geometry.pos = geometry
-        .pos
-        .clamp(screen.min, (screen.max - geometry.size).max(screen.min));
-    let layer = egui::LayerId::new(egui::Order::Foreground, id);
-
-    // Le calque qui capte les clics : tout le reste de l'interface est sous lui.
-    // Il est **invisible** : pas de voile sombre sur le reste de l'application,
-    // pour qu'on continue de voir le rendu du graphe pendant qu'on règle ses
-    // propriétés (issue #20). Le clignotement du contour dit déjà que le
-    // reste est bloqué.
-    let backdrop = egui::Area::new(id.with("backdrop"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(screen.min)
-        .sense(egui::Sense::click_and_drag())
-        .show(ctx, |ui| {
-            ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
-        });
-    let blocked_click =
-        backdrop.response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed());
-    let now = ctx.input(|input| input.time);
-    if blocked_click {
-        ctx.data_mut(|data| data.insert_temp(flash_id, now));
-    }
-    if blocked_click || just_opened {
-        ctx.move_to_top(layer);
-    }
-    let flash = ctx
-        .data(|data| data.get_temp::<f64>(flash_id))
-        .map(|start| now - start)
-        .filter(|elapsed| *elapsed < MODAL_FLASH_SECONDS)
-        .map(|elapsed| {
-            ctx.request_repaint();
-            // Deux impulsions sur la durée : 0 → 1 → 0, deux fois.
-            0.5 * (1.0 - (std::f64::consts::TAU * elapsed / (MODAL_FLASH_SECONDS / 2.0)).cos())
-        });
-
-    let popup_open = egui::Popup::is_any_open(ctx);
-    let window_rect = egui::Rect::from_min_size(geometry.pos, geometry.size);
-    let mut header_actions = WindowHeaderActions::default();
-    let mut button_outcome = DialogOutcome::Open;
-    let mut position = geometry.pos;
-    let mut size = geometry.size;
-    show_window_in_layer(
-        ctx,
-        id,
-        egui::Order::Foreground,
-        window_rect,
-        screen,
-        true,
-        |ui| {
-            header_actions = window_header(ui, id, title, None, false, HeaderPlacement::Dialog);
-            show_window_contents_bounded(ui, |ui| {
-                let full = ui.available_rect_before_wrap();
-                let split = (full.bottom() - DIALOG_FOOTER_HEIGHT).max(full.top());
-                let mut body = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(egui::Rect::from_min_max(
-                            full.min,
-                            egui::pos2(full.right(), split),
-                        ))
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                );
-                body.set_clip_rect(ui.clip_rect().intersect(body.max_rect()));
-                add_contents(&mut body);
-                let mut footer = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(egui::Rect::from_min_max(
-                            egui::pos2(full.left(), split),
-                            full.max,
-                        ))
-                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
-                );
-                footer.painter().hline(
-                    full.x_range(),
-                    split,
-                    footer.visuals().widgets.noninteractive.bg_stroke,
-                );
-                // Premier ajouté = le plus à droite : « Valider », par défaut.
-                let accept = egui::Button::new(footer_spec.accept_label)
-                    .fill(footer.visuals().selection.bg_fill)
-                    .min_size(egui::vec2(84.0, 24.0));
-                if footer
-                    .add_enabled(footer_spec.accept_enabled, accept)
-                    .on_hover_text(footer_spec.accept_hint)
-                    .clicked()
-                {
-                    button_outcome = DialogOutcome::Accept;
-                }
-                let cancel =
-                    egui::Button::new(tr!("dialog-cancel")).min_size(egui::vec2(84.0, 24.0));
-                if footer
-                    .add(cancel)
-                    .on_hover_text(tr!("dialog-cancel", "hint"))
-                    .clicked()
-                {
-                    button_outcome = DialogOutcome::Cancel;
-                }
-                extra_buttons(&mut footer);
-            });
-        },
-        |ui, rect| {
-            floating_resize_handles(ui, id, rect, &mut position, &mut size);
-            if let Some(intensity) = flash {
-                let style = ui.style();
-                ui.painter().rect_stroke(
-                    rect,
-                    style.visuals.window_corner_radius,
-                    egui::Stroke::new(
-                        2.5,
-                        theme::blocked_flash_color().gamma_multiply(intensity as f32),
-                    ),
-                    egui::StrokeKind::Inside,
-                );
-            }
-        },
-    );
-    position += header_actions.drag_delta;
-    geometry = DialogGeometry {
-        pos: position,
-        size,
-    };
-    ctx.data_mut(|data| data.insert_temp(geometry_id, geometry));
-
-    // Échap : consommé par le sélecteur de couleur ou une liste ouverts (ils
-    // le lisent avant), sinon il annule. Entrée valide, sauf pendant une
-    // saisie de texte (où elle termine la saisie).
-    let escape = !popup_open
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-    let enter = !popup_open
-        && !keyboard_focus_outside_grid(ctx)
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-    let outcome = if header_actions.close || escape {
-        DialogOutcome::Cancel
-    } else if enter && footer_spec.accept_enabled {
-        DialogOutcome::Accept
-    } else {
-        button_outcome
-    };
-    if outcome != DialogOutcome::Open {
-        ctx.data_mut(|data| {
-            data.remove::<DialogGeometry>(geometry_id);
-            data.remove::<f64>(flash_id);
-        });
-    }
-    outcome
-}
-
 /// Corps de [`plot_settings_window`] : la bande d'onglets, puis la page de
 /// l'onglet choisi.
 fn plot_settings_contents(
@@ -10074,6 +9314,17 @@ mod formula_memo_tests {
 
 #[cfg(test)]
 mod graph_layout_tests {
+    use super::tab_strip::TabStripOverflow;
+    use super::window_chrome::{
+        active_window_stroke, floating_window_frame, show_floating_window, FLOATING_WINDOW_ORDER,
+        RESIZE_BORDER, WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT,
+    };
+    use super::window_placement::{
+        clamp_to_workspace, floating_window_display_size, floating_window_geometry_to_persist,
+        workspace_max_scroll, workspace_scroll_to_reveal, workspace_to_screen, GRAPH_WINDOW_SIZE,
+        WORKSPACE_SIZE,
+    };
+    use super::window_stack::{sync_floating_tabs_order_to_top_layer, toggle_collapse};
     use super::*;
     use stokesforge_core::{Column, Project};
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
@@ -14181,6 +13432,7 @@ mod grid_keyboard_tests {
 
 #[cfg(test)]
 mod window_header_tests {
+    use super::window_chrome::{header_actions_width, shows_detach_and_maximize};
     use super::*;
 
     /// #50 : un dialogue ne peint que la croix, il ne doit donc réserver que
@@ -14430,6 +13682,8 @@ mod text_format_state_tests {
 
 #[cfg(test)]
 mod object_manager_tests {
+    use super::window_chrome::{show_floating_window, FLOATING_WINDOW_ORDER};
+    use super::window_stack::window_pointer_pressed;
     use super::*;
     use stokesforge_core::Project;
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};

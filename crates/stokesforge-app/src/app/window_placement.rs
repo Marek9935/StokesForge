@@ -8,7 +8,8 @@
 //! travail ; la conversion en coordonnées écran n'a lieu qu'au moment de
 //! peindre (`workspace_to_screen`).
 
-use super::*;
+use eframe::egui;
+use stokesforge_session::WindowGeometry;
 
 /// Taille par défaut des fenêtres flottantes qui n'affichent pas un graphe —
 /// voir la doc de tête du module, § Fenêtres flottantes confinées. Rognée à

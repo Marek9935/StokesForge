@@ -138,7 +138,31 @@
 //! l'en-tête des fenêtres flottantes `Book`/`Graph`/`Matrix`/`Note`.
 //!
 
-use super::*;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
+use eframe::egui;
+use stokesforge_core::NodeId;
+use stokesforge_render_egui::GraphView;
+use stokesforge_session::{Snapshot, WindowGeometry};
+
+use crate::state::{Action, AppState, ProjectTreeNode};
+use crate::tr;
+
+use super::shortcuts::collect_undo_redo_shortcuts;
+use super::tab::{tab_node, Tab};
+use super::window_chrome::{
+    detached_resize_handles, paint_active_window_outline, show_window_contents_bounded,
+    window_header, HeaderPlacement, WindowHeaderActions, MIN_CONTENT_WINDOW_SIZE,
+    WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT,
+};
+use super::window_placement::{floating_window_display_size, GRAPH_WINDOW_SIZE};
+use super::window_stack::toggle_collapse_to;
+use super::{
+    begin_file_drop, book_contents, finish_file_drop, graph_view_contents, matrix_contents,
+    note_contents, project_manager_contents_from_tree, selected_manager_target, snapshot_stamp,
+    tab_title, tab_title_from_tree, PmInteraction, StokesForgeApp, PROJECT_MANAGER_WIDTH,
+};
 
 /// Ce que la fenêtre OS détachée du Project Manager a besoin de peindre —
 /// strictement ça, et rien de plus. Voir la doc de tête de

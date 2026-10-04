@@ -11,7 +11,7 @@
 //!   la brique commune (`show_window_in_layer`, `modal_dialog_with`) ;
 //! - `la_fenetre_des_proprietes_est_construite_comme_les_autres` (#13) ;
 //! - `aucun_import_global_hors_des_tests` : imports explicites, aucun
-//!   `use …::*` hors du code de test (décision 2 de #115).
+//!   `use …::*` hors du code de test (décision 2 de #115), sans dérogation.
 //!
 //! Chaque garde a son **témoin** : le motif interdit, posé dans un autre
 //! fichier qu'`app.rs`, est bien refusé — sans lui, une garde qui ne voit rien
@@ -190,22 +190,6 @@ fn une_fonction_en_double_fait_echouer_la_garde() {
 // Aucun import global hors des tests
 // ---------------------------------------------------------------------------
 
-/// Les imports globaux encore tolérés, `(fichier, arbre d'import)` : les
-/// `window_*.rs` de #101, sous-modules d'`app` qui empruntent ses types privés
-/// par `use super::*`, et leurs réexportations dans `app.rs`. #117 les
-/// convertit en vrais modules et **vide cette liste** ; une dérogation qui ne
-/// correspond plus à aucun import fait échouer la garde.
-const DEROGATIONS_117: &[(&str, &str)] = &[
-    ("app.rs", "window_chrome::*"),
-    ("app.rs", "window_detach::*"),
-    ("app.rs", "window_placement::*"),
-    ("app.rs", "window_stack::*"),
-    ("window_chrome.rs", "super::*"),
-    ("window_detach.rs", "super::*"),
-    ("window_placement.rs", "super::*"),
-    ("window_stack.rs", "super::*"),
-];
-
 /// Un import global : son fichier, sa ligne, son arbre d'import sans blancs
 /// (`super::*`, `super::{a,b::*}`).
 #[derive(Debug, PartialEq, Eq)]
@@ -244,30 +228,10 @@ fn imports_globaux(sources: &[Fichier]) -> Vec<ImportGlobal> {
     trouves
 }
 
-/// Les écarts : imports globaux sans dérogation, puis dérogations périmées.
-fn ecarts_d_imports(sources: &[Fichier], derogations: &[(&str, &str)]) -> Vec<String> {
-    let trouves = imports_globaux(sources);
-    // Une dérogation excuse **un** import : un second `use super::*` dans le
-    // même fichier est un écart.
-    let mut excuses = vec![false; derogations.len()];
-    let mut ecarts: Vec<String> = trouves
+/// Les écarts, un par import global ; vide si tout est en règle.
+fn ecarts_d_imports(sources: &[Fichier]) -> Vec<String> {
+    imports_globaux(sources)
         .iter()
-        .filter(|t| {
-            let libre =
-                derogations
-                    .iter()
-                    .zip(excuses.iter_mut())
-                    .find(|((chemin, arbre), pris)| {
-                        !**pris && *chemin == t.chemin && *arbre == t.arbre
-                    });
-            match libre {
-                Some((_, pris)) => {
-                    *pris = true;
-                    false
-                }
-                None => true,
-            }
-        })
         .map(|t| {
             format!(
                 "src/{}:{} : `use {};` — import global hors des tests : nommer ce \
@@ -275,26 +239,18 @@ fn ecarts_d_imports(sources: &[Fichier], derogations: &[(&str, &str)]) -> Vec<St
                 t.chemin, t.ligne, t.arbre
             )
         })
-        .collect();
-    for ((chemin, arbre), pris) in derogations.iter().zip(excuses) {
-        if !pris {
-            ecarts.push(format!(
-                "dérogation périmée ({chemin}, `use {arbre};`) : plus aucun import ne lui \
-                 correspond, la retirer de DEROGATIONS_117"
-            ));
-        }
-    }
-    ecarts
+        .collect()
 }
 
 /// Décision 2 de #115 : des vrais modules, à imports explicites. Aucun
 /// `use …::*` — `use super::*` en tête — hors du code `#[cfg(test)]`, dans
 /// tout `src/` (pas seulement `src/app/`) : un `use super::*` en production
 /// fait d'un module un simple découpage de fichier, qui voit tout de son
-/// parent sans rien déclarer.
+/// parent sans rien déclarer. Garde absolue : les dérogations des
+/// `window_*.rs` de #101 ont été levées par #117.
 #[test]
 fn aucun_import_global_hors_des_tests() {
-    let ecarts = ecarts_d_imports(&sources::sources(), DEROGATIONS_117);
+    let ecarts = ecarts_d_imports(&sources::sources());
     assert!(
         ecarts.is_empty(),
         "{} écart(s) :\n  {}",
@@ -351,30 +307,30 @@ fn la_garde_des_imports_laisse_passer_le_code_de_test_et_les_imports_nommes() {
     assert!(imports_globaux(&[de_test]).is_empty());
 }
 
-/// Une dérogation excuse son import, et seulement lui ; une dérogation sans
-/// import est périmée et fait échouer la garde (#117 doit vider la liste).
+/// Le rapport nomme chaque import, un écart par import — deux dans le même
+/// fichier font deux écarts.
 #[test]
-fn une_derogation_excuse_son_import_et_perime_sans_lui() {
+fn la_garde_des_imports_rapporte_chaque_import() {
     let sources = [
         fichier(
-            "window_chrome.rs",
+            "app/window_chrome.rs",
             "use super::*;\nfn f() {}\nuse super::*;",
         ),
-        fichier("app/grille.rs", "use super::*;"),
+        fichier("app/grille.rs", "use crate::state::{Action, *};"),
     ];
-    let derogations = [
-        ("window_chrome.rs", "super::*"),
-        ("window_stack.rs", "super::*"),
-    ];
-    let ecarts = ecarts_d_imports(&sources, &derogations);
+    let ecarts = ecarts_d_imports(&sources);
     assert_eq!(ecarts.len(), 3, "{ecarts:?}");
     assert!(
-        ecarts[0].starts_with("src/window_chrome.rs:3"),
-        "une dérogation n'excuse qu'un import : {ecarts:?}"
+        ecarts[0].starts_with("src/app/window_chrome.rs:1"),
+        "{ecarts:?}"
     );
-    assert!(ecarts[1].starts_with("src/app/grille.rs:1"), "{ecarts:?}");
     assert!(
-        ecarts[2].contains("périmée") && ecarts[2].contains("window_stack.rs"),
+        ecarts[1].starts_with("src/app/window_chrome.rs:3"),
+        "{ecarts:?}"
+    );
+    assert!(
+        ecarts[2].starts_with("src/app/grille.rs:1")
+            && ecarts[2].contains("crate::state::{Action,*}"),
         "{ecarts:?}"
     );
 }
@@ -415,7 +371,7 @@ fn la_lecture_descend_dans_les_sous_dossiers() {
 #[test]
 fn la_vraie_lecture_voit_les_sous_dossiers_de_src() {
     let sources = sources::sources();
-    for attendu in ["app.rs", "lib.rs", "i18n/pseudo.rs", "window_chrome.rs"] {
+    for attendu in ["app.rs", "lib.rs", "i18n/pseudo.rs", "app/window_chrome.rs"] {
         let fichier = sources
             .iter()
             .find(|f| f.chemin == attendu)

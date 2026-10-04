@@ -8,7 +8,11 @@
 //! fenêtres détachées et les dialogues modaux. Sous-module d'`app` pour garder
 //! l'accès à ses types privés (`Tab`, constantes d'icônes…).
 
-use super::*;
+use eframe::egui;
+
+use crate::icons::{icon_image, Icon, IconRole, ICON_SIZE};
+
+use super::tab::Tab;
 
 /// Hauteur de la bande d'en-tête peinte par [`window_header`] — partagée
 /// avec le calcul de la taille repliée d'une fenêtre flottante (B3,
@@ -159,7 +163,7 @@ pub(super) const RESIZE_BORDER: f32 = 6.0;
 /// Longueur, le long de chaque côté, des deux branches d'une poignée de coin
 /// (voir [`floating_resize_handles`]) : le coin se vise sur ~18 points
 /// au lieu de 6.
-pub(super) const CORNER_REACH: f32 = 12.0;
+const CORNER_REACH: f32 = 12.0;
 
 /// Peint une fenêtre flottante de l'espace de travail, cadre compris, dans
 /// son propre calque. `window_rect` est le rectangle écran de la fenêtre,
@@ -684,4 +688,17 @@ pub(super) fn window_header(
         ui.visuals().widgets.noninteractive.bg_stroke,
     );
     actions
+}
+
+/// Pose le contenu d'une fenêtre dans l'espace qui reste, rogné à cet espace :
+/// un contenu trop grand ne déborde ni ne repousse le cadre.
+pub(super) fn show_window_contents_bounded(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    let rect = ui.available_rect_before_wrap();
+    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    content.set_clip_rect(ui.clip_rect().intersect(rect));
+    add_contents(&mut content);
+    ui.advance_cursor_after_rect(rect);
 }

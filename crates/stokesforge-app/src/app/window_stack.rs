@@ -109,30 +109,26 @@
 //! jamais dédoublé, n'a besoin d'aucun cas particulier ici.
 //!
 
-use super::*;
+use std::collections::HashSet;
 
-/// Un onglet, c'est-à-dire une fenêtre de contenu ouverte.
-///
-/// Ni le Project Manager ni la console de script n'en sont — voir la doc de
-/// tête du module, §§ Project Manager et Console de script : ce sont deux
-/// `egui::Panel` fixes, peints respectivement par
-/// [`StokesForgeApp::project_manager_panel`] et [`StokesForgeApp::script_panel`].
-/// [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`], [`Tab::Note`] portent un
-/// [`NodeId`] : une instance par fenêtre **ouverte**, focalisée plutôt que
-/// dupliquée si on la rouvre — voir [`StokesForgeApp::open_tab`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum Tab {
-    /// Un classeur ouvert, identifié par son nœud. Contient la grille,
-    /// scopée à la feuille actuellement choisie *dans ce classeur*.
-    Book(NodeId),
-    /// Un graphe ouvert, identifié par son nœud.
-    Graph(NodeId),
-    /// Une matrice ouverte, identifiée par son nœud. Contenu **espace
-    /// réservé** — voir [`matrix_contents`].
-    Matrix(NodeId),
-    /// Une note ouverte, identifiée par son nœud.
-    Note(NodeId),
-}
+use eframe::egui;
+use stokesforge_core::NodeId;
+
+use crate::state::{Action, WindowKind};
+use crate::tr;
+
+use super::tab::{tab_node, Tab};
+use super::window_chrome::{
+    floating_resize_handles, floating_window_frame, show_floating_window,
+    show_window_contents_bounded, window_header, HeaderPlacement, WindowHeaderActions,
+    FLOATING_WINDOW_ORDER, MIN_CONTENT_WINDOW_SIZE, WINDOW_HEADER_HEIGHT,
+};
+use super::window_placement::{
+    clamp_to_workspace, floating_window_display_size, floating_window_geometry_to_persist,
+    geometry_rect, workspace_scroll_to_reveal, workspace_to_screen, BOOK_WINDOW_WIDTH,
+    CASCADE_STEP, CASCADE_WRAP, FLOATING_WINDOW_SIZE, GRAPH_WINDOW_SIZE, WORKSPACE_SIZE,
+};
+use super::{tab_contents, tab_title, StokesForgeApp};
 
 /// Un clic ne réactive le contenu que sur son calque : Object Manager
 /// flottant peut le recouvrir tout en gardant un autre graphe comme cible.
@@ -156,24 +152,6 @@ pub(super) fn window_nodes(tree: &[crate::state::ProjectTreeNode]) -> Vec<(NodeI
         }
     }
     out
-}
-
-/// Traduit une nature de fenêtre du Project Manager en l'onglet qui l'ouvre.
-pub(super) fn tab_for_window(id: NodeId, kind: WindowKind) -> Tab {
-    match kind {
-        WindowKind::Book => Tab::Book(id),
-        WindowKind::Graph => Tab::Graph(id),
-        WindowKind::Matrix => Tab::Matrix(id),
-        WindowKind::Note => Tab::Note(id),
-    }
-}
-
-/// Chaque variante de [`Tab`] correspond à une fenêtre persistée identifiée
-/// par son nœud.
-pub(super) fn tab_node(tab: Tab) -> NodeId {
-    match tab {
-        Tab::Book(id) | Tab::Graph(id) | Tab::Matrix(id) | Tab::Note(id) => id,
-    }
 }
 
 /// Bascule le repli du contenu d'un onglet. Réservé à `Tab::Graph` et
