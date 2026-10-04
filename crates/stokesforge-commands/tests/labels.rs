@@ -70,10 +70,11 @@ fn rank(command: &Command) -> usize {
         Command::SetPlotSpec { .. } => 21,
         Command::SetSavedColors { .. } => 22,
         Command::EditPlotSpec { .. } => 23,
+        Command::DuplicateWorksheet { .. } => 24,
     }
 }
 
-const VARIANTS: usize = 24;
+const VARIANTS: usize = 25;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -202,6 +203,15 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
                 name: None,
             },
             HistoryLabel::AddWorksheet,
+        ),
+        (
+            Command::DuplicateWorksheet {
+                sheet: w.sheet,
+                name: "Sheet1 copy 1".to_string(),
+            },
+            HistoryLabel::DuplicateWorksheet {
+                name: named("Sheet1"),
+            },
         ),
         (
             Command::AddGraph {

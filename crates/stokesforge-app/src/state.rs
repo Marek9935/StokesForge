@@ -106,6 +106,29 @@ pub enum Action {
     /// d'une feuille dans l'un n'affecte jamais celle d'un autre classeur
     /// ouvert simultanément.
     SelectSheet(NodeId),
+    /// Passe l'onglet de `sheet` en édition de son nom (double-clic, F2, menu
+    /// contextuel) et la sélectionne.
+    BeginRenameSheet(NodeId),
+    /// Valide le nom saisi pour `sheet`. Nom vide ou déjà pris dans le
+    /// classeur : l'ancien nom reste, un message l'explique, aucune entrée
+    /// d'historique.
+    CommitRenameSheet {
+        /// Feuille renommée.
+        sheet: NodeId,
+        /// Nom saisi.
+        name: String,
+    },
+    /// Abandonne l'édition du nom d'une feuille (Échap).
+    CancelRenameSheet,
+    /// Duplique `sheet` (colonnes comprises) juste après elle, et affiche la
+    /// copie.
+    DuplicateSheet(NodeId),
+    /// Demande la suppression de `sheet` : ouvre la confirmation, qui nomme
+    /// les graphes qui en tracent des colonnes. Refusée pour la dernière
+    /// feuille d'un classeur.
+    RequestDeleteSheet(NodeId),
+    /// Réponse à la confirmation de [`Action::RequestDeleteSheet`].
+    ConfirmDeleteSheet(bool),
     /// Valide la saisie d'une cellule : le texte tel que tapé, à convertir
     /// selon le type de la colonne.
     CommitCell {
@@ -1835,6 +1858,10 @@ pub struct AppState {
     /// d'un ancien arbre. Une annulation demande aussi confirmation.
     saved_revision: Option<(u64, u64)>,
     new_project_pending: bool,
+    /// Feuille dont l'onglet est en édition de nom.
+    renaming_sheet: Option<NodeId>,
+    /// Feuille dont la suppression attend confirmation.
+    pending_sheet_delete: Option<NodeId>,
     /// Agrandissement des exports PNG (issue #34), un de
     /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
     png_export_scale: f32,
@@ -1966,6 +1993,8 @@ impl AppState {
             snapshot,
             saved_revision,
             new_project_pending: false,
+            renaming_sheet: None,
+            pending_sheet_delete: None,
             selected_sheets: std::collections::HashMap::new(),
             path,
             png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
@@ -3452,6 +3481,12 @@ impl AppState {
             }),
             Action::AddWorkbook => self.add_workbook(),
             Action::SelectSheet(id) => self.select_sheet(id),
+            Action::BeginRenameSheet(sheet) => self.begin_rename_sheet(sheet),
+            Action::CommitRenameSheet { sheet, name } => self.commit_rename_sheet(sheet, &name),
+            Action::CancelRenameSheet => self.renaming_sheet = None,
+            Action::DuplicateSheet(sheet) => self.duplicate_sheet(sheet),
+            Action::RequestDeleteSheet(sheet) => self.request_delete_sheet(sheet),
+            Action::ConfirmDeleteSheet(accept) => self.confirm_delete_sheet(accept),
             Action::CommitCell { column, row, text } => {
                 self.commit_cell(column, row, text);
             }
@@ -5069,6 +5104,140 @@ impl AppState {
         self.selected_sheets.insert(book, id);
         self.editing = None;
         self.status = None;
+    }
+
+    /// Feuille dont l'onglet est en cours de renommage.
+    pub fn renaming_sheet(&self) -> Option<NodeId> {
+        self.renaming_sheet
+    }
+
+    /// Feuille dont la suppression attend confirmation.
+    pub fn pending_sheet_delete(&self) -> Option<NodeId> {
+        self.pending_sheet_delete
+    }
+
+    /// La dernière feuille d'un classeur ne se supprime pas.
+    pub fn can_delete_sheet(&self, sheet: NodeId) -> bool {
+        self.sheet_book(sheet)
+            .is_some_and(|book| self.worksheets_of(book).len() > 1)
+    }
+
+    /// Noms des graphes qui tracent au moins une colonne de `sheet`.
+    pub fn sheet_users(&self, sheet: NodeId) -> Vec<String> {
+        let tree = &self.snapshot.tree;
+        let Some(node) = tree.node(sheet) else {
+            return Vec::new();
+        };
+        let columns = node.children();
+        tree.walk_all()
+            .into_iter()
+            .filter_map(|id| tree.node(id))
+            .filter(|node| match node.kind() {
+                NodeKind::Graph { spec, .. } => columns.iter().any(|c| spec.references(*c)),
+                _ => false,
+            })
+            .map(|node| node.name().to_string())
+            .collect()
+    }
+
+    /// Classeur parent de `sheet`, si c'en est bien une.
+    fn sheet_book(&self, sheet: NodeId) -> Option<NodeId> {
+        let node = self.snapshot.tree.node(sheet)?;
+        node.kind().is_worksheet().then(|| node.parent()).flatten()
+    }
+
+    fn begin_rename_sheet(&mut self, sheet: NodeId) {
+        if self.sheet_book(sheet).is_none() {
+            self.fail(tr!("sheet-invalid", id = sheet.to_string()));
+            return;
+        }
+        self.select_sheet(sheet);
+        self.renaming_sheet = Some(sheet);
+    }
+
+    fn commit_rename_sheet(&mut self, sheet: NodeId, name: &str) {
+        self.renaming_sheet = None;
+        let Some(book) = self.sheet_book(sheet) else {
+            return;
+        };
+        let name = name.trim();
+        let current = self
+            .snapshot
+            .tree
+            .node(sheet)
+            .map(|node| node.name().to_string())
+            .unwrap_or_default();
+        if name == current {
+            return;
+        }
+        let taken = self
+            .worksheets_of(book)
+            .iter()
+            .any(|(id, other)| *id != sheet && other == name);
+        if name.is_empty() {
+            self.fail(tr!("sheet-rename-empty", name = current));
+        } else if taken {
+            self.fail(tr!("sheet-rename-taken", name = name, old = current));
+        } else {
+            self.execute(Command::Rename {
+                id: sheet,
+                name: name.to_string(),
+            });
+        }
+    }
+
+    fn duplicate_sheet(&mut self, sheet: NodeId) {
+        let Some(book) = self.sheet_book(sheet) else {
+            self.fail(tr!("sheet-invalid", id = sheet.to_string()));
+            return;
+        };
+        let origin = self
+            .snapshot
+            .tree
+            .node(sheet)
+            .map(|node| node.name().to_string())
+            .unwrap_or_default();
+        let existing = self.worksheets_of(book);
+        let name = (1u64..)
+            .map(|n| {
+                tr!(
+                    "sheet-copy-name",
+                    name = origin.as_str(),
+                    number = n.to_string()
+                )
+            })
+            .find(|candidate| existing.iter().all(|(_, other)| other != candidate))
+            .unwrap_or(origin.clone());
+        let before: Vec<NodeId> = existing.iter().map(|(id, _)| *id).collect();
+        self.execute(Command::DuplicateWorksheet { sheet, name });
+        let copy = self
+            .worksheets_of(book)
+            .into_iter()
+            .map(|(id, _)| id)
+            .find(|id| !before.contains(id));
+        if let Some(copy) = copy {
+            self.select_sheet(copy);
+        }
+    }
+
+    fn request_delete_sheet(&mut self, sheet: NodeId) {
+        if self.sheet_book(sheet).is_none() {
+            self.fail(tr!("sheet-invalid", id = sheet.to_string()));
+        } else if !self.can_delete_sheet(sheet) {
+            self.fail(tr!("sheet-delete-last"));
+        } else {
+            self.pending_sheet_delete = Some(sheet);
+        }
+    }
+
+    fn confirm_delete_sheet(&mut self, accept: bool) {
+        let Some(sheet) = self.pending_sheet_delete.take() else {
+            return;
+        };
+        if accept && self.can_delete_sheet(sheet) {
+            self.editing = None;
+            self.execute(Command::RemoveNode { id: sheet });
+        }
     }
 
     /// Rend `true` si la saisie a été acceptée (y compris un no-op parce que

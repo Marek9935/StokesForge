@@ -467,6 +467,15 @@ pub(crate) const SHORTCUT_IMPORT_TEXT: &str = "Ctrl+\"";
 pub const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
 
+/// F2 — renommer la feuille affichée du classeur actif (édition en place de
+/// son onglet).
+pub const SHORTCUT_RENAME_SHEET: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F2);
+/// Ctrl+D — dupliquer la feuille affichée du classeur actif. Pas de Suppr
+/// pour supprimer une feuille : trop de faux positifs, le menu seul suffit.
+pub const SHORTCUT_DUPLICATE_SHEET: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
+
 /// Ctrl+C — copier la sélection de la grille.
 ///
 /// # Ces cinq raccourcis-ci ne sont **jamais** consommés
@@ -1127,13 +1136,19 @@ impl StokesForgeApp {
 
     /// Consomme les raccourcis au niveau du contexte et en fait des actions.
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        if self.state.new_project_pending() {
+        if self.state.new_project_pending() || self.state.pending_sheet_delete().is_some() {
             return;
         }
         let mut save_as = false;
         let mut open = false;
         let mut import = false;
         let mut export = false;
+        // Les gestes de feuille ne s'appliquent pas pendant une saisie dans un
+        // champ, ni pendant l'édition du nom d'un onglet.
+        let typing = keyboard_focus_outside_grid(ctx) || self.state.renaming_sheet().is_some();
+        let active_sheet = self
+            .active_book()
+            .and_then(|book| self.state.selected_sheet_in(book));
         ctx.input_mut(|input| {
             if input.consume_shortcut(&SHORTCUT_NEW_PROJECT) && self.state.can_new_project() {
                 actions.push(Action::NewProject {
@@ -1155,6 +1170,16 @@ impl StokesForgeApp {
             }
             if input.consume_shortcut(&SHORTCUT_RUN_SCRIPT) {
                 actions.push(Action::RunScript);
+            }
+            if !typing {
+                if let Some(sheet) = active_sheet {
+                    if input.consume_shortcut(&SHORTCUT_RENAME_SHEET) {
+                        actions.push(Action::BeginRenameSheet(sheet));
+                    }
+                    if input.consume_shortcut(&SHORTCUT_DUPLICATE_SHEET) {
+                        actions.push(Action::DuplicateSheet(sheet));
+                    }
+                }
             }
             if input.consume_shortcut(&SHORTCUT_IMPORT)
                 || input.consume_shortcut(&SHORTCUT_IMPORT_QWERTY)
@@ -1359,6 +1384,13 @@ impl StokesForgeApp {
                         ui.close();
                     }
                 });
+                if let Some(book) = self.active_book() {
+                    if let Some(sheet) = self.state.selected_sheet_in(book) {
+                        ui.menu_button(tr!("menu-workbook"), |ui| {
+                            workbook_menu(ui, ctx, &self.state, book, sheet, actions);
+                        });
+                    }
+                }
                 if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
                     ui.menu_button(tr!("menu-graph"), |ui| {
                         let spec = crate::state::current_plot_spec(self.state.tree(), graph);
@@ -3813,6 +3845,41 @@ impl eframe::App for StokesForgeApp {
                 DialogOutcome::Open => {}
             }
         }
+        if let Some(sheet) = self.state.pending_sheet_delete() {
+            actions.clear();
+            let name = self
+                .state
+                .tree()
+                .node(sheet)
+                .map(|node| node.name().to_string())
+                .unwrap_or_default();
+            let users = self.state.sheet_users(sheet);
+            let label = tr!("sheet-delete-accept");
+            let hint = tr!("sheet-delete-accept", "hint");
+            match modal_dialog_with(
+                &ctx,
+                egui::Id::new("stokesforge_delete_sheet"),
+                &tr!("sheet-delete-title"),
+                egui::vec2(480.0, 170.0),
+                DialogFooter {
+                    accept_label: &label,
+                    accept_hint: &hint,
+                    accept_enabled: true,
+                },
+                |_| {},
+                |ui| {
+                    ui.label(tr!("sheet-delete-confirm", name = name.as_str()));
+                    if !users.is_empty() {
+                        ui.add_space(6.0);
+                        ui.label(tr!("sheet-delete-used", graphs = users.join(", ")));
+                    }
+                },
+            ) {
+                DialogOutcome::Accept => actions.push(Action::ConfirmDeleteSheet(true)),
+                DialogOutcome::Cancel => actions.push(Action::ConfirmDeleteSheet(false)),
+                DialogOutcome::Open => {}
+            }
+        }
         for action in actions {
             let action = if matches!(action, Action::Save) && self.state.path().is_empty() {
                 let mut chosen = Vec::new();
@@ -4595,10 +4662,38 @@ fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
     ui: &mut egui::Ui,
     tabs: &[(K, String)],
     selected: K,
+    on_select: impl FnMut(K),
+    add_label: Option<&str>,
+    on_add: impl FnMut(),
+) -> TabStripOutput {
+    tab_strip_with(
+        ui,
+        tabs,
+        selected,
+        on_select,
+        add_label,
+        on_add,
+        None,
+        |_| {},
+    )
+}
+
+/// [`tab_strip`] avec, en option, les gestes sur une feuille : double-clic
+/// (renommage en place, validé par Entrée ou en quittant le champ, abandonné
+/// par Échap), menu contextuel Renommer / Dupliquer / Supprimer. Les demandes
+/// remontent par `on_event` ; la bande ne touche jamais au modèle.
+#[allow(clippy::too_many_arguments)]
+fn tab_strip_with<K: Copy + PartialEq + Send + Sync + 'static>(
+    ui: &mut egui::Ui,
+    tabs: &[(K, String)],
+    selected: K,
     mut on_select: impl FnMut(K),
     add_label: Option<&str>,
     mut on_add: impl FnMut(),
+    ops: Option<&TabOps<K>>,
+    mut on_event: impl FnMut(TabEvent<K>),
 ) -> TabStripOutput {
+    let mut events: Vec<TabEvent<K>> = Vec::new();
     let add_menu = |ui: &mut egui::Ui, requested_add: &mut bool| {
         if let Some(label) = add_label {
             if ui.button(label).clicked() {
@@ -4607,6 +4702,48 @@ fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
             }
         }
     };
+    let tab_menu =
+        |ui: &mut egui::Ui, id: K, events: &mut Vec<TabEvent<K>>, requested_add: &mut bool| {
+            if let Some(ops) = ops {
+                let ctx = ui.ctx().clone();
+                if ui
+                    .add(
+                        egui::Button::new(tr!("action-rename-sheet"))
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_RENAME_SHEET)),
+                    )
+                    .on_hover_text(tr!("action-rename-sheet", "hint"))
+                    .clicked()
+                {
+                    events.push(TabEvent::BeginRename(id));
+                    ui.close();
+                }
+                if ui
+                    .add(
+                        egui::Button::new(tr!("action-duplicate-sheet"))
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+                    )
+                    .on_hover_text(tr!("action-duplicate-sheet", "hint"))
+                    .clicked()
+                {
+                    events.push(TabEvent::Duplicate(id));
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        ops.can_delete,
+                        egui::Button::new(tr!("action-delete-sheet")),
+                    )
+                    .on_hover_text(tr!("action-delete-sheet", "hint"))
+                    .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"))
+                    .clicked()
+                {
+                    events.push(TabEvent::Delete(id));
+                    ui.close();
+                }
+                ui.separator();
+            }
+            add_menu(ui, requested_add);
+        };
     if tabs.is_empty() {
         let mut requested_add = false;
         ui.allocate_response(
@@ -4687,18 +4824,64 @@ fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
                     let mut tab_rects = Vec::with_capacity(tabs.len());
                     let mut selected_index = None;
                     for (index, (id, name)) in tabs.iter().enumerate() {
-                        let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
-                            .small()
-                            .fill(if selected == *id {
-                                ui.visuals().selection.bg_fill
+                        let renaming = ops.is_some_and(|ops| ops.renaming == Some(*id));
+                        let response = if renaming {
+                            let buffer_id = ui.id().with("tab_rename_buffer");
+                            let fresh = ui
+                                .memory(|memory| memory.data.get_temp::<String>(buffer_id))
+                                .is_none();
+                            let mut text = ui
+                                .memory(|memory| memory.data.get_temp::<String>(buffer_id))
+                                .unwrap_or_else(|| name.clone());
+                            let width = (name.chars().count().max(6) as f32 * 8.0).min(240.0);
+                            let edit_id = buffer_id.with("edit");
+                            let output = egui::TextEdit::singleline(&mut text)
+                                .id(edit_id)
+                                .font(egui::FontId::proportional(12.0))
+                                .desired_width(width)
+                                .show(ui);
+                            if fresh {
+                                output.response.request_focus();
+                                let mut state = output.state;
+                                state
+                                    .cursor
+                                    .set_char_range(Some(egui::text::CCursorRange::two(
+                                        egui::text::CCursor::new(0),
+                                        egui::text::CCursor::new(text.chars().count()),
+                                    )));
+                                state.store(ui.ctx(), edit_id);
+                            }
+                            let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+                            if escape {
+                                ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
+                                events.push(TabEvent::CancelRename);
+                            } else if !fresh && output.response.lost_focus() {
+                                ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
+                                events.push(TabEvent::CommitRename(*id, text));
                             } else {
-                                egui::Color32::TRANSPARENT
+                                ui.memory_mut(|memory| memory.data.insert_temp(buffer_id, text));
+                            }
+                            output.response.response
+                        } else {
+                            let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
+                                .small()
+                                .fill(if selected == *id {
+                                    ui.visuals().selection.bg_fill
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                });
+                            let response = ui.add(tab);
+                            response.context_menu(|ui| {
+                                tab_menu(ui, *id, &mut events, &mut requested_add)
                             });
-                        let response = ui.add(tab);
-                        response.context_menu(|ui| add_menu(ui, &mut requested_add));
-                        if response.clicked() {
-                            requested = Some(*id);
-                        }
+                            if response.clicked() {
+                                requested = Some(*id);
+                            }
+                            if ops.is_some() && response.double_clicked() {
+                                events.push(TabEvent::BeginRename(*id));
+                            }
+                            response
+                        };
                         tab_rects.push(response.rect);
                         if selected == *id {
                             selected_index = Some(index);
@@ -4762,12 +4945,83 @@ fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
     if requested_add {
         on_add();
     }
+    for event in events {
+        on_event(event);
+    }
     TabStripOutput {
         offset,
         overflow: new_overflow,
         arrows,
         fully_visible,
     }
+}
+
+/// Menu « Classeur » : les gestes sur la feuille affichée, miroir du menu
+/// contextuel des onglets et des raccourcis F2 / Ctrl+D.
+fn workbook_menu(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    state: &AppState,
+    book: NodeId,
+    sheet: NodeId,
+    actions: &mut Vec<Action>,
+) {
+    if ui
+        .add(
+            egui::Button::new(tr!("action-rename-sheet"))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_RENAME_SHEET)),
+        )
+        .on_hover_text(tr!("action-rename-sheet", "hint"))
+        .clicked()
+    {
+        actions.push(Action::BeginRenameSheet(sheet));
+        ui.close();
+    }
+    if ui
+        .add(
+            egui::Button::new(tr!("action-duplicate-sheet"))
+                .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+        )
+        .on_hover_text(tr!("action-duplicate-sheet", "hint"))
+        .clicked()
+    {
+        actions.push(Action::DuplicateSheet(sheet));
+        ui.close();
+    }
+    let can_delete = state.can_delete_sheet(sheet);
+    let delete = ui
+        .add_enabled(can_delete, egui::Button::new(tr!("action-delete-sheet")))
+        .on_hover_text(tr!("action-delete-sheet", "hint"))
+        .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"));
+    if delete.clicked() {
+        actions.push(Action::RequestDeleteSheet(sheet));
+        ui.close();
+    }
+    ui.separator();
+    if ui.button(tr!("workbook-worksheet-add")).clicked() {
+        actions.push(Action::AddWorksheet { book });
+        ui.close();
+    }
+}
+
+/// Ce que la bande d'onglets demande sur une feuille ; l'appelant en fait des
+/// [`Action`].
+#[derive(Debug, Clone, PartialEq)]
+enum TabEvent<K> {
+    BeginRename(K),
+    CommitRename(K, String),
+    CancelRename,
+    Duplicate(K),
+    Delete(K),
+}
+
+/// Gestes de renommage, de duplication et de suppression d'une bande d'onglets
+/// de feuilles.
+struct TabOps<K> {
+    /// Onglet dont le nom est en cours d'édition.
+    renaming: Option<K>,
+    /// Faux sur la dernière feuille d'un classeur : « Supprimer » grisé.
+    can_delete: bool,
 }
 
 /// Bande d'onglets des feuilles d'un classeur : [`tab_strip`] avec, en plus,
@@ -4778,9 +5032,20 @@ fn sheet_tabs(
     selected: NodeId,
     on_select: impl FnMut(NodeId),
     on_add: impl FnMut(),
+    ops: Option<&TabOps<NodeId>>,
+    on_event: impl FnMut(TabEvent<NodeId>),
 ) -> TabStripOutput {
     let add_label = tr!("workbook-worksheet-add");
-    tab_strip(ui, sheets, selected, on_select, Some(&add_label), on_add)
+    tab_strip_with(
+        ui,
+        sheets,
+        selected,
+        on_select,
+        Some(&add_label),
+        on_add,
+        ops,
+        on_event,
+    )
 }
 
 /// Défilement automatique de la bande d'onglets quand la feuille
@@ -7394,12 +7659,26 @@ fn book_contents(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Acti
     };
     let mut tabs_ui = bounded(tabs_rect);
     let mut grid_ui = bounded(grid_rect);
+    let sheet_ops = TabOps {
+        renaming: state.renaming_sheet(),
+        can_delete: sheets.len() > 1,
+    };
     sheet_tabs(
         &mut tabs_ui,
         &sheets,
         selected,
         |id| chosen_sheet = Some(id),
         || add_sheet = true,
+        Some(&sheet_ops),
+        |event| {
+            actions.push(match event {
+                TabEvent::BeginRename(sheet) => Action::BeginRenameSheet(sheet),
+                TabEvent::CommitRename(sheet, name) => Action::CommitRenameSheet { sheet, name },
+                TabEvent::CancelRename => Action::CancelRenameSheet,
+                TabEvent::Duplicate(sheet) => Action::DuplicateSheet(sheet),
+                TabEvent::Delete(sheet) => Action::RequestDeleteSheet(sheet),
+            })
+        },
     );
     if sheets.is_empty() {
         grid_ui.centered_and_justified(|ui| {
@@ -13778,7 +14057,7 @@ mod graph_layout_tests {
         };
         let mut output = context.run_ui(input, |ui| {
             ui.allocate_ui(egui::vec2(200.0, TAB_STRIP_HEIGHT), |ui| {
-                sheet_tabs(ui, &sheets, sheets[0].0, |_| {}, || {});
+                sheet_tabs(ui, &sheets, sheets[0].0, |_| {}, || {}, None, |_| {});
             });
         });
         output.textures_delta.clear();
@@ -13816,7 +14095,7 @@ mod graph_layout_tests {
         };
         let mut sortie = TabStripOutput::default();
         let mut output = context.run_ui(input, |ui| {
-            sortie = sheet_tabs(ui, sheets, selected, |_| {}, || {});
+            sortie = sheet_tabs(ui, sheets, selected, |_| {}, || {}, None, |_| {});
         });
         output.textures_delta.clear();
         sortie

@@ -43,10 +43,11 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::SetSavedColors => 21,
         HistoryLabel::Macro(_) => 22,
         HistoryLabel::EditPlotSpec(_) => 23,
+        HistoryLabel::DuplicateWorksheet { .. } => 24,
     }
 }
 
-const VARIANTS: usize = 24;
+const VARIANTS: usize = 25;
 
 /// Chaque variante, sous **chacune** de ses formes (cible connue ou non, 0, 1 et
 /// plusieurs lignes, chaque nature de groupe).
@@ -86,6 +87,10 @@ fn all_labels() -> Vec<HistoryLabel> {
         HistoryLabel::AddWorkbook,
         HistoryLabel::AddEmptyWorkbook,
         HistoryLabel::AddWorksheet,
+        HistoryLabel::DuplicateWorksheet { name: None },
+        HistoryLabel::DuplicateWorksheet {
+            name: name("Sheet2"),
+        },
         HistoryLabel::AddGraph,
         HistoryLabel::AddMatrix,
         HistoryLabel::AddNote,

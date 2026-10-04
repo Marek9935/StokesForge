@@ -69,6 +69,10 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         HistoryLabel::AddWorkbook => tr!("history-add-workbook"),
         HistoryLabel::AddEmptyWorkbook => tr!("history-add-empty-workbook"),
         HistoryLabel::AddWorksheet => tr!("history-add-worksheet"),
+        HistoryLabel::DuplicateWorksheet { name: None } => tr!("history-duplicate-worksheet"),
+        HistoryLabel::DuplicateWorksheet { name: Some(name) } => {
+            tr!("history-duplicate-worksheet-named", name = name.as_str())
+        }
         HistoryLabel::AddGraph => tr!("history-add-graph"),
         HistoryLabel::AddMatrix => tr!("history-add-matrix"),
         HistoryLabel::AddNote => tr!("history-add-note"),

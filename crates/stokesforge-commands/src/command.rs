@@ -208,6 +208,16 @@ pub enum Command {
         /// Nom demandé, ou nom automatique.
         name: Option<String>,
     },
+    /// Duplique une feuille (colonnes comprises, identifiants neufs) juste
+    /// après elle, sous `name`. Le nom est **obligatoire** : le suffixe
+    /// « copie » est une phrase de l'interface, que `stokesforge-core` ne
+    /// connaît pas ; l'appelant le compose (`Project::duplicate_worksheet`).
+    DuplicateWorksheet {
+        /// Feuille à dupliquer.
+        sheet: NodeId,
+        /// Nom de la copie.
+        name: String,
+    },
     /// Ajoute un graphe portant `spec`. `name: None` → premier « GraphN »
     /// libre. `spec` est obligatoire, comme dans `Project::add_graph` : un
     /// graphe sans spec ne décrit rien de plus qu'une fenêtre vide, autant le
@@ -333,6 +343,9 @@ impl Command {
             Command::AddWorkbook { .. } => HistoryLabel::AddWorkbook,
             Command::AddEmptyWorkbook { .. } => HistoryLabel::AddEmptyWorkbook,
             Command::AddWorksheet { .. } => HistoryLabel::AddWorksheet,
+            Command::DuplicateWorksheet { sheet, .. } => {
+                HistoryLabel::DuplicateWorksheet { name: name(*sheet) }
+            }
             Command::AddGraph { .. } => HistoryLabel::AddGraph,
             Command::AddMatrix { .. } => HistoryLabel::AddMatrix,
             Command::AddNote { .. } => HistoryLabel::AddNote,
@@ -384,6 +397,7 @@ impl Command {
                 | Command::AddWorkbook { .. }
                 | Command::AddEmptyWorkbook { .. }
                 | Command::AddWorksheet { .. }
+                | Command::DuplicateWorksheet { .. }
                 | Command::AddGraph { .. }
                 | Command::AddMatrix { .. }
                 | Command::AddNote { .. }

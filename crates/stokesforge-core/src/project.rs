@@ -288,6 +288,49 @@ impl Project {
         )
     }
 
+    /// Duplique une feuille, colonnes comprises, juste après elle dans son
+    /// classeur, sous le nom `name`. La copie est une feuille ordinaire sans
+    /// lien avec la mère : chaque colonne reçoit un identifiant neuf (les
+    /// buffers de valeurs restent partagés copy-on-write jusqu'à la première
+    /// écriture). Les séries qui référencent les colonnes de la mère les
+    /// référencent toujours.
+    pub fn duplicate_worksheet(&mut self, sheet: NodeId, name: &str) -> CoreResult<NodeId> {
+        let source = self.tree.get(sheet)?;
+        if !source.kind().is_worksheet() {
+            return Err(CoreError::Structure(format!(
+                "{sheet} is not a worksheet but {}",
+                source.kind().with_article()
+            )));
+        }
+        let book = self.tree.parent(sheet)?.ok_or_else(|| {
+            CoreError::Structure(format!("{sheet} has no workbook to duplicate into"))
+        })?;
+        let index = self
+            .tree
+            .children(book)?
+            .iter()
+            .position(|&child| child == sheet)
+            .map_or(0, |at| at + 1);
+        let columns: Vec<(String, Column)> = source
+            .children()
+            .iter()
+            .filter_map(|&id| self.tree.node(id))
+            .filter_map(|node| Some((node.name().to_string(), node.as_column()?.clone())))
+            .collect();
+        let copy = self.insert_node(
+            book,
+            index,
+            name,
+            NodeKind::Worksheet {
+                columns: Vec::new(),
+            },
+        )?;
+        for (column_name, column) in columns {
+            self.add_column(copy, None, Some(&column_name), column)?;
+        }
+        Ok(copy)
+    }
+
     /// Insère une colonne à `index` (`None` → en fin). `name: None` → premier
     /// nom libre façon tableur (A, B, …, Z, AA, AB, …) dans cette feuille.
     pub fn add_column(

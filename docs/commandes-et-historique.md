@@ -31,6 +31,7 @@ Liste faisant foi : `stokesforge-commands/src/command.rs` (`Command`,
 | `AddWorkbook { parent, name }` | structure |
 | `AddEmptyWorkbook { parent, name }` | structure |
 | `AddWorksheet { book, name }` | structure |
+| `DuplicateWorksheet { sheet, name }` | structure (le nom « copie N » est composé par l'application : phrase d'interface) |
 | `AddGraph { parent, name, spec }` | structure |
 | `AddMatrix { parent, name }` | structure |
 | `AddNote { parent, name, text }` | structure |

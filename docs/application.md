@@ -281,6 +281,16 @@ compris, est agrandi ou réduit uniformément (`GraphView::paint_scaled`,
 ne reconstruit pas le cache de formes. La règle est identique en fenêtre
 flottante et détachée, qui partagent la même fonction.
 
+Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
+Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou
+en quittant le champ, abandonnée par Échap) ; Ctrl+D ou menu Dupliquer (« … copie
+N », premier numéro libre, la copie est affichée) ; Supprimer par le menu seul,
+avec confirmation qui nomme les graphes qui en tracent des colonnes, grisé
+sur la dernière feuille. Nom vide ou déjà pris : ancien nom conservé et message,
+aucune entrée d'historique. Mêmes gestes dans le menu *Workbook* (miroir du clic
+droit, `workbook_menu`) ; la bande les offre par `tab_strip_with`
+(`TabOps`/`TabEvent`), qui ne touche jamais au modèle.
+
 Pour une nouvelle nature de fenêtre, conserver cette borne commune puis
 définir avec l'utilisateur quelles zones défilent et quelles zones sont
 rognées avant de brancher son contenu.

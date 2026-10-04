@@ -142,6 +142,11 @@ pub enum HistoryLabel {
     AddEmptyWorkbook,
     /// Ajout d'une feuille.
     AddWorksheet,
+    /// Duplication d'une feuille.
+    DuplicateWorksheet {
+        /// Nom de la feuille dupliquée.
+        name: Option<String>,
+    },
     /// Ajout d'un graphique.
     AddGraph,
     /// Ajout d'une matrice.
@@ -275,6 +280,10 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::AddWorkbook => f.write_str("Add Workbook"),
             HistoryLabel::AddEmptyWorkbook => f.write_str("Add Empty Workbook"),
             HistoryLabel::AddWorksheet => f.write_str("Add Sheet"),
+            HistoryLabel::DuplicateWorksheet { name } => match name {
+                Some(name) => write!(f, "Duplicate Sheet “{name}”"),
+                None => f.write_str("Duplicate Sheet"),
+            },
             HistoryLabel::AddGraph => f.write_str("Add Graph"),
             HistoryLabel::AddMatrix => f.write_str("Add Matrix"),
             HistoryLabel::AddNote => f.write_str("Add Note"),

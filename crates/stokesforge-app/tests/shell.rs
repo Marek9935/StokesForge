@@ -7790,3 +7790,137 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
         state.dispatch(Action::Undo);
     }
 }
+
+// -- Feuilles : renommer, dupliquer, supprimer (#106) --
+
+/// Renommer une feuille : une seule entrée d'historique, annulable ; nom vide
+/// ou déjà pris dans le classeur → l'ancien nom reste, message d'erreur, rien
+/// dans l'historique.
+#[test]
+fn renaming_a_sheet_is_undoable_and_rejects_empty_or_taken_names() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    state.dispatch(Action::AddWorksheet { book });
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let other = state.worksheets_of(book).last().unwrap().clone();
+
+    state.dispatch(Action::BeginRenameSheet(sheet1));
+    assert_eq!(state.renaming_sheet(), Some(sheet1));
+    state.dispatch(Action::CommitRenameSheet {
+        sheet: sheet1,
+        name: "Mesures".to_string(),
+    });
+    assert_eq!(state.renaming_sheet(), None);
+    assert_eq!(state.tree().node(sheet1).unwrap().name(), "Mesures");
+    state.dispatch(Action::Undo);
+    assert_eq!(state.tree().node(sheet1).unwrap().name(), "Sheet1");
+
+    let revision = state.revision();
+    for name in ["   ", other.1.as_str()] {
+        state.dispatch(Action::BeginRenameSheet(sheet1));
+        state.dispatch(Action::CommitRenameSheet {
+            sheet: sheet1,
+            name: name.to_string(),
+        });
+        assert_eq!(state.tree().node(sheet1).unwrap().name(), "Sheet1");
+        assert!(state.status().is_some_and(|status| status.is_error));
+        assert_eq!(state.revision(), revision, "aucune entrée d'historique");
+    }
+
+    state.dispatch(Action::BeginRenameSheet(sheet1));
+    state.dispatch(Action::CancelRenameSheet);
+    assert_eq!(state.renaming_sheet(), None);
+}
+
+/// Dupliquer : « … copie 1 », « … copie 2 » (premier numéro libre), colonnes
+/// aux identifiants neufs et mêmes valeurs, copie affichée ; les graphes de la
+/// mère la tracent toujours ; un Ctrl+Z retire la copie.
+#[test]
+fn duplicating_a_sheet_copies_its_columns_and_keeps_graphs_on_the_original() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![temps, signal],
+        plot_type: PlotType::Line,
+    });
+    let before = std::sync::Arc::clone(state.tree());
+    let count = state.worksheets_of(book).len();
+
+    state.dispatch(Action::DuplicateSheet(sheet1));
+    state.dispatch(Action::DuplicateSheet(sheet1));
+
+    let sheets = state.worksheets_of(book);
+    assert_eq!(sheets.len(), count + 2);
+    let names: Vec<&str> = sheets.iter().map(|(_, n)| n.as_str()).collect();
+    assert!(names.contains(&"Sheet1 copy 1"), "{names:?}");
+    assert!(names.contains(&"Sheet1 copy 2"), "{names:?}");
+    let copy2 = sheet_named(state.tree(), "Sheet1 copy 2");
+    assert_eq!(state.selected_sheet_in(book), Some(copy2));
+    let copy1 = sheet_named(state.tree(), "Sheet1 copy 1");
+    let original: Vec<_> = state.tree().node(sheet1).unwrap().children().to_vec();
+    let copied: Vec<_> = state.tree().node(copy1).unwrap().children().to_vec();
+    assert_eq!(original.len(), copied.len());
+    for (a, b) in original.iter().zip(&copied) {
+        assert_ne!(a, b, "identifiants neufs");
+        assert_eq!(
+            state.tree().node(*a).unwrap().name(),
+            state.tree().node(*b).unwrap().name()
+        );
+        assert_eq!(
+            state.tree().node(*a).unwrap().as_column(),
+            state.tree().node(*b).unwrap().as_column()
+        );
+    }
+    assert_eq!(state.sheet_users(copy1), Vec::<String>::new());
+    assert_eq!(state.sheet_users(sheet1).len(), 1);
+
+    state.dispatch(Action::Undo);
+    state.dispatch(Action::Undo);
+    assert_eq!(**state.tree(), *before);
+}
+
+/// Supprimer : confirmation qui nomme les graphes, annulation possible ; la
+/// dernière feuille d'un classeur est refusée.
+#[test]
+fn deleting_a_sheet_asks_for_confirmation_and_keeps_the_last_sheet() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![temps, signal],
+        plot_type: PlotType::Line,
+    });
+    let only = state.worksheets_of(book);
+    if only.len() == 1 {
+        assert!(!state.can_delete_sheet(sheet1));
+        state.dispatch(Action::RequestDeleteSheet(sheet1));
+        assert_eq!(state.pending_sheet_delete(), None);
+        assert!(state.status().is_some_and(|status| status.is_error));
+    }
+    state.dispatch(Action::AddWorksheet { book });
+    let before = std::sync::Arc::clone(state.tree());
+
+    assert!(state.can_delete_sheet(sheet1));
+    state.dispatch(Action::RequestDeleteSheet(sheet1));
+    assert_eq!(state.pending_sheet_delete(), Some(sheet1));
+    assert_eq!(state.sheet_users(sheet1).len(), 1);
+    state.dispatch(Action::ConfirmDeleteSheet(false));
+    assert_eq!(state.pending_sheet_delete(), None);
+    assert!(state.tree().node(sheet1).is_some());
+
+    state.dispatch(Action::RequestDeleteSheet(sheet1));
+    state.dispatch(Action::ConfirmDeleteSheet(true));
+    assert!(state.tree().node(sheet1).is_none());
+    state.dispatch(Action::Undo);
+    assert_eq!(**state.tree(), *before);
+}
