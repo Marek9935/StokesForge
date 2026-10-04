@@ -4,7 +4,10 @@
 //! pas capturer `&mut AppState`, d'où les vues locales (`DetachedTabViewModel`,
 //! `ProjectManagerViewModel`) et les requêtes qu'elles renvoient à la racine.
 //!
-//! Déplacé tel quel d'`app.rs` (#101), sans changement de comportement.
+//! Déplacé d'`app.rs` (#101), puis découpé par phase (#124) : publication
+//! de l'instantané, peinture et collecte d'événements, commandes de fenêtre.
+//! Le payload du callback reste possédé et `'static` ; ses deux verrous
+//! gardent la même durée, et les actions métier attendent toujours la racine.
 //!
 //! # Repris de la doc de tête d'`app.rs`
 //!
@@ -642,19 +645,7 @@ impl StokesForgeApp {
             ..
         } = self;
         for (tab, detached) in detached_tabs.iter() {
-            let changed = {
-                let mut model = detached
-                    .view_model
-                    .lock()
-                    .unwrap_or_else(|err| err.into_inner());
-                let changed = model.snapshot.as_ref().map(snapshot_stamp)
-                    != Some(snapshot_stamp(state.snapshot()));
-                model.snapshot = Some(state.snapshot().clone());
-                if let Some(view_state) = model.view_state.as_mut() {
-                    view_state.sync_detached_snapshot(state.snapshot().clone());
-                }
-                changed
-            };
+            let changed = detached.publish_snapshot(state.snapshot());
             let view_model = Arc::clone(&detached.view_model);
             let requests = Arc::clone(&detached.requests);
             let root_context = ctx.clone();
@@ -689,235 +680,329 @@ impl StokesForgeApp {
                 // naturelle) défilent au lieu de rétrécir — voir `sheet_tabs`.
                 .with_min_inner_size([MIN_CONTENT_WINDOW_SIZE.x, WINDOW_HEADER_HEIGHT]);
             let id = egui::Id::new(tab);
+            let payload = DetachedTabViewport {
+                tab,
+                id,
+                size,
+                view_model,
+                requests,
+                root_context,
+            };
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of(tab),
                 viewport,
-                move |ui, _class| {
-                    begin_file_drop(ui.ctx());
-                    let mut model = view_model.lock().unwrap_or_else(|err| err.into_inner());
-                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
-                    let was_collapsed = model.collapsed;
-                    // B9 (`retours-2026-09-23-bugs.md`) : la
-                    // taille OS « logique » (hors repli) se mémorise nous-
-                    // mêmes plutôt que de se déduire du rectangle rapporté
-                    // cette image — pendant un repli ce rectangle est
-                    // volontairement réduit (voir plus bas), et le geler ici
-                    // est ce qui permet à la fois de retrouver l'exacte
-                    // taille d'avant repli au dépli et de ne pas persister la
-                    // taille repliée (même piège que
-                    // `floating_window_geometry_to_persist`, B3). Lu avant
-                    // tout traitement du clic de cette image : `was_collapsed`
-                    // reflète l'état d'entrée, pas un éventuel bascule de
-                    // cette image même.
-                    if !was_collapsed {
-                        if let Some(rect) = ui.ctx().input(|input| input.viewport().outer_rect) {
-                            model.expanded_size = Some(rect.size());
-                        }
-                    }
-                    let mut header_actions = WindowHeaderActions::default();
-                    // Surbrillance (B1/B3 suite) : une fenêtre détachée est
-                    // un viewport OS séparé, donc « active » n'a de sens
-                    // qu'au sens du focus OS — `active_tab`/`floating_tabs`
-                    // ne le couvrent pas. `RawInput::focused` est déjà
-                    // rapporté par le backend par viewport.
-                    let is_active = ui.input(|input| input.focused);
-                    if model.focused != is_active {
-                        model.focused = is_active;
-                        root_context.request_repaint_of(egui::ViewportId::ROOT);
-                    }
-                    // Trait par défaut (inactif) uniquement — le contour actif
-                    // n'est plus recoloré ici (B7,
-                    // `retours-2026-09-23-bugs.md`) : la
-                    // géométrie de ce `Frame` suit `content_ui.min_rect()`
-                    // (`containers/frame.rs`), et `CentralPanel::show_inside_dyn`
-                    // rogne son affichage à `outer_rect` *avant* de le peindre
-                    // — le débordement logique de contenu (bande d'outils qui
-                    // ne s'enroule pas) faisait donc disparaître le contour
-                    // sur les bords qui débordent, au lieu de le montrer.
-                    // L'état actif est peint à part, après `.show()`, sur
-                    // `input.content_rect()` — le rectangle du viewport OS
-                    // réel, pas celui qu'egui recalcule.
-                    let frame = egui::Frame::central_panel(ui.style())
-                        .inner_margin(WINDOW_CONTENT_MARGIN)
-                        .stroke(ui.style().visuals.window_stroke());
-                    egui::CentralPanel::default().frame(frame).show(ui, |ui| {
-                        let Some(snapshot) = model.snapshot.clone() else {
-                            // Ne devrait jamais arriver : `detach_tab` pose le
-                            // premier instantané avant toute image détachée.
-                            return;
-                        };
-                        header_actions = window_header(
-                            ui,
-                            id,
-                            &tab_title_from_tree(&snapshot.tree, tab),
-                            Some(tab),
-                            was_collapsed,
-                            HeaderPlacement::Detached,
-                        );
-                        if was_collapsed ^ header_actions.toggle_collapse {
-                            return;
-                        }
-                        // Même borne logique pour les quatre natures : leur
-                        // contenu peut déborder, mais il ne doit modifier ni
-                        // le Frame ni le rectangle de découpe du viewport.
-                        show_window_contents_bounded(ui, |ui| {
-                            let tree = &snapshot.tree;
-                            match tab {
-                                Tab::Book(id) => {
-                                    if let Some(view_state) = model.view_state.as_mut() {
-                                        book_contents(ui, view_state, &mut requests.actions, id);
-                                    } else {
-                                        ui.label(tr!("detached-workbook-unavailable"));
-                                    }
-                                }
-                                Tab::Graph(id) => {
-                                    let view =
-                                        model.graph_view.get_or_insert_with(GraphView::default);
-                                    let before = selected_manager_target(view);
-                                    graph_view_contents(
-                                        ui,
-                                        view,
-                                        &snapshot,
-                                        id,
-                                        &mut requests.actions,
-                                    );
-                                    if before != selected_manager_target(view) {
-                                        root_context.request_repaint_of(egui::ViewportId::ROOT);
-                                    }
-                                }
-                                Tab::Matrix(id) => {
-                                    matrix_contents(ui, tree, id);
-                                }
-                                Tab::Note(id) => {
-                                    if let Some(view_state) = model.view_state.as_mut() {
-                                        note_contents(ui, view_state, &mut requests.actions, id);
-                                    } else {
-                                        ui.label(tr!("detached-note-unavailable"));
-                                    }
-                                }
-                            }
-                        });
-                    });
-                    // Les raccourcis de l'édition sont lus dans le contexte
-                    // du viewport qui a le focus, comme pour la racine.
-                    if matches!(tab, Tab::Book(_)) {
-                        collect_undo_redo_shortcuts(ui.ctx(), &mut requests.actions);
-                    }
-                    if let Some(mut action) = finish_file_drop(ui.ctx()) {
-                        // Même destination qu'un classeur flottant, y compris
-                        // si sa grille est repliée et n'a pas réclamé le dépôt.
-                        if let (Tab::Book(book), Action::DropFiles { target_book, .. }) =
-                            (tab, &mut action)
-                        {
-                            *target_book = Some(book);
-                        }
-                        requests.actions.push(action);
-                    }
-                    if !requests.actions.is_empty() {
-                        root_context.request_repaint_of(egui::ViewportId::ROOT);
-                    }
-                    // État de repli qui s'applique à partir de cette image
-                    // (avant même l'affectation à `model.collapsed`
-                    // ci-dessous) — calculé une fois, servant à la fois à
-                    // la cible du `ViewportCommand::InnerSize`, à la garde
-                    // des poignées de redimensionnement et à la géométrie
-                    // persistée en fin de fermeture.
-                    let collapsed_now = was_collapsed ^ header_actions.toggle_collapse;
-                    // Contour actif (B7) : peint sur le rectangle du
-                    // viewport OS réel (`input.content_rect()`, déjà utilisé
-                    // par `detached_resize_handles` juste en dessous), pas
-                    // sur celui qu'egui recalcule depuis le contenu — voir la
-                    // doc du `Frame` ci-dessus. `LayerId::background()` :
-                    // même couche que `CentralPanel`, peint après elle donc
-                    // par-dessus ; un seul viewport détaché ici, pas d'autre
-                    // fenêtre dont l'ordre serait à disputer.
-                    if is_active {
-                        let content_rect = ui.ctx().input(|input| input.content_rect());
-                        paint_active_window_outline(
-                            &ui.ctx().layer_painter(egui::LayerId::background()),
-                            content_rect,
-                            egui::CornerRadius::ZERO,
-                            ui.style(),
-                        );
-                    }
-                    if header_actions.toggle_collapse {
-                        model.collapsed = collapsed_now;
-                    }
-                    // B9 : contrairement aux poignées maison des fenêtres
-                    // flottantes internes (sans conséquence pendant un repli,
-                    // puisqu'elles ne mutent qu'une taille purement logique),
-                    // celles-ci pilotent le viewport OS réel via
-                    // `ViewportCommand::BeginResize` — les laisser actives
-                    // pendant un repli permettrait à l'utilisateur
-                    // d'agrandir la fenêtre repliée en direct, une taille
-                    // qui ne serait ni affichée (le contenu reste sauté) ni
-                    // mémorisée (`expanded_size` est gelée pendant un repli)
-                    // et donc perdue au premier dépli.
-                    if !collapsed_now {
-                        detached_resize_handles(ui);
-                    }
-                    // B9 : une fenêtre détachée est un viewport OS réel — à
-                    // la différence d'une fenêtre flottante interne, où
-                    // `.fixed_size(display_size)` (B3) suffit à réduire ce
-                    // qui est demandé à egui, rien ne réduit ici la taille
-                    // du viewport tant qu'on ne le demande pas explicitement
-                    // à l'OS. Réutilise le même calcul que
-                    // `floating_window_display_size` (même hauteur de
-                    // bande d'en-tête) : au repli, la largeur mémorisée et
-                    // la hauteur de l'en-tête ; au dépli, la taille
-                    // mémorisée telle quelle. Envoyé uniquement à l'image du
-                    // bascule (pas à chaque image : un `InnerSize` répété
-                    // pendant qu'un utilisateur redimensionne la fenêtre à
-                    // la main la ferait sauter en arrière).
-                    if header_actions.toggle_collapse {
-                        let expanded_size = model
-                            .expanded_size
-                            .unwrap_or_else(|| egui::vec2(size[0], size[1]));
-                        let target = floating_window_display_size(
-                            expanded_size,
-                            collapsed_now,
-                            WINDOW_HEADER_HEIGHT,
-                            frame.inner_margin.sum(),
-                        );
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::InnerSize(target));
-                    }
-                    if header_actions.title_drag_started {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                    }
-                    if header_actions.maximize {
-                        let is_maximized = ui
-                            .ctx()
-                            .input(|input| input.viewport().maximized)
-                            .unwrap_or(false);
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
-                    }
-                    if header_actions.detach {
-                        requests.reattach = true;
-                        root_context.request_repaint_of(egui::ViewportId::ROOT);
-                    }
-                    if header_actions.close {
-                        requests.close = true;
-                        root_context.request_repaint_of(egui::ViewportId::ROOT);
-                    }
-                    if std::mem::take(&mut model.needs_initial_repaint) {
-                        // `show_viewport_deferred` crée la fenêtre après
-                        // l'image racine. Sous Wayland, le premier callback
-                        // peut donc voir une surface encore sans taille
-                        // définitive ; redessiner une fois reconstruit la
-                        // figure avec le rectangle configuré par WGPU.
-                        ui.ctx().request_repaint();
-                    }
-                    if ui.ctx().input(|input| input.viewport().close_requested()) {
-                        requests.close = true;
-                        root_context.request_repaint_of(egui::ViewportId::ROOT);
-                    }
-                },
+                move |ui, _class| payload.show(ui),
             );
             if changed {
                 ctx.request_repaint_of(egui::ViewportId::from_hash_of(tab));
             }
+        }
+    }
+}
+
+/// Données possédées du callback différé : aucun emprunt à l'application ne
+/// survit à la publication du viewport. Les phases ne créent aucun sous-Ui.
+struct DetachedTabViewport {
+    tab: Tab,
+    id: egui::Id,
+    size: [f32; 2],
+    view_model: Arc<Mutex<DetachedTabViewModel>>,
+    requests: Arc<Mutex<DetachedTabRequests>>,
+    root_context: egui::Context,
+}
+
+/// État de l'image lu avant les clics, puis actions de l'en-tête peint.
+struct DetachedTabFrame {
+    was_collapsed: bool,
+    is_active: bool,
+    header_actions: WindowHeaderActions,
+    inner_margin: egui::Margin,
+}
+
+impl DetachedTab {
+    /// Publie d'abord l'instantané et la vue locale ; le réveil reste après
+    /// l'enregistrement du callback, dans `show_detached_tabs`.
+    fn publish_snapshot(&self, snapshot: &Snapshot) -> bool {
+        let mut model = self
+            .view_model
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let changed = model.snapshot.as_ref().map(snapshot_stamp) != Some(snapshot_stamp(snapshot));
+        model.snapshot = Some(snapshot.clone());
+        if let Some(view_state) = model.view_state.as_mut() {
+            view_state.sync_detached_snapshot(snapshot.clone());
+        }
+        changed
+    }
+}
+
+impl DetachedTabViewport {
+    /// Les deux verrous restent tenus pendant toute l'image, comme avant le
+    /// découpage : aucun drainage racine ne s'intercale entre ses phases.
+    fn show(&self, ui: &mut egui::Ui) {
+        let root_context = &self.root_context;
+        begin_file_drop(ui.ctx());
+        let mut model = self
+            .view_model
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let mut requests = self.requests.lock().unwrap_or_else(|err| err.into_inner());
+        let was_collapsed = model.collapsed;
+        // B9 (`retours-2026-09-23-bugs.md`) : la
+        // taille OS « logique » (hors repli) se mémorise nous-
+        // mêmes plutôt que de se déduire du rectangle rapporté
+        // cette image — pendant un repli ce rectangle est
+        // volontairement réduit (voir plus bas), et le geler ici
+        // est ce qui permet à la fois de retrouver l'exacte
+        // taille d'avant repli au dépli et de ne pas persister la
+        // taille repliée (même piège que
+        // `floating_window_geometry_to_persist`, B3). Lu avant
+        // tout traitement du clic de cette image : `was_collapsed`
+        // reflète l'état d'entrée, pas un éventuel bascule de
+        // cette image même.
+        if !was_collapsed {
+            if let Some(rect) = ui.ctx().input(|input| input.viewport().outer_rect) {
+                model.expanded_size = Some(rect.size());
+            }
+        }
+        // Surbrillance (B1/B3 suite) : une fenêtre détachée est
+        // un viewport OS séparé, donc « active » n'a de sens
+        // qu'au sens du focus OS — `active_tab`/`floating_tabs`
+        // ne le couvrent pas. `RawInput::focused` est déjà
+        // rapporté par le backend par viewport.
+        let is_active = ui.input(|input| input.focused);
+        if model.focused != is_active {
+            model.focused = is_active;
+            root_context.request_repaint_of(egui::ViewportId::ROOT);
+        }
+        let (header_actions, frame) =
+            self.paint_contents(ui, &mut model, &mut requests, was_collapsed);
+        self.collect_actions(ui, &mut requests);
+        self.apply_window_actions(
+            ui,
+            &mut model,
+            &mut requests,
+            DetachedTabFrame {
+                was_collapsed,
+                is_active,
+                header_actions,
+                inner_margin: frame.inner_margin,
+            },
+        );
+        if std::mem::take(&mut model.needs_initial_repaint) {
+            // `show_viewport_deferred` crée la fenêtre après
+            // l'image racine. Sous Wayland, le premier callback
+            // peut donc voir une surface encore sans taille
+            // définitive ; redessiner une fois reconstruit la
+            // figure avec le rectangle configuré par WGPU.
+            ui.ctx().request_repaint();
+        }
+        if ui.ctx().input(|input| input.viewport().close_requested()) {
+            requests.close = true;
+            root_context.request_repaint_of(egui::ViewportId::ROOT);
+        }
+    }
+
+    fn paint_contents(
+        &self,
+        ui: &mut egui::Ui,
+        model: &mut DetachedTabViewModel,
+        requests: &mut DetachedTabRequests,
+        was_collapsed: bool,
+    ) -> (WindowHeaderActions, egui::Frame) {
+        let tab = self.tab;
+        let id = self.id;
+        let root_context = &self.root_context;
+        let mut header_actions = WindowHeaderActions::default();
+        // Trait par défaut (inactif) uniquement — le contour actif
+        // n'est plus recoloré ici (B7,
+        // `retours-2026-09-23-bugs.md`) : la
+        // géométrie de ce `Frame` suit `content_ui.min_rect()`
+        // (`containers/frame.rs`), et `CentralPanel::show_inside_dyn`
+        // rogne son affichage à `outer_rect` *avant* de le peindre
+        // — le débordement logique de contenu (bande d'outils qui
+        // ne s'enroule pas) faisait donc disparaître le contour
+        // sur les bords qui débordent, au lieu de le montrer.
+        // L'état actif est peint à part, après `.show()`, sur
+        // `input.content_rect()` — le rectangle du viewport OS
+        // réel, pas celui qu'egui recalcule.
+        let frame = egui::Frame::central_panel(ui.style())
+            .inner_margin(WINDOW_CONTENT_MARGIN)
+            .stroke(ui.style().visuals.window_stroke());
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+            let Some(snapshot) = model.snapshot.clone() else {
+                // Ne devrait jamais arriver : `detach_tab` pose le
+                // premier instantané avant toute image détachée.
+                return;
+            };
+            header_actions = window_header(
+                ui,
+                id,
+                &tab_title_from_tree(&snapshot.tree, tab),
+                Some(tab),
+                was_collapsed,
+                HeaderPlacement::Detached,
+            );
+            if was_collapsed ^ header_actions.toggle_collapse {
+                return;
+            }
+            // Même borne logique pour les quatre natures : leur
+            // contenu peut déborder, mais il ne doit modifier ni
+            // le Frame ni le rectangle de découpe du viewport.
+            show_window_contents_bounded(ui, |ui| {
+                let tree = &snapshot.tree;
+                match tab {
+                    Tab::Book(id) => {
+                        if let Some(view_state) = model.view_state.as_mut() {
+                            book_contents(ui, view_state, &mut requests.actions, id);
+                        } else {
+                            ui.label(tr!("detached-workbook-unavailable"));
+                        }
+                    }
+                    Tab::Graph(id) => {
+                        let view = model.graph_view.get_or_insert_with(GraphView::default);
+                        let before = selected_manager_target(view);
+                        graph_view_contents(ui, view, &snapshot, id, &mut requests.actions);
+                        if before != selected_manager_target(view) {
+                            root_context.request_repaint_of(egui::ViewportId::ROOT);
+                        }
+                    }
+                    Tab::Matrix(id) => {
+                        matrix_contents(ui, tree, id);
+                    }
+                    Tab::Note(id) => {
+                        if let Some(view_state) = model.view_state.as_mut() {
+                            note_contents(ui, view_state, &mut requests.actions, id);
+                        } else {
+                            ui.label(tr!("detached-note-unavailable"));
+                        }
+                    }
+                }
+            });
+        });
+        (header_actions, frame)
+    }
+
+    fn collect_actions(&self, ui: &mut egui::Ui, requests: &mut DetachedTabRequests) {
+        let tab = self.tab;
+        let root_context = &self.root_context;
+        // Les raccourcis de l'édition sont lus dans le contexte
+        // du viewport qui a le focus, comme pour la racine.
+        if matches!(tab, Tab::Book(_)) {
+            collect_undo_redo_shortcuts(ui.ctx(), &mut requests.actions);
+        }
+        if let Some(mut action) = finish_file_drop(ui.ctx()) {
+            // Même destination qu'un classeur flottant, y compris
+            // si sa grille est repliée et n'a pas réclamé le dépôt.
+            if let (Tab::Book(book), Action::DropFiles { target_book, .. }) = (tab, &mut action) {
+                *target_book = Some(book);
+            }
+            requests.actions.push(action);
+        }
+        if !requests.actions.is_empty() {
+            root_context.request_repaint_of(egui::ViewportId::ROOT);
+        }
+    }
+
+    fn apply_window_actions(
+        &self,
+        ui: &mut egui::Ui,
+        model: &mut DetachedTabViewModel,
+        requests: &mut DetachedTabRequests,
+        frame: DetachedTabFrame,
+    ) {
+        let DetachedTabFrame {
+            was_collapsed,
+            is_active,
+            header_actions,
+            inner_margin,
+        } = frame;
+        let size = self.size;
+        let root_context = &self.root_context;
+        // État de repli qui s'applique à partir de cette image
+        // (avant même l'affectation à `model.collapsed`
+        // ci-dessous) — calculé une fois, servant à la fois à
+        // la cible du `ViewportCommand::InnerSize`, à la garde
+        // des poignées de redimensionnement et à la géométrie
+        // persistée en fin de fermeture.
+        let collapsed_now = was_collapsed ^ header_actions.toggle_collapse;
+        // Contour actif (B7) : peint sur le rectangle du
+        // viewport OS réel (`input.content_rect()`, déjà utilisé
+        // par `detached_resize_handles` juste en dessous), pas
+        // sur celui qu'egui recalcule depuis le contenu — voir la
+        // doc du `Frame` ci-dessus. `LayerId::background()` :
+        // même couche que `CentralPanel`, peint après elle donc
+        // par-dessus ; un seul viewport détaché ici, pas d'autre
+        // fenêtre dont l'ordre serait à disputer.
+        if is_active {
+            let content_rect = ui.ctx().input(|input| input.content_rect());
+            paint_active_window_outline(
+                &ui.ctx().layer_painter(egui::LayerId::background()),
+                content_rect,
+                egui::CornerRadius::ZERO,
+                ui.style(),
+            );
+        }
+        if header_actions.toggle_collapse {
+            model.collapsed = collapsed_now;
+        }
+        // B9 : contrairement aux poignées maison des fenêtres
+        // flottantes internes (sans conséquence pendant un repli,
+        // puisqu'elles ne mutent qu'une taille purement logique),
+        // celles-ci pilotent le viewport OS réel via
+        // `ViewportCommand::BeginResize` — les laisser actives
+        // pendant un repli permettrait à l'utilisateur
+        // d'agrandir la fenêtre repliée en direct, une taille
+        // qui ne serait ni affichée (le contenu reste sauté) ni
+        // mémorisée (`expanded_size` est gelée pendant un repli)
+        // et donc perdue au premier dépli.
+        if !collapsed_now {
+            detached_resize_handles(ui);
+        }
+        // B9 : une fenêtre détachée est un viewport OS réel — à
+        // la différence d'une fenêtre flottante interne, où
+        // `.fixed_size(display_size)` (B3) suffit à réduire ce
+        // qui est demandé à egui, rien ne réduit ici la taille
+        // du viewport tant qu'on ne le demande pas explicitement
+        // à l'OS. Réutilise le même calcul que
+        // `floating_window_display_size` (même hauteur de
+        // bande d'en-tête) : au repli, la largeur mémorisée et
+        // la hauteur de l'en-tête ; au dépli, la taille
+        // mémorisée telle quelle. Envoyé uniquement à l'image du
+        // bascule (pas à chaque image : un `InnerSize` répété
+        // pendant qu'un utilisateur redimensionne la fenêtre à
+        // la main la ferait sauter en arrière).
+        if header_actions.toggle_collapse {
+            let expanded_size = model
+                .expanded_size
+                .unwrap_or_else(|| egui::vec2(size[0], size[1]));
+            let target = floating_window_display_size(
+                expanded_size,
+                collapsed_now,
+                WINDOW_HEADER_HEIGHT,
+                inner_margin.sum(),
+            );
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::InnerSize(target));
+        }
+        if header_actions.title_drag_started {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        if header_actions.maximize {
+            let is_maximized = ui
+                .ctx()
+                .input(|input| input.viewport().maximized)
+                .unwrap_or(false);
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
+        }
+        if header_actions.detach {
+            requests.reattach = true;
+            root_context.request_repaint_of(egui::ViewportId::ROOT);
+        }
+        if header_actions.close {
+            requests.close = true;
+            root_context.request_repaint_of(egui::ViewportId::ROOT);
         }
     }
 }
@@ -935,6 +1020,7 @@ mod tests {
     use super::super::graph_window::graph_drop_target;
     use super::super::graph_window::tests::graphe;
     use super::super::grid::role_label;
+    use super::super::project_manager::tests::find_text_center;
     use super::super::window_chrome::tests::find_icon_centers;
     use super::*;
     use crate::theme;
@@ -950,6 +1036,137 @@ mod tests {
             .window_geometries
             .get(&node)
             .expect("géométrie envoyée à la session")
+    }
+
+    /// #124 : le payload possédé d'une note conserve sa saisie locale ; la
+    /// perte de focus produit une requête, puis seule la racine l'applique.
+    /// La fermeture OS est elle aussi une requête, sans réattachement.
+    #[test]
+    fn une_note_detachee_differe_son_edition_et_sa_fermeture() {
+        let mut project = Project::new("Note détachée").unwrap();
+        let note = project
+            .add_note(project.root(), Some("Journal"), "Début")
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let tab = Tab::Note(note);
+        app.open_tab(tab);
+        app.detach_tab(tab);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let viewport_id = egui::ViewportId::from_hash_of(tab);
+        let mut output = context.run_ui(root_input.clone(), |ui| app.show_detached_tabs(ui.ctx()));
+        let callback = output.viewport_output[&viewport_id]
+            .viewport_ui_cb
+            .clone()
+            .unwrap();
+        output.textures_delta.clear();
+        let paint = |events: Vec<egui::Event>, close: bool| {
+            let mut input = root_input.clone();
+            input.viewport_id = viewport_id;
+            input.viewports.insert(
+                viewport_id,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    events: if close {
+                        vec![egui::ViewportEvent::Close]
+                    } else {
+                        Vec::new()
+                    },
+                    ..Default::default()
+                },
+            );
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(420.0, 360.0),
+            ));
+            input.events = events;
+            let mut output = context.run_ui(input, |ui| callback(ui));
+            output.textures_delta.clear();
+            output
+        };
+        paint(Vec::new(), false);
+        let first = paint(Vec::new(), false);
+        let dedans = find_text_center(&first.shapes, "Début") + egui::vec2(80.0, 0.0);
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        paint(
+            vec![egui::Event::PointerMoved(dedans), pointer(dedans, true)],
+            false,
+        );
+        paint(vec![pointer(dedans, false)], false);
+        paint(vec![egui::Event::Text(" suite".into())], false);
+        {
+            let model = app.detached_tabs[&tab].view_model.lock().unwrap();
+            assert_eq!(
+                model
+                    .view_state
+                    .as_ref()
+                    .unwrap()
+                    .note_editing()
+                    .unwrap()
+                    .buffer,
+                "Début suite"
+            );
+        }
+        assert!(app.detached_tabs[&tab]
+            .requests
+            .lock()
+            .unwrap()
+            .actions
+            .is_empty());
+        assert_eq!(app.state.note_text(note).as_deref(), Some("Début"));
+
+        let dehors = egui::pos2(200.0, 15.0);
+        paint(
+            vec![egui::Event::PointerMoved(dehors), pointer(dehors, true)],
+            false,
+        );
+        paint(vec![pointer(dehors, false)], false);
+        let actions = std::mem::take(&mut app.detached_tabs[&tab].requests.lock().unwrap().actions);
+        assert_eq!(
+            actions,
+            vec![Action::SetNoteText {
+                note,
+                text: "Début suite".into()
+            }]
+        );
+        assert_eq!(
+            app.state.note_text(note).as_deref(),
+            Some("Début"),
+            "la requête attend la racine"
+        );
+        for action in actions {
+            app.state.dispatch(action);
+        }
+        assert_eq!(app.state.note_text(note).as_deref(), Some("Début suite"));
+        app.state.dispatch(Action::Undo);
+        assert_eq!(app.state.note_text(note).as_deref(), Some("Début"));
+
+        assert!(!app.detached_tabs[&tab].requests.lock().unwrap().close);
+        paint(Vec::new(), true);
+        let requests = app.detached_tabs[&tab].requests.lock().unwrap();
+        assert!(requests.close, "la croix OS doit revenir à la racine");
+        assert!(!requests.reattach, "la croix ferme la vue détachée");
+        assert!(
+            app.detached_tabs.contains_key(&tab),
+            "la fermeture attend aussi son drainage"
+        );
     }
 
     /// #104 : aucune entrée de souris dans les viewports lecteurs ; la
@@ -1188,6 +1405,17 @@ mod tests {
                 },
             );
             detached_input.dropped_files = vec![Arc::new(FakeFile("detache.csv".into()))];
+            if kind == "classeur" {
+                // #124 : dans une même image, le raccourci rejoint la file
+                // avant le dépôt. L'ordre est observable au drainage racine.
+                detached_input.events.push(egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::CTRL),
+                });
+            }
             context
                 .run_ui(detached_input, |ui| callback(ui))
                 .textures_delta
@@ -1198,13 +1426,15 @@ mod tests {
                 std::mem::take(&mut app.detached_tabs[&tab].requests.lock().unwrap().actions)
             };
             let target = (kind == "classeur").then_some(book);
-            assert_eq!(
-                actions,
-                vec![Action::DropFiles {
-                    paths: vec!["detache.csv".into()],
-                    target_book: target
-                }]
-            );
+            let mut attendues = Vec::new();
+            if kind == "classeur" {
+                attendues.push(Action::Undo);
+            }
+            attendues.push(Action::DropFiles {
+                paths: vec!["detache.csv".into()],
+                target_book: target,
+            });
+            assert_eq!(actions, attendues);
             let mut root_action = None;
             root_input.dropped_files.clear();
             context
