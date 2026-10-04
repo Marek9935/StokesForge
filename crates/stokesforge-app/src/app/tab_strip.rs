@@ -495,7 +495,9 @@ mod tests {
     /// peints, et un clic sur l'un d'eux le choisit. Le témoin : tant qu'on
     /// ne clique pas, rien n'est choisi — la sélection reconduite d'une image
     /// à l'autre n'est pas un choix. (C'est la bande des propriétés du
-    /// graphe ; qu'elles l'emploient se lit dans `plot_settings_contents`.)
+    /// graphe ; qu'elles l'emploient est tenu par
+    /// `un_clic_sur_un_onglet_des_proprietes_change_de_page`, dans
+    /// `app/plot_settings.rs`.)
     #[test]
     fn un_clic_sur_un_onglet_le_choisit() {
         let context = contexte();

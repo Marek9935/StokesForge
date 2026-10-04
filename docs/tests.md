@@ -152,6 +152,12 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   plafonds et compteurs déjà arbitrés sont documentés à l'endroit de leur
   constante, et recensés dans
   `docs/archive/rustrewrite/questions-ouvertes.md` §11.
+- La langue de l'interface est un état **global** du processus
+  (`i18n::set_language`) : un test unitaire qui doit peindre dans une langue
+  précise (`en`, `en-XA`) se relance en sous-processus avec `STOKESFORGE_LANG`
+  posé, et vérifie que le fils a bien peint dans cette langue (modèle :
+  `chaque_onglet_se_peint_en_anglais_et_en_pseudo_langue`,
+  `src/app/plot_settings.rs`, #119).
 - Les tests et leurs commentaires sont en français, comme le reste.
 
 **À lire** : `stokesforge-robustesse/src/lib.rs` (l'index des batteries), puis la

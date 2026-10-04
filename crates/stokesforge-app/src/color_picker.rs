@@ -48,7 +48,7 @@
 //! clic sur un échantillon, fin d'un glisser dans le nuancier, champ
 //! validé, fermeture de la fenêtre surgissante. Même règle anti-inflation
 //! d'historique que le reste de la fenêtre des propriétés
-//! (`crate::app::plot_settings_window`).
+//! (`crate::app::plot_settings`).
 //!
 //! Les conversions (hexadécimal, RVB ↔ TSL, RVB ↔ TSV) et les palettes sont
 //! des fonctions pures, testées sans fenêtre.

@@ -7198,28 +7198,7 @@ fn cell_widget(
 }
 
 #[cfg(test)]
-mod formula_memo_tests {
-    use stokesforge_render_egui::formula;
-
-    /// Chaque exemple du mémo de syntaxe compile vraiment en Typst : un mémo
-    /// qui montre une syntaxe fausse enseignerait une erreur.
-    #[test]
-    fn chaque_exemple_du_memo_compile() {
-        let fonts = formula::resolve_fonts(&stokesforge_render_egui::FontChoice::default())
-            .expect("polices");
-        for (source, _) in super::plot_settings::formula_memo_rows() {
-            for example in source.split("  ") {
-                let (sans, math) = fonts.clone();
-                formula::compile(example, 14.0, [0, 0, 0, 255], sans, math)
-                    .unwrap_or_else(|error| panic!("{example:?} ne compile pas : {error}"));
-            }
-        }
-    }
-}
-
-#[cfg(test)]
 mod graph_layout_tests {
-    use super::plot_settings::theme_editor;
     use super::window_chrome::tests::find_icon_centers;
     use super::window_chrome::{show_floating_window, WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT};
     use super::window_placement::GRAPH_WINDOW_SIZE;
@@ -8082,31 +8061,6 @@ mod graph_layout_tests {
             )),
             "la grille a volé Retour arrière/Suppr au champ texte : {actions:?}",
         );
-    }
-
-    /// #11 : l'onglet « Thème » se dessine (thèmes, fond, texte, axes) sans
-    /// rien modifier tant qu'on n'agit pas.
-    #[test]
-    fn l_onglet_theme_se_dessine_sans_rien_modifier() {
-        let mut spec = stokesforge_plot::PlotSpec::empty("Figure")
-            .with_panels(stokesforge_plot::PanelSpec::at(0, 0));
-        spec.set_text_color("#336699");
-        let avant = spec.clone();
-        let mut env = PickerEnv {
-            project: Default::default(),
-            user: Default::default(),
-            requests: Vec::new(),
-        };
-        let context = egui::Context::default();
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        let mut commit = true;
-        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
-            commit = theme_editor(ui, &mut spec, &mut env);
-        });
-        output.textures_delta.clear();
-        assert!(!commit);
-        assert_eq!(spec, avant);
-        assert!(!output.shapes.is_empty());
     }
 
     /// #12 : un fond sans couleur ou semi-transparent s'affiche sur du

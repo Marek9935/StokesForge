@@ -119,7 +119,7 @@ factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
 ## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
 
 `app.rs` est en cours de découpage (chantier #115, sous-tickets #116–#124,
-chacun **sur feu vert seulement** ; #116 et #117 faits). Cible décidée le 2026-10-04 : de vrais
+chacun **sur feu vert seulement** ; #116 à #119 faits). Cible décidée le 2026-10-04 : de vrais
 modules dans `src/app/` (imports explicites, interface `pub(crate)` minimale,
 pas de `use super::*` hors des modules de tests), des tests qui suivent leur
 code et sont relus et améliorés à chaque déplacement par un agent Opus
@@ -132,7 +132,9 @@ explicites, `pub(super)` pour ce que partagent les modules d'`app`) :
   `shortcuts.rs` (`SHORTCUT_*`, `shortcut_text_*`), `tab.rs` (`Tab`) ;
 - fenêtres de contenu : `window_chrome.rs` (cadre commun, `show_window_in_layer`),
   `window_placement.rs`, `window_stack.rs` (pile, repli, maximisation),
-  `window_detach.rs`.
+  `window_detach.rs` ;
+- dialogues : `import_wizard.rs` (#118, `import_window`), `plot_settings.rs`
+  (#119, `plot_settings_window`, ses onglets et éditeurs, `column_metadata_window`).
 
 D'ici la fin du chantier :
 - du code de fenêtre (placement, pile, détachement) va dans le
@@ -198,7 +200,8 @@ Some(&tr!("…")), &mut env)`, avec l'usage de la couleur — `Curves` pour
 une courbe (l'outil des courbes, palettes nommées), `Text` pour du texte ou
 une échelle, `Background` pour un fond — et le `PickerEnv` des couleurs
 enregistrées, dont les demandes sont traduites en `Action::SaveColor`/
-`RemoveSavedColor` par l'appelant (modèle : `plot_settings_contents`). Une
+`RemoveSavedColor` par l'appelant (modèle : `plot_settings_contents`, dans
+`src/app/plot_settings.rs`). Une
 couleur peut porter une opacité (`#RRGGBBAA`). Dans le modèle, une couleur
 vide veut dire « automatique » ; pour du texte ou une
 échelle, le rendu la résout par `stokesforge_render::color::auto_ink` (blanc sur

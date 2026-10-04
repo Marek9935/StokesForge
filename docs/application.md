@@ -294,8 +294,13 @@ d'une fenêtre ouverte), `app/dialogs.rs` (`modal_dialog`, `modal_dialog_with`),
 `app/tab_strip.rs` (la bande d'onglets, `tab_strip`) et `app/shortcuts.rs` (les
 constantes `SHORTCUT_*` ; leur consommation, `collect_shortcuts`, reste dans `app.rs`).
 L'assistant d'import (#118) : `app/import_wizard.rs` (`import_window`, ses six
-étapes, l'aperçu coloré par rôle, les tables de libellés). La suite (propriétés
-du graphe, grille, graphe, menus) est #119–#123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
+étapes, l'aperçu coloré par rôle, les tables de libellés). Les propriétés du
+graphe (#119) : `app/plot_settings.rs` (`plot_settings_window`, ses onglets et
+leurs éditeurs, le mémo des formules, les libellés des choix, et
+`column_metadata_window`, même famille de dialogue) ; ses tests peignent chaque
+onglet sans rien modifier, en `en` et en `en-XA` (sous-processus, la langue
+étant globale), et tiennent la validation au relâchement et à la perte de
+focus. La suite (grille, graphe, menus) est #120–#123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
 et cherchent leurs fonctions par leur nom (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
@@ -924,7 +929,7 @@ global du `Context` plutôt que scopé à une fenêtre OS.
 ### Propriétés des graphiques
 
 Les réglages d'un graphe vivent dans une **fenêtre flottante à onglets**
-(`app::plot_settings_window`), un **dialogue modal** (`modal_dialog`, `src/app/dialogs.rs`) :
+(`app::plot_settings::plot_settings_window`), un **dialogue modal** (`modal_dialog`, `src/app/dialogs.rs`) :
 au premier plan, le reste de l'interface ne reçoit plus aucun clic, et un
 clic ailleurs fait clignoter son contour en rouge foncé
 (`theme::blocked_flash_color`). Deux boutons en bas : **OK** (par défaut,
@@ -1041,7 +1046,7 @@ sont des données, jamais traduits.
 **Textes du graphe** : titre, titre du panneau, libellé et unité d'axe, nom de
 série sont composés par Typst et lus comme du **markup** (`docs/rendu.md`
 § Typst). Sous chacun de ces champs, une section repliée « Formula syntax »
-(`app::formula_memo`, issue #33) rappelle la syntaxe : `$lambda$`, `$x_2$`,
+(`app::plot_settings::formula_memo`, issue #33) rappelle la syntaxe : `$lambda$`, `$x_2$`,
 `$"cm"^(-1)$`, `*bold*`, `\$` pour un dollar. Repliable plutôt qu'en bulle
 d'aide : la fenêtre est un dialogue modal (issue #9). Le test
 `chaque_exemple_du_memo_compile` vérifie que chaque exemple compile. Un nom de
@@ -1133,7 +1138,7 @@ seulement à la validation), généralisé à un objet entier plutôt qu'à un s
 champ : le panneau mélange une douzaine de petits widgets (titre, axes,
 style de chaque série, légende) qui doivent tous voir et modifier le **même**
 brouillon. `AppState::begin_plot_edit(graph)`, appelée à chaque image par
-`app::plot_settings_window` avant de peindre quoi que ce soit, n'écrase le
+`app::plot_settings::plot_settings_window` avant de peindre quoi que ce soit, n'écrase le
 brouillon que s'il n'y en a pas encore ou qu'il portait sur un autre graphe
 — repeindre la même image sur le même graphe ne doit jamais effacer une
 saisie en cours, et changer de graphe ne doit jamais laisser fuiter le
@@ -1166,7 +1171,7 @@ chaque frappe/pixel :
   validé tout de suite — rien à débouncer, il n'y a par construction jamais
   de rafale d'événements `changed()` pour ces widgets-là.
 
-Chaque widget de `app::plot_settings_contents` (et de ses fonctions auxiliaires
+Chaque widget de `app::plot_settings::plot_settings_contents` (et de ses fonctions auxiliaires
 `axis_editor`/`series_editor`/`legend_editor`) accumule dans un simple
 booléen local `commit`, mis à `true` par n'importe quel widget qui vient de
 finir une interaction ; `commit_plot_edit` n'est appelé qu'une seule fois, à
