@@ -2561,16 +2561,7 @@ impl StokesForgeApp {
                 select_manager_target(view, Some(target), &spec);
                 match target {
                     T::Annotation(t) => open_annotation_editor(ctx, view, &tree, graph, t),
-                    T::Shape(t) => {
-                        if let Some(draft) = t.get(&spec).cloned() {
-                            ctx.data_mut(|data| {
-                                data.insert_temp(
-                                    view.id().with("shape_properties"),
-                                    ShapeProperties { target: t, draft },
-                                )
-                            });
-                        }
-                    }
+                    T::Shape(t) => open_shape_properties(ctx, view, &spec, t),
                     _ => actions.push(Action::OpenObjectProperties { graph, target }),
                 }
             }
@@ -5936,6 +5927,42 @@ struct SeriesDrag {
     source: stokesforge_plot::SeriesRef,
 }
 
+/// Ouvre le dialogue des propriétés d'un objet graphique : l'Object Manager
+/// (double-clic sur sa ligne) et la figure (double-clic sur l'objet) y vont
+/// par ici (#113).
+fn open_shape_properties(
+    ctx: &egui::Context,
+    view: &mut GraphView,
+    spec: &stokesforge_plot::PlotSpec,
+    target: stokesforge_plot::ShapeRef,
+) {
+    view.set_tool(stokesforge_render_egui::GraphTool::Pointer);
+    view.select_shape(Some(target));
+    if let Some(draft) = target.get(spec).cloned() {
+        ctx.data_mut(|data| {
+            data.insert_temp(
+                view.id().with("shape_properties"),
+                ShapeProperties { target, draft },
+            )
+        });
+    }
+}
+
+/// Libellé d'un nœud d'en-tête de l'Object Manager (graphe, calque, groupes) :
+/// un double-clic ouvre ses paramètres, comme sur les autres lignes (#113).
+fn manager_header_label(
+    ui: &mut egui::Ui,
+    text: &str,
+    target: crate::object_manager::VisibilityTarget,
+    requests: &mut Vec<ObjectManagerRequest>,
+) -> egui::Response {
+    let response = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
+    if response.double_clicked() {
+        requests.push(ObjectManagerRequest::Properties(target));
+    }
+    response
+}
+
 fn selected_manager_target(view: &GraphView) -> Option<crate::object_manager::VisibilityTarget> {
     use crate::object_manager::VisibilityTarget as T;
     view.selected_series()
@@ -6136,7 +6163,7 @@ fn object_manager_contents(
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
             .show_header(ui, |ui| {
                 object_visibility(ui, model.graph, T::Graph, spec, actions);
-                let response = ui.label(&model.title);
+                let response = manager_header_label(ui, &model.title, T::Graph, &mut requests);
                 response.context_menu(|ui| {
                     object_node_menu(ui, model.graph, T::Graph, spec, actions, &mut requests)
                 });
@@ -6166,7 +6193,12 @@ fn object_manager_contents(
                     )
                     .show_header(ui, |ui| {
                         object_visibility(ui, model.graph, T::Panel(layer.index), spec, actions);
-                        ui.label(tr!("object-manager-layer", index = (layer.index + 1)))
+                        manager_header_label(
+                            ui,
+                            &tr!("object-manager-layer", index = (layer.index + 1)),
+                            T::Panel(layer.index),
+                            &mut requests,
+                        )
                             .context_menu(|ui| {
                                 object_node_menu(
                                     ui,
@@ -6193,7 +6225,13 @@ fn object_manager_contents(
                                 spec,
                                 actions,
                             );
-                            ui.label(tr!("object-manager-group")).context_menu(|ui| {
+                            manager_header_label(
+                                ui,
+                                &tr!("object-manager-group"),
+                                T::Group(layer.index),
+                                &mut requests,
+                            )
+                            .context_menu(|ui| {
                                 object_node_menu(
                                     ui,
                                     model.graph,
@@ -6331,7 +6369,13 @@ fn object_manager_contents(
                                         spec,
                                         actions,
                                     );
-                                    ui.label(tr!("object-manager-axes")).context_menu(|ui| {
+                                    manager_header_label(
+                                        ui,
+                                        &tr!("object-manager-axes"),
+                                        T::Axes(layer.index),
+                                        &mut requests,
+                                    )
+                                    .context_menu(|ui| {
                                         object_node_menu(
                                             ui,
                                             model.graph,
@@ -10476,6 +10520,22 @@ fn annotation_interactions(
                 column,
                 series,
             } => open_legend_entry_editor(ui.ctx(), view, tree, graph, row, column, series),
+            stokesforge_render_egui::GraphEvent::OpenAxisProperties { panel, side } => {
+                actions.push(
+                    plot_target(Some(PlotComponent::Axis { panel, side })).open_settings(graph),
+                );
+            }
+            stokesforge_render_egui::GraphEvent::OpenSeriesProperties(series) => {
+                actions.push(Action::OpenObjectProperties {
+                    graph,
+                    target: crate::object_manager::VisibilityTarget::Series(series),
+                });
+            }
+            stokesforge_render_egui::GraphEvent::OpenShapeProperties(shape) => {
+                if let Some(spec) = crate::state::current_plot_spec(tree, graph) {
+                    open_shape_properties(ui.ctx(), view, &spec, shape);
+                }
+            }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {
                     graph,

@@ -186,6 +186,20 @@ pub enum GraphEvent {
         /// Rang de la série dans `PanelSpec::series`.
         series: usize,
     },
+    /// Double-clic sur un axe (ligne ou graduations) : ouvrir les
+    /// paramètres de cet axe (issue #113).
+    OpenAxisProperties {
+        /// Indice du panneau dans la figure dessinée.
+        panel: usize,
+        /// Côté de l'axe.
+        side: stokesforge_render::AxisSide,
+    },
+    /// Double-clic sur une courbe : ouvrir les paramètres de la série
+    /// (issue #113).
+    OpenSeriesProperties(stokesforge_plot::SeriesRef),
+    /// Double-clic sur un objet graphique : ouvrir ses propriétés
+    /// (issue #113).
+    OpenShapeProperties(stokesforge_plot::ShapeRef),
     /// Un titre ou une légende a été glissé puis relâché : sa nouvelle
     /// ancre, à valider en **une** modification du modèle. L'aperçu reste
     /// affiché jusqu'à ce que le modèle change ([`GraphView::hold_preview`]).
@@ -1242,7 +1256,24 @@ impl GraphView {
                         });
                     }
                 }
-                _ => self.view.reset(),
+                // Issue #113 : sur un objet, une courbe ou un axe, le
+                // double-clic ouvre leurs paramètres. Ailleurs (zone de
+                // tracé nue, marges), il réinitialise toujours le zoom.
+                _ => {
+                    let shape = pointer.and_then(|pos| self.shape_at(pos));
+                    let series = pointer.and_then(|pos| self.series_at(pos, spec));
+                    if let Some(shape) = shape {
+                        self.events.push(GraphEvent::OpenShapeProperties(shape));
+                    } else if let Some(series) = series {
+                        self.selected_series = Some(series);
+                        self.events.push(GraphEvent::OpenSeriesProperties(series));
+                    } else if let Some(PlotComponent::Axis { panel, side }) = component {
+                        self.events
+                            .push(GraphEvent::OpenAxisProperties { panel, side });
+                    } else {
+                        self.view.reset();
+                    }
+                }
             }
         }
         if self.tool == GraphTool::Pointer

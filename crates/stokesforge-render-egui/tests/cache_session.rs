@@ -963,3 +963,92 @@ fn glisser_une_poignee_redimensionne_la_forme() {
         "pas agrandi : {shape:?}"
     );
 }
+
+// -- Issue #113 : le double-clic ouvre les paramètres de l'objet visé --
+
+/// Un double-clic à `pos` sur quatre images ; rend les signaux émis.
+fn double_clic(
+    context: &egui::Context,
+    view: &mut GraphView,
+    banc: &Banc,
+    rect: Rect,
+    pos: Pos2,
+) -> Vec<stokesforge_render_egui::GraphEvent> {
+    let mut signaux = Vec::new();
+    for (index, (pressed, time)) in [(true, 0.1), (false, 0.12), (true, 0.2), (false, 0.22)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut events = vec![bouton(pos, pressed)];
+        if index == 0 {
+            events.insert(0, egui::Event::PointerMoved(pos));
+        }
+        signaux.extend(image_avec(context, view, banc, rect, events, time));
+    }
+    signaux
+}
+
+/// Sur un axe : paramètres de l'axe. Sur une courbe : paramètres de la série.
+/// Dans le vide de la zone de tracé : le zoom est réinitialisé, comme avant.
+#[test]
+fn double_cliquer_un_axe_ou_une_courbe_ouvre_ses_parametres() {
+    use stokesforge_render::{AxisSide, PlotComponent};
+    use stokesforge_render_egui::GraphEvent;
+    let banc = Banc::with_title("Titre");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    let spec = match banc
+        .snapshot()
+        .tree
+        .node(banc.graph)
+        .expect("graphe")
+        .kind()
+    {
+        stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => panic!("pas un graphe"),
+    };
+    let balayage = || {
+        (0..600).step_by(2).flat_map(|x| {
+            (0..400)
+                .step_by(2)
+                .map(move |y| Pos2::new(x as f32, y as f32))
+        })
+    };
+
+    let axe = balayage()
+        .find(|pos| {
+            matches!(
+                view.component_at(*pos),
+                Some(PlotComponent::Axis {
+                    side: AxisSide::Bottom,
+                    ..
+                })
+            ) && view.series_at(*pos, &spec).is_none()
+        })
+        .expect("un point de l'axe des abscisses");
+    let signaux = double_clic(&context, &mut view, &banc, rect, axe);
+    assert!(
+        matches!(
+            signaux.as_slice(),
+            [GraphEvent::OpenAxisProperties {
+                side: AxisSide::Bottom,
+                ..
+            }]
+        ),
+        "{signaux:?}"
+    );
+
+    // Contexte neuf : le temps d'egui ne remonte pas, et le double-clic
+    // précédent ne doit pas se mêler au suivant.
+    let context = contexte();
+    let mut view = GraphView::new();
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    let courbe = balayage()
+        .find(|pos| view.series_at(*pos, &spec).is_some())
+        .expect("un point de la courbe");
+    let attendue = view.series_at(courbe, &spec).expect("série visée");
+    let signaux = double_clic(&context, &mut view, &banc, rect, courbe);
+    assert_eq!(signaux, vec![GraphEvent::OpenSeriesProperties(attendue)]);
+}

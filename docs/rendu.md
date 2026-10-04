@@ -431,7 +431,10 @@ et `hit::component_at` rend `PlotComponent::Text(TextTarget)` /
 `LegendEntry`, avant la zone de tracé qu'ils recouvrent. Côté écran,
 `GraphView::handle_text_drag` déplace le centre du texte avec le pointeur
 (aperçu `set_text_preview`, même motif que les textes libres) et le
-double-clic émet `GraphEvent::EditText` / `EditLegendEntry`.
+double-clic émet `GraphEvent::EditText` / `EditLegendEntry`. Sur un objet graphique, une courbe ou un axe (#113), il
+émet `OpenShapeProperties` / `OpenSeriesProperties` / `OpenAxisProperties` — l'application
+les traduit en `Action::OpenObjectProperties` / `OpenPlotSettings`, les mêmes que le
+double-clic d'une ligne de l'Object Manager ; ailleurs, il réinitialise le zoom.
 
 **Texte repris automatiquement** (issue #33) : un nom de série laissé vide
 reprend le nom long ou le nom de la colonne, souvent importé d'un appareil
