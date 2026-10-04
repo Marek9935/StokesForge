@@ -117,6 +117,7 @@ use stokesforge_core::NodeId;
 use crate::state::{Action, WindowKind};
 use crate::tr;
 
+use super::contents::tab_contents;
 use super::tab::{tab_node, Tab};
 use super::window_chrome::{
     floating_resize_handles, floating_window_frame, show_floating_window,
@@ -128,7 +129,7 @@ use super::window_placement::{
     geometry_rect, workspace_scroll_to_reveal, workspace_to_screen, BOOK_WINDOW_WIDTH,
     CASCADE_STEP, CASCADE_WRAP, FLOATING_WINDOW_SIZE, GRAPH_WINDOW_SIZE, WORKSPACE_SIZE,
 };
-use super::{tab_contents, tab_title, StokesForgeApp};
+use super::{tab_title, StokesForgeApp};
 
 /// Un clic ne réactive le contenu que sur son calque : Object Manager
 /// flottant peut le recouvrir tout en gardant un autre graphe comme cible.

@@ -44,7 +44,7 @@ qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
 | change le **modèle** (colonnes, arbre, `PlotSpec`, texte de note…) | une `Command` de `stokesforge-commands` | jamais une primitive `stokesforge-core` en direct (invariant 1) ; voir le skill **stokesforge-commande** |
 | change le **cadrage de vue** (zoom, pan) | `ViewState` sur `GraphView` | ce n'est **pas** une mutation du modèle : personne ne veut annuler un zoom par Ctrl+Z |
 | est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `stokesforge-app/src/state.rs` | doit rester testable sans fenêtre |
-| est du **dessin ou de l'événement** egui | `stokesforge-app/src/app.rs` et ses sous-modules (`window_*.rs`, voir § 2 octies) | rien de ce qu'ils contiennent n'est une décision de produit |
+| est du **dessin ou de l'événement** egui | `stokesforge-app/src/app.rs` et ses sous-modules de `src/app/` (fenêtres `window_*.rs`, voir § 2 octies ; surfaces `graph_window.rs`, `graph_text_edit.rs`, `object_manager_ui.rs`, `project_manager.rs`, `script_console.rs`, `contents.rs`, #121) | rien de ce qu'ils contiennent n'est une décision de produit |
 | est une **fonctionnalité de tracé** | `stokesforge-render` (générique sur le backend) | jamais dans un seul backend (invariant 5) ; voir le skill **stokesforge-rendu** |
 | lit un **fichier de données** | `stokesforge-import` | reste indépendant de l'UI, de `core`, des commandes et de la session |
 
@@ -59,7 +59,8 @@ Un **geste continu sur un graphe** (glisser, édition sur place) n'émet pas une
 action par image : l'aperçu vit dans la `GraphView`, l'état d'un éditeur dans
 la mémoire d'egui sous `GraphView::id()` (donc identique en fenêtre détachée),
 et une seule action part à la validation. Modèle : textes libres, issue #35
-(`app::annotation_interactions`). Le champ de saisie d'un tel éditeur s'écrit
+(`app::graph_window::annotation_interactions` ; les éditeurs sur place dans
+`app/graph_text_edit.rs`). Le champ de saisie d'un tel éditeur s'écrit
 **dans le cadre du rendu** (centre, corps, sans rotation : une fonction pure de
 placement, testée sans fenêtre — `stokesforge_render_egui::annotation_field`, issue
 #37), et ne masque pas l'aperçu quand on règle autre chose que le texte (#36).
@@ -82,8 +83,8 @@ aux tests et bancs de rendu ; ils ne définissent pas le défaut utilisateur.
 Les contenus de `stokesforge-app` ont longtemps existé **en deux écritures** : une
 pour la fenêtre flottante, une pour la fenêtre détachée. Depuis le 2026-09-30,
 classeur, graphe, note et matrice n'en ont plus qu'une (`book_contents`,
-de `src/app/workbook.rs`,
-`graph_view_contents`, `note_contents`, `matrix_contents`) — **ne pas en
+de `src/app/workbook.rs`, `graph_view_contents` dans `app/graph_window.rs`,
+`note_contents` et `matrix_contents` dans `app/contents.rs`) — **ne pas en
 réintroduire** : une nouvelle nature de fenêtre s'écrit une fois et s'appelle
 des deux côtés, sur le motif du classeur (vue `AppState` locale,
 `fork_for_detached_view`).
@@ -461,7 +462,9 @@ ouverture et sélection restent hors historique. L'échantillon de série appell
 
 Les textes et objets sélectionnés lisent aussi `with_graph_view` /
 `read_graph_view` (propriétés et barres de format incluses). Le menu
-contextuel et Graph › Selection partagent `object_node_menu`. Réordonner une
+contextuel et Graph › Selection partagent `object_node_menu`
+(`app/object_manager_ui.rs`, l'arbre peint, à côté du modèle
+`object_manager.rs`). Réordonner une
 série reste dans son groupe ; le rang final est décidé par `series_drop`,
 puis une seule `Action::ReorderSeries` part au relâchement. Les propriétés
 conservent le calque exact dans `PlotEdit::selected_panel`.

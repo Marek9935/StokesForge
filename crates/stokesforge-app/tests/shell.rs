@@ -4824,7 +4824,7 @@ fn drop_payload_action_dispatches_add_series_to_graph_with_line_by_default() {
 
 /// Bout en bout : dispatcher l'action produite par [`drop_payload_action`]
 /// ajoute effectivement la série au graphe visé — le même chemin que
-/// `crate::app::graph_drop_target` emprunte au relâchement du glisser.
+/// `crate::app::graph_window::graph_drop_target` emprunte au relâchement du glisser.
 #[test]
 fn dispatching_drop_payload_action_adds_the_series_to_the_graph() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");

@@ -82,7 +82,8 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 - Rendu : **tout titre, titre d'axe et entrée de légende passe par Typst, les graduations jamais** (issue #32). Le rôle est décidé dans le pipeline par le style (`formula::rich_style`), et les deux backends aiguillent sur `formula::is_rich` à la mesure **et** au dessin — jamais sur la présence de `$`. Ces textes sont donc du markup Typst : un texte repris automatiquement (nom de colonne) doit être échappé en amont.
 - Rendu : le levier `TessellationOptions::feathering` vit dans `stokesforge_render_egui::feathering`, en fonction libre sur le `Context`. Il n'est **pas** dans la clé de cache et ne doit pas y entrer (`architecture-choisie.md` §4.2, verrouillé par `stokesforge-render-egui/tests/feathering.rs`). Son déclencheur, le glisser, est câblé dans `stokesforge-render-egui/src/lib.rs` depuis R7.3.
 
-Object Manager (#81–85) : `object_manager.rs` projette le graphe, la sélection
+Object Manager (#81–85) : `object_manager.rs` projette le graphe,
+`app/object_manager_ui.rs` peint l'arbre (#121), la sélection
 reste dans `GraphView` (même vue en fenêtre détachée). Les textes automatiques
 (titres, légende) sont cachés par défaut ; une bascule unique
 (`Action::SetObjectManagerShowTexts`, préférence hors `.stf`, #102) les liste.

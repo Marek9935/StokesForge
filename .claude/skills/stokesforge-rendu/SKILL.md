@@ -168,7 +168,10 @@ Un geste continu sur la figure (glisser un texte libre, éditer sur place) ne
 modifie pas le modèle à chaque image : l'aperçu est posé sur la vue
 (`GraphView::set_annotation_preview`, appliqué au clone du spec comme le zoom,
 compteur dans `view_generation`), et l'application envoie **une** action à la
-fin — une entrée d'historique. `hold_preview` garde l'aperçu jusqu'à ce que le
+fin — une entrée d'historique. Côté application, les signaux de la vue sont
+traduits par `app::graph_window::annotation_interactions` et les éditeurs sur
+place vivent dans `app/graph_text_edit.rs` (validation :
+`commit_annotation_editor`, testée sans fenêtre). `hold_preview` garde l'aperçu jusqu'à ce que le
 modèle l'ait rattrapé, sans image de l'ancienne position entre les deux
 (issue #35). Un futur geste du même genre suit ce motif. Un champ de saisie
 posé sur la figure se place par une fonction pure (`annotation_field` : centre
