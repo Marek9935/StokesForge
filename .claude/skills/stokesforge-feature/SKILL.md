@@ -119,22 +119,25 @@ factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
 ## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
 
 `app.rs` est en cours de découpage (chantier #115, sous-tickets #116–#124,
-**à lancer sur feu vert seulement**). Cible décidée le 2026-10-04 : de vrais
+chacun **sur feu vert seulement** ; #116 et #117 faits). Cible décidée le 2026-10-04 : de vrais
 modules dans `src/app/` (imports explicites, interface `pub(crate)` minimale,
 pas de `use super::*` hors des modules de tests), des tests qui suivent leur
 code et sont relus et améliorés à chaque déplacement par un agent Opus
 (outil `Agent`, modèle `opus`, briefé avec le contexte du module), et les
 fonctions géantes redécoupées à part (#124), jamais dans le même commit
-qu'un déplacement. État actuel : le cadre commun des
-fenêtres est dans `window_chrome.rs`, le placement dans
-`window_placement.rs`, la pile, le repli et la maximisation dans
-`window_stack.rs`, le détachement dans `window_detach.rs`. Ce sont de simples
-découpages de fichiers (sous-modules d'`app` par `#[path]` vers `src/`,
-`use super::*`), pas encore des modules à interface explicite.
+qu'un déplacement. État actuel, dans `src/app/` (vrais modules, imports
+explicites, `pub(super)` pour ce que partagent les modules d'`app`) :
+- briques communes (#117) : `dialogs.rs` (`modal_dialog`, `modal_dialog_with`,
+  `DialogFooter`), `tab_strip.rs` (`tab_strip`, `tab_strip_with`, `TabOps`),
+  `shortcuts.rs` (`SHORTCUT_*`, `shortcut_text_*`), `tab.rs` (`Tab`) ;
+- fenêtres de contenu : `window_chrome.rs` (cadre commun, `show_window_in_layer`),
+  `window_placement.rs`, `window_stack.rs` (pile, repli, maximisation),
+  `window_detach.rs`.
 
-En attendant le chantier :
-- du code de fenêtre (placement, pile, détachement) va dans le `window_*.rs`
-  concerné, pas dans `app.rs` ;
+D'ici la fin du chantier :
+- du code de fenêtre (placement, pile, détachement) va dans le
+  `app/window_*.rs` concerné, pas dans `app.rs` ; une brique commune nouvelle
+  rejoint `src/app/` avec ses tests ;
 - une nouvelle surface d'interface **volumineuse** (assistant, dialogue,
   panneau) s'écrit d'emblée dans son propre module à imports explicites, sur
   le modèle de `object_manager.rs` ou `toolbar.rs`, plutôt que d'allonger
@@ -150,9 +153,8 @@ En attendant le chantier :
   renomme fait échouer la garde : mettre la garde à jour, ne pas la
   contourner ;
 - aucun `use …::*` hors du code de test (`aucun_import_global_hors_des_tests`,
-  `tests/gardes.rs`) : un module nouveau nomme ce qu'il importe. Seuls les
-  `window_*.rs` y dérogent, listés dans `DEROGATIONS_117` jusqu'à #117 ; n'y
-  rien ajouter.
+  `tests/gardes.rs`, garde absolue depuis #117) : un module nouveau nomme ce
+  qu'il importe.
 
 ## 2 ter. Barres de défilement : le standard du thème
 
@@ -226,13 +228,14 @@ réglage gagne ; un nouveau champ de couleur du modèle doit y être ajouté.
 
 Toute fenêtre de l'application se construit par la brique commune
 (`show_window_in_layer` : cadre, contour actif, rognage ; `window_header`
-pour la barre de titre), **jamais** par une `egui::Window` brute. Un dialogue
-qui doit bloquer le reste de l'interface passe par `modal_dialog` (fenêtre des
+pour la barre de titre ; `src/app/window_chrome.rs`), **jamais** par une
+`egui::Window` brute. Un dialogue qui doit bloquer le reste de l'interface
+passe par `modal_dialog` (`src/app/dialogs.rs` ; fenêtre des
 propriétés du graphe) : calque plein écran qui capte les clics, contour rouge
 foncé qui clignote sur un clic bloqué, boutons Valider (défaut, Entrée) /
 Annuler (croix, Échap) rendus par `DialogOutcome`. Les gestes d'un dialogue
 d'édition vivent dans une macro d'historique (`begin_macro`) : Valider la
-ferme (une entrée), Annuler l'avorte (modèle : `cancel_plot_settings`). **Tout jeu d'onglets passe par `tab_strip`** (issue #19), la bande des
+ferme (une entrée), Annuler l'avorte (modèle : `cancel_plot_settings`). **Tout jeu d'onglets passe par `tab_strip`** (`src/app/tab_strip.rs`, issue #19), la bande des
 onglets de feuille rendue générique : défilement horizontal sans barre,
 flèches (icônes `CaretLeft`/`CaretRight`) quand des onglets sont cachés, défilement minimal vers
 l'onglet choisi. Ne jamais écrire une rangée de `selectable_label` pour des
@@ -280,8 +283,8 @@ de menu, son grisage et son libellé. Ici les quatre sont **séparés**, et rien
 ne garantit leur cohérence sinon la relecture. C'est le premier point à
 vérifier quand une action est ajoutée :
 
-1. **le raccourci** — une constante `SHORTCUT_*` dans `app.rs`, déclarée *et*
-   consommée à la main (`input.consume_shortcut`) ;
+1. **le raccourci** — une constante `SHORTCUT_*` dans `app/shortcuts.rs`,
+   déclarée là *et* consommée à la main dans `collect_shortcuts` (`app.rs`) (`input.consume_shortcut`) ;
 2. **l'entrée de menu** (barre de menus et/ou menu contextuel), avec son
    `shortcut_text` pour rappeler le raccourci à droite ;
 3. **le grisage** (`add_enabled`), calculé depuis `AppState` ;
@@ -298,7 +301,7 @@ vérifier quand une action est ajoutée :
 
 ### Ajouter un raccourci clavier
 
-- Vérifier d'abord les collisions : `rg "SHORTCUT_" crates/stokesforge-app/src/app.rs`.
+- Vérifier d'abord les collisions : `rg "SHORTCUT_" crates/stokesforge-app/src/app/shortcuts.rs`.
 - **Ctrl+C / Ctrl+X / Ctrl+V ne sont jamais reçus comme `Event::Key`** :
   `egui-winit` les intercepte à la traduction des événements de fenêtre.
   Les constantes `SHORTCUT_COPY`/`CUT`/`PASTE`/`COPY_FULL_COLUMNS`/

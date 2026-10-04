@@ -281,19 +281,20 @@ compris, est agrandi ou réduit uniformément (`GraphView::paint_scaled`,
 ne reconstruit pas le cache de formes. La règle est identique en fenêtre
 flottante et détachée, qui partagent la même fonction.
 
-Les fenêtres de contenu sont découpées en sous-modules d'`app` (#100, #101), déplacés
-sans changement de comportement ; chacun porte la doc de tête de sa partie :
-`window_chrome.rs` (cadre commun : `window_header`, `show_window_in_layer`,
-`floating_window_frame`, poignées, `HeaderPlacement`), `window_placement.rs` (cascade,
-espace de travail, bornage), `window_stack.rs` (`Tab`, ordre de pile, masquage, repli,
-maximisation, `show_workspace`) et `window_detach.rs` (viewports OS du Project Manager et
-des onglets). Ce sont des sous-modules (`#[path]` vers `src/`) pour garder l'accès aux types
-privés d'`app`. C'est un découpage de
-fichiers (`use super::*`), pas encore des modules à interface explicite ; la suite
-(briques communes, assistant d'import, propriétés du graphe, grille, graphe,
-menus, tests) est le chantier #115 (#116–#123). Les gardes qui lisent le code
-parcourent tout `src/`, sous-dossiers compris, et cherchent leurs fonctions par
-leur nom (#116) : voir `docs/tests.md`.
+`app.rs` se découpe en vrais modules dans `src/app/` (chantier #115), à imports
+explicites ; chacun porte la doc de tête de sa partie. Les fenêtres de contenu
+(#100, #101, déménagées par #117) : `app/window_chrome.rs` (cadre commun :
+`window_header`, `show_window_in_layer`, `floating_window_frame`, poignées,
+`HeaderPlacement`, `show_window_contents_bounded`), `app/window_placement.rs` (cascade,
+espace de travail, bornage), `app/window_stack.rs` (ordre de pile, masquage, repli,
+maximisation, `show_workspace`) et `app/window_detach.rs` (viewports OS du Project
+Manager et des onglets). Les briques communes (#117) : `app/tab.rs` (`Tab`, l'onglet
+d'une fenêtre ouverte), `app/dialogs.rs` (`modal_dialog`, `modal_dialog_with`),
+`app/tab_strip.rs` (la bande d'onglets, `tab_strip`) et `app/shortcuts.rs` (les
+constantes `SHORTCUT_*` ; leur consommation, `collect_shortcuts`, reste dans `app.rs`).
+La suite (assistant d'import, propriétés du graphe, grille, graphe, menus) est
+#118–#123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
+et cherchent leurs fonctions par leur nom (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
 Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou
@@ -310,7 +311,7 @@ définir avec l'utilisateur quelles zones défilent et quelles zones sont
 rognées avant de brancher son contenu.
 
 Le `Frame` de ces fenêtres n'a pas de marge verticale
-(`WINDOW_CONTENT_MARGIN`, `crates/stokesforge-app/src/window_chrome.rs`) : la bande d'en-tête
+(`WINDOW_CONTENT_MARGIN`, `crates/stokesforge-app/src/app/window_chrome.rs`) : la bande d'en-tête
 et les séparateurs du contenu fournissent déjà leur propre espacement, une
 marge par défaut n'ajoutait qu'un bandeau blanc mort au-dessus et en dessous.
 La marge horizontale reste. Toutes les barres de défilement suivent le
@@ -921,7 +922,7 @@ global du `Context` plutôt que scopé à une fenêtre OS.
 ### Propriétés des graphiques
 
 Les réglages d'un graphe vivent dans une **fenêtre flottante à onglets**
-(`app::plot_settings_window`), un **dialogue modal** (`app::modal_dialog`) :
+(`app::plot_settings_window`), un **dialogue modal** (`modal_dialog`, `src/app/dialogs.rs`) :
 au premier plan, le reste de l'interface ne reçoit plus aucun clic, et un
 clic ailleurs fait clignoter son contour en rouge foncé
 (`theme::blocked_flash_color`). Deux boutons en bas : **OK** (par défaut,

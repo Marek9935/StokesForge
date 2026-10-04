@@ -552,3 +552,338 @@ impl StokesForgeApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::window_chrome::show_window_in_layer;
+    use super::*;
+    use crate::state::ProjectTreeNode;
+
+    #[test]
+    fn le_repli_ne_concerne_que_longlet_vise() {
+        let node = NodeId::from_raw(1);
+        let graph_tab = Tab::Graph(node);
+        let mut collapsed = HashSet::new();
+
+        toggle_collapse(&mut collapsed, graph_tab);
+        assert_eq!(collapsed, HashSet::from([graph_tab]));
+
+        // B5 (`retours-2026-09-23-bugs.md`) : `Tab::Book` a
+        // aussi ce contrôle depuis ce correctif, suivi indépendamment du
+        // graphe même quand son identifiant de nœud coïncide (test de
+        // présentation).
+        let book_tab = Tab::Book(node);
+        toggle_collapse(&mut collapsed, book_tab);
+        assert_eq!(collapsed, HashSet::from([graph_tab, book_tab]));
+
+        toggle_collapse(&mut collapsed, graph_tab);
+        assert_eq!(collapsed, HashSet::from([book_tab]));
+
+        toggle_collapse(&mut collapsed, book_tab);
+        assert!(collapsed.is_empty());
+    }
+
+    #[test]
+    fn le_repli_reste_refuse_aux_matrices_et_aux_notes() {
+        let node = NodeId::from_raw(1);
+        let mut collapsed = HashSet::new();
+
+        toggle_collapse(&mut collapsed, Tab::Matrix(node));
+        assert!(
+            collapsed.is_empty(),
+            "une matrice n'a pas ce contrôle : rien à replier"
+        );
+
+        toggle_collapse(&mut collapsed, Tab::Note(node));
+        assert!(
+            collapsed.is_empty(),
+            "une note n'a pas ce contrôle : rien à replier"
+        );
+
+        // Le refus ne touche pas au repli des autres onglets.
+        toggle_collapse(&mut collapsed, Tab::Graph(node));
+        toggle_collapse(&mut collapsed, Tab::Matrix(node));
+        assert_eq!(collapsed, HashSet::from([Tab::Graph(node)]));
+    }
+
+    /// [`toggle_collapse_to`] (réattachement d'une fenêtre détachée) pose la
+    /// valeur demandée au lieu de basculer : la reposer deux fois ne la
+    /// retourne pas. Mêmes natures que [`toggle_collapse`].
+    #[test]
+    fn le_repli_pose_une_valeur_sans_basculer() {
+        let node = NodeId::from_raw(1);
+        let mut collapsed = HashSet::new();
+
+        toggle_collapse_to(&mut collapsed, Tab::Book(node), true);
+        toggle_collapse_to(&mut collapsed, Tab::Book(node), true);
+        assert_eq!(collapsed, HashSet::from([Tab::Book(node)]));
+
+        toggle_collapse_to(&mut collapsed, Tab::Book(node), false);
+        toggle_collapse_to(&mut collapsed, Tab::Book(node), false);
+        assert!(collapsed.is_empty());
+
+        toggle_collapse_to(&mut collapsed, Tab::Matrix(node), true);
+        toggle_collapse_to(&mut collapsed, Tab::Note(node), true);
+        assert!(
+            collapsed.is_empty(),
+            "matrices et notes n'ont pas de repli, même posé"
+        );
+    }
+
+    /// Les fenêtres de l'arbre, à plat, dans l'ordre de l'arbre (le contenu
+    /// d'un dossier à sa place) ; les dossiers eux-mêmes n'en sont pas.
+    #[test]
+    fn les_fenetres_de_l_arbre_sont_mises_a_plat_dans_l_ordre() {
+        let window = |raw, kind| ProjectTreeNode::Window {
+            id: NodeId::from_raw(raw),
+            name: format!("{raw}"),
+            kind,
+        };
+        let tree = vec![
+            window(1, WindowKind::Book),
+            ProjectTreeNode::Folder {
+                id: NodeId::from_raw(2),
+                name: "Dossier".to_string(),
+                children: vec![
+                    window(3, WindowKind::Graph),
+                    ProjectTreeNode::Folder {
+                        id: NodeId::from_raw(4),
+                        name: "Vide".to_string(),
+                        children: Vec::new(),
+                    },
+                    window(5, WindowKind::Note),
+                ],
+            },
+            window(6, WindowKind::Matrix),
+        ];
+        assert_eq!(
+            window_nodes(&tree),
+            vec![
+                (NodeId::from_raw(1), WindowKind::Book),
+                (NodeId::from_raw(3), WindowKind::Graph),
+                (NodeId::from_raw(5), WindowKind::Note),
+                (NodeId::from_raw(6), WindowKind::Matrix),
+            ]
+        );
+    }
+
+    // B2 (`retours-2026-09-23-bugs.md`) : `sync_floating_tabs_order_to_top_layer`
+    // teste la logique pure de réalignement.
+
+    #[test]
+    fn le_tab_au_premier_plan_est_ramene_en_fin_de_floating_tabs() {
+        let tab_a = Tab::Graph(NodeId::from_raw(1));
+        let tab_b = Tab::Graph(NodeId::from_raw(2));
+        let tab_c = Tab::Book(NodeId::from_raw(3));
+        let mut floating_tabs = vec![tab_a, tab_b, tab_c];
+
+        // `tab_c` est déjà en fin de liste (donc déjà « actif ») : rien à
+        // faire.
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_c));
+        assert_eq!(floating_tabs, vec![tab_a, tab_b, tab_c]);
+
+        // `tab_a` est au premier plan (clic direct) sans être en fin de
+        // liste : il doit passer en dernier, les autres gardant leur ordre
+        // relatif (l'ordre de pile des fenêtres de dessous).
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_a));
+        assert_eq!(floating_tabs, vec![tab_b, tab_c, tab_a]);
+    }
+
+    #[test]
+    fn aucun_calque_au_premier_plan_ou_tab_inconnu_laisse_floating_tabs_intact() {
+        let tab_a = Tab::Graph(NodeId::from_raw(1));
+        let tab_b = Tab::Graph(NodeId::from_raw(2));
+        let tab_inconnu = Tab::Graph(NodeId::from_raw(3));
+        let mut floating_tabs = vec![tab_a, tab_b];
+
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, None);
+        assert_eq!(floating_tabs, vec![tab_a, tab_b]);
+
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_inconnu));
+        assert_eq!(
+            floating_tabs,
+            vec![tab_a, tab_b],
+            "un tab qui n'est plus dans floating_tabs (fermé entretemps) ne doit rien perturber"
+        );
+    }
+
+    // B2, bout à bout : un clic direct dans une fenêtre flottante qui n'est
+    // pas déjà en fin de `floating_tabs` amène egui à réordonner son propre
+    // calque (`Area`, `Sense::CLICK`) *avant* que `floating_tabs` ne le
+    // sache — c'est exactement l'écart que corrige
+    // `sync_floating_tabs_order_to_top_layer`. Ce test peint deux fenêtres
+    // avec les mêmes `egui::Id` que la production (`egui::Id::new(tab)`),
+    // simule un clic dans celle qui n'est pas en fin de liste, puis vérifie
+    // que la résolution utilisée en production (`ctx.top_layer_id()` +
+    // recherche du tab correspondant) place bien `tab_a` au premier plan —
+    // et que sans la resynchronisation, `floating_tabs.last()`
+    // (`active_tab`) resterait sur `tab_b`, périmé.
+    #[test]
+    fn un_clic_direct_dans_une_fenetre_en_arriere_plan_la_ramene_active() {
+        let tab_a = Tab::Graph(NodeId::from_raw(1));
+        let tab_b = Tab::Graph(NodeId::from_raw(2));
+        let mut floating_tabs = vec![tab_a, tab_b];
+        let context = egui::Context::default();
+
+        let rect_a = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(100.0, 100.0));
+        let rect_b = egui::Rect::from_min_size(egui::pos2(200.0, 20.0), egui::vec2(100.0, 100.0));
+
+        let paint = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                let viewport = ui.ctx().content_rect();
+                for (tab, rect) in [(tab_a, rect_a), (tab_b, rect_b)] {
+                    show_floating_window(
+                        ui.ctx(),
+                        egui::Id::new(tab),
+                        rect,
+                        viewport,
+                        false,
+                        |_| {},
+                        |_, _| {},
+                    );
+                }
+            });
+            output.textures_delta.clear();
+        };
+        let top_layer_tab = |floating_tabs: &[Tab]| {
+            context.top_layer_id().and_then(|top| {
+                floating_tabs
+                    .iter()
+                    .copied()
+                    .find(|&tab| egui::Id::new(tab) == top.id)
+            })
+        };
+
+        // Image de repos : `floating_tabs` place `tab_b` en dernier, comme
+        // s'il avait été ouvert (ou cliqué) en dernier légitimement — et egui
+        // aussi, puisqu'il l'a peinte en dernier.
+        paint(vec![]);
+        assert_eq!(top_layer_tab(&floating_tabs), Some(tab_b));
+
+        // Clic dans `tab_a`, qui n'est pas en fin de `floating_tabs` — sur
+        // deux images distinctes, comme les autres tests d'interaction
+        // (déplacer la souris, puis presser) : `layer_id_at` doit pouvoir
+        // s'appuyer sur une position de pointeur déjà connue.
+        let click_pos = rect_a.center();
+        paint(vec![egui::Event::PointerMoved(click_pos)]);
+        assert_eq!(
+            top_layer_tab(&floating_tabs),
+            Some(tab_b),
+            "survoler une fenêtre ne la ramène pas au premier plan"
+        );
+        paint(vec![egui::Event::PointerButton {
+            pos: click_pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::default(),
+        }]);
+
+        let top = top_layer_tab(&floating_tabs);
+        assert_eq!(
+            top,
+            Some(tab_a),
+            "egui doit avoir amené la fenêtre cliquée au premier plan de son propre ordre \
+             de calques, indépendamment de floating_tabs"
+        );
+
+        // Sans la resynchronisation (B2), `active_tab` resterait périmé sur
+        // `tab_b` malgré le clic.
+        assert_eq!(
+            floating_tabs.last().copied(),
+            Some(tab_b),
+            "avant resynchronisation, floating_tabs (donc active_tab) ignore encore le clic"
+        );
+
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, top);
+        assert_eq!(
+            floating_tabs.last().copied(),
+            Some(tab_a),
+            "après resynchronisation, la fenêtre cliquée doit devenir active_tab \
+             (donc se surligner)"
+        );
+    }
+
+    /// #85 : un clic dans l'Object Manager flottant (calque au-dessus) ne
+    /// réactive pas la fenêtre de contenu qu'il recouvre ; un clic sur la
+    /// partie découverte de cette même fenêtre, si (témoin).
+    #[test]
+    fn cliquer_le_gestionnaire_flottant_ne_reactive_pas_le_contenu_derriere() {
+        let ctx = egui::Context::default();
+        let content_id = egui::Id::new("object_manager_content_test");
+        let manager_id = egui::Id::new("object_manager_float_test");
+        let content = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(400.0, 300.0));
+        let manager = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let paint = |events: Vec<egui::Event>, expected: bool| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let viewport = ui.ctx().content_rect();
+                    show_window_in_layer(
+                        &ctx,
+                        manager_id,
+                        egui::Order::Foreground,
+                        manager,
+                        viewport,
+                        false,
+                        |_| {},
+                        |_, _| {},
+                    );
+                    show_floating_window(
+                        &ctx,
+                        content_id,
+                        content,
+                        viewport,
+                        false,
+                        |_| {},
+                        |_, _| {},
+                    );
+                    assert_eq!(
+                        window_pointer_pressed(
+                            &ctx,
+                            egui::LayerId::new(FLOATING_WINDOW_ORDER, content_id),
+                            content
+                        ),
+                        expected
+                    );
+                },
+            );
+            output.textures_delta.clear();
+        };
+        let press = |pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        };
+        paint(Vec::new(), false);
+        paint(vec![egui::Event::PointerMoved(manager.center())], false);
+        paint(vec![press(manager.center())], false);
+        paint(
+            vec![egui::Event::PointerButton {
+                pos: manager.center(),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            false,
+        );
+        let exposed = egui::pos2(70.0, 70.0);
+        paint(vec![egui::Event::PointerMoved(exposed)], false);
+        paint(vec![press(exposed)], true);
+    }
+}

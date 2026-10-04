@@ -50,3 +50,46 @@ pub(super) fn tab_node(tab: Tab) -> NodeId {
         Tab::Book(id) | Tab::Graph(id) | Tab::Matrix(id) | Tab::Note(id) => id,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NATURES: [WindowKind; 4] = [
+        WindowKind::Book,
+        WindowKind::Graph,
+        WindowKind::Matrix,
+        WindowKind::Note,
+    ];
+
+    /// Chaque nature de fenêtre s'ouvre dans son propre onglet, qui désigne
+    /// bien le nœud d'où il vient ; un même nœud sous deux natures donne
+    /// deux onglets distincts (le repli et la pile les suivent séparément).
+    #[test]
+    fn l_onglet_d_une_fenetre_garde_sa_nature_et_son_noeud() {
+        let id = NodeId::from_raw(7);
+        let tabs: Vec<Tab> = NATURES
+            .iter()
+            .map(|&kind| tab_for_window(id, kind))
+            .collect();
+        assert_eq!(
+            tabs,
+            vec![
+                Tab::Book(id),
+                Tab::Graph(id),
+                Tab::Matrix(id),
+                Tab::Note(id)
+            ]
+        );
+        for tab in &tabs {
+            assert_eq!(tab_node(*tab), id, "{tab:?}");
+        }
+        let distincts: std::collections::HashSet<Tab> = tabs.iter().copied().collect();
+        assert_eq!(distincts.len(), NATURES.len());
+        // Le témoin : un autre nœud donne un autre onglet, de même nature.
+        assert_ne!(
+            tab_for_window(NodeId::from_raw(8), WindowKind::Graph),
+            Tab::Graph(id)
+        );
+    }
+}

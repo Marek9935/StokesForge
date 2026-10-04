@@ -268,3 +268,158 @@ pub(super) fn modal_dialog_with(
     }
     outcome
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Une touche pressée, sans modificateur.
+    fn touche(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// Une image de 800 × 600 avec `events`, où `ui` dessine l'arrière-plan.
+    fn image(context: &egui::Context, events: Vec<egui::Event>, ui: impl FnMut(&mut egui::Ui)) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, ui);
+        output.textures_delta.clear();
+    }
+
+    /// #14 : tant qu'un dialogue modal est ouvert, un clic sur le reste de
+    /// l'interface n'a aucun effet et déclenche le clignotement du contour ;
+    /// Échap le ferme ; sans dialogue, le même clic agit (témoin). Un clic
+    /// **dans** le dialogue, lui, ne clignote pas.
+    #[test]
+    fn un_dialogue_modal_bloque_l_arriere_plan_et_clignote() {
+        let id = egui::Id::new("dialogue_test");
+        let clicks = std::cell::Cell::new(0);
+        let closed = std::cell::Cell::new(DialogOutcome::Open);
+        let run = |context: &egui::Context, modal: bool, events: Vec<egui::Event>| {
+            image(context, events, |ui| {
+                if ui.button("fond").clicked() {
+                    clicks.set(clicks.get() + 1);
+                }
+                if modal {
+                    let close =
+                        modal_dialog(ui.ctx(), id, "Test", egui::vec2(300.0, 200.0), |ui| {
+                            ui.label("contenu");
+                        });
+                    if close != DialogOutcome::Open {
+                        closed.set(close);
+                    }
+                }
+            });
+        };
+        let click = |context: &egui::Context, modal: bool, at: egui::Pos2| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            run(context, modal, vec![egui::Event::PointerMoved(at)]);
+            run(context, modal, vec![button(true)]);
+            run(context, modal, vec![button(false)]);
+        };
+        let fond = egui::pos2(20.0, 14.0);
+        let flash = |context: &egui::Context| {
+            context.data(|data| data.get_temp::<f64>(id.with("flash_start")))
+        };
+
+        let free = egui::Context::default();
+        run(&free, false, vec![]);
+        click(&free, false, fond);
+        assert_eq!(clicks.get(), 1, "sans dialogue, le bouton répond");
+
+        let context = egui::Context::default();
+        for _ in 0..3 {
+            run(&context, true, vec![]);
+        }
+        // Le dialogue est centré à l'écran : son milieu est dans son corps.
+        click(&context, true, egui::pos2(400.0, 300.0));
+        assert!(
+            flash(&context).is_none(),
+            "un clic dans le dialogue n'est pas un clic bloqué"
+        );
+        assert_eq!(closed.get(), DialogOutcome::Open);
+        click(&context, true, fond);
+        assert_eq!(clicks.get(), 1, "le dialogue a bloqué le clic");
+        assert!(
+            flash(&context).is_some(),
+            "le clic bloqué déclenche le clignotement"
+        );
+        assert_eq!(closed.get(), DialogOutcome::Open);
+        run(&context, true, vec![touche(egui::Key::Escape)]);
+        assert_eq!(closed.get(), DialogOutcome::Cancel, "Échap annule");
+        assert!(
+            flash(&context).is_none(),
+            "fermé, le dialogue oublie son clignotement"
+        );
+
+        // Valider est le bouton par défaut : Entrée (hors saisie de texte).
+        closed.set(DialogOutcome::Open);
+        let again = egui::Context::default();
+        for _ in 0..3 {
+            run(&again, true, vec![]);
+        }
+        run(&again, true, vec![touche(egui::Key::Enter)]);
+        assert_eq!(closed.get(), DialogOutcome::Accept, "Entrée valide");
+    }
+
+    /// Le bouton par défaut grisé (assistant à une étape incomplète) : Entrée
+    /// ne valide plus, Échap annule toujours.
+    #[test]
+    fn entree_ne_valide_pas_un_dialogue_dont_le_bouton_par_defaut_est_grise() {
+        let id = egui::Id::new("dialogue_grise");
+        for (accept_enabled, attendu) in
+            [(false, DialogOutcome::Open), (true, DialogOutcome::Accept)]
+        {
+            let context = egui::Context::default();
+            let mut issue = DialogOutcome::Open;
+            let mut run = |events: Vec<egui::Event>| {
+                image(&context, events, |ui| {
+                    issue = modal_dialog_with(
+                        ui.ctx(),
+                        id,
+                        "Test",
+                        egui::vec2(300.0, 200.0),
+                        DialogFooter {
+                            accept_label: "Suivant",
+                            accept_hint: "",
+                            accept_enabled,
+                        },
+                        |_| {},
+                        |ui| {
+                            ui.label("contenu");
+                        },
+                    );
+                });
+                issue
+            };
+            for _ in 0..3 {
+                run(Vec::new());
+            }
+            assert_eq!(
+                run(vec![touche(egui::Key::Enter)]),
+                attendu,
+                "accept_enabled={accept_enabled}"
+            );
+            if !accept_enabled {
+                assert_eq!(run(vec![touche(egui::Key::Escape)]), DialogOutcome::Cancel);
+            }
+        }
+    }
+}

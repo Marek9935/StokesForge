@@ -134,3 +134,56 @@ pub(super) fn shortcut_text_backspace() -> String {
 pub(super) fn shortcut_text_delete() -> String {
     tr!("shortcut-delete")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ce que [`collect_undo_redo_shortcuts`] tire d'une image où `key` est
+    /// pressée avec `modifiers`, puis ce qu'il en reste pour un second
+    /// lecteur dans la même image.
+    fn actions_pour(key: egui::Key, modifiers: egui::Modifiers) -> (Vec<Action>, Vec<Action>) {
+        let context = egui::Context::default();
+        let mut premieres = Vec::new();
+        let mut restes = Vec::new();
+        let mut output = context.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                collect_undo_redo_shortcuts(ui.ctx(), &mut premieres);
+                collect_undo_redo_shortcuts(ui.ctx(), &mut restes);
+            },
+        );
+        output.textures_delta.clear();
+        (premieres, restes)
+    }
+
+    /// Ctrl+Z annule ; Ctrl+Y et Ctrl+Maj+Z rétablissent. Ctrl+Maj+Z
+    /// contient Ctrl+Z : il doit rétablir **sans** annuler (le rétablissement
+    /// se teste d'abord). Le raccourci est consommé : un second lecteur de la
+    /// même image n'en voit rien, et Z sans Ctrl n'est pas un raccourci.
+    #[test]
+    fn annuler_et_retablir_se_lisent_au_clavier_une_seule_fois() {
+        let ctrl = egui::Modifiers::COMMAND.plus(egui::Modifiers::CTRL);
+        let ctrl_maj = ctrl.plus(egui::Modifiers::SHIFT);
+        for (key, modifiers, attendu) in [
+            (egui::Key::Z, ctrl, vec![Action::Undo]),
+            (egui::Key::Y, ctrl, vec![Action::Redo]),
+            (egui::Key::Z, ctrl_maj, vec![Action::Redo]),
+            (egui::Key::Z, egui::Modifiers::NONE, vec![]),
+            (egui::Key::A, ctrl, vec![]),
+        ] {
+            let (premieres, restes) = actions_pour(key, modifiers);
+            assert_eq!(premieres, attendu, "{key:?} {modifiers:?}");
+            assert!(restes.is_empty(), "{key:?} {modifiers:?} lu deux fois");
+        }
+    }
+}

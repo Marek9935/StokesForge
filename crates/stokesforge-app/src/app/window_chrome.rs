@@ -702,3 +702,679 @@ pub(super) fn show_window_contents_bounded(
     add_contents(&mut content);
     ui.advance_cursor_after_rect(rect);
 }
+
+/// `pub(super)` : [`tests::find_icon_centers`] sert aussi aux tests d'`app.rs`
+/// qui peignent l'en-tête d'une fenêtre détachée.
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+    use stokesforge_core::NodeId;
+
+    /// Centres des icônes peintes (images : rectangles à texture), de gauche à
+    /// droite. Les chargeurs d'images doivent être installés sur le contexte,
+    /// et l'image avoir déjà tourné une fois pour que la texture soit prête.
+    pub(in crate::app) fn find_icon_centers(
+        shapes: &[egui::epaint::ClippedShape],
+    ) -> Vec<egui::Pos2> {
+        let mut centers: Vec<egui::Pos2> = shapes
+            .iter()
+            .filter_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect) if rect.brush.is_some() => Some(rect.rect.center()),
+                _ => None,
+            })
+            .collect();
+        centers.sort_by(|a, b| a.x.total_cmp(&b.x));
+        centers
+    }
+
+    /// Largeur de l'écran des tests d'en-tête : l'en-tête la prend toute.
+    const LARGEUR_EN_TETE: f32 = 400.0;
+
+    /// Peint [`window_header`] seul, sur toute la largeur de l'écran, sur
+    /// `events.len() + 1` images (la première sans événement : la texture SVG
+    /// des icônes n'est prête qu'à la seconde). Rend la sortie de la dernière
+    /// image et les actions de chaque image.
+    fn peindre_en_tete(
+        context: &egui::Context,
+        title: &str,
+        tab: Option<Tab>,
+        placement: HeaderPlacement,
+        events: Vec<Vec<egui::Event>>,
+    ) -> (egui::FullOutput, Vec<WindowHeaderActions>) {
+        egui_extras::install_image_loaders(context);
+        let mut output = egui::FullOutput::default();
+        let mut actions = Vec::new();
+        for events in std::iter::once(Vec::new()).chain(events) {
+            output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(LARGEUR_EN_TETE, 120.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    actions.push(window_header(
+                        ui,
+                        egui::Id::new("en_tete_de_test"),
+                        title,
+                        tab,
+                        false,
+                        placement,
+                    ));
+                },
+            );
+            output.textures_delta.clear();
+        }
+        (output, actions)
+    }
+
+    /// Les icônes d'un en-tête au repos, de gauche à droite.
+    fn icones_de_l_en_tete(tab: Option<Tab>, placement: HeaderPlacement) -> Vec<egui::Pos2> {
+        let context = egui::Context::default();
+        let (output, _) = peindre_en_tete(&context, "Titre", tab, placement, vec![Vec::new()]);
+        find_icon_centers(&output.shapes)
+    }
+
+    // B7 (`retours-2026-09-23-bugs.md`) : jusque-là, la
+    // surbrillance recolorait le trait du `Frame` de la fenêtre
+    // (`floating_window_frame`) plutôt que de peindre un second contour par
+    // dessus — mais ce trait suit `content_ui.min_rect()`, pas la taille
+    // demandée, et débordait donc quand le contenu dépassait (bande
+    // d'outils qui ne s'enroule pas). Le `Frame` ne code plus l'activité :
+    // il garde toujours le trait par défaut d'egui, quel que soit l'état.
+    #[test]
+    fn le_frame_de_la_fenetre_flottante_garde_toujours_le_trait_par_defaut() {
+        let style = egui::Style::default();
+
+        let frame = floating_window_frame(&style);
+
+        assert_eq!(
+            frame.stroke.color,
+            style.visuals.window_stroke().color,
+            "le Frame ne recolore plus selon l'activité (B7) : le contour actif est peint à \
+             part par `paint_active_window_outline`, sur le rectangle demandé plutôt que celui \
+             qu'egui recalcule depuis le contenu"
+        );
+        assert_eq!(
+            frame.inner_margin, WINDOW_CONTENT_MARGIN,
+            "la marge du cadre est celle des fenêtres de contenu, sans bandeau vertical mort"
+        );
+    }
+
+    // Le trait recoloré vit maintenant dans `active_window_stroke`, utilisé
+    // par [`paint_active_window_outline`] plutôt que par le `Frame` — même
+    // logique de distinction active/inactive qu'avant B7, déplacée d'une
+    // fonction à l'autre.
+    #[test]
+    fn active_window_stroke_distingue_toujours_actif_et_inactif() {
+        let style = egui::Style::default();
+
+        let inactif = active_window_stroke(&style, false);
+        let actif = active_window_stroke(&style, true);
+
+        assert_eq!(
+            inactif.color,
+            style.visuals.window_stroke().color,
+            "une fenêtre inactive garde le trait par défaut d'egui"
+        );
+        assert_eq!(
+            actif.color, style.visuals.selection.stroke.color,
+            "une fenêtre active reprend la couleur de sélection du thème"
+        );
+        assert_ne!(
+            actif.color, inactif.color,
+            "sans couleurs distinctes, rien ne montrerait quelle fenêtre est active"
+        );
+    }
+
+    /// Peint des fenêtres flottantes par le chemin de production
+    /// ([`show_floating_window`]), sur une image, et rend la sortie d'egui.
+    /// Deux images au moins sont nécessaires : la première est la passe de
+    /// mesure d'une `Area` neuve, qui ne peint rien.
+    fn peindre_fenetres(
+        context: &egui::Context,
+        fenetres: &[(egui::Id, egui::Rect)],
+        viewport: egui::Rect,
+        actives: bool,
+        contenu: impl Fn(&mut egui::Ui),
+    ) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 1000.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, |ui| {
+            for &(id, rect) in fenetres {
+                show_floating_window(ui.ctx(), id, rect, viewport, actives, &contenu, |_, _| {});
+            }
+        });
+        output.textures_delta.clear();
+        output
+    }
+
+    /// Contenu plus large que n'importe quelle fenêtre de test — comme un
+    /// classeur à plusieurs colonnes.
+    fn contenu_debordant(ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            for index in 0..10 {
+                ui.label(format!("colonne {index}"));
+                ui.add_space(80.0);
+            }
+        });
+    }
+
+    /// Tous les rectangles peints, `Shape::Vec` dépliés (le cadre d'egui
+    /// arrive en `Vec[ombre, rectangle]`).
+    fn rectangles_peints(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::RectShape> {
+        fn deplier(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+            match shape {
+                egui::Shape::Rect(rect) => out.push(rect.clone()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| deplier(shape, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for painted in shapes {
+            deplier(&painted.shape, &mut out);
+        }
+        out
+    }
+
+    // Bug 1 (`retours-2026-09-24-bugs.md`), la conséquence, et B1/B3/B4/B7 du
+    // rapport du 2026-09-23 : le cadre, le contour actif, la zone cliquable et
+    // le rognage du contenu suivent tous le même rectangle, que le contenu
+    // soit court ou déborde.
+    #[test]
+    fn le_cadre_le_contour_et_la_zone_cliquable_suivent_le_meme_rectangle() {
+        let style = egui::Style::default();
+        let window_rect =
+            egui::Rect::from_min_size(egui::pos2(100.0, 80.0), egui::vec2(220.0, 180.0));
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+        for deborde in [false, true] {
+            let context = egui::Context::default();
+            let id = egui::Id::new(("meme_rectangle", deborde));
+            let contenu = |ui: &mut egui::Ui| {
+                if deborde {
+                    contenu_debordant(ui);
+                } else {
+                    ui.label("contenu court");
+                }
+            };
+            peindre_fenetres(&context, &[(id, window_rect)], viewport, true, contenu);
+            let output = peindre_fenetres(&context, &[(id, window_rect)], viewport, true, contenu);
+
+            let rectangles = rectangles_peints(&output.shapes);
+            let cadre = rectangles
+                .iter()
+                .find(|rect| rect.fill == style.visuals.window_fill())
+                .expect("le cadre doit être peint");
+            let contour = rectangles
+                .iter()
+                .find(|rect| rect.stroke.color == style.visuals.selection.stroke.color)
+                .expect("le contour actif doit être peint");
+            assert_eq!(cadre.rect, window_rect, "deborde={deborde}");
+            assert_eq!(contour.rect, window_rect, "deborde={deborde}");
+            assert_eq!(
+                context.memory(|memory| memory.area_rect(id)),
+                Some(window_rect.expand(RESIZE_BORDER)),
+                "la zone cliquable est la fenêtre plus ses poignées, deborde={deborde}"
+            );
+            let mut textes = 0;
+            for painted in &output.shapes {
+                if let egui::Shape::Text(text) = &painted.shape {
+                    textes += 1;
+                    assert!(
+                        window_rect.contains_rect(painted.clip_rect),
+                        "{:?} déborde de la fenêtre : découpe {:?}",
+                        text.galley.job.text,
+                        painted.clip_rect,
+                    );
+                }
+            }
+            // Sans texte peint, la boucle ci-dessus ne vérifierait rien.
+            assert!(textes > 0, "le contenu doit être peint, deborde={deborde}");
+        }
+
+        // Le témoin : la même fenêtre inactive est encadrée, mais aucun
+        // rectangle ne porte la couleur de sélection — c'est bien le contour
+        // actif que la recherche ci-dessus a trouvé, pas un autre trait.
+        let context = egui::Context::default();
+        let id = egui::Id::new("meme_rectangle_inactive");
+        let contenu = |ui: &mut egui::Ui| {
+            ui.label("contenu court");
+        };
+        peindre_fenetres(&context, &[(id, window_rect)], viewport, false, contenu);
+        let output = peindre_fenetres(&context, &[(id, window_rect)], viewport, false, contenu);
+        let rectangles = rectangles_peints(&output.shapes);
+        assert!(rectangles
+            .iter()
+            .any(|rect| rect.fill == style.visuals.window_fill() && rect.rect == window_rect));
+        assert!(
+            !rectangles
+                .iter()
+                .any(|rect| rect.stroke.color == style.visuals.selection.stroke.color),
+            "une fenêtre inactive n'a pas de contour de sélection"
+        );
+    }
+
+    // Bug 2 (`retours-2026-09-24-bugs.md`) : une fenêtre à
+    // cheval sur le bord de la vue (espace de travail défilé) peignait
+    // par-dessus le Project Manager, et y captait les clics.
+    #[test]
+    fn une_fenetre_a_cheval_sur_le_bord_de_la_vue_est_rognee_et_laisse_passer_les_clics() {
+        let context = egui::Context::default();
+        let id = egui::Id::new("a_cheval");
+        // La vue commence à x = 400 (à gauche : le Project Manager).
+        let viewport = egui::Rect::from_min_max(egui::pos2(400.0, 0.0), egui::pos2(1400.0, 1000.0));
+        let window_rect =
+            egui::Rect::from_min_size(egui::pos2(250.0, 100.0), egui::vec2(500.0, 400.0));
+        let fenetres = [(id, window_rect)];
+        peindre_fenetres(&context, &fenetres, viewport, true, contenu_debordant);
+        let output = peindre_fenetres(&context, &fenetres, viewport, true, contenu_debordant);
+
+        assert!(!output.shapes.is_empty());
+        for painted in &output.shapes {
+            assert!(
+                viewport.contains_rect(painted.clip_rect),
+                "une forme de la fenêtre est découpée hors de la vue : {:?}",
+                painted.clip_rect,
+            );
+        }
+        let calque = egui::LayerId::new(FLOATING_WINDOW_ORDER, id);
+        assert_ne!(
+            context.layer_id_at(egui::pos2(300.0, 300.0)),
+            Some(calque),
+            "sous le Project Manager, la partie cachée de la fenêtre ne doit capter aucun clic"
+        );
+        assert_eq!(context.layer_id_at(egui::pos2(500.0, 300.0)), Some(calque));
+    }
+
+    /// Une fenêtre entièrement hors de la portion visible de l'espace de
+    /// travail (défilé ailleurs) n'est ni peinte ni cliquable, et son contenu
+    /// n'est même pas construit ; sa voisine visible, si (témoin).
+    #[test]
+    fn une_fenetre_hors_de_la_vue_n_est_ni_peinte_ni_cliquable() {
+        let context = egui::Context::default();
+        let viewport = egui::Rect::from_min_max(egui::pos2(400.0, 0.0), egui::pos2(1400.0, 1000.0));
+        let cachee = egui::Id::new("hors_vue");
+        let visible = egui::Id::new("dans_la_vue");
+        // À gauche de la vue, poignées comprises : rien n'en dépasse.
+        let cachee_rect =
+            egui::Rect::from_min_size(egui::pos2(50.0, 100.0), egui::vec2(300.0, 200.0));
+        let visible_rect =
+            egui::Rect::from_min_size(egui::pos2(600.0, 100.0), egui::vec2(300.0, 200.0));
+        let mut rendus = Vec::new();
+        // Deux images : la première est la passe de mesure d'une `Area` neuve.
+        for _ in 0..2 {
+            rendus.clear();
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 1000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    for (id, rect) in [(cachee, cachee_rect), (visible, visible_rect)] {
+                        rendus.push(show_floating_window(
+                            ui.ctx(),
+                            id,
+                            rect,
+                            viewport,
+                            true,
+                            |_| id,
+                            |_, _| {},
+                        ));
+                    }
+                },
+            );
+            output.textures_delta.clear();
+        }
+        assert_eq!(rendus, vec![None, Some(visible)]);
+        assert_eq!(
+            context.memory(|memory| memory.area_rect(cachee)),
+            None,
+            "aucune zone cliquable n'est posée pour la fenêtre hors de la vue"
+        );
+        assert_ne!(
+            context.layer_id_at(cachee_rect.center()),
+            Some(egui::LayerId::new(FLOATING_WINDOW_ORDER, cachee))
+        );
+        assert_eq!(
+            context.layer_id_at(visible_rect.center()),
+            Some(egui::LayerId::new(FLOATING_WINDOW_ORDER, visible))
+        );
+    }
+
+    #[test]
+    fn len_tete_du_graphe_garde_son_titre_au_centre_et_sa_fleche_a_gauche() {
+        let context = egui::Context::default();
+        let (output, _) = peindre_en_tete(
+            &context,
+            "Graph1",
+            Some(Tab::Graph(NodeId::from_raw(1))),
+            HeaderPlacement::Floating,
+            Vec::new(),
+        );
+        let icons = find_icon_centers(&output.shapes);
+
+        let title = output
+            .shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Text(shape) if shape.galley.job.text == "Graph1" => Some(shape),
+                _ => None,
+            })
+            .expect("le titre doit être peint");
+        let title_center = title.pos.x + title.galley.rect.center().x;
+        assert!(
+            (title_center - LARGEUR_EN_TETE / 2.0).abs() < f32::EPSILON,
+            "le titre doit être centré dans l'en-tête, pas après la flèche"
+        );
+        let collapse = icons.first().expect("la flèche de repli doit être peinte");
+        assert!(
+            collapse.x < 24.0,
+            "la flèche de repli doit rester dans le coin supérieur gauche"
+        );
+
+        // Régression : les icônes d'action étaient posées via `Button::
+        // small()`, un widget avec son propre cadre/padding qui ne
+        // s'aligne pas pixel pour pixel sur le titre peint brut — d'où un
+        // désalignement visible malgré des rects nominalement centrés sur
+        // la même ligne (voir la doc de tête de `window_header`).
+        // `header_icon` peint désormais tout de la même façon : les centres
+        // verticaux doivent coïncider exactement.
+        let title_center_y = title.pos.y + title.galley.rect.center().y;
+        let close_center_y = icons.last().expect("le bouton fermer doit être peint").y;
+        assert!(
+            (title_center_y - close_center_y).abs() < f32::EPSILON,
+            "le titre et les icônes d'action doivent partager le même centre vertical"
+        );
+    }
+
+    // B5 (`retours-2026-09-23-bugs.md`) : l'icône « Masquer le
+    // contenu de… » était réservée à `Tab::Graph` sans raison documentée —
+    // vérifie qu'elle est bien peinte pour `Tab::Book`, et toujours absente
+    // pour `Tab::Matrix`/`Tab::Note`, qui n'ont pas ce contrôle.
+    #[test]
+    fn licone_de_repli_est_peinte_pour_les_classeurs_mais_pas_les_matrices() {
+        // Une icône dans le coin gauche (la croix, elle, est à droite).
+        let fleche_de_repli = |tab: Tab| {
+            icones_de_l_en_tete(Some(tab), HeaderPlacement::Floating)
+                .first()
+                .is_some_and(|center| center.x < 24.0)
+        };
+
+        let node = NodeId::from_raw(1);
+        assert!(
+            fleche_de_repli(Tab::Book(node)),
+            "un classeur doit porter l'icône de repli"
+        );
+        assert!(
+            fleche_de_repli(Tab::Graph(node)),
+            "un graphe doit garder l'icône de repli"
+        );
+        assert!(
+            !fleche_de_repli(Tab::Matrix(node)),
+            "une matrice n'a pas ce contrôle"
+        );
+        assert!(
+            !fleche_de_repli(Tab::Note(node)),
+            "une note n'a pas ce contrôle"
+        );
+    }
+
+    /// #50 : un dialogue ne peint que la croix, il ne doit donc réserver que
+    /// sa place ; la largeur retranchée au titre suit les icônes peintes.
+    #[test]
+    fn la_largeur_reservee_suit_les_icones_peintes() {
+        let id = NodeId::from_raw(1);
+        let croix = header_actions_width(shows_detach_and_maximize(HeaderPlacement::Dialog, None));
+        let trois = header_actions_width(shows_detach_and_maximize(
+            HeaderPlacement::Floating,
+            Some(Tab::Graph(id)),
+        ));
+        let matrice = header_actions_width(shows_detach_and_maximize(
+            HeaderPlacement::Floating,
+            Some(Tab::Matrix(id)),
+        ));
+        assert_eq!(croix, 28.0);
+        assert_eq!(trois, 80.0);
+        assert_eq!(matrice, croix);
+        assert!(shows_detach_and_maximize(HeaderPlacement::Detached, None));
+    }
+
+    /// #50, côté dessin : le nombre d'icônes réellement peintes à droite de
+    /// l'en-tête est celui que [`shows_detach_and_maximize`] annonce, et
+    /// toutes tiennent dans la largeur que [`header_actions_width`] retranche
+    /// au titre — sans quoi le titre passerait sous une icône (ou serait
+    /// rogné pour une icône absente).
+    #[test]
+    fn les_icones_peintes_a_droite_sont_celles_que_la_largeur_reserve() {
+        let id = NodeId::from_raw(1);
+        for (tab, placement) in [
+            (Some(Tab::Graph(id)), HeaderPlacement::Floating),
+            (Some(Tab::Book(id)), HeaderPlacement::Floating),
+            (Some(Tab::Matrix(id)), HeaderPlacement::Floating),
+            (Some(Tab::Note(id)), HeaderPlacement::Floating),
+            (Some(Tab::Matrix(id)), HeaderPlacement::Detached),
+            (Some(Tab::Graph(id)), HeaderPlacement::Detached),
+            (None, HeaderPlacement::Dialog),
+        ] {
+            let a_droite: Vec<_> = icones_de_l_en_tete(tab, placement)
+                .into_iter()
+                .filter(|center| center.x > LARGEUR_EN_TETE / 2.0)
+                .collect();
+            let trois = shows_detach_and_maximize(placement, tab);
+            assert_eq!(a_droite.len(), if trois { 3 } else { 1 }, "{tab:?}");
+            let reserve = header_actions_width(trois);
+            for center in a_droite {
+                assert!(
+                    center.x - ICON_SIZE / 2.0 >= LARGEUR_EN_TETE - reserve,
+                    "{tab:?} : une icône ({center:?}) déborde sur la place du titre ({reserve})"
+                );
+            }
+        }
+        // Un dialogue n'a pas non plus de flèche de repli à gauche.
+        assert!(icones_de_l_en_tete(None, HeaderPlacement::Dialog)
+            .iter()
+            .all(|center| center.x > LARGEUR_EN_TETE / 2.0));
+    }
+
+    /// Les gestes de la barre de titre remontent à l'appelant : glisser le
+    /// titre donne son déplacement (et le signal de départ, une seule fois),
+    /// cliquer la croix demande la fermeture. Le témoin : glisser le titre ne
+    /// ferme rien.
+    #[test]
+    fn glisser_le_titre_deplace_et_cliquer_la_croix_ferme() {
+        let tab = Some(Tab::Graph(NodeId::from_raw(1)));
+        let bouton = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        let context = egui::Context::default();
+        let depart = egui::pos2(LARGEUR_EN_TETE / 2.0, WINDOW_HEADER_HEIGHT / 2.0);
+        let arrivee = depart + egui::vec2(30.0, 10.0);
+        let (_, actions) = peindre_en_tete(
+            &context,
+            "Titre",
+            tab,
+            HeaderPlacement::Floating,
+            vec![
+                vec![egui::Event::PointerMoved(depart)],
+                vec![bouton(depart, true)],
+                vec![egui::Event::PointerMoved(arrivee)],
+                vec![bouton(arrivee, false)],
+            ],
+        );
+        let deplacement = actions
+            .iter()
+            .fold(egui::Vec2::ZERO, |somme, action| somme + action.drag_delta);
+        assert_eq!(deplacement, arrivee - depart);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| action.title_drag_started)
+                .count(),
+            1
+        );
+        assert!(actions.iter().all(|action| !action.close
+            && !action.detach
+            && !action.maximize
+            && !action.toggle_collapse));
+
+        let context = egui::Context::default();
+        let croix = *icones_de_l_en_tete(tab, HeaderPlacement::Floating)
+            .last()
+            .expect("la croix est la dernière icône à droite");
+        let (_, actions) = peindre_en_tete(
+            &context,
+            "Titre",
+            tab,
+            HeaderPlacement::Floating,
+            vec![
+                vec![egui::Event::PointerMoved(croix)],
+                vec![bouton(croix, true)],
+                vec![bouton(croix, false)],
+            ],
+        );
+        assert!(actions.iter().any(|action| action.close));
+        assert!(actions
+            .iter()
+            .all(|action| action.drag_delta == egui::Vec2::ZERO && !action.detach));
+    }
+
+    /// Glisse, sur une fenêtre de `(300, 300)`, `400 × 300`, la poignée de
+    /// redimensionnement visée en `prise` de `deplacement`, puis relâche et
+    /// peint une image de plus sans événement. Rend la position et la taille
+    /// après le glissé, puis après l'image de repos.
+    fn glisser_poignee(
+        prise: impl FnOnce(egui::Rect) -> egui::Pos2,
+        deplacement: egui::Vec2,
+    ) -> ((egui::Pos2, egui::Vec2), (egui::Pos2, egui::Vec2)) {
+        let tab = Tab::Graph(NodeId::from_raw(1));
+        let context = egui::Context::default();
+        let state = std::cell::Cell::new((egui::pos2(300.0, 300.0), egui::vec2(400.0, 300.0)));
+
+        let paint = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let (mut position, mut size) = state.get();
+            let rect = egui::Rect::from_min_size(position, size);
+            let mut output = context.run_ui(input, |ui| {
+                floating_resize_handles(ui, tab, rect, &mut position, &mut size);
+            });
+            output.textures_delta.clear();
+            state.set((position, size));
+        };
+
+        paint(Vec::new());
+        let (position, size) = state.get();
+        let depart = prise(egui::Rect::from_min_size(position, size));
+        paint(vec![egui::Event::PointerMoved(depart)]);
+        paint(vec![egui::Event::PointerButton {
+            pos: depart,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let arrivee = depart + deplacement;
+        paint(vec![egui::Event::PointerMoved(arrivee)]);
+        let apres_glisse = state.get();
+        paint(vec![egui::Event::PointerButton {
+            pos: arrivee,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        paint(Vec::new());
+        (apres_glisse, state.get())
+    }
+
+    /// Régression (§3, redimensionnement par les 4 côtés) : `egui::Window`
+    /// coupe `resize_left`/`resize_top` en interne dès que
+    /// `.drag_area(WindowDrag::Off)` est posé (nécessaire au glissé de la
+    /// barre de titre maison) — les deux dépendent d'`Area::is_movable()`,
+    /// qu'`Off` force à `false`, sans moyen de les garder actifs séparément.
+    /// D'où [`floating_resize_handles`], qui remplace entièrement le
+    /// redimensionnement natif. Ce test glisse sa poignée ouest et vérifie
+    /// que la position *et* la taille suivent, puis qu'une image sans
+    /// événement ne fait rien sauter en arrière.
+    #[test]
+    fn le_redimensionnement_par_le_bord_gauche_deplace_et_retrecit() {
+        let ((position, size), repos) = glisser_poignee(
+            |rect| egui::pos2(rect.left() - 3.0, rect.center().y),
+            egui::vec2(-40.0, 0.0),
+        );
+        assert!(
+            (position.x - 260.0).abs() < f32::EPSILON,
+            "le bord ouest doit déplacer le coin de la fenêtre de la même distance que le glissé, position={position:?}"
+        );
+        assert!(
+            (size.x - 440.0).abs() < f32::EPSILON,
+            "le bord ouest doit élargir la fenêtre d'autant que le coin recule, size={size:?}"
+        );
+        assert_eq!(
+            (position.y, size.y),
+            (300.0, 300.0),
+            "un bord vertical ne touche pas à la hauteur"
+        );
+        // Image suivante sans aucun événement : rien ne doit plus bouger —
+        // contrairement au bug natif, il n'y a ici aucun mécanisme qui
+        // pourrait faire sauter la fenêtre en arrière (`position`/`size`
+        // sont notre propre état, pas une mémoire interne qu'un autre
+        // appel pourrait écraser).
+        assert_eq!(repos, (position, size));
+    }
+
+    /// Rétrécir par le bord ouest s'arrête à [`MIN_CONTENT_WINDOW_SIZE`], et
+    /// le bord **est** reste alors en place : la fenêtre ne glisse pas vers la
+    /// droite une fois sa taille minimale atteinte.
+    #[test]
+    fn retrecir_par_le_bord_gauche_s_arrete_a_la_taille_minimale() {
+        let bord_est = 300.0 + 400.0;
+        let ((position, size), _) = glisser_poignee(
+            |rect| egui::pos2(rect.left() - 3.0, rect.center().y),
+            egui::vec2(600.0, 0.0),
+        );
+        assert_eq!(size.x, MIN_CONTENT_WINDOW_SIZE.x);
+        assert_eq!(position.x + size.x, bord_est);
+    }
+
+    /// #75 : un coin se vise le long de ses deux côtés voisins, sur
+    /// `CORNER_REACH`, pas seulement dans un carré de 6 × 6. Saisi sur le
+    /// bord haut **près** du coin nord-ouest, le glissé redimensionne sur les
+    /// deux axes ; le témoin, saisi au milieu du même bord, ne touche qu'à la
+    /// hauteur.
+    #[test]
+    fn un_coin_se_saisit_le_long_de_ses_deux_cotes() {
+        let deplacement = egui::vec2(-20.0, -30.0);
+        let ((position, size), _) = glisser_poignee(
+            |rect| egui::pos2(rect.left() + CORNER_REACH - 2.0, rect.top() - 3.0),
+            deplacement,
+        );
+        assert_eq!(position, egui::pos2(280.0, 270.0), "coin nord-ouest");
+        assert_eq!(size, egui::vec2(420.0, 330.0), "coin nord-ouest");
+
+        let ((position, size), _) = glisser_poignee(
+            |rect| egui::pos2(rect.center().x, rect.top() - 3.0),
+            deplacement,
+        );
+        assert_eq!(position, egui::pos2(300.0, 270.0), "bord nord seul");
+        assert_eq!(size, egui::vec2(400.0, 330.0), "bord nord seul");
+    }
+}

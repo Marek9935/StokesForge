@@ -94,7 +94,7 @@ SVG** par `scripts/icons-build.sh`.
   `assets/icons` ni un URI d'icône.
 - `chaque_icone_se_charge` : toute variante se rastérise avec le vrai chargeur.
 - Largeur : `ICON_SIZE` (16 pt) est la seule taille ; la bande d'une icône
-  d'en-tête de fenêtre est `HEADER_ACTION_WIDTH` (`window_chrome.rs`, #50).
+  d'en-tête de fenêtre est `HEADER_ACTION_WIDTH` (`app/window_chrome.rs`, #50).
 - Dans un test d'interface, une icône peinte est un `Shape::Rect` à texture ;
   installer `egui_extras::install_image_loaders` et peindre **deux images**
   (la texture est prête à la seconde) — voir `find_icon_centers`.

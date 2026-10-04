@@ -153,3 +153,192 @@ pub(super) fn clamp_to_workspace(rect: egui::Rect) -> egui::Rect {
     let max_min = (WORKSPACE_SIZE - size).to_pos2();
     egui::Rect::from_min_size(rect.min.clamp(egui::Pos2::ZERO, max_min), size)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // B3 (`retours-2026-09-23-bugs.md`) : une fenêtre repliée
+    // gardait un contour à sa taille dépliée, un grand cadre vert autour
+    // d'une zone vide — parce que la fenêtre était forcée (`.fixed_size`) à
+    // sa taille dépliée même quand seule sa bande d'en-tête est peinte.
+    #[test]
+    fn la_taille_demandee_a_egui_se_reduit_a_len_tete_pendant_un_repli() {
+        let current_size = egui::vec2(400.0, 300.0);
+        let window_margin = egui::vec2(12.0, 12.0);
+
+        let deplie = floating_window_display_size(current_size, false, 28.0, window_margin);
+        assert_eq!(
+            deplie, current_size,
+            "dépliée, la fenêtre garde sa taille logique"
+        );
+
+        let replie = floating_window_display_size(current_size, true, 28.0, window_margin);
+        assert_eq!(
+            replie,
+            egui::vec2(400.0, 40.0),
+            "repliée, seule la bande d'en-tête (+ marges du Frame) doit être demandée à egui"
+        );
+        assert!(
+            replie.y < current_size.y,
+            "la taille demandée doit être strictement plus petite que la taille dépliée"
+        );
+        // Seule la marge verticale compte : la largeur repliée ne dépend
+        // jamais de la marge horizontale.
+        assert_eq!(
+            floating_window_display_size(current_size, true, 28.0, egui::vec2(50.0, 12.0)),
+            replie
+        );
+    }
+
+    #[test]
+    fn workspace_to_screen_decale_de_lorigine_de_la_vue_et_du_defilement() {
+        let viewport_min = egui::pos2(40.0, 20.0);
+        assert_eq!(
+            workspace_to_screen(
+                egui::pos2(500.0, 400.0),
+                viewport_min,
+                egui::vec2(300.0, 150.0)
+            ),
+            egui::pos2(240.0, 270.0)
+        );
+        // Sans défilement, l'espace de travail et l'écran ne diffèrent que
+        // par l'origine de la zone visible — comportement identique à
+        // l'ancien `workspace_rect.min + position`.
+        assert_eq!(
+            workspace_to_screen(egui::pos2(10.0, 5.0), viewport_min, egui::Vec2::ZERO),
+            viewport_min + egui::vec2(10.0, 5.0)
+        );
+    }
+
+    #[test]
+    fn workspace_max_scroll_est_nul_quand_lespace_de_travail_tient_deja() {
+        assert_eq!(
+            workspace_max_scroll(WORKSPACE_SIZE),
+            egui::Vec2::ZERO,
+            "la zone visible fait déjà la taille de l'espace de travail : rien à défiler"
+        );
+        assert_eq!(
+            workspace_max_scroll(WORKSPACE_SIZE * 2.0),
+            egui::Vec2::ZERO,
+            "une zone visible plus grande que l'espace de travail ne doit jamais produire \
+             de défilement négatif"
+        );
+        let viewport = egui::vec2(800.0, 600.0);
+        assert_eq!(workspace_max_scroll(viewport), WORKSPACE_SIZE - viewport);
+        // Chaque axe pour lui-même : une vue plus large que l'espace de
+        // travail mais moins haute ne défile que verticalement.
+        assert_eq!(
+            workspace_max_scroll(egui::vec2(WORKSPACE_SIZE.x + 100.0, 600.0)),
+            egui::vec2(0.0, WORKSPACE_SIZE.y - 600.0)
+        );
+    }
+
+    #[test]
+    fn workspace_scroll_to_reveal_ne_bouge_pas_si_deja_visible() {
+        let viewport_size = egui::vec2(800.0, 600.0);
+        let scroll = egui::vec2(100.0, 50.0);
+        let visible = egui::Rect::from_min_size(egui::pos2(200.0, 100.0), egui::vec2(300.0, 200.0));
+        assert_eq!(
+            workspace_scroll_to_reveal(scroll, viewport_size, visible),
+            scroll,
+            "une fenêtre déjà entièrement dans la zone visible ne doit pas faire défiler"
+        );
+        // Une fenêtre qui longe exactement les bords de la vue est visible
+        // elle aussi : aucun défilement d'un point.
+        let bord_a_bord = egui::Rect::from_min_size(scroll.to_pos2(), viewport_size);
+        assert_eq!(
+            workspace_scroll_to_reveal(scroll, viewport_size, bord_a_bord),
+            scroll
+        );
+    }
+
+    #[test]
+    fn workspace_scroll_to_reveal_ramene_une_fenetre_hors_vue_a_lecran() {
+        let viewport_size = egui::vec2(800.0, 600.0);
+        let scroll = egui::Vec2::ZERO;
+
+        // Hors vue à droite/en bas : défiler juste assez pour longer le bord
+        // le plus proche de la fenêtre visée, pas la centrer arbitrairement.
+        let apres_droite =
+            egui::Rect::from_min_size(egui::pos2(1200.0, 50.0), egui::vec2(100.0, 80.0));
+        let revealed = workspace_scroll_to_reveal(scroll, viewport_size, apres_droite);
+        assert_eq!(revealed.x, apres_droite.max.x - viewport_size.x);
+        assert_eq!(revealed.y, 0.0, "l'axe vertical était déjà visible");
+        let target_screen = egui::Rect::from_min_size(
+            apres_droite.min.to_vec2().to_pos2() - revealed,
+            apres_droite.size(),
+        );
+        assert!(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, viewport_size).contains_rect(target_screen),
+            "après défilement, la fenêtre doit tenir dans la zone visible : {target_screen:?}"
+        );
+
+        // Hors vue à gauche/en haut (défilement déjà avancé).
+        let scroll = egui::vec2(500.0, 400.0);
+        let avant_gauche =
+            egui::Rect::from_min_size(egui::pos2(50.0, 20.0), egui::vec2(100.0, 80.0));
+        let revealed = workspace_scroll_to_reveal(scroll, viewport_size, avant_gauche);
+        assert_eq!(revealed.x, avant_gauche.min.x);
+        assert_eq!(revealed.y, avant_gauche.min.y);
+
+        // Toujours borné à [0, max_scroll], même pour une cible qui déborde
+        // l'espace de travail (fenêtre plus grande que lui, cas dégénéré) :
+        // le défilement s'arrête exactement à la borne, sans la dépasser.
+        let max_scroll = workspace_max_scroll(viewport_size);
+        let hors_bornes =
+            egui::Rect::from_min_size(WORKSPACE_SIZE.to_pos2(), egui::vec2(50.0, 50.0));
+        let revealed = workspace_scroll_to_reveal(egui::Vec2::ZERO, viewport_size, hors_bornes);
+        assert_eq!(revealed, max_scroll);
+    }
+
+    #[test]
+    fn la_geometrie_persistee_garde_la_taille_logique_meme_repliee() {
+        // Le rectangle réellement peint cette image (`area_rect`) est celui
+        // d'une fenêtre repliée — plus petit que sa taille logique.
+        let painted_rect =
+            egui::Rect::from_min_size(egui::pos2(50.0, 60.0), egui::vec2(400.0, 40.0));
+        let current_size = egui::vec2(400.0, 300.0);
+
+        let persisted = floating_window_geometry_to_persist(painted_rect, current_size);
+
+        assert_eq!(
+            persisted,
+            egui::Rect::from_min_size(painted_rect.min, current_size),
+            "la géométrie sauvegardée doit garder la taille dépliée, sinon un projet rechargé \
+             rouvrirait la fenêtre minuscule même après avoir cliqué sur « déplier »"
+        );
+    }
+
+    // Bug 1 (`retours-2026-09-24-bugs.md`), la cause : la
+    // position était bornée deux fois, par egui (`constrain_to`) et pas par
+    // nous, si bien que le contour suivait la position demandée et le cadre
+    // la position recalée. Il n'y a plus qu'une borne, celle-ci.
+    #[test]
+    fn une_position_hors_de_lespace_de_travail_est_bornee_par_une_seule_fonction() {
+        let size = egui::vec2(500.0, 400.0);
+        assert_eq!(
+            clamp_to_workspace(egui::Rect::from_min_size(egui::pos2(-300.0, 80.0), size)),
+            egui::Rect::from_min_size(egui::pos2(0.0, 80.0), size),
+        );
+        assert_eq!(
+            clamp_to_workspace(egui::Rect::from_min_size(egui::pos2(1800.0, 1000.0), size)).max,
+            WORKSPACE_SIZE.to_pos2(),
+        );
+        assert_eq!(
+            clamp_to_workspace(egui::Rect::from_min_size(
+                egui::pos2(10.0, 10.0),
+                egui::vec2(5000.0, 5000.0),
+            )),
+            egui::Rect::from_min_size(egui::Pos2::ZERO, WORKSPACE_SIZE),
+        );
+        // Le témoin : une fenêtre déjà dans l'espace de travail ne bouge pas
+        // d'un point, même collée à son coin opposé.
+        for legale in [
+            egui::Rect::from_min_size(egui::pos2(120.0, 80.0), size),
+            egui::Rect::from_min_size((WORKSPACE_SIZE - size).to_pos2(), size),
+        ] {
+            assert_eq!(clamp_to_workspace(legale), legale);
+        }
+    }
+}
