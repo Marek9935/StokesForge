@@ -11,13 +11,16 @@
 //!
 //! Sorti d'`app.rs` tel quel (#121) ; le panneau ancré ou flottant,
 //! [`StokesForgeApp::object_manager_panel`], et l'exécution des demandes l'ont
-//! rejoint (#122).
+//! rejoint (#122). Les en-têtes, calques, séries, axes et objets se peignent
+//! par sections (#124), sans changer les portées et identifiants egui ni
+//! l'ordre des demandes et des connecteurs d'arbre.
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::GraphView;
 
 use crate::icons::{icon_button, icon_image, Icon, IconRole};
+use crate::object_manager::{LayerRow, ObjectRow, ObjectTree, SeriesRow, VisibilityTarget as T};
 use crate::state::{active_graph, Action};
 use crate::tr;
 
@@ -254,275 +257,15 @@ pub(super) fn object_manager_contents(
             ui.close();
         }
     });
+    let paint = ObjectManagerPaint {
+        tree,
+        spec,
+        graph: model.graph,
+        focus,
+    };
     egui::ScrollArea::both().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
-        let id = ui.make_persistent_id(("object_manager_graph", model.graph));
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-            .show_header(ui, |ui| {
-                object_visibility(ui, model.graph, T::Graph, spec, actions);
-                let response = manager_header_label(ui, &model.title, T::Graph, &mut requests);
-                response.context_menu(|ui| {
-                    object_node_menu(ui, model.graph, T::Graph, spec, actions, &mut requests)
-                });
-            })
-            .body(|ui| crate::tree_lines::tree_children(ui, |ui, branch| {
-                for object in &model.objects {
-                    let y = object_manager_object_row(
-                        ui,
-                        model.graph,
-                        object,
-                        spec,
-                        focus,
-                        actions,
-                        &mut requests,
-                    );
-                    branch.mark(y);
-                    if object.selected {
-                        selected = Some(object.target);
-                    }
-                }
-                for layer in &model.layers {
-                    let id = ui.make_persistent_id((model.graph, layer.index));
-                    let (layer_toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
-                        ui.ctx(),
-                        id,
-                        true,
-                    )
-                    .show_header(ui, |ui| {
-                        object_visibility(ui, model.graph, T::Panel(layer.index), spec, actions);
-                        manager_header_label(
-                            ui,
-                            &tr!("object-manager-layer", index = (layer.index + 1)),
-                            T::Panel(layer.index),
-                            &mut requests,
-                        )
-                            .context_menu(|ui| {
-                                object_node_menu(
-                                    ui,
-                                    model.graph,
-                                    T::Panel(layer.index),
-                                    spec,
-                                    actions,
-                                    &mut requests,
-                                )
-                            });
-                    })
-                    .body(|ui| crate::tree_lines::tree_children(ui, |ui, branch| {
-                        let id = ui.make_persistent_id((model.graph, layer.index, "group"));
-                        let (group_toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
-                            ui.ctx(),
-                            id,
-                            true,
-                        )
-                        .show_header(ui, |ui| {
-                            object_visibility(
-                                ui,
-                                model.graph,
-                                T::Group(layer.index),
-                                spec,
-                                actions,
-                            );
-                            manager_header_label(
-                                ui,
-                                &tr!("object-manager-group"),
-                                T::Group(layer.index),
-                                &mut requests,
-                            )
-                            .context_menu(|ui| {
-                                object_node_menu(
-                                    ui,
-                                    model.graph,
-                                    T::Group(layer.index),
-                                    spec,
-                                    actions,
-                                    &mut requests,
-                                )
-                            });
-                        })
-                        .body(|ui| crate::tree_lines::tree_children(ui, |ui, branch| {
-                            for series in &layer.series {
-                                if series.selected {
-                                    selected = Some(T::Series(series.target));
-                                }
-                                let y = ui.push_id(series.target, |ui| {
-                                    ui.horizontal(|ui| {
-                                        object_visibility(
-                                            ui,
-                                            model.graph,
-                                            T::Series(series.target),
-                                            spec,
-                                            actions,
-                                        );
-                                        let (rect, _) = ui.allocate_exact_size(
-                                            egui::vec2(28.0, 18.0),
-                                            egui::Sense::hover(),
-                                        );
-                                        ui.painter().extend(
-                                            stokesforge_render_egui::series_swatch(
-                                                tree,
-                                                &series.spec,
-                                                rect,
-                                            ),
-                                        );
-                                        let text = egui::RichText::new(&series.label);
-                                        let text =
-                                            if series.selected { text.strong() } else { text };
-                                        let response = ui.add(
-                                            egui::Button::selectable(series.selected, text)
-                                                .sense(egui::Sense::click_and_drag()),
-                                        );
-                                        if response.clicked()
-                                            || response.secondary_clicked()
-                                            || response.drag_started()
-                                        {
-                                            requests.push(ObjectManagerRequest::Select(T::Series(
-                                                series.target,
-                                            )));
-                                            ui.memory_mut(|memory| memory.request_focus(focus));
-                                        }
-                                        if response.double_clicked() {
-                                            requests.push(ObjectManagerRequest::Properties(
-                                                T::Series(series.target),
-                                            ));
-                                        }
-                                        response.dnd_set_drag_payload(SeriesDrag {
-                                            graph: model.graph,
-                                            source: series.target,
-                                        });
-                                        let drop_index = response
-                                            .dnd_hover_payload::<SeriesDrag>()
-                                            .filter(|drag| drag.graph == model.graph)
-                                            .and_then(|drag| {
-                                                let after = ui
-                                                    .input(|i| i.pointer.interact_pos())
-                                                    .is_some_and(|p| {
-                                                        p.y > response.rect.center().y
-                                                    });
-                                                crate::object_manager::series_drop(
-                                                    spec,
-                                                    drag.source,
-                                                    series.target,
-                                                    after,
-                                                )
-                                            });
-                                        if let Some(index) = drop_index {
-                                            let after = ui
-                                                .input(|i| i.pointer.interact_pos())
-                                                .is_some_and(|p| p.y > response.rect.center().y);
-                                            let y = if after {
-                                                response.rect.bottom()
-                                            } else {
-                                                response.rect.top()
-                                            };
-                                            ui.painter().hline(
-                                                response.rect.x_range(),
-                                                y,
-                                                ui.visuals().selection.stroke,
-                                            );
-                                            if let Some(drag) =
-                                                response.dnd_release_payload::<SeriesDrag>()
-                                            {
-                                                actions.push(Action::ReorderSeries {
-                                                    graph: model.graph,
-                                                    source: drag.source,
-                                                    index,
-                                                });
-                                            }
-                                        }
-                                        response.context_menu(|ui| {
-                                            object_node_menu(
-                                                ui,
-                                                model.graph,
-                                                T::Series(series.target),
-                                                spec,
-                                                actions,
-                                                &mut requests,
-                                            )
-                                        });
-                                    })
-                                    .response
-                                    .rect
-                                    .center()
-                                    .y
-                                })
-                                .inner;
-                                branch.mark(y);
-                            }
-                        }));
-                        branch.mark(group_toggle.rect.center().y);
-                        if !layer.axes.is_empty() {
-                            let id = ui.make_persistent_id((model.graph, layer.index, "axes"));
-                            let (axes_toggle, _, _) =
-                                egui::collapsing_header::CollapsingState::load_with_default_open(
-                                    ui.ctx(),
-                                    id,
-                                    true,
-                                )
-                                .show_header(ui, |ui| {
-                                    object_visibility(
-                                        ui,
-                                        model.graph,
-                                        T::Axes(layer.index),
-                                        spec,
-                                        actions,
-                                    );
-                                    manager_header_label(
-                                        ui,
-                                        &tr!("object-manager-axes"),
-                                        T::Axes(layer.index),
-                                        &mut requests,
-                                    )
-                                    .context_menu(|ui| {
-                                        object_node_menu(
-                                            ui,
-                                            model.graph,
-                                            T::Axes(layer.index),
-                                            spec,
-                                            actions,
-                                            &mut requests,
-                                        )
-                                    });
-                                })
-                                .body(|ui| {
-                                    crate::tree_lines::tree_children(ui, |ui, branch| {
-                                        for object in &layer.axes {
-                                            let y = object_manager_object_row(
-                                                ui,
-                                                model.graph,
-                                                object,
-                                                spec,
-                                                focus,
-                                                actions,
-                                                &mut requests,
-                                            );
-                                            branch.mark(y);
-                                            if object.selected {
-                                                selected = Some(object.target);
-                                            }
-                                        }
-                                    })
-                                });
-                            branch.mark(axes_toggle.rect.center().y);
-                        }
-                        for object in &layer.objects {
-                            let y = object_manager_object_row(
-                                ui,
-                                model.graph,
-                                object,
-                                spec,
-                                focus,
-                                actions,
-                                &mut requests,
-                            );
-                            branch.mark(y);
-                            if object.selected {
-                                selected = Some(object.target);
-                            }
-                        }
-                    }));
-                    branch.mark(layer_toggle.rect.center().y);
-                }
-            }));
+        paint.graph(ui, model, actions, &mut requests, &mut selected);
     });
     // L'ancrage appartient au panneau ; aucun champ d'édition ne perd ses touches.
     ui.interact(
@@ -546,6 +289,262 @@ pub(super) fn object_manager_contents(
         }
     }
     requests
+}
+
+// Arguments de peinture communs aux sections : aucune Ui ni portée egui
+// supplémentaire. La sélection et les événements restent accumulés par les
+// corps effectivement dépliés, dans l'ordre de leurs lignes.
+struct ObjectManagerPaint<'a> {
+    tree: &'a Tree,
+    spec: &'a stokesforge_plot::PlotSpec,
+    graph: NodeId,
+    focus: egui::Id,
+}
+
+impl ObjectManagerPaint<'_> {
+    fn header(
+        &self,
+        ui: &mut egui::Ui,
+        text: &str,
+        target: T,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+    ) {
+        object_visibility(ui, self.graph, target, self.spec, actions);
+        let response = manager_header_label(ui, text, target, requests);
+        response.context_menu(|ui| {
+            object_node_menu(ui, self.graph, target, self.spec, actions, requests)
+        });
+    }
+
+    fn graph(
+        &self,
+        ui: &mut egui::Ui,
+        model: &ObjectTree,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+        selected: &mut Option<T>,
+    ) {
+        let id = ui.make_persistent_id(("object_manager_graph", self.graph));
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+            .show_header(ui, |ui| {
+                self.header(ui, &model.title, T::Graph, actions, requests);
+            })
+            .body(|ui| {
+                crate::tree_lines::tree_children(ui, |ui, branch| {
+                    self.objects(ui, &model.objects, branch, actions, requests, selected);
+                    for layer in &model.layers {
+                        let y = self.layer(ui, layer, actions, requests, selected);
+                        branch.mark(y);
+                    }
+                })
+            });
+    }
+
+    fn layer(
+        &self,
+        ui: &mut egui::Ui,
+        layer: &LayerRow,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+        selected: &mut Option<T>,
+    ) -> f32 {
+        let id = ui.make_persistent_id((self.graph, layer.index));
+        let (layer_toggle, _, _) =
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+                .show_header(ui, |ui| {
+                    self.header(
+                        ui,
+                        &tr!("object-manager-layer", index = (layer.index + 1)),
+                        T::Panel(layer.index),
+                        actions,
+                        requests,
+                    );
+                })
+                .body(|ui| {
+                    crate::tree_lines::tree_children(ui, |ui, branch| {
+                        let y = self.series(ui, layer, actions, requests, selected);
+                        branch.mark(y);
+                        if !layer.axes.is_empty() {
+                            let y = self.axes(ui, layer, actions, requests, selected);
+                            branch.mark(y);
+                        }
+                        self.objects(ui, &layer.objects, branch, actions, requests, selected);
+                    })
+                });
+
+        layer_toggle.rect.center().y
+    }
+
+    fn series(
+        &self,
+        ui: &mut egui::Ui,
+        layer: &LayerRow,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+        selected: &mut Option<T>,
+    ) -> f32 {
+        let id = ui.make_persistent_id((self.graph, layer.index, "group"));
+        let (group_toggle, _, _) =
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+                .show_header(ui, |ui| {
+                    self.header(
+                        ui,
+                        &tr!("object-manager-group"),
+                        T::Group(layer.index),
+                        actions,
+                        requests,
+                    );
+                })
+                .body(|ui| {
+                    crate::tree_lines::tree_children(ui, |ui, branch| {
+                        for series in &layer.series {
+                            if series.selected {
+                                *selected = Some(T::Series(series.target));
+                            }
+                            let y = self.series_row(ui, series, actions, requests);
+                            branch.mark(y);
+                        }
+                    })
+                });
+
+        group_toggle.rect.center().y
+    }
+
+    fn axes(
+        &self,
+        ui: &mut egui::Ui,
+        layer: &LayerRow,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+        selected: &mut Option<T>,
+    ) -> f32 {
+        let id = ui.make_persistent_id((self.graph, layer.index, "axes"));
+        let (axes_toggle, _, _) =
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+                .show_header(ui, |ui| {
+                    self.header(
+                        ui,
+                        &tr!("object-manager-axes"),
+                        T::Axes(layer.index),
+                        actions,
+                        requests,
+                    );
+                })
+                .body(|ui| {
+                    crate::tree_lines::tree_children(ui, |ui, branch| {
+                        self.objects(ui, &layer.axes, branch, actions, requests, selected);
+                    })
+                });
+
+        axes_toggle.rect.center().y
+    }
+
+    fn objects(
+        &self,
+        ui: &mut egui::Ui,
+        objects: &[ObjectRow],
+        branch: &mut crate::tree_lines::TreeBranch,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+        selected: &mut Option<T>,
+    ) {
+        for object in objects {
+            let y = object_manager_object_row(
+                ui, self.graph, object, self.spec, self.focus, actions, requests,
+            );
+            branch.mark(y);
+            if object.selected {
+                *selected = Some(object.target);
+            }
+        }
+    }
+
+    fn series_row(
+        &self,
+        ui: &mut egui::Ui,
+        series: &SeriesRow,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+    ) -> f32 {
+        ui.push_id(series.target, |ui| {
+            ui.horizontal(|ui| {
+                object_visibility(ui, self.graph, T::Series(series.target), self.spec, actions);
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(28.0, 18.0), egui::Sense::hover());
+                ui.painter().extend(stokesforge_render_egui::series_swatch(
+                    self.tree,
+                    &series.spec,
+                    rect,
+                ));
+                let text = egui::RichText::new(&series.label);
+                let text = if series.selected { text.strong() } else { text };
+                let response = ui.add(
+                    egui::Button::selectable(series.selected, text)
+                        .sense(egui::Sense::click_and_drag()),
+                );
+                if response.clicked() || response.secondary_clicked() || response.drag_started() {
+                    requests.push(ObjectManagerRequest::Select(T::Series(series.target)));
+                    ui.memory_mut(|memory| memory.request_focus(self.focus));
+                }
+                if response.double_clicked() {
+                    requests.push(ObjectManagerRequest::Properties(T::Series(series.target)));
+                }
+                response.dnd_set_drag_payload(SeriesDrag {
+                    graph: self.graph,
+                    source: series.target,
+                });
+                let drop_index = response
+                    .dnd_hover_payload::<SeriesDrag>()
+                    .filter(|drag| drag.graph == self.graph)
+                    .and_then(|drag| {
+                        let after = ui
+                            .input(|i| i.pointer.interact_pos())
+                            .is_some_and(|p| p.y > response.rect.center().y);
+                        crate::object_manager::series_drop(
+                            self.spec,
+                            drag.source,
+                            series.target,
+                            after,
+                        )
+                    });
+                if let Some(index) = drop_index {
+                    let after = ui
+                        .input(|i| i.pointer.interact_pos())
+                        .is_some_and(|p| p.y > response.rect.center().y);
+                    let y = if after {
+                        response.rect.bottom()
+                    } else {
+                        response.rect.top()
+                    };
+                    ui.painter()
+                        .hline(response.rect.x_range(), y, ui.visuals().selection.stroke);
+                    if let Some(drag) = response.dnd_release_payload::<SeriesDrag>() {
+                        actions.push(Action::ReorderSeries {
+                            graph: self.graph,
+                            source: drag.source,
+                            index,
+                        });
+                    }
+                }
+                response.context_menu(|ui| {
+                    object_node_menu(
+                        ui,
+                        self.graph,
+                        T::Series(series.target),
+                        self.spec,
+                        actions,
+                        requests,
+                    )
+                });
+            })
+            .response
+            .rect
+            .center()
+            .y
+        })
+        .inner
+    }
 }
 
 pub(super) fn series_shortcuts(
@@ -879,6 +878,127 @@ mod tests {
             modifiers,
         }
     }
+    /// Les groupes ont des identités indépendantes ; replier les séries
+    /// laisse les axes et les objets du calque à leur place, et inversement.
+    #[test]
+    fn replier_un_groupe_preserve_les_autres_sections_de_l_arbre() {
+        let mut project = Project::new("Objets").unwrap();
+        let mut spec = PlotSpec::empty("Titre global");
+        let panel = spec.panels.get_mut(0).unwrap();
+        let mut series = SeriesSpec::new(NodeId::from_raw(900));
+        series.name = "Courbe".into();
+        panel.series.push(series);
+        panel
+            .annotations
+            .push(AnnotationSpec::new("Note libre", 0.0, 0.0));
+        let graph = project
+            .add_graph(project.root(), None, spec.clone())
+            .unwrap();
+        let model = crate::object_manager::object_tree_with_selection(
+            project.tree(),
+            graph,
+            None,
+            true,
+            true,
+        )
+        .unwrap();
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        let labels = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .filter_map(|painted| match &painted.shape {
+                    egui::Shape::Text(text) if !text.galley.text().is_empty() => {
+                        Some(text.galley.text().to_string())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let toggle = |output: &egui::FullOutput, label: &str| {
+            let center = text_center(output, label);
+            output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Path(path) if path.closed && path.points.len() == 3 => {
+                        let rect = egui::Rect::from_points(&path.points);
+                        ((rect.center().y - center.y).abs() < 4.0 && rect.right() < center.x)
+                            .then_some(rect.center())
+                    }
+                    _ => None,
+                })
+                .expect("flèche de repli peinte sur l'en-tête")
+        };
+        paint(Vec::new());
+        let (output, actions, requests) = paint(Vec::new());
+        assert!(actions.is_empty() && requests.is_empty());
+        let mut expected = vec![model.title.clone()];
+        expected.extend(model.objects.iter().map(|object| object.label.clone()));
+        expected.extend([
+            tr!("object-manager-layer", index = 1),
+            tr!("object-manager-group"),
+            "Courbe".into(),
+            tr!("object-manager-axes"),
+        ]);
+        expected.extend(
+            model.layers[0]
+                .axes
+                .iter()
+                .map(|object| object.label.clone()),
+        );
+        expected.extend(
+            model.layers[0]
+                .objects
+                .iter()
+                .map(|object| object.label.clone()),
+        );
+        assert_eq!(
+            labels(&output),
+            expected,
+            "les sections suivent l'ordre du graphique"
+        );
+
+        let click_toggle = |output: &egui::FullOutput, label: &str| {
+            let pos = toggle(output, label);
+            for events in [
+                vec![egui::Event::PointerMoved(pos)],
+                vec![pointer(pos, true)],
+                vec![pointer(pos, false)],
+            ] {
+                let (_, actions, requests) = paint(events);
+                assert!(
+                    actions.is_empty() && requests.is_empty(),
+                    "replier n'est pas une mutation du modèle"
+                );
+            }
+            paint(Vec::new()).0
+        };
+        let collapsed = click_toggle(&output, &tr!("object-manager-group"));
+        let texts = labels(&collapsed);
+        assert!(!texts.iter().any(|text| text == "Courbe"));
+        assert!(texts.iter().any(|text| text == "Note libre"));
+        for axis in &model.layers[0].axes {
+            assert!(
+                texts.contains(&axis.label),
+                "témoin : les axes restent dépliés"
+            );
+        }
+        let expanded = click_toggle(&collapsed, &tr!("object-manager-group"));
+        assert!(labels(&expanded).iter().any(|text| text == "Courbe"));
+        let collapsed = click_toggle(&expanded, &tr!("object-manager-axes"));
+        let texts = labels(&collapsed);
+        assert!(texts.iter().any(|text| text == "Courbe"));
+        assert!(texts.iter().any(|text| text == "Note libre"));
+        for axis in &model.layers[0].axes {
+            assert!(!texts.contains(&axis.label), "seuls les axes sont repliés");
+        }
+    }
+
     #[test]
     fn glisser_une_serie_emet_un_seul_deplacement_au_rang_final() {
         let (project, _graph, spec, model) = trois_series();
