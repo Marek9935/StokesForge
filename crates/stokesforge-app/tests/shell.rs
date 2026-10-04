@@ -4457,7 +4457,7 @@ fn add_column_and_select_header_field_adds_a_column_and_selects_the_field_in_it(
 // -- 21. Alignement du corps de la grille : nombres à droite, texte à gauche --
 
 /// Une cellule numérique renseignée est numérique — `cell_is_numeric` pilote
-/// `app::cell_widget` pour l'aligner à droite, comme dans tout tableur.
+/// `app::grid::cell_widget` pour l'aligner à droite, comme dans tout tableur.
 #[test]
 fn a_populated_numeric_cell_is_numeric() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -4770,7 +4770,7 @@ fn column_drag_payload_is_none_without_a_column_selection() {
 
 /// Avec une sélection de cellules couvrant une colonne, la charge utile
 /// porte la feuille et exactement les colonnes couvertes par la sélection —
-/// c'est elle que `crate::app::grid_contents` glisse depuis la zone de
+/// c'est elle que `crate::app::grid::grid_contents` glisse depuis la zone de
 /// prise, et que [`drop_payload_action`] relit au dépôt.
 #[test]
 fn column_drag_payload_carries_the_sheet_and_its_selected_columns() {

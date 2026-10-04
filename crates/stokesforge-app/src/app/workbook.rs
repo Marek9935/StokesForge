@@ -4,7 +4,9 @@
 //! feuille ([`sheet_tabs`]) et le menu Classeur ([`workbook_menu`]). La grille
 //! elle-même vit dans `grid.rs`.
 //!
-//! Sorti d'`app.rs` tel quel (#120).
+//! Sorti d'`app.rs` tel quel (#120). Les tests, en fin de fichier, portent
+//! sur la disposition (grille, onglets, barres déportées, rognage) et les
+//! menus du classeur ; ceux du clavier et de l'en-tête sont dans `grid.rs`.
 //!
 //! [`Tab::Book`]: super::tab::Tab::Book
 
@@ -228,5 +230,539 @@ pub(super) fn book_contents(
     }
     if add_sheet {
         actions.push(Action::AddWorksheet { book });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests du classeur, sans fenêtre : disposition (grille, onglets de
+    //! feuille, barres de défilement déportées), rognage, menus. Ils lisent
+    //! ce qui est peint (rectangles, textes, rognages) ou les actions
+    //! poussées, jamais le texte source.
+
+    use super::super::window_chrome::show_floating_window;
+    use super::*;
+    use stokesforge_core::{Column, Project};
+    use stokesforge_session::Session;
+
+    /// Un classeur d'une feuille, `colonnes` colonnes de `lignes` lignes.
+    fn classeur(colonnes: usize, lignes: usize) -> (Session, NodeId) {
+        let mut project = Project::new("Classeur").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        let valeurs: Vec<f64> = (0..lignes).map(|ligne| ligne as f64).collect();
+        for _ in 0..colonnes {
+            project
+                .add_column(sheet, None, None, Column::from_f64(&valeurs))
+                .unwrap();
+        }
+        (Session::spawn(project, None).unwrap(), book)
+    }
+
+    /// Centre du premier texte peint égal à `needle`.
+    fn centre_du_texte(shapes: &[egui::epaint::ClippedShape], needle: &str) -> egui::Pos2 {
+        shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Text(shape) if shape.galley.job.text == needle => {
+                    Some(shape.pos + shape.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("aucun texte peint ne porte {needle:?}"))
+    }
+
+    /// Clic gauche en `pos`, réparti sur trois images (survol, pression,
+    /// relâchement).
+    fn cliquer(paint: &mut impl FnMut(Vec<egui::Event>) -> egui::FullOutput, pos: egui::Pos2) {
+        paint(vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            paint(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+    }
+
+    // Un classeur coupé par le bas de la vue : sa bande d'onglets de
+    // feuille, posée au bas de la fenêtre, ne doit pas être dessinée sous la
+    // vue (sur la barre de défilement ou la console). `egui::Panel` remplace
+    // le rognage de son parent au lieu de le combiner : c'est lui qui
+    // faisait déborder les onglets.
+    #[test]
+    fn un_classeur_coupe_par_le_bas_de_la_vue_ne_dessine_rien_dessous() {
+        let (session, book) = classeur(2, 2);
+        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let id = egui::Id::new("classeur_coupe");
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1400.0, 400.0));
+        let window_rect =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(500.0, 400.0));
+        let mut actions = Vec::new();
+        let mut output = None;
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1000.0),
+                )),
+                ..Default::default()
+            };
+            let mut frame = context.run_ui(input, |ui| {
+                show_floating_window(
+                    ui.ctx(),
+                    id,
+                    window_rect,
+                    viewport,
+                    false,
+                    |ui| book_contents(ui, &mut state, &mut actions, book),
+                    |_, _| {},
+                );
+            });
+            frame.textures_delta.clear();
+            output = Some(frame);
+        }
+        let output = output.unwrap();
+        assert!(!output.shapes.is_empty());
+        // Une forme dont le rognage est vide (onglets entièrement sous la
+        // vue) ne dessine rien : seule compte une découpe non vide.
+        for painted in output
+            .shapes
+            .iter()
+            .filter(|painted| painted.clip_rect.is_positive())
+        {
+            assert!(
+                viewport.contains_rect(painted.clip_rect),
+                "une forme du classeur est découpée hors de la vue : {:?}",
+                painted.clip_rect,
+            );
+        }
+    }
+
+    /// Rectangles pleins peints par `shapes`, à plat, avec leur rognage.
+    fn rectangles_et_rognages(
+        shapes: &[egui::epaint::ClippedShape],
+    ) -> Vec<(egui::Rect, egui::Rect)> {
+        fn visiter(
+            shape: &egui::Shape,
+            clip: egui::Rect,
+            sortie: &mut Vec<(egui::Rect, egui::Rect)>,
+        ) {
+            match shape {
+                egui::Shape::Rect(rect) => sortie.push((rect.rect, clip)),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        visiter(shape, clip, sortie);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut sortie = Vec::new();
+        for painted in shapes {
+            visiter(&painted.shape, painted.clip_rect, &mut sortie);
+        }
+        sortie
+    }
+
+    /// Écran de 300 x 320 : `book_contents` d'un classeur de 12 colonnes
+    /// (bien plus larges que l'écran) et 200 lignes, peint six images, la
+    /// cinquième (indice 4) recevant `events`. Renvoie l'écran et les
+    /// rectangles (avec rognage) de la dernière image.
+    fn peindre_classeur_large(
+        events: Vec<egui::Event>,
+    ) -> (egui::Rect, Vec<(egui::Rect, egui::Rect)>) {
+        peindre_classeur(12, events)
+    }
+
+    /// [`peindre_classeur_large`] pour un classeur de `colonnes` colonnes.
+    fn peindre_classeur(
+        colonnes: usize,
+        events: Vec<egui::Event>,
+    ) -> (egui::Rect, Vec<(egui::Rect, egui::Rect)>) {
+        let (session, book) = classeur(colonnes, 200);
+        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 320.0));
+        let mut actions = Vec::new();
+        let mut derniere = None;
+        for frame_index in 0..6 {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events: if frame_index == 4 {
+                    events.clone()
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            };
+            let mut frame = context.run_ui(input, |ui| {
+                book_contents(ui, &mut state, &mut actions, book);
+            });
+            frame.textures_delta.clear();
+            derniere = Some(frame);
+        }
+        (screen, rectangles_et_rognages(&derniere.unwrap().shapes))
+    }
+
+    /// La poignée de la barre verticale (pas sa piste) : mince, courte, dans la bande de
+    /// droite de l'écran.
+    fn poignees_de_barre(
+        screen: egui::Rect,
+        rectangles: &[(egui::Rect, egui::Rect)],
+    ) -> Vec<(egui::Rect, egui::Rect)> {
+        let largeur_barre = theme::scroll_bar_allocated_width();
+        rectangles
+            .iter()
+            .copied()
+            .filter(|(rect, _)| {
+                rect.width() <= largeur_barre
+                    && rect.height() >= 11.9
+                    && rect.height() < 100.0
+                    && rect.left() >= screen.right() - largeur_barre - 0.5
+            })
+            .collect()
+    }
+
+    /// B10 : la barre de
+    /// défilement verticale de la grille est plaquée au bord droit de la
+    /// fenêtre, même quand les colonnes débordent (elle suivait auparavant
+    /// la largeur des colonnes et sortait de la vue).
+    #[test]
+    fn la_barre_verticale_de_la_grille_reste_au_bord_droit_de_la_fenetre() {
+        let (screen, rectangles) = peindre_classeur_large(Vec::new());
+        let poignees = poignees_de_barre(screen, &rectangles);
+        assert!(
+            !poignees.is_empty(),
+            "la poignée de la barre verticale doit être dans la bande de droite de la fenêtre \
+             ({screen:?}) ; rectangles peints : {rectangles:?}",
+        );
+        for (rect, clip) in poignees {
+            assert!(
+                screen.contains_rect(rect) && clip.is_positive(),
+                "la poignée {rect:?} sort de la fenêtre {screen:?} (rognage {clip:?})"
+            );
+        }
+    }
+
+    /// La barre déportée au bord de la fenêtre suit le défilement de la
+    /// table (molette sur la table) : sa poignée descend.
+    #[test]
+    fn la_barre_verticale_de_la_grille_suit_la_molette_sur_la_table() {
+        let (screen, repos) = peindre_classeur_large(Vec::new());
+        let avant = poignees_de_barre(screen, &repos);
+        let (_, defile) = peindre_classeur_large(vec![
+            egui::Event::PointerMoved(egui::pos2(100.0, 150.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -120.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        let apres = poignees_de_barre(screen, &defile);
+        assert_eq!(avant.len(), 1, "une poignée au repos : {avant:?}");
+        assert_eq!(apres.len(), 1, "une poignée après défilement : {apres:?}");
+        assert!(
+            apres[0].0.top() > avant[0].0.top() + 1.0,
+            "la poignée doit descendre : {:?} -> {:?}",
+            avant[0].0,
+            apres[0].0
+        );
+    }
+
+    /// l'écran, en-tête figé et onglets de feuille compris.
+    #[test]
+    fn la_barre_verticale_de_la_grille_couvre_toute_la_hauteur_de_la_fenetre() {
+        let (screen, rectangles) = peindre_classeur_large(Vec::new());
+        let largeur_barre = theme::scroll_bar_allocated_width();
+        let pistes: Vec<_> = rectangles
+            .iter()
+            .filter(|(rect, _)| {
+                rect.width() <= largeur_barre
+                    && rect.left() >= screen.right() - largeur_barre - 0.5
+                    && rect.height() >= screen.height() - largeur_barre
+            })
+            .collect();
+        assert!(
+            !pistes.is_empty(),
+            "une piste de barre verticale sur toute la hauteur de {screen:?} ; \
+             rectangles peints : {rectangles:?}"
+        );
+    }
+
+    /// La barre horizontale de la grille est déportée **sous** les onglets de
+    /// feuille : sa piste occupe le bas de la fenêtre, sur presque toute sa
+    /// largeur (moins la bande de la barre verticale).
+    #[test]
+    fn la_barre_horizontale_de_la_grille_est_sous_les_onglets() {
+        let (screen, rectangles) = peindre_classeur_large(Vec::new());
+        let hauteur_barre = theme::scroll_bar_allocated_width();
+        let pistes: Vec<_> = rectangles
+            .iter()
+            .filter(|(rect, _)| {
+                rect.height() <= hauteur_barre
+                    && rect.top() >= screen.bottom() - hauteur_barre - 0.5
+                    && rect.width() >= screen.width() - 2.0 * hauteur_barre
+            })
+            .collect();
+        assert!(
+            !pistes.is_empty(),
+            "une piste de barre horizontale en bas de {screen:?}, sous les onglets ; \
+             rectangles peints : {rectangles:?}"
+        );
+    }
+
+    #[test]
+    fn clic_droit_dans_le_vide_de_grille_et_sur_les_onglets_propose_les_ajouts() {
+        let mut project = Project::new("Menus").unwrap();
+        let book = project.add_workbook(project.root(), None).unwrap();
+        let sheet = project.tree().node(book).unwrap().children()[0];
+        project
+            .add_column(sheet, None, None, Column::from_f64(&[1.0]))
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+
+        for (on_tabs, label) in [
+            (false, tr!("workbook-column-add")),
+            (true, tr!("workbook-worksheet-add")),
+        ] {
+            let context = egui::Context::default();
+            let mut state =
+                AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+            let mut actions = Vec::new();
+            {
+                let mut paint = |events: Vec<egui::Event>| {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(600.0, 500.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    };
+                    let mut output = context.run_ui(input, |ui| {
+                        book_contents(ui, &mut state, &mut actions, book)
+                    });
+                    output.textures_delta.clear();
+                    output
+                };
+                let first = paint(Vec::new());
+                let tab_is_visible = first.shapes.iter().any(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == "Sheet1" => painted
+                        .clip_rect
+                        .contains(shape.pos + shape.galley.rect.center().to_vec2()),
+                    _ => false,
+                });
+                assert!(
+                    tab_is_visible,
+                    "la bande d'onglets doit rester dans la fenêtre"
+                );
+                let pos = if on_tabs {
+                    centre_du_texte(&first.shapes, "Sheet1")
+                } else {
+                    egui::pos2(450.0, 180.0)
+                };
+                paint(vec![egui::Event::PointerMoved(pos)]);
+                paint(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                paint(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                let output = paint(Vec::new());
+                assert!(
+                    output.shapes.iter().any(|painted| match &painted.shape {
+                        egui::Shape::Text(shape) => shape.galley.job.text == *label,
+                        _ => false,
+                    }),
+                    "le menu contextuel doit proposer {label} : {:?}",
+                    output
+                        .shapes
+                        .iter()
+                        .filter_map(|painted| match &painted.shape {
+                            egui::Shape::Text(shape) => Some(shape.galley.job.text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                );
+                let menu_pos = centre_du_texte(&output.shapes, &label);
+                paint(vec![egui::Event::PointerMoved(menu_pos)]);
+                paint(vec![egui::Event::PointerButton {
+                    pos: menu_pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                paint(vec![egui::Event::PointerButton {
+                    pos: menu_pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            if on_tabs {
+                assert!(
+                    matches!(actions.as_slice(), [Action::AddWorksheet { book: id }] if *id == book)
+                );
+            } else {
+                assert!(
+                    matches!(actions.as_slice(), [Action::AddColumn { sheet: id }] if *id == sheet)
+                );
+            }
+        }
+    }
+
+    /// #51 : la bande de la barre horizontale n'est réservée que si la grille
+    /// déborde en largeur. Une seule colonne étroite : aucune piste au bas de
+    /// la fenêtre (témoin de `la_barre_horizontale_de_la_grille_est_sous_les_onglets`,
+    /// dont le filtre de rectangles pourrait sinon attraper n'importe quoi).
+    #[test]
+    fn sans_debordement_aucune_barre_horizontale_n_est_reservee() {
+        let (screen, rectangles) = peindre_classeur(1, Vec::new());
+        let hauteur_barre = theme::scroll_bar_allocated_width();
+        let pistes: Vec<_> = rectangles
+            .iter()
+            .filter(|(rect, _)| {
+                rect.height() <= hauteur_barre
+                    && rect.top() >= screen.bottom() - hauteur_barre - 0.5
+                    && rect.width() >= screen.width() - 2.0 * hauteur_barre
+            })
+            .collect();
+        assert!(
+            pistes.is_empty(),
+            "une colonne tient dans {screen:?} : pas de piste horizontale ; {pistes:?}"
+        );
+    }
+
+    /// Deux feuilles : leurs onglets sont peints sous la grille (sous la
+    /// première ligne de données), et un clic sur le second affiche sa
+    /// feuille.
+    #[test]
+    fn les_onglets_de_feuille_sont_sous_la_grille_et_choisissent_la_feuille() {
+        let mut project = Project::new("Feuilles").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let premiere = project.add_worksheet(book, None).unwrap();
+        let seconde = project.add_worksheet(book, None).unwrap();
+        for sheet in [premiere, seconde] {
+            project
+                .add_column(sheet, None, None, Column::from_f64(&[42.0]))
+                .unwrap();
+        }
+        let session = Session::spawn(project, None).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let noms: Vec<String> = state
+            .worksheets_of(book)
+            .into_iter()
+            .map(|(_, nom)| nom)
+            .collect();
+        assert_eq!(noms.len(), 2);
+        assert_eq!(state.selected_sheet_in(book), Some(premiere));
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        let mut actions = Vec::new();
+        let mut paint = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                book_contents(ui, &mut state, &mut actions, book);
+            });
+            output.textures_delta.clear();
+            output
+        };
+        paint(Vec::new());
+        let output = paint(Vec::new());
+        let donnee = centre_du_texte(&output.shapes, "42");
+        for nom in &noms {
+            let onglet = centre_du_texte(&output.shapes, nom);
+            assert!(
+                onglet.y > donnee.y,
+                "l'onglet {nom:?} ({onglet:?}) doit être sous la grille ({donnee:?})"
+            );
+        }
+        let seconde_pos = centre_du_texte(&output.shapes, &noms[1]);
+        cliquer(&mut paint, seconde_pos);
+        assert_eq!(
+            state.selected_sheet_in(book),
+            Some(seconde),
+            "le clic sur l'onglet affiche sa feuille"
+        );
+    }
+
+    /// Menu Classeur : « Ajouter une feuille » pousse son action ;
+    /// « Supprimer la feuille » est grisé quand le classeur n'a qu'une
+    /// feuille (un clic n'y pousse rien), actif sinon.
+    #[test]
+    fn le_menu_classeur_grise_la_suppression_de_la_derniere_feuille() {
+        for feuilles in [1, 2] {
+            let mut project = Project::new("Menu").unwrap();
+            let root = project.root();
+            let book = project.add_empty_workbook(root, None).unwrap();
+            let mut sheets = Vec::new();
+            for _ in 0..feuilles {
+                sheets.push(project.add_worksheet(book, None).unwrap());
+            }
+            let sheet = sheets[0];
+            let session = Session::spawn(project, None).unwrap();
+            let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+            let context = egui::Context::default();
+            context.set_fonts(stokesforge_render_egui::font_definitions());
+            let mut actions = Vec::new();
+            let mut paint = |events: Vec<egui::Event>| {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| {
+                    let ctx = ui.ctx().clone();
+                    workbook_menu(ui, &ctx, &state, book, sheet, &mut actions);
+                });
+                output.textures_delta.clear();
+                output
+            };
+            let output = paint(Vec::new());
+            let supprimer = centre_du_texte(&output.shapes, &tr!("action-delete-sheet"));
+            let ajouter = centre_du_texte(&output.shapes, &tr!("workbook-worksheet-add"));
+            cliquer(&mut paint, supprimer);
+            cliquer(&mut paint, ajouter);
+            let suppression = actions
+                .iter()
+                .any(|action| matches!(action, Action::RequestDeleteSheet(s) if *s == sheet));
+            assert_eq!(
+                suppression,
+                feuilles > 1,
+                "{feuilles} feuille(s) : suppression demandée = {suppression} ({actions:?})"
+            );
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| matches!(action, Action::AddWorksheet { book: b } if *b == book)),
+                "{actions:?}"
+            );
+        }
     }
 }

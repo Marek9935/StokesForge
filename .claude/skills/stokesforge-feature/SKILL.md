@@ -82,6 +82,7 @@ aux tests et bancs de rendu ; ils ne définissent pas le défaut utilisateur.
 Les contenus de `stokesforge-app` ont longtemps existé **en deux écritures** : une
 pour la fenêtre flottante, une pour la fenêtre détachée. Depuis le 2026-09-30,
 classeur, graphe, note et matrice n'en ont plus qu'une (`book_contents`,
+de `src/app/workbook.rs`,
 `graph_view_contents`, `note_contents`, `matrix_contents`) — **ne pas en
 réintroduire** : une nouvelle nature de fenêtre s'écrit une fois et s'appelle
 des deux côtés, sur le motif du classeur (vue `AppState` locale,
@@ -310,7 +311,7 @@ vérifier quand une action est ajoutée :
   essai antérieur fondé sur l'hypothèse inverse produisait des raccourcis qui
   ne se déclenchaient jamais. Si le geste doit passer par le presse-papier
   système, c'est `Event::Copy`/`Event::Paste` (ou `arboard` en lecture directe,
-  comme `app::system_clipboard_text`).
+  comme `app::grid::system_clipboard_text`).
 - Les raccourcis sont consommés **au niveau du contexte**, donc avant les
   widgets : Ctrl+Z pendant la saisie d'une cellule annule la dernière commande
   du modèle, pas la dernière frappe. C'est voulu (comportement de tableur).
@@ -318,7 +319,8 @@ vérifier quand une action est ajoutée :
 - **Tab, Maj+Tab et les flèches appartiennent à la grille** (#38) : egui les
   prend au début de l'image pour déplacer son focus, et `key_pressed` n'y
   change rien. Un raccourci de grille qui lit l'une de ces touches ne marche
-  que parce que `grid_contents` tient le focus clavier par un ancrage portant
+  que parce que `grid_contents` (`src/app/grid.rs`, où vivent aussi les tests
+  de ces touches, `app::grid::tests`) tient le focus clavier par un ancrage portant
   `GRID_KEYS` ; un nouveau champ de saisie dans la grille doit poser
   `TextEdit::event_filter(GRID_KEYS)` et lire Tab lui-même. Pour savoir si
   l'on « tape dans un champ », utiliser `keyboard_focus_outside_grid`, jamais
@@ -330,7 +332,7 @@ vérifier quand une action est ajoutée :
 
 Le menu contextuel de la grille suit trois règles qu'il ne faut pas casser :
 
-- **Il est le miroir exact du clavier.** `app::grid_edit_menu` n'offre aucune
+- **Il est le miroir exact du clavier.** `app::grid::grid_edit_menu` n'offre aucune
   action qui n'ait pas d'équivalent en raccourci. Ajouter une entrée de menu
   sans geste clavier équivalent, c'est créer une fonctionnalité que seul le
   clic droit atteint — décider explicitement si c'est voulu.
@@ -389,7 +391,7 @@ vérifié par une suite verte : il se vérifie en regardant la fenêtre.
 `stokesforge-app` sait se photographier — procédure dans
 [`../stokesforge-bug-report/references/voir-l-interface.md`](../stokesforge-bug-report/references/voir-l-interface.md).
 Une capture avant et une après valent mieux qu'une affirmation.
-Une fonction pure extraite exprès pour être testable (`app::grid_grip_side`,
+Une fonction pure extraite exprès pour être testable (`app::grid::grid_grip_side`,
 `state::active_graph`, `state::drop_payload_action`) est le motif idiomatique
 du dépôt quand une décision doit vivre près de l'UI : extraire, puis tester.
 

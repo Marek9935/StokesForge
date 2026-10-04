@@ -861,7 +861,7 @@ pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
 
 /// Vrai si la cellule `(column, row)` porte une valeur **numérique** — sert
 /// à aligner le corps de la grille comme un tableur (nombres à droite, texte
-/// à gauche, voir [`crate::app::cell_widget`]). Pour une colonne `Mixed`, le
+/// à gauche, voir [`crate::app::grid::cell_widget`]). Pour une colonne `Mixed`, le
 /// type se lit par cellule (`Column::cell`), pas par colonne : deux lignes
 /// voisines peuvent s'aligner différemment. `false` pour une cellule vide
 /// (numérique manquante ou texte manquant) : un vide n'a pas de sens à
@@ -1108,7 +1108,7 @@ pub enum GridZone {
 
 /// Ce qu'un menu contextuel de la grille doit proposer pour la sélection
 /// courante — construit par [`AppState::grid_menu`], rendu par
-/// [`crate::app::grid_edit_menu`].
+/// [`crate::app::grid::grid_edit_menu`].
 ///
 /// Ce type ne porte **que la décision** (quels gestes ont un sens ici,
 /// comment les nommer, lesquels sont grisés) et jamais de widget : c'est ce
@@ -1117,7 +1117,7 @@ pub enum GridZone {
 ///
 /// Les gestes listés sont exactement les raccourcis clavier de la grille
 /// (voir la doc de tête de ce module, section copier/coller, et le bloc
-/// clavier de [`crate::app::grid_contents`]) : aucun menu n'offre ici
+/// clavier de [`crate::app::grid::grid_contents`]) : aucun menu n'offre ici
 /// d'action qui n'aurait pas d'équivalent au clavier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridMenu {
@@ -2257,7 +2257,7 @@ impl AppState {
     /// graphe ouvert ([`ColumnDragPayload`]), ou `None` si `sheet` n'a
     /// aucune sélection ou si sa sélection ne couvre aucune colonne
     /// ([`Selection::columns`]) — pas de glisser possible sans colonne, même
-    /// depuis la zone de prise. `crate::app::grid_contents` l'appelle à
+    /// depuis la zone de prise. `crate::app::grid::grid_contents` l'appelle à
     /// chaque image pour savoir s'il y a quoi que ce soit à proposer au
     /// glisser ; ne rien avoir sélectionné y désactive la zone de prise tout
     /// entière plutôt que de la laisser démarrer un glisser vide.
@@ -2800,8 +2800,8 @@ impl AppState {
     /// ouvrir, plutôt qu'un menu dont chaque entrée serait sans effet.
     ///
     /// Un clic droit pose toujours une sélection avant d'arriver ici (voir
-    /// [`crate::app::cell_widget`]/[`crate::app::header_field_widget`]/
-    /// [`crate::app::column_header_widget`], qui réduisent la sélection à la
+    /// [`crate::app::grid::cell_widget`]/[`crate::app::grid::header_field_widget`]/
+    /// [`crate::app::grid::column_header_widget`], qui réduisent la sélection à la
     /// case visée si le clic droit tombe en dehors) : le `None` ne se
     /// produit en pratique que sur une feuille vidée sous le curseur.
     pub fn grid_menu(&self, sheet: NodeId) -> Option<GridMenu> {
@@ -2987,7 +2987,7 @@ impl AppState {
     }
 
     /// Texte affiché d'un champ d'en-tête (hors édition) — même détail que
-    /// [`crate::app::header_field_widget`], factorisé ici pour être partagé
+    /// [`crate::app::grid::header_field_widget`], factorisé ici pour être partagé
     /// avec [`AppState::copy_selection`]/[`AppState::copy_full_columns`].
     pub(crate) fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
         let meta = self.column_meta(column);
@@ -4864,7 +4864,7 @@ impl AppState {
     /// Enregistre un message informatif. `pub(crate)` pour que la couche
     /// fenêtre puisse signaler ce qu'elle seule sait — un presse-papier
     /// système illisible au moment d'un « Coller » pris dans un menu
-    /// contextuel (voir [`crate::app::system_clipboard_text`]) : cet échec
+    /// contextuel (voir [`crate::app::grid::system_clipboard_text`]) : cet échec
     /// naît côté plateforme, jamais dans le modèle.
     pub(crate) fn notice(&mut self, text: String) {
         self.status = Some(StatusMessage {

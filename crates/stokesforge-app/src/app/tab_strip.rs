@@ -4,7 +4,8 @@
 //! défilement automatique ([`scroll_tab_strip_to_selected`]).
 //!
 //! Sorti d'`app.rs` tel quel (#117). La bande des feuilles d'un classeur
-//! (`sheet_tabs`) et le menu Classeur restent avec la grille.
+//! (`sheet_tabs`) et le menu Classeur vivent avec le classeur, dans
+//! `workbook.rs` (#120).
 
 use eframe::egui;
 

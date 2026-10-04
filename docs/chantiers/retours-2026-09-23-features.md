@@ -122,7 +122,7 @@ Vérifier l'effet sur B4 : des colonnes plus larges débordent plus tôt.
 
 Le bandeau d'actions reste hors de la zone défilable. La fenêtre flottante et
 la fenêtre détachée utilisent la même règle, et la même fonction
-(`sheet_tabs`, `crates/stokesforge-app/src/app.rs`). Sélectionner une feuille dont
+(`sheet_tabs`, `crates/stokesforge-app/src/app/workbook.rs`). Sélectionner une feuille dont
 l'onglet est hors vue (clic, clavier, script) fait défiler la bande pour
 l'y ramener (`Response::scroll_to_me`, déclenché uniquement quand la
 sélection change réellement, pas à chaque image).
