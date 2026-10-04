@@ -22,7 +22,7 @@ par inadvertance, et ce sont eux qu'il faut comprendre avant de les modifier.
 | `stokesforge-render-egui/tests/accord.rs` | écran et export placent les mêmes primitives aux mêmes pixels |
 | `stokesforge-render-egui/tests/feathering.rs` | le feathering n'entre pas dans la clé de cache (invariant 6) |
 | `stokesforge-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
-| `stokesforge-app/tests/libelles.rs` | aucun texte d'interface en dur (`aucun_libelle_en_dur`, garde absolue, sans dérogation, #48) ; les dépendances de traduction restent dans `stokesforge-app` ; les témoins qui prouvent que la garde voit un littéral |
+| `stokesforge-app/tests/libelles.rs` | aucun texte d'interface en dur (`aucun_libelle_en_dur`, garde absolue, sans dérogation, #48) ; les dépendances de traduction restent dans `stokesforge-app` ; les témoins qui prouvent que la garde voit un littéral. Lit `src/*.rs` sans sous-dossier ; la zone #43 (`ZONE_43`) ne cherche ses fonctions que dans `app.rs`, comme `aucune_fenetre_n_est_une_egui_window_brute` (`include_str!("app.rs")`) et `every_history_key_of_the_catalogue_is_used` (trois fichiers nommés) : à rendre indépendantes du fichier avant tout déplacement (#116) |
 | `stokesforge-app/src/i18n.rs` (tests) | toute clé de `fr` existe dans `en` avec les mêmes arguments ; la pseudo-langue entoure et allonge chaque message ; complétude bloquante (toute clé de `en` existe dans `fr`) ; pluriels et typographie françaises ; une préférence `fr` ouvre l'interface en français ; choix de la langue sans panique ; `tests/language_switch.rs` : la langue change sans redémarrer |
 | `stokesforge-commands/tests/memory_pinning.rs` | l'historique n'épingle pas indéfiniment de gros buffers |
 

@@ -288,7 +288,11 @@ sans changement de comportement ; chacun porte la doc de tête de sa partie :
 espace de travail, bornage), `window_stack.rs` (`Tab`, ordre de pile, masquage, repli,
 maximisation, `show_workspace`) et `window_detach.rs` (viewports OS du Project Manager et
 des onglets). Ce sont des sous-modules (`#[path]` vers `src/`) pour garder l'accès aux types
-privés d'`app` et rester vus des gardes qui lisent `src/*.rs`.
+privés d'`app` et rester vus des gardes qui lisent `src/*.rs`. C'est un découpage de
+fichiers (`use super::*`), pas encore des modules à interface explicite ; la suite
+(briques communes, assistant d'import, propriétés du graphe, grille, graphe,
+menus, tests) est le chantier #115 (#116–#123). Trois gardes ne lisent encore que
+`app.rs` (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
 Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou
@@ -305,7 +309,7 @@ définir avec l'utilisateur quelles zones défilent et quelles zones sont
 rognées avant de brancher son contenu.
 
 Le `Frame` de ces fenêtres n'a pas de marge verticale
-(`WINDOW_CONTENT_MARGIN`, `crates/stokesforge-app/src/app.rs`) : la bande d'en-tête
+(`WINDOW_CONTENT_MARGIN`, `crates/stokesforge-app/src/window_chrome.rs`) : la bande d'en-tête
 et les séparateurs du contenu fournissent déjà leur propre espacement, une
 marge par défaut n'ajoutait qu'un bandeau blanc mort au-dessus et en dessous.
 La marge horizontale reste. Toutes les barres de défilement suivent le
@@ -946,6 +950,16 @@ Elle remplace l'ancien panneau fixe à droite de l'espace de travail, affiché
 en permanence dès qu'un graphe était actif. Son état (quel graphe, quel
 onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
 par `Action::OpenPlotSettings { graph, tab, axis }`.
+
+**Double-clic sur la figure** (#113) : sur un axe, une courbe ou un objet
+graphique, il ouvre leurs paramètres (`GraphEvent::OpenAxisProperties`,
+`OpenSeriesProperties`, `OpenShapeProperties`, traduits par
+`annotation_interactions`) ; sur un texte, il garde l'édition sur place ;
+dans la zone de tracé nue, il réinitialise le zoom. Dans l'Object Manager,
+toute ligne (graphe, calque, groupes, séries, axes, objets) ouvre ses
+paramètres au double-clic. Limite connue : sur un graphe à plusieurs calques,
+l'axe double-cliqué ouvre l'onglet Axes du calque déjà choisi (commentaire de
+#113).
 
 **Titres, titres d'axe et légende** (issue #53) : se désignent comme un texte
 libre. Double-clic sur un titre ou un titre d'axe → éditeur sur place

@@ -44,7 +44,7 @@ qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
 | change le **modèle** (colonnes, arbre, `PlotSpec`, texte de note…) | une `Command` de `stokesforge-commands` | jamais une primitive `stokesforge-core` en direct (invariant 1) ; voir le skill **stokesforge-commande** |
 | change le **cadrage de vue** (zoom, pan) | `ViewState` sur `GraphView` | ce n'est **pas** une mutation du modèle : personne ne veut annuler un zoom par Ctrl+Z |
 | est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `stokesforge-app/src/state.rs` | doit rester testable sans fenêtre |
-| est du **dessin ou de l'événement** egui | `stokesforge-app/src/app.rs` | rien de ce que contient `app.rs` n'est une décision de produit |
+| est du **dessin ou de l'événement** egui | `stokesforge-app/src/app.rs` et ses sous-modules (`window_*.rs`, voir § 2 octies) | rien de ce qu'ils contiennent n'est une décision de produit |
 | est une **fonctionnalité de tracé** | `stokesforge-render` (générique sur le backend) | jamais dans un seul backend (invariant 5) ; voir le skill **stokesforge-rendu** |
 | lit un **fichier de données** | `stokesforge-import` | reste indépendant de l'UI, de `core`, des commandes et de la session |
 
@@ -95,14 +95,53 @@ renvoie ses actions à la racine.
 Avant de toucher à une surface d'interface :
 
 ```sh
-rg "fn <nom>|fn detached_<nom>" crates/stokesforge-app/src/app.rs
+rg "fn <nom>|fn detached_<nom>" crates/stokesforge-app/src/
 ```
 
 Deux résultats → le changement se fait deux fois, ou mieux : **se factorise**.
+
+Une seule écriture ne suffit pas : la vue détachée a **son propre**
+`AppState`. Un état d'interface ajouté à `AppState` (édition en cours,
+confirmation, renommage…) n'y existe que s'il est recopié par
+`fork_for_detached_view`, resynchronisé par `sync_detached_snapshot` ou
+rapatrié par `adopt_detached_book_view` ; sinon le geste marche en flottant
+et pas en détaché (constaté sur le renommage de feuille, #106). De même,
+`collect_shortcuts` lit l'entrée du viewport racine : un raccourci global
+n'agit pas dans une fenêtre OS détachée sans câblage propre, et
+`active_book` retombe sur « le seul classeur détaché » même quand un graphe
+est actif — un raccourci de classeur peut y voler une touche à un autre
+contexte (F2 de l'Object Manager).
 Une factorisation supplémentaire est légitime quand elle ne bute pas sur la
 contrainte `'static` ci-dessus — un bandeau de boutons qui ne fait que pousser
 des `Action` n'y bute pas. Le dire explicitement dans le compte rendu : « j'ai
 factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
+
+## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
+
+`app.rs` est en cours de découpage (chantier #115, sous-tickets #116–#123,
+**à lancer sur feu vert seulement**). État actuel : le cadre commun des
+fenêtres est dans `window_chrome.rs`, le placement dans
+`window_placement.rs`, la pile, le repli et la maximisation dans
+`window_stack.rs`, le détachement dans `window_detach.rs`. Ce sont de simples
+découpages de fichiers (sous-modules d'`app` par `#[path]` vers `src/`,
+`use super::*`), pas encore des modules à interface explicite.
+
+En attendant le chantier :
+- du code de fenêtre (placement, pile, détachement) va dans le `window_*.rs`
+  concerné, pas dans `app.rs` ;
+- une nouvelle surface d'interface **volumineuse** (assistant, dialogue,
+  panneau) s'écrit d'emblée dans son propre module à imports explicites, sur
+  le modèle de `object_manager.rs` ou `toolbar.rs`, plutôt que d'allonger
+  `app.rs` ;
+- restent dans `app.rs` : l'ordre des panneaux dans `ui()`, les emprunts
+  disjoints de `StokesForgeApp`, l'application différée des actions après la
+  peinture, les confirmations bloquantes, `collect_shortcuts` (liste et
+  raisons dans #115) ;
+- **trois gardes ne lisent encore que `app.rs`** (`aucune_fenetre_n_est_une_egui_window_brute`,
+  `ZONE_43` de `tests/libelles.rs`, `every_history_key_of_the_catalogue_is_used`) :
+  une fenêtre, un libellé de la zone #43 ou une clé `history-*` écrits
+  ailleurs leur échappent jusqu'à #116. Vérifier ces règles à la main dans
+  les autres fichiers.
 
 ## 2 ter. Barres de défilement : le standard du thème
 
@@ -375,6 +414,8 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] imprécisions de la demande levées **avant** de coder, en une seule question
 - [ ] ce n'est pas un plafond déjà arbitré (`questions-ouvertes.md` §11)
 - [ ] doublon docké/détaché vérifié (`rg "fn <nom>|fn detached_<nom>"`)
+- [ ] état d'`AppState` nouveau recopié dans la vue détachée s'il doit y valoir ; raccourci global essayé avec un graphe actif et un classeur détaché
+- [ ] code de fenêtre dans le `window_*.rs` concerné ; surface volumineuse dans son propre module (§2 octies, chantier #115)
 - [ ] barres de défilement : aucun style local, place lue via `theme::scroll_bar_allocated_width`
 - [ ] icônes : composant `icons.rs`, info-bulle `tr!`, seulement si elle apporte quelque chose (`docs/icones.md`)
 - [ ] couleurs : `color_picker::color_field` avec l'usage et le `PickerEnv`, vide = automatique
