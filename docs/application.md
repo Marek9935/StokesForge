@@ -281,6 +281,11 @@ compris, est agrandi ou réduit uniformément (`GraphView::paint_scaled`,
 ne reconstruit pas le cache de formes. La règle est identique en fenêtre
 flottante et détachée, qui partagent la même fonction.
 
+Le cadre commun des fenêtres de contenu (`window_header`, `show_window_in_layer`,
+`floating_window_frame`, poignées de redimensionnement, `HeaderPlacement`) vit dans
+`window_chrome.rs`, sous-module d'`app` (#100 étape 1) ; le reste de la logique des
+fenêtres reste dans `app.rs` en attendant #101.
+
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
 Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou
 en quittant le champ, abandonnée par Échap) ; Ctrl+D ou menu Dupliquer (« … copie
