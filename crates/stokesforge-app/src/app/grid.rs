@@ -508,162 +508,8 @@ fn column_header_widget(
         // entre chaque rangée empilée — la couleur de fond ne remplit alors
         // pas vraiment la case, elle y flotte.
         ui.spacing_mut().item_spacing.y = 0.0;
-        let letter = column_letter(column_index);
-        let is_column_selected = state.is_column_selected(sheet, column);
-        let touched = state.column_touched_by_selection(sheet, column);
-        let role = state.column_meta(column).role;
-        ui.scope(|ui| {
-            ui.set_min_height(HEADER_SUBROW_HEIGHT);
-            ui.set_max_height(HEADER_SUBROW_HEIGHT);
-            let rect = ui.available_rect_before_wrap();
-            ui.painter()
-                .rect_filled(rect, 0.0, gutter_fill(is_column_selected, touched));
-            header_row_separator(ui, rect);
-            // Toute la largeur de la rangée sélectionne la colonne — pas
-            // seulement la lettre —, glisser ou Maj-clic étend à plusieurs
-            // colonnes (même logique que la multi-sélection de cellules de
-            // données, voir `cell_widget`), au clic principal comme au clic
-            // secondaire (`response.secondary_clicked()` couvre aussi
-            // `Sense::click_and_drag()`) : le clic droit doit pouvoir
-            // sélectionner *et* ouvrir le menu contextuel en un seul geste,
-            // sans exiger que la colonne soit déjà sélectionnée au
-            // préalable.
-            let id = ui
-                .id()
-                .with(("stokesforge_column_letter_row", column.raw()));
-            let response = ui.interact(rect, id, egui::Sense::click_and_drag());
-            let letter_text = format!("{letter}({})", role_label(role));
-            ui.put(
-                rect,
-                egui::Label::new(
-                    egui::RichText::new(letter_text).color(crate::theme::gutter_text_color()),
-                )
-                .selectable(false),
-            );
-            let shift = ui.input(|i| i.modifiers.shift);
-            if response.drag_started() || (response.clicked() && !shift) {
-                state.select_column(sheet, column);
-            } else if response.clicked() && shift {
-                state.extend_column_selection(sheet, column);
-            } else if response.secondary_clicked() && !is_column_selected {
-                // `&& !is_column_selected` : un clic droit *dans* une plage
-                // déjà posée doit la laisser intacte, seul un clic droit en
-                // dehors la réduit à cette colonne. Sans cette garde, le
-                // clic droit réduisait **toujours** la plage à une seule
-                // colonne — ce que le commentaire de `target_columns`
-                // ci-dessous supposait pourtant déjà faux : changer le type
-                // ou le rôle de trois colonnes sélectionnées d'un coup était
-                // donc impossible, la sélection s'étant effondrée entre le
-                // clic et l'ouverture du menu. Même règle que dans
-                // `cell_widget`/`header_field_widget`/`row_number_widget`.
-                state.select_column(sheet, column);
-            } else if response.contains_pointer()
-                && ui.input(|i| i.pointer.primary_down())
-                && state.selection(sheet).is_some()
-            {
-                // Même geste que pour les cellules de données : étendre
-                // pendant le glisser, pas seulement au clic de départ (voir
-                // le commentaire détaillé de `cell_widget`).
-                state.extend_column_selection(sheet, column);
-            }
-            // Colonnes visées par le menu contextuel : toute la plage
-            // sélectionnée si `column` en fait partie (menu ouvert sur une
-            // sélection multiple déjà posée), sinon `column` seule — un
-            // clic droit hors de la plage sélectionnée l'a déjà réduite à
-            // elle-même ci-dessus.
-            let target_columns: Vec<NodeId> = state
-                .selection(sheet)
-                .map(|selection| selection.columns(state.tree(), sheet))
-                .filter(|columns| columns.contains(&column))
-                .unwrap_or_else(|| vec![column]);
-            response.context_menu(|ui| {
-                // Le bloc d'édition d'abord (les gestes du quotidien, les
-                // mêmes que sur une cellule ou un champ d'en-tête), puis ce
-                // qui n'existe que sur la rangée des lettres : type et rôle
-                // de colonne, qui décrivent la colonne plutôt qu'ils
-                // n'agissent sur son contenu. Calcul paresseux, pour la
-                // même raison que dans `cell_widget`.
-                if let Some(menu) = state.grid_menu(sheet) {
-                    grid_edit_menu(ui, state, actions, sheet, &menu);
-                    ui.separator();
-                }
-                // Choix manuel du type de colonne — conversion destructrice
-                // assumée (`Action::SetColumnType`/`Command::
-                // SetColumnType`, `stokesforge-core::Column::set_column_type`) :
-                // texte non numérique effacé en passant en `Numeric`, comme
-                // pour toute saisie directe dans une colonne numérique.
-                for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
-                    if ui
-                        .selectable_label(column_type == candidate, type_label(candidate))
-                        .clicked()
-                    {
-                        if candidate != column_type {
-                            for &target in &target_columns {
-                                actions.push(Action::SetColumnType {
-                                    column: target,
-                                    column_type: candidate,
-                                });
-                            }
-                        }
-                        ui.close();
-                    }
-                }
-                // Rôle de tracé, dans un sous-menu séparé : encore sans
-                // effet sur la résolution de série (voir `role_suffix`),
-                // mais un seul et même endroit pour tout ce qui décrit une
-                // colonne à l'utilisateur.
-                ui.menu_button(tr!("column-role"), |ui| {
-                    for candidate in [
-                        ColumnRole::X,
-                        ColumnRole::Y,
-                        ColumnRole::Z,
-                        ColumnRole::XError,
-                        ColumnRole::YError,
-                        ColumnRole::Label,
-                        ColumnRole::None,
-                    ] {
-                        if ui
-                            .selectable_label(role == candidate, role_label(candidate))
-                            .clicked()
-                        {
-                            if candidate != role {
-                                for &target in &target_columns {
-                                    actions.push(Action::SetColumnRole {
-                                        column: target,
-                                        role: candidate,
-                                    });
-                                }
-                            }
-                            ui.close();
-                        }
-                    }
-                });
-                // Créer un graphe depuis les colonnes visées — chantier
-                // « tracer depuis un classeur ». La règle d'appariement X/Y
-                // (chaque Y prend la colonne X la plus proche à sa gauche)
-                // vit dans `AppState::plot_columns`/`series_from_columns` ;
-                // ce menu ne fait que choisir le type de tracé et pousser
-                // l'action sur `target_columns`, comme les deux sous-menus
-                // ci-dessus.
-                ui.menu_button(tr!("workbook-plot-menu"), |ui| {
-                    for (label, plot_type) in [
-                        (tr!("plot-type-line"), PlotType::Line),
-                        (tr!("plot-type-scatter"), PlotType::Scatter),
-                        (tr!("plot-type-line-symbol"), PlotType::LineScatter),
-                        (tr!("plot-type-bar"), PlotType::Bar),
-                    ] {
-                        if ui.button(label).clicked() {
-                            actions.push(Action::PlotColumns {
-                                sheet,
-                                columns: target_columns.clone(),
-                                plot_type,
-                            });
-                            ui.close();
-                        }
-                    }
-                });
-            });
-        });
+        let is_column_selected =
+            column_letter_widget(ui, state, actions, sheet, column, column_index, column_type);
         header_field_widget(
             ui,
             state,
@@ -706,6 +552,196 @@ fn column_header_widget(
         );
         if metadata_row_visible(ui.ctx()) {
             metadata_cell_widget(ui, state, actions, column);
+        }
+    });
+}
+
+/// Rangée des lettres : sélection de colonnes, puis menu sur la sélection.
+fn column_letter_widget(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    column: NodeId,
+    column_index: usize,
+    column_type: ColumnType,
+) -> bool {
+    let letter = column_letter(column_index);
+    let is_column_selected = state.is_column_selected(sheet, column);
+    let touched = state.column_touched_by_selection(sheet, column);
+    let role = state.column_meta(column).role;
+    ui.scope(|ui| {
+        ui.set_min_height(HEADER_SUBROW_HEIGHT);
+        ui.set_max_height(HEADER_SUBROW_HEIGHT);
+        let rect = ui.available_rect_before_wrap();
+        ui.painter()
+            .rect_filled(rect, 0.0, gutter_fill(is_column_selected, touched));
+        header_row_separator(ui, rect);
+        // Toute la largeur de la rangée sélectionne la colonne — pas
+        // seulement la lettre —, glisser ou Maj-clic étend à plusieurs
+        // colonnes (même logique que la multi-sélection de cellules de
+        // données, voir `cell_widget`), au clic principal comme au clic
+        // secondaire (`response.secondary_clicked()` couvre aussi
+        // `Sense::click_and_drag()`) : le clic droit doit pouvoir
+        // sélectionner *et* ouvrir le menu contextuel en un seul geste,
+        // sans exiger que la colonne soit déjà sélectionnée au
+        // préalable.
+        let id = ui
+            .id()
+            .with(("stokesforge_column_letter_row", column.raw()));
+        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+        let letter_text = format!("{letter}({})", role_label(role));
+        ui.put(
+            rect,
+            egui::Label::new(
+                egui::RichText::new(letter_text).color(crate::theme::gutter_text_color()),
+            )
+            .selectable(false),
+        );
+        let shift = ui.input(|i| i.modifiers.shift);
+        if response.drag_started() || (response.clicked() && !shift) {
+            state.select_column(sheet, column);
+        } else if response.clicked() && shift {
+            state.extend_column_selection(sheet, column);
+        } else if response.secondary_clicked() && !is_column_selected {
+            // `&& !is_column_selected` : un clic droit *dans* une plage
+            // déjà posée doit la laisser intacte, seul un clic droit en
+            // dehors la réduit à cette colonne. Sans cette garde, le
+            // clic droit réduisait **toujours** la plage à une seule
+            // colonne — ce que le commentaire de `target_columns`
+            // ci-dessous supposait pourtant déjà faux : changer le type
+            // ou le rôle de trois colonnes sélectionnées d'un coup était
+            // donc impossible, la sélection s'étant effondrée entre le
+            // clic et l'ouverture du menu. Même règle que dans
+            // `cell_widget`/`header_field_widget`/`row_number_widget`.
+            state.select_column(sheet, column);
+        } else if response.contains_pointer()
+            && ui.input(|i| i.pointer.primary_down())
+            && state.selection(sheet).is_some()
+        {
+            // Même geste que pour les cellules de données : étendre
+            // pendant le glisser, pas seulement au clic de départ (voir
+            // le commentaire détaillé de `cell_widget`).
+            state.extend_column_selection(sheet, column);
+        }
+        // Colonnes visées par le menu contextuel : toute la plage
+        // sélectionnée si `column` en fait partie (menu ouvert sur une
+        // sélection multiple déjà posée), sinon `column` seule — un
+        // clic droit hors de la plage sélectionnée l'a déjà réduite à
+        // elle-même ci-dessus.
+        let target_columns: Vec<NodeId> = state
+            .selection(sheet)
+            .map(|selection| selection.columns(state.tree(), sheet))
+            .filter(|columns| columns.contains(&column))
+            .unwrap_or_else(|| vec![column]);
+        response.context_menu(|ui| {
+            column_properties_menu(
+                ui,
+                state,
+                actions,
+                sheet,
+                &target_columns,
+                column_type,
+                role,
+            );
+        });
+    });
+    is_column_selected
+}
+
+/// Propriétés et tracé des colonnes visées, après le bloc d'édition commun.
+fn column_properties_menu(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    target_columns: &[NodeId],
+    column_type: ColumnType,
+    role: ColumnRole,
+) {
+    // Le bloc d'édition d'abord (les gestes du quotidien, les
+    // mêmes que sur une cellule ou un champ d'en-tête), puis ce
+    // qui n'existe que sur la rangée des lettres : type et rôle
+    // de colonne, qui décrivent la colonne plutôt qu'ils
+    // n'agissent sur son contenu. Calcul paresseux, pour la
+    // même raison que dans `cell_widget`.
+    if let Some(menu) = state.grid_menu(sheet) {
+        grid_edit_menu(ui, state, actions, sheet, &menu);
+        ui.separator();
+    }
+    // Choix manuel du type de colonne — conversion destructrice
+    // assumée (`Action::SetColumnType`/`Command::
+    // SetColumnType`, `stokesforge-core::Column::set_column_type`) :
+    // texte non numérique effacé en passant en `Numeric`, comme
+    // pour toute saisie directe dans une colonne numérique.
+    for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
+        if ui
+            .selectable_label(column_type == candidate, type_label(candidate))
+            .clicked()
+        {
+            if candidate != column_type {
+                for &target in target_columns {
+                    actions.push(Action::SetColumnType {
+                        column: target,
+                        column_type: candidate,
+                    });
+                }
+            }
+            ui.close();
+        }
+    }
+    // Rôle de tracé, dans un sous-menu séparé : encore sans
+    // effet sur la résolution de série (voir `role_suffix`),
+    // mais un seul et même endroit pour tout ce qui décrit une
+    // colonne à l'utilisateur.
+    ui.menu_button(tr!("column-role"), |ui| {
+        for candidate in [
+            ColumnRole::X,
+            ColumnRole::Y,
+            ColumnRole::Z,
+            ColumnRole::XError,
+            ColumnRole::YError,
+            ColumnRole::Label,
+            ColumnRole::None,
+        ] {
+            if ui
+                .selectable_label(role == candidate, role_label(candidate))
+                .clicked()
+            {
+                if candidate != role {
+                    for &target in target_columns {
+                        actions.push(Action::SetColumnRole {
+                            column: target,
+                            role: candidate,
+                        });
+                    }
+                }
+                ui.close();
+            }
+        }
+    });
+    // Créer un graphe depuis les colonnes visées — chantier
+    // « tracer depuis un classeur ». La règle d'appariement X/Y
+    // (chaque Y prend la colonne X la plus proche à sa gauche)
+    // vit dans `AppState::plot_columns`/`series_from_columns` ;
+    // ce menu ne fait que choisir le type de tracé et pousser
+    // l'action sur `target_columns`, comme les deux sous-menus
+    // ci-dessus.
+    ui.menu_button(tr!("workbook-plot-menu"), |ui| {
+        for (label, plot_type) in [
+            (tr!("plot-type-line"), PlotType::Line),
+            (tr!("plot-type-scatter"), PlotType::Scatter),
+            (tr!("plot-type-line-symbol"), PlotType::LineScatter),
+            (tr!("plot-type-bar"), PlotType::Bar),
+        ] {
+            if ui.button(label).clicked() {
+                actions.push(Action::PlotColumns {
+                    sheet,
+                    columns: target_columns.to_vec(),
+                    plot_type,
+                });
+                ui.close();
+            }
         }
     });
 }
@@ -2862,5 +2898,52 @@ mod tests {
             decalage.abs() < 0.5,
             "témoin : rien à faire défiler, décalage {decalage}"
         );
+    }
+    /// Le clic droit dans une plage de colonnes la conserve. Un changement
+    /// de type vise chacune de ces colonnes une fois, sans toucher la voisine.
+    #[test]
+    fn le_type_dans_le_menu_des_lettres_vise_toute_la_selection() {
+        let mut banc = Banc::new();
+        banc.state.select_column(banc.sheet, banc.columns[0]);
+        banc.state
+            .extend_column_selection(banc.sheet, banc.columns[1]);
+        banc.image(Vec::new());
+        let lettre = format!("B({})", role_label(ColumnRole::Y));
+        banc.clic_bouton(&lettre, egui::PointerButton::Secondary);
+        assert!(banc.state.is_column_selected(banc.sheet, banc.columns[0]));
+        assert!(banc.state.is_column_selected(banc.sheet, banc.columns[1]));
+        assert!(
+            !banc.state.is_column_selected(banc.sheet, banc.columns[2]),
+            "témoin : la voisine n'est pas sélectionnée"
+        );
+        let position = banc
+            .centre_de(&type_label(ColumnType::Mixed))
+            .expect("menu du type ouvert");
+        banc.image(vec![egui::Event::PointerMoved(position)]);
+        for pressed in [true, false] {
+            banc.image(vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        let cibles: Vec<_> = banc
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetColumnType {
+                    column,
+                    column_type: ColumnType::Mixed,
+                } => Some(*column),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            cibles,
+            banc.columns[..2],
+            "un changement dans l'ordre des colonnes"
+        );
+        assert_eq!(banc.actions.len(), 2, "aucune action sur la voisine");
     }
 }
