@@ -421,6 +421,17 @@ fn recipe_combo_text(name: &str, modified: bool) -> String {
 
 /// Étape 1 : fichiers et modèle.
 fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
+    // Sans état, l'étape ne peint rien, comme avant son découpage.
+    if state.import_state().is_none() {
+        return;
+    }
+    import_template_controls(ui, state);
+    import_file_choices(ui, state);
+    import_file_status_rows(ui, state);
+}
+
+/// Modèle sélectionné, échanges JSON et confirmation de suppression.
+fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState) {
     let (names, current_name, modified, confirm) = {
         let Some(import) = state.import_state() else {
             return;
@@ -517,6 +528,10 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
         });
     }
     ui.separator();
+}
+
+/// Ajout de fichiers et choix parmi les fichiers récemment importés.
+fn import_file_choices(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         if ui
             .button(tr!("import-files-add"))
@@ -561,6 +576,10 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
             state.add_import_paths(vec![path]);
         }
     }
+}
+
+/// Choix du fichier prévisualisé et retrait, appliqués après toutes les rangées.
+fn import_file_status_rows(ui: &mut egui::Ui, state: &mut AppState) {
     let statuses = state.import_file_statuses();
     let preview_index = state
         .import_state()
@@ -2144,5 +2163,35 @@ mod tests {
             }
         }
         distincts(&familles, |famille| format!("{:?}", couleur(famille[0])));
+    }
+    /// Repartir d'un modèle vierge réinitialise la recette, tout en gardant
+    /// les fichiers déjà choisis pour le prochain aperçu.
+    #[test]
+    fn nouveau_modele_reinitialise_la_recette_et_garde_les_fichiers() {
+        let mut banc = banc(true);
+        let context = contexte();
+        let avant = banc.state.import_state().unwrap().recipe.clone();
+        assert_ne!(
+            avant,
+            stokesforge_import::ImportRecipe::new(tr!("import-template-untitled")),
+            "témoin : la recette initiale porte nos réglages Jasco"
+        );
+        let peints = textes(&image(&context, Vec::new(), |ui| {
+            super::import_step_files(ui, &mut banc.state)
+        }));
+        let position = texte_exact(&peints, &tr!("import-files-reset")).centre;
+        cliquer(&context, position, egui::PointerButton::Primary, |ui| {
+            super::import_step_files(ui, &mut banc.state)
+        });
+        let import = banc.state.import_state().unwrap();
+        assert_eq!(
+            import.recipe,
+            stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
+        );
+        assert_eq!(import.paths, banc.fichiers);
+        assert!(
+            !import.paths.is_empty(),
+            "témoin : des fichiers sont conservés"
+        );
     }
 }
