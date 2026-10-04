@@ -153,7 +153,9 @@ use super::contents::{matrix_contents, note_contents};
 use super::file_drop::{begin_file_drop, finish_file_drop};
 use super::graph_window::graph_view_contents;
 use super::object_manager_ui::selected_manager_target;
-use super::project_manager::{project_manager_contents_from_tree, PmInteraction};
+use super::project_manager::{
+    project_manager_contents_from_tree, PmInteraction, PROJECT_MANAGER_WIDTH,
+};
 use super::shortcuts::collect_undo_redo_shortcuts;
 use super::tab::{tab_node, Tab};
 use super::window_chrome::{
@@ -163,10 +165,7 @@ use super::window_chrome::{
 };
 use super::window_placement::{floating_window_display_size, GRAPH_WINDOW_SIZE};
 use super::window_stack::toggle_collapse_to;
-use super::{
-    book_contents, snapshot_stamp, tab_title, tab_title_from_tree, StokesForgeApp,
-    PROJECT_MANAGER_WIDTH,
-};
+use super::{book_contents, snapshot_stamp, tab_title, tab_title_from_tree, StokesForgeApp};
 
 /// Ce que la fenêtre OS détachée du Project Manager a besoin de peindre —
 /// strictement ça, et rien de plus. Voir la doc de tête de

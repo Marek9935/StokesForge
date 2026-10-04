@@ -15,6 +15,7 @@ use crate::state::{ProjectTreeNode, WindowKind};
 use crate::tr;
 
 use super::tab::{tab_for_window, Tab};
+use super::StokesForgeApp;
 
 /// Ce que le rendu de l'arbre du Project Manager accumule ou lit, à travers
 /// [`project_manager_contents_from_tree`]/[`project_tree_node_ui`] — un seul
@@ -181,6 +182,49 @@ fn project_tree_node_ui(
             }
             response.rect.center().y
         }
+    }
+}
+
+/// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
+/// séparée quand il est détaché.
+pub(super) const PROJECT_MANAGER_WIDTH: f32 = 260.0;
+
+impl StokesForgeApp {
+    /// Peint le Project Manager dans son panneau fixe, ancré à gauche — voir
+    /// la doc de tête du module, § Project Manager. Appelé par
+    /// [`StokesForgeApp::ui`] *avant* le `CentralPanel`, mais
+    /// *après* [`StokesForgeApp::script_panel`] — voir sa doc de tête pour
+    /// pourquoi cet ordre précis. Comme [`StokesForgeApp::menu_bar`]
+    /// (`egui::Panel::top`) : peindre un panneau ancré avant le reste
+    /// garantit par construction qu'il n'est jamais recouvert ni ne recouvre
+    /// ce qui vient après. N'est pas appelé quand [`StokesForgeApp::pm_detached`]
+    /// vaut `true` — cette image-là, rien ne remplace ce panneau, la vraie
+    /// fenêtre OS séparée ([`StokesForgeApp::show_detached_project_manager`]) en
+    /// tient lieu. Reste redimensionnable en largeur par glisser du bord
+    /// (comportement par défaut d'`egui::Panel::left`) mais figé en
+    /// position : pas de bascule vers la droite ni de repositionnement par
+    /// glisser, voir la doc de tête du module, § attacher à gauche ou à
+    /// droite.
+    pub(super) fn project_manager_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        open_requests: &mut Vec<Tab>,
+        close_requests: &mut Vec<Tab>,
+        active_tab: Option<Tab>,
+    ) {
+        egui::Panel::left("stokesforge_pm")
+            .default_size(PROJECT_MANAGER_WIDTH)
+            .show(ui, |ui| {
+                let tree = self.state.project_tree();
+                let mut interaction = PmInteraction {
+                    open_requests,
+                    close_requests,
+                    active_tab,
+                    selection: &mut self.pm_selection,
+                    hidden: &mut self.hidden_tabs,
+                };
+                project_manager_contents_from_tree(ui, &tree, &mut interaction);
+            });
     }
 }
 

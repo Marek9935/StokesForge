@@ -18,6 +18,7 @@ use crate::tr;
 
 use super::shortcuts::SHORTCUT_RUN_SCRIPT;
 use super::window_chrome::{header_icon, HEADER_ACTION_WIDTH};
+use super::StokesForgeApp;
 
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
@@ -127,6 +128,64 @@ pub(super) fn script_contents(
                 }
             }
         });
+}
+
+/// Hauteur par défaut du panneau fixe de la console de script — point de
+/// départ seulement, l'utilisateur peut ensuite le redimensionner en
+/// glissant son bord (`.resizable(true)`, voir [`StokesForgeApp::script_panel`]).
+const SCRIPT_PANEL_HEIGHT: f32 = 220.0;
+
+impl StokesForgeApp {
+    /// Peint la console de script dans son panneau fixe, ancré en bas — voir
+    /// la doc de tête du module, § Console de script. Appelé par
+    /// [`StokesForgeApp::ui`] *avant* [`StokesForgeApp::project_manager_panel`]
+    /// (`egui::Panel::left`) : avec `egui::Panel`, le premier panneau ajouté
+    /// est le plus extérieur, donc celui-ci, posé en premier, réserve sa
+    /// bande sur toute la largeur de la fenêtre — y compris sous le Project
+    /// Manager, pas seulement sous la zone du `CentralPanel` — plutôt que
+    /// d'être resserré entre lui et le bord droit. `egui::Panel::bottom`
+    /// n'est **pas** redimensionnable par défaut (à la différence de
+    /// `left`/`right`) : `.resizable(true)` restaure le glisser du bord en
+    /// hauteur. Contrairement au Project
+    /// Manager, aucun mode détaché en fenêtre OS séparée ni bascule de
+    /// position : la console de script a toujours été en bas, et le reste.
+    ///
+    /// Repliée (issue #79), la console se réduit à sa barre de titre — un
+    /// panneau distinct, non redimensionnable, pour que la hauteur mémorisée
+    /// du panneau déplié ne soit pas écrasée.
+    pub(super) fn script_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        actions: &mut Vec<Action>,
+    ) {
+        if actions
+            .iter()
+            .any(|action| matches!(action, Action::RunScript))
+        {
+            self.script_collapsed = false;
+        }
+        if self.script_collapsed {
+            egui::Panel::bottom("stokesforge_script_collapsed")
+                .resizable(false)
+                .show(ui, |ui| {
+                    if script_header(ui, &self.state, true) {
+                        self.script_collapsed = false;
+                    }
+                });
+            return;
+        }
+        egui::Panel::bottom("stokesforge_script")
+            .resizable(true)
+            .default_size(SCRIPT_PANEL_HEIGHT)
+            .show(ui, |ui| {
+                if script_header(ui, &self.state, false) {
+                    self.script_collapsed = true;
+                }
+                ui.separator();
+                script_contents(ui, ctx, &mut self.state, actions);
+            });
+    }
 }
 
 #[cfg(test)]

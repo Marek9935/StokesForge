@@ -13,11 +13,19 @@ use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::GraphView;
 
-use crate::icons::{icon_image, Icon, IconRole};
-use crate::state::Action;
+use crate::icons::{icon_button, icon_image, Icon, IconRole};
+use crate::state::{active_graph, Action};
 use crate::tr;
 
+use super::graph_text_edit::{open_annotation_editor, open_series_name_editor};
+use super::graph_window::open_shape_properties;
 use super::shortcuts::shortcut_text_delete;
+use super::tab::Tab;
+use super::window_chrome::{
+    floating_resize_handles, show_window_in_layer, window_header, HeaderPlacement,
+    WindowHeaderActions,
+};
+use super::{active_tab_kind, StokesForgeApp};
 
 #[derive(Clone, Copy)]
 pub(super) enum ObjectManagerRequest {
@@ -611,6 +619,170 @@ fn object_manager_object_row(
         .y
     })
     .inner
+}
+
+impl StokesForgeApp {
+    pub(super) fn object_manager_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
+        if !self.state.object_manager_open() {
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let graph = active_graph(active_tab_kind(active_tab));
+        let tree = self.state.snapshot().tree.clone();
+        let show_texts = self.state.object_manager_show_texts();
+        let show_scales = self.state.object_manager_show_scales();
+        let spec = graph.and_then(|graph| crate::state::current_plot_spec(&tree, graph));
+        let model = graph.and_then(|graph| {
+            crate::object_manager::object_tree_with_selection(
+                &tree,
+                graph,
+                self.read_graph_view(graph, selected_manager_target)
+                    .flatten(),
+                show_texts,
+                show_scales,
+            )
+        });
+        let mut requests = Vec::new();
+        let mut close = false;
+        let mut toggle_dock = false;
+        let mut contents = |ui: &mut egui::Ui| {
+            ui.horizontal(|ui| {
+                if !self.object_manager_floating {
+                    ui.heading(tr!("action-object-manager"));
+                }
+                toggle_dock |= icon_button(
+                    ui,
+                    if self.object_manager_floating {
+                        Icon::Reattach
+                    } else {
+                        Icon::Detach
+                    },
+                    IconRole::Neutral,
+                    if self.object_manager_floating {
+                        tr!("action-object-manager-dock")
+                    } else {
+                        tr!("action-object-manager-float")
+                    },
+                )
+                .clicked();
+                close |= icon_button(
+                    ui,
+                    Icon::Close,
+                    IconRole::Neutral,
+                    tr!("action-object-manager-close"),
+                )
+                .clicked();
+            });
+            ui.separator();
+            requests = object_manager_contents(
+                ui,
+                &tree,
+                model.as_ref(),
+                spec.as_ref(),
+                show_texts,
+                show_scales,
+                actions,
+            );
+        };
+        if self.object_manager_floating {
+            let viewport = ctx.input(|input| input.content_rect());
+            let rect = self.object_manager_rect.unwrap_or_else(|| {
+                egui::Rect::from_min_size(
+                    viewport.min + egui::vec2(80.0, 80.0),
+                    egui::vec2(330.0, 420.0),
+                )
+            });
+            let id = egui::Id::new("stokesforge_object_manager_float");
+            let mut header = WindowHeaderActions::default();
+            let mut position = rect.min;
+            let mut size = rect.size();
+            show_window_in_layer(
+                &ctx,
+                id,
+                egui::Order::Foreground,
+                rect,
+                viewport,
+                false,
+                |ui| {
+                    header = window_header(
+                        ui,
+                        id,
+                        &tr!("action-object-manager"),
+                        None,
+                        false,
+                        HeaderPlacement::Floating,
+                    );
+                    contents(ui);
+                },
+                |ui, rect| floating_resize_handles(ui, id, rect, &mut position, &mut size),
+            );
+            close |= header.close;
+            size = size.min(viewport.size());
+            position += header.drag_delta;
+            position.x = position.x.clamp(
+                viewport.left(),
+                (viewport.right() - size.x).max(viewport.left()),
+            );
+            position.y = position.y.clamp(
+                viewport.top(),
+                (viewport.bottom() - size.y).max(viewport.top()),
+            );
+            self.object_manager_rect = Some(egui::Rect::from_min_size(position, size));
+        } else {
+            egui::Panel::right("stokesforge_object_manager")
+                .default_size(300.0)
+                .size_range(180.0..=500.0)
+                .show(ui, &mut contents);
+        }
+        if toggle_dock {
+            self.object_manager_floating = !self.object_manager_floating;
+        }
+        if close {
+            actions.push(Action::SetObjectManagerOpen(false));
+        }
+        if let Some(graph) = graph {
+            for request in requests {
+                self.run_object_manager_request(&ctx, graph, request, actions);
+            }
+        }
+    }
+
+    /// L'arbre et le menu Graph partagent les mêmes gestes de vue et Action.
+    pub(super) fn run_object_manager_request(
+        &mut self,
+        ctx: &egui::Context,
+        graph: NodeId,
+        request: ObjectManagerRequest,
+        actions: &mut Vec<Action>,
+    ) {
+        use crate::object_manager::VisibilityTarget as T;
+        let tree = self.state.tree().clone();
+        let Some(spec) = crate::state::current_plot_spec(&tree, graph) else {
+            return;
+        };
+        self.with_graph_view(graph, |view| match request {
+            ObjectManagerRequest::Select(target) => {
+                select_manager_target(view, Some(target), &spec)
+            }
+            ObjectManagerRequest::Rename(series) => {
+                open_series_name_editor(ctx, view, &tree, graph, series)
+            }
+            ObjectManagerRequest::Properties(target) => {
+                select_manager_target(view, Some(target), &spec);
+                match target {
+                    T::Annotation(t) => open_annotation_editor(ctx, view, &tree, graph, t),
+                    T::Shape(t) => open_shape_properties(ctx, view, &spec, t),
+                    _ => actions.push(Action::OpenObjectProperties { graph, target }),
+                }
+            }
+        });
+        ctx.request_repaint();
+    }
 }
 
 #[cfg(test)]
