@@ -121,8 +121,8 @@ factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
 ## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
 
 `app.rs` a été découpé en **vrais modules** dans `src/app/` (chantier #115,
-#116–#123 ; reste #124, la redécoupe des fonctions géantes, chacune dans son
-propre commit et jamais avec un déplacement). La table module → rôle est dans
+#116–#124 : déplacements puis redécoupe des fonctions géantes, chacune dans
+son propre commit et jamais avec un déplacement). La table module → rôle est dans
 `docs/application.md`, § Découpage du code. Les règles, tenues par des gardes
 ou par la relecture :
 
@@ -149,6 +149,14 @@ ou par la relecture :
   `les_panneaux_fixes_se_posent_dans_l_ordre_de_ui`), les emprunts disjoints,
   l'application différée des actions après la peinture, les confirmations
   bloquantes, `collect_shortcuts` et le drainage des fenêtres détachées ;
+- **redécouper sur place** : les phases privées de `ui()` restent dans
+  `app.rs`, un menu dans `menus.rs`, les sections de grille, dialogues et
+  arbres dans leur surface. Une extraction n'ajoute aucun `ui.scope` /
+  `push_id` : conserver les mêmes fermetures, identifiants egui et ordre des
+  événements. Si les emprunts disjoints empêchent une méthode sur `&mut self`,
+  regrouper seulement les champs utiles dans un contexte privé de peinture,
+  limité à l'image ; aucun nouvel état métier. Comparer les formes et les
+  captures avant/après, et exercer les décisions extraites avec leurs témoins ;
 - **une surface nouvelle** s'écrit d'emblée dans son propre module à imports
   explicites et doc de tête (modèle : `object_manager.rs`, `toolbar.rs`,
   `app/dialogs.rs`), puis s'ajoute à la table de `docs/application.md` ;

@@ -44,7 +44,9 @@
 //!
 //! Le module `tests` en fin de fichier n'éprouve que cette orchestration ;
 //! chaque surface a ses tests dans son module (les tests suivent leur code,
-//! #123).
+//! #123). Depuis #124, `ui()` rend cet ordre explicite et délègue les phases
+//! de récupération, dialogue et application différée à des méthodes privées.
+//! Ces extractions n’ajoutent ni sous-Ui ni identifiant egui.
 //!
 //! # Où vit le reste
 //!
@@ -761,36 +763,73 @@ impl StokesForgeApp {
 
 impl eframe::App for StokesForgeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // `Context` est un `Arc` : le cloner coûte un compteur, et évite
-        // d'emprunter `ui` en lecture pendant qu'on le peint.
+        // `Context` est un `Arc` : le clone évite l’emprunt de lecture du Ui peint.
         let ctx = ui.ctx().clone();
         let published_stamp = snapshot_stamp(self.state.snapshot());
-        let mut actions: Vec<Action> = Vec::new();
-        // Onglets demandés par un clic dans le Project Manager (panneau fixe
-        // ou détaché en fenêtre OS) : appliqués après le rendu, comme
-        // `actions` — muter `floating_tabs` en plein parcours des fenêtres
-        // flottantes l'invaliderait.
-        let mut open_requests: Vec<Tab> = Vec::new();
-        // Onglets dont l'en-tête de fenêtre flottante a demandé le
-        // détachement cette image-ci — appliqués après le rendu, comme
-        // `open_requests`.
-        let mut detach_requests: Vec<Tab> = Vec::new();
-        // Onglets dont la fenêtre flottante a été fermée (bouton natif de la
-        // fenêtre) cette image-ci — appliqués après le rendu, même raison.
-        let mut close_requests: Vec<Tab> = Vec::new();
-        let mut geometry_updates: Vec<(Tab, egui::Rect)> = Vec::new();
-        // L'onglet au premier plan — source de vérité pour le double-clic du
-        // Project Manager (§4) et le surlignage de la fenêtre active (§5) :
-        // calculé une fois ici, avant même le panneau fixe du Project
-        // Manager qui en a besoin, plutôt qu'à l'intérieur du `CentralPanel`
-        // (trop tard pour lui).
+        let mut actions = Vec::new();
+        // Ces files ne s’appliquent qu’après la peinture de la pile flottante.
+        let mut open_requests = Vec::new();
+        let mut detach_requests = Vec::new();
+        let mut close_requests = Vec::new();
+        let mut geometry_updates = Vec::new();
         let active_tab = self.active_content_tab(&ctx);
 
-        // Glisser-déposer de fichiers : les chemins déposés cette image sont
-        // posés dans un emplacement que le classeur sous le curseur peut
-        // réclamer en se peignant (`book_contents`), puis vidés plus bas.
         begin_file_drop(&ctx);
+        self.poll_background_jobs(&ctx);
+        publish_saved_colors(&ctx, &self.state);
+        self.collect_shortcuts(&ctx, &mut actions);
 
+        // L’ordre de ces appels détermine l’emprise des panneaux egui (#115).
+        self.menu_bar(ui, &ctx, &mut actions, active_tab);
+        self.show_toolbars(ui, &ctx, active_tab, &mut actions);
+        self.status_bar(ui, &mut actions);
+        self.script_panel(ui, &ctx, &mut actions);
+        self.show_project_manager(
+            ui,
+            &ctx,
+            active_tab,
+            &mut open_requests,
+            &mut close_requests,
+            &mut actions,
+        );
+        self.object_manager_panel(ui, active_tab, &mut actions);
+        self.drain_detached_tabs(&ctx, &mut actions);
+        self.show_workspace(
+            ui,
+            active_tab,
+            &mut actions,
+            &mut detach_requests,
+            &mut close_requests,
+            &mut geometry_updates,
+        );
+
+        for (tab, rect) in geometry_updates {
+            self.remember_window_geometry(tab, rect);
+        }
+        self.show_edit_dialogs(&ctx, &mut actions);
+        if let Some(action) = finish_file_drop(&ctx) {
+            actions.push(action);
+        }
+        for project in self.state.take_projects_to_open() {
+            open_project_in_new_window(&project);
+        }
+        self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
+        self.blocking_confirmations(&ctx, &mut actions);
+        self.dispatch_actions(&ctx, actions);
+
+        self.sync_window_views();
+        if snapshot_stamp(self.state.snapshot()) != published_stamp {
+            // Une commande appliquée après la publication réveille les viewports.
+            ctx.request_repaint();
+        }
+        self.screenshot(&ctx);
+        self.autoquit(&ctx);
+    }
+}
+
+impl StokesForgeApp {
+    /// Récupère les travaux terminés avant que les panneaux lisent l’instantané.
+    fn poll_background_jobs(&mut self, ctx: &egui::Context) {
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
         // rafraîchit l'instantané après un script (voir la doc de tête de
@@ -814,17 +853,23 @@ impl eframe::App for StokesForgeApp {
         if !imported.is_empty() {
             remember_recent_imports(&imported);
         }
+    }
 
-        publish_saved_colors(&ctx, &self.state);
-        self.collect_shortcuts(&ctx, &mut actions);
-        self.menu_bar(ui, &ctx, &mut actions, active_tab);
+    /// Peint les barres au même rang entre menus et statut, sans créer de sous-Ui.
+    fn show_toolbars(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
         let bar_env = BarEnv {
             new_project_enabled: self.state.can_new_project(),
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
             object_manager_open: self.state.object_manager_open(),
             tools: self.tools_context(active_tab),
-            text_format: self.format_target(&ctx, active_tab),
-            text_style: self.text_format_state(&ctx, active_tab),
+            text_format: self.format_target(ctx, active_tab),
+            text_style: self.text_format_state(ctx, active_tab),
             object_format: self.object_format_state(active_tab),
             shortcuts: crate::toolbar::ShortcutTexts {
                 new_project: ctx.format_shortcut(&SHORTCUT_NEW_PROJECT),
@@ -838,23 +883,25 @@ impl eframe::App for StokesForgeApp {
         let mut bar_requests = Vec::new();
         self.toolbars.show(ui, &bar_env, &mut bar_requests);
         for request in bar_requests {
-            self.run_toolbar_request(&ctx, request, active_tab, &mut actions);
+            self.run_toolbar_request(ctx, request, active_tab, actions);
         }
         if self.toolbars.take_changed() {
             self.save_toolbar_layout();
         }
-        self.status_bar(ui, &mut actions);
-        // Panneau fixe, peint *avant* `StokesForgeApp::project_manager_panel` —
-        // voir la doc de tête du module, § Ce qui reste ici (l'ordre des
-        // panneaux), et la doc de `StokesForgeApp::script_panel`
-        // (`script_console.rs`) : c'est cet ordre précis qui lui
-        // garantit de courir sur toute la largeur de la fenêtre, y compris
-        // sous le Project Manager, plutôt que d'être resserré entre lui et
-        // le bord droit.
-        self.script_panel(ui, &ctx, &mut actions);
+    }
 
+    /// Le panneau ou son viewport détaché occupe une seule étape de l’image.
+    fn show_project_manager(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        active_tab: Option<Tab>,
+        open_requests: &mut Vec<Tab>,
+        close_requests: &mut Vec<Tab>,
+        actions: &mut Vec<Action>,
+    ) {
         if self.pm_detached {
-            self.show_detached_project_manager(&ctx, active_tab);
+            self.show_detached_project_manager(ctx, active_tab);
             // Vidange ce que la fenêtre OS détachée a écrit depuis la
             // dernière image (voir la doc de tête de
             // `show_detached_project_manager`) — même moment que le reste de
@@ -889,13 +936,14 @@ impl eframe::App for StokesForgeApp {
             // construction qu'il n'est jamais recouvert par lui ni ne le
             // recouvre, comme la barre de menu (`egui::Panel::top`) peinte
             // plus haut.
-            self.project_manager_panel(ui, &mut open_requests, &mut close_requests, active_tab);
+            self.project_manager_panel(ui, open_requests, close_requests, active_tab);
         }
+    }
 
-        self.object_manager_panel(ui, active_tab, &mut actions);
-
+    /// Les requêtes détachées restent drainées avant l’espace de travail.
+    fn drain_detached_tabs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if !self.detached_tabs.is_empty() {
-            self.show_detached_tabs(&ctx);
+            self.show_detached_tabs(ctx);
             // Même vidange que pour le Project Manager, généralisée à
             // plusieurs onglets : chacun peut avoir accumulé des actions et/ou
             // demandé à être réattaché depuis la dernière image.
@@ -942,20 +990,10 @@ impl eframe::App for StokesForgeApp {
                 self.close_detached_tab(tab);
             }
         }
+    }
 
-        self.show_workspace(
-            ui,
-            active_tab,
-            &mut actions,
-            &mut detach_requests,
-            &mut close_requests,
-            &mut geometry_updates,
-        );
-
-        for (tab, rect) in geometry_updates {
-            self.remember_window_geometry(tab, rect);
-        }
-
+    /// Peint les dialogues après le CentralPanel, avant l’application différée.
+    fn show_edit_dialogs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         // Fenêtre d'import (`Action::ImportFiles`, voir la doc de tête de
         // [`import_window`]) : un dialogue transitoire, peint tant que
         // `self.state.import_state()` est `Some`, plutôt qu'une fenêtre
@@ -963,19 +1001,22 @@ impl eframe::App for StokesForgeApp {
         // des requêtes ci-dessous, pour que l'`Action::ImportFiles` qu'elle
         // pousse éventuellement soit dispatchée cette image-ci comme toute
         // autre action.
-        import_window(&ctx, &mut self.state, &mut actions);
+        import_window(ctx, &mut self.state, actions);
         // Fenêtre des propriétés d'un graphe : même famille de dialogue
         // transitoire que la fenêtre d'import, peinte tant que
         // `self.state.plot_settings()` est `Some`.
-        plot_settings_window(&ctx, &mut self.state);
-        column_metadata_window(&ctx, &self.state, &mut actions);
-        if let Some(action) = finish_file_drop(&ctx) {
-            actions.push(action);
-        }
-        for project in self.state.take_projects_to_open() {
-            open_project_in_new_window(&project);
-        }
+        plot_settings_window(ctx, &mut self.state);
+        column_metadata_window(ctx, &self.state, actions);
+    }
 
+    /// Applique les changements de pile seulement après la peinture des fenêtres.
+    fn apply_window_requests(
+        &mut self,
+        ctx: &egui::Context,
+        open_requests: Vec<Tab>,
+        detach_requests: Vec<Tab>,
+        close_requests: Vec<Tab>,
+    ) {
         // Les onglets demandés (Project Manager, panneau fixe ou détaché),
         // les détachements et fermetures demandés par l'en-tête d'une fenêtre
         // flottante, et les actions récoltées par tous les panneaux et
@@ -997,6 +1038,10 @@ impl eframe::App for StokesForgeApp {
             ctx.request_repaint();
         }
         self.close_floating_tabs(close_requests);
+    }
+
+    /// Une confirmation remplace toutes les actions déjà récoltées dans cette image.
+    fn blocking_confirmations(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if self.state.new_project_pending() {
             // Seule la confirmation peut agir sur cette image : clavier,
             // dépôts et requêtes des viewports détachés sont aussi bloqués.
@@ -1004,7 +1049,7 @@ impl eframe::App for StokesForgeApp {
             let label = tr!("new-project-discard");
             let hint = tr!("new-project-discard", "hint");
             match modal_dialog_with(
-                &ctx,
+                ctx,
                 egui::Id::new("stokesforge_new_project"),
                 &tr!("action-new-project"),
                 egui::vec2(480.0, 160.0),
@@ -1035,7 +1080,7 @@ impl eframe::App for StokesForgeApp {
             let label = tr!("sheet-delete-accept");
             let hint = tr!("sheet-delete-accept", "hint");
             match modal_dialog_with(
-                &ctx,
+                ctx,
                 egui::Id::new("stokesforge_delete_sheet"),
                 &tr!("sheet-delete-title"),
                 egui::vec2(480.0, 170.0),
@@ -1058,6 +1103,41 @@ impl eframe::App for StokesForgeApp {
                 DialogOutcome::Open => {}
             }
         }
+    }
+
+    /// La saisie des vues externes compte dans la confirmation de nouveau projet.
+    fn prepare_new_project_action(&self, ctx: &egui::Context, action: Action) -> Action {
+        if let Action::NewProject { pending_edits } = action {
+            // Une saisie dans un viewport détaché, ou un texte du graphe,
+            // n'est pas encore dans l'instantané d'AppState. La signaler
+            // pour demander confirmation même si le modèle est enregistré.
+            let graph_editing = |view: &GraphView| {
+                ctx.data(|data| {
+                    data.get_temp::<TextEditor>(text_editor_id(view)).is_some()
+                        || data
+                            .get_temp::<AnnotationEditor>(annotation_editor_id(view))
+                            .is_some()
+                })
+            };
+            let pending_edits = pending_edits
+                || self.graph_views.values().any(&graph_editing)
+                || self.detached_tabs.values().any(|detached| {
+                    detached.view_model.lock().map_or(true, |model| {
+                        model.view_state.as_ref().is_some_and(|state| {
+                            state.editing().is_some()
+                                || state.header_editing().is_some()
+                                || state.note_editing().is_some()
+                        }) || model.graph_view.as_ref().is_some_and(&graph_editing)
+                    })
+                });
+            Action::NewProject { pending_edits }
+        } else {
+            action
+        }
+    }
+
+    /// Une demande de confirmation arrête aussi les actions restantes de l’image.
+    fn dispatch_actions(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
         for action in actions {
             let action = if matches!(action, Action::Save) && self.state.path().is_empty() {
                 let mut chosen = Vec::new();
@@ -1067,261 +1147,242 @@ impl eframe::App for StokesForgeApp {
             } else {
                 action
             };
-            let action = if let Action::NewProject { pending_edits } = action {
-                // Une saisie dans un viewport détaché, ou un texte du graphe,
-                // n'est pas encore dans l'instantané d'AppState. La signaler
-                // pour demander confirmation même si le modèle est enregistré.
-                let graph_editing = |view: &GraphView| {
-                    ctx.data(|data| {
-                        data.get_temp::<TextEditor>(text_editor_id(view)).is_some()
-                            || data
-                                .get_temp::<AnnotationEditor>(annotation_editor_id(view))
-                                .is_some()
-                    })
-                };
-                let pending_edits = pending_edits
-                    || self.graph_views.values().any(&graph_editing)
-                    || self.detached_tabs.values().any(|detached| {
-                        detached.view_model.lock().map_or(true, |model| {
-                            model.view_state.as_ref().is_some_and(|state| {
-                                state.editing().is_some()
-                                    || state.header_editing().is_some()
-                                    || state.note_editing().is_some()
-                            }) || model.graph_view.as_ref().is_some_and(&graph_editing)
-                        })
-                    });
-                Action::NewProject { pending_edits }
-            } else {
-                action
-            };
-            // `Action::PlotColumns` doit ouvrir le graphe qu'elle crée
-            // (chantier « tracer depuis un classeur »). `dispatch` ne rend
-            // jamais l'identifiant créé — même contrainte que l'import
-            // (`AppState::import_files`) — donc le dossier parent se
-            // calcule **avant** l'envoi de la commande, et le graphe se
-            // retrouve après coup comme le dernier enfant de ce dossier :
-            // `Project::add_graph` l'y insère en dernière position, et
-            // `AppState::dispatch` a déjà rafraîchi `self.state`
-            // (`AppState::refresh`) au retour de cet appel.
-            let plotted_from = if matches!(action, Action::AddGraph) {
-                Some(self.state.tree().root())
-            } else if let Action::PlotColumns { sheet, .. } = &action {
-                self.state
-                    .tree()
-                    .node(*sheet)
-                    .and_then(Node::parent)
-                    .and_then(|book| self.state.tree().node(book).and_then(Node::parent))
-            } else {
-                None
-            };
-            let creates_workbook = matches!(action, Action::AddWorkbook);
-            let new_import_books_after = if matches!(
-                action,
-                Action::ImportFiles {
-                    destination: ImportDestination::NewBookPerFile
-                        | ImportDestination::NewBookForAll,
-                    ..
-                } | Action::DropFiles {
-                    target_book: None,
-                    ..
-                }
-            ) {
-                let root = self.state.tree().root();
-                self.state
-                    .tree()
-                    .node(root)
-                    .map(|node| node.children().len())
-            } else {
-                None
-            };
-            let revision_before = self.state.revision();
-            let epoch_before = self.state.snapshot().epoch;
-            let replaces_project = matches!(
-                action,
-                Action::NewProject { .. } | Action::ConfirmNewProject(true)
-            );
-            let history_selections: Vec<_> = if matches!(action, Action::Undo | Action::Redo) {
-                let graphs =
-                    self.graph_views
-                        .keys()
-                        .copied()
-                        .chain(self.detached_tabs.keys().filter_map(|tab| match tab {
-                            Tab::Graph(graph) => Some(*graph),
-                            _ => None,
-                        }));
-                graphs
-                    .filter_map(|graph| {
-                        let target = self
-                            .read_graph_view(graph, selected_manager_target)
-                            .flatten()?;
-                        let previous = crate::state::current_plot_spec(self.state.tree(), graph)?;
-                        Some((graph, target, previous))
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            let selection_change = match &action {
-                Action::ReorderSeries {
-                    graph,
-                    source,
-                    index,
-                } => Some((*graph, Some((*source, *index)), None)),
-                Action::RemovePlotObject { graph, target } => Some((*graph, None, Some(*target))),
-                Action::RemoveAnnotation { graph, target } => Some((
-                    *graph,
-                    None,
-                    Some(crate::object_manager::VisibilityTarget::Annotation(*target)),
-                )),
-                Action::RemoveShape { graph, target } => Some((
-                    *graph,
-                    None,
-                    Some(crate::object_manager::VisibilityTarget::Shape(*target)),
-                )),
-                _ => None,
-            };
-            self.state.dispatch(action);
-            if self.state.revision() != revision_before {
-                if let Some((graph, moved, removed)) = selection_change {
-                    if let Some(spec) = crate::state::current_plot_spec(self.state.tree(), graph) {
-                        self.with_graph_view(graph, |view| {
-                            if let Some((source, index)) = moved {
-                                if let Some(selected) =
-                                    view.selected_series().filter(|s| s.panel == source.panel)
-                                {
-                                    let next = if selected.index == source.index {
-                                        index
-                                    } else if source.index < selected.index
-                                        && selected.index <= index
-                                    {
-                                        selected.index - 1
-                                    } else if index <= selected.index
-                                        && selected.index < source.index
-                                    {
-                                        selected.index + 1
-                                    } else {
-                                        selected.index
-                                    };
-                                    view.select_series(
-                                        Some(stokesforge_plot::SeriesRef::new(source.panel, next)),
-                                        &spec,
-                                    );
-                                }
-                            }
-                            if let Some(removed) = removed {
-                                let next = crate::object_manager::selection_after_remove(
-                                    selected_manager_target(view),
-                                    removed,
-                                );
-                                select_manager_target(view, next, &spec);
-                            }
-                        });
-                    }
-                }
-            }
-            if self.state.revision() != revision_before {
-                for (graph, target, previous) in history_selections {
-                    if let Some(next) = crate::state::current_plot_spec(self.state.tree(), graph) {
-                        let target = crate::object_manager::selection_after_history(
-                            &previous,
-                            &next,
-                            Some(target),
-                        );
-                        self.with_graph_view(graph, |view| {
-                            select_manager_target(view, target, &next)
-                        });
-                    }
-                }
-            }
-            if replaces_project && self.state.snapshot().epoch != epoch_before {
-                // Les NodeId peuvent être réemployés : oublier toutes les
-                // vues et géométries de l'ancienne identité avant de peindre.
-                for tab in self.detached_tabs.keys() {
-                    ctx.send_viewport_cmd_to(
-                        egui::ViewportId::from_hash_of(tab),
-                        egui::ViewportCommand::Close,
-                    );
-                }
-                self.detached_tabs.clear();
-                self.floating_tabs.clear();
-                self.cascade_rank.clear();
-                self.next_cascade = 0;
-                self.focus_next = None;
-                self.graph_views.clear();
-                self.active_detached = None;
-                self.collapsed_tabs.clear();
-                self.maximized_tab = None;
-                self.window_positions.clear();
-                self.window_sizes.clear();
-                self.workspace_scroll = egui::Vec2::ZERO;
-                self.saved_window_geometries.clear();
-                self.floating_rects.clear();
-                self.pm_selection.clear();
-                self.pm_requests = Arc::new(Mutex::new(DetachedProjectManagerRequests::default()));
-                self.hidden_tabs.clear();
-                ctx.memory_mut(|memory| {
-                    // Les éditeurs sur place et formats différés ne doivent
-                    // pas survivre à la fenêtre qu'ils visaient. Garder les
-                    // préférences et dimensions des panneaux de l'application.
-                    memory.data.remove_by_type::<TextEditor>();
-                    memory.data.remove_by_type::<AnnotationEditor>();
-                    memory
-                        .data
-                        .remove::<Option<crate::text_format::TextFormat>>(pending_format_id());
-                    memory.data.remove::<Option<String>>(pending_zone_font_id());
-                    memory.data.remove_by_type::<egui::scroll_area::State>();
-                    if let Some(focused) = memory.focused() {
-                        memory.surrender_focus(focused);
-                    }
-                });
-                ctx.request_repaint();
-            }
-            if self.state.new_project_pending() {
-                ctx.request_repaint();
+            let action = self.prepare_new_project_action(ctx, action);
+            if self.dispatch_action(ctx, action) {
                 break;
             }
-            if creates_workbook && self.state.revision() != revision_before {
-                let root = self.state.tree().root();
-                if let Some(book) = self
+        }
+    }
+
+    /// Capture les effets de présentation avant la commande, puis les applique à son résultat.
+    fn dispatch_action(&mut self, ctx: &egui::Context, action: Action) -> bool {
+        // `Action::PlotColumns` doit ouvrir le graphe qu'elle crée
+        // (chantier « tracer depuis un classeur »). `dispatch` ne rend
+        // jamais l'identifiant créé — même contrainte que l'import
+        // (`AppState::import_files`) — donc le dossier parent se
+        // calcule **avant** l'envoi de la commande, et le graphe se
+        // retrouve après coup comme le dernier enfant de ce dossier :
+        // `Project::add_graph` l'y insère en dernière position, et
+        // `AppState::dispatch` a déjà rafraîchi `self.state`
+        // (`AppState::refresh`) au retour de cet appel.
+        let plotted_from = if matches!(action, Action::AddGraph) {
+            Some(self.state.tree().root())
+        } else if let Action::PlotColumns { sheet, .. } = &action {
+            self.state
+                .tree()
+                .node(*sheet)
+                .and_then(Node::parent)
+                .and_then(|book| self.state.tree().node(book).and_then(Node::parent))
+        } else {
+            None
+        };
+        let creates_workbook = matches!(action, Action::AddWorkbook);
+        let new_import_books_after = if matches!(
+            action,
+            Action::ImportFiles {
+                destination: ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll,
+                ..
+            } | Action::DropFiles {
+                target_book: None,
+                ..
+            }
+        ) {
+            let root = self.state.tree().root();
+            self.state
+                .tree()
+                .node(root)
+                .map(|node| node.children().len())
+        } else {
+            None
+        };
+        let revision_before = self.state.revision();
+        let epoch_before = self.state.snapshot().epoch;
+        let replaces_project = matches!(
+            action,
+            Action::NewProject { .. } | Action::ConfirmNewProject(true)
+        );
+        let history_selections: Vec<_> = if matches!(action, Action::Undo | Action::Redo) {
+            let graphs =
+                self.graph_views
+                    .keys()
+                    .copied()
+                    .chain(self.detached_tabs.keys().filter_map(|tab| match tab {
+                        Tab::Graph(graph) => Some(*graph),
+                        _ => None,
+                    }));
+            graphs
+                .filter_map(|graph| {
+                    let target = self
+                        .read_graph_view(graph, selected_manager_target)
+                        .flatten()?;
+                    let previous = crate::state::current_plot_spec(self.state.tree(), graph)?;
+                    Some((graph, target, previous))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let selection_change = match &action {
+            Action::ReorderSeries {
+                graph,
+                source,
+                index,
+            } => Some((*graph, Some((*source, *index)), None)),
+            Action::RemovePlotObject { graph, target } => Some((*graph, None, Some(*target))),
+            Action::RemoveAnnotation { graph, target } => Some((
+                *graph,
+                None,
+                Some(crate::object_manager::VisibilityTarget::Annotation(*target)),
+            )),
+            Action::RemoveShape { graph, target } => Some((
+                *graph,
+                None,
+                Some(crate::object_manager::VisibilityTarget::Shape(*target)),
+            )),
+            _ => None,
+        };
+        self.state.dispatch(action);
+        if self.state.revision() != revision_before {
+            if let Some((graph, moved, removed)) = selection_change {
+                self.update_selection_after_action(graph, moved, removed);
+            }
+        }
+        if self.state.revision() != revision_before {
+            for (graph, target, previous) in history_selections {
+                if let Some(next) = crate::state::current_plot_spec(self.state.tree(), graph) {
+                    let target = crate::object_manager::selection_after_history(
+                        &previous,
+                        &next,
+                        Some(target),
+                    );
+                    self.with_graph_view(graph, |view| select_manager_target(view, target, &next));
+                }
+            }
+        }
+        if replaces_project && self.state.snapshot().epoch != epoch_before {
+            self.forget_project_views(ctx);
+        }
+        if self.state.new_project_pending() {
+            ctx.request_repaint();
+            return true;
+        }
+        if creates_workbook && self.state.revision() != revision_before {
+            let root = self.state.tree().root();
+            if let Some(book) = self
+                .state
+                .tree()
+                .node(root)
+                .and_then(|node| node.children().last().copied())
+                .filter(|id| self.state.worksheets_of(*id).len() == 1)
+            {
+                self.open_tab(Tab::Book(book));
+            }
+        }
+        if let Some(before) = new_import_books_after {
+            self.open_new_workbooks_after(before);
+        }
+        if let Some(parent) = plotted_from {
+            // `self.state.revision()` n'a bougé que si `AddGraph` a
+            // effectivement été envoyée (voir `AppState::plot_columns`) :
+            // sans ce garde, une sélection sans Y (no-op côté modèle)
+            // rouvrirait à tort le dernier enfant déjà présent dans
+            // `parent`, qui n'a rien à voir avec ce clic.
+            if self.state.revision() != revision_before {
+                if let Some(graph) = self
                     .state
                     .tree()
-                    .node(root)
+                    .node(parent)
                     .and_then(|node| node.children().last().copied())
-                    .filter(|id| self.state.worksheets_of(*id).len() == 1)
                 {
-                    self.open_tab(Tab::Book(book));
+                    self.open_tab(Tab::Graph(graph));
                 }
             }
-            if let Some(before) = new_import_books_after {
-                self.open_new_workbooks_after(before);
-            }
-            if let Some(parent) = plotted_from {
-                // `self.state.revision()` n'a bougé que si `AddGraph` a
-                // effectivement été envoyée (voir `AppState::plot_columns`) :
-                // sans ce garde, une sélection sans Y (no-op côté modèle)
-                // rouvrirait à tort le dernier enfant déjà présent dans
-                // `parent`, qui n'a rien à voir avec ce clic.
-                if self.state.revision() != revision_before {
-                    if let Some(graph) = self
-                        .state
-                        .tree()
-                        .node(parent)
-                        .and_then(|node| node.children().last().copied())
+        }
+        false
+    }
+
+    /// Réordonnancement et suppression font suivre la sélection seulement si la commande a agi.
+    fn update_selection_after_action(
+        &mut self,
+        graph: NodeId,
+        moved: Option<(stokesforge_plot::SeriesRef, usize)>,
+        removed: Option<crate::object_manager::VisibilityTarget>,
+    ) {
+        if let Some(spec) = crate::state::current_plot_spec(self.state.tree(), graph) {
+            self.with_graph_view(graph, |view| {
+                if let Some((source, index)) = moved {
+                    if let Some(selected) =
+                        view.selected_series().filter(|s| s.panel == source.panel)
                     {
-                        self.open_tab(Tab::Graph(graph));
+                        let next = if selected.index == source.index {
+                            index
+                        } else if source.index < selected.index && selected.index <= index {
+                            selected.index - 1
+                        } else if index <= selected.index && selected.index < source.index {
+                            selected.index + 1
+                        } else {
+                            selected.index
+                        };
+                        view.select_series(
+                            Some(stokesforge_plot::SeriesRef::new(source.panel, next)),
+                            &spec,
+                        );
                     }
                 }
-            }
+                if let Some(removed) = removed {
+                    let next = crate::object_manager::selection_after_remove(
+                        selected_manager_target(view),
+                        removed,
+                    );
+                    select_manager_target(view, next, &spec);
+                }
+            });
         }
+    }
 
-        self.sync_window_views();
-        if snapshot_stamp(self.state.snapshot()) != published_stamp {
-            // Les commandes sont appliquées après la publication des viewports.
-            // Garantir l'image qui leur transmettra ce nouvel instantané.
-            ctx.request_repaint();
+    /// Un remplacement d’identité oublie les vues qui pourraient viser des NodeId réemployés.
+    fn forget_project_views(&mut self, ctx: &egui::Context) {
+        // Les NodeId peuvent être réemployés : oublier toutes les
+        // vues et géométries de l'ancienne identité avant de peindre.
+        for tab in self.detached_tabs.keys() {
+            ctx.send_viewport_cmd_to(
+                egui::ViewportId::from_hash_of(tab),
+                egui::ViewportCommand::Close,
+            );
         }
-        self.screenshot(&ctx);
-        self.autoquit(&ctx);
+        self.detached_tabs.clear();
+        self.floating_tabs.clear();
+        self.cascade_rank.clear();
+        self.next_cascade = 0;
+        self.focus_next = None;
+        self.graph_views.clear();
+        self.active_detached = None;
+        self.collapsed_tabs.clear();
+        self.maximized_tab = None;
+        self.window_positions.clear();
+        self.window_sizes.clear();
+        self.workspace_scroll = egui::Vec2::ZERO;
+        self.saved_window_geometries.clear();
+        self.floating_rects.clear();
+        self.pm_selection.clear();
+        self.pm_requests = Arc::new(Mutex::new(DetachedProjectManagerRequests::default()));
+        self.hidden_tabs.clear();
+        ctx.memory_mut(|memory| {
+            // Les éditeurs sur place et formats différés ne doivent
+            // pas survivre à la fenêtre qu'ils visaient. Garder les
+            // préférences et dimensions des panneaux de l'application.
+            memory.data.remove_by_type::<TextEditor>();
+            memory.data.remove_by_type::<AnnotationEditor>();
+            memory
+                .data
+                .remove::<Option<crate::text_format::TextFormat>>(pending_format_id());
+            memory.data.remove::<Option<String>>(pending_zone_font_id());
+            memory.data.remove_by_type::<egui::scroll_area::State>();
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+        ctx.request_repaint();
     }
 }
 
@@ -1603,6 +1664,116 @@ mod tests {
             app.state.revision(),
             "l'image programmée publie le résultat"
         );
+        session.shutdown().unwrap();
+    }
+
+    /// L'arrêt du dispatch protège aussi les actions déjà collectées après Ctrl+N.
+    #[test]
+    fn la_confirmation_arrete_les_actions_suivantes_de_l_image() {
+        let (session, _) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let column = app.state.visible_columns(sheet)[0].0;
+        let context = egui::Context::default();
+        let commit = || Action::CommitCell {
+            column,
+            row: 0,
+            text: "42".into(),
+        };
+        let before = app.state.cell_text(column, 0);
+        assert_ne!(before, "42", "témoin : la saisie change bien la valeur");
+        app.dispatch_actions(
+            &context,
+            vec![
+                Action::NewProject {
+                    pending_edits: true,
+                },
+                commit(),
+            ],
+        );
+        assert!(app.state.new_project_pending());
+        assert_eq!(app.state.cell_text(column, 0), before);
+
+        // Témoin : une fois la confirmation annulée, la même saisie agit.
+        app.dispatch_actions(&context, vec![Action::ConfirmNewProject(false), commit()]);
+        assert!(!app.state.new_project_pending());
+        assert_eq!(app.state.cell_text(column, 0), "42");
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn la_confirmation_peinte_vide_les_actions_de_l_image() {
+        let (session, _) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        let mut actions = vec![Action::AddGraph];
+        context
+            .run_ui(egui::RawInput::default(), |ui| {
+                app.blocking_confirmations(ui.ctx(), &mut actions);
+            })
+            .textures_delta
+            .clear();
+        assert_eq!(
+            actions.len(),
+            1,
+            "sans confirmation, l'action reste collectée"
+        );
+        app.state.dispatch(Action::NewProject {
+            pending_edits: true,
+        });
+        context
+            .run_ui(egui::RawInput::default(), |ui| {
+                app.blocking_confirmations(ui.ctx(), &mut actions);
+            })
+            .textures_delta
+            .clear();
+        assert!(
+            actions.is_empty(),
+            "seul le dialogue peut agir dans cette image"
+        );
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn le_dispatch_n_ouvre_un_graphe_que_si_la_commande_en_cree_un() {
+        let (session, _) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        app.floating_tabs.clear();
+        let context = egui::Context::default();
+        let before = app.state.revision();
+        app.dispatch_actions(
+            &context,
+            vec![Action::PlotColumns {
+                sheet,
+                columns: Vec::new(),
+                plot_type: stokesforge_plot::PlotType::Line,
+            }],
+        );
+        assert_eq!(app.state.revision(), before);
+        assert!(
+            app.floating_tabs.is_empty(),
+            "pas de réouverture du dernier enfant"
+        );
+
+        app.dispatch_actions(&context, vec![Action::AddGraph]);
+        assert!(app.state.revision() > before, "témoin : création effective");
+        let graph = *app
+            .state
+            .tree()
+            .node(app.state.tree().root())
+            .unwrap()
+            .children()
+            .last()
+            .unwrap();
+        assert_eq!(app.floating_tabs, vec![Tab::Graph(graph)]);
         session.shutdown().unwrap();
     }
 

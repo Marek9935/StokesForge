@@ -181,3 +181,24 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
 
 **À lire** : `stokesforge-robustesse/src/lib.rs` (l'index des batteries), puis la
 tête du fichier `b*` visé.
+
+## Redécoupe des fonctions d'interface (#124)
+
+Les bancs des surfaces gardent les mêmes événements et rectangles : menus,
+grille, pages des propriétés, assistant d'import, Object Manager et bande
+d'onglets. Les cas ajoutés vérifient notamment la plage visée par le menu de
+type, le maintien des paramètres de format, le calque et la série réellement
+édités, le repli indépendant des groupes de l'arbre et l'ordre des callbacks.
+Le callback détaché de la note collecte son édition et sa fermeture avant leur
+application par la racine.
+
+Dans `app.rs`, les phases extraites sont éprouvées aussi directement : une
+confirmation vide les actions récoltées, arrête le dispatch de celles qui
+suivent, et une commande de tracé sans effet n'ouvre aucun onglet. Dans
+`window_stack.rs`, masquer un graphe garde sa place mais saute contenu et
+publication de géométrie ; le témoin visible les retrouve.
+
+Les nouveaux cas sont éprouvés par des mutations temporaires retirées avant
+livraison. Les comparaisons de formes egui avant/après (texte, positions,
+couleurs, rognage) complètent les tests de gestes ; elles ne remplacent pas une
+validation interactive des fenêtres OS détachées ou des sélecteurs natifs.

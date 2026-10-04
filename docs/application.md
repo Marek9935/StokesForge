@@ -13,7 +13,7 @@ l'intégration bout en bout tient — modèle → commande → annulation → sa
 coûte qu'une réécriture de ce crate**, et non celle de tout ce qu'on aurait
 bâti par-dessus. Deux fondations techniques sont posées au-dessus de ce
 principe (voir plus bas) : la disposition est en **fenêtres flottantes
-confinées** (`egui::Window`), et Save/Load passent par un vrai sélecteur de
+confinées** (`egui::Area`), et Save/Load passent par un vrai sélecteur de
 fichiers natif (`rfd`) — ce ne sont que des charpentes, pas les panneaux
 définitifs qu'elles accueilleront.
 
@@ -37,7 +37,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | Fichier | Rôle |
 |---|---|
 | `app.rs` | orchestration : `StokesForgeApp` et ses champs, `new` (disposition initiale, restauration de l'état des fenêtres), `ui()` et l'**ordre des panneaux**, `collect_shortcuts` (raccourcis globaux, consommés avant les widgets), application différée des actions et ouvertures après la peinture, confirmations bloquantes (nouveau projet, suppression de feuille), drainage des fenêtres détachées, capture et auto-fermeture de vérification. Y restent aussi des aides que des modules relisent par `super::` (`tab_title`, `tab_title_from_tree`, `snapshot_stamp`, `active_tab_kind`, `saved_colors_id`, `color_request_action`, `paint_drag_handle_icon`) : des dépendances à rebours, à reprendre |
-| `app/menus.rs` | barre de menu (`menu_bar` : File, Edit, Workbook, Graph, View, Window) et barre d'état (`status_bar`) |
+| `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`) |
 | `app/format.rs` | barres de format de texte et d'objet, barre contextuelle : `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (les barres elles-mêmes : `crate::toolbar`) |
 | `app/project_manager.rs` | Project Manager : `project_manager_panel` (panneau fixe) et l'arbre `project_manager_contents_from_tree`, commun au panneau et à la fenêtre détachée |
 | `app/object_manager_ui.rs` | Object Manager peint : `object_manager_panel`, `run_object_manager_request`, lignes, cases, menus, glisser des séries (le modèle : `crate::object_manager`) |
@@ -45,12 +45,12 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/tab.rs` | `Tab`, l'onglet d'une fenêtre de contenu (classeur, graphe, matrice, note), et ses traductions vers le modèle (`tab_for_window`, `tab_node`) |
 | `app/contents.rs` | contenus partagés flottant/détaché : `tab_contents`, `note_contents`, `matrix_contents` (espace réservé) |
 | `app/workbook.rs` | classeur : `book_contents` (contenu commun flottant/détaché), `sheet_tabs`, `workbook_menu` |
-| `app/grid.rs` | grille d'une feuille : table virtualisée, en-tête empilé, gouttière, cellules, `grid_edit_menu`, focus clavier (`GRID_KEYS`, `keyboard_focus_outside_grid`), barres déportées, `grid_grip_side`, libellés de type et de rôle |
+| `app/grid.rs` | grille d'une feuille : `grid_contents` prépare la table, appelle `grid_keyboard`, puis ses en-têtes et son corps virtualisé, en-tête empilé, gouttière, cellules, `grid_edit_menu`, focus clavier (`GRID_KEYS`, `keyboard_focus_outside_grid`), barres déportées, `grid_grip_side`, libellés de type et de rôle |
 | `app/graph_window.rs` | fenêtre de graphe : `graph_view_contents` (commun flottant/détaché), `graph_drop_target`, menu contextuel de la figure, `annotation_interactions`, ordre et propriétés des objets, `request_graph_export` |
 | `app/graph_text_edit.rs` | éditeurs sur place (texte libre, titre, nom de légende) et mise en forme en attente demandée par la barre de format |
 | `app/file_drop.rs` | dépôt de fichiers : `begin_file_drop`, `claim_file_drop`, `finish_file_drop` (un emplacement par viewport), `open_project_in_new_window` |
-| `app/import_wizard.rs` | assistant d'import : `import_window`, ses six étapes, l'aperçu coloré par rôle, les libellés des choix |
-| `app/plot_settings.rs` | propriétés du graphe : `plot_settings_window`, ses onglets et éditeurs, le mémo des formules ; `column_metadata_window` |
+| `app/import_wizard.rs` | assistant d'import : `import_window`, ses six étapes ; choix du modèle/fichiers et réglages du format en sections, l'aperçu coloré par rôle, les libellés des choix |
+| `app/plot_settings.rs` | propriétés du graphe : `plot_settings_window`, ses onglets, un éditeur par page, le mémo des formules ; `column_metadata_window` |
 | `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with` |
 | `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
 | `app/shortcuts.rs` | constantes `SHORTCUT_*` et leurs rappels, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
@@ -60,8 +60,22 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/window_detach.rs` | détachement en fenêtres OS : `show_detached_project_manager`, `detach_tab`/`reattach_tab`, `show_detached_tabs` et la publication de l'instantané qui réveille les viewports (#104), `sync_window_views` (état des fenêtres envoyé à la session, #16) |
 
 Une nouvelle surface volumineuse s'écrit dans son propre module, sur ce
-modèle ; `app.rs` n'y gagne que l'appel. La redécoupe des fonctions géantes
-(`menu_bar`, `ui()`…) est l'issue #124, chacune dans son propre commit.
+modèle ; `app.rs` n'y gagne que l'appel. Depuis #124, `ui()` décrit les
+étapes de l'image : travaux en fond, raccourcis, panneaux dans l'ordre ci-dessus,
+espace de travail, dialogues, requêtes de fenêtres, confirmations et dispatch.
+Les menus, la grille (en-têtes, clavier, corps et glisser), l'Object Manager
+(en-têtes, calques, séries, axes et objets), les pages des propriétés et les
+étapes fichiers/format de l'import sont découpés sur place. Le détachement
+sépare publication, contenu et requêtes ; l'espace de travail sépare
+maximisation, défilement et peinture d'une fenêtre ; la bande d'onglets sépare
+menus, renommage, défilement et callbacks.
+
+Une extraction conserve l'imbrication des `Ui`, les identifiants persistés et
+l'ordre de consommation des événements. Les petits contextes privés de
+peinture regroupent uniquement les données ou emprunts disjoints nécessaires
+à une image ; ils n'ajoutent ni état métier ni sous-`Ui`. Les ouvertures et
+fermetures restent appliquées après le parcours de la pile. Une redécoupe
+future reste dans un commit séparé d'un déplacement.
 
 ### Fenêtres flottantes confinées
 
