@@ -258,7 +258,7 @@ avant la construction de la grille, qui ne peut donc plus la repousser hors du
 cadre (`book_contents`) ; ce découpage n'utilise pas `egui::Panel`, qui
 remplace le rognage de son parent au lieu de le combiner et dessinait les
 onglets sous la vue d'une fenêtre coupée. Les onglets
-gardent leur taille naturelle (`sheet_tabs`, enveloppe de `tab_strip`, `crates/stokesforge-app/src/app.rs`) —
+gardent leur taille naturelle (`sheet_tabs`, enveloppe de `tab_strip`, `crates/stokesforge-app/src/app/workbook.rs`) —
 ils ne rétrécissent pas et ne se replient pas dans un menu « … ». La bande n'a
 **pas** de barre de défilement : quand des onglets sont cachés, deux boutons
 « < » et « > » apparaissent à sa gauche et font apparaître l'onglet caché
@@ -300,7 +300,12 @@ leurs éditeurs, le mémo des formules, les libellés des choix, et
 `column_metadata_window`, même famille de dialogue) ; ses tests peignent chaque
 onglet sans rien modifier, en `en` et en `en-XA` (sous-processus, la langue
 étant globale), et tiennent la validation au relâchement et à la perte de
-focus. La suite (grille, graphe, menus) est #120–#123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
+focus. La grille et le classeur (#120) : `app/grid.rs` (table, en-tête empilé,
+gouttière, cellules, `grid_edit_menu`, focus clavier
+`GRID_KEYS`/`keyboard_focus_outside_grid`, barres déportées, `grid_grip_side`,
+constantes et libellés de la grille) et `app/workbook.rs` (`book_contents`,
+contenu commun flottant/détaché, `sheet_tabs`, `workbook_menu`). La suite
+(graphe, menus) est #121–#123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
 et cherchent leurs fonctions par leur nom (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
@@ -806,7 +811,7 @@ réussie. Le lot est une seule entrée d'historique annulable.
 Les cinq zones de la grille — cellule de données, champ d'en-tête d'une seule
 colonne, rangée des lettres, gouttière des numéros de ligne, libellés de champ
 entier dans cette même gouttière — portent le **même** bloc d'édition au clic
-droit (`app::grid_edit_menu`) : Couper, Copier, Copier avec l'en-tête, Coller,
+droit (`app::grid::grid_edit_menu`) : Couper, Copier, Copier avec l'en-tête, Coller,
 Coller à l'identique, Vider, Supprimer et décaler, Annuler, Rétablir. Aucun
 n'offre d'action qui n'ait pas d'équivalent au clavier : ce bloc est le miroir
 exact du bloc de raccourcis de `grid_contents`. La rangée des lettres y ajoute
@@ -896,9 +901,9 @@ chaque colonne individuellement — et n'apparaît que si la feuille a déjà un
 sélection couvrant au moins une colonne (`AppState::column_drag_payload`).
 Le survol y affiche un curseur « attraper » et un petit pictogramme (une
 grille de points, peinte à la main plutôt qu'un glyphe de police — voir
-`app::paint_drag_handle_icon`) à côté du pointeur. `app::grid_grip_side` est
-la fonction pure qui décide si un point est dans cette bande, testée dans
-`tests/shell.rs` sans fenêtre ; `grid_contents` s'en sert pour peindre
+`app::paint_drag_handle_icon`) à côté du pointeur. `app::grid::grid_grip_side`
+(réexportée en `app::grid_grip_side`) est la fonction pure qui décide si un
+point est dans cette bande, testée dans `tests/shell.rs` sans fenêtre ; `grid_contents` s'en sert pour peindre
 l'icône et interagit séparément sur deux rectangles confinés (gauche, droite)
 pour démarrer le glisser, afin de ne jamais intercepter le reste de la
 grille.
@@ -1259,12 +1264,12 @@ affiché, dans le Project Manager.
 La correspondance position → lettre est `stokesforge_core::spreadsheet_name`,
 rendue publique pour l'occasion : c'est la même fonction qui nomme les
 colonnes créées sans nom explicite, qui peint l'en-tête de la grille
-(`app::column_letter` n'en est plus qu'un alias) et qui écrit les libellés
+(`app::grid::column_letter` n'en est plus qu'un alias) et qui écrit les libellés
 d'historique. Trois copies de cet algorithme valaient trois façons d'appeler
 la même colonne.
 
-La gouttière (`app::row_number_widget`) est le miroir exact de la rangée des
-lettres (`app::column_header_widget`) : toute sa largeur sélectionne, au clic,
+La gouttière (`app::grid::row_number_widget`) est le miroir exact de la rangée des
+lettres (`app::grid::column_header_widget`) : toute sa largeur sélectionne, au clic,
 **toute la ligne** — les colonnes visibles de la feuille, à cette ligne, quelle
 que soit leur longueur propre (une colonne plus courte que la ligne visée
 reste touchée par la sélection, seule sa portion réellement écrite est
@@ -1278,14 +1283,14 @@ d'étendre silencieusement sans effet, et réciproquement.
 
 ### La gouttière côté en-tête : homogène, et elle aussi sélectionnable
 
-Côté en-tête empilée (`app::row_number_header_widget`), la gouttière portait
+Côté en-tête empilée (`app::grid::row_number_header_widget`), la gouttière portait
 un « # » décoratif sur fond `header_letter_row_fill`, puis quatre rangées de
 libellés (« Long Name », « Units », « Comments », « F(x)= ») restées
 **transparentes** et inertes — la colonne de gauche n'était donc homogène ni
 visuellement (le fond s'arrêtait au « # ») ni fonctionnellement (rien n'y
 était cliquable). Les deux sont corrigés ensemble : chaque rangée de libellé
 porte désormais le même fond que le « # » (ou le surlignage de sélection),
-et un clic sur un libellé (`app::header_row_label_widget`) sélectionne ce
+et un clic sur un libellé (`app::grid::header_row_label_widget`) sélectionne ce
 champ pour **toutes** les colonnes visibles de la feuille — symétrique de
 `row_number_widget` côté données. `AppState::select_header_row`/
 `extend_header_row_selection`/`is_header_row_selected` en sont les pendants
@@ -1295,7 +1300,7 @@ pour la zone d'en-tête : elle touche toutes les colonnes et, symétriquement,
 ne touche jamais les données (`row_range()` y vaut toujours `None`).
 
 Ce n'est **pas** la même chose qu'un champ sélectionné sur une seule colonne
-(`app::header_field_widget`, `Selection::header_field`) : celui-ci reste
+(`app::grid::header_field_widget`, `Selection::header_field`) : celui-ci reste
 strictement à une colonne, glisser peut l'étendre à d'autres colonnes mais
 jamais d'un seul geste à *toutes* les colonnes de la feuille — les deux
 widgets, les deux constructeurs et les deux gestes restent distincts, même
@@ -1323,7 +1328,7 @@ gutter_text_color` lui donne une teinte propre, nettement plus sombre,
 indépendante de la couleur globale des éléments « actifs » pour ne pas
 déteindre sur des boutons ou onglets sans rapport.
 
-Le fond, lui, gagne un troisième palier. `app::gutter_fill(selected,
+Le fond, lui, gagne un troisième palier. `app::grid::gutter_fill(selected,
 touched)` choisit entre `theme::header_letter_row_fill` (repos),
 `header_letter_row_touched_fill` (la colonne ou la ligne d'une cellule de
 données sélectionnée, sans être elle-même cliquée) et
@@ -1364,7 +1369,7 @@ dans son propre traitement (`AppState::add_column_and_select`) : ajoute la
 colonne, *puis* — une fois `self.snapshot` rafraîchi par `execute` — sélectionne
 `row` dans la dernière colonne visible. Câblé aux deux mêmes endroits que Tab
 normal : le raccourci clavier direct de `grid_contents`, et la validation
-d'édition de `cell_widget` — `app::is_last_visible_column` factorise la
+d'édition de `cell_widget` — `app::grid::is_last_visible_column` factorise la
 condition commune aux deux.
 
 Câblé aussi **côté en-tête** (`Action::AddColumnAndSelectHeaderField`,
@@ -1411,7 +1416,7 @@ classeur détaché, tous deux par `book_contents`) :
 Limite : le filtre ne s'applique qu'à l'image qui suit la prise de focus
 (`set_focus_lock_filter` exige `had_focus_last_frame`) — une touche tombant
 dans l'image même du clic n'est pas une frappe réaliste. Verrouillé par
-`app::grid_keyboard_tests`. Le focus d'egui ne se voit pas dans une capture
+les tests de `app/grid.rs` (`app::grid::tests`). Le focus d'egui ne se voit pas dans une capture
 (`STOKESFORGE_APP_SCREENSHOT`) : à confirmer sur une vraie fenêtre.
 
 ### Alignement du corps : nombres à droite, texte à gauche
@@ -1454,7 +1459,7 @@ Deux écarts délibérés entre le menu et le clavier :
   facile d'accès ; un menu contextuel est un geste explicite et désigné.
 - **« Coller » n'est jamais grisé.** egui n'expose aucune API de *lecture* du
   presse-papier (Ctrl+V ne marche que parce qu'`egui-winit` lit lui-même le
-  presse-papier avant de pousser l'`Event::Paste`), donc `app::
+  presse-papier avant de pousser l'`Event::Paste`), donc `app::grid::
   system_clipboard_text` le lit directement via `arboard` — la bibliothèque
   qu'`egui-winit` emploie déjà en interne. Savoir s'il y a quelque chose à
   coller exigerait cette lecture à *chaque image* où le menu est ouvert : on

@@ -12,7 +12,7 @@ Le *quoi* et le *pourquoi* du résultat, eux, vivent au plus près du code :
 coût de l'aperçu, `crates/stokesforge-import/src/recipe.rs` pour le modèle
 (`HeaderLayout`, `SubheaderRoles`), `crates/stokesforge-app/src/app/import_wizard.rs`
 (`import_window`, sorti d'`app.rs` par #118) pour le panneau, et
-`crates/stokesforge-app/src/app.rs` (`grid_contents`) pour le bug de champ de
+`crates/stokesforge-app/src/app/grid.rs` (`grid_contents`) pour le bug de champ de
 texte.
 
 ## L'objectif

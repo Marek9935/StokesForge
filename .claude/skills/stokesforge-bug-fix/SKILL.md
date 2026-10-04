@@ -45,7 +45,9 @@ Le réflexe coûteux est de réparer là où le symptôme se voit. Table de renv
 
 | Symptôme | Où la cause vit le plus souvent |
 |---|---|
-| valeur fausse dans la grille | `stokesforge-core` (colonnes, conversion) ou la `Command` qui l'a écrite, pas `app.rs` |
+| valeur fausse dans la grille | `stokesforge-core` (colonnes, conversion) ou la `Command` qui l'a écrite, pas `app/grid.rs` |
+| Tab ou une flèche sort de la grille, ou la grille vole une touche à un champ texte | focus clavier de `app/grid.rs` (#38) : `GRID_KEYS` sur l'ancrage et sur les champs en édition, `claim_grid_focus`, garde `focus_free` ; ailleurs, `keyboard_focus_outside_grid`, jamais `focused().is_some()`. Tests : `app::grid::tests` |
+| grille, onglets de feuille ou barres mal placés dans un classeur | `book_contents` (`app/workbook.rs`), partagé flottant/détaché : le découpage du rectangle (grille, onglets, barres) y est fait une fois. Tests de disposition : `app::workbook::tests` |
 | annulation qui ne rend pas l'état d'avant | `stokesforge-commands` : le delta calculé à l'application, ou la nature structurelle/données de la commande |
 | état perdu après enregistrement + rechargement | `stokesforge-persistence` (`convert.rs`, `schema.rs`) — un champ ajouté au modèle sans transport |
 | écran ≠ export SVG/PDF/PNG | mesure de texte (invariant 4) ou fonctionnalité écrite dans un seul backend (invariant 5) — voir **stokesforge-rendu** |

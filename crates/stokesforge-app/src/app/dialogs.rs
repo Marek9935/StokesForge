@@ -9,7 +9,7 @@ use eframe::egui;
 
 use crate::{theme, tr};
 
-use super::keyboard_focus_outside_grid;
+use super::grid::keyboard_focus_outside_grid;
 use super::window_chrome::{
     floating_resize_handles, show_window_contents_bounded, show_window_in_layer, window_header,
     HeaderPlacement, WindowHeaderActions, MIN_CONTENT_WINDOW_SIZE,
