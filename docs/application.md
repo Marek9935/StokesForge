@@ -281,10 +281,14 @@ compris, est agrandi ou réduit uniformément (`GraphView::paint_scaled`,
 ne reconstruit pas le cache de formes. La règle est identique en fenêtre
 flottante et détachée, qui partagent la même fonction.
 
-Le cadre commun des fenêtres de contenu (`window_header`, `show_window_in_layer`,
-`floating_window_frame`, poignées de redimensionnement, `HeaderPlacement`) vit dans
-`window_chrome.rs`, sous-module d'`app` (#100 étape 1) ; le reste de la logique des
-fenêtres reste dans `app.rs` en attendant #101.
+Les fenêtres de contenu sont découpées en sous-modules d'`app` (#100, #101), déplacés
+sans changement de comportement ; chacun porte la doc de tête de sa partie :
+`window_chrome.rs` (cadre commun : `window_header`, `show_window_in_layer`,
+`floating_window_frame`, poignées, `HeaderPlacement`), `window_placement.rs` (cascade,
+espace de travail, bornage), `window_stack.rs` (`Tab`, ordre de pile, masquage, repli,
+maximisation, `show_workspace`) et `window_detach.rs` (viewports OS du Project Manager et
+des onglets). Ce sont des sous-modules (`#[path]` vers `src/`) pour garder l'accès aux types
+privés d'`app` et rester vus des gardes qui lisent `src/*.rs`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
 Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou
