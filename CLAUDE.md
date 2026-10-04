@@ -87,7 +87,7 @@ Object Manager (#81–85) : `object_manager.rs` projette le graphe,
 reste dans `GraphView` (même vue en fenêtre détachée). Les textes automatiques
 (titres, légende) sont cachés par défaut ; une bascule unique
 (`Action::SetObjectManagerShowTexts`, préférence hors `.stf`, #102) les liste.
-Les échelles (groupe « Axes » sous le calque, une ligne par axe, case = `AxisSpec::visible`, #111)
+Les échelles (groupe « Axes » sous le calque, replié par défaut #138, une ligne par axe, case = `AxisSpec::visible`, #111)
 ont leur propre bascule jumelle (`Action::SetObjectManagerShowScales`) et ne sont
 pas commandées par les cases du graphique/calque. Les filtres vivent dans
 `object_tree_with_selection`. Les bascules réutilisent

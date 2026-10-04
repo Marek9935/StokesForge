@@ -420,8 +420,9 @@ impl ObjectManagerPaint<'_> {
         selected: &mut Option<T>,
     ) -> f32 {
         let id = ui.make_persistent_id((self.graph, layer.index, "axes"));
+        // Replié par défaut (#138) : les échelles se déplient d'un clic.
         let (axes_toggle, _, _) =
-            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                 .show_header(ui, |ui| {
                     self.header(
                         ui,
@@ -945,12 +946,12 @@ mod tests {
             "Courbe".into(),
             tr!("object-manager-axes"),
         ]);
-        expected.extend(
-            model.layers[0]
-                .axes
-                .iter()
-                .map(|object| object.label.clone()),
-        );
+        for axis in &model.layers[0].axes {
+            assert!(
+                !labels(&output).contains(&axis.label),
+                "les axes sont repliés par défaut"
+            );
+        }
         expected.extend(
             model.layers[0]
                 .objects
@@ -984,18 +985,30 @@ mod tests {
         assert!(texts.iter().any(|text| text == "Note libre"));
         for axis in &model.layers[0].axes {
             assert!(
-                texts.contains(&axis.label),
-                "témoin : les axes restent dépliés"
+                !texts.contains(&axis.label),
+                "replier le groupe de tracés ne déplie pas les axes"
             );
         }
         let expanded = click_toggle(&collapsed, &tr!("object-manager-group"));
         assert!(labels(&expanded).iter().any(|text| text == "Courbe"));
-        let collapsed = click_toggle(&expanded, &tr!("object-manager-axes"));
-        let texts = labels(&collapsed);
+        let with_axes = click_toggle(&expanded, &tr!("object-manager-axes"));
+        let texts = labels(&with_axes);
         assert!(texts.iter().any(|text| text == "Courbe"));
         assert!(texts.iter().any(|text| text == "Note libre"));
         for axis in &model.layers[0].axes {
-            assert!(!texts.contains(&axis.label), "seuls les axes sont repliés");
+            assert!(
+                texts.contains(&axis.label),
+                "témoin : un clic sur « Axes » déplie les échelles"
+            );
+        }
+        let collapsed = click_toggle(&with_axes, &tr!("object-manager-axes"));
+        let texts = labels(&collapsed);
+        assert!(texts.iter().any(|text| text == "Courbe"));
+        for axis in &model.layers[0].axes {
+            assert!(
+                !texts.contains(&axis.label),
+                "un second clic replie les axes, et seulement eux"
+            );
         }
     }
 
