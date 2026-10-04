@@ -630,6 +630,40 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     };
     let recipe = &mut import.recipe;
+    import_delimiter_controls(ui, recipe);
+    import_number_controls(ui, recipe);
+    ui.horizontal(|ui| {
+        ui.label(tr!("import-format-comment-prefix"));
+        ui.add(egui::TextEdit::singleline(&mut recipe.comment_prefix).desired_width(60.0))
+            .on_hover_text(tr!("import-format-comment-prefix", "hint"));
+    });
+    import_block_encoding_controls(ui, recipe);
+    ui.horizontal(|ui| {
+        ui.label(tr!("import-format-skip-chars"))
+            .on_hover_text(tr!("import-format-skip-chars", "hint"));
+        let mut value = recipe.skip_chars as i64;
+        if ui
+            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+            .changed()
+        {
+            recipe.skip_chars = value.max(0) as usize;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label(tr!("import-format-skip-lines"))
+            .on_hover_text(tr!("import-format-skip-lines", "hint"));
+        let mut value = recipe.skip_data_rows as i64;
+        if ui
+            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
+            .changed()
+        {
+            recipe.skip_data_rows = value.max(0) as usize;
+        }
+    });
+}
+
+/// Délimiteur et paramètres de sa variante (caractère ou largeurs fixes).
+fn import_delimiter_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import::ImportRecipe) {
     ui.horizontal(|ui| {
         ui.label(tr!("import-format-delimiter"))
             .on_hover_text(tr!("import-format-delimiter", "hint"));
@@ -684,6 +718,10 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
             _ => {}
         }
     });
+}
+
+/// Décimale, milliers et valeurs manquantes, dans leur ordre de saisie.
+fn import_number_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import::ImportRecipe) {
     ui.horizontal(|ui| {
         ui.label(tr!("import-format-decimal"));
         egui::ComboBox::from_id_salt("stokesforge_import_decimal_combo")
@@ -727,11 +765,13 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
                 .collect();
         }
     });
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-comment-prefix"));
-        ui.add(egui::TextEdit::singleline(&mut recipe.comment_prefix).desired_width(60.0))
-            .on_hover_text(tr!("import-format-comment-prefix", "hint"));
-    });
+}
+
+/// Découpage en blocs et encodage du fichier.
+fn import_block_encoding_controls(
+    ui: &mut egui::Ui,
+    recipe: &mut stokesforge_import::ImportRecipe,
+) {
     ui.horizontal(|ui| {
         use stokesforge_import::BlockSplit;
         ui.label(tr!("import-format-blocks"))
@@ -785,28 +825,6 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 }
             });
-    });
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-skip-chars"))
-            .on_hover_text(tr!("import-format-skip-chars", "hint"));
-        let mut value = recipe.skip_chars as i64;
-        if ui
-            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
-            .changed()
-        {
-            recipe.skip_chars = value.max(0) as usize;
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-skip-lines"))
-            .on_hover_text(tr!("import-format-skip-lines", "hint"));
-        let mut value = recipe.skip_data_rows as i64;
-        if ui
-            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
-            .changed()
-        {
-            recipe.skip_data_rows = value.max(0) as usize;
-        }
     });
 }
 
@@ -2193,5 +2211,50 @@ mod tests {
             !import.paths.is_empty(),
             "témoin : des fichiers sont conservés"
         );
+    }
+
+    /// Le champ associé à un délimiteur conserve sa valeur en reprenant la
+    /// même variante. Changer d'option prouve que le clic atteint la liste.
+    #[test]
+    fn reprendre_le_delimiteur_garde_ses_parametres() {
+        for initial in [Separator::Custom('@'), Separator::FixedWidth(vec![4, 8])] {
+            let mut banc = banc(false);
+            let context = contexte();
+            banc.state.import_state_mut().unwrap().recipe.separator = initial.clone();
+            choisir_delimiteur(&context, &mut banc.state, &separator_label(&initial));
+            assert_eq!(banc.state.import_state().unwrap().recipe.separator, initial);
+            choisir_delimiteur(
+                &context,
+                &mut banc.state,
+                &separator_label(&Separator::Comma),
+            );
+            assert_eq!(
+                banc.state.import_state().unwrap().recipe.separator,
+                Separator::Comma,
+                "témoin : le choix d'une autre option écrit bien la recette"
+            );
+        }
+    }
+
+    fn choisir_delimiteur(context: &egui::Context, state: &mut AppState, libelle: &str) {
+        let actuel = separator_label(&state.import_state().unwrap().recipe.separator);
+        let peints = textes(&image(context, Vec::new(), |ui| {
+            super::import_step_format(ui, state)
+        }));
+        let liste = texte_exact(&peints, &actuel).centre;
+        cliquer(context, liste, egui::PointerButton::Primary, |ui| {
+            super::import_step_format(ui, state)
+        });
+        let peints = textes(&image(context, Vec::new(), |ui| {
+            super::import_step_format(ui, state)
+        }));
+        let choix = peints
+            .iter()
+            .find(|texte| texte.texte == libelle && texte.centre != liste)
+            .unwrap_or_else(|| panic!("{libelle:?} absent de la liste ouverte"))
+            .centre;
+        cliquer(context, choix, egui::PointerButton::Primary, |ui| {
+            super::import_step_format(ui, state)
+        });
     }
 }
