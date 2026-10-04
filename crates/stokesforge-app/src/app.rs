@@ -11192,47 +11192,6 @@ mod graph_layout_tests {
         assert_eq!(closed.get(), DialogOutcome::Accept, "Entrée valide");
     }
 
-    /// #13 : la fenêtre des propriétés n'écrit pas son propre cadre — elle
-    /// passe par la brique des fenêtres de contenu (`show_window_in_layer`,
-    /// `window_header`) ; `egui::Window` n'y est plus employé.
-    #[test]
-    fn la_fenetre_des_proprietes_est_construite_comme_les_autres() {
-        let source = include_str!("app.rs");
-        let start = source.find("fn plot_settings_window").expect("fonction");
-        let end = source[start..]
-            .find("fn plot_settings_contents")
-            .expect("fin");
-        let body = &source[start..start + end];
-        assert!(!body.contains("egui::Window::new"), "plus de Window brute");
-        assert!(body.contains("modal_dialog("));
-        let dialog = source.find("fn modal_dialog").expect("brique");
-        let dialog = &source[dialog..dialog + 6000];
-        assert!(dialog.contains("show_window_in_layer("));
-        assert!(dialog.contains("window_header("));
-    }
-
-    /// Règle du projet : **toute** fenêtre de l'application passe par la brique
-    /// commune (`show_window_in_layer`, via `modal_dialog_with` pour un dialogue),
-    /// jamais par une `egui::Window` brute. L'assistant d'import a déjà dérogé
-    /// à cette règle une fois : ce garde-fou l'empêche de se reproduire.
-    #[test]
-    fn aucune_fenetre_n_est_une_egui_window_brute() {
-        let source = include_str!("app.rs");
-        let production = &source[..source.find("#[cfg(test)]").expect("module de tests")];
-        let construct = ["egui::Window", "::new("].concat();
-        assert!(
-            !production.contains(&construct),
-            "une fenêtre est construite par `egui::Window` brute : passer par \
-             `show_window_in_layer` / `modal_dialog_with` (voir `stokesforge-feature`)"
-        );
-        let start = production.find("fn import_window").expect("fonction");
-        let body = &production[start..start + 4000];
-        assert!(
-            body.contains("modal_dialog_with("),
-            "l'assistant d'import est un dialogue modal"
-        );
-    }
-
     #[test]
     fn le_repli_ne_concerne_que_longlet_vise() {
         let (_session, graph) = graphe();

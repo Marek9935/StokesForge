@@ -14,6 +14,11 @@
 //! Un littéral sans aucune lettre (`"→"`, `" · "`, `"{}"`) n'est pas un texte à
 //! traduire et passe ; la clé d'un `tr!("…")` non plus.
 //!
+//! Les sources sont lues par `support/sources.rs` (#116) : tout `src/`,
+//! sous-dossiers compris, et le code de test retiré item par item — un
+//! fichier qui alterne code et modules de test (`errors.rs`) reste gardé
+//! après son premier `#[cfg(test)]`.
+//!
 //! ## Une garde absolue (#48)
 //!
 //! Aucune dérogation : un littéral textuel dans un de ces appels fait échouer le
@@ -30,6 +35,14 @@
 //! (`STOKESFORGE_LANG=en-XA`) montre ce qui a échappé : un texte sans `[[ ]]`.
 
 use std::path::Path;
+
+#[path = "support/sources.rs"]
+mod sources;
+
+use sources::{
+    commence_par, corps, est_ident, fermante, fonctions, fonctions_nommees, ident_en, ligne_de,
+    nom_court, Fichier, Masque,
+};
 
 /// Les appels `.nom(…)` dont un argument ne doit pas être un littéral textuel.
 const APPELS: &[&str] = &[
@@ -82,198 +95,6 @@ const TABLES: &[&str] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// Lecture des sources
-// ---------------------------------------------------------------------------
-
-/// Une source dont les commentaires sont blanchis et le contenu des chaînes
-/// remplacé : `A` pour une lettre, `_` pour le reste. Même longueur (en
-/// caractères) que l'original, donc mêmes positions.
-struct Source {
-    masque: Vec<char>,
-    original: Vec<char>,
-}
-
-fn est_ident(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
-fn masquer(texte: &str) -> Source {
-    let original: Vec<char> = texte.chars().collect();
-    let mut masque = original.clone();
-    let n = original.len();
-    let mut i = 0;
-    while i < n {
-        let c = original[i];
-        let suivant = original.get(i + 1).copied();
-        // Commentaire de ligne.
-        if c == '/' && suivant == Some('/') {
-            while i < n && original[i] != '\n' {
-                masque[i] = ' ';
-                i += 1;
-            }
-            continue;
-        }
-        // Commentaire de bloc, imbriqué.
-        if c == '/' && suivant == Some('*') {
-            let mut profondeur = 0;
-            while i < n {
-                if original[i] == '/' && original.get(i + 1) == Some(&'*') {
-                    profondeur += 1;
-                    masque[i] = ' ';
-                    masque[i + 1] = ' ';
-                    i += 2;
-                } else if original[i] == '*' && original.get(i + 1) == Some(&'/') {
-                    profondeur -= 1;
-                    masque[i] = ' ';
-                    masque[i + 1] = ' ';
-                    i += 2;
-                    if profondeur == 0 {
-                        break;
-                    }
-                } else {
-                    if original[i] != '\n' {
-                        masque[i] = ' ';
-                    }
-                    i += 1;
-                }
-            }
-            continue;
-        }
-        let precedent_ident = i > 0 && est_ident(original[i - 1]);
-        // Chaîne brute : r"…", r#"…"#, br#"…"#.
-        if (c == 'r' || (c == 'b' && suivant == Some('r'))) && !precedent_ident {
-            let mut j = i + if c == 'b' { 2 } else { 1 };
-            let mut dieses = 0;
-            while original.get(j) == Some(&'#') {
-                dieses += 1;
-                j += 1;
-            }
-            if original.get(j) == Some(&'"') {
-                j += 1;
-                while j < n {
-                    if original[j] == '"'
-                        && (0..dieses).all(|k| original.get(j + 1 + k) == Some(&'#'))
-                    {
-                        break;
-                    }
-                    masquer_caractere(&original, &mut masque, j);
-                    j += 1;
-                }
-                i = (j + 1 + dieses).min(n);
-                continue;
-            }
-        }
-        // Chaîne ordinaire.
-        if c == '"' {
-            let mut j = i + 1;
-            while j < n && original[j] != '"' {
-                if original[j] == '\\' {
-                    masque[j] = '_';
-                    j += 1;
-                    if j < n {
-                        let echappe = original[j];
-                        masquer_neutre(&original, &mut masque, j);
-                        j += 1;
-                        if echappe == 'u' && original.get(j) == Some(&'{') {
-                            while j < n && original[j] != '}' {
-                                masquer_neutre(&original, &mut masque, j);
-                                j += 1;
-                            }
-                            if j < n {
-                                masquer_neutre(&original, &mut masque, j);
-                                j += 1;
-                            }
-                        }
-                    }
-                    continue;
-                }
-                // Un champ de format (`{code}`, `{label:>4}`) n'est pas du texte :
-                // son contenu est neutre. `{{` est une accolade littérale.
-                if original[j] == '{' && original.get(j + 1) != Some(&'{') {
-                    while j < n && original[j] != '}' && original[j] != '"' {
-                        masquer_neutre(&original, &mut masque, j);
-                        j += 1;
-                    }
-                    continue;
-                }
-                masquer_caractere(&original, &mut masque, j);
-                j += 1;
-            }
-            i = (j + 1).min(n);
-            continue;
-        }
-        // Littéral de caractère (et non une durée de vie).
-        if c == '\'' {
-            if suivant == Some('\\') {
-                let mut j = i + 2;
-                while j < n && original[j] != '\'' {
-                    masque[j] = '_';
-                    j += 1;
-                }
-                masque[i + 1] = '_';
-                i = (j + 1).min(n);
-                continue;
-            }
-            if original.get(i + 2) == Some(&'\'') {
-                masque[i + 1] = '_';
-                i += 3;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    Source { masque, original }
-}
-
-/// Dans une chaîne : une lettre devient `A`, le reste `_`, sauf les fins de ligne.
-fn masquer_caractere(original: &[char], masque: &mut [char], i: usize) {
-    masque[i] = if original[i] == '\n' {
-        '\n'
-    } else if original[i].is_alphabetic() {
-        'A'
-    } else {
-        '_'
-    };
-}
-
-/// Dans une séquence d'échappement : jamais une lettre de texte.
-fn masquer_neutre(original: &[char], masque: &mut [char], i: usize) {
-    masque[i] = if original[i] == '\n' { '\n' } else { '_' };
-}
-
-/// Position du délimiteur fermant qui répond à celui ouvert en `ouvrante`.
-fn fermante(masque: &[char], ouvrante: usize) -> Option<usize> {
-    let mut profondeur = 0usize;
-    for (i, c) in masque.iter().enumerate().skip(ouvrante) {
-        match c {
-            '(' | '[' | '{' => profondeur += 1,
-            ')' | ']' | '}' => {
-                profondeur = profondeur.checked_sub(1)?;
-                if profondeur == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn commence_par(masque: &[char], position: usize, motif: &str) -> bool {
-    motif
-        .chars()
-        .enumerate()
-        .all(|(k, c)| masque.get(position + k) == Some(&c))
-}
-
-fn ident_en(masque: &[char], position: usize) -> String {
-    masque[position..]
-        .iter()
-        .take_while(|c| est_ident(**c))
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
 // Les infractions
 // ---------------------------------------------------------------------------
 
@@ -319,84 +140,8 @@ fn litteraux_textuels(masque: &[char], debut: usize, fin: usize) -> Vec<usize> {
     trouves
 }
 
-/// Les fonctions du fichier : position du `fn`, nom qualifié par le bloc `impl`
-/// qui la contient.
-fn fonctions(masque: &[char]) -> Vec<(usize, String)> {
-    let impls = blocs_impl(masque);
-    let mut trouvees = Vec::new();
-    for i in 0..masque.len() {
-        if commence_par(masque, i, "fn ") && (i == 0 || !est_ident(masque[i - 1])) {
-            let nom = ident_en(masque, i + 3);
-            if nom.is_empty() {
-                continue;
-            }
-            let qualifie = impls
-                .iter()
-                .find(|(debut, fin, _)| *debut < i && i < *fin)
-                .map_or(nom.clone(), |(_, _, cible)| format!("{cible}::{nom}"));
-            trouvees.push((i, qualifie));
-        }
-    }
-    trouvees
-}
-
-/// Les blocs `impl` : (début, fin, type visé).
-fn blocs_impl(masque: &[char]) -> Vec<(usize, usize, String)> {
-    let mut blocs = Vec::new();
-    for i in 0..masque.len() {
-        if !commence_par(masque, i, "impl")
-            || (i > 0 && est_ident(masque[i - 1]))
-            || masque.get(i + 4).is_some_and(|c| est_ident(*c))
-        {
-            continue;
-        }
-        let Some(accolade) = (i..masque.len()).find(|k| masque[*k] == '{' || masque[*k] == ';')
-        else {
-            continue;
-        };
-        if masque[accolade] != '{' {
-            continue;
-        }
-        let Some(fin) = fermante(masque, accolade) else {
-            continue;
-        };
-        let entete: String = masque[i + 4..accolade].iter().collect();
-        blocs.push((i, fin, cible_de_impl(&entete)));
-    }
-    blocs
-}
-
-/// Le type visé par l'en-tête d'un `impl` : `Type` pour `impl Type`,
-/// `impl<T> Type<T>`, `impl Trait for Type`.
-fn cible_de_impl(entete: &str) -> String {
-    let mut reste = entete.trim();
-    if let Some((_, apres)) = reste.rsplit_once(" for ") {
-        reste = apres.trim();
-    } else if reste.starts_with('<') {
-        let mut profondeur = 0usize;
-        for (k, c) in reste.char_indices() {
-            match c {
-                '<' => profondeur += 1,
-                '>' => {
-                    profondeur = profondeur.saturating_sub(1);
-                    if profondeur == 0 {
-                        reste = reste[k + 1..].trim();
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    reste.chars().take_while(|c| est_ident(*c)).collect()
-}
-
-fn ligne_de(original: &[char], position: usize) -> usize {
-    1 + original[..position].iter().filter(|c| **c == '\n').count()
-}
-
 /// Le littéral tel qu'écrit, depuis son guillemet ouvrant.
-fn extrait(source: &Source, ouverture: usize) -> String {
+fn extrait(source: &Masque, ouverture: usize) -> String {
     let mut fin = ouverture + 1;
     while fin < source.masque.len() && source.masque[fin] != '"' {
         fin += 1;
@@ -408,17 +153,14 @@ fn extrait(source: &Source, ouverture: usize) -> String {
 
 /// Toutes les infractions d'un fichier, code de test exclu.
 fn infractions(
-    fichier: &str,
-    texte: &str,
+    fichier: &Fichier,
     appels: &[&str],
     constructeurs: &[&str],
     tables: &[&str],
 ) -> Vec<Infraction> {
-    let source = masquer(texte);
-    let fin_production = (0..source.masque.len())
-        .find(|i| commence_par(&source.masque, *i, "#[cfg(test)]"))
-        .unwrap_or(source.masque.len());
-    let masque = &source.masque[..fin_production];
+    let source = fichier.production();
+    let masque = &source.masque;
+    let chemin = format!("src/{}", fichier.chemin);
     let fns = fonctions(masque);
     let fonction_a = |position: usize| -> String {
         fns.iter()
@@ -455,7 +197,7 @@ fn infractions(
         for ouverture in litteraux_textuels(masque, parenthese + 1, f) {
             if vus.insert(ouverture) {
                 trouvees.push(Infraction {
-                    fichier: fichier.to_string(),
+                    fichier: chemin.clone(),
                     fonction: fonction_a(position),
                     ligne: ligne_de(&source.original, ouverture),
                     appel: appel.clone(),
@@ -467,20 +209,17 @@ fn infractions(
 
     // Les tables `fn label()` / `fn title()` : tout littéral textuel du corps.
     for (position, qualifie) in &fns {
-        let nom = qualifie.rsplit("::").next().unwrap_or(qualifie);
+        let nom = nom_court(qualifie);
         if !tables.contains(&nom) {
             continue;
         }
-        let Some(accolade) = (*position..masque.len()).find(|k| masque[*k] == '{') else {
-            continue;
-        };
-        let Some(f) = fermante(masque, accolade) else {
+        let Some((accolade, f)) = corps(masque, *position) else {
             continue;
         };
         for ouverture in litteraux_textuels(masque, accolade + 1, f) {
             if vus.insert(ouverture) {
                 trouvees.push(Infraction {
-                    fichier: fichier.to_string(),
+                    fichier: chemin.clone(),
                     fonction: qualifie.clone(),
                     ligne: ligne_de(&source.original, ouverture),
                     appel: format!("fn {nom}()"),
@@ -492,42 +231,23 @@ fn infractions(
     trouvees
 }
 
-fn sources_de_l_application() -> Vec<(String, String)> {
-    let dossier = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut fichiers: Vec<_> = std::fs::read_dir(&dossier)
-        .expect("dossier src")
-        .filter_map(Result::ok)
-        .map(|entree| entree.path())
-        .filter(|chemin| chemin.extension().is_some_and(|e| e == "rs"))
-        .collect();
-    fichiers.sort();
-    fichiers
-        .into_iter()
-        .map(|chemin| {
-            let nom = chemin
-                .file_name()
-                .expect("nom")
-                .to_string_lossy()
-                .into_owned();
-            let texte = std::fs::read_to_string(&chemin).expect("lecture");
-            (nom, texte)
-        })
-        .collect()
-}
-
 // ---------------------------------------------------------------------------
 // La garde
 // ---------------------------------------------------------------------------
 
 /// Les infractions de `sources`, une ligne chacune ; vide si tout est en règle.
-fn ecarts(sources: &[(String, String)]) -> Vec<String> {
+fn ecarts(sources: &[Fichier]) -> Vec<String> {
     let mut ecarts = Vec::new();
-    for (fichier, texte) in sources {
-        for infraction in infractions(fichier, texte, APPELS, CONSTRUCTEURS, TABLES) {
+    for fichier in sources {
+        for infraction in infractions(fichier, APPELS, CONSTRUCTEURS, TABLES) {
             ecarts.push(format!(
-                "{fichier}:{} dans `{}` : {} {} — texte en dur, passer par `tr!` avec une clé \
+                "{}:{} dans `{}` : {} {} — texte en dur, passer par `tr!` avec une clé \
                  de `i18n/en/stokesforge_app.ftl` (skill `stokesforge-textes-interface`)",
-                infraction.ligne, infraction.fonction, infraction.appel, infraction.extrait
+                infraction.fichier,
+                infraction.ligne,
+                infraction.fonction,
+                infraction.appel,
+                infraction.extrait
             ));
         }
     }
@@ -537,7 +257,7 @@ fn ecarts(sources: &[(String, String)]) -> Vec<String> {
 /// Aucun texte d'interface écrit en dur dans `src/` : tout passe par `tr!`.
 #[test]
 fn aucun_libelle_en_dur() {
-    let ecarts = ecarts(&sources_de_l_application());
+    let ecarts = ecarts(&sources::sources());
     assert!(
         ecarts.is_empty(),
         "{} écart(s) :\n  {}",
@@ -550,7 +270,7 @@ fn aucun_libelle_en_dur() {
 // La zone #43, gardée sans réserve
 // ---------------------------------------------------------------------------
 
-/// Les fonctions de `app.rs` de la fenêtre des propriétés du graphe, de
+/// Les fonctions de la fenêtre des propriétés du graphe, de
 /// l'éditeur de texte sur le graphique et du pied commun des dialogues
 /// modaux (#43). Zéro dérogation, et plus strictement que [`APPELS`] : **aucun**
 /// littéral textuel dans leur corps, quelle que soit la forme de l'appel
@@ -560,6 +280,11 @@ fn aucun_libelle_en_dur() {
 /// (`SVG`) et les clés de `tr!`.
 /// À fusionner dans la garde générale quand [`APPELS`] saura voir ces formes
 /// (#48).
+///
+/// Une entrée nomme une fonction par son dernier segment (`modal_dialog` :
+/// fonction libre ou méthode `Type::modal_dialog`), cherchée dans **toutes** les
+/// sources ; une entrée qu'on ne trouve nulle part fait échouer la garde (#116)
+/// — une fonction renommée ne sort pas de la zone en silence.
 const ZONE_43: &[&str] = &[
     "plot_settings_window",
     "plot_settings_contents",
@@ -580,26 +305,20 @@ const ZONE_43: &[&str] = &[
     "modal_dialog_with",
 ];
 
-/// Les littéraux textuels, hors identifiants, du corps des fonctions `zone`.
-fn litteraux_nus(texte: &str, zone: &[&str]) -> Vec<(String, usize, String)> {
-    let source = masquer(texte);
-    let fin_production = (0..source.masque.len())
-        .find(|i| commence_par(&source.masque, *i, "#[cfg(test)]"))
-        .unwrap_or(source.masque.len());
-    let masque = &source.masque[..fin_production];
+/// Les littéraux textuels, hors identifiants, du corps des fonctions `zone` de
+/// `source` (vue de production) : (fonction, ligne, littéral).
+fn litteraux_nus(source: &Masque, zone: &[&str]) -> Vec<(String, usize, String)> {
+    let masque = &source.masque;
     let mut trouves = Vec::new();
     for (position, nom) in fonctions(masque) {
-        if !zone.contains(&nom.as_str()) {
+        if !zone.contains(&nom_court(&nom)) {
             continue;
         }
-        let Some(accolade) = (position..masque.len()).find(|k| masque[*k] == '{') else {
-            continue;
-        };
-        let Some(fin) = fermante(masque, accolade) else {
+        let Some((accolade, fin)) = corps(masque, position) else {
             continue;
         };
         for ouverture in litteraux_textuels(masque, accolade + 1, fin) {
-            let litteral = extrait(&source, ouverture);
+            let litteral = extrait(source, ouverture);
             let contenu = &litteral[1..litteral.len().saturating_sub(1)];
             let identifiant = contenu
                 .chars()
@@ -616,25 +335,58 @@ fn litteraux_nus(texte: &str, zone: &[&str]) -> Vec<(String, usize, String)> {
     trouves
 }
 
+/// Les entrées de `zone` qu'aucune fonction de production de `sources` ne porte.
+fn absentes<'z>(sources: &[Fichier], zone: &[&'z str]) -> Vec<&'z str> {
+    zone.iter()
+        .copied()
+        .filter(|nom| fonctions_nommees(sources, nom).is_empty())
+        .collect()
+}
+
+/// Les littéraux nus de la zone dans `sources`, une ligne chacun.
+fn ecarts_de_la_zone(sources: &[Fichier], zone: &[&str]) -> Vec<String> {
+    let mut ecarts = Vec::new();
+    for fichier in sources {
+        for (fonction, ligne, litteral) in litteraux_nus(&fichier.production(), zone) {
+            ecarts.push(format!(
+                "src/{}:{ligne} dans `{fonction}` : {litteral}",
+                fichier.chemin
+            ));
+        }
+    }
+    ecarts
+}
+
+fn nus(code: &str, zone: &[&str]) -> Vec<(String, usize, String)> {
+    litteraux_nus(&fichier("t.rs", code).production(), zone)
+}
+
+fn fichier(chemin: &str, texte: &str) -> Fichier {
+    Fichier {
+        chemin: chemin.to_string(),
+        texte: texte.to_string(),
+        de_test: false,
+    }
+}
+
 /// La fenêtre des propriétés du graphe, ses onglets, l'éditeur de texte et le
 /// pied des dialogues modaux sont **entièrement** passés par `tr!` : aucune
 /// dérogation (#43).
 #[test]
 fn les_proprietes_du_graphe_et_l_export_sont_sans_litteral() {
-    let (_, texte) = sources_de_l_application()
-        .into_iter()
-        .find(|(nom, _)| nom == "app.rs")
-        .expect("app.rs");
-    let trouves = litteraux_nus(&texte, ZONE_43);
+    let sources = sources::sources();
+    let absentes = absentes(&sources, ZONE_43);
     assert!(
-        trouves.is_empty(),
+        absentes.is_empty(),
+        "fonction(s) de la zone #43 introuvable(s) dans src/ : {absentes:?} — renommée ? \
+         mettre à jour ZONE_43 plutôt que la laisser sortir de la garde"
+    );
+    let ecarts = ecarts_de_la_zone(&sources, ZONE_43);
+    assert!(
+        ecarts.is_empty(),
         "{} texte(s) en dur dans la zone #43 :\n  {}",
-        trouves.len(),
-        trouves
-            .iter()
-            .map(|(f, l, t)| format!("app.rs:{l} dans `{f}` : {t}"))
-            .collect::<Vec<_>>()
-            .join("\n  ")
+        ecarts.len(),
+        ecarts.join("\n  ")
     );
 }
 
@@ -650,7 +402,7 @@ fn la_garde_de_la_zone_43_voit_les_formes_que_appels_ignore() {
         r#"fn page(ui: &mut Ui) { let _ = ui.hyperlink("lien"); let _ = Some("Auto"); }"#,
         r#"fn page(ui: &mut Ui) { let _ = format!("Axe {}", n); }"#,
     ] {
-        assert_eq!(litteraux_nus(code, zone).len(), 1, "non vu : {code}");
+        assert_eq!(nus(code, zone).len(), 1, "non vu : {code}");
     }
     for code in [
         r#"fn page(ui: &mut Ui) { ui.strong(tr!("plot-tab-axes")); }"#,
@@ -660,11 +412,44 @@ fn la_garde_de_la_zone_43_voit_les_formes_que_appels_ignore() {
         r#"fn page(d: Dialog) { d.add_filter("SVG", &["svg"]); }"#,
         "fn page(ui: &mut Ui) { let _ = \"→\"; }",
     ] {
-        assert!(
-            litteraux_nus(code, zone).is_empty(),
-            "faux positif : {code}"
-        );
+        assert!(nus(code, zone).is_empty(), "faux positif : {code}");
     }
+}
+
+/// Le témoin de #116 : une fonction de la zone déplacée hors d'`app.rs` —
+/// dans un module de `src/app/`, ou devenue méthode — reste gardée ; sa copie
+/// de test ne l'est pas ; une entrée de la zone introuvable est signalée.
+#[test]
+fn la_zone_43_suit_ses_fonctions_hors_d_app_rs() {
+    let sources = [
+        fichier(
+            "app/proprietes.rs",
+            "pub(crate) fn page(ui: &mut Ui) {\n    ui.strong(\"Titre\");\n}\n\
+             #[cfg(test)]\nmod tests { fn page(ui: &mut Ui) { ui.strong(\"Test\"); } }",
+        ),
+        fichier(
+            "app/methodes.rs",
+            "impl App {\n    fn export(&mut self) { champ(\"Format\"); }\n}",
+        ),
+    ];
+    let ecarts = ecarts_de_la_zone(&sources, &["page", "export"]);
+    assert_eq!(
+        ecarts,
+        [
+            "src/app/proprietes.rs:2 dans `page` : \"Titre\"",
+            "src/app/methodes.rs:2 dans `App::export` : \"Format\"",
+        ]
+    );
+    assert_eq!(
+        absentes(&sources, &["page", "export", "disparue"]),
+        ["disparue"]
+    );
+    // Une fonction qui n'existe plus qu'en test est introuvable, pas gardée.
+    let seulement_en_test = [fichier(
+        "app/a.rs",
+        "#[cfg(test)]\nmod tests { fn page() {} }",
+    )];
+    assert_eq!(absentes(&seulement_en_test, &["page"]), ["page"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -672,7 +457,7 @@ fn la_garde_de_la_zone_43_voit_les_formes_que_appels_ignore() {
 // ---------------------------------------------------------------------------
 
 fn trouve(code: &str) -> Vec<Infraction> {
-    infractions("t.rs", code, APPELS, CONSTRUCTEURS, TABLES)
+    infractions(&fichier("t.rs", code), APPELS, CONSTRUCTEURS, TABLES)
 }
 
 #[test]
@@ -734,6 +519,9 @@ fn la_garde_lit_les_tables_de_libelles() {
     assert!(trouvees.iter().all(|i| i.fonction == "Onglet::label"));
     let converti = "impl Onglet {\n    pub fn label(self) -> String {\n        match self {\n            Onglet::A => tr!(\"tab-axes\"),\n        }\n    }\n}\n";
     assert!(trouve(converti).is_empty());
+    // Un `;` de tableau dans la signature ne cache pas le corps (#116).
+    let tableau = "impl Onglet {\n    fn label(self, _c: [u8; 4]) -> &'static str {\n        \"Axes\"\n    }\n}\n";
+    assert_eq!(trouve(tableau).len(), 1);
     // Une autre fonction ne lit pas ses littéraux comme une table.
     assert!(trouve("fn nom() -> &'static str { \"Axes\" }").is_empty());
 }
@@ -747,16 +535,33 @@ fn la_garde_nomme_la_fonction_et_le_bloc_impl() {
 
 #[test]
 fn la_garde_rapporte_chaque_litteral_avec_son_fichier_et_sa_fonction() {
-    let sources = vec![(
-        "t.rs".to_string(),
-        "fn menu(ui: &mut Ui) { ui.label(\"un\"); ui.label(\"deux\"); }\nfn autre(ui: &mut Ui) { ui.label(tr!(\"ok\")); }\n"
-            .to_string(),
+    let sources = vec![fichier(
+        "t.rs",
+        "fn menu(ui: &mut Ui) { ui.label(\"un\"); ui.label(\"deux\"); }\nfn autre(ui: &mut Ui) { ui.label(tr!(\"ok\")); }\n",
     )];
     let rapport = ecarts(&sources);
     assert_eq!(rapport.len(), 2, "{rapport:?}");
     assert!(rapport
         .iter()
-        .all(|e| e.contains("t.rs") && e.contains("`menu`")));
+        .all(|e| e.contains("src/t.rs:1") && e.contains("`menu`")));
+}
+
+/// Le témoin de #116 : un libellé en dur dans un sous-dossier de `src/`, ou
+/// placé après un module de test (`errors.rs` alterne les deux), est vu ; le
+/// même dans un fichier de test ne l'est pas.
+#[test]
+fn la_garde_voit_les_sous_dossiers_et_le_code_apres_un_module_de_test() {
+    let code = "mod a {\n    #[cfg(test)]\n    mod tests { fn t(ui: &mut Ui) { ui.label(\"test\"); } }\n}\n\
+                fn menu(ui: &mut Ui) { ui.label(\"Ouvrir\"); }\n";
+    let rapport = ecarts(&[fichier("app/grille/menu.rs", code)]);
+    assert_eq!(rapport.len(), 1, "{rapport:?}");
+    assert!(
+        rapport[0].starts_with("src/app/grille/menu.rs:5 dans `menu`"),
+        "{rapport:?}"
+    );
+    let mut de_test = fichier("app/grille/tests.rs", code);
+    de_test.de_test = true;
+    assert!(ecarts(&[de_test]).is_empty());
 }
 
 /// Les dépendances de traduction n'existent que dans `stokesforge-app` : aucun

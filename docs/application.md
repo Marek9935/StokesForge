@@ -288,11 +288,12 @@ sans changement de comportement ; chacun porte la doc de tête de sa partie :
 espace de travail, bornage), `window_stack.rs` (`Tab`, ordre de pile, masquage, repli,
 maximisation, `show_workspace`) et `window_detach.rs` (viewports OS du Project Manager et
 des onglets). Ce sont des sous-modules (`#[path]` vers `src/`) pour garder l'accès aux types
-privés d'`app` et rester vus des gardes qui lisent `src/*.rs`. C'est un découpage de
+privés d'`app`. C'est un découpage de
 fichiers (`use super::*`), pas encore des modules à interface explicite ; la suite
 (briques communes, assistant d'import, propriétés du graphe, grille, graphe,
-menus, tests) est le chantier #115 (#116–#123). Trois gardes ne lisent encore que
-`app.rs` (#116) : voir `docs/tests.md`.
+menus, tests) est le chantier #115 (#116–#123). Les gardes qui lisent le code
+parcourent tout `src/`, sous-dossiers compris, et cherchent leurs fonctions par
+leur nom (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
 Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou

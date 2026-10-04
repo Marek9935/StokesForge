@@ -326,27 +326,58 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    #[test]
-    fn aucune_icone_hors_du_composant() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    /// Les lignes qui chargent une icône hors d'`icons.rs`, `src/chemin:ligne`
+    /// (commentaires exclus, tests compris).
+    fn icones_hors_du_composant(sources: &[crate::sources::Fichier]) -> Vec<String> {
         let mut fautifs = Vec::new();
-        for entry in std::fs::read_dir(&src).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_none_or(|ext| ext != "rs") || path.ends_with("icons.rs") {
+        for fichier in sources {
+            if fichier.chemin == "icons.rs" {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).unwrap();
-            for (index, line) in text.lines().enumerate() {
-                let code = line.split("//").next().unwrap_or("");
-                if code.contains("assets/icons") || code.contains("stokesforge-icons") {
-                    fautifs.push(format!("{}:{}", path.display(), index + 1));
+            for (index, ligne) in fichier.code().lines().enumerate() {
+                if ligne.contains("assets/icons") || ligne.contains("stokesforge-icons") {
+                    fautifs.push(format!("src/{}:{}", fichier.chemin, index + 1));
                 }
             }
         }
+        fautifs
+    }
+
+    /// Garde-fou du standard : aucune icône n'est chargée hors de ce module.
+    /// Toutes les sources de `src/` sont lues, sous-dossiers compris (#116).
+    #[test]
+    fn aucune_icone_hors_du_composant() {
+        let fautifs = icones_hors_du_composant(&crate::sources::sources());
         assert!(
             fautifs.is_empty(),
             "icône chargée hors de icons.rs — passer par icons::icon_image / \
              icons::icon_button : {fautifs:?}"
+        );
+    }
+
+    /// Le témoin : une icône chargée dans un module de `src/app/` est vue ;
+    /// un commentaire et `icons.rs` lui-même passent.
+    #[test]
+    fn la_garde_des_icones_voit_un_chargement_hors_d_app_rs() {
+        let fichier = |chemin: &str, texte: &str| crate::sources::Fichier {
+            chemin: chemin.to_string(),
+            texte: texte.to_string(),
+            de_test: false,
+        };
+        let sources = [
+            fichier(
+                "app/barre.rs",
+                "// assets/icons\nconst X: &[u8] = include_bytes!(\"../../assets/icons/x.svg\");",
+            ),
+            fichier(
+                "app/autre.rs",
+                "fn f() { image(\"stokesforge-icons://x\"); }",
+            ),
+            fichier("icons.rs", "const Y: &str = \"assets/icons\";"),
+        ];
+        assert_eq!(
+            icones_hors_du_composant(&sources),
+            ["src/app/barre.rs:2", "src/app/autre.rs:1"]
         );
     }
 

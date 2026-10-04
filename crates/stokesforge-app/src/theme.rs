@@ -229,25 +229,52 @@ mod tests {
     /// local échapperait au réglage unique des constantes `SCROLL_BAR_*`.
     #[test]
     fn aucun_scroll_style_hors_du_theme() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut fautifs = Vec::new();
-        for entry in std::fs::read_dir(&src).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_none_or(|ext| ext != "rs") || path.ends_with("theme.rs") {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path).unwrap();
-            for (index, line) in text.lines().enumerate() {
-                let code = line.split("//").next().unwrap_or("");
-                if code.contains("ScrollStyle") || code.contains(".scroll =") {
-                    fautifs.push(format!("{}:{}", path.display(), index + 1));
-                }
-            }
-        }
+        let fautifs = styles_de_defilement_hors_du_theme(&crate::sources::sources());
         assert!(
             fautifs.is_empty(),
             "style de barre de défilement construit hors de theme.rs — passer par \
              theme::scroll_style / theme::scroll_bar_allocated_width : {fautifs:?}"
+        );
+    }
+
+    /// Les lignes qui touchent un `ScrollStyle` hors de `theme.rs`,
+    /// `src/chemin:ligne` (commentaires exclus, tests compris). Toutes les
+    /// sources de `src/`, sous-dossiers compris (#116).
+    fn styles_de_defilement_hors_du_theme(sources: &[crate::sources::Fichier]) -> Vec<String> {
+        let mut fautifs = Vec::new();
+        for fichier in sources {
+            if fichier.chemin == "theme.rs" {
+                continue;
+            }
+            for (index, ligne) in fichier.code().lines().enumerate() {
+                if ligne.contains("ScrollStyle") || ligne.contains(".scroll =") {
+                    fautifs.push(format!("src/{}:{}", fichier.chemin, index + 1));
+                }
+            }
+        }
+        fautifs
+    }
+
+    /// Le témoin : un style de défilement posé dans un module de `src/app/` est
+    /// vu ; un commentaire et `theme.rs` lui-même passent.
+    #[test]
+    fn la_garde_du_defilement_voit_un_style_hors_d_app_rs() {
+        let fichier = |chemin: &str, texte: &str| crate::sources::Fichier {
+            chemin: chemin.to_string(),
+            texte: texte.to_string(),
+            de_test: false,
+        };
+        let sources = [
+            fichier(
+                "app/grille.rs",
+                "// ScrollStyle\nfn f(s: &mut Style) {\n    s.spacing.scroll = ScrollStyle::thin();\n}",
+            ),
+            fichier("app/notes.rs", "fn f(s: &mut Spacing) { s.scroll = x; }"),
+            fichier("theme.rs", "fn scroll_style() -> ScrollStyle { todo!() }"),
+        ];
+        assert_eq!(
+            styles_de_defilement_hors_du_theme(&sources),
+            ["src/app/grille.rs:3", "src/app/notes.rs:1"]
         );
     }
 }

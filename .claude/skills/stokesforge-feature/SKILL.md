@@ -143,11 +143,16 @@ En attendant le chantier :
   disjoints de `StokesForgeApp`, l'application différée des actions après la
   peinture, les confirmations bloquantes, `collect_shortcuts` (liste et
   raisons dans #115) ;
-- **trois gardes ne lisent encore que `app.rs`** (`aucune_fenetre_n_est_une_egui_window_brute`,
-  `ZONE_43` de `tests/libelles.rs`, `every_history_key_of_the_catalogue_is_used`) :
-  une fenêtre, un libellé de la zone #43 ou une clé `history-*` écrits
-  ailleurs leur échappent jusqu'à #116. Vérifier ces règles à la main dans
-  les autres fichiers.
+- les gardes qui lisent le code parcourent tout `src/`, sous-dossiers
+  compris (lecteur unique `tests/support/sources.rs`, #116) : un module
+  déplacé reste gardé sans rien déclarer. Une fonction qu'une garde attend
+  (`import_window`, `modal_dialog_with`, une entrée de `ZONE_43`…) et qu'on
+  renomme fait échouer la garde : mettre la garde à jour, ne pas la
+  contourner ;
+- aucun `use …::*` hors du code de test (`aucun_import_global_hors_des_tests`,
+  `tests/gardes.rs`) : un module nouveau nomme ce qu'il importe. Seuls les
+  `window_*.rs` y dérogent, listés dans `DEROGATIONS_117` jusqu'à #117 ; n'y
+  rien ajouter.
 
 ## 2 ter. Barres de défilement : le standard du thème
 

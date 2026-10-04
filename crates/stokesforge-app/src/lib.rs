@@ -56,3 +56,10 @@ pub mod theme;
 pub mod toolbar;
 pub mod tree_lines;
 pub mod user_colors;
+
+/// Le lecteur des sources partagé par toutes les gardes qui lisent le code
+/// (#116) : celles d'`icons`, de `theme` et d'`i18n` ici, celles de `tests/`
+/// par le même fichier.
+#[cfg(test)]
+#[path = "../tests/support/sources.rs"]
+mod sources;

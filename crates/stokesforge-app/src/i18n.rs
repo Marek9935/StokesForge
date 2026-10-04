@@ -685,24 +685,14 @@ mod tests {
     /// Une clé du catalogue `en` que le code n'emploie nulle part est une clé
     /// morte (un texte qu'on croit visible, ou le reste d'une conversion) : elle
     /// fait échouer ce test (#48). Une clé est employée quand son nom, entre
-    /// guillemets, figure dans une source de `src/`.
+    /// guillemets, figure dans une source de `src/` — la liste récursive
+    /// partagée par toutes les gardes qui lisent le code (#116).
     #[test]
     fn aucune_cle_du_catalogue_n_est_morte() {
-        fn lire(dossier: &std::path::Path, sortie: &mut String) {
-            for entree in std::fs::read_dir(dossier).expect("dossier src").flatten() {
-                let chemin = entree.path();
-                if chemin.is_dir() {
-                    lire(&chemin, sortie);
-                } else if chemin.extension().is_some_and(|ext| ext == "rs") {
-                    sortie.push_str(&std::fs::read_to_string(&chemin).expect("source lisible"));
-                }
-            }
-        }
-        let mut sources = String::new();
-        lire(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-            &mut sources,
-        );
+        let sources: String = crate::sources::sources()
+            .into_iter()
+            .map(|fichier| fichier.texte)
+            .collect();
         let mortes: Vec<String> = read(EN)
             .messages
             .keys()
