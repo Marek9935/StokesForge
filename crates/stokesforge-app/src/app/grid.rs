@@ -1239,6 +1239,64 @@ pub(super) fn grid_contents(
         });
         return None;
     }
+    let (grid_rect, focus_anchor) = prepare_grid(ui, sheet);
+    let was_editing = state.editing().is_some() || state.header_editing().is_some();
+    let mut last_column_right = grid_rect.left();
+    let header_height = stacked_header_height(metadata_row_visible(ui.ctx()));
+    let mut table = TableBuilder::new(ui)
+        .striped(true)
+        .resizable(true)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        .column(TableColumn::initial(ROW_NUMBER_COLUMN_WIDTH).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH))
+        .columns(
+            TableColumn::initial(DEFAULT_COLUMN_WIDTH).at_least(MIN_COLUMN_WIDTH),
+            columns.len(),
+        )
+        .min_scrolled_height(0.0)
+        // La table occupe l'espace laissé par le panneau d'onglets, même
+        // quand sa feuille contient peu de lignes : la grille garde ainsi
+        // sa hauteur et son défilement vertical.
+        .auto_shrink([false, false])
+        // Sa barre verticale n'est pas dessinée ici : dans la zone de
+        // défilement horizontale, elle suivrait le bord droit de la table et
+        // sortirait de la vue sur une grille large (B10). Le défilement
+        // (molette, glisser) reste actif ; la barre visible est portée par
+        // [`show_grid_vertical_bar`], collée au bord droit de la fenêtre.
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+    if let Some(offset) = pending_vertical_offset {
+        table = table.vertical_scroll_offset(offset);
+    }
+    let table_output = table
+        .header(header_height, |header| {
+            grid_table_header(
+                header,
+                state,
+                actions,
+                sheet,
+                &columns,
+                &mut last_column_right,
+            );
+        })
+        .body(|body| {
+            grid_table_body(body, state, actions, sheet, &columns, row_count);
+        });
+
+    grid_blank_column_target(ui, actions, sheet, grid_rect, last_column_right);
+    grid_column_drag_source(ui, state, sheet, grid_rect);
+    grid_keyboard(
+        ui,
+        state,
+        actions,
+        sheet,
+        grid_rect,
+        focus_anchor,
+        was_editing,
+    );
+    Some(table_output)
+}
+
+/// Prépare les espacements et l'ancrage focalisable, sans créer de nouvelle Ui.
+fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id) {
     // Sans ceci, l'espacement vertical par défaut d'egui entre les rangées
     // de la table (`Spacing::item_spacing.y`, dont `TableBuilder` se sert en
     // interne pour séparer les lignes) laisse un mince filet blanc entre
@@ -1276,58 +1334,58 @@ pub(super) fn grid_contents(
     if anchor_focused {
         ui.memory_mut(|memory| memory.set_focus_lock_filter(focus_anchor, GRID_KEYS));
     }
-    let was_editing = state.editing().is_some() || state.header_editing().is_some();
-    let mut last_column_right = grid_rect.left();
-    let header_height = stacked_header_height(metadata_row_visible(ui.ctx()));
-    let mut table = TableBuilder::new(ui)
-        .striped(true)
-        .resizable(true)
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(TableColumn::initial(ROW_NUMBER_COLUMN_WIDTH).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH))
-        .columns(
-            TableColumn::initial(DEFAULT_COLUMN_WIDTH).at_least(MIN_COLUMN_WIDTH),
-            columns.len(),
-        )
-        .min_scrolled_height(0.0)
-        // La table occupe l'espace laissé par le panneau d'onglets, même
-        // quand sa feuille contient peu de lignes : la grille garde ainsi
-        // sa hauteur et son défilement vertical.
-        .auto_shrink([false, false])
-        // Sa barre verticale n'est pas dessinée ici : dans la zone de
-        // défilement horizontale, elle suivrait le bord droit de la table et
-        // sortirait de la vue sur une grille large (B10). Le défilement
-        // (molette, glisser) reste actif ; la barre visible est portée par
-        // [`show_grid_vertical_bar`], collée au bord droit de la fenêtre.
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
-    if let Some(offset) = pending_vertical_offset {
-        table = table.vertical_scroll_offset(offset);
-    }
-    let table_output = table
-        .header(header_height, |mut header| {
-            header.col(|ui| {
-                row_number_header_widget(ui, state, actions, sheet);
-            });
-            for (index, (id, _, column_type)) in columns.iter().enumerate() {
-                header.col(|ui| {
-                    last_column_right = ui.max_rect().right();
-                    column_header_widget(ui, state, actions, sheet, *id, index, *column_type);
-                });
-            }
-        })
-        .body(|body| {
-            body.rows(ROW_HEIGHT, row_count, |mut row| {
-                let index = row.index();
-                row.col(|ui| {
-                    row_number_widget(ui, state, actions, sheet, index);
-                });
-                for (id, _, _) in &columns {
-                    row.col(|ui| {
-                        cell_widget(ui, state, actions, sheet, *id, index);
-                    });
-                }
-            });
-        });
+    (grid_rect, focus_anchor)
+}
 
+/// L'en-tête dispose les colonnes et relève la borne de la zone libre.
+fn grid_table_header(
+    mut header: egui_extras::TableRow<'_, '_>,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    columns: &[(NodeId, String, ColumnType)],
+    last_column_right: &mut f32,
+) {
+    header.col(|ui| {
+        row_number_header_widget(ui, state, actions, sheet);
+    });
+    for (index, (id, _, column_type)) in columns.iter().enumerate() {
+        header.col(|ui| {
+            *last_column_right = ui.max_rect().right();
+            column_header_widget(ui, state, actions, sheet, *id, index, *column_type);
+        });
+    }
+}
+
+/// Le corps garde la virtualisation des lignes au même endroit dans la table.
+fn grid_table_body(
+    body: egui_extras::TableBody<'_>,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    columns: &[(NodeId, String, ColumnType)],
+    row_count: usize,
+) {
+    body.rows(ROW_HEIGHT, row_count, |mut row| {
+        let index = row.index();
+        row.col(|ui| {
+            row_number_widget(ui, state, actions, sheet, index);
+        });
+        for (id, _, _) in columns {
+            row.col(|ui| {
+                cell_widget(ui, state, actions, sheet, *id, index);
+            });
+        }
+    });
+}
+
+fn grid_blank_column_target(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    grid_rect: egui::Rect,
+    last_column_right: f32,
+) {
     // La portion libre après la dernière colonne est une cible distincte
     // des cellules et de leurs menus. La borne vient de l'en-tête réellement
     // disposé (y compris les largeurs redimensionnées), pas des largeurs par défaut.
@@ -1348,7 +1406,14 @@ pub(super) fn grid_contents(
             }
         });
     }
+}
 
+fn grid_column_drag_source(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    sheet: NodeId,
+    grid_rect: egui::Rect,
+) {
     // Glisser une sélection de colonnes vers un graphe ouvert (chantier
     // « glisser une sélection vers un graphe », suite du menu contextuel
     // « Tracer » — voir `docs/application.md`). La zone de prise est une
@@ -1407,7 +1472,18 @@ pub(super) fn grid_contents(
             right_response.dnd_set_drag_payload(payload);
         }
     }
+}
 
+/// Après la peinture et le dépôt : reprise du focus, puis saisie, navigation et édition.
+fn grid_keyboard(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    grid_rect: egui::Rect,
+    focus_anchor: egui::Id,
+    was_editing: bool,
+) {
     // Prise du focus clavier (#38), **avant** le bloc de raccourcis, pour que
     // la touche qui suit un clic soit déjà celle de la grille. Deux cas : un
     // appui dans le rectangle de la grille (clic, glisser, menu contextuel),
@@ -1465,221 +1541,242 @@ pub(super) fn grid_contents(
         && state.import_state().is_none()
         && focus_free
     {
-        // Taper sur une cellule ou un champ d'en-tête sélectionné (simple
-        // clic, pas encore en édition) démarre l'édition en remplaçant tout
-        // son contenu par ce qui est tapé — comportement standard de
-        // tableur, le même pour les deux. Ne se déclenche que pour une
-        // sélection réduite à une seule cellule ([`Selection::single_cell`])
-        // côté données : taper sur une plage ne doit jamais écraser
-        // plusieurs cellules à la fois — un champ d'en-tête, lui, n'est
-        // jamais une plage. `egui::Event::Text` ne porte que du texte
-        // imprimable — jamais une touche de contrôle ou de navigation, qui
-        // n'apparaît que dans `events` comme un `Event::Key` — donc pas de
-        // filtrage supplémentaire à faire ici.
-        let typed: String = ui.input(|input| {
-            input
-                .events
-                .iter()
-                .filter_map(|event| match event {
-                    egui::Event::Text(text) => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect()
-        });
-        if !typed.is_empty() {
-            if let Some((column, row)) = state.selection(sheet).and_then(Selection::single_cell) {
-                state.begin_edit(column, row);
-                if let Some(edit) = state.editing_mut() {
-                    edit.buffer = typed;
-                }
-            } else if let Some((column, field)) = state.selected_header_field(sheet) {
-                state.begin_header_edit(column, field);
-                if let Some(edit) = state.header_editing_mut() {
-                    edit.buffer = typed;
-                }
+        start_grid_typing(ui, state, sheet);
+        navigate_grid_selection(ui, state, actions, sheet);
+        grid_clipboard_shortcuts(ui, state, actions, sheet);
+    }
+}
+
+fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) {
+    // Taper sur une cellule ou un champ d'en-tête sélectionné (simple
+    // clic, pas encore en édition) démarre l'édition en remplaçant tout
+    // son contenu par ce qui est tapé — comportement standard de
+    // tableur, le même pour les deux. Ne se déclenche que pour une
+    // sélection réduite à une seule cellule ([`Selection::single_cell`])
+    // côté données : taper sur une plage ne doit jamais écraser
+    // plusieurs cellules à la fois — un champ d'en-tête, lui, n'est
+    // jamais une plage. `egui::Event::Text` ne porte que du texte
+    // imprimable — jamais une touche de contrôle ou de navigation, qui
+    // n'apparaît que dans `events` comme un `Event::Key` — donc pas de
+    // filtrage supplémentaire à faire ici.
+    let typed: String = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    });
+    if !typed.is_empty() {
+        if let Some((column, row)) = state.selection(sheet).and_then(Selection::single_cell) {
+            state.begin_edit(column, row);
+            if let Some(edit) = state.editing_mut() {
+                edit.buffer = typed;
             }
-        }
-        // Déplacement clavier d'une cellule déjà sélectionnée, sans
-        // édition en cours (pendant l'édition, ces mêmes touches sont
-        // gérées par `cell_widget`, qui valide *puis* déplace : voir sa
-        // doc). Flèches directionnelles + Maj pour étendre le rectangle ;
-        // Tab/Maj+Tab avec retour à la ligne aux bords ; Entrée/Maj+Entrée
-        // comme équivalents non-éditants de Bas/Haut. Sans effet si la
-        // sélection courante n'est pas un rectangle de cellules (colonne
-        // entière ou champ d'en-tête) — voir `Selection::cursor`.
-        let shift = ui.input(|i| i.modifiers.shift);
-        let (up, down, left, right, tab, enter) = ui.input(|input| {
-            (
-                input.key_pressed(egui::Key::ArrowUp),
-                input.key_pressed(egui::Key::ArrowDown),
-                input.key_pressed(egui::Key::ArrowLeft),
-                input.key_pressed(egui::Key::ArrowRight),
-                input.key_pressed(egui::Key::Tab),
-                input.key_pressed(egui::Key::Enter),
-            )
-        });
-        if up {
-            state.move_selection(sheet, MoveDirection::Up, shift);
-        }
-        if down {
-            state.move_selection(sheet, MoveDirection::Down, shift);
-        }
-        if left {
-            state.move_selection(sheet, MoveDirection::Left, shift);
-        }
-        if right {
-            state.move_selection(sheet, MoveDirection::Right, shift);
-        }
-        if tab && !shift {
-            // Tab sur la dernière colonne d'une ligne de données, ou sur
-            // n'importe quel champ d'en-tête de la dernière colonne : même geste — ajoute une colonne plutôt que de
-            // revenir en début de ligne suivante ou d'entrer dans les
-            // données, puis sélectionne tout de suite la case qui y
-            // correspondra (voir `Action::AddColumnAndSelect`/
-            // `Action::AddColumnAndSelectHeaderField`, qui ne peuvent la
-            // poser qu'une fois la colonne réellement créée, contrairement à
-            // une ligne). Valait seulement pour Formule avant #52 (Tab
-            // circulait d'abord colonne par colonne pour un même champ) ;
-            // décision levée par l'utilisateur.
-            let cursor = state.selection(sheet).and_then(Selection::grid_cursor);
-            let needs_new_column = match cursor {
-                Some(GridCursor::Data(column, _) | GridCursor::Header(column, _)) => {
-                    is_last_visible_column(state, sheet, column)
-                }
-                None => false,
-            };
-            if needs_new_column {
-                match cursor {
-                    Some(GridCursor::Data(_, row)) => {
-                        actions.push(Action::AddColumnAndSelect { sheet, row });
-                    }
-                    Some(GridCursor::Header(_, field)) => {
-                        actions.push(Action::AddColumnAndSelectHeaderField { sheet, field });
-                    }
-                    None => {}
-                }
-            } else {
-                state.move_selection_tab(sheet, false);
+        } else if let Some((column, field)) = state.selected_header_field(sheet) {
+            state.begin_header_edit(column, field);
+            if let Some(edit) = state.header_editing_mut() {
+                edit.buffer = typed;
             }
-        } else if tab {
-            state.move_selection_tab(sheet, true);
-        }
-        if enter && shift {
-            state.move_selection(sheet, MoveDirection::Up, false);
-        } else if enter {
-            // Entrée sur la dernière ligne de la feuille, cellule déjà
-            // vide et jamais éditée dans cette frappe : `move_selection`
-            // seul ne ferait rien (`Down` est borné à `row_count - 1`,
-            // voir sa doc). Même geste que `CommitCellAndAdvance` sur une
-            // cellule qu'on vient de remplir — ajoute la ligne, puis
-            // sélectionne tout de suite la cellule qui y correspondra
-            // (elle sera créée avant le prochain rendu, voir `cell_widget`).
-            let data_cursor = state
-                .selection(sheet)
-                .and_then(Selection::grid_cursor)
-                .and_then(|cursor| match cursor {
-                    GridCursor::Data(column, row) => Some((column, row)),
-                    GridCursor::Header(..) => None,
-                });
-            let at_last_row = data_cursor.is_some_and(|(_, row)| row + 1 >= state.row_count(sheet));
-            if at_last_row {
-                if let Some((column, row)) = data_cursor {
-                    actions.push(Action::InsertRows {
-                        sheet,
-                        at: row + 1,
-                        count: 1,
-                    });
-                    state.select_cell(sheet, column, row + 1);
-                }
-            } else {
-                state.move_selection(sheet, MoveDirection::Down, false);
-            }
-        }
-        // Ctrl+C/X/V n'apparaissent **jamais** comme un `egui::Event::Key`
-        // ordinaire (donc jamais via `consume_key`/`consume_shortcut`) :
-        // `egui-winit` les intercepte lui-même à la traduction des
-        // événements de la fenêtre et pousse à la place un `Event::Copy`/
-        // `Event::Cut`/`Event::Paste(String)` (ce dernier porte déjà le
-        // contenu du presse-papier système, lu par `egui-winit` via
-        // `arboard` en interne — inutile de le relire nous-mêmes). Ça vaut
-        // aussi pour Ctrl+Maj+C/Ctrl+Maj+V : `egui-winit::is_copy_command`/
-        // `is_paste_command` ne testent que `modifiers.command`, jamais
-        // `shift` (voir `egui-winit/src/lib.rs`), donc Maj enfoncée ou non
-        // produit le **même** `Event::Copy`/`Event::Paste` — jamais un
-        // `Event::Key` à capturer par un raccourci séparé (un essai
-        // précédent le supposait à tort : `consume_shortcut` sur un
-        // raccourci Ctrl+Maj+C/V ne matchait jamais). On distingue donc les
-        // deux en lisant `input.modifiers.shift` au moment de l'événement —
-        // toujours à jour à ce point, `ModifiersChanged` précédant la
-        // frappe de la touche elle-même. Retour arrière/Suppr, eux, n'ont
-        // pas de modificateur et restent des `Event::Key` ordinaires,
-        // capturés via `consume_key` comme avant. Suppr est le seul des
-        // deux à ne pas dispatcher une action fixe : `AppState::
-        // consume_delete_key` décide si c'est un vidage ou une suppression
-        // selon qu'il s'agit ou non de la deuxième pression consécutive sur
-        // la même sélection (voir sa doc).
-        let (mut copy, mut cut, mut paste_text, mut copy_full_columns, mut paste_absolute) =
-            (false, false, None, false, false);
-        ui.input(|input| {
-            let shift = input.modifiers.shift;
-            for event in &input.events {
-                match event {
-                    egui::Event::Copy if shift => copy_full_columns = true,
-                    egui::Event::Copy => copy = true,
-                    egui::Event::Cut => cut = true,
-                    egui::Event::Paste(_) if shift => paste_absolute = true,
-                    egui::Event::Paste(text) => paste_text = Some(text.clone()),
-                    _ => {}
-                }
-            }
-        });
-        let (delete, backspace) = ui.input_mut(|input| {
-            (
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
-            )
-        });
-        // Toute la matrice de comportement (une seule case copiée devient du
-        // texte brut, un rectangle devient relatif, Ctrl+Maj+C promeut les
-        // colonnes touchées en entier, un collage se décale sur l'ancre ou
-        // rejoue ses rangs d'origine…) vit dans `AppState` — voir sa doc de
-        // tête, section copier/coller. Cette couche ne fait que traduire
-        // clavier/souris en appels, la même façon quelle que soit la sorte
-        // de sélection courante : plus de branche séparée pour un champ
-        // d'en-tête sélectionné, `AppState::copy_selection`/`AppState::
-        // paste`/`Action::ClearSelectedCells`/`Action::DeleteSelectedCells`
-        // savent déjà tous distinguer en-tête et données par eux-mêmes.
-        if copy_full_columns {
-            if let Some(text) = state.copy_full_columns(sheet) {
-                ui.ctx().copy_text(text);
-            }
-        } else if copy || cut {
-            if let Some(text) = state.copy_selection(sheet) {
-                ui.ctx().copy_text(text);
-            }
-        }
-        if cut || backspace {
-            // Une autre mutation de la grille s'intercale entre deux
-            // pressions sur Suppr : la deuxième doit repartir au premier
-            // temps (vider), pas supprimer par surprise — voir la doc de
-            // `AppState::consume_delete_key`.
-            state.forget_delete_repeat(sheet);
-            actions.push(Action::ClearSelectedCells { sheet });
-        }
-        if delete {
-            if let Some(action) = state.consume_delete_key(sheet) {
-                actions.push(action);
-            }
-        }
-        if paste_absolute {
-            state.forget_delete_repeat(sheet);
-            actions.push(Action::PasteAbsolute { sheet });
-        } else if let Some(text) = paste_text {
-            state.forget_delete_repeat(sheet);
-            actions.push(Action::Paste { sheet, text });
         }
     }
-    Some(table_output)
+}
+
+fn navigate_grid_selection(
+    ui: &egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+) {
+    // Déplacement clavier d'une cellule déjà sélectionnée, sans
+    // édition en cours (pendant l'édition, ces mêmes touches sont
+    // gérées par `cell_widget`, qui valide *puis* déplace : voir sa
+    // doc). Flèches directionnelles + Maj pour étendre le rectangle ;
+    // Tab/Maj+Tab avec retour à la ligne aux bords ; Entrée/Maj+Entrée
+    // comme équivalents non-éditants de Bas/Haut. Sans effet si la
+    // sélection courante n'est pas un rectangle de cellules (colonne
+    // entière ou champ d'en-tête) — voir `Selection::cursor`.
+    let shift = ui.input(|i| i.modifiers.shift);
+    let (up, down, left, right, tab, enter) = ui.input(|input| {
+        (
+            input.key_pressed(egui::Key::ArrowUp),
+            input.key_pressed(egui::Key::ArrowDown),
+            input.key_pressed(egui::Key::ArrowLeft),
+            input.key_pressed(egui::Key::ArrowRight),
+            input.key_pressed(egui::Key::Tab),
+            input.key_pressed(egui::Key::Enter),
+        )
+    });
+    if up {
+        state.move_selection(sheet, MoveDirection::Up, shift);
+    }
+    if down {
+        state.move_selection(sheet, MoveDirection::Down, shift);
+    }
+    if left {
+        state.move_selection(sheet, MoveDirection::Left, shift);
+    }
+    if right {
+        state.move_selection(sheet, MoveDirection::Right, shift);
+    }
+    if tab && !shift {
+        // Tab sur la dernière colonne d'une ligne de données, ou sur
+        // n'importe quel champ d'en-tête de la dernière colonne : même geste — ajoute une colonne plutôt que de
+        // revenir en début de ligne suivante ou d'entrer dans les
+        // données, puis sélectionne tout de suite la case qui y
+        // correspondra (voir `Action::AddColumnAndSelect`/
+        // `Action::AddColumnAndSelectHeaderField`, qui ne peuvent la
+        // poser qu'une fois la colonne réellement créée, contrairement à
+        // une ligne). Valait seulement pour Formule avant #52 (Tab
+        // circulait d'abord colonne par colonne pour un même champ) ;
+        // décision levée par l'utilisateur.
+        let cursor = state.selection(sheet).and_then(Selection::grid_cursor);
+        let needs_new_column = match cursor {
+            Some(GridCursor::Data(column, _) | GridCursor::Header(column, _)) => {
+                is_last_visible_column(state, sheet, column)
+            }
+            None => false,
+        };
+        if needs_new_column {
+            match cursor {
+                Some(GridCursor::Data(_, row)) => {
+                    actions.push(Action::AddColumnAndSelect { sheet, row });
+                }
+                Some(GridCursor::Header(_, field)) => {
+                    actions.push(Action::AddColumnAndSelectHeaderField { sheet, field });
+                }
+                None => {}
+            }
+        } else {
+            state.move_selection_tab(sheet, false);
+        }
+    } else if tab {
+        state.move_selection_tab(sheet, true);
+    }
+    if enter && shift {
+        state.move_selection(sheet, MoveDirection::Up, false);
+    } else if enter {
+        // Entrée sur la dernière ligne de la feuille, cellule déjà
+        // vide et jamais éditée dans cette frappe : `move_selection`
+        // seul ne ferait rien (`Down` est borné à `row_count - 1`,
+        // voir sa doc). Même geste que `CommitCellAndAdvance` sur une
+        // cellule qu'on vient de remplir — ajoute la ligne, puis
+        // sélectionne tout de suite la cellule qui y correspondra
+        // (elle sera créée avant le prochain rendu, voir `cell_widget`).
+        let data_cursor = state
+            .selection(sheet)
+            .and_then(Selection::grid_cursor)
+            .and_then(|cursor| match cursor {
+                GridCursor::Data(column, row) => Some((column, row)),
+                GridCursor::Header(..) => None,
+            });
+        let at_last_row = data_cursor.is_some_and(|(_, row)| row + 1 >= state.row_count(sheet));
+        if at_last_row {
+            if let Some((column, row)) = data_cursor {
+                actions.push(Action::InsertRows {
+                    sheet,
+                    at: row + 1,
+                    count: 1,
+                });
+                state.select_cell(sheet, column, row + 1);
+            }
+        } else {
+            state.move_selection(sheet, MoveDirection::Down, false);
+        }
+    }
+}
+
+fn grid_clipboard_shortcuts(
+    ui: &egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+) {
+    // Ctrl+C/X/V n'apparaissent **jamais** comme un `egui::Event::Key`
+    // ordinaire (donc jamais via `consume_key`/`consume_shortcut`) :
+    // `egui-winit` les intercepte lui-même à la traduction des
+    // événements de la fenêtre et pousse à la place un `Event::Copy`/
+    // `Event::Cut`/`Event::Paste(String)` (ce dernier porte déjà le
+    // contenu du presse-papier système, lu par `egui-winit` via
+    // `arboard` en interne — inutile de le relire nous-mêmes). Ça vaut
+    // aussi pour Ctrl+Maj+C/Ctrl+Maj+V : `egui-winit::is_copy_command`/
+    // `is_paste_command` ne testent que `modifiers.command`, jamais
+    // `shift` (voir `egui-winit/src/lib.rs`), donc Maj enfoncée ou non
+    // produit le **même** `Event::Copy`/`Event::Paste` — jamais un
+    // `Event::Key` à capturer par un raccourci séparé (un essai
+    // précédent le supposait à tort : `consume_shortcut` sur un
+    // raccourci Ctrl+Maj+C/V ne matchait jamais). On distingue donc les
+    // deux en lisant `input.modifiers.shift` au moment de l'événement —
+    // toujours à jour à ce point, `ModifiersChanged` précédant la
+    // frappe de la touche elle-même. Retour arrière/Suppr, eux, n'ont
+    // pas de modificateur et restent des `Event::Key` ordinaires,
+    // capturés via `consume_key` comme avant. Suppr est le seul des
+    // deux à ne pas dispatcher une action fixe : `AppState::
+    // consume_delete_key` décide si c'est un vidage ou une suppression
+    // selon qu'il s'agit ou non de la deuxième pression consécutive sur
+    // la même sélection (voir sa doc).
+    let (mut copy, mut cut, mut paste_text, mut copy_full_columns, mut paste_absolute) =
+        (false, false, None, false, false);
+    ui.input(|input| {
+        let shift = input.modifiers.shift;
+        for event in &input.events {
+            match event {
+                egui::Event::Copy if shift => copy_full_columns = true,
+                egui::Event::Copy => copy = true,
+                egui::Event::Cut => cut = true,
+                egui::Event::Paste(_) if shift => paste_absolute = true,
+                egui::Event::Paste(text) => paste_text = Some(text.clone()),
+                _ => {}
+            }
+        }
+    });
+    let (delete, backspace) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+        )
+    });
+    // Toute la matrice de comportement (une seule case copiée devient du
+    // texte brut, un rectangle devient relatif, Ctrl+Maj+C promeut les
+    // colonnes touchées en entier, un collage se décale sur l'ancre ou
+    // rejoue ses rangs d'origine…) vit dans `AppState` — voir sa doc de
+    // tête, section copier/coller. Cette couche ne fait que traduire
+    // clavier/souris en appels, la même façon quelle que soit la sorte
+    // de sélection courante : plus de branche séparée pour un champ
+    // d'en-tête sélectionné, `AppState::copy_selection`/`AppState::
+    // paste`/`Action::ClearSelectedCells`/`Action::DeleteSelectedCells`
+    // savent déjà tous distinguer en-tête et données par eux-mêmes.
+    if copy_full_columns {
+        if let Some(text) = state.copy_full_columns(sheet) {
+            ui.ctx().copy_text(text);
+        }
+    } else if copy || cut {
+        if let Some(text) = state.copy_selection(sheet) {
+            ui.ctx().copy_text(text);
+        }
+    }
+    if cut || backspace {
+        // Une autre mutation de la grille s'intercale entre deux
+        // pressions sur Suppr : la deuxième doit repartir au premier
+        // temps (vider), pas supprimer par surprise — voir la doc de
+        // `AppState::consume_delete_key`.
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::ClearSelectedCells { sheet });
+    }
+    if delete {
+        if let Some(action) = state.consume_delete_key(sheet) {
+            actions.push(action);
+        }
+    }
+    if paste_absolute {
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::PasteAbsolute { sheet });
+    } else if let Some(text) = paste_text {
+        state.forget_delete_repeat(sheet);
+        actions.push(Action::Paste { sheet, text });
+    }
 }
 
 /// Case de la gouttière des numéros de ligne, dans le **corps** de la table
