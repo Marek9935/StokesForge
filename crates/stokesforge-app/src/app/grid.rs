@@ -1785,209 +1785,229 @@ fn cell_widget(
             .is_some_and(|edit| edit.column == column && edit.row == row);
 
         if editing_here {
-            let Some(edit) = state.editing_mut() else {
-                return;
-            };
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut edit.buffer)
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY)
-                    // #38 : Tab ne doit pas faire sortir le focus du champ
-                    // vers le reste de l'interface — voir `GRID_KEYS` ; c'est
-                    // ce widget qui le lit (`tab_pressed`) pour valider.
-                    .event_filter(GRID_KEYS),
-            );
-            // `Response::has_focus`/`lost_focus` sont recalculés à chaque
-            // appel à partir de l'état *courant* du focus (pas un instantané
-            // figé) : il faut donc lire `lost_focus()` **avant** de
-            // potentiellement redemander le focus, sous peine de se
-            // redonner nous-mêmes le focus qu'on vient de perdre (Entrée
-            // fait perdre le focus au `TextEdit` en interne) et de faire
-            // rentrer `lost_focus()` à `false` — plus aucune validation
-            // n'aurait alors lieu, la cellule restant bloquée en édition et,
-            // avec elle, `AppState::editing()` bloquant à son tour tous les
-            // raccourcis clavier de la grille (voir la garde en tête de
-            // `grid_contents`).
-            let lost_focus = response.lost_focus();
-            // Sans ceci, un `TextEdit` qui vient d'apparaître (édition
-            // ouverte par double-clic ou, depuis le bug 1, par une frappe
-            // sur une cellule sélectionnée) ne reçoit le focus clavier
-            // qu'après un clic dessus — egui ne le lui donne pas
-            // automatiquement à l'apparition.
-            if !response.has_focus() && !lost_focus {
-                response.request_focus();
-            }
-            // Avec le filtre `GRID_KEYS`, Tab ne fait plus perdre le focus au
-            // champ (c'était lui, auparavant, qui signalait la validation) :
-            // on lit la touche, et on rend le focus nous-mêmes — la grille le
-            // reprend à la fin de l'édition (`grid_contents`).
-            let tab_pressed =
-                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab));
-            if tab_pressed {
-                response.surrender_focus();
-            }
-            if !lost_focus && !tab_pressed {
-                return;
-            }
-            // Échap referme la saisie sans rien écrire ; toute autre perte
-            // de focus (clic ailleurs, Tab, Entrée) valide — et, pour
-            // Entrée/Maj+Entrée/Tab/Maj+Tab, déplace aussi la sélection vers
-            // la cellule suivante, comme dans tout tableur (déplacement
-            // clavier complet : voir le bloc de raccourcis hors édition dans
-            // `grid_contents` pour les flèches directionnelles, qui ne
-            // s'appliquent qu'à une cellule déjà sélectionnée mais pas en
-            // édition — `TextEdit` capture lui-même les flèches pour
-            // déplacer le curseur de texte pendant la saisie).
-            if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                state.cancel_edit();
-                return;
-            }
-            let shift = ui.input(|i| i.modifiers.shift);
-            // `consume_key`, pas `key_pressed` : cette cellule valide *et*
-            // déplace la sélection tout de suite (`select_cell`/
-            // `move_selection*` ci-dessous), avant que le bloc de
-            // raccourcis clavier de `grid_contents` (qui tourne après, une
-            // fois `state.editing()` redevenu `None` par le `cancel_edit`
-            // ci-dessous) ne voie passer la même image. Sans consommer la
-            // touche ici, ce bloc plus tard dans la même image relisait le
-            // même Entrée/Tab (`key_pressed` ne retire rien des
-            // événements) et déplaçait la sélection une deuxième fois —
-            // Entrée sur la ligne 2 atterrissait sur la ligne 4, pas 3.
-            // `Modifiers::NONE` matche Entrée avec ou sans Maj
-            // (`Modifiers::matches_logically` ignore Maj/Alt en trop quand
-            // le motif ne les demande pas).
-            let enter =
-                ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-            let tab =
-                ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
-            let pending = state
-                .editing()
-                .filter(|edit| edit.column == column && edit.row == row)
-                .map(|edit| edit.buffer.clone());
-            if let Some(text) = pending {
-                state.cancel_edit();
-                if enter && !shift {
-                    // `CommitCellAndAdvance` ajoute déjà une ligne quand
-                    // `row` était la dernière de la colonne ; sélectionner
-                    // `row + 1` sans attendre que cette commande (appliquée
-                    // après le rendu de cette image) ait créé la ligne est
-                    // sûr : soit elle existait déjà, soit elle est sur le
-                    // point de l'être.
-                    actions.push(Action::CommitCellAndAdvance {
-                        column,
-                        row,
-                        text,
-                        sheet,
-                    });
-                    state.select_cell(sheet, column, row + 1);
-                } else {
-                    actions.push(Action::CommitCell { column, row, text });
-                    if enter {
-                        // Maj+Entrée : remonte d'une ligne, jamais d'ajout.
-                        state.move_selection(sheet, MoveDirection::Up, false);
-                    } else if tab && !shift && is_last_visible_column(state, sheet, column) {
-                        // Même geste que dans le bloc de raccourcis hors
-                        // édition : Tab valide sur la dernière colonne ajoute
-                        // une colonne plutôt que de revenir en début de ligne
-                        // suivante (voir `Action::AddColumnAndSelect`).
-                        actions.push(Action::AddColumnAndSelect { sheet, row });
-                    } else if tab {
-                        state.move_selection_tab(sheet, shift);
-                    }
-                }
-            }
+            edit_cell_widget(ui, state, actions, sheet, column, row);
             return;
         }
+        display_cell_widget(ui, state, actions, sheet, column, row);
+    });
+}
 
-        let text = state.cell_text(column, row);
-        let selected = state.is_selected(sheet, column, row);
-        let rect = ui.available_rect_before_wrap();
-        let response = ui.interact(rect, ui.id().with("cell"), egui::Sense::click_and_drag());
-        if selected {
-            ui.painter().rect_filled(
-                rect,
-                0.0,
-                ui.visuals().selection.bg_fill.linear_multiply(0.35),
-            );
-        }
-        // `.truncate()` plutôt que le retour à la ligne par défaut d'un
-        // `Label` : une valeur trop large pour sa colonne est coupée à
-        // droite (avec un léger fondu), jamais renvoyée sur une seconde
-        // ligne qui casserait la hauteur uniforme des rangées de la table.
-        //
-        // Alignement à la tableur, dans le **corps** seulement (jamais la
-        // gouttière ni l'en-tête, qui ne portent pas de valeur de colonne) :
-        // les nombres à droite, le texte à gauche — `AppState::
-        // cell_is_numeric` tranche par cellule, pas par colonne, pour
-        // qu'une colonne `Mixed` aligne chaque ligne selon sa propre valeur.
-        //
-        // `Label::halign` seul ne suffit pas ici : `ui.put` place le widget
-        // dans un `Layout::centered_and_justified`, qui justifie le texte
-        // (l'étire pour remplir la largeur) avant que `halign` n'ait voix au
-        // chapitre — le résultat restait visuellement centré. Un vrai
-        // `Layout` directionnel (`right_to_left`/`left_to_right`), comme
-        // celui déjà posé sur toute la table (`cell_layout` du
-        // `TableBuilder`), aligne réellement le texte contre le bord voulu.
-        let layout = if state.cell_is_numeric(column, row) {
-            egui::Layout::right_to_left(egui::Align::Center)
+/// Champ de saisie : la validation consomme Tab/Entrée avant le clavier de grille.
+fn edit_cell_widget(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    column: NodeId,
+    row: usize,
+) {
+    let Some(edit) = state.editing_mut() else {
+        return;
+    };
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut edit.buffer)
+            .frame(egui::Frame::NONE)
+            .desired_width(f32::INFINITY)
+            // #38 : Tab ne doit pas faire sortir le focus du champ
+            // vers le reste de l'interface — voir `GRID_KEYS` ; c'est
+            // ce widget qui le lit (`tab_pressed`) pour valider.
+            .event_filter(GRID_KEYS),
+    );
+    // `Response::has_focus`/`lost_focus` sont recalculés à chaque
+    // appel à partir de l'état *courant* du focus (pas un instantané
+    // figé) : il faut donc lire `lost_focus()` **avant** de
+    // potentiellement redemander le focus, sous peine de se
+    // redonner nous-mêmes le focus qu'on vient de perdre (Entrée
+    // fait perdre le focus au `TextEdit` en interne) et de faire
+    // rentrer `lost_focus()` à `false` — plus aucune validation
+    // n'aurait alors lieu, la cellule restant bloquée en édition et,
+    // avec elle, `AppState::editing()` bloquant à son tour tous les
+    // raccourcis clavier de la grille (voir la garde en tête de
+    // `grid_contents`).
+    let lost_focus = response.lost_focus();
+    // Sans ceci, un `TextEdit` qui vient d'apparaître (édition
+    // ouverte par double-clic ou, depuis le bug 1, par une frappe
+    // sur une cellule sélectionnée) ne reçoit le focus clavier
+    // qu'après un clic dessus — egui ne le lui donne pas
+    // automatiquement à l'apparition.
+    if !response.has_focus() && !lost_focus {
+        response.request_focus();
+    }
+    // Avec le filtre `GRID_KEYS`, Tab ne fait plus perdre le focus au
+    // champ (c'était lui, auparavant, qui signalait la validation) :
+    // on lit la touche, et on rend le focus nous-mêmes — la grille le
+    // reprend à la fin de l'édition (`grid_contents`).
+    let tab_pressed = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab));
+    if tab_pressed {
+        response.surrender_focus();
+    }
+    if !lost_focus && !tab_pressed {
+        return;
+    }
+    // Échap referme la saisie sans rien écrire ; toute autre perte
+    // de focus (clic ailleurs, Tab, Entrée) valide — et, pour
+    // Entrée/Maj+Entrée/Tab/Maj+Tab, déplace aussi la sélection vers
+    // la cellule suivante, comme dans tout tableur (déplacement
+    // clavier complet : voir le bloc de raccourcis hors édition dans
+    // `grid_contents` pour les flèches directionnelles, qui ne
+    // s'appliquent qu'à une cellule déjà sélectionnée mais pas en
+    // édition — `TextEdit` capture lui-même les flèches pour
+    // déplacer le curseur de texte pendant la saisie).
+    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        state.cancel_edit();
+        return;
+    }
+    let shift = ui.input(|i| i.modifiers.shift);
+    // `consume_key`, pas `key_pressed` : cette cellule valide *et*
+    // déplace la sélection tout de suite (`select_cell`/
+    // `move_selection*` ci-dessous), avant que le bloc de
+    // raccourcis clavier de `grid_contents` (qui tourne après, une
+    // fois `state.editing()` redevenu `None` par le `cancel_edit`
+    // ci-dessous) ne voie passer la même image. Sans consommer la
+    // touche ici, ce bloc plus tard dans la même image relisait le
+    // même Entrée/Tab (`key_pressed` ne retire rien des
+    // événements) et déplaçait la sélection une deuxième fois —
+    // Entrée sur la ligne 2 atterrissait sur la ligne 4, pas 3.
+    // `Modifiers::NONE` matche Entrée avec ou sans Maj
+    // (`Modifiers::matches_logically` ignore Maj/Alt en trop quand
+    // le motif ne les demande pas).
+    let enter = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let tab = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+    let pending = state
+        .editing()
+        .filter(|edit| edit.column == column && edit.row == row)
+        .map(|edit| edit.buffer.clone());
+    if let Some(text) = pending {
+        state.cancel_edit();
+        if enter && !shift {
+            // `CommitCellAndAdvance` ajoute déjà une ligne quand
+            // `row` était la dernière de la colonne ; sélectionner
+            // `row + 1` sans attendre que cette commande (appliquée
+            // après le rendu de cette image) ait créé la ligne est
+            // sûr : soit elle existait déjà, soit elle est sur le
+            // point de l'être.
+            actions.push(Action::CommitCellAndAdvance {
+                column,
+                row,
+                text,
+                sheet,
+            });
+            state.select_cell(sheet, column, row + 1);
         } else {
-            egui::Layout::left_to_right(egui::Align::Center)
-        };
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(rect.shrink2(egui::vec2(4.0, 0.0)))
-                .layout(layout),
-            |ui| {
-                ui.add(egui::Label::new(text).selectable(false).truncate());
-            },
-        );
-
-        if response.double_clicked() {
-            state.begin_edit(column, row);
-            return;
-        }
-        let shift = ui.input(|i| i.modifiers.shift);
-        if response.drag_started() || (response.clicked() && !shift) {
-            state.select_cell(sheet, column, row);
-        } else if response.clicked() && shift {
-            state.extend_selection(sheet, column, row);
-        } else if response.contains_pointer()
-            && ui.input(|i| i.pointer.primary_down())
-            && state.selection(sheet).is_some()
-        {
-            // `response.dragged()` ne se déclenche que sur le widget qui a
-            // *commencé* le glisser — jamais sur les cellules simplement
-            // survolées ensuite —, d'où ce test manuel plutôt que
-            // `dragged()` pour étendre la sélection pendant qu'on glisse.
-            //
-            // `response.hovered()` ne convient pas non plus : tant qu'un
-            // glisser est en cours *ailleurs* (sur la cellule de départ),
-            // egui ne considère plus que ce widget d'origine comme
-            // « survolé » — aucune autre cellule ne redevient `hovered()`
-            // pendant tout le glisser, même sous le curseur (`egui::
-            // Context::interact`, doc de `InteractionSnapshot::hovered` :
-            // « While dragging or clicking something, nothing else is
-            // hovered »). `contains_pointer()` reste vrai indépendamment de
-            // ce qui est en train d'être glissé ailleurs — c'est le test
-            // qu'il faut ici.
-            state.extend_selection(sheet, column, row);
-        } else if response.secondary_clicked() && !selected {
-            // Clic droit hors de la sélection : la réduire à cette cellule
-            // avant d'ouvrir le menu — même règle que dans l'en-tête et sur
-            // la rangée des lettres (voir `header_field_widget`).
-            state.select_cell(sheet, column, row);
-        }
-        // `grid_menu` **dans** la fermeture, jamais avant : elle ne tourne
-        // que tant que le menu est ouvert. Calculée dehors, elle serait
-        // recalculée à chaque image pour *chaque cellule visible* — et elle
-        // parcourt l'arbre (`Selection::columns`), ce qui en ferait un coût
-        // quadratique en nombre de colonnes sur une grille qui ne fait que
-        // s'afficher.
-        response.context_menu(|ui| {
-            if let Some(menu) = state.grid_menu(sheet) {
-                grid_edit_menu(ui, state, actions, sheet, &menu);
+            actions.push(Action::CommitCell { column, row, text });
+            if enter {
+                // Maj+Entrée : remonte d'une ligne, jamais d'ajout.
+                state.move_selection(sheet, MoveDirection::Up, false);
+            } else if tab && !shift && is_last_visible_column(state, sheet, column) {
+                // Même geste que dans le bloc de raccourcis hors
+                // édition : Tab valide sur la dernière colonne ajoute
+                // une colonne plutôt que de revenir en début de ligne
+                // suivante (voir `Action::AddColumnAndSelect`).
+                actions.push(Action::AddColumnAndSelect { sheet, row });
+            } else if tab {
+                state.move_selection_tab(sheet, shift);
             }
-        });
+        }
+    }
+}
+
+/// Cellule au repos : affichage, sélection et menu contextuel paresseux.
+fn display_cell_widget(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    column: NodeId,
+    row: usize,
+) {
+    let text = state.cell_text(column, row);
+    let selected = state.is_selected(sheet, column, row);
+    let rect = ui.available_rect_before_wrap();
+    let response = ui.interact(rect, ui.id().with("cell"), egui::Sense::click_and_drag());
+    if selected {
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            ui.visuals().selection.bg_fill.linear_multiply(0.35),
+        );
+    }
+    // `.truncate()` plutôt que le retour à la ligne par défaut d'un
+    // `Label` : une valeur trop large pour sa colonne est coupée à
+    // droite (avec un léger fondu), jamais renvoyée sur une seconde
+    // ligne qui casserait la hauteur uniforme des rangées de la table.
+    //
+    // Alignement à la tableur, dans le **corps** seulement (jamais la
+    // gouttière ni l'en-tête, qui ne portent pas de valeur de colonne) :
+    // les nombres à droite, le texte à gauche — `AppState::
+    // cell_is_numeric` tranche par cellule, pas par colonne, pour
+    // qu'une colonne `Mixed` aligne chaque ligne selon sa propre valeur.
+    //
+    // `Label::halign` seul ne suffit pas ici : `ui.put` place le widget
+    // dans un `Layout::centered_and_justified`, qui justifie le texte
+    // (l'étire pour remplir la largeur) avant que `halign` n'ait voix au
+    // chapitre — le résultat restait visuellement centré. Un vrai
+    // `Layout` directionnel (`right_to_left`/`left_to_right`), comme
+    // celui déjà posé sur toute la table (`cell_layout` du
+    // `TableBuilder`), aligne réellement le texte contre le bord voulu.
+    let layout = if state.cell_is_numeric(column, row) {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(4.0, 0.0)))
+            .layout(layout),
+        |ui| {
+            ui.add(egui::Label::new(text).selectable(false).truncate());
+        },
+    );
+
+    if response.double_clicked() {
+        state.begin_edit(column, row);
+        return;
+    }
+    let shift = ui.input(|i| i.modifiers.shift);
+    if response.drag_started() || (response.clicked() && !shift) {
+        state.select_cell(sheet, column, row);
+    } else if response.clicked() && shift {
+        state.extend_selection(sheet, column, row);
+    } else if response.contains_pointer()
+        && ui.input(|i| i.pointer.primary_down())
+        && state.selection(sheet).is_some()
+    {
+        // `response.dragged()` ne se déclenche que sur le widget qui a
+        // *commencé* le glisser — jamais sur les cellules simplement
+        // survolées ensuite —, d'où ce test manuel plutôt que
+        // `dragged()` pour étendre la sélection pendant qu'on glisse.
+        //
+        // `response.hovered()` ne convient pas non plus : tant qu'un
+        // glisser est en cours *ailleurs* (sur la cellule de départ),
+        // egui ne considère plus que ce widget d'origine comme
+        // « survolé » — aucune autre cellule ne redevient `hovered()`
+        // pendant tout le glisser, même sous le curseur (`egui::
+        // Context::interact`, doc de `InteractionSnapshot::hovered` :
+        // « While dragging or clicking something, nothing else is
+        // hovered »). `contains_pointer()` reste vrai indépendamment de
+        // ce qui est en train d'être glissé ailleurs — c'est le test
+        // qu'il faut ici.
+        state.extend_selection(sheet, column, row);
+    } else if response.secondary_clicked() && !selected {
+        // Clic droit hors de la sélection : la réduire à cette cellule
+        // avant d'ouvrir le menu — même règle que dans l'en-tête et sur
+        // la rangée des lettres (voir `header_field_widget`).
+        state.select_cell(sheet, column, row);
+    }
+    // `grid_menu` **dans** la fermeture, jamais avant : elle ne tourne
+    // que tant que le menu est ouvert. Calculée dehors, elle serait
+    // recalculée à chaque image pour *chaque cellule visible* — et elle
+    // parcourt l'arbre (`Selection::columns`), ce qui en ferait un coût
+    // quadratique en nombre de colonnes sur une grille qui ne fait que
+    // s'afficher.
+    response.context_menu(|ui| {
+        if let Some(menu) = state.grid_menu(sheet) {
+            grid_edit_menu(ui, state, actions, sheet, &menu);
+        }
     });
 }
 
