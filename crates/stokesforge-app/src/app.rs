@@ -7983,7 +7983,6 @@ mod graph_layout_tests {
     use super::window_placement::GRAPH_WINDOW_SIZE;
     use super::*;
     use stokesforge_core::{Column, Project};
-    use stokesforge_import::{HeaderSkip, Separator};
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
     use stokesforge_session::Session;
 
@@ -8509,62 +8508,6 @@ mod graph_layout_tests {
             "le détachement ne se retient pas"
         );
         assert_eq!(app.floating_rects[&graph], rect);
-    }
-
-    /// Issue #6 : chaque étape de l'assistant d'import se peint sans
-    /// paniquer, montre son titre en surbrillance et l'aperçu du fichier à
-    /// droite, quelle que soit l'étape.
-    #[test]
-    fn chaque_etape_de_l_assistant_d_import_se_peint_avec_son_apercu() {
-        // Hermétique : ni les modèles ni les fichiers récents de la machine.
-        let config = tempfile::tempdir().unwrap();
-        std::env::set_var("XDG_CONFIG_HOME", config.path());
-        let (session, _graph) = graphe();
-        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
-        let directory = tempfile::tempdir().unwrap();
-        let file = directory.path().join("jasco.csv");
-        std::fs::write(
-            &file,
-            "TITLE;S13\nXUNITS;NANOMETERS\nXYDATA\n800;1\n799;2\n798;3\n\nData points;3\n",
-        )
-        .unwrap();
-        state.open_import(None::<NodeId>);
-        state.set_import_paths(vec![file]);
-        if let Some(import) = state.import_state_mut() {
-            import.recipe.separator = Separator::Semicolon;
-            import.recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
-        }
-        let context = egui::Context::default();
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        crate::theme::install(&context);
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1400.0, 900.0),
-            )),
-            ..Default::default()
-        };
-        for step in crate::state::ImportStep::ALL {
-            let mut actions = Vec::new();
-            let mut output: Option<egui::FullOutput> = None;
-            for _ in 0..3 {
-                if let Some(mut previous) = output.take() {
-                    previous.textures_delta.clear();
-                }
-                output = Some(context.run_ui(input.clone(), |ui| {
-                    import_window(ui.ctx(), &mut state, &mut actions);
-                }));
-            }
-            let mut output = output.unwrap();
-            output.textures_delta.clear();
-            let shapes = output.shapes;
-            find_text_center(&shapes, &step.title());
-            find_text_center(&shapes, "TITLE;S13");
-            assert!(actions.is_empty(), "peindre n'importe rien");
-            state.import_step_forward();
-        }
-        assert!(state.import_state().is_some(), "l'assistant reste ouvert");
-        std::env::remove_var("XDG_CONFIG_HOME");
     }
 
     /// Issue #8 : un fichier lâché sur un classeur est réclamé par ce classeur

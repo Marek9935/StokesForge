@@ -3,7 +3,11 @@
 //! et les libellés des choix. Un seul point d'entrée pour `app.rs` :
 //! [`import_window`], un `modal_dialog_with` (jamais d'`egui::Window` brute).
 //!
-//! Sorti d'`app.rs` tel quel (#118).
+//! Sorti d'`app.rs` tel quel (#118), à une retouche près : le libellé d'une
+//! fin des données (`data_end_label`) est une table à part, testable et
+//! gardée par `tests/libelles.rs`, au lieu d'une fermeture de `data_end_row`.
+//! Les tests sont en fin de fichier : ils peignent l'assistant sans fenêtre et
+//! lisent les textes peints (contenu, couleur, position), jamais le source.
 
 use eframe::egui;
 use stokesforge_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
@@ -14,19 +18,26 @@ use crate::tr;
 
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
 
-/// Réglage « Fin des données » de la recette d'import (issue #4) : coupure
-/// automatique par défaut, désactivable. Le texte ou le nombre associé à
-/// l'option choisie reste dans la recette tant qu'on en change.
-fn data_end_row(ui: &mut egui::Ui, end: &mut stokesforge_import::DataEnd) {
+/// Libellé d'une option « Fin des données » : celui de la variante, quel que
+/// soit le texte ou le nombre qu'elle porte.
+fn data_end_label(end: &stokesforge_import::DataEnd) -> String {
     use stokesforge_import::DataEnd;
-    let label = |end: &DataEnd| match end {
+    match end {
         DataEnd::Auto => tr!("import-dataend-auto"),
         DataEnd::None => tr!("import-option-none"),
         DataEnd::FirstBlankLine => tr!("import-dataend-blank"),
         DataEnd::Marker(_) => tr!("import-dataend-marker"),
         DataEnd::LinesAfterHeader(_) => tr!("import-dataend-after-header"),
         DataEnd::LinesBeforeEnd(_) => tr!("import-dataend-before-end"),
-    };
+    }
+}
+
+/// Réglage « Fin des données » de la recette d'import (issue #4) : coupure
+/// automatique par défaut, désactivable. Le texte ou le nombre associé à
+/// l'option choisie reste dans la recette tant qu'on en change.
+fn data_end_row(ui: &mut egui::Ui, end: &mut stokesforge_import::DataEnd) {
+    use stokesforge_import::DataEnd;
+    let label = data_end_label;
     ui.horizontal(|ui| {
         ui.label(tr!("import-dataend"));
         egui::ComboBox::from_id_salt("stokesforge_import_data_end")
@@ -1348,5 +1359,790 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
         state.cancel_import();
     } else if requests.cancel {
         state.cancel_import();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::{Mutex, MutexGuard};
+
+    use eframe::egui;
+    use stokesforge_core::Project;
+    use stokesforge_import::{
+        ColumnKind, ColumnRoleChoice, DataEnd, DecimalStyle, Encoding, FilePreview, HeaderSkip,
+        LineRole, PreviewCell, PreviewLine, Separator,
+    };
+    use stokesforge_session::Session;
+
+    use super::{
+        column_kind_label, column_role_label, data_end_label, data_end_row, decimal_label,
+        encoding_label, import_line_preview_widget, import_window, line_role_color,
+        recipe_combo_text, separator_label, thousands_label,
+    };
+    use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
+    use crate::tr;
+
+    // -- Outillage --------------------------------------------------------
+
+    /// Sérialise les tests de ce module qui ouvrent l'assistant :
+    /// `XDG_CONFIG_HOME` est un état du *processus*, et `cargo test` fait
+    /// tourner les tests en parallèle (même motif que
+    /// `tests/shell.rs::isolate_recipe_store`).
+    static CONFIG_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Redirige `XDG_CONFIG_HOME` vers un dossier temporaire tant que la
+    /// valeur vit : `AppState::open_import` lit les modèles et les fichiers
+    /// récents de la machine (`RecipeStore`, `RecentFiles`), ce qui rendrait
+    /// le test dépendant du poste. `Drop` restaure la valeur d'avant, même
+    /// sur panique.
+    struct ConfigIsolee {
+        avant: Option<std::ffi::OsString>,
+        _dossier: tempfile::TempDir,
+        _verrou: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for ConfigIsolee {
+        fn drop(&mut self) {
+            match self.avant.take() {
+                Some(valeur) => std::env::set_var("XDG_CONFIG_HOME", valeur),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+        }
+    }
+
+    fn isoler_la_config() -> ConfigIsolee {
+        let verrou = CONFIG_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|empoisonne| empoisonne.into_inner());
+        let dossier = tempfile::tempdir().unwrap();
+        let avant = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("XDG_CONFIG_HOME", dossier.path());
+        ConfigIsolee {
+            avant,
+            _dossier: dossier,
+            _verrou: verrou,
+        }
+    }
+
+    /// Un fichier Jasco : un en-tête jusqu'au repère `XYDATA`, trois lignes
+    /// de données à deux colonnes, un pied de page.
+    const JASCO: &str =
+        "TITLE;S13\nXUNITS;NANOMETERS\nXYDATA\n800;1\n799;2\n798;3\n\nData points;3\n";
+
+    /// L'assistant ouvert sur un projet vide, sans classeur actif, avec
+    /// `fichiers` déjà choisis ; la recette lit `JASCO` (point-virgule,
+    /// en-tête jusqu'à `XYDATA`). Les champs gardent en vie ce dont l'état
+    /// dépend.
+    struct Banc {
+        state: AppState,
+        fichiers: Vec<PathBuf>,
+        _session: Session,
+        _dossier: tempfile::TempDir,
+        _config: ConfigIsolee,
+    }
+
+    fn banc(avec_fichier: bool) -> Banc {
+        let config = isoler_la_config();
+        let session = Session::spawn(Project::new("Import").unwrap(), None).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let dossier = tempfile::tempdir().unwrap();
+        let mut fichiers = Vec::new();
+        if avec_fichier {
+            let fichier = dossier.path().join("jasco.csv");
+            std::fs::write(&fichier, JASCO).unwrap();
+            fichiers.push(fichier);
+        }
+        state.open_import(None::<stokesforge_core::NodeId>);
+        state.set_import_paths(fichiers.clone());
+        let import = state.import_state_mut().unwrap();
+        import.recipe.separator = Separator::Semicolon;
+        import.recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
+        Banc {
+            state,
+            fichiers,
+            _session: session,
+            _dossier: dossier,
+            _config: config,
+        }
+    }
+
+    /// Un contexte aux polices et au thème de l'application.
+    fn contexte() -> egui::Context {
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        crate::theme::install(&context);
+        context
+    }
+
+    /// Une image de 1400 × 900 avec `events` ; rend ce qui a été peint.
+    fn image(
+        context: &egui::Context,
+        events: Vec<egui::Event>,
+        contenu: impl FnMut(&mut egui::Ui),
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, contenu);
+        output.textures_delta.clear();
+        output.shapes
+    }
+
+    /// Un texte peint : son contenu, sa couleur effective et son centre.
+    #[derive(Debug)]
+    struct Texte {
+        texte: String,
+        couleur: egui::Color32,
+        centre: egui::Pos2,
+    }
+
+    fn textes(shapes: &[egui::epaint::ClippedShape]) -> Vec<Texte> {
+        shapes
+            .iter()
+            .filter_map(|peint| match &peint.shape {
+                egui::Shape::Text(shape) => {
+                    let section = shape
+                        .galley
+                        .job
+                        .sections
+                        .first()
+                        .map_or(egui::Color32::PLACEHOLDER, |s| s.format.color);
+                    let couleur = shape.override_text_color.unwrap_or(
+                        if section == egui::Color32::PLACEHOLDER {
+                            shape.fallback_color
+                        } else {
+                            section
+                        },
+                    );
+                    Some(Texte {
+                        texte: shape.galley.job.text.clone(),
+                        couleur,
+                        centre: shape.pos + shape.galley.rect.center().to_vec2(),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Le texte peint exactement égal à `cherche`, s'il y en a un seul.
+    fn texte_exact<'a>(textes: &'a [Texte], cherche: &str) -> &'a Texte {
+        let trouves: Vec<&Texte> = textes.iter().filter(|t| t.texte == cherche).collect();
+        assert_eq!(
+            trouves.len(),
+            1,
+            "{cherche:?} doit être peint une fois : {:?}",
+            textes.iter().map(|t| &t.texte).collect::<Vec<_>>()
+        );
+        trouves[0]
+    }
+
+    fn est_peint(textes: &[Texte], cherche: &str) -> bool {
+        textes.iter().any(|t| t.texte == cherche)
+    }
+
+    /// Un clic de `bouton` en `pos`, réparti sur trois images (survol,
+    /// pression, relâchement) comme le veut la détection de clic d'egui.
+    fn cliquer(
+        context: &egui::Context,
+        pos: egui::Pos2,
+        bouton: egui::PointerButton,
+        mut contenu: impl FnMut(&mut egui::Ui),
+    ) {
+        image(context, vec![egui::Event::PointerMoved(pos)], &mut contenu);
+        for pressed in [true, false] {
+            image(
+                context,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: bouton,
+                    pressed,
+                    modifiers: egui::Modifiers::default(),
+                }],
+                &mut contenu,
+            );
+        }
+    }
+
+    fn touche(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Peint l'assistant trois fois (mise en page stabilisée, dialogue
+    /// centré) puis une quatrième avec `events` ; rend les textes de la
+    /// dernière image.
+    fn peindre_assistant(
+        context: &egui::Context,
+        state: &mut AppState,
+        actions: &mut Vec<Action>,
+        events: Vec<egui::Event>,
+    ) -> Vec<Texte> {
+        for _ in 0..3 {
+            image(context, Vec::new(), |ui| {
+                import_window(ui.ctx(), state, actions)
+            });
+        }
+        textes(&image(context, events, |ui| {
+            import_window(ui.ctx(), state, actions)
+        }))
+    }
+
+    // -- L'assistant entier -----------------------------------------------
+
+    /// Issue #6 : chaque étape de l'assistant se peint sans paniquer, montre
+    /// son titre en surbrillance (les autres en retrait), **son** contenu et
+    /// pas celui des autres étapes, et l'aperçu du fichier à droite, quelle
+    /// que soit l'étape. Peindre n'importe rien et ne ferme pas l'assistant.
+    #[test]
+    fn chaque_etape_de_l_assistant_d_import_se_peint_avec_son_apercu() {
+        let mut banc = banc(true);
+        let context = contexte();
+        let visuals = context.global_style().visuals.clone();
+        let (fort, faible) = (visuals.strong_text_color(), visuals.weak_text_color());
+        assert_ne!(fort, faible, "témoin : surbrillance et retrait diffèrent");
+        // Un libellé propre à chaque étape.
+        let propres = [
+            (ImportStep::Files, tr!("import-files-template")),
+            (ImportStep::Format, tr!("import-format-delimiter")),
+            (ImportStep::Header, tr!("import-dataend")),
+            (ImportStep::Columns, tr!("import-columns-read-as")),
+            (ImportStep::Metadata, tr!("import-metadata-keep-header")),
+            (ImportStep::Destination, tr!("import-destination")),
+        ];
+        assert_eq!(propres.len(), ImportStep::ALL.len());
+        for step in ImportStep::ALL {
+            assert_eq!(banc.state.import_state().unwrap().step, step);
+            let colonnes_avant = banc.state.import_state().unwrap().recipe.column_roles.len();
+            let mut actions = Vec::new();
+            let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+            for (i, candidate) in ImportStep::ALL.iter().enumerate() {
+                let fil = texte_exact(&peints, &format!("{} {}", i + 1, candidate.title()));
+                let attendu = if *candidate == step { fort } else { faible };
+                assert_eq!(
+                    fil.couleur, attendu,
+                    "{step:?} : fil d'Ariane de {candidate:?}"
+                );
+            }
+            for (proprietaire, libelle) in &propres {
+                assert_eq!(
+                    est_peint(&peints, libelle),
+                    *proprietaire == step,
+                    "{step:?} : {libelle:?} appartient à {proprietaire:?}"
+                );
+            }
+            // L'aperçu : la ligne d'en-tête brute et une cellule de données.
+            assert!(
+                peints.iter().any(|t| t.texte.contains("TITLE;S13")),
+                "{step:?} : aperçu absent"
+            );
+            assert!(est_peint(&peints, "800"), "{step:?} : cellule absente");
+            if step == ImportStep::Columns {
+                // Un rôle et une nature par colonne lue : la liste
+                // déroulante de la colonne 2 écrit `column_roles[1]`.
+                assert!(colonnes_avant < 2, "témoin : la recette part sans rôles");
+                let recipe = &banc.state.import_state().unwrap().recipe;
+                assert_eq!(recipe.column_roles.len(), 2);
+                assert_eq!(recipe.column_kinds.len(), 2);
+            }
+            assert!(actions.is_empty(), "peindre n'importe rien");
+            banc.state.import_step_forward();
+        }
+        assert!(
+            banc.state.import_state().is_some(),
+            "l'assistant reste ouvert"
+        );
+    }
+
+    /// « Terminer » (Entrée, bouton par défaut) importe dès que des fichiers
+    /// sont choisis, avec la recette telle qu'elle est — import en deux
+    /// clics — et ferme l'assistant ; sans fichier, Entrée ne fait rien
+    /// (témoin). Échap vaut « Annuler » : fermé, rien d'importé, même avec
+    /// des fichiers.
+    #[test]
+    fn terminer_importe_la_recette_telle_quelle_et_annuler_n_importe_rien() {
+        let mut complet = banc(true);
+        let recette = complet.state.import_state().unwrap().recipe.clone();
+        assert_eq!(recette.separator, Separator::Semicolon);
+        let mut actions = Vec::new();
+        peindre_assistant(
+            &contexte(),
+            &mut complet.state,
+            &mut actions,
+            vec![touche(egui::Key::Enter)],
+        );
+        assert_eq!(
+            actions,
+            vec![Action::StartImport {
+                destination: ImportDestination::NewBookForAll,
+                recipe: recette,
+                paths: complet.fichiers.clone(),
+            }]
+        );
+        assert!(complet.state.import_state().is_none(), "Terminer ferme");
+        drop(complet);
+
+        let mut vide = banc(false);
+        let context = contexte();
+        let mut actions = Vec::new();
+        peindre_assistant(
+            &context,
+            &mut vide.state,
+            &mut actions,
+            vec![touche(egui::Key::Enter)],
+        );
+        assert!(actions.is_empty(), "sans fichier, rien à importer");
+        assert!(vide.state.import_state().is_some(), "ni fermé");
+        drop(vide);
+
+        let mut annule = banc(true);
+        let mut actions = Vec::new();
+        peindre_assistant(
+            &contexte(),
+            &mut annule.state,
+            &mut actions,
+            vec![touche(egui::Key::Escape)],
+        );
+        assert!(actions.is_empty(), "Annuler n'importe rien");
+        assert!(annule.state.import_state().is_none(), "Annuler ferme");
+    }
+
+    /// Les boutons du pied : « Suivant » avance d'une étape, « Précédent »
+    /// recule — pas l'inverse.
+    #[test]
+    fn suivant_et_precedent_changent_d_etape() {
+        let mut banc = banc(true);
+        let context = contexte();
+        let mut actions = Vec::new();
+        for (bouton, attendue) in [
+            (tr!("import-button-next"), ImportStep::Format),
+            (tr!("import-button-next"), ImportStep::Header),
+            (tr!("import-button-back"), ImportStep::Format),
+        ] {
+            let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+            let pos = texte_exact(&peints, &bouton).centre;
+            cliquer(&context, pos, egui::PointerButton::Primary, |ui| {
+                import_window(ui.ctx(), &mut banc.state, &mut actions)
+            });
+            assert_eq!(
+                banc.state.import_state().unwrap().step,
+                attendue,
+                "{bouton}"
+            );
+        }
+        assert!(actions.is_empty());
+    }
+
+    /// Le clic droit dans l'aperçu de l'assistant atteint la recette, une
+    /// fois l'image peinte : « Les données commencent ici » sur la ligne 4
+    /// (`800;1`) remplace le repère `XYDATA` par trois lignes d'en-tête.
+    #[test]
+    fn le_clic_droit_dans_l_apercu_de_l_assistant_regle_la_recette() {
+        let mut banc = banc(true);
+        let context = contexte();
+        let mut actions = Vec::new();
+        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        let ligne = numero(&peints, 4).centre;
+        cliquer(&context, ligne, egui::PointerButton::Secondary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        let peints = textes(&image(&context, Vec::new(), |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        }));
+        let entree = texte_exact(&peints, &tr!("import-line-data-start")).centre;
+        cliquer(&context, entree, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        let recipe = &banc.state.import_state().unwrap().recipe;
+        assert_eq!(recipe.header, HeaderSkip::None);
+        assert_eq!(recipe.header_layout.main_header_lines, 3);
+        assert!(actions.is_empty());
+    }
+
+    // -- Les libellés des choix ---------------------------------------------
+
+    /// Les libellés d'une liste rendue par `libelle`, tous distincts : deux
+    /// choix d'une même liste déroulante qui s'affichent pareil ne se
+    /// distinguent plus.
+    fn distincts<T: std::fmt::Debug>(choix: &[T], libelle: impl Fn(&T) -> String) {
+        let libelles: Vec<String> = choix.iter().map(&libelle).collect();
+        for (i, a) in libelles.iter().enumerate() {
+            assert!(!a.trim().is_empty(), "{:?} sans libellé", choix[i]);
+            for (j, b) in libelles.iter().enumerate().skip(i + 1) {
+                assert_ne!(a, b, "{:?} et {:?} s'affichent pareil", choix[i], choix[j]);
+            }
+        }
+    }
+
+    /// Chaque liste déroulante de l'assistant montre des choix qu'on
+    /// distingue ; le libellé suit la variante, pas la valeur qu'elle porte
+    /// (un séparateur « autre » reste « autre » quel que soit son caractère).
+    #[test]
+    fn les_choix_d_une_meme_liste_ont_des_libelles_distincts() {
+        distincts(
+            &[
+                Separator::Comma,
+                Separator::Semicolon,
+                Separator::Tab,
+                Separator::Whitespace,
+                Separator::Custom('|'),
+                Separator::FixedWidth(vec![10]),
+                Separator::Auto,
+            ],
+            separator_label,
+        );
+        assert_eq!(
+            separator_label(&Separator::Custom('|')),
+            separator_label(&Separator::Custom('!'))
+        );
+        assert_eq!(
+            separator_label(&Separator::FixedWidth(vec![10])),
+            separator_label(&Separator::FixedWidth(vec![4, 8]))
+        );
+        distincts(
+            &[DecimalStyle::Auto, DecimalStyle::Dot, DecimalStyle::Comma],
+            |d| decimal_label(*d),
+        );
+        // Les milliers : les cinq choix proposés, plus un caractère lu dans
+        // un modèle, qui s'affiche « autre » sans se confondre avec eux.
+        distincts(
+            &[None, Some(' '), Some(','), Some('.'), Some('\''), Some('_')],
+            |t| thousands_label(*t),
+        );
+        distincts(
+            &[
+                Encoding::Auto,
+                Encoding::Utf8,
+                Encoding::Windows1252,
+                Encoding::Latin1,
+                Encoding::Utf16Le,
+                Encoding::Utf16Be,
+            ],
+            |e| encoding_label(*e),
+        );
+        distincts(
+            &[ColumnKind::Auto, ColumnKind::Text, ColumnKind::DateTime],
+            |k| column_kind_label(*k),
+        );
+        distincts(
+            &[
+                ColumnRoleChoice::Auto,
+                ColumnRoleChoice::X,
+                ColumnRoleChoice::Y,
+                ColumnRoleChoice::XError,
+                ColumnRoleChoice::YError,
+                ColumnRoleChoice::Ignore,
+            ],
+            |r| column_role_label(*r),
+        );
+        distincts(
+            &[
+                DataEnd::Auto,
+                DataEnd::None,
+                DataEnd::FirstBlankLine,
+                DataEnd::Marker(String::new()),
+                DataEnd::LinesAfterHeader(100),
+                DataEnd::LinesBeforeEnd(1),
+            ],
+            data_end_label,
+        );
+        assert_eq!(
+            data_end_label(&DataEnd::Marker(String::new())),
+            data_end_label(&DataEnd::Marker("FIN".into()))
+        );
+        assert_eq!(
+            data_end_label(&DataEnd::LinesAfterHeader(100)),
+            data_end_label(&DataEnd::LinesAfterHeader(3))
+        );
+    }
+
+    /// Une notion, un mot (`docs/textes-interface.md`) : la virgule, le point,
+    /// « Auto » et « aucun » s'écrivent pareil d'une liste de l'assistant à
+    /// l'autre.
+    #[test]
+    fn une_meme_notion_porte_le_meme_libelle_d_une_liste_a_l_autre() {
+        let virgule = separator_label(&Separator::Comma);
+        assert_eq!(decimal_label(DecimalStyle::Comma), virgule);
+        assert_eq!(thousands_label(Some(',')), virgule);
+        assert_eq!(thousands_label(Some('.')), decimal_label(DecimalStyle::Dot));
+        let auto = separator_label(&Separator::Auto);
+        assert_eq!(decimal_label(DecimalStyle::Auto), auto);
+        assert_eq!(encoding_label(Encoding::Auto), auto);
+        assert_eq!(column_role_label(ColumnRoleChoice::Auto), auto);
+        let aucun = thousands_label(None);
+        assert_eq!(column_role_label(ColumnRoleChoice::Ignore), aucun);
+        assert_eq!(data_end_label(&DataEnd::None), aucun);
+        // Un séparateur personnalisé est un « autre », comme un séparateur
+        // de milliers inconnu.
+        assert_eq!(
+            separator_label(&Separator::Custom('|')),
+            thousands_label(Some('_'))
+        );
+    }
+
+    /// La liste des modèles dit qu'une recette a été modifiée sans être
+    /// enregistrée, sans perdre le nom du modèle ; non modifiée, le nom seul.
+    #[test]
+    fn le_modele_modifie_se_signale_dans_la_liste_des_modeles() {
+        assert_eq!(recipe_combo_text("Jasco", false), "Jasco");
+        let modifie = recipe_combo_text("Jasco", true);
+        assert_ne!(modifie, "Jasco");
+        assert!(modifie.contains("Jasco"), "{modifie:?}");
+    }
+
+    // -- La fin des données -------------------------------------------------
+
+    /// Ouvre la liste « Fin des données » puis clique le choix `libelle`.
+    fn choisir_fin(context: &egui::Context, fin: &mut DataEnd, libelle: &str) {
+        let peints = textes(&image(context, Vec::new(), |ui| data_end_row(ui, fin)));
+        let liste = texte_exact(&peints, &data_end_label(fin)).centre;
+        cliquer(context, liste, egui::PointerButton::Primary, |ui| {
+            data_end_row(ui, fin)
+        });
+        let peints = textes(&image(context, Vec::new(), |ui| data_end_row(ui, fin)));
+        // La liste ouverte : le choix voulu, ailleurs que sur le bouton fermé.
+        let choix = peints
+            .iter()
+            .find(|t| t.texte == libelle && t.centre != liste)
+            .unwrap_or_else(|| panic!("{libelle:?} absent de la liste ouverte"))
+            .centre;
+        cliquer(context, choix, egui::PointerButton::Primary, |ui| {
+            data_end_row(ui, fin)
+        });
+    }
+
+    /// Issue #4 : la fin des données montre le champ de l'option choisie
+    /// (repère, nombre de lignes) ; reprendre la même option garde le texte
+    /// saisi, en changer prend la valeur par défaut de la nouvelle (témoin :
+    /// le clic atteint bien la liste).
+    #[test]
+    fn la_fin_des_donnees_garde_sa_valeur_tant_qu_on_ne_change_pas_d_option() {
+        let context = contexte();
+        let mut fin = DataEnd::Marker("FIN".into());
+        let peints = textes(&image(&context, Vec::new(), |ui| {
+            data_end_row(ui, &mut fin)
+        }));
+        assert!(est_peint(&peints, "FIN"), "le repère est dans son champ");
+
+        choisir_fin(&context, &mut fin, &tr!("import-dataend-marker"));
+        assert_eq!(
+            fin,
+            DataEnd::Marker("FIN".into()),
+            "même option : texte gardé"
+        );
+
+        choisir_fin(&context, &mut fin, &tr!("import-dataend-after-header"));
+        assert_eq!(fin, DataEnd::LinesAfterHeader(100), "autre option");
+        let peints = textes(&image(&context, Vec::new(), |ui| {
+            data_end_row(ui, &mut fin)
+        }));
+        assert!(est_peint(&peints, "100"), "le nombre est dans son champ");
+        assert!(!est_peint(&peints, "FIN"));
+
+        choisir_fin(&context, &mut fin, &tr!("import-dataend-auto"));
+        assert_eq!(fin, DataEnd::Auto);
+        let peints = textes(&image(&context, Vec::new(), |ui| {
+            data_end_row(ui, &mut fin)
+        }));
+        assert!(!est_peint(&peints, "100"), "Auto n'a pas de champ");
+    }
+
+    // -- L'aperçu -----------------------------------------------------------
+
+    /// Un aperçu de trois lignes : un en-tête, une donnée à deux cellules
+    /// dont la seconde serait gardée en texte, un pied de page.
+    fn apercu(total_data_lines: usize) -> FilePreview {
+        FilePreview {
+            lines: vec![
+                PreviewLine {
+                    number: 1,
+                    role: LineRole::MainHeader,
+                    text: "TITLE".into(),
+                    cells: None,
+                },
+                PreviewLine {
+                    number: 2,
+                    role: LineRole::Data,
+                    text: "1.5;abc".into(),
+                    cells: Some(vec![
+                        PreviewCell {
+                            text: "1.5".into(),
+                            is_text: false,
+                        },
+                        PreviewCell {
+                            text: "abc".into(),
+                            is_text: true,
+                        },
+                    ]),
+                },
+                PreviewLine {
+                    number: 3,
+                    role: LineRole::Footer,
+                    text: "END".into(),
+                    cells: None,
+                },
+            ],
+            total_data_lines,
+            block_count: 1,
+        }
+    }
+
+    /// Le numéro de la ligne `numero` dans l'aperçu : aligné à droite sur
+    /// cinq caractères, puis son code de rôle (pas « 4 Colonnes », l'étape
+    /// du fil d'Ariane).
+    fn numero(peints: &[Texte], numero: usize) -> &Texte {
+        let numero = numero.to_string();
+        peints
+            .iter()
+            .find(|t| t.texte.get(..5).map(str::trim_start) == Some(numero.as_str()))
+            .unwrap_or_else(|| panic!("ligne {numero} absente"))
+    }
+
+    /// Clic droit sur la ligne `ligne` de l'aperçu, puis clic sur l'entrée
+    /// `entree` du menu : ce que l'aperçu demande alors.
+    fn clic_droit(ligne: usize, entree: &str, auto_cut: bool) -> Option<(ImportLineAction, usize)> {
+        let context = contexte();
+        let preview = apercu(1);
+        let mut chosen = None;
+        let mut peindre =
+            |ui: &mut egui::Ui| import_line_preview_widget(ui, &preview, auto_cut, &mut chosen);
+        let peints = textes(&image(&context, Vec::new(), &mut peindre));
+        let pos = numero(&peints, ligne).centre;
+        cliquer(&context, pos, egui::PointerButton::Secondary, &mut peindre);
+        let peints = textes(&image(&context, Vec::new(), &mut peindre));
+        let pos = texte_exact(&peints, entree).centre;
+        cliquer(&context, pos, egui::PointerButton::Primary, &mut peindre);
+        chosen
+    }
+
+    /// Le clic droit sur une ligne de l'aperçu règle l'import à cet endroit,
+    /// en rapportant le numéro de la ligne. « Fin des données ici » n'a de
+    /// sens que sur une donnée ou le pied de page, « Annuler la coupure
+    /// automatique » que si elle est active : grisés sinon, ils ne
+    /// demandent rien (le même clic actif étant le témoin).
+    #[test]
+    fn le_clic_droit_sur_une_ligne_regle_l_import_a_cet_endroit() {
+        let debut = tr!("import-line-data-start");
+        let unites = tr!("import-line-units");
+        let fin = tr!("import-line-data-end");
+        let sans_coupure = tr!("import-line-no-auto-end");
+        for (ligne, entree, auto_cut, attendu) in [
+            (2, &debut, true, Some(ImportLineAction::DataStartsHere)),
+            (1, &unites, true, Some(ImportLineAction::UnitsLine)),
+            (2, &fin, true, Some(ImportLineAction::DataEndsHere)),
+            (3, &fin, true, Some(ImportLineAction::DataEndsHere)),
+            (1, &fin, true, None),
+            (3, &sans_coupure, true, Some(ImportLineAction::NoAutoCut)),
+            (3, &sans_coupure, false, None),
+        ] {
+            assert_eq!(
+                clic_droit(ligne, entree, auto_cut),
+                attendu.map(|action| (action, ligne)),
+                "ligne {ligne}, {entree:?}, coupure auto {auto_cut}"
+            );
+        }
+    }
+
+    /// L'aperçu colore chaque ligne selon son rôle (numéro et texte brut) et
+    /// signale en couleur d'avertissement une cellule qui serait gardée en
+    /// texte — une cellule numérique de la même ligne, non (témoin). Le
+    /// nombre de lignes montrées n'est dit que s'il en manque.
+    #[test]
+    fn l_apercu_colore_les_lignes_par_role_et_les_cellules_gardees_en_texte() {
+        let context = contexte();
+        let visuals = context.global_style().visuals.clone();
+        let mut chosen = None;
+        let preview = apercu(1);
+        let peints = textes(&image(&context, Vec::new(), |ui| {
+            import_line_preview_widget(ui, &preview, true, &mut chosen)
+        }));
+        assert_eq!(texte_exact(&peints, "abc").couleur, visuals.warn_fg_color);
+        assert_eq!(texte_exact(&peints, "1.5").couleur, visuals.text_color());
+        let couleur_de = |role| {
+            let mut couleur = egui::Color32::PLACEHOLDER;
+            image(&context, Vec::new(), |ui| {
+                couleur = line_role_color(ui, role)
+            });
+            couleur
+        };
+        let entete = couleur_de(LineRole::MainHeader);
+        let pied = couleur_de(LineRole::Footer);
+        let donnee = couleur_de(LineRole::Data);
+        assert_eq!(texte_exact(&peints, "TITLE").couleur, entete);
+        assert_eq!(numero(&peints, 1).couleur, entete);
+        assert_eq!(texte_exact(&peints, "END").couleur, pied);
+        assert_eq!(numero(&peints, 3).couleur, pied);
+        assert_eq!(numero(&peints, 2).couleur, donnee);
+        // Rien ne manque : pas de résumé, ni « 1 sur 1 ».
+        let complet = tr!("import-preview-showing", shown = 1, total = 1);
+        assert!(!est_peint(&peints, &complet));
+        let resume = tr!("import-preview-showing", shown = 1, total = 40);
+        assert!(!est_peint(&peints, &resume));
+
+        let tronque = apercu(40);
+        let peints = textes(&image(&context, Vec::new(), |ui| {
+            import_line_preview_widget(ui, &tronque, true, &mut chosen)
+        }));
+        texte_exact(&peints, &resume);
+        assert_eq!(chosen, None, "peindre ne règle rien");
+    }
+
+    /// Le code couleur de l'aperçu (façon assistant ASCII d'OriginLab) :
+    /// une couleur pour toute ligne d'en-tête reconnue, une pour les
+    /// commentaires de sous-en-tête, une pour le pied de page, une pour les
+    /// lignes ignorées, et le texte ordinaire pour les données — cinq
+    /// familles, toutes distinctes dans le thème de l'application.
+    #[test]
+    fn chaque_famille_de_lignes_a_sa_couleur_dans_l_apercu() {
+        let context = contexte();
+        let mut couleurs = Vec::new();
+        image(&context, Vec::new(), |ui| {
+            couleurs = [
+                LineRole::MainHeader,
+                LineRole::Subheader,
+                LineRole::SubheaderLongName,
+                LineRole::SubheaderUnit,
+                LineRole::ColumnHeaderRow,
+                LineRole::SubheaderComment,
+                LineRole::Footer,
+                LineRole::Comment,
+                LineRole::Skipped,
+                LineRole::Data,
+                LineRole::Blank,
+            ]
+            .map(|role| (role, line_role_color(ui, role)))
+            .to_vec();
+        });
+        let couleur = |role| couleurs.iter().find(|(r, _)| *r == role).unwrap().1;
+        let familles = [
+            vec![
+                LineRole::MainHeader,
+                LineRole::Subheader,
+                LineRole::SubheaderLongName,
+                LineRole::SubheaderUnit,
+                LineRole::ColumnHeaderRow,
+            ],
+            vec![LineRole::SubheaderComment],
+            vec![LineRole::Footer],
+            vec![LineRole::Comment, LineRole::Skipped],
+            vec![LineRole::Data, LineRole::Blank],
+        ];
+        for famille in &familles {
+            for role in famille {
+                assert_eq!(couleur(*role), couleur(famille[0]), "{role:?}");
+            }
+        }
+        distincts(&familles, |famille| format!("{:?}", couleur(famille[0])));
     }
 }

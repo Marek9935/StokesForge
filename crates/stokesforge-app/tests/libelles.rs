@@ -82,8 +82,9 @@ const CONSTRUCTEURS: &[&str] = &[
 ];
 
 /// Les fonctions dont le corps est une table de libellés : aucun littéral
-/// textuel dedans. Les quatre dernières sont les tables de l'assistant d'import
-/// (#44) ; `encoding_label` et `column_role_label` n'y sont pas : leurs noms
+/// textuel dedans. Les cinq dernières sont les tables de l'assistant d'import
+/// (#44, `data_end_label` sortie de `data_end_row` par #118) ;
+/// `encoding_label` et `column_role_label` n'y sont pas : leurs noms
 /// techniques (`UTF-8`, `Windows-1252`, `X`, `Y`) sont des littéraux légitimes.
 const TABLES: &[&str] = &[
     "label",
@@ -92,6 +93,7 @@ const TABLES: &[&str] = &[
     "thousands_label",
     "decimal_label",
     "column_kind_label",
+    "data_end_label",
 ];
 
 // ---------------------------------------------------------------------------

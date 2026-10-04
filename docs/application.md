@@ -143,7 +143,8 @@ les autres cas du protocole ci-dessous restent à valider manuellement.
 ### Assistant d'import
 
 « Importer… » ouvre un assistant en six étapes façon Origin (`import_window`,
-`ImportStep`), **dialogue modal de la brique commune** (`modal_dialog_with` :
+`ImportStep` ; module `src/app/import_wizard.rs`, #118, seul point d'entrée
+appelé par `app.rs`), **dialogue modal de la brique commune** (`modal_dialog_with` :
 même cadre, même barre de titre, même blocage du reste de l'interface que les
 propriétés du graphe ; *Finish* = bouton par défaut, *Back* et *Next* dans le
 pied de page) : fichiers et modèle, format, en-tête et fin des données,
@@ -292,8 +293,9 @@ Manager et des onglets). Les briques communes (#117) : `app/tab.rs` (`Tab`, l'on
 d'une fenêtre ouverte), `app/dialogs.rs` (`modal_dialog`, `modal_dialog_with`),
 `app/tab_strip.rs` (la bande d'onglets, `tab_strip`) et `app/shortcuts.rs` (les
 constantes `SHORTCUT_*` ; leur consommation, `collect_shortcuts`, reste dans `app.rs`).
-La suite (assistant d'import, propriétés du graphe, grille, graphe, menus) est
-#118–#123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
+L'assistant d'import (#118) : `app/import_wizard.rs` (`import_window`, ses six
+étapes, l'aperçu coloré par rôle, les tables de libellés). La suite (propriétés
+du graphe, grille, graphe, menus) est #119–#123. Les gardes qui lisent le code parcourent tout `src/`, sous-dossiers compris,
 et cherchent leurs fonctions par leur nom (#116) : voir `docs/tests.md`.
 
 Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu

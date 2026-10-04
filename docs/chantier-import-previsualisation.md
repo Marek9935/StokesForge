@@ -10,8 +10,9 @@ rejoint `docs/archive/`. Le cahier des charges complet, verbatim, vit dans
 Le *quoi* et le *pourquoi* du résultat, eux, vivent au plus près du code :
 `crates/stokesforge-import/src/preview.rs` (tête de module) pour le budget de
 coût de l'aperçu, `crates/stokesforge-import/src/recipe.rs` pour le modèle
-(`HeaderLayout`, `SubheaderRoles`), `crates/stokesforge-app/src/app.rs`
-(`import_window`, `grid_contents`) pour le panneau et le bug de champ de
+(`HeaderLayout`, `SubheaderRoles`), `crates/stokesforge-app/src/app/import_wizard.rs`
+(`import_window`, sorti d'`app.rs` par #118) pour le panneau, et
+`crates/stokesforge-app/src/app.rs` (`grid_contents`) pour le bug de champ de
 texte.
 
 ## L'objectif
