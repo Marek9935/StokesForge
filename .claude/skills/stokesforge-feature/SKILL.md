@@ -118,8 +118,14 @@ factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
 
 ## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
 
-`app.rs` est en cours de découpage (chantier #115, sous-tickets #116–#123,
-**à lancer sur feu vert seulement**). État actuel : le cadre commun des
+`app.rs` est en cours de découpage (chantier #115, sous-tickets #116–#124,
+**à lancer sur feu vert seulement**). Cible décidée le 2026-10-04 : de vrais
+modules dans `src/app/` (imports explicites, interface `pub(crate)` minimale,
+pas de `use super::*` hors des modules de tests), des tests qui suivent leur
+code et sont relus et améliorés à chaque déplacement par un agent Opus
+(outil `Agent`, modèle `opus`, briefé avec le contexte du module), et les
+fonctions géantes redécoupées à part (#124), jamais dans le même commit
+qu'un déplacement. État actuel : le cadre commun des
 fenêtres est dans `window_chrome.rs`, le placement dans
 `window_placement.rs`, la pile, le repli et la maximisation dans
 `window_stack.rs`, le détachement dans `window_detach.rs`. Ce sont de simples
