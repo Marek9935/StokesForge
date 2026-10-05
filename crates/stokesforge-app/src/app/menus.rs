@@ -416,6 +416,8 @@ impl StokesForgeApp {
 
     fn view_menu(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.menu_button(tr!("menu-view"), |ui| {
+            ui.checkbox(&mut self.pm_open, tr!("project-manager-title"));
+            ui.checkbox(&mut self.script_open, tr!("script-title"));
             let mut open = self.state.object_manager_open();
             if ui
                 .checkbox(&mut open, tr!("action-object-manager"))
@@ -423,18 +425,6 @@ impl StokesForgeApp {
                 .changed()
             {
                 actions.push(Action::SetObjectManagerOpen(open));
-            }
-            if open
-                && ui
-                    .button(if self.object_manager_floating {
-                        tr!("action-object-manager-dock")
-                    } else {
-                        tr!("action-object-manager-float")
-                    })
-                    .clicked()
-            {
-                self.object_manager_floating = !self.object_manager_floating;
-                ui.close();
             }
             let mut show_texts = self.state.object_manager_show_texts();
             if ui
@@ -1001,10 +991,10 @@ mod tests {
             let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-view"));
             let case = active(&menu, &tr!("action-object-manager"));
             assert_eq!(case.toggled, Some(open));
-            assert_eq!(
-                entree(&menu, &tr!("action-object-manager-float")).is_some(),
-                open,
-                "détacher l'Object Manager n'a de sens qu'ouvert"
+            assert!(
+                entree(&menu, &tr!("project-manager-title")).is_some()
+                    && entree(&menu, &tr!("script-title")).is_some(),
+                "les trois panneaux sont accessibles dans Affichage"
             );
             assert_eq!(
                 active(&menu, &tr!("object-manager-show-texts")).toggled,

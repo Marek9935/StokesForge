@@ -11,6 +11,7 @@
 use eframe::egui;
 
 use crate::icons::{icon_image, Icon, IconRole, ICON_SIZE};
+use crate::tr;
 
 use super::tab::Tab;
 
@@ -526,6 +527,142 @@ pub(super) fn detached_resize_handles(ui: &egui::Ui) {
 /// Largeur d'une icône d'action de la barre de titre (croix, détacher,
 /// maximiser).
 pub(super) const HEADER_ACTION_WIDTH: f32 = 24.0;
+
+/// Les panneaux gardent leur emplacement ; seule leur fenêtre OS se déplace.
+/// Une bande latérale repliée garde son titre vertical et ses deux prises.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PanelPlacement {
+    Left,
+    Right,
+    Bottom,
+    Detached,
+}
+
+pub(super) const PANEL_STRIP_WIDTH: f32 = 32.0;
+
+/// Même dessin et mêmes cellules d'icônes que les fenêtres de contenu, avec
+/// une typographie compacte. Aucun chemin ne peint Fermer ou Maximiser (#100).
+pub(super) fn panel_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    placement: PanelPlacement,
+    collapsed: bool,
+) -> WindowHeaderActions {
+    let vertical = collapsed && matches!(placement, PanelPlacement::Left | PanelPlacement::Right);
+    let size = egui::vec2(
+        ui.available_width(),
+        if vertical {
+            ui.available_height()
+        } else {
+            WINDOW_HEADER_HEIGHT
+        },
+    );
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let id = ui.id().with("panel_header");
+    let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    let cell =
+        |pos| egui::Rect::from_min_size(pos, egui::vec2(HEADER_ACTION_WIDTH, WINDOW_HEADER_HEIGHT));
+    let mut toggle_rect = cell(rect.min);
+    let mut detach_rect = if vertical {
+        cell(rect.min + egui::vec2(0.0, WINDOW_HEADER_HEIGHT))
+    } else {
+        cell(egui::pos2(rect.right() - HEADER_ACTION_WIDTH, rect.top()))
+    };
+    // Le repli se vise au bord de l'espace de travail, le détachement au
+    // bord extérieur. La règle dépend du côté, jamais de la nature du panneau.
+    // Dans une bande verticale, les prises restent empilées dans le même ordre.
+    if placement == PanelPlacement::Left && !vertical {
+        std::mem::swap(&mut toggle_rect, &mut detach_rect);
+    }
+    let mut actions = WindowHeaderActions::default();
+    if placement != PanelPlacement::Detached {
+        let icon = match (placement, collapsed) {
+            (PanelPlacement::Left, true) | (PanelPlacement::Right, false) => Icon::CaretRight,
+            (PanelPlacement::Left, false) | (PanelPlacement::Right, true) => Icon::CaretLeft,
+            (_, true) => Icon::CaretUp,
+            (_, false) => Icon::CaretDown,
+        };
+        actions.toggle_collapse = header_icon(
+            &mut header,
+            id,
+            "collapse",
+            toggle_rect,
+            icon,
+            &if collapsed {
+                tr!("panel-expand")
+            } else {
+                tr!("panel-collapse")
+            },
+        );
+    }
+    actions.detach = header_icon(
+        &mut header,
+        id,
+        "detach",
+        detach_rect,
+        if placement == PanelPlacement::Detached {
+            Icon::Reattach
+        } else {
+            Icon::Detach
+        },
+        &if placement == PanelPlacement::Detached {
+            tr!("panel-reattach")
+        } else {
+            tr!("panel-detach")
+        },
+    );
+    let title_rect = if vertical {
+        egui::Rect::from_min_max(
+            rect.min + egui::vec2(0.0, 2.0 * WINDOW_HEADER_HEIGHT),
+            rect.max,
+        )
+    } else {
+        egui::Rect::from_min_max(
+            rect.min
+                + egui::vec2(
+                    if placement == PanelPlacement::Detached {
+                        0.0
+                    } else {
+                        HEADER_ACTION_WIDTH
+                    },
+                    0.0,
+                ),
+            egui::pos2(rect.right() - HEADER_ACTION_WIDTH, rect.bottom()),
+        )
+    };
+    let painter = header.painter().with_clip_rect(title_rect);
+    let font = egui::TextStyle::Body.resolve(header.style());
+    if vertical {
+        let galley = painter.layout_no_wrap(title.to_owned(), font, header.visuals().text_color());
+        let pos = egui::pos2(
+            title_rect.center().x - galley.size().y / 2.0,
+            title_rect.bottom() - 4.0,
+        );
+        let mut shape = egui::epaint::TextShape::new(pos, galley, header.visuals().text_color());
+        shape.angle = -std::f32::consts::FRAC_PI_2;
+        painter.add(shape);
+    } else {
+        painter.text(
+            title_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            title,
+            font,
+            header.visuals().text_color(),
+        );
+    }
+    let title_response = header
+        .interact(title_rect, id.with("title"), egui::Sense::drag())
+        .on_hover_text(title);
+    if placement == PanelPlacement::Detached {
+        actions.title_drag_started = title_response.drag_started();
+    }
+    header.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        header.visuals().widgets.noninteractive.bg_stroke,
+    );
+    actions
+}
 
 /// Détacher et maximiser sont-ils peints ? Une seule source pour le dessin
 /// et pour la largeur réservée au titre (#50).

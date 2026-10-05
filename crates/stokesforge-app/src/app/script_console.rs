@@ -8,47 +8,57 @@
 //! principale — c'est [`AppState::dispatch`] qui garantit qu'elles ne
 //! bloquent pas.
 //!
-//! Sorti d'`app.rs` tel quel (#121) ; le panneau qui la porte,
-//! [`StokesForgeApp::script_panel`], l'a rejoint (#122).
+//! Un contenu unique lit AppState en mode attaché et `ScriptConsoleModel`
+//! en mode détaché (#100) : aucun moteur ne migre dans le callback. Le tampon
+//! de saisie remonte avant les actions, la sortie reste celle de la racine.
 
 use eframe::egui;
 
-use crate::icons::Icon;
-use crate::state::{Action, AppState};
+use crate::state::{Action, AppState, ScriptOutput};
 use crate::tr;
 
 use super::shortcuts::SHORTCUT_RUN_SCRIPT;
-use super::window_chrome::{header_icon, HEADER_ACTION_WIDTH};
+use super::window_chrome::{
+    panel_header, show_window_contents_bounded, PanelPlacement, WindowHeaderActions,
+};
 use super::StokesForgeApp;
 
 /// Hauteur de la zone de sortie du script, en points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
 
 /// Barre de titre de la console de script, avec le bouton qui la replie ou la
-/// déplie (issue #79). Rend `true` si ce bouton a été cliqué.
-pub(super) fn script_header(ui: &mut egui::Ui, state: &AppState, collapsed: bool) -> bool {
-    ui.horizontal(|ui| {
-        let (icon, tooltip) = if collapsed {
-            (Icon::CaretUp, tr!("script-expand"))
-        } else {
-            (Icon::CaretDown, tr!("script-collapse"))
-        };
-        // Même cellule de `HEADER_ACTION_WIDTH` que les icônes des fenêtres,
-        // l'icône centrée dedans et la cellule centrée sur la ligne du titre
-        // (#95) : un `icon_button` collait le chevron à gauche, sans cellule.
-        let row_height = ui.text_style_height(&egui::TextStyle::Heading);
-        let (cell, _) = ui.allocate_exact_size(
-            egui::vec2(HEADER_ACTION_WIDTH, row_height),
-            egui::Sense::hover(),
-        );
-        let toggled = header_icon(ui, ui.id(), "script-toggle", cell, icon, &tooltip);
-        ui.heading(tr!("script-title"));
-        if !state.script_available() {
-            ui.weak(tr!("script-unavailable"));
+/// déplie (issue #79), et celui qui la détache (#100).
+pub(super) fn script_header(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    collapsed: bool,
+) -> WindowHeaderActions {
+    let header = panel_header(ui, &tr!("script-title"), PanelPlacement::Bottom, collapsed);
+    if !collapsed && !state.script_available() {
+        ui.weak(tr!("script-unavailable"));
+    }
+    header
+}
+
+/// Lecture de la console pour le callback différé ; le moteur et son travail
+/// restent dans AppState à la racine. Seule la saisie remonte comme requête.
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct ScriptConsoleModel {
+    pub(super) source: String,
+    pub(super) output: Option<ScriptOutput>,
+    pub(super) running: bool,
+    pub(super) available: bool,
+}
+
+impl ScriptConsoleModel {
+    pub(super) fn from_state(state: &AppState) -> Self {
+        Self {
+            source: state.script_source().to_owned(),
+            output: state.script_output().cloned(),
+            running: state.script_running(),
+            available: state.script_available(),
         }
-        toggled
-    })
-    .inner
+    }
 }
 
 pub(super) fn script_contents(
@@ -57,25 +67,63 @@ pub(super) fn script_contents(
     state: &mut AppState,
     actions: &mut Vec<Action>,
 ) {
-    let running = state.script_running();
+    let mut source = state.script_source().to_owned();
+    script_fields_contents(
+        ui,
+        ctx,
+        &mut source,
+        state.script_output(),
+        state.script_running(),
+        state.script_available(),
+        actions,
+    );
+    if source != state.script_source() {
+        state.set_script_source(source);
+    }
+}
+
+pub(super) fn script_model_contents(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    model: &mut ScriptConsoleModel,
+    actions: &mut Vec<Action>,
+) {
+    script_fields_contents(
+        ui,
+        ctx,
+        &mut model.source,
+        model.output.as_ref(),
+        model.running,
+        model.available,
+        actions,
+    );
+}
+
+/// La console attachée emprunte la sortie : pas de copie de tout un résultat
+/// à chaque image. La lecture détachée en possède déjà sa copie publiée.
+fn script_fields_contents(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    source: &mut String,
+    output: Option<&ScriptOutput>,
+    running: bool,
+    available: bool,
+    actions: &mut Vec<Action>,
+) {
     if running {
         // Sans ça, egui ne redessine que sur événement d'entrée : la fin du
         // script n'apparaîtrait qu'au prochain geste de l'utilisateur.
         ctx.request_repaint();
     }
 
-    let available = state.script_available() && !running;
-    let mut source = state.script_source().to_string();
-    let edit = ui.add_enabled(
+    let available = available && !running;
+    ui.add_enabled(
         available,
-        egui::TextEdit::multiline(&mut source)
+        egui::TextEdit::multiline(source)
             .code_editor()
             .desired_rows(6)
             .desired_width(f32::INFINITY),
     );
-    if edit.changed() {
-        state.set_script_source(source);
-    }
 
     ui.horizontal(|ui| {
         if ui
@@ -103,7 +151,7 @@ pub(super) fn script_contents(
     ui.separator();
     egui::ScrollArea::vertical()
         .max_height(SCRIPT_OUTPUT_HEIGHT)
-        .show(ui, |ui| match state.script_output() {
+        .show(ui, |ui| match output {
             None => {
                 ui.weak(tr!("script-not-run"));
             }
@@ -148,9 +196,8 @@ impl StokesForgeApp {
     /// d'être resserré entre lui et le bord droit. `egui::Panel::bottom`
     /// n'est **pas** redimensionnable par défaut (à la différence de
     /// `left`/`right`) : `.resizable(true)` restaure le glisser du bord en
-    /// hauteur. Contrairement au Project
-    /// Manager, aucun mode détaché en fenêtre OS séparée ni bascule de
-    /// position : la console de script a toujours été en bas, et le reste.
+    /// hauteur. Le détachement utilise la même lecture de console et laisse
+    /// le moteur à la racine ; le masquage View ne suspend pas son travail.
     ///
     /// Repliée (issue #79), la console se réduit à sa barre de titre — un
     /// panneau distinct, non redimensionnable, pour que la hauteur mémorisée
@@ -167,26 +214,40 @@ impl StokesForgeApp {
         {
             self.script_collapsed = false;
         }
-        if self.script_collapsed {
-            egui::Panel::bottom("stokesforge_script_collapsed")
-                .resizable(false)
-                .show(ui, |ui| {
-                    if script_header(ui, &self.state, true) {
-                        self.script_collapsed = false;
-                    }
-                });
+        self.drain_script_console(ctx, actions);
+        if !self.script_open {
             return;
         }
-        egui::Panel::bottom("stokesforge_script")
-            .resizable(true)
-            .default_size(SCRIPT_PANEL_HEIGHT)
-            .show(ui, |ui| {
-                if script_header(ui, &self.state, false) {
-                    self.script_collapsed = true;
-                }
-                ui.separator();
-                script_contents(ui, ctx, &mut self.state, actions);
-            });
+        if self.script_detached {
+            self.show_detached_script_console(ctx);
+            return;
+        }
+        let collapsed = self.script_collapsed;
+        egui::Panel::bottom(if collapsed {
+            "stokesforge_script_collapsed"
+        } else {
+            "stokesforge_script"
+        })
+        .resizable(!collapsed)
+        .default_size(if collapsed {
+            super::window_chrome::WINDOW_HEADER_HEIGHT
+        } else {
+            SCRIPT_PANEL_HEIGHT
+        })
+        .show(ui, |ui| {
+            let header = script_header(ui, &self.state, collapsed);
+            self.script_collapsed ^= header.toggle_collapse;
+            if header.detach {
+                self.detach_script_console();
+            }
+            if !collapsed {
+                // Le contenu seul peut être plus court que la hauteur
+                // choisie : occuper la place réservée la conserve (#100).
+                show_window_contents_bounded(ui, |ui| {
+                    script_contents(ui, ctx, &mut self.state, actions);
+                });
+            }
+        });
     }
 }
 
@@ -235,7 +296,8 @@ mod tests {
             let toggled = std::cell::Cell::new(false);
             let paint = |context: &egui::Context, events| {
                 let mut output = context.run_ui(input(events), |ui| {
-                    toggled.set(toggled.get() | script_header(ui, &state, collapsed));
+                    toggled
+                        .set(toggled.get() | script_header(ui, &state, collapsed).toggle_collapse);
                 });
                 output.textures_delta.clear();
                 output
@@ -246,7 +308,7 @@ mod tests {
             assert!(painted(&output, &tr!("script-title")));
             assert_eq!(
                 painted(&output, &tr!("script-unavailable")),
-                !state.script_available(),
+                !collapsed && !state.script_available(),
                 "l'absence d'interpréteur se dit, et seulement elle"
             );
             let chevron = find_icon_centers(&output.shapes)[0];

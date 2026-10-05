@@ -110,8 +110,9 @@ les limites du cadrage, distinctes des coins de maximisation. « New Project »
 (#73) utilise `file-plus` ; le nouveau graphique garde le rôle `Graph`.
 
 Object Manager (#82) réutilise l'icône `Graph` en rôle neutre pour son bouton
-de barre : son infobulle porte le nom du panneau. Ancrer, faire flotter et
-fermer réutilisent `Reattach`, `Detach` et `Close` ; aucune icône ajoutée.
+de barre : son infobulle porte le nom du panneau. Les panneaux fixes (#100) réutilisent `Detach`, `Reattach` et les chevrons
+`CaretLeft`/`CaretRight`/`CaretUp`/`CaretDown` pour le repli ; aucune icône ajoutée.
+Leurs en-têtes ne proposent ni `Close` ni `Maximize`.
 
 ## Échantillons de couleur (#89)
 

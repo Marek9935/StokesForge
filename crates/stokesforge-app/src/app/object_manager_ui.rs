@@ -9,7 +9,7 @@
 //! « Graph › Selected Content ». Une seule écriture pour le panneau fixe et la
 //! fenêtre détachée.
 //!
-//! Sorti d'`app.rs` tel quel (#121) ; le panneau ancré ou flottant,
+//! Le panneau fixe ou détaché (#100),
 //! [`StokesForgeApp::object_manager_panel`], et l'exécution des demandes l'ont
 //! rejoint (#122). Les en-têtes, calques, séries, axes et objets se peignent
 //! par sections (#124), sans changer les portées et identifiants egui ni
@@ -19,7 +19,7 @@ use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::GraphView;
 
-use crate::icons::{icon_button, icon_image, Icon, IconRole};
+use crate::icons::{icon_image, Icon, IconRole};
 use crate::object_manager::{LayerRow, ObjectRow, ObjectTree, SeriesRow, VisibilityTarget as T};
 use crate::state::{active_graph, Action};
 use crate::tr;
@@ -28,10 +28,8 @@ use super::graph_text_edit::{open_annotation_editor, open_series_name_editor};
 use super::graph_window::open_shape_properties;
 use super::shortcuts::shortcut_text_delete;
 use super::tab::Tab;
-use super::window_chrome::{
-    floating_resize_handles, show_window_in_layer, window_header, HeaderPlacement,
-    WindowHeaderActions,
-};
+use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_WIDTH};
+use super::window_detach::ObjectManagerModel;
 use super::{active_tab_kind, StokesForgeApp};
 
 #[derive(Clone, Copy)]
@@ -635,123 +633,79 @@ impl StokesForgeApp {
         active_tab: Option<Tab>,
         actions: &mut Vec<Action>,
     ) {
+        let ctx = ui.ctx().clone();
+        self.drain_object_manager(&ctx, actions);
         if !self.state.object_manager_open() {
             return;
         }
-        let ctx = ui.ctx().clone();
         let graph = active_graph(active_tab_kind(active_tab));
         let tree = self.state.snapshot().tree.clone();
         let show_texts = self.state.object_manager_show_texts();
         let show_scales = self.state.object_manager_show_scales();
+        let selection = graph.and_then(|graph| {
+            self.read_graph_view(graph, selected_manager_target)
+                .flatten()
+        });
         let spec = graph.and_then(|graph| crate::state::current_plot_spec(&tree, graph));
         let model = graph.and_then(|graph| {
             crate::object_manager::object_tree_with_selection(
                 &tree,
                 graph,
-                self.read_graph_view(graph, selected_manager_target)
-                    .flatten(),
+                selection,
                 show_texts,
                 show_scales,
             )
         });
-        let mut requests = Vec::new();
-        let mut close = false;
-        let mut toggle_dock = false;
-        let mut contents = |ui: &mut egui::Ui| {
-            ui.horizontal(|ui| {
-                if !self.object_manager_floating {
-                    ui.heading(tr!("action-object-manager"));
-                }
-                toggle_dock |= icon_button(
-                    ui,
-                    if self.object_manager_floating {
-                        Icon::Reattach
-                    } else {
-                        Icon::Detach
-                    },
-                    IconRole::Neutral,
-                    if self.object_manager_floating {
-                        tr!("action-object-manager-dock")
-                    } else {
-                        tr!("action-object-manager-float")
-                    },
-                )
-                .clicked();
-                close |= icon_button(
-                    ui,
-                    Icon::Close,
-                    IconRole::Neutral,
-                    tr!("action-object-manager-close"),
-                )
-                .clicked();
-            });
-            ui.separator();
-            requests = object_manager_contents(
-                ui,
-                &tree,
-                model.as_ref(),
-                spec.as_ref(),
-                show_texts,
-                show_scales,
-                actions,
-            );
-        };
-        if self.object_manager_floating {
-            let viewport = ctx.input(|input| input.content_rect());
-            let rect = self.object_manager_rect.unwrap_or_else(|| {
-                egui::Rect::from_min_size(
-                    viewport.min + egui::vec2(80.0, 80.0),
-                    egui::vec2(330.0, 420.0),
-                )
-            });
-            let id = egui::Id::new("stokesforge_object_manager_float");
-            let mut header = WindowHeaderActions::default();
-            let mut position = rect.min;
-            let mut size = rect.size();
-            show_window_in_layer(
+        if self.om_detached {
+            self.show_detached_object_manager(
                 &ctx,
-                id,
-                egui::Order::Foreground,
-                rect,
-                viewport,
-                false,
-                |ui| {
-                    header = window_header(
-                        ui,
-                        id,
-                        &tr!("action-object-manager"),
-                        None,
-                        false,
-                        HeaderPlacement::Floating,
-                    );
-                    contents(ui);
+                ObjectManagerModel {
+                    stamp: super::snapshot_stamp(self.state.snapshot()),
+                    tree,
+                    graph,
+                    selection,
+                    model,
+                    spec,
+                    show_texts,
+                    show_scales,
                 },
-                |ui, rect| floating_resize_handles(ui, id, rect, &mut position, &mut size),
             );
-            close |= header.close;
-            size = size.min(viewport.size());
-            position += header.drag_delta;
-            position.x = position.x.clamp(
-                viewport.left(),
-                (viewport.right() - size.x).max(viewport.left()),
-            );
-            position.y = position.y.clamp(
-                viewport.top(),
-                (viewport.bottom() - size.y).max(viewport.top()),
-            );
-            self.object_manager_rect = Some(egui::Rect::from_min_size(position, size));
+            return;
+        }
+        let mut requests = Vec::new();
+        let collapsed = self.om_collapsed;
+        let panel = if collapsed {
+            egui::Panel::right("stokesforge_object_manager_collapsed")
+                .exact_size(PANEL_STRIP_WIDTH)
+                .resizable(false)
         } else {
             egui::Panel::right("stokesforge_object_manager")
                 .default_size(300.0)
                 .size_range(180.0..=500.0)
-                .show(ui, &mut contents);
-        }
-        if toggle_dock {
-            self.object_manager_floating = !self.object_manager_floating;
-        }
-        if close {
-            actions.push(Action::SetObjectManagerOpen(false));
-        }
+        };
+        panel.show(ui, |ui| {
+            let header = panel_header(
+                ui,
+                &tr!("action-object-manager"),
+                PanelPlacement::Right,
+                collapsed,
+            );
+            self.om_collapsed ^= header.toggle_collapse;
+            if header.detach {
+                self.om_detached = true;
+            }
+            if !collapsed {
+                requests = object_manager_contents(
+                    ui,
+                    &tree,
+                    model.as_ref(),
+                    spec.as_ref(),
+                    show_texts,
+                    show_scales,
+                    actions,
+                );
+            }
+        });
         if let Some(graph) = graph {
             for request in requests {
                 self.run_object_manager_request(&ctx, graph, request, actions);
@@ -1203,9 +1157,9 @@ mod tests {
 
     /// Sans graphe actif, le panneau le dit et ne demande rien.
     /// Le panneau ([`StokesForgeApp::object_manager_panel`]) ne se peint
-    /// qu'ouvert : ancré au bord droit, ou flottant sans quitter l'écran.
+    /// qu'ouvert : ancré au bord droit, ou dans son viewport OS.
     #[test]
-    fn l_object_manager_ne_se_peint_qu_ouvert_ancre_a_droite_ou_flottant() {
+    fn l_object_manager_ne_se_peint_qu_ouvert_ancre_a_droite_ou_detache() {
         use egui::containers::panel::PanelState;
         let (project, graph, _, _) = trois_series();
         let session = stokesforge_session::Session::spawn(project, None).unwrap();
@@ -1251,7 +1205,7 @@ mod tests {
         let docked = PanelState::load(&context, id).unwrap().outer_rect;
         assert_eq!(docked.right(), screen.right(), "ancré au bord droit");
 
-        app.object_manager_floating = true;
+        app.om_detached = true;
         let context = egui::Context::default();
         egui_extras::install_image_loaders(&context);
         let output = paint(&mut app, &context);
@@ -1260,11 +1214,7 @@ mod tests {
             PanelState::load(&context, id).is_none(),
             "plus de panneau ancré"
         );
-        let floating = app.object_manager_rect.expect("rectangle flottant retenu");
-        assert!(
-            screen.contains_rect(floating),
-            "{floating:?} dans {screen:?}"
-        );
+        assert!(app.om_view.is_some(), "le lecteur détaché existe");
         session.shutdown().unwrap();
     }
 

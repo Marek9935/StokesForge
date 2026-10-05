@@ -4,8 +4,8 @@
 //! fermer, sélectionner, afficher, masquer) s'accumule dans
 //! [`PmInteraction`], appliqué par `StokesForgeApp` après la peinture.
 //!
-//! Sorti d'`app.rs` tel quel (#121) ; le panneau fixe qui le porte,
-//! [`StokesForgeApp::project_manager_panel`], l'a rejoint (#122).
+//! Le titre appartient au cadre partagé `panel_header`, pas à l'arbre :
+//! attaché ou détaché, aucun double en-tête et les mêmes gestes (#100).
 
 use std::collections::HashSet;
 
@@ -16,6 +16,7 @@ use crate::state::{ProjectTreeNode, WindowKind};
 use crate::tr;
 
 use super::tab::{tab_for_window, Tab};
+use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_WIDTH};
 use super::StokesForgeApp;
 
 /// Ce que le rendu de l'arbre du Project Manager accumule ou lit, à travers
@@ -55,8 +56,6 @@ pub(super) fn project_manager_contents_from_tree(
     tree: &[ProjectTreeNode],
     interaction: &mut PmInteraction,
 ) {
-    ui.heading(tr!("project-manager-title"));
-    ui.separator();
     if !interaction.selection.is_empty() {
         // Barre d'actions groupées, seulement quand elle a un effet — pas de
         // boutons désactivés à regarder tant que rien n'est sélectionné.
@@ -205,8 +204,7 @@ impl StokesForgeApp {
     /// tient lieu. Reste redimensionnable en largeur par glisser du bord
     /// (comportement par défaut d'`egui::Panel::left`) mais figé en
     /// position : pas de bascule vers la droite ni de repositionnement par
-    /// glisser, voir la doc de tête d'`app.rs`, § attacher à gauche ou à
-    /// droite.
+    /// glisser. Une bande séparée au repli conserve la largeur déployée.
     pub(super) fn project_manager_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -214,9 +212,37 @@ impl StokesForgeApp {
         close_requests: &mut Vec<Tab>,
         active_tab: Option<Tab>,
     ) {
+        if self.pm_collapsed {
+            egui::Panel::left("stokesforge_pm_collapsed")
+                .exact_size(PANEL_STRIP_WIDTH)
+                .resizable(false)
+                .show(ui, |ui| {
+                    let header = panel_header(
+                        ui,
+                        &tr!("project-manager-title"),
+                        PanelPlacement::Left,
+                        true,
+                    );
+                    self.pm_collapsed ^= header.toggle_collapse;
+                    if header.detach {
+                        self.detach_project_manager();
+                    }
+                });
+            return;
+        }
         egui::Panel::left("stokesforge_pm")
             .default_size(PROJECT_MANAGER_WIDTH)
             .show(ui, |ui| {
+                let header = panel_header(
+                    ui,
+                    &tr!("project-manager-title"),
+                    PanelPlacement::Left,
+                    false,
+                );
+                self.pm_collapsed ^= header.toggle_collapse;
+                if header.detach {
+                    self.detach_project_manager();
+                }
                 let tree = self.state.project_tree();
                 let mut interaction = PmInteraction {
                     open_requests,

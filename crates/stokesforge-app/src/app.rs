@@ -84,15 +84,14 @@
 //! la relecture — et les tests de `menus.rs`, qui lisent le grisage de chaque
 //! menu de haut niveau.
 //!
-//! # Attacher le Project Manager à gauche ou à droite
+//! # Panneaux fixes (#100)
 //!
-//! **Hors périmètre, délibérément.** Une tâche antérieure avait donné au
-//! Project Manager une bascule gauche/droite dans le dock (menu « Fenêtre »
-//! et clic droit sur son onglet) ; elle a disparu avec le passage à un
-//! panneau fixe. Le côté droit et le repositionnement par glisser sont un
-//! travail futur volontairement laissé de côté par cette tâche-ci — pas
-//! implémentés, même partiellement. La console de script n'a jamais eu de
-//! bascule : elle a toujours été en bas.
+//! PM reste à gauche, OM à droite et console en bas. Le repli garde une
+//! prise visible ; le masquage se commande depuis View. Les dimensions du
+//! panneau déployé sont conservées par des identifiants de bande distincts.
+//! Chaque panneau peut se détacher en fenêtre OS avec Rattacher uniquement ;
+//! aucune bascule de côté ni flottant interne. `panel_header` et les lectures
+//! et requêtes de `window_detach.rs` assurent l'accord entre les deux modes.
 //!
 //! # Sélecteur de fichiers natif
 //!
@@ -144,6 +143,8 @@ mod grid;
 mod import_wizard;
 mod menus;
 mod object_manager_ui;
+#[cfg(test)]
+mod panel_tests;
 mod plot_settings;
 mod project_manager;
 mod script_console;
@@ -220,8 +221,15 @@ pub struct StokesForgeApp {
     /// Les barres d'outils : disposition, visibilité et glisser en cours
     /// (issue #60).
     toolbars: ToolbarState,
-    object_manager_floating: bool,
-    object_manager_rect: Option<egui::Rect>,
+    om_detached: bool,
+    om_collapsed: bool,
+    om_view: Option<window_detach::DetachedObjectManager>,
+    /// Visibilité et repli sont des états de vue, hors historique et format .stf.
+    pm_open: bool,
+    pm_collapsed: bool,
+    script_open: bool,
+    script_detached: bool,
+    script_view: Option<window_detach::DetachedScriptConsole>,
     active_detached: Option<Tab>,
     /// Les onglets de contenu actuellement ouverts en fenêtre flottante, dans
     /// l'ordre où ils ont été focalisés pour la dernière fois — le dernier
@@ -342,14 +350,14 @@ impl StokesForgeApp {
     /// # Disposition initiale
     ///
     /// Ni le Project Manager ni la console de script n'entrent pour rien
-    /// dans ce plan : ce sont deux panneaux fixes peints à part (voir
+    /// dans ce plan : ce sont des panneaux fixes peints à part (voir
     /// [`StokesForgeApp::project_manager_panel`] et [`StokesForgeApp::script_panel`]),
     /// pas des fenêtres flottantes. Si le projet contient au moins un
     /// classeur, son onglet s'ouvre en fenêtre flottante, suivi de l'onglet
     /// du premier graphe s'il y en a un — montrer quelque chose sans qu'on
     /// ait à cliquer, comme l'ancien comportement par défaut. À défaut de
     /// classeur ou de graphe, aucune fenêtre flottante ne s'ouvre (seuls les
-    /// deux panneaux fixes et la barre de menu sont visibles).
+    /// panneaux fixes et la barre de menu sont visibles).
     ///
     /// # Auto-fermeture
     ///
@@ -423,8 +431,14 @@ impl StokesForgeApp {
         Self {
             state,
             toolbars: ToolbarState::default(),
-            object_manager_floating: false,
-            object_manager_rect: None,
+            om_detached: false,
+            om_collapsed: false,
+            om_view: None,
+            pm_open: true,
+            pm_collapsed: false,
+            script_open: true,
+            script_detached: false,
+            script_view: None,
             active_detached: None,
             floating_tabs,
             cascade_rank,
@@ -835,6 +849,10 @@ impl StokesForgeApp {
         // rafraîchit l'instantané après un script (voir la doc de tête de
         // `crate::state`). Ne bloque jamais, même sans script en cours.
         self.state.poll_script();
+        // Le travail continue aussi quand sa console est masquée ou repliée.
+        if self.state.script_running() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
         // Import en fond : avancement, et création des feuilles à la fin. Les
         // classeurs créés s'ouvrent comme après un import immédiat.
         if self.state.import_progress().is_some() {
@@ -901,7 +919,7 @@ impl StokesForgeApp {
         actions: &mut Vec<Action>,
     ) {
         if self.pm_detached {
-            self.show_detached_project_manager(ctx, active_tab);
+            // Drainer avant la publication évite de publier une sélection périmée.
             // Vidange ce que la fenêtre OS détachée a écrit depuis la
             // dernière image (voir la doc de tête de
             // `show_detached_project_manager`) — même moment que le reste de
@@ -929,7 +947,14 @@ impl StokesForgeApp {
             }
             if should_reattach {
                 self.reattach_project_manager();
+                ctx.request_repaint();
             }
+        }
+        if !self.pm_open {
+            return;
+        }
+        if self.pm_detached {
+            self.show_detached_project_manager(ctx, active_tab);
         } else {
             // Panneau fixe, peint *avant* le `CentralPanel` — voir la doc de
             // tête du module, § Ce qui reste ici : c'est ce qui garantit par

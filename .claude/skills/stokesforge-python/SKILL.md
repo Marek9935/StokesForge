@@ -257,3 +257,12 @@ voit un script — restent en anglais, ce ne sont pas des textes d'interface.
 - [ ] écriture exposée aux scripts : `expected_version` portée
 - [ ] surface publique de `state` identique avec et sans la feature
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts **en plus** du script Python
+
+### Console détachée (#100)
+
+Le même `script_fields_contents` peint la console attachée et détachée.
+`ScriptConsoleModel` contient seulement saisie, sortie et disponibilité ; le
+moteur et le travail restent dans `AppState` à la racine. Drainer la saisie
+avant de publier et avant RunScript ; une saisie encore en attente ne doit
+pas être écrasée par l’ancien tampon. Le polling continue même quand View
+masque la console. Détacher/rattacher ne redémarre ni n’interrompt le moteur.

@@ -267,6 +267,17 @@ onglets ; `sheet_tabs` (feuilles) et la fenêtre des propriétés du graphe en
 sont des usages. Un dialogue modal ne **peint pas de voile** sur le reste de
 l'application (issue #20) : il le bloque seulement.
 
+Les panneaux fixes (#100) passent par `panel_header` dans le même module :
+PM à gauche, OM à droite, console en bas. L’ordre horizontal des boutons
+dépend du côté : repli vers l’espace de travail, détachement vers l’extérieur.
+Les bandes verticales gardent Déployer puis Détacher de haut en bas.
+Visibilité par View, repli distinct
+du masquage ; en-tête attaché = Détacher et Replier/Déployer ; fenêtre OS
+sans décoration native = Rattacher uniquement. Une fermeture OS rattache.
+Ne pas réintroduire de flottant interne pour un panneau ni de bouton Fermer
+ou Maximiser. Réutiliser les lectures/requêtes de `window_detach.rs` ; le
+moteur de script reste dans l’AppState principal.
+
 **Aucune exception, y compris pour un assistant à plusieurs étapes.**
 L'assistant d'import (`import_window`) est un dialogue modal comme les
 propriétés du graphe : `modal_dialog_with(ctx, id, titre, taille, DialogFooter

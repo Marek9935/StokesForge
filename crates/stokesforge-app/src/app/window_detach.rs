@@ -1,4 +1,4 @@
-//! Détachement en fenêtres OS : le Project Manager et chaque fenêtre de
+//! Détachement en fenêtres OS : les trois panneaux fixes et chaque fenêtre de
 //! contenu peuvent vivre dans un viewport dédié (`show_viewport_deferred`).
 //! La fermeture de ce callback est `'static` et `Send + Sync` : elle ne peut
 //! pas capturer `&mut AppState`, d'où les vues locales (`DetachedTabViewModel`,
@@ -24,8 +24,9 @@
 //! n'est simplement pas peint cette image-là ; le fermer (bouton
 //! de la fenêtre OS, ou « Réattacher ») repose `pm_detached` à `false`, ce
 //! qui fait réapparaître le panneau au prochain rendu — toujours au même
-//! endroit, puisqu'il est figé à gauche. Déclenchable du menu « Fenêtre » du
-//! haut. Sous Wayland, le compositeur peut ignorer une position de fenêtre
+//! endroit, puisqu'il est figé à gauche. Déclenchable depuis son en-tête
+//! ou le menu « Fenêtre ». Sous Wayland, le compositeur peut ignorer une
+//! position de fenêtre
 //! demandée par l'application — la même réserve que documente déjà
 //! `docs/application.md` pour `rfd` ; cette tâche ne demande explicitement
 //! aucune position (elle laisse le compositeur placer la fenêtre), donc n'en
@@ -135,10 +136,15 @@
 //! [`matrix_contents`] ne lit que l'arbre et sert tel quel aux deux
 //! fenêtres.
 //!
-//! La console de script n'entre pour rien dans ce mécanisme : ce n'est pas
-//! une fenêtre de contenu (voir § Console de script ci-dessus), donc rien à
-//! détacher ici — le bouton « Détacher dans une fenêtre » n'existe que dans
-//! l'en-tête des fenêtres flottantes `Book`/`Graph`/`Matrix`/`Note`.
+//! # OM et console (#100)
+//!
+//! Les panneaux détachés ont leur propre lecture et leurs requêtes, comme
+//! le PM, mais ne deviennent pas des onglets de contenu. L'OM publie aussi
+//! le graphe actif et sa sélection ; la console publie saisie/sortie et état
+//! du travail. Le moteur Python reste à la racine. Les requêtes de saisie
+//! sont drainées avant publication pour ne pas perdre les dernières frappes.
+//! Tous utilisent `detached_panel_contents` : cadre maison sans décoration
+//! native, Rattacher uniquement, fermeture OS convertie en rattachement.
 //!
 
 use std::collections::HashSet;
@@ -155,16 +161,19 @@ use crate::tr;
 use super::contents::{matrix_contents, note_contents};
 use super::file_drop::{begin_file_drop, finish_file_drop};
 use super::graph_window::graph_view_contents;
-use super::object_manager_ui::selected_manager_target;
+use super::object_manager_ui::{
+    object_manager_contents, selected_manager_target, ObjectManagerRequest,
+};
 use super::project_manager::{
     project_manager_contents_from_tree, PmInteraction, PROJECT_MANAGER_WIDTH,
 };
+use super::script_console::{script_model_contents, ScriptConsoleModel};
 use super::shortcuts::collect_undo_redo_shortcuts;
 use super::tab::{tab_node, Tab};
 use super::window_chrome::{
-    detached_resize_handles, paint_active_window_outline, show_window_contents_bounded,
-    window_header, HeaderPlacement, WindowHeaderActions, MIN_CONTENT_WINDOW_SIZE,
-    WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT,
+    detached_resize_handles, paint_active_window_outline, panel_header,
+    show_window_contents_bounded, window_header, HeaderPlacement, PanelPlacement,
+    WindowHeaderActions, MIN_CONTENT_WINDOW_SIZE, WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT,
 };
 use super::window_placement::{floating_window_display_size, GRAPH_WINDOW_SIZE};
 use super::window_stack::toggle_collapse_to;
@@ -223,6 +232,83 @@ pub(super) struct DetachedProjectManagerRequests {
     /// qu'en delta, comme `DetachedTabRequests::geometry` (§6).
     pub(super) selection: Option<HashSet<Tab>>,
     pub(super) hidden: Option<HashSet<Tab>>,
+}
+
+/// L'OM détaché reçoit la projection du graphe actif, même sans événement
+/// dans son viewport. Les gestes restent associés au graphe qui était peint.
+#[derive(Clone)]
+pub(super) struct ObjectManagerModel {
+    pub(super) stamp: (u64, u64, u64),
+    pub(super) tree: Arc<stokesforge_core::Tree>,
+    pub(super) graph: Option<NodeId>,
+    pub(super) selection: Option<crate::object_manager::VisibilityTarget>,
+    pub(super) model: Option<crate::object_manager::ObjectTree>,
+    pub(super) spec: Option<stokesforge_plot::PlotSpec>,
+    pub(super) show_texts: bool,
+    pub(super) show_scales: bool,
+}
+
+#[derive(Default)]
+struct ObjectManagerRequests {
+    gestures: Vec<(NodeId, ObjectManagerRequest)>,
+    actions: Vec<Action>,
+    reattach: bool,
+}
+
+pub(super) struct DetachedObjectManager {
+    model: Arc<Mutex<ObjectManagerModel>>,
+    requests: Arc<Mutex<ObjectManagerRequests>>,
+}
+
+#[derive(Default)]
+struct ScriptConsoleRequests {
+    source: Option<String>,
+    actions: Vec<Action>,
+    reattach: bool,
+}
+
+pub(super) struct DetachedScriptConsole {
+    model: Arc<Mutex<ScriptConsoleModel>>,
+    requests: Arc<Mutex<ScriptConsoleRequests>>,
+}
+
+/// Les panneaux détachés ont le cadre maison et une seule action de fenêtre.
+/// Une fermeture demandée par le compositeur devient un rattachement.
+fn detached_panel_contents(
+    ui: &mut egui::Ui,
+    title: &str,
+    contents: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let mut reattach = false;
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::central_panel(ui.style())
+                .inner_margin(WINDOW_CONTENT_MARGIN)
+                .stroke(ui.visuals().window_stroke()),
+        )
+        .show(ui, |ui| {
+            let header = panel_header(ui, title, PanelPlacement::Detached, false);
+            reattach = header.detach;
+            if header.title_drag_started {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+            show_window_contents_bounded(ui, contents);
+        });
+    if ui.ctx().input(|input| input.focused) {
+        paint_active_window_outline(
+            &ui.ctx().layer_painter(egui::LayerId::background()),
+            ui.ctx().input(|input| input.content_rect()),
+            egui::CornerRadius::ZERO,
+            ui.style(),
+        );
+    }
+    detached_resize_handles(ui);
+    if ui.ctx().input(|input| input.viewport().close_requested()) {
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        reattach = true;
+    }
+    reattach
 }
 
 /// Un onglet de contenu détaché en fenêtre OS séparée — voir la doc de tête
@@ -304,6 +390,184 @@ pub(super) struct DetachedTabRequests {
 }
 
 impl StokesForgeApp {
+    pub(super) fn drain_object_manager(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        let Some(view) = &self.om_view else {
+            return;
+        };
+        let (gestures, reattach) = {
+            let mut requests = view.requests.lock().unwrap_or_else(|err| err.into_inner());
+            actions.append(&mut requests.actions);
+            (
+                std::mem::take(&mut requests.gestures),
+                std::mem::take(&mut requests.reattach),
+            )
+        };
+        for (graph, request) in gestures {
+            self.run_object_manager_request(ctx, graph, request, actions);
+        }
+        if reattach {
+            self.om_detached = false;
+            // La lecture détachée ne doit plus retenir un ancien arbre entier.
+            self.om_view = None;
+        }
+    }
+
+    pub(super) fn show_detached_object_manager(
+        &mut self,
+        ctx: &egui::Context,
+        next: ObjectManagerModel,
+    ) {
+        let view = self.om_view.get_or_insert_with(|| DetachedObjectManager {
+            model: Arc::new(Mutex::new(next.clone())),
+            requests: Arc::default(),
+        });
+        let changed = {
+            let mut model = view.model.lock().unwrap_or_else(|err| err.into_inner());
+            let changed = model.stamp != next.stamp
+                || model.graph != next.graph
+                || model.selection != next.selection
+                || model.show_texts != next.show_texts
+                || model.show_scales != next.show_scales;
+            *model = next;
+            changed
+        };
+        let model = Arc::clone(&view.model);
+        let requests = Arc::clone(&view.requests);
+        let root = ctx.clone();
+        let id = egui::ViewportId::from_hash_of("stokesforge_object_manager_window");
+        ctx.show_viewport_deferred(
+            id,
+            egui::ViewportBuilder::default()
+                .with_title(tr!("action-object-manager"))
+                .with_decorations(false)
+                .with_inner_size([330.0, 480.0])
+                .with_min_inner_size([220.0, 140.0]),
+            move |ui, _class| {
+                let model = model.lock().unwrap_or_else(|err| err.into_inner()).clone();
+                let mut actions = Vec::new();
+                let mut gestures = Vec::new();
+                let reattach = detached_panel_contents(ui, &tr!("action-object-manager"), |ui| {
+                    gestures = object_manager_contents(
+                        ui,
+                        &model.tree,
+                        model.model.as_ref(),
+                        model.spec.as_ref(),
+                        model.show_texts,
+                        model.show_scales,
+                        &mut actions,
+                    );
+                });
+                if reattach || !actions.is_empty() || !gestures.is_empty() {
+                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                    requests.reattach |= reattach;
+                    requests.actions.append(&mut actions);
+                    if let Some(graph) = model.graph {
+                        requests
+                            .gestures
+                            .extend(gestures.into_iter().map(|gesture| (graph, gesture)));
+                    }
+                    root.request_repaint_of(egui::ViewportId::ROOT);
+                }
+            },
+        );
+        if changed {
+            ctx.request_repaint_of(id);
+        }
+    }
+
+    pub(super) fn detach_script_console(&mut self) {
+        self.script_detached = true;
+        // Le travail Python ne migre jamais ; ce lecteur ne possède que la saisie et la sortie.
+        self.script_view = Some(DetachedScriptConsole {
+            model: Arc::new(Mutex::new(ScriptConsoleModel::from_state(&self.state))),
+            requests: Arc::default(),
+        });
+    }
+
+    pub(super) fn drain_script_console(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        let Some(view) = &self.script_view else {
+            return;
+        };
+        let (source, reattach) = {
+            let mut requests = view.requests.lock().unwrap_or_else(|err| err.into_inner());
+            actions.append(&mut requests.actions);
+            (
+                requests.source.take(),
+                std::mem::take(&mut requests.reattach),
+            )
+        };
+        if let Some(source) = source {
+            self.state.set_script_source(source);
+        }
+        if reattach {
+            self.script_detached = false;
+            self.script_view = None;
+            ctx.request_repaint();
+        }
+    }
+
+    pub(super) fn show_detached_script_console(&mut self, ctx: &egui::Context) {
+        let Some(view) = &self.script_view else {
+            return;
+        };
+        let next = ScriptConsoleModel::from_state(&self.state);
+        let changed = {
+            let mut model = view.model.lock().unwrap_or_else(|err| err.into_inner());
+            let changed = *model != next;
+            // Une saisie arrivée après le drainage ne doit pas être écrasée
+            // par une publication de l'ancien tampon dans cette même image.
+            let requests = view.requests.lock().unwrap_or_else(|err| err.into_inner());
+            if requests.source.is_none() {
+                model.source = next.source;
+            }
+            model.output = next.output;
+            model.running = next.running;
+            model.available = next.available;
+            changed
+        };
+        let model = Arc::clone(&view.model);
+        let requests = Arc::clone(&view.requests);
+        let root = ctx.clone();
+        let id = egui::ViewportId::from_hash_of("stokesforge_script_window");
+        ctx.show_viewport_deferred(
+            id,
+            egui::ViewportBuilder::default()
+                .with_title(tr!("script-title"))
+                .with_decorations(false)
+                .with_inner_size([700.0, 440.0])
+                .with_min_inner_size([300.0, 220.0]),
+            move |ui, _class| {
+                let mut model = model.lock().unwrap_or_else(|err| err.into_inner());
+                let source = model.source.clone();
+                let mut actions = Vec::new();
+                let ctx = ui.ctx().clone();
+                if ctx.input_mut(|input| {
+                    input.consume_shortcut(&super::shortcuts::SHORTCUT_RUN_SCRIPT)
+                }) {
+                    actions.push(Action::RunScript);
+                }
+                let reattach = detached_panel_contents(ui, &tr!("script-title"), |ui| {
+                    if !model.available {
+                        ui.weak(tr!("script-unavailable"));
+                    }
+                    script_model_contents(ui, &ctx, &mut model, &mut actions);
+                });
+                if source != model.source || reattach || !actions.is_empty() {
+                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                    if source != model.source {
+                        requests.source = Some(model.source.clone());
+                    }
+                    requests.reattach |= reattach;
+                    requests.actions.append(&mut actions);
+                    root.request_repaint_of(egui::ViewportId::ROOT);
+                }
+            },
+        );
+        if changed {
+            ctx.request_repaint_of(id);
+        }
+    }
+
     /// Bascule en mode détaché : le prochain rendu ouvre le Project Manager
     /// dans sa propre fenêtre OS ([`StokesForgeApp::show_detached_project_manager`])
     /// au lieu du panneau fixe ([`StokesForgeApp::project_manager_panel`]). Sans
@@ -368,7 +632,7 @@ impl StokesForgeApp {
     ///   image, **avant** l'appel à `show_viewport_deferred` ;
     /// - [`DetachedProjectManagerRequests`] recueille dans l'autre sens ce
     ///   que le callback produit (clics d'ouverture, réattachement demandé) ;
-    ///   [`StokesForgeApp::ui`](eframe::App::ui) la draine juste après cet appel pour produire les
+    ///   [`StokesForgeApp::ui`](eframe::App::ui) la draine avant la publication pour produire les
     ///   mêmes `open_requests`/`Action` qu'avant, sans dupliquer la logique
     ///   de [`StokesForgeApp::open_tab`] ni appeler
     ///   [`StokesForgeApp::reattach_project_manager`] depuis l'intérieur d'un
@@ -402,7 +666,9 @@ impl StokesForgeApp {
             egui::ViewportId::from_hash_of("stokesforge_project_manager_window"),
             egui::ViewportBuilder::default()
                 .with_title(tr!("window-title-project-manager"))
-                .with_inner_size([PROJECT_MANAGER_WIDTH + 40.0, 480.0]),
+                .with_inner_size([PROJECT_MANAGER_WIDTH + 40.0, 480.0])
+                .with_decorations(false)
+                .with_min_inner_size([220.0, 140.0]),
             move |ui, _class| {
                 begin_file_drop(ui.ctx());
                 let mut opened = Vec::new();
@@ -417,19 +683,9 @@ impl StokesForgeApp {
                     .lock()
                     .unwrap_or_else(|err| err.into_inner())
                     .clone();
-                egui::CentralPanel::default().show(ui, |ui| {
-                    if ui
-                        .button(tr!("action-reattach-project-manager"))
-                        .on_hover_text(tr!("action-reattach-project-manager", "hint"))
-                        .clicked()
-                    {
-                        requests
-                            .lock()
-                            .unwrap_or_else(|err| err.into_inner())
-                            .reattach = true;
-                        root_context.request_repaint_of(egui::ViewportId::ROOT);
-                    }
-                    ui.separator();
+                let selected_before = model.selected.clone();
+                let hidden_before = model.hidden.clone();
+                let reattach = detached_panel_contents(ui, &tr!("project-manager-title"), |ui| {
                     let mut interaction = PmInteraction {
                         open_requests: &mut opened,
                         close_requests: &mut closed,
@@ -441,24 +697,27 @@ impl StokesForgeApp {
                 });
                 {
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                    if reattach
+                        || !opened.is_empty()
+                        || !closed.is_empty()
+                        || model.selected != selected_before
+                        || model.hidden != hidden_before
+                    {
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                    }
+                    requests.reattach |= reattach;
                     requests.open.append(&mut opened);
                     requests.close.append(&mut closed);
-                    requests.selection = Some(model.selected);
-                    requests.hidden = Some(model.hidden);
+                    if model.selected != selected_before {
+                        requests.selection = Some(model.selected);
+                    }
+                    if model.hidden != hidden_before {
+                        requests.hidden = Some(model.hidden);
+                    }
                     if let Some(action) = finish_file_drop(ui.ctx()) {
                         requests.actions.push(action);
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
-                }
-                // L'utilisateur a cliqué le bouton de fermeture de cette
-                // fenêtre OS : on la referme proprement en la réattachant au
-                // dock plutôt que de laisser le panneau disparaître sans
-                // recours.
-                if ui.ctx().input(|input| input.viewport().close_requested()) {
-                    requests
-                        .lock()
-                        .unwrap_or_else(|err| err.into_inner())
-                        .reattach = true;
                 }
             },
         );
@@ -474,8 +733,8 @@ impl StokesForgeApp {
     /// effet si `tab` est déjà détaché ou n'est pas une fenêtre flottante
     /// actuellement ouverte. Ni le Project Manager ni la console de script
     /// n'entrent dans ce chemin depuis leur passage en panneaux fixes — voir
-    /// [`StokesForgeApp::detach_project_manager`] pour le premier ; la seconde n'a
-    /// simplement plus de mécanisme de détachement du tout.
+    /// [`StokesForgeApp::detach_project_manager`] et
+    /// [`StokesForgeApp::detach_script_console`] pour leurs chemins propres.
     pub(super) fn detach_tab(&mut self, tab: Tab) {
         if self.detached_tabs.contains_key(&tab) {
             return;

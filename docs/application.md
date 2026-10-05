@@ -41,7 +41,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/format.rs` | barres de format de texte et d'objet, barre contextuelle : `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (les barres elles-mêmes : `crate::toolbar`) |
 | `app/project_manager.rs` | Project Manager : `project_manager_panel` (panneau fixe) et l'arbre `project_manager_contents_from_tree`, commun au panneau et à la fenêtre détachée |
 | `app/object_manager_ui.rs` | Object Manager peint : `object_manager_panel`, `run_object_manager_request`, lignes, cases, menus, glisser des séries (le modèle : `crate::object_manager`) |
-| `app/script_console.rs` | console de script : `script_panel`, saisie, Exécuter/Arrêter, sortie |
+| `app/script_console.rs` | console de script : `script_panel`, lecture `ScriptConsoleModel`, contenu commun attaché/détaché, saisie, Exécuter/Arrêter, sortie |
 | `app/tab.rs` | `Tab`, l'onglet d'une fenêtre de contenu (classeur, graphe, matrice, note), et ses traductions vers le modèle (`tab_for_window`, `tab_node`) |
 | `app/contents.rs` | contenus partagés flottant/détaché : `tab_contents`, `note_contents`, `matrix_contents` (espace réservé) |
 | `app/workbook.rs` | classeur : `book_contents` (contenu commun flottant/détaché), `sheet_tabs`, `workbook_menu` |
@@ -54,10 +54,10 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with` |
 | `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
 | `app/shortcuts.rs` | constantes `SHORTCUT_*` et leurs rappels, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
-| `app/window_chrome.rs` | cadre commun des fenêtres : `window_header`, `floating_window_frame`, contour actif, poignées, `show_window_in_layer`, `show_window_contents_bounded` |
+| `app/window_chrome.rs` | cadre commun des fenêtres et panneaux : `window_header`, `panel_header`, `floating_window_frame`, contour actif, poignées, `show_window_in_layer`, `show_window_contents_bounded` |
 | `app/window_placement.rs` | placement : tailles par défaut, cascade, espace de travail fixe (`WORKSPACE_SIZE`), `clamp_to_workspace`, conversion logique → écran |
 | `app/window_stack.rs` | pile des fenêtres flottantes : `open_tab` (seul endroit qui décide ouvrir ou focaliser), ordre et calques egui, masquage, repli, maximisation, `show_workspace` |
-| `app/window_detach.rs` | détachement en fenêtres OS : `show_detached_project_manager`, `detach_tab`/`reattach_tab`, `show_detached_tabs` et la publication de l'instantané qui réveille les viewports (#104), `sync_window_views` (état des fenêtres envoyé à la session, #16) |
+| `app/window_detach.rs` | détachement en fenêtres OS : `show_detached_project_manager`, `show_detached_object_manager`, `show_detached_script_console`, `detach_tab`/`reattach_tab`, `show_detached_tabs` et la publication de l'instantané qui réveille les viewports (#104), `sync_window_views` (état des fenêtres envoyé à la session, #16) |
 
 Une nouvelle surface volumineuse s'écrit dans son propre module, sur ce
 modèle ; `app.rs` n'y gagne que l'appel. Depuis #124, `ui()` décrit les
@@ -79,16 +79,17 @@ future reste dans un commit séparé d'un déplacement.
 
 ### Fenêtres flottantes confinées
 
-Le Project Manager et la console de script sont deux panneaux fixes
-(`egui::Panel::left`/`egui::Panel::bottom`), jamais fermés. L'ordre des
+Le Project Manager, l’Object Manager et la console Python sont des panneaux
+fixes à gauche, à droite et en bas (#100). Leur visibilité se commande par
+View ; aucun en-tête ne porte de bouton Fermer. L'ordre des
 panneaux fait la mise en page egui (le premier posé est le plus extérieur) ;
 il est décidé dans `StokesForgeApp::ui`, et nulle part ailleurs : barre de
 menu (`Panel::top`, `app/menus.rs`), barres d'outils (`toolbar.rs`), barre
 d'état (`Panel::bottom`, `app/menus.rs`), console de script (`Panel::bottom`,
 `app/script_console.rs`, posée avant le Project Manager pour courir sous lui
 sur toute la largeur), Project Manager (`Panel::left`,
-`app/project_manager.rs`, sauf détaché), Object Manager (`Panel::right` ou
-flottant, `app/object_manager_ui.rs`), puis le `CentralPanel`. Le test
+`app/project_manager.rs`, sauf détaché), Object Manager (`Panel::right`,
+`app/object_manager_ui.rs`, sauf détaché), puis le `CentralPanel`. Le test
 `les_panneaux_fixes_se_posent_dans_l_ordre_de_ui` (`app.rs`) tient cet ordre
 par les rectangles des panneaux. Les quatre autres
 natures de fenêtre de contenu — `Tab::Book` (classeur), `Tab::Graph`,
@@ -467,11 +468,27 @@ sur le pixel). Un nœud qui contient un arbre doit renvoyer le centre de sa
 rangée à son parent ; limite : le vertical part du haut du corps, pas du bas
 de la flèche du parent.
 
-### Détachement du Project Manager
+### Panneaux rétractables et détachés (#100)
 
-Le Project Manager est un panneau fixe à gauche. Le menu Window permet de
-le détacher (Detach / Reattach Project Manager) dans une fenêtre OS puis de le réattacher. Sa fermeture OS le
-réattache, puisque ce panneau de navigation n'est jamais fermé.
+Les trois panneaux partagent `panel_header` (`app/window_chrome.rs`) : titre
+compact, Détacher, Replier/Déployer. L'ordre des boutons dépend du côté :
+Replier/Déployer vers l'espace de travail, Détacher vers le bord extérieur.
+Les bandes verticales gardent Déployer puis Détacher de haut en bas.
+PM et OM se replient en une bande
+latérale de 32 points, avec titre vertical et prise visible ; la console se
+replie en une barre horizontale. Le panneau déployé reste redimensionnable
+(largeur de PM/OM, hauteur de la console). Les bandes de repli ont des
+identifiants egui distincts : leur taille n’écrase pas la dimension déployée.
+Le repli laisse le panneau visible ; View le masque ou le réaffiche. Le
+masquage conserve également le repli et le détachement. La visibilité de
+l’OM reste une préférence ; celles du PM et de la console sont locales à
+l’application, comme leur repli. Le mode flottant interne de l’OM est retiré.
+
+Détacher ouvre une vraie fenêtre système sans décoration native, avec le
+même cadre maison et un seul bouton Rattacher. Son titre permet le glisser,
+ses bords le redimensionnement. Une demande de fermeture du compositeur
+est annulée puis traitée comme un rattachement ; elle ne masque pas le
+panneau. Le menu Window garde aussi Detach / Reattach Project Manager.
 
 Les fenêtres séparées utilisent `show_viewport_deferred` : leur rendu est
 indépendant de celui de la fenêtre principale. Le callback échange un
@@ -482,11 +499,20 @@ principale pour être traitées même quand elle est inactive.
 Dans l'autre sens, publier un instantané modifié réveille explicitement le
 viewport lecteur (#104) : époque du projet, révision du modèle ou révision
 des géométries. Le Project Manager est aussi réveillé si sa sélection, son
-masquage ou l'onglet actif change. Une commande appliquée en fin d'image
+masquage ou l’onglet actif change. L’OM reçoit le graphe actif, sa sélection
+et les filtres à chaque publication : il suit aussi un graphe détaché et
+se réveille sans interaction dans sa propre fenêtre. Les gestes remontent
+avec l’identifiant du graphe qui était peint. La console reçoit la saisie,
+la sortie et l’état d’exécution (`ScriptConsoleModel`) ; les nouvelles frappes
+sont drainées avant publication. Le moteur et le travail Python restent dans
+l’`AppState` principal : détacher, rattacher, replier ou masquer la console
+ne les interrompt pas. La racine sonde le résultat tant qu’un script tourne,
+y compris quand la console est masquée. Une commande appliquée en fin d'image
 programme l'image racine qui publiera son résultat ; aucun réveil périodique
 n'est ajouté au repos. Les tests sans fenêtre vérifient la demande ciblée
-et le retour au repos ; le redessin réel des fenêtres OS reste à vérifier
-manuellement.
+et le retour au repos ; les tests transversaux des trois panneaux sont dans
+`app/panel_tests.rs` (clics, tailles, callbacks différés, console sous Python).
+Le redessin réel des fenêtres OS reste à vérifier manuellement.
 
 ### Détachement générique des onglets de contenu
 
@@ -1669,7 +1695,7 @@ au modèle. Les cases du graphique, du
 calque et du groupe de tracés ne commandent **pas** les axes : Droite et Haut sont masqués par défaut, le parent
 serait indéterminé dès l'ouverture et « tout afficher » ferait apparaître deux
 axes non demandés. Le panneau est redimensionnable à droite ;
-son bouton Détacher le rend flottant, Ancrer le replace à droite. Il est
+son bouton Détacher ouvre une fenêtre système, Rattacher le replace à droite. Il est
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.
 

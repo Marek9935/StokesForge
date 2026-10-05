@@ -716,8 +716,6 @@ note-deleted = Cette note a été supprimée
 # Console de script
 script-title = Script Python
 script-unavailable = — Indisponible dans cette version
-script-expand = Déplier la console de script
-script-collapse = Replier la console de script
 script-run = Exécuter
 script-stop = Arrêter
 script-running = Exécution…
@@ -825,9 +823,6 @@ format-color = Couleur du texte
 
 action-object-manager = Gestionnaire d’objets
     .hint = Afficher ou masquer les objets du graphique actif.
-action-object-manager-dock = Ancrer le gestionnaire d’objets
-action-object-manager-float = Faire flotter le gestionnaire d’objets
-action-object-manager-close = Fermer le gestionnaire d’objets
 object-manager-no-graph = Activer un graphique pour voir ses objets.
 object-manager-visibility = Afficher ou masquer ce contenu. Les séries masquées sont exclues de la légende et des bornes automatiques des axes.
 object-manager-layer = Calque { $index }
@@ -857,3 +852,9 @@ history-plot-remove-series = Supprimer la série
 history-plot-remove-text = Supprimer le texte
 history-plot-remove-object = Supprimer l'objet
 history-plot-reorder-object = Réordonner les objets
+
+# Panneaux fixes et fenêtres détachées (#100)
+panel-expand = Déployer le panneau
+panel-collapse = Replier le panneau
+panel-detach = Détacher dans une fenêtre séparée
+panel-reattach = Rattacher à la fenêtre principale
