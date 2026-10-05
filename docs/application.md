@@ -1597,6 +1597,11 @@ un nombre tapé y reste un nombre.
 fichier ; sinon un projet de démonstration est construit et `chemin` devient la
 cible d'un futur enregistrement.
 
+Les colonnes du projet de démonstration utilisent les noms automatiques
+`A`, `B`, `C`… ; le script prérempli lit `[Book1]Sheet1!A`, la première
+colonne visible dans la grille. Les noms descriptifs ne sont pas utilisés
+comme clés cachées de la démonstration.
+
 Le graphe de démonstration suit le même défaut que les créations par le menu,
 le tracé de colonnes et `pyst.plot` sans option `title` : aucun titre (#103).
 Un titre vide n'est pas dessiné et ne réserve aucune bande au-dessus du tracé.

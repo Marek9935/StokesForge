@@ -22,7 +22,7 @@ const DEFAULT_FILE: &str = "demo.stokesforge";
 /// critère de fin du socle (lecture sans copie d'une colonne). Affiché même
 /// sans la feature `python` : un banc d'essai doit montrer ce qui manque, pas
 /// le cacher.
-const EXAMPLE_SCRIPT: &str = "a = pyst.resolve(\"[Book1]Sheet1!Temps\")\n\
+const EXAMPLE_SCRIPT: &str = "a = pyst.resolve(\"[Book1]Sheet1!A\")\n\
 v = pyst.column(a)\n\
 print(\"longueur :\", len(v), \"premier :\", v[0])\n";
 
@@ -154,6 +154,8 @@ fn configure_script_engine(_state: &mut AppState) {}
 /// (`NaN`), les deux valeurs texte que rien ne distingue à l'écran (`None` et
 /// `Some("")`), et surtout des **colonnes de longueurs différentes** — une
 /// feuille n'est pas un tableau rectangulaire.
+/// Les noms de colonnes restent automatiques (A, B, C…) pour que le script
+/// d'exemple désigne la même colonne que la lettre visible dans la grille.
 fn demo_project() -> anyhow::Result<Project> {
     let mut project = Project::new("Demo").context("projet de démonstration")?;
     let root = project.root();
@@ -169,32 +171,32 @@ fn demo_project() -> anyhow::Result<Project> {
         .add_column(
             sheet1,
             None,
-            Some("Temps"),
+            None,
             Column::from_f64(&[0.0, 0.5, 1.0, 1.5, 2.0]),
         )
-        .context("colonne Temps")?;
+        .context("colonne A de Sheet1")?;
     project
         .add_column(
             sheet1,
             None,
-            Some("Signal"),
+            None,
             Column::from_f64(&[10.0, 12.5, f64::NAN, 18.0, 21.5]),
         )
-        .context("colonne Signal")?;
+        .context("colonne B de Sheet1")?;
     project
         .add_column(
             sheet1,
             None,
-            Some("Note"),
+            None,
             Column::from_text(&[Some("a".to_string()), None, Some(String::new())]),
         )
-        .context("colonne Note")?;
+        .context("colonne C de Sheet1")?;
     let sheet2 = project
         .add_worksheet(book, Some("Sheet2"))
         .context("feuille Sheet2")?;
     project
-        .add_column(sheet2, None, Some("Court"), Column::from_f64(&[7.0, 8.0]))
-        .context("colonne Court")?;
+        .add_column(sheet2, None, None, Column::from_f64(&[7.0, 8.0]))
+        .context("colonne A de Sheet2")?;
     // Deux feuilles vides de plus — Book1 n'en montrait que trois, pas assez
     // pour éprouver à l'œil le défilement de la bande d'onglets (F8) une
     // fois qu'elle ne rétrécit plus ses onglets.
@@ -206,7 +208,7 @@ fn demo_project() -> anyhow::Result<Project> {
         .context("feuille Sheet4")?;
 
     // Le graphe de la phase R4. Ses colonnes sont **les siennes** et non
-    // `Temps`/`Signal` : celles-là portent volontairement un `NaN` et des
+    // A/B de Sheet1 : celles-là portent volontairement un `NaN` et des
     // longueurs inégales pour éprouver la grille, ce qui donnerait une
     // courbe difficile à lire. Un banc doit montrer les cas tordus du
     // modèle *et* un rendu qu'on puisse juger à l'œil.
@@ -223,11 +225,11 @@ fn demo_project() -> anyhow::Result<Project> {
         })
         .collect();
     let x = project
-        .add_column(spectre, None, Some("Lambda"), Column::from_f64(&xs))
-        .context("colonne Lambda")?;
+        .add_column(spectre, None, None, Column::from_f64(&xs))
+        .context("colonne A de Spectre")?;
     let y = project
-        .add_column(spectre, None, Some("Absorbance"), Column::from_f64(&ys))
-        .context("colonne Absorbance")?;
+        .add_column(spectre, None, None, Column::from_f64(&ys))
+        .context("colonne B de Spectre")?;
     project
         .add_graph(root, Some("Graph1"), demo_spec(x, y))
         .context("graphe de démonstration")?;
@@ -264,6 +266,31 @@ fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
 mod startup_tests {
     use super::*;
     use stokesforge_session::WindowGeometry;
+
+    #[test]
+    fn les_colonnes_de_demo_et_le_script_suivent_les_lettres_de_la_grille() {
+        let project = demo_project().unwrap();
+        for (sheet, names) in [
+            ("Sheet1", &["A", "B", "C"][..]),
+            ("Sheet2", &["A"][..]),
+            ("Spectre", &["A", "B"][..]),
+        ] {
+            let id = project.resolve_path(&format!("[Book1]{sheet}")).unwrap();
+            let actual: Vec<_> = project
+                .tree()
+                .children(id)
+                .unwrap()
+                .iter()
+                .map(|id| project.tree().node(*id).unwrap().name())
+                .collect();
+            assert_eq!(actual, names);
+        }
+        let path = EXAMPLE_SCRIPT.split('"').nth(1).unwrap();
+        let id = project.resolve_path(path).unwrap();
+        assert_eq!(id, project.resolve_path("[Book1]Sheet1!A").unwrap());
+        let column = stokesforge_core::resolve_column(project.tree(), id).unwrap();
+        assert_eq!(column.len(), 5);
+    }
 
     /// #103 : la démo suit le même défaut que les graphes créés par l'utilisateur.
     #[test]
