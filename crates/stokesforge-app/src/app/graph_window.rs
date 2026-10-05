@@ -18,6 +18,7 @@ use stokesforge_render_egui::{
 use stokesforge_session::Snapshot;
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv};
+use crate::object_manager::{AxisRef, VisibilityTarget};
 use crate::state::{
     drop_payload_action, export_file_name, Action, AppState, ColumnDragPayload, PlotAxis,
     PlotTarget, ShapeOrder,
@@ -352,6 +353,7 @@ fn graph_context_menu(
         return;
     };
     let target_id = response.id.with("plot_target");
+    let axis_id = response.id.with("plot_axis");
     let point_id = response.id.with("plot_point");
     let text_id = response.id.with("plot_text");
     if response.secondary_clicked() {
@@ -365,6 +367,18 @@ fn graph_context_menu(
                 PlotTarget::Annotation,
             )
         });
+        let axis = pos.and_then(|pos| match view.component_at(pos) {
+            Some(
+                PlotComponent::Axis { panel, side } | PlotComponent::AxisTitle { panel, side },
+            ) => axis_target(view, panel, side),
+            Some(PlotComponent::Text(TextTarget::AxisTitle { row, column, side })) => {
+                Some(VisibilityTarget::Axis(AxisRef { row, column, side }))
+            }
+            _ => None,
+        });
+        // Figer l'adresse au clic : ni le déplacement du pointeur ni un
+        // nouveau rendu pendant le menu ne doivent changer le calque visé.
+        ui.ctx().data_mut(|data| data.insert_temp(axis_id, axis));
         let point = pos.and_then(|pos| view.data_at(pos));
         // Titre, titre d'axe, légende ou entrée de légende visé (issue #53) :
         // lu au clic, comme la cible, pour que le menu reste cohérent pendant
@@ -495,7 +509,15 @@ fn graph_context_menu(
             .on_hover_text(tr!("action-properties", "hint"))
             .clicked()
         {
-            actions.push(target.open_settings(graph_id));
+            let axis: Option<VisibilityTarget> =
+                ui.memory(|memory| memory.data.get_temp(axis_id)).flatten();
+            actions.push(axis.map_or_else(
+                || target.open_settings(graph_id),
+                |target| Action::OpenObjectProperties {
+                    graph: graph_id,
+                    target,
+                },
+            ));
             ui.close();
         }
         if ui
@@ -628,9 +650,9 @@ fn annotation_interactions(
                 series,
             } => open_legend_entry_editor(ui.ctx(), view, tree, graph, row, column, series),
             stokesforge_render_egui::GraphEvent::OpenAxisProperties { panel, side } => {
-                actions.push(
-                    plot_target(Some(PlotComponent::Axis { panel, side })).open_settings(graph),
-                );
+                if let Some(target) = axis_target(view, panel, side) {
+                    actions.push(Action::OpenObjectProperties { graph, target });
+                }
             }
             stokesforge_render_egui::GraphEvent::OpenSeriesProperties(series) => {
                 actions.push(Action::OpenObjectProperties {
@@ -723,9 +745,23 @@ pub(super) fn request_graph_export(
     }
 }
 
-/// Traduit le composant désigné par le rendu en cible d'interface. Seul le
-/// premier panneau est éditable (pas de multi-panneaux), l'indice de
-/// panneau est donc ignoré.
+/// Le rang rendu peut différer du rang dans le spec (panneaux omis) :
+/// adresser l'axe par la position du calque, comme l'Object Manager (#113).
+fn axis_target(view: &GraphView, panel: usize, side: AxisSide) -> Option<VisibilityTarget> {
+    let drawn = view.last_drawn()?.panels.get(panel)?;
+    Some(VisibilityTarget::Axis(AxisRef {
+        row: drawn.row,
+        column: drawn.column,
+        side: match side {
+            AxisSide::Bottom => stokesforge_plot::AxisSide::Bottom,
+            AxisSide::Left => stokesforge_plot::AxisSide::Left,
+            AxisSide::Right => stokesforge_plot::AxisSide::Right,
+        },
+    }))
+}
+
+/// Libellé et onglet du composant. L'adresse des axes est conservée à part
+/// par `axis_target`, pour ouvrir les propriétés du calque visé.
 fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
     let axis = |side| match side {
         AxisSide::Bottom => PlotAxis::Bottom,
@@ -1076,6 +1112,100 @@ pub(super) mod tests {
             graph_views.get(&graph).unwrap().view().generation() > 0,
             "la fenetre flottante ne doit pas intercepter le pan de la figure"
         );
+    }
+
+    /// #113 : les deux gestes doivent adresser le calque et le côté visés.
+    /// La ligne dans la grille diffère ici de l'indice de calque.
+    #[test]
+    fn gestes_axe_ouvrent_le_bon_calque() {
+        for context_menu in [false, true] {
+            let (session, graph) = graphe();
+            let mut state = AppState::new(session.handle(), "test.stf".into()).unwrap();
+            let mut spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
+            spec.panels.push(PanelSpec::at(0, 1));
+            state.dispatch(Action::SetPlotSpec { graph, spec });
+            let context = egui::Context::default();
+            context.set_fonts(stokesforge_render_egui::font_definitions());
+            let mut view = GraphView::new();
+            let mut actions = Vec::new();
+            {
+                let mut paint = |events| {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(900.0, 900.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    };
+                    let mut output = context.run_ui(input, |ui| {
+                        graph_view_contents(ui, &mut view, state.snapshot(), graph, &mut actions);
+                    });
+                    output.textures_delta.clear();
+                };
+                paint(Vec::new());
+            }
+            let drawn = &view.last_drawn().unwrap().panels[1];
+            let figure = view.response().unwrap().rect;
+            let scale = figure.width() / DEFAULT_FIGURE_SIZE.0 as f32;
+            let pos = figure.min
+                + egui::vec2(
+                    (drawn.pixel_origin.0 as f32 - 5.0) * scale,
+                    (drawn.pixel_origin.1 as f32 + drawn.pixel_size.1 as f32 / 2.0) * scale,
+                );
+            assert_eq!(
+                view.component_at(pos),
+                Some(PlotComponent::Axis {
+                    panel: 1,
+                    side: AxisSide::Left
+                })
+            );
+            let button = if context_menu {
+                egui::PointerButton::Secondary
+            } else {
+                egui::PointerButton::Primary
+            };
+            let mut events = vec![egui::Event::PointerMoved(pos)];
+            let presses: &[bool] = if context_menu {
+                &[true, false]
+            } else {
+                &[true, false, true, false]
+            };
+            for &pressed in presses {
+                events.push(egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            let mut paint = |events| {
+                let mut output = context.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        graph_view_contents(ui, &mut view, state.snapshot(), graph, &mut actions);
+                    },
+                );
+                output.textures_delta.clear();
+                output
+            };
+            paint(events);
+            if context_menu {
+                let output = paint(Vec::new());
+                let properties = find_text_center(&output.shapes, &tr!("action-properties"));
+                // Le menu doit garder le calque d'origine quand le pointeur le quitte.
+                click_at(&context, properties, egui::Modifiers::NONE, |_, events| {
+                    paint(events)
+                });
+            }
+            assert_eq!(actions.len(), 1);
+            state.dispatch(actions.pop().unwrap());
+            assert_eq!(state.plot_settings().unwrap().axis, PlotAxis::Left);
+            assert_eq!(state.plot_edit().unwrap().selected_panel, 1);
+        }
     }
 
     /// Chaque composant désigné par le rendu ouvre l'onglet de propriétés qui

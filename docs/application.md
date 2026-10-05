@@ -1106,9 +1106,10 @@ graphique, il ouvre leurs paramètres (`GraphEvent::OpenAxisProperties`,
 `graph_window::annotation_interactions`) ; sur un texte, il garde l'édition sur place ;
 dans la zone de tracé nue, il réinitialise le zoom. Dans l'Object Manager,
 toute ligne (graphe, calque, groupes, séries, axes, objets) ouvre ses
-paramètres au double-clic. Limite connue : sur un graphe à plusieurs calques,
-l'axe double-cliqué ouvre l'onglet Axes du calque déjà choisi (commentaire de
-#113).
+paramètres au double-clic. Sur un graphe à plusieurs calques, le double-clic
+sur un axe et son menu contextuel ouvrent l'onglet Axes du calque visé,
+avec le même `Action::OpenObjectProperties` que l'Object Manager. L'adresse
+est celle du calque dans la grille, indépendante du rang des panneaux tracés.
 
 **Titres, titres d'axe et légende** (issue #53) : se désignent comme un texte
 libre. Double-clic sur un titre ou un titre d'axe → éditeur sur place
