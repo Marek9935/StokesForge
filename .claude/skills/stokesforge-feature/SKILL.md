@@ -271,6 +271,9 @@ Les panneaux fixes (#100) passent par `panel_header` dans le même module :
 PM à gauche, OM à droite, console en bas. L’ordre horizontal des boutons
 dépend du côté : repli vers l’espace de travail, détachement vers l’extérieur.
 Les bandes verticales gardent Déployer puis Détacher de haut en bas.
+Les bandes repliées font `ICON_SIZE` d’épaisseur, sans marge de panneau ni
+place réservée au séparateur ; icônes centrées, titre vertical centré sous
+les boutons.
 Visibilité par View, repli distinct
 du masquage ; en-tête attaché = Détacher et Replier/Déployer ; fenêtre OS
 sans décoration native = Rattacher uniquement. Une fermeture OS rattache.

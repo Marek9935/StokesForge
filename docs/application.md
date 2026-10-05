@@ -474,9 +474,11 @@ Les trois panneaux partagent `panel_header` (`app/window_chrome.rs`) : titre
 compact, Détacher, Replier/Déployer. L'ordre des boutons dépend du côté :
 Replier/Déployer vers l'espace de travail, Détacher vers le bord extérieur.
 Les bandes verticales gardent Déployer puis Détacher de haut en bas.
-PM et OM se replient en une bande
-latérale de 32 points, avec titre vertical et prise visible ; la console se
-replie en une barre horizontale. Le panneau déployé reste redimensionnable
+PM et OM se replient en une bande latérale avec titre vertical centré dans
+l’espace disponible sous les boutons ; la console se replie en une barre
+horizontale. Les trois bandes font 16 points d’épaisseur, comme leurs icônes,
+centrées sans marge de panneau supplémentaire. Le panneau déployé reste
+redimensionnable
 (largeur de PM/OM, hauteur de la console). Les bandes de repli ont des
 identifiants egui distincts : leur taille n’écrase pas la dimension déployée.
 Le repli laisse le panneau visible ; View le masque ou le réaffiche. Le

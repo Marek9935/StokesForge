@@ -6,7 +6,7 @@ use std::cell::RefCell;
 
 use super::project_manager::tests::{click_at, find_text_center};
 use super::window_chrome::tests::find_icon_centers;
-use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_WIDTH};
+use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::*;
 use egui::containers::panel::PanelState;
 use stokesforge_core::Project;
@@ -116,6 +116,52 @@ impl Panel {
 }
 
 #[test]
+fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
+    for panel in [Panel::Project, Panel::Object, Panel::Script] {
+        let session = Session::spawn(Project::new("Bandes").unwrap(), None).unwrap();
+        let mut app = StokesForgeApp::new(AppState::new(session.handle(), String::new()).unwrap());
+        panel.set_collapsed(&mut app, true);
+        app.state.set_object_manager_open_for_test(true);
+        let ctx = context();
+        let mut output = ctx.run_ui(input(Vec::new()), |ui| panel.paint(&mut app, ui));
+        output.textures_delta.clear();
+        let strip = PanelState::load(&ctx, egui::Id::new(panel.collapsed_id()))
+            .unwrap()
+            .outer_rect;
+        let axis = if matches!(panel, Panel::Script) { 1 } else { 0 };
+        assert_eq!(strip.size()[axis], crate::icons::ICON_SIZE);
+        let icons = find_icon_centers(&output.shapes);
+        assert_eq!(icons.len(), 2);
+        for icon in icons {
+            assert!(
+                (icon[axis] - strip.center()[axis]).abs() < 0.1,
+                "{panel:?} : {icon:?} / {strip:?}"
+            );
+        }
+        let title = output
+            .shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Text(text) => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        let center = title.pos
+            + egui::emath::Rot2::from_angle(title.angle) * title.galley.rect.center().to_vec2();
+        let expected = if matches!(panel, Panel::Script) {
+            strip.center()
+        } else {
+            egui::pos2(strip.center().x, strip.center().y + crate::icons::ICON_SIZE)
+        };
+        assert!(
+            center.distance(expected) < 0.1,
+            "titre centré : {center:?} / {expected:?}"
+        );
+        session.shutdown().unwrap();
+    }
+}
+
+#[test]
 fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
     for panel in [Panel::Project, Panel::Object, Panel::Script] {
         let session = Session::spawn(Project::new("Panneaux").unwrap(), None).unwrap();
@@ -171,7 +217,7 @@ fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
             .size();
         match panel {
             Panel::Script => assert!(strip.y < before.y / 2.0),
-            _ => assert!((strip.x - PANEL_STRIP_WIDTH).abs() <= 1.0),
+            _ => assert!((strip.x - PANEL_STRIP_THICKNESS).abs() <= 1.0),
         }
         assert_eq!(
             PanelState::load(&ctx, egui::Id::new(panel.id()))

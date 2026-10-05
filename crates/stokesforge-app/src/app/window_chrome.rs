@@ -538,7 +538,8 @@ pub(super) enum PanelPlacement {
     Detached,
 }
 
-pub(super) const PANEL_STRIP_WIDTH: f32 = 32.0;
+/// Épaisseur repliée, commune aux bandes latérales et à la console.
+pub(super) const PANEL_STRIP_THICKNESS: f32 = ICON_SIZE;
 
 /// Même dessin et mêmes cellules d'icônes que les fenêtres de contenu, avec
 /// une typographie compacte. Aucun chemin ne peint Fermer ou Maximiser (#100).
@@ -549,24 +550,38 @@ pub(super) fn panel_header(
     collapsed: bool,
 ) -> WindowHeaderActions {
     let vertical = collapsed && matches!(placement, PanelPlacement::Left | PanelPlacement::Right);
+    let action_width = if collapsed {
+        ICON_SIZE
+    } else {
+        HEADER_ACTION_WIDTH
+    };
+    let header_height = if collapsed {
+        ICON_SIZE
+    } else {
+        WINDOW_HEADER_HEIGHT
+    };
     let size = egui::vec2(
         ui.available_width(),
         if vertical {
             ui.available_height()
         } else {
-            WINDOW_HEADER_HEIGHT
+            header_height
         },
     );
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let id = ui.id().with("panel_header");
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    let cell =
-        |pos| egui::Rect::from_min_size(pos, egui::vec2(HEADER_ACTION_WIDTH, WINDOW_HEADER_HEIGHT));
-    let mut toggle_rect = cell(rect.min);
-    let mut detach_rect = if vertical {
-        cell(rect.min + egui::vec2(0.0, WINDOW_HEADER_HEIGHT))
+    let cell = |pos| egui::Rect::from_min_size(pos, egui::vec2(action_width, header_height));
+    let first_pos = if vertical {
+        egui::pos2(rect.center().x - action_width / 2.0, rect.top())
     } else {
-        cell(egui::pos2(rect.right() - HEADER_ACTION_WIDTH, rect.top()))
+        rect.min
+    };
+    let mut toggle_rect = cell(first_pos);
+    let mut detach_rect = if vertical {
+        cell(first_pos + egui::vec2(0.0, header_height))
+    } else {
+        cell(egui::pos2(rect.right() - action_width, rect.top()))
     };
     // Le repli se vise au bord de l'espace de travail, le détachement au
     // bord extérieur. La règle dépend du côté, jamais de la nature du panneau.
@@ -612,10 +627,7 @@ pub(super) fn panel_header(
         },
     );
     let title_rect = if vertical {
-        egui::Rect::from_min_max(
-            rect.min + egui::vec2(0.0, 2.0 * WINDOW_HEADER_HEIGHT),
-            rect.max,
-        )
+        egui::Rect::from_min_max(rect.min + egui::vec2(0.0, 2.0 * header_height), rect.max)
     } else {
         egui::Rect::from_min_max(
             rect.min
@@ -623,11 +635,11 @@ pub(super) fn panel_header(
                     if placement == PanelPlacement::Detached {
                         0.0
                     } else {
-                        HEADER_ACTION_WIDTH
+                        action_width
                     },
                     0.0,
                 ),
-            egui::pos2(rect.right() - HEADER_ACTION_WIDTH, rect.bottom()),
+            egui::pos2(rect.right() - action_width, rect.bottom()),
         )
     };
     let painter = header.painter().with_clip_rect(title_rect);
@@ -636,7 +648,7 @@ pub(super) fn panel_header(
         let galley = painter.layout_no_wrap(title.to_owned(), font, header.visuals().text_color());
         let pos = egui::pos2(
             title_rect.center().x - galley.size().y / 2.0,
-            title_rect.bottom() - 4.0,
+            title_rect.center().y + galley.size().x / 2.0,
         );
         let mut shape = egui::epaint::TextShape::new(pos, galley, header.visuals().text_color());
         shape.angle = -std::f32::consts::FRAC_PI_2;
@@ -656,11 +668,21 @@ pub(super) fn panel_header(
     if placement == PanelPlacement::Detached {
         actions.title_drag_started = title_response.drag_started();
     }
-    header.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        header.visuals().widgets.noninteractive.bg_stroke,
-    );
+    let stroke = header.visuals().widgets.noninteractive.bg_stroke;
+    if vertical {
+        // La séparation reste dans la bande : Panel réserverait une marge
+        // extérieure qui décalerait le centre des icônes d'un demi-point.
+        let x = if placement == PanelPlacement::Left {
+            rect.right() - stroke.width / 2.0
+        } else {
+            rect.left() + stroke.width / 2.0
+        };
+        header.painter().vline(x, rect.y_range(), stroke);
+    } else {
+        header
+            .painter()
+            .hline(rect.x_range(), rect.bottom(), stroke);
+    }
     actions
 }
 

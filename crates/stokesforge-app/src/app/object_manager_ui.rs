@@ -28,7 +28,7 @@ use super::graph_text_edit::{open_annotation_editor, open_series_name_editor};
 use super::graph_window::open_shape_properties;
 use super::shortcuts::shortcut_text_delete;
 use super::tab::Tab;
-use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_WIDTH};
+use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::window_detach::ObjectManagerModel;
 use super::{active_tab_kind, StokesForgeApp};
 
@@ -676,8 +676,10 @@ impl StokesForgeApp {
         let collapsed = self.om_collapsed;
         let panel = if collapsed {
             egui::Panel::right("stokesforge_object_manager_collapsed")
-                .exact_size(PANEL_STRIP_WIDTH)
+                .exact_size(PANEL_STRIP_THICKNESS)
                 .resizable(false)
+                .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(0))
+                .show_separator_line(false)
         } else {
             egui::Panel::right("stokesforge_object_manager")
                 .default_size(300.0)

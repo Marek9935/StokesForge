@@ -223,18 +223,21 @@ impl StokesForgeApp {
             return;
         }
         let collapsed = self.script_collapsed;
-        egui::Panel::bottom(if collapsed {
+        let panel = egui::Panel::bottom(if collapsed {
             "stokesforge_script_collapsed"
         } else {
             "stokesforge_script"
         })
-        .resizable(!collapsed)
-        .default_size(if collapsed {
-            super::window_chrome::WINDOW_HEADER_HEIGHT
+        .resizable(!collapsed);
+        let panel = if collapsed {
+            panel
+                .exact_size(super::window_chrome::PANEL_STRIP_THICKNESS)
+                .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(0))
+                .show_separator_line(false)
         } else {
-            SCRIPT_PANEL_HEIGHT
-        })
-        .show(ui, |ui| {
+            panel.default_size(SCRIPT_PANEL_HEIGHT)
+        };
+        panel.show(ui, |ui| {
             let header = script_header(ui, &self.state, collapsed);
             self.script_collapsed ^= header.toggle_collapse;
             if header.detach {

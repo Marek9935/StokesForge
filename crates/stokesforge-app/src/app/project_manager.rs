@@ -16,7 +16,7 @@ use crate::state::{ProjectTreeNode, WindowKind};
 use crate::tr;
 
 use super::tab::{tab_for_window, Tab};
-use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_WIDTH};
+use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::StokesForgeApp;
 
 /// Ce que le rendu de l'arbre du Project Manager accumule ou lit, à travers
@@ -214,8 +214,10 @@ impl StokesForgeApp {
     ) {
         if self.pm_collapsed {
             egui::Panel::left("stokesforge_pm_collapsed")
-                .exact_size(PANEL_STRIP_WIDTH)
+                .exact_size(PANEL_STRIP_THICKNESS)
                 .resizable(false)
+                .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(0))
+                .show_separator_line(false)
                 .show(ui, |ui| {
                     let header = panel_header(
                         ui,
