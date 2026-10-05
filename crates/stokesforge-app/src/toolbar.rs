@@ -692,7 +692,7 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
             response.on_hover_text(tooltip)
         };
         let (project, user) = ctx
-            .data(|data| data.get_temp(crate::app::saved_colors_id()))
+            .data(|data| data.get_temp(crate::color_picker::saved_colors_id()))
             .unwrap_or_default();
         let mut picker = PickerEnv {
             project,
@@ -934,7 +934,7 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
         }
         let before = color.clone();
         let (project, user) = ctx
-            .data(|data| data.get_temp(crate::app::saved_colors_id()))
+            .data(|data| data.get_temp(crate::color_picker::saved_colors_id()))
             .unwrap_or_default();
         let mut picker = PickerEnv {
             project,

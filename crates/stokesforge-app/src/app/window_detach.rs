@@ -170,6 +170,7 @@ use super::project_manager::{
 use super::script_console::{script_model_contents, ScriptConsoleModel};
 use super::shortcuts::collect_undo_redo_shortcuts;
 use super::tab::{tab_node, Tab};
+use super::tab::{tab_title, tab_title_from_tree};
 use super::window_chrome::{
     detached_resize_handles, paint_active_window_outline, panel_header,
     show_window_contents_bounded, window_header, HeaderPlacement, PanelPlacement,
@@ -178,7 +179,17 @@ use super::window_chrome::{
 use super::window_placement::{floating_window_display_size, GRAPH_WINDOW_SIZE};
 use super::window_stack::toggle_collapse_to;
 use super::workbook::book_contents;
-use super::{snapshot_stamp, tab_title, tab_title_from_tree, StokesForgeApp};
+use super::StokesForgeApp;
+
+/// Les deux compteurs ne suffisent pas après un remplacement de projet :
+/// l'époque appartient aussi à l'identité de l'instantané publié.
+pub(super) fn snapshot_stamp(snapshot: &Snapshot) -> (u64, u64, u64) {
+    (
+        snapshot.epoch,
+        snapshot.revision,
+        snapshot.geometry_revision,
+    )
+}
 
 /// Ce que la fenêtre OS détachée du Project Manager a besoin de peindre —
 /// strictement ça, et rien de plus. Voir la doc de tête de
@@ -1301,6 +1312,49 @@ mod tests {
     use stokesforge_core::{Column, ColumnRole, Project};
     use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
     use stokesforge_session::Session;
+
+    /// L'empreinte d'un instantané publié aux fenêtres détachées : chacun de
+    /// ses trois compteurs la change **à lui seul**. Révision et révision des
+    /// géométries ne suffisent pas : l'époque appartient aussi à l'identité
+    /// de l'instantané (un remplacement de projet), et une empreinte qui
+    /// l'oublierait laisserait un lecteur détaché sur l'ancien projet si les
+    /// deux autres compteurs coïncidaient.
+    #[test]
+    fn chacun_des_trois_compteurs_change_l_empreinte_d_un_instantane() {
+        let session = Session::spawn(Project::new("Empreinte").unwrap(), None).unwrap();
+        let base = session.handle().snapshot().unwrap();
+        let empreinte = snapshot_stamp(&base);
+        assert_eq!(
+            empreinte,
+            (base.epoch, base.revision, base.geometry_revision),
+            "l'empreinte lit les compteurs de l'instantané"
+        );
+        // Le témoin : le même instantané, recloné, garde son empreinte.
+        assert_eq!(snapshot_stamp(&base.clone()), empreinte);
+
+        let mut epoque = base.clone();
+        epoque.epoch += 1;
+        let mut revision = base.clone();
+        revision.revision += 1;
+        let mut geometries = base.clone();
+        geometries.geometry_revision += 1;
+        let changees = [
+            ("époque", snapshot_stamp(&epoque)),
+            ("révision", snapshot_stamp(&revision)),
+            ("révision des géométries", snapshot_stamp(&geometries)),
+        ];
+        for (compteur, autre) in changees {
+            assert_ne!(
+                autre, empreinte,
+                "{compteur} seule doit changer l'empreinte"
+            );
+        }
+        // Chacun change une composante différente : deux compteurs confondus
+        // donneraient deux empreintes égales.
+        let distinctes: std::collections::HashSet<(u64, u64, u64)> =
+            changees.iter().map(|(_, autre)| *autre).collect();
+        assert_eq!(distinctes.len(), changees.len(), "{changees:?}");
+    }
 
     fn vue_persistee(session: &Session, node: NodeId) -> WindowGeometry {
         *session

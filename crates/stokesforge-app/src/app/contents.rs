@@ -121,6 +121,7 @@ pub(super) fn note_contents(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::painted;
     use super::*;
     use std::cell::RefCell;
 
@@ -138,13 +139,6 @@ mod tests {
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         (session, state, note, matrix)
-    }
-
-    fn painted(output: &egui::FullOutput, needle: &str) -> bool {
-        output.shapes.iter().any(|painted| {
-            matches!(&painted.shape,
-                egui::Shape::Text(shape) if shape.galley.job.text.contains(needle))
-        })
     }
 
     /// Une image de `tab` sur un écran de 800 × 800.

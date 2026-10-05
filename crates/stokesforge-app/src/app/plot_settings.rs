@@ -58,7 +58,7 @@ const PLOT_SETTINGS_HEIGHT: f32 = 460.0;
 /// Fermer la fenêtre valide ce qui diverge encore du modèle
 /// ([`AppState::close_plot_settings`]).
 ///
-/// **Un seul panneau, pas de multi-panneaux** : seul `PlotSpec::panels`[0]
+/// **Un seul panneau, pas de multi-panneaux** : seul `PlotSpec::panels[0]`
 /// est éditable ici. Éditer le premier panneau revient, pour l'instant, à
 /// éditer *le* graphe.
 pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
@@ -851,87 +851,11 @@ mod tests {
     use crate::state::{series_list_label, Action, AppState, PlotAxis, PlotSettingsTab};
     use crate::tr;
 
+    use super::super::test_support::{
+        cliquer, colonnes_xy, contexte, distincts, image, texte_exact, textes, touche, Texte,
+    };
+
     // -- Outillage --------------------------------------------------------
-
-    /// Un contexte aux polices et au thème de l'application.
-    fn contexte() -> egui::Context {
-        let context = egui::Context::default();
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        crate::theme::install(&context);
-        context
-    }
-
-    /// Une image de 1400 × 900 avec `events`, 0,1 s après la précédente ;
-    /// rend ce qui a été peint. Le temps avance pour que les défilements
-    /// animés aillent au bout (la bande d'onglets montre l'onglet choisi par
-    /// `scroll_to_rect`, étalé sur 0,3 s au plus).
-    fn image(
-        context: &egui::Context,
-        events: Vec<egui::Event>,
-        contenu: impl FnMut(&mut egui::Ui),
-    ) -> Vec<egui::epaint::ClippedShape> {
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1400.0, 900.0),
-            )),
-            time: Some(context.input(|input| input.time) + 0.1),
-            events,
-            ..Default::default()
-        };
-        let mut output = context.run_ui(input, contenu);
-        output.textures_delta.clear();
-        output.shapes
-    }
-
-    /// Un texte peint : son contenu, sa couleur effective et son centre.
-    #[derive(Debug)]
-    struct Texte {
-        texte: String,
-        couleur: egui::Color32,
-        centre: egui::Pos2,
-    }
-
-    fn textes(shapes: &[egui::epaint::ClippedShape]) -> Vec<Texte> {
-        shapes
-            .iter()
-            .filter_map(|peint| match &peint.shape {
-                egui::Shape::Text(shape) => {
-                    let section = shape
-                        .galley
-                        .job
-                        .sections
-                        .first()
-                        .map_or(egui::Color32::PLACEHOLDER, |s| s.format.color);
-                    let couleur = shape.override_text_color.unwrap_or(
-                        if section == egui::Color32::PLACEHOLDER {
-                            shape.fallback_color
-                        } else {
-                            section
-                        },
-                    );
-                    Some(Texte {
-                        texte: shape.galley.job.text.clone(),
-                        couleur,
-                        centre: shape.pos + shape.galley.rect.center().to_vec2(),
-                    })
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Le texte peint exactement égal à `cherche`, s'il y en a un seul.
-    fn texte_exact<'a>(textes: &'a [Texte], cherche: &str) -> &'a Texte {
-        let trouves: Vec<&Texte> = textes.iter().filter(|t| t.texte == cherche).collect();
-        assert_eq!(
-            trouves.len(),
-            1,
-            "{cherche:?} doit être peint une fois : {:?}",
-            textes.iter().map(|t| &t.texte).collect::<Vec<_>>()
-        );
-        trouves[0]
-    }
 
     fn est_peint(textes: &[Texte], cherche: &str) -> bool {
         textes.iter().any(|t| t.texte == cherche)
@@ -943,25 +867,6 @@ mod tests {
             button: egui::PointerButton::Primary,
             pressed,
             modifiers: egui::Modifiers::default(),
-        }
-    }
-
-    /// Un clic en `pos`, réparti sur trois images (survol, pression,
-    /// relâchement) comme le veut la détection de clic d'egui.
-    fn cliquer(context: &egui::Context, pos: egui::Pos2, mut contenu: impl FnMut(&mut egui::Ui)) {
-        image(context, vec![egui::Event::PointerMoved(pos)], &mut contenu);
-        for pressed in [true, false] {
-            image(context, vec![clic(pos, pressed)], &mut contenu);
-        }
-    }
-
-    fn touche(key: egui::Key) -> egui::Event {
-        egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
         }
     }
 
@@ -982,14 +887,7 @@ mod tests {
     fn banc(regler: impl FnOnce(&mut PlotSpec)) -> Banc {
         let mut project = Project::new("Propriétés").unwrap();
         let root = project.root();
-        let book = project.add_empty_workbook(root, None).unwrap();
-        let sheet = project.add_worksheet(book, None).unwrap();
-        let x = project
-            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
-            .unwrap();
-        let y = project
-            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
-            .unwrap();
+        let (x, y) = colonnes_xy(&mut project);
         let mut panel = PanelSpec::at(0, 0);
         panel.series.push(SeriesSpec::new_xy(x, y));
         let mut spec = PlotSpec::default().with_panels(panel);
@@ -1050,21 +948,10 @@ mod tests {
     fn cliquer_libelle(context: &egui::Context, state: &mut AppState, libelle: &str) -> Vec<Texte> {
         let peints = peindre_fenetre(context, state, Vec::new());
         let pos = texte_exact(&peints, libelle).centre;
-        cliquer(context, pos, |ui| plot_settings_window(ui.ctx(), state));
+        cliquer(context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), state)
+        });
         peindre_fenetre(context, state, Vec::new())
-    }
-
-    /// Les libellés d'une liste rendue par `libelle`, tous distincts et non
-    /// vides : deux choix d'une même liste déroulante qui s'affichent pareil
-    /// ne se distinguent plus.
-    fn distincts<T: std::fmt::Debug>(choix: &[T], libelle: impl Fn(&T) -> String) {
-        let libelles: Vec<String> = choix.iter().map(&libelle).collect();
-        for (i, a) in libelles.iter().enumerate() {
-            assert!(!a.trim().is_empty(), "{:?} sans libellé", choix[i]);
-            for (j, b) in libelles.iter().enumerate().skip(i + 1) {
-                assert_ne!(a, b, "{:?} et {:?} s'affichent pareil", choix[i], choix[j]);
-            }
-        }
     }
 
     // -- Chaque onglet, dans chaque langue ----------------------------------
@@ -1574,7 +1461,9 @@ mod tests {
     ) -> (Vec<Texte>, egui::Pos2) {
         let peints = peindre_fenetre(context, state, Vec::new());
         let bouton = texte_exact(&peints, affiche).centre;
-        cliquer(context, bouton, |ui| plot_settings_window(ui.ctx(), state));
+        cliquer(context, bouton, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), state)
+        });
         (peindre_fenetre(context, state, Vec::new()), bouton)
     }
 
@@ -1637,7 +1526,7 @@ mod tests {
             assert!(!est_peint(&peints, &plot_type_label(&inconnu())));
             assert_ne!(lire(&banc.modele()), attendu, "témoin : pas encore choisi");
             let pos = texte_exact(&peints, &choix).centre;
-            cliquer(&context, pos, |ui| {
+            cliquer(&context, pos, egui::PointerButton::Primary, |ui| {
                 plot_settings_window(ui.ctx(), &mut banc.state)
             });
             assert_eq!(lire(&banc.modele()), attendu, "{affiche:?} : choix validé");
@@ -1787,7 +1676,7 @@ mod tests {
         assert!(!est_peint(&peints, &pied));
 
         let pos = texte_exact(&peints, &titre).centre;
-        cliquer(&context, pos, peindre);
+        cliquer(&context, pos, egui::PointerButton::Primary, peindre);
         // Laisse l'animation de dépliage aller au bout.
         let mut peints = Vec::new();
         for _ in 0..5 {

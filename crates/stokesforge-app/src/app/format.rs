@@ -24,8 +24,9 @@ use super::graph_text_edit::{
     annotation_editor_id, pending_format_id, pending_zone_font_id, text_editor_id,
     AnnotationEditor, TextEditTarget, TextEditor,
 };
+use super::tab::active_tab_kind;
 use super::tab::Tab;
-use super::{active_tab_kind, StokesForgeApp};
+use super::StokesForgeApp;
 
 impl StokesForgeApp {
     /// Ce que la barre contextuelle montre pour la fenêtre au premier plan.

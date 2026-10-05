@@ -5,6 +5,7 @@ use crate::theme;
 use std::cell::RefCell;
 
 use super::project_manager::tests::{click_at, find_text_center};
+use super::test_support::painted;
 use super::window_chrome::tests::find_icon_centers;
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::*;
@@ -31,13 +32,6 @@ fn input(events: Vec<egui::Event>) -> egui::RawInput {
         events,
         ..Default::default()
     }
-}
-
-fn painted(output: &egui::FullOutput, text: &str) -> bool {
-    output.shapes.iter().any(|shape| {
-        matches!(&shape.shape,
-        egui::Shape::Text(shape) if shape.galley.job.text.contains(text))
-    })
 }
 
 #[derive(Clone, Copy, Debug)]

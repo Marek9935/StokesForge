@@ -188,7 +188,10 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   `tests` de sa surface (`src/app/<surface>.rs`) ; celui d'`app.rs` n'éprouve
   que l'orchestration (ordre des panneaux, application différée,
   confirmations, raccourcis globaux, restauration des fenêtres). Une aide de
-  test partagée est `pub(in crate::app)` dans le module de tests qui la porte
+  test que plusieurs surfaces recopieraient (contexte aux polices et au thème,
+  image d'egui, touche, clic en trois images, texte peint, `colonnes_xy`) vit
+  dans `src/app/test_support.rs` (#128), importée par nom ; une aide propre à
+  une surface reste `pub(in crate::app)` dans le module de tests qui la porte
   (`graph_window::tests::graphe`, `project_manager::tests::click_at`). Une
   assertion de vide (« la table est vidée ») a besoin du témoin qui montre que
   la table était pleine avant (modèle :

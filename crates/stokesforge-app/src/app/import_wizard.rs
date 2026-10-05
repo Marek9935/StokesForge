@@ -1420,6 +1420,10 @@ mod tests {
     use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
     use crate::tr;
 
+    use super::super::test_support::{
+        cliquer, contexte, distincts, image, texte_exact, textes, touche, Texte,
+    };
+
     // -- Outillage --------------------------------------------------------
 
     /// Sérialise les tests de ce module qui ouvrent l'assistant :
@@ -1504,117 +1508,8 @@ mod tests {
         }
     }
 
-    /// Un contexte aux polices et au thème de l'application.
-    fn contexte() -> egui::Context {
-        let context = egui::Context::default();
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        crate::theme::install(&context);
-        context
-    }
-
-    /// Une image de 1400 × 900 avec `events` ; rend ce qui a été peint.
-    fn image(
-        context: &egui::Context,
-        events: Vec<egui::Event>,
-        contenu: impl FnMut(&mut egui::Ui),
-    ) -> Vec<egui::epaint::ClippedShape> {
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1400.0, 900.0),
-            )),
-            events,
-            ..Default::default()
-        };
-        let mut output = context.run_ui(input, contenu);
-        output.textures_delta.clear();
-        output.shapes
-    }
-
-    /// Un texte peint : son contenu, sa couleur effective et son centre.
-    #[derive(Debug)]
-    struct Texte {
-        texte: String,
-        couleur: egui::Color32,
-        centre: egui::Pos2,
-    }
-
-    fn textes(shapes: &[egui::epaint::ClippedShape]) -> Vec<Texte> {
-        shapes
-            .iter()
-            .filter_map(|peint| match &peint.shape {
-                egui::Shape::Text(shape) => {
-                    let section = shape
-                        .galley
-                        .job
-                        .sections
-                        .first()
-                        .map_or(egui::Color32::PLACEHOLDER, |s| s.format.color);
-                    let couleur = shape.override_text_color.unwrap_or(
-                        if section == egui::Color32::PLACEHOLDER {
-                            shape.fallback_color
-                        } else {
-                            section
-                        },
-                    );
-                    Some(Texte {
-                        texte: shape.galley.job.text.clone(),
-                        couleur,
-                        centre: shape.pos + shape.galley.rect.center().to_vec2(),
-                    })
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Le texte peint exactement égal à `cherche`, s'il y en a un seul.
-    fn texte_exact<'a>(textes: &'a [Texte], cherche: &str) -> &'a Texte {
-        let trouves: Vec<&Texte> = textes.iter().filter(|t| t.texte == cherche).collect();
-        assert_eq!(
-            trouves.len(),
-            1,
-            "{cherche:?} doit être peint une fois : {:?}",
-            textes.iter().map(|t| &t.texte).collect::<Vec<_>>()
-        );
-        trouves[0]
-    }
-
     fn est_peint(textes: &[Texte], cherche: &str) -> bool {
         textes.iter().any(|t| t.texte == cherche)
-    }
-
-    /// Un clic de `bouton` en `pos`, réparti sur trois images (survol,
-    /// pression, relâchement) comme le veut la détection de clic d'egui.
-    fn cliquer(
-        context: &egui::Context,
-        pos: egui::Pos2,
-        bouton: egui::PointerButton,
-        mut contenu: impl FnMut(&mut egui::Ui),
-    ) {
-        image(context, vec![egui::Event::PointerMoved(pos)], &mut contenu);
-        for pressed in [true, false] {
-            image(
-                context,
-                vec![egui::Event::PointerButton {
-                    pos,
-                    button: bouton,
-                    pressed,
-                    modifiers: egui::Modifiers::default(),
-                }],
-                &mut contenu,
-            );
-        }
-    }
-
-    fn touche(key: egui::Key) -> egui::Event {
-        egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        }
     }
 
     /// Peint l'assistant trois fois (mise en page stabilisée, dialogue
@@ -1808,19 +1703,6 @@ mod tests {
     }
 
     // -- Les libellés des choix ---------------------------------------------
-
-    /// Les libellés d'une liste rendue par `libelle`, tous distincts : deux
-    /// choix d'une même liste déroulante qui s'affichent pareil ne se
-    /// distinguent plus.
-    fn distincts<T: std::fmt::Debug>(choix: &[T], libelle: impl Fn(&T) -> String) {
-        let libelles: Vec<String> = choix.iter().map(&libelle).collect();
-        for (i, a) in libelles.iter().enumerate() {
-            assert!(!a.trim().is_empty(), "{:?} sans libellé", choix[i]);
-            for (j, b) in libelles.iter().enumerate().skip(i + 1) {
-                assert_ne!(a, b, "{:?} et {:?} s'affichent pareil", choix[i], choix[j]);
-            }
-        }
-    }
 
     /// Chaque liste déroulante de l'assistant montre des choix qu'on
     /// distingue ; le libellé suit la variante, pas la valeur qu'elle porte

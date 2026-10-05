@@ -261,6 +261,7 @@ mod tests {
     use stokesforge_session::Session;
 
     use super::super::project_manager::tests::{click_at, find_text_center};
+    use super::super::test_support::painted;
     use super::super::window_chrome::tests::find_icon_centers;
 
     fn state() -> (Session, AppState) {
@@ -268,13 +269,6 @@ mod tests {
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         (session, state)
-    }
-
-    fn painted(output: &egui::FullOutput, needle: &str) -> bool {
-        output.shapes.iter().any(|painted| {
-            matches!(&painted.shape,
-                egui::Shape::Text(shape) if shape.galley.job.text.contains(needle))
-        })
     }
 
     fn input(events: Vec<egui::Event>) -> egui::RawInput {

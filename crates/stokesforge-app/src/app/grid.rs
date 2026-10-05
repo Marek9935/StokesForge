@@ -11,9 +11,8 @@
 //! d'ici que [`keyboard_focus_outside_grid`] (`app.rs` pour les raccourcis
 //! globaux, `dialogs.rs`, `graph_window.rs`) et la visibilité de la ligne
 //! « Metadata » (`menus.rs`) ; [`role_label`] sert aussi au test du classeur
-//! détaché (`window_detach.rs`). Une dépendance à rebours vers `app.rs` reste
-//! à reprendre : `paint_drag_handle_icon` (pictogramme de la zone de prise),
-//! qui n'a pas d'autre utilisateur que ce module.
+//! détaché (`window_detach.rs`). `paint_drag_handle_icon`
+//! (pictogramme de la zone de prise) n'a pas d'autre utilisateur que ce module.
 //!
 //! Les tests sont en fin de fichier : ils peignent le classeur sans fenêtre,
 //! injectent clavier et souris, et lisent ce qui est peint (textes,
@@ -28,7 +27,6 @@ use crate::selection::{GridCursor, Selection};
 use crate::state::{Action, AppState, GridMenu, HeaderField, MoveDirection};
 use crate::{theme, tr};
 
-use super::paint_drag_handle_icon;
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
     SHORTCUT_CUT, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_REDO_Y, SHORTCUT_UNDO,
@@ -2112,6 +2110,24 @@ fn display_cell_widget(
     });
 }
 
+/// Peint l'icône « prise » du glisser-déposer de colonnes ([`grid_contents`])
+/// à côté du curseur — une petite grille de points plutôt qu'un glyphe de
+/// police : la mesure de texte de l'appli passe entièrement par
+/// `stokesforge_render::text` pour le rendu de graphe (voir `CLAUDE.md`, § Pièges
+/// connus), et rien ne garantit qu'un glyphe « poignée » soit seulement
+/// présent dans la police par défaut d'egui — un pictogramme dessiné à la
+/// main évite la question.
+fn paint_drag_handle_icon(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
+    const DOT_RADIUS: f32 = 1.6;
+    const SPACING: f32 = 5.0;
+    for row in 0..3 {
+        for col in 0..2 {
+            let offset = egui::vec2(col as f32 * SPACING, row as f32 * SPACING);
+            painter.circle_filled(at + offset, DOT_RADIUS, color);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Tests de la grille, sans fenêtre : un `egui::Context` nu, des
@@ -2122,6 +2138,7 @@ mod tests {
     //! grille : c'est le contenu commun du classeur flottant et du classeur
     //! détaché, donc le chemin qu'emprunte l'utilisateur dans les deux
     //! fenêtres.
+    use super::super::test_support::image_de;
 
     use super::super::workbook::book_contents;
     use super::*;
@@ -2262,23 +2279,14 @@ mod tests {
         }
 
         fn image(&mut self, events: Vec<egui::Event>) {
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(700.0, 420.0),
-                )),
-                events,
-                ..Default::default()
-            };
             self.actions.clear();
             let (state, actions, book) = (&mut self.state, &mut self.actions, self.book);
             let mut voisin = false;
-            let mut sortie = self.context.run_ui(input, |ui| {
+            let sortie = image_de(&self.context, egui::vec2(700.0, 420.0), events, |ui| {
                 voisin = ui.button("avant").has_focus();
                 book_contents(ui, state, actions, book);
             });
             self.voisin_focalise = voisin;
-            sortie.textures_delta.clear();
             self.dernier = Some(sortie);
         }
 

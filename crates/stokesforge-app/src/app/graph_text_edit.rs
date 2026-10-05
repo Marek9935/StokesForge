@@ -21,7 +21,7 @@ use crate::color_picker::{ColorUsage, PickerEnv};
 use crate::state::{series_list_label, Action};
 use crate::tr;
 
-use super::{color_request_action, saved_colors_id};
+use crate::color_picker::{saved_colors_id, SavedColorRequest};
 
 /// L'éditeur sur place d'un texte libre, ouvert sur une vue.
 #[derive(Debug, Clone)]
@@ -508,7 +508,7 @@ pub(super) fn annotation_editor_ui(
             }
         });
 
-    actions.extend(env.requests.into_iter().map(color_request_action));
+    actions.extend(env.requests.into_iter().map(SavedColorRequest::into_action));
 
     // Échap : le sélecteur de couleur ouvert le consomme d'abord pour lui.
     let cancel = ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));

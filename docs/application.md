@@ -36,13 +36,13 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 
 | Fichier | Rôle |
 |---|---|
-| `app.rs` | orchestration : `StokesForgeApp` et ses champs, `new` (disposition initiale, restauration de l'état des fenêtres), `ui()` et l'**ordre des panneaux**, `collect_shortcuts` (raccourcis globaux, consommés avant les widgets), application différée des actions et ouvertures après la peinture, confirmations bloquantes (nouveau projet, suppression de feuille), drainage des fenêtres détachées, capture et auto-fermeture de vérification. Y restent aussi des aides que des modules relisent par `super::` (`tab_title`, `tab_title_from_tree`, `snapshot_stamp`, `active_tab_kind`, `saved_colors_id`, `color_request_action`, `paint_drag_handle_icon`) : des dépendances à rebours, à reprendre |
+| `app.rs` | orchestration : `StokesForgeApp` et ses champs, `new` (disposition initiale, restauration de l'état des fenêtres), `ui()` et l'**ordre des panneaux**, `collect_shortcuts` (raccourcis globaux, consommés avant les widgets), application différée des actions et ouvertures après la peinture, confirmations bloquantes (nouveau projet, suppression de feuille), drainage des fenêtres détachées, capture et auto-fermeture de vérification. Aucun module de `src/app/` ne lui emprunte d'aide : ce qu'ils partagent vit dans `tab.rs`, `window_detach.rs` ou `crate::color_picker` (#128) |
 | `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`) |
 | `app/format.rs` | barres de format de texte et d'objet, barre contextuelle : `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (les barres elles-mêmes : `crate::toolbar`) |
 | `app/project_manager.rs` | Project Manager : `project_manager_panel` (panneau fixe) et l'arbre `project_manager_contents_from_tree`, commun au panneau et à la fenêtre détachée |
 | `app/object_manager_ui.rs` | Object Manager peint : `object_manager_panel`, `run_object_manager_request`, lignes, cases, menus, glisser des séries (le modèle : `crate::object_manager`) |
 | `app/script_console.rs` | console de script : `script_panel`, lecture `ScriptConsoleModel`, contenu commun attaché/détaché, saisie, Exécuter/Arrêter, sortie |
-| `app/tab.rs` | `Tab`, l'onglet d'une fenêtre de contenu (classeur, graphe, matrice, note), et ses traductions vers le modèle (`tab_for_window`, `tab_node`) |
+| `app/tab.rs` | `Tab`, l'onglet d'une fenêtre de contenu (classeur, graphe, matrice, note), ses traductions vers le modèle (`tab_for_window`, `tab_node`), son titre (`tab_title`, `tab_title_from_tree`, nœud supprimé compris) et son miroir lisible par `crate::state` (`active_tab_kind`) |
 | `app/contents.rs` | contenus partagés flottant/détaché : `tab_contents`, `note_contents`, `matrix_contents` (espace réservé) |
 | `app/workbook.rs` | classeur : `book_contents` (contenu commun flottant/détaché), `sheet_tabs`, `workbook_menu` |
 | `app/grid.rs` | grille d'une feuille : `grid_contents` prépare la table, peint ses en-têtes et son corps virtualisé, puis traite le clavier avec `grid_keyboard` (après les cellules : les éditeurs consomment d'abord Tab/Entrée et reprennent le focus), en-tête empilé, gouttière, cellules, `grid_edit_menu`, focus clavier (`GRID_KEYS`, `keyboard_focus_outside_grid`), barres déportées, `grid_grip_side`, libellés de type et de rôle |
@@ -57,7 +57,8 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/window_chrome.rs` | cadre commun des fenêtres et panneaux : `window_header`, `panel_header`, `floating_window_frame`, contour actif, poignées, `show_window_in_layer`, `show_window_contents_bounded` |
 | `app/window_placement.rs` | placement : tailles par défaut, cascade, espace de travail fixe (`WORKSPACE_SIZE`), `clamp_to_workspace`, conversion logique → écran |
 | `app/window_stack.rs` | pile des fenêtres flottantes : `open_tab` (seul endroit qui décide ouvrir ou focaliser), ordre et calques egui, masquage, repli, maximisation, `show_workspace` |
-| `app/window_detach.rs` | détachement en fenêtres OS : `show_detached_project_manager`, `show_detached_object_manager`, `show_detached_script_console`, `detach_tab`/`reattach_tab`, `show_detached_tabs` et la publication de l'instantané qui réveille les viewports (#104), `sync_window_views` (état des fenêtres envoyé à la session, #16) |
+| `app/test_support.rs` | (compilé en test seulement) aides de test communes aux surfaces : `contexte`, `image`/`image_de`, `touche`, `cliquer`, `painted`, `textes`/`texte_exact`, `distincts`, `colonnes_xy` (#128) |
+| `app/window_detach.rs` | détachement en fenêtres OS : `show_detached_project_manager`, `show_detached_object_manager`, `show_detached_script_console`, `detach_tab`/`reattach_tab`, `show_detached_tabs` et la publication de l'instantané qui réveille les viewports (#104, `snapshot_stamp` en est l'empreinte), `sync_window_views` (état des fenêtres envoyé à la session, #16) |
 
 Une nouvelle surface volumineuse s'écrit dans son propre module, sur ce
 modèle ; `app.rs` n'y gagne que l'appel. Depuis #124, `ui()` décrit les
@@ -1011,7 +1012,7 @@ chaque colonne individuellement — et n'apparaît que si la feuille a déjà un
 sélection couvrant au moins une colonne (`AppState::column_drag_payload`).
 Le survol y affiche un curseur « attraper » et un petit pictogramme (une
 grille de points, peinte à la main plutôt qu'un glyphe de police — voir
-`app::paint_drag_handle_icon`) à côté du pointeur. `app::grid::grid_grip_side`
+`app::grid::paint_drag_handle_icon`) à côté du pointeur. `app::grid::grid_grip_side`
 est la fonction pure qui décide si un point est dans cette bande, testée seule
 dans `app/grid.rs` (bornes de la marge comprises) ; `grid_contents` s'en sert pour peindre
 l'icône et interagit séparément sur deux rectangles confinés (gauche, droite)
@@ -1123,7 +1124,7 @@ l'état de l'éditeur dans la mémoire d'egui, sous l'identifiant de la vue : m�
 `AppState`. Chaque geste validé est **une** `Action::SetAnnotation` ou
 `RemoveAnnotation`, donc un `SetPlotSpec` ou `EditPlotSpec`, une entrée d'historique. Les couleurs
 enregistrées sont publiées chaque image dans la mémoire d'egui
-(`publish_saved_colors`) pour que le sélecteur de l'éditeur les propose aussi
+(`color_picker::publish_saved_colors`, lue par `color_picker::saved_colors_id`) pour que le sélecteur de l'éditeur les propose aussi
 dans une fenêtre détachée.
 
 **Objets graphiques** (issue #76) : quatre outils de la barre « Outils »

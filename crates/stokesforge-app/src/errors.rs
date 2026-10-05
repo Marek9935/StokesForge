@@ -13,7 +13,7 @@
 //!
 //! Une fonction `error_message` par famille d'erreurs, chacune dans son
 //! sous-module : [`model`], [`commands`], [`session`], [`file`], [`import`],
-//! [`formula`], [`render`], [`export`] et, avec la feature `python`, [`script`].
+//! [`formula`], [`render`], [`export`] et, avec la feature `python`, `script`.
 //! Toute erreur **affichée** à l'utilisateur passe par l'une d'elles, jamais par
 //! `to_string()`.
 //!

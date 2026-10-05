@@ -580,6 +580,7 @@ pub(super) mod tests {
     use stokesforge_plot::PlotSpec;
     use stokesforge_session::Session;
 
+    use super::super::test_support::painted;
     use crate::state::AppState;
 
     /// Trouve le centre du texte peint contenant `needle` dans `shapes` —
@@ -816,14 +817,6 @@ pub(super) mod tests {
         );
     }
 
-    /// Un texte contenant `needle` a-t-il été peint ?
-    fn painted(shapes: &[egui::epaint::ClippedShape], needle: &str) -> bool {
-        shapes.iter().any(|painted| {
-            matches!(&painted.shape,
-                egui::Shape::Text(shape) if shape.galley.job.text.contains(needle))
-        })
-    }
-
     /// Couleur effective du premier texte peint contenant `needle`.
     fn text_color(shapes: &[egui::epaint::ClippedShape], needle: &str) -> egui::Color32 {
         shapes
@@ -877,7 +870,7 @@ pub(super) mod tests {
         };
         paint(&context, Vec::new());
         let output = paint(&context, Vec::new());
-        assert!(painted(&output.shapes, &tr!("project-manager-title")));
+        assert!(painted(&output, &tr!("project-manager-title")));
         let panel =
             egui::containers::panel::PanelState::load(&context, egui::Id::new("stokesforge_pm"))
                 .expect("le panneau est posé")
@@ -1036,8 +1029,8 @@ pub(super) mod tests {
 
         let first = paint(&context, Vec::new());
         assert!(
-            !painted(&first.shapes, &tr!("project-manager-hide"))
-                && !painted(&first.shapes, &tr!("project-manager-show")),
+            !painted(&first, &tr!("project-manager-hide"))
+                && !painted(&first, &tr!("project-manager-show")),
             "sans sélection, aucun bouton groupé à regarder"
         );
         let graph_pos = find_text_center(&first.shapes, "Graph1");
@@ -1053,14 +1046,8 @@ pub(super) mod tests {
         // Témoin : la même image, avec une sélection, peint bien la barre.
         banc.selection.borrow_mut().insert(graph_tab);
         let with_selection = paint(&context, Vec::new());
-        assert!(painted(
-            &with_selection.shapes,
-            &tr!("project-manager-hide")
-        ));
-        assert!(painted(
-            &with_selection.shapes,
-            &tr!("project-manager-show")
-        ));
+        assert!(painted(&with_selection, &tr!("project-manager-hide")));
+        assert!(painted(&with_selection, &tr!("project-manager-show")));
     }
 
     /// Une entrée masquée reste listée, atténuée : sa couleur diffère de celle
@@ -1112,12 +1099,12 @@ pub(super) mod tests {
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
         paint(&context, Vec::new());
         let closed = paint(&context, Vec::new());
-        assert!(painted(&closed.shapes, "Mesures") && painted(&closed.shapes, "Vide"));
+        assert!(painted(&closed, "Mesures") && painted(&closed, "Vide"));
         assert!(
-            !painted(&closed.shapes, "Spectre"),
+            !painted(&closed, "Spectre"),
             "un dossier replié ne peint pas ses enfants"
         );
-        assert!(!painted(&closed.shapes, &tr!("project-folder-empty")));
+        assert!(!painted(&closed, &tr!("project-folder-empty")));
         assert!(
             banc.open_requests.borrow().is_empty(),
             "peindre n'ouvre rien"
@@ -1140,13 +1127,13 @@ pub(super) mod tests {
         click_at(&context, at, egui::Modifiers::NONE, paint);
         let opened = paint(&context, Vec::new());
         assert!(
-            painted(&opened.shapes, "Spectre"),
+            painted(&opened, "Spectre"),
             "le dossier déplié peint son enfant"
         );
         let at = toggle(&opened.shapes, "Vide");
         click_at(&context, at, egui::Modifiers::NONE, paint);
         let opened = paint(&context, Vec::new());
-        assert!(painted(&opened.shapes, &tr!("project-folder-empty")));
+        assert!(painted(&opened, &tr!("project-folder-empty")));
         assert!(
             banc.open_requests.borrow().is_empty(),
             "déplier un dossier n'ouvre aucune fenêtre"

@@ -32,8 +32,9 @@ use super::shortcuts::{
 };
 use super::tab::tab_node;
 use super::tab::Tab;
+use super::tab::{active_tab_kind, tab_title};
 use super::workbook::workbook_menu;
-use super::{active_tab_kind, tab_title, StokesForgeApp};
+use super::StokesForgeApp;
 
 impl StokesForgeApp {
     /// Barre de menu : « Fichier », « Édition », « Classeur » (seulement
@@ -587,10 +588,10 @@ impl StokesForgeApp {
 #[cfg(test)]
 mod tests {
     use super::super::project_manager::tests::find_text_center;
+    use super::super::test_support::{self, colonnes_xy};
     use super::*;
     use crate::state::AppState;
-    use crate::theme;
-    use stokesforge_core::{Column, NodeId, Project};
+    use stokesforge_core::{NodeId, Project};
     use stokesforge_plot::{AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesSpec};
     use stokesforge_session::Session;
 
@@ -600,14 +601,7 @@ mod tests {
     fn banc() -> (Session, StokesForgeApp, NodeId) {
         let mut project = Project::new("Menus").unwrap();
         let root = project.root();
-        let book = project.add_empty_workbook(root, None).unwrap();
-        let sheet = project.add_worksheet(book, None).unwrap();
-        let x = project
-            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
-            .unwrap();
-        let y = project
-            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
-            .unwrap();
+        let (x, y) = colonnes_xy(&mut project);
         let mut panel = PanelSpec::at(0, 0);
         panel.series.push(SeriesSpec::new_xy(x, y));
         panel
@@ -737,10 +731,11 @@ mod tests {
         (output, actions)
     }
 
+    /// Le contexte commun des tests, avec en plus les chargeurs d'images, des
+    /// animations instantanées et AccessKit (les entrées de menu se lisent
+    /// par l'arbre d'accessibilité).
     fn contexte() -> egui::Context {
-        let ctx = egui::Context::default();
-        ctx.set_fonts(stokesforge_render_egui::font_definitions());
-        theme::install(&ctx);
+        let ctx = test_support::contexte();
         egui_extras::install_image_loaders(&ctx);
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
         ctx.enable_accesskit();

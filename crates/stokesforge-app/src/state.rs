@@ -917,7 +917,7 @@ pub(crate) fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, Str
 /// Règle d'appariement, façon OriginLab : chaque Y est apparié à la colonne
 /// X la plus proche à sa **gauche** dans la feuille (rôle
 /// [`ColumnRole::X`]), en incluant les colonnes X non sélectionnées — sans X
-/// à gauche, l'abscisse reste implicite ([`SeriesSpec::new`]). Chaque série
+/// à gauche, l'abscisse reste implicite ([`SeriesSpec::new`](stokesforge_plot::SeriesSpec::new)). Chaque série
 /// prend la couleur de palette de son rang, `start_index` inclus : décalage
 /// utile à [`AppState::add_series_to_graph`], qui prolonge la palette après
 /// les séries déjà présentes dans le panneau visé plutôt que de la reprendre
@@ -1030,7 +1030,7 @@ pub(crate) fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
 }
 
 /// Nom d'un nœud, ou `"{missing} {id} (deleted)"` s'il n'existe plus dans
-/// `tree` — pendant de `crate::app::node_title`, factorisé sur un `&Tree`
+/// `tree` — pendant de `crate::app::tab::node_title`, factorisé sur un `&Tree`
 /// pour la même raison que [`cell_text_in`].
 pub(crate) fn node_title_in(tree: &Tree, id: NodeId, missing: impl FnOnce() -> String) -> String {
     tree.node(id)
@@ -2209,7 +2209,7 @@ impl AppState {
     ///
     /// Reflète uniquement la **compilation**, pas la localisation d'un
     /// interpréteur : un binaire compilé avec la feature mais qui n'a pas
-    /// trouvé son préfixe embarqué ([`AppState::set_python`] jamais appelé)
+    /// trouvé son préfixe embarqué (`AppState::set_python` jamais appelé)
     /// reste `true` ici, et [`Action::RunScript`] l'explique à l'exécution —
     /// le même choix que pour toute autre action de ce banc (échouer avec un
     /// message plutôt que griser par anticipation).
@@ -2525,7 +2525,7 @@ impl AppState {
 
     /// Colonnes visibles de `sheet`, dans l'ordre — juste les identifiants,
     /// pour la navigation clavier ([`AppState::move_selection`]/
-    /// [`AppState::move_selection_tab`]) comme pour [`AppState::paste_tsv`].
+    /// [`AppState::move_selection_tab`]) comme pour [`AppState::paste`].
     fn column_order(&self, sheet: NodeId) -> Vec<NodeId> {
         self.visible_columns(sheet)
             .into_iter()
@@ -2537,7 +2537,7 @@ impl AppState {
     /// directionnelles), en gardant l'ancre déjà posée si `extend`
     /// (Maj+flèche étend le rectangle plutôt que déplacer la case
     /// sélectionnée). Haut/Bas traversent la frontière entre l'en-tête (les
-    /// 4 champs, voir [`HeaderField::ALL`]) et les données : Haut depuis la
+    /// 4 champs, voir [`HeaderField`]) et les données : Haut depuis la
     /// première ligne de données rejoint le champ Formule (le plus bas des
     /// 4), Bas depuis le champ Formule rejoint la première ligne de
     /// données, Haut depuis le champ Nom long (le plus haut) ne fait rien —
@@ -3206,7 +3206,7 @@ impl AppState {
     /// (voir [`PlotEdit::base`]). `graph` sans
     /// spec (nœud supprimé, ou pas un graphe) laisse le brouillon inchangé :
     /// c'est à l'appelant de vérifier `self.tree().node(graph)` avant
-    /// d'afficher le panneau (voir `node_title` dans `crate::app`).
+    /// d'afficher le panneau (voir `node_title` dans `crate::app::tab`).
     pub fn begin_plot_edit(&mut self, graph: NodeId) {
         let Some(model) = self.plot_spec(graph) else {
             return;

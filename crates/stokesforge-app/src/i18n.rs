@@ -1,5 +1,5 @@
 //! Mécanique de traduction de l'interface : Fluent, catalogues embarqués,
-//! langue courante, macro [`tr!`] (issue #41, chantier #39).
+//! langue courante, macro [`tr!`](crate::tr!) (issue #41, chantier #39).
 //!
 //! # Pourquoi Fluent, et pourquoi ici seulement
 //!
@@ -23,7 +23,7 @@
 //! ui.label(tr!("history-insert-rows", count = n));
 //! ```
 //!
-//! [`tr!`] est **l'unique point d'entrée** : il enveloppe `fl!` sur le
+//! [`tr!`](crate::tr!) est **l'unique point d'entrée** : il enveloppe `fl!` sur le
 //! chargeur global ([`loader`]), pour qu'un changement de mécanique ne touche
 //! pas les appels. Une clé absente de `i18n/en/stokesforge_app.ftl`, ou un argument
 //! que le message ne déclare pas, **ne compile pas**. Jamais de littéral dans
@@ -236,7 +236,7 @@ fn current() -> &'static Current {
         .map_or_else(|poisoned| *poisoned.into_inner(), |guard| *guard)
 }
 
-/// Le chargeur global, celui de [`tr!`].
+/// Le chargeur global, celui de [`tr!`](crate::tr!).
 pub fn loader() -> &'static FluentLanguageLoader {
     &current().loader
 }
@@ -246,7 +246,7 @@ pub fn language() -> Language {
     current().language
 }
 
-/// Change la langue du chargeur global : les [`tr!`] suivants parlent
+/// Change la langue du chargeur global : les [`tr!`](crate::tr!) suivants parlent
 /// `language`. Ne touche pas aux préférences ([`Preferences::save_language`]).
 pub fn set_language(language: Language) {
     if self::language() == language {

@@ -27,10 +27,11 @@ use crate::tr;
 use super::graph_text_edit::{open_annotation_editor, open_series_name_editor};
 use super::graph_window::open_shape_properties;
 use super::shortcuts::shortcut_text_delete;
+use super::tab::active_tab_kind;
 use super::tab::Tab;
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::window_detach::ObjectManagerModel;
-use super::{active_tab_kind, StokesForgeApp};
+use super::StokesForgeApp;
 
 #[derive(Clone, Copy)]
 pub(super) enum ObjectManagerRequest {
@@ -660,7 +661,7 @@ impl StokesForgeApp {
             self.show_detached_object_manager(
                 &ctx,
                 ObjectManagerModel {
-                    stamp: super::snapshot_stamp(self.state.snapshot()),
+                    stamp: super::window_detach::snapshot_stamp(self.state.snapshot()),
                     tree,
                     graph,
                     selection,
@@ -750,6 +751,7 @@ impl StokesForgeApp {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::image_de;
     use super::*;
     use stokesforge_core::Project;
     use stokesforge_plot::{
@@ -789,21 +791,9 @@ mod tests {
     ) -> (egui::FullOutput, Vec<Action>, Vec<ObjectManagerRequest>) {
         let mut actions = Vec::new();
         let mut requests = Vec::new();
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(600.0, 500.0),
-                )),
-                events,
-                ..Default::default()
-            },
-            |ui| {
-                requests =
-                    object_manager_contents(ui, tree, model, spec, false, false, &mut actions);
-            },
-        );
-        output.textures_delta.clear();
+        let output = image_de(ctx, egui::vec2(600.0, 500.0), events, |ui| {
+            requests = object_manager_contents(ui, tree, model, spec, false, false, &mut actions);
+        });
         (output, actions, requests)
     }
 

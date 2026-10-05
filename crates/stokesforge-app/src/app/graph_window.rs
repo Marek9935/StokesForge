@@ -35,7 +35,7 @@ use super::graph_text_edit::{
 use super::grid::keyboard_focus_outside_grid;
 use super::object_manager_ui::{series_shortcuts, ObjectManagerRequest};
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_EXPORT_GRAPH};
-use super::{color_request_action, saved_colors_id};
+use crate::color_picker::{saved_colors_id, SavedColorRequest};
 
 /// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
 /// initial. Réserver sa hauteur garde le rectangle de la figure stable d'une
@@ -183,7 +183,7 @@ fn shape_properties_ui(
             });
         },
     );
-    actions.extend(env.requests.into_iter().map(color_request_action));
+    actions.extend(env.requests.into_iter().map(SavedColorRequest::into_action));
     match outcome {
         DialogOutcome::Accept => {
             actions.push(Action::SetShape {
@@ -787,9 +787,10 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use super::super::test_support::colonnes_xy;
     use super::*;
 
-    use stokesforge_core::{Column, Project};
+    use stokesforge_core::Project;
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec, ShapeKind, ShapeRef, ShapeSpec};
     use stokesforge_session::Session;
 
@@ -804,14 +805,7 @@ pub(super) mod tests {
     pub(in crate::app) fn graphe() -> (Session, NodeId) {
         let mut project = Project::new("Graphe").unwrap();
         let root = project.root();
-        let book = project.add_empty_workbook(root, None).unwrap();
-        let sheet = project.add_worksheet(book, None).unwrap();
-        let x = project
-            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
-            .unwrap();
-        let y = project
-            .add_column(sheet, None, None, Column::from_f64(&[0.0, 1.0]))
-            .unwrap();
+        let (x, y) = colonnes_xy(&mut project);
         let mut panel = PanelSpec::at(0, 0);
         panel.series.push(SeriesSpec::new_xy(x, y));
         let graph = project

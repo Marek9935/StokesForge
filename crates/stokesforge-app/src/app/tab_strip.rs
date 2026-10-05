@@ -494,6 +494,7 @@ fn scroll_tab_strip_to_selected(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::contexte;
     use super::*;
 
     /// Dix onglets « Feuille N », de clés `0..10`.
@@ -501,15 +502,6 @@ mod tests {
         (0..10)
             .map(|index| (index, format!("Feuille {index}")))
             .collect()
-    }
-
-    /// Un contexte aux polices et au thème de l'application : la largeur des
-    /// onglets en dépend.
-    fn contexte() -> egui::Context {
-        let context = egui::Context::default();
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        crate::theme::install(&context);
-        context
     }
 
     /// Peint une bande d'onglets dans `largeur` points, à l'instant

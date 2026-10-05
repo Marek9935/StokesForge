@@ -271,31 +271,12 @@ pub(super) fn modal_dialog_with(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::{image_de, touche};
     use super::*;
-
-    /// Une touche pressée, sans modificateur.
-    fn touche(key: egui::Key) -> egui::Event {
-        egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Default::default(),
-        }
-    }
 
     /// Une image de 800 × 600 avec `events`, où `ui` dessine l'arrière-plan.
     fn image(context: &egui::Context, events: Vec<egui::Event>, ui: impl FnMut(&mut egui::Ui)) {
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
-            )),
-            events,
-            ..Default::default()
-        };
-        let mut output = context.run_ui(input, ui);
-        output.textures_delta.clear();
+        image_de(context, egui::vec2(800.0, 600.0), events, ui);
     }
 
     /// #14 : tant qu'un dialogue modal est ouvert, un clic sur le reste de

@@ -57,7 +57,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 pub use stokesforge_plot::ColorUsage;
 use stokesforge_plot::{SavedColors, CURVE_PALETTES};
 
-use crate::state::SaveTarget;
+use crate::state::{AppState, SaveTarget};
 use crate::tr;
 
 /// Une rangée nommée d'échantillons.
@@ -315,6 +315,21 @@ impl SavedColorRequest {
             },
         }
     }
+}
+
+/// Les couleurs enregistrées, publiées chaque image par la racine pour que
+/// le sélecteur de couleur de l'éditeur sur place les propose aussi depuis
+/// une fenêtre détachée (qui n'a pas `AppState`).
+pub(crate) fn saved_colors_id() -> egui::Id {
+    egui::Id::new("stokesforge_saved_colors_for_graphs")
+}
+
+pub(crate) fn publish_saved_colors(ctx: &egui::Context, state: &AppState) {
+    let colors = (
+        state.saved_colors(SaveTarget::Project),
+        state.saved_colors(SaveTarget::User),
+    );
+    ctx.data_mut(|data| data.insert_temp(saved_colors_id(), colors));
 }
 
 /// Ce que le sélecteur lit et écrit hors de la couleur éditée : les couleurs
@@ -1434,5 +1449,57 @@ mod tests {
                 .all(|&[r, g, b, _]| luminance([r, g, b]) < 0.2),
             "fonds sombres"
         );
+    }
+
+    /// Les couleurs enregistrées publiées par la racine dans la mémoire
+    /// d'egui se relisent, sous [`saved_colors_id`], comme les lisent les
+    /// fenêtres détachées (`(projet, utilisateur)`) : le projet reste le
+    /// projet, l'utilisateur l'utilisateur. Le témoin : les deux jeux
+    /// diffèrent (une couleur chacun), une inversion se verrait. Une
+    /// nouvelle publication remplace l'ancienne. Les couleurs de
+    /// l'utilisateur vont dans un fichier temporaire, jamais dans les
+    /// préférences de la machine.
+    #[test]
+    fn les_couleurs_publiees_se_relisent_projet_et_utilisateur_a_leur_place() {
+        use crate::state::Action;
+        use stokesforge_core::Project;
+        use stokesforge_session::Session;
+
+        let dir = tempfile::tempdir().expect("dossier temporaire");
+        let session = Session::spawn(Project::new("Couleurs").unwrap(), None).unwrap();
+        let mut state = AppState::new(session.handle(), String::new()).unwrap();
+        state.use_user_colors_file(dir.path().join("couleurs.json"));
+        for (color, target) in [
+            ("#aa0000", SaveTarget::Project),
+            ("#00bb00", SaveTarget::User),
+        ] {
+            state.dispatch(Action::SaveColor {
+                usage: ColorUsage::Curves,
+                color: color.to_string(),
+                target,
+            });
+        }
+        let projet = state.saved_colors(SaveTarget::Project);
+        let utilisateur = state.saved_colors(SaveTarget::User);
+        assert_eq!(projet.get(ColorUsage::Curves), ["#aa0000"]);
+        assert_eq!(utilisateur.get(ColorUsage::Curves), ["#00bb00"]);
+
+        let context = egui::Context::default();
+        let relire = |context: &egui::Context| -> Option<(SavedColors, SavedColors)> {
+            context.data(|data| data.get_temp(saved_colors_id()))
+        };
+        assert_eq!(relire(&context), None, "rien avant la publication");
+        publish_saved_colors(&context, &state);
+        assert_eq!(relire(&context), Some((projet, utilisateur.clone())));
+
+        state.dispatch(Action::SaveColor {
+            usage: ColorUsage::Text,
+            color: "#0000cc".to_string(),
+            target: SaveTarget::Project,
+        });
+        publish_saved_colors(&context, &state);
+        let (projet, relu_utilisateur) = relire(&context).expect("republiées");
+        assert_eq!(projet.get(ColorUsage::Text), ["#0000cc"], "republiées");
+        assert_eq!(relu_utilisateur, utilisateur);
     }
 }

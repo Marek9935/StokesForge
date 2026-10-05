@@ -151,6 +151,8 @@ mod script_console;
 mod shortcuts;
 mod tab;
 mod tab_strip;
+#[cfg(test)]
+mod test_support;
 mod window_chrome;
 mod window_detach;
 mod window_placement;
@@ -179,22 +181,22 @@ use shortcuts::{
     SHORTCUT_IMPORT_QWERTY, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
     SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS,
 };
-use tab::{tab_for_window, tab_node, Tab};
-use window_detach::{DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel};
+use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
+use window_detach::{
+    snapshot_stamp, DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel,
+};
 use window_placement::geometry_rect;
 use window_stack::window_nodes;
 
 use eframe::egui;
-use stokesforge_core::{Node, NodeId, Tree};
+use stokesforge_core::{Node, NodeId};
 use stokesforge_render_egui::GraphView;
-use stokesforge_session::{Snapshot, WindowGeometry};
+use stokesforge_session::WindowGeometry;
 
-use crate::color_picker::SavedColorEdit;
+use crate::color_picker::publish_saved_colors;
 use crate::i18n;
 use crate::preferences::Preferences;
-use crate::state::{
-    active_graph, node_title_in, Action, ActiveTabKind, AppState, ImportDestination, SaveTarget,
-};
+use crate::state::{active_graph, Action, AppState, ImportDestination};
 use crate::toolbar::{BarEnv, ToolbarLayout, ToolbarState};
 use crate::tr;
 
@@ -1494,16 +1496,6 @@ impl StokesForgeApp {
     }
 }
 
-/// Les deux compteurs ne suffisent pas après un remplacement de projet :
-/// l'époque appartient aussi à l'identité de l'instantané publié.
-fn snapshot_stamp(snapshot: &Snapshot) -> (u64, u64, u64) {
-    (
-        snapshot.epoch,
-        snapshot.revision,
-        snapshot.geometry_revision,
-    )
-}
-
 /// Le nom de fichier suggéré par défaut au sélecteur « Enregistrer sous… » :
 /// le nom du chemin courant s'il en a un, sinon un nom de repli.
 fn suggested_file_name(path: &str) -> String {
@@ -1511,104 +1503,6 @@ fn suggested_file_name(path: &str) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "demo.stokesforge".to_string())
-}
-
-/// Titre d'un onglet : le nom du nœud qu'il porte, ou un texte « supprimé »
-/// explicite s'il a disparu de l'arbre entre-temps (fermeture depuis un
-/// autre onglet, ou par un script) — un onglet resté ouvert sur un nœud
-/// disparu ne doit jamais paniquer ni disparaître silencieusement
-/// (invariant 10).
-fn tab_title(state: &AppState, tab: Tab) -> String {
-    match tab {
-        Tab::Book(id) => node_title(state, id, || tr!("window-kind-workbook")),
-        Tab::Graph(id) => node_title(state, id, || tr!("window-kind-graph")),
-        Tab::Matrix(id) => node_title(state, id, || tr!("window-kind-matrix")),
-        Tab::Note(id) => node_title(state, id, || tr!("window-kind-note")),
-    }
-}
-
-/// [`tab_title`], à partir d'un `Tree` déjà en main plutôt que d'un
-/// `&AppState` vivant — pour l'en-tête peint par une fenêtre détachée, qui
-/// n'a que le [`Snapshot`] resynchronisé dans `DetachedTabViewModel`
-/// (voir `window_detach.rs`, § « la lecture du modèle est factorisée »).
-fn tab_title_from_tree(tree: &Tree, tab: Tab) -> String {
-    match tab {
-        Tab::Book(id) => node_title_in(tree, id, || tr!("window-kind-workbook")),
-        Tab::Graph(id) => node_title_in(tree, id, || tr!("window-kind-graph")),
-        Tab::Matrix(id) => node_title_in(tree, id, || tr!("window-kind-matrix")),
-        Tab::Note(id) => node_title_in(tree, id, || tr!("window-kind-note")),
-    }
-}
-
-/// Traduit le `Tab` (privé à ce module) que voit `StokesForgeApp::ui` vers
-/// [`ActiveTabKind`], le miroir public que `crate::state` peut lire sans
-/// connaître `Tab` — seul point de contact entre les deux, voir la doc de
-/// tête d'[`ActiveTabKind`].
-fn active_tab_kind(tab: Option<Tab>) -> ActiveTabKind {
-    match tab {
-        Some(Tab::Book(id)) => ActiveTabKind::Book(id),
-        Some(Tab::Graph(id)) => ActiveTabKind::Graph(id),
-        Some(Tab::Matrix(id)) => ActiveTabKind::Matrix(id),
-        Some(Tab::Note(id)) => ActiveTabKind::Note(id),
-        None => ActiveTabKind::None,
-    }
-}
-
-/// Le nom du nœud `id`, ou `"{missing} {id} (deleted)"` s'il n'existe plus.
-fn node_title(state: &AppState, id: NodeId, missing: impl FnOnce() -> String) -> String {
-    state
-        .tree()
-        .node(id)
-        .map(|node| node.name().to_string())
-        .unwrap_or_else(|| tr!("window-deleted", kind = missing(), id = id.to_string()))
-}
-
-/// Peint l'icône « prise » du glisser-déposer de colonnes ([`grid_contents`](crate::app::grid::grid_contents))
-/// à côté du curseur — une petite grille de points plutôt qu'un glyphe de
-/// police : la mesure de texte de l'appli passe entièrement par
-/// `stokesforge_render::text` pour le rendu de graphe (voir `CLAUDE.md`, § Pièges
-/// connus), et rien ne garantit qu'un glyphe « poignée » soit seulement
-/// présent dans la police par défaut d'egui — un pictogramme dessiné à la
-/// main évite la question.
-fn paint_drag_handle_icon(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
-    const DOT_RADIUS: f32 = 1.6;
-    const SPACING: f32 = 5.0;
-    for row in 0..3 {
-        for col in 0..2 {
-            let offset = egui::vec2(col as f32 * SPACING, row as f32 * SPACING);
-            painter.circle_filled(at + offset, DOT_RADIUS, color);
-        }
-    }
-}
-
-/// Les couleurs enregistrées, publiées chaque image par la racine pour que
-/// le sélecteur de couleur de l'éditeur sur place les propose aussi depuis
-/// une fenêtre détachée (qui n'a pas `AppState`).
-pub(crate) fn saved_colors_id() -> egui::Id {
-    egui::Id::new("stokesforge_saved_colors_for_graphs")
-}
-
-fn color_request_action(request: crate::color_picker::SavedColorRequest) -> Action {
-    match request.edit {
-        SavedColorEdit::Save => Action::SaveColor {
-            usage: request.usage,
-            color: request.color,
-            target: request.target,
-        },
-        SavedColorEdit::Remove => Action::RemoveSavedColor {
-            usage: request.usage,
-            color: request.color,
-            target: request.target,
-        },
-    }
-}
-
-fn publish_saved_colors(ctx: &egui::Context, state: &AppState) {
-    let colors = (
-        state.saved_colors(SaveTarget::Project),
-        state.saved_colors(SaveTarget::User),
-    );
-    ctx.data_mut(|data| data.insert_temp(saved_colors_id(), colors));
 }
 
 #[cfg(test)]
