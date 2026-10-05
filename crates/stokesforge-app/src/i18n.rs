@@ -181,6 +181,13 @@ pub fn choose_language(environment: Option<&str>, preference: Option<&str>) -> L
 /// La langue du démarrage : la variable d'environnement, puis `preferences.json`.
 fn startup_language() -> Language {
     let environment = std::env::var(LANGUAGE_VARIABLE).ok();
+    // Les tests du crate partagent ce chargeur global et certains (`errors`) le
+    // passent en anglais : les `preferences.json` de celui qui teste ne doivent
+    // pas décider de la langue de départ, sinon ils se marchent dessus. Seule la
+    // variable d'environnement reste (les sous-processus de test s'en servent).
+    #[cfg(test)]
+    return choose_language(environment.as_deref(), None);
+    #[cfg(not(test))]
     choose_language(environment.as_deref(), Preferences::load().language())
 }
 
