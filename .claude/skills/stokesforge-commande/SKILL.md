@@ -159,4 +159,6 @@ natures : elles sont copiables par défaut. Ne transporter ni arbre complet ni
 allocateur source dans une commande. `Project::insert_copy` alloue chaque ID
 au collage et restaure l'arbre en cas d'échec ; `DuplicateWorksheet` l'utilise
 également. Les groupes utilisent les `MacroKind::*Objects` ; les graphes gardent
-leurs références dans le même projet, le transport entre projets est #107.
+leurs références dans le même projet ; entre projets, `NodeCopy::into_external`
+active les données embarquées et le remplacement de toutes les références (#107). Le
+classeur caché est persisté et révélé par `SetWindowMeta`.

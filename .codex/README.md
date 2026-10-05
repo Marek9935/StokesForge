@@ -112,7 +112,8 @@ la cible active Rust.
   Copier, identifiants créés dans la destination, rollback atomique. Les noms
   sont uniques par dossier et les chemins canoniques sont enracinés. Le
   transport texte système réutilise les conversions `.stf`, sans numéro de
-  version ; les graphes entre projets restent le chantier #107. F2 appartient
+  version ; les graphes entre projets emportent leurs colonnes dans un classeur caché
+  persisté (#107), révélé par Show Data. F2 appartient
   aux gestionnaires, Ctrl+D des feuilles au viewport du classeur (#130).
 - Dans l'application, réutiliser `Action` / `AppState::dispatch` pour les
   actions concernées. Garder la logique testable dans `state.rs` et la

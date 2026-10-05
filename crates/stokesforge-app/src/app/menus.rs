@@ -275,6 +275,17 @@ impl StokesForgeApp {
         object_requests: &mut Vec<ObjectManagerRequest>,
     ) {
         ui.menu_button(tr!("menu-graph"), |ui| {
+            if ui
+                .add_enabled(
+                    !crate::state::graph_data_books(self.state.tree(), graph).is_empty(),
+                    egui::Button::new(tr!("action-show-graph-data")),
+                )
+                .clicked()
+            {
+                actions.push(Action::ShowGraphData { graph });
+                ui.close();
+            }
+
             let spec = crate::state::current_plot_spec(self.state.tree(), graph);
             let target = self
                 .read_graph_view(graph, selected_manager_target)
@@ -919,6 +930,25 @@ mod tests {
                     && !titres(&mut app, Some(Tab::Book(book))).contains(&entree.label)),
             "le menu Classeur a un contenu : {menu:#?}"
         );
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn afficher_les_donnees_suit_les_references_du_graphique() {
+        let (session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        let entry = active(&menu, &tr!("action-show-graph-data"));
+        assert!(entry.enabled);
+        assert_eq!(
+            clique(&mut app, &ctx, tab, entry.center),
+            vec![Action::ShowGraphData { graph }]
+        );
+        app.state.dispatch(Action::AddGraph);
+        let graph = app.state.graphs().last().unwrap().0;
+        app.open_tab(Tab::Graph(graph));
+        let (_, menu) = ouvre(&mut app, Some(Tab::Graph(graph)), &tr!("menu-graph"));
+        assert!(!active(&menu, &tr!("action-show-graph-data")).enabled);
         session.shutdown().unwrap();
     }
 

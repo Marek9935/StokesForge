@@ -786,6 +786,7 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
         },
         NodeKind::Workbook { sheets, meta } => KindRecord::Workbook {
             sheets: sheets.iter().map(|id| id.raw()).collect(),
+            hidden: meta.hidden,
             label: meta.label.clone(),
             comment: meta.comment.clone(),
         },
@@ -824,15 +825,18 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
             }
         }
         NodeKind::Graph { meta, spec } => KindRecord::Graph {
+            hidden: meta.hidden,
             label: meta.label.clone(),
             comment: meta.comment.clone(),
             spec: plot_spec_to_record(spec),
         },
         NodeKind::Matrix { meta } => KindRecord::Matrix {
+            hidden: meta.hidden,
             label: meta.label.clone(),
             comment: meta.comment.clone(),
         },
         NodeKind::Note { meta, text } => KindRecord::Note {
+            hidden: meta.hidden,
             label: meta.label.clone(),
             comment: meta.comment.clone(),
             text: text.clone(),
@@ -853,11 +857,16 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
         },
         KindRecord::Workbook {
             sheets,
+            hidden,
             label,
             comment,
         } => NodeKind::Workbook {
             sheets: sheets.into_iter().map(NodeId::from_raw).collect(),
-            meta: WindowMeta { label, comment },
+            meta: WindowMeta {
+                label,
+                comment,
+                hidden,
+            },
         },
         KindRecord::Worksheet { columns } => NodeKind::Worksheet {
             columns: columns.into_iter().map(NodeId::from_raw).collect(),
@@ -928,22 +937,40 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             NodeKind::Column(column)
         }
         KindRecord::Graph {
+            hidden,
             label,
             comment,
             spec,
         } => NodeKind::Graph {
-            meta: WindowMeta { label, comment },
+            meta: WindowMeta {
+                label,
+                comment,
+                hidden,
+            },
             spec: record_to_plot_spec(spec)?,
         },
-        KindRecord::Matrix { label, comment } => NodeKind::Matrix {
-            meta: WindowMeta { label, comment },
+        KindRecord::Matrix {
+            hidden,
+            label,
+            comment,
+        } => NodeKind::Matrix {
+            meta: WindowMeta {
+                label,
+                comment,
+                hidden,
+            },
         },
         KindRecord::Note {
+            hidden,
             label,
             comment,
             text,
         } => NodeKind::Note {
-            meta: WindowMeta { label, comment },
+            meta: WindowMeta {
+                label,
+                comment,
+                hidden,
+            },
             text,
         },
         KindRecord::Unknown(raw) => NodeKind::Unknown(raw),

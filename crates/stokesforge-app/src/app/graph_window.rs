@@ -402,6 +402,17 @@ fn graph_context_menu(
         });
     }
     response.context_menu(|ui| {
+        if ui
+            .add_enabled(
+                !crate::state::graph_data_books(tree, graph_id).is_empty(),
+                egui::Button::new(tr!("action-show-graph-data")),
+            )
+            .clicked()
+        {
+            actions.push(Action::ShowGraphData { graph: graph_id });
+            ui.close();
+        }
+
         let target: PlotTarget = ui
             .memory(|memory| memory.data.get_temp(target_id))
             .unwrap_or(PlotTarget::Background);

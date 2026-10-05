@@ -774,6 +774,7 @@ mod tests {
             name: "Racine".to_string(),
             parent: None,
             kind: KindRecord::Note {
+                hidden: false,
                 label: String::new(),
                 comment: String::new(),
                 text: String::new(),
@@ -854,6 +855,7 @@ mod tests {
             name: "Book1".to_string(),
             parent: Some(1),
             kind: KindRecord::Workbook {
+                hidden: false,
                 sheets: vec![3],
                 label: String::new(),
                 comment: String::new(),

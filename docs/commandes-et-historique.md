@@ -221,3 +221,10 @@ Les gestes multiples sont groupés par `MacroKind::{PasteObjects,
 DuplicateObjects, DeleteObjects, RenameObjects, MoveObjects}` ; un échec
 intermédiaire avorte le groupe entier. Ces libellés restent des données et ne
 sont pas enregistrés dans le `.stf`.
+
+Pour les graphes inter-projets (#107), la copie porte aussi les dépendances
+figées ; `NodeCopy::into_external` active leur insertion dans `InsertCopy`.
+Les classeurs cachés et les graphes sont créés atomiquement dans la même
+entrée structurelle, avec remplacement des références. Dans le même projet,
+les dépendances ne sont pas insérées. La révélation du classeur réutilise
+`SetWindowMeta`, donc son delta et son annulation.
