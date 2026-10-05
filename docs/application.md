@@ -1373,6 +1373,11 @@ all_rows`), qui touche déjà toutes les colonnes visibles sans qu'il faille de
 sorte de sélection dédiée — `is_all_selected` en teste la couverture exacte
 pour teindre le « # » en retour.
 
+Les libellés de la gouttière restent sur une seule ligne, même en français,
+en pseudo-langue ou après réduction de sa largeur (#125). Si la place
+manque, ils sont tronqués avec des points de suspension ; le survol affiche
+le texte complet. Ils ne débordent pas sur les rangées voisines.
+
 ### Une palette à trois paliers pour la gouttière, et une teinte propre à son texte
 
 La gouttière (rangée des lettres, « # », numéros de ligne, libellés de champ)
@@ -1681,8 +1686,11 @@ panneau et ces barres suivent aussi une fenêtre de graphique détachée.
 
 Le clic droit et Graphique › Sélection partagent les mêmes actions :
 Propriétés, Renommer la série (F2), Déplacer vers le haut/bas (Ctrl+Haut/Bas),
-Afficher/Masquer et Supprimer (Suppr). Le glisser-déposer d'une série change
-son rang dans le groupe de son calque, avec un repère avant/après la ligne
+Afficher/Masquer et Supprimer (Suppr). Un clic simple sur une ligne donne
+le focus clavier au panneau : F2, Ctrl+flèches et Suppr agissent dès ce clic,
+sans glisser préalable (#126). Un clic ailleurs rend ce focus.
+
+Le glisser-déposer d'une série change son rang dans le groupe de son calque, avec un repère avant/après la ligne
 visée ; un dépôt sur un autre calque est refusé. Le relâchement envoie une
 seule action. La sélection suit le contenu déplacé, y compris après
 Annuler/Rétablir, et une suppression décale les adresses des voisins sélectionnés.

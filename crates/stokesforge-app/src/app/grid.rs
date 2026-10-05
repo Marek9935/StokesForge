@@ -977,7 +977,9 @@ fn header_field_widget(
 /// rompant le fond de la colonne. Chaque libellé sélectionne désormais son
 /// champ pour **toutes** les colonnes visibles de la feuille (glisser/
 /// Maj-clic étend à plusieurs champs), symétrique de [`row_number_widget`]
-/// côté données — voir [`header_row_label_widget`].
+/// côté données — voir [`header_row_label_widget`]. Les libellés longs
+/// restent sur une ligne (#125) : egui les tronque et affiche le texte
+/// complet au survol, sans déborder sur une rangée voisine.
 fn row_number_header_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1070,6 +1072,7 @@ fn row_number_header_widget(
                             .color(crate::theme::gutter_text_color()),
                     )
                     .selectable(false)
+                    .truncate()
                     .sense(egui::Sense::click()),
                 );
                 // Miroir du menu Fenêtre : rien n'est atteignable au seul
@@ -1120,7 +1123,8 @@ fn header_row_label_widget(
                     .strong()
                     .color(crate::theme::gutter_text_color()),
             )
-            .selectable(false),
+            .selectable(false)
+            .truncate(),
         );
         let shift = ui.input(|i| i.modifiers.shift);
         if response.drag_started() || (response.clicked() && !shift) {
@@ -2810,6 +2814,72 @@ mod tests {
             "les données remontent d'une sous-rangée : {} → {y_donnees}",
             y[6]
         );
+    }
+
+    /// #125 : les traductions longues restent dans leur rangée, même
+    /// lorsque la gouttière est rétrécie à sa largeur minimale.
+    #[test]
+    fn les_libelles_de_gouttiere_restent_sur_une_seule_ligne() {
+        use crate::i18n::{build_loader, Language};
+        let mut banc = Banc::new();
+        for language in [Language::English, Language::French, Language::PseudoEnglish] {
+            let loader = build_loader(language);
+            let libelles = [
+                tr!(in loader; "column-long-name"),
+                tr!(in loader; "column-units"),
+                tr!(in loader; "column-comments"),
+                tr!(in loader; "workbook-header-formula"),
+                tr!(in loader; "common-metadata"),
+            ];
+            for width in [ROW_NUMBER_COLUMN_WIDTH, MIN_ROW_NUMBER_COLUMN_WIDTH] {
+                let mut output = banc.context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 500.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.set_width(width);
+                        row_number_header_widget(ui, &mut banc.state, &mut Vec::new(), banc.sheet);
+                        // Les libellés de champ empruntent exactement le même widget.
+                        for label in &libelles {
+                            header_row_label_widget(
+                                ui,
+                                &mut banc.state,
+                                &mut Vec::new(),
+                                banc.sheet,
+                                HeaderField::LongName,
+                                HEADER_LONGNAME_HEIGHT,
+                                label,
+                            );
+                        }
+                    },
+                );
+                output.textures_delta.clear();
+                let mut found = 0;
+                for painted in &output.shapes {
+                    if let egui::Shape::Text(text) = &painted.shape {
+                        if libelles.contains(&text.galley.text().to_string())
+                            || text.galley.text() == tr!("common-metadata")
+                        {
+                            found += 1;
+                            assert_eq!(
+                                text.galley.rows.len(),
+                                1,
+                                "{language:?}, {width} px : {:?}",
+                                text.galley.text()
+                            );
+                        }
+                    }
+                }
+                assert!(
+                    found >= 6,
+                    "les cinq traductions et la rangée Metadata sont réellement peintes"
+                );
+            }
+        }
     }
 
     /// Le fond de la gouttière a trois paliers distincts, et « sélectionnée »

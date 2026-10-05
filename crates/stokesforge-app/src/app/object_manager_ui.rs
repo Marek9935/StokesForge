@@ -229,6 +229,15 @@ pub(super) fn object_manager_contents(
         return requests;
     };
     let focus = ui.make_persistent_id(("object_manager_keys", model.graph));
+    // #126 : enregistrer l'ancre avant les lignes. egui rend son focus
+    // au relâchement d'un clic, car Rect::NOTHING n'est jamais survolé ;
+    // la ligne cliquée le réclame ensuite. Un clic ailleurs le rend toujours,
+    // et un champ d'édition garde ses propres touches.
+    ui.interact(
+        egui::Rect::NOTHING,
+        focus,
+        egui::Sense::focusable_noninteractive(),
+    );
     let mut selected = None;
     // Fond du panneau, posé sous les lignes : son menu contextuel porte la
     // bascule des textes automatiques (même action que le menu View).
@@ -267,12 +276,6 @@ pub(super) fn object_manager_contents(
         crate::tree_lines::begin_tree(ui);
         paint.graph(ui, model, actions, &mut requests, &mut selected);
     });
-    // L'ancrage appartient au panneau ; aucun champ d'édition ne perd ses touches.
-    ui.interact(
-        egui::Rect::NOTHING,
-        focus,
-        egui::Sense::focusable_noninteractive(),
-    );
     if ui.memory(|m| m.focused()) == Some(focus) {
         if let Some(target) = selected {
             if target.removable(spec)
@@ -1073,24 +1076,35 @@ mod tests {
         let (_, actions, _) = image(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
         assert!(actions.is_empty(), "sans focus, Suppr n'est pas pour nous");
 
-        // Le focus est pris au début d'un glisser sur la ligne (relâché sur
-        // elle-même : aucun déplacement), comme dans le test du glisser. Un
-        // simple clic le demande aussi, mais dans l'image du clic l'ancre du
-        // panneau, jamais survolée, le rend aussitôt (egui lâche au clic le
-        // focus d'un widget non survolé) : ce chemin-là n'est pas éprouvé ici.
+        // #126 : un clic simple doit suffire, sans amorcer de glisser.
         let row = text_center(&output, "Premier");
-        let nudged = row + egui::vec2(0.0, 8.0);
         image(vec![egui::Event::PointerMoved(row)]);
         image(vec![pointer(row, true)]);
-        let (_, _, requests) = image(vec![egui::Event::PointerMoved(nudged)]);
-        assert!(requests
-            .iter()
-            .any(|r| matches!(r, ObjectManagerRequest::Select(T::Series(s)) if *s == SeriesRef::new(0, 0))));
-        let (_, actions, _) = image(vec![pointer(nudged, false)]);
-        assert!(
-            actions.is_empty(),
-            "relâchée sur elle-même, la série ne bouge pas"
-        );
+        let (_, actions, requests) = image(vec![pointer(row, false)]);
+        assert!(actions.is_empty(), "un clic ne déplace pas la série");
+        assert!(requests.iter().any(|r| {
+            matches!(r, ObjectManagerRequest::Select(T::Series(s)) if *s == SeriesRef::new(0, 0))
+        }));
+        // Une image sans événement ne doit pas rendre le focus.
+        image(Vec::new());
+        let (_, actions, requests) = image(vec![key(egui::Key::F2, egui::Modifiers::NONE)]);
+        assert!(actions.is_empty());
+        assert!(requests.iter().any(|r| matches!(
+            r,
+            ObjectManagerRequest::Rename(SeriesRef { panel: 0, index: 0 })
+        )));
+        for (key_name, index) in [(egui::Key::ArrowDown, Some(1)), (egui::Key::ArrowUp, None)] {
+            let (_, actions, _) = image(vec![key(key_name, egui::Modifiers::CTRL)]);
+            let expected: Vec<_> = index
+                .into_iter()
+                .map(|index| Action::ReorderSeries {
+                    graph,
+                    source: SeriesRef::new(0, 0),
+                    index,
+                })
+                .collect();
+            assert_eq!(actions, expected);
+        }
         let (_, actions, _) = image(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
         assert_eq!(
             actions,
@@ -1113,6 +1127,23 @@ mod tests {
             properties,
             "le double-clic demande les propriétés de la série"
         );
+
+        // Témoin : un clic hors des lignes rend le focus du panneau.
+        let ailleurs = egui::pos2(550.0, 450.0);
+        image(vec![egui::Event::PointerMoved(ailleurs)]);
+        image(vec![pointer(ailleurs, true)]);
+        image(vec![pointer(ailleurs, false)]);
+        for (touche, modifiers) in [
+            (egui::Key::F2, egui::Modifiers::NONE),
+            (egui::Key::ArrowDown, egui::Modifiers::CTRL),
+            (egui::Key::Delete, egui::Modifiers::NONE),
+        ] {
+            let (_, actions, requests) = image(vec![key(touche, modifiers)]);
+            assert!(
+                actions.is_empty() && requests.is_empty(),
+                "le panneau a rendu ses touches"
+            );
+        }
     }
 
     /// La case d'une ligne bascule la visibilité de son objet : une action,
