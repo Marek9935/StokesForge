@@ -108,6 +108,11 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::Macro(kind) => match kind {
             MacroKind::PasteCells => tr!("history-macro-paste-cells"),
+            MacroKind::PasteObjects => tr!("history-macro-paste-objects"),
+            MacroKind::DuplicateObjects => tr!("history-macro-duplicate-objects"),
+            MacroKind::DeleteObjects => tr!("history-macro-delete-objects"),
+            MacroKind::MoveObjects => tr!("history-macro-move-objects"),
+            MacroKind::RenameObjects => tr!("history-macro-rename-objects"),
             MacroKind::ClearSelection => tr!("history-macro-clear-selection"),
             MacroKind::GraphProperties => tr!("history-macro-graph-properties"),
             MacroKind::RefreshFromFile => tr!("history-macro-refresh-from-file"),

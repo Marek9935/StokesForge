@@ -10,7 +10,8 @@
 //! - `Tree::child_by_name`, filtré par `is_folder` — à la résolution d'un
 //!   chemin de dossier.
 //!
-//! Cette batterie vérifie qu'ils disent la même chose. Ils ne la disent pas.
+//! Cette batterie vérifie qu’ils disent la même chose. Depuis #105, la portée
+//! est le dossier parent, avec refus des chemins courts ambigus.
 
 use stokesforge_core::{CoreError, Node, NodeId, NodeKind, Project, Tree, WindowMeta};
 
@@ -60,20 +61,49 @@ fn b11_deux_dossiers_freres_homonymes_sont_refuses() {
 }
 
 #[test]
-fn b11_deux_fenetres_homonymes_sont_refusees_ou_quelles_soient() {
+fn b11_homonymes_entre_dossiers_acceptes_et_chemins_canoniques_non_ambigus() {
     let mut project = Project::new("R").expect("projet");
     let root = project.root();
     let ailleurs = project.add_folder(root, "Ailleurs").expect("dossier");
-    project
-        .add_note(root, Some("N"), "")
-        .expect("première note");
+    let first = project.add_note(root, Some("N"), "racine").unwrap();
+    let second = project.add_note(ailleurs, Some("N"), "ailleurs").unwrap();
+    assert!(matches!(
+        project.add_note(root, Some("N"), ""),
+        Err(CoreError::DuplicateName(_))
+    ));
+    assert!(matches!(
+        project.add_note(ailleurs, Some("N"), ""),
+        Err(CoreError::DuplicateName(_))
+    ));
     assert!(
-        matches!(
-            project.add_note(ailleurs, Some("N"), ""),
-            Err(CoreError::DuplicateName(_))
-        ),
-        "un nom de fenêtre est unique à l'échelle du projet, pas seulement entre frères"
+        project.resolve_path("[N]").is_err(),
+        "le nom court ne choisit pas arbitrairement une note"
     );
+    assert_eq!(project.resolve_path("/[N]").unwrap(), first);
+    assert_eq!(project.resolve_path("/Ailleurs/[N]").unwrap(), second);
+    for id in [first, second] {
+        assert_eq!(
+            project.resolve_path(&project.path_of(id).unwrap()).unwrap(),
+            id
+        );
+    }
+    let before = project.tree().clone();
+    assert!(
+        project.move_node(second, root, 0).is_err(),
+        "le déplacement ne crée pas d’homonymes frères"
+    );
+    assert_eq!(project.tree(), &before);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("homonyms.stf");
+    stokesforge_persistence::save(&project, &path).unwrap();
+    let loaded = stokesforge_persistence::load(&path).unwrap();
+    assert_eq!(loaded.tree(), &before);
+    for id in [first, second] {
+        assert_eq!(
+            loaded.resolve_path(&loaded.path_of(id).unwrap()).unwrap(),
+            id
+        );
+    }
 }
 
 #[test]

@@ -31,7 +31,9 @@
 //! le contenu d'un nœud existant — même nature que `SetColumnType`, qui
 //! remplace elle aussi un contenu en bloc sans toucher à la structure.
 
-use stokesforge_core::{Column, ColumnMeta, ColumnType, NodeId, Tree, ValueBlock, WindowMeta};
+use stokesforge_core::{
+    Column, ColumnMeta, ColumnType, NodeCopy, NodeId, Tree, ValueBlock, WindowMeta,
+};
 use stokesforge_plot::{PlotSpec, SavedColors};
 
 use crate::label::{ColumnRef, HistoryLabel};
@@ -218,6 +220,15 @@ pub enum Command {
         /// Nom de la copie.
         name: String,
     },
+    /// Colle une copie autonome, quelle que soit sa nature.
+    InsertCopy {
+        /// Conteneur de destination.
+        parent: NodeId,
+        /// Valeurs capturées à la copie, sans projet ni allocateur source.
+        copy: NodeCopy,
+        /// Nom choisi dans le conteneur de destination.
+        name: String,
+    },
     /// Ajoute un graphe portant `spec`. `name: None` → premier « GraphN »
     /// libre. `spec` est obligatoire, comme dans `Project::add_graph` : un
     /// graphe sans spec ne décrit rien de plus qu'une fenêtre vide, autant le
@@ -346,6 +357,7 @@ impl Command {
             Command::DuplicateWorksheet { sheet, .. } => {
                 HistoryLabel::DuplicateWorksheet { name: name(*sheet) }
             }
+            Command::InsertCopy { .. } => HistoryLabel::Macro(crate::MacroKind::PasteObjects),
             Command::AddGraph { .. } => HistoryLabel::AddGraph,
             Command::AddMatrix { .. } => HistoryLabel::AddMatrix,
             Command::AddNote { .. } => HistoryLabel::AddNote,
@@ -398,6 +410,7 @@ impl Command {
                 | Command::AddEmptyWorkbook { .. }
                 | Command::AddWorksheet { .. }
                 | Command::DuplicateWorksheet { .. }
+                | Command::InsertCopy { .. }
                 | Command::AddGraph { .. }
                 | Command::AddMatrix { .. }
                 | Command::AddNote { .. }

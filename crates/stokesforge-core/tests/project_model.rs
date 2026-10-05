@@ -233,12 +233,20 @@ fn critere_5_regles_d_unicite_des_noms() {
     let a = project.add_folder(root, "A").expect("dossier A");
     let b = project.add_folder(root, "B").expect("dossier B");
 
-    // Deux fenêtres de même nom, même rangées ailleurs : refusé.
+    // Deux fenêtres de même nom dans des dossiers distincts : accepté (#105).
     project
         .add_empty_workbook(a, Some("Book1"))
         .expect("classeur");
+    project
+        .add_empty_workbook(b, Some("Book1"))
+        .expect("homonyme dans un autre dossier");
+    assert!(project.resolve_path("[Book1]").is_err());
+    assert_ne!(
+        project.resolve_path("A/[Book1]").unwrap(),
+        project.resolve_path("B/[Book1]").unwrap()
+    );
     assert!(matches!(
-        project.add_empty_workbook(b, Some("Book1")),
+        project.add_empty_workbook(a, Some("Book1")),
         Err(CoreError::DuplicateName(_))
     ));
 
@@ -306,7 +314,7 @@ fn critere_6_renommage() {
     let mut demo = Demo::new();
     let other = demo
         .project
-        .add_empty_workbook(demo.root, Some("Book2"))
+        .add_empty_workbook(demo.folder, Some("Book2"))
         .expect("classeur");
 
     let before = demo.project.tree().clone();
@@ -510,7 +518,7 @@ fn critere_11_resolution_de_chemins() {
     );
     match p.resolve_path("/Ailleurs/[Book1]Sheet1!Temps") {
         Err(CoreError::Path(message)) => {
-            assert!(message.contains("is not in folder"), "{message}")
+            assert!(message.contains("folder not found"), "{message}")
         }
         other => panic!("attendu Path, obtenu {other:?}"),
     }
@@ -1195,4 +1203,13 @@ fn critere_26_add_workbook_ajoute_exactement_deux_noeuds() {
     project.add_workbook(root, None).expect("classeur");
 
     assert_eq!(project.tree().len(), before + 2);
+}
+
+#[test]
+fn duplication_de_feuille_atomique_meme_si_les_identifiants_sont_epuises() {
+    let demo = Demo::new();
+    let mut project = Project::from_tree(demo.project.tree().clone(), u64::MAX - 1);
+    let before = project.tree().clone();
+    assert!(project.duplicate_worksheet(demo.sheet, "Copy").is_err());
+    assert_eq!(project.tree(), &before);
 }

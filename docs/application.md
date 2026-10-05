@@ -351,7 +351,7 @@ compris, est agrandi ou réduit uniformément (`GraphView::paint_scaled`,
 ne reconstruit pas le cache de formes. La règle est identique en fenêtre
 flottante et détachée, qui partagent la même fonction.
 
-Gestes sur une feuille (#106) : double-clic sur l'onglet, F2 ou menu
+Gestes sur une feuille (#106, retrait de F2 selon #130) : double-clic sur l'onglet ou menu
 Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou
 en quittant le champ, abandonnée par Échap) ; Ctrl+D ou menu Dupliquer (« … copie
 N », premier numéro libre, la copie est affichée) ; Supprimer par le menu seul,
@@ -409,6 +409,33 @@ les repliées ; sans état enregistré, il ouvre le premier classeur et le
 premier graphe.
 
 ### Project Manager et fenêtres par contenu
+
+Le menu contextuel des fenêtres et le menu *Edit* proposent Renommer, Dupliquer,
+Copier, Coller et Supprimer (#105). Un clic sélectionne et ouvre l'objet ; Ctrl
+bascule une cible sans ouvrir, Maj sélectionne une plage parmi les lignes visibles.
+F2, Ctrl+D, Ctrl+C, Ctrl+V et Suppr s'appliquent à cette sélection quand le
+Project Manager a le focus, aussi en fenêtre détachée. Les renommages multiples
+saisissent les noms successivement, puis valident une seule entrée annulable ;
+Échap abandonne l'ensemble. Le champ se valide par Entrée ou perte du focus.
+
+Les noms sont uniques dans le dossier parent. Les copies portent le premier
+suffixe « copy N » / « copie N » libre et de nouveaux identifiants pour toute
+leur descendance. Un graphe copié dans son projet garde ses références aux
+colonnes originales. Un classeur dupliqué conserve son état ouvert ou fermé ;
+les graphes qui l'utilisent ne sont pas dupliqués. Supprimer ferme les fenêtres
+flottantes et détachées ; annuler restaure les objets sans rouvrir les fenêtres.
+Les classeurs et les sélections multiples demandent confirmation, en nommant
+les graphes utilisateurs ; une note, matrice ou graphe seul se supprime directement.
+
+Copier capture le contenu au moment du geste, puis l'écrit dans le presse-papiers
+système ; le collage lit celui-ci, sans relecture des objets source. Les classeurs,
+notes et matrices se transfèrent entre projets et entre processus ; les graphes
+entre projets restent refusés jusqu'au chantier #107. Coller dans le menu d'un
+dossier y place les copies. La grille refuse ce transport d'objets au lieu de le
+transformer en cellules. `Action::MoveObjects` prépare le déplacement entre
+futurs dossiers en un seul groupe annulable ; le geste Couper reste à câbler lors
+de leur introduction.
+
 
 Le Project Manager affiche l'arbre du projet **arrêté** à `Workbook`,
 `Graph`, `Matrix`, `Note` : ces quatre natures sont des feuilles cliquables de

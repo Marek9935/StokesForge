@@ -52,6 +52,11 @@ confirmation pour les choix courants couverts par la demande.
 - L'import de l'application, du CLI et des scripts partage les plans et la
   conversion de `stokesforge-importer` ; `pyst.import_file` écrit par les commandes
   de sa session, GIL relâché, dans une macro annulable.
+- Les copies d’objets (#105–106) réutilisent `NodeCopy` / `InsertCopy`, sans
+  allocateur ni projet source transporté. Toute nature est copiable par défaut ;
+  les IDs sont créés dans la destination et un échec restaure l’arbre. Unicité
+  des noms par dossier, chemins canoniques enracinés ; les graphes entre projets
+  restent #107. F2 appartient aux gestionnaires (#130), pas aux feuilles.
 - Le rendu partagé appartient à `stokesforge-render`. Préserver l'accord entre
   l'écran et les exports, ainsi que la mesure de texte unique.
 - Object Manager projette l'instantané dans `object_manager.rs` ; la sélection

@@ -30,6 +30,7 @@ use super::shortcuts::{
     shortcut_text_delete, SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT,
     SHORTCUT_OPEN, SHORTCUT_REDO_Y, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_UNDO,
 };
+use super::tab::tab_node;
 use super::tab::Tab;
 use super::workbook::workbook_menu;
 use super::{active_tab_kind, tab_title, StokesForgeApp};
@@ -232,6 +233,25 @@ impl StokesForgeApp {
                 actions.push(Action::Redo);
                 ui.close();
             }
+            ui.separator();
+            let ids: Vec<_> = self
+                .state
+                .tree()
+                .walk_all()
+                .into_iter()
+                .filter(|id| self.pm_selection.iter().any(|tab| tab_node(*tab) == *id))
+                .collect();
+            super::project_manager::object_menu(
+                ui,
+                &ids,
+                self.state.tree().root(),
+                actions,
+                if self.pm_detached {
+                    super::project_manager::viewport_id()
+                } else {
+                    egui::ViewportId::ROOT
+                },
+            );
         });
     }
 

@@ -193,6 +193,7 @@ pub(super) struct ProjectManagerViewModel {
     /// `show_viewport_deferred` — `AppState` reste la seule source de
     /// vérité, ceci n'en est qu'un instantané pour le callback différé.
     pub(super) tree: Vec<ProjectTreeNode>,
+    pub(super) root: Option<NodeId>,
     /// Copie de [`StokesForgeApp::pm_selection`], même resynchronisation que
     /// `tree` — nécessaire pour que la fenêtre détachée du Project Manager
     /// affiche elle aussi la sélection courante et le fond « Masquer » à
@@ -654,6 +655,7 @@ impl StokesForgeApp {
                 || model.active_tab != active_tab;
             model.snapshot_stamp = Some(stamp);
             model.tree = self.state.project_tree();
+            model.root = Some(self.state.tree().root());
             model.selected = self.pm_selection.clone();
             model.hidden = self.hidden_tabs.clone();
             model.active_tab = active_tab;
@@ -673,6 +675,7 @@ impl StokesForgeApp {
                 begin_file_drop(ui.ctx());
                 let mut opened = Vec::new();
                 let mut closed = Vec::new();
+                let mut actions = Vec::new();
                 // Lecture d'une copie plutôt que du verrou tenu pendant
                 // toute la peinture : `project_manager_contents_from_tree`
                 // ne doit pas retenir `view_model` verrouillé le temps
@@ -687,6 +690,8 @@ impl StokesForgeApp {
                 let hidden_before = model.hidden.clone();
                 let reattach = detached_panel_contents(ui, &tr!("project-manager-title"), |ui| {
                     let mut interaction = PmInteraction {
+                        actions: &mut actions,
+                        root: model.root.unwrap_or(NodeId::from_raw(1)),
                         open_requests: &mut opened,
                         close_requests: &mut closed,
                         active_tab: model.active_tab,
@@ -706,6 +711,10 @@ impl StokesForgeApp {
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
                     requests.reattach |= reattach;
+                    if !actions.is_empty() {
+                        root_context.request_repaint_of(egui::ViewportId::ROOT);
+                    }
+                    requests.actions.append(&mut actions);
                     requests.open.append(&mut opened);
                     requests.close.append(&mut closed);
                     if model.selected != selected_before {
@@ -904,7 +913,7 @@ impl StokesForgeApp {
             ..
         } = self;
         for (tab, detached) in detached_tabs.iter() {
-            let changed = detached.publish_snapshot(state.snapshot());
+            let changed = detached.publish_snapshot(state);
             let view_model = Arc::clone(&detached.view_model);
             let requests = Arc::clone(&detached.requests);
             let root_context = ctx.clone();
@@ -981,15 +990,21 @@ struct DetachedTabFrame {
 impl DetachedTab {
     /// Publie d'abord l'instantané et la vue locale ; le réveil reste après
     /// l'enregistrement du callback, dans `show_detached_tabs`.
-    fn publish_snapshot(&self, snapshot: &Snapshot) -> bool {
+    fn publish_snapshot(&self, state: &AppState) -> bool {
+        let snapshot = state.snapshot();
         let mut model = self
             .view_model
             .lock()
             .unwrap_or_else(|err| err.into_inner());
-        let changed = model.snapshot.as_ref().map(snapshot_stamp) != Some(snapshot_stamp(snapshot));
+        let changed = model.snapshot.as_ref().map(snapshot_stamp) != Some(snapshot_stamp(snapshot))
+            || model
+                .view_state
+                .as_ref()
+                .is_some_and(|view| view.renaming_sheet() != state.renaming_sheet());
         model.snapshot = Some(snapshot.clone());
         if let Some(view_state) = model.view_state.as_mut() {
             view_state.sync_detached_snapshot(snapshot.clone());
+            view_state.sync_detached_sheet_editor(state);
         }
         changed
     }

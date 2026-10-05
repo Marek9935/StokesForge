@@ -39,8 +39,8 @@ graphe, une matrice ou une note n'en a pas, et c'est garanti à la compilation
 plutôt que par une vérification.
 
 **Fenêtre** (*window*) = classeur, graphe, matrice ou note — un nœud
-affichable en sous-fenêtre. Leurs noms sont uniques à l'échelle du **projet
-entier**, pas seulement du parent (c'est ce que vérifie la batterie `b11`).
+affichable en sous-fenêtre. Leurs noms sont uniques dans leur **dossier parent** (#105). Un chemin
+canonique inclut ce dossier ; un nom seul est refusé s’il est ambigu.
 
 ### L'arbre est persistant, au sens fonctionnel
 

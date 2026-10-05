@@ -21,11 +21,11 @@ use super::grid::{
     grid_contents, show_grid_horizontal_bar, show_grid_vertical_bar,
     show_horizontally_scrollable_grid,
 };
-use super::shortcuts::{SHORTCUT_DUPLICATE_SHEET, SHORTCUT_RENAME_SHEET};
+use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 use super::tab_strip::{tab_strip_with, TabEvent, TabOps, TabStripOutput, TAB_STRIP_HEIGHT};
 
 /// Menu « Classeur » : les gestes sur la feuille affichée, miroir du menu
-/// contextuel des onglets et des raccourcis F2 / Ctrl+D.
+/// contextuel des onglets et du raccourci Ctrl+D (F2 est réservé aux gestionnaires, #130).
 pub(super) fn workbook_menu(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -35,10 +35,7 @@ pub(super) fn workbook_menu(
     actions: &mut Vec<Action>,
 ) {
     if ui
-        .add(
-            egui::Button::new(tr!("action-rename-sheet"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_RENAME_SHEET)),
-        )
+        .add(egui::Button::new(tr!("action-rename-sheet")))
         .on_hover_text(tr!("action-rename-sheet", "hint"))
         .clicked()
     {
@@ -114,6 +111,15 @@ pub(super) fn book_contents(
     claim_file_drop(ui, book);
     let sheets = state.worksheets_of(book);
     let selected = state.selected_sheet_in(book).unwrap_or(book);
+    // Le viewport racine consomme déjà ce geste sur le classeur actif.
+    // Dans une fenêtre OS séparée, le même contenu reçoit son propre clavier.
+    if ui.ctx().viewport_id() != egui::ViewportId::ROOT
+        && !ui.ctx().text_edit_focused()
+        && state.renaming_sheet().is_none()
+        && ui.input_mut(|input| input.consume_shortcut(&SHORTCUT_DUPLICATE_SHEET))
+    {
+        actions.push(Action::DuplicateSheet(selected));
+    }
     let mut chosen_sheet = None;
     let mut add_sheet = false;
     // La bande d'onglets est retranchée du rectangle du classeur **avant**

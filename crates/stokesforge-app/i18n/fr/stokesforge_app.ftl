@@ -858,3 +858,23 @@ panel-expand = Déployer le panneau
 panel-collapse = Replier le panneau
 panel-detach = Détacher dans une fenêtre séparée
 panel-reattach = Rattacher à la fenêtre principale
+
+history-macro-paste-objects = Coller des objets
+history-macro-duplicate-objects = Dupliquer des objets
+history-macro-delete-objects = Supprimer des objets
+history-macro-move-objects = Déplacer des objets
+
+object-rename-empty = Le nom est vide, le nom précédent a été conservé
+object-clipboard-invalid = Le presse-papiers ne contient aucun objet StokesForge valide
+object-clipboard-graph-external = La copie de graphiques entre projets n’est pas encore disponible
+object-delete-title = Supprimer des objets
+object-delete-confirm = Supprimer { $names } ?
+object-delete-used = Utilisés par les graphiques : { $graphs }
+
+action-rename-project-object = Renommer
+action-duplicate-project-object = Dupliquer
+action-delete-project-object = Supprimer
+
+history-macro-rename-objects = Renommer des objets
+
+object-clipboard-use-manager = Sélectionner un dossier ou un objet dans le gestionnaire de projet pour coller ces objets

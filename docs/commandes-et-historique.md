@@ -206,3 +206,18 @@ transportée par l'acteur. Le menu et l'arbre émettent les mêmes `Action`.
 Une cible périmée, un rang inchangé ou une valeur identique n'envoie aucune
 commande. Ouvrir le panneau, choisir un contenu ou ouvrir ses propriétés
 relève de l'état de vue ; les modifications validées sont annulables.
+
+## Copie d'objets (#105–106)
+
+`NodeCopy::capture` fige un sous-arbre sans conserver le projet ni son allocateur.
+`Command::InsertCopy` le recrée par `Project::insert_copy`, avec de nouveaux
+identifiants alloués dans la destination. Toute nature est copiable par défaut :
+la copie conserve son contenu et reconstruit ses enfants, sans liste blanche.
+Un échec restaure l'arbre ; le compteur d'identifiants ne recule jamais.
+`DuplicateWorksheet` réutilise cette primitive atomique et replace la feuille
+juste après l'originale, y compris si des natures inconnues y sont conservées.
+
+Les gestes multiples sont groupés par `MacroKind::{PasteObjects,
+DuplicateObjects, DeleteObjects, RenameObjects, MoveObjects}` ; un échec
+intermédiaire avorte le groupe entier. Ces libellés restent des données et ne
+sont pas enregistrés dans le `.stf`.

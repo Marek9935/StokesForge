@@ -12,10 +12,12 @@ use std::collections::HashSet;
 use eframe::egui;
 
 use crate::icons::{icon_image, Icon, IconRole};
-use crate::state::{ProjectTreeNode, WindowKind};
+use crate::state::{Action, ProjectTreeNode, WindowKind};
 use crate::tr;
+use stokesforge_core::NodeId;
 
-use super::tab::{tab_for_window, Tab};
+use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_RENAME_OBJECT};
+use super::tab::{tab_for_window, tab_node, Tab};
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::StokesForgeApp;
 
@@ -25,6 +27,8 @@ use super::StokesForgeApp;
 /// reste du module (panneau fixe et fenêtre OS détachée, voir la doc de tête
 /// de [`StokesForgeApp::show_detached_project_manager`]).
 pub(super) struct PmInteraction<'a> {
+    pub(super) actions: &'a mut Vec<Action>,
+    pub(super) root: NodeId,
     /// Onglet ouvert ou focalisé par un simple clic — voir
     /// [`StokesForgeApp::open_tab`].
     pub(super) open_requests: &'a mut Vec<Tab>,
@@ -44,6 +48,190 @@ pub(super) struct PmInteraction<'a> {
     pub(super) hidden: &'a mut HashSet<Tab>,
 }
 
+/// La sélection est partagée avec le viewport ; l'éditeur et le focus restent
+/// dans la mémoire du viewport qui reçoit le clavier.
+#[derive(Clone, Default)]
+struct PmMemory {
+    focus: bool,
+    anchor: Option<Tab>,
+    rename: Vec<NodeId>,
+    renamed: Vec<(NodeId, String)>,
+    text: Option<String>,
+    order: Vec<Tab>,
+    next_order: Vec<Tab>,
+}
+
+pub(super) fn viewport_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("stokesforge_project_manager_window")
+}
+
+/// Aucun éditeur ne peut survivre à un remplacement d'identité du projet.
+pub(super) fn forget_views(ctx: &egui::Context) {
+    let paste_keys = [egui::ViewportId::ROOT, viewport_id()]
+        .map(|viewport| egui::Id::new(("project_paste_parent", viewport)));
+    ctx.data_mut(|data| {
+        data.remove_by_type::<PmMemory>();
+        for key in paste_keys {
+            data.remove::<NodeId>(key);
+        }
+    });
+}
+
+fn memory_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new(("project_manager_gestures", ctx.viewport_id()))
+}
+
+pub(super) fn has_focus(ctx: &egui::Context) -> bool {
+    let memory_key = memory_id(ctx);
+    ctx.data(|data| {
+        data.get_temp::<PmMemory>(memory_key)
+            .is_some_and(|m| m.focus || !m.rename.is_empty())
+    })
+}
+
+fn selected_ids(selection: &HashSet<Tab>, order: &[Tab]) -> Vec<NodeId> {
+    order
+        .iter()
+        .filter(|tab| selection.contains(tab))
+        .map(|tab| tab_node(*tab))
+        .collect()
+}
+
+/// Même menu pour la barre Edit et le clic droit. Le collage déclenche une
+/// demande de lecture à egui-winit, donc utilise aussi le récepteur Wayland.
+pub(super) fn object_menu(
+    ui: &mut egui::Ui,
+    ids: &[NodeId],
+    parent: NodeId,
+    actions: &mut Vec<Action>,
+    rename_viewport: egui::ViewportId,
+) {
+    let memory_key = egui::Id::new(("project_manager_gestures", rename_viewport));
+    let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
+    let enabled = !ids.is_empty();
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(tr!("action-rename-project-object"))
+                .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_RENAME_OBJECT)),
+        )
+        .clicked()
+    {
+        ui.ctx().data_mut(|data| {
+            let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
+            memory.rename = ids.to_vec();
+            memory.renamed.clear();
+            memory.text = None;
+            memory.focus = true;
+            data.insert_temp(memory_key, memory);
+        });
+        ui.ctx().request_repaint_of(rename_viewport);
+        if rename_viewport != ui.ctx().viewport_id() {
+            ui.ctx()
+                .send_viewport_cmd_to(rename_viewport, egui::ViewportCommand::Focus);
+        }
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(tr!("action-duplicate-project-object"))
+                .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+        )
+        .clicked()
+    {
+        actions.push(Action::DuplicateObjects(ids.to_vec()));
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(tr!("action-copy")).shortcut_text(ui.ctx().format_shortcut(
+                &egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C),
+            )),
+        )
+        .clicked()
+    {
+        actions.push(Action::CopyObjects(ids.to_vec()));
+        ui.close();
+    }
+    if ui.button(tr!("action-paste")).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(paste_key, parent);
+        });
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(tr!("action-delete-project-object"))
+                .shortcut_text(shortcut_text_delete()),
+        )
+        .clicked()
+    {
+        actions.push(Action::DeleteObjects(ids.to_vec()));
+        ui.close();
+    }
+}
+
+fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
+    let ctx = ui.ctx();
+    let memory_key = memory_id(ctx);
+    let paste_key = egui::Id::new(("project_paste_parent", ctx.viewport_id()));
+    let mut memory = ctx
+        .data(|data| data.get_temp::<PmMemory>(memory_key))
+        .unwrap_or_default();
+    let pending = ctx.data_mut(|data| {
+        let id = paste_key;
+        let value = data.get_temp::<NodeId>(id);
+        data.remove::<NodeId>(id);
+        value
+    });
+    let ids = selected_ids(interaction.selection, &memory.order);
+    if pending.is_some() || (memory.focus && memory.rename.is_empty() && !ctx.text_edit_focused()) {
+        let parent = pending.unwrap_or(interaction.root);
+        let mut paste = None;
+        ctx.input_mut(|input| {
+            if memory.focus && !ids.is_empty() {
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::F2) {
+                    memory.rename = ids.clone();
+                    memory.renamed.clear();
+                    memory.text = None;
+                }
+                if input.consume_key(egui::Modifiers::COMMAND, egui::Key::D) {
+                    interaction
+                        .actions
+                        .push(Action::DuplicateObjects(ids.clone()));
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::Delete) {
+                    interaction.actions.push(Action::DeleteObjects(ids.clone()));
+                }
+            }
+            input.events.retain(|event| match event {
+                egui::Event::Copy if memory.focus => {
+                    interaction.actions.push(Action::CopyObjects(ids.clone()));
+                    false
+                }
+                egui::Event::Paste(text) => {
+                    paste = Some(text.clone());
+                    false
+                }
+                _ => true,
+            });
+        });
+        if let Some(text) = paste {
+            interaction
+                .actions
+                .push(Action::PasteObjects { parent, text });
+        } else if let Some(parent) = pending {
+            ctx.data_mut(|data| data.insert_temp(paste_key, parent));
+        }
+    }
+    ctx.data_mut(|data| data.insert_temp(memory_key, memory));
+}
+
 /// Le corps du Project Manager, à partir d'un arbre déjà construit plutôt
 /// que d'un `&AppState` vivant — seul le callback `show_viewport_deferred`
 /// de [`StokesForgeApp::show_detached_project_manager`] a besoin de cette forme :
@@ -56,10 +244,18 @@ pub(super) fn project_manager_contents_from_tree(
     tree: &[ProjectTreeNode],
     interaction: &mut PmInteraction,
 ) {
-    if !interaction.selection.is_empty() {
-        // Barre d'actions groupées, seulement quand elle a un effet — pas de
-        // boutons désactivés à regarder tant que rien n'est sélectionné.
-        ui.horizontal(|ui| {
+    let memory_key = memory_id(ui.ctx());
+    object_shortcuts(ui, interaction);
+    ui.ctx().data_mut(|data| {
+        let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
+        memory.next_order.clear();
+        data.insert_temp(memory_key, memory);
+    });
+    // Réserver la hauteur évite que sélectionner une ligne la déplace
+    // sous la souris avant le second clic d'un double-clic.
+    ui.horizontal(|ui| {
+        ui.set_min_height(ui.spacing().interact_size.y);
+        if !interaction.selection.is_empty() {
             if ui
                 .button(tr!("project-manager-show"))
                 .on_hover_text(tr!("project-manager-show", "hint"))
@@ -83,15 +279,30 @@ pub(super) fn project_manager_contents_from_tree(
                 "project-manager-selected",
                 count = interaction.selection.len()
             ));
-        });
-        ui.separator();
-    }
-    egui::ScrollArea::vertical().show(ui, |ui| {
+        }
+    });
+    ui.separator();
+    let response = egui::ScrollArea::vertical().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
         for node in tree {
             project_tree_node_ui(ui, node, interaction);
         }
     });
+    ui.ctx().data_mut(|data| {
+        let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
+        memory.order = std::mem::take(&mut memory.next_order);
+        data.insert_temp(memory_key, memory);
+    });
+    if ui.input(|input| input.pointer.any_pressed()) {
+        let inside = ui
+            .input(|input| input.pointer.interact_pos())
+            .is_some_and(|pos| response.inner_rect.contains(pos));
+        ui.ctx().data_mut(|data| {
+            let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
+            memory.focus = inside;
+            data.insert_temp(memory_key, memory);
+        });
+    }
 }
 
 /// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants ; rend
@@ -101,6 +312,7 @@ fn project_tree_node_ui(
     node: &ProjectTreeNode,
     interaction: &mut PmInteraction,
 ) -> f32 {
+    let memory_key = memory_id(ui.ctx());
     match node {
         ProjectTreeNode::Folder { id, name, children } => {
             let state_id = ui.make_persistent_id(("project_tree_folder", id));
@@ -111,7 +323,10 @@ fn project_tree_node_ui(
             )
             .show_header(ui, |ui| {
                 ui.add(icon_image(Icon::Folder, IconRole::Folder));
-                ui.label(name);
+                let response = ui.label(name);
+                response.context_menu(|ui| {
+                    object_menu(ui, &[], *id, interaction.actions, ui.ctx().viewport_id())
+                });
             })
             .body(|ui| {
                 crate::tree_lines::tree_children(ui, |ui, branch| {
@@ -133,6 +348,53 @@ fn project_tree_node_ui(
                 WindowKind::Note => (Icon::Note, IconRole::Note),
             };
             let tab = tab_for_window(*id, *kind);
+            ui.ctx().data_mut(|data| {
+                let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
+                memory.next_order.push(tab);
+                data.insert_temp(memory_key, memory);
+            });
+            let editing = ui
+                .ctx()
+                .data(|data| data.get_temp::<PmMemory>(memory_key))
+                .is_some_and(|m| m.rename.first() == Some(id));
+            if editing {
+                let mut memory = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<PmMemory>(memory_key))
+                    .unwrap_or_default();
+                let fresh = memory.text.is_none();
+                let text = memory.text.get_or_insert_with(|| name.clone());
+                let response = ui.add(
+                    egui::TextEdit::singleline(text)
+                        .id(egui::Id::new(("pm_rename", id)))
+                        .desired_width(ui.available_width()),
+                );
+                if fresh {
+                    response.request_focus();
+                }
+                let escape = ui
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                let enter = ui
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                if escape {
+                    memory.rename.clear();
+                    memory.renamed.clear();
+                    memory.text = None;
+                } else if enter || (!fresh && response.lost_focus()) {
+                    response.surrender_focus();
+                    memory.renamed.push((*id, text.clone()));
+                    memory.rename.remove(0);
+                    if memory.rename.is_empty() {
+                        interaction
+                            .actions
+                            .push(Action::RenameObjects(std::mem::take(&mut memory.renamed)));
+                    }
+                    memory.text = None;
+                }
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(memory_key, memory));
+                return response.rect.center().y;
+            }
             let selected = interaction.selection.contains(&tab);
             let is_hidden = interaction.hidden.contains(&tab);
             let fill = if selected {
@@ -168,15 +430,61 @@ fn project_tree_node_ui(
                         .inner
                 })
                 .inner;
-            if response.clicked() {
-                if ui.input(|input| input.modifiers.command) {
+            if response.clicked() || response.secondary_clicked() {
+                let modifiers = ui.input(|input| input.modifiers);
+                let mut memory = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<PmMemory>(memory_key))
+                    .unwrap_or_default();
+                if response.secondary_clicked() {
+                    if !selected {
+                        interaction.selection.clear();
+                        interaction.selection.insert(tab);
+                    }
+                } else if modifiers.shift {
+                    let anchor = memory.anchor.unwrap_or(tab);
+                    if let (Some(a), Some(b)) = (
+                        memory.order.iter().position(|t| *t == anchor),
+                        memory.order.iter().position(|t| *t == tab),
+                    ) {
+                        // L'ordre complet de l'image précédente reste disponible dans
+                        // la liste de rangs des lignes, y compris après la cible.
+                        if !modifiers.command {
+                            interaction.selection.clear();
+                        }
+                        interaction
+                            .selection
+                            .extend(memory.order[a.min(b)..=a.max(b)].iter().copied());
+                    }
+                } else if modifiers.command {
                     if !interaction.selection.remove(&tab) {
                         interaction.selection.insert(tab);
                     }
+                    memory.anchor = Some(tab);
                 } else {
+                    interaction.selection.clear();
+                    interaction.selection.insert(tab);
+                    memory.anchor = Some(tab);
                     interaction.open_requests.push(tab);
                 }
+                memory.focus = true;
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(memory_key, memory));
             }
+            response.context_menu(|ui| {
+                let memory = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<PmMemory>(memory_key))
+                    .unwrap_or_default();
+                let ids = selected_ids(interaction.selection, &memory.order);
+                object_menu(
+                    ui,
+                    &ids,
+                    interaction.root,
+                    interaction.actions,
+                    ui.ctx().viewport_id(),
+                );
+            });
             if response.double_clicked() && interaction.active_tab == Some(tab) {
                 interaction.close_requests.push(tab);
             }
@@ -211,6 +519,7 @@ impl StokesForgeApp {
         open_requests: &mut Vec<Tab>,
         close_requests: &mut Vec<Tab>,
         active_tab: Option<Tab>,
+        actions: &mut Vec<Action>,
     ) {
         if self.pm_collapsed {
             egui::Panel::left("stokesforge_pm_collapsed")
@@ -247,6 +556,8 @@ impl StokesForgeApp {
                 }
                 let tree = self.state.project_tree();
                 let mut interaction = PmInteraction {
+                    actions,
+                    root: self.state.tree().root(),
                     open_requests,
                     close_requests,
                     active_tab,
@@ -370,6 +681,7 @@ pub(super) mod tests {
     /// Les accumulateurs de [`PmInteraction`] d'un test, et une image peinte
     /// de l'arbre sur un écran de 400 × 400.
     struct Banc {
+        actions: RefCell<Vec<Action>>,
         open_requests: RefCell<Vec<Tab>>,
         close_requests: RefCell<Vec<Tab>>,
         active_tab: Option<Tab>,
@@ -380,6 +692,7 @@ pub(super) mod tests {
     impl Banc {
         fn new(active_tab: Option<Tab>, selection: HashSet<Tab>) -> Self {
             Banc {
+                actions: RefCell::new(Vec::new()),
                 open_requests: RefCell::new(Vec::new()),
                 close_requests: RefCell::new(Vec::new()),
                 active_tab,
@@ -403,6 +716,8 @@ pub(super) mod tests {
                 ..Default::default()
             };
             let mut interaction = PmInteraction {
+                actions: &mut self.actions.borrow_mut(),
+                root: NodeId::from_raw(1),
                 open_requests: &mut self.open_requests.borrow_mut(),
                 close_requests: &mut self.close_requests.borrow_mut(),
                 active_tab: self.active_tab,
@@ -415,6 +730,90 @@ pub(super) mod tests {
             output.textures_delta.clear();
             output
         }
+    }
+
+    #[test]
+    fn maj_selectionne_la_plage_et_les_raccourcis_agissent_sur_la_selection() {
+        let (_session, book, graph, tree) = project_manager_fixture();
+        let context = egui::Context::default();
+        let banc = Banc::new(None, HashSet::new());
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        let book_pos = find_text_center(&first.shapes, "Book");
+        let graph_pos = find_text_center(&first.shapes, "Graph");
+        click_at(&context, book_pos, egui::Modifiers::NONE, paint);
+        click_at(&context, graph_pos, egui::Modifiers::SHIFT, paint);
+        assert_eq!(*banc.selection.borrow(), HashSet::from([book, graph]));
+        paint(&context, vec![egui::Event::Copy]);
+        assert_eq!(
+            banc.actions.take(),
+            vec![Action::CopyObjects(vec![tab_node(book), tab_node(graph)])]
+        );
+        paint(
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::D,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            }],
+        );
+        assert_eq!(
+            banc.actions.take(),
+            vec![Action::DuplicateObjects(vec![
+                tab_node(book),
+                tab_node(graph)
+            ])]
+        );
+        paint(
+            &context,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                egui::Event::Key {
+                    key: egui::Key::Delete,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert_eq!(
+            banc.actions.take(),
+            vec![Action::DeleteObjects(vec![tab_node(book), tab_node(graph)])]
+        );
+    }
+
+    #[test]
+    fn f2_ouvre_le_champ_et_entree_valide_une_seule_action() {
+        let (_session, book, _graph, tree) = project_manager_fixture();
+        let context = egui::Context::default();
+        let banc = Banc::new(None, HashSet::from([book]));
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let memory_key = memory_id(&context);
+        context.data_mut(|data| {
+            let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap();
+            memory.focus = true;
+            data.insert_temp(memory_key, memory);
+        });
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        paint(&context, vec![key(egui::Key::F2)]);
+        assert!(context.text_edit_focused());
+        paint(&context, vec![key(egui::Key::Enter)]);
+        assert_eq!(banc.actions.take().len(), 1);
+        assert!(
+            !has_focus(&egui::Context::default()),
+            "un autre contexte ne possède pas ce focus"
+        );
     }
 
     /// Un texte contenant `needle` a-t-il été peint ?
@@ -470,6 +869,7 @@ pub(super) mod tests {
                     &mut open.borrow_mut(),
                     &mut close.borrow_mut(),
                     None,
+                    &mut Vec::new(),
                 );
             });
             output.textures_delta.clear();
@@ -626,7 +1026,7 @@ pub(super) mod tests {
     }
 
     /// La barre « Afficher / Masquer » n'existe qu'avec une sélection ; sans
-    /// elle, un simple clic ouvre l'entrée sans toucher à la sélection.
+    /// elle, un simple clic ouvre et sélectionne seulement cette entrée.
     #[test]
     fn la_barre_groupee_n_apparait_qu_avec_une_selection_et_un_clic_simple_ouvre() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
@@ -643,9 +1043,10 @@ pub(super) mod tests {
         let graph_pos = find_text_center(&first.shapes, "Graph1");
         click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
         assert_eq!(*banc.open_requests.borrow(), vec![graph_tab]);
-        assert!(
-            banc.selection.borrow().is_empty(),
-            "un clic simple ne sélectionne pas"
+        assert_eq!(
+            *banc.selection.borrow(),
+            HashSet::from([graph_tab]),
+            "un clic simple sélectionne sa cible (#105)"
         );
         assert!(banc.close_requests.borrow().is_empty());
 

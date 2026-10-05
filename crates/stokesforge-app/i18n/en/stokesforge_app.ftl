@@ -862,3 +862,23 @@ panel-expand = Expand the panel
 panel-collapse = Collapse the panel
 panel-detach = Detach into a separate window
 panel-reattach = Reattach to the main window
+
+history-macro-paste-objects = Paste Objects
+history-macro-duplicate-objects = Duplicate Objects
+history-macro-delete-objects = Delete Objects
+history-macro-move-objects = Move Objects
+
+object-rename-empty = The name is empty; the previous name was kept
+object-clipboard-invalid = The clipboard contains no valid StokesForge objects
+object-clipboard-graph-external = Copying graphs between projects is not yet available
+object-delete-title = Delete Objects
+object-delete-confirm = Delete { $names }?
+object-delete-used = Used by graphs: { $graphs }
+
+action-rename-project-object = Rename
+action-duplicate-project-object = Duplicate
+action-delete-project-object = Delete
+
+history-macro-rename-objects = Rename Objects
+
+object-clipboard-use-manager = Select a folder or object in Project Manager to paste these objects

@@ -71,10 +71,11 @@ fn rank(command: &Command) -> usize {
         Command::SetSavedColors { .. } => 22,
         Command::EditPlotSpec { .. } => 23,
         Command::DuplicateWorksheet { .. } => 24,
+        Command::InsertCopy { .. } => 25,
     }
 }
 
-const VARIANTS: usize = 25;
+const VARIANTS: usize = 26;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -84,6 +85,14 @@ fn named(name: &str) -> Option<String> {
 fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
     let root = w.project.root();
     vec![
+        (
+            Command::InsertCopy {
+                parent: root,
+                copy: stokesforge_core::NodeCopy::capture(w.project.tree(), w.book).unwrap(),
+                name: "Copy".into(),
+            },
+            HistoryLabel::Macro(MacroKind::PasteObjects),
+        ),
         (
             Command::SetCells {
                 column: w.third,

@@ -72,6 +72,7 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 |---|---|---|
 | Découpage et dépendances | `docs/architecture.md` | `Cargo.toml`, manifestes des crates |
 | Arbre, colonnes, identifiants, description de graphe | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` |
+| Copie d’objets et presse-papiers | `docs/application.md` (§ Project Manager), `docs/persistance.md` (§ Presse-papiers) | `stokesforge-core/src/copy.rs`, `Project::insert_copy`, `Command::InsertCopy`, `stokesforge-persistence/src/clipboard.rs`, `stokesforge-app/src/app/project_manager.rs` |
 | Undo/redo et macros | `docs/commandes-et-historique.md` | `stokesforge-commands`, méthodes de `stokesforge-core` appelées |
 | Sauvegarde, chargement et format `.stf` | `docs/persistance.md` | `stokesforge-persistence`, types du modèle et du graphe |
 | Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, commandes et persistance appelées |
@@ -107,6 +108,12 @@ la cible active Rust.
 - `SessionHandle::new_project`, comme `load`, remplace l'identité du projet
   et vide l'historique et les géométries ; il refuse une macro ouverte.
   La confirmation avant perte de travail appartient à `AppState`.
+- La copie d’objets réutilise `NodeCopy` / `InsertCopy` : contenu figé au geste
+  Copier, identifiants créés dans la destination, rollback atomique. Les noms
+  sont uniques par dossier et les chemins canoniques sont enracinés. Le
+  transport texte système réutilise les conversions `.stf`, sans numéro de
+  version ; les graphes entre projets restent le chantier #107. F2 appartient
+  aux gestionnaires, Ctrl+D des feuilles au viewport du classeur (#130).
 - Dans l'application, réutiliser `Action` / `AppState::dispatch` pour les
   actions concernées. Garder la logique testable dans `state.rs` et la
   traduction des événements et l'affichage dans le module de la surface

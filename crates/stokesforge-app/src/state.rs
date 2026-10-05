@@ -52,7 +52,8 @@ use std::thread;
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::{
-    Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeId, Tree, ValueBlock,
+    Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeCopy, NodeId, Tree,
+    ValueBlock,
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
@@ -129,6 +130,22 @@ pub enum Action {
     RequestDeleteSheet(NodeId),
     /// Réponse à la confirmation de [`Action::RequestDeleteSheet`].
     ConfirmDeleteSheet(bool),
+    /// Renomme un objet du Project Manager après édition en place.
+    RenameObject { id: NodeId, name: String },
+    /// Valide tous les noms saisis pendant un seul geste de renommage.
+    RenameObjects(Vec<(NodeId, String)>),
+    /// Copie la sélection vers le transport système.
+    CopyObjects(Vec<NodeId>),
+    /// Duplique la sélection dans ses dossiers d'origine.
+    DuplicateObjects(Vec<NodeId>),
+    /// Colle le transport système dans un dossier.
+    PasteObjects { parent: NodeId, text: String },
+    /// Demande la suppression de la sélection.
+    DeleteObjects(Vec<NodeId>),
+    /// Répond à la confirmation de suppression.
+    ConfirmDeleteObjects(bool),
+    /// Déplace la sélection en un seul geste annulable.
+    MoveObjects { ids: Vec<NodeId>, parent: NodeId },
     /// Valide la saisie d'une cellule : le texte tel que tapé, à convertir
     /// selon le type de la colonne.
     CommitCell {
@@ -1862,6 +1879,10 @@ pub struct AppState {
     renaming_sheet: Option<NodeId>,
     /// Feuille dont la suppression attend confirmation.
     pending_sheet_delete: Option<NodeId>,
+    pending_object_delete: Vec<NodeId>,
+    object_clipboard_origin: String,
+    object_clipboard_output: Option<String>,
+    copied_objects: Vec<(NodeId, NodeId, bool)>,
     /// Agrandissement des exports PNG (issue #34), un de
     /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
     png_export_scale: f32,
@@ -1995,6 +2016,17 @@ impl AppState {
             new_project_pending: false,
             renaming_sheet: None,
             pending_sheet_delete: None,
+            pending_object_delete: Vec::new(),
+            object_clipboard_origin: format!(
+                "{}:{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ),
+            object_clipboard_output: None,
+            copied_objects: Vec::new(),
             selected_sheets: std::collections::HashMap::new(),
             path,
             png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
@@ -2045,6 +2077,7 @@ impl AppState {
         let mut view = Self::new(self.handle.with_new_identity(), self.path.clone())?;
         view.snapshot = self.snapshot.clone();
         view.selected_sheets = self.selected_sheets.clone();
+        view.renaming_sheet = self.renaming_sheet;
         view.selection = self.selection.clone();
         view.editing = self.editing.clone();
         view.header_editing = self.header_editing.clone();
@@ -2059,6 +2092,11 @@ impl AppState {
     pub fn sync_detached_snapshot(&mut self, snapshot: Snapshot) {
         self.snapshot = snapshot;
         self.revalidate_selection();
+    }
+
+    /// Synchronise l'éditeur des onglets sans écraser la sélection locale.
+    pub fn sync_detached_sheet_editor(&mut self, root: &Self) {
+        self.renaming_sheet = root.renaming_sheet;
     }
 
     /// Réunit l'interaction d'un classeur détaché avec la voie de commande
@@ -3496,6 +3534,19 @@ impl AppState {
             Action::DuplicateSheet(sheet) => self.duplicate_sheet(sheet),
             Action::RequestDeleteSheet(sheet) => self.request_delete_sheet(sheet),
             Action::ConfirmDeleteSheet(accept) => self.confirm_delete_sheet(accept),
+            Action::RenameObject { id, name } => self.rename_object(id, &name),
+            Action::RenameObjects(changes) => self.rename_objects(changes),
+            Action::CopyObjects(ids) => self.copy_objects(&ids),
+            Action::DuplicateObjects(ids) => self.duplicate_objects(&ids),
+            Action::PasteObjects { parent, text } => self.paste_objects(parent, &text),
+            Action::DeleteObjects(ids) => self.request_delete_objects(ids),
+            Action::ConfirmDeleteObjects(accept) => {
+                let ids = std::mem::take(&mut self.pending_object_delete);
+                if accept {
+                    self.delete_objects(&ids);
+                }
+            }
+            Action::MoveObjects { ids, parent } => self.move_objects(&ids, parent),
             Action::CommitCell { column, row, text } => {
                 self.commit_cell(column, row, text);
             }
@@ -3870,6 +3921,13 @@ impl AppState {
     pub fn refresh(&mut self) {
         match self.handle.snapshot() {
             Ok(snapshot) => {
+                if self.snapshot.epoch != snapshot.epoch {
+                    self.renaming_sheet = None;
+                    self.pending_sheet_delete = None;
+                    self.pending_object_delete.clear();
+                    self.object_clipboard_output = None;
+                    self.copied_objects.clear();
+                }
                 self.snapshot = snapshot;
                 self.revalidate_selection();
             }
@@ -5115,6 +5173,308 @@ impl AppState {
         self.status = None;
     }
 
+    /// Transport à publier par le viewport qui reçoit le geste de copie.
+    pub fn take_object_clipboard_text(&mut self) -> Option<String> {
+        self.object_clipboard_output.take()
+    }
+
+    /// Copies créées : source, destination et conservation de l'état de vue.
+    pub fn take_copied_objects(&mut self) -> Vec<(NodeId, NodeId, bool)> {
+        std::mem::take(&mut self.copied_objects)
+    }
+
+    /// Objets en attente de confirmation de suppression.
+    pub fn pending_object_delete(&self) -> &[NodeId] {
+        &self.pending_object_delete
+    }
+
+    /// Graphes qui utilisent des colonnes des sous-arbres indiqués.
+    pub fn object_users(&self, ids: &[NodeId]) -> Vec<String> {
+        let columns: std::collections::HashSet<_> = ids
+            .iter()
+            .flat_map(|id| self.tree().walk(*id).unwrap_or_default())
+            .collect();
+        self.tree()
+            .walk_all()
+            .into_iter()
+            .filter_map(|id| self.tree().node(id))
+            .filter(|node| match node.kind() {
+                NodeKind::Graph { spec, .. } => columns.iter().any(|id| spec.references(*id)),
+                _ => false,
+            })
+            .map(|node| node.name().to_string())
+            .collect()
+    }
+
+    fn clipboard_origin(&self) -> String {
+        format!("{}:{}", self.object_clipboard_origin, self.snapshot.epoch)
+    }
+
+    // Éliminer doublons et descendants d'une autre cible empêche de supprimer
+    // ou déplacer deux fois le même contenu. L'ordre reste celui de l'arbre.
+    fn object_targets(&self, ids: &[NodeId]) -> Vec<NodeId> {
+        self.tree()
+            .walk_all()
+            .into_iter()
+            .filter(|id| ids.contains(id))
+            .filter(|id| *id != self.tree().root())
+            .filter(|id| {
+                self.tree()
+                    .node(*id)
+                    .is_some_and(|n| n.kind().is_window() || n.kind().is_folder())
+            })
+            .filter(|id| {
+                !self
+                    .tree()
+                    .ancestors(*id)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|a| ids.contains(a))
+            })
+            .collect()
+    }
+
+    fn rename_object(&mut self, id: NodeId, name: &str) {
+        if self.object_targets(&[id]).is_empty() {
+            return;
+        }
+        let Some(node) = self.tree().node(id) else {
+            return;
+        };
+        let name = name.trim();
+        if node.name() == name {
+            return;
+        }
+        if name.is_empty() {
+            self.fail(tr!("object-rename-empty"));
+            return;
+        }
+        self.execute(Command::Rename {
+            id,
+            name: name.into(),
+        });
+    }
+
+    fn rename_objects(&mut self, changes: Vec<(NodeId, String)>) {
+        let mut commands = Vec::new();
+        for (id, name) in changes {
+            let Some(node) = self.tree().node(id) else {
+                continue;
+            };
+            if self.object_targets(&[id]).is_empty() {
+                continue;
+            }
+            let name = name.trim();
+            if name.is_empty() {
+                self.fail(tr!("object-rename-empty"));
+                return;
+            }
+            if name != node.name() {
+                commands.push(Command::Rename {
+                    id,
+                    name: name.into(),
+                });
+            }
+        }
+        self.execute_object_group(MacroKind::RenameObjects, commands);
+    }
+
+    fn capture_objects(&self, ids: &[NodeId]) -> Vec<NodeCopy> {
+        self.object_targets(ids)
+            .into_iter()
+            .filter_map(|id| NodeCopy::capture(self.tree(), id).ok())
+            .collect()
+    }
+
+    fn copy_objects(&mut self, ids: &[NodeId]) {
+        let copies = self.capture_objects(ids);
+        if copies.is_empty() {
+            return;
+        }
+        match stokesforge_persistence::clipboard::encode_objects(&self.clipboard_origin(), &copies)
+        {
+            Ok(text) => self.object_clipboard_output = Some(text),
+            Err(err) => self.fail(errors::file::error_message(&err)),
+        }
+    }
+
+    fn next_object_copy_name(&self, parent: NodeId, origin: &str) -> String {
+        (1u64..)
+            .map(|number| {
+                tr!(
+                    "sheet-copy-name",
+                    name = origin,
+                    number = number.to_string()
+                )
+            })
+            .find(|name| {
+                self.tree()
+                    .children(parent)
+                    .unwrap_or_default()
+                    .iter()
+                    .all(|id| self.tree().node(*id).is_none_or(|node| node.name() != name))
+            })
+            .unwrap_or_else(|| origin.to_string())
+    }
+
+    fn duplicate_objects(&mut self, ids: &[NodeId]) {
+        let copies = self.capture_objects(ids);
+        if copies.is_empty() {
+            return;
+        }
+        self.insert_object_copies(copies, None, true);
+    }
+
+    fn paste_objects(&mut self, parent: NodeId, text: &str) {
+        let (origin, copies) = match stokesforge_persistence::clipboard::decode_objects(text) {
+            Ok(value) => value,
+            Err(_) => {
+                self.fail(tr!("object-clipboard-invalid"));
+                return;
+            }
+        };
+        if origin != self.clipboard_origin()
+            && copies.iter().any(|copy| {
+                copy.nodes()
+                    .iter()
+                    .any(|node| matches!(node.kind(), NodeKind::Graph { .. }))
+            })
+        {
+            self.fail(tr!("object-clipboard-graph-external"));
+            return;
+        }
+        self.insert_object_copies(copies, Some(parent), false);
+    }
+
+    fn insert_object_copies(
+        &mut self,
+        copies: Vec<NodeCopy>,
+        parent: Option<NodeId>,
+        duplicate: bool,
+    ) {
+        let kind = if duplicate {
+            MacroKind::DuplicateObjects
+        } else {
+            MacroKind::PasteObjects
+        };
+        if self.handle.begin_macro(kind).is_err() {
+            return;
+        }
+        let mut created = Vec::new();
+        for copy in copies {
+            let source = copy.root().id();
+            let destination = parent
+                .or(copy.root().parent())
+                .unwrap_or(self.tree().root());
+            let name = self.next_object_copy_name(destination, copy.root().name());
+            let before = self
+                .tree()
+                .children(destination)
+                .unwrap_or_default()
+                .to_vec();
+            if let Err(err) = self.handle.execute(Command::InsertCopy {
+                parent: destination,
+                copy,
+                name,
+            }) {
+                let _ = self.handle.abort_macro();
+                self.refresh();
+                self.fail(errors::session::error_message(&err));
+                return;
+            }
+            self.refresh();
+            if let Some(id) = self
+                .tree()
+                .children(destination)
+                .unwrap_or_default()
+                .iter()
+                .find(|id| !before.contains(id))
+            {
+                created.push((source, *id, duplicate));
+            }
+        }
+        if let Err(err) = self.handle.end_macro() {
+            self.fail(errors::session::error_message(&err));
+        } else {
+            self.copied_objects.extend(created);
+            self.notice(history_text(&HistoryLabel::Macro(kind)));
+        }
+        self.refresh();
+    }
+
+    fn request_delete_objects(&mut self, ids: Vec<NodeId>) {
+        let ids = self.object_targets(&ids);
+        if ids.is_empty() {
+            return;
+        }
+        if ids.len() > 1
+            || ids.iter().any(|id| {
+                self.tree()
+                    .walk(*id)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|child| {
+                        self.tree()
+                            .node(*child)
+                            .is_some_and(|n| matches!(n.kind(), NodeKind::Workbook { .. }))
+                    })
+            })
+        {
+            self.pending_object_delete = ids;
+        } else {
+            self.delete_objects(&ids);
+        }
+    }
+
+    fn delete_objects(&mut self, ids: &[NodeId]) {
+        let commands = self
+            .object_targets(ids)
+            .into_iter()
+            .map(|id| Command::RemoveNode { id })
+            .collect();
+        self.execute_object_group(MacroKind::DeleteObjects, commands);
+    }
+
+    fn move_objects(&mut self, ids: &[NodeId], parent: NodeId) {
+        let index = self.tree().children(parent).map_or(0, <[NodeId]>::len);
+        let commands = self
+            .object_targets(ids)
+            .into_iter()
+            .filter(|id| {
+                self.tree()
+                    .node(*id)
+                    .is_some_and(|node| node.parent() != Some(parent))
+            })
+            .enumerate()
+            .map(|(offset, id)| Command::Move {
+                id,
+                new_parent: parent,
+                index: index + offset,
+            })
+            .collect();
+        self.execute_object_group(MacroKind::MoveObjects, commands);
+    }
+
+    fn execute_object_group(&mut self, kind: MacroKind, commands: Vec<Command>) {
+        if commands.is_empty() || self.handle.begin_macro(kind).is_err() {
+            return;
+        }
+        for command in commands {
+            if let Err(err) = self.handle.execute(command) {
+                let _ = self.handle.abort_macro();
+                self.refresh();
+                self.fail(errors::session::error_message(&err));
+                return;
+            }
+        }
+        if let Err(err) = self.handle.end_macro() {
+            self.fail(errors::session::error_message(&err));
+        } else {
+            self.notice(history_text(&HistoryLabel::Macro(kind)));
+        }
+        self.refresh();
+    }
+
     /// Feuille dont l'onglet est en cours de renommage.
     pub fn renaming_sheet(&self) -> Option<NodeId> {
         self.renaming_sheet
@@ -5514,6 +5874,10 @@ impl AppState {
     /// [`external_clipboard_from_text`]. Voir [`AppState::apply_paste`] pour
     /// la matrice de comportement complète.
     fn paste(&mut self, sheet: NodeId, text: String) {
+        if stokesforge_persistence::clipboard::is_object_clipboard(&text) {
+            self.fail(tr!("object-clipboard-use-manager"));
+            return;
+        }
         let Some(selection) = self.selection.get(&sheet) else {
             self.fail("Aucune cellule sélectionnée pour coller".to_string());
             return;

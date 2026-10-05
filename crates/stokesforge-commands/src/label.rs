@@ -50,6 +50,16 @@ impl ColumnRef {
 pub enum MacroKind {
     /// Coller des cellules.
     PasteCells,
+    /// Coller des objets du projet.
+    PasteObjects,
+    /// Dupliquer les objets sélectionnés.
+    DuplicateObjects,
+    /// Supprimer les objets sélectionnés.
+    DeleteObjects,
+    /// Déplacer les objets sélectionnés.
+    MoveObjects,
+    /// Renommer la sélection du Project Manager.
+    RenameObjects,
     /// Effacer la sélection de la grille.
     ClearSelection,
     /// Appliquer la fenêtre des propriétés d'un graphe.
@@ -68,8 +78,13 @@ pub enum MacroKind {
 
 impl MacroKind {
     /// Toutes les natures de groupe, pour les tests exhaustifs.
-    pub const ALL: [MacroKind; 8] = [
+    pub const ALL: [MacroKind; 13] = [
         MacroKind::PasteCells,
+        MacroKind::PasteObjects,
+        MacroKind::DuplicateObjects,
+        MacroKind::DeleteObjects,
+        MacroKind::MoveObjects,
+        MacroKind::RenameObjects,
         MacroKind::ClearSelection,
         MacroKind::GraphProperties,
         MacroKind::RefreshFromFile,
@@ -235,6 +250,11 @@ impl fmt::Display for MacroKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             MacroKind::PasteCells => "Paste",
+            MacroKind::PasteObjects => "Paste Objects",
+            MacroKind::DuplicateObjects => "Duplicate Objects",
+            MacroKind::DeleteObjects => "Delete Objects",
+            MacroKind::MoveObjects => "Move Objects",
+            MacroKind::RenameObjects => "Rename Objects",
             MacroKind::ClearSelection => "Clear Selection",
             MacroKind::GraphProperties => "Edit Graph Properties",
             MacroKind::RefreshFromFile => "Refresh from File",

@@ -177,7 +177,7 @@ use plot_settings::{column_metadata_window, plot_settings_window};
 use shortcuts::{
     collect_undo_redo_shortcuts, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT,
     SHORTCUT_IMPORT_QWERTY, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
-    SHORTCUT_RENAME_SHEET, SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS,
+    SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS,
 };
 use tab::{tab_for_window, tab_node, Tab};
 use window_detach::{DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel};
@@ -516,7 +516,10 @@ impl StokesForgeApp {
 
     /// Consomme les raccourcis au niveau du contexte et en fait des actions.
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        if self.state.new_project_pending() || self.state.pending_sheet_delete().is_some() {
+        if self.state.new_project_pending()
+            || self.state.pending_sheet_delete().is_some()
+            || !self.state.pending_object_delete().is_empty()
+        {
             return;
         }
         let mut save_as = false;
@@ -525,10 +528,13 @@ impl StokesForgeApp {
         let mut export = false;
         // Les gestes de feuille ne s'appliquent pas pendant une saisie dans un
         // champ, ni pendant l'édition du nom d'un onglet.
-        let typing = keyboard_focus_outside_grid(ctx) || self.state.renaming_sheet().is_some();
-        let active_sheet = self
-            .active_book()
-            .and_then(|book| self.state.selected_sheet_in(book));
+        let typing = keyboard_focus_outside_grid(ctx)
+            || self.state.renaming_sheet().is_some()
+            || project_manager::has_focus(ctx);
+        let active_sheet = self.active_content_tab(ctx).and_then(|tab| match tab {
+            Tab::Book(book) => self.state.selected_sheet_in(book),
+            _ => None,
+        });
         ctx.input_mut(|input| {
             if input.consume_shortcut(&SHORTCUT_NEW_PROJECT) && self.state.can_new_project() {
                 actions.push(Action::NewProject {
@@ -553,9 +559,6 @@ impl StokesForgeApp {
             }
             if !typing {
                 if let Some(sheet) = active_sheet {
-                    if input.consume_shortcut(&SHORTCUT_RENAME_SHEET) {
-                        actions.push(Action::BeginRenameSheet(sheet));
-                    }
                     if input.consume_shortcut(&SHORTCUT_DUPLICATE_SHEET) {
                         actions.push(Action::DuplicateSheet(sheet));
                     }
@@ -961,7 +964,7 @@ impl StokesForgeApp {
             // construction qu'il n'est jamais recouvert par lui ni ne le
             // recouvre, comme la barre de menu (`egui::Panel::top`) peinte
             // plus haut.
-            self.project_manager_panel(ui, open_requests, close_requests, active_tab);
+            self.project_manager_panel(ui, open_requests, close_requests, active_tab, actions);
         }
     }
 
@@ -1090,6 +1093,41 @@ impl StokesForgeApp {
             ) {
                 DialogOutcome::Accept => actions.push(Action::ConfirmNewProject(true)),
                 DialogOutcome::Cancel => actions.push(Action::ConfirmNewProject(false)),
+                DialogOutcome::Open => {}
+            }
+        }
+        if !self.state.pending_object_delete().is_empty() {
+            actions.clear();
+            let ids = self.state.pending_object_delete();
+            let names = ids
+                .iter()
+                .filter_map(|id| self.state.tree().node(*id))
+                .map(|n| n.name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let users = self.state.object_users(ids);
+            let label = tr!("action-delete-project-object");
+            let hint = tr!("sheet-delete-accept", "hint");
+            match modal_dialog_with(
+                ctx,
+                egui::Id::new("stokesforge_delete_objects"),
+                &tr!("object-delete-title"),
+                egui::vec2(480.0, 170.0),
+                DialogFooter {
+                    accept_label: &label,
+                    accept_hint: &hint,
+                    accept_enabled: true,
+                },
+                |_| {},
+                |ui| {
+                    ui.label(tr!("object-delete-confirm", names = names.as_str()));
+                    if !users.is_empty() {
+                        ui.label(tr!("object-delete-used", graphs = users.join(", ")));
+                    }
+                },
+            ) {
+                DialogOutcome::Accept => actions.push(Action::ConfirmDeleteObjects(true)),
+                DialogOutcome::Cancel => actions.push(Action::ConfirmDeleteObjects(false)),
                 DialogOutcome::Open => {}
             }
         }
@@ -1267,6 +1305,48 @@ impl StokesForgeApp {
             _ => None,
         };
         self.state.dispatch(action);
+        if let Some(text) = self.state.take_object_clipboard_text() {
+            ctx.copy_text(text);
+        }
+        for (source, destination, duplicate) in self.state.take_copied_objects() {
+            let source_open = self
+                .floating_tabs
+                .iter()
+                .chain(self.detached_tabs.keys())
+                .any(|tab| tab_node(*tab) == source && !self.hidden_tabs.contains(tab));
+            if !duplicate || source_open {
+                if let Some((id, kind)) = window_nodes(&self.state.project_tree())
+                    .into_iter()
+                    .find(|(id, _)| *id == destination)
+                {
+                    self.open_tab(tab_for_window(id, kind));
+                }
+            }
+        }
+        let removed: Vec<_> = self
+            .floating_tabs
+            .iter()
+            .chain(self.detached_tabs.keys())
+            .copied()
+            .filter(|tab| self.state.tree().node(tab_node(*tab)).is_none())
+            .collect();
+        for tab in &removed {
+            if self.detached_tabs.remove(tab).is_some() {
+                ctx.send_viewport_cmd_to(
+                    egui::ViewportId::from_hash_of(tab),
+                    egui::ViewportCommand::Close,
+                );
+            }
+            self.hidden_tabs.remove(tab);
+            self.pm_selection.remove(tab);
+            self.collapsed_tabs.remove(tab);
+            self.graph_views.remove(&tab_node(*tab));
+            if self.active_detached == Some(*tab) {
+                self.active_detached = None;
+            }
+        }
+        self.close_floating_tabs(removed);
+
         if self.state.revision() != revision_before {
             if let Some((graph, moved, removed)) = selection_change {
                 self.update_selection_after_action(graph, moved, removed);
@@ -1287,7 +1367,10 @@ impl StokesForgeApp {
         if replaces_project && self.state.snapshot().epoch != epoch_before {
             self.forget_project_views(ctx);
         }
-        if self.state.new_project_pending() {
+        if self.state.new_project_pending()
+            || self.state.pending_sheet_delete().is_some()
+            || !self.state.pending_object_delete().is_empty()
+        {
             ctx.request_repaint();
             return true;
         }
@@ -1367,6 +1450,7 @@ impl StokesForgeApp {
 
     /// Un remplacement d’identité oublie les vues qui pourraient viser des NodeId réemployés.
     fn forget_project_views(&mut self, ctx: &egui::Context) {
+        project_manager::forget_views(ctx);
         // Les NodeId peuvent être réemployés : oublier toutes les
         // vues et géométries de l'ancienne identité avant de peindre.
         for tab in self.detached_tabs.keys() {
@@ -1726,6 +1810,65 @@ mod tests {
         assert!(!app.state.new_project_pending());
         assert_eq!(app.state.cell_text(column, 0), "42");
         session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn supprimer_ferme_les_vues_et_annuler_ne_les_rouvre_pas() {
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Graph(graph));
+        app.detach_tab(Tab::Graph(graph));
+        assert!(app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        app.dispatch_actions(&context, vec![Action::DeleteObjects(vec![graph])]);
+        assert!(!app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        assert!(!app.state.tree().contains(graph));
+        app.dispatch_actions(&context, vec![Action::Undo]);
+        assert!(app.state.tree().contains(graph));
+        assert!(!app.floating_tabs.contains(&Tab::Graph(graph)));
+        assert!(!app.detached_tabs.contains_key(&Tab::Graph(graph)));
+        app.open_tab(Tab::Book(book));
+        app.dispatch_actions(&context, vec![Action::DeleteObjects(vec![book])]);
+        assert!(
+            app.floating_tabs.contains(&Tab::Book(book)),
+            "en attente de confirmation"
+        );
+        app.dispatch_actions(&context, vec![Action::ConfirmDeleteObjects(true)]);
+        assert!(!app.floating_tabs.contains(&Tab::Book(book)));
+        app.dispatch_actions(&context, vec![Action::Undo]);
+        assert!(app.state.tree().contains(book));
+        assert!(!app.floating_tabs.contains(&Tab::Book(book)));
+    }
+
+    #[test]
+    fn dupliquer_un_classeur_conserve_son_etat_ouvert_ou_ferme() {
+        let (session, _) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        let book = app.state.books()[0].0;
+        app.close_floating_tabs(vec![Tab::Book(book)]);
+        app.dispatch_actions(&context, vec![Action::DuplicateObjects(vec![book])]);
+        let closed = app
+            .state
+            .books()
+            .into_iter()
+            .find(|(_, name)| name == "Book1 copy 1")
+            .unwrap()
+            .0;
+        assert!(!app.floating_tabs.contains(&Tab::Book(closed)));
+        app.open_tab(Tab::Book(book));
+        app.dispatch_actions(&context, vec![Action::DuplicateObjects(vec![book])]);
+        let opened = app
+            .state
+            .books()
+            .into_iter()
+            .find(|(_, name)| name == "Book1 copy 2")
+            .unwrap()
+            .0;
+        assert!(app.floating_tabs.contains(&Tab::Book(opened)));
     }
 
     #[test]

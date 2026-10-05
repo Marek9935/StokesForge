@@ -11,7 +11,7 @@
 //! mutation du crate. Chacune valide **tout** avant d'écrire quoi que ce soit,
 //! pour qu'un échec laisse l'arbre inchangé.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use stokesforge_plot::SavedColors;
@@ -200,38 +200,10 @@ impl Tree {
         Ok(())
     }
 
-    /// Unicité des noms d'un arbre chargé : globale pour les fenêtres, entre
-    /// **tous** les frères directs par ailleurs — fenêtres comprises.
-    ///
-    /// A8 (`guide-de-correction-robustesse.md` §F9) — reproduit ici, à
-    /// l'identique, la portée de `check_name_available` : deux frères
-    /// directs ne partagent jamais un nom, quelle que soit leur nature.
-    /// Avant ce correctif, une fenêtre pouvait prendre le nom d'un dossier
-    /// frère (la branche « fenêtre » de `check_name_available` ne
-    /// regardait que les autres fenêtres, jamais ses frères directs) : un
-    /// dossier et une fenêtre homonymes rendaient le dossier introuvable
-    /// par son chemin canonique selon l'ordre d'arrivée des deux
-    /// (`b11_path_of_se_re_resout_toujours_sur_le_meme_noeud`). Le sens du
-    /// correctif est de refuser plus (§6 du guide) : `check_name_available`
-    /// compare désormais aussi une fenêtre à ses frères directs, et ce
-    /// contrôle-ci reprend la même règle, sans exception ni dépendance à
-    /// l'ordre des enfants dans `children()` (une première version de ce
-    /// correctif faisait dépendre le verdict de cette position — « le
-    /// premier arrivé gagne le nom » — et un balayage aléatoire,
-    /// `b14_laller_retour_disque_tient_a_chaque_pas`, a montré qu'un simple
-    /// déplacement, `Move`, suffit à la changer sans rien changer aux noms,
-    /// faisant rejeter au chargement un arbre pourtant valide).
+    /// Unicité entre tous les frères directs, fenêtres comprises (#105).
+    /// La résolution canonique porte le dossier ; un nom de fenêtre seul
+    /// reste utilisable s'il désigne une seule fenêtre dans le projet.
     fn validate_loaded_names(&self) -> CoreResult<()> {
-        let mut windows: HashSet<&str> = HashSet::new();
-        for node in self.nodes.values() {
-            if node.kind().is_window() && !windows.insert(node.name()) {
-                return Err(CoreError::Structure(format!(
-                    "two windows share the name {}",
-                    node.name()
-                )));
-            }
-        }
-
         for (id, node) in &self.nodes {
             let mut seen: HashMap<&str, NodeId> = HashMap::new();
             for &child in node.children() {
@@ -242,9 +214,7 @@ impl Tree {
                 // available` (voir sa doc, A8) refuse maintenant qu'une
                 // fenêtre prenne le nom d'un dossier frère tout autant que
                 // l'inverse — deux frères directs ne partagent jamais un
-                // nom, quelle que soit leur nature. L'unicité globale des
-                // fenêtres (au-delà de la fratrie directe) reste vérifiée
-                // séparément, ci-dessus.
+                // nom, quelle que soit leur nature.
                 if let Some(&earlier) = seen.get(child_node.name()) {
                     return Err(CoreError::Structure(format!(
                         "{child} ({}) cannot be named {} in {id}: {earlier} \
@@ -392,7 +362,8 @@ impl Tree {
         count
     }
 
-    /// Fenêtre portant ce nom (unique à l'échelle du projet), ou `None`.
+    /// Première fenêtre portant ce nom, ou `None`. Sert à éviter les noms
+    /// automatiques déjà pris ; `resolve_parsed` refuse les noms ambigus.
     ///
     /// D2 (option 2, `guide-de-correction-robustesse.md` §F7) — parcours
     /// direct qui s'arrête au premier nœud trouvé, au lieu de passer par
@@ -527,13 +498,10 @@ impl Tree {
     ///   courant dans le modèle — c'est une notion d'interface, pas de données —
     ///   donc la descente part toujours de la racine et `Manips/[Book1]Sheet1`
     ///   désigne le même nœud que `/Manips/[Book1]Sheet1` ;
-    /// - une fenêtre se cherche par son nom seul, **unique à l'échelle du
-    ///   projet** (invariant tenu par `check_name_available`). Un préfixe de
-    ///   dossiers ne sert donc jamais à la trouver, seulement à vérifier
-    ///   ensuite qu'elle est bien là où le chemin la dit. C'est ce qui permet
-    ///   d'écrire `[Book1]Sheet1!ColA` sans savoir où le classeur a été rangé,
-    ///   et ce qui fait qu'un préfixe faux est une erreur explicite plutôt
-    ///   qu'un « introuvable » trompeur.
+    /// - une fenêtre avec un préfixe se cherche dans ce dossier ;
+    /// - sans préfixe, son nom doit être non ambigu à l'échelle du projet.
+    ///
+    /// Le chemin canonique est enraciné, même pour une fenêtre de la racine.
     ///
     /// La comparaison des noms est celle de `child_by_name` et `find_window` :
     /// égalité exacte, donc **sensible à la casse**.
@@ -555,20 +523,41 @@ impl Tree {
             return Ok(current);
         };
 
-        let window = self
-            .find_window(window_name)
-            .ok_or_else(|| CoreError::Path(format!("window not found: [{window_name}]")))?;
-
-        if !path.folders.is_empty() {
-            let actual = self.folder_names_above(window)?;
-            if actual != path.folders {
+        let window = if path.rooted || !path.folders.is_empty() {
+            let mut parent = self.root();
+            for segment in &path.folders {
+                parent = self
+                    .folder_child_by_name(parent, segment)?
+                    .ok_or_else(|| CoreError::Path(format!("folder not found: {segment}")))?;
+            }
+            self.child_by_name(parent, window_name)?
+                .filter(|id| self.node(*id).is_some_and(|n| n.kind().is_window()))
+                .ok_or_else(|| {
+                    CoreError::Path(format!(
+                        "window not found in {}: [{window_name}]",
+                        display_folders(&path.folders)
+                    ))
+                })?
+        } else {
+            let mut found = None;
+            let mut ambiguous = false;
+            self.visit_windows(|id| {
+                if self.node(id).is_some_and(|n| n.name() == window_name) {
+                    if found.is_some() {
+                        ambiguous = true;
+                        return true;
+                    }
+                    found = Some(id);
+                }
+                false
+            });
+            if ambiguous {
                 return Err(CoreError::Path(format!(
-                    "[{window_name}] is not in folder {} but in {}",
-                    display_folders(&path.folders),
-                    display_folders(&actual)
+                    "ambiguous window name: [{window_name}]; use its folder path"
                 )));
             }
-        }
+            found.ok_or_else(|| CoreError::Path(format!("window not found: [{window_name}]")))?
+        };
 
         let Some(sheet_name) = path.sheet.as_deref() else {
             return Ok(window);
@@ -619,32 +608,10 @@ impl Tree {
     fn check_name_available(
         &self,
         parent: Option<NodeId>,
-        kind: &NodeKind,
+        _kind: &NodeKind,
         name: &str,
         ignore: Option<NodeId>,
     ) -> CoreResult<()> {
-        if kind.is_window() {
-            for id in self.windows() {
-                if Some(id) == ignore {
-                    continue;
-                }
-                if self.node(id).is_some_and(|node| node.name() == name) {
-                    return Err(CoreError::DuplicateName(format!(
-                        "{name} (another window in the project already has this name)"
-                    )));
-                }
-            }
-            // A8 (`guide-de-correction-robustesse.md` §F9) — l'unicité
-            // globale entre fenêtres ne suffit pas : une fenêtre reste aussi
-            // un frère parmi d'autres pour la résolution de chemin
-            // (`resolve_parsed`), et ne doit donc pas pouvoir prendre le nom
-            // d'un dossier frère — sans quoi `path_of ∘ resolve_path` cesse
-            // d'être l'identité pour le dossier homonyme, selon l'ordre
-            // d'arrivée des deux. PAS de retour anticipé ici : on continue
-            // vers le contrôle de frère générique ci-dessous, qui s'applique
-            // maintenant à toute nature de nœud, fenêtre comprise.
-        }
-
         let Some(parent) = parent else {
             return Ok(()); // nœud sans parent (racine) : pas de frère
         };
@@ -1184,15 +1151,15 @@ mod tests {
 
     #[test]
     fn resolve_finds_a_window_without_its_folder_prefix() {
-        // Un nom de fenêtre est unique à l'échelle du projet : le préfixe n'est
-        // pas nécessaire pour trouver le classeur, seulement pour le vérifier.
+        // Un nom non ambigu peut s’écrire sans préfixe ; le chemin canonique
+        // désigne toujours le dossier précis, sans résolution implicite.
         let f = Fixture::new();
         assert_eq!(f.tree.resolve("[Book1]Sheet1").unwrap(), f.sheet);
         let err = f.tree.resolve("/Ailleurs/[Book1]Sheet1").unwrap_err();
         let CoreError::Path(message) = err else {
             panic!("attendu Path, obtenu {err:?}");
         };
-        assert!(message.contains("is not in folder"), "{message}");
+        assert!(message.contains("folder not found"), "{message}");
     }
 
     #[test]

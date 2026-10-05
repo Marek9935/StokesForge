@@ -1051,6 +1051,10 @@ impl History {
                 project.duplicate_worksheet(sheet, &name)?;
                 Ok(structural(before, project, label))
             }
+            Command::InsertCopy { parent, copy, name } => {
+                project.insert_copy(parent, &copy, &name)?;
+                Ok(structural(before, project, label))
+            }
             Command::AddGraph { parent, name, spec } => {
                 project.add_graph(parent, name.as_deref(), spec)?;
                 Ok(structural(before, project, label))
@@ -1320,6 +1324,7 @@ impl History {
             | Command::AddEmptyWorkbook { .. }
             | Command::AddWorksheet { .. }
             | Command::DuplicateWorksheet { .. }
+            | Command::InsertCopy { .. }
             | Command::AddGraph { .. }
             | Command::AddMatrix { .. }
             | Command::AddNote { .. }
@@ -1931,6 +1936,7 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::AddEmptyWorkbook { .. }
         | Command::AddWorksheet { .. }
         | Command::DuplicateWorksheet { .. }
+        | Command::InsertCopy { .. }
         | Command::AddGraph { .. }
         | Command::AddMatrix { .. }
         | Command::AddNote { .. }

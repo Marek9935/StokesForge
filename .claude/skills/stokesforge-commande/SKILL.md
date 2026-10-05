@@ -151,3 +151,12 @@ dans `stokesforge-robustesse/src/lib.rs`.
 - [ ] `Action` + `dispatch` + rafraîchissement de l'instantané côté UI
 - [ ] tests : undo/redo, macro LIFO, aller-retour `.stf`, `b21`
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts
+
+## Copie générique (#105–106)
+
+Réutiliser `NodeCopy::capture` et `Command::InsertCopy` pour les nouvelles
+natures : elles sont copiables par défaut. Ne transporter ni arbre complet ni
+allocateur source dans une commande. `Project::insert_copy` alloue chaque ID
+au collage et restaure l'arbre en cas d'échec ; `DuplicateWorksheet` l'utilise
+également. Les groupes utilisent les `MacroKind::*Objects` ; les graphes gardent
+leurs références dans le même projet, le transport entre projets est #107.

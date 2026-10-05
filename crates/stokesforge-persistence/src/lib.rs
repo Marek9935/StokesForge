@@ -92,6 +92,7 @@
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+pub mod clipboard;
 mod convert;
 mod error;
 mod schema;

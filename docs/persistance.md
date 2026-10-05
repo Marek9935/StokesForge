@@ -255,3 +255,21 @@ Ces champs absents se relisent à `true` : les fichiers antérieurs gardent
 tous leurs titres visibles. Le numéro de format ne change pas pour l'ajout de
 ces champs avec valeur par défaut. Le libellé d'une commande `EditPlotSpec`
 appartient à l'historique en mémoire ; il n'est pas enregistré dans le fichier.
+
+## Presse-papiers d'objets (#105)
+
+`clipboard::{encode_objects, decode_objects}` réutilise `NodeRecord` et les
+conversions du `.stf`, sans toucher au format des fichiers. Le transport est
+un texte commençant par `StokesForge Objects` puis un saut de ligne, suivi
+d'un corps MessagePack encodé en hexadécimal. Il ne porte pas de numéro de
+version : les instances doivent exécuter la même version du logiciel.
+
+Le corps contient une origine opaque et une liste d'objets, chacun en parcours
+préfixe avec sa descendance. Chaque objet lu est validé comme un arbre autonome,
+avec les mêmes bornes d'identifiants et les mêmes règles de contenance que le
+fichier. Les valeurs et métadonnées sont conservées, notamment les NaN bit à bit,
+les cellules mixtes et la provenance d'import. Les identifiants source décrivent
+uniquement la structure du transport : ils sont remplacés à l'insertion.
+L'origine distingue le projet courant d'un autre pour empêcher un graphe
+étranger de référencer accidentellement des colonnes ayant les mêmes numéros.
+Elle change après un chargement ou un nouveau projet ; elle n'est pas persistée.

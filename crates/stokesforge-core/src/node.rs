@@ -86,7 +86,7 @@ pub enum NodeKind {
 
 impl NodeKind {
     /// Vrai pour `Workbook`, `Graph`, `Matrix`, `Note` — les nœuds adressables
-    /// par `[Nom]`, dont le nom est unique à l'échelle du projet.
+    /// par `[Nom]`, dont le nom est unique dans leur dossier parent (#105).
     ///
     /// Vrai aussi pour `Unknown` : dans le schéma sur disque (`schema.rs`),
     /// une nature de nœud est un enfant plat de `Folder` au même titre que

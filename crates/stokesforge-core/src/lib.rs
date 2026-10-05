@@ -51,6 +51,7 @@
 )]
 
 pub mod column;
+pub mod copy;
 pub mod error;
 pub mod formula;
 pub mod id;
@@ -65,6 +66,7 @@ pub use column::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, ImportSource, MetaLine,
     MixedCell, NumericStatus, ValueBlock, ValuesDelta,
 };
+pub use copy::NodeCopy;
 pub use error::{CoreError, CoreResult};
 pub use formula::{
     evaluate as evaluate_formula, topological_order, Formula, FormulaError, FormulaEvaluation,

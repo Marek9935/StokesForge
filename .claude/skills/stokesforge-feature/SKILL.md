@@ -105,7 +105,8 @@ Deux résultats → le changement se fait deux fois, ou mieux : **se factorise**
 Une seule écriture ne suffit pas : la vue détachée a **son propre**
 `AppState`. Un état d'interface ajouté à `AppState` (édition en cours,
 confirmation, renommage…) n'y existe que s'il est recopié par
-`fork_for_detached_view`, resynchronisé par `sync_detached_snapshot` ou
+`fork_for_detached_view`, resynchronisé par `sync_detached_snapshot` /
+`sync_detached_sheet_editor` ou
 rapatrié par `adopt_detached_book_view` ; sinon le geste marche en flottant
 et pas en détaché (constaté sur le renommage de feuille, #106). De même,
 `collect_shortcuts` lit l'entrée du viewport racine : un raccourci global
@@ -117,6 +118,18 @@ Une factorisation supplémentaire est légitime quand elle ne bute pas sur la
 contrainte `'static` ci-dessus — un bandeau de boutons qui ne fait que pousser
 des `Action` n'y bute pas. Le dire explicitement dans le compte rendu : « j'ai
 factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
+
+F2 est réservé aux gestionnaires (#130) : jamais aux feuilles. Ctrl+D des
+feuilles se lit dans le viewport du classeur, sans secours vers un classeur
+détaché quand un graphe est actif. Les éditeurs et le focus du Project Manager
+sont indexés par viewport dans la mémoire d'egui ; calculer les IDs **avant**
+un `Context::data_mut`, sans rappel au contexte sous son verrou.
+
+Copier un objet (#105) réutilise `NodeCopy` / `InsertCopy`, quelle que soit sa
+nature. Les données sont figées au geste Copier ; la publication système passe
+par egui, le collage par `RequestPaste`. Un nom est unique dans le dossier
+parent, le chemin canonique porte ce dossier. Un graphe dans son projet garde
+ses références ; le transfert de ses données entre projets relève de #107.
 
 ## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
 

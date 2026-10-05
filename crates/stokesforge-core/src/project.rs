@@ -311,24 +311,68 @@ impl Project {
             .iter()
             .position(|&child| child == sheet)
             .map_or(0, |at| at + 1);
-        let columns: Vec<(String, Column)> = source
-            .children()
-            .iter()
-            .filter_map(|&id| self.tree.node(id))
-            .filter_map(|node| Some((node.name().to_string(), node.as_column()?.clone())))
-            .collect();
-        let copy = self.insert_node(
-            book,
-            index,
-            name,
-            NodeKind::Worksheet {
-                columns: Vec::new(),
-            },
-        )?;
-        for (column_name, column) in columns {
-            self.add_column(copy, None, Some(&column_name), column)?;
+        let content = crate::NodeCopy::capture(&self.tree, sheet)?;
+        let before = self.tree.clone();
+        let result = self.insert_copy(book, &content, name).and_then(|copy| {
+            self.move_node(copy, book, index)?;
+            Ok(copy)
+        });
+        if result.is_err() {
+            self.tree = before;
         }
-        Ok(copy)
+        result
+    }
+
+    /// Colle un sous-arbre avec des identifiants créés dans ce projet.
+    /// Les graphes conservent leurs références : le transfert de leurs données
+    /// entre projets relève d'un autre geste (#107). Tout échec restaure l'arbre,
+    /// mais ne remet jamais en arrière l'allocateur.
+    pub fn insert_copy(
+        &mut self,
+        parent: NodeId,
+        copy: &crate::NodeCopy,
+        name: &str,
+    ) -> CoreResult<NodeId> {
+        let before = self.tree.clone();
+        let result = (|| {
+            let mut ids = std::collections::HashMap::new();
+            let mut root = None;
+            for source in copy.nodes() {
+                let destination = if source.id() == copy.root().id() {
+                    parent
+                } else {
+                    source
+                        .parent()
+                        .and_then(|id| ids.get(&id).copied())
+                        .ok_or_else(|| CoreError::Structure("copy is not in prefix order".into()))?
+                };
+                let mut kind = source.kind().clone();
+                // Une version venue d'un autre projet ne doit jamais être
+                // réattribuée plus tard à un autre contenu de cette colonne.
+                if let NodeKind::Column(column) = &kind {
+                    self.column_version_counter = self
+                        .column_version_counter
+                        .max(column.version().saturating_add(1));
+                }
+                if let Some(children) = kind.children_mut() {
+                    children.clear();
+                }
+                let index = self.tree.children(destination)?.len();
+                let id = self.insert_node(
+                    destination,
+                    index,
+                    if root.is_none() { name } else { source.name() },
+                    kind,
+                )?;
+                ids.insert(source.id(), id);
+                root.get_or_insert(id);
+            }
+            root.ok_or_else(|| CoreError::Structure("empty copy".into()))
+        })();
+        if result.is_err() {
+            self.tree = before;
+        }
+        result
     }
 
     /// Insère une colonne à `index` (`None` → en fin). `name: None` → premier

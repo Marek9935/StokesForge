@@ -14,7 +14,7 @@ use eframe::egui;
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::tr;
 
-use super::shortcuts::{SHORTCUT_DUPLICATE_SHEET, SHORTCUT_RENAME_SHEET};
+use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 
 /// Hauteur fixe du panneau des onglets de feuille sous la grille.
 /// `book_contents` la réserve avant de construire la table : la hauteur
@@ -59,7 +59,9 @@ pub(super) struct TabStripOutput {
 /// des onglets sont cachés. Changer de feuille sélectionnée (au clavier, par
 /// script, ou par clic) fait défiler la bande juste assez pour montrer
 /// l'onglet actif et ses voisins ([`scroll_tab_strip_to_selected`]).
-pub(super) fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
+pub(super) fn tab_strip<
+    K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq + Send + Sync + 'static,
+>(
     ui: &mut egui::Ui,
     tabs: &[(K, String)],
     selected: K,
@@ -84,7 +86,9 @@ pub(super) fn tab_strip<K: Copy + PartialEq + Send + Sync + 'static>(
 /// par Échap), menu contextuel Renommer / Dupliquer / Supprimer. Les demandes
 /// remontent par `on_event` ; la bande ne touche jamais au modèle.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn tab_strip_with<K: Copy + PartialEq + Send + Sync + 'static>(
+pub(super) fn tab_strip_with<
+    K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq + Send + Sync + 'static,
+>(
     ui: &mut egui::Ui,
     tabs: &[(K, String)],
     selected: K,
@@ -221,10 +225,7 @@ fn tab_strip_tab_menu<K: Copy>(
     if let Some(ops) = config.ops {
         let ctx = ui.ctx().clone();
         if ui
-            .add(
-                egui::Button::new(tr!("action-rename-sheet"))
-                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_RENAME_SHEET)),
-            )
+            .add(egui::Button::new(tr!("action-rename-sheet")))
             .on_hover_text(tr!("action-rename-sheet", "hint"))
             .clicked()
         {
@@ -298,13 +299,13 @@ fn tab_strip_arrows(
     (step, arrows)
 }
 
-fn tab_strip_rename<K: Copy>(
+fn tab_strip_rename<K: Copy + std::hash::Hash + std::fmt::Debug>(
     ui: &mut egui::Ui,
     id: K,
     name: &str,
     requests: &mut TabStripRequests<K>,
 ) -> egui::Response {
-    let buffer_id = ui.id().with("tab_rename_buffer");
+    let buffer_id = ui.id().with(("tab_rename_buffer", id));
     let fresh = ui
         .memory(|memory| memory.data.get_temp::<String>(buffer_id))
         .is_none();
@@ -333,7 +334,10 @@ fn tab_strip_rename<K: Copy>(
     if escape {
         ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
         requests.events.push(TabEvent::CancelRename);
-    } else if !fresh && output.response.lost_focus() {
+    } else if ui.input(|input| input.key_pressed(egui::Key::Enter))
+        || (!fresh && (output.response.lost_focus() || !output.response.has_focus()))
+    {
+        output.response.surrender_focus();
         ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
         requests.events.push(TabEvent::CommitRename(id, text));
     } else {
@@ -342,7 +346,7 @@ fn tab_strip_rename<K: Copy>(
     output.response.response
 }
 
-fn tab_strip_tab<K: Copy + PartialEq>(
+fn tab_strip_tab<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
     ui: &mut egui::Ui,
     id: K,
     name: &str,
@@ -372,7 +376,7 @@ fn tab_strip_tab<K: Copy + PartialEq>(
     }
 }
 
-fn tab_strip_contents<K: Copy + PartialEq>(
+fn tab_strip_contents<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
     ui: &mut egui::Ui,
     config: &TabStripConfig<'_, K>,
     requests: &mut TabStripRequests<K>,
