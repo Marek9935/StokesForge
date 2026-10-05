@@ -833,9 +833,6 @@ object-manager-show-texts = Afficher les textes du graphique
 object-manager-show-scales = Afficher les échelles
     .hint = Liste les axes de chaque calque dans le gestionnaire d'objets, avec une case qui affiche ou masque d'un coup la ligne d'axe, les graduations et leurs libellés. Cachées par défaut.
 
-toolbar-object-manager = Barre du gestionnaire d’objets
-    .hint = Afficher ou masquer la barre du gestionnaire d’objets.
-
 menu-selected-content = Sélection
 action-rename-series = Renommer la série
 action-move-series-up = Déplacer vers le haut

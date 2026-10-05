@@ -837,9 +837,6 @@ object-manager-show-texts = Show graph texts
 object-manager-show-scales = Show scales
     .hint = Lists the axes of each layer in the Object Manager, with one checkbox that shows or hides the axis line, ticks and tick labels together. Hidden by default.
 
-toolbar-object-manager = Object Manager Toolbar
-    .hint = Show or hide the Object Manager toolbar.
-
 menu-selected-content = Selection
 action-rename-series = Rename Series
 action-move-series-up = Move Up

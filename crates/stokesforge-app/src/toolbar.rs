@@ -9,9 +9,9 @@
 //! `egui::Panel::top` : ni `egui::Window` brute (interdite,
 //! `aucune_fenetre_n_est_une_egui_window_brute`) ni `show_window_in_layer`.
 //!
-//! La disposition par défaut est écrite en dur : rangée 0 = `File`, `Tools`
-//! (puis `ObjectManager`, qui disparaîtra avec #109) ; rangée 1 = `Text`, large,
-//! seule sur sa rangée.
+//! La disposition par défaut est écrite en dur : rangée 0 = `File`, `Tools` ;
+//! rangée 1 = `Text`, large, seule sur sa rangée. Le panneau Object Manager
+//! se commande par View et son en-tête (#100) : sa barre est supprimée (#109).
 //!
 //! # Ce qui est pur, ce qui est egui
 //!
@@ -55,16 +55,10 @@ pub enum ToolbarId {
     Tools,
     /// Le format du texte (issue #63) : propre au graphe au premier plan.
     Text,
-    ObjectManager,
 }
 
 impl ToolbarId {
-    pub const ALL: [ToolbarId; 4] = [
-        ToolbarId::File,
-        ToolbarId::Tools,
-        ToolbarId::Text,
-        ToolbarId::ObjectManager,
-    ];
+    pub const ALL: [ToolbarId; 3] = [ToolbarId::File, ToolbarId::Tools, ToolbarId::Text];
 
     /// Nom de la barre : entrée du menu View.
     pub fn label(self) -> String {
@@ -72,7 +66,6 @@ impl ToolbarId {
             ToolbarId::File => tr!("toolbar-file"),
             ToolbarId::Tools => tr!("toolbar-tools"),
             ToolbarId::Text => tr!("toolbar-text"),
-            ToolbarId::ObjectManager => tr!("toolbar-object-manager"),
         }
     }
 
@@ -82,7 +75,6 @@ impl ToolbarId {
             ToolbarId::File => tr!("toolbar-file", "hint"),
             ToolbarId::Tools => tr!("toolbar-tools", "hint"),
             ToolbarId::Text => tr!("toolbar-text", "hint"),
-            ToolbarId::ObjectManager => tr!("toolbar-object-manager", "hint"),
         }
     }
 }
@@ -93,7 +85,7 @@ impl ToolbarId {
     pub const fn row(self) -> usize {
         match self {
             ToolbarId::Text => 1,
-            ToolbarId::File | ToolbarId::Tools | ToolbarId::ObjectManager => 0,
+            ToolbarId::File | ToolbarId::Tools => 0,
         }
     }
 }
@@ -332,7 +324,6 @@ pub struct BarEnv {
     /// Un graphe est au premier plan (sinon *Export* est grisé, comme le menu
     /// Graph est absent).
     pub export_enabled: bool,
-    pub object_manager_open: bool,
     pub shortcuts: ShortcutTexts,
     pub tools: ToolsContext,
     pub text_format: FormatTarget,
@@ -350,20 +341,6 @@ pub fn bar_contents(
     requests: &mut Vec<ToolbarRequest>,
 ) {
     match id {
-        ToolbarId::ObjectManager => {
-            if tool_button(
-                ui,
-                Icon::Graph,
-                tr!("action-object-manager"),
-                Some(tr!("action-object-manager", "hint")),
-                true,
-                env.object_manager_open,
-            ) {
-                requests.push(ToolbarRequest::Action(Box::new(
-                    Action::SetObjectManagerOpen(!env.object_manager_open),
-                )));
-            }
-        }
         ToolbarId::File => {
             let button = |ui: &mut egui::Ui,
                           icon,
@@ -1115,7 +1092,7 @@ mod tests {
         assert_eq!(
             layout.rows(),
             vec![
-                vec![ToolbarId::File, ToolbarId::Tools, ToolbarId::ObjectManager],
+                vec![ToolbarId::File, ToolbarId::Tools],
                 vec![ToolbarId::Text]
             ]
         );
@@ -1179,7 +1156,8 @@ mod tests {
         let layout = ToolbarLayout::from_json(&value);
         assert!(!layout.is_visible(ToolbarId::File));
         assert!(layout.is_visible(ToolbarId::Tools));
-        assert!(!layout.is_visible(ToolbarId::ObjectManager));
+        assert_eq!(layout.entries.len(), ToolbarId::ALL.len());
+        assert!(!layout.to_json().to_string().contains("object_manager"));
         // La place reste celle du logiciel, quoi que dise le fichier.
         assert_eq!(
             layout.rows(),
@@ -1191,7 +1169,6 @@ mod tests {
     #[test]
     fn une_barre_masquee_ne_se_peint_nulle_part() {
         let mut layout = ToolbarLayout::default();
-        layout.set_visible(ToolbarId::ObjectManager, false);
         layout.set_visible(ToolbarId::Text, false);
         layout.set_visible(ToolbarId::File, false);
         assert_eq!(layout.rows(), vec![vec![ToolbarId::Tools]]);
@@ -1202,7 +1179,6 @@ mod tests {
     #[test]
     fn la_visibilite_survit_a_l_ecriture() {
         let mut layout = ToolbarLayout::default();
-        layout.set_visible(ToolbarId::ObjectManager, false);
         layout.set_visible(ToolbarId::File, false);
         assert_eq!(ToolbarLayout::from_json(&layout.to_json()), layout);
     }

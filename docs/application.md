@@ -621,8 +621,9 @@ d'exécution du script, hors périmètre de cette tâche.
 contenu et leur place sont figés dans le logiciel, dans le panneau
 `stokesforge_toolbars` sous la barre de menu. Ni poignée, ni glisser-déposer,
 ni barre flottante ou verticale, ni logique de fenêtre étroite. Disposition en
-dur (`ToolbarId::row`) : rangée 0 = Fichier, Outils (puis Object Manager,
-jusqu'à #109) ; rangée 1 = Texte, large, seule sur sa rangée. Chaque barre se
+dur (`ToolbarId::row`) : rangée 0 = Fichier, Outils ; rangée 1 = Texte, large,
+seule sur sa rangée. La barre Object Manager est supprimée (#109) : le panneau
+se commande par View et son en-tête. Chaque barre se
 masque par le menu View ; seule cette **visibilité** est une préférence
 (`preferences.json`), jamais une donnée du `.stf`. Un ancien champ `placement`
 est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un

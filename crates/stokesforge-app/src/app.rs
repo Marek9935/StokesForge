@@ -887,7 +887,6 @@ impl StokesForgeApp {
         let bar_env = BarEnv {
             new_project_enabled: self.state.can_new_project(),
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
-            object_manager_open: self.state.object_manager_open(),
             tools: self.tools_context(active_tab),
             text_format: self.format_target(ctx, active_tab),
             text_style: self.text_format_state(ctx, active_tab),
