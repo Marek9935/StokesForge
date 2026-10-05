@@ -62,7 +62,7 @@ use stokesforge_render::pipeline::{self, DrawnPlot};
 use stokesforge_render::text::TextMeasurer;
 
 pub use backend::MeasuredSvgBackend;
-pub use export::{export_bytes, export_to_file, ExportError, ExportFormat};
+pub use export::{export_bytes, export_bytes_many, export_to_file, ExportError, ExportFormat};
 // Le choix de police de l'export, pour qu'un appelant sans egui (l'état de
 // l'application) n'ait pas à déclarer d'arête vers `stokesforge-render`.
 pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};

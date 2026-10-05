@@ -89,6 +89,9 @@ action-properties = Propriétés…
 action-export-graph = Exporter le graphique…
     .hint = SVG, PDF ou PNG, au zoom courant
     .disabled = Mettez d'abord une fenêtre de graphique au premier plan
+action-copy-graph = Copier le graphique
+    .hint = Copie le graphique comme image (SVG, PNG et PDF) pour le coller dans une autre application. Ctrl+C fait de même quand aucun objet n'est sélectionné
+    .disabled = Mettez d'abord une fenêtre de graphique au premier plan
 
 menu-window-show-metadata-row = Afficher la ligne Métadonnées
     .hint = Affiche les métadonnées des fichiers importés dans les en-têtes de colonnes
@@ -137,6 +140,8 @@ status-loaded = Chargé depuis { $path }
 status-nothing-to-undo = Rien à annuler
 status-nothing-to-redo = Rien à rétablir
 status-clipboard-unreadable = Presse-papiers vide ou illisible
+status-graph-copied = Graphique copié en { $formats }
+status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
 status-language-not-saved = Impossible d'enregistrer le choix de la langue : { $detail }
 
 ## Assistant d'import (#44)
@@ -876,3 +881,9 @@ history-macro-rename-objects = Renommer des objets
 object-clipboard-use-manager = Sélectionner un dossier ou un objet dans le gestionnaire de projet pour coller ces objets
 
 action-show-graph-data = Afficher les données
+
+## Copie du graphe vers une autre application (#149)
+
+error-clipboard-empty = Il n'y a rien à copier
+error-clipboard-unsupported = Cet affichage ne peut pas recevoir un graphique copié ({ $display })
+error-clipboard-backend = Impossible de copier le graphique : { $detail }

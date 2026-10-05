@@ -5022,6 +5022,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "stokesforge-clipboard",
  "stokesforge-commands",
  "stokesforge-core",
  "stokesforge-import",
@@ -5058,6 +5059,20 @@ dependencies = [
  "stokesforge-script",
  "stokesforge-session",
  "tempfile",
+]
+
+[[package]]
+name = "stokesforge-clipboard"
+version = "0.0.0"
+dependencies = [
+ "clipboard-win",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "smithay-clipboard",
+ "stokesforge-arch-guard",
+ "thiserror 2.0.20",
+ "x11rb",
 ]
 
 [[package]]

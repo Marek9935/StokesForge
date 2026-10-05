@@ -94,6 +94,9 @@ action-properties = Properties…
 action-export-graph = Export Graph…
     .hint = SVG, PDF or PNG, at the current zoom
     .disabled = Bring a graph window to the front first
+action-copy-graph = Copy Graph
+    .hint = Copies the graph as an image (SVG, PNG and PDF) to paste into another application. Ctrl+C does the same when no object is selected
+    .disabled = Bring a graph window to the front first
 
 menu-window-show-metadata-row = Show Metadata Row
     .hint = Shows the metadata of imported files in the column headers
@@ -142,6 +145,8 @@ status-loaded = Loaded from { $path }
 status-nothing-to-undo = Nothing to undo
 status-nothing-to-redo = Nothing to redo
 status-clipboard-unreadable = Clipboard is empty or unreadable
+status-graph-copied = Graph copied as { $formats }
+status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared
 status-language-not-saved = Could not save the language choice: { $detail }
 
 ## Assistant d'import (#44)
@@ -880,3 +885,9 @@ history-macro-rename-objects = Rename Objects
 object-clipboard-use-manager = Select a folder or object in Project Manager to paste these objects
 
 action-show-graph-data = Show Data
+
+## Copie du graphe vers une autre application (#149)
+
+error-clipboard-empty = There is nothing to copy
+error-clipboard-unsupported = This display cannot receive a copied graph ({ $display })
+error-clipboard-backend = Could not copy the graph: { $detail }

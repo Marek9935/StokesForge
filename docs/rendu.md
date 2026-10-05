@@ -347,7 +347,9 @@ politique telle quelle.
 donné), **toujours avec Typst** : `render_to_string_with_typst`, puis
 `document_to_pdf` ou `document_to_png` sur ce SVG. L'application lui passe le
 spec cadré par la vue (`GraphView::framed_spec`) : on exporte le zoom courant,
-sans toucher au modèle. La taille est `DEFAULT_SIZE`, celle où l'écran met la
+sans toucher au modèle. `export::export_bytes_many` rend plusieurs formats d'une
+même figure en ne la composant qu'une fois (la copie vers le presse-papiers,
+#149, en demande trois) ; chaque conversion échoue seule. La taille est `DEFAULT_SIZE`, celle où l'écran met la
 figure en page. Le blanc d'affichage d'un fond transparent reste à l'écran.
 Le fragment Typst inliné redéclare `xmlns:xlink` (ses glyphes sont des
 `<use xlink:href>`) : sans lui `usvg` refusait le document, donc tout PDF ou PNG

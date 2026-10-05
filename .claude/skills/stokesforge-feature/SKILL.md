@@ -362,7 +362,11 @@ vérifier quand une action est ajoutée :
   essai antérieur fondé sur l'hypothèse inverse produisait des raccourcis qui
   ne se déclenchaient jamais. Si le geste doit passer par le presse-papier
   système, c'est `Event::Copy`/`Event::Paste` (ou `arboard` en lecture directe,
-  comme `app::grid::system_clipboard_text`).
+  comme `app::grid::system_clipboard_text`). Pour offrir autre chose que du
+  texte au presse-papiers (image, plusieurs types MIME), ni egui ni `arboard`
+  ne suffisent : `stokesforge-clipboard` (#149, `app/figure_copy.rs` pour le
+  modèle : décider du geste avant les panneaux, consommer l'`Event::Copy`,
+  pousser une `Action`, offrir depuis la fenêtre racine).
 - Les raccourcis sont consommés **au niveau du contexte**, donc avant les
   widgets : Ctrl+Z pendant la saisie d'une cellule annule la dernière commande
   du modèle, pas la dernière frappe. C'est voulu (comportement de tableur).

@@ -507,6 +507,19 @@ pub enum Action {
         /// Spec cadré à exporter.
         spec: Box<PlotSpec>,
     },
+    /// Copie le graphe vers une application externe (issue #149) : SVG, PNG
+    /// puis PDF de la **même** figure, offerts ensemble au presse-papiers
+    /// système — c'est l'application destinataire qui choisit.
+    ///
+    /// Comme [`Action::ExportGraph`], `spec` est le spec **déjà cadré** par la
+    /// vue (`GraphView::framed_spec`) et le modèle n'est pas touché : ni
+    /// commande, ni historique. L'action prépare les octets
+    /// ([`AppState::take_figure_clipboard`]) ; c'est la fenêtre qui les offre
+    /// au système, parce qu'elle seule connaît son affichage.
+    CopyGraphFigure {
+        /// Spec cadré à copier.
+        spec: Box<PlotSpec>,
+    },
     /// Règle l'agrandissement des exports PNG ([`PNG_EXPORT_SCALES`]).
     SetPngExportScale(f32),
     /// Pose un texte libre (issue #35) : remplace celui de `target`, ou
@@ -1884,6 +1897,9 @@ pub struct AppState {
     pending_object_delete: Vec<NodeId>,
     object_clipboard_origin: String,
     object_clipboard_output: Option<String>,
+    /// Les représentations de la figure à offrir au système, préparées par
+    /// [`Action::CopyGraphFigure`] et relevées par la fenêtre (#149).
+    figure_clipboard: Option<Vec<stokesforge_clipboard::Representation>>,
     copied_objects: Vec<(NodeId, NodeId, bool)>,
     /// Agrandissement des exports PNG (issue #34), un de
     /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
@@ -2028,6 +2044,7 @@ impl AppState {
                     .as_nanos()
             ),
             object_clipboard_output: None,
+            figure_clipboard: None,
             copied_objects: Vec::new(),
             selected_sheets: std::collections::HashMap::new(),
             path,
@@ -3806,6 +3823,7 @@ impl AppState {
                 self.replace_saved_colors(target, next);
             }
             Action::ExportGraph { path, spec } => self.export_graph(path, &spec),
+            Action::CopyGraphFigure { spec } => self.copy_graph_figure(&spec),
             Action::SetAnnotation {
                 graph,
                 target,
@@ -5091,6 +5109,87 @@ impl AppState {
             Ok(()) => self.notice(format!("Graphe exporté dans {}", path.display())),
             Err(err) => self.fail(errors::export::error_message(&err)),
         }
+    }
+
+    /// Voir [`Action::CopyGraphFigure`]. Mêmes taille, mesure et polices que
+    /// l'export vers un fichier ; la figure n'est composée qu'une fois pour
+    /// les trois formats. Un format qui échoue seul est omis et nommé dans le
+    /// message ; si aucun n'est prêt, rien n'est offert.
+    fn copy_graph_figure(&mut self, spec: &PlotSpec) {
+        use stokesforge_clipboard::{mime, Representation};
+        use stokesforge_render_svg::ExportFormat;
+
+        let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
+        let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+        let wanted = [
+            ("SVG", mime::SVG, ExportFormat::Svg),
+            (
+                "PNG",
+                mime::PNG,
+                ExportFormat::Png {
+                    scale: self.png_export_scale,
+                },
+            ),
+            ("PDF", mime::PDF, ExportFormat::Pdf),
+        ];
+        let formats: Vec<ExportFormat> = wanted.iter().map(|(_, _, format)| *format).collect();
+        let results = match stokesforge_render_svg::export_bytes_many(
+            &plot,
+            stokesforge_render_svg::DEFAULT_SIZE,
+            &measurer,
+            &stokesforge_render_svg::FontChoice::default(),
+            &formats,
+        ) {
+            Ok(results) => results,
+            Err(err) => {
+                self.fail(errors::export::error_message(&err));
+                return;
+            }
+        };
+        let mut representations = Vec::new();
+        let mut offered = Vec::new();
+        let mut missing = Vec::new();
+        let mut first_error = None;
+        for ((name, mime, _), result) in wanted.iter().zip(results) {
+            match result {
+                Ok(bytes) => {
+                    representations.push(Representation::new(mime, bytes));
+                    offered.push(*name);
+                }
+                Err(err) => {
+                    missing.push(*name);
+                    first_error.get_or_insert(err);
+                }
+            }
+        }
+        if let Some(err) = first_error.filter(|_| representations.is_empty()) {
+            self.fail(errors::export::error_message(&err));
+            return;
+        }
+        self.figure_clipboard = Some(representations);
+        let text = if missing.is_empty() {
+            tr!("status-graph-copied", formats = offered.join(", "))
+        } else {
+            tr!(
+                "status-graph-copied-partly",
+                formats = offered.join(", "),
+                missing = missing.join(", ")
+            )
+        };
+        self.notice(text);
+    }
+
+    /// Les représentations de la figure que [`Action::CopyGraphFigure`] vient de
+    /// préparer, à offrir au presse-papiers système par la fenêtre qui a reçu
+    /// le geste ; relevées une seule fois.
+    pub fn take_figure_clipboard(&mut self) -> Option<Vec<stokesforge_clipboard::Representation>> {
+        self.figure_clipboard.take()
+    }
+
+    /// Le système a refusé l'offre de la figure : le message « copié » cède la
+    /// place à la cause.
+    pub fn figure_clipboard_failed(&mut self, error: &stokesforge_clipboard::ClipboardError) {
+        self.fail(errors::clipboard::error_message(error));
     }
 
     fn load(&mut self) {

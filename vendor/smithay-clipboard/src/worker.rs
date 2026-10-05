@@ -1,4 +1,5 @@
 use std::io::{Error, Result};
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use sctk::reexports::calloop::channel::Channel;
@@ -31,6 +32,9 @@ pub fn spawn(
 pub enum Command {
     /// Store data to a clipboard.
     Store(String),
+    /// Store several MIME-typed representations to a clipboard
+    /// (StokesForge, #149).
+    StoreFormats(Vec<(String, Arc<[u8]>)>),
     /// Store data to a primary selection.
     StorePrimary(String),
     /// Load data from a clipboard.
@@ -76,6 +80,9 @@ fn worker_impl(
                     }
                     Command::Store(contents) => {
                         state.store_selection(SelectionTarget::Clipboard, contents);
+                    }
+                    Command::StoreFormats(formats) => {
+                        state.store_formats(formats);
                     }
                     Command::Load if state.data_device_manager_state.is_some() => {
                         if let Err(err) = state.load_selection(SelectionTarget::Clipboard) {

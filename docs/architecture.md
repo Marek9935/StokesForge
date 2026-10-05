@@ -32,8 +32,10 @@ stokesforge-cli    (core, commands, import, importer, persistence)
 stokesforge-import (aucune dépendance stokesforge) — lecture des fichiers d'appareil
 stokesforge-importer (core, import) — plan de feuilles et colonnes du modèle, sans
                commandes : partagé par l'application, le CLI et les scripts
-stokesforge-app    (commands, core, import, importer, persistence, plot, python,
-               render-egui, render-svg, script, session)
+stokesforge-clipboard (aucune dépendance stokesforge) — offre multi-format au
+               presse-papiers système (SVG, PNG, PDF), un backend par affichage
+stokesforge-app    (clipboard, commands, core, import, importer, persistence, plot,
+               python, render-egui, render-svg, script, session)
 ```
 
 `stokesforge-robustesse` est à part : il dépend du socle et du pont Python, et ne
@@ -60,6 +62,7 @@ dépendances.
 | `stokesforge-app` | la coquille UI eframe (banc d'essai) ; **seul** crate qui traduit l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application.md) |
 | `stokesforge-cli` | import et scripts Python sans interface | [application](application.md) |
 | `stokesforge-importer` | du résultat de `stokesforge-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
+| `stokesforge-clipboard` | offre d'un même contenu au presse-papiers système sous plusieurs types MIME (la figure d'un graphe : SVG, PNG, PDF) ; Wayland, X11, Windows, macOS ; indépendant du reste du workspace | [application](application.md) |
 | `stokesforge-robustesse` | 21 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
 | `stokesforge-arch-guard` | lecture commune des `Cargo.toml` pour les garde-fous de dépendances (dev-dependency) | [tests](tests.md) |
 
@@ -70,7 +73,7 @@ Le découpage n'est pas décoratif ; chacune de ces trois frontières est
 
 1. **Aucune dépendance UI sous `stokesforge-session`.** `stokesforge-core`,
    `stokesforge-plot`, `stokesforge-commands`, `stokesforge-persistence`, `stokesforge-session`,
-   `stokesforge-script`, `stokesforge-import` et `stokesforge-importer` portent chacun un
+   `stokesforge-script`, `stokesforge-import`, `stokesforge-importer` et `stokesforge-clipboard` portent chacun un
    `tests/no_ui_dependency.rs` : une liste blanche de dépendances, qui force
    une décision consciente à toute nouvelle arête plutôt que de compter sur une
    relecture. La lecture du manifeste est commune (`stokesforge-arch-guard`) :

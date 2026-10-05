@@ -135,6 +135,7 @@
 
 mod contents;
 mod dialogs;
+mod figure_copy;
 mod file_drop;
 mod format;
 mod graph_text_edit;
@@ -781,7 +782,7 @@ impl StokesForgeApp {
 }
 
 impl eframe::App for StokesForgeApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // `Context` est un `Arc` : le clone évite l’emprunt de lecture du Ui peint.
         let ctx = ui.ctx().clone();
         let published_stamp = snapshot_stamp(self.state.snapshot());
@@ -797,6 +798,9 @@ impl eframe::App for StokesForgeApp {
         self.poll_background_jobs(&ctx);
         publish_saved_colors(&ctx, &self.state);
         self.collect_shortcuts(&ctx, &mut actions);
+        // Ctrl+C sur le graphique actif, avant que panneaux et contenus ne lisent
+        // l’`Event::Copy` (#149).
+        self.request_active_figure_copy(&ctx, active_tab, &mut actions);
 
         // L’ordre de ces appels détermine l’emprise des panneaux egui (#115).
         self.menu_bar(ui, &ctx, &mut actions, active_tab);
@@ -835,6 +839,7 @@ impl eframe::App for StokesForgeApp {
         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
         self.blocking_confirmations(&ctx, &mut actions);
         self.dispatch_actions(&ctx, actions);
+        self.offer_figure(frame);
 
         self.sync_window_views();
         if snapshot_stamp(self.state.snapshot()) != published_stamp {

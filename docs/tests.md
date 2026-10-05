@@ -200,6 +200,7 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   machine (`SetObjectManagerOpen`, `SetObjectManagerShowTexts`…) : il pose
   l'état en mémoire (`AppState::set_object_manager_open_for_test`), ou ne
   vérifie que l'action poussée.
+- `stokesforge-clipboard` (#149) : la décision des réponses X11 (`x11::answer`) et les noms de formats Windows/macOS se testent sans serveur ; l'offre X11 se teste contre un **vrai serveur** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` requis, XWayland suffit : `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Wayland, Windows et macOS n'ont pas de test automatique : Wayland exige un compositeur et une entrée réelle (serial), les deux autres ne sont que compilés (`cargo check --target …`). Un test X11 d'un destinataire ne teste pas `response_type` d'un `SelectionNotify` : un événement venu de `SendEvent` porte le bit 0x80.
 - Les tests et leurs commentaires sont en français, comme le reste.
 
 **À lire** : `stokesforge-robustesse/src/lib.rs` (l'index des batteries), puis la

@@ -115,6 +115,9 @@ la cible active Rust.
   version ; les graphes entre projets emportent leurs colonnes dans un classeur caché
   persisté (#107), révélé par Show Data. F2 appartient
   aux gestionnaires, Ctrl+D des feuilles au viewport du classeur (#130).
+- Copier une figure vers une application externe (#149) passe par
+  `stokesforge-clipboard` (SVG, PNG, PDF offerts ensemble ; Wayland par le patch
+  `vendor/smithay-clipboard`) et `app/figure_copy.rs`, jamais par `copy_text`.
 - Dans l'application, réutiliser `Action` / `AppState::dispatch` pour les
   actions concernées. Garder la logique testable dans `state.rs` et la
   traduction des événements et l'affichage dans le module de la surface

@@ -13,7 +13,7 @@
 //!
 //! Une fonction `error_message` par famille d'erreurs, chacune dans son
 //! sous-module : [`model`], [`commands`], [`session`], [`file`], [`import`],
-//! [`formula`], [`render`], [`export`] et, avec la feature `python`, `script`.
+//! [`formula`], [`render`], [`export`], [`clipboard`] et, avec la feature `python`, `script`.
 //! Toute erreur **affichée** à l'utilisateur passe par l'une d'elles, jamais par
 //! `to_string()`.
 //!
@@ -900,6 +900,57 @@ pub mod script {
             for error in script_variants() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
+        }
+    }
+}
+
+/// Les erreurs de l'offre multi-format au presse-papiers système (#149).
+pub mod clipboard {
+    use stokesforge_clipboard::ClipboardError;
+
+    use crate::tr;
+
+    /// La phrase d'une [`ClipboardError`].
+    pub fn error_message(error: &ClipboardError) -> String {
+        match error {
+            ClipboardError::Empty => tr!("error-clipboard-empty"),
+            ClipboardError::Unsupported(display) => {
+                tr!("error-clipboard-unsupported", display = display.to_string())
+            }
+            ClipboardError::Backend(detail) => {
+                tr!("error-clipboard-backend", detail = detail.as_str())
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::errors::tests_support::check;
+
+        #[test]
+        fn chaque_erreur_du_presse_papiers_a_sa_phrase() {
+            let samples = [
+                ClipboardError::Empty,
+                ClipboardError::Unsupported("Wayland"),
+                ClipboardError::Backend("selection refused".into()),
+            ];
+            let mut seen = [false; 3];
+            for sample in &samples {
+                let index = match sample {
+                    ClipboardError::Empty => 0,
+                    ClipboardError::Unsupported(_) => 1,
+                    ClipboardError::Backend(_) => 2,
+                };
+                seen[index] = true;
+                check(sample, &error_message(sample));
+            }
+            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            // Le détail et l'affichage sont repris tels quels dans la phrase.
+            let phrase = error_message(&ClipboardError::Backend("selection refused".into()));
+            assert!(phrase.contains("selection refused"), "{phrase}");
+            let phrase = error_message(&ClipboardError::Unsupported("Wayland"));
+            assert!(phrase.contains("Wayland"), "{phrase}");
         }
     }
 }

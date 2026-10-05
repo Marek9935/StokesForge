@@ -46,6 +46,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/contents.rs` | contenus partagés flottant/détaché : `tab_contents`, `note_contents`, `matrix_contents` (espace réservé) |
 | `app/workbook.rs` | classeur : `book_contents` (contenu commun flottant/détaché), `sheet_tabs`, `workbook_menu` |
 | `app/grid.rs` | grille d'une feuille : `grid_contents` prépare la table, peint ses en-têtes et son corps virtualisé, puis traite le clavier avec `grid_keyboard` (après les cellules : les éditeurs consomment d'abord Tab/Entrée et reprennent le focus), en-tête empilé, gouttière, cellules, `grid_edit_menu`, focus clavier (`GRID_KEYS`, `keyboard_focus_outside_grid`), barres déportées, `grid_grip_side`, libellés de type et de rôle |
+| `app/figure_copy.rs` | copier la figure du graphique actif vers une application externe (#149) : le geste Ctrl+C (`request_figure_copy`, `take_figure_copy_gesture`), l'entrée de menu (`request_graph_figure_copy`) et l'offre au système (`offer_figure`) |
 | `app/graph_window.rs` | fenêtre de graphe : `graph_view_contents` (commun flottant/détaché), `graph_drop_target`, menu contextuel de la figure, `annotation_interactions`, ordre et propriétés des objets, `request_graph_export` |
 | `app/graph_text_edit.rs` | éditeurs sur place (texte libre, titre, nom de légende) et mise en forme en attente demandée par la barre de format |
 | `app/file_drop.rs` | dépôt de fichiers : `begin_file_drop`, `claim_file_drop`, `finish_file_drop` (un emplacement par viewport), `open_project_in_new_window` |
@@ -1175,6 +1176,58 @@ dans la barre d'état. Aucune commande : le modèle n'est pas touché. La
 résolution PNG (×1, ×2, ×4 ; ×4 par défaut, soit 1920 × 1440 px) se règle dans
 « Graph » → « PNG Resolution » (`Action::SetPngExportScale`,
 préférence de session).
+
+**Copier le graphe vers une autre application** (issue #149) : menu « Graph »
+→ « Copy Graph », ou **Ctrl+C** quand une fenêtre de graphique est active au
+premier plan (flottante ou détachée), qu'**aucun objet** n'y est sélectionné
+(série, texte libre, forme, titre ou légende : `selected_manager_target`, la
+sélection de l'Object Manager est celle de la vue) et qu'aucun champ de saisie
+n'a le focus (`keyboard_focus_outside_grid`). Le presse-papiers reçoit la
+**même figure en trois représentations**, offertes ensemble — SVG, PNG, PDF,
+dans cet ordre de préférence ; c'est l'application destinataire qui choisit, et
+beaucoup préfèrent le PNG. Le cadrage est celui de la vue affichée (zoom et
+déplacement, `GraphView::framed_spec`), la taille, les polices et le fond ceux de
+l'export vers un fichier, et le PNG suit « PNG Resolution ». Le Ctrl+C d'une
+cellule, d'une feuille ou du Project Manager est inchangé : le Project Manager
+retire lui-même son `Event::Copy` quand il a le focus, et `figure_copy` passe
+avant les panneaux et les contenus, de sorte qu'une grille visible derrière la
+fenêtre de graphique ne reçoit pas le même événement.
+
+Chaîne : `app::figure_copy::request_figure_copy` (la racine, depuis `ui()`,
+ou le viewport d'un graphique détaché) pousse `Action::CopyGraphFigure { spec }` ;
+`AppState::copy_graph_figure` compose la figure **une fois**
+(`stokesforge_render_svg::export_bytes_many`) et prépare les représentations
+(`take_figure_clipboard`) ; la fenêtre racine les offre ensuite
+(`StokesForgeApp::offer_figure`, qui seule connaît son affichage par
+`eframe::Frame`) par `stokesforge-clipboard`. Un format qui échoue seul est omis
+et nommé dans le message ; si aucun n'est prêt, ou si le système refuse, la barre
+d'état donne la cause. Aucune commande : ni le modèle ni l'historique ne
+bougent.
+
+Pourquoi un crate à part : ni egui (`Context::copy_text`) ni `arboard` ne savent
+offrir `image/svg+xml` ni `application/pdf`, ni plusieurs types à la fois.
+`stokesforge-clipboard` porte un backend par affichage : **Wayland** par
+`Clipboard::store_formats` du patch `vendor/smithay-clipboard` (le worker déjà
+partagé avec egui-winit, voir `vendor/winit/STOKESFORGE.md`), **X11** par un
+propriétaire de la sélection `CLIPBOARD` (`TARGETS`, un type par
+représentation, pas d'`INCR` : une représentation plus grosse qu'une requête X
+n'est pas offerte), **Windows** (un format enregistré par représentation :
+`PNG`, `image/svg+xml`, `application/pdf`) et **macOS** (`NSPasteboard`, UTI
+`public.svg-image`, `public.png`, `com.adobe.pdf`). Sous Wayland le
+compositeur n'accepte la sélection que de la fenêtre focalisée qui vient de
+recevoir une entrée : l'offre part donc du geste, et sinon elle est perdue sans
+erreur, comme le texte d'egui-winit.
+
+Vérifié : la composition et l'ordre des trois formats, le geste (sélection,
+focus, onglet actif, événement consommé) et l'entrée de menu par des tests ;
+X11 contre un vrai serveur (`cargo test -p stokesforge-clipboard --test x11 --
+--ignored`, XWayland suffit). **Non exécutés par la CI ni ici** : Wayland réel,
+Windows et macOS (ces deux derniers compilent seulement,
+`cargo check -p stokesforge-clipboard --target x86_64-pc-windows-gnu` et
+`aarch64-apple-darwin`). Contrôle manuel Wayland : lancer l'application,
+sélectionner un graphique au premier plan sans rien y sélectionner, Ctrl+C, puis
+`wl-paste -l` doit lister `image/svg+xml`, `image/png` et `application/pdf`
+(`wl-paste -t image/png > figure.png` pour lire une représentation).
 
 **Onglets** (`state::PlotSettingsTab`, clés `plot-tab-*`, en anglais) :
 « General » (titre et sa couleur, fond), « Plot Area » (titre du calque,

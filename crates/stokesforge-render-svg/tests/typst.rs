@@ -131,6 +131,41 @@ fn un_graphe_typst_sexporte_en_svg_pdf_et_png() {
     assert_eq!(largeur, 960, "PNG pas à l'échelle 2");
 }
 
+/// #149 : l'export groupé donne, format par format, les mêmes octets que
+/// l'export isolé — il ne fait qu'éviter de composer trois fois la figure.
+/// Témoins : l'ordre demandé est l'ordre rendu (un SVG n'est pas un PNG), et
+/// une liste vide ne rend rien.
+#[test]
+fn l_export_groupe_rend_les_memes_octets_que_l_export_isole() {
+    use stokesforge_render_svg::{export_bytes, export_bytes_many, ExportFormat};
+    let project = Project::new("Export groupé").expect("projet");
+    let mut spec = spec_with_label("$lambda$ (nm)");
+    spec.title = "Spectre $Delta H$".to_owned();
+    let plot = resolve_spec(project.tree(), &spec);
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let formats = [
+        ExportFormat::Png { scale: 1.0 },
+        ExportFormat::Svg,
+        ExportFormat::Pdf,
+    ];
+    let groupe = export_bytes_many(&plot, (480, 360), &measurer, &choice, &formats)
+        .expect("tracé")
+        .into_iter()
+        .map(|octets| octets.expect("conversion"))
+        .collect::<Vec<_>>();
+    assert_eq!(groupe.len(), 3);
+    assert!(groupe[0].starts_with(b"\x89PNG"), "premier : PNG");
+    assert!(groupe[1].starts_with(b"<?xml") || groupe[1].starts_with(b"<svg"));
+    assert!(groupe[2].starts_with(b"%PDF"), "troisième : PDF");
+    for (format, octets) in formats.iter().zip(&groupe) {
+        let isole = export_bytes(&plot, (480, 360), &measurer, &choice, *format).expect("export");
+        assert_eq!(&isole, octets, "{format:?} diffère de l'export isolé");
+    }
+    let vide = export_bytes_many(&plot, (480, 360), &measurer, &choice, &[]).expect("tracé");
+    assert!(vide.is_empty());
+}
+
 /// Issues #77 et #78 : la police et le corps réglés sur une zone de texte
 /// changent l'export — le titre d'axe composé en Fira Sans 28 n'est pas celui
 /// composé dans la police du graphe, et les autres zones ne bougent pas de

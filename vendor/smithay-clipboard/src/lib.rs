@@ -94,6 +94,17 @@ impl Clipboard {
         let _ = self.inner.lock().unwrap().request_sender.send(request);
     }
 
+    /// Store several representations of one content to a clipboard
+    /// (StokesForge, #149), each under its own MIME type, in the given order
+    /// of preference — e.g. `image/svg+xml`, then `image/png`.
+    ///
+    /// Stores to a clipboard on a last observed seat, like [`Clipboard::store`] :
+    /// it is dropped silently without a focused seat holding a valid serial.
+    pub fn store_formats(&self, formats: Vec<(String, Arc<[u8]>)>) {
+        let request = worker::Command::StoreFormats(formats);
+        let _ = self.inner.lock().unwrap().request_sender.send(request);
+    }
+
     /// Load primary clipboard data.
     ///
     /// Loads content from a  primary clipboard on a last observed seat.

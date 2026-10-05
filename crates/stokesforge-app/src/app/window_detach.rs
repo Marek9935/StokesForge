@@ -159,6 +159,7 @@ use crate::state::{Action, AppState, ProjectTreeNode};
 use crate::tr;
 
 use super::contents::{matrix_contents, note_contents};
+use super::figure_copy::request_figure_copy;
 use super::file_drop::{begin_file_drop, finish_file_drop};
 use super::graph_window::graph_view_contents;
 use super::object_manager_ui::{
@@ -1147,6 +1148,8 @@ impl DetachedTabViewport {
                     Tab::Graph(id) => {
                         let view = model.graph_view.get_or_insert_with(GraphView::default);
                         let before = selected_manager_target(view);
+                        // Ctrl+C dans ce viewport : la figure de **ce** graphique (#149).
+                        request_figure_copy(ui.ctx(), view, tree, id, &mut requests.actions);
                         graph_view_contents(ui, view, &snapshot, id, &mut requests.actions);
                         if before != selected_manager_target(view) {
                             root_context.request_repaint_of(egui::ViewportId::ROOT);

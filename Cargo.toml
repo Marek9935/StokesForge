@@ -12,6 +12,7 @@ members = [
     "crates/stokesforge-render-svg",
     "crates/stokesforge-persistence",
     "crates/stokesforge-import",
+    "crates/stokesforge-clipboard",
     "crates/stokesforge-importer",
     "crates/stokesforge-python",
     "crates/stokesforge-script",

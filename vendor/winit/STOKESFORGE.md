@@ -59,7 +59,12 @@ Le manifeste et les handlers de siège sont ceux d'amont.
 
 smithay-clipboard : `Cargo.toml` (winit et url, déjà présents dans le graphe),
 `src/lib.rs` (worker partagé), `worker.rs` (callback), `state.rs` (raccordement),
-les nouveaux `file_drop.rs` et `file_drop_uri.rs`. Les manifestes d'origine
+les nouveaux `file_drop.rs` et `file_drop_uri.rs`. **#149** ajoute
+`Clipboard::store_formats` (`lib.rs`, `Command::StoreFormats` de `worker.rs`,
+`State::store_formats` et la recherche du type MIME demandé dans `send_request`
+de `state.rs`) : une sélection du presse-papiers à plusieurs types MIME (SVG, PNG,
+PDF d'une figure), consommée par `stokesforge-clipboard`. Le chemin texte est
+inchangé ; une sélection texte efface les représentations, et inversement. Les manifestes d'origine
 restent les témoins amont. Source crates.io 0.7.3, SHA-256 :
 `71704c03f739f7745053bde45fa203a46c58d25bc5c4efba1d9a60e9dba81226`.
 

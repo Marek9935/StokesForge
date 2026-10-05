@@ -71,6 +71,15 @@ pub enum ExportError {
     },
 }
 
+/// Le document SVG composé (Typst compris) converti vers `format`.
+fn convert(document: &str, format: ExportFormat) -> Result<Vec<u8>, ExportError> {
+    Ok(match format {
+        ExportFormat::Svg => document.as_bytes().to_vec(),
+        ExportFormat::Pdf => document_to_pdf(document)?,
+        ExportFormat::Png { scale } => document_to_png(document, scale)?,
+    })
+}
+
 /// Le contenu du fichier d'export, sans l'écrire.
 pub fn export_bytes(
     plot: &ResolvedPlot<'_>,
@@ -80,11 +89,26 @@ pub fn export_bytes(
     format: ExportFormat,
 ) -> Result<Vec<u8>, ExportError> {
     let document = render_to_string_with_typst(plot, size, measurer, choice)?;
-    Ok(match format {
-        ExportFormat::Svg => document.into_bytes(),
-        ExportFormat::Pdf => document_to_pdf(&document)?,
-        ExportFormat::Png { scale } => document_to_png(&document, scale)?,
-    })
+    convert(&document, format)
+}
+
+/// Plusieurs formats d'une **même** figure (le presse-papiers, #149), dans
+/// l'ordre de `formats`. La figure n'est tracée et composée par Typst qu'une
+/// fois, le PDF et le PNG étant tirés du même SVG ; chaque conversion réussit
+/// ou échoue seule, de sorte qu'un format raté n'emporte pas les autres.
+/// `Err` seulement si le tracé lui-même échoue : aucun format n'existe alors.
+pub fn export_bytes_many(
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    choice: &FontChoice,
+    formats: &[ExportFormat],
+) -> Result<Vec<Result<Vec<u8>, ExportError>>, ExportError> {
+    let document = render_to_string_with_typst(plot, size, measurer, choice)?;
+    Ok(formats
+        .iter()
+        .map(|format| convert(&document, *format))
+        .collect())
 }
 
 /// Exporte le graphe résolu dans `path`.

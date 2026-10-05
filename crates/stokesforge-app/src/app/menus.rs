@@ -426,6 +426,14 @@ impl StokesForgeApp {
                 self.request_graph_export(graph, actions);
                 ui.close();
             }
+            if ui
+                .button(tr!("action-copy-graph"))
+                .on_hover_text(tr!("action-copy-graph", "hint"))
+                .clicked()
+            {
+                self.request_graph_figure_copy(graph, actions);
+                ui.close();
+            }
             ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
                 let current = self.state.png_export_scale();
                 for scale in crate::state::PNG_EXPORT_SCALES {
@@ -949,6 +957,37 @@ mod tests {
         app.open_tab(Tab::Graph(graph));
         let (_, menu) = ouvre(&mut app, Some(Tab::Graph(graph)), &tr!("menu-graph"));
         assert!(!active(&menu, &tr!("action-show-graph-data")).enabled);
+        session.shutdown().unwrap();
+    }
+
+    /// #149 : « Copier le graphique » est dans le menu Graphique, comme
+    /// l'export, et pousse la figure cadrée par la vue — le même chemin que
+    /// Ctrl+C, sans condition de sélection (un clic de menu est explicite).
+    #[test]
+    fn copier_le_graphique_est_dans_le_menu_graphique() {
+        let (session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        // Une série sélectionnée ne grise pas l'entrée : Ctrl+C se tait alors,
+        // le menu non.
+        app.with_graph_view(graph, |view| {
+            view.select_series(Some(stokesforge_plot::SeriesRef::new(0, 0)), &spec)
+        });
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        let entry = active(&menu, &tr!("action-copy-graph"));
+        assert!(entry.enabled);
+        let attendu = app
+            .read_graph_view(graph, |view| view.framed_spec(&spec))
+            .unwrap();
+        assert_eq!(
+            clique(&mut app, &ctx, tab, entry.center),
+            vec![Action::CopyGraphFigure {
+                spec: Box::new(attendu)
+            }]
+        );
+        // Témoin : sans graphique actif, le menu Graphique n'existe pas.
+        let book = app.state.books()[0].0;
+        assert!(!titres(&mut app, Some(Tab::Book(book))).contains(&tr!("menu-graph")));
         session.shutdown().unwrap();
     }
 

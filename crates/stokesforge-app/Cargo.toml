@@ -30,6 +30,10 @@ stokesforge-render-egui = { path = "../stokesforge-render-egui" }
 # l'écran, texte Typst compris. Aucune commande : l'export ne touche pas le
 # modèle.
 stokesforge-render-svg = { path = "../stokesforge-render-svg" }
+# Copie de la figure vers une application externe (issue #149) : offre
+# multi-format (SVG, PNG, PDF) au presse-papiers système, que ni egui ni
+# `arboard` ne savent faire.
+stokesforge-clipboard = { path = "../stokesforge-clipboard" }
 # Chemins optionnels, activés uniquement par la feature `python` de CE crate :
 # c'est elle qui active la feature `python` de chacun (dont dépend l'existence
 # même de leurs types publics, cf. la doc de tête de leurs `lib.rs`).

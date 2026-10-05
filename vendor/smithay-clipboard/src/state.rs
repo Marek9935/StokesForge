@@ -4,6 +4,7 @@ use std::io::{Error, ErrorKind, Read, Result, Write};
 use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use sctk::data_device_manager::data_device::DataDevice;
@@ -59,6 +60,10 @@ pub struct State {
 
     data_sources: Vec<CopyPasteSource>,
     data_selection_content: Rc<[u8]>,
+    /// Représentations non textuelles offertes par [`State::store_formats`]
+    /// (StokesForge, #149) : un type MIME et ses octets, dans l'ordre de
+    /// préférence. Vide tant que la sélection est du texte.
+    data_selection_formats: Vec<(String, Rc<[u8]>)>,
 }
 
 impl State {
@@ -93,6 +98,7 @@ impl State {
             file_drops: crate::file_drop::FileDrops::new(file_drop),
             primary_selection_content: Rc::from([]),
             data_selection_content: Rc::from([]),
+            data_selection_formats: Vec::new(),
             queue_handle: queue_handle.clone(),
             primary_selection_manager_state,
             primary_sources: Vec::new(),
@@ -124,6 +130,7 @@ impl State {
             SelectionTarget::Clipboard => {
                 let mgr = self.data_device_manager_state.as_ref()?;
                 self.data_selection_content = contents;
+                self.data_selection_formats.clear();
                 let source =
                     mgr.create_copy_paste_source(&self.queue_handle, ALLOWED_MIME_TYPES.iter());
                 source.set_selection(seat.data_device.as_ref().unwrap(), seat.latest_serial);
@@ -139,6 +146,37 @@ impl State {
             }
         }
 
+        Some(())
+    }
+
+    /// Store several representations of one content (StokesForge, #149) as
+    /// the clipboard selection : each `(mime, bytes)` is offered under its
+    /// own MIME type, in the given order of preference. Replaces the current
+    /// clipboard selection, text or not. `None` (nothing stored) under the
+    /// same conditions as [`State::store_selection`], or without any format.
+    pub fn store_formats(&mut self, formats: Vec<(String, Arc<[u8]>)>) -> Option<()> {
+        if formats.is_empty() {
+            return None;
+        }
+        let latest = self.latest_seat.as_ref()?;
+        let seat = self.seats.get_mut(latest)?;
+
+        if !seat.has_focus {
+            return None;
+        }
+
+        let mgr = self.data_device_manager_state.as_ref()?;
+        let source = mgr.create_copy_paste_source(
+            &self.queue_handle,
+            formats.iter().map(|(mime, _)| mime.as_str()),
+        );
+        self.data_selection_content = Rc::from([]);
+        self.data_selection_formats = formats
+            .into_iter()
+            .map(|(mime, bytes)| (mime, Rc::from(&*bytes)))
+            .collect();
+        source.set_selection(seat.data_device.as_ref().unwrap(), seat.latest_serial);
+        self.data_sources.push(source);
         Some(())
     }
 
@@ -250,8 +288,17 @@ impl State {
     }
 
     fn send_request(&mut self, ty: SelectionTarget, write_pipe: WritePipe, mime: String) {
-        // We can only send strings, so don't do anything with the mime-type.
-        if MimeType::find_allowed(&[mime]).is_none() {
+        // A representation stored by `store_formats` is sent under its own
+        // MIME type ; anything else can only be text.
+        let format = match ty {
+            SelectionTarget::Clipboard => self
+                .data_selection_formats
+                .iter()
+                .find(|(offered, _)| *offered == mime)
+                .map(|(_, bytes)| bytes.clone()),
+            SelectionTarget::Primary => None,
+        };
+        if format.is_none() && MimeType::find_allowed(&[mime]).is_none() {
             return;
         }
 
@@ -262,9 +309,10 @@ impl State {
 
         // Don't access the content on the state directly, since it could change during
         // the send.
-        let contents = match ty {
-            SelectionTarget::Clipboard => self.data_selection_content.clone(),
-            SelectionTarget::Primary => self.primary_selection_content.clone(),
+        let contents = match (format, ty) {
+            (Some(bytes), _) => bytes,
+            (None, SelectionTarget::Clipboard) => self.data_selection_content.clone(),
+            (None, SelectionTarget::Primary) => self.primary_selection_content.clone(),
         };
 
         let mut written = 0;
