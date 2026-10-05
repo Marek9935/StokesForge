@@ -1,4 +1,4 @@
-# CI de la branche rewriterust : cœur Rust et intégration Python embarquée.
+# CI de la branche dev : cœur Rust et intégration Python embarquée.
 # Ce fichier racine est le seul lu par GitLab.
 #
 # ATTENTION — ce que `fmt`, `clippy` et `test` ne prouvent PAS :

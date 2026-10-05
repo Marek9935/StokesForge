@@ -126,7 +126,7 @@ ouvert au prochain récap — c'est arrivé (B6). Donc, **dans le même geste qu
 commit du correctif** :
 
 - le message de commit porte `Closes #<n>` (l'issue GitLab se ferme au push sur
-  la branche par défaut) ; si le push n'est pas fait ou pas sur `main`, fermer
+  la branche par défaut) ; si le push n'est pas fait ou pas sur `dev`, fermer
   explicitement : `glab issue close <n>` avec un commentaire citant le commit ;
 - pas d'issue ? Rien à fermer — mais ne pas créer de `.md`
   pour l'occasion.

@@ -1,4 +1,4 @@
-# Documentation StokesForge — branche `rewriterust`
+# Documentation StokesForge — branche `dev`
 
 Portage de StokesForge (analyse et tracé de données scientifiques, façon OriginLab)
 de Python/Qt vers Rust. Tout le code vit dans le workspace Cargo à la racine.

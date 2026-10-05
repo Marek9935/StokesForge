@@ -1,4 +1,4 @@
-# StokesForge — branche `rewriterust`
+# StokesForge — branche `dev`
 
 Cette branche est dédiée au portage de StokesForge vers Rust. PyQt/PySide n'est
 plus à l'ordre du jour ici — le développement actif se fait dans le
@@ -19,7 +19,7 @@ workspace Cargo à la racine.
   embarquées.
 
 L'ancienne implémentation Python/Qt a été supprimée de cette branche ; elle
-continue d'exister sur `main`.
+continue d'exister sous le tag `legacy-python`.
 
 ## Démarrer
 
@@ -54,5 +54,5 @@ la page de licence. Le travail CI `licenses` vérifie la politique et génère
 les notices.
 
 Les contributions extérieures suivent [`CONTRIBUTING.md`](CONTRIBUTING.md)
-et le [DCO 1.1](DCO). Ce changement de licence concerne `rewriterust` ;
-l'ancienne implémentation Python/Qt sur `main` conserve son statut propre.
+et le [DCO 1.1](DCO). Ce changement de licence concerne `dev` ;
+l'ancienne implémentation Python/Qt (tag `legacy-python`) conserve son statut propre.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Contexte
 
-Branche `rewriterust` : portage de StokesForge (analyse/tracé de données scientifiques, façon OriginLab) de Python/Qt vers Rust. Tout le code vit dans le workspace Cargo à la racine — l'ancienne implémentation Python/Qt (`legacy-python/`, qui servait de spec de comportement) a été supprimée de cette branche ; elle continue d'exister sur `main`.
+Branche `dev` : portage de StokesForge (analyse/tracé de données scientifiques, façon OriginLab) de Python/Qt vers Rust. Tout le code vit dans le workspace Cargo à la racine — l'ancienne implémentation Python/Qt (`legacy-python/`, qui servait de spec de comportement) a été supprimée de cette branche ; elle continue d'exister sous le tag `legacy-python`.
 
 Documentation du code : `docs/` — [`docs/README.md`](docs/README.md) est le point d'entrée et route par tâche. `docs/invariants.md` liste les règles à ne pas casser ; les lire avant de toucher au rendu, à l'historique ou à l'acteur.
 

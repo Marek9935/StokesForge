@@ -1,11 +1,11 @@
 # Licence et interfaces d'extension
 
 Copyright © 2026 Aliocha Skrzypczak. Le code original de StokesForge de la
-branche `rewriterust` est distribué sous **GNU GPL version 3 ou ultérieure**,
+branche `dev` est distribué sous **GNU GPL version 3 ou ultérieure**,
 avec la permission supplémentaire de [`LICENSE-EXCEPTION`](../LICENSE-EXCEPTION).
 Le texte officiel de la GPLv3 est reproduit sans modification dans
 [`LICENSE`](../LICENSE). Les composants tiers conservent leurs licences.
-Cette décision ne change pas le statut de `main`, l'ancienne version
+Cette décision ne change pas le statut du tag `legacy-python`, l'ancienne version
 Python/Qt, ni celui des versions antérieures à ce changement.
 
 La GPL autorise les distributions commerciales ; la distribution du

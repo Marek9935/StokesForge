@@ -1,6 +1,6 @@
 ---
 name: stokesforge-feature
-description: Implémenter une nouvelle fonctionnalité dans StokesForge (portage Rust, branche rewriterust) — du choix de la couche jusqu'au menu contextuel, au raccourci clavier, aux tests et à la mise à jour de la doc. À utiliser dès que la demande est « ajoute », « implémente », « je voudrais pouvoir… », « il manque… », « fais que… » sur l'application, la grille, les graphes, l'import, les scripts ou le modèle — y compris quand la demande a l'air d'une simple ligne de code, parce que le coût de StokesForge n'est jamais dans la ligne mais dans les quatre surfaces (raccourci, menu, grisage, libellé) et l'entrée d'historique qu'elle oblige à tenir en accord.
+description: Implémenter une nouvelle fonctionnalité dans StokesForge (portage Rust, branche dev) — du choix de la couche jusqu'au menu contextuel, au raccourci clavier, aux tests et à la mise à jour de la doc. À utiliser dès que la demande est « ajoute », « implémente », « je voudrais pouvoir… », « il manque… », « fais que… » sur l'application, la grille, les graphes, l'import, les scripts ou le modèle — y compris quand la demande a l'air d'une simple ligne de code, parce que le coût de StokesForge n'est jamais dans la ligne mais dans les quatre surfaces (raccourci, menu, grisage, libellé) et l'entrée d'historique qu'elle oblige à tenir en accord.
 ---
 
 # Implémenter une fonctionnalité dans StokesForge

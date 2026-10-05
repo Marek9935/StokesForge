@@ -1,6 +1,6 @@
 ---
 name: stokesforge-verification
-description: Écrire un test StokesForge au bon endroit, et vérifier un changement avant de le livrer — `fmt`, `clippy -D warnings`, `cargo test --workspace`, plus la feature hors défaut (`python`) exercée par le travail CI test-python, mise à jour de la doc, message de commit en français sur la branche `rewriterust`. À utiliser dès que la demande est « teste », « vérifie », « c'est bon ? », « commit », « pousse », « j'ai fini », ou en fin de toute tâche d'implémentation ou de correction — un `cargo test` vert ne prouve pas ce qu'on croit dans ce dépôt, et ce skill dit exactement ce qu'il ne prouve pas.
+description: Écrire un test StokesForge au bon endroit, et vérifier un changement avant de le livrer — `fmt`, `clippy -D warnings`, `cargo test --workspace`, plus la feature hors défaut (`python`) exercée par le travail CI test-python, mise à jour de la doc, message de commit en français sur la branche `dev`. À utiliser dès que la demande est « teste », « vérifie », « c'est bon ? », « commit », « pousse », « j'ai fini », ou en fin de toute tâche d'implémentation ou de correction — un `cargo test` vert ne prouve pas ce qu'on croit dans ce dépôt, et ce skill dit exactement ce qu'il ne prouve pas.
 ---
 
 # Vérifier un changement StokesForge
@@ -114,7 +114,7 @@ n'importe quelle machine. Suivre ce principe pour tout nouveau test de coût.
 
 ## Committer
 
-Branche de développement : **`rewriterust`**. Ne jamais pousser ailleurs sans
+Branche de développement : **`dev`**. Ne jamais pousser ailleurs sans
 autorisation explicite.
 
 Format des messages, tel qu'il est pratiqué dans l'historique — `<domaine> :
@@ -127,7 +127,7 @@ formule : distingue case vide (Missing) et échec de calcul (Failed) affiché "-
 docs : note de passation du chantier « prévisualisation d'import »
 ```
 
-Pousser avec `git push -u origin rewriterust`. En cas d'échec réseau, réessayer
+Pousser avec `git push -u origin dev`. En cas d'échec réseau, réessayer
 jusqu'à 4 fois (2s, 4s, 8s, 16s). Ne pas ouvrir de *merge request* sans demande
 explicite.
 
@@ -149,4 +149,4 @@ Un résultat vert sans les features concernées ne valide pas ces chemins.
 - [ ] `#[ignore]` retiré si une reproduction passe désormais
 - [ ] doc à jour (`//!`, page `docs/`, et fichiers de routage si les chemins ont bougé)
 - [ ] diff relu, travail en cours de l'utilisateur préservé
-- [ ] commit en français, branche `rewriterust`
+- [ ] commit en français, branche `dev`
