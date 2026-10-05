@@ -1,5 +1,12 @@
 # Python et scripts
 
+`pyst` est l'interface d'extension publique couverte par la permission
+supplémentaire de `LICENSE-EXCEPTION`. Un script qui l'utilise sans
+incorporer ni lier le code de StokesForge dans son propre programme peut
+être distribué sous la licence choisie par son auteur. La liste fermée des
+interfaces et la portée de cette permission sont dans
+[`licence-et-extensions.md`](licence-et-extensions.md).
+
 Deux crates, derrière la feature `python` (absente de `default`) :
 
 - **`stokesforge-python`** — l'interpréteur CPython **embarqué**. Il ne connaît pas

@@ -1,0 +1,1180 @@
+[
+  {
+    "repository": "brendanzab/gl-rs",
+    "commit": "f150967b1c44ae888e6676f93f639ebc82771bdc",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/brendanzab/gl-rs/f150967b1c44ae888e6676f93f639ebc82771bdc/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "crates": [
+      {
+        "name": "khronos_api",
+        "version": "3.1.0",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "madsmtm/objc2",
+    "commit": "4fc083f1c6d6784577e38b0ee8dbd344481e2fd2",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/madsmtm/objc2/4fc083f1c6d6784577e38b0ee8dbd344481e2fd2/LICENSE.txt",
+    "sha256": "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5",
+    "crates": [
+      {
+        "name": "block2",
+        "version": "0.5.1",
+        "path_in_vcs": "crates/block2"
+      },
+      {
+        "name": "objc-sys",
+        "version": "0.3.5",
+        "path_in_vcs": "crates/objc-sys"
+      },
+      {
+        "name": "objc2",
+        "version": "0.5.2",
+        "path_in_vcs": "crates/objc2"
+      }
+    ]
+  },
+  {
+    "repository": "microsoft/windows-rs",
+    "commit": "3a605cba064b26f2a198ac58085f8c8836f47c38",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/microsoft/windows-rs/3a605cba064b26f2a198ac58085f8c8836f47c38/license-mit",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "crates": [
+      {
+        "name": "windows-sys",
+        "version": "0.52.0",
+        "path_in_vcs": "crates/libs/sys"
+      }
+    ]
+  },
+  {
+    "repository": "projectfluent/fluent-langneg-rs",
+    "commit": "7fdc590466ea63ca2367ac10fb1b881fe561f1a8",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/projectfluent/fluent-langneg-rs/7fdc590466ea63ca2367ac10fb1b881fe561f1a8/LICENSE-MIT",
+    "sha256": "016fcc02048817d628b04b140c54db290fd9d29a5e8a55b77871194e810716ac",
+    "crates": [
+      {
+        "name": "fluent-langneg",
+        "version": "0.13.1",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "rust-lang/compiler-builtins",
+    "commit": "dfd2203a4d6110820ad7bb65cafe1bf331a03a3d",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/rust-lang/compiler-builtins/dfd2203a4d6110820ad7bb65cafe1bf331a03a3d/libm/LICENSE.txt",
+    "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+    "crates": [
+      {
+        "name": "libm",
+        "version": "0.2.16",
+        "path_in_vcs": "libm"
+      }
+    ]
+  },
+  {
+    "repository": "alexheretic/owned-ttf-parser",
+    "commit": "3abee95150b4c32f16ffbaf1bb922a68b465d48b",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/alexheretic/owned-ttf-parser/3abee95150b4c32f16ffbaf1bb922a68b465d48b/LICENSE",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "crates": [
+      {
+        "name": "owned_ttf_parser",
+        "version": "0.25.1",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "AccessKit/accesskit",
+    "commit": "1bbcf100942bac96c2c3a4a91cb67b0b20201a24",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/1bbcf100942bac96c2c3a4a91cb67b0b20201a24/LICENSE-APACHE",
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "crates": [
+      {
+        "name": "accesskit_winit",
+        "version": "0.32.2",
+        "path_in_vcs": "platforms/winit"
+      }
+    ]
+  },
+  {
+    "repository": "AccessKit/accesskit",
+    "commit": "c88605b96d04431f9c3c792464a0f2f253480e94",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-MIT",
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "crates": [
+      {
+        "name": "accesskit_consumer",
+        "version": "0.38.0",
+        "path_in_vcs": "consumer"
+      },
+      {
+        "name": "accesskit_macos",
+        "version": "0.26.3",
+        "path_in_vcs": "platforms/macos"
+      }
+    ]
+  },
+  {
+    "repository": "typst/codex",
+    "commit": "ed6d7a8e8cec7cca53d75656412aa32a43f1111a",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/typst/codex/ed6d7a8e8cec7cca53d75656412aa32a43f1111a/LICENSE",
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "crates": [
+      {
+        "name": "codex",
+        "version": "0.3.0",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "alexheretic/ab-glyph",
+    "commit": "971e5a9b337fbae3edb1ac3ac44d84351d24e8b8",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/alexheretic/ab-glyph/971e5a9b337fbae3edb1ac3ac44d84351d24e8b8/LICENSE",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "crates": [
+      {
+        "name": "ab_glyph_rasterizer",
+        "version": "0.1.10",
+        "path_in_vcs": "rasterizer"
+      }
+    ]
+  },
+  {
+    "repository": "microsoft/windows-rs",
+    "commit": "db06b51c2ebb743efb544d40e3064efa49f28d38",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/microsoft/windows-rs/db06b51c2ebb743efb544d40e3064efa49f28d38/license-mit",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "crates": [
+      {
+        "name": "windows-targets",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/libs/targets"
+      },
+      {
+        "name": "windows_aarch64_gnullvm",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/targets/aarch64_gnullvm"
+      },
+      {
+        "name": "windows_aarch64_msvc",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/targets/aarch64_msvc"
+      },
+      {
+        "name": "windows_i686_gnu",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/targets/i686_gnu"
+      },
+      {
+        "name": "windows_i686_gnullvm",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/targets/i686_gnullvm"
+      },
+      {
+        "name": "windows_i686_msvc",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/targets/i686_msvc"
+      },
+      {
+        "name": "windows_x86_64_gnu",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/targets/x86_64_gnu"
+      },
+      {
+        "name": "windows_x86_64_gnullvm",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/targets/x86_64_gnullvm"
+      },
+      {
+        "name": "windows_x86_64_msvc",
+        "version": "0.52.6",
+        "path_in_vcs": "crates/targets/x86_64_msvc"
+      }
+    ]
+  },
+  {
+    "repository": "microsoft/windows-rs",
+    "commit": "406944152ef28d3273236edc958c2bfbf825775d",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/microsoft/windows-rs/406944152ef28d3273236edc958c2bfbf825775d/license-mit",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "crates": [
+      {
+        "name": "windows-sys",
+        "version": "0.48.0",
+        "path_in_vcs": "crates/libs/sys"
+      }
+    ]
+  },
+  {
+    "repository": "gfx-rs/rspirv",
+    "commit": "8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "crates": [
+      {
+        "name": "spirv",
+        "version": "0.4.0+sdk-1.4.341.0",
+        "path_in_vcs": "spirv"
+      }
+    ]
+  },
+  {
+    "repository": "microsoft/windows-rs",
+    "commit": "b769fa7570f8eeaede0ed1995a7dbe1e9591a35b",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/microsoft/windows-rs/b769fa7570f8eeaede0ed1995a7dbe1e9591a35b/license-mit",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "crates": [
+      {
+        "name": "windows-targets",
+        "version": "0.48.5",
+        "path_in_vcs": "crates/libs/targets"
+      },
+      {
+        "name": "windows_aarch64_gnullvm",
+        "version": "0.48.5",
+        "path_in_vcs": "crates/targets/aarch64_gnullvm"
+      },
+      {
+        "name": "windows_aarch64_msvc",
+        "version": "0.48.5",
+        "path_in_vcs": "crates/targets/aarch64_msvc"
+      },
+      {
+        "name": "windows_i686_gnu",
+        "version": "0.48.5",
+        "path_in_vcs": "crates/targets/i686_gnu"
+      },
+      {
+        "name": "windows_i686_msvc",
+        "version": "0.48.5",
+        "path_in_vcs": "crates/targets/i686_msvc"
+      },
+      {
+        "name": "windows_x86_64_gnu",
+        "version": "0.48.5",
+        "path_in_vcs": "crates/targets/x86_64_gnu"
+      },
+      {
+        "name": "windows_x86_64_gnullvm",
+        "version": "0.48.5",
+        "path_in_vcs": "crates/targets/x86_64_gnullvm"
+      },
+      {
+        "name": "windows_x86_64_msvc",
+        "version": "0.48.5",
+        "path_in_vcs": "crates/targets/x86_64_msvc"
+      }
+    ]
+  },
+  {
+    "repository": "rust-windowing/android-ndk-rs",
+    "commit": "10f2ba388fca20f7349996ebae26ccda7a6fda5c",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-MIT",
+    "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+    "crates": [
+      {
+        "name": "ndk-context",
+        "version": "0.1.1",
+        "path_in_vcs": "ndk-context"
+      }
+    ]
+  },
+  {
+    "repository": "typst/comemo",
+    "commit": "0eaf0707f37032ad936d6d63bb60755fdd1d2cda",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/typst/comemo/0eaf0707f37032ad936d6d63bb60755fdd1d2cda/LICENSE-MIT",
+    "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+    "crates": [
+      {
+        "name": "comemo-macros",
+        "version": "0.5.1",
+        "path_in_vcs": "macros"
+      }
+    ]
+  },
+  {
+    "repository": "madsmtm/objc2",
+    "commit": "e282618be4c3a3b9542957e0c8540e9588472ce8",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt",
+    "sha256": "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5",
+    "crates": [
+      {
+        "name": "objc2-app-kit",
+        "version": "0.2.2",
+        "path_in_vcs": "framework-crates/objc2-app-kit"
+      },
+      {
+        "name": "objc2-foundation",
+        "version": "0.2.2",
+        "path_in_vcs": "framework-crates/objc2-foundation"
+      },
+      {
+        "name": "objc2-ui-kit",
+        "version": "0.2.2",
+        "path_in_vcs": "framework-crates/objc2-ui-kit"
+      }
+    ]
+  },
+  {
+    "repository": "typst/typst-assets",
+    "commit": "ab9eed7b046c6a29f6cdb8566f4b44fb46a2f57f",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/typst/typst-assets/ab9eed7b046c6a29f6cdb8566f4b44fb46a2f57f/LICENSE",
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "crates": [
+      {
+        "name": "typst-assets",
+        "version": "0.15.1",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "plotters-rs/plotters",
+    "commit": "cb7791f6814024d85aa6f9968e73051a4b295bf0",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/plotters-rs/plotters/cb7791f6814024d85aa6f9968e73051a4b295bf0/LICENSE",
+    "sha256": "cab8ff38785be68c4c914b6a01f871711b7c983e98c8f5c5f7057e31c46fe05c",
+    "crates": [
+      {
+        "name": "plotters-backend",
+        "version": "0.3.7",
+        "path_in_vcs": "plotters-backend"
+      },
+      {
+        "name": "plotters-svg",
+        "version": "0.3.7",
+        "path_in_vcs": "plotters-svg"
+      },
+      {
+        "name": "plotters",
+        "version": "0.3.7",
+        "path_in_vcs": "plotters"
+      }
+    ]
+  },
+  {
+    "repository": "jni-rs/jni-sys",
+    "commit": "64d77b7a5f119d7b55b4e2c169a4668067ff59e6",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-MIT",
+    "sha256": "1d85bd754b04ceec93e98e890edd1fa3c6a22e81bcb32135806beeccefa51cd1",
+    "crates": [
+      {
+        "name": "jni-sys-macros",
+        "version": "0.4.1",
+        "path_in_vcs": "jni-sys-macros"
+      }
+    ]
+  },
+  {
+    "repository": "dropbox/rust-alloc-no-stdlib",
+    "commit": "ae42d22078b98549e987d2f03d12df7b984fde47",
+    "license": "BSD-3-Clause",
+    "source_url": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/ae42d22078b98549e987d2f03d12df7b984fde47/LICENSE",
+    "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae",
+    "crates": [
+      {
+        "name": "alloc-stdlib",
+        "version": "0.2.4",
+        "path_in_vcs": "alloc-stdlib"
+      }
+    ]
+  },
+  {
+    "repository": "AccessKit/accesskit",
+    "commit": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-MIT",
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "crates": [
+      {
+        "name": "accesskit",
+        "version": "0.24.1",
+        "path_in_vcs": "common"
+      }
+    ]
+  },
+  {
+    "repository": "alexheretic/ab-glyph",
+    "commit": "ffde4c677fa1095ac355174c1aa2919d7d53eff3",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/alexheretic/ab-glyph/ffde4c677fa1095ac355174c1aa2919d7d53eff3/LICENSE",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "crates": [
+      {
+        "name": "ab_glyph",
+        "version": "0.2.32",
+        "path_in_vcs": "glyph"
+      }
+    ]
+  },
+  {
+    "repository": "microsoft/windows-rs",
+    "commit": "d468916ac27a36fb8a12bafc1bf5c0ec2fe92238",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/microsoft/windows-rs/d468916ac27a36fb8a12bafc1bf5c0ec2fe92238/license-mit",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "crates": [
+      {
+        "name": "windows-link",
+        "version": "0.2.1",
+        "path_in_vcs": "crates/libs/link"
+      },
+      {
+        "name": "windows-threading",
+        "version": "0.2.1",
+        "path_in_vcs": "crates/libs/threading"
+      },
+      {
+        "name": "windows_aarch64_gnullvm",
+        "version": "0.53.1",
+        "path_in_vcs": "crates/targets/aarch64_gnullvm"
+      },
+      {
+        "name": "windows_aarch64_msvc",
+        "version": "0.53.1",
+        "path_in_vcs": "crates/targets/aarch64_msvc"
+      },
+      {
+        "name": "windows_i686_gnu",
+        "version": "0.53.1",
+        "path_in_vcs": "crates/targets/i686_gnu"
+      },
+      {
+        "name": "windows_i686_gnullvm",
+        "version": "0.53.1",
+        "path_in_vcs": "crates/targets/i686_gnullvm"
+      },
+      {
+        "name": "windows_i686_msvc",
+        "version": "0.53.1",
+        "path_in_vcs": "crates/targets/i686_msvc"
+      },
+      {
+        "name": "windows_x86_64_gnu",
+        "version": "0.53.1",
+        "path_in_vcs": "crates/targets/x86_64_gnu"
+      },
+      {
+        "name": "windows_x86_64_gnullvm",
+        "version": "0.53.1",
+        "path_in_vcs": "crates/targets/x86_64_gnullvm"
+      },
+      {
+        "name": "windows_x86_64_msvc",
+        "version": "0.53.1",
+        "path_in_vcs": "crates/targets/x86_64_msvc"
+      }
+    ]
+  },
+  {
+    "repository": "aclysma/profiling",
+    "commit": "8271551172eb6fa4cba47369aedd93790c623df9",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+    "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333",
+    "crates": [
+      {
+        "name": "profiling",
+        "version": "1.0.18",
+        "path_in_vcs": "profiling"
+      }
+    ]
+  },
+  {
+    "repository": "jni-rs/jni-rs",
+    "commit": "5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-MIT",
+    "sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
+    "crates": [
+      {
+        "name": "jni",
+        "version": "0.22.4",
+        "path_in_vcs": "crates/jni"
+      }
+    ]
+  },
+  {
+    "repository": "microsoft/windows-rs",
+    "commit": "4b8893b307719ec23cce698269ca572ef301dc5c",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/microsoft/windows-rs/4b8893b307719ec23cce698269ca572ef301dc5c/license-mit",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "crates": [
+      {
+        "name": "windows-sys",
+        "version": "0.60.2",
+        "path_in_vcs": "crates/libs/sys"
+      }
+    ]
+  },
+  {
+    "repository": "bytecodealliance/wasm-tools",
+    "commit": "35f8671bce74190ef0b00ce36c399b053b490374",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/bytecodealliance/wasm-tools/35f8671bce74190ef0b00ce36c399b053b490374/LICENSE-MIT",
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "crates": [
+      {
+        "name": "wasmparser",
+        "version": "0.239.0",
+        "path_in_vcs": "crates/wasmparser"
+      }
+    ]
+  },
+  {
+    "repository": "AccessKit/accesskit",
+    "commit": "f40dfc01a0c0e76de535969f82fb35e19513737d",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/f40dfc01a0c0e76de535969f82fb35e19513737d/LICENSE-MIT",
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "crates": [
+      {
+        "name": "accesskit_atspi_common",
+        "version": "0.18.1",
+        "path_in_vcs": "platforms/atspi-common"
+      },
+      {
+        "name": "accesskit_consumer",
+        "version": "0.36.0",
+        "path_in_vcs": "consumer"
+      },
+      {
+        "name": "accesskit_unix",
+        "version": "0.21.1",
+        "path_in_vcs": "platforms/unix"
+      }
+    ]
+  },
+  {
+    "repository": "emilk/egui",
+    "commit": "49682f8baa058bf49e011035cfbd6e825f88a5ef",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/emilk/egui/49682f8baa058bf49e011035cfbd6e825f88a5ef/LICENSE-MIT",
+    "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+    "crates": [
+      {
+        "name": "ecolor",
+        "version": "0.36.2",
+        "path_in_vcs": "crates/ecolor"
+      },
+      {
+        "name": "eframe",
+        "version": "0.36.2",
+        "path_in_vcs": "crates/eframe"
+      },
+      {
+        "name": "egui-wgpu",
+        "version": "0.36.2",
+        "path_in_vcs": "crates/egui-wgpu"
+      },
+      {
+        "name": "egui-winit",
+        "version": "0.36.2",
+        "path_in_vcs": "crates/egui-winit"
+      },
+      {
+        "name": "egui",
+        "version": "0.36.2",
+        "path_in_vcs": "crates/egui"
+      },
+      {
+        "name": "egui_extras",
+        "version": "0.36.2",
+        "path_in_vcs": "crates/egui_extras"
+      },
+      {
+        "name": "emath",
+        "version": "0.36.2",
+        "path_in_vcs": "crates/emath"
+      },
+      {
+        "name": "epaint",
+        "version": "0.36.2",
+        "path_in_vcs": "crates/epaint"
+      }
+    ]
+  },
+  {
+    "repository": "Ogeon/palette",
+    "commit": "0a516fed5e94c9ef4b12469410c1981fa6ba7d06",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/Ogeon/palette/0a516fed5e94c9ef4b12469410c1981fa6ba7d06/LICENSE-MIT",
+    "sha256": "be1313a4b07ab509c80083966cdd209a7d81d75cd57fcea24441fc9041ccf184",
+    "crates": [
+      {
+        "name": "palette_math",
+        "version": "0.7.7",
+        "path_in_vcs": "palette_math"
+      }
+    ]
+  },
+  {
+    "repository": "microsoft/windows-rs",
+    "commit": "32c3144490c016fe496a0aed769bce60987a2e9d",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/microsoft/windows-rs/32c3144490c016fe496a0aed769bce60987a2e9d/license-mit",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "crates": [
+      {
+        "name": "windows-collections",
+        "version": "0.3.2",
+        "path_in_vcs": "crates/libs/collections"
+      },
+      {
+        "name": "windows-core",
+        "version": "0.62.2",
+        "path_in_vcs": "crates/libs/core"
+      },
+      {
+        "name": "windows-future",
+        "version": "0.3.2",
+        "path_in_vcs": "crates/libs/future"
+      },
+      {
+        "name": "windows-implement",
+        "version": "0.60.2",
+        "path_in_vcs": "crates/libs/implement"
+      },
+      {
+        "name": "windows-interface",
+        "version": "0.59.3",
+        "path_in_vcs": "crates/libs/interface"
+      },
+      {
+        "name": "windows-numerics",
+        "version": "0.3.1",
+        "path_in_vcs": "crates/libs/numerics"
+      },
+      {
+        "name": "windows-result",
+        "version": "0.4.1",
+        "path_in_vcs": "crates/libs/result"
+      },
+      {
+        "name": "windows-strings",
+        "version": "0.5.1",
+        "path_in_vcs": "crates/libs/strings"
+      },
+      {
+        "name": "windows-sys",
+        "version": "0.61.2",
+        "path_in_vcs": "crates/libs/sys"
+      },
+      {
+        "name": "windows-targets",
+        "version": "0.53.5",
+        "path_in_vcs": "crates/libs/targets"
+      },
+      {
+        "name": "windows",
+        "version": "0.62.2",
+        "path_in_vcs": "crates/libs/windows"
+      }
+    ]
+  },
+  {
+    "repository": "dtolnay/ryu",
+    "commit": "f0b52bb194befe6fd242154f2182fafd43a819b8",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/dtolnay/ryu/f0b52bb194befe6fd242154f2182fafd43a819b8/LICENSE-APACHE",
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "crates": [
+      {
+        "name": "ryu",
+        "version": "1.0.23",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "brendanzab/gl-rs",
+    "commit": "ea503e8d5fb6d73c6030e6191ce738cd3bf3433e",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/brendanzab/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "crates": [
+      {
+        "name": "gl_generator",
+        "version": "0.14.0",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "typst/pixglyph",
+    "commit": "d378e9f3e9eaf973d0233559730e151e900784ea",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/typst/pixglyph/d378e9f3e9eaf973d0233559730e151e900784ea/LICENSE",
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "crates": [
+      {
+        "name": "pixglyph",
+        "version": "0.6.1",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "AccessKit/accesskit",
+    "commit": "1bbcf100942bac96c2c3a4a91cb67b0b20201a24",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/1bbcf100942bac96c2c3a4a91cb67b0b20201a24/LICENSE-MIT",
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "crates": [
+      {
+        "name": "accesskit_consumer",
+        "version": "0.35.0",
+        "path_in_vcs": "consumer"
+      },
+      {
+        "name": "accesskit_windows",
+        "version": "0.32.1",
+        "path_in_vcs": "platforms/windows"
+      }
+    ]
+  },
+  {
+    "repository": "rust-mobile/ndk",
+    "commit": "49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-MIT",
+    "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+    "crates": [
+      {
+        "name": "ndk-sys",
+        "version": "0.6.0+11769913",
+        "path_in_vcs": "ndk-sys"
+      },
+      {
+        "name": "ndk",
+        "version": "0.9.0",
+        "path_in_vcs": "ndk"
+      }
+    ]
+  },
+  {
+    "repository": "wasmi-labs/wasmi",
+    "commit": "8273dfb09d493971b7bb12fe614d740cdc857175",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/wasmi-labs/wasmi/8273dfb09d493971b7bb12fe614d740cdc857175/LICENSE-MIT",
+    "sha256": "172bc1497507c1c363496bc23b0f16de8fa8e94befa85db6c8d9fa790e0a8657",
+    "crates": [
+      {
+        "name": "wasmi",
+        "version": "1.1.0",
+        "path_in_vcs": "crates/wasmi"
+      },
+      {
+        "name": "wasmi_collections",
+        "version": "1.1.0",
+        "path_in_vcs": "crates/collections"
+      },
+      {
+        "name": "wasmi_core",
+        "version": "1.1.0",
+        "path_in_vcs": "crates/core"
+      },
+      {
+        "name": "wasmi_ir",
+        "version": "1.1.0",
+        "path_in_vcs": "crates/ir"
+      }
+    ]
+  },
+  {
+    "repository": "jni-rs/jni-rs",
+    "commit": "33045a124105c939d1e2cbdcb5a39e5d868ffa03",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-MIT",
+    "sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
+    "crates": [
+      {
+        "name": "jni-macros",
+        "version": "0.22.4",
+        "path_in_vcs": "crates/jni-macros"
+      }
+    ]
+  },
+  {
+    "repository": "microsoft/windows-rs",
+    "commit": "308e08ec259027ebbef11b8ef838923626bf821e",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/microsoft/windows-rs/308e08ec259027ebbef11b8ef838923626bf821e/license-mit",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "crates": [
+      {
+        "name": "windows-sys",
+        "version": "0.59.0",
+        "path_in_vcs": "crates/libs/sys"
+      }
+    ]
+  },
+  {
+    "repository": "zbraniecki/pluralrules",
+    "commit": "d0715d5b7cca72e228d6e6c4de154bd30dfdd06a",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/zbraniecki/pluralrules/d0715d5b7cca72e228d6e6c4de154bd30dfdd06a/intl_pluralrules/LICENSE-MIT",
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "crates": [
+      {
+        "name": "intl_pluralrules",
+        "version": "7.0.2",
+        "path_in_vcs": "intl_pluralrules"
+      }
+    ]
+  },
+  {
+    "repository": "DoumanAsh/clipboard-win",
+    "commit": "3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342",
+    "license": "BSL-1.0",
+    "source_url": "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342/LICENSE",
+    "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+    "crates": [
+      {
+        "name": "clipboard-win",
+        "version": "5.4.1",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "kardeiz/type-map",
+    "commit": "d3ab3e642736d87f3fa8b1e6c8f13a93fcfb72e1",
+    "license": "MIT",
+    "source_url": "https://raw.githubusercontent.com/kardeiz/type-map/d3ab3e642736d87f3fa8b1e6c8f13a93fcfb72e1/LICENSE-MIT",
+    "sha256": "b47fb719a40d9ef9c8e3be525c41ce129c46d613cfc96a91bddd7c19dcebf7a1",
+    "crates": [
+      {
+        "name": "type-map",
+        "version": "0.5.1",
+        "path_in_vcs": ""
+      }
+    ]
+  },
+  {
+    "repository": "typst/typst",
+    "commit": "9dfd3a08500b7896045f907433cf7b4b02434fad",
+    "license": "Apache-2.0",
+    "source_url": "https://raw.githubusercontent.com/typst/typst/9dfd3a08500b7896045f907433cf7b4b02434fad/LICENSE",
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "crates": [
+      {
+        "name": "typst-eval",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-eval"
+      },
+      {
+        "name": "typst-html",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-html"
+      },
+      {
+        "name": "typst-layout",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-layout"
+      },
+      {
+        "name": "typst-library",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-library"
+      },
+      {
+        "name": "typst-macros",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-macros"
+      },
+      {
+        "name": "typst-realize",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-realize"
+      },
+      {
+        "name": "typst-render",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-render"
+      },
+      {
+        "name": "typst-svg",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-svg"
+      },
+      {
+        "name": "typst-syntax",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-syntax"
+      },
+      {
+        "name": "typst-timing",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-timing"
+      },
+      {
+        "name": "typst-utils",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst-utils"
+      },
+      {
+        "name": "typst",
+        "version": "0.15.1",
+        "path_in_vcs": "crates/typst"
+      }
+    ]
+  },
+  {
+    "repository": "AA-Turner/roman-numerals",
+    "commit": "ec81337f99d8b557a6fce10f674c054050551444",
+    "license": "0BSD",
+    "crates": [
+      {
+        "name": "roman-numerals-rs",
+        "version": "3.1.0",
+        "path_in_vcs": "rust"
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/AA-Turner/roman-numerals/ec81337f99d8b557a6fce10f674c054050551444/LICENCE.rst",
+    "sha256": "c744ffc7e120b22e6620b613298dc003a2613c0ae489ee414fb1d473f24f916f"
+  },
+  {
+    "repository": "madsmtm/objc2",
+    "commit": "b4167b582b2f75f9a1be75495c41b765344fd03c",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "block2",
+        "version": "0.6.2",
+        "path_in_vcs": "crates/block2"
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+    "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+  },
+  {
+    "repository": "dropbox/rust-brotli-decompressor",
+    "commit": "b56177b8eb3d2440536281397e5ffe06eedf1a5c",
+    "license": "BSD-3-Clause",
+    "crates": [
+      {
+        "name": "brotli-decompressor",
+        "version": "5.0.3",
+        "path_in_vcs": ""
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/dropbox/rust-brotli-decompressor/b56177b8eb3d2440536281397e5ffe06eedf1a5c/LICENSE",
+    "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+  },
+  {
+    "repository": "madsmtm/objc2",
+    "commit": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "dispatch2",
+        "version": "0.3.1",
+        "path_in_vcs": "crates/dispatch2"
+      },
+      {
+        "name": "objc2",
+        "version": "0.6.4",
+        "path_in_vcs": "crates/objc2"
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+    "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+  },
+  {
+    "repository": "SSheldon/rust-dispatch",
+    "commit": "82d6c7a5b75dc0c71c3f46f87bb6c16a476f7748",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "dispatch",
+        "version": "0.2.0",
+        "path_in_vcs": ""
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/SSheldon/rust-dispatch/82d6c7a5b75dc0c71c3f46f87bb6c16a476f7748/Cargo.toml",
+    "note": "MIT et auteur déclarés dans le manifeste ; aucun fichier de licence dans cet instantané."
+  },
+  {
+    "repository": "rust-windowing/winit",
+    "commit": "587ade844dfb0eada3696ba1cb263c66eea80581",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "dpi",
+        "version": "0.1.2",
+        "path_in_vcs": "dpi"
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/rust-windowing/winit/587ade844dfb0eada3696ba1cb263c66eea80581/dpi/LICENSE-LIBM-MIT",
+    "sha256": "9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997"
+  },
+  {
+    "repository": "orlp/glidesort",
+    "commit": "c4df9518ec23a424a867b3d50967f0aaafe3c0fd",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "glidesort",
+        "version": "0.1.2",
+        "path_in_vcs": ""
+      }
+    ],
+    "excerpt": "section License",
+    "source_url": "https://raw.githubusercontent.com/orlp/glidesort/c4df9518ec23a424a867b3d50967f0aaafe3c0fd/README.md",
+    "sha256": "e74f6835c2208450b26427e02b1f2c7e2504bbcf0c06671c86de349c8ba9bbe6"
+  },
+  {
+    "repository": "madsmtm/objc2",
+    "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "objc2-app-kit",
+        "version": "0.3.2",
+        "path_in_vcs": "framework-crates/objc2-app-kit"
+      },
+      {
+        "name": "objc2-core-foundation",
+        "version": "0.3.2",
+        "path_in_vcs": "framework-crates/objc2-core-foundation"
+      },
+      {
+        "name": "objc2-core-graphics",
+        "version": "0.3.2",
+        "path_in_vcs": "framework-crates/objc2-core-graphics"
+      },
+      {
+        "name": "objc2-foundation",
+        "version": "0.3.2",
+        "path_in_vcs": "framework-crates/objc2-foundation"
+      },
+      {
+        "name": "objc2-metal",
+        "version": "0.3.2",
+        "path_in_vcs": "framework-crates/objc2-metal"
+      },
+      {
+        "name": "objc2-quartz-core",
+        "version": "0.3.2",
+        "path_in_vcs": "framework-crates/objc2-quartz-core"
+      },
+      {
+        "name": "objc2-ui-kit",
+        "version": "0.3.2",
+        "path_in_vcs": "framework-crates/objc2-ui-kit"
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+    "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+  },
+  {
+    "repository": "madsmtm/objc2",
+    "commit": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "objc2-encode",
+        "version": "4.1.0",
+        "path_in_vcs": "crates/objc2-encode"
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+    "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+  },
+  {
+    "repository": "r-efi/r-efi",
+    "commit": "97b55bed1c2c91dcbf787674849f05337ff80b33",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "r-efi",
+        "version": "5.3.0",
+        "path_in_vcs": ""
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/r-efi/r-efi/97b55bed1c2c91dcbf787674849f05337ff80b33/AUTHORS",
+    "sha256": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7"
+  },
+  {
+    "repository": "r-efi/r-efi",
+    "commit": "7e1b0322d31d625f81a5656096330934f9cd835d",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "r-efi",
+        "version": "6.0.0",
+        "path_in_vcs": ""
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/r-efi/r-efi/7e1b0322d31d625f81a5656096330934f9cd835d/AUTHORS",
+    "sha256": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111"
+  },
+  {
+    "repository": "jedisct1/rust-siphash",
+    "commit": "451f67d73a772cba325728109bbfa247750ed076",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "siphasher",
+        "version": "1.0.3",
+        "path_in_vcs": ""
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/jedisct1/rust-siphash/451f67d73a772cba325728109bbfa247750ed076/COPYING",
+    "sha256": "c962ee4d1d05ddc138b202b2540219ebc57893fcf97b364852094a9a94ce1365"
+  },
+  {
+    "repository": "etemesi254/zune-image",
+    "commit": "f8fbb123d5ed04441e8324a555bfcda0cb1bd28f",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "zune-core",
+        "version": "0.4.12",
+        "path_in_vcs": "crates/zune-core"
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/etemesi254/zune-image/f8fbb123d5ed04441e8324a555bfcda0cb1bd28f/LICENSE.md",
+    "sha256": "c6dff146a9f31848ac296faa5a08a4253caf2c384c86f906dc99e7fc0a39cc8c"
+  },
+  {
+    "repository": "etemesi254/zune-image",
+    "commit": "fa2c767a01d7d9373911d0bf63e0588553d67e0e",
+    "license": "MIT",
+    "crates": [
+      {
+        "name": "zune-jpeg",
+        "version": "0.4.21",
+        "path_in_vcs": "crates/zune-jpeg"
+      }
+    ],
+    "source_url": "https://raw.githubusercontent.com/etemesi254/zune-image/fa2c767a01d7d9373911d0bf63e0588553d67e0e/LICENSE.md",
+    "sha256": "c6dff146a9f31848ac296faa5a08a4253caf2c384c86f906dc99e7fc0a39cc8c"
+  }
+]

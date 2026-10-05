@@ -79,6 +79,9 @@ rm -rf "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip" \
 # __pycache__ conservés : voir la doc de pyhello-dist.sh (même raison, même
 # gain de ~165 ms au premier script).
 
+# Licences du code, des ressources et du runtime effectivement livré (#129).
+"$REPO_ROOT/scripts/licenses-dist.sh" "$DIST"
+
 TAILLE="$(du -sm "$DIST" | cut -f1)"
 echo "[dist] taille de $DIST : ${TAILLE} Mo"
 

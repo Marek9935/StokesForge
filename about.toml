@@ -1,0 +1,29 @@
+# MIT est préféré pour les doubles licences MIT/Apache ; les notices et
+# copyrights propres à chaque paquet sont conservés dans le fichier généré.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "0BSD",
+    "OFL-1.1",
+    "GPL-3.0-or-later WITH AdditionRef-StokesForge-Extension",
+]
+
+[epaint_default_fonts]
+accepted = ["Ubuntu-font-1.0"]
+
+[option-ext]
+accepted = ["MPL-2.0"]
+
+[brotli-decompressor.clarify]
+license = "BSD-3-Clause"
+
+[[brotli-decompressor.clarify.files]]
+path = "LICENSE"
+checksum = "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"

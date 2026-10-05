@@ -29,6 +29,12 @@ contre cet interpréteur. On ne change jamais l'une sans relancer
 
 ## Construire et vérifier
 
+Avant les scripts de distribution, installer les outils de licence figés
+selon [`docs/licence-et-extensions.md`](../../docs/licence-et-extensions.md).
+Ils livrent aussi les notices du code, des ressources, de CPython et de
+numpy. Une mise à jour du verrou Python actualise
+[`vendor/python/licenses/`](../../vendor/python/licenses/README.md).
+
 ```bash
 scripts/python-vendor.sh     # interpréteur + numpy épinglé dans vendor/python/extracted/python
 scripts/python-test.sh       # pont, scripts, robustesse, application et CLI contre le préfixe vendorisé
@@ -241,6 +247,9 @@ de la console de script (tâche 5.4).
 
 ```
 dist/pyhello/
+├── LICENSE, LICENSE-EXCEPTION                licence de StokesForge
+├── THIRD-PARTY-LICENSES.txt                  textes des dépendances Rust
+├── licenses/                                ressources, patches, CPython, numpy
 ├── pyhello                                  binaire release (0,7 Mo)
 └── lib/
     ├── libpython3.12.so.1.0                 31 Mo (strippée), cible du rpath $ORIGIN/lib

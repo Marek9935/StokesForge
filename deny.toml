@@ -1,0 +1,40 @@
+# Contrôle de tout le workspace, toutes plateformes et feature python comprise.
+# Les textes de distribution sont produits avec about.toml ; garder les deux
+# politiques en accord lors d'une modification de Cargo.lock.
+[graph]
+all-features = true
+
+[licenses]
+include-dev = true
+confidence-threshold = 0.93
+allow = [
+    "GPL-3.0-or-later WITH AdditionRef-StokesForge-Extension",
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "0BSD",
+    "OFL-1.1",
+]
+
+# Permissions limitées aux composants effectivement relus, pas à toute
+# dépendance future. Les polices restent sous leurs licences d'origine.
+[[licenses.exceptions]]
+crate = "epaint_default_fonts@0.36.2"
+allow = ["Ubuntu-font-1.0"]
+
+[[licenses.exceptions]]
+crate = "option-ext@0.2.0"
+allow = ["MPL-2.0"]
+
+# Le manifeste 5.0.3 annonce MIT mais son fichier LICENSE est BSD-3-Clause.
+# Conserver le texte de Dropbox ; le hash lie la clarification à ce fichier.
+[[licenses.clarify]]
+crate = "brotli-decompressor@5.0.3"
+expression = "BSD-3-Clause"
+license-files = [{ path = "LICENSE", hash = 0x1a60a92d }]

@@ -17,6 +17,15 @@ confirmation pour les choix courants couverts par la demande.
 
 ## Repères permanents
 
+- La licence de `rewriterust` est GPL-3.0-or-later avec la permission de
+  `LICENSE-EXCEPTION`. Toute nouvelle interface couverte s'ajoute par commit
+  explicite à la liste fermée de `docs/licence-et-extensions.md` (`pyst`
+  aujourd'hui). Conserver les notices tierces et les actualiser avec les
+  dépendances ou le runtime ; `scripts/licenses-dist.sh` les livre et le
+  travail CI `licenses` contrôle la politique par `cargo deny check licenses`.
+  Les compléments de `vendor/crate-license-notices/` sont liés au verrou
+  Cargo ; une modification de `Cargo.lock` exige leur revalidation avant
+  distribution.
 - Le développement actif est le workspace Rust dans `crates/`. Lire
   `Cargo.toml`, les manifestes concernés et `rust-toolchain.toml` pour les
   outils, versions et features effectifs.

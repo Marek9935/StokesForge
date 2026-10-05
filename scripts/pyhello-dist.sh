@@ -62,6 +62,9 @@ rm -rf "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip" \
 # import (mesuré : ~250 ms d'init au lieu de ~85 ms), et une distribution
 # installée en lecture seule ne pourrait jamais reconstituer ce cache.
 
+# Licences du code, des ressources et du runtime effectivement livré (#129).
+"$REPO_ROOT/scripts/licenses-dist.sh" "$DIST"
+
 TAILLE="$(du -sm "$DIST" | cut -f1)"
 echo "[dist] taille de $DIST : ${TAILLE} Mo"
 

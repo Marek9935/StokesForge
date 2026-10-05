@@ -49,6 +49,27 @@ fmt:
     - rustup component add rustfmt
     - cargo fmt --all -- --check
 
+# #129 : politique et notices, toutes plateformes et feature python comprise,
+# sans compilation du workspace. Versions partagées avec la distribution.
+licenses:
+  stage: check
+  image: rust:1
+  cache:
+    key: cargo-${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .cargo/
+  script:
+    - source scripts/licenses-tools.env
+    - cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
+    - cargo install cargo-about --locked --version "$CARGO_ABOUT_VERSION"
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - cargo deny --locked check licenses
+    - scripts/licenses-test.sh
+    - scripts/licenses-rust.sh target/licenses/THIRD-PARTY-LICENSES.txt
+  artifacts:
+    paths:
+      - target/licenses/THIRD-PARTY-LICENSES.txt
+
 clippy:
   stage: check
   image: rust:1

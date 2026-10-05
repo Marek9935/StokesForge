@@ -1617,6 +1617,11 @@ et groupes annulables sont disponibles dans le CLI et la console ; voir
 [`python-et-script.md`](python-et-script.md). Le paquet Linux autonome se
 construit et se vérifie par `scripts/cli-dist.sh`.
 
+Les distributions de l'application et du CLI livrent également les licences
+de StokesForge et les notices tierces (ressources, patches, CPython et numpy)
+par `scripts/licenses-dist.sh`. Installer ses outils avant l'assemblage ;
+voir [`licence-et-extensions.md`](licence-et-extensions.md).
+
 ## Règles communes avec le rendu
 
 Deux règles ne sont **pas** réécrites dans l'interface (issue #25) :

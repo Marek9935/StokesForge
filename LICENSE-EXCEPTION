@@ -1,0 +1,25 @@
+StokesForge extension interface exception
+SPDX-Addition-Identifier: AdditionRef-StokesForge-Extension
+
+Copyright (c) 2026 Aliocha Skrzypczak.
+
+StokesForge is licensed under the GNU General Public License, version 3
+or (at your option) any later version, with the additional permission
+below. The GNU GPL version 3 is reproduced in LICENSE and is available at
+https://www.gnu.org/licenses/gpl-3.0.html.
+
+Additional permission under GNU GPL version 3 section 7.
+
+As a special exception, you may create and distribute a work that
+interacts with StokesForge solely through its documented extension
+interfaces (the pyst scripting API, and any further interface that the
+project documents as an extension interface), without linking, compiling
+or incorporating any StokesForge source code or object code into that
+work, and license that work under terms of your choice.
+
+This exception does not extend to modifications of StokesForge itself,
+nor to works that include or link StokesForge code.
+
+The documented extension interfaces are enumerated in
+docs/licence-et-extensions.md. Third-party components retain their own
+licenses; this additional permission does not relicense them.

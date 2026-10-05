@@ -1,0 +1,18 @@
+Notices des dépendances Rust de StokesForge
+Générées par cargo-about depuis Cargo.lock, toutes plateformes et features.
+Les licences de StokesForge, de ses ressources et du runtime Python sont
+livrées séparément dans LICENSE, LICENSE-EXCEPTION et licenses/.
+
+{{#each licenses}}
+======================================================================
+{{name}} ({{id}})
+Utilisée par :
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}
+    {{{crate.repository}}}
+    Auteurs déclarés : {{#each crate.authors}}{{{this}}}; {{/each}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

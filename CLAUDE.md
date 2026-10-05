@@ -53,6 +53,8 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 
 ## Conventions
 
+- Licence (#129) : GPL-3.0-or-later avec `LICENSE-EXCEPTION`, limitée aux interfaces de la liste fermée `docs/licence-et-extensions.md` (`pyst` aujourd'hui). Une nouvelle interface couverte exige un commit explicite dans cette liste. Préserver les licences des composants tiers ; une dépendance ou un runtime modifié actualise les notices et passe `cargo deny check licenses`. Les distributions utilisent `scripts/licenses-dist.sh`. Les contributions extérieures portent le DCO de `CONTRIBUTING.md` ; il ne remplace pas un CLA pour un futur relicenciement.
+- Notices Rust : `scripts/licenses-rust.sh` ajoute les copyrights amont manquants de `vendor/crate-license-notices/`. Leur empreinte lie le rapport au `Cargo.lock` exact ; toute modification du verrou exige de revalider ces compléments avant de générer les notices.
 - `rustfmt` + `clippy -D warnings` obligatoires (CI `.gitlab-ci.yml`).
 - Quand un travail installe une règle nouvelle (standard d'interface, motif à suivre, frontière), mettre à jour **au besoin** les skills concernés (`.claude/skills/`) et ce fichier, dans le même commit que le code, pour garder le développement cohérent. Voir `.claude/skills/README.md` (règles transversales).
 - Bugs et évolutions se suivent en issues GitLab (`glab issue list`), pas en `.md` ; chaque issue porte une ligne « **Cohérence** » qui dit quels skills et quelles docs mettre à jour.

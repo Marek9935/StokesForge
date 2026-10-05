@@ -5,7 +5,7 @@ Font License 1.1** (vérifiée sur chaque fichier `OFL.txt` ci-dessous, pas
 supposée). Embarquées dans le binaire par `crates/stokesforge-render/src/fonts.rs`
 via `include_bytes!`, pour que StokesForge sache toujours dessiner du texte lisible
 sans dépendre de ce qui est installé sur la machine — voir
-`docs/newarchitecture/architecture-choisie.md` §7 pour la décision et sa
+`docs/archive/newarchitecture/architecture-choisie.md` §7 pour la décision et sa
 date (2026-09-13).
 
 Noto Sans / Noto Sans Math a un double rôle dans ce mécanisme : c'est la
@@ -43,6 +43,8 @@ Chaque répertoire porte son propre `OFL.txt` (texte de licence intégral),
 copié depuis la même source que le fichier de police — c'est l'usage
 standard de distribution de polices, au même niveau de soin que les licences
 vendorisées de `vendor/python/`.
+Les scripts de distribution copient chaque texte dans
+`licenses/fonts/<famille>/OFL.txt` par `scripts/licenses-dist.sh` (#129).
 
 ## Notes
 

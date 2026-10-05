@@ -27,6 +27,9 @@ find "$PREFIX/lib" -maxdepth 1 -name '*.so*' ! -name 'libpython*' \
 rm -rf "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip" \
        "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip-"*.dist-info
 # __pycache__ conservés, libpython une seule fois, aucun pip livré : cf. pyhello.
+# Licences du code, des ressources et du runtime effectivement livré (#129).
+"$REPO_ROOT/scripts/licenses-dist.sh" "$DIST"
+
 LINKS="$(ldd "$DIST/stokesforge-cli")"
 if ! grep -Fq "$DIST/lib/$SOFILE" <<<"$LINKS"; then
     echo '[dist] libpython is not resolved from the package' >&2

@@ -5,6 +5,14 @@ description: Travailler sur le pont Python de StokesForge — interpréteur CPyt
 
 # Le pont Python de StokesForge
 
+`pyst` est l'interface d'extension documentée couverte par
+`LICENSE-EXCEPTION` (#129). Une nouvelle fonction actualise son contrat dans
+`docs/python-et-script.md`. Toute **nouvelle interface** couverte exige un
+commit explicite dans la liste fermée de `docs/licence-et-extensions.md` ;
+ne pas étendre la permission aux API Rust ou à une future liaison par analogie.
+Une modification du runtime Python impose aussi de mettre à jour ses notices
+dans `vendor/python/licenses/` avant de livrer une distribution.
+
 Deux crates, derrière la feature `python`, **absente de `default`** :
 
 - **`stokesforge-python`** — l'interpréteur CPython embarqué. Il ne connaît pas le

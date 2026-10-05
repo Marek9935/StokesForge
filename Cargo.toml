@@ -23,6 +23,8 @@ members = [
 
 [workspace.package]
 edition = "2021"
+# Permission supplémentaire définie dans LICENSE-EXCEPTION (SPDX 3.0).
+license = "GPL-3.0-or-later WITH AdditionRef-StokesForge-Extension"
 
 [workspace.lints.clippy]
 all = "warn"

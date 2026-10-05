@@ -1,0 +1,11 @@
+{
+  "crate": "epaint_default_fonts",
+  "version": "0.36.2",
+  "files_sha256": {
+    "Hack-Regular.ttf": "15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125",
+    "NotoEmoji-Regular.ttf": "415dc6290378574135b64c808dc640c1df7531973290c4970c51fdeb849cb0c5",
+    "Ubuntu-Light.ttf": "80307b8da7649aa4ee4d484b232140e3ce1ec0ca093073d3c53c8f5a5ced7a70",
+    "emoji-icon-font.ttf": "f426bec371f484646d002717e2c555a95cd5145e635d83a48bbef83f3abf18ca",
+    "emoji-icon-font-mit-license.txt": "b9d2c1d909aa149996fd4c91dcb92b2362a04431640c1d200959da94caf8cde1"
+  }
+}

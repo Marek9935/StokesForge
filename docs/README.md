@@ -34,6 +34,7 @@ page qui contredit le code a tort.
 | ajouter ou afficher une icône (rôles de couleur, planche-contact) | [`icones.md`](icones.md) |
 | écrire ou modifier un texte visible (libellé, infobulle, message) | [`textes-interface.md`](textes-interface.md) |
 | écrire ou lancer un test, comprendre la CI | [`tests.md`](tests.md) |
+| licence, contributions, interfaces d'extension et notices tierces | [`licence-et-extensions.md`](licence-et-extensions.md) |
 
 `.claude/rules.md` complète ce tableau côté **chargement de contexte** : quels
 crates ouvrir, et surtout lesquels ne pas ouvrir, pour chaque domaine.

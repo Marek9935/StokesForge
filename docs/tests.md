@@ -1,5 +1,25 @@
 # Tests et intégration continue
 
+## Licences et notices (#129)
+
+Le travail automatique et bloquant `licenses` installe les versions de
+`scripts/licenses-tools.env`, exécute `cargo deny --locked check licenses`
+puis produit les notices Rust avec `cargo-about`. La résolution porte sur
+toutes les plateformes et features, y compris `python`, sans compilation :
+ce contrôle ne valide pas le pont Python. L'artefact conserve les textes
+générés à partir du verrou de ce pipeline.
+`scripts/licenses-test.sh` vérifie les témoins de refus : runtime sans notice,
+jeu de notices Python périmé, compléments pour un autre verrou Cargo et
+dépendance GPL-2.0-only hors politique. Ces
+sondes utilisent des répertoires temporaires, sans modifier les sources.
+
+Les distributions appellent `scripts/licenses-dist.sh`, qui ajoute les textes
+de StokesForge, les notices Rust, OFL et Phosphor, celles des patches, ainsi
+que CPython, ses bibliothèques natives et numpy. Il refuse un verrou Python
+différent du jeu de notices versionné et un runtime sans les licences de
+CPython/numpy. Politique et commandes :
+[`licence-et-extensions.md`](licence-et-extensions.md).
+
 ## Trois familles
 
 | Famille | Où | Ce qu'elle garde |

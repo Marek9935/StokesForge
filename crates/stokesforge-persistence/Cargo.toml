@@ -2,6 +2,7 @@
 name = "stokesforge-persistence"
 version = "0.0.0"
 edition.workspace = true
+license.workspace = true
 description = "save / load d'un Project complet — frontière figée, format provisoire (phase 3)."
 
 [lints]
