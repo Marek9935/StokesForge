@@ -434,8 +434,12 @@ et `hit::component_at` rend `PlotComponent::Text(TextTarget)` /
 (aperçu `set_text_preview`, même motif que les textes libres) et le
 double-clic émet `GraphEvent::EditText` / `EditLegendEntry`. Sur un objet graphique, une courbe ou un axe (#113), il
 émet `OpenShapeProperties` / `OpenSeriesProperties` / `OpenAxisProperties` — l'application
-(`app::graph_window::annotation_interactions`) les traduit en `Action::OpenObjectProperties` / `OpenPlotSettings`, les mêmes que le
+(`app::graph_window::annotation_interactions`) traduit les axes et courbes en
+`Action::OpenObjectProperties`, comme le
 double-clic d'une ligne de l'Object Manager ; ailleurs, il réinitialise le zoom.
+Pour un axe, l'application lit `(row, column)` dans le `DrawnPanel` désigné
+et ouvre les propriétés du calque correspondant, même si d'autres panneaux
+ont été omis du rendu. Le menu contextuel conserve cette adresse au clic.
 
 **Texte repris automatiquement** (issue #33) : un nom de série laissé vide
 reprend le nom long ou le nom de la colonne, souvent importé d'un appareil
