@@ -714,6 +714,7 @@ fn les_metadonnees_de_colonne_et_de_fenetre_rendent_les_precedentes() {
     let window_meta = WindowMeta {
         label: "Manip 3".to_string(),
         comment: "essai".to_string(),
+        ..Default::default()
     };
     assert_eq!(
         demo.project

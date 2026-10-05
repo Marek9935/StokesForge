@@ -270,6 +270,15 @@ avec les mêmes bornes d'identifiants et les mêmes règles de contenance que le
 fichier. Les valeurs et métadonnées sont conservées, notamment les NaN bit à bit,
 les cellules mixtes et la provenance d'import. Les identifiants source décrivent
 uniquement la structure du transport : ils sont remplacés à l'insertion.
-L'origine distingue le projet courant d'un autre pour empêcher un graphe
-étranger de référencer accidentellement des colonnes ayant les mêmes numéros.
+L'origine distingue le projet courant d'un autre : les graphes externes
+emportent leurs données et remplacent toutes leurs références (#107).
 Elle change après un chargement ou un nouveau projet ; elle n'est pas persistée.
+
+Les dépendances de chaque graphique sont transportées comme un sous-arbre
+classeur autonome dans `graph_data`, validé par le même lecteur que les
+objets. `WindowMeta.hidden` (défaut `false`, dans les records de fenêtres) enregistre
+le masquage des données
+embarquées dans le `.stf` et le presse-papiers. Les références rompues sont
+remplacées par des identifiants réservés sans nœud dans la destination,
+jamais réutilisés, y compris après sauvegarde/rechargement. Le transport
+textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).

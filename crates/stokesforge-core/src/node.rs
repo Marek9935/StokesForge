@@ -20,6 +20,8 @@ pub struct WindowMeta {
     pub label: String,
     /// Commentaire libre.
     pub comment: String,
+    /// Fenêtre absente du gestionnaire ; utilisé pour les classeurs embarqués.
+    pub hidden: bool,
 }
 
 /// Nature d'un nœud et son contenu propre. Les listes d'enfants sont ordonnées :

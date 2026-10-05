@@ -89,6 +89,7 @@ fn un_projet_realiste_supporte_instantanes_et_mutations() {
                         WindowMeta {
                             label: format!("Note {step}"),
                             comment: String::new(),
+                            ..Default::default()
                         },
                     )
                     .expect("métadonnées");

@@ -38,6 +38,7 @@ fn fixture_project() -> Project {
             WindowMeta {
                 label: "Étiquette du classeur".to_string(),
                 comment: "Commentaire du classeur".to_string(),
+                ..Default::default()
             },
         )
         .expect("métadonnées de fenêtre valides");
@@ -142,6 +143,7 @@ fn fixture_project() -> Project {
             WindowMeta {
                 label: "Mon graphe".to_string(),
                 comment: String::new(),
+                ..Default::default()
             },
         )
         .expect("métadonnées de fenêtre valides");

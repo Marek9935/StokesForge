@@ -863,7 +863,6 @@ history-macro-move-objects = Déplacer des objets
 
 object-rename-empty = Le nom est vide, le nom précédent a été conservé
 object-clipboard-invalid = Le presse-papiers ne contient aucun objet StokesForge valide
-object-clipboard-graph-external = La copie de graphiques entre projets n’est pas encore disponible
 object-delete-title = Supprimer des objets
 object-delete-confirm = Supprimer { $names } ?
 object-delete-used = Utilisés par les graphiques : { $graphs }
@@ -875,3 +874,5 @@ action-delete-project-object = Supprimer
 history-macro-rename-objects = Renommer des objets
 
 object-clipboard-use-manager = Sélectionner un dossier ou un objet dans le gestionnaire de projet pour coller ces objets
+
+action-show-graph-data = Afficher les données

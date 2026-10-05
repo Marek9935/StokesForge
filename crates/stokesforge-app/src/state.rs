@@ -140,6 +140,8 @@ pub enum Action {
     DuplicateObjects(Vec<NodeId>),
     /// Colle le transport système dans un dossier.
     PasteObjects { parent: NodeId, text: String },
+    /// Révèle les classeurs embarqués référencés par ce graphique.
+    ShowGraphData { graph: NodeId },
     /// Demande la suppression de la sélection.
     DeleteObjects(Vec<NodeId>),
     /// Répond à la confirmation de suppression.
@@ -3348,8 +3350,9 @@ impl AppState {
         tree.walk_all()
             .into_iter()
             .filter(|id| {
-                tree.node(*id)
-                    .is_some_and(|node| matches!(node.kind(), NodeKind::Workbook { .. }))
+                tree.node(*id).is_some_and(
+                    |node| matches!(node.kind(), NodeKind::Workbook { meta, .. } if !meta.hidden),
+                )
             })
             .map(|id| (id, self.readable_path(id)))
             .collect()
@@ -3380,6 +3383,9 @@ impl AppState {
             .iter()
             .filter_map(|id| {
                 let child = tree.node(*id)?;
+                if matches!(child.kind(), NodeKind::Workbook { meta, .. } if meta.hidden) {
+                    return None;
+                }
                 let name = child.name().to_string();
                 match child.kind() {
                     NodeKind::Folder { .. } => Some(ProjectTreeNode::Folder {
@@ -3539,6 +3545,21 @@ impl AppState {
             Action::CopyObjects(ids) => self.copy_objects(&ids),
             Action::DuplicateObjects(ids) => self.duplicate_objects(&ids),
             Action::PasteObjects { parent, text } => self.paste_objects(parent, &text),
+            Action::ShowGraphData { graph } => {
+                for book in graph_data_books(self.tree(), graph) {
+                    let Some(NodeKind::Workbook { meta, .. }) =
+                        self.tree().node(book).map(Node::kind)
+                    else {
+                        continue;
+                    };
+                    let mut meta = meta.clone();
+                    if meta.hidden {
+                        meta.hidden = false;
+                        self.execute(Command::SetWindowMeta { id: book, meta });
+                    }
+                    self.copied_objects.push((book, book, false));
+                }
+            }
             Action::DeleteObjects(ids) => self.request_delete_objects(ids),
             Action::ConfirmDeleteObjects(accept) => {
                 let ids = std::mem::take(&mut self.pending_object_delete);
@@ -5333,16 +5354,11 @@ impl AppState {
                 return;
             }
         };
-        if origin != self.clipboard_origin()
-            && copies.iter().any(|copy| {
-                copy.nodes()
-                    .iter()
-                    .any(|node| matches!(node.kind(), NodeKind::Graph { .. }))
-            })
-        {
-            self.fail(tr!("object-clipboard-graph-external"));
-            return;
-        }
+        let copies = if origin != self.clipboard_origin() {
+            copies.into_iter().map(NodeCopy::into_external).collect()
+        } else {
+            copies
+        };
         self.insert_object_copies(copies, Some(parent), false);
     }
 
@@ -5372,6 +5388,7 @@ impl AppState {
                 .children(destination)
                 .unwrap_or_default()
                 .to_vec();
+            let copy_kind = copy.root().kind().type_name();
             if let Err(err) = self.handle.execute(Command::InsertCopy {
                 parent: destination,
                 copy,
@@ -5388,7 +5405,13 @@ impl AppState {
                 .children(destination)
                 .unwrap_or_default()
                 .iter()
-                .find(|id| !before.contains(id))
+                .find(|id| {
+                    !before.contains(id)
+                        && self
+                            .tree()
+                            .node(**id)
+                            .is_some_and(|node| node.kind().type_name() == copy_kind)
+                })
             {
                 created.push((source, *id, duplicate));
             }
@@ -6920,6 +6943,38 @@ impl AppState {
             _ => self.notice("Aucun script en cours à interrompre.".to_string()),
         }
     }
+}
+
+/// Classeurs référencés par un graphique ; utilisable depuis tous les viewports.
+pub fn graph_data_books(tree: &Tree, graph: NodeId) -> Vec<NodeId> {
+    let Some(NodeKind::Graph { spec, .. }) = tree.node(graph).map(Node::kind) else {
+        return Vec::new();
+    };
+    let mut books = Vec::new();
+    for column in spec
+        .panels
+        .iter()
+        .flat_map(|p| &p.series)
+        .flat_map(|s| s.referenced_columns())
+    {
+        let Some(book) = tree
+            .node(column)
+            .filter(|n| n.as_column().is_some())
+            .and_then(Node::parent)
+            .and_then(|id| tree.node(id))
+            .and_then(Node::parent)
+        else {
+            continue;
+        };
+        if tree
+            .node(book)
+            .is_some_and(|n| matches!(n.kind(), NodeKind::Workbook { .. }))
+            && !books.contains(&book)
+        {
+            books.push(book);
+        }
+    }
+    books
 }
 
 #[cfg(test)]

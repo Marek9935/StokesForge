@@ -1327,7 +1327,11 @@ impl StokesForgeApp {
             .iter()
             .chain(self.detached_tabs.keys())
             .copied()
-            .filter(|tab| self.state.tree().node(tab_node(*tab)).is_none())
+            .filter(|tab| {
+                self.state.tree().node(tab_node(*tab)).is_none_or(
+                    |node| matches!(node.kind(), stokesforge_core::NodeKind::Workbook { meta, .. } if meta.hidden),
+                )
+            })
             .collect();
         for tab in &removed {
             if self.detached_tabs.remove(tab).is_some() {
@@ -2273,5 +2277,45 @@ mod tests {
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }]);
+    }
+
+    #[test]
+    fn les_donnees_embarquees_restent_fermees_au_demarrage_et_apres_undo() {
+        let mut project = stokesforge_core::Project::new("Test").unwrap();
+        let root = project.root();
+        let book = project.add_workbook(root, None).unwrap();
+        project
+            .set_window_meta(
+                book,
+                stokesforge_core::WindowMeta {
+                    hidden: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        let column = project
+            .add_column(sheet, None, None, stokesforge_core::Column::from_f64(&[1.]))
+            .unwrap();
+        let mut panel = stokesforge_plot::PanelSpec::default();
+        panel.series.push(stokesforge_plot::SeriesSpec::new(column));
+        let graph = project
+            .add_graph(
+                root,
+                None,
+                stokesforge_plot::PlotSpec::default()
+                    .with_panels(stokesforge_plot::Panels::one(panel)),
+            )
+            .unwrap();
+        let session = stokesforge_session::Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        assert_eq!(app.floating_tabs, vec![Tab::Graph(graph)]);
+        let ctx = egui::Context::default();
+        app.dispatch_action(&ctx, Action::ShowGraphData { graph });
+        assert!(app.floating_tabs.contains(&Tab::Book(book)));
+        app.dispatch_action(&ctx, Action::Undo);
+        assert!(!app.floating_tabs.contains(&Tab::Book(book)));
+        session.shutdown().unwrap();
     }
 }

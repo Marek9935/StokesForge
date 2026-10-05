@@ -1972,6 +1972,7 @@ fn set_window_meta_round_trip() {
     let meta = WindowMeta {
         label: "Manip 3".to_string(),
         comment: "essai".to_string(),
+        ..Default::default()
     };
 
     history

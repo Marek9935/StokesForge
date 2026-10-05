@@ -129,7 +129,8 @@ Copier un objet (#105) réutilise `NodeCopy` / `InsertCopy`, quelle que soit sa
 nature. Les données sont figées au geste Copier ; la publication système passe
 par egui, le collage par `RequestPaste`. Un nom est unique dans le dossier
 parent, le chemin canonique porte ce dossier. Un graphe dans son projet garde
-ses références ; le transfert de ses données entre projets relève de #107.
+ses références ; entre projets, ses colonnes sont embarquées dans un classeur caché
+persisté (#107), révélé par Show Data.
 
 ## 2 octies. Où ranger du code d'interface (`app.rs` et ses modules)
 

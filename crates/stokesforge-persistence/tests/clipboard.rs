@@ -86,3 +86,107 @@ fn une_note_et_une_matrice_sont_copiables_sans_commandes_par_nature() {
         assert!(decode_objects(text).is_err());
     }
 }
+
+#[test]
+fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
+    use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
+    let mut source = Project::new("Source").unwrap();
+    let root = source.root();
+    let mut columns = Vec::new();
+    // Deux feuilles homonymes, issues de classeurs différents.
+    for name in ["Book1", "Book2"] {
+        let book = source.add_workbook(root, Some(name)).unwrap();
+        let sheet = source.tree().children(book).unwrap()[0];
+        for index in 0..3 {
+            columns.push(
+                source
+                    .add_column(sheet, None, None, Column::from_f64(&[index as f64]))
+                    .unwrap(),
+            );
+        }
+    }
+    let mut series = SeriesSpec::new_xy(columns[0], columns[1]);
+    series.x_error = Some(columns[3]);
+    series.y_error = Some(columns[4]);
+    let mut panel = PanelSpec::default();
+    panel.series.push(series.clone());
+    // Une seconde série partage X et garde une référence déjà rompue.
+    let broken = stokesforge_core::NodeId::from_raw(999);
+    panel.series.push(SeriesSpec::new_xy(columns[0], broken));
+    let graph = source
+        .add_graph(
+            root,
+            Some("Graph1"),
+            PlotSpec::default().with_panels(Panels::one(panel)),
+        )
+        .unwrap();
+    let copy = NodeCopy::capture(source.tree(), graph).unwrap();
+    let (_, copies) = decode_objects(&encode_objects("source", &[copy]).unwrap()).unwrap();
+    let mut target = Project::new("Target").unwrap();
+    let root = target.root();
+    // Forcer une collision avec la référence rompue source.
+    for _ in 0..1000 {
+        target.add_note(root, None, "").unwrap();
+    }
+    let copied = target
+        .insert_copy(root, &copies[0].clone().into_external(), "Graph1")
+        .unwrap();
+    let NodeKind::Graph { spec, .. } = target.tree().node(copied).unwrap().kind() else {
+        panic!("graphe");
+    };
+    let s = &spec.panels[0].series;
+    assert_eq!(s[0].x, s[1].x);
+    assert!(!target.tree().contains(s[1].y));
+    assert_ne!(s[1].y, broken);
+    for (new, old) in s[0]
+        .referenced_columns()
+        .into_iter()
+        .zip(series.referenced_columns())
+    {
+        assert_eq!(
+            target
+                .tree()
+                .node(new)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .float_values(),
+            source
+                .tree()
+                .node(old)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .float_values()
+        );
+    }
+    let books: Vec<_> = target
+        .tree()
+        .walk_all()
+        .into_iter()
+        .filter(|id| {
+            matches!(
+                target.tree().node(*id).unwrap().kind(),
+                NodeKind::Workbook { .. }
+            )
+        })
+        .collect();
+    assert_eq!(books.len(), 1);
+    assert!(
+        matches!(target.tree().node(books[0]).unwrap().kind(), NodeKind::Workbook { meta, .. } if meta.hidden)
+    );
+    assert_eq!(target.tree().walk(books[0]).unwrap().len(), 7); // classeur + deux feuilles + quatre colonnes
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("graph.stf");
+    stokesforge_persistence::save(&target, &path).unwrap();
+    let mut loaded = stokesforge_persistence::load(&path).unwrap();
+    assert_eq!(loaded.tree(), target.tree());
+    let next = loaded.add_note(root, None, "").unwrap();
+    assert_ne!(next, s[1].y);
+    // Une erreur après l'insertion des données restaure tout le modèle.
+    let before = target.tree().clone();
+    assert!(target
+        .insert_copy(root, &copies[0].clone().into_external(), "Graph1")
+        .is_err());
+    assert_eq!(target.tree(), &before);
+}

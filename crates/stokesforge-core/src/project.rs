@@ -336,6 +336,57 @@ impl Project {
         let before = self.tree.clone();
         let result = (|| {
             let mut ids = std::collections::HashMap::new();
+            let mut graph_specs = std::collections::HashMap::new();
+            if copy.is_external() {
+                for source in copy.nodes() {
+                    let NodeKind::Graph { spec, .. } = source.kind() else {
+                        continue;
+                    };
+                    let mut columns = std::collections::HashMap::new();
+                    if let Some((_, data)) =
+                        copy.graph_data().iter().find(|(id, _)| *id == source.id())
+                    {
+                        let book_name = self.next_window_name("Book");
+                        let book = self.insert_copy(parent, data, &book_name)?;
+                        let inserted = self.tree.walk(book)?;
+                        for (old, new) in data.nodes().iter().zip(inserted) {
+                            if old.as_column().is_some() {
+                                columns.insert(old.id(), new);
+                            }
+                        }
+                    }
+                    // Une référence rompue reçoit une réservation sans nœud :
+                    // ni une colonne existante ni une future allocation ne
+                    // doivent lui donner un autre sens dans la destination.
+                    let mut spec = spec.clone();
+                    for series in spec.panels.iter_mut().flat_map(|p| &mut p.series) {
+                        for reference in [&mut series.x, &mut series.x_error, &mut series.y_error]
+                            .into_iter()
+                            .flatten()
+                        {
+                            let id = match columns.get(reference) {
+                                Some(id) => *id,
+                                None => {
+                                    let id = self.ids.next()?;
+                                    columns.insert(*reference, id);
+                                    id
+                                }
+                            };
+                            *reference = id;
+                        }
+                        let id = match columns.get(&series.y) {
+                            Some(id) => *id,
+                            None => {
+                                let id = self.ids.next()?;
+                                columns.insert(series.y, id);
+                                id
+                            }
+                        };
+                        series.y = id;
+                    }
+                    graph_specs.insert(source.id(), spec);
+                }
+            }
             let mut root = None;
             for source in copy.nodes() {
                 let destination = if source.id() == copy.root().id() {
@@ -347,6 +398,11 @@ impl Project {
                         .ok_or_else(|| CoreError::Structure("copy is not in prefix order".into()))?
                 };
                 let mut kind = source.kind().clone();
+                if let NodeKind::Graph { spec, .. } = &mut kind {
+                    if let Some(replacement) = graph_specs.remove(&source.id()) {
+                        *spec = replacement;
+                    }
+                }
                 // Une version venue d'un autre projet ne doit jamais être
                 // réattribuée plus tard à un autre contenu de cette colonne.
                 if let NodeKind::Column(column) = &kind {

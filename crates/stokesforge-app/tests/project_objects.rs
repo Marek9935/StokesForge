@@ -164,7 +164,7 @@ fn renommage_local_et_chemins_non_ambigus_apres_enregistrement() {
 }
 
 #[test]
-fn graphe_collable_dans_son_projet_et_refuse_dans_un_autre() {
+fn graphe_collable_dans_son_projet_et_embarque_ses_donnees_dans_un_autre() {
     let (_session, mut state, _, graph, y) = fixture();
     state.dispatch(Action::CopyObjects(vec![graph]));
     let text = state.take_object_clipboard_text().unwrap();
@@ -179,13 +179,40 @@ fn graphe_collable_dans_son_projet_et_refuse_dans_un_autre() {
     let before = other.tree().clone();
     let parent = other.tree().root();
     other.dispatch(Action::PasteObjects { parent, text });
+    let copied = other.take_copied_objects()[0].1;
+    assert!(!other.plot_spec(copied).unwrap().references(y));
+    let books = stokesforge_app::state::graph_data_books(other.tree(), copied);
+    assert_eq!(books.len(), 1);
+    let book = books[0];
+    assert!(
+        matches!(other.tree().node(book).unwrap().kind(), NodeKind::Workbook { meta, .. } if meta.hidden)
+    );
+    let entry = stokesforge_app::state::ProjectTreeNode::Window {
+        id: book,
+        name: other.tree().node(book).unwrap().name().into(),
+        kind: stokesforge_app::state::WindowKind::Book,
+    };
+    assert!(!other.project_tree().contains(&entry));
+    other.dispatch(Action::ShowGraphData { graph: copied });
+    assert!(
+        matches!(other.tree().node(book).unwrap().kind(), NodeKind::Workbook { meta, .. } if !meta.hidden)
+    );
+    assert!(other.project_tree().contains(&entry));
+    assert_eq!(other.take_copied_objects()[0].1, book);
+    other.dispatch(Action::Undo);
+    assert!(
+        matches!(other.tree().node(book).unwrap().kind(), NodeKind::Workbook { meta, .. } if meta.hidden)
+    );
+    other.dispatch(Action::Undo);
     assert_eq!(other.tree(), &before);
-    assert!(other.status().unwrap().is_error);
+    other.dispatch(Action::Redo);
+    assert!(other.tree().contains(copied));
+    let after = other.tree().clone();
     other.dispatch(Action::PasteObjects {
         parent,
         text: "ordinary clipboard".into(),
     });
-    assert_eq!(other.tree(), &before);
+    assert_eq!(other.tree(), &after);
 }
 
 #[test]
@@ -243,4 +270,73 @@ fn collage_dans_un_autre_dossier_et_deplacement_groupes() {
     assert_eq!(state.tree().children(b).unwrap().len(), 2);
     state.dispatch(Action::Undo);
     assert!(state.tree().children(b).unwrap().is_empty());
+}
+
+#[test]
+fn deux_collages_de_graphe_sont_independants_et_figes() {
+    let (_session, mut source, _, graph, y) = fixture();
+    source.dispatch(Action::CopyObjects(vec![graph]));
+    let text = source.take_object_clipboard_text().unwrap();
+    source.dispatch(Action::CommitCell {
+        column: y,
+        row: 0,
+        text: "99".into(),
+    });
+    let (_session, mut target, _, _, _) = fixture();
+    let parent = target.tree().root();
+    let before = target.tree().clone();
+    let mut graphs = Vec::new();
+    for _ in 0..2 {
+        target.dispatch(Action::PasteObjects {
+            parent,
+            text: text.clone(),
+        });
+        let graph = target.take_copied_objects()[0].1;
+        let spec = target.plot_spec(graph).unwrap();
+        let column = spec.panels[0].series[0].y;
+        assert_eq!(
+            target
+                .tree()
+                .node(column)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .get(0),
+            stokesforge_core::Cell::Float(3.)
+        );
+        graphs.push(graph);
+    }
+    assert_ne!(
+        stokesforge_app::state::graph_data_books(target.tree(), graphs[0]),
+        stokesforge_app::state::graph_data_books(target.tree(), graphs[1])
+    );
+    target.dispatch(Action::Undo);
+    target.dispatch(Action::Undo);
+    assert_eq!(target.tree(), &before);
+}
+
+#[test]
+fn les_colonnes_calculees_embarquees_conservent_leurs_valeurs_sans_dependances() {
+    let (_session, mut source, _, graph, y) = fixture();
+    source.dispatch(Action::SetColumnFormula {
+        column: y,
+        formula: Some("A*2".into()),
+    });
+    let mut spec = source.plot_spec(graph).unwrap();
+    spec.panels.iter_mut().next().unwrap().series[0].x = None; // A participe au calcul, mais n’est pas tracée.
+    source.dispatch(Action::SetPlotSpec { graph, spec });
+    assert_eq!(
+        source.tree().node(y).unwrap().as_column().unwrap().get(0),
+        stokesforge_core::Cell::Float(2.)
+    );
+    source.dispatch(Action::CopyObjects(vec![graph]));
+    let text = source.take_object_clipboard_text().unwrap();
+    let (_session, mut target, _, _, _) = fixture();
+    let parent = target.tree().root();
+    target.dispatch(Action::PasteObjects { parent, text });
+    let copied = target.take_copied_objects()[0].1;
+    let column = target.plot_spec(copied).unwrap().panels[0].series[0].y;
+    let data = target.tree().node(column).unwrap().as_column().unwrap();
+    assert_eq!(data.get(0), stokesforge_core::Cell::Float(2.));
+    assert_eq!(data.meta().formula, None);
 }

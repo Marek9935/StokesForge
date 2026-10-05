@@ -56,7 +56,8 @@ confirmation pour les choix courants couverts par la demande.
   allocateur ni projet source transporté. Toute nature est copiable par défaut ;
   les IDs sont créés dans la destination et un échec restaure l’arbre. Unicité
   des noms par dossier, chemins canoniques enracinés ; les graphes entre projets
-  restent #107. F2 appartient aux gestionnaires (#130), pas aux feuilles.
+  emportent leurs colonnes dans un classeur caché persisté (#107), révélé par Show
+  Data. F2 appartient aux gestionnaires (#130), pas aux feuilles.
 - Le rendu partagé appartient à `stokesforge-render`. Préserver l'accord entre
   l'écran et les exports, ainsi que la mesure de texte unique.
 - Object Manager projette l'instantané dans `object_manager.rs` ; la sélection

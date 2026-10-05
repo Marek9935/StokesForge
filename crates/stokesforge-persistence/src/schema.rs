@@ -138,6 +138,7 @@ pub(crate) enum KindRecord {
     Workbook {
         /// Feuilles, dans l'ordre des onglets.
         sheets: Vec<u64>,
+        hidden: bool,
         /// Étiquette de fenêtre.
         label: String,
         /// Commentaire de fenêtre.
@@ -191,6 +192,7 @@ pub(crate) enum KindRecord {
     },
     /// Graphe.
     Graph {
+        hidden: bool,
         /// Étiquette de fenêtre.
         label: String,
         /// Commentaire de fenêtre.
@@ -205,6 +207,7 @@ pub(crate) enum KindRecord {
     },
     /// Matrice.
     Matrix {
+        hidden: bool,
         /// Étiquette de fenêtre.
         label: String,
         /// Commentaire de fenêtre.
@@ -212,6 +215,7 @@ pub(crate) enum KindRecord {
     },
     /// Note.
     Note {
+        hidden: bool,
         /// Étiquette de fenêtre.
         label: String,
         /// Commentaire de fenêtre.
@@ -236,6 +240,8 @@ enum KindRecordKnown {
     },
     Workbook {
         sheets: Vec<u64>,
+        #[serde(default)]
+        hidden: bool,
         label: String,
         comment: String,
     },
@@ -260,16 +266,22 @@ enum KindRecordKnown {
         import_source: Option<(String, String, u64, u64)>,
     },
     Graph {
+        #[serde(default)]
+        hidden: bool,
         label: String,
         comment: String,
         #[serde(default)]
         spec: PlotSpecRecord,
     },
     Matrix {
+        #[serde(default)]
+        hidden: bool,
         label: String,
         comment: String,
     },
     Note {
+        #[serde(default)]
+        hidden: bool,
         label: String,
         comment: String,
         text: String,
@@ -282,10 +294,12 @@ impl From<KindRecordKnown> for KindRecord {
             KindRecordKnown::Folder { children } => KindRecord::Folder { children },
             KindRecordKnown::Workbook {
                 sheets,
+                hidden,
                 label,
                 comment,
             } => KindRecord::Workbook {
                 sheets,
+                hidden,
                 label,
                 comment,
             },
@@ -316,20 +330,32 @@ impl From<KindRecordKnown> for KindRecord {
                 import_source,
             },
             KindRecordKnown::Graph {
+                hidden,
                 label,
                 comment,
                 spec,
             } => KindRecord::Graph {
+                hidden,
                 label,
                 comment,
                 spec,
             },
-            KindRecordKnown::Matrix { label, comment } => KindRecord::Matrix { label, comment },
+            KindRecordKnown::Matrix {
+                hidden,
+                label,
+                comment,
+            } => KindRecord::Matrix {
+                hidden,
+                label,
+                comment,
+            },
             KindRecordKnown::Note {
+                hidden,
                 label,
                 comment,
                 text,
             } => KindRecord::Note {
+                hidden,
                 label,
                 comment,
                 text,
@@ -364,6 +390,7 @@ enum KindRecordRef<'a> {
     },
     Workbook {
         sheets: &'a [u64],
+        hidden: bool,
         label: &'a str,
         comment: &'a str,
     },
@@ -384,15 +411,18 @@ enum KindRecordRef<'a> {
         import_source: &'a Option<(String, String, u64, u64)>,
     },
     Graph {
+        hidden: bool,
         label: &'a str,
         comment: &'a str,
         spec: &'a PlotSpecRecord,
     },
     Matrix {
+        hidden: bool,
         label: &'a str,
         comment: &'a str,
     },
     Note {
+        hidden: bool,
         label: &'a str,
         comment: &'a str,
         text: &'a str,
@@ -410,10 +440,12 @@ impl Serialize for KindRecord {
             }
             KindRecord::Workbook {
                 sheets,
+                hidden,
                 label,
                 comment,
             } => KindRecordRef::Workbook {
                 sheets,
+                hidden: *hidden,
                 label,
                 comment,
             }
@@ -448,23 +480,34 @@ impl Serialize for KindRecord {
             }
             .serialize(serializer),
             KindRecord::Graph {
+                hidden,
                 label,
                 comment,
                 spec,
             } => KindRecordRef::Graph {
+                hidden: *hidden,
                 label,
                 comment,
                 spec,
             }
             .serialize(serializer),
-            KindRecord::Matrix { label, comment } => {
-                KindRecordRef::Matrix { label, comment }.serialize(serializer)
+            KindRecord::Matrix {
+                hidden,
+                label,
+                comment,
+            } => KindRecordRef::Matrix {
+                hidden: *hidden,
+                label,
+                comment,
             }
+            .serialize(serializer),
             KindRecord::Note {
+                hidden,
                 label,
                 comment,
                 text,
             } => KindRecordRef::Note {
+                hidden: *hidden,
                 label,
                 comment,
                 text,

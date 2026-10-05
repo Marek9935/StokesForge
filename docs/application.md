@@ -430,11 +430,12 @@ les graphes utilisateurs ; une note, matrice ou graphe seul se supprime directem
 Copier capture le contenu au moment du geste, puis l'écrit dans le presse-papiers
 système ; le collage lit celui-ci, sans relecture des objets source. Les classeurs,
 notes et matrices se transfèrent entre projets et entre processus ; les graphes
-entre projets restent refusés jusqu'au chantier #107. Coller dans le menu d'un
-dossier y place les copies. La grille refuse ce transport d'objets au lieu de le
+entre projets emportent leurs colonnes dans un classeur caché (#107).
+Coller dans le menu d'un dossier y place les copies. La grille refuse ce transport d'objets au lieu de le
 transformer en cellules. `Action::MoveObjects` prépare le déplacement entre
 futurs dossiers en un seul groupe annulable ; le geste Couper reste à câbler lors
 de leur introduction.
+
 
 
 Le Project Manager affiche l'arbre du projet **arrêté** à `Workbook`,
@@ -470,6 +471,28 @@ Cliquer une fenêtre l'ouvre ou la focalise, pour les quatre natures :
   — `stokesforge-core::NodeKind::Matrix` n'a aujourd'hui aucun contenu à éditer, et
   l'éditeur de matrice complet est explicitement hors périmètre de cette
   tâche.
+
+### Données d’un graphique collé entre projets (#107)
+
+Le geste Copier fige aussi les colonnes X, Y, erreur X et erreur Y référencées
+par toutes les séries et tous les panneaux. Un collage dans un autre projet
+crée un classeur caché distinct par graphique et par collage, sans fusion ;
+les feuilles source sont conservées avec des noms distincts si nécessaire.
+Les colonnes non utilisées ne sont pas emportées. Les colonnes calculées
+transportent leurs résultats figés, sans leur formule : le nouvel agencement
+des colonnes et les dépendances omises ne doivent pas recalculer ces valeurs. Un collage dans le même
+projet conserve ses références d’origine et ne crée aucun classeur.
+
+Graphique › Afficher les données (Show Data), également au clic droit du
+graphique, révèle et ouvre les classeurs référencés. Le masquage des données
+embarquées est une métadonnée persistée du classeur, distincte des fenêtres
+masquées de l’interface ; la révélation est annulable. Un collage entier
+s’annule en un geste. Une référence déjà rompue reste rompue, même si la
+destination comporte une colonne de même identifiant.
+
+Le texte du presse-papiers est limité à 64 Mio (hexadécimal compris) ; le
+sérialiseur s’arrête avant le dépassement et l’erreur est affichée sans
+remplacer le presse-papiers. Le collage d’un transport trop grand est refusé.
 
 ### Maximiser et détacher une fenêtre
 
