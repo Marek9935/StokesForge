@@ -231,7 +231,7 @@ délibérément sa place dans aucun menu, l'écrire et dire pourquoi.
 
 Les listes longues se regroupent par thème : mêmes noms et clés au menu du
 haut et au clic droit. Réutiliser `object_menu`, `object_node_menu`,
-`object_manager_filters_menu`, `column_options_menu`, `graph_properties_menu`
+`object_manager_settings_menu`, `column_options_menu`, `graph_properties_menu`
 plutôt que recopier les entrées. Les cases restent pour les vraies bascules
 d'affichage, qui **gardent les menus ouverts** (choix de l'utilisateur).
 Les actions et les choix exclusifs ferment toute la chaîne par `ui.close()`.
@@ -523,6 +523,15 @@ sélection de `GraphView` : jamais de sélection parallèle dans le panneau.
 visibilité passent par `Action::SetPlotVisibility`, puis `EditPlotSpec` (delta du spec partagé, motif `PlotEditKind`) ;
 ouverture et sélection restent hors historique. L'échantillon de série appelle
 `stokesforge_render_egui::series_swatch` (vignette partagée de la légende).
+
+Les réglages de vue (#139) réutilisent `object_manager_settings_menu` depuis
+Affichage et le fond du panneau (grisé si fermé), les `Action` et la table
+`preferences::ObjectManagerSettings`. Le repli initial, y compris après
+Réinitialiser, ne remplace jamais un état egui déjà mémorisé. La section Objets
+est propre au graphique ou au calque ; ne pas la confondre avec les axes.
+Le modèle du viewport détaché transporte tous les réglages et doit se réveiller
+sur leur seul changement. Pour tester leurs actions, injecter un fichier
+temporaire avec `AppState::new_with_preferences`, jamais la configuration réelle.
 
 Les textes et objets sélectionnés lisent aussi `with_graph_view` /
 `read_graph_view` (propriétés et barres de format incluses). Le menu

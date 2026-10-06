@@ -34,7 +34,7 @@ use super::graph_window::{
     disabled_shape_order_buttons, graph_properties_menu, shape_order_buttons,
 };
 use super::object_manager_ui::{
-    object_manager_filters_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
+    object_manager_settings_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
 };
 use super::shortcuts::{
     shortcut_text_delete, SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT,
@@ -457,10 +457,10 @@ impl StokesForgeApp {
                     if ui.checkbox(&mut open, tr!("action-show-content")).changed() {
                         actions.push(Action::SetObjectManagerOpen(open));
                     }
-                    object_manager_filters_menu(
+                    object_manager_settings_menu(
                         ui,
-                        self.state.object_manager_show_texts(),
-                        self.state.object_manager_show_scales(),
+                        self.state.object_manager_settings(),
+                        open,
                         actions,
                     );
                 });
@@ -1291,32 +1291,7 @@ mod tests {
             );
             let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
             assert!(entree(&toujours, &tr!("action-show-content")).is_some());
-            let (ctx, filtres) = ouvre_chemin(
-                &mut app,
-                tab,
-                &[
-                    tr!("menu-view"),
-                    tr!("menu-panels"),
-                    tr!("action-object-manager"),
-                    tr!("menu-view"),
-                ],
-            );
-            assert_eq!(
-                active(&filtres, &tr!("object-manager-show-texts")).toggled,
-                Some(app.state.object_manager_show_texts())
-            );
-            assert_eq!(
-                active(&filtres, &tr!("object-manager-show-scales")).toggled,
-                Some(app.state.object_manager_show_scales())
-            );
-            let show = app.state.object_manager_show_texts();
-            let pos = active(&filtres, &tr!("object-manager-show-texts")).center;
-            assert_eq!(
-                clique(&mut app, &ctx, tab, pos),
-                vec![Action::SetObjectManagerShowTexts(!show)]
-            );
-            let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
-            assert!(entree(&toujours, &tr!("object-manager-show-scales")).is_some());
+            assert_eq!(active(&menu, &tr!("object-manager-settings")).enabled, open);
         }
         let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-view"), tr!("menu-toolbars")]);
         for id in ToolbarId::ALL {
@@ -1398,6 +1373,91 @@ mod tests {
         assert_ferme(&mut app, &ctx, tab);
         let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-objects")]);
         assert!(!active(&menu, &tr!("action-delete-object")).enabled);
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn les_sous_menus_des_reglages_emettent_les_actions_communes() {
+        use crate::preferences::ObjectManagerGroup;
+        let (session, mut app, _) = banc();
+        app.state.set_object_manager_open_for_test(true);
+        // Les réglages restent accessibles sans graphique actif.
+        let open = |app: &mut StokesForgeApp, child: Option<&str>| {
+            let mut path = vec![
+                tr!("menu-view"),
+                tr!("menu-panels"),
+                tr!("action-object-manager"),
+                tr!("object-manager-settings"),
+            ];
+            if let Some(label) = child {
+                path.push(label.to_string());
+            }
+            ouvre_chemin(app, None, &path)
+        };
+        for (label, current, action) in [
+            (
+                tr!("object-manager-show-texts"),
+                app.state.object_manager_show_texts(),
+                Action::SetObjectManagerShowTexts(!app.state.object_manager_show_texts()),
+            ),
+            (
+                tr!("object-manager-show-scales"),
+                app.state.object_manager_show_scales(),
+                Action::SetObjectManagerShowScales(!app.state.object_manager_show_scales()),
+            ),
+        ] {
+            let (ctx, menu) = open(&mut app, Some(&tr!("object-manager-display")));
+            let row = active(&menu, &label);
+            assert!(row.enabled);
+            assert_eq!(row.toggled, Some(current));
+            assert_eq!(clique(&mut app, &ctx, None, row.center), vec![action]);
+            let still_open = entrees(&peint(&mut app, &ctx, None, Vec::new()).0);
+            assert!(
+                entree(&still_open, &label).is_some(),
+                "la bascule garde Display ouvert"
+            );
+        }
+        for (group, label) in [
+            (ObjectManagerGroup::Graph, tr!("window-kind-graph")),
+            (
+                ObjectManagerGroup::Layers,
+                tr!("object-manager-expand-layers"),
+            ),
+            (
+                ObjectManagerGroup::Plots,
+                tr!("object-manager-expand-plots"),
+            ),
+            (ObjectManagerGroup::Axes, tr!("object-manager-axes")),
+            (ObjectManagerGroup::Objects, tr!("object-manager-objects")),
+        ] {
+            let current = app.state.object_manager_settings().group_open(group);
+            let (ctx, menu) = open(&mut app, Some(&tr!("object-manager-default-expansion")));
+            let row = active(&menu, &label);
+            assert_eq!(row.toggled, Some(current));
+            assert_eq!(
+                clique(&mut app, &ctx, None, row.center),
+                vec![Action::SetObjectManagerGroupOpen {
+                    group,
+                    open: !current
+                }]
+            );
+            let still_open = entrees(&peint(&mut app, &ctx, None, Vec::new()).0);
+            assert!(
+                entree(&still_open, &label).is_some(),
+                "la bascule garde Expand by Default ouvert"
+            );
+        }
+        let (ctx, menu) = open(&mut app, None);
+        assert_eq!(
+            clique(
+                &mut app,
+                &ctx,
+                None,
+                active(&menu, &tr!("object-manager-reset")).center
+            ),
+            vec![Action::ResetObjectManagerSettings]
+        );
+        assert_ferme(&mut app, &ctx, None);
         session.shutdown().unwrap();
     }
 

@@ -7,7 +7,9 @@
 //! [`ObjectManagerRequest`], exécuté après la peinture par
 //! [`StokesForgeApp::run_object_manager_request`], qui sert aussi le menu
 //! « Graph › Selected Content ». Une seule écriture pour le panneau fixe et la
-//! fenêtre détachée.
+//! fenêtre détachée. Les réglages (#139) viennent de la table unique
+//! `preferences::ObjectManagerSettings` ; egui garde la priorité pour les
+//! groupes déjà vus, y compris après Réinitialiser.
 //!
 //! Le panneau fixe ou détaché (#100),
 //! [`StokesForgeApp::object_manager_panel`], et l'exécution des demandes l'ont
@@ -21,6 +23,7 @@ use stokesforge_render_egui::GraphView;
 
 use crate::icons::{icon_image, Icon, IconRole};
 use crate::object_manager::{LayerRow, ObjectRow, ObjectTree, SeriesRow, VisibilityTarget as T};
+use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings};
 use crate::state::{active_graph, Action};
 use crate::tr;
 
@@ -214,37 +217,79 @@ fn object_visibility(
     }
 }
 
-/// Filtres du panneau, partagés entre Affichage et son fond au clic droit.
-/// Ils changent la projection de l'arbre, jamais la visibilité du graphique.
-pub(super) fn object_manager_filters_menu(
+/// Même menu depuis Affichage et le fond, y compris en fenêtre détachée.
+/// Les réglages ne touchent ni le PlotSpec ni les replis courants d'egui.
+pub(super) fn object_manager_settings_menu(
     ui: &mut egui::Ui,
-    show_texts: bool,
-    show_scales: bool,
+    settings: ObjectManagerSettings,
+    enabled: bool,
     actions: &mut Vec<Action>,
 ) {
-    egui::containers::menu::SubMenuButton::new(tr!("menu-view"))
-        .config(
-            egui::containers::menu::MenuConfig::new()
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+    ui.add_enabled_ui(enabled, |ui| {
+        let config = egui::containers::menu::MenuConfig::new()
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        egui::containers::menu::SubMenuButton::from_button(
+            egui::Button::image_and_text(
+                icon_image(Icon::Properties, IconRole::Neutral),
+                tr!("object-manager-settings"),
+            )
+            .right_text(egui::containers::menu::SubMenuButton::RIGHT_ARROW),
         )
+        .config(config.clone())
         .ui(ui, |ui| {
-            let mut show = show_texts;
+            egui::containers::menu::SubMenuButton::new(tr!("object-manager-display"))
+                .config(config.clone())
+                .ui(ui, |ui| {
+                    let mut show = settings.show_texts;
+                    if ui
+                        .checkbox(&mut show, tr!("object-manager-show-texts"))
+                        .on_hover_text(tr!("object-manager-show-texts", "hint"))
+                        .changed()
+                    {
+                        actions.push(Action::SetObjectManagerShowTexts(show));
+                    }
+                    let mut show = settings.show_scales;
+                    if ui
+                        .checkbox(&mut show, tr!("object-manager-show-scales"))
+                        .on_hover_text(tr!("object-manager-show-scales", "hint"))
+                        .changed()
+                    {
+                        actions.push(Action::SetObjectManagerShowScales(show));
+                    }
+                });
+            egui::containers::menu::SubMenuButton::new(tr!("object-manager-default-expansion"))
+                .config(config.clone())
+                .ui(ui, |ui| {
+                    for group in ObjectManagerGroup::ALL {
+                        let label = match group {
+                            ObjectManagerGroup::Graph => tr!("window-kind-graph"),
+                            ObjectManagerGroup::Layers => tr!("object-manager-expand-layers"),
+                            ObjectManagerGroup::Plots => tr!("object-manager-expand-plots"),
+                            ObjectManagerGroup::Axes => tr!("object-manager-axes"),
+                            ObjectManagerGroup::Objects => tr!("object-manager-objects"),
+                        };
+                        let mut open = settings.group_open(group);
+                        if ui.checkbox(&mut open, label).changed() {
+                            actions.push(Action::SetObjectManagerGroupOpen { group, open });
+                        }
+                    }
+                })
+                .0
+                .on_hover_text(tr!("object-manager-default-expansion", "hint"));
+            ui.separator();
             if ui
-                .checkbox(&mut show, tr!("object-manager-show-texts"))
-                .on_hover_text(tr!("object-manager-show-texts", "hint"))
-                .changed()
+                .add(egui::Button::image_and_text(
+                    icon_image(Icon::ResetZoom, IconRole::Neutral),
+                    tr!("object-manager-reset"),
+                ))
+                .on_hover_text(tr!("object-manager-reset", "hint"))
+                .clicked()
             {
-                actions.push(Action::SetObjectManagerShowTexts(show));
-            }
-            let mut show = show_scales;
-            if ui
-                .checkbox(&mut show, tr!("object-manager-show-scales"))
-                .on_hover_text(tr!("object-manager-show-scales", "hint"))
-                .changed()
-            {
-                actions.push(Action::SetObjectManagerShowScales(show));
+                actions.push(Action::ResetObjectManagerSettings);
+                ui.close();
             }
         });
+    });
 }
 
 /// Un seul contenu pour Object Manager, quel que soit son emplacement.
@@ -253,12 +298,19 @@ pub(super) fn object_manager_contents(
     tree: &Tree,
     model: Option<&crate::object_manager::ObjectTree>,
     spec: Option<&stokesforge_plot::PlotSpec>,
-    show_texts: bool,
-    show_scales: bool,
+    settings: ObjectManagerSettings,
     actions: &mut Vec<Action>,
 ) -> Vec<ObjectManagerRequest> {
     use crate::object_manager::VisibilityTarget as T;
     let mut requests = Vec::new();
+    let background = ui.interact(
+        ui.available_rect_before_wrap(),
+        ui.make_persistent_id("object_manager_background"),
+        egui::Sense::click(),
+    );
+    egui::Popup::context_menu(&background)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| object_manager_settings_menu(ui, settings, true, actions));
     let (Some(model), Some(spec)) = (model, spec) else {
         ui.label(tr!("object-manager-no-graph"));
         return requests;
@@ -274,23 +326,12 @@ pub(super) fn object_manager_contents(
         egui::Sense::focusable_noninteractive(),
     );
     let mut selected = None;
-    // Fond du panneau, posé sous les lignes : son menu contextuel porte la
-    // bascule des textes automatiques (même action que le menu View).
-    let background = ui.interact(
-        ui.available_rect_before_wrap(),
-        ui.make_persistent_id(("object_manager_background", model.graph)),
-        egui::Sense::click(),
-    );
-    egui::Popup::context_menu(&background)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            object_manager_filters_menu(ui, show_texts, show_scales, actions);
-        });
     let paint = ObjectManagerPaint {
         tree,
         spec,
         graph: model.graph,
         focus,
+        settings,
     };
     egui::ScrollArea::both().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
@@ -322,6 +363,7 @@ struct ObjectManagerPaint<'a> {
     spec: &'a stokesforge_plot::PlotSpec,
     graph: NodeId,
     focus: egui::Id,
+    settings: ObjectManagerSettings,
 }
 
 impl ObjectManagerPaint<'_> {
@@ -349,19 +391,31 @@ impl ObjectManagerPaint<'_> {
         selected: &mut Option<T>,
     ) {
         let id = ui.make_persistent_id(("object_manager_graph", self.graph));
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-            .show_header(ui, |ui| {
-                self.header(ui, &model.title, T::Graph, actions, requests);
+        egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            id,
+            self.settings.group_open(ObjectManagerGroup::Graph),
+        )
+        .show_header(ui, |ui| {
+            self.header(ui, &model.title, T::Graph, actions, requests);
+        })
+        .body(|ui| {
+            crate::tree_lines::tree_children(ui, |ui, branch| {
+                self.object_group(
+                    ui,
+                    None,
+                    &model.objects,
+                    branch,
+                    actions,
+                    requests,
+                    selected,
+                );
+                for layer in &model.layers {
+                    let y = self.layer(ui, layer, actions, requests, selected);
+                    branch.mark(y);
+                }
             })
-            .body(|ui| {
-                crate::tree_lines::tree_children(ui, |ui, branch| {
-                    self.objects(ui, &model.objects, branch, actions, requests, selected);
-                    for layer in &model.layers {
-                        let y = self.layer(ui, layer, actions, requests, selected);
-                        branch.mark(y);
-                    }
-                })
-            });
+        });
     }
 
     fn layer(
@@ -374,27 +428,39 @@ impl ObjectManagerPaint<'_> {
     ) -> f32 {
         let id = ui.make_persistent_id((self.graph, layer.index));
         let (layer_toggle, _, _) =
-            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-                .show_header(ui, |ui| {
-                    self.header(
+            egui::collapsing_header::CollapsingState::load_with_default_open(
+                ui.ctx(),
+                id,
+                self.settings.group_open(ObjectManagerGroup::Layers),
+            )
+            .show_header(ui, |ui| {
+                self.header(
+                    ui,
+                    &tr!("object-manager-layer", index = (layer.index + 1)),
+                    T::Panel(layer.index),
+                    actions,
+                    requests,
+                );
+            })
+            .body(|ui| {
+                crate::tree_lines::tree_children(ui, |ui, branch| {
+                    let y = self.series(ui, layer, actions, requests, selected);
+                    branch.mark(y);
+                    if !layer.axes.is_empty() {
+                        let y = self.axes(ui, layer, actions, requests, selected);
+                        branch.mark(y);
+                    }
+                    self.object_group(
                         ui,
-                        &tr!("object-manager-layer", index = (layer.index + 1)),
-                        T::Panel(layer.index),
+                        Some(layer.index),
+                        &layer.objects,
+                        branch,
                         actions,
                         requests,
+                        selected,
                     );
                 })
-                .body(|ui| {
-                    crate::tree_lines::tree_children(ui, |ui, branch| {
-                        let y = self.series(ui, layer, actions, requests, selected);
-                        branch.mark(y);
-                        if !layer.axes.is_empty() {
-                            let y = self.axes(ui, layer, actions, requests, selected);
-                            branch.mark(y);
-                        }
-                        self.objects(ui, &layer.objects, branch, actions, requests, selected);
-                    })
-                });
+            });
 
         layer_toggle.rect.center().y
     }
@@ -409,27 +475,31 @@ impl ObjectManagerPaint<'_> {
     ) -> f32 {
         let id = ui.make_persistent_id((self.graph, layer.index, "group"));
         let (group_toggle, _, _) =
-            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-                .show_header(ui, |ui| {
-                    self.header(
-                        ui,
-                        &tr!("object-manager-group"),
-                        T::Group(layer.index),
-                        actions,
-                        requests,
-                    );
-                })
-                .body(|ui| {
-                    crate::tree_lines::tree_children(ui, |ui, branch| {
-                        for series in &layer.series {
-                            if series.selected {
-                                *selected = Some(T::Series(series.target));
-                            }
-                            let y = self.series_row(ui, series, actions, requests);
-                            branch.mark(y);
+            egui::collapsing_header::CollapsingState::load_with_default_open(
+                ui.ctx(),
+                id,
+                self.settings.group_open(ObjectManagerGroup::Plots),
+            )
+            .show_header(ui, |ui| {
+                self.header(
+                    ui,
+                    &tr!("object-manager-group"),
+                    T::Group(layer.index),
+                    actions,
+                    requests,
+                );
+            })
+            .body(|ui| {
+                crate::tree_lines::tree_children(ui, |ui, branch| {
+                    for series in &layer.series {
+                        if series.selected {
+                            *selected = Some(T::Series(series.target));
                         }
-                    })
-                });
+                        let y = self.series_row(ui, series, actions, requests);
+                        branch.mark(y);
+                    }
+                })
+            });
 
         group_toggle.rect.center().y
     }
@@ -443,25 +513,59 @@ impl ObjectManagerPaint<'_> {
         selected: &mut Option<T>,
     ) -> f32 {
         let id = ui.make_persistent_id((self.graph, layer.index, "axes"));
-        // Replié par défaut (#138) : les échelles se déplient d'un clic.
-        let (axes_toggle, _, _) =
-            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-                .show_header(ui, |ui| {
-                    self.header(
-                        ui,
-                        &tr!("object-manager-axes"),
-                        T::Axes(layer.index),
-                        actions,
-                        requests,
-                    );
-                })
-                .body(|ui| {
-                    crate::tree_lines::tree_children(ui, |ui, branch| {
-                        self.objects(ui, &layer.axes, branch, actions, requests, selected);
-                    })
-                });
+        // Le défaut vient des préférences (#139), sans écraser un repli déjà choisi.
+        let (axes_toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            id,
+            self.settings.group_open(ObjectManagerGroup::Axes),
+        )
+        .show_header(ui, |ui| {
+            self.header(
+                ui,
+                &tr!("object-manager-axes"),
+                T::Axes(layer.index),
+                actions,
+                requests,
+            );
+        })
+        .body(|ui| {
+            crate::tree_lines::tree_children(ui, |ui, branch| {
+                self.objects(ui, &layer.axes, branch, actions, requests, selected);
+            })
+        });
 
         axes_toggle.rect.center().y
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn object_group(
+        &self,
+        ui: &mut egui::Ui,
+        layer: Option<usize>,
+        objects: &[ObjectRow],
+        branch: &mut crate::tree_lines::TreeBranch,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+        selected: &mut Option<T>,
+    ) {
+        if objects.is_empty() {
+            return;
+        }
+        let id = ui.make_persistent_id((self.graph, layer, "objects"));
+        let (toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            id,
+            self.settings.group_open(ObjectManagerGroup::Objects),
+        )
+        .show_header(ui, |ui| {
+            ui.label(tr!("object-manager-objects"));
+        })
+        .body(|ui| {
+            crate::tree_lines::tree_children(ui, |ui, branch| {
+                self.objects(ui, objects, branch, actions, requests, selected);
+            });
+        });
+        branch.mark(toggle.rect.center().y);
     }
 
     fn objects(
@@ -662,8 +766,7 @@ impl StokesForgeApp {
         }
         let graph = active_graph(active_tab_kind(active_tab));
         let tree = self.state.snapshot().tree.clone();
-        let show_texts = self.state.object_manager_show_texts();
-        let show_scales = self.state.object_manager_show_scales();
+        let settings = self.state.object_manager_settings();
         let selection = graph.and_then(|graph| {
             self.read_graph_view(graph, selected_manager_target)
                 .flatten()
@@ -674,8 +777,8 @@ impl StokesForgeApp {
                 &tree,
                 graph,
                 selection,
-                show_texts,
-                show_scales,
+                settings.show_texts,
+                settings.show_scales,
             )
         });
         if self.om_detached {
@@ -688,8 +791,7 @@ impl StokesForgeApp {
                     selection,
                     model,
                     spec,
-                    show_texts,
-                    show_scales,
+                    settings,
                 },
             );
             return;
@@ -724,8 +826,7 @@ impl StokesForgeApp {
                     &tree,
                     model.as_ref(),
                     spec.as_ref(),
-                    show_texts,
-                    show_scales,
+                    settings,
                     actions,
                 );
             }
@@ -813,7 +914,14 @@ mod tests {
         let mut actions = Vec::new();
         let mut requests = Vec::new();
         let output = image_de(ctx, egui::vec2(600.0, 500.0), events, |ui| {
-            requests = object_manager_contents(ui, tree, model, spec, false, false, &mut actions);
+            requests = object_manager_contents(
+                ui,
+                tree,
+                model,
+                spec,
+                ObjectManagerSettings::default(),
+                &mut actions,
+            );
         });
         (output, actions, requests)
     }
@@ -877,11 +985,17 @@ mod tests {
             egui::PointerButton::Secondary,
         );
         let output = paint(Vec::new()).0;
-        assert!(painted(&output, &tr!("menu-view")));
+        assert!(painted(&output, &tr!("object-manager-settings")));
         assert!(!painted(&output, &tr!("object-manager-show-texts")));
         clic_menu(
             &paint,
-            text_center(&output, &tr!("menu-view")),
+            text_center(&output, &tr!("object-manager-settings")),
+            egui::PointerButton::Primary,
+        );
+        let output = paint(Vec::new()).0;
+        clic_menu(
+            &paint,
+            text_center(&output, &tr!("object-manager-display")),
             egui::PointerButton::Primary,
         );
         paint(Vec::new());
@@ -906,12 +1020,88 @@ mod tests {
             assert!(egui::Popup::is_any_open(&ctx));
             let output = paint(Vec::new()).0;
             assert!(
-                painted(&output, &tr!("menu-view")),
+                painted(&output, &tr!("object-manager-settings")),
                 "le menu racine reste ouvert"
             );
             assert!(painted(&output, &tr!("object-manager-show-texts")));
             assert!(painted(&output, &tr!("object-manager-show-scales")));
         }
+    }
+
+    /// Les réglages du fond restent disponibles sans graphe ; les cinq
+    /// bascules gardent leur chaîne ouverte, tandis que Réinitialiser ferme.
+    #[test]
+    fn clic_droit_sans_graphe_regle_les_cinq_defauts_puis_reinitialise() {
+        use super::super::test_support::painted;
+        let project = Project::new("Réglages").unwrap();
+        let settings = ObjectManagerSettings::default();
+        let ctx = super::super::test_support::contexte();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let paint = |events| image(&ctx, project.tree(), None, None, events);
+        paint(Vec::new());
+        paint(Vec::new());
+        clic_menu(
+            &paint,
+            egui::pos2(200.0, 150.0),
+            egui::PointerButton::Secondary,
+        );
+        for label in [
+            tr!("object-manager-settings"),
+            tr!("object-manager-default-expansion"),
+        ] {
+            let output = paint(Vec::new()).0;
+            clic_menu(
+                &paint,
+                text_center(&output, &label),
+                egui::PointerButton::Primary,
+            );
+            paint(Vec::new());
+        }
+        for (group, label) in [
+            (ObjectManagerGroup::Graph, tr!("window-kind-graph")),
+            (
+                ObjectManagerGroup::Layers,
+                tr!("object-manager-expand-layers"),
+            ),
+            (
+                ObjectManagerGroup::Plots,
+                tr!("object-manager-expand-plots"),
+            ),
+            (ObjectManagerGroup::Axes, tr!("object-manager-axes")),
+            (ObjectManagerGroup::Objects, tr!("object-manager-objects")),
+        ] {
+            let output = paint(Vec::new()).0;
+            let (_, actions, requests) = clic_menu(
+                &paint,
+                text_center(&output, &label),
+                egui::PointerButton::Primary,
+            );
+            assert_eq!(
+                actions,
+                vec![Action::SetObjectManagerGroupOpen {
+                    group,
+                    open: !settings.group_open(group)
+                }]
+            );
+            assert!(requests.is_empty());
+            let output = paint(Vec::new()).0;
+            assert!(egui::Popup::is_any_open(&ctx));
+            assert!(painted(&output, &tr!("object-manager-settings")));
+            assert!(painted(&output, &tr!("object-manager-default-expansion")));
+            assert!(painted(&output, &label));
+        }
+        let output = paint(Vec::new()).0;
+        let (_, actions, requests) = clic_menu(
+            &paint,
+            text_center(&output, &tr!("object-manager-reset")),
+            egui::PointerButton::Primary,
+        );
+        assert_eq!(actions, vec![Action::ResetObjectManagerSettings]);
+        assert!(requests.is_empty());
+        paint(Vec::new());
+        assert!(!egui::Popup::is_any_open(&ctx));
+        let output = paint(Vec::new()).0;
+        assert!(!painted(&output, &tr!("object-manager-settings")));
     }
 
     #[test]
@@ -1086,6 +1276,9 @@ mod tests {
         let (output, actions, requests) = paint(Vec::new());
         assert!(actions.is_empty() && requests.is_empty());
         let mut expected = vec![model.title.clone()];
+        if !model.objects.is_empty() {
+            expected.push(tr!("object-manager-objects"));
+        }
         expected.extend(model.objects.iter().map(|object| object.label.clone()));
         expected.extend([
             tr!("object-manager-layer", index = 1),
@@ -1098,6 +1291,9 @@ mod tests {
                 !labels(&output).contains(&axis.label),
                 "les axes sont repliés par défaut"
             );
+        }
+        if !model.layers[0].objects.is_empty() {
+            expected.push(tr!("object-manager-objects"));
         }
         expected.extend(
             model.layers[0]
@@ -1155,6 +1351,111 @@ mod tests {
             assert!(
                 !texts.contains(&axis.label),
                 "un second clic replie les axes, et seulement eux"
+            );
+        }
+    }
+
+    /// Chaque famille a un témoin peint ; modifier le défaut doit changer
+    /// un contexte neuf, sans remplacer les états des groupes déjà vus.
+    #[test]
+    fn les_reglages_initiaux_changent_chaque_groupe_neuf_et_preservent_les_groupes_vus() {
+        use crate::app::test_support::painted;
+        let mut project = Project::new("Réglages").unwrap();
+        let mut spec = PlotSpec::empty("Titre");
+        spec.title = "Texte global".into();
+        let panel = spec.panels.get_mut(0).unwrap();
+        let mut series = SeriesSpec::new(NodeId::from_raw(900));
+        series.name = "Courbe témoin".into();
+        panel.series.push(series);
+        panel
+            .annotations
+            .push(AnnotationSpec::new("Texte local", 0.0, 0.0));
+        let graph = project
+            .add_graph(project.root(), None, spec.clone())
+            .unwrap();
+        let settings = ObjectManagerSettings {
+            show_scales: true,
+            show_texts: true,
+            ..Default::default()
+        };
+        let model = crate::object_manager::object_tree_with_selection(
+            project.tree(),
+            graph,
+            None,
+            true,
+            true,
+        )
+        .unwrap();
+        let paint = |ctx: &egui::Context, settings| {
+            let mut actions = Vec::new();
+            let output = image_de(ctx, egui::vec2(800.0, 700.0), Vec::new(), |ui| {
+                let requests = object_manager_contents(
+                    ui,
+                    project.tree(),
+                    Some(&model),
+                    Some(&spec),
+                    settings,
+                    &mut actions,
+                );
+                assert!(requests.is_empty());
+            });
+            assert!(actions.is_empty(), "un défaut de vue ne mute pas le modèle");
+            output
+        };
+        for (group, witness) in [
+            (
+                ObjectManagerGroup::Graph,
+                tr!("object-manager-layer", index = 1),
+            ),
+            (ObjectManagerGroup::Layers, tr!("object-manager-group")),
+            (ObjectManagerGroup::Plots, "Courbe témoin".into()),
+            (
+                ObjectManagerGroup::Axes,
+                model.layers[0].axes[0].label.clone(),
+            ),
+            (ObjectManagerGroup::Objects, "Texte local".into()),
+        ] {
+            let ctx = crate::app::test_support::contexte();
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            paint(&ctx, settings);
+            let baseline = paint(&ctx, settings);
+            if group == ObjectManagerGroup::Objects {
+                assert!(painted(&baseline, "Texte global"));
+            }
+            let expected = settings.group_open(group);
+            assert_eq!(
+                painted(&baseline, &witness),
+                expected,
+                "témoin par défaut {group:?}"
+            );
+            let mut changed = settings;
+            changed.set_group_open(group, !expected);
+            paint(&ctx, changed);
+            assert_eq!(
+                painted(&paint(&ctx, changed), &witness),
+                expected,
+                "le groupe déjà vu garde son état {group:?}"
+            );
+            let fresh = crate::app::test_support::contexte();
+            fresh.all_styles_mut(|style| style.animation_time = 0.0);
+            paint(&fresh, changed);
+            let output = paint(&fresh, changed);
+            assert_eq!(
+                painted(&output, &witness),
+                !expected,
+                "le nouveau groupe lit le réglage {group:?}"
+            );
+            if group == ObjectManagerGroup::Objects {
+                assert!(
+                    !painted(&output, "Texte global"),
+                    "le groupe global suit le même réglage mais possède son propre ID"
+                );
+            }
+            // Réinitialiser rend les défauts sans modifier les groupes vus.
+            paint(&fresh, ObjectManagerSettings::default());
+            assert_eq!(
+                painted(&paint(&fresh, ObjectManagerSettings::default()), &witness),
+                !expected
             );
         }
     }

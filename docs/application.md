@@ -86,8 +86,8 @@ les mêmes noms. Les raccourcis et les barres d'outils gardent leurs actions.
 Les cases restent réservées aux bascules d'affichage ; elles laissent la
 chaîne de menus ouverte. Une action ou un choix exclusif (langue, type,
 rôle, résolution) ferme toute la chaîne. `MenuBar` utilise
-`CloseOnClickOutside` ; le fond de l'Object Manager et son sous-menu
-Affichage utilisent le même comportement. Les actions ferment explicitement
+`CloseOnClickOutside` ; le fond de l'Object Manager et ses sous-menus de réglages
+utilisent le même comportement. Les actions ferment explicitement
 par `Ui::close`, dont egui propage la demande aux menus parents.
 
 | Menu | Organisation |
@@ -96,7 +96,7 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 | Edit | Undo, Redo ; Selection → Rename, Duplicate, Copy, Paste, Delete des objets du Project Manager |
 | Workbook (classeur actif) | Sheet → Rename Sheet, Duplicate Sheet, Delete Sheet, Add Sheet ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
 | Graph (graphique actif) | Show Data ; Selection → Properties…, Rename, Order, Show/Hide, Delete selon la cible ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… ; Reset Zoom ; Text → Reset Text Positions, Add Text, Delete Text ; Objects → Bring to Front, Send to Back, Delete Object ; Export → Export Graph…, Copy Graph, PNG Resolution |
-| View | Panels → Project Manager, Script Console, Object Manager → Show, View → Show graph texts, Show scales ; Toolbars → File, Tools, Text format |
+| View | Panels → Project Manager, Script Console, Object Manager → Show, Object Manager Settings → Display (Show graph texts, Show scales), Expand by Default, Reset ; Toolbars → File, Tools, Text format |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
 Le clic droit du Project Manager réutilise `object_menu` et son sous-menu
@@ -107,8 +107,8 @@ puis Columns → Type / Role et Plot, peints par `column_options_menu`,
 sélection courante, grise Type, Role et Plot sans sélection (Add Column reste disponible) et ne marque aucun type
 ou rôle quand les colonnes diffèrent.
 
-Le fond de l'Object Manager propose View et les mêmes filtres que
-View → Panels → Object Manager ; `object_manager_filters_menu` en est
+Le fond de l'Object Manager propose Object Manager Settings et les mêmes réglages que
+View → Panels → Object Manager ; `object_manager_settings_menu` en est
 l'unique écriture. Ses nœuds partagent `object_node_menu` avec
 Graph → Selection, y compris Order pour les séries. Le clic droit du
 graphique propose Text, Objects si un objet est visé, Properties (la cible
@@ -1826,8 +1826,8 @@ séries, ainsi que les objets rares, textes libres et objets graphiques
 (rectangle, ellipse, ligne, flèche), quand il y en a. Les **textes
 automatiques** (titre du graphique et des calques, titres d'axes, légende) sont
 cachés par défaut (#102) : une seule bascule, « Afficher les textes du
-graphique » (Affichage › Panneaux › Gestionnaire d'objets › Affichage et
-clic droit sur le fond du panneau › Affichage, même
+graphique » (Affichage › Panneaux › Gestionnaire d'objets › Réglages du gestionnaire d’objets › Affichage et
+clic droit sur le fond du panneau › Réglages du gestionnaire d’objets › Affichage, même
 `Action::SetObjectManagerShowTexts`), les liste. C'est une préférence
 d'interface (`object_manager_show_texts` dans `preferences.json`, hors `.stf`),
 et le filtre vit dans `object_tree_with_selection`. Un texte caché n'apparaît
@@ -1850,6 +1850,22 @@ axes non demandés. Le panneau est redimensionnable à droite ;
 son bouton Détacher ouvre une fenêtre système, Rattacher le replace à droite. Il est
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.
+
+Les réglages de vue (#139) sont regroupés dans **Affichage › Panneaux › Gestionnaire d’objets › Réglages du
+gestionnaire d’objets**, aussi accessible au clic droit sur le fond, même sans
+graphique actif. Le sous-menu Affichage réunit les deux filtres ; **Déplier par
+défaut** règle graphique, calques, groupes de tracés, axes et objets. Les objets
+sont regroupés par graphique ou calque, sans modifier leur visibilité.
+Le menu est grisé lorsque le panneau est fermé. **Réinitialiser** rétablit les
+filtres cachés, les axes repliés et les autres groupes dépliés ; les replis déjà
+choisis restent libres et conservés. Les valeurs initiales ne s'appliquent
+qu'aux groupes sans état egui, jamais à un groupe déjà peint ou manipulé.
+`preferences::ObjectManagerSettings` est la table unique des défauts ; les
+réglages vont dans `preferences.json`, hors `.stf` et historique. Les anciens
+champs des deux filtres restent lus et écrits pour la compatibilité.
+`object_manager_settings_menu` et `object_manager_contents` servent aussi le
+viewport détaché ; une modification des réglages le réveille même si le
+projet et la sélection n'ont pas changé.
 
 Chaque série garde son nom dérivé de colonne et son échantillon de légende
 (trait, couleur, épaisseur, marqueur ou barre). Les cases des parents modifient

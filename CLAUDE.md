@@ -94,7 +94,13 @@ reste dans `GraphView` (même vue en fenêtre détachée). Les textes automatiqu
 Les échelles (groupe « Axes » sous le calque, replié par défaut #138, une ligne par axe, case = `AxisSpec::visible`, #111)
 ont leur propre bascule jumelle (`Action::SetObjectManagerShowScales`) et ne sont
 pas commandées par les cases du graphique/calque. Les filtres vivent dans
-`object_tree_with_selection`. Les bascules réutilisent
+`object_tree_with_selection`. Les réglages de vue (#139) passent par le menu
+commun `object_manager_settings_menu` (Affichage et fond, grisé si panneau
+fermé), les `Action` et `preferences::ObjectManagerSettings`, table unique des
+défauts. Les objets ont leur section repliable par graphique/calque ; le repli
+initial ne remplace jamais l’état courant d’egui, même après Réinitialiser.
+Le modèle détaché transporte tous les réglages et réveille son viewport si
+seuls ceux-ci changent. Les bascules réutilisent
 `EditPlotSpec`, dont le motif d'historique reste une donnée. Les échantillons
 appellent `series_swatch`, partagé avec la légende.
 
@@ -111,7 +117,7 @@ de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
 
 - Menus (#114) : regrouper les longues listes par thèmes, mêmes sous-menus et
   clés entre barre de menus et clic droit ; réutiliser les peintures partagées
-  (`object_menu`, `object_node_menu`, `object_manager_filters_menu`,
+  (`object_menu`, `object_node_menu`, `object_manager_settings_menu`,
   `column_options_menu`, `graph_properties_menu`). Les cases se limitent aux
   vraies bascules d'affichage et laissent les menus ouverts ; une action ou
   un choix exclusif ferme la chaîne. Ne pas créer de voie de mutation parallèle.

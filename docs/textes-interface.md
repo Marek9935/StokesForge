@@ -71,6 +71,8 @@ l'interface, mais son mot est déjà fixé.
 | Refresh | Actualiser | Relire le fichier source d'une colonne | Rafraîchir, Recharger | G |
 | Properties | Propriétés | Réglages d'un objet précis | Options, Paramètres | O |
 | Preferences† | Préférences | Réglages de l'application | Options, Paramètres | G |
+| Expand by Default | Déplier par défaut | Repli initial des nouveaux groupes de l’Object Manager ; ne modifie pas les groupes déjà vus | Tout déplier | #139 |
+| Objects | Objets | Section des textes et formes du graphique ou d’un calque dans l’Object Manager | Éléments | #139 |
 | Setting | Réglage | Valeur choisie par l'utilisateur | Option, Paramètre | G |
 | Template | Modèle | Réglages d'import enregistrés sous un nom | Recette, Preset, Filtre | O |
 | Wizard | Assistant | Fenêtre à étapes | Wizard, Guide | G |
@@ -328,7 +330,7 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | New | Nouveau | Sous-menu des créations de projet, classeur et graphique | Créer (pour le groupe) |
 | Panels | Panneaux | Groupe des trois panneaux fixes de l'application | Calques (réservé au graphique) |
 | Toolbars | Barres d'outils | Groupe des bascules de visibilité des barres | Outils (nom d'une barre) |
-| Order | Ordre | Rang des séries dans leur groupe | Position (géométrie) |
+| Order | Ordre | Rang des séries dans leur groupe ou empilement des objets | Position (géométrie) |
 
 Les groupes reprennent les termes existants Properties, Text, Object,
 Sheet, Column, Import, Export et Selection, au pluriel lorsque le groupe

@@ -7471,6 +7471,84 @@ fn object_manager_proprietes_ouvrent_la_serie_du_bon_calque_et_annulent() {
 }
 
 #[test]
+fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
+    use stokesforge_app::preferences::{ObjectManagerGroup, ObjectManagerSettings, Preferences};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("preferences.json");
+    let (project, graph, before) = object_manager_project();
+    let session = Session::spawn(project, None).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        dir.path().join("projet.stf").display().to_string(),
+        Preferences::load_from(Some(path.clone())),
+    )
+    .unwrap();
+    let defaults = ObjectManagerSettings::default();
+    let revision = state.revision();
+    state.dispatch(Action::SetObjectManagerOpen(false));
+    for group in ObjectManagerGroup::ALL {
+        state.dispatch(Action::SetObjectManagerGroupOpen {
+            group,
+            open: !defaults.group_open(group),
+        });
+        assert_eq!(
+            state.object_manager_settings().group_open(group),
+            !defaults.group_open(group)
+        );
+    }
+    state.dispatch(Action::SetObjectManagerShowTexts(true));
+    state.dispatch(Action::SetObjectManagerShowScales(true));
+    let changed = state.object_manager_settings();
+    assert_ne!(
+        changed, defaults,
+        "témoin : les actions changent les réglages"
+    );
+    assert_eq!(
+        Preferences::load_from(Some(path.clone())).object_manager_settings(),
+        changed
+    );
+    assert!(state.object_manager_show_texts() && state.object_manager_show_scales());
+    state.dispatch(Action::ResetObjectManagerSettings);
+    assert_eq!(state.object_manager_settings(), defaults);
+    let loaded = Preferences::load_from(Some(path));
+    assert_eq!(loaded.object_manager_settings(), defaults);
+    assert!(
+        !state.object_manager_open() && !loaded.object_manager_open(),
+        "le reset ne rouvre pas le panneau"
+    );
+    assert_eq!(state.revision(), revision);
+    assert!(!state.can_undo() && !state.can_redo());
+    assert_eq!(graph_spec(&state, graph), before);
+    assert!(state.status().is_none_or(|status| !status.is_error));
+    session.shutdown().unwrap();
+}
+
+#[test]
+fn object_manager_reglage_reste_actif_si_le_stockage_echoue() {
+    use stokesforge_app::preferences::{ObjectManagerGroup, Preferences};
+    let dir = tempfile::tempdir().unwrap();
+    // Un dossier à la place du fichier provoque une erreur portable,
+    // sans dépendre des permissions ou de l'identité de l'utilisateur CI.
+    let session = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        dir.path().join("projet.stf").display().to_string(),
+        Preferences::load_from(Some(dir.path().to_path_buf())),
+    )
+    .unwrap();
+    let revision = state.revision();
+    state.dispatch(Action::SetObjectManagerGroupOpen {
+        group: ObjectManagerGroup::Graph,
+        open: false,
+    });
+    assert!(!state.object_manager_settings().graph_open);
+    assert!(state.status().is_some_and(|status| status.is_error));
+    assert_eq!(state.revision(), revision);
+    assert!(!state.can_undo());
+    session.shutdown().unwrap();
+}
+
+#[test]
 fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
     use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
     use stokesforge_plot::{AnnotationRef, ShapeRef, TextTarget};
