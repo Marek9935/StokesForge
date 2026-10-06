@@ -7,6 +7,8 @@
 //! comportement : c'est la brique que partagent les fenêtres flottantes, les
 //! fenêtres détachées et les dialogues modaux. Sous-module d'`app` pour garder
 //! l'accès à ses types privés (`Tab`, constantes d'icônes…).
+//! La console regroupe ses prises à gauche (#142) ; sa bande repliée trace
+//! sa séparation côté espace de travail, comme les bandes des gestionnaires.
 
 use eframe::egui;
 
@@ -580,11 +582,14 @@ pub(super) fn panel_header(
     let mut toggle_rect = cell(first_pos);
     let mut detach_rect = if vertical {
         cell(first_pos + egui::vec2(0.0, header_height))
+    } else if placement == PanelPlacement::Bottom {
+        cell(first_pos + egui::vec2(action_width, 0.0))
     } else {
         cell(egui::pos2(rect.right() - action_width, rect.top()))
     };
     // Le repli se vise au bord de l'espace de travail, le détachement au
-    // bord extérieur. La règle dépend du côté, jamais de la nature du panneau.
+    // bord extérieur pour les gestionnaires. La console garde les deux
+    // prises à gauche, repliée comme déployée (#142).
     // Dans une bande verticale, les prises restent empilées dans le même ordre.
     if placement == PanelPlacement::Left && !vertical {
         std::mem::swap(&mut toggle_rect, &mut detach_rect);
@@ -632,14 +637,22 @@ pub(super) fn panel_header(
         egui::Rect::from_min_max(
             rect.min
                 + egui::vec2(
-                    if placement == PanelPlacement::Detached {
+                    match placement {
+                        PanelPlacement::Detached => 0.0,
+                        PanelPlacement::Bottom => 2.0 * action_width,
+                        _ => action_width,
+                    },
+                    0.0,
+                ),
+            egui::pos2(
+                rect.right()
+                    - if placement == PanelPlacement::Bottom {
                         0.0
                     } else {
                         action_width
                     },
-                    0.0,
-                ),
-            egui::pos2(rect.right() - action_width, rect.bottom()),
+                rect.bottom(),
+            ),
         )
     };
     let painter = header.painter().with_clip_rect(title_rect);
@@ -682,6 +695,13 @@ pub(super) fn panel_header(
         header
             .painter()
             .hline(rect.x_range(), rect.bottom(), stroke);
+        if placement == PanelPlacement::Bottom && collapsed {
+            // Garder tout le trait supérieur à l'intérieur du clip de la
+            // bande, comme les séparations verticales des gestionnaires.
+            header
+                .painter()
+                .hline(rect.x_range(), rect.top() + stroke.width / 2.0, stroke);
+        }
     }
     actions
 }

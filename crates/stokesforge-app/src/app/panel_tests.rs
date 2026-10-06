@@ -143,7 +143,7 @@ fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
         let center = title.pos
             + egui::emath::Rot2::from_angle(title.angle) * title.galley.rect.center().to_vec2();
         let expected = if matches!(panel, Panel::Script) {
-            strip.center()
+            strip.center() + egui::vec2(crate::icons::ICON_SIZE, 0.0)
         } else {
             egui::pos2(strip.center().x, strip.center().y + crate::icons::ICON_SIZE)
         };
@@ -152,6 +152,72 @@ fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
             "titre centré : {center:?} / {expected:?}"
         );
         session.shutdown().unwrap();
+    }
+}
+
+/// #142 : les prises de console restent voisines au bord gauche, et la
+/// bande repliée se sépare de l'espace de travail par le même trait que PM/OM.
+#[test]
+fn la_console_groupe_ses_prises_a_gauche_et_delimite_le_haut_de_sa_bande() {
+    for width in [320.0, 1200.0] {
+        for collapsed in [true, false] {
+            let session = Session::spawn(Project::new("Console").unwrap(), None).unwrap();
+            let mut app =
+                StokesForgeApp::new(AppState::new(session.handle(), String::new()).unwrap());
+            app.script_collapsed = collapsed;
+            let ctx = context();
+            let paint = |app: &mut StokesForgeApp| {
+                let mut raw = input(Vec::new());
+                raw.screen_rect.as_mut().unwrap().max.x = width;
+                let mut output = ctx.run_ui(raw, |ui| Panel::Script.paint(app, ui));
+                output.textures_delta.clear();
+                output
+            };
+            paint(&mut app);
+            let output = paint(&mut app);
+            let id = if collapsed {
+                Panel::Script.collapsed_id()
+            } else {
+                Panel::Script.id()
+            };
+            let rect = PanelState::load(&ctx, egui::Id::new(id))
+                .unwrap()
+                .outer_rect;
+            let icons = find_icon_centers(&output.shapes);
+            assert_eq!(icons.len(), 2);
+            let cell = if collapsed {
+                crate::icons::ICON_SIZE
+            } else {
+                super::window_chrome::HEADER_ACTION_WIDTH
+            };
+            assert!(icons[0].x < rect.left() + cell, "chevron à gauche");
+            assert!(
+                (icons[1].x - icons[0].x - cell).abs() < 0.1,
+                "Détacher immédiatement après le chevron : {icons:?}"
+            );
+            assert!((icons[0].y - icons[1].y).abs() < 0.1);
+            if collapsed {
+                let stroke = ctx
+                    .style_of(ctx.theme())
+                    .visuals
+                    .widgets
+                    .noninteractive
+                    .bg_stroke;
+                assert!(stroke.width > 0.0, "séparation visible");
+                assert!(
+                    output.shapes.iter().any(|shape| {
+                        matches!(&shape.shape, egui::Shape::LineSegment { points, stroke: painted }
+                        if *painted == stroke
+                        && (points[0].x - rect.left()).abs() < 0.1
+                        && (points[1].x - rect.right()).abs() < 0.1
+                        && (points[0].y - rect.top() - stroke.width / 2.0).abs() < 0.1
+                        && (points[1].y - points[0].y).abs() < 0.1)
+                    }),
+                    "trait supérieur sur toute la largeur de la bande"
+                );
+            }
+            session.shutdown().unwrap();
+        }
     }
 }
 
