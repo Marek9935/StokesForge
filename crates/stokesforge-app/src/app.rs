@@ -331,6 +331,8 @@ pub struct StokesForgeApp {
     /// en bascule l'appartenance ; consommée par « Afficher »/« Masquer ».
     /// Indépendante de `selection.rs`, propre à la grille de données.
     pm_selection: HashSet<Tab>,
+    /// Dernier contenu actif observé pour suivre la sélection simple (#146).
+    pm_last_active_tab: Option<Tab>,
     /// Onglets masqués sans être fermés (§6) — même patron que
     /// `collapsed_tabs`, mais l'onglet entier n'est plus peint du tout
     /// (au lieu de replier seulement son contenu). Reste dans
@@ -461,6 +463,7 @@ impl StokesForgeApp {
             saved_window_geometries,
             floating_rects,
             pm_selection: HashSet::new(),
+            pm_last_active_tab: None,
             hidden_tabs: HashSet::new(),
             autoquit,
             first_frame: None,
@@ -793,6 +796,7 @@ impl eframe::App for StokesForgeApp {
         let mut close_requests = Vec::new();
         let mut geometry_updates = Vec::new();
         let active_tab = self.active_content_tab(&ctx);
+        self.follow_project_manager_active_tab(active_tab);
 
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);
@@ -1484,6 +1488,7 @@ impl StokesForgeApp {
         self.saved_window_geometries.clear();
         self.floating_rects.clear();
         self.pm_selection.clear();
+        self.pm_last_active_tab = None;
         self.pm_requests = Arc::new(Mutex::new(DetachedProjectManagerRequests::default()));
         self.hidden_tabs.clear();
         ctx.memory_mut(|memory| {

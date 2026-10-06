@@ -399,24 +399,12 @@ fn project_tree_node_ui(
             }
             let selected = interaction.selection.contains(&tab);
             let is_hidden = interaction.hidden.contains(&tab);
-            let fill = if selected {
-                ui.visuals().selection.bg_fill
-            } else {
-                egui::Color32::TRANSPARENT
-            };
-            // Le bouton reste un `egui::Button` normal (affordance de survol
-            // native) ; seul le fond du `Frame` qui l'entoure porte la
-            // teinte de sélection, posée derrière lui. `push_id(tab, ...)`
-            // est nécessaire : `Frame::show` fait naître son enfant avec un
-            // salt fixe ("child"), identique à chaque itération de cette
-            // boucle — sans un salt propre à `tab`, toutes les lignes de
-            // l'arbre partageraient le même `Id` de bouton, et un clic
-            // finirait attribué à la dernière ligne pressée plutôt qu'à
-            // celle réellement cliquée.
+            // #144 : le bouton porte la sélection dans sa propre forme arrondie,
+            // y compris au survol ; le cadre ne garde que l'espacement. Le salt
+            // par onglet évite que toutes les lignes partagent le même Id.
             let response = ui
                 .push_id(tab, |ui| {
                     egui::Frame::NONE
-                        .fill(fill)
                         .inner_margin(2.0)
                         .show(ui, |ui| {
                             let text = if is_hidden {
@@ -424,10 +412,10 @@ fn project_tree_node_ui(
                             } else {
                                 egui::RichText::new(name)
                             };
-                            ui.add(egui::Button::image_and_text(
-                                icon_image(icon.0, icon.1),
-                                text,
-                            ))
+                            ui.add(
+                                egui::Button::image_and_text(icon_image(icon.0, icon.1), text)
+                                    .selected(selected),
+                            )
                         })
                         .inner
                 })
@@ -500,6 +488,20 @@ fn project_tree_node_ui(
 pub(super) const PROJECT_MANAGER_WIDTH: f32 = 260.0;
 
 impl StokesForgeApp {
+    /// #146 : suivre seulement les changements de fenêtre active. Refaire la
+    /// sélection à chaque image écraserait le clic du panneau avant que sa
+    /// demande d'ouverture soit appliquée. Une sélection multiple reste à
+    /// l'utilisateur ; le clic simple existant réactive le suivi.
+    pub(super) fn follow_project_manager_active_tab(&mut self, active_tab: Option<Tab>) {
+        if active_tab != self.pm_last_active_tab {
+            self.pm_last_active_tab = active_tab;
+            if self.pm_selection.len() <= 1 {
+                self.pm_selection.clear();
+                self.pm_selection.extend(active_tab);
+            }
+        }
+    }
+
     /// Peint le Project Manager dans son panneau fixe, ancré à gauche — voir
     /// la doc de tête d'`app.rs`, § Ce qui reste ici (l'ordre des panneaux).
     /// Appelé par
@@ -733,6 +735,76 @@ pub(super) mod tests {
             output.textures_delta.clear();
             output
         }
+    }
+
+    #[test]
+    fn la_selection_du_project_manager_utilise_la_forme_arrondie_des_boutons() {
+        let mut project = Project::new("Sélection arrondie").unwrap();
+        let root = project.root();
+        let book = Tab::Book(project.add_empty_workbook(root, None).unwrap());
+        let graph = Tab::Graph(project.add_graph(root, None, PlotSpec::default()).unwrap());
+        let note = Tab::Note(project.add_note(root, None, "").unwrap());
+        let matrix = Tab::Matrix(project.add_matrix(root, None).unwrap());
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let tree = state.project_tree();
+        let context = super::super::test_support::contexte();
+        let banc = Banc::new(None, HashSet::from([book, graph, note, matrix]));
+        banc.paint(&context, &tree, Vec::new());
+        let output = banc.paint(&context, &tree, Vec::new());
+        let fill = context.global_style().visuals.selection.bg_fill;
+        let selected_rects: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.fill == fill => Some(rect),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            selected_rects.len(),
+            4,
+            "un seul fond par entrée sélectionnée"
+        );
+        for rect in selected_rects {
+            assert_ne!(
+                rect.corner_radius,
+                egui::CornerRadius::ZERO,
+                "la sélection épouse l'arrondi du bouton"
+            );
+        }
+        banc.selection.borrow_mut().clear();
+        let output = banc.paint(&context, &tree, Vec::new());
+        assert!(
+            !output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.fill == fill)),
+            "le témoin sans sélection n'a pas cette teinte"
+        );
+    }
+
+    #[test]
+    fn le_suivi_du_contenu_actif_preserve_la_selection_multiple() {
+        let (session, book, graph, _tree) = project_manager_fixture();
+        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.follow_project_manager_active_tab(Some(book));
+        assert_eq!(app.pm_selection, HashSet::from([book]));
+        app.follow_project_manager_active_tab(Some(graph));
+        assert_eq!(app.pm_selection, HashSet::from([graph]));
+        app.pm_selection.insert(book);
+        app.follow_project_manager_active_tab(Some(book));
+        assert_eq!(app.pm_selection, HashSet::from([book, graph]));
+        app.follow_project_manager_active_tab(None);
+        assert_eq!(app.pm_selection, HashSet::from([book, graph]));
+        // Le clic simple existant remplace la sélection. Même fenêtre active :
+        // ne pas écraser ce clic avant l'application de sa demande d'ouverture.
+        app.pm_selection = HashSet::from([book]);
+        app.follow_project_manager_active_tab(None);
+        assert_eq!(app.pm_selection, HashSet::from([book]));
+        app.follow_project_manager_active_tab(Some(graph));
+        assert_eq!(app.pm_selection, HashSet::from([graph]));
+        app.follow_project_manager_active_tab(None);
+        assert!(app.pm_selection.is_empty());
     }
 
     #[test]

@@ -466,6 +466,16 @@ Project Manager a le focus, aussi en fenêtre détachée. Les renommages multipl
 saisissent les noms successivement, puis valident une seule entrée annulable ;
 Échap abandonne l'ensemble. Le champ se valide par Entrée ou perte du focus.
 
+La sélection utilise la forme arrondie des boutons, sans fond rectangulaire
+ajouté autour des entrées (#144), y compris dans le Project Manager détaché.
+
+La sélection simple suit les changements de fenêtre de contenu active (#146),
+qu'elle soit flottante, maximisée ou détachée. Une sélection multiple est
+conservée pendant ces changements et reste la cible des actions du panneau.
+Un clic simple sur une entrée remplace la sélection multiple et réactive le
+suivi. `follow_project_manager_active_tab` applique cette règle avant les menus
+et la publication au Project Manager détaché.
+
 Les noms sont uniques dans le dossier parent. Les copies portent le premier
 suffixe « copy N » / « copie N » libre et de nouveaux identifiants pour toute
 leur descendance. Un graphe copié dans son projet garde ses références aux
