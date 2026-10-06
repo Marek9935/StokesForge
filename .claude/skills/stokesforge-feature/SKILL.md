@@ -297,12 +297,14 @@ l'application (issue #20) : il le bloque seulement.
 Les panneaux fixes (#100) passent par `panel_header` dans le même module :
 PM à gauche, OM à droite, console en bas. L’ordre horizontal des boutons
 dépend du côté : repli vers l’espace de travail, détachement vers l’extérieur.
-Les bandes verticales gardent Déployer puis Détacher de haut en bas.
+La console déployée garde Replier puis Détacher côte à côte à gauche (#142).
+Les trois panneaux repliés ne montrent que Déployer, sans cible invisible
+ni place réservée à Détacher ; le titre occupe l’espace restant.
 Les bandes repliées font `ICON_SIZE` d’épaisseur, sans marge de panneau ni
-place réservée au séparateur ; icônes centrées, titre vertical centré sous
-les boutons.
+place réservée au séparateur ; Déployer centré, titre vertical centré sous
+le bouton.
 Visibilité par View, repli distinct
-du masquage ; en-tête attaché = Détacher et Replier/Déployer ; fenêtre OS
+du masquage ; en-tête attaché déployé = Détacher et Replier, replié = Déployer ; fenêtre OS
 sans décoration native = Rattacher uniquement. Une fermeture OS rattache.
 Ne pas réintroduire de flottant interne pour un panneau ni de bouton Fermer
 ou Maximiser. Réutiliser les lectures/requêtes de `window_detach.rs` ; le

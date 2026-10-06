@@ -109,8 +109,10 @@ par View, repli distinct du masquage, pas de flottant interne. Le cadre
 `panel_header` (`app/window_chrome.rs`) partage les cellules d’icônes des
 fenêtres de contenu avec une police compacte. L’ordre horizontal des boutons
 dépend du côté : repli vers l’espace de travail, détachement vers l’extérieur.
-Replié : épaisseur `ICON_SIZE` sans marge supplémentaire, icônes centrées et
-titre vertical centré dans l’espace sous les boutons. Attaché : Détacher et repli ;
+La console déployée garde Replier puis Détacher côte à côte à gauche (#142).
+Replié : épaisseur `ICON_SIZE` sans marge supplémentaire, seul Déployer est
+visible, sans cible ni espace réservé à Détacher ; titre centré dans l’espace
+restant (vertical pour PM/OM). Attaché déployé : Détacher et Replier ;
 détaché : Rattacher uniquement, sans décoration système. Une fermeture OS
 rattache. Réutiliser les contenus de chaque surface et les lectures/requêtes
 de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.

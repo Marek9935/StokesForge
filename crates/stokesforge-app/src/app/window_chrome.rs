@@ -7,6 +7,7 @@
 //! comportement : c'est la brique que partagent les fenêtres flottantes, les
 //! fenêtres détachées et les dialogues modaux. Sous-module d'`app` pour garder
 //! l'accès à ses types privés (`Tab`, constantes d'icônes…).
+//! Les panneaux repliés ne gardent que Déployer : Détacher exige de les ouvrir.
 //! La console regroupe ses prises à gauche (#142) ; sa bande repliée trace
 //! sa séparation côté espace de travail, comme les bandes des gestionnaires.
 
@@ -531,7 +532,7 @@ pub(super) fn detached_resize_handles(ui: &egui::Ui) {
 pub(super) const HEADER_ACTION_WIDTH: f32 = 24.0;
 
 /// Les panneaux gardent leur emplacement ; seule leur fenêtre OS se déplace.
-/// Une bande latérale repliée garde son titre vertical et ses deux prises.
+/// Une bande latérale repliée garde son titre vertical et la prise Déployer.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PanelPlacement {
     Left,
@@ -589,8 +590,8 @@ pub(super) fn panel_header(
     };
     // Le repli se vise au bord de l'espace de travail, le détachement au
     // bord extérieur pour les gestionnaires. La console garde les deux
-    // prises à gauche, repliée comme déployée (#142).
-    // Dans une bande verticale, les prises restent empilées dans le même ordre.
+    // prises à gauche, Détacher seulement quand elle est déployée (#142).
+    // Une bande repliée ne garde que Déployer, sans cible de détachement.
     if placement == PanelPlacement::Left && !vertical {
         std::mem::swap(&mut toggle_rect, &mut detach_rect);
     }
@@ -615,31 +616,36 @@ pub(super) fn panel_header(
             },
         );
     }
-    actions.detach = header_icon(
-        &mut header,
-        id,
-        "detach",
-        detach_rect,
-        if placement == PanelPlacement::Detached {
-            Icon::Reattach
-        } else {
-            Icon::Detach
-        },
-        &if placement == PanelPlacement::Detached {
-            tr!("panel-reattach")
-        } else {
-            tr!("panel-detach")
-        },
-    );
+    let shows_detach = !collapsed || placement == PanelPlacement::Detached;
+    if shows_detach {
+        actions.detach = header_icon(
+            &mut header,
+            id,
+            "detach",
+            detach_rect,
+            if placement == PanelPlacement::Detached {
+                Icon::Reattach
+            } else {
+                Icon::Detach
+            },
+            &if placement == PanelPlacement::Detached {
+                tr!("panel-reattach")
+            } else {
+                tr!("panel-detach")
+            },
+        );
+    }
     let title_rect = if vertical {
-        egui::Rect::from_min_max(rect.min + egui::vec2(0.0, 2.0 * header_height), rect.max)
+        egui::Rect::from_min_max(rect.min + egui::vec2(0.0, header_height), rect.max)
     } else {
         egui::Rect::from_min_max(
             rect.min
                 + egui::vec2(
                     match placement {
                         PanelPlacement::Detached => 0.0,
-                        PanelPlacement::Bottom => 2.0 * action_width,
+                        PanelPlacement::Bottom => {
+                            (if shows_detach { 2.0 } else { 1.0 }) * action_width
+                        }
                         _ => action_width,
                     },
                     0.0,

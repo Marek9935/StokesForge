@@ -58,6 +58,9 @@ confirmation pour les choix courants couverts par la demande.
   des noms par dossier, chemins canoniques enracinés ; les graphes entre projets
   emportent leurs colonnes dans un classeur caché persisté (#107), révélé par Show
   Data. F2 appartient aux gestionnaires (#130), pas aux feuilles.
+- Panneaux Python, PM et OM repliés : seul Déployer est visible, sans cible
+  ni espace réservé à Détacher (`panel_header`). Le détachement par bouton
+  exige un panneau déployé ; une fenêtre OS garde Rattacher.
 - Le rendu partagé appartient à `stokesforge-render`. Préserver l'accord entre
   l'écran et les exports, ainsi que la mesure de texte unique.
   Le banc des grandes courbes (#141) reste manuel (`#[ignore]`, `--release`),

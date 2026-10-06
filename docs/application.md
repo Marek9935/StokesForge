@@ -572,12 +572,14 @@ Les trois panneaux partagent `panel_header` (`app/window_chrome.rs`) : titre
 compact, Détacher, Replier/Déployer. L'ordre des boutons dépend du côté :
 Replier/Déployer vers l'espace de travail, Détacher vers le bord extérieur
 pour les gestionnaires. La console garde Replier/Déployer puis Détacher
-côte à côte à gauche, repliée comme déployée (#142). Sa bande repliée porte
-une séparation supérieure sur toute la largeur, du même style que celles
+côte à côte à gauche quand elle est déployée (#142). Les trois panneaux
+repliés ne montrent que Déployer : Détacher est masqué et sa place est rendue
+au titre. Il faut déployer le panneau pour accéder à son bouton Détacher.
+La bande repliée de la console porte une séparation supérieure sur toute la largeur, du même style que celles
 des bandes des gestionnaires.
-Les bandes verticales gardent Déployer puis Détacher de haut en bas.
+Les bandes verticales repliées gardent Déployer en haut et le titre dessous.
 PM et OM se replient en une bande latérale avec titre vertical centré dans
-l’espace disponible sous les boutons ; la console se replie en une barre
+l’espace disponible sous le bouton ; la console se replie en une barre
 horizontale. Les trois bandes font 16 points d’épaisseur, comme leurs icônes,
 centrées sans marge de panneau supplémentaire. Le panneau déployé reste
 redimensionnable

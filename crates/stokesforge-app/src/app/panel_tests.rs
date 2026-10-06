@@ -125,7 +125,7 @@ fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
         let axis = if matches!(panel, Panel::Script) { 1 } else { 0 };
         assert_eq!(strip.size()[axis], crate::icons::ICON_SIZE);
         let icons = find_icon_centers(&output.shapes);
-        assert_eq!(icons.len(), 2);
+        assert_eq!(icons.len(), 1);
         for icon in icons {
             assert!(
                 (icon[axis] - strip.center()[axis]).abs() < 0.1,
@@ -143,9 +143,12 @@ fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
         let center = title.pos
             + egui::emath::Rot2::from_angle(title.angle) * title.galley.rect.center().to_vec2();
         let expected = if matches!(panel, Panel::Script) {
-            strip.center() + egui::vec2(crate::icons::ICON_SIZE, 0.0)
+            strip.center() + egui::vec2(crate::icons::ICON_SIZE / 2.0, 0.0)
         } else {
-            egui::pos2(strip.center().x, strip.center().y + crate::icons::ICON_SIZE)
+            egui::pos2(
+                strip.center().x,
+                strip.center().y + crate::icons::ICON_SIZE / 2.0,
+            )
         };
         assert!(
             center.distance(expected) < 0.1,
@@ -155,7 +158,7 @@ fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
     }
 }
 
-/// #142 : les prises de console restent voisines au bord gauche, et la
+/// #142 : les prises de console déployée restent voisines à gauche, et la
 /// bande repliée se sépare de l'espace de travail par le même trait que PM/OM.
 #[test]
 fn la_console_groupe_ses_prises_a_gauche_et_delimite_le_haut_de_sa_bande() {
@@ -184,18 +187,20 @@ fn la_console_groupe_ses_prises_a_gauche_et_delimite_le_haut_de_sa_bande() {
                 .unwrap()
                 .outer_rect;
             let icons = find_icon_centers(&output.shapes);
-            assert_eq!(icons.len(), 2);
+            assert_eq!(icons.len(), if collapsed { 1 } else { 2 });
             let cell = if collapsed {
                 crate::icons::ICON_SIZE
             } else {
                 super::window_chrome::HEADER_ACTION_WIDTH
             };
             assert!(icons[0].x < rect.left() + cell, "chevron à gauche");
-            assert!(
-                (icons[1].x - icons[0].x - cell).abs() < 0.1,
-                "Détacher immédiatement après le chevron : {icons:?}"
-            );
-            assert!((icons[0].y - icons[1].y).abs() < 0.1);
+            if !collapsed {
+                assert!(
+                    (icons[1].x - icons[0].x - cell).abs() < 0.1,
+                    "Détacher immédiatement après le chevron : {icons:?}"
+                );
+                assert!((icons[0].y - icons[1].y).abs() < 0.1);
+            }
             if collapsed {
                 let stroke = ctx
                     .style_of(ctx.theme())
@@ -310,11 +315,11 @@ fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
 fn les_entetes_de_panneau_n_ont_que_replier_et_detacher_ou_rattacher() {
     for (placement, collapsed, count) in [
         (PanelPlacement::Left, false, 2),
-        (PanelPlacement::Left, true, 2),
+        (PanelPlacement::Left, true, 1),
         (PanelPlacement::Right, false, 2),
-        (PanelPlacement::Right, true, 2),
+        (PanelPlacement::Right, true, 1),
         (PanelPlacement::Bottom, false, 2),
-        (PanelPlacement::Bottom, true, 2),
+        (PanelPlacement::Bottom, true, 1),
         (PanelPlacement::Detached, false, 1),
     ] {
         let ctx = context();
@@ -336,7 +341,7 @@ fn les_entetes_de_panneau_n_ont_que_replier_et_detacher_ou_rattacher() {
             let before = actions.borrow().len();
             click_at(&ctx, icon, egui::Modifiers::NONE, paint);
             let detach = placement == PanelPlacement::Detached
-                || index == usize::from(placement != PanelPlacement::Left || collapsed);
+                || (!collapsed && index == usize::from(placement != PanelPlacement::Left));
             let actions = actions.borrow();
             assert_eq!(
                 actions[before..].iter().any(|action| action.detach),
@@ -350,8 +355,22 @@ fn les_entetes_de_panneau_n_ont_que_replier_et_detacher_ou_rattacher() {
                 !detach
             );
         }
+        if collapsed {
+            // L'ancienne cellule de Détacher est désormais du titre : un
+            // clic ici ne doit déclencher ni détachement ni déploiement.
+            let hidden = if placement == PanelPlacement::Bottom {
+                find_icon_centers(&output.shapes)[0] + egui::vec2(crate::icons::ICON_SIZE, 0.0)
+            } else {
+                find_icon_centers(&output.shapes)[0] + egui::vec2(0.0, crate::icons::ICON_SIZE)
+            };
+            let before = actions.borrow().len();
+            click_at(&ctx, hidden, egui::Modifiers::NONE, paint);
+            assert!(actions.borrow()[before..]
+                .iter()
+                .all(|action| !action.detach && !action.toggle_collapse));
+        }
         let actions = actions.borrow();
-        assert!(actions.iter().any(|action| action.detach));
+        assert_eq!(actions.iter().any(|action| action.detach), !collapsed);
         assert_eq!(
             actions.iter().any(|action| action.toggle_collapse),
             placement != PanelPlacement::Detached
