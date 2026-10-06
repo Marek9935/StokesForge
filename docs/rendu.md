@@ -23,7 +23,7 @@ formules — est dans `stokesforge-render`.
 | `pipeline` | la suite d'appels Plotters, écrite une fois |
 | `series` | les six `PlotType` traduits en géométrie |
 | `scale` | les échelles d'axe, dont la logarithmique |
-| `paint` | les primitives en pixels : traits, marqueurs, barres, moustaches |
+| `paint` | les primitives en pixels : traits au sous-pixel, marqueurs, barres, moustaches |
 | `clip` | rognage géométrique d'une polyligne contre le rectangle de tracé |
 | `legend` | la légende, mise en page à la main |
 | `decimate` | LTTB |
@@ -33,6 +33,18 @@ formules — est dans `stokesforge-render`.
 | `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `stokesforge_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
 | `formula` | Typst (dépendance ferme, pas une feature) : le style « texte riche » des titres, titres d'axe et légende, la compilation, le cache |
 | `sample` | deux figures témoins à titres explicites |
+
+Les courbes conservent leurs coordonnées fractionnaires après projection et
+rognage, puis sont tracées au seizième de pixel à l'écran et dans les exports
+SVG/PDF/PNG (#150). Les tirets suivent la même précision. Cela évite les
+marches artificielles au dézoom sans lisser les données ; la décimation LTTB
+reste inchangée. `stokesforge-render-egui/tests/jasco_dezoom.rs` vérifie les
+deux cadrages du fichier réel `test/import/JascoUV_vis.csv`, la fidélité aux
+mesures et l'accord des sommets écran/SVG. Pour regarder les mêmes figures :
+
+```sh
+STOKESFORGE_JASCO_CAPTURE=/tmp/jasco150 cargo test -p stokesforge-render-egui --test jasco_dezoom
+```
 
 Les titres de `sample::minimal()` et `sample::realistic()` sont conservés
 pour exercer les bandes de titre et la mesure du texte dans les tests

@@ -5184,6 +5184,7 @@ dependencies = [
  "plotters-backend",
  "stokesforge-commands",
  "stokesforge-core",
+ "stokesforge-import",
  "stokesforge-plot",
  "stokesforge-render",
  "stokesforge-render-svg",

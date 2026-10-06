@@ -50,8 +50,8 @@ pub const HANDLE_SPACING: f64 = 50.0;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DrawnSeries {
     pub index: usize,
-    /// Les tronçons de la ligne tracée, après rognage.
-    pub paths: Vec<Vec<Pixel>>,
+    /// Les tronçons de la ligne tracée, après rognage, au seizième de pixel.
+    pub paths: Vec<Vec<(f64, f64)>>,
     /// Les moustaches (barres d'erreur), après rognage : désignables, sans
     /// poignée.
     pub whiskers: Vec<(Pixel, Pixel)>,
@@ -65,16 +65,16 @@ pub struct DrawnSeries {
     pub bar_tips: Vec<Pixel>,
 }
 
-fn segment_distance(p: (f64, f64), a: Pixel, b: Pixel) -> f64 {
-    let (dx, dy) = (b.0 as f64 - a.0 as f64, b.1 as f64 - a.1 as f64);
+fn segment_distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
     let length = dx * dx + dy * dy;
     let t = if length == 0.0 {
         0.0
     } else {
-        ((p.0 - a.0 as f64) * dx + (p.1 - a.1 as f64) * dy) / length
+        ((p.0 - a.0) * dx + (p.1 - a.1) * dy) / length
     }
     .clamp(0.0, 1.0);
-    (p.0 - a.0 as f64 - t * dx).hypot(p.1 - a.1 as f64 - t * dy)
+    (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy)
 }
 
 impl DrawnSeries {
@@ -84,11 +84,13 @@ impl DrawnSeries {
             .iter()
             .flat_map(|path| path.windows(2))
             .map(|s| segment_distance(pixel, s[0], s[1]));
-        let whiskers = self
-            .whiskers
+        let whiskers = self.whiskers.iter().map(|&(a, b)| {
+            segment_distance(pixel, (a.0 as f64, a.1 as f64), (b.0 as f64, b.1 as f64))
+        });
+        let points = self
+            .points
             .iter()
-            .map(|&(a, b)| segment_distance(pixel, a, b));
-        let points = self.points.iter().map(|&p| segment_distance(pixel, p, p));
+            .map(|&p| segment_distance(pixel, (p.0 as f64, p.1 as f64), (p.0 as f64, p.1 as f64)));
         let bars = self.bars.iter().map(|&(a, b)| {
             let x = pixel.0.clamp(a.0 as f64, b.0 as f64);
             let y = pixel.1.clamp(a.1 as f64, b.1 as f64);
@@ -109,7 +111,7 @@ impl DrawnSeries {
     /// porte ses poignées le long de ses tronçons ([`along_path`]) ; sans
     /// ligne, les marqueurs puis les barres en reçoivent un sous-ensemble
     /// régulier ([`thinned`]).
-    pub fn handle_centers(&self, to_display: impl Fn(Pixel) -> (f64, f64)) -> Vec<(f64, f64)> {
+    pub fn handle_centers(&self, to_display: impl Fn((f64, f64)) -> (f64, f64)) -> Vec<(f64, f64)> {
         if !self.paths.is_empty() {
             return self
                 .paths
@@ -121,9 +123,19 @@ impl DrawnSeries {
                 .collect();
         }
         if !self.points.is_empty() {
-            return thinned(self.points.iter().map(|&p| to_display(p)), HANDLE_SPACING);
+            return thinned(
+                self.points
+                    .iter()
+                    .map(|&p| to_display((p.0 as f64, p.1 as f64))),
+                HANDLE_SPACING,
+            );
         }
-        thinned(self.bar_tips.iter().map(|&p| to_display(p)), HANDLE_SPACING)
+        thinned(
+            self.bar_tips
+                .iter()
+                .map(|&p| to_display((p.0 as f64, p.1 as f64))),
+            HANDLE_SPACING,
+        )
     }
 }
 
@@ -236,7 +248,7 @@ mod tests {
     #[test]
     fn les_segments_et_les_barres_se_designent_entre_leurs_points() {
         let line = DrawnSeries {
-            paths: vec![vec![(0, 0), (100, 100)]],
+            paths: vec![vec![(0.0, 0.0), (100.0, 100.0)]],
             ..Default::default()
         };
         assert!(line.distance((50.0, 50.0)) < 0.1);
@@ -306,11 +318,11 @@ mod tests {
     #[test]
     fn l_espacement_se_mesure_en_pixels_d_affichage() {
         let series = DrawnSeries {
-            paths: vec![vec![(0, 0), (200, 0)]],
+            paths: vec![vec![(0.0, 0.0), (200.0, 0.0)]],
             ..Default::default()
         };
-        let native = series.handle_centers(|(x, y)| (x as f64, y as f64));
-        let doubled = series.handle_centers(|(x, y)| (x as f64 * 2.0, y as f64 * 2.0));
+        let native = series.handle_centers(|(x, y)| (x, y));
+        let doubled = series.handle_centers(|(x, y)| (x * 2.0, y * 2.0));
         assert_eq!(native.len(), 5);
         // Figure affichée deux fois plus grande : deux fois plus de poignées,
         // toujours à HANDLE_SPACING les unes des autres à l'écran.
@@ -325,7 +337,7 @@ mod tests {
             points: (0..=20).map(|i| (i * 10, 0)).collect(),
             ..Default::default()
         };
-        let handles = scatter.handle_centers(|(x, y)| (x as f64, y as f64));
+        let handles = scatter.handle_centers(|(x, y)| (x, y));
         assert_eq!(
             handles,
             vec![
@@ -343,18 +355,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            bars.handle_centers(|(x, y)| (x as f64, y as f64)),
+            bars.handle_centers(|(x, y)| (x, y)),
             vec![(20.0, 10.0), (80.0, 150.0)]
         );
         // Une ligne avec marqueurs : les poignées suivent la ligne, pas les
         // marqueurs.
         let line_and_symbols = DrawnSeries {
-            paths: vec![vec![(0, 0), (100, 0)]],
+            paths: vec![vec![(0.0, 0.0), (100.0, 0.0)]],
             points: vec![(0, 0), (7, 0), (100, 0)],
             ..Default::default()
         };
         assert_eq!(
-            line_and_symbols.handle_centers(|(x, y)| (x as f64, y as f64)),
+            line_and_symbols.handle_centers(|(x, y)| (x, y)),
             vec![(0.0, 0.0), (50.0, 0.0), (100.0, 0.0)]
         );
         // Les moustaches seules n'en portent pas.
@@ -362,9 +374,7 @@ mod tests {
             whiskers: vec![((0, 0), (0, 100))],
             ..Default::default()
         };
-        assert!(whiskers
-            .handle_centers(|(x, y)| (x as f64, y as f64))
-            .is_empty());
+        assert!(whiskers.handle_centers(|(x, y)| (x, y)).is_empty());
     }
 
     #[test]

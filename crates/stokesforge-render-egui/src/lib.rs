@@ -595,7 +595,7 @@ impl GraphView {
         // de la figure. Peintes par-dessus la figure en cache, jamais dedans :
         // sélectionner ne reconstruit rien, et l'export n'en sait rien.
         let scale = f64::from(scale);
-        let centers = series.handle_centers(|(x, y)| (f64::from(x) * scale, f64::from(y) * scale));
+        let centers = series.handle_centers(|(x, y)| (x * scale, y * scale));
         let mut shapes = Vec::with_capacity(centers.len());
         let size = (rect.width().max(1.0) as u32, rect.height().max(1.0) as u32);
         let mut backend = EguiBackend::new(&mut shapes, rect.min, size, &self.measurer);

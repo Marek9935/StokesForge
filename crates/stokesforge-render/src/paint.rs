@@ -19,10 +19,12 @@
 //!   mesuré faux **sans que rien ne le signale**, alors même que le texte
 //!   dedans serait dessiné juste. Voir [`crate::legend`].
 //!
-//! Descendre en pixels ne coûte ni fidélité ni accord entre les deux
-//! backends : c'est le même code, dans le pipeline commun, qui calcule les
-//! coordonnées entières ; les deux backends ne voient qu'un `draw_path`, un
-//! `draw_rect` ou un `draw_circle` déjà résolu.
+//! Les courbes ne doivent pas être arrondies au pixel entier : cet arrondi
+//! fabrique des marches au dézoom sur des données lisses (#150, spectre réel
+//! Jasco). Le pipeline conserve projection et rognage en flottants, puis
+//! [`polyline_f64`] emploie le point fixe partagé de [`crate::subpixel`]. Les
+//! deux backends reçoivent ainsi le même chemin au seizième de pixel, tirets
+//! compris ; aucun lissage des données n'est effectué.
 //!
 //! # Le débordement était mal traité par Plotters — corrigé le 2026-09-13
 //!
@@ -150,6 +152,20 @@ pub fn dash_pattern(style: LineStyle) -> Option<&'static [f64]> {
 /// entière, en un seul tronçon : mieux vaut un trait plein qu'un rendu qui
 /// s'effondre.
 pub fn dashes(points: &[BackendCoord], pattern: &[f64]) -> Vec<Vec<BackendCoord>> {
+    let points: Vec<_> = points.iter().map(|&(x, y)| (x as f64, y as f64)).collect();
+    dashes_f64(&points, pattern)
+        .into_iter()
+        .map(|run| {
+            run.into_iter()
+                .map(|(x, y)| (x.round() as i32, y.round() as i32))
+                .collect()
+        })
+        .collect()
+}
+
+/// Découpe les tirets sans arrondir leurs extrémités ni la longueur parcourue
+/// (courbes sous-pixel, #150). Même garde-fou que [`dashes`].
+pub fn dashes_f64(points: &[(f64, f64)], pattern: &[f64]) -> Vec<Vec<(f64, f64)>> {
     let period: f64 = pattern.iter().sum();
     if points.len() < 2 || pattern.is_empty() || !period.is_finite() || period <= 0.0 {
         return vec![points.to_vec()];
@@ -162,8 +178,8 @@ pub fn dashes(points: &[BackendCoord], pattern: &[f64]) -> Vec<Vec<BackendCoord>
         return vec![points.to_vec()];
     }
 
-    let mut runs: Vec<Vec<BackendCoord>> = Vec::new();
-    let mut current: Vec<BackendCoord> = vec![points[0]];
+    let mut runs: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut current: Vec<(f64, f64)> = vec![points[0]];
     let mut on = true;
     let mut index = 0usize;
     let mut remaining = pattern[0];
@@ -203,17 +219,14 @@ pub fn dashes(points: &[BackendCoord], pattern: &[f64]) -> Vec<Vec<BackendCoord>
     runs
 }
 
-fn distance(a: BackendCoord, b: BackendCoord) -> f64 {
-    let dx = (b.0 - a.0) as f64;
-    let dy = (b.1 - a.1) as f64;
+fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
     dx.hypot(dy)
 }
 
-fn lerp(a: BackendCoord, b: BackendCoord, t: f64) -> BackendCoord {
-    (
-        (a.0 as f64 + (b.0 - a.0) as f64 * t).round() as i32,
-        (a.1 as f64 + (b.1 - a.1) as f64 * t).round() as i32,
-    )
+fn lerp(a: (f64, f64), b: (f64, f64), t: f64) -> (f64, f64) {
+    (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
 }
 
 /// Trace une polyligne, en tenant compte du style de trait.
@@ -235,6 +248,31 @@ pub fn polyline<DB: DrawingBackend>(
             for run in dashes(points, pattern) {
                 if run.len() >= 2 {
                     area.draw(&PathElement::new(run, style))?;
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Trace une courbe sans la quantifier au pixel entier (#150). Le chemin
+/// fixe partagé par les deux backends conserve aussi les bouts de tirets.
+pub fn polyline_f64<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    points: &[(f64, f64)],
+    line: &LineSpec,
+    broken: bool,
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    if points.len() < 2 || line.style == LineStyle::None {
+        return Ok(());
+    }
+    let style = line_style(line, broken);
+    match dash_pattern(line.style) {
+        None => area.draw(&crate::subpixel::SubpixelPath::new(points, style)),
+        Some(pattern) => {
+            for run in dashes_f64(points, pattern) {
+                if run.len() >= 2 {
+                    area.draw(&crate::subpixel::SubpixelPath::new(&run, style))?;
                 }
             }
             Ok(())
@@ -438,6 +476,32 @@ mod tests {
         let brise = dashes(&ligne, &[6.0, 4.0]);
         let droit = dashes(&[(0, 0), (100, 0)], &[6.0, 4.0]);
         assert_eq!(brise.len(), droit.len());
+    }
+
+    #[test]
+    fn les_tirets_conservent_les_coordonnees_fractionnaires() {
+        let runs = dashes_f64(&[(0.25, 1.375), (100.25, 1.375)], &[6.0, 4.0]);
+        assert_eq!(runs.len(), 10);
+        assert_eq!(runs[0], vec![(0.25, 1.375), (6.25, 1.375)]);
+        assert_eq!(runs[1], vec![(10.25, 1.375), (16.25, 1.375)]);
+        // Changer la densité des sommets ne change ni le pas ni la phase.
+        let dense = dashes_f64(
+            &[(0.25, 1.375), (3.25, 1.375), (6.25, 1.375), (100.25, 1.375)],
+            &[6.0, 4.0],
+        );
+        assert_eq!(dense.len(), runs.len());
+        for (dense, sparse) in dense.iter().zip(&runs) {
+            // Comparer les coordonnées envoyées aux backends : les calculs
+            // flottants peuvent différer au dernier bit avant encodage.
+            assert_eq!(
+                dense.first().copied().map(crate::subpixel::encode),
+                sparse.first().copied().map(crate::subpixel::encode)
+            );
+            assert_eq!(
+                dense.last().copied().map(crate::subpixel::encode),
+                sparse.last().copied().map(crate::subpixel::encode)
+            );
+        }
     }
 
     #[test]

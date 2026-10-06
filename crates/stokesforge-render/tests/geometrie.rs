@@ -6,7 +6,7 @@
 //! est aussi, incidemment, la preuve que la généricité n'est pas décorative.
 
 use plotters_backend::{
-    BackendColor, BackendCoord, BackendTextStyle, DrawingBackend, DrawingErrorKind,
+    BackendColor, BackendCoord, BackendStyle, BackendTextStyle, DrawingBackend, DrawingErrorKind,
 };
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
 use stokesforge_core::resolve::resolve_spec;
@@ -48,6 +48,16 @@ impl DrawingBackend for Muet {
     }
 
     fn present(&mut self) -> Result<(), DrawingErrorKind<Jamais>> {
+        Ok(())
+    }
+
+    // Un backend muet doit aussi jeter les chemins : le défaut rastérise
+    // l'épaisseur marquée des chemins sous-pixel comme une largeur réelle.
+    fn draw_path<S: BackendStyle, I: IntoIterator<Item = BackendCoord>>(
+        &mut self,
+        _path: I,
+        _style: &S,
+    ) -> Result<(), DrawingErrorKind<Jamais>> {
         Ok(())
     }
 
@@ -645,17 +655,17 @@ fn les_moustaches_ne_sont_pas_des_troncons_de_la_ligne() {
     assert_eq!(series.paths.len(), 1, "{series:?}");
     assert_eq!(series.paths[0].len(), 3);
     assert!(!series.whiskers.is_empty());
-    let handles = series.handle_centers(|(x, y)| (f64::from(x), f64::from(y)));
+    let handles = series.handle_centers(|p| p);
     assert!(!handles.is_empty());
     // Toutes les poignées sont sur la ligne, aucune sur une moustache.
     for handle in handles {
         let on_line = series.paths[0].windows(2).any(|s| {
             let (a, b) = (s[0], s[1]);
-            let (dx, dy) = (f64::from(b.0 - a.0), f64::from(b.1 - a.1));
-            let cross = dx * (handle.1 - f64::from(a.1)) - dy * (handle.0 - f64::from(a.0));
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let cross = dx * (handle.1 - a.1) - dy * (handle.0 - a.0);
             (cross / dx.hypot(dy)).abs() < 1e-6
-                && handle.0 >= f64::from(a.0.min(b.0)) - 1e-6
-                && handle.0 <= f64::from(a.0.max(b.0)) + 1e-6
+                && handle.0 >= a.0.min(b.0) - 1e-6
+                && handle.0 <= a.0.max(b.0) + 1e-6
         });
         assert!(on_line, "poignée hors de la ligne : {handle:?}");
     }

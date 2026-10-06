@@ -33,6 +33,7 @@ typst = "=0.15.1"
 typst-render = "=0.15.1"
 
 [dev-dependencies]
+stokesforge-import = { path = "../stokesforge-import" }
 stokesforge-commands = { path = "../stokesforge-commands" }
 # Le test d'accord (R4.5) vit ici et non dans `stokesforge-render-svg` : en
 # dépendance de développement, il ferait entrer egui dans l'arbre du crate

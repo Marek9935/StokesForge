@@ -951,7 +951,7 @@ fn draw_panel<DB: DrawingBackend>(
             },
             series,
             threshold,
-            if right { secondary } else { y_range },
+            (x_range, if right { secondary } else { y_range }),
             bounds,
             ink,
         )?;
@@ -1215,7 +1215,7 @@ fn paint_series<DB: DrawingBackend>(
     map: impl Fn((f64, f64)) -> plotters_backend::BackendCoord,
     series: &Prepared<'_>,
     threshold: usize,
-    y_range: (f64, f64),
+    ranges: ((f64, f64), (f64, f64)),
     bounds: Option<PixelBounds>,
     ink: (u8, u8, u8),
 ) -> Result<(usize, crate::series_selection::DrawnSeries), DrawingAreaErrorKind<DB::ErrorType>> {
@@ -1227,7 +1227,7 @@ fn paint_series<DB: DrawingBackend>(
             // La ligne de base d'une barre est zéro quand l'axe sait le
             // représenter, et le bas du cadrage sinon — sur une échelle
             // logarithmique, zéro n'a pas de place.
-            let baseline = scale_baseline(y_range);
+            let baseline = scale_baseline(ranges.1);
             let rects: Vec<_> = bars
                 .iter()
                 .map(|(left, right, top)| (map((*left, *top)), map((*right, baseline))))
@@ -1268,10 +1268,25 @@ fn paint_series<DB: DrawingBackend>(
             let drawn_points: &[(f64, f64)] = decimated.as_deref().unwrap_or(points);
             let removed = points.len() - drawn_points.len();
 
-            let mapped: Vec<_> = drawn_points.iter().map(|point| map(*point)).collect();
             if spec.plot_type.draws_line() && spec.line.style != stokesforge_plot::LineStyle::None {
+                // Les extrémités entières de Plotters fixent le repère (dernier
+                // pixel inclus, axe Y inversé). Interpoler dans l'espace déjà
+                // transformé évite son arrondi par sommet : au dézoom celui-ci
+                // fabriquait des marches sur le spectre Jasco (#150).
+                let (xr, yr) = ranges;
+                let a = map((xr.0, yr.0));
+                let b = map((xr.1, yr.1));
+                let precise: Vec<_> = drawn_points
+                    .iter()
+                    .map(|&(x, y)| {
+                        (
+                            a.0 as f64 + (x - xr.0) / (xr.1 - xr.0) * (b.0 - a.0) as f64,
+                            a.1 as f64 + (y - yr.0) / (yr.1 - yr.0) * (b.1 - a.1) as f64,
+                        )
+                    })
+                    .collect();
                 // Rognage géométrique contre le rectangle de tracé, **avant**
-                // `paint::polyline` : un segment qui traverse le panneau est
+                // `paint::polyline_f64` : un segment qui traverse le panneau est
                 // coupé à l'intersection réelle plutôt que ramené sur le bord
                 // par composante (le défaut documenté en tête de
                 // `crate::paint`, corrigé par `crate::clip`). Sans cadrage
@@ -1280,14 +1295,14 @@ fn paint_series<DB: DrawingBackend>(
                 // rend alors le segment tel quel.
                 match bounds {
                     Some(bounds) => {
-                        for run in clip::clip_polyline(bounds, &mapped) {
-                            paint::polyline(screen, &run, &spec.line, false)?;
-                            geometry.paths.push(run);
+                        for run in clip::clip_polyline_f64(bounds, &precise) {
+                            paint::polyline_f64(screen, &run, &spec.line, false)?;
+                            geometry.paths.push(quantized_path(&run));
                         }
                     }
                     None => {
-                        paint::polyline(screen, &mapped, &spec.line, false)?;
-                        geometry.paths.push(mapped.clone());
+                        paint::polyline_f64(screen, &precise, &spec.line, false)?;
+                        geometry.paths.push(quantized_path(&precise));
                     }
                 }
             }
@@ -1318,6 +1333,7 @@ fn paint_series<DB: DrawingBackend>(
             if spec.plot_type.draws_symbols()
                 && spec.symbol.shape != stokesforge_plot::SymbolShape::None
             {
+                let mapped: Vec<_> = drawn_points.iter().map(|point| map(*point)).collect();
                 paint::symbols(screen, &mapped, &spec.symbol, false)?;
                 geometry.points = mapped
                     .into_iter()
@@ -1334,6 +1350,16 @@ fn paint_series<DB: DrawingBackend>(
             Ok((removed, geometry))
         }
     }
+}
+
+/// Géométrie de désignation identique aux sommets réellement envoyés au
+/// backend (seizièmes de pixel), plutôt qu'un second arrondi entier.
+fn quantized_path(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    points
+        .iter()
+        .copied()
+        .map(|p| crate::subpixel::decode(crate::subpixel::encode(p)))
+        .collect()
 }
 
 /// La ligne de base des barres, dans l'espace transformé.
