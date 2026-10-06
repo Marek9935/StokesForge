@@ -60,6 +60,8 @@ confirmation pour les choix courants couverts par la demande.
   Data. F2 appartient aux gestionnaires (#130), pas aux feuilles.
 - Le rendu partagé appartient à `stokesforge-render`. Préserver l'accord entre
   l'écran et les exports, ainsi que la mesure de texte unique.
+  Le banc des grandes courbes (#141) reste manuel (`#[ignore]`, `--release`),
+  sans API dédiée ; son protocole et les mesures vivent dans `docs/rendu.md`.
 - Object Manager projette l'instantané dans `object_manager.rs` ; la sélection
   reste dans `GraphView`, y compris en fenêtre détachée. La visibilité passe
   par `EditPlotSpec` (même delta que `SetPlotSpec`) et les vignettes réutilisent

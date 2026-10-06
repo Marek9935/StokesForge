@@ -197,6 +197,9 @@ dans une copie distincte du runtime ; voir `docs/python-matplotlib-spike.md`.
 
 - Rendu : vérifier mesure, accord écran/SVG et témoins qui doivent différer ;
   exercer les exports concernés et les features modifiées.
+  Le banc manuel des grandes courbes (#141),
+  `stokesforge-render-egui/tests/mesure_courbes.rs`, se lance en `--release`
+  avec `--ignored` ; protocole, commande et mesures dans `docs/rendu.md`.
 - UI : tester la logique via `AppState` ; pour le clavier, le focus ou la
   présentation, compléter par une vérification visuelle si un affichage est
   disponible. Sinon préciser ce qui reste non vérifié.

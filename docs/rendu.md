@@ -231,6 +231,124 @@ le plus grand triangle avec le point retenu à gauche et la moyenne de la
 tranche de droite : concrètement, **il garde les pics**, là où « un point sur
 N » les perd.
 
+### Banc des grandes courbes (#141)
+
+Le test manuel `stokesforge-render-egui/tests/mesure_courbes.rs` compare
+100 000, 1 000 000 et 10 000 000 points **au total**, répartis en une ou dix
+séries. Il utilise le pipeline partagé, `ShapeCache`, `ViewState` et la
+vraie tessellation egui, sans fenêtre ni renderer GPU. Le banc conservé appelle
+`pipeline::draw_on`, avec le LTTB normal. Le mode expérimental sans LTTB a été
+retiré après les mesures : aucune API publique dédiée au banc n'est ajoutée.
+Ses résultats historiques restent consignés ci-dessous ; ils ne sont plus
+rejoués par cette commande. Les tests d'accord écran/SVG existants couvrent la
+décimation de production. Le banc est `#[ignore]`, hors de la CI ordinaire.
+
+```sh
+cargo test -p stokesforge-render-egui --release --test mesure_courbes mesure_courbes_gros_volumes -- --ignored --nocapture --test-threads=1
+```
+
+`STOKESFORGE_BENCH_POINTS=100000,1000000` limite les volumes ;
+`STOKESFORGE_BENCH_FRAMES=5` choisit le nombre d'images par régime (au moins
+3). Chaque ligne `IMAGE` donne les médianes du pipeline (résolution,
+préparation, cadrage, LTTB, projection, rognage, Plotters et collecte), de
+l'image egui avant tessellation, de la tessellation et du total CPU, puis le
+maximum du total, les octets des maillages et les points retirés. Les médianes
+par phase ne s'additionnent pas nécessairement à la médiane du total.
+
+Protocole : figure 800 × 600, échelle 1, colonnes numériques, abscisses
+partagées, signal déterministe avec deux fréquences, sans titre ni légende
+(donc sans compilation Typst). Une image d'échauffement est exclue. « Froid »
+désigne le **cache de formes invalidé**, pas les polices ni les caches CPU.
+Le zoom varie un cadrage central d'environ 80 % avec anticrénelage complet ;
+le pan déplace ce cadrage avec la frange coupée, comme pendant un glisser.
+Les images « chaud » répètent le dernier cadrage sans changer la génération ;
+elles correspondent à une image repeinte pendant une pause du geste.
+`fenetre_chaud` conserve le cadrage initial et la clé (coût du graphe lors du
+déplacement de sa fenêtre ; le chrome de l'application est exclu).
+
+Les lignes `PHASES` mesurent séparément `series::prepare` et le LTTB isolé
+sur sa géométrie, au seuil réel de la zone de tracé. Elles aident à identifier
+le coût CPU, mais **ne doivent pas être soustraites** du pipeline : les
+allocations et la localité mémoire diffèrent. Les octets de maillages sont
+une quantité à téléverser, **pas un temps GPU** : ni soumission, ni pilote,
+ni rastérisation, ni présentation/vsync ne sont mesurés. Le total exclut aussi
+la libération des maillages après mesure, le modèle et le démarrage.
+
+#### Mesures du 6 octobre 2026
+
+Intel Core Ultra 7 155H (22 processeurs logiques), Linux x86-64, Rust 1.98.1,
+egui 0.36.2, profil `release`, cinq images par régime. Machine de travail
+non dédiée, fréquence et affinité CPU non fixées. Les tableaux ci-dessous
+proviennent de la seconde passe, après la fin de nos compilations ; ce ne
+sont pas des garanties pour d'autres machines ni un débit natif de fenêtre.
+
+Avec LTTB (temps CPU médians en ms ; préparation et LTTB isolés hors total) :
+
+| Points au total | Séries | Préparation isolée | LTTB isolé | Pipeline zoom | Tessellation zoom | Total zoom froid | Total pan froid | Fenêtre, cache chaud |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 000 | 1 | 0.27 | 0.17 | 1.03 | 0.04 | 1.08 | 1.06 | 0.05 |
+| 100 000 | 10 | 0.28 | 0.36 | 1.42 | 0.53 | 1.97 | 1.91 | 0.75 |
+| 250 000 | 1 | 1.84 | 0.78 | 4.78 | 0.10 | 4.94 | 3.43 | 0.11 |
+| 250 000 | 10 | 1.37 | 1.21 | 5.57 | 1.52 | 7.21 | 3.44 | 1.53 |
+| 500 000 | 1 | 1.81 | 1.22 | 7.33 | 0.08 | 7.44 | 7.71 | 0.10 |
+| 500 000 | 10 | 2.22 | 1.66 | 8.25 | 0.88 | 9.20 | 9.53 | 1.48 |
+| 1 000 000 | 1 | 3.03 | 1.74 | 10.48 | 0.05 | 10.55 | 10.36 | 0.05 |
+| 1 000 000 | 10 | 2.90 | 2.08 | 10.95 | 0.61 | 11.59 | 11.40 | 0.68 |
+| 2 000 000 | 1 | 6.75 | 4.35 | 23.93 | 0.06 | 24.02 | 24.20 | 0.07 |
+| 2 000 000 | 10 | 6.56 | 4.11 | 23.20 | 0.86 | 24.09 | 24.22 | 0.89 |
+| 5 000 000 | 1 | 34.82 | 9.01 | 80.70 | 0.07 | 80.83 | 79.43 | 0.06 |
+| 5 000 000 | 10 | 34.15 | 9.67 | 79.73 | 0.75 | 80.54 | 81.20 | 0.87 |
+| 10 000 000 | 1 | 66.97 | 17.43 | 159.85 | 0.06 | 159.96 | 153.72 | 0.05 |
+| 10 000 000 | 10 | 71.69 | 18.92 | 163.00 | 0.93 | 163.94 | 163.88 | 0.86 |
+
+Le témoin sans LTTB confirme son utilité (temps CPU médians en ms) :
+
+| Points au total | Séries | Zoom froid | Pan froid | Fenêtre, cache chaud | Maillages fenêtre (Mo décimaux) |
+|---:|---:|---:|---:|---:|---:|
+| 100 000 | 1 | 7.24 | 3.66 | 5.20 | 15.58 |
+| 100 000 | 10 | 11.10 | 4.54 | 10.47 | 19.03 |
+| 1 000 000 | 1 | 82.03 | 55.58 | 53.97 | 152.36 |
+| 1 000 000 | 10 | 80.85 | 80.28 | 63.36 | 155.74 |
+| 10 000 000 | 1 | 971.67 | 821.00 | 633.80 | 1520.35 |
+| 10 000 000 | 10 | 821.90 | 732.42 | 525.63 | 1523.50 |
+
+**Lecture pour la décision CPU/GPU.** Le budget de 60 images/s est
+16,7 ms pour **toute** l'image, dont le banc ne mesure que la partie CPU du
+graphe. Le million de points reste sous ce budget dans la passe de référence ;
+les cas à deux millions et au-delà le dépassent. Le franchissement observé
+est donc encadré entre un et deux millions de points au total sur cette
+machine, pour ces courbes et cette largeur. Il ne définit pas un plafond
+du modèle : les données restent traçables, l'interaction ralentit.
+
+À dix millions, plus de 99 % du total CPU pendant zoom/pan avec LTTB appartient
+à l'image avant tessellation. Le seuil est 1 424 points par série : le maillage
+final est petit, mais préparer, cadrer et décimer reparcourt toujours les
+données entières à chaque génération. Les images à cache chaud avec LTTB
+restent petites ; sans LTTB le cache conserve des chemins énormes qu'egui
+retessèle et clone à chaque image (jusqu'à environ 1,52 Go de maillages au
+cadrage initial).
+
+Une première passe pendant les compilations donnait environ 30–32 ms au
+million de points (une série) et 191–410 ms à dix millions ; la seconde donne
+environ 10–11 ms et 154–160 ms. Cette dispersion justifie de garder des
+mesures manuelles et des médianes, plutôt qu'une assertion de temps en CI.
+
+**Décision :** le passage GPU est écarté à l'issue de cette expérience (#141).
+Ces mesures ne justifient pas de développer Vello ou un
+chemin wgpu direct pour les longues courbes déjà décimées : remplacer seulement
+la tessellation ne retire presque rien au coût CPU mesuré. La piste à étudier
+ensemble est la réutilisation de la géométrie préparée et/ou une décimation
+à plusieurs niveaux, en conservant la fidélité scientifique et l'accord des
+backends. Aucune optimisation ni chemin GPU n'est implémenté ici.
+
+L'envoi GPU réel reste **non mesuré** ; sa séparation exige un banc avec un
+renderer natif et un protocole de synchronisation. Le pipeline regroupe encore
+préparation/cadrage/projection/rognage et appels Plotters : les mesures annexes
+isolent les algorithmes, pas exactement leur part dans chaque image. La
+conclusion porte sur quelques longues courbes ; elle ne tranche pas le cas
+de centaines de petites séries, ni le coût de Typst, des colonnes mixtes ou
+d'un rendu en haute résolution.
+
 ### Polices
 
 Trois paires texte + Math embarquées (Libertinus, Fira, Noto — SIL OFL 1.1,
