@@ -10,7 +10,7 @@
 //! de Maj-clic dans les deux viewports : le seul fond sélectionné ne suffit
 //! pas à définir la prochaine plage après un clic dans le workspace (#154).
 //! Afficher et Masquer vivent dans le menu contextuel d'une entrée et portent
-//! sur la sélection entière ; le bandeau ne garde que son compteur.
+//! sur la sélection entière ; l'arbre commence directement sous l'en-tête.
 
 use std::collections::HashSet;
 
@@ -272,18 +272,6 @@ pub(super) fn project_manager_contents_from_tree(
         memory.next_order.clear();
         data.insert_temp(memory_key, memory);
     });
-    // Réserver la hauteur évite que sélectionner une ligne la déplace
-    // sous la souris avant le second clic d'un double-clic.
-    ui.horizontal(|ui| {
-        ui.set_min_height(ui.spacing().interact_size.y);
-        if !interaction.selection.is_empty() {
-            ui.weak(tr!(
-                "project-manager-selected",
-                count = interaction.selection.len()
-            ));
-        }
-    });
-    ui.separator();
     let response = egui::ScrollArea::vertical().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
         for node in tree {
@@ -1282,8 +1270,8 @@ pub(super) mod tests {
         paint(context, Vec::new())
     }
 
-    /// Le bandeau garde seulement le compteur ; les actions de visibilité
-    /// s'ouvrent au clic droit. Le clic simple ouvre toujours son entrée.
+    /// Les actions de visibilité s'ouvrent au clic droit. Le clic simple
+    /// ouvre toujours son entrée, sans déplacer l'arbre lors de la sélection.
     #[test]
     fn les_actions_de_visibilite_sont_dans_le_menu_contextuel_et_le_clic_simple_ouvre() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
@@ -1307,14 +1295,14 @@ pub(super) mod tests {
         );
         assert!(banc.close_requests.borrow().is_empty());
 
-        // Le compteur reste visible, sans les anciens boutons du bandeau.
+        // La sélection ne déplace pas les entrées sous la souris.
         let with_selection = paint(&context, Vec::new());
         assert!(!painted(&with_selection, &tr!("project-manager-hide")));
         assert!(!painted(&with_selection, &tr!("project-manager-show")));
-        assert!(painted(
-            &with_selection,
-            &tr!("project-manager-selected", count = 1)
-        ));
+        assert_eq!(
+            find_text_center(&with_selection.shapes, "Graph1"),
+            graph_pos
+        );
         let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
         assert!(painted(&menu, &tr!("project-manager-hide")));
         assert!(painted(&menu, &tr!("project-manager-show")));

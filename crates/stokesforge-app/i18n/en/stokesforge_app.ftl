@@ -679,7 +679,6 @@ project-manager-show = Show
     .hint = Opens or unhides the selected windows
 project-manager-hide = Hide
     .hint = Hides the selected windows without closing them
-project-manager-selected = { $count } selected
 project-folder-empty = (empty)
 
 # Workbook: stacked column header (left gutter)

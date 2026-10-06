@@ -466,8 +466,8 @@ Project Manager a le focus, aussi en fenêtre détachée. Les renommages multipl
 saisissent les noms successivement, puis valident une seule entrée annulable ;
 Échap abandonne l'ensemble. Le champ se valide par Entrée ou perte du focus.
 Afficher et Masquer sont dans le menu contextuel d'une entrée et agissent sur
-toute la sélection. Le bandeau du panneau garde uniquement le nombre d'objets
-sélectionnés, sans ces boutons.
+toute la sélection. L'arbre commence directement sous l'en-tête du panneau,
+sans bandeau de compteur ni boutons intermédiaires.
 
 La sélection utilise la forme arrondie des boutons, sans fond rectangulaire
 ajouté autour des entrées (#144), y compris dans le Project Manager détaché.

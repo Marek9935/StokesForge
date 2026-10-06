@@ -671,11 +671,6 @@ project-manager-show = Afficher
     .hint = Ouvre ou réaffiche les fenêtres sélectionnées
 project-manager-hide = Masquer
     .hint = Masque les fenêtres sélectionnées sans les fermer
-project-manager-selected =
-    { $count ->
-        [one] { $count } sélectionné
-       *[other] { $count } sélectionnés
-    }
 project-folder-empty = (vide)
 
 # Classeur : en-tête de colonne empilé (gouttière de gauche)
