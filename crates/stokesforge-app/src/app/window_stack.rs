@@ -3,6 +3,11 @@
 //! alignement sur les calques d'egui, le masquage, le repli, la maximisation
 //! et le dessin de l'espace de travail (`show_workspace`).
 //!
+//! Un clic reçu par une fenêtre reprend explicitement le suivi du Project
+//! Manager (#154), même si cette fenêtre était déjà active. Le suivi passif
+//! conserve les multi-sélections pour les actions groupées du panneau ; seul
+//! le geste sur le contenu les remplace, après vérification du calque touché.
+//!
 //! Déplacé tel quel d'`app.rs` (#101), puis redécoupé sur place (#124) :
 //! maximisation, défilement et peinture d’une fenêtre partagent uniquement
 //! les emprunts disjoints de l’image, sans ajouter de sous-Ui.
@@ -222,6 +227,7 @@ struct Workspace<'a> {
     next_cascade: &'a mut u32,
     focus_next: &'a mut Option<Tab>,
     active_detached: &'a mut Option<Tab>,
+    pm_selection: &'a mut HashSet<Tab>,
     graph_views: &'a mut HashMap<NodeId, GraphView>,
     collapsed_tabs: &'a mut HashSet<Tab>,
     maximized_tab: &'a mut Option<Tab>,
@@ -237,6 +243,14 @@ struct Workspace<'a> {
 }
 
 impl Workspace<'_> {
+    fn activate_clicked_tab(&mut self, ctx: &egui::Context, tab: Tab) {
+        *self.active_detached = None;
+        self.pm_selection.clear();
+        self.pm_selection.insert(tab);
+        // Le panneau et son viewport détaché ont déjà été publiés cette image.
+        ctx.request_repaint();
+    }
+
     fn show_maximized(&mut self, ui: &mut egui::Ui, tab: Tab) {
         // § maximiser (doc de tête du module) : aucune fenêtre
         // flottante n'est peinte du tout cette image-ci. Le Project
@@ -260,7 +274,7 @@ impl Workspace<'_> {
         });
         ui.separator();
         if window_pointer_pressed(ui.ctx(), ui.layer_id(), ui.max_rect()) {
-            *self.active_detached = None;
+            self.activate_clicked_tab(ui.ctx(), tab);
         }
         tab_contents(ui, self.state, self.actions, self.graph_views, tab);
     }
@@ -488,7 +502,7 @@ impl Workspace<'_> {
             egui::LayerId::new(FLOATING_WINDOW_ORDER, id),
             window_rect.intersect(viewport_rect),
         ) {
-            *self.active_detached = None;
+            self.activate_clicked_tab(ui.ctx(), tab);
         }
         if header_actions.toggle_collapse {
             toggle_collapse(self.collapsed_tabs, tab);
@@ -572,6 +586,7 @@ impl StokesForgeApp {
             next_cascade,
             focus_next,
             active_detached,
+            pm_selection,
             graph_views,
             collapsed_tabs,
             maximized_tab,
@@ -590,6 +605,7 @@ impl StokesForgeApp {
             next_cascade,
             focus_next,
             active_detached,
+            pm_selection,
             graph_views,
             collapsed_tabs,
             maximized_tab,
@@ -637,6 +653,130 @@ mod tests {
     use super::super::window_chrome::show_window_in_layer;
     use super::*;
     use crate::state::ProjectTreeNode;
+
+    /// #154 : le clic explicite reprend le suivi, même sans changement d'onglet.
+    #[test]
+    fn le_clic_workspace_remplace_la_multiselection_du_project_manager() {
+        for (maximized, already_active, header) in [
+            (false, false, false),
+            (false, true, false),
+            (true, false, false),
+            (true, true, false),
+            (false, false, true),
+            (false, true, true),
+            (true, false, true),
+            (true, true, true),
+        ] {
+            let (session, graph) = crate::app::graph_window::tests::graphe();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let book = window_nodes(&state.project_tree())
+                .into_iter()
+                .find(|(_, kind)| *kind == WindowKind::Book)
+                .map(|(id, _)| Tab::Book(id))
+                .unwrap();
+            let tab = Tab::Graph(graph);
+            let mut app = StokesForgeApp::new(state);
+            app.floating_tabs = if already_active {
+                vec![book, tab]
+            } else {
+                vec![tab, book]
+            };
+            app.window_positions.insert(tab, egui::pos2(30.0, 30.0));
+            app.window_positions.insert(book, egui::pos2(750.0, 30.0));
+            app.maximized_tab = maximized.then_some(tab);
+            app.pm_selection = HashSet::from([tab, book]);
+            let context = egui::Context::default();
+            context.set_fonts(stokesforge_render_egui::font_definitions());
+            crate::theme::install(&context);
+            egui_extras::install_image_loaders(&context);
+            let mut paint = |events| {
+                context
+                    .run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1400.0, 900.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let active = app
+                                .maximized_tab
+                                .or_else(|| app.floating_tabs.last().copied());
+                            app.follow_project_manager_active_tab(active);
+                            app.show_workspace(
+                                ui,
+                                active,
+                                &mut Vec::new(),
+                                &mut Vec::new(),
+                                &mut Vec::new(),
+                                &mut Vec::new(),
+                            );
+                        },
+                    )
+                    .textures_delta
+                    .clear();
+                app.pm_selection.clone()
+            };
+            for _ in 0..3 {
+                assert_eq!(
+                    paint(Vec::new()),
+                    HashSet::from([tab, book]),
+                    "le repos conserve les actions groupées"
+                );
+            }
+            if !maximized {
+                let empty = egui::pos2(1350.0, 850.0);
+                paint(vec![egui::Event::PointerMoved(empty)]);
+                assert_eq!(
+                    paint(vec![egui::Event::PointerButton {
+                        pos: empty,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    }]),
+                    HashSet::from([tab, book]),
+                    "le vide du workspace conserve la sélection"
+                );
+                paint(vec![egui::Event::PointerButton {
+                    pos: empty,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            let pos = egui::pos2(
+                150.0,
+                if header {
+                    if maximized {
+                        15.0
+                    } else {
+                        45.0
+                    }
+                } else {
+                    150.0
+                },
+            );
+            assert_eq!(
+                paint(vec![egui::Event::PointerMoved(pos)]),
+                HashSet::from([tab, book]),
+                "le survol conserve la sélection"
+            );
+            let selection = paint(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            assert_eq!(
+                selection,
+                HashSet::from([tab]),
+                "maximisée={maximized}, déjà active={already_active}, en-tête={header}"
+            );
+            session.shutdown().unwrap();
+        }
+    }
 
     #[test]
     fn une_fenetre_masquee_ne_peint_rien_et_conserve_sa_place_dans_la_pile() {

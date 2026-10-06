@@ -471,10 +471,14 @@ ajouté autour des entrées (#144), y compris dans le Project Manager détaché.
 
 La sélection simple suit les changements de fenêtre de contenu active (#146),
 qu'elle soit flottante, maximisée ou détachée. Une sélection multiple est
-conservée pendant ces changements et reste la cible des actions du panneau.
-Un clic simple sur une entrée remplace la sélection multiple et réactive le
-suivi. `follow_project_manager_active_tab` applique cette règle avant les menus
-et la publication au Project Manager détaché.
+conservée pendant les changements passifs et reste la cible des actions du panneau.
+Un clic simple sur une entrée, ou un clic dans une fenêtre du workspace
+(flottante ou maximisée), remplace la sélection multiple par la fenêtre visée
+et réactive le suivi (#154), même si cette fenêtre est déjà active. Le survol,
+le clic dans le vide et les panneaux recouvrant le contenu ne la remplacent pas.
+`follow_project_manager_active_tab` assure le suivi passif avant les menus ;
+`window_stack` traite le clic explicite et demande la republication au Project
+Manager détaché.
 
 Les noms sont uniques dans le dossier parent. Les copies portent le premier
 suffixe « copy N » / « copie N » libre et de nouveaux identifiants pour toute

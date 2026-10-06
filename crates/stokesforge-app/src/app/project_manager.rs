@@ -491,7 +491,8 @@ impl StokesForgeApp {
     /// #146 : suivre seulement les changements de fenêtre active. Refaire la
     /// sélection à chaque image écraserait le clic du panneau avant que sa
     /// demande d'ouverture soit appliquée. Une sélection multiple reste à
-    /// l'utilisateur ; le clic simple existant réactive le suivi.
+    /// l'utilisateur tant qu'aucun clic explicite sur une entrée ou une fenêtre
+    /// du workspace ne la remplace (#154, `Workspace::activate_clicked_tab`).
     pub(super) fn follow_project_manager_active_tab(&mut self, active_tab: Option<Tab>) {
         if active_tab != self.pm_last_active_tab {
             self.pm_last_active_tab = active_tab;
