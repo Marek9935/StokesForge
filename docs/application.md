@@ -465,6 +465,9 @@ F2, Ctrl+D, Ctrl+C, Ctrl+V et Suppr s'appliquent à cette sélection quand le
 Project Manager a le focus, aussi en fenêtre détachée. Les renommages multiples
 saisissent les noms successivement, puis valident une seule entrée annulable ;
 Échap abandonne l'ensemble. Le champ se valide par Entrée ou perte du focus.
+Afficher et Masquer sont dans le menu contextuel d'une entrée et agissent sur
+toute la sélection. Le bandeau du panneau garde uniquement le nombre d'objets
+sélectionnés, sans ces boutons.
 
 La sélection utilise la forme arrondie des boutons, sans fond rectangulaire
 ajouté autour des entrées (#144), y compris dans le Project Manager détaché.

@@ -9,6 +9,8 @@
 //! Une sélection reprise par la fenêtre active doit aussi déplacer l'ancre
 //! de Maj-clic dans les deux viewports : le seul fond sélectionné ne suffit
 //! pas à définir la prochaine plage après un clic dans le workspace (#154).
+//! Afficher et Masquer vivent dans le menu contextuel d'une entrée et portent
+//! sur la sélection entière ; le bandeau ne garde que son compteur.
 
 use std::collections::HashSet;
 
@@ -275,25 +277,6 @@ pub(super) fn project_manager_contents_from_tree(
     ui.horizontal(|ui| {
         ui.set_min_height(ui.spacing().interact_size.y);
         if !interaction.selection.is_empty() {
-            if ui
-                .button(tr!("project-manager-show"))
-                .on_hover_text(tr!("project-manager-show", "hint"))
-                .clicked()
-            {
-                for &tab in interaction.selection.iter() {
-                    interaction.hidden.remove(&tab);
-                    interaction.open_requests.push(tab);
-                }
-            }
-            if ui
-                .button(tr!("project-manager-hide"))
-                .on_hover_text(tr!("project-manager-hide", "hint"))
-                .clicked()
-            {
-                for &tab in interaction.selection.iter() {
-                    interaction.hidden.insert(tab);
-                }
-            }
             ui.weak(tr!(
                 "project-manager-selected",
                 count = interaction.selection.len()
@@ -479,6 +462,28 @@ fn project_tree_node_ui(
                     .data_mut(|data| data.insert_temp(memory_key, memory));
             }
             response.context_menu(|ui| {
+                if ui
+                    .button(tr!("project-manager-show"))
+                    .on_hover_text(tr!("project-manager-show", "hint"))
+                    .clicked()
+                {
+                    for &tab in interaction.selection.iter() {
+                        interaction.hidden.remove(&tab);
+                        interaction.open_requests.push(tab);
+                    }
+                    ui.close();
+                }
+                if ui
+                    .button(tr!("project-manager-hide"))
+                    .on_hover_text(tr!("project-manager-hide", "hint"))
+                    .clicked()
+                {
+                    for &tab in interaction.selection.iter() {
+                        interaction.hidden.insert(tab);
+                    }
+                    ui.close();
+                }
+                ui.separator();
                 let memory = ui
                     .ctx()
                     .data(|data| data.get_temp::<PmMemory>(memory_key))
@@ -1216,8 +1221,15 @@ pub(super) mod tests {
         let banc = Banc::new(None, HashSet::from([graph_tab, book_tab]));
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
 
-        let with_toolbar = paint(&context, Vec::new());
-        let hide_pos = find_text_center(&with_toolbar.shapes, &tr!("project-manager-hide"));
+        paint(&context, Vec::new());
+        let first = paint(&context, Vec::new());
+        let graph_pos = find_text_center(&first.shapes, "Graph");
+        let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
+        assert_eq!(
+            *banc.selection.borrow(),
+            HashSet::from([graph_tab, book_tab])
+        );
+        let hide_pos = find_text_center(&menu.shapes, &tr!("project-manager-hide"));
         click_at(&context, hide_pos, egui::Modifiers::NONE, paint);
         assert_eq!(
             *banc.hidden.borrow(),
@@ -1225,9 +1237,13 @@ pub(super) mod tests {
             "« Masquer » doit s'appliquer à toute la sélection, hidden={:?}",
             banc.hidden.borrow()
         );
+        assert!(
+            !painted(&paint(&context, Vec::new()), &tr!("project-manager-hide")),
+            "Masquer ferme le menu contextuel"
+        );
 
-        let with_hidden_rows = paint(&context, Vec::new());
-        let show_pos = find_text_center(&with_hidden_rows.shapes, &tr!("project-manager-show"));
+        let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
+        let show_pos = find_text_center(&menu.shapes, &tr!("project-manager-show"));
         click_at(&context, show_pos, egui::Modifiers::NONE, paint);
         assert!(
             banc.hidden.borrow().is_empty(),
@@ -1240,12 +1256,36 @@ pub(super) mod tests {
             "« Afficher » doit aussi garantir que chaque onglet est ouvert, open_requests={:?}",
             banc.open_requests.borrow()
         );
+        assert!(
+            !painted(&paint(&context, Vec::new()), &tr!("project-manager-show")),
+            "Afficher ferme le menu contextuel"
+        );
     }
 
-    /// La barre « Afficher / Masquer » n'existe qu'avec une sélection ; sans
-    /// elle, un simple clic ouvre et sélectionne seulement cette entrée.
+    fn ouvrir_menu_contextuel(
+        context: &egui::Context,
+        pos: egui::Pos2,
+        mut paint: impl FnMut(&egui::Context, Vec<egui::Event>) -> egui::FullOutput,
+    ) -> egui::FullOutput {
+        paint(context, vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            paint(
+                context,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        paint(context, Vec::new())
+    }
+
+    /// Le bandeau garde seulement le compteur ; les actions de visibilité
+    /// s'ouvrent au clic droit. Le clic simple ouvre toujours son entrée.
     #[test]
-    fn la_barre_groupee_n_apparait_qu_avec_une_selection_et_un_clic_simple_ouvre() {
+    fn les_actions_de_visibilite_sont_dans_le_menu_contextuel_et_le_clic_simple_ouvre() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
         let banc = Banc::new(None, HashSet::new());
@@ -1267,11 +1307,17 @@ pub(super) mod tests {
         );
         assert!(banc.close_requests.borrow().is_empty());
 
-        // Témoin : la même image, avec une sélection, peint bien la barre.
-        banc.selection.borrow_mut().insert(graph_tab);
+        // Le compteur reste visible, sans les anciens boutons du bandeau.
         let with_selection = paint(&context, Vec::new());
-        assert!(painted(&with_selection, &tr!("project-manager-hide")));
-        assert!(painted(&with_selection, &tr!("project-manager-show")));
+        assert!(!painted(&with_selection, &tr!("project-manager-hide")));
+        assert!(!painted(&with_selection, &tr!("project-manager-show")));
+        assert!(painted(
+            &with_selection,
+            &tr!("project-manager-selected", count = 1)
+        ));
+        let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
+        assert!(painted(&menu, &tr!("project-manager-hide")));
+        assert!(painted(&menu, &tr!("project-manager-show")));
     }
 
     /// Une entrée masquée reste listée, atténuée : sa couleur diffère de celle
