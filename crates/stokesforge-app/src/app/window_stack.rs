@@ -247,6 +247,7 @@ impl Workspace<'_> {
         *self.active_detached = None;
         self.pm_selection.clear();
         self.pm_selection.insert(tab);
+        super::project_manager::follow_selection_anchor(ctx, Some(tab));
         // Le panneau et son viewport détaché ont déjà été publiés cette image.
         ctx.request_repaint();
     }
@@ -704,7 +705,7 @@ mod tests {
                             let active = app
                                 .maximized_tab
                                 .or_else(|| app.floating_tabs.last().copied());
-                            app.follow_project_manager_active_tab(active);
+                            app.follow_project_manager_active_tab(ui.ctx(), active);
                             app.show_workspace(
                                 ui,
                                 active,

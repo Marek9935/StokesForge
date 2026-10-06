@@ -476,6 +476,9 @@ Un clic simple sur une entrée, ou un clic dans une fenêtre du workspace
 (flottante ou maximisée), remplace la sélection multiple par la fenêtre visée
 et réactive le suivi (#154), même si cette fenêtre est déjà active. Le survol,
 le clic dans le vide et les panneaux recouvrant le contenu ne la remplacent pas.
+Quand la fenêtre active reprend la sélection, elle devient aussi l'ancre de
+Maj-clic dans le panneau fixe et détaché : la prochaine plage part donc de
+cette fenêtre, et non de la dernière entrée cliquée dans Project Manager.
 `follow_project_manager_active_tab` assure le suivi passif avant les menus ;
 `window_stack` traite le clic explicite et demande la republication au Project
 Manager détaché.

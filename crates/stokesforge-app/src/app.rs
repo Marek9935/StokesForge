@@ -796,7 +796,7 @@ impl eframe::App for StokesForgeApp {
         let mut close_requests = Vec::new();
         let mut geometry_updates = Vec::new();
         let active_tab = self.active_content_tab(&ctx);
-        self.follow_project_manager_active_tab(active_tab);
+        self.follow_project_manager_active_tab(&ctx, active_tab);
 
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);

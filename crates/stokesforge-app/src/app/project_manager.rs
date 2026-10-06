@@ -6,6 +6,9 @@
 //!
 //! Le titre appartient au cadre partagé `panel_header`, pas à l'arbre :
 //! attaché ou détaché, aucun double en-tête et les mêmes gestes (#100).
+//! Une sélection reprise par la fenêtre active doit aussi déplacer l'ancre
+//! de Maj-clic dans les deux viewports : le seul fond sélectionné ne suffit
+//! pas à définir la prochaine plage après un clic dans le workspace (#154).
 
 use std::collections::HashSet;
 
@@ -79,6 +82,20 @@ pub(super) fn forget_views(ctx: &egui::Context) {
 
 fn memory_id(ctx: &egui::Context) -> egui::Id {
     egui::Id::new(("project_manager_gestures", ctx.viewport_id()))
+}
+
+/// Une activation externe remplace l'ancre, sans toucher au focus ni à
+/// l'éditeur du panneau. Les gestes internes gardent leur propre ancre,
+/// notamment lorsqu'une plage Maj revient à une seule entrée.
+pub(super) fn follow_selection_anchor(ctx: &egui::Context, tab: Option<Tab>) {
+    ctx.data_mut(|data| {
+        for viewport in [egui::ViewportId::ROOT, viewport_id()] {
+            let key = egui::Id::new(("project_manager_gestures", viewport));
+            let mut memory = data.get_temp::<PmMemory>(key).unwrap_or_default();
+            memory.anchor = tab;
+            data.insert_temp(key, memory);
+        }
+    });
 }
 
 pub(super) fn has_focus(ctx: &egui::Context) -> bool {
@@ -493,12 +510,17 @@ impl StokesForgeApp {
     /// demande d'ouverture soit appliquée. Une sélection multiple reste à
     /// l'utilisateur tant qu'aucun clic explicite sur une entrée ou une fenêtre
     /// du workspace ne la remplace (#154, `Workspace::activate_clicked_tab`).
-    pub(super) fn follow_project_manager_active_tab(&mut self, active_tab: Option<Tab>) {
+    pub(super) fn follow_project_manager_active_tab(
+        &mut self,
+        ctx: &egui::Context,
+        active_tab: Option<Tab>,
+    ) {
         if active_tab != self.pm_last_active_tab {
             self.pm_last_active_tab = active_tab;
             if self.pm_selection.len() <= 1 {
                 self.pm_selection.clear();
                 self.pm_selection.extend(active_tab);
+                follow_selection_anchor(ctx, active_tab);
             }
         }
     }
@@ -788,24 +810,151 @@ pub(super) mod tests {
         let (session, book, graph, _tree) = project_manager_fixture();
         let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
-        app.follow_project_manager_active_tab(Some(book));
+        let context = egui::Context::default();
+        let detached_key = egui::Id::new(("project_manager_gestures", viewport_id()));
+        context.data_mut(|data| {
+            data.insert_temp(
+                detached_key,
+                PmMemory {
+                    focus: true,
+                    rename: vec![tab_node(book)],
+                    ..Default::default()
+                },
+            )
+        });
+        let assert_anchor = |anchor| {
+            for viewport in [egui::ViewportId::ROOT, viewport_id()] {
+                let key = egui::Id::new(("project_manager_gestures", viewport));
+                context.data(|data| {
+                    assert_eq!(data.get_temp::<PmMemory>(key).unwrap().anchor, anchor)
+                });
+            }
+        };
+        app.follow_project_manager_active_tab(&context, Some(book));
         assert_eq!(app.pm_selection, HashSet::from([book]));
-        app.follow_project_manager_active_tab(Some(graph));
+        assert_anchor(Some(book));
+        app.follow_project_manager_active_tab(&context, Some(graph));
         assert_eq!(app.pm_selection, HashSet::from([graph]));
+        assert_anchor(Some(graph));
         app.pm_selection.insert(book);
-        app.follow_project_manager_active_tab(Some(book));
+        app.follow_project_manager_active_tab(&context, Some(book));
         assert_eq!(app.pm_selection, HashSet::from([book, graph]));
-        app.follow_project_manager_active_tab(None);
+        assert_anchor(Some(graph));
+        app.follow_project_manager_active_tab(&context, None);
         assert_eq!(app.pm_selection, HashSet::from([book, graph]));
         // Le clic simple existant remplace la sélection. Même fenêtre active :
         // ne pas écraser ce clic avant l'application de sa demande d'ouverture.
         app.pm_selection = HashSet::from([book]);
-        app.follow_project_manager_active_tab(None);
+        app.follow_project_manager_active_tab(&context, None);
         assert_eq!(app.pm_selection, HashSet::from([book]));
-        app.follow_project_manager_active_tab(Some(graph));
+        app.follow_project_manager_active_tab(&context, Some(graph));
         assert_eq!(app.pm_selection, HashSet::from([graph]));
-        app.follow_project_manager_active_tab(None);
+        app.follow_project_manager_active_tab(&context, None);
         assert!(app.pm_selection.is_empty());
+        assert_anchor(None);
+        context.data(|data| {
+            let memory = data.get_temp::<PmMemory>(detached_key).unwrap();
+            assert!(memory.focus, "le focus de l'autre viewport est conservé");
+            assert_eq!(
+                memory.rename,
+                vec![tab_node(book)],
+                "l'éditeur est conservé"
+            );
+        });
+    }
+
+    #[test]
+    fn maj_apres_un_clic_workspace_part_de_la_fenetre_selectionnee() {
+        verifier_maj_apres_clic_workspace(false);
+    }
+
+    #[test]
+    fn maj_apres_un_clic_workspace_sur_la_meme_entree_ne_selectionne_pas_l_ancienne_ancre() {
+        verifier_maj_apres_clic_workspace(true);
+    }
+
+    fn verifier_maj_apres_clic_workspace(same_target: bool) {
+        for maximized in [false, true] {
+            let (session, book, graph, tree) = project_manager_fixture();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let app = RefCell::new(StokesForgeApp::new(state));
+            app.borrow_mut().floating_tabs = vec![book, graph];
+            app.borrow_mut()
+                .window_positions
+                .insert(graph, egui::pos2(30.0, 30.0));
+            app.borrow_mut()
+                .window_positions
+                .insert(book, egui::pos2(750.0, 30.0));
+            app.borrow_mut().maximized_tab = maximized.then_some(graph);
+            let context = super::super::test_support::contexte();
+            egui_extras::install_image_loaders(&context);
+            let paint = |ctx: &egui::Context, events| {
+                super::super::test_support::image_de(ctx, egui::vec2(1400.0, 900.0), events, |ui| {
+                    let mut app = app.borrow_mut();
+                    egui::Panel::left("pm_test")
+                        .exact_size(260.0)
+                        .show(ui, |ui| {
+                            let mut interaction = PmInteraction {
+                                actions: &mut Vec::new(),
+                                root: app.state.tree().root(),
+                                open_requests: &mut Vec::new(),
+                                close_requests: &mut Vec::new(),
+                                active_tab: Some(graph),
+                                selection: &mut app.pm_selection,
+                                hidden: &mut HashSet::new(),
+                            };
+                            project_manager_contents_from_tree(ui, &tree, &mut interaction);
+                        });
+                    app.show_workspace(
+                        ui,
+                        Some(graph),
+                        &mut Vec::new(),
+                        &mut Vec::new(),
+                        &mut Vec::new(),
+                        &mut Vec::new(),
+                    );
+                })
+            };
+            paint(&context, vec![]);
+            let first = paint(&context, vec![]);
+            let book_pos = find_text_center(&first.shapes, "Book");
+            let graph_pos = find_text_center(&first.shapes, "Graph");
+            // L'ancre vient d'un vrai clic du panneau, puis la même fenêtre
+            // déjà active reprend la sélection par le workspace.
+            click_at(&context, book_pos, egui::Modifiers::NONE, paint);
+            assert_eq!(app.borrow().pm_selection, HashSet::from([book]));
+            click_at(
+                &context,
+                egui::pos2(410.0, 150.0),
+                egui::Modifiers::NONE,
+                paint,
+            );
+            assert_eq!(app.borrow().pm_selection, HashSet::from([graph]));
+            let detached_key = egui::Id::new(("project_manager_gestures", viewport_id()));
+            context.data(|data| {
+                assert_eq!(
+                    data.get_temp::<PmMemory>(detached_key).unwrap().anchor,
+                    Some(graph),
+                    "le clic workspace déplace aussi l'ancre du panneau détaché"
+                )
+            });
+            click_at(
+                &context,
+                if same_target { graph_pos } else { book_pos },
+                egui::Modifiers::SHIFT,
+                paint,
+            );
+            assert_eq!(
+                app.borrow().pm_selection,
+                if same_target {
+                    HashSet::from([graph])
+                } else {
+                    HashSet::from([book, graph])
+                },
+                "maximisée={maximized}, même cible={same_target}"
+            );
+            session.shutdown().unwrap();
+        }
     }
 
     #[test]
