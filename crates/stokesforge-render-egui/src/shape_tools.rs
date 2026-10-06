@@ -102,8 +102,7 @@ pub(crate) fn handles(drawn: &DrawnShape) -> Vec<(Handle, Pos2)> {
 /// Taille dans le repère de la figure, indépendante des unités des axes.
 fn default_extent(kind: ShapeKind) -> egui::Vec2 {
     match kind {
-        ShapeKind::Rectangle => egui::vec2(48.0, 48.0),
-        ShapeKind::Ellipse => egui::vec2(64.0, 40.0),
+        ShapeKind::Rectangle | ShapeKind::Ellipse => egui::vec2(48.0, 48.0),
         ShapeKind::Line | ShapeKind::Arrow => egui::vec2(80.0, 0.0),
     }
 }

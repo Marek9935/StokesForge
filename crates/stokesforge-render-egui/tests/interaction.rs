@@ -846,7 +846,7 @@ fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
     use stokesforge_render_egui::{GraphEvent, GraphTool};
     for (tool, width, height) in [
         (GraphTool::Rectangle, 48.0, 48.0),
-        (GraphTool::Ellipse, 64.0, 40.0),
+        (GraphTool::Ellipse, 48.0, 48.0),
         (GraphTool::Line, 80.0, 0.0),
         (GraphTool::Arrow, 80.0, 0.0),
     ] {
