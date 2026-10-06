@@ -511,6 +511,15 @@ visibilité passent par `Action::SetPlotVisibility`, puis `EditPlotSpec` (delta 
 ouverture et sélection restent hors historique. L'échantillon de série appelle
 `stokesforge_render_egui::series_swatch` (vignette partagée de la légende).
 
+Les réglages de vue (#139) réutilisent `object_manager_settings_menu` depuis
+Affichage et le fond du panneau (grisé si fermé), les `Action` et la table
+`preferences::ObjectManagerSettings`. Le repli initial, y compris après
+Réinitialiser, ne remplace jamais un état egui déjà mémorisé. La section Objets
+est propre au graphique ou au calque ; ne pas la confondre avec les axes.
+Le modèle du viewport détaché transporte tous les réglages et doit se réveiller
+sur leur seul changement. Pour tester leurs actions, injecter un fichier
+temporaire avec `AppState::new_with_preferences`, jamais la configuration réelle.
+
 Les textes et objets sélectionnés lisent aussi `with_graph_view` /
 `read_graph_view` (propriétés et barres de format incluses). Le menu
 contextuel et Graph › Selection partagent `object_node_menu`

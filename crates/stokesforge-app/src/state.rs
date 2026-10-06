@@ -68,6 +68,7 @@ use stokesforge_session::{SessionHandle, SessionResult, Snapshot};
 
 use crate::errors;
 use crate::history_text::history_text;
+use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings, Preferences};
 use crate::selection::{GridCursor, Selection};
 use crate::tr;
 use crate::user_colors::UserColors;
@@ -429,6 +430,13 @@ pub enum Action {
     SetObjectManagerShowTexts(bool),
     /// Liste ou cache les échelles (axes) dans l'Object Manager (#111).
     SetObjectManagerShowScales(bool),
+    /// Repli initial d'une famille, hors projet et historique (#139).
+    SetObjectManagerGroupOpen {
+        group: ObjectManagerGroup,
+        open: bool,
+    },
+    /// Rétablit les valeurs initiales sans effacer les replis courants.
+    ResetObjectManagerSettings,
     /// Visibilité d'un contenu ou d'un ensemble de contenus (#81–82).
     SetPlotVisibility {
         graph: NodeId,
@@ -1905,8 +1913,7 @@ pub struct AppState {
     /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
     png_export_scale: f32,
     object_manager_open: bool,
-    object_manager_show_texts: bool,
-    object_manager_show_scales: bool,
+    object_manager_preferences: Preferences,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
     /// Saisie de cellule en cours, s'il y en a une.
@@ -2023,6 +2030,16 @@ impl AppState {
     /// Ne touche **jamais** à l'interpréteur Python : voir la section « Le
     /// script Python » en tête de ce module.
     pub fn new(handle: SessionHandle, path: String) -> SessionResult<Self> {
+        Self::new_with_preferences(handle, path, Preferences::load())
+    }
+
+    /// Injection du stockage, notamment pour tester les actions sans écrire
+    /// les préférences de la machine de l'utilisateur.
+    pub fn new_with_preferences(
+        handle: SessionHandle,
+        path: String,
+        preferences: Preferences,
+    ) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
         let saved_revision = std::path::Path::new(&path)
             .is_file()
@@ -2049,11 +2066,8 @@ impl AppState {
             selected_sheets: std::collections::HashMap::new(),
             path,
             png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
-            object_manager_open: crate::preferences::Preferences::load().object_manager_open(),
-            object_manager_show_texts: crate::preferences::Preferences::load()
-                .object_manager_show_texts(),
-            object_manager_show_scales: crate::preferences::Preferences::load()
-                .object_manager_show_scales(),
+            object_manager_open: preferences.object_manager_open(),
+            object_manager_preferences: preferences,
             status: None,
             editing: None,
             note_editing: None,
@@ -3517,12 +3531,25 @@ impl AppState {
 
     /// Textes automatiques listés dans l'Object Manager (#102), hors projet.
     pub fn object_manager_show_texts(&self) -> bool {
-        self.object_manager_show_texts
+        self.object_manager_settings().show_texts
     }
 
     /// Échelles (axes) listées dans l'Object Manager (#111), hors projet.
     pub fn object_manager_show_scales(&self) -> bool {
-        self.object_manager_show_scales
+        self.object_manager_settings().show_scales
+    }
+
+    pub fn object_manager_settings(&self) -> ObjectManagerSettings {
+        self.object_manager_preferences.object_manager_settings()
+    }
+
+    fn save_object_manager_settings(&mut self, settings: ObjectManagerSettings) {
+        if let Err(error) = self
+            .object_manager_preferences
+            .save_object_manager_settings(settings)
+        {
+            self.fail(error.to_string());
+        }
     }
 
     /// Applique une action. Ne rend jamais d'erreur : toute erreur devient un
@@ -3658,27 +3685,30 @@ impl AppState {
             } => self.add_series_to_graph(graph, columns, plot_type),
             Action::SetObjectManagerOpen(open) => {
                 self.object_manager_open = open;
-                if let Err(error) =
-                    crate::preferences::Preferences::load().save_object_manager_open(open)
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_object_manager_open(open)
                 {
                     self.fail(error.to_string());
                 }
             }
             Action::SetObjectManagerShowTexts(show) => {
-                self.object_manager_show_texts = show;
-                if let Err(error) =
-                    crate::preferences::Preferences::load().save_object_manager_show_texts(show)
-                {
-                    self.fail(error.to_string());
-                }
+                let mut settings = self.object_manager_settings();
+                settings.show_texts = show;
+                self.save_object_manager_settings(settings);
             }
             Action::SetObjectManagerShowScales(show) => {
-                self.object_manager_show_scales = show;
-                if let Err(error) =
-                    crate::preferences::Preferences::load().save_object_manager_show_scales(show)
-                {
-                    self.fail(error.to_string());
-                }
+                let mut settings = self.object_manager_settings();
+                settings.show_scales = show;
+                self.save_object_manager_settings(settings);
+            }
+            Action::SetObjectManagerGroupOpen { group, open } => {
+                let mut settings = self.object_manager_settings();
+                settings.set_group_open(group, open);
+                self.save_object_manager_settings(settings);
+            }
+            Action::ResetObjectManagerSettings => {
+                self.save_object_manager_settings(ObjectManagerSettings::default());
             }
             Action::SetPlotVisibility {
                 graph,

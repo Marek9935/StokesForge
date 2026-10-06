@@ -887,3 +887,14 @@ action-show-graph-data = Afficher les données
 error-clipboard-empty = Il n'y a rien à copier
 error-clipboard-unsupported = Cet affichage ne peut pas recevoir un graphique copié ({ $display })
 error-clipboard-backend = Impossible de copier le graphique : { $detail }
+
+# Réglages de vue de l’Object Manager (#139).
+object-manager-settings = Réglages du gestionnaire d’objets
+object-manager-display = Affichage
+object-manager-default-expansion = Déplier par défaut
+    .hint = Définit seulement l’état initial des nouveaux groupes ; les groupes déjà dépliés ou repliés gardent leur état
+object-manager-expand-layers = Calques
+object-manager-expand-plots = Groupes de tracés
+object-manager-objects = Objets
+object-manager-reset = Réinitialiser
+    .hint = Rétablit les réglages par défaut du gestionnaire d’objets sans changer le repli courant des groupes

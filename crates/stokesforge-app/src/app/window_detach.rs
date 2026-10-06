@@ -257,8 +257,7 @@ pub(super) struct ObjectManagerModel {
     pub(super) selection: Option<crate::object_manager::VisibilityTarget>,
     pub(super) model: Option<crate::object_manager::ObjectTree>,
     pub(super) spec: Option<stokesforge_plot::PlotSpec>,
-    pub(super) show_texts: bool,
-    pub(super) show_scales: bool,
+    pub(super) settings: crate::preferences::ObjectManagerSettings,
 }
 
 #[derive(Default)]
@@ -439,8 +438,7 @@ impl StokesForgeApp {
             let changed = model.stamp != next.stamp
                 || model.graph != next.graph
                 || model.selection != next.selection
-                || model.show_texts != next.show_texts
-                || model.show_scales != next.show_scales;
+                || model.settings != next.settings;
             *model = next;
             changed
         };
@@ -465,8 +463,7 @@ impl StokesForgeApp {
                         &model.tree,
                         model.model.as_ref(),
                         model.spec.as_ref(),
-                        model.show_texts,
-                        model.show_scales,
+                        model.settings,
                         &mut actions,
                     );
                 });
