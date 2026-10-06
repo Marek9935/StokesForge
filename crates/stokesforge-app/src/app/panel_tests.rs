@@ -716,3 +716,106 @@ fn detacher_et_rattacher_la_console_conserve_le_travail_python_et_sa_sortie() {
     output.textures_delta.clear();
     session.shutdown().unwrap();
 }
+
+/// L'ancien callback doit lire les nouveaux réglages même si ni graphe ni
+/// instantané ne changent. Le stockage injecté ne touche pas la machine.
+#[test]
+fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre() {
+    use crate::preferences::{ObjectManagerGroup, Preferences};
+    let mut project = Project::new("Réglages détachés").unwrap();
+    let mut spec = stokesforge_plot::PlotSpec::empty("Titre témoin");
+    spec.panels
+        .get_mut(0)
+        .unwrap()
+        .annotations
+        .push(stokesforge_plot::AnnotationSpec::new(
+            "Annotation témoin",
+            0.0,
+            0.0,
+        ));
+    let graph = project.add_graph(project.root(), None, spec).unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let preferences = Preferences::load_from(Some(dir.path().join("preferences.json")));
+    let state =
+        AppState::new_with_preferences(session.handle(), String::new(), preferences).unwrap();
+    let mut app = StokesForgeApp::new(state);
+    app.om_detached = true;
+    let ctx = context();
+    let id = egui::ViewportId::from_hash_of("stokesforge_object_manager_window");
+    let publish = |app: &mut StokesForgeApp| {
+        let mut output = ctx.run_ui(input(Vec::new()), |ui| {
+            app.object_manager_panel(ui, Some(Tab::Graph(graph)), &mut Vec::new());
+        });
+        output.textures_delta.clear();
+        output
+    };
+    let output = publish(&mut app);
+    let callback = output.viewport_output[&id].viewport_ui_cb.clone().unwrap();
+    let child = || {
+        let mut output = ctx.run_ui(child_input(id, Vec::new(), false), |ui| callback(ui));
+        output.textures_delta.clear();
+        output
+    };
+    child();
+    assert!(!painted(&child(), &tr!("object-manager-axes")));
+    assert!(painted(&child(), "Annotation témoin"));
+    for _ in 0..8 {
+        publish(&mut app);
+        child();
+    }
+    let idle = publish(&mut app);
+    assert_eq!(
+        idle.viewport_output[&id].repaint_delay,
+        std::time::Duration::MAX,
+        "témoin : un panneau inchangé dort"
+    );
+    app.state.dispatch(Action::SetObjectManagerGroupOpen {
+        group: ObjectManagerGroup::Axes,
+        open: true,
+    });
+    let group_changed = publish(&mut app);
+    assert_eq!(
+        group_changed.viewport_output[&id].repaint_delay,
+        std::time::Duration::ZERO,
+        "un réglage de repli seul réveille le panneau, même si les axes sont encore filtrés"
+    );
+    app.state.dispatch(Action::SetObjectManagerShowScales(true));
+    app.state.dispatch(Action::SetObjectManagerShowTexts(true));
+    let output = publish(&mut app);
+    assert_eq!(
+        output.viewport_output[&id].repaint_delay,
+        std::time::Duration::ZERO
+    );
+    child();
+    let output = child();
+    assert!(painted(&output, &tr!("object-manager-axes")));
+    assert!(painted(&output, &tr!("plot-axis-bottom")));
+    assert!(painted(&output, "Titre témoin"));
+    // Le panneau ancré lit les mêmes filtres et replis initiaux.
+    app.om_detached = false;
+    publish(&mut app);
+    let anchored = publish(&mut app);
+    assert!(painted(&anchored, &tr!("object-manager-axes")));
+    assert!(painted(&anchored, &tr!("plot-axis-bottom")));
+    app.state.dispatch(Action::ResetObjectManagerSettings);
+    publish(&mut app);
+    let reset = publish(&mut app);
+    assert!(!painted(&reset, &tr!("object-manager-axes")));
+    assert!(painted(&reset, "Annotation témoin"));
+    app.om_detached = true;
+    publish(&mut app);
+    child();
+    assert!(!painted(&child(), &tr!("object-manager-axes")));
+    assert!(painted(&child(), "Annotation témoin"));
+    // Le reset n'efface pas les axes déjà dépliés. Le filtre les révèle,
+    // malgré le nouveau défaut axes_open=false, dans les deux présentations.
+    app.state.dispatch(Action::SetObjectManagerShowScales(true));
+    publish(&mut app);
+    child();
+    assert!(painted(&child(), &tr!("plot-axis-bottom")));
+    app.om_detached = false;
+    publish(&mut app);
+    assert!(painted(&publish(&mut app), &tr!("plot-axis-bottom")));
+    session.shutdown().unwrap();
+}

@@ -891,3 +891,14 @@ action-show-graph-data = Show Data
 error-clipboard-empty = There is nothing to copy
 error-clipboard-unsupported = This display cannot receive a copied graph ({ $display })
 error-clipboard-backend = Could not copy the graph: { $detail }
+
+# Réglages de vue de l’Object Manager (#139).
+object-manager-settings = Object Manager Settings
+object-manager-display = Display
+object-manager-default-expansion = Expand by Default
+    .hint = Only sets the initial state of new groups; groups already expanded or collapsed keep their state
+object-manager-expand-layers = Layers
+object-manager-expand-plots = Plot groups
+object-manager-objects = Objects
+object-manager-reset = Reset
+    .hint = Restores the Object Manager settings to their defaults without changing the current state of groups

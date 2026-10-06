@@ -1777,20 +1777,21 @@ RGB/HSL restent propres au sélecteur.
 
 ## Gestionnaire d'objets (Object Manager, #81–85)
 
-Affichage › Gestionnaire d'objets et la barre du même nom ouvrent l'arbre du
+Affichage › Gestionnaire d'objets ouvre l'arbre du
 graphique actif : graphique › calques (`PlotSpec::panels`) › groupe de tracés ›
 séries, ainsi que les objets rares, textes libres et objets graphiques
 (rectangle, ellipse, ligne, flèche), quand il y en a. Les **textes
 automatiques** (titre du graphique et des calques, titres d'axes, légende) sont
 cachés par défaut (#102) : une seule bascule, « Afficher les textes du
-graphique » (Affichage et clic droit sur le fond du panneau, même
+graphique » (sous-menu Réglages du gestionnaire d’objets › Affichage,
+dans Affichage et au clic droit sur le fond du panneau, même
 `Action::SetObjectManagerShowTexts`), les liste. C'est une préférence
 d'interface (`object_manager_show_texts` dans `preferences.json`, hors `.stf`),
 et le filtre vit dans `object_tree_with_selection`. Un texte caché n'apparaît
 pas même sélectionné dans la figure. Les **échelles** (#111) suivent le même
 motif avec leur propre bascule, « Afficher les échelles »
 (`Action::SetObjectManagerShowScales`, préférence `object_manager_show_scales`,
-même place dans Affichage et dans le menu du fond) : cachées par défaut, elles
+même sous-menu dans Affichage et dans le menu du fond) : cachées par défaut, elles
 ajoutent sous chaque calque, après le groupe de tracés, un groupe « Axes »
 (`VisibilityTarget::Axes`, `LayerRow::axes`) qui réunit une ligne par axe — les
 quatre, bas, gauche, droite et haut, y compris ceux masqués par défaut — avec
@@ -1806,6 +1807,22 @@ axes non demandés. Le panneau est redimensionnable à droite ;
 son bouton Détacher ouvre une fenêtre système, Rattacher le replace à droite. Il est
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.
+
+Les réglages de vue (#139) sont regroupés dans **Affichage › Réglages du
+gestionnaire d’objets**, aussi accessible au clic droit sur le fond, même sans
+graphique actif. Le sous-menu Affichage réunit les deux filtres ; **Déplier par
+défaut** règle graphique, calques, groupes de tracés, axes et objets. Les objets
+sont regroupés par graphique ou calque, sans modifier leur visibilité.
+Le menu est grisé lorsque le panneau est fermé. **Réinitialiser** rétablit les
+filtres cachés, les axes repliés et les autres groupes dépliés ; les replis déjà
+choisis restent libres et conservés. Les valeurs initiales ne s'appliquent
+qu'aux groupes sans état egui, jamais à un groupe déjà peint ou manipulé.
+`preferences::ObjectManagerSettings` est la table unique des défauts ; les
+réglages vont dans `preferences.json`, hors `.stf` et historique. Les anciens
+champs des deux filtres restent lus et écrits pour la compatibilité.
+`object_manager_settings_menu` et `object_manager_contents` servent aussi le
+viewport détaché ; une modification des réglages le réveille même si le
+projet et la sélection n'ont pas changé.
 
 Chaque série garde son nom dérivé de colonne et son échantillon de légende
 (trait, couleur, épaisseur, marqueur ou barre). Les cases des parents modifient

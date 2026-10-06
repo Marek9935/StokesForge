@@ -71,6 +71,8 @@ l'interface, mais son mot est déjà fixé.
 | Refresh | Actualiser | Relire le fichier source d'une colonne | Rafraîchir, Recharger | G |
 | Properties | Propriétés | Réglages d'un objet précis | Options, Paramètres | O |
 | Preferences† | Préférences | Réglages de l'application | Options, Paramètres | G |
+| Expand by Default | Déplier par défaut | Repli initial des nouveaux groupes de l’Object Manager ; ne modifie pas les groupes déjà vus | Tout déplier | #139 |
+| Objects | Objets | Section des textes et formes du graphique ou d’un calque dans l’Object Manager | Éléments | #139 |
 | Setting | Réglage | Valeur choisie par l'utilisateur | Option, Paramètre | G |
 | Template | Modèle | Réglages d'import enregistrés sous un nom | Recette, Preset, Filtre | O |
 | Wizard | Assistant | Fenêtre à étapes | Wizard, Guide | G |

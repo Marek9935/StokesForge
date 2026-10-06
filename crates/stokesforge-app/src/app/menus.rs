@@ -25,7 +25,9 @@ use crate::tr;
 use super::graph_text_edit::add_annotation_at;
 use super::graph_window::{disabled_shape_order_buttons, shape_order_buttons};
 use super::grid::{metadata_row_visible, set_metadata_row_visible};
-use super::object_manager_ui::{object_node_menu, selected_manager_target, ObjectManagerRequest};
+use super::object_manager_ui::{
+    object_manager_settings_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
+};
 use super::shortcuts::{
     shortcut_text_delete, SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT,
     SHORTCUT_OPEN, SHORTCUT_REDO_Y, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_UNDO,
@@ -466,22 +468,7 @@ impl StokesForgeApp {
             {
                 actions.push(Action::SetObjectManagerOpen(open));
             }
-            let mut show_texts = self.state.object_manager_show_texts();
-            if ui
-                .checkbox(&mut show_texts, tr!("object-manager-show-texts"))
-                .on_hover_text(tr!("object-manager-show-texts", "hint"))
-                .changed()
-            {
-                actions.push(Action::SetObjectManagerShowTexts(show_texts));
-            }
-            let mut show_scales = self.state.object_manager_show_scales();
-            if ui
-                .checkbox(&mut show_scales, tr!("object-manager-show-scales"))
-                .on_hover_text(tr!("object-manager-show-scales", "hint"))
-                .changed()
-            {
-                actions.push(Action::SetObjectManagerShowScales(show_scales));
-            }
+            object_manager_settings_menu(ui, self.state.object_manager_settings(), open, actions);
             ui.separator();
             for id in ToolbarId::ALL {
                 let mut visible = self.toolbars.layout().is_visible(id);
@@ -1080,14 +1067,7 @@ mod tests {
                     && entree(&menu, &tr!("script-title")).is_some(),
                 "les trois panneaux sont accessibles dans Affichage"
             );
-            assert_eq!(
-                active(&menu, &tr!("object-manager-show-texts")).toggled,
-                Some(app.state.object_manager_show_texts())
-            );
-            assert_eq!(
-                active(&menu, &tr!("object-manager-show-scales")).toggled,
-                Some(app.state.object_manager_show_scales())
-            );
+            assert_eq!(active(&menu, &tr!("object-manager-settings")).enabled, open);
             for id in ToolbarId::ALL {
                 assert_eq!(
                     active(&menu, &id.label()).toggled,
@@ -1109,6 +1089,80 @@ mod tests {
         let pos = active(&menu, &id.label()).center;
         assert!(clique(&mut app, &ctx, tab, pos).is_empty());
         assert_eq!(app.toolbars.layout().is_visible(id), !visible);
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn les_sous_menus_des_reglages_emettent_les_actions_communes() {
+        use crate::preferences::ObjectManagerGroup;
+        let (session, mut app, _) = banc();
+        app.state.set_object_manager_open_for_test(true);
+        // Les réglages restent accessibles sans graphique actif.
+        let open = |app: &mut StokesForgeApp, child: Option<&str>| {
+            let (ctx, menu) = ouvre(app, None, &tr!("menu-view"));
+            let pos = active(&menu, &tr!("object-manager-settings")).center;
+            assert!(clique(app, &ctx, None, pos).is_empty());
+            let menu = entrees(&peint(app, &ctx, None, Vec::new()).0);
+            if let Some(label) = child {
+                let pos = active(&menu, label).center;
+                assert!(clique(app, &ctx, None, pos).is_empty());
+            }
+            let menu = entrees(&peint(app, &ctx, None, Vec::new()).0);
+            (ctx, menu)
+        };
+        for (label, current, action) in [
+            (
+                tr!("object-manager-show-texts"),
+                app.state.object_manager_show_texts(),
+                Action::SetObjectManagerShowTexts(!app.state.object_manager_show_texts()),
+            ),
+            (
+                tr!("object-manager-show-scales"),
+                app.state.object_manager_show_scales(),
+                Action::SetObjectManagerShowScales(!app.state.object_manager_show_scales()),
+            ),
+        ] {
+            let (ctx, menu) = open(&mut app, Some(&tr!("object-manager-display")));
+            let row = active(&menu, &label);
+            assert!(row.enabled);
+            assert_eq!(row.toggled, Some(current));
+            assert_eq!(clique(&mut app, &ctx, None, row.center), vec![action]);
+        }
+        for (group, label) in [
+            (ObjectManagerGroup::Graph, tr!("window-kind-graph")),
+            (
+                ObjectManagerGroup::Layers,
+                tr!("object-manager-expand-layers"),
+            ),
+            (
+                ObjectManagerGroup::Plots,
+                tr!("object-manager-expand-plots"),
+            ),
+            (ObjectManagerGroup::Axes, tr!("object-manager-axes")),
+            (ObjectManagerGroup::Objects, tr!("object-manager-objects")),
+        ] {
+            let current = app.state.object_manager_settings().group_open(group);
+            let (ctx, menu) = open(&mut app, Some(&tr!("object-manager-default-expansion")));
+            let row = active(&menu, &label);
+            assert_eq!(row.toggled, Some(current));
+            assert_eq!(
+                clique(&mut app, &ctx, None, row.center),
+                vec![Action::SetObjectManagerGroupOpen {
+                    group,
+                    open: !current
+                }]
+            );
+        }
+        let (ctx, menu) = open(&mut app, None);
+        assert_eq!(
+            clique(
+                &mut app,
+                &ctx,
+                None,
+                active(&menu, &tr!("object-manager-reset")).center
+            ),
+            vec![Action::ResetObjectManagerSettings]
+        );
         session.shutdown().unwrap();
     }
 

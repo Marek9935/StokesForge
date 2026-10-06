@@ -1,6 +1,7 @@
 //! Préférences de l'utilisateur, gardées sur cette machine : pour l'instant la
 //! langue de l'interface (issue #41) et la disposition des barres d'outils
-//! (issue #60), ainsi que l’ouverture du gestionnaire d’objets (#82).
+//! (issue #60), ainsi que l’ouverture et les réglages de vue du gestionnaire
+//! d’objets (#82, #139).
 //!
 //! Même stockage que les couleurs de l'utilisateur ([`crate::user_colors`]) et
 //! que les recettes d'import : un fichier JSON — `preferences.json` — dans le
@@ -15,6 +16,76 @@
 
 use std::path::{Path, PathBuf};
 
+/// Familles de groupes dont le repli initial est réglable (#139).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectManagerGroup {
+    Graph,
+    Layers,
+    Plots,
+    Axes,
+    Objects,
+}
+
+impl ObjectManagerGroup {
+    pub const ALL: [Self; 5] = [
+        Self::Graph,
+        Self::Layers,
+        Self::Plots,
+        Self::Axes,
+        Self::Objects,
+    ];
+}
+
+/// Table unique des réglages de vue. Les valeurs initiales ne remplacent
+/// jamais l'état de repli déjà mémorisé par egui pour un groupe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ObjectManagerSettings {
+    pub show_texts: bool,
+    pub show_scales: bool,
+    pub graph_open: bool,
+    pub layers_open: bool,
+    pub plots_open: bool,
+    pub axes_open: bool,
+    pub objects_open: bool,
+}
+
+impl Default for ObjectManagerSettings {
+    fn default() -> Self {
+        Self {
+            show_texts: false,
+            show_scales: false,
+            graph_open: true,
+            layers_open: true,
+            plots_open: true,
+            axes_open: false,
+            objects_open: true,
+        }
+    }
+}
+
+impl ObjectManagerSettings {
+    pub fn group_open(self, group: ObjectManagerGroup) -> bool {
+        match group {
+            ObjectManagerGroup::Graph => self.graph_open,
+            ObjectManagerGroup::Layers => self.layers_open,
+            ObjectManagerGroup::Plots => self.plots_open,
+            ObjectManagerGroup::Axes => self.axes_open,
+            ObjectManagerGroup::Objects => self.objects_open,
+        }
+    }
+
+    pub fn set_group_open(&mut self, group: ObjectManagerGroup, open: bool) {
+        *match group {
+            ObjectManagerGroup::Graph => &mut self.graph_open,
+            ObjectManagerGroup::Layers => &mut self.layers_open,
+            ObjectManagerGroup::Plots => &mut self.plots_open,
+            ObjectManagerGroup::Axes => &mut self.axes_open,
+            ObjectManagerGroup::Objects => &mut self.objects_open,
+        } = open;
+    }
+}
+
 /// Forme du fichier sur disque. Un champ inconnu est ignoré, un champ absent
 /// prend sa valeur par défaut : un fichier écrit par une version plus récente
 /// reste lisible.
@@ -28,6 +99,8 @@ struct PreferencesFile {
     object_manager_show_texts: Option<bool>,
     #[serde(default)]
     object_manager_show_scales: Option<bool>,
+    #[serde(default)]
+    object_manager_settings: Option<ObjectManagerSettings>,
     /// Gardée brute : c'est `toolbar::ToolbarLayout::from_json` qui la lit, en
     /// tolérant ce qu'une autre version y a écrit.
     #[serde(default)]
@@ -39,8 +112,7 @@ struct PreferencesFile {
 pub struct Preferences {
     language: Option<String>,
     object_manager_open: bool,
-    object_manager_show_texts: bool,
-    object_manager_show_scales: bool,
+    object_manager_settings: ObjectManagerSettings,
     toolbars: Option<serde_json::Value>,
     path: Option<PathBuf>,
 }
@@ -65,11 +137,19 @@ impl Preferences {
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|content| serde_json::from_str::<PreferencesFile>(&content).ok())
             .unwrap_or_default();
+        let mut settings = file.object_manager_settings.unwrap_or_default();
+        // Les anciennes versions écrivent encore les deux champs historiques.
+        // Ils restent prioritaires et sont tenus à jour lors de chaque écriture.
+        if let Some(show) = file.object_manager_show_texts {
+            settings.show_texts = show;
+        }
+        if let Some(show) = file.object_manager_show_scales {
+            settings.show_scales = show;
+        }
         Self {
             language: file.language,
             object_manager_open: file.object_manager_open.unwrap_or(true),
-            object_manager_show_texts: file.object_manager_show_texts.unwrap_or(false),
-            object_manager_show_scales: file.object_manager_show_scales.unwrap_or(false),
+            object_manager_settings: settings,
             toolbars: file.toolbars,
             path,
         }
@@ -116,27 +196,54 @@ impl Preferences {
     /// Textes automatiques (titres, légende) listés dans l'Object Manager ;
     /// cachés par défaut (#102).
     pub fn object_manager_show_texts(&self) -> bool {
-        self.object_manager_show_texts
+        self.object_manager_settings.show_texts
     }
 
     /// Mémorise la bascule sans remplacer les autres préférences.
     pub fn save_object_manager_show_texts(&mut self, show: bool) -> std::io::Result<()> {
-        self.object_manager_show_texts = show;
+        self.object_manager_settings.show_texts = show;
         self.save_field("object_manager_show_texts", show.into())
     }
 
     /// Échelles (axes) listées dans l'Object Manager ; cachées par défaut (#111).
     pub fn object_manager_show_scales(&self) -> bool {
-        self.object_manager_show_scales
+        self.object_manager_settings.show_scales
     }
 
     /// Mémorise la bascule sans remplacer les autres préférences.
     pub fn save_object_manager_show_scales(&mut self, show: bool) -> std::io::Result<()> {
-        self.object_manager_show_scales = show;
+        self.object_manager_settings.show_scales = show;
         self.save_field("object_manager_show_scales", show.into())
     }
 
+    pub fn object_manager_settings(&self) -> ObjectManagerSettings {
+        self.object_manager_settings
+    }
+
+    /// Écrit les réglages ensemble en conservant les préférences étrangères.
+    pub fn save_object_manager_settings(
+        &mut self,
+        settings: ObjectManagerSettings,
+    ) -> std::io::Result<()> {
+        self.object_manager_settings = settings;
+        self.save_fields([
+            (
+                "object_manager_settings",
+                serde_json::to_value(settings).map_err(std::io::Error::other)?,
+            ),
+            ("object_manager_show_texts", settings.show_texts.into()),
+            ("object_manager_show_scales", settings.show_scales.into()),
+        ])
+    }
+
     fn save_field(&self, key: &str, value: serde_json::Value) -> std::io::Result<()> {
+        self.save_fields([(key, value)])
+    }
+
+    fn save_fields<'a>(
+        &self,
+        fields: impl IntoIterator<Item = (&'a str, serde_json::Value)>,
+    ) -> std::io::Result<()> {
         let Some(path) = self.path.as_deref() else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -151,7 +258,9 @@ impl Preferences {
                 _ => None,
             })
             .unwrap_or_default();
-        document.insert(key.to_string(), value);
+        for (key, value) in fields {
+            document.insert(key.to_string(), value);
+        }
         if let Some(folder) = path.parent() {
             std::fs::create_dir_all(folder)?;
         }
@@ -271,6 +380,70 @@ mod tests {
 #[cfg(test)]
 mod object_manager_tests {
     use super::*;
+
+    #[test]
+    fn reglages_initiaux_tolerent_les_fichiers_absents_incomplets_et_anciens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let defaults = ObjectManagerSettings::default();
+        assert_eq!(
+            Preferences::load_from(Some(path.clone())).object_manager_settings(),
+            defaults
+        );
+        for content in ["{corrompu", "{}", r#"{"object_manager_settings":{}}"#] {
+            std::fs::write(&path, content).unwrap();
+            assert_eq!(
+                Preferences::load_from(Some(path.clone())).object_manager_settings(),
+                defaults
+            );
+        }
+        std::fs::write(&path, r#"{"object_manager_settings":{"axes_open":true},"object_manager_show_texts":true,"object_manager_show_scales":true}"#).unwrap();
+        let settings = Preferences::load_from(Some(path)).object_manager_settings();
+        assert_eq!(
+            settings,
+            ObjectManagerSettings {
+                show_texts: true,
+                show_scales: true,
+                axes_open: true,
+                ..defaults
+            }
+        );
+    }
+
+    #[test]
+    fn reglages_et_reinitialisation_preservent_les_preferences_etrangeres() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        std::fs::write(
+            &path,
+            r#"{"language":"fr","object_manager_open":false,"toolbars":{"bars":[]},"avenir":42}"#,
+        )
+        .unwrap();
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        let defaults = ObjectManagerSettings::default();
+        let settings = ObjectManagerSettings {
+            show_texts: true,
+            show_scales: true,
+            graph_open: false,
+            layers_open: false,
+            plots_open: false,
+            axes_open: true,
+            objects_open: false,
+        };
+        for expected in [settings, defaults] {
+            preferences.save_object_manager_settings(expected).unwrap();
+            let loaded = Preferences::load_from(Some(path.clone()));
+            assert_eq!(loaded.object_manager_settings(), expected);
+            assert_eq!(loaded.language(), Some("fr"));
+            assert!(!loaded.object_manager_open());
+            assert_eq!(loaded.toolbars(), Some(&serde_json::json!({"bars":[]})));
+            let document: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(document["avenir"], 42);
+            assert_eq!(document["object_manager_show_texts"], expected.show_texts);
+            assert_eq!(document["object_manager_show_scales"], expected.show_scales);
+        }
+    }
     #[test]
     fn ouverture_memorisee_sans_perdre_langue_barres_et_champs_inconnus() {
         let dir = tempfile::tempdir().unwrap();
