@@ -956,29 +956,33 @@ fn import_step_header(
         }
     });
     ui.separator();
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-column-names"));
-        let mut is_filename = matches!(recipe.name_source, NameSource::Filename);
-        let mut is_header_key = matches!(recipe.name_source, NameSource::HeaderKey(_));
-        if ui
-            .radio_value(&mut is_filename, true, tr!("import-header-name-file"))
-            .clicked()
-        {
-            recipe.name_source = NameSource::Filename;
-        }
-        if ui
-            .radio_value(&mut is_header_key, true, tr!("import-header-name-key"))
-            .clicked()
-        {
-            recipe.name_source = NameSource::HeaderKey(String::new());
+    // Garder les valeurs choisies pendant le grisage pour les retrouver
+    // quand les noms ne viennent plus de la première ligne.
+    ui.add_enabled_ui(!recipe.has_column_header_row, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(tr!("import-column-names"));
+            let mut is_filename = matches!(recipe.name_source, NameSource::Filename);
+            let mut is_header_key = matches!(recipe.name_source, NameSource::HeaderKey(_));
+            if ui
+                .radio_value(&mut is_filename, true, tr!("import-header-name-file"))
+                .clicked()
+            {
+                recipe.name_source = NameSource::Filename;
+            }
+            if ui
+                .radio_value(&mut is_header_key, true, tr!("import-header-name-key"))
+                .clicked()
+            {
+                recipe.name_source = NameSource::HeaderKey(String::new());
+            }
+        });
+        if let NameSource::HeaderKey(key) = &mut recipe.name_source {
+            ui.horizontal(|ui| {
+                ui.label(tr!("import-header-key"));
+                ui.text_edit_singleline(key);
+            });
         }
     });
-    if let NameSource::HeaderKey(key) = &mut recipe.name_source {
-        ui.horizontal(|ui| {
-            ui.label(tr!("import-header-key"));
-            ui.text_edit_singleline(key);
-        });
-    }
 }
 
 /// Libellé de la nature choisie pour une colonne.
@@ -1532,6 +1536,84 @@ mod tests {
     }
 
     // -- L'assistant entier -----------------------------------------------
+
+    #[test]
+    fn noms_de_colonnes_inactifs_avec_noms_en_premiere_ligne() {
+        let mut banc = banc(true);
+        banc.state.import_state_mut().unwrap().step = ImportStep::Header;
+        banc.state
+            .import_state_mut()
+            .unwrap()
+            .recipe
+            .has_column_header_row = true;
+        let context = contexte();
+        let mut actions = Vec::new();
+        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        let cle = texte_exact(&peints, &tr!("import-header-name-key")).centre;
+        cliquer(&context, cle, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        assert_eq!(
+            banc.state.import_state().unwrap().recipe.name_source,
+            stokesforge_import::NameSource::Filename,
+            "la section désactivée doit ignorer les clics"
+        );
+
+        let case = texte_exact(&peints, &tr!("import-header-names-first-line")).centre;
+        cliquer(&context, case, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        assert!(
+            !banc
+                .state
+                .import_state()
+                .unwrap()
+                .recipe
+                .has_column_header_row
+        );
+        let actifs = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        assert_ne!(
+            texte_exact(&peints, &tr!("import-column-names")).couleur,
+            texte_exact(&actifs, &tr!("import-column-names")).couleur,
+            "le titre doit refléter le grisage"
+        );
+        let cle = texte_exact(&actifs, &tr!("import-header-name-key")).centre;
+        cliquer(&context, cle, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        assert_eq!(
+            banc.state.import_state().unwrap().recipe.name_source,
+            stokesforge_import::NameSource::HeaderKey(String::new()),
+            "décocher réactive la section"
+        );
+        banc.state.import_state_mut().unwrap().recipe.name_source =
+            stokesforge_import::NameSource::HeaderKey("TITLE".into());
+        let actifs = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        let case = texte_exact(&actifs, &tr!("import-header-names-first-line")).centre;
+        cliquer(&context, case, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        let grises = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        let champ = texte_exact(&grises, "TITLE").centre;
+        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        peindre_assistant(
+            &context,
+            &mut banc.state,
+            &mut actions,
+            vec![egui::Event::Text("modification".into())],
+        );
+        let fichier = texte_exact(&grises, &tr!("import-header-name-file")).centre;
+        cliquer(&context, fichier, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        assert_eq!(
+            banc.state.import_state().unwrap().recipe.name_source,
+            stokesforge_import::NameSource::HeaderKey("TITLE".into()),
+            "le champ et les deux choix restent inactifs, sans perdre la clé"
+        );
+    }
 
     /// Issue #6 : chaque étape de l'assistant se peint sans paniquer, montre
     /// son titre en surbrillance (les autres en retrait), **son** contenu et

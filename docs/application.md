@@ -272,7 +272,10 @@ modèle tel quel. Les octets des fichiers sont lus une fois (cache par chemin,
 `ImportState::bytes`) ; chaque fichier montre avant l'import ses lignes lues ou
 son erreur. L'en-tête est un seul réglage (`ImportRecipe::unify_header` ramène
 `HeaderSkip::Lines` au découpage structuré) ; les rôles de colonne choisis à
-l'étape 4 vivent dans la recette (`column_roles`). Un dépôt de fichiers pendant
+l'étape 4 vivent dans la recette (`column_roles`). La section *Column names*
+est grisée et inactive quand *Names in first line* est coché : les noms
+viennent alors de cette ligne. Sinon, les choix *Filename* et *Header key*
+sont actifs ; leurs valeurs sont conservées pendant le grisage. Un dépôt de fichiers pendant
 que l'assistant est ouvert les ajoute à sa liste. *Finish* lance
 `Action::StartImport` : l'analyse des fichiers tourne sur un fil de fond (avec
 progression « Import en cours… k/n », `AppState::poll_import` appelé à chaque
