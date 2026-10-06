@@ -14,9 +14,12 @@
 //! boîte (quatre coins, quatre milieux de côté) ; celles d'une ligne ou d'une
 //! flèche, ses deux extrémités. Elles sont testées **avant** l'objet : un
 //! coin de boîte d'ellipse n'est pas sur le tracé.
+//! Un clic insère une taille par défaut en pixels de figure (#153) ; Maj
+//! contraint les poignées au ratio initial, sans modifier le tracé libre.
+//! Ces gestes passent par la même vue dans les deux types de fenêtre.
 
 use egui::{Color32, Painter, PointerButton, Pos2, Rect, Response, Shape, Stroke, StrokeKind};
-use stokesforge_plot::{AxisScale, PlotSpec, SeriesAxis, ShapeRef, ShapeSpec};
+use stokesforge_plot::{AxisScale, PlotSpec, SeriesAxis, ShapeKind, ShapeRef, ShapeSpec};
 use stokesforge_render::shapes::DrawnShape;
 use stokesforge_render::{PanelTransform, PlotComponent};
 
@@ -94,6 +97,85 @@ pub(crate) fn handles(drawn: &DrawnShape) -> Vec<(Handle, Pos2)> {
         }
     }
     out
+}
+
+/// Taille dans le repère de la figure, indépendante des unités des axes.
+fn default_extent(kind: ShapeKind) -> egui::Vec2 {
+    match kind {
+        ShapeKind::Rectangle => egui::vec2(48.0, 48.0),
+        ShapeKind::Ellipse => egui::vec2(64.0, 40.0),
+        ShapeKind::Line | ShapeKind::Arrow => egui::vec2(80.0, 0.0),
+    }
+}
+
+/// Maj conserve les proportions **visuelles du début du geste**, même sur
+/// des axes logarithmiques. Un côté garde son côté opposé et le centre de
+/// l'autre dimension ; un coin garde le coin opposé. Une extrémité de ligne
+/// reste sur sa direction initiale (y compris horizontale ou verticale).
+fn resized_points(start: (Pos2, Pos2), handle: Handle, current: Pos2, shift: bool) -> (Pos2, Pos2) {
+    if let Handle::Endpoint(endpoint) = handle {
+        let (fixed, moving) = if endpoint == 1 {
+            (start.1, start.0)
+        } else {
+            start
+        };
+        let direction = moving - fixed;
+        let at = if shift && direction.length_sq() > 0.0 {
+            fixed + direction * ((current - fixed).dot(direction) / direction.length_sq())
+        } else {
+            current
+        };
+        return if endpoint == 1 {
+            (at, fixed)
+        } else {
+            (fixed, at)
+        };
+    }
+    let Handle::Box(hx, hy) = handle else {
+        unreachable!()
+    };
+    let rect = Rect::from_two_pos(start.0, start.1);
+    let (mut left, mut right, mut top, mut bottom) =
+        (rect.left(), rect.right(), rect.top(), rect.bottom());
+    match hx {
+        -1 => left = current.x,
+        1 => right = current.x,
+        _ => {}
+    }
+    match hy {
+        -1 => top = current.y,
+        1 => bottom = current.y,
+        _ => {}
+    }
+    if shift && rect.width() > 0.0 && rect.height() > 0.0 {
+        let ratio = rect.width() / rect.height();
+        if hx == 0 {
+            let half = (bottom - top).abs() * ratio / 2.0;
+            left = rect.center().x - half;
+            right = rect.center().x + half;
+        } else if hy == 0 {
+            let half = (right - left).abs() / ratio / 2.0;
+            top = rect.center().y - half;
+            bottom = rect.center().y + half;
+        } else {
+            let width = right - left;
+            let height = bottom - top;
+            let scale = (width.abs() / rect.width()).max(height.abs() / rect.height());
+            let width = (if width < 0.0 { -1.0 } else { 1.0 }) * rect.width() * scale;
+            let height = (if height < 0.0 { -1.0 } else { 1.0 }) * rect.height() * scale;
+            if hx == -1 {
+                left = right - width;
+            } else {
+                right = left + width;
+            }
+            if hy == -1 {
+                top = bottom - height;
+            } else {
+                bottom = top + height;
+            }
+        }
+    }
+    (Pos2::new(left, top), Pos2::new(right, bottom))
 }
 
 impl GraphView {
@@ -229,6 +311,38 @@ impl GraphView {
         let Some(kind) = self.tool.shape_kind() else {
             return;
         };
+        // Egui appelle aussi « clic » les petits glissers. Leur garde-fou
+        // de 4 px reste inchangé : seule une pression quasi immobile (1 px
+        // de tolérance écran) insère la taille par défaut.
+        if response.clicked_by(PointerButton::Primary) {
+            let drag = self.shape_drag.take();
+            let current = response
+                .interact_pointer_pos()
+                .and_then(|pos| self.figure_position(pos));
+            if let (Some(drag), Some(current)) = (drag, current) {
+                let scale = self.display_scale().unwrap_or(1.0);
+                if (current - drag.press).length() * scale <= 1.0 {
+                    if let Some(shape) = self.moved_shape(
+                        drag.target,
+                        &drag.original,
+                        drag.press,
+                        drag.press + default_extent(kind),
+                    ) {
+                        self.set_shape_preview(Some((drag.target, shape.clone())));
+                        self.events.push(GraphEvent::ShapeChanged {
+                            target: drag.target,
+                            shape,
+                        });
+                        self.hold_preview();
+                        self.select_shape(Some(drag.target));
+                        self.tool = GraphTool::Pointer;
+                        return;
+                    }
+                }
+            }
+            self.set_shape_preview(None);
+            return;
+        }
         if response.drag_stopped_by(PointerButton::Primary) {
             let Some(drag) = self.shape_drag.take() else {
                 return;
@@ -244,7 +358,11 @@ impl GraphView {
             }
             return;
         }
-        if !response.dragged_by(PointerButton::Primary) {
+        let primary_down = response.is_pointer_button_down_on()
+            && response
+                .ctx
+                .input(|input| input.pointer.button_down(PointerButton::Primary));
+        if !response.dragged_by(PointerButton::Primary) && !primary_down {
             return;
         }
         let Some(pos) = response.interact_pointer_pos() else {
@@ -371,29 +489,12 @@ impl GraphView {
                 let delta = current - drag.press;
                 (drag.start.0 + delta, drag.start.1 + delta)
             }
-            DragMode::Resize(Handle::Endpoint(1)) => (current, drag.start.1),
-            DragMode::Resize(Handle::Endpoint(_)) => (drag.start.0, current),
-            DragMode::Resize(Handle::Box(hx, hy)) => {
-                let (mut left, mut right) = (
-                    drag.start.0.x.min(drag.start.1.x),
-                    drag.start.0.x.max(drag.start.1.x),
-                );
-                let (mut top, mut bottom) = (
-                    drag.start.0.y.min(drag.start.1.y),
-                    drag.start.0.y.max(drag.start.1.y),
-                );
-                match hx {
-                    -1 => left = current.x,
-                    1 => right = current.x,
-                    _ => {}
-                }
-                match hy {
-                    -1 => top = current.y,
-                    1 => bottom = current.y,
-                    _ => {}
-                }
-                (Pos2::new(left, top), Pos2::new(right, bottom))
-            }
+            DragMode::Resize(handle) => resized_points(
+                drag.start,
+                handle,
+                current,
+                response.ctx.input(|input| input.modifiers.shift),
+            ),
         };
         if let Some(shape) = self.moved_shape(drag.target, &drag.original, a, b) {
             self.set_shape_preview(Some((drag.target, shape)));
@@ -454,5 +555,73 @@ mod tests {
         assert_eq!(at(Handle::Box(1, 1)), Some(Pos2::new(50.0, 60.0)));
         assert_eq!(at(Handle::Box(0, -1)), Some(Pos2::new(30.0, 20.0)));
         assert_eq!(handles(&drawn(ShapeKind::Arrow)).len(), 2);
+    }
+    #[test]
+    fn maj_conserve_le_ratio_initial_sur_les_huit_poignees() {
+        let start = (Pos2::new(10.0, 20.0), Pos2::new(90.0, 60.0));
+        for hx in [-1, 0, 1] {
+            for hy in [-1, 0, 1] {
+                if hx == 0 && hy == 0 {
+                    continue;
+                }
+                // Agrandir, rétrécir, franchir le point d'appui et tomber
+                // exactement sur sa verticale : aucun ratio infini.
+                for at in [
+                    Pos2::new(-30.0, -40.0),
+                    Pos2::new(40.0, 35.0),
+                    Pos2::new(130.0, 110.0),
+                    Pos2::new(90.0, 110.0),
+                ] {
+                    let handle = Handle::Box(hx, hy);
+                    let (a, b) = resized_points(start, handle, at, true);
+                    assert!(((b.x - a.x).abs() - 2.0 * (b.y - a.y).abs()).abs() < 1e-4);
+                    if hx == 0 {
+                        assert_eq!((a.x + b.x) / 2.0, 50.0);
+                    } else if hx == -1 {
+                        assert_eq!(b.x, 90.0);
+                    } else {
+                        assert_eq!(a.x, 10.0);
+                    }
+                    if hy == 0 {
+                        assert_eq!((a.y + b.y) / 2.0, 40.0);
+                    } else if hy == -1 {
+                        assert_eq!(b.y, 60.0);
+                    } else {
+                        assert_eq!(a.y, 20.0);
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            resized_points(start, Handle::Box(1, 1), Pos2::new(130.0, 110.0), false),
+            (start.0, Pos2::new(130.0, 110.0))
+        );
+    }
+
+    #[test]
+    fn maj_conserve_la_direction_des_lignes_et_supporte_les_objets_plats() {
+        for end in [
+            Pos2::new(80.0, 40.0),
+            Pos2::new(80.0, 0.0),
+            Pos2::new(0.0, 40.0),
+        ] {
+            let start = (Pos2::ZERO, end);
+            for endpoint in [1, 2] {
+                let (a, b) = resized_points(
+                    start,
+                    Handle::Endpoint(endpoint),
+                    Pos2::new(120.0, 95.0),
+                    true,
+                );
+                let delta = b - a;
+                assert!((delta.x * end.y - delta.y * end.x).abs() < 1e-3);
+            }
+        }
+        let flat = (Pos2::ZERO, Pos2::new(80.0, 0.0));
+        let current = Pos2::new(100.0, 30.0);
+        assert_eq!(
+            resized_points(flat, Handle::Box(1, 1), current, true),
+            (Pos2::ZERO, current)
+        );
     }
 }

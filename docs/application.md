@@ -1218,10 +1218,19 @@ enregistrées sont publiées chaque image dans la mémoire d'egui
 dans une fenêtre détachée.
 
 **Objets graphiques** (issue #76) : quatre outils de la barre « Outils »
-(`GraphTool::Rectangle`, `Ellipse`, `Line`, `Arrow`) ; glisser trace l'objet
-(aperçu dans la vue), le relâchement rend la main à l'outil Pointeur et le
-sélectionne. Avec le Pointeur : un clic sélectionne (contour et poignées),
-glisser le corps déplace, glisser une poignée redimensionne, Suppr retire. Menu
+(`GraphTool::Rectangle`, `Ellipse`, `Line`, `Arrow`) ; un clic insère une
+forme de taille par défaut (#153) : rectangle carré de 48 × 48 px, ellipse de
+64 × 40 px, ligne ou flèche horizontale de 80 px, en pixels de figure à partir
+du point cliqué. Glisser trace librement l'objet (aperçu dans la vue) ; le
+clic ou relâchement rend la main à l'outil Pointeur et sélectionne l'objet.
+Avec le Pointeur : un clic sélectionne (contour et poignées),
+glisser le corps déplace, glisser une poignée redimensionne, Suppr retire.
+Maintenir Maj pendant le redimensionnement conserve les proportions à l'écran
+au début du geste : le coin opposé reste fixe, une poignée de côté conserve
+le côté opposé et le centre de l'autre dimension. Une ligne ou flèche garde
+sa direction initiale. Sans Maj, les dimensions restent libres ; une forme
+initialement plate reste libre faute de rapport largeur/hauteur défini.
+Ces gestes sont communs aux graphes flottants et détachés. Menu
 « Graph » et clic droit sur l'objet : « Bring to Front », « Send to Back »,
 « Delete Object » (`graph_window::shape_order_buttons`). Chaque geste validé est **une**
 `Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec` ou `EditPlotSpec`. La

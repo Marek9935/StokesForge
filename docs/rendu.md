@@ -539,7 +539,12 @@ dans la zone de tracé, sous les textes libres. Côté écran, `GraphView`
 (`shape_tools.rs`) porte l'aperçu (`set_shape_preview`, même mécanisme que les
 textes), la sélection, les huit poignées d'un rectangle ou d'une ellipse (deux
 extrémités pour une ligne), les outils de tracé (`GraphTool::Rectangle`…) et
-le signal unique `GraphEvent::ShapeChanged` au relâchement. Un déplacement sur
+le signal unique `GraphEvent::ShapeChanged` au relâchement. Le clic insère une
+forme de taille par défaut en pixels de figure ; Maj contraint le
+redimensionnement au rapport des dimensions projetées au début du geste,
+y compris sur des axes logarithmiques (#153, `shape_tools::resized_points`).
+L'aperçu est converti vers les coordonnées de données avant validation :
+l'export retrouve la même géométrie via le pipeline partagé. Un déplacement sur
 axes linéaires se fait **en données** (les points tracés sont arrondis au
 pixel).
 

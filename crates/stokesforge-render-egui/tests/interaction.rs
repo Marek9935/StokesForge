@@ -837,3 +837,238 @@ fn la_selection_n_entre_pas_dans_le_spec_exporte() {
     assert!(view.selected_series().is_some());
     assert_eq!(view.framed_spec(spec), avant);
 }
+
+/// #153 : le clic insère un objet visible, le glisser conserve son tracé
+/// libre. Les événements sont publiés une seule fois à la validation.
+#[test]
+fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
+    use stokesforge_commands::Command;
+    use stokesforge_render_egui::{GraphEvent, GraphTool};
+    for (tool, width, height) in [
+        (GraphTool::Rectangle, 48.0, 48.0),
+        (GraphTool::Ellipse, 64.0, 40.0),
+        (GraphTool::Line, 80.0, 0.0),
+        (GraphTool::Arrow, 80.0, 0.0),
+    ] {
+        let (session, graph) = banc();
+        let handle = session.handle();
+        let snapshot = handle.snapshot().unwrap();
+        let context = contexte();
+        let mut view = GraphView::new();
+        image(&context, &mut view, &snapshot, graph, vec![]);
+        view.set_tool(tool);
+        let at = Pos2::new(350.0, 300.0);
+        image(
+            &context,
+            &mut view,
+            &snapshot,
+            graph,
+            vec![
+                pointer_moved(at),
+                pointer_button(at, PointerButton::Primary, true),
+            ],
+        );
+        assert!(view.take_events().is_empty());
+        image(
+            &context,
+            &mut view,
+            &snapshot,
+            graph,
+            vec![pointer_button(at, PointerButton::Primary, false)],
+        );
+        let events = view.take_events();
+        assert_eq!(events.len(), 1);
+        let GraphEvent::ShapeChanged { target, shape } = &events[0] else {
+            panic!("insertion")
+        };
+        assert_eq!(view.tool(), GraphTool::Pointer);
+        let stokesforge_core::node::NodeKind::Graph { spec, .. } =
+            snapshot.tree.node(graph).unwrap().kind()
+        else {
+            panic!("graphe")
+        };
+        let mut updated = spec.clone();
+        assert!(target.set(&mut updated, shape.clone()));
+        handle
+            .execute(Command::SetPlotSpec {
+                graph,
+                spec: updated,
+            })
+            .unwrap();
+        image(
+            &context,
+            &mut view,
+            &handle.snapshot().unwrap(),
+            graph,
+            vec![],
+        );
+        let drawn = view.drawn_shape(*target).unwrap();
+        assert!(((drawn.p2.0 - drawn.p1.0).abs() - width).abs() <= 1.0);
+        assert!(((drawn.p2.1 - drawn.p1.1).abs() - height).abs() <= 1.0);
+        handle.undo().unwrap();
+        assert_eq!(
+            handle.snapshot().unwrap().tree.node(graph).unwrap().kind(),
+            snapshot.tree.node(graph).unwrap().kind()
+        );
+        handle.redo().unwrap();
+        image(
+            &context,
+            &mut view,
+            &handle.snapshot().unwrap(),
+            graph,
+            vec![],
+        );
+        assert!(view.drawn_shape(*target).is_some());
+    }
+}
+
+/// Éprouve le câblage egui de Maj et son changement pendant le geste ;
+/// le ratio est celui d'une forme non carrée au départ, jamais celui du défaut.
+#[test]
+fn maj_contraint_le_redimensionnement_et_se_relache_pendant_le_geste() {
+    use stokesforge_commands::Command;
+    use stokesforge_plot::{ShapeKind, ShapeRef, ShapeSpec};
+    use stokesforge_render_egui::GraphEvent;
+    let (session, graph) = banc();
+    let handle = session.handle();
+    let snapshot = handle.snapshot().unwrap();
+    let stokesforge_core::node::NodeKind::Graph { spec, .. } =
+        snapshot.tree.node(graph).unwrap().kind()
+    else {
+        panic!("graphe")
+    };
+    let mut spec = spec.clone();
+    spec.panels.get_mut(0).unwrap().shapes.push(ShapeSpec::new(
+        ShapeKind::Rectangle,
+        30.0,
+        40.0,
+        55.0,
+        65.0,
+    ));
+    handle
+        .execute(Command::SetPlotSpec { graph, spec })
+        .unwrap();
+    let snapshot = handle.snapshot().unwrap();
+    let context = contexte();
+    let mut view = GraphView::new();
+    let target = ShapeRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+    view.select_shape(Some(target));
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let drawn = *view.drawn_shape(target).unwrap();
+    let ratio = (drawn.p2.0 - drawn.p1.0).abs() / (drawn.p2.1 - drawn.p1.1).abs();
+    assert!(
+        (ratio - 1.0).abs() > 0.1,
+        "forme initiale non carrée à l'écran"
+    );
+    let scale = view.display_scale().unwrap();
+    let origin = view.display_rect().unwrap().min;
+    let at = origin
+        + Vec2::new(
+            drawn.p1.0.max(drawn.p2.0) as f32,
+            drawn.p1.1.max(drawn.p2.1) as f32,
+        ) * scale;
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![
+            pointer_moved(at),
+            pointer_button(at, PointerButton::Primary, true),
+        ],
+    );
+    let end = at + Vec2::new(90.0, 15.0);
+    let paint = |view: &mut GraphView, shift| {
+        let input = egui::RawInput {
+            events: vec![
+                Event::ModifiersChanged(egui::Modifiers {
+                    shift,
+                    ..Default::default()
+                }),
+                pointer_moved(end),
+            ],
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, |ui| {
+            view.paint(ui, RECT, &snapshot, graph).unwrap();
+        });
+        output.textures_delta.clear();
+    };
+    paint(&mut view, true);
+    assert!(view.take_events().is_empty());
+    // L'aperçu est tracé à l'image suivante.
+    paint(&mut view, true);
+    let resized = view.drawn_shape(target).unwrap();
+    let constrained = (resized.p2.0 - resized.p1.0).abs() / (resized.p2.1 - resized.p1.1).abs();
+    assert!(
+        (ratio - constrained).abs() < 0.03,
+        "{ratio} != {constrained}"
+    );
+    paint(&mut view, false);
+    paint(&mut view, false);
+    let resized = view.drawn_shape(target).unwrap();
+    let free = (resized.p2.0 - resized.p1.0).abs() / (resized.p2.1 - resized.p1.1).abs();
+    assert!((ratio - free).abs() > 0.1);
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![pointer_button(end, PointerButton::Primary, false)],
+    );
+    assert!(
+        matches!(view.take_events().as_slice(), [GraphEvent::ShapeChanged { target: changed, .. }] if *changed == target)
+    );
+}
+
+#[test]
+fn glisser_une_forme_garde_le_trace_libre() {
+    use stokesforge_render_egui::{GraphEvent, GraphTool};
+    let (session, graph) = banc();
+    let snapshot = session.handle().snapshot().unwrap();
+    let context = contexte();
+    let mut view = GraphView::new();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    view.set_tool(GraphTool::Rectangle);
+    let start = Pos2::new(300.0, 250.0);
+    let end = Pos2::new(420.0, 280.0);
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![
+            pointer_moved(start),
+            pointer_button(start, PointerButton::Primary, true),
+        ],
+    );
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![pointer_moved(end)],
+    );
+    assert!(view.take_events().is_empty());
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let (target, _) = view.shape_preview().unwrap();
+    let drawn = view.drawn_shape(*target).unwrap();
+    let scale = view.display_scale().unwrap() as f64;
+    assert!(((drawn.p2.0 - drawn.p1.0).abs() * scale - 120.0).abs() < 2.0);
+    assert!(((drawn.p2.1 - drawn.p1.1).abs() * scale - 30.0).abs() < 2.0);
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![pointer_button(end, PointerButton::Primary, false)],
+    );
+    assert!(matches!(
+        view.take_events().as_slice(),
+        [GraphEvent::ShapeChanged { .. }]
+    ));
+}

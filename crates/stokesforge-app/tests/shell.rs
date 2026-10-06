@@ -8101,3 +8101,45 @@ fn un_refus_du_presse_papiers_est_dit_en_phrase() {
         stokesforge_app::tr!("error-clipboard-backend", detail = "selection refused")
     );
 }
+
+/// #153 : un redimensionnement passe par la même action que l'insertion ;
+/// un seul annuler/rétablir restaure les dimensions et tout le style.
+#[test]
+fn le_redimensionnement_d_une_forme_est_annulable_en_un_pas() {
+    use stokesforge_plot::{ShapeKind, ShapeRef, ShapeSpec};
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let target = ShapeRef {
+        row: 0,
+        column: 0,
+        index: 0,
+    };
+    for kind in [
+        ShapeKind::Rectangle,
+        ShapeKind::Ellipse,
+        ShapeKind::Line,
+        ShapeKind::Arrow,
+    ] {
+        let original = ShapeSpec::new(kind, 1.0, 2.0, 5.0, 4.0);
+        state.dispatch(Action::SetShape {
+            graph,
+            target,
+            shape: Box::new(original.clone()),
+        });
+        let resized = ShapeSpec {
+            x2: 9.0,
+            y2: 6.0,
+            ..original.clone()
+        };
+        state.dispatch(Action::SetShape {
+            graph,
+            target,
+            shape: Box::new(resized.clone()),
+        });
+        assert_eq!(target.get(&graph_spec(&state, graph)), Some(&resized));
+        state.dispatch(Action::Undo);
+        assert_eq!(target.get(&graph_spec(&state, graph)), Some(&original));
+        state.dispatch(Action::Redo);
+        assert_eq!(target.get(&graph_spec(&state, graph)), Some(&resized));
+    }
+}
