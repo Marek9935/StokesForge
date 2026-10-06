@@ -31,6 +31,17 @@ menu-workbook = Workbook
 menu-graph = Graph
 menu-view = View
 menu-window = Window
+menu-new = New
+menu-import = Import
+menu-properties = Properties
+menu-text = Text
+menu-objects = Objects
+menu-export = Export
+menu-panels = Panels
+menu-toolbars = Toolbars
+menu-sheet = Sheet
+menu-columns = Columns
+menu-order = Order
 menu-language = Language
 
 action-add-workbook = Add Workbook
@@ -174,6 +185,7 @@ import-option-apostrophe = Apostrophe
 import-option-other = Other
 
 # Column types, shared by the "Read As" and "Type" columns.
+column-type = Type
 column-type-numeric = Numeric
 column-type-text = Text
 column-type-mixed = Mixed

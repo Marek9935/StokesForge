@@ -108,3 +108,10 @@ titre vertical centré dans l’espace sous les boutons. Attaché : Détacher et
 détaché : Rattacher uniquement, sans décoration système. Une fermeture OS
 rattache. Réutiliser les contenus de chaque surface et les lectures/requêtes
 de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
+
+- Menus (#114) : regrouper les longues listes par thèmes, mêmes sous-menus et
+  clés entre barre de menus et clic droit ; réutiliser les peintures partagées
+  (`object_menu`, `object_node_menu`, `object_manager_filters_menu`,
+  `column_options_menu`, `graph_properties_menu`). Les cases se limitent aux
+  vraies bascules d'affichage et laissent les menus ouverts ; une action ou
+  un choix exclusif ferme la chaîne. Ne pas créer de voie de mutation parallèle.

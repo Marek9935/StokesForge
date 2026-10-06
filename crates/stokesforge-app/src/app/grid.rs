@@ -10,7 +10,7 @@
 //! feuille, menu Classeur) vit dans `workbook.rs`. Les autres modules ne lisent
 //! d'ici que [`keyboard_focus_outside_grid`] (`app.rs` pour les raccourcis
 //! globaux, `dialogs.rs`, `graph_window.rs`) et la visibilité de la ligne
-//! « Metadata » (`menus.rs`) ; [`role_label`] sert aussi au test du classeur
+//! « Metadata » (`workbook.rs`) ; [`role_label`] sert aussi au test du classeur
 //! détaché (`window_detach.rs`). `paint_drag_handle_icon`
 //! (pictogramme de la zone de prise) n'a pas d'autre utilisateur que ce module.
 //!
@@ -498,7 +498,6 @@ fn column_header_widget(
     sheet: NodeId,
     column: NodeId,
     column_index: usize,
-    column_type: ColumnType,
 ) {
     ui.vertical(|ui| {
         // Sans ceci, l'espacement par défaut d'egui entre enfants d'un
@@ -507,7 +506,7 @@ fn column_header_widget(
         // pas vraiment la case, elle y flotte.
         ui.spacing_mut().item_spacing.y = 0.0;
         let is_column_selected =
-            column_letter_widget(ui, state, actions, sheet, column, column_index, column_type);
+            column_letter_widget(ui, state, actions, sheet, column, column_index);
         header_field_widget(
             ui,
             state,
@@ -562,7 +561,6 @@ fn column_letter_widget(
     sheet: NodeId,
     column: NodeId,
     column_index: usize,
-    column_type: ColumnType,
 ) -> bool {
     let letter = column_letter(column_index);
     let is_column_selected = state.is_column_selected(sheet, column);
@@ -633,15 +631,7 @@ fn column_letter_widget(
             .filter(|columns| columns.contains(&column))
             .unwrap_or_else(|| vec![column]);
         response.context_menu(|ui| {
-            column_properties_menu(
-                ui,
-                state,
-                actions,
-                sheet,
-                &target_columns,
-                column_type,
-                role,
-            );
+            column_properties_menu(ui, state, actions, sheet, &target_columns);
         });
     });
     is_column_selected
@@ -654,8 +644,6 @@ fn column_properties_menu(
     actions: &mut Vec<Action>,
     sheet: NodeId,
     target_columns: &[NodeId],
-    column_type: ColumnType,
-    role: ColumnRole,
 ) {
     // Le bloc d'édition d'abord (les gestes du quotidien, les
     // mêmes que sur une cellule ou un champ d'en-tête), puis ce
@@ -667,80 +655,119 @@ fn column_properties_menu(
         grid_edit_menu(ui, state, actions, sheet, &menu);
         ui.separator();
     }
-    // Choix manuel du type de colonne — conversion destructrice
-    // assumée (`Action::SetColumnType`/`Command::
-    // SetColumnType`, `stokesforge-core::Column::set_column_type`) :
-    // texte non numérique effacé en passant en `Numeric`, comme
-    // pour toute saisie directe dans une colonne numérique.
-    for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
-        if ui
-            .selectable_label(column_type == candidate, type_label(candidate))
-            .clicked()
-        {
-            if candidate != column_type {
-                for &target in target_columns {
-                    actions.push(Action::SetColumnType {
-                        column: target,
-                        column_type: candidate,
-                    });
-                }
-            }
-            ui.close();
-        }
+    column_options_menu(ui, state, actions, sheet, target_columns);
+}
+
+/// Ajout disponible même sans sélection, commun au classeur et au vide de grille.
+fn add_column_entry(ui: &mut egui::Ui, sheet: NodeId, actions: &mut Vec<Action>) {
+    if ui.button(tr!("workbook-column-add")).clicked() {
+        actions.push(Action::AddColumn { sheet });
+        ui.close();
     }
-    // Rôle de tracé, dans un sous-menu séparé : encore sans
-    // effet sur la résolution de série (voir `role_suffix`),
-    // mais un seul et même endroit pour tout ce qui décrit une
-    // colonne à l'utilisateur.
-    ui.menu_button(tr!("column-role"), |ui| {
-        for candidate in [
-            ColumnRole::X,
-            ColumnRole::Y,
-            ColumnRole::Z,
-            ColumnRole::XError,
-            ColumnRole::YError,
-            ColumnRole::Label,
-            ColumnRole::None,
-        ] {
-            if ui
-                .selectable_label(role == candidate, role_label(candidate))
-                .clicked()
-            {
-                if candidate != role {
-                    for &target in target_columns {
-                        actions.push(Action::SetColumnRole {
-                            column: target,
-                            role: candidate,
-                        });
+}
+
+/// Options des colonnes sélectionnées : même cible et mêmes actions dans
+/// Classeur et au clic droit. Une sélection hétérogène ne coche aucun choix.
+pub(super) fn column_options_menu(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    target_columns: &[NodeId],
+) {
+    let columns: Vec<_> = target_columns
+        .iter()
+        .filter_map(|id| state.tree().node(*id)?.as_column())
+        .collect();
+    let first = columns.first();
+    let column_type = first
+        .map(|column| column.column_type())
+        .filter(|kind| columns.iter().all(|column| column.column_type() == *kind));
+    let role = first
+        .map(|column| column.meta().role)
+        .filter(|role| columns.iter().all(|column| column.meta().role == *role));
+    ui.menu_button(tr!("menu-columns"), |ui| {
+        add_column_entry(ui, sheet, actions);
+        ui.separator();
+        ui.add_enabled_ui(!target_columns.is_empty(), |ui| {
+            // Choix manuel du type de colonne — conversion destructrice
+            // assumée (`Action::SetColumnType`/`Command::
+            // SetColumnType`, `stokesforge-core::Column::set_column_type`) :
+            // texte non numérique effacé en passant en `Numeric`, comme
+            // pour toute saisie directe dans une colonne numérique.
+            ui.menu_button(tr!("column-type"), |ui| {
+                for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
+                    if ui
+                        .selectable_label(column_type == Some(candidate), type_label(candidate))
+                        .clicked()
+                    {
+                        if Some(candidate) != column_type {
+                            for &target in target_columns {
+                                actions.push(Action::SetColumnType {
+                                    column: target,
+                                    column_type: candidate,
+                                });
+                            }
+                        }
+                        ui.close();
                     }
                 }
-                ui.close();
-            }
-        }
+            });
+            // Le rôle décrit les colonnes, et reste partagé avec le
+            // menu Classeur comme le type.
+            ui.menu_button(tr!("column-role"), |ui| {
+                for candidate in [
+                    ColumnRole::X,
+                    ColumnRole::Y,
+                    ColumnRole::Z,
+                    ColumnRole::XError,
+                    ColumnRole::YError,
+                    ColumnRole::Label,
+                    ColumnRole::None,
+                ] {
+                    if ui
+                        .selectable_label(role == Some(candidate), role_label(candidate))
+                        .clicked()
+                    {
+                        if Some(candidate) != role {
+                            for &target in target_columns {
+                                actions.push(Action::SetColumnRole {
+                                    column: target,
+                                    role: candidate,
+                                });
+                            }
+                        }
+                        ui.close();
+                    }
+                }
+            });
+        });
     });
-    // Créer un graphe depuis les colonnes visées — chantier
-    // « tracer depuis un classeur ». La règle d'appariement X/Y
-    // (chaque Y prend la colonne X la plus proche à sa gauche)
-    // vit dans `AppState::plot_columns`/`series_from_columns` ;
-    // ce menu ne fait que choisir le type de tracé et pousser
-    // l'action sur `target_columns`, comme les deux sous-menus
-    // ci-dessus.
-    ui.menu_button(tr!("workbook-plot-menu"), |ui| {
-        for (label, plot_type) in [
-            (tr!("plot-type-line"), PlotType::Line),
-            (tr!("plot-type-scatter"), PlotType::Scatter),
-            (tr!("plot-type-line-symbol"), PlotType::LineScatter),
-            (tr!("plot-type-bar"), PlotType::Bar),
-        ] {
-            if ui.button(label).clicked() {
-                actions.push(Action::PlotColumns {
-                    sheet,
-                    columns: target_columns.to_vec(),
-                    plot_type,
-                });
-                ui.close();
+    ui.add_enabled_ui(!target_columns.is_empty(), |ui| {
+        // Créer un graphe depuis les colonnes visées — chantier
+        // « tracer depuis un classeur ». La règle d'appariement X/Y
+        // (chaque Y prend la colonne X la plus proche à sa gauche)
+        // vit dans `AppState::plot_columns`/`series_from_columns` ;
+        // ce menu ne fait que choisir le type de tracé et pousser
+        // l'action sur `target_columns`, comme les deux sous-menus
+        // ci-dessus.
+        ui.menu_button(tr!("workbook-plot-menu"), |ui| {
+            for (label, plot_type) in [
+                (tr!("plot-type-line"), PlotType::Line),
+                (tr!("plot-type-scatter"), PlotType::Scatter),
+                (tr!("plot-type-line-symbol"), PlotType::LineScatter),
+                (tr!("plot-type-bar"), PlotType::Bar),
+            ] {
+                if ui.button(label).clicked() {
+                    actions.push(Action::PlotColumns {
+                        sheet,
+                        columns: target_columns.to_vec(),
+                        plot_type,
+                    });
+                    ui.close();
+                }
             }
-        }
+        });
     });
 }
 
@@ -1234,10 +1261,9 @@ pub(super) fn grid_contents(
             ui.weak(tr!("workbook-grid-no-columns"));
         });
         empty.response.context_menu(|ui| {
-            if ui.button(tr!("workbook-column-add")).clicked() {
-                actions.push(Action::AddColumn { sheet });
-                ui.close();
-            }
+            ui.menu_button(tr!("menu-columns"), |ui| {
+                add_column_entry(ui, sheet, actions)
+            });
         });
         return None;
     }
@@ -1351,10 +1377,10 @@ fn grid_table_header(
     header.col(|ui| {
         row_number_header_widget(ui, state, actions, sheet);
     });
-    for (index, (id, _, column_type)) in columns.iter().enumerate() {
+    for (index, (id, _, _)) in columns.iter().enumerate() {
         header.col(|ui| {
             *last_column_right = ui.max_rect().right();
-            column_header_widget(ui, state, actions, sheet, *id, index, *column_type);
+            column_header_widget(ui, state, actions, sheet, *id, index);
         });
     }
 }
@@ -1402,10 +1428,9 @@ fn grid_blank_column_target(
             egui::Sense::click(),
         );
         response.context_menu(|ui| {
-            if ui.button(tr!("workbook-column-add")).clicked() {
-                actions.push(Action::AddColumn { sheet });
-                ui.close();
-            }
+            ui.menu_button(tr!("menu-columns"), |ui| {
+                add_column_entry(ui, sheet, actions)
+            });
         });
     }
 }
@@ -3102,6 +3127,10 @@ mod tests {
         banc.state.select_column(banc.sheet, banc.columns[0]);
         banc.state
             .extend_column_selection(banc.sheet, banc.columns[1]);
+        banc.state.dispatch(Action::SetColumnType {
+            column: banc.columns[0],
+            column_type: ColumnType::Mixed,
+        });
         banc.image(Vec::new());
         let lettre = format!("B({})", role_label(ColumnRole::Y));
         banc.clic_bouton(&lettre, egui::PointerButton::Secondary);
@@ -3111,8 +3140,11 @@ mod tests {
             !banc.state.is_column_selected(banc.sheet, banc.columns[2]),
             "témoin : la voisine n'est pas sélectionnée"
         );
+        assert!(banc.centre_de(&type_label(ColumnType::Numeric)).is_none());
+        banc.clic_sur(&tr!("menu-columns"));
+        banc.clic_sur(&tr!("column-type"));
         let position = banc
-            .centre_de(&type_label(ColumnType::Mixed))
+            .centre_de(&type_label(ColumnType::Numeric))
             .expect("menu du type ouvert");
         banc.image(vec![egui::Event::PointerMoved(position)]);
         for pressed in [true, false] {
@@ -3129,7 +3161,7 @@ mod tests {
             .filter_map(|action| match action {
                 Action::SetColumnType {
                     column,
-                    column_type: ColumnType::Mixed,
+                    column_type: ColumnType::Numeric,
                 } => Some(*column),
                 _ => None,
             })

@@ -340,19 +340,40 @@ fn le_menu_view_masque_et_reaffiche_chaque_panneau() {
                 paint,
             );
             let menu = paint(&ctx, Vec::new());
-            // Le menu est peint après le panneau ; son libellé homonyme est
-            // donc le dernier texte. Ne pas cliquer le titre du panneau.
-            let item = menu
-                .shapes
-                .iter()
-                .rev()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.job.text == title => {
-                        Some(text.pos + text.galley.size() / 2.0)
-                    }
-                    _ => None,
-                })
-                .expect("entrée du menu View");
+            click_at(
+                &ctx,
+                find_text_center(&menu.shapes, &tr!("menu-panels")),
+                egui::Modifiers::NONE,
+                paint,
+            );
+            let mut menu = paint(&ctx, Vec::new());
+            // Le menu est peint après le panneau : chercher sa dernière
+            // occurrence évite de cliquer le titre du panneau homonyme.
+            let last_center = |output: &egui::FullOutput, label: &str| {
+                output
+                    .shapes
+                    .iter()
+                    .rev()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.job.text == label => {
+                            Some(text.pos + text.galley.size() / 2.0)
+                        }
+                        _ => None,
+                    })
+                    .expect("entrée du menu Panneaux")
+            };
+            let item = if matches!(panel, Panel::Object) {
+                click_at(
+                    &ctx,
+                    last_center(&menu, &title),
+                    egui::Modifiers::NONE,
+                    paint,
+                );
+                menu = paint(&ctx, Vec::new());
+                last_center(&menu, &tr!("action-show-content"))
+            } else {
+                last_center(&menu, &title)
+            };
             click_at(&ctx, item, egui::Modifiers::NONE, paint);
             let visible = match panel {
                 Panel::Project => app.borrow().pm_open,

@@ -108,72 +108,74 @@ pub(super) fn object_menu(
 ) {
     let memory_key = egui::Id::new(("project_manager_gestures", rename_viewport));
     let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
-    let enabled = !ids.is_empty();
-    if ui
-        .add_enabled(
-            enabled,
-            egui::Button::new(tr!("action-rename-project-object"))
-                .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_RENAME_OBJECT)),
-        )
-        .clicked()
-    {
-        ui.ctx().data_mut(|data| {
-            let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
-            memory.rename = ids.to_vec();
-            memory.renamed.clear();
-            memory.text = None;
-            memory.focus = true;
-            data.insert_temp(memory_key, memory);
-        });
-        ui.ctx().request_repaint_of(rename_viewport);
-        if rename_viewport != ui.ctx().viewport_id() {
-            ui.ctx()
-                .send_viewport_cmd_to(rename_viewport, egui::ViewportCommand::Focus);
+    ui.menu_button(tr!("menu-selected-content"), |ui| {
+        let enabled = !ids.is_empty();
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Button::new(tr!("action-rename-project-object"))
+                    .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_RENAME_OBJECT)),
+            )
+            .clicked()
+        {
+            ui.ctx().data_mut(|data| {
+                let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
+                memory.rename = ids.to_vec();
+                memory.renamed.clear();
+                memory.text = None;
+                memory.focus = true;
+                data.insert_temp(memory_key, memory);
+            });
+            ui.ctx().request_repaint_of(rename_viewport);
+            if rename_viewport != ui.ctx().viewport_id() {
+                ui.ctx()
+                    .send_viewport_cmd_to(rename_viewport, egui::ViewportCommand::Focus);
+            }
+            ui.close();
         }
-        ui.close();
-    }
-    if ui
-        .add_enabled(
-            enabled,
-            egui::Button::new(tr!("action-duplicate-project-object"))
-                .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
-        )
-        .clicked()
-    {
-        actions.push(Action::DuplicateObjects(ids.to_vec()));
-        ui.close();
-    }
-    if ui
-        .add_enabled(
-            enabled,
-            egui::Button::new(tr!("action-copy")).shortcut_text(ui.ctx().format_shortcut(
-                &egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C),
-            )),
-        )
-        .clicked()
-    {
-        actions.push(Action::CopyObjects(ids.to_vec()));
-        ui.close();
-    }
-    if ui.button(tr!("action-paste")).clicked() {
-        ui.ctx().data_mut(|data| {
-            data.insert_temp(paste_key, parent);
-        });
-        ui.ctx()
-            .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-        ui.close();
-    }
-    if ui
-        .add_enabled(
-            enabled,
-            egui::Button::new(tr!("action-delete-project-object"))
-                .shortcut_text(shortcut_text_delete()),
-        )
-        .clicked()
-    {
-        actions.push(Action::DeleteObjects(ids.to_vec()));
-        ui.close();
-    }
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Button::new(tr!("action-duplicate-project-object"))
+                    .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+            )
+            .clicked()
+        {
+            actions.push(Action::DuplicateObjects(ids.to_vec()));
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Button::new(tr!("action-copy")).shortcut_text(ui.ctx().format_shortcut(
+                    &egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C),
+                )),
+            )
+            .clicked()
+        {
+            actions.push(Action::CopyObjects(ids.to_vec()));
+            ui.close();
+        }
+        if ui.button(tr!("action-paste")).clicked() {
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(paste_key, parent);
+            });
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Button::new(tr!("action-delete-project-object"))
+                    .shortcut_text(shortcut_text_delete()),
+            )
+            .clicked()
+        {
+            actions.push(Action::DeleteObjects(ids.to_vec()));
+            ui.close();
+        }
+    });
 }
 
 fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {

@@ -21,7 +21,7 @@ use crate::color_picker::{color_field, ColorUsage, PickerEnv};
 use crate::object_manager::{AxisRef, VisibilityTarget};
 use crate::state::{
     drop_payload_action, export_file_name, Action, AppState, ColumnDragPayload, PlotAxis,
-    PlotTarget, ShapeOrder,
+    PlotSettingsTab, PlotTarget, ShapeOrder,
 };
 use crate::theme;
 use crate::tr;
@@ -421,105 +421,113 @@ fn graph_context_menu(
         let text: Option<ContextText> = ui.memory(|memory| memory.data.get_temp(text_id)).flatten();
         ui.weak(target.label());
         ui.separator();
-        // Titres, légende et entrées de légende (issue #53) : modifier le
-        // texte, remettre à sa place — le pendant du double-clic et du
-        // glisser, et du menu *Graph* pour la remise à zéro générale.
-        if let Some(text) = text {
-            let editable = !matches!(text, ContextText::Title(TextTarget::Legend { .. }));
-            if editable && ui.button(tr!("action-edit-text")).clicked() {
-                match text {
-                    ContextText::Title(target) => {
-                        open_text_editor(ui.ctx(), view, tree, graph_id, target)
+        ui.menu_button(tr!("menu-text"), |ui| {
+            // Titres, légende et entrées de légende (issue #53) : modifier le
+            // texte, remettre à sa place — le pendant du double-clic et du
+            // glisser, et du menu *Graph* pour la remise à zéro générale.
+            if let Some(text) = text {
+                let editable = !matches!(text, ContextText::Title(TextTarget::Legend { .. }));
+                if editable && ui.button(tr!("action-edit-text")).clicked() {
+                    match text {
+                        ContextText::Title(target) => {
+                            open_text_editor(ui.ctx(), view, tree, graph_id, target)
+                        }
+                        ContextText::LegendEntry {
+                            row,
+                            column,
+                            series,
+                        } => open_legend_entry_editor(
+                            ui.ctx(),
+                            view,
+                            tree,
+                            graph_id,
+                            row,
+                            column,
+                            series,
+                        ),
                     }
-                    ContextText::LegendEntry {
-                        row,
-                        column,
-                        series,
-                    } => open_legend_entry_editor(
-                        ui.ctx(),
-                        view,
-                        tree,
-                        graph_id,
-                        row,
-                        column,
-                        series,
-                    ),
-                }
-                ui.close();
-            }
-            if let ContextText::Title(target) = text {
-                let moved = crate::state::current_plot_spec(tree, graph_id)
-                    .is_some_and(|spec| target.anchor(&spec).is_some());
-                if ui
-                    .add_enabled(moved, egui::Button::new(tr!("action-reset-text-position")))
-                    .on_hover_text(tr!("action-reset-text-position", "hint"))
-                    .clicked()
-                {
-                    actions.push(Action::SetTextAnchor {
-                        graph: graph_id,
-                        target,
-                        anchor: None,
-                    });
                     ui.close();
                 }
+                if let ContextText::Title(target) = text {
+                    let moved = crate::state::current_plot_spec(tree, graph_id)
+                        .is_some_and(|spec| target.anchor(&spec).is_some());
+                    if ui
+                        .add_enabled(moved, egui::Button::new(tr!("action-reset-text-position")))
+                        .on_hover_text(tr!("action-reset-text-position", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::SetTextAnchor {
+                            graph: graph_id,
+                            target,
+                            anchor: None,
+                        });
+                        ui.close();
+                    }
+                }
+                ui.separator();
             }
-            ui.separator();
-        }
-        // Textes libres (issue #35) : les mêmes gestes que la barre de menus
-        // et le clavier (double-clic, Suppr).
-        if let PlotTarget::Annotation(annotation) = target {
-            if ui.button(tr!("action-edit-text")).clicked() {
-                open_annotation_editor(ui.ctx(), view, tree, graph_id, annotation);
+            // Textes libres (issue #35) : les mêmes gestes que la barre de menus
+            // et le clavier (double-clic, Suppr).
+            if let PlotTarget::Annotation(annotation) = target {
+                if ui.button(tr!("action-edit-text")).clicked() {
+                    open_annotation_editor(ui.ctx(), view, tree, graph_id, annotation);
+                    ui.close();
+                }
+                if ui
+                    .add(
+                        egui::Button::new(tr!("action-delete-text"))
+                            .shortcut_text(shortcut_text_delete()),
+                    )
+                    .clicked()
+                {
+                    actions.push(Action::RemoveAnnotation {
+                        graph: graph_id,
+                        target: annotation,
+                    });
+                    view.clear_annotation_selection();
+                    ui.close();
+                }
+                ui.separator();
+            } else if !matches!(target, PlotTarget::Object(_))
+                && ui
+                    .add_enabled(point.is_some(), egui::Button::new(tr!("action-add-text")))
+                    .on_hover_text(tr!("action-add-text", "hint"))
+                    .on_disabled_hover_text(tr!("action-add-text", "disabled"))
+                    .clicked()
+            {
+                if let Some(point) = point {
+                    add_annotation_at(ui.ctx(), view, tree, graph_id, point);
+                }
                 ui.close();
             }
+        });
+        if let PlotTarget::Object(object) = target {
+            view.select_shape(Some(object));
+            ui.menu_button(tr!("menu-objects"), |ui| {
+                shape_order_buttons(ui, view, tree, graph_id, object, actions);
+            });
+        }
+        ui.menu_button(tr!("menu-properties"), |ui| {
             if ui
-                .add(
-                    egui::Button::new(tr!("action-delete-text"))
-                        .shortcut_text(shortcut_text_delete()),
-                )
+                .button(tr!("action-properties"))
+                .on_hover_text(tr!("action-properties", "hint"))
                 .clicked()
             {
-                actions.push(Action::RemoveAnnotation {
-                    graph: graph_id,
-                    target: annotation,
-                });
-                view.clear_annotation_selection();
+                let axis: Option<VisibilityTarget> =
+                    ui.memory(|memory| memory.data.get_temp(axis_id)).flatten();
+                actions.push(axis.map_or_else(
+                    || target.open_settings(graph_id),
+                    |target| Action::OpenObjectProperties {
+                        graph: graph_id,
+                        target,
+                    },
+                ));
                 ui.close();
             }
+
             ui.separator();
-        } else if let PlotTarget::Object(object) = target {
-            // Objets graphiques (issue #76) : les mêmes gestes que la barre
-            // de menus et le clavier (Suppr).
-            view.select_shape(Some(object));
-            shape_order_buttons(ui, view, tree, graph_id, object, actions);
-            ui.separator();
-        } else if ui
-            .add_enabled(point.is_some(), egui::Button::new(tr!("action-add-text")))
-            .on_hover_text(tr!("action-add-text", "hint"))
-            .on_disabled_hover_text(tr!("action-add-text", "disabled"))
-            .clicked()
-        {
-            if let Some(point) = point {
-                add_annotation_at(ui.ctx(), view, tree, graph_id, point);
-            }
-            ui.close();
-        }
-        if ui
-            .button(tr!("action-properties"))
-            .on_hover_text(tr!("action-properties", "hint"))
-            .clicked()
-        {
-            let axis: Option<VisibilityTarget> =
-                ui.memory(|memory| memory.data.get_temp(axis_id)).flatten();
-            actions.push(axis.map_or_else(
-                || target.open_settings(graph_id),
-                |target| Action::OpenObjectProperties {
-                    graph: graph_id,
-                    target,
-                },
-            ));
-            ui.close();
-        }
+            graph_properties_menu(ui, graph_id, actions);
+        });
         if ui
             .button(tr!("action-reset-zoom"))
             .on_hover_text(tr!("action-reset-zoom", "hint"))
@@ -528,18 +536,78 @@ fn graph_context_menu(
             view.reset_view();
             ui.close();
         }
-        if ui
-            .add(
-                egui::Button::new(tr!("action-export-graph"))
-                    .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
-            )
-            .on_hover_text(tr!("action-export-graph", "hint"))
-            .clicked()
-        {
-            request_graph_export(Some(view), tree, graph_id, actions);
+        ui.menu_button(tr!("menu-export"), |ui| {
+            if ui
+                .add(
+                    egui::Button::new(tr!("action-export-graph"))
+                        .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
+                )
+                .on_hover_text(tr!("action-export-graph", "hint"))
+                .clicked()
+            {
+                request_graph_export(Some(view), tree, graph_id, actions);
+                ui.close();
+            }
+
+            if ui
+                .button(tr!("action-copy-graph"))
+                .on_hover_text(tr!("action-copy-graph", "hint"))
+                .clicked()
+            {
+                if let Some(spec) = crate::state::current_plot_spec(tree, graph_id) {
+                    actions.push(Action::CopyGraphFigure {
+                        spec: Box::new(view.framed_spec(&spec)),
+                    });
+                }
+                ui.close();
+            }
+        });
+    });
+}
+
+/// Pages des propriétés : un seul ensemble pour Graphique et son clic droit.
+pub(super) fn graph_properties_menu(ui: &mut egui::Ui, graph: NodeId, actions: &mut Vec<Action>) {
+    for (label, hint, tab) in [
+        (
+            tr!("menu-graph-properties"),
+            tr!("menu-graph-properties", "hint"),
+            PlotSettingsTab::Graph,
+        ),
+        (
+            tr!("menu-graph-plot-area"),
+            tr!("menu-graph-plot-area", "hint"),
+            PlotSettingsTab::PlotArea,
+        ),
+        (
+            tr!("menu-graph-axes"),
+            tr!("menu-graph-axes", "hint"),
+            PlotSettingsTab::Axes,
+        ),
+        (
+            tr!("menu-graph-series"),
+            tr!("menu-graph-series", "hint"),
+            PlotSettingsTab::Series,
+        ),
+        (
+            tr!("menu-graph-legend"),
+            tr!("menu-graph-legend", "hint"),
+            PlotSettingsTab::Legend,
+        ),
+        (
+            tr!("menu-graph-theme"),
+            tr!("menu-graph-theme", "hint"),
+            PlotSettingsTab::Theme,
+        ),
+    ] {
+        if ui.button(label).on_hover_text(hint).clicked() {
+            actions.push(Action::OpenPlotSettings {
+                graph,
+                tab,
+                axis: None,
+            });
             ui.close();
         }
-    });
+    }
 }
 
 /// Signaux de la vue, éditeur sur place et Suppr — après la peinture de la
@@ -1189,6 +1257,11 @@ pub(super) mod tests {
             paint(events);
             if context_menu {
                 let output = paint(Vec::new());
+                let submenu = find_text_center(&output.shapes, &tr!("menu-properties"));
+                click_at(&context, submenu, egui::Modifiers::NONE, |_, events| {
+                    paint(events)
+                });
+                let output = paint(Vec::new());
                 let properties = find_text_center(&output.shapes, &tr!("action-properties"));
                 // Le menu doit garder le calque d'origine quand le pointeur le quitte.
                 click_at(&context, properties, egui::Modifiers::NONE, |_, events| {
@@ -1344,6 +1417,122 @@ pub(super) mod tests {
         paint(vec![egui::Event::PointerMoved(outside)], true);
         let (_, actions) = paint(vec![release(outside)], false);
         assert!(actions.is_empty(), "relâché hors du graphe, rien");
+    }
+
+    #[test]
+    fn clic_droit_sur_forme_selectionne_avant_sous_menu_et_garde_sa_cible() {
+        let mut project = Project::new("Cible du menu").unwrap();
+        let mut spec = PlotSpec::empty("Formes");
+        for (a, b) in [(0.2, 0.4), (0.6, 0.8)] {
+            spec.panels.get_mut(0).unwrap().shapes.push(ShapeSpec::new(
+                ShapeKind::Rectangle,
+                a,
+                a,
+                b,
+                b,
+            ));
+        }
+        let graph = project.add_graph(project.root(), None, spec).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+        let object = ShapeRef {
+            row: 0,
+            column: 0,
+            index: 0,
+        };
+        let other = ShapeRef { index: 1, ..object };
+        for properties in [true, false] {
+            let context = super::super::test_support::contexte();
+            context.all_styles_mut(|style| style.animation_time = 0.0);
+            let view = std::cell::RefCell::new(GraphView::new());
+            let actions = std::cell::RefCell::new(Vec::new());
+            let paint = |events| {
+                super::super::test_support::image_de(
+                    &context,
+                    egui::vec2(1200.0, 900.0),
+                    events,
+                    |ui| {
+                        graph_view_contents(
+                            ui,
+                            &mut view.borrow_mut(),
+                            state.snapshot(),
+                            graph,
+                            &mut actions.borrow_mut(),
+                        );
+                    },
+                )
+            };
+            paint(Vec::new());
+            paint(Vec::new());
+            let pos = {
+                let view = view.borrow();
+                let shape = view.drawn_shape(object).unwrap();
+                let display = view.display_rect().unwrap();
+                let scale = display.width() / DEFAULT_FIGURE_SIZE.0 as f32;
+                display.min
+                    + egui::vec2(
+                        shape.p1.0 as f32 * scale,
+                        ((shape.p1.1 + shape.p2.1) / 2.0) as f32 * scale,
+                    )
+            };
+            assert_eq!(
+                view.borrow().shape_at(pos),
+                Some(object),
+                "témoin : le clic atteint la forme"
+            );
+            view.borrow_mut().select_shape(Some(other));
+            paint(vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                paint(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            let output = paint(Vec::new());
+            assert_eq!(
+                view.borrow().selected_shape(),
+                Some(object),
+                "la sélection précède toute ouverture de sous-menu"
+            );
+            assert!(actions.borrow().is_empty());
+            let parent = if properties {
+                tr!("menu-properties")
+            } else {
+                tr!("menu-objects")
+            };
+            let pos = find_text_center(&output.shapes, &parent);
+            click_at(&context, pos, egui::Modifiers::NONE, |_, events| {
+                paint(events)
+            });
+            let output = paint(Vec::new());
+            let label = if properties {
+                tr!("action-properties")
+            } else {
+                tr!("action-bring-to-front")
+            };
+            let pos = find_text_center(&output.shapes, &label);
+            click_at(&context, pos, egui::Modifiers::NONE, |_, events| {
+                paint(events)
+            });
+            let expected = if properties {
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::PlotArea,
+                    axis: None,
+                }
+            } else {
+                Action::ReorderShape {
+                    graph,
+                    target: object,
+                    order: ShapeOrder::ToFront,
+                }
+            };
+            assert_eq!(*actions.borrow(), vec![expected]);
+            assert!(!egui::Popup::is_any_open(&context));
+        }
+        session.shutdown().unwrap();
     }
 
     /// Premier plan, arrière-plan et suppression d'un objet graphique :
