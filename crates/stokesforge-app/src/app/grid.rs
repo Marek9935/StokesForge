@@ -29,7 +29,8 @@ use crate::{theme, tr};
 
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
-    SHORTCUT_CUT, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_REDO_Y, SHORTCUT_UNDO,
+    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_REDO_Y,
+    SHORTCUT_UNDO,
 };
 
 /// Hauteur d'une ligne de la grille, en points.
@@ -1568,6 +1569,26 @@ fn grid_keyboard(
         && state.import_state().is_none()
         && focus_free
     {
+        // #143 : F2 appartient uniquement à la grille focalisée. Les autres
+        // raccourcis gardent leur secours sans focus, mais F2 doit rester
+        // disponible pour les gestionnaires. Réutiliser l'éditeur du double-clic.
+        if ui.ctx().memory(|memory| memory.focused()) == Some(focus_anchor)
+            && ui.input_mut(|input| input.consume_shortcut(&SHORTCUT_EDIT_CELL))
+        {
+            let target = state.selection(sheet).and_then(|selection| {
+                let rank = selection.full_rank_range()?.0;
+                let column = *selection.columns(state.tree(), sheet).first()?;
+                Some((column, rank))
+            });
+            if let Some((column, rank)) = target {
+                if rank < 0 {
+                    state.begin_header_edit(column, HeaderField::from_index((rank + 4) as usize));
+                } else {
+                    state.begin_edit(column, rank as usize);
+                }
+            }
+            return;
+        }
         start_grid_typing(ui, state, sheet);
         navigate_grid_selection(ui, state, actions, sheet);
         grid_clipboard_shortcuts(ui, state, actions, sheet);
@@ -2411,6 +2432,158 @@ mod tests {
     // widget focalisé les réclame par un `EventFilter` ([`GRID_KEYS`]) : sans
     // filtre, Tab faisait sortir le focus du tableau vers le reste de
     // l'interface au lieu d'avancer la sélection de cellule en cellule.
+
+    #[test]
+    fn f2_edite_la_cellule_comme_un_double_clic() {
+        let mut saisies = Vec::new();
+        for clavier in [false, true] {
+            let mut banc = Banc::new();
+            banc.clic_sur("101");
+            if clavier {
+                banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+            } else {
+                banc.clic_sur("101");
+            }
+            let edit = banc
+                .state
+                .editing()
+                .unwrap_or_else(|| panic!("le geste ouvre l'éditeur (clavier : {clavier})"));
+            assert_eq!(
+                (edit.column, edit.row, edit.buffer.as_str()),
+                (banc.columns[0], 0, "101")
+            );
+            assert!(
+                keyboard_focus_outside_grid(&banc.context),
+                "le champ a le focus"
+            );
+            banc.image(vec![egui::Event::Text("7".into())]);
+            let saisie = banc.state.editing().unwrap().buffer.clone();
+            assert_ne!(saisie, "101");
+            saisies.push(saisie.clone());
+            banc.image(vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            assert!(banc.state.editing().is_none());
+            assert!(banc.actions.iter().any(|action| matches!(action,
+                Action::CommitCellAndAdvance { column, row: 0, text, .. }
+                if *column == banc.columns[0] && text == &saisie)));
+        }
+        assert_eq!(
+            saisies[0], saisies[1],
+            "même focus et même curseur de saisie"
+        );
+    }
+
+    #[test]
+    fn f2_edite_chaque_champ_d_en_tete_comme_un_double_clic() {
+        for field in [
+            HeaderField::LongName,
+            HeaderField::Unit,
+            HeaderField::Comment,
+            HeaderField::Formula,
+        ] {
+            let mut saisies = Vec::new();
+            for clavier in [false, true] {
+                let mut banc = Banc::new();
+                let column = banc.columns[0];
+                banc.state.begin_header_edit(column, field);
+                banc.state.header_editing_mut().unwrap().buffer = "9".into();
+                banc.state.commit_header_edit();
+                banc.image(Vec::new());
+                banc.clic_sur("9");
+                if clavier {
+                    banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+                } else {
+                    banc.clic_sur("9");
+                }
+                let edit = banc
+                    .state
+                    .header_editing()
+                    .expect("le geste ouvre le champ");
+                assert_eq!(
+                    (edit.column, edit.field, edit.buffer.as_str()),
+                    (column, field, "9")
+                );
+                assert!(banc.context.text_edit_focused());
+                banc.image(vec![egui::Event::Text("7".into())]);
+                let saisie = banc.state.header_editing().unwrap().buffer.clone();
+                assert_ne!(saisie, "9");
+                banc.touche(egui::Key::Enter, egui::Modifiers::NONE);
+                assert!(banc.state.header_editing().is_none());
+                assert_eq!(header_field_text(&banc.state, column, field), saisie);
+                saisies.push(saisie.clone());
+                // Entrée peut déplacer la sélection : revenir au champ validé
+                // pour éprouver ensuite son annulation, comme avec un double-clic.
+                banc.state.select_header_field(banc.sheet, column, field);
+                banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+                banc.image(vec![egui::Event::Text("8".into())]);
+                assert_ne!(banc.state.header_editing().unwrap().buffer, saisie);
+                banc.touche(egui::Key::Escape, egui::Modifiers::NONE);
+                assert!(banc.state.header_editing().is_none());
+                assert_eq!(header_field_text(&banc.state, column, field), saisie);
+            }
+            assert_eq!(saisies[0], saisies[1], "même saisie pour {field:?}");
+        }
+    }
+
+    #[test]
+    fn f2_edite_le_coin_superieur_gauche_d_une_plage_d_en_tete_inversee() {
+        let mut banc = Banc::new();
+        banc.clic_sur("303");
+        banc.state
+            .select_header_field(banc.sheet, banc.columns[2], HeaderField::Comment);
+        banc.state.extend_header_field_selection(
+            banc.sheet,
+            banc.columns[0],
+            HeaderField::LongName,
+        );
+        banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+        let edit = banc.state.header_editing().unwrap();
+        assert_eq!(
+            (edit.column, edit.field),
+            (banc.columns[0], HeaderField::LongName)
+        );
+        assert!(banc.state.editing().is_none());
+    }
+
+    #[test]
+    fn f2_edite_le_coin_superieur_gauche_d_une_plage_inversee() {
+        let mut banc = Banc::new();
+        banc.clic_sur("303");
+        banc.state.extend_selection(banc.sheet, banc.columns[0], 0);
+        banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+        let edit = banc.state.editing().unwrap();
+        assert_eq!(
+            (edit.column, edit.row, edit.buffer.as_str()),
+            (banc.columns[0], 0, "101")
+        );
+    }
+
+    #[test]
+    fn f2_annule_sans_ecrire_et_ne_vole_pas_le_focus_voisin() {
+        let mut banc = Banc::new();
+        banc.clic_sur("101");
+        banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+        assert!(banc.state.editing().is_some());
+        banc.image(vec![egui::Event::Text("7".into())]);
+        banc.image(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(banc.actions.is_empty(), "Échap ne soumet aucune commande");
+        assert!(banc.state.editing().is_none());
+        assert_eq!(banc.state.cell_text(banc.columns[0], 0), "101");
+        banc.clic_sur("avant");
+        banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+        assert!(banc.state.editing().is_none());
+    }
 
     #[test]
     fn tab_hors_edition_avance_la_selection_sans_sortir_de_la_grille() {

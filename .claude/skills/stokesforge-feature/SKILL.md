@@ -119,7 +119,9 @@ contrainte `'static` ci-dessus — un bandeau de boutons qui ne fait que pousser
 des `Action` n'y bute pas. Le dire explicitement dans le compte rendu : « j'ai
 factorisé X » ou « j'ai dû modifier les deux écritures parce que Y ».
 
-F2 est réservé aux gestionnaires (#130) : jamais aux feuilles. Ctrl+D des
+F2 renomme dans les gestionnaires (#130) et édite la case en haut à gauche
+de la sélection dans la grille (#143), cellule de données ou champ d'en-tête,
+selon le focus ; jamais le nom des feuilles. Ctrl+D des
 feuilles se lit dans le viewport du classeur, sans secours vers un classeur
 détaché quand un graphe est actif. Les éditeurs et le focus du Project Manager
 sont indexés par viewport dans la mémoire d'egui ; calculer les IDs **avant**

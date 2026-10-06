@@ -77,6 +77,9 @@ pub(super) const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
 /// F2 — renommer la sélection du Project Manager ou de l’Object Manager.
 pub(super) const SHORTCUT_RENAME_OBJECT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F2);
+/// F2 — éditer une cellule ou un champ d’en-tête dans la grille focalisée (#143).
+pub(super) const SHORTCUT_EDIT_CELL: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F2);
 /// Ctrl+D — dupliquer la feuille affichée du classeur actif. Pas de Suppr
 /// pour supprimer une feuille : trop de faux positifs, le menu seul suffit.
 pub(super) const SHORTCUT_DUPLICATE_SHEET: egui::KeyboardShortcut =

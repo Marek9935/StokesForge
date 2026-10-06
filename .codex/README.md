@@ -113,8 +113,8 @@ la cible active Rust.
   sont uniques par dossier et les chemins canoniques sont enracinés. Le
   transport texte système réutilise les conversions `.stf`, sans numéro de
   version ; les graphes entre projets emportent leurs colonnes dans un classeur caché
-  persisté (#107), révélé par Show Data. F2 appartient
-  aux gestionnaires, Ctrl+D des feuilles au viewport du classeur (#130).
+  persisté (#107), révélé par Show Data. F2 renomme dans les gestionnaires et édite dans la grille (#143), selon le focus,
+  jamais le nom des feuilles ; Ctrl+D des feuilles au viewport du classeur (#130).
 - Copier une figure vers une application externe (#149) passe par
   `stokesforge-clipboard` (SVG, PNG, PDF offerts ensemble ; Wayland par le patch
   `vendor/smithay-clipboard`) et `app/figure_copy.rs`, jamais par `copy_text`.

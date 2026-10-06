@@ -1660,6 +1660,13 @@ classeur détaché, tous deux par `book_contents`) :
   savoir si l'on tape dans un champ (Entrée d'un dialogue, Suppr d'une
   annotation), passe par `keyboard_focus_outside_grid`.
 
+F2 ouvre le même éditeur qu'un double-clic, avec le contenu initial conservé
+(#143), uniquement lorsque l'ancrage de la grille a le focus. Sur une plage
+de données ou de champs d'en-tête, il édite la case en haut à gauche, dans
+l'ordre visible des colonnes. Nom long, Unité, Commentaire et Formule utilisent
+leur éditeur existant ; les colonnes entières ne déclenchent pas cette édition.
+Le renommage par F2 reste propre aux gestionnaires focalisés.
+
 Limite : le filtre ne s'applique qu'à l'image qui suit la prise de focus
 (`set_focus_lock_filter` exige `had_focus_last_frame`) — une touche tombant
 dans l'image même du clic n'est pas une frappe réaliste. Verrouillé par

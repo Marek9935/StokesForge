@@ -25,7 +25,7 @@ use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 use super::tab_strip::{tab_strip_with, TabEvent, TabOps, TabStripOutput, TAB_STRIP_HEIGHT};
 
 /// Menu « Classeur » : les gestes sur la feuille affichée, miroir du menu
-/// contextuel des onglets et du raccourci Ctrl+D (F2 est réservé aux gestionnaires, #130).
+/// contextuel des onglets et du raccourci Ctrl+D (F2 édite les cellules, jamais le nom des feuilles, #130/#143).
 pub(super) fn workbook_menu(
     ui: &mut egui::Ui,
     ctx: &egui::Context,

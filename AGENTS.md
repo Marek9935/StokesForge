@@ -57,7 +57,7 @@ confirmation pour les choix courants couverts par la demande.
   les IDs sont créés dans la destination et un échec restaure l’arbre. Unicité
   des noms par dossier, chemins canoniques enracinés ; les graphes entre projets
   emportent leurs colonnes dans un classeur caché persisté (#107), révélé par Show
-  Data. F2 appartient aux gestionnaires (#130), pas aux feuilles.
+  Data. F2 renomme dans les gestionnaires (#130) et édite dans la grille (#143), selon le focus ; jamais le nom des feuilles.
 - Panneaux Python, PM et OM repliés : seul Déployer est visible, sans cible
   ni espace réservé à Détacher (`panel_header`). Le détachement par bouton
   exige un panneau déployé ; une fenêtre OS garde Rattacher.
