@@ -7,9 +7,9 @@
 //! clic. Les adresses restent locales au spec : un déplacement suit le contenu,
 //! une suppression efface la sélection plutôt que de viser son voisin.
 //!
-//! Échelles (#111) : sous chaque calque, un groupe « Axes » réunit une ligne
+//! Axes (#111, #147) : sous chaque calque, un groupe « Axes » réunit une ligne
 //! par axe — les quatre, masqués par défaut compris. Il est caché par défaut et
-//! listé par sa propre bascule « Show scales » (même motif que les textes,
+//! listé par sa propre bascule « Show Axes » (même motif que les textes,
 //! `object_manager_show_scales`). La case d'un axe commande `AxisSpec::visible`
 //! (ligne, graduations et libellés d'un coup) ; celle du groupe
 //! ([`VisibilityTarget::Axes`]) commande ses quatre axes et se montre mixte

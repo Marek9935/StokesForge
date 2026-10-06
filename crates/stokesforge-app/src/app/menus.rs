@@ -452,18 +452,18 @@ impl StokesForgeApp {
             ui.menu_button(tr!("menu-panels"), |ui| {
                 ui.checkbox(&mut self.pm_open, tr!("project-manager-title"));
                 ui.checkbox(&mut self.script_open, tr!("script-title"));
-                ui.menu_button(tr!("action-object-manager"), |ui| {
-                    let mut open = self.state.object_manager_open();
-                    if ui.checkbox(&mut open, tr!("action-show-content")).changed() {
-                        actions.push(Action::SetObjectManagerOpen(open));
-                    }
-                    object_manager_settings_menu(
-                        ui,
-                        self.state.object_manager_settings(),
-                        open,
-                        actions,
-                    );
-                });
+            });
+            ui.menu_button(tr!("action-object-manager"), |ui| {
+                let mut open = self.state.object_manager_open();
+                if ui.checkbox(&mut open, tr!("action-show-content")).changed() {
+                    actions.push(Action::SetObjectManagerOpen(open));
+                }
+                object_manager_settings_menu(
+                    ui,
+                    self.state.object_manager_settings(),
+                    open,
+                    actions,
+                );
             });
             ui.menu_button(tr!("menu-toolbars"), |ui| {
                 for id in ToolbarId::ALL {
@@ -1265,7 +1265,9 @@ mod tests {
         let (session, mut app, graph) = banc();
         let tab = Some(Tab::Graph(graph));
         let (_, menu) = ouvre(&mut app, tab, &tr!("menu-view"));
-        assert!(entree(&menu, &tr!("action-object-manager")).is_none());
+        assert!(active(&menu, &tr!("action-object-manager")).enabled);
+        assert!(entree(&menu, &tr!("object-manager-show-texts")).is_none());
+        assert!(entree(&menu, &tr!("object-manager-show-axes")).is_none());
         for open in [false, true] {
             app.state.set_object_manager_open_for_test(open);
             let (_, panels) = ouvre_chemin(&mut app, tab, &[tr!("menu-view"), tr!("menu-panels")]);
@@ -1274,14 +1276,18 @@ mod tests {
                     && entree(&panels, &tr!("script-title")).is_some()
             );
             assert!(entree(&panels, &tr!("object-manager-show-texts")).is_none());
+            assert_eq!(
+                panels
+                    .iter()
+                    .filter(|entry| entry.label == tr!("action-object-manager"))
+                    .count(),
+                1,
+                "Object Manager reste au premier niveau, sans doublon dans Panels"
+            );
             let (ctx, menu) = ouvre_chemin(
                 &mut app,
                 tab,
-                &[
-                    tr!("menu-view"),
-                    tr!("menu-panels"),
-                    tr!("action-object-manager"),
-                ],
+                &[tr!("menu-view"), tr!("action-object-manager")],
             );
             let case = active(&menu, &tr!("action-show-content"));
             assert_eq!(case.toggled, Some(open));
@@ -1385,7 +1391,6 @@ mod tests {
         let open = |app: &mut StokesForgeApp, child: Option<&str>| {
             let mut path = vec![
                 tr!("menu-view"),
-                tr!("menu-panels"),
                 tr!("action-object-manager"),
                 tr!("object-manager-settings"),
             ];
@@ -1401,7 +1406,7 @@ mod tests {
                 Action::SetObjectManagerShowTexts(!app.state.object_manager_show_texts()),
             ),
             (
-                tr!("object-manager-show-scales"),
+                tr!("object-manager-show-axes"),
                 app.state.object_manager_show_scales(),
                 Action::SetObjectManagerShowScales(!app.state.object_manager_show_scales()),
             ),

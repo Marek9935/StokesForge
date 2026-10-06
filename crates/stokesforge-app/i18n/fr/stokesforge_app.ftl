@@ -846,9 +846,9 @@ object-manager-layer = Calque { $index }
 object-manager-group = Groupe de tracés
 object-manager-axes = Axes
 object-manager-show-texts = Afficher les textes du graphique
-    .hint = Liste dans le gestionnaire d’objets le titre du graphique, les titres des calques et des axes et la légende. Masqués par défaut ; les cases de visibilité les commandent toujours.
-object-manager-show-scales = Afficher les échelles
-    .hint = Liste les axes de chaque calque dans le gestionnaire d'objets, avec une case qui affiche ou masque d'un coup la ligne d'axe, les graduations et leurs libellés. Cachées par défaut.
+    .hint = Liste dans le gestionnaire d’objets le titre du graphique, les titres des calques et des axes et la légende. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.
+object-manager-show-axes = Afficher les axes
+    .hint = Liste les axes de chaque calque dans le gestionnaire d’objets. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.
 
 menu-selected-content = Sélection
 action-rename-series = Renommer la série

@@ -10,6 +10,8 @@
 //! fenêtre détachée. Les réglages (#139) viennent de la table unique
 //! `preferences::ObjectManagerSettings` ; egui garde la priorité pour les
 //! groupes déjà vus, y compris après Réinitialiser.
+//! L'échantillon de légende reçoit les mêmes gestes que le nom de série
+//! (#151) : une zone seulement peinte laissait son clic droit au fond.
 //!
 //! Le panneau fixe ou détaché (#100),
 //! [`StokesForgeApp::object_manager_panel`], et l'exécution des demandes l'ont
@@ -250,8 +252,8 @@ pub(super) fn object_manager_settings_menu(
                     }
                     let mut show = settings.show_scales;
                     if ui
-                        .checkbox(&mut show, tr!("object-manager-show-scales"))
-                        .on_hover_text(tr!("object-manager-show-scales", "hint"))
+                        .checkbox(&mut show, tr!("object-manager-show-axes"))
+                        .on_hover_text(tr!("object-manager-show-axes", "hint"))
                         .changed()
                     {
                         actions.push(Action::SetObjectManagerShowScales(show));
@@ -598,8 +600,8 @@ impl ObjectManagerPaint<'_> {
         ui.push_id(series.target, |ui| {
             ui.horizontal(|ui| {
                 object_visibility(ui, self.graph, T::Series(series.target), self.spec, actions);
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::vec2(28.0, 18.0), egui::Sense::hover());
+                let (rect, swatch) =
+                    ui.allocate_exact_size(egui::vec2(28.0, 18.0), egui::Sense::click_and_drag());
                 ui.painter().extend(stokesforge_render_egui::series_swatch(
                     self.tree,
                     &series.spec,
@@ -607,10 +609,15 @@ impl ObjectManagerPaint<'_> {
                 ));
                 let text = egui::RichText::new(&series.label);
                 let text = if series.selected { text.strong() } else { text };
-                let response = ui.add(
-                    egui::Button::selectable(series.selected, text)
-                        .sense(egui::Sense::click_and_drag()),
-                );
+                // #151 : l'échantillon de légende fait partie de la cible,
+                // comme le nom. Garder l'ID du bouton pour son menu et unir
+                // les gestes avant de traiter sélection, glisser et propriétés.
+                let response = ui
+                    .add(
+                        egui::Button::selectable(series.selected, text)
+                            .sense(egui::Sense::click_and_drag()),
+                    )
+                    .union(swatch);
                 if response.clicked() || response.secondary_clicked() || response.drag_started() {
                     requests.push(ObjectManagerRequest::Select(T::Series(series.target)));
                     ui.memory_mut(|memory| memory.request_focus(self.focus));
@@ -1005,7 +1012,7 @@ mod tests {
                 Action::SetObjectManagerShowTexts(true),
             ),
             (
-                tr!("object-manager-show-scales"),
+                tr!("object-manager-show-axes"),
                 Action::SetObjectManagerShowScales(true),
             ),
         ] {
@@ -1024,7 +1031,7 @@ mod tests {
                 "le menu racine reste ouvert"
             );
             assert!(painted(&output, &tr!("object-manager-show-texts")));
-            assert!(painted(&output, &tr!("object-manager-show-scales")));
+            assert!(painted(&output, &tr!("object-manager-show-axes")));
         }
     }
 
@@ -1505,6 +1512,101 @@ mod tests {
                 ..
             }]
         ));
+    }
+
+    /// #151 : le clic droit doit cibler la ligne visée, même si une autre
+    /// courbe est sélectionnée. Le menu peint est commun au panneau détaché.
+    #[test]
+    fn clic_droit_supprime_la_courbe_visee_et_ferme_le_menu() {
+        use super::super::test_support::painted;
+        for swatch in [false, true] {
+            let (project, graph, spec, model) = trois_series();
+            let ctx = super::super::test_support::contexte();
+            let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+            paint(Vec::new());
+            let (output, _, _) = paint(Vec::new());
+            let row = if swatch {
+                let text_rect = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == "Deuxième" => {
+                            Some(text.visual_bounding_rect())
+                        }
+                        _ => None,
+                    })
+                    .unwrap();
+                // Le trait de légende est immédiatement à gauche du bouton.
+                egui::pos2(text_rect.left() - 24.0, text_rect.center().y)
+            } else {
+                text_center(&output, "Deuxième")
+            };
+            let (_, actions, requests) = clic_menu(&paint, row, egui::PointerButton::Secondary);
+            assert!(actions.is_empty());
+            assert!(requests.iter().any(|request| matches!(request,
+                ObjectManagerRequest::Select(T::Series(series)) if *series == SeriesRef::new(0, 1)
+            )));
+            let (output, _, _) = paint(Vec::new());
+            let delete = text_center(&output, &tr!("action-delete-content"));
+            let (_, actions, _) = clic_menu(&paint, delete, egui::PointerButton::Primary);
+            assert_eq!(
+                actions,
+                vec![Action::RemovePlotObject {
+                    graph,
+                    target: T::Series(SeriesRef::new(0, 1)),
+                }]
+            );
+            let (output, actions, _) = paint(Vec::new());
+            assert!(actions.is_empty());
+            assert!(!painted(&output, &tr!("action-delete-content")));
+        }
+    }
+
+    #[test]
+    fn le_trait_colore_prend_le_focus_pour_suppr_et_ouvre_les_proprietes() {
+        let (project, graph, spec, model) = trois_series();
+        let ctx = super::super::test_support::contexte();
+        let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        paint(Vec::new());
+        let (output, _, _) = paint(Vec::new());
+        let text_rect = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Premier" => {
+                    Some(text.visual_bounding_rect())
+                }
+                _ => None,
+            })
+            .unwrap();
+        let swatch = egui::pos2(text_rect.left() - 24.0, text_rect.center().y);
+        let (_, actions, requests) = clic_menu(&paint, swatch, egui::PointerButton::Primary);
+        assert!(actions.is_empty());
+        assert!(requests.iter().any(|r| matches!(r,
+            ObjectManagerRequest::Select(T::Series(s)) if *s == SeriesRef::new(0, 0)
+        )));
+        paint(Vec::new());
+        let (_, actions, _) = paint(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
+        assert_eq!(
+            actions,
+            vec![Action::RemovePlotObject {
+                graph,
+                target: T::Series(SeriesRef::new(0, 0)),
+            }]
+        );
+        let mut properties = false;
+        for _ in 0..2 {
+            let (_, _, requests) = clic_menu(&paint, swatch, egui::PointerButton::Primary);
+            properties |= requests.iter().any(|r| {
+                matches!(r,
+                    ObjectManagerRequest::Properties(T::Series(s)) if *s == SeriesRef::new(0, 0)
+                )
+            });
+        }
+        assert!(
+            properties,
+            "le double-clic sur le trait ouvre les propriétés"
+        );
     }
 
     /// Suppr retire l'objet sélectionné, mais seulement quand le panneau a le

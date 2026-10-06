@@ -96,7 +96,7 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 | Edit | Undo, Redo ; Selection → Rename, Duplicate, Copy, Paste, Delete des objets du Project Manager |
 | Workbook (classeur actif) | Sheet → Rename Sheet, Duplicate Sheet, Delete Sheet, Add Sheet ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
 | Graph (graphique actif) | Show Data ; Selection → Properties…, Rename, Order, Show/Hide, Delete selon la cible ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… ; Reset Zoom ; Text → Reset Text Positions, Add Text, Delete Text ; Objects → Bring to Front, Send to Back, Delete Object ; Export → Export Graph…, Copy Graph, PNG Resolution |
-| View | Panels → Project Manager, Script Console, Object Manager → Show, Object Manager Settings → Display (Show graph texts, Show scales), Expand by Default, Reset ; Toolbars → File, Tools, Text format |
+| View | Panels → Project Manager, Script Console ; Object Manager → Show, Object Manager Settings → Display (Show graph texts, Show Axes), Expand by Default, Reset ; Toolbars → File, Tools, Text format |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
 Le clic droit du Project Manager réutilise `object_menu` et son sous-menu
@@ -108,7 +108,7 @@ sélection courante, grise Type, Role et Plot sans sélection (Add Column reste 
 ou rôle quand les colonnes diffèrent.
 
 Le fond de l'Object Manager propose Object Manager Settings et les mêmes réglages que
-View → Panels → Object Manager ; `object_manager_settings_menu` en est
+View → Object Manager ; `object_manager_settings_menu` en est
 l'unique écriture. Ses nœuds partagent `object_node_menu` avec
 Graph → Selection, y compris Order pour les séries. Le clic droit du
 graphique propose Text, Objects si un objet est visé, Properties (la cible
@@ -1829,21 +1829,21 @@ RGB/HSL restent propres au sélecteur.
 
 ## Gestionnaire d'objets (Object Manager, #81–85)
 
-Affichage › Panneaux › Gestionnaire d'objets › Afficher ouvre l'arbre du
+Affichage › Gestionnaire d'objets › Afficher ouvre l'arbre du
 graphique actif : graphique › calques (`PlotSpec::panels`) › groupe de tracés ›
 séries, ainsi que les objets rares, textes libres et objets graphiques
 (rectangle, ellipse, ligne, flèche), quand il y en a. Les **textes
 automatiques** (titre du graphique et des calques, titres d'axes, légende) sont
 cachés par défaut (#102) : une seule bascule, « Afficher les textes du
-graphique » (Affichage › Panneaux › Gestionnaire d'objets › Réglages du gestionnaire d’objets › Affichage et
+graphique » (Affichage › Gestionnaire d'objets › Réglages du gestionnaire d’objets › Affichage et
 clic droit sur le fond du panneau › Réglages du gestionnaire d’objets › Affichage, même
 `Action::SetObjectManagerShowTexts`), les liste. C'est une préférence
 d'interface (`object_manager_show_texts` dans `preferences.json`, hors `.stf`),
 et le filtre vit dans `object_tree_with_selection`. Un texte caché n'apparaît
-pas même sélectionné dans la figure. Les **échelles** (#111) suivent le même
-motif avec leur propre bascule, « Afficher les échelles »
+pas même sélectionné dans la figure. Les **axes** (#111, #147) suivent le même
+motif avec leur propre bascule, « Afficher les axes »
 (`Action::SetObjectManagerShowScales`, préférence `object_manager_show_scales`,
-même sous-menu Affichage et dans le menu du fond) : cachées par défaut, elles
+même sous-menu Affichage et dans le menu du fond) : non listés par défaut, ils
 ajoutent sous chaque calque, après le groupe de tracés, un groupe « Axes »
 (`VisibilityTarget::Axes`, `LayerRow::axes`) qui réunit une ligne par axe — les
 quatre, bas, gauche, droite et haut, y compris ceux masqués par défaut — avec
@@ -1860,7 +1860,7 @@ son bouton Détacher ouvre une fenêtre système, Rattacher le replace à droite
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.
 
-Les réglages de vue (#139) sont regroupés dans **Affichage › Panneaux › Gestionnaire d’objets › Réglages du
+Les réglages de vue (#139) sont regroupés dans **Affichage › Gestionnaire d’objets › Réglages du
 gestionnaire d’objets**, aussi accessible au clic droit sur le fond, même sans
 graphique actif. Le sous-menu Affichage réunit les deux filtres ; **Déplier par
 défaut** règle graphique, calques, groupes de tracés, axes et objets. Les objets
@@ -1896,7 +1896,11 @@ Le clic droit et Graphique › Sélection partagent les mêmes actions :
 Propriétés, Renommer la série (F2), Déplacer vers le haut/bas (Ctrl+Haut/Bas),
 Afficher/Masquer et Supprimer (Suppr). Un clic simple sur une ligne donne
 le focus clavier au panneau : F2, Ctrl+flèches et Suppr agissent dès ce clic,
-sans glisser préalable (#126). Un clic ailleurs rend ce focus.
+sans glisser préalable (#126). Le trait coloré et le nom de la série offrent
+les mêmes gestes (sélection, clic droit, double-clic et glisser, #151).
+Supprimer une série ne supprime aucune colonne de données ni les autres
+courbes ; Annuler/Rétablir restaure sa place et ses réglages. Un clic ailleurs
+rend ce focus.
 
 Le glisser-déposer d'une série change son rang dans le groupe de son calque, avec un repère avant/après la ligne
 visée ; un dépôt sur un autre calque est refusé. Le relâchement envoie une

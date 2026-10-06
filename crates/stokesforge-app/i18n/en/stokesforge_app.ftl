@@ -850,9 +850,9 @@ object-manager-layer = Layer { $index }
 object-manager-group = Plot Group
 object-manager-axes = Axes
 object-manager-show-texts = Show graph texts
-    .hint = Lists the graph title, layer titles, axis titles and legend in the Object Manager. Hidden by default; the visibility checkboxes still control them.
-object-manager-show-scales = Show scales
-    .hint = Lists the axes of each layer in the Object Manager, with one checkbox that shows or hides the axis line, ticks and tick labels together. Hidden by default.
+    .hint = Lists the graph title, layer titles, axis titles and legend in the Object Manager. Does not change their visibility on the graph. Not listed by default.
+object-manager-show-axes = Show Axes
+    .hint = Lists the axes of each layer in the Object Manager. Does not change their visibility on the graph. Not listed by default.
 
 menu-selected-content = Selection
 action-rename-series = Rename Series

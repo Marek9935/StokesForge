@@ -7330,6 +7330,67 @@ fn object_manager_project() -> (Project, NodeId, stokesforge_plot::PlotSpec) {
     (project, graph, spec)
 }
 
+/// #151 : supprimer une courbe ne touche ni les données partagées ni les
+/// autres courbes ; Annuler/Rétablir restaure le graphique et sa projection.
+#[test]
+fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
+    use stokesforge_app::object_manager::{object_tree, VisibilityTarget as T};
+    use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = demo_project();
+    let sheet = project
+        .tree()
+        .iter()
+        .find_map(|(id, node)| (node.name() == "Sheet1").then_some(id))
+        .unwrap();
+    let columns: Vec<_> = project.tree().children(sheet).unwrap().to_vec();
+    let mut panel = PanelSpec::default();
+    for name in ["Première", "Deuxième"] {
+        let mut series = SeriesSpec::new(columns[1]);
+        series.x = Some(columns[0]);
+        series.name = name.into();
+        panel.series.push(series);
+    }
+    let before = PlotSpec::default().with_panels(panel);
+    let graph = project
+        .add_graph(project.root(), None, before.clone())
+        .unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("courbes.stf"));
+    let original_nodes: Vec<_> = state
+        .tree()
+        .iter()
+        .filter(|(id, _)| *id != graph)
+        .map(|(id, node)| (id, node.clone()))
+        .collect();
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::Series(SeriesRef::new(0, 0)),
+    });
+    let mut after = before.clone();
+    after.panels.get_mut(0).unwrap().series.remove(0);
+    assert_eq!(graph_spec(&state, graph), after);
+    let model = object_tree(state.tree(), graph, None).unwrap();
+    assert_eq!(model.layers[0].series.len(), 1);
+    assert_eq!(model.layers[0].series[0].label, "Deuxième");
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+    assert_eq!(
+        object_tree(state.tree(), graph, None).unwrap().layers[0]
+            .series
+            .len(),
+        2
+    );
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), after);
+    let remaining_nodes: Vec<_> = state
+        .tree()
+        .iter()
+        .filter(|(id, _)| *id != graph)
+        .map(|(id, node)| (id, node.clone()))
+        .collect();
+    assert_eq!(remaining_nodes, original_nodes);
+}
+
 #[test]
 fn object_manager_series_renommage_ordre_suppression_undo_redo() {
     use stokesforge_app::object_manager::{series_drop, VisibilityTarget as T};
