@@ -114,7 +114,13 @@ pub(super) fn tab_strip_with<
             egui::vec2(ui.available_width(), TAB_STRIP_HEIGHT),
             egui::Sense::click(),
         )
-        .context_menu(|ui| tab_strip_add_menu(ui, add_label, &mut requests.add));
+        .context_menu(|ui| {
+            if add_label.is_some() {
+                ui.menu_button(tr!("menu-sheet"), |ui| {
+                    tab_strip_add_menu(ui, add_label, &mut requests.add)
+                });
+            }
+        });
         if requests.add {
             on_add();
         }
@@ -222,42 +228,47 @@ fn tab_strip_tab_menu<K: Copy>(
     config: &TabStripConfig<'_, K>,
     requests: &mut TabStripRequests<K>,
 ) {
-    if let Some(ops) = config.ops {
-        let ctx = ui.ctx().clone();
-        if ui
-            .add(egui::Button::new(tr!("action-rename-sheet")))
-            .on_hover_text(tr!("action-rename-sheet", "hint"))
-            .clicked()
-        {
-            requests.events.push(TabEvent::BeginRename(id));
-            ui.close();
-        }
-        if ui
-            .add(
-                egui::Button::new(tr!("action-duplicate-sheet"))
-                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
-            )
-            .on_hover_text(tr!("action-duplicate-sheet", "hint"))
-            .clicked()
-        {
-            requests.events.push(TabEvent::Duplicate(id));
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                ops.can_delete,
-                egui::Button::new(tr!("action-delete-sheet")),
-            )
-            .on_hover_text(tr!("action-delete-sheet", "hint"))
-            .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"))
-            .clicked()
-        {
-            requests.events.push(TabEvent::Delete(id));
-            ui.close();
-        }
-        ui.separator();
+    if config.ops.is_none() && config.add_label.is_none() {
+        return;
     }
-    tab_strip_add_menu(ui, config.add_label, &mut requests.add);
+    ui.menu_button(tr!("menu-sheet"), |ui| {
+        if let Some(ops) = config.ops {
+            let ctx = ui.ctx().clone();
+            if ui
+                .add(egui::Button::new(tr!("action-rename-sheet")))
+                .on_hover_text(tr!("action-rename-sheet", "hint"))
+                .clicked()
+            {
+                requests.events.push(TabEvent::BeginRename(id));
+                ui.close();
+            }
+            if ui
+                .add(
+                    egui::Button::new(tr!("action-duplicate-sheet"))
+                        .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+                )
+                .on_hover_text(tr!("action-duplicate-sheet", "hint"))
+                .clicked()
+            {
+                requests.events.push(TabEvent::Duplicate(id));
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    ops.can_delete,
+                    egui::Button::new(tr!("action-delete-sheet")),
+                )
+                .on_hover_text(tr!("action-delete-sheet", "hint"))
+                .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"))
+                .clicked()
+            {
+                requests.events.push(TabEvent::Delete(id));
+                ui.close();
+            }
+            ui.separator();
+        }
+        tab_strip_add_menu(ui, config.add_label, &mut requests.add);
+    });
 }
 
 fn tab_strip_arrows(
@@ -436,7 +447,13 @@ fn tab_strip_contents<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
         egui::vec2((band_width - used).max(1.0), TAB_STRIP_HEIGHT),
         egui::Sense::click(),
     );
-    empty.context_menu(|ui| tab_strip_add_menu(ui, config.add_label, &mut requests.add));
+    empty.context_menu(|ui| {
+        if config.add_label.is_some() {
+            ui.menu_button(tr!("menu-sheet"), |ui| {
+                tab_strip_add_menu(ui, config.add_label, &mut requests.add)
+            });
+        }
+    });
     TabStripContent {
         overflow: new_overflow,
         fully_visible,
@@ -570,6 +587,41 @@ mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         }
+    }
+
+    #[test]
+    fn les_onglets_de_proprietes_ne_proposent_pas_un_menu_feuille_vide() {
+        let context = contexte();
+        let tabs = [(0, "Propriétés".to_string())];
+        let mut time = 0.0;
+        let (_, output) = peindre_onglets(&context, 800.0, &tabs, 0, &mut time, Vec::new());
+        let pos = position(&output, "Propriétés").expect("témoin : l'onglet est peint");
+        peindre_onglets(
+            &context,
+            800.0,
+            &tabs,
+            0,
+            &mut time,
+            vec![egui::Event::PointerMoved(pos)],
+        );
+        for pressed in [true, false] {
+            peindre_onglets(
+                &context,
+                800.0,
+                &tabs,
+                0,
+                &mut time,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        let (_, output) = peindre_onglets(&context, 800.0, &tabs, 0, &mut time, Vec::new());
+        assert!(position(&output, "Propriétés").is_some());
+        assert!(position(&output, &tr!("menu-sheet")).is_none());
     }
 
     /// #19 : tous les onglets d'une bande qui tient dans sa largeur sont

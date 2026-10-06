@@ -322,3 +322,18 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | Anglais | Français | Définition | Refusés | Réf. |
 |---|---|---|---|---|
 | Show Data | Afficher les données | Révéler et ouvrir les classeurs référencés par le graphique | Extraire les données | #107 |
+
+### Regroupements des menus (#114)
+
+| Anglais | Français | Définition | Refusés |
+|---|---|---|---|
+| New | Nouveau | Sous-menu des créations de projet, classeur et graphique | Créer (pour le groupe) |
+| Panels | Panneaux | Groupe des trois panneaux fixes de l'application | Calques (réservé au graphique) |
+| Toolbars | Barres d'outils | Groupe des bascules de visibilité des barres | Outils (nom d'une barre) |
+| Order | Ordre | Rang des séries dans leur groupe ou empilement des objets | Position (géométrie) |
+
+Les groupes reprennent les termes existants Properties, Text, Object,
+Sheet, Column, Import, Export et Selection, au pluriel lorsque le groupe
+porte plusieurs objets. Une même entrée partage sa clé dans le menu du haut
+et le clic droit. Les bascules d'affichage gardent leur case et laissent le
+menu ouvert ; les actions et les choix exclusifs le ferment.

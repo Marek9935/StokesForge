@@ -18,8 +18,8 @@ use crate::{theme, tr};
 
 use super::file_drop::claim_file_drop;
 use super::grid::{
-    grid_contents, show_grid_horizontal_bar, show_grid_vertical_bar,
-    show_horizontally_scrollable_grid,
+    column_options_menu, grid_contents, metadata_row_visible, set_metadata_row_visible,
+    show_grid_horizontal_bar, show_grid_vertical_bar, show_horizontally_scrollable_grid,
 };
 use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 use super::tab_strip::{tab_strip_with, TabEvent, TabOps, TabStripOutput, TAB_STRIP_HEIGHT};
@@ -27,6 +27,33 @@ use super::tab_strip::{tab_strip_with, TabEvent, TabOps, TabStripOutput, TAB_STR
 /// Menu « Classeur » : les gestes sur la feuille affichée, miroir du menu
 /// contextuel des onglets et du raccourci Ctrl+D (F2 est réservé aux gestionnaires, #130).
 pub(super) fn workbook_menu(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    state: &AppState,
+    book: NodeId,
+    sheet: NodeId,
+    actions: &mut Vec<Action>,
+) {
+    ui.menu_button(tr!("menu-sheet"), |ui| {
+        sheet_menu(ui, ctx, state, book, sheet, actions);
+    });
+    let columns = state
+        .selection(sheet)
+        .map(|selection| selection.columns(state.tree(), sheet))
+        .unwrap_or_default();
+    column_options_menu(ui, state, actions, sheet, &columns);
+    ui.separator();
+    let mut show = metadata_row_visible(ctx);
+    if ui
+        .checkbox(&mut show, tr!("menu-window-show-metadata-row"))
+        .on_hover_text(tr!("menu-window-show-metadata-row", "hint"))
+        .changed()
+    {
+        set_metadata_row_visible(ctx, show);
+    }
+}
+
+fn sheet_menu(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     state: &AppState,
@@ -589,6 +616,16 @@ mod tests {
                     modifiers: egui::Modifiers::NONE,
                 }]);
                 let output = paint(Vec::new());
+                let submenu = centre_du_texte(
+                    &output.shapes,
+                    &if on_tabs {
+                        tr!("menu-sheet")
+                    } else {
+                        tr!("menu-columns")
+                    },
+                );
+                cliquer(&mut paint, submenu);
+                let output = paint(Vec::new());
                 assert!(
                     output.shapes.iter().any(|painted| match &painted.shape {
                         egui::Shape::Text(shape) => shape.galley.job.text == *label,
@@ -745,7 +782,7 @@ mod tests {
                 };
                 let mut output = context.run_ui(input, |ui| {
                     let ctx = ui.ctx().clone();
-                    workbook_menu(ui, &ctx, &state, book, sheet, &mut actions);
+                    sheet_menu(ui, &ctx, &state, book, sheet, &mut actions);
                 });
                 output.textures_delta.clear();
                 output

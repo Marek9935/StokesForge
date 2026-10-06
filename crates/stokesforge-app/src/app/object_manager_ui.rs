@@ -124,7 +124,7 @@ pub(super) fn object_node_menu(
             requests.push(ObjectManagerRequest::Rename(series));
             ui.close();
         }
-        for (label, shortcut, index) in [
+        let moves = [
             (
                 tr!("action-move-series-up"),
                 "Ctrl+Up",
@@ -139,24 +139,27 @@ pub(super) fn object_node_menu(
                         .is_some_and(|p| *i < p.series.len())
                 }),
             ),
-        ] {
-            if ui
-                .add_enabled(
-                    index.is_some(),
-                    egui::Button::new(label).shortcut_text(shortcut),
-                )
-                .clicked()
-            {
-                if let Some(index) = index {
-                    actions.push(Action::ReorderSeries {
-                        graph,
-                        source: series,
-                        index,
-                    });
+        ];
+        ui.menu_button(tr!("menu-order"), |ui| {
+            for (label, shortcut, index) in moves {
+                if ui
+                    .add_enabled(
+                        index.is_some(),
+                        egui::Button::new(label).shortcut_text(shortcut),
+                    )
+                    .clicked()
+                {
+                    if let Some(index) = index {
+                        actions.push(Action::ReorderSeries {
+                            graph,
+                            source: series,
+                            index,
+                        });
+                    }
+                    ui.close();
                 }
-                ui.close();
             }
-        }
+        });
     }
     let visibility = target.visibility(spec);
     if ui
@@ -223,11 +226,20 @@ pub(super) fn object_manager_settings_menu(
     actions: &mut Vec<Action>,
 ) {
     ui.add_enabled_ui(enabled, |ui| {
-        ui.menu_image_text_button(
-            icon_image(Icon::Properties, IconRole::Neutral),
-            tr!("object-manager-settings"),
-            |ui| {
-                ui.menu_button(tr!("object-manager-display"), |ui| {
+        let config = egui::containers::menu::MenuConfig::new()
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        egui::containers::menu::SubMenuButton::from_button(
+            egui::Button::image_and_text(
+                icon_image(Icon::Properties, IconRole::Neutral),
+                tr!("object-manager-settings"),
+            )
+            .right_text(egui::containers::menu::SubMenuButton::RIGHT_ARROW),
+        )
+        .config(config.clone())
+        .ui(ui, |ui| {
+            egui::containers::menu::SubMenuButton::new(tr!("object-manager-display"))
+                .config(config.clone())
+                .ui(ui, |ui| {
                     let mut show = settings.show_texts;
                     if ui
                         .checkbox(&mut show, tr!("object-manager-show-texts"))
@@ -235,7 +247,6 @@ pub(super) fn object_manager_settings_menu(
                         .changed()
                     {
                         actions.push(Action::SetObjectManagerShowTexts(show));
-                        ui.close();
                     }
                     let mut show = settings.show_scales;
                     if ui
@@ -244,10 +255,11 @@ pub(super) fn object_manager_settings_menu(
                         .changed()
                     {
                         actions.push(Action::SetObjectManagerShowScales(show));
-                        ui.close();
                     }
                 });
-                ui.menu_button(tr!("object-manager-default-expansion"), |ui| {
+            egui::containers::menu::SubMenuButton::new(tr!("object-manager-default-expansion"))
+                .config(config.clone())
+                .ui(ui, |ui| {
                     for group in ObjectManagerGroup::ALL {
                         let label = match group {
                             ObjectManagerGroup::Graph => tr!("window-kind-graph"),
@@ -259,26 +271,24 @@ pub(super) fn object_manager_settings_menu(
                         let mut open = settings.group_open(group);
                         if ui.checkbox(&mut open, label).changed() {
                             actions.push(Action::SetObjectManagerGroupOpen { group, open });
-                            ui.close();
                         }
                     }
                 })
-                .response
+                .0
                 .on_hover_text(tr!("object-manager-default-expansion", "hint"));
-                ui.separator();
-                if ui
-                    .add(egui::Button::image_and_text(
-                        icon_image(Icon::ResetZoom, IconRole::Neutral),
-                        tr!("object-manager-reset"),
-                    ))
-                    .on_hover_text(tr!("object-manager-reset", "hint"))
-                    .clicked()
-                {
-                    actions.push(Action::ResetObjectManagerSettings);
-                    ui.close();
-                }
-            },
-        );
+            ui.separator();
+            if ui
+                .add(egui::Button::image_and_text(
+                    icon_image(Icon::ResetZoom, IconRole::Neutral),
+                    tr!("object-manager-reset"),
+                ))
+                .on_hover_text(tr!("object-manager-reset", "hint"))
+                .clicked()
+            {
+                actions.push(Action::ResetObjectManagerSettings);
+                ui.close();
+            }
+        });
     });
 }
 
@@ -298,7 +308,9 @@ pub(super) fn object_manager_contents(
         ui.make_persistent_id("object_manager_background"),
         egui::Sense::click(),
     );
-    background.context_menu(|ui| object_manager_settings_menu(ui, settings, true, actions));
+    egui::Popup::context_menu(&background)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| object_manager_settings_menu(ui, settings, true, actions));
     let (Some(model), Some(spec)) = (model, spec) else {
         ui.label(tr!("object-manager-no-graph"));
         return requests;
@@ -933,6 +945,265 @@ mod tests {
             button: egui::PointerButton::Primary,
             pressed,
             modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Pilote un vrai clic sur une surface peinte, sans appeler le menu
+    /// directement : les popup racine et les sous-menus participent au geste.
+    fn clic_menu(
+        paint: &impl Fn(Vec<egui::Event>) -> (egui::FullOutput, Vec<Action>, Vec<ObjectManagerRequest>),
+        pos: egui::Pos2,
+        button: egui::PointerButton,
+    ) -> (egui::FullOutput, Vec<Action>, Vec<ObjectManagerRequest>) {
+        paint(vec![egui::Event::PointerMoved(pos)]);
+        paint(vec![egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        paint(vec![egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }])
+    }
+
+    #[test]
+    fn clic_droit_du_fond_affichage_bascule_les_filtres_et_garde_les_menus_ouverts() {
+        use super::super::test_support::painted;
+        let (project, _, spec, model) = trois_series();
+        let ctx = super::super::test_support::contexte();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        paint(Vec::new());
+        paint(Vec::new());
+        clic_menu(
+            &paint,
+            egui::pos2(300.0, 300.0),
+            egui::PointerButton::Secondary,
+        );
+        let output = paint(Vec::new()).0;
+        assert!(painted(&output, &tr!("object-manager-settings")));
+        assert!(!painted(&output, &tr!("object-manager-show-texts")));
+        clic_menu(
+            &paint,
+            text_center(&output, &tr!("object-manager-settings")),
+            egui::PointerButton::Primary,
+        );
+        let output = paint(Vec::new()).0;
+        clic_menu(
+            &paint,
+            text_center(&output, &tr!("object-manager-display")),
+            egui::PointerButton::Primary,
+        );
+        paint(Vec::new());
+        for (key, expected) in [
+            (
+                tr!("object-manager-show-texts"),
+                Action::SetObjectManagerShowTexts(true),
+            ),
+            (
+                tr!("object-manager-show-scales"),
+                Action::SetObjectManagerShowScales(true),
+            ),
+        ] {
+            let output = paint(Vec::new()).0;
+            let (_, actions, requests) = clic_menu(
+                &paint,
+                text_center(&output, &key),
+                egui::PointerButton::Primary,
+            );
+            assert_eq!(actions, vec![expected]);
+            assert!(requests.is_empty());
+            assert!(egui::Popup::is_any_open(&ctx));
+            let output = paint(Vec::new()).0;
+            assert!(
+                painted(&output, &tr!("object-manager-settings")),
+                "le menu racine reste ouvert"
+            );
+            assert!(painted(&output, &tr!("object-manager-show-texts")));
+            assert!(painted(&output, &tr!("object-manager-show-scales")));
+        }
+    }
+
+    /// Les réglages du fond restent disponibles sans graphe ; les cinq
+    /// bascules gardent leur chaîne ouverte, tandis que Réinitialiser ferme.
+    #[test]
+    fn clic_droit_sans_graphe_regle_les_cinq_defauts_puis_reinitialise() {
+        use super::super::test_support::painted;
+        let project = Project::new("Réglages").unwrap();
+        let settings = ObjectManagerSettings::default();
+        let ctx = super::super::test_support::contexte();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let paint = |events| image(&ctx, project.tree(), None, None, events);
+        paint(Vec::new());
+        paint(Vec::new());
+        clic_menu(
+            &paint,
+            egui::pos2(200.0, 150.0),
+            egui::PointerButton::Secondary,
+        );
+        for label in [
+            tr!("object-manager-settings"),
+            tr!("object-manager-default-expansion"),
+        ] {
+            let output = paint(Vec::new()).0;
+            clic_menu(
+                &paint,
+                text_center(&output, &label),
+                egui::PointerButton::Primary,
+            );
+            paint(Vec::new());
+        }
+        for (group, label) in [
+            (ObjectManagerGroup::Graph, tr!("window-kind-graph")),
+            (
+                ObjectManagerGroup::Layers,
+                tr!("object-manager-expand-layers"),
+            ),
+            (
+                ObjectManagerGroup::Plots,
+                tr!("object-manager-expand-plots"),
+            ),
+            (ObjectManagerGroup::Axes, tr!("object-manager-axes")),
+            (ObjectManagerGroup::Objects, tr!("object-manager-objects")),
+        ] {
+            let output = paint(Vec::new()).0;
+            let (_, actions, requests) = clic_menu(
+                &paint,
+                text_center(&output, &label),
+                egui::PointerButton::Primary,
+            );
+            assert_eq!(
+                actions,
+                vec![Action::SetObjectManagerGroupOpen {
+                    group,
+                    open: !settings.group_open(group)
+                }]
+            );
+            assert!(requests.is_empty());
+            let output = paint(Vec::new()).0;
+            assert!(egui::Popup::is_any_open(&ctx));
+            assert!(painted(&output, &tr!("object-manager-settings")));
+            assert!(painted(&output, &tr!("object-manager-default-expansion")));
+            assert!(painted(&output, &label));
+        }
+        let output = paint(Vec::new()).0;
+        let (_, actions, requests) = clic_menu(
+            &paint,
+            text_center(&output, &tr!("object-manager-reset")),
+            egui::PointerButton::Primary,
+        );
+        assert_eq!(actions, vec![Action::ResetObjectManagerSettings]);
+        assert!(requests.is_empty());
+        paint(Vec::new());
+        assert!(!egui::Popup::is_any_open(&ctx));
+        let output = paint(Vec::new()).0;
+        assert!(!painted(&output, &tr!("object-manager-settings")));
+    }
+
+    #[test]
+    fn clic_droit_serie_ordre_grise_les_extremes_et_ferme_apres_deplacement() {
+        use super::super::test_support::{painted, texte_exact, textes};
+        for (row, source, disabled, enabled, index) in [
+            (
+                "Premier",
+                SeriesRef::new(0, 0),
+                tr!("action-move-series-up"),
+                tr!("action-move-series-down"),
+                1,
+            ),
+            (
+                "Dernier",
+                SeriesRef::new(0, 2),
+                tr!("action-move-series-down"),
+                tr!("action-move-series-up"),
+                1,
+            ),
+        ] {
+            let (project, graph, spec, model) = trois_series();
+            let ctx = super::super::test_support::contexte();
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+            paint(Vec::new());
+            let output = paint(Vec::new()).0;
+            let (_, actions, requests) = clic_menu(
+                &paint,
+                text_center(&output, row),
+                egui::PointerButton::Secondary,
+            );
+            assert!(actions.is_empty());
+            assert!(requests.iter().any(|request| matches!(request,
+                ObjectManagerRequest::Select(T::Series(series)) if *series == source)));
+            let output = paint(Vec::new()).0;
+            assert!(
+                !painted(&output, &enabled),
+                "les déplacements sont dans Ordre"
+            );
+            clic_menu(
+                &paint,
+                text_center(&output, &tr!("menu-order")),
+                egui::PointerButton::Primary,
+            );
+            paint(Vec::new());
+            let output = paint(Vec::new()).0;
+            let labels = textes(&output.shapes);
+            assert_ne!(
+                texte_exact(&labels, &disabled).couleur,
+                texte_exact(&labels, &enabled).couleur,
+                "l'extrême est grisé"
+            );
+            let (_, actions, requests) = clic_menu(
+                &paint,
+                text_center(&output, &disabled),
+                egui::PointerButton::Primary,
+            );
+            assert!(
+                actions.is_empty() && requests.is_empty(),
+                "le déplacement interdit ne produit rien"
+            );
+            // Un clic sur un item grisé peut fermer le popup d'egui ; le
+            // geste utile est testé après réouverture de la même série.
+            if !egui::Popup::is_any_open(&ctx) {
+                let output = paint(Vec::new()).0;
+                clic_menu(
+                    &paint,
+                    text_center(&output, row),
+                    egui::PointerButton::Secondary,
+                );
+                let output = paint(Vec::new()).0;
+                clic_menu(
+                    &paint,
+                    text_center(&output, &tr!("menu-order")),
+                    egui::PointerButton::Primary,
+                );
+                paint(Vec::new());
+            }
+            let output = paint(Vec::new()).0;
+            let (_, actions, requests) = clic_menu(
+                &paint,
+                text_center(&output, &enabled),
+                egui::PointerButton::Primary,
+            );
+            assert_eq!(
+                actions,
+                vec![Action::ReorderSeries {
+                    graph,
+                    source,
+                    index
+                }]
+            );
+            assert!(requests.is_empty());
+            paint(Vec::new());
+            assert!(
+                !egui::Popup::is_any_open(&ctx),
+                "toute la chaîne de menus est fermée"
+            );
+            let output = paint(Vec::new()).0;
+            assert!(!painted(&output, &tr!("menu-order")));
+            assert!(!painted(&output, &enabled));
         }
     }
 

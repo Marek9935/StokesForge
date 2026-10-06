@@ -79,6 +79,49 @@ peinture regroupent uniquement les données ou emprunts disjoints nécessaires
 fermetures restent appliquées après le parcours de la pile. Une redécoupe
 future reste dans un commit séparé d'un déplacement.
 
+### Menus thématiques (#114)
+
+Les menus du haut et les clics droits rangent les actions partagées sous
+les mêmes noms. Les raccourcis et les barres d'outils gardent leurs actions.
+Les cases restent réservées aux bascules d'affichage ; elles laissent la
+chaîne de menus ouverte. Une action ou un choix exclusif (langue, type,
+rôle, résolution) ferme toute la chaîne. `MenuBar` utilise
+`CloseOnClickOutside` ; le fond de l'Object Manager et ses sous-menus de réglages
+utilisent le même comportement. Les actions ferment explicitement
+par `Ui::close`, dont egui propage la demande aux menus parents.
+
+| Menu | Organisation |
+|---|---|
+| File | New → New Project, Add Workbook, Add Graph ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
+| Edit | Undo, Redo ; Selection → Rename, Duplicate, Copy, Paste, Delete des objets du Project Manager |
+| Workbook (classeur actif) | Sheet → Rename Sheet, Duplicate Sheet, Delete Sheet, Add Sheet ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
+| Graph (graphique actif) | Show Data ; Selection → Properties…, Rename, Order, Show/Hide, Delete selon la cible ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… ; Reset Zoom ; Text → Reset Text Positions, Add Text, Delete Text ; Objects → Bring to Front, Send to Back, Delete Object ; Export → Export Graph…, Copy Graph, PNG Resolution |
+| View | Panels → Project Manager, Script Console, Object Manager → Show, Object Manager Settings → Display (Show graph texts, Show scales), Expand by Default, Reset ; Toolbars → File, Tools, Text format |
+| Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
+
+Le clic droit du Project Manager réutilise `object_menu` et son sous-menu
+Selection. Celui d'une feuille propose Sheet (même depuis la bande vide).
+Celui des lettres de colonnes garde l'édition courante au premier niveau,
+puis Columns → Type / Role et Plot, peints par `column_options_menu`,
+également appelé depuis Workbook. Le menu du haut prend les colonnes de la
+sélection courante, grise Type, Role et Plot sans sélection (Add Column reste disponible) et ne marque aucun type
+ou rôle quand les colonnes diffèrent.
+
+Le fond de l'Object Manager propose Object Manager Settings et les mêmes réglages que
+View → Panels → Object Manager ; `object_manager_settings_menu` en est
+l'unique écriture. Ses nœuds partagent `object_node_menu` avec
+Graph → Selection, y compris Order pour les séries. Le clic droit du
+graphique propose Text, Objects si un objet est visé, Properties (la cible
+figée au clic et les pages générales), Reset Zoom et Export (export et
+copie). Les pages de Properties passent par `graph_properties_menu`.
+Les contenus et cibles sont identiques en fenêtres flottantes et détachées.
+
+Les filtres de l'arbre ne changent pas la visibilité des objets du graphique.
+Les cases directement dans l'arbre restent des contrôles de visibilité du
+modèle, indépendants de ces filtres. L'inventaire des réglages globaux et les
+questions de persistance pour la future fenêtre Preferences sont suivis dans
+l'issue #148 ; cette refonte n'ajoute pas cette fenêtre.
+
 ### Fenêtres flottantes confinées
 
 Le Project Manager, l’Object Manager et la console Python sont des panneaux
@@ -160,7 +203,7 @@ la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 
 ### Nouveau projet et graphique vide (#73)
 
-**File › New Project** (« Fichier › Nouveau projet », Ctrl+N) remplace le
+**File › New › New Project** (« Fichier › Nouveau projet », Ctrl+N) remplace le
 projet courant dans la même fenêtre. La barre Fichier offre le même geste.
 Un projet contenant du travail non enregistré, y compris une saisie locale
 dans une fenêtre détachée ou un texte du graphique, demande confirmation ; Annuler,
@@ -177,7 +220,7 @@ et la langue sont conservées. Le geste est grisé pendant un script, un import
 en cours ou une macro ouverte. Le premier **Save** (« Enregistrer ») demande
 une destination, puis les suivants utilisent ce fichier.
 
-**File › Add Graph** (« Fichier › Ajouter un graphique ») et la barre Fichier
+**File › New › Add Graph** (« Fichier › Ajouter un graphique ») et la barre Fichier
 créent un graphique vide à la racine : une zone de tracé, aucune série ni titre.
 Sa fenêtre s'ouvre au premier plan. Il passe par la commande `AddGraph` existante :
 Annuler le retire, Rétablir retrouve la même identité, et le `.stf` le conserve.
@@ -198,7 +241,7 @@ seule entrée « Importer » ; un fichier qui ne donne aucune valeur numérique
 ouvre à la place la fenêtre d'import pré-remplie. Décision pure :
 `state::file_drop_plan`. Le dépôt crée toujours de nouvelles feuilles, même
 si la recette du dernier import remplaçait ou fusionnait une feuille. Le lien
-« Reopen Last Import… » dans la barre d'état et File › Reopen Last
+« Reopen Last Import… » dans la barre d'état et File › Import › Reopen Last
 Import… reprennent ses fichiers dans l'assistant.
 
 Le même geste est câblé dans les fenêtres détachées : sur un classeur,
@@ -237,7 +280,7 @@ image) et les feuilles se créent à la fin, en une seule entrée « Importer »
 Raccourci : **Ctrl+"** (`SHORTCUT_IMPORT` : touche du 3 sans Maj sur AZERTY,
 `SHORTCUT_IMPORT_QWERTY` : Ctrl+Maj+' sur QWERTY). Fichiers récents et dossier
 mémorisé : `stokesforge_import::RecentFiles` (`import_recent.json`, à côté des
-recettes). « File › Reopen Last Import… » (`Action::ReopenLastImport`)
+recettes). « File › Import › Reopen Last Import… » (`Action::ReopenLastImport`)
 rouvre l'assistant sur les fichiers et le modèle du dernier import — en
 l'annulant d'abord s'il est encore au sommet de l'historique, jamais un travail
 postérieur.
@@ -275,7 +318,7 @@ selon `FilesLayout`. L'aperçu montre le premier bloc et le nombre de blocs.
 
 **Actualiser.** Chaque colonne importée garde sa source
 (`ColumnMeta::import_source` : chemin, recette en JSON, index de colonne).
-« File › Refresh from Source » (`Action::RefreshFromSource`)
+« File › Import › Refresh from Source » (`Action::RefreshFromSource`)
 relit les fichiers et réécrit les valeurs **en place** : les colonnes gardent
 leur identité, les graphes restent valides. Les lignes de la feuille suivent le
 plus long des nouveaux contenus ; elles ne raccourcissent que si toutes les
@@ -311,7 +354,7 @@ décision d'import, pas le compositeur.
 
 ### Ligne « Metadata » de l'en-tête
 
-Elle se masque et se réaffiche (Fenêtre › Afficher la ligne Metadata des
+Elle se masque et se réaffiche (Classeur › Afficher la ligne Metadata des
 colonnes, ou clic droit sur son libellé) : réglage de vue gardé dans la mémoire
 d'egui, partagé par les classeurs flottants et détachés, jamais dans le modèle.
 
@@ -716,7 +759,7 @@ est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un
   choix fait sur une autre zone. Un passage portant une couleur locale donne
   un échantillon neutre. En édition, le brouillon du sélecteur dure seulement
   jusqu'à la validation du geste, qui pose une seule balise sur le passage.
-- Visibilité : menu **View**, une case par barre. Emplacement et visibilité
+- Visibilité : menu **View › Toolbars**, une case par barre. Emplacement et visibilité
   sont dans `preferences.json` (champ `toolbars`), pas dans le `.stf` ; la
   lecture ignore ce qu'elle ne comprend pas. `StokesForgeApp::new` ne lit pas le
   fichier (les tests), `main` appelle `load_toolbar_layout`.
@@ -1120,14 +1163,14 @@ annule) ; sur une entrée de légende → renomme la série (`SetLegendEntryName
 vide = nom dérivé de la colonne) ; sur le cadre de la légende, rien (elle n'a
 pas de texte à elle). Un glisser déplace le texte (ancré aux données : il suit
 le zoom) ; un clic droit propose « Edit Text » et « Reset Position » (grisé tant
-que le texte est à sa place), et « Graph » → « Reset Text Positions » remet tout
+que le texte est à sa place), et « Graph » → « Text » → « Reset Text Positions » remet tout
 d'un coup. Chaque geste validé est **une** `Action` (`SetTextAnchor`,
 `ResetTextAnchors`, `SetTextContent`, `SetLegendEntryName`), donc un
 `SetPlotSpec`, une entrée d'historique ; la position est enregistrée dans le
 `.stf` et vaut à l'export.
 
 **Textes libres** (issue #35) : clic droit dans une zone de tracé →
-« Add Text » au point cliqué, ou « Graph » → « Add Text »
+« Add Text » au point cliqué, ou « Graph » → « Text » → « Add Text »
 (au centre du premier panneau). Le texte s'édite **sur place** : un champ posé
 sur le texte, et au-dessus une barre couleur / taille / rotation
 (`app::graph_text_edit::annotation_editor_ui`) ; Entrée ou clic ailleurs valide, Échap annule.
@@ -1165,7 +1208,7 @@ une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
 épaisseur. Chaque réglage est un champ du modèle posé par une `Action::SetShape`
 (`StokesForgeApp::format_object`, `app/format.rs`). Côté script : `pyst.add_shape` / `pyst.remove_shape` (`docs/python-et-script.md`).
 
-**Exporter le graphe** (issue #34) : menu « Graph » → « Export
+**Exporter le graphe** (issue #34) : menu « Graph » → « Export » → « Export
 Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
 compris dans une fenêtre détachée). Un sélecteur `rfd` (SVG, PDF, PNG) propose
 le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
@@ -1174,11 +1217,11 @@ le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
 `AppState` écrit le fichier (`stokesforge-render-svg`, texte Typst compris) et le dit
 dans la barre d'état. Aucune commande : le modèle n'est pas touché. La
 résolution PNG (×1, ×2, ×4 ; ×4 par défaut, soit 1920 × 1440 px) se règle dans
-« Graph » → « PNG Resolution » (`Action::SetPngExportScale`,
+« Graph » → « Export » → « PNG Resolution » (`Action::SetPngExportScale`,
 préférence de session).
 
 **Copier le graphe vers une autre application** (issue #149) : menu « Graph »
-→ « Copy Graph », ou **Ctrl+C** quand une fenêtre de graphique est active au
+→ « Export » → « Copy Graph », ou **Ctrl+C** quand une fenêtre de graphique est active au
 premier plan (flottante ou détachée), qu'**aucun objet** n'y est sélectionné
 (série, texte libre, forme, titre ou légende : `selected_manager_target`, la
 sélection de l'Object Manager est celle de la vue) et qu'aucun champ de saisie
@@ -1305,7 +1348,7 @@ réglage de couleur passe par ce sélecteur, avec l'usage qui lui correspond.
 **Trois façons de l'ouvrir** :
 
 - **clic droit sur un composant du graphe** (`app::graph_window::graph_context_menu`) :
-  titre, zone de tracé, axe, titre d'axe. Le menu propose « Properties… »,
+  titre, zone de tracé, axe, titre d'axe. Le menu propose « Properties » → « Properties… »,
   qui ouvre l'onglet qui règle ce composant (`state::PlotTarget::
   settings_page`), et « Reset Zoom ». Le composant sous le
   pointeur est trouvé par `stokesforge_render::hit::component_at`, sur la
@@ -1316,7 +1359,7 @@ réglage de couleur passe par ce sélecteur, avec l'usage qui lui correspond.
   (`graph_view_contents`) ;
 - **menu « Graph »** de la barre de menus, présent seulement quand
   l'onglet actif est un graphe (`state::active_graph`, testée sans fenêtre) :
-  une entrée par onglet, et « Reset Zoom ». Aucun réglage n'est
+  un sous-menu « Properties » avec une entrée par onglet, et « Reset Zoom ». Aucun réglage n'est
   donc atteignable **seulement** au clic droit ;
 - rouvrir la fenêtre sur un autre graphe valide d'abord le brouillon du
   précédent.
@@ -1739,7 +1782,7 @@ comme clés cachées de la démonstration.
 Le graphe de démonstration suit le même défaut que les créations par le menu,
 le tracé de colonnes et `pyst.plot` sans option `title` : aucun titre (#103).
 Un titre vide n'est pas dessiné et ne réserve aucune bande au-dessus du tracé.
-Le titre reste saisissable dans **Graph › Graph Properties… › General** ; un titre
+Le titre reste saisissable dans **Graph › Properties › Graph Properties… › General** ; un titre
 présent reste éditable au double-clic sur la figure.
 
 Deux variables d'environnement servent aux tests et aux captures :
@@ -1777,21 +1820,21 @@ RGB/HSL restent propres au sélecteur.
 
 ## Gestionnaire d'objets (Object Manager, #81–85)
 
-Affichage › Gestionnaire d'objets ouvre l'arbre du
+Affichage › Panneaux › Gestionnaire d'objets › Afficher ouvre l'arbre du
 graphique actif : graphique › calques (`PlotSpec::panels`) › groupe de tracés ›
 séries, ainsi que les objets rares, textes libres et objets graphiques
 (rectangle, ellipse, ligne, flèche), quand il y en a. Les **textes
 automatiques** (titre du graphique et des calques, titres d'axes, légende) sont
 cachés par défaut (#102) : une seule bascule, « Afficher les textes du
-graphique » (sous-menu Réglages du gestionnaire d’objets › Affichage,
-dans Affichage et au clic droit sur le fond du panneau, même
+graphique » (Affichage › Panneaux › Gestionnaire d'objets › Réglages du gestionnaire d’objets › Affichage et
+clic droit sur le fond du panneau › Réglages du gestionnaire d’objets › Affichage, même
 `Action::SetObjectManagerShowTexts`), les liste. C'est une préférence
 d'interface (`object_manager_show_texts` dans `preferences.json`, hors `.stf`),
 et le filtre vit dans `object_tree_with_selection`. Un texte caché n'apparaît
 pas même sélectionné dans la figure. Les **échelles** (#111) suivent le même
 motif avec leur propre bascule, « Afficher les échelles »
 (`Action::SetObjectManagerShowScales`, préférence `object_manager_show_scales`,
-même sous-menu dans Affichage et dans le menu du fond) : cachées par défaut, elles
+même sous-menu Affichage et dans le menu du fond) : cachées par défaut, elles
 ajoutent sous chaque calque, après le groupe de tracés, un groupe « Axes »
 (`VisibilityTarget::Axes`, `LayerRow::axes`) qui réunit une ligne par axe — les
 quatre, bas, gauche, droite et haut, y compris ceux masqués par défaut — avec
@@ -1808,7 +1851,7 @@ son bouton Détacher ouvre une fenêtre système, Rattacher le replace à droite
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.
 
-Les réglages de vue (#139) sont regroupés dans **Affichage › Réglages du
+Les réglages de vue (#139) sont regroupés dans **Affichage › Panneaux › Gestionnaire d’objets › Réglages du
 gestionnaire d’objets**, aussi accessible au clic droit sur le fond, même sans
 graphique actif. Le sous-menu Affichage réunit les deux filtres ; **Déplier par
 défaut** règle graphique, calques, groupes de tracés, axes et objets. Les objets
@@ -1865,6 +1908,5 @@ et porte la glu de sélection vers `GraphView` (`select_manager_target`,
 `selected_manager_target`) ; ce qu'il demande à la vue remonte en
 `ObjectManagerRequest`, exécuté après la peinture par
 `StokesForgeApp::run_object_manager_request` (même module, #122, qui porte
-aussi le panneau `object_manager_panel`) — le menu « Graph › Selected
-Content » passe par le même chemin. Les décisions de mutation restent dans
+aussi le panneau `object_manager_panel`) — le menu « Graph › Selection » passe par le même chemin. Les décisions de mutation restent dans
 `AppState::dispatch`, avec les commandes de la session.

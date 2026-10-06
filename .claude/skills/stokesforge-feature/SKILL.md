@@ -227,6 +227,19 @@ pour la grille). Le clic droit est un raccourci vers ce que la barre de
 menus offre déjà, pas un chemin exclusif. Si la fonctionnalité n'a
 délibérément sa place dans aucun menu, l'écrire et dire pourquoi.
 
+### Sous-menus et fermeture (#114)
+
+Les listes longues se regroupent par thème : mêmes noms et clés au menu du
+haut et au clic droit. Réutiliser `object_menu`, `object_node_menu`,
+`object_manager_settings_menu`, `column_options_menu`, `graph_properties_menu`
+plutôt que recopier les entrées. Les cases restent pour les vraies bascules
+d'affichage, qui **gardent les menus ouverts** (choix de l'utilisateur).
+Les actions et les choix exclusifs ferment toute la chaîne par `ui.close()`.
+`MenuBar` et les menus contenant des bascules utilisent
+`PopupCloseBehavior::CloseOnClickOutside`, transmis aux sous-menus.
+Tester une bascule avec deux clics dans le même menu et une action après
+repeinture sans événement : ni la feuille ni ses parents ne doivent rester.
+
 ## 2 quinquies. Couleurs : le sélecteur commun
 
 Un réglage de couleur ne s'écrit jamais comme un champ texte `#RRGGBB` :

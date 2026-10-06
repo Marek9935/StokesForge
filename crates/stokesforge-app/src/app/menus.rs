@@ -9,6 +9,13 @@
 //! `egui::Panel::top`, la barre d'état le premier `egui::Panel::bottom`) reste
 //! décidé dans `ui()`.
 //!
+//! # Sous-menus (#114)
+//! Les listes se regroupent par thème, avec les mêmes composants que les
+//! clics droits. Les bascules d'affichage doivent rester ouvertes, les actions
+//! et les choix exclusifs fermer la chaîne : `CloseOnClickOutside` hérité par
+//! les sous-menus évite la fermeture automatique d'egui sur une case ; chaque
+//! action appelle `ui.close()`, propagé par egui aux parents.
+//!
 //! Chaque menu possède sa fonction (#124), appelée dans la même Ui et dans
 //! le même ordre ; les demandes de l'Object Manager restent différées après
 //! la fermeture du panneau. Aucun scope egui ne dépend du découpage Rust.
@@ -18,13 +25,14 @@ use stokesforge_core::NodeId;
 use stokesforge_render_egui::{GraphView, DEFAULT_FIGURE_SIZE};
 
 use crate::i18n;
-use crate::state::{active_graph, Action, PlotSettingsTab};
+use crate::state::{active_graph, Action};
 use crate::toolbar::ToolbarId;
 use crate::tr;
 
 use super::graph_text_edit::add_annotation_at;
-use super::graph_window::{disabled_shape_order_buttons, shape_order_buttons};
-use super::grid::{metadata_row_visible, set_metadata_row_visible};
+use super::graph_window::{
+    disabled_shape_order_buttons, graph_properties_menu, shape_order_buttons,
+};
 use super::object_manager_ui::{
     object_manager_settings_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
 };
@@ -64,16 +72,21 @@ impl StokesForgeApp {
     ) {
         let mut object_requests = Vec::new();
         egui::Panel::top("stokesforge_menu_bar").show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                self.file_menu(ui, ctx, actions);
-                self.edit_menu(ui, ctx, actions);
-                self.workbook_menu(ui, ctx, actions);
-                if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
-                    self.graph_menu(ui, ctx, graph, actions, &mut object_requests);
-                }
-                self.view_menu(ui, actions);
-                self.window_menu(ui, ctx);
-            });
+            egui::MenuBar::new()
+                .config(
+                    egui::containers::menu::MenuConfig::new()
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                )
+                .ui(ui, |ui| {
+                    self.file_menu(ui, ctx, actions);
+                    self.edit_menu(ui, ctx, actions);
+                    self.workbook_menu(ui, ctx, actions);
+                    if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+                        self.graph_menu(ui, ctx, graph, actions, &mut object_requests);
+                    }
+                    self.view_menu(ui, actions);
+                    self.window_menu(ui);
+                });
         });
         if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
             for request in object_requests {
@@ -86,71 +99,77 @@ impl StokesForgeApp {
     // ajouter aucun scope egui ni déplacer l'application différée des demandes.
     fn file_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
         ui.menu_button(tr!("menu-file"), |ui| {
-            if ui
-                .add_enabled(
-                    self.state.can_new_project(),
-                    egui::Button::new(tr!("action-new-project"))
-                        .shortcut_text(ctx.format_shortcut(&SHORTCUT_NEW_PROJECT)),
-                )
-                .on_hover_text(tr!("action-new-project", "hint"))
-                .clicked()
-            {
-                actions.push(Action::NewProject {
-                    pending_edits: false,
-                });
-                ui.close();
-            }
-            if ui
-                .button(tr!("action-add-workbook"))
-                .on_hover_text(tr!("action-add-workbook", "hint"))
-                .clicked()
-            {
-                actions.push(Action::AddWorkbook);
-                ui.close();
-            }
-            if ui
-                .button(tr!("action-add-graph"))
-                .on_hover_text(tr!("action-add-graph", "hint"))
-                .clicked()
-            {
-                actions.push(Action::AddGraph);
-                ui.close();
-            }
-            if ui
-                .add(egui::Button::new(tr!("action-import")).shortcut_text(SHORTCUT_IMPORT_TEXT))
-                .on_hover_text(tr!("action-import", "hint"))
-                .clicked()
-            {
-                self.open_import_dialog();
-                ui.close();
-            }
-            let active_sheet = self
-                .active_book()
-                .and_then(|book| self.state.selected_sheet_in(book));
-            if ui
-                .add_enabled(
-                    active_sheet.is_some_and(|sheet| self.state.can_refresh_from_source(sheet)),
-                    egui::Button::new(tr!("action-refresh-from-source")),
-                )
-                .on_hover_text(tr!("action-refresh-from-source", "hint"))
-                .clicked()
-            {
-                if let Some(sheet) = active_sheet {
-                    actions.push(Action::RefreshFromSource { sheet });
+            ui.menu_button(tr!("menu-new"), |ui| {
+                if ui
+                    .add_enabled(
+                        self.state.can_new_project(),
+                        egui::Button::new(tr!("action-new-project"))
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_NEW_PROJECT)),
+                    )
+                    .on_hover_text(tr!("action-new-project", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::NewProject {
+                        pending_edits: false,
+                    });
+                    ui.close();
                 }
-                ui.close();
-            }
-            if ui
-                .add_enabled(
-                    self.state.can_reopen_last_import(),
-                    egui::Button::new(tr!("action-reopen-last-import")),
-                )
-                .on_hover_text(tr!("action-reopen-last-import", "hint"))
-                .clicked()
-            {
-                actions.push(Action::ReopenLastImport);
-                ui.close();
-            }
+                if ui
+                    .button(tr!("action-add-workbook"))
+                    .on_hover_text(tr!("action-add-workbook", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::AddWorkbook);
+                    ui.close();
+                }
+                if ui
+                    .button(tr!("action-add-graph"))
+                    .on_hover_text(tr!("action-add-graph", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::AddGraph);
+                    ui.close();
+                }
+            });
+            ui.menu_button(tr!("menu-import"), |ui| {
+                if ui
+                    .add(
+                        egui::Button::new(tr!("action-import")).shortcut_text(SHORTCUT_IMPORT_TEXT),
+                    )
+                    .on_hover_text(tr!("action-import", "hint"))
+                    .clicked()
+                {
+                    self.open_import_dialog();
+                    ui.close();
+                }
+                let active_sheet = self
+                    .active_book()
+                    .and_then(|book| self.state.selected_sheet_in(book));
+                if ui
+                    .add_enabled(
+                        active_sheet.is_some_and(|sheet| self.state.can_refresh_from_source(sheet)),
+                        egui::Button::new(tr!("action-refresh-from-source")),
+                    )
+                    .on_hover_text(tr!("action-refresh-from-source", "hint"))
+                    .clicked()
+                {
+                    if let Some(sheet) = active_sheet {
+                        actions.push(Action::RefreshFromSource { sheet });
+                    }
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        self.state.can_reopen_last_import(),
+                        egui::Button::new(tr!("action-reopen-last-import")),
+                    )
+                    .on_hover_text(tr!("action-reopen-last-import", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::ReopenLastImport);
+                    ui.close();
+                }
+            });
             ui.separator();
             if ui
                 .add(
@@ -302,47 +321,9 @@ impl StokesForgeApp {
                 }
             });
             ui.separator();
-            for (label, hint, tab) in [
-                (
-                    tr!("menu-graph-properties"),
-                    tr!("menu-graph-properties", "hint"),
-                    PlotSettingsTab::Graph,
-                ),
-                (
-                    tr!("menu-graph-plot-area"),
-                    tr!("menu-graph-plot-area", "hint"),
-                    PlotSettingsTab::PlotArea,
-                ),
-                (
-                    tr!("menu-graph-axes"),
-                    tr!("menu-graph-axes", "hint"),
-                    PlotSettingsTab::Axes,
-                ),
-                (
-                    tr!("menu-graph-series"),
-                    tr!("menu-graph-series", "hint"),
-                    PlotSettingsTab::Series,
-                ),
-                (
-                    tr!("menu-graph-legend"),
-                    tr!("menu-graph-legend", "hint"),
-                    PlotSettingsTab::Legend,
-                ),
-                (
-                    tr!("menu-graph-theme"),
-                    tr!("menu-graph-theme", "hint"),
-                    PlotSettingsTab::Theme,
-                ),
-            ] {
-                if ui.button(label).on_hover_text(hint).clicked() {
-                    actions.push(Action::OpenPlotSettings {
-                        graph,
-                        tab,
-                        axis: None,
-                    });
-                    ui.close();
-                }
-            }
+            ui.menu_button(tr!("menu-properties"), |ui| {
+                graph_properties_menu(ui, graph, actions);
+            });
             ui.separator();
             if ui
                 .button(tr!("action-reset-zoom"))
@@ -354,146 +335,153 @@ impl StokesForgeApp {
                 }
                 ui.close();
             }
-            let moved = crate::state::current_plot_spec(self.state.tree(), graph)
-                .is_some_and(|spec| spec.has_text_anchors());
-            if ui
-                .add_enabled(moved, egui::Button::new(tr!("action-reset-text-positions")))
-                .on_hover_text(tr!("action-reset-text-positions", "hint"))
-                .on_disabled_hover_text(tr!("action-reset-text-positions", "disabled"))
-                .clicked()
-            {
-                actions.push(Action::ResetTextAnchors { graph });
-                ui.close();
-            }
-            ui.separator();
-            // Textes libres (issue #35) : le pendant, dans la
-            // barre de menus, du clic droit et de Suppr.
-            let selected = self
-                .read_graph_view(graph, GraphView::selected_annotation)
-                .flatten();
-            if ui
-                .button(tr!("action-add-text"))
-                .on_hover_text(tr!("action-add-text", "hint"))
-                .clicked()
-            {
-                let tree = self.state.tree().clone();
-                if let Some(view) = self.graph_views.get_mut(&graph) {
-                    if let Some(point) = view.panel_center_data() {
-                        add_annotation_at(ctx, view, &tree, graph, point);
+            ui.menu_button(tr!("menu-text"), |ui| {
+                let moved = crate::state::current_plot_spec(self.state.tree(), graph)
+                    .is_some_and(|spec| spec.has_text_anchors());
+                if ui
+                    .add_enabled(moved, egui::Button::new(tr!("action-reset-text-positions")))
+                    .on_hover_text(tr!("action-reset-text-positions", "hint"))
+                    .on_disabled_hover_text(tr!("action-reset-text-positions", "disabled"))
+                    .clicked()
+                {
+                    actions.push(Action::ResetTextAnchors { graph });
+                    ui.close();
+                }
+                // Textes libres (issue #35) : le pendant, dans la
+                // barre de menus, du clic droit et de Suppr.
+                let selected = self
+                    .read_graph_view(graph, GraphView::selected_annotation)
+                    .flatten();
+                if ui
+                    .button(tr!("action-add-text"))
+                    .on_hover_text(tr!("action-add-text", "hint"))
+                    .clicked()
+                {
+                    let tree = self.state.tree().clone();
+                    if let Some(view) = self.graph_views.get_mut(&graph) {
+                        if let Some(point) = view.panel_center_data() {
+                            add_annotation_at(ctx, view, &tree, graph, point);
+                        }
                     }
+                    ui.close();
                 }
-                ui.close();
-            }
-            if ui
-                .add_enabled(
-                    selected.is_some(),
-                    egui::Button::new(tr!("action-delete-text"))
-                        .shortcut_text(shortcut_text_delete()),
-                )
-                .clicked()
-            {
-                if let Some(target) = selected {
-                    actions.push(Action::RemoveAnnotation { graph, target });
-                }
-                if let Some(view) = self.graph_views.get_mut(&graph) {
-                    view.clear_annotation_selection();
-                }
-                ui.close();
-            }
-            ui.separator();
-            // Objets graphiques (issue #76) : l'ordre
-            // d'empilement et la suppression de l'objet
-            // sélectionné ; les outils de tracé sont dans la barre
-            // d'outils, comme l'outil Texte.
-            let object = self
-                .graph_views
-                .get(&graph)
-                .and_then(GraphView::selected_shape);
-            if let Some(view) = self.graph_views.get_mut(&graph) {
-                let tree = self.state.tree().clone();
-                match object {
-                    Some(object) => shape_order_buttons(ui, view, &tree, graph, object, actions),
-                    None => disabled_shape_order_buttons(ui),
-                }
-            }
-            ui.separator();
-            if ui
-                .add(
-                    egui::Button::new(tr!("action-export-graph"))
-                        .shortcut_text(ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
-                )
-                .on_hover_text(tr!("action-export-graph", "hint"))
-                .clicked()
-            {
-                self.request_graph_export(graph, actions);
-                ui.close();
-            }
-            if ui
-                .button(tr!("action-copy-graph"))
-                .on_hover_text(tr!("action-copy-graph", "hint"))
-                .clicked()
-            {
-                self.request_graph_figure_copy(graph, actions);
-                ui.close();
-            }
-            ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
-                let current = self.state.png_export_scale();
-                for scale in crate::state::PNG_EXPORT_SCALES {
-                    let (w, h) = DEFAULT_FIGURE_SIZE;
-                    let (width, height) = ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
-                    let label = tr!(
-                        "menu-graph-png-resolution-option",
-                        scale = scale,
-                        width = width,
-                        height = height
-                    );
-                    if ui.radio(current == scale, label).clicked() {
-                        actions.push(Action::SetPngExportScale(scale));
-                        ui.close();
+                if ui
+                    .add_enabled(
+                        selected.is_some(),
+                        egui::Button::new(tr!("action-delete-text"))
+                            .shortcut_text(shortcut_text_delete()),
+                    )
+                    .clicked()
+                {
+                    if let Some(target) = selected {
+                        actions.push(Action::RemoveAnnotation { graph, target });
                     }
+                    if let Some(view) = self.graph_views.get_mut(&graph) {
+                        view.clear_annotation_selection();
+                    }
+                    ui.close();
                 }
+                ui.separator();
+            });
+            ui.menu_button(tr!("menu-objects"), |ui| {
+                // Objets graphiques (issue #76) : l'ordre
+                // d'empilement et la suppression de l'objet
+                // sélectionné ; les outils de tracé sont dans la barre
+                // d'outils, comme l'outil Texte.
+                let object = self
+                    .graph_views
+                    .get(&graph)
+                    .and_then(GraphView::selected_shape);
+                if let Some(view) = self.graph_views.get_mut(&graph) {
+                    let tree = self.state.tree().clone();
+                    match object {
+                        Some(object) => {
+                            shape_order_buttons(ui, view, &tree, graph, object, actions)
+                        }
+                        None => disabled_shape_order_buttons(ui),
+                    }
+                } else {
+                    disabled_shape_order_buttons(ui);
+                }
+                ui.separator();
+            });
+            ui.menu_button(tr!("menu-export"), |ui| {
+                if ui
+                    .add(
+                        egui::Button::new(tr!("action-export-graph"))
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
+                    )
+                    .on_hover_text(tr!("action-export-graph", "hint"))
+                    .clicked()
+                {
+                    self.request_graph_export(graph, actions);
+                    ui.close();
+                }
+                if ui
+                    .button(tr!("action-copy-graph"))
+                    .on_hover_text(tr!("action-copy-graph", "hint"))
+                    .clicked()
+                {
+                    self.request_graph_figure_copy(graph, actions);
+                    ui.close();
+                }
+                ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
+                    let current = self.state.png_export_scale();
+                    for scale in crate::state::PNG_EXPORT_SCALES {
+                        let (w, h) = DEFAULT_FIGURE_SIZE;
+                        let (width, height) =
+                            ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
+                        let label = tr!(
+                            "menu-graph-png-resolution-option",
+                            scale = scale,
+                            width = width,
+                            height = height
+                        );
+                        if ui.radio(current == scale, label).clicked() {
+                            actions.push(Action::SetPngExportScale(scale));
+                            ui.close();
+                        }
+                    }
+                });
             });
         });
     }
 
     fn view_menu(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.menu_button(tr!("menu-view"), |ui| {
-            ui.checkbox(&mut self.pm_open, tr!("project-manager-title"));
-            ui.checkbox(&mut self.script_open, tr!("script-title"));
-            let mut open = self.state.object_manager_open();
-            if ui
-                .checkbox(&mut open, tr!("action-object-manager"))
-                .on_hover_text(tr!("action-object-manager", "hint"))
-                .changed()
-            {
-                actions.push(Action::SetObjectManagerOpen(open));
-            }
-            object_manager_settings_menu(ui, self.state.object_manager_settings(), open, actions);
-            ui.separator();
-            for id in ToolbarId::ALL {
-                let mut visible = self.toolbars.layout().is_visible(id);
-                if ui
-                    .checkbox(&mut visible, id.label())
-                    .on_hover_text(id.hint())
-                    .changed()
-                {
-                    self.toolbars.set_visible(id, visible);
+            ui.menu_button(tr!("menu-panels"), |ui| {
+                ui.checkbox(&mut self.pm_open, tr!("project-manager-title"));
+                ui.checkbox(&mut self.script_open, tr!("script-title"));
+                ui.menu_button(tr!("action-object-manager"), |ui| {
+                    let mut open = self.state.object_manager_open();
+                    if ui.checkbox(&mut open, tr!("action-show-content")).changed() {
+                        actions.push(Action::SetObjectManagerOpen(open));
+                    }
+                    object_manager_settings_menu(
+                        ui,
+                        self.state.object_manager_settings(),
+                        open,
+                        actions,
+                    );
+                });
+            });
+            ui.menu_button(tr!("menu-toolbars"), |ui| {
+                for id in ToolbarId::ALL {
+                    let mut visible = self.toolbars.layout().is_visible(id);
+                    if ui
+                        .checkbox(&mut visible, id.label())
+                        .on_hover_text(id.hint())
+                        .changed()
+                    {
+                        self.toolbars.set_visible(id, visible);
+                    }
                 }
-            }
+            });
         });
     }
 
-    fn window_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn window_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button(tr!("menu-window"), |ui| {
-            let mut show_metadata = metadata_row_visible(ctx);
-            if ui
-                .checkbox(&mut show_metadata, tr!("menu-window-show-metadata-row"))
-                .on_hover_text(tr!("menu-window-show-metadata-row", "hint"))
-                .changed()
-            {
-                set_metadata_row_visible(ctx, show_metadata);
-            }
-            ui.separator();
             if let Some(tab) = self.maximized_tab {
                 if ui
                     .button(tr!(
@@ -664,6 +652,12 @@ mod tests {
         .collect();
         textes.push(SHORTCUT_IMPORT_TEXT.to_string());
         textes.push(shortcut_text_delete());
+        textes.push(ctx.format_shortcut(&egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND,
+            egui::Key::C,
+        )));
+        textes.push(ctx.format_shortcut(&super::super::SHORTCUT_DUPLICATE_SHEET));
+        textes.push("F2".into());
         textes
     }
 
@@ -708,7 +702,11 @@ mod tests {
     }
 
     fn active<'a>(entrees: &'a [Entree], label: &str) -> &'a Entree {
-        entree(entrees, label).unwrap_or_else(|| panic!("entrée {label:?} absente de {entrees:#?}"))
+        entrees
+            .iter()
+            .filter(|entree| entree.label == label)
+            .max_by(|a, b| a.center.y.total_cmp(&b.center.y))
+            .unwrap_or_else(|| panic!("entrée {label:?} absente de {entrees:#?}"))
     }
 
     /// Une image de la seule barre de menu, sur l'onglet actif `tab`.
@@ -803,6 +801,35 @@ mod tests {
         (ctx, contenu)
     }
 
+    /// Chaque niveau s'ouvre par un vrai clic, avec le contexte des parents.
+    fn ouvre_chemin(
+        app: &mut StokesForgeApp,
+        tab: Option<Tab>,
+        chemin: &[String],
+    ) -> (egui::Context, Vec<Entree>) {
+        let (ctx, mut menu) = ouvre(app, tab, &chemin[0]);
+        for parent in &chemin[1..] {
+            let pos = menu
+                .iter()
+                .filter(|entree| &entree.label == parent)
+                .max_by(|a, b| a.center.y.total_cmp(&b.center.y))
+                .unwrap_or_else(|| panic!("sous-menu {parent} absent : {menu:#?}"))
+                .center;
+            assert!(clique(app, &ctx, tab, pos).is_empty());
+            menu = entrees(&peint(app, &ctx, tab, Vec::new()).0);
+        }
+        (ctx, menu)
+    }
+
+    fn assert_ferme(app: &mut StokesForgeApp, ctx: &egui::Context, tab: Option<Tab>) {
+        let menu = entrees(&peint(app, ctx, tab, Vec::new()).0);
+        let mut visibles: Vec<_> = menu.iter().map(|e| e.label.clone()).collect();
+        let mut fermes = titres(app, tab);
+        visibles.sort();
+        fermes.sort();
+        assert_eq!(visibles, fermes, "le choix ferme tous les niveaux");
+    }
+
     /// Les extractions de menus gardent leur ordre ; changer le contenu
     /// actif remplace seulement le menu propre au classeur ou au graphique.
     #[test]
@@ -841,13 +868,17 @@ mod tests {
         let tab = app.floating_tabs.last().copied();
         let (_, menu) = ouvre(&mut app, tab, &tr!("menu-file"));
         assert!(active(&menu, &tr!("action-save")).enabled, "témoin");
-        assert!(active(&menu, &tr!("action-add-workbook")).enabled);
-        assert!(!active(&menu, &tr!("action-reopen-last-import")).enabled);
-        assert!(!active(&menu, &tr!("action-refresh-from-source")).enabled);
+        assert!(entree(&menu, &tr!("action-add-workbook")).is_none());
+        assert!(entree(&menu, &tr!("action-refresh-from-source")).is_none());
+        let (_, nouveau) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
+        assert!(active(&nouveau, &tr!("action-add-workbook")).enabled);
         assert_eq!(
-            active(&menu, &tr!("action-new-project")).enabled,
+            active(&nouveau, &tr!("action-new-project")).enabled,
             app.state.can_new_project()
         );
+        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
+        assert!(!active(&menu, &tr!("action-reopen-last-import")).enabled);
+        assert!(!active(&menu, &tr!("action-refresh-from-source")).enabled);
         session.shutdown().unwrap();
 
         // Après un import dans un classeur neuf : la relecture suit le
@@ -860,7 +891,7 @@ mod tests {
         let mut app = StokesForgeApp::new(state);
         let tab = app.floating_tabs.last().copied();
         assert!(matches!(tab, Some(Tab::Graph(_))));
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-file"));
+        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
         assert!(active(&menu, &tr!("action-reopen-last-import")).enabled);
         assert!(
             !active(&menu, &tr!("action-refresh-from-source")).enabled,
@@ -868,12 +899,14 @@ mod tests {
         );
         app.open_tab(Tab::Book(imported));
         let tab = app.floating_tabs.last().copied();
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-file"));
+        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
         assert!(active(&menu, &tr!("action-refresh-from-source")).enabled);
 
         // Une entrée cliquée pousse son action, rien de plus.
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
         let pos = active(&menu, &tr!("action-add-workbook")).center;
         assert_eq!(clique(&mut app, &ctx, tab, pos), vec![Action::AddWorkbook]);
+        assert_ferme(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 
@@ -909,6 +942,40 @@ mod tests {
     }
 
     #[test]
+    fn selection_d_edition_garde_les_actions_et_le_grisage_du_project_manager() {
+        let (session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-edit"));
+        assert!(entree(&menu, &tr!("action-delete-project-object")).is_none());
+        app.pm_selection.clear();
+        let (_, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[tr!("menu-edit"), tr!("menu-selected-content")],
+        );
+        assert!(!active(&menu, &tr!("action-delete-project-object")).enabled);
+        assert!(!active(&menu, &tr!("action-copy")).enabled);
+        assert!(
+            active(&menu, &tr!("action-paste")).enabled,
+            "témoin indépendant de la sélection"
+        );
+        app.pm_selection.insert(Tab::Graph(graph));
+        let (ctx, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[tr!("menu-edit"), tr!("menu-selected-content")],
+        );
+        let copy = active(&menu, &tr!("action-copy"));
+        assert!(copy.enabled);
+        assert_eq!(
+            clique(&mut app, &ctx, tab, copy.center),
+            vec![Action::CopyObjects(vec![graph])]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+        session.shutdown().unwrap();
+    }
+
+    #[test]
     fn le_menu_classeur_n_existe_qu_avec_un_classeur_au_premier_plan() {
         let (session, mut app, graph) = banc();
         let book = app.state.books()[0].0;
@@ -925,6 +992,144 @@ mod tests {
                     && !titres(&mut app, Some(Tab::Book(book))).contains(&entree.label)),
             "le menu Classeur a un contenu : {menu:#?}"
         );
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn le_classeur_range_feuilles_colonnes_et_metadata_sans_changer_les_actions() {
+        use stokesforge_core::{ColumnRole, ColumnType};
+        let (session, mut app, _) = banc();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let columns: Vec<_> = app
+            .state
+            .visible_columns(sheet)
+            .iter()
+            .map(|c| c.0)
+            .collect();
+        let tab = Some(Tab::Book(book));
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-workbook"));
+        assert!(entree(&menu, &tr!("action-rename-sheet")).is_none());
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-workbook"), tr!("menu-sheet")]);
+        assert!(!active(&menu, &tr!("action-delete-sheet")).enabled);
+        let pos = active(&menu, &tr!("action-duplicate-sheet")).center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            vec![Action::DuplicateSheet(sheet)]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+
+        app.state.deselect_all(sheet);
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-workbook"));
+        assert!(!active(&menu, &tr!("workbook-plot-menu")).enabled);
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-workbook"), tr!("menu-columns")]);
+        assert!(active(&menu, &tr!("workbook-column-add")).enabled);
+        for label in [
+            tr!("column-type"),
+            tr!("column-role"),
+            tr!("workbook-plot-menu"),
+        ] {
+            assert!(!active(&menu, &label).enabled, "aucune sélection : {label}");
+        }
+        let pos = active(&menu, &tr!("workbook-column-add")).center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            vec![Action::AddColumn { sheet }]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+
+        app.state.select_column(sheet, columns[0]);
+        app.state.extend_column_selection(sheet, columns[1]);
+        app.state.dispatch(Action::SetColumnType {
+            column: columns[0],
+            column_type: ColumnType::Mixed,
+        });
+        app.state.dispatch(Action::SetColumnRole {
+            column: columns[0],
+            role: ColumnRole::X,
+        });
+        let (ctx, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[
+                tr!("menu-workbook"),
+                tr!("menu-columns"),
+                tr!("column-type"),
+            ],
+        );
+        assert_eq!(
+            active(&menu, &tr!("column-type-numeric")).toggled,
+            Some(false)
+        );
+        assert_eq!(
+            active(&menu, &tr!("column-type-mixed")).toggled,
+            Some(false)
+        );
+        let pos = active(&menu, &tr!("column-type-mixed")).center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            columns
+                .iter()
+                .map(|column| Action::SetColumnType {
+                    column: *column,
+                    column_type: ColumnType::Mixed
+                })
+                .collect::<Vec<_>>()
+        );
+        assert_ferme(&mut app, &ctx, tab);
+        // X et Y sont différents : aucun rôle n'est indiqué comme sélectionné.
+        let (ctx, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[
+                tr!("menu-workbook"),
+                tr!("menu-columns"),
+                tr!("column-role"),
+            ],
+        );
+        for label in [tr!("workbook-role-x"), tr!("workbook-role-y")] {
+            assert_eq!(active(&menu, &label).toggled, Some(false));
+        }
+        let pos = active(&menu, &tr!("workbook-role-z")).center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            columns
+                .iter()
+                .map(|column| Action::SetColumnRole {
+                    column: *column,
+                    role: ColumnRole::Z
+                })
+                .collect::<Vec<_>>()
+        );
+        assert_ferme(&mut app, &ctx, tab);
+        let (ctx, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[
+                tr!("menu-workbook"),
+                tr!("menu-columns"),
+                tr!("workbook-plot-menu"),
+            ],
+        );
+        let pos = active(&menu, &tr!("plot-type-line")).center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            vec![Action::PlotColumns {
+                sheet,
+                columns: columns.clone(),
+                plot_type: stokesforge_plot::PlotType::Line
+            }]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-workbook"));
+        let label = tr!("menu-window-show-metadata-row");
+        let case = active(&menu, &label);
+        let visible = case.toggled.unwrap();
+        assert!(clique(&mut app, &ctx, tab, case.center).is_empty());
+        let menu = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
+        assert_eq!(active(&menu, &label).toggled, Some(!visible));
         session.shutdown().unwrap();
     }
 
@@ -960,7 +1165,7 @@ mod tests {
         app.with_graph_view(graph, |view| {
             view.select_series(Some(stokesforge_plot::SeriesRef::new(0, 0)), &spec)
         });
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-export")]);
         let entry = active(&menu, &tr!("action-copy-graph"));
         assert!(entry.enabled);
         let attendu = app
@@ -972,6 +1177,7 @@ mod tests {
                 spec: Box::new(attendu)
             }]
         );
+        assert_ferme(&mut app, &ctx, tab);
         // Témoin : sans graphique actif, le menu Graphique n'existe pas.
         let book = app.state.books()[0].0;
         assert!(!titres(&mut app, Some(Tab::Book(book))).contains(&tr!("menu-graph")));
@@ -986,9 +1192,10 @@ mod tests {
         assert!(!menus.contains(&tr!("menu-graph")), "{menus:?}");
 
         let tab = Some(Tab::Graph(graph));
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-text")]);
         assert!(active(&menu, &tr!("action-add-text")).enabled, "témoin");
-        assert!(active(&menu, &tr!("action-export-graph")).enabled);
+        let (_, export) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-export")]);
+        assert!(active(&export, &tr!("action-export-graph")).enabled);
         assert!(!active(&menu, &tr!("action-delete-text")).enabled);
         assert!(
             !active(&menu, &tr!("action-reset-text-positions")).enabled,
@@ -1002,7 +1209,7 @@ mod tests {
         };
         let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_annotation(Some(target), &spec));
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-text")]);
         let pos = active(&menu, &tr!("action-delete-text")).center;
         assert!(active(&menu, &tr!("action-delete-text")).enabled);
         assert_eq!(
@@ -1057,38 +1264,115 @@ mod tests {
     fn le_menu_affichage_reflete_et_bascule_panneaux_et_barres() {
         let (session, mut app, graph) = banc();
         let tab = Some(Tab::Graph(graph));
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-view"));
+        assert!(entree(&menu, &tr!("action-object-manager")).is_none());
         for open in [false, true] {
             app.state.set_object_manager_open_for_test(open);
-            let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-view"));
-            let case = active(&menu, &tr!("action-object-manager"));
-            assert_eq!(case.toggled, Some(open));
+            let (_, panels) = ouvre_chemin(&mut app, tab, &[tr!("menu-view"), tr!("menu-panels")]);
             assert!(
-                entree(&menu, &tr!("project-manager-title")).is_some()
-                    && entree(&menu, &tr!("script-title")).is_some(),
-                "les trois panneaux sont accessibles dans Affichage"
+                entree(&panels, &tr!("project-manager-title")).is_some()
+                    && entree(&panels, &tr!("script-title")).is_some()
             );
-            assert_eq!(active(&menu, &tr!("object-manager-settings")).enabled, open);
-            for id in ToolbarId::ALL {
-                assert_eq!(
-                    active(&menu, &id.label()).toggled,
-                    Some(app.toolbars.layout().is_visible(id)),
-                    "{id:?}"
-                );
-            }
-            let pos = case.center;
+            assert!(entree(&panels, &tr!("object-manager-show-texts")).is_none());
+            let (ctx, menu) = ouvre_chemin(
+                &mut app,
+                tab,
+                &[
+                    tr!("menu-view"),
+                    tr!("menu-panels"),
+                    tr!("action-object-manager"),
+                ],
+            );
+            let case = active(&menu, &tr!("action-show-content"));
+            assert_eq!(case.toggled, Some(open));
             assert_eq!(
-                clique(&mut app, &ctx, tab, pos),
+                clique(&mut app, &ctx, tab, case.center),
                 vec![Action::SetObjectManagerOpen(!open)]
             );
+            let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
+            assert!(entree(&toujours, &tr!("action-show-content")).is_some());
+            assert_eq!(active(&menu, &tr!("object-manager-settings")).enabled, open);
         }
-
-        // Une barre se masque depuis le menu, sans passer par une action.
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-view"), tr!("menu-toolbars")]);
+        for id in ToolbarId::ALL {
+            assert_eq!(
+                active(&menu, &id.label()).toggled,
+                Some(app.toolbars.layout().is_visible(id)),
+                "{id:?}"
+            );
+        }
         let id = ToolbarId::ALL[0];
         let visible = app.toolbars.layout().is_visible(id);
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-view"));
         let pos = active(&menu, &id.label()).center;
         assert!(clique(&mut app, &ctx, tab, pos).is_empty());
         assert_eq!(app.toolbars.layout().is_visible(id), !visible);
+        let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
+        assert_eq!(active(&toujours, &id.label()).toggled, Some(!visible));
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn la_resolution_png_est_un_choix_exclusif_qui_ferme_trois_niveaux() {
+        let (session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        let (ctx, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[
+                tr!("menu-graph"),
+                tr!("menu-export"),
+                tr!("menu-graph-png-resolution"),
+            ],
+        );
+        let scale = crate::state::PNG_EXPORT_SCALES
+            .iter()
+            .copied()
+            .find(|scale| *scale != app.state.png_export_scale())
+            .unwrap();
+        let (w, h) = DEFAULT_FIGURE_SIZE;
+        let label = tr!(
+            "menu-graph-png-resolution-option",
+            scale = scale,
+            width = ((w as f32 * scale) as u32),
+            height = ((h as f32 * scale) as u32)
+        );
+        assert_eq!(
+            clique(&mut app, &ctx, tab, active(&menu, &label).center),
+            vec![Action::SetPngExportScale(scale)]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn les_proprietes_du_graphique_ouvrent_le_bon_onglet_et_ferment_les_parents() {
+        let (session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        for feuille in [
+            tr!("menu-graph-axes"),
+            tr!("action-add-text"),
+            tr!("action-export-graph"),
+            tr!("action-delete-object"),
+        ] {
+            assert!(
+                entree(&menu, &feuille).is_none(),
+                "la feuille {feuille} doit être rangée"
+            );
+        }
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-properties")]);
+        let pos = active(&menu, &tr!("menu-graph-axes")).center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            vec![Action::OpenPlotSettings {
+                graph,
+                tab: crate::state::PlotSettingsTab::Axes,
+                axis: None
+            }]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-objects")]);
+        assert!(!active(&menu, &tr!("action-delete-object")).enabled);
         session.shutdown().unwrap();
     }
 
@@ -1099,16 +1383,16 @@ mod tests {
         app.state.set_object_manager_open_for_test(true);
         // Les réglages restent accessibles sans graphique actif.
         let open = |app: &mut StokesForgeApp, child: Option<&str>| {
-            let (ctx, menu) = ouvre(app, None, &tr!("menu-view"));
-            let pos = active(&menu, &tr!("object-manager-settings")).center;
-            assert!(clique(app, &ctx, None, pos).is_empty());
-            let menu = entrees(&peint(app, &ctx, None, Vec::new()).0);
+            let mut path = vec![
+                tr!("menu-view"),
+                tr!("menu-panels"),
+                tr!("action-object-manager"),
+                tr!("object-manager-settings"),
+            ];
             if let Some(label) = child {
-                let pos = active(&menu, label).center;
-                assert!(clique(app, &ctx, None, pos).is_empty());
+                path.push(label.to_string());
             }
-            let menu = entrees(&peint(app, &ctx, None, Vec::new()).0);
-            (ctx, menu)
+            ouvre_chemin(app, None, &path)
         };
         for (label, current, action) in [
             (
@@ -1127,6 +1411,11 @@ mod tests {
             assert!(row.enabled);
             assert_eq!(row.toggled, Some(current));
             assert_eq!(clique(&mut app, &ctx, None, row.center), vec![action]);
+            let still_open = entrees(&peint(&mut app, &ctx, None, Vec::new()).0);
+            assert!(
+                entree(&still_open, &label).is_some(),
+                "la bascule garde Display ouvert"
+            );
         }
         for (group, label) in [
             (ObjectManagerGroup::Graph, tr!("window-kind-graph")),
@@ -1152,6 +1441,11 @@ mod tests {
                     open: !current
                 }]
             );
+            let still_open = entrees(&peint(&mut app, &ctx, None, Vec::new()).0);
+            assert!(
+                entree(&still_open, &label).is_some(),
+                "la bascule garde Expand by Default ouvert"
+            );
         }
         let (ctx, menu) = open(&mut app, None);
         assert_eq!(
@@ -1163,6 +1457,7 @@ mod tests {
             ),
             vec![Action::ResetObjectManagerSettings]
         );
+        assert_ferme(&mut app, &ctx, None);
         session.shutdown().unwrap();
     }
 

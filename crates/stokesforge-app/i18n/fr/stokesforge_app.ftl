@@ -27,6 +27,17 @@ menu-workbook = Classeur
 menu-graph = Graphique
 menu-view = Affichage
 menu-window = Fenêtre
+menu-new = Nouveau
+menu-import = Importer
+menu-properties = Propriétés
+menu-text = Texte
+menu-objects = Objets
+menu-export = Exporter
+menu-panels = Panneaux
+menu-toolbars = Barres d’outils
+menu-sheet = Feuille
+menu-columns = Colonnes
+menu-order = Ordre
 menu-language = Langue
 
 action-add-workbook = Ajouter un classeur
@@ -168,6 +179,7 @@ import-option-apostrophe = Apostrophe
 import-option-other = Autre
 
 # Types de colonne, partagés par « Lu comme » et « Type ».
+column-type = Type
 column-type-numeric = Numérique
 column-type-text = Texte
 column-type-mixed = Mixte
