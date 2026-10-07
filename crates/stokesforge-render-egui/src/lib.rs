@@ -487,6 +487,10 @@ pub struct GraphView {
     selected_shape: Option<ShapeRef>,
     /// Série sélectionnée, commune au graphe et à Object Manager (#83).
     selected_series: Option<stokesforge_plot::SeriesRef>,
+    /// Où est parti le glisser de navigation en cours : décidé à la première
+    /// image du geste, pour que le curseur puisse en sortir sans changer de
+    /// cible.
+    nav_drag: Option<NavDrag>,
     /// Calque actif (#161) : le dernier calque sélectionné, cible par défaut
     /// des ajouts. État d'interface, hors modèle ; jamais dessiné dans la
     /// figure. Lu par [`Self::active_panel`], qui le revalide.
@@ -497,6 +501,14 @@ pub struct GraphView {
     /// sélectionné).
     seen_selection: SelectionKey,
     events: Vec<GraphEvent>,
+}
+
+/// La cible d'un glisser de navigation : toute la zone de tracé, ou une seule
+/// échelle (glisser sur un axe, #167).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum NavDrag {
+    Plot,
+    Axis { panel: usize, side: AxisSide },
 }
 
 /// Les quatre sélections d'une vue, pour détecter qu'elles ont changé.
@@ -571,6 +583,7 @@ impl GraphView {
             shape_drag: None,
             selected_shape: None,
             selected_series: None,
+            nav_drag: None,
             active_panel: 0,
             seen_selection: (None, None, None, None),
             events: Vec::new(),
@@ -1279,6 +1292,69 @@ impl GraphView {
         }
     }
 
+    /// L'axe (ligne et graduations) sous le pixel egui `pos`, par l'indice du
+    /// panneau dans [`DrawnPlot::panels`] et le côté **du spec**.
+    fn axis_at(&self, pos: Pos2) -> Option<(usize, AxisSide)> {
+        match self.component_at(pos)? {
+            PlotComponent::Axis { panel, side } => Some((panel, side)),
+            _ => None,
+        }
+    }
+
+    /// Applique un geste à **une seule échelle** (#167) : celle de l'axe
+    /// `side` du panneau `panel_index` (dans [`DrawnPlot::panels`]). Les
+    /// autres échelles, liées ou non, ne bougent pas. Le geste n'agit que
+    /// selon l'axe : l'autre composante est neutralisée au centre de la zone
+    /// de tracé.
+    fn commit_axis_gesture(&mut self, panel_index: usize, side: AxisSide, gesture: Gesture) {
+        let Some(panel) = self.last.as_ref().and_then(|l| l.panels.get(panel_index)) else {
+            return;
+        };
+        let horizontal = side == AxisSide::Bottom;
+        let center = (
+            panel.pixel_origin.0 as f64 + panel.pixel_size.0 as f64 / 2.0,
+            panel.pixel_origin.1 as f64 + panel.pixel_size.1 as f64 / 2.0,
+        );
+        let gesture = match gesture {
+            Gesture::Zoom { anchor, factor } => Gesture::Zoom {
+                anchor: if horizontal {
+                    (anchor.0, center.1)
+                } else {
+                    (center.0, anchor.1)
+                },
+                factor,
+            },
+            Gesture::Pan { dx, dy } => {
+                if horizontal {
+                    Gesture::Pan { dx, dy: 0.0 }
+                } else {
+                    Gesture::Pan { dx: 0.0, dy }
+                }
+            }
+            other => other,
+        };
+        let mut framing = Framing::default();
+        match side {
+            AxisSide::Bottom => {
+                framing.x = PanelTransform::of(panel)
+                    .and_then(|t| t.apply(&gesture))
+                    .map(|(x, _)| x);
+            }
+            AxisSide::Left => {
+                framing.y = PanelTransform::of(panel)
+                    .and_then(|t| t.apply(&gesture))
+                    .map(|(_, y)| y);
+            }
+            AxisSide::Right => {
+                framing.y2 = PanelTransform::of_axis(panel, true)
+                    .and_then(|t| t.apply(&gesture))
+                    .map(|(_, y2)| y2);
+            }
+        }
+        let index = panel.index;
+        self.view.set_framing(index, framing);
+    }
+
     /// Ctrl+molette (zoom), glissé principal (pan avec l'outil Pointeur,
     /// rectangle de zoom élastique avec l'outil Zoom), clic de l'outil Texte
     /// et double-clic (réinitialisation) — tâches 7.1 et 7.4, issue #62. Ne fait rien tant qu'aucune figure n'a encore été tracée.
@@ -1401,38 +1477,59 @@ impl GraphView {
                 // le cadrage d'un coup.
                 let zoom = context.input(|input| input.zoom_delta());
                 if zoom != 1.0 {
-                    if let Some((panel_index, _)) = self.panel_at(pos.0) {
-                        let factor = (1.0 / zoom as f64).clamp(0.5, 2.0);
-                        self.commit_gesture(
-                            panel_index,
-                            Gesture::Zoom {
-                                anchor: (pos.1.x as f64, pos.1.y as f64),
-                                factor,
-                            },
-                        );
+                    let factor = (1.0 / zoom as f64).clamp(0.5, 2.0);
+                    let gesture = Gesture::Zoom {
+                        anchor: (pos.1.x as f64, pos.1.y as f64),
+                        factor,
+                    };
+                    if let Some((panel_index, side)) = self.axis_at(pos.0) {
+                        // Au-dessus d'un axe, le zoom ne cadre que cette échelle.
+                        self.commit_axis_gesture(panel_index, side, gesture);
+                    } else if let Some((panel_index, _)) = self.panel_at(pos.0) {
+                        self.commit_gesture(panel_index, gesture);
                     }
                 }
             }
         }
 
+        if !response.dragged_by(PointerButton::Primary) {
+            self.nav_drag = None;
+        }
         if self.tool == GraphTool::Pointer && response.dragged_by(PointerButton::Primary) {
             let delta = response.drag_delta();
             if let Some(pos) = response.interact_pointer_pos() {
-                // Le panneau visé est celui sous le point de départ du
-                // geste : une fois qu'on glisse, le curseur peut sortir de
-                // la zone de tracé (paner jusqu'au bord d'un panneau voisin)
-                // sans que la cible ne change en cours de route.
+                // La cible est celle du point de départ du geste, décidée à
+                // la première image : une fois qu'on glisse, le curseur peut
+                // sortir de la zone de tracé (paner jusqu'au bord d'un
+                // panneau voisin) ou de l'axe sans que la cible ne change en
+                // cours de route. Un glisser parti d'un axe ne déplace que
+                // cette échelle (#167).
                 let origin = pos - delta;
-                if let Some((panel_index, _)) = self.panel_at(origin).or_else(|| self.panel_at(pos))
-                {
-                    let scale = self.display_scale().unwrap_or(1.0);
-                    self.commit_gesture(
-                        panel_index,
-                        Gesture::Pan {
-                            dx: (delta.x / scale) as f64,
-                            dy: (delta.y / scale) as f64,
-                        },
-                    );
+                let target = match self.nav_drag {
+                    Some(target) => target,
+                    None => {
+                        let target = match self.axis_at(origin) {
+                            Some((panel, side)) => NavDrag::Axis { panel, side },
+                            None => NavDrag::Plot,
+                        };
+                        self.nav_drag = Some(target);
+                        target
+                    }
+                };
+                let scale = self.display_scale().unwrap_or(1.0);
+                let pan = Gesture::Pan {
+                    dx: (delta.x / scale) as f64,
+                    dy: (delta.y / scale) as f64,
+                };
+                match target {
+                    NavDrag::Axis { panel, side } => self.commit_axis_gesture(panel, side, pan),
+                    NavDrag::Plot => {
+                        if let Some((panel_index, _)) =
+                            self.panel_at(origin).or_else(|| self.panel_at(pos))
+                        {
+                            self.commit_gesture(panel_index, pan);
+                        }
+                    }
                 }
             }
         }

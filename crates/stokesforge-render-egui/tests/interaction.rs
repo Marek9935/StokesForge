@@ -1063,12 +1063,9 @@ fn glisser_une_forme_garde_le_trace_libre() {
     ));
 }
 
-/// #167 : un geste de cadrage porte sur les **échelles** de tous les calques
-/// de la case, pas sur le seul calque touché — un calque superposé à axes
-/// propres garde ses graduations alignées sur celles du calque de base, et
-/// une échelle liée (axe non affiché) n'a pas de cadrage à elle.
-#[test]
-fn le_zoom_cadre_les_echelles_de_tous_les_calques_de_la_case() {
+/// Trois calques dans la même case : le calque de base, un calque à axes
+/// propres (X en haut, Y à droite) et un calque dont l'axe X est lié.
+fn trois_calques() -> (Session, NodeId) {
     use stokesforge_plot::{OverlaySpec, Panels};
     let mut project = Project::new("Calques").expect("projet");
     let root = project.root();
@@ -1104,7 +1101,16 @@ fn le_zoom_cadre_les_echelles_de_tous_les_calques_de_la_case() {
     lie.series.push(SeriesSpec::new_xy(x, y2));
     let spec = PlotSpec::empty("").with_panels(Panels::new(vec![base, propre, lie]));
     let graph = project.add_graph(root, None, spec).expect("graphe");
-    let session = Session::spawn(project, None).expect("session");
+    (Session::spawn(project, None).expect("session"), graph)
+}
+
+/// #167 : un geste de cadrage porte sur les **échelles** de tous les calques
+/// de la case, pas sur le seul calque touché — un calque superposé à axes
+/// propres garde ses graduations alignées sur celles du calque de base, et
+/// une échelle liée (axe non affiché) n'a pas de cadrage à elle.
+#[test]
+fn le_zoom_cadre_les_echelles_de_tous_les_calques_de_la_case() {
+    let (session, graph) = trois_calques();
     let snapshot = session.handle().snapshot().expect("instantané");
     let context = contexte();
     let mut view = GraphView::new();
@@ -1179,5 +1185,65 @@ fn le_zoom_cadre_les_echelles_de_tous_les_calques_de_la_case() {
     assert_eq!(
         apres.panel(2).unwrap().x_range,
         apres.panel(0).unwrap().x_range
+    );
+}
+
+/// #167 : au-dessus d'un axe, la molette et le glisser ne cadrent que cette
+/// échelle ; les autres échelles de la case, liées ou non, ne bougent pas.
+#[test]
+fn la_molette_et_le_glisser_sur_un_axe_ne_cadrent_que_cette_echelle() {
+    let (session, graph) = trois_calques();
+    let snapshot = session.handle().snapshot().expect("instantané");
+    let context = contexte();
+    let mut view = GraphView::new();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let panel = view.last_drawn().expect("figure").panel(0).unwrap().clone();
+    let centre_x = panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0;
+    let sous = Pos2::new(
+        centre_x,
+        (panel.pixel_origin.1 + panel.pixel_size.1 as i32) as f32 + 8.0,
+    );
+    let dessus = Pos2::new(centre_x, panel.pixel_origin.1 as f32 - 8.0);
+
+    // Molette sur l'axe X du bas (calque de base).
+    image(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        vec![pointer_moved(sous), wheel(7.9)],
+    );
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let base = view.view().framing(0).expect("l'axe X du bas est cadré");
+    assert!(base.x.is_some(), "{base:?}");
+    assert!(base.y.is_none(), "l'axe Y du calque de base n'a pas bougé");
+    assert!(
+        view.view().framing(1).is_none() && view.view().framing(2).is_none(),
+        "les autres calques ne bougent pas"
+    );
+
+    // Glisser sur l'axe X du haut (calque à axes propres).
+    let arrivee = Pos2::new(dessus.x + 80.0, dessus.y);
+    for events in [
+        vec![
+            pointer_moved(dessus),
+            pointer_button(dessus, PointerButton::Primary, true),
+        ],
+        vec![pointer_moved(arrivee)],
+        vec![pointer_moved(Pos2::new(
+            arrivee.x + 20.0,
+            arrivee.y + 150.0,
+        ))],
+        vec![pointer_button(arrivee, PointerButton::Primary, false)],
+        vec![],
+    ] {
+        image(&context, &mut view, &snapshot, graph, events);
+    }
+    let propre = view.view().framing(1).expect("l'axe X du haut est cadré");
+    assert!(propre.x.is_some() && propre.y.is_none(), "{propre:?}");
+    assert_eq!(
+        view.view().framing(0).unwrap().x,
+        base.x,
+        "le calque de base n'a pas suivi"
     );
 }

@@ -1203,7 +1203,11 @@ calques d'une case), s'applique à toutes les échelles propres de tous les
 calques de la case (X, Y et y2 du calque ordinaire ; X en haut / Y à droite
 d'un calque superposé), si bien que les graduations restent alignées. Une
 échelle liée n'a pas de cadrage à elle (`Framing` par échelle, `Gesture`,
-`GraphView::commit_gesture`). Zoomer un seul axe : à venir. Rendu : `docs/rendu.md`.
+`GraphView::commit_gesture`). **Un seul axe** : la molette (Ctrl) et le glisser
+au-dessus d'un axe (ligne et graduations, pas son titre) ne cadrent que cette
+échelle (`commit_axis_gesture`) ; la cible d'un glisser est figée à sa première
+image (`NavDrag`), le curseur peut donc quitter l'axe. Les autres échelles, liées
+ou non, ne bougent pas. Le rectangle de zoom reste un geste de zone de tracé. Rendu : `docs/rendu.md`.
 
 **Calque actif (#161).** `GraphView::active_panel(spec)` : le dernier calque
 sélectionné, état d'interface hors `.stf` et hors historique, porté par la vue
