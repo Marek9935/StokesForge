@@ -1,6 +1,6 @@
 //! Tests d'intégration du recalcul des colonnes calculées (v1), via la seule
 //! API publique de `stokesforge-session` — voir la doc de tête de
-//! `stokesforge-session::actor::recalc_formulas` pour la portée exacte du
+//! `stokesforge-session::recalc::recalc_formulas` pour la portée exacte du
 //! déclenchement que ces tests vérifient depuis l'extérieur.
 
 use stokesforge_commands::{ColumnRef, Command, HistoryLabel};

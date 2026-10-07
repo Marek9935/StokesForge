@@ -2125,7 +2125,7 @@ fn set_column_meta_round_trip() {
 /// Colonnes calculées (v1) — poser une formule sur une colonne qui portait
 /// déjà des valeurs, puis annuler, doit restaurer **ces valeurs**, pas
 /// seulement retirer la formule. `stokesforge-commands` ne recalcule jamais
-/// lui-même (c'est `stokesforge-session::actor::recalc_formulas`, hors
+/// lui-même (c'est `stokesforge-session::recalc::recalc_formulas`, hors
 /// historique — voir `crates/stokesforge-session/tests/formula.rs` pour le test
 /// de bout en bout via l'acteur réel) : ce test simule ici, par un
 /// `project.set_values` direct après l'exécution de `SetColumnMeta`, l'effet

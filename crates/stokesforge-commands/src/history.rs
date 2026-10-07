@@ -140,7 +140,7 @@ pub enum DataDelta {
     ///
     /// Exception : `values_before`. Quand cette commande fait passer
     /// `formula` de `None` à `Some(_)`, la colonne cesse d'être une source de
-    /// vérité et devient, dans l'instant qui suit (`stokesforge-session::actor::
+    /// vérité et devient, dans l'instant qui suit (`stokesforge-session::recalc::
     /// recalc_formulas`, hors historique — voir sa doc de tête), une colonne
     /// recalculée dont le contenu précédent est **écrasé sans qu'aucune
     /// commande ne le rejoue**. Sans capturer ce contenu ici, annuler cette
@@ -1275,7 +1275,7 @@ impl History {
                 // capturé seulement à la transition « pas de formule avant,
                 // formule après » — c'est la colonne qui perd, dans
                 // l'instant, sa qualité de source de vérité au profit du
-                // recalcul (`stokesforge-session::actor::recalc_formulas`, hors
+                // recalcul (`stokesforge-session::recalc::recalc_formulas`, hors
                 // historique). Lu **après** `set_column_meta` : cet appel ne
                 // touche jamais aux valeurs, seulement à `meta`, donc l'ordre
                 // ne change rien à ce qui est capturé ici.
@@ -1437,7 +1437,7 @@ impl History {
                 // Voir la doc de `DataDelta::ColumnMeta::values_before` : la
                 // colonne redevient une source de vérité ordinaire, ses
                 // valeurs d'avant la formule doivent revenir avec elle — sans
-                // quoi le recalcul qui suit (`stokesforge-session::actor::
+                // quoi le recalcul qui suit (`stokesforge-session::recalc::
                 // recalc_formulas`) ignore une colonne qui n'a plus de
                 // formule et laisse les valeurs calculées en place.
                 if let Some((column_type, values)) = values_before {

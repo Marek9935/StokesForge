@@ -143,6 +143,7 @@
 
 mod actor;
 mod error;
+mod recalc;
 mod snapshot;
 
 use std::path::Path;

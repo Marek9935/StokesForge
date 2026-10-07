@@ -9,7 +9,7 @@
 //!
 //! Module pur : ni accès au `Project`, ni à l'arbre — [`evaluate`] ne prend
 //! qu'un slice de [`ColumnValues`] déjà extrait par l'appelant (typiquement
-//! `stokesforge-session::actor`, qui orchestre le recalcul — voir sa doc de tête
+//! `stokesforge-session::recalc`, qui orchestre le recalcul — voir sa doc de tête
 //! pour l'ordonnancement par dépendances et la détection de cycle, dont
 //! [`topological_order`] ci-dessous est l'outil générique).
 //!
@@ -511,7 +511,7 @@ fn combine(
 
 /// Ordonne un ensemble de nœuds par dépendance (tri topologique de Kahn),
 /// **sans jamais boucler indéfiniment** — c'est l'outil générique dont
-/// l'orchestrateur de recalcul (`stokesforge-session::actor`) se sert pour ne
+/// l'orchestrateur de recalcul (`stokesforge-session::recalc`) se sert pour ne
 /// recalculer une colonne-formule qu'une fois toutes celles dont elle dépend
 /// déjà à jour, et pour détecter un cycle entre colonnes-formule sans risque
 /// de boucle infinie.
