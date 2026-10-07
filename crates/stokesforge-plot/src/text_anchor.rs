@@ -47,54 +47,45 @@ impl TextAnchor {
     }
 }
 
-/// Un texte déplaçable, désigné dans un [`PlotSpec`]. Les panneaux sont
-/// adressés par leur position dans la grille, comme [`crate::AnnotationRef`].
+/// Un texte déplaçable, désigné dans un [`PlotSpec`]. Les calques sont
+/// adressés par leur indice, comme [`crate::AnnotationRef`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextTarget {
     /// Le titre du graphe.
     Title,
     /// Le titre d'un panneau.
     PanelTitle {
-        /// Ligne du panneau.
-        row: usize,
-        /// Colonne du panneau.
-        column: usize,
+        /// Indice du calque dans [`PlotSpec::panels`].
+        panel: usize,
     },
     /// Le titre d'un axe d'un panneau.
     AxisTitle {
-        /// Ligne du panneau.
-        row: usize,
-        /// Colonne du panneau.
-        column: usize,
+        /// Indice du calque dans [`PlotSpec::panels`].
+        panel: usize,
         /// Le côté de l'axe.
         side: AxisSide,
     },
     /// La légende d'un panneau (le cadre entier).
     Legend {
-        /// Ligne du panneau.
-        row: usize,
-        /// Colonne du panneau.
-        column: usize,
+        /// Indice du calque dans [`PlotSpec::panels`].
+        panel: usize,
     },
 }
 
 impl TextTarget {
-    /// La position `(row, column)` du panneau du texte ; `None` pour le titre
-    /// du graphe.
-    pub fn panel_position(&self) -> Option<(usize, usize)> {
+    /// L'indice du calque du texte ; `None` pour le titre du graphe.
+    pub fn panel_index_of(&self) -> Option<usize> {
         match *self {
             Self::Title => None,
-            Self::PanelTitle { row, column }
-            | Self::AxisTitle { row, column, .. }
-            | Self::Legend { row, column } => Some((row, column)),
+            Self::PanelTitle { panel } | Self::AxisTitle { panel, .. } | Self::Legend { panel } => {
+                Some(panel)
+            }
         }
     }
 
     fn panel_index(&self, spec: &PlotSpec) -> Option<usize> {
-        let (row, column) = self.panel_position()?;
-        spec.panels
-            .iter()
-            .position(|panel| panel.row == row && panel.column == column)
+        self.panel_index_of()
+            .filter(|panel| *panel < spec.panels.len())
     }
 
     /// Visibilité mémorisée du texte, sans effacer son contenu ni son ancre.
@@ -396,13 +387,12 @@ mod tests {
         let mut spec = PlotSpec::empty("Titre");
         let cibles = [
             TextTarget::Title,
-            TextTarget::PanelTitle { row: 0, column: 0 },
+            TextTarget::PanelTitle { panel: 0 },
             TextTarget::AxisTitle {
-                row: 0,
-                column: 0,
+                panel: 0,
                 side: AxisSide::Left,
             },
-            TextTarget::Legend { row: 0, column: 0 },
+            TextTarget::Legend { panel: 0 },
         ];
         for cible in cibles {
             assert_eq!(cible.anchor(&spec), None);
@@ -418,7 +408,7 @@ mod tests {
     #[test]
     fn un_panneau_absent_ne_change_rien() {
         let mut spec = PlotSpec::empty("T");
-        let loin = TextTarget::Legend { row: 3, column: 3 };
+        let loin = TextTarget::Legend { panel: 3 };
         assert!(!loin.set_anchor(&mut spec, Some(TextAnchor::new(0.0, 0.0))));
         assert_eq!(loin.anchor(&spec), None);
         assert!(!spec.has_text_anchors());
@@ -428,8 +418,7 @@ mod tests {
     fn le_texte_d_un_titre_se_lit_et_se_remplace() {
         let mut spec = PlotSpec::empty("A");
         let axe = TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: AxisSide::Bottom,
         };
         assert_eq!(TextTarget::Title.text(&spec).as_deref(), Some("A"));
@@ -446,7 +435,7 @@ mod tests {
         assert!(axe.set_text(&mut spec, "durée".into()));
         assert_eq!(spec.panels[0].bottom.label, "durée");
         assert_eq!(spec.panels[0].bottom.unit, "");
-        let legende = TextTarget::Legend { row: 0, column: 0 };
+        let legende = TextTarget::Legend { panel: 0 };
         assert_eq!(legende.text(&spec), None);
         assert!(!legende.set_text(&mut spec, "x".into()));
     }

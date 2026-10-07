@@ -24,13 +24,14 @@
 //! seul le déclenchement (molette, glisser, rectangle élastique — R7.1/7.4)
 //! est nouveau, dans [`crate::GraphView`].
 //!
-//! # Identité d'un panneau : `(row, column)`, pas son indice
+//! # Identité d'un panneau : son indice dans le spec
 //!
 //! [`stokesforge_render::DrawnPlot::panels`] omet les panneaux trop petits pour
 //! être tracés ([`stokesforge_render::pipeline::MIN_CELL`]) : son indice n'est
-//! donc pas stable d'une image à l'autre si la fenêtre change de taille. La
-//! position déclarée (`row`, `column`) l'est — c'est la même qu'on relit sur
-//! [`stokesforge_plot::PanelSpec`] pour appliquer la surcharge.
+//! donc pas stable d'une image à l'autre si la fenêtre change de taille. Le
+//! cadrage est donc rangé par l'indice du calque dans
+//! [`stokesforge_plot::PlotSpec::panels`] (`DrawnPanel::index`), stable et
+//! distinct même quand plusieurs calques se superposent dans la même case.
 //!
 //! # La clé de cache : un compteur, pas les bornes
 //!
@@ -67,7 +68,7 @@ pub struct Framing {
 /// documentation dans `crate::lib`.
 #[derive(Debug, Clone, Default)]
 pub struct ViewState {
-    framings: HashMap<(usize, usize), Framing>,
+    framings: HashMap<usize, Framing>,
     generation: u64,
 }
 
@@ -88,15 +89,15 @@ impl ViewState {
         self.framings.is_empty()
     }
 
-    /// Le cadrage explicite du panneau à `(row, column)`, s'il y en a un.
-    pub fn framing(&self, row: usize, column: usize) -> Option<Framing> {
-        self.framings.get(&(row, column)).copied()
+    /// Le cadrage explicite du calque `panel`, s'il y en a un.
+    pub fn framing(&self, panel: usize) -> Option<Framing> {
+        self.framings.get(&panel).copied()
     }
 
     /// Pose (ou remplace) le cadrage explicite d'un panneau, et fait avancer
     /// la génération — donc invalide le cache.
-    pub fn set_framing(&mut self, row: usize, column: usize, framing: Framing) {
-        self.framings.insert((row, column), framing);
+    pub fn set_framing(&mut self, panel: usize, framing: Framing) {
+        self.framings.insert(panel, framing);
         self.generation += 1;
     }
 
@@ -126,7 +127,7 @@ impl ViewState {
             let Some(panel) = spec.panels.get_mut(index) else {
                 continue;
             };
-            let Some(framing) = self.framing(panel.row, panel.column) else {
+            let Some(framing) = self.framing(index) else {
                 continue;
             };
             panel.bottom.auto_range = false;
@@ -164,7 +165,6 @@ mod tests {
         let mut view = ViewState::new();
         view.set_framing(
             0,
-            0,
             Framing {
                 x: (1.0, 2.0),
                 y: (3.0, 4.0),
@@ -191,7 +191,6 @@ mod tests {
         assert_eq!(view.generation(), 0);
         view.set_framing(
             0,
-            0,
             Framing {
                 x: (0.0, 1.0),
                 y: (0.0, 1.0),
@@ -199,7 +198,6 @@ mod tests {
         );
         assert_eq!(view.generation(), 1);
         view.set_framing(
-            0,
             0,
             Framing {
                 x: (0.0, 2.0),
@@ -220,7 +218,6 @@ mod tests {
     fn reset_efface_et_fait_avancer_la_generation_une_fois() {
         let mut view = ViewState::new();
         view.set_framing(
-            0,
             0,
             Framing {
                 x: (0.0, 1.0),

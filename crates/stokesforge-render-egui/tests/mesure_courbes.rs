@@ -271,7 +271,7 @@ fn mesure_courbes_gros_volumes() {
                         } else {
                             (0.1 + step, 0.9 + step)
                         };
-                        banc.view.set_framing(0, 0, Framing { x, y: (-1.3, 1.3) });
+                        banc.view.set_framing(0, Framing { x, y: (-1.3, 1.3) });
                     }
                     let frange = if scenario.starts_with("pan") {
                         Feathering::Off

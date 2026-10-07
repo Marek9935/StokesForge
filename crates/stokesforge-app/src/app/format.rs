@@ -146,9 +146,9 @@ impl StokesForgeApp {
                     .as_ref()
                     .map(|editor| match editor.target {
                         TextEditTarget::Title(target) => target,
-                        TextEditTarget::LegendEntry(_, (row, column)) => {
-                            TextTarget::Legend { row, column }
-                        }
+                        TextEditTarget::LegendEntry(address) => TextTarget::Legend {
+                            panel: address.panel,
+                        },
                     })
                     .or_else(|| view.selected_text())?;
                 let font = target.font(&spec)?;
@@ -310,8 +310,10 @@ impl StokesForgeApp {
         let zone = match (&title_editing, selected_text) {
             (Some(editor), _) => Some(match editor.target {
                 TextEditTarget::Title(target) => target,
-                TextEditTarget::LegendEntry(_, (row, column)) => {
-                    stokesforge_render_egui::TextTarget::Legend { row, column }
+                TextEditTarget::LegendEntry(address) => {
+                    stokesforge_render_egui::TextTarget::Legend {
+                        panel: address.panel,
+                    }
                 }
             }),
             (None, selected) if !annotation_editing => selected,
@@ -529,11 +531,7 @@ mod tests {
     use stokesforge_session::Session;
 
     /// Le texte libre du graphe de [`setup`].
-    const TEXTE: AnnotationRef = AnnotationRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
+    const TEXTE: AnnotationRef = AnnotationRef { panel: 0, index: 0 };
 
     /// Les actions d'une demande de format, sans les envoyer.
     fn formate(
@@ -703,8 +701,7 @@ mod tests {
         for target in [
             TextTarget::Title,
             TextTarget::AxisTitle {
-                row: 0,
-                column: 0,
+                panel: 0,
                 side: stokesforge_plot::AxisSide::Bottom,
             },
         ] {
@@ -762,19 +759,18 @@ mod tests {
             for (target, size) in [
                 (TextTarget::Title, stokesforge_render_egui::TITLE_SIZE),
                 (
-                    TextTarget::PanelTitle { row: 0, column: 0 },
+                    TextTarget::PanelTitle { panel: 0 },
                     stokesforge_render_egui::PANEL_TITLE_SIZE,
                 ),
                 (
                     TextTarget::AxisTitle {
-                        row: 0,
-                        column: 0,
+                        panel: 0,
                         side: AxisSide::Bottom,
                     },
                     stokesforge_render_egui::AXIS_DESC_SIZE,
                 ),
                 (
-                    TextTarget::Legend { row: 0, column: 0 },
+                    TextTarget::Legend { panel: 0 },
                     stokesforge_render_egui::LABEL_SIZE,
                 ),
             ] {
@@ -829,11 +825,7 @@ mod tests {
     #[test]
     fn la_barre_lit_le_brouillon_et_auto_retablit_le_corps_du_texte_libre() {
         let (session, mut app, graph, ctx) = setup();
-        let target = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let target = AnnotationRef { panel: 0, index: 0 };
         let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
         let mut draft = target.get(&spec).unwrap().clone();
         draft.font = "Libertinus Sans".into();
@@ -987,16 +979,8 @@ mod tests {
         let mut app = StokesForgeApp::new(state);
         app.detach_tab(Tab::Graph(graph));
         let ctx = egui::Context::default();
-        let text = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
-        let shape = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let text = AnnotationRef { panel: 0, index: 0 };
+        let shape = ShapeRef { panel: 0, index: 0 };
         let mut actions = Vec::new();
         for target in [
             T::Annotation(text),
@@ -1132,8 +1116,7 @@ mod tests {
     fn la_couleur_et_le_corps_d_un_titre_selectionne_vont_a_la_zone() {
         let (session, mut app, graph, ctx) = setup();
         let target = TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: AxisSide::Bottom,
         };
         let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
@@ -1338,11 +1321,7 @@ mod tests {
         assert!(actions.is_empty(), "sans sélection, rien");
         assert!(app.object_format_state(tab).is_none());
 
-        let target = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let target = ShapeRef { panel: 0, index: 0 };
         app.with_graph_view(graph, |view| view.select_shape(Some(target)));
         let state = app.object_format_state(tab).unwrap();
         assert!(state.closed, "un rectangle se remplit");

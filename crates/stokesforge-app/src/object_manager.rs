@@ -46,25 +46,20 @@ pub enum VisibilityTarget {
     Axes(usize),
 }
 
-/// Un axe d'un calque, adressé par la position du calque dans la grille.
+/// Un axe d'un calque, adressé par l'indice du calque dans `PlotSpec::panels`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AxisRef {
-    pub row: usize,
-    pub column: usize,
+    pub panel: usize,
     pub side: AxisSide,
 }
 
 impl AxisRef {
     fn get(self, spec: &PlotSpec) -> Option<&stokesforge_plot::AxisSpec> {
-        spec.panels
-            .iter()
-            .find(|p| (p.row, p.column) == (self.row, self.column))
-            .map(|p| p.axis(self.side))
+        spec.panels.get(self.panel).map(|p| p.axis(self.side))
     }
     fn get_mut(self, spec: &mut PlotSpec) -> Option<&mut stokesforge_plot::AxisSpec> {
         spec.panels
-            .iter_mut()
-            .find(|p| (p.row, p.column) == (self.row, self.column))
+            .get_mut(self.panel)
             .map(|p| p.axis_mut(self.side))
     }
 }
@@ -87,18 +82,12 @@ impl VisibilityTarget {
     /// Feuilles concernées ; un titre vide ne rend pas un parent indéterminé.
     pub fn contents(self, spec: &PlotSpec) -> Vec<Self> {
         if let Self::Axes(index) = self {
-            let Some(panel) = spec.panels.get(index) else {
+            if spec.panels.get(index).is_none() {
                 return Vec::new();
-            };
+            }
             return AXIS_SIDES
                 .into_iter()
-                .map(|side| {
-                    Self::Axis(AxisRef {
-                        row: panel.row,
-                        column: panel.column,
-                        side,
-                    })
-                })
+                .map(|side| Self::Axis(AxisRef { panel: index, side }))
                 .collect();
         }
         if !matches!(self, Self::Graph | Self::Panel(_) | Self::Group(_)) {
@@ -125,15 +114,13 @@ impl VisibilityTarget {
             leaves.extend(panel_texts(spec, index).into_iter().map(Self::Text));
             leaves.extend(panel.annotations.iter().enumerate().map(|(rank, _)| {
                 Self::Annotation(AnnotationRef {
-                    row: panel.row,
-                    column: panel.column,
+                    panel: index,
                     index: rank,
                 })
             }));
             leaves.extend(panel.shapes.iter().enumerate().map(|(rank, _)| {
                 Self::Shape(ShapeRef {
-                    row: panel.row,
-                    column: panel.column,
+                    panel: index,
                     index: rank,
                 })
             }));
@@ -239,15 +226,11 @@ pub fn selection_after_remove(
             s.index -= 1;
             T::Series(s)
         }
-        (T::Annotation(mut s), T::Annotation(r))
-            if (s.row, s.column) == (r.row, r.column) && s.index > r.index =>
-        {
+        (T::Annotation(mut s), T::Annotation(r)) if s.panel == r.panel && s.index > r.index => {
             s.index -= 1;
             T::Annotation(s)
         }
-        (T::Shape(mut s), T::Shape(r))
-            if (s.row, s.column) == (r.row, r.column) && s.index > r.index =>
-        {
+        (T::Shape(mut s), T::Shape(r)) if s.panel == r.panel && s.index > r.index => {
             s.index -= 1;
             T::Shape(s)
         }
@@ -300,14 +283,8 @@ pub fn selection_after_history(
             .map(|index| T::Series(SeriesRef { index, ..t }))
         }
         T::Annotation(t) => {
-            let old = previous
-                .panels
-                .iter()
-                .find(|p| (p.row, p.column) == (t.row, t.column))?;
-            let new = next
-                .panels
-                .iter()
-                .find(|p| (p.row, p.column) == (t.row, t.column))?;
+            let old = previous.panels.get(t.panel)?;
+            let new = next.panels.get(t.panel)?;
             let value = t.get(previous)?;
             remap(
                 t.index,
@@ -323,14 +300,8 @@ pub fn selection_after_history(
             .map(|index| T::Annotation(AnnotationRef { index, ..t }))
         }
         T::Shape(t) => {
-            let old = previous
-                .panels
-                .iter()
-                .find(|p| (p.row, p.column) == (t.row, t.column))?;
-            let new = next
-                .panels
-                .iter()
-                .find(|p| (p.row, p.column) == (t.row, t.column))?;
+            let old = previous.panels.get(t.panel)?;
+            let new = next.panels.get(t.panel)?;
             let value = t.get(previous)?;
             remap(
                 t.index,
@@ -353,20 +324,19 @@ fn panel_texts(spec: &PlotSpec, index: usize) -> Vec<TextTarget> {
     let Some(panel) = spec.panels.get(index) else {
         return Vec::new();
     };
-    let (row, column) = (panel.row, panel.column);
     let mut texts = Vec::new();
     if !panel.title.is_empty() {
-        texts.push(TextTarget::PanelTitle { row, column });
+        texts.push(TextTarget::PanelTitle { panel: index });
     }
     // Le modèle réserve aussi Top ; le pipeline ne trace encore que ces
     // trois axes. Ne pas proposer un titre sans composant à éditer.
     for side in [AxisSide::Bottom, AxisSide::Left, AxisSide::Right] {
         if !panel.axis(side).display_label().is_empty() {
-            texts.push(TextTarget::AxisTitle { row, column, side });
+            texts.push(TextTarget::AxisTitle { panel: index, side });
         }
     }
     if !panel.series.is_empty() {
-        texts.push(TextTarget::Legend { row, column });
+        texts.push(TextTarget::Legend { panel: index });
     }
     texts
 }
@@ -513,11 +483,7 @@ pub fn object_tree_with_selection(
                     AXIS_SIDES
                         .into_iter()
                         .map(|side| {
-                            let target = VisibilityTarget::Axis(AxisRef {
-                                row: panel.row,
-                                column: panel.column,
-                                side,
-                            });
+                            let target = VisibilityTarget::Axis(AxisRef { panel: index, side });
                             ObjectRow {
                                 target,
                                 label: axis_label(side),
@@ -529,8 +495,7 @@ pub fn object_tree_with_selection(
                 };
                 objects.extend(panel.annotations.iter().enumerate().map(|(rank, a)| {
                     let target = VisibilityTarget::Annotation(AnnotationRef {
-                        row: panel.row,
-                        column: panel.column,
+                        panel: index,
                         index: rank,
                     });
                     ObjectRow {
@@ -542,8 +507,7 @@ pub fn object_tree_with_selection(
                 }));
                 objects.extend(panel.shapes.iter().enumerate().map(|(rank, s)| {
                     let target = VisibilityTarget::Shape(ShapeRef {
-                        row: panel.row,
-                        column: panel.column,
+                        panel: index,
                         index: rank,
                     });
                     let label = match s.kind {
@@ -594,16 +558,8 @@ mod tests {
     fn supprimer_un_voisin_ne_selectionne_pas_le_suivant() {
         use crate::object_manager::{selection_after_remove, VisibilityTarget as T};
         use stokesforge_plot::{AnnotationRef, ShapeRef};
-        let a = AnnotationRef {
-            row: 1,
-            column: 2,
-            index: 3,
-        };
-        let s = ShapeRef {
-            row: 1,
-            column: 2,
-            index: 3,
-        };
+        let a = AnnotationRef { panel: 1, index: 3 };
+        let s = ShapeRef { panel: 1, index: 3 };
         for (selected, removed, expected) in [
             (
                 T::Series(SeriesRef::new(1, 3)),

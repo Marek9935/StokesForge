@@ -218,8 +218,7 @@ impl GraphView {
             PlotComponent::Shape { panel, index } => {
                 let drawn = self.last.as_ref()?.panels.get(panel)?;
                 Some(ShapeRef {
-                    row: drawn.row,
-                    column: drawn.column,
+                    panel: drawn.index,
                     index,
                 })
             }
@@ -233,7 +232,7 @@ impl GraphView {
             .as_ref()?
             .panels
             .iter()
-            .find(|panel| panel.row == target.row && panel.column == target.column)?
+            .find(|panel| panel.index == target.panel)?
             .shapes
             .iter()
             .find(|shape| shape.index == target.index)
@@ -251,7 +250,7 @@ impl GraphView {
             .as_ref()?
             .panels
             .iter()
-            .find(|panel| panel.row == target.row && panel.column == target.column)?;
+            .find(|panel| panel.index == target.panel)?;
         PanelTransform::of_axis(panel, axis == SeriesAxis::Right)
     }
 
@@ -283,7 +282,7 @@ impl GraphView {
             .as_ref()?
             .panels
             .iter()
-            .find(|panel| panel.row == drag.target.row && panel.column == drag.target.column)?;
+            .find(|panel| panel.index == drag.target.panel)?;
         let right = drag.original.axis == SeriesAxis::Right;
         let y_scale = if right { panel.y2_scale } else { panel.y_scale };
         if panel.x_scale != AxisScale::Linear || y_scale != AxisScale::Linear {
@@ -322,7 +321,7 @@ impl GraphView {
         else {
             return false;
         };
-        let Some(target) = ShapeRef::next_in(spec, panel.row, panel.column) else {
+        let Some(target) = ShapeRef::next_in(spec, panel.index) else {
             return false;
         };
         let original = ShapeSpec::new(kind, 0.0, 0.0, 0.0, 0.0);
@@ -417,7 +416,7 @@ impl GraphView {
             else {
                 return;
             };
-            let Some(target) = ShapeRef::next_in(spec, panel.row, panel.column) else {
+            let Some(target) = ShapeRef::next_in(spec, panel.index) else {
                 return;
             };
             self.shape_drag = Some(ShapeDrag {

@@ -307,7 +307,7 @@ fn le_rectangle_elastique_zoome_sur_la_zone_choisie() {
     );
     let framing = view
         .view()
-        .framing(panel_avant.row, panel_avant.column)
+        .framing(panel_avant.index)
         .expect("le panneau devrait porter un cadrage explicite");
     assert!(
         (framing.x.0 - attendu.0 .0).abs() < 1e-6 && (framing.x.1 - attendu.0 .1).abs() < 1e-6,
@@ -668,16 +668,8 @@ fn object_manager_selectionne_les_contenus_masques_sans_deux_selections() {
         .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
     panel.shapes[0].visible = false;
     spec.title_visible = false;
-    let annotation = AnnotationRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
-    let shape = ShapeRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
+    let annotation = AnnotationRef { panel: 0, index: 0 };
+    let shape = ShapeRef { panel: 0, index: 0 };
     let mut view = stokesforge_render_egui::GraphView::new();
     view.select_series(Some(SeriesRef::new(0, 0)), &spec);
     view.select_annotation(Some(annotation), &spec);
@@ -951,11 +943,7 @@ fn maj_contraint_le_redimensionnement_et_se_relache_pendant_le_geste() {
     let snapshot = handle.snapshot().unwrap();
     let context = contexte();
     let mut view = GraphView::new();
-    let target = ShapeRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
+    let target = ShapeRef { panel: 0, index: 0 };
     view.select_shape(Some(target));
     image(&context, &mut view, &snapshot, graph, vec![]);
     let drawn = *view.drawn_shape(target).unwrap();

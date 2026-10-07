@@ -111,13 +111,7 @@ pub(super) fn select_manager_target(
         Some(T::Text(t)) => view.select_text(Some(t), spec),
         Some(T::Panel(i) | T::Group(i) | T::Axes(i)) => view.set_active_panel(i, spec),
         Some(T::Axis(axis)) => {
-            if let Some(i) = spec
-                .panels
-                .iter()
-                .position(|p| p.row == axis.row && p.column == axis.column)
-            {
-                view.set_active_panel(i, spec);
-            }
+            view.set_active_panel(axis.panel, spec);
         }
         _ => {
             view.select_annotation(None, spec);
@@ -253,8 +247,7 @@ pub(super) fn object_node_menu(
             if let T::Shape(object) = target {
                 let count = spec
                     .panels
-                    .iter()
-                    .find(|panel| panel.row == object.row && panel.column == object.column)
+                    .get(object.panel)
                     .map_or(0, |panel| panel.shapes.len());
                 for order in [
                     crate::state::ShapeOrder::ToFront,
@@ -1023,11 +1016,9 @@ pub(super) fn apply_object_request(
         ObjectManagerRequest::EditText(ContextText::Title(target)) => {
             open_text_editor(ctx, view, tree, graph, target)
         }
-        ObjectManagerRequest::EditText(ContextText::LegendEntry {
-            row,
-            column,
-            series,
-        }) => open_legend_entry_editor(ctx, view, tree, graph, row, column, series),
+        ObjectManagerRequest::EditText(ContextText::LegendEntry { panel, series }) => {
+            open_legend_entry_editor(ctx, view, tree, graph, panel, series)
+        }
         ObjectManagerRequest::Properties(target) => {
             select_manager_target(view, Some(target), &spec);
             match target {
@@ -1971,16 +1962,8 @@ mod tests {
         panel
             .shapes
             .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
-        let annotation = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
-        let shape = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let annotation = AnnotationRef { panel: 0, index: 0 };
+        let shape = ShapeRef { panel: 0, index: 0 };
         let mut view = GraphView::new();
         for target in [
             T::Series(SeriesRef::new(0, 0)),

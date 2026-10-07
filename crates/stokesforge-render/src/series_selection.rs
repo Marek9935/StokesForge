@@ -215,8 +215,8 @@ pub fn paint_handles<DB: DrawingBackend>(
     Ok(())
 }
 
-/// Rang d'origine dans le panneau déclaré. À égalité, le dernier tracé gagne.
-pub fn series_at(plot: &DrawnPlot, pixel: (f64, f64)) -> Option<(usize, usize, usize)> {
+/// Indice du calque et rang d'origine dans le calque déclaré. À égalité, le dernier tracé gagne.
+pub fn series_at(plot: &DrawnPlot, pixel: (f64, f64)) -> Option<(usize, usize)> {
     for panel in plot.panels.iter().rev() {
         if !PanelTransform::of(panel)?.contains(pixel.0, pixel.1) {
             continue;
@@ -227,7 +227,7 @@ pub fn series_at(plot: &DrawnPlot, pixel: (f64, f64)) -> Option<(usize, usize, u
             let candidate = series.distance(pixel);
             if candidate < distance {
                 distance = candidate;
-                best = Some((panel.row, panel.column, series.index));
+                best = Some((panel.index, series.index));
             }
         }
         if best.is_some() {

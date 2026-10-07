@@ -83,31 +83,25 @@ impl AnnotationSpec {
     }
 }
 
-/// L'adresse d'un texte libre dans un [`PlotSpec`] : son panneau, par sa
-/// position dans la grille (comme le cadrage de vue, qui survit ainsi à un
-/// panneau omis faute de place), et son rang dans
+/// L'adresse d'un texte libre dans un [`PlotSpec`] : son calque, par son
+/// indice dans [`PlotSpec::panels`] (plusieurs calques peuvent se superposer
+/// dans la même case de la grille), et son rang dans
 /// [`crate::PanelSpec::annotations`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AnnotationRef {
-    /// Ligne du panneau.
-    pub row: usize,
-    /// Colonne du panneau.
-    pub column: usize,
+    /// Indice du calque dans [`PlotSpec::panels`].
+    pub panel: usize,
     /// Rang du texte dans son panneau.
     pub index: usize,
 }
 
 impl AnnotationRef {
     fn panel<'a>(&self, spec: &'a PlotSpec) -> Option<&'a crate::PanelSpec> {
-        spec.panels
-            .iter()
-            .find(|panel| panel.row == self.row && panel.column == self.column)
+        spec.panels.get(self.panel)
     }
 
     fn panel_index(&self, spec: &PlotSpec) -> Option<usize> {
-        spec.panels
-            .iter()
-            .position(|panel| panel.row == self.row && panel.column == self.column)
+        (self.panel < spec.panels.len()).then_some(self.panel)
     }
 
     /// Le texte désigné, s'il existe.
@@ -148,17 +142,13 @@ impl AnnotationRef {
         true
     }
 
-    /// L'adresse du prochain texte ajouté au panneau `(row, column)`, ou
-    /// `None` si ce panneau n'existe pas.
-    pub fn next_in(spec: &PlotSpec, row: usize, column: usize) -> Option<Self> {
-        let panel = spec
-            .panels
-            .iter()
-            .find(|panel| panel.row == row && panel.column == column)?;
+    /// L'adresse du prochain texte ajouté au calque `panel`, ou `None` si ce
+    /// calque n'existe pas.
+    pub fn next_in(spec: &PlotSpec, panel: usize) -> Option<Self> {
+        let source = spec.panels.get(panel)?;
         Some(Self {
-            row,
-            column,
-            index: panel.annotations.len(),
+            panel,
+            index: source.annotations.len(),
         })
     }
 }
@@ -170,7 +160,7 @@ mod tests {
     #[test]
     fn une_adresse_ajoute_remplace_et_retire() {
         let mut spec = PlotSpec::empty("A");
-        let new = AnnotationRef::next_in(&spec, 0, 0).expect("panneau 0,0");
+        let new = AnnotationRef::next_in(&spec, 0).expect("panneau 0,0");
         assert_eq!(new.index, 0);
         assert!(new.set(&mut spec, AnnotationSpec::new("a", 1.0, 2.0)));
         assert_eq!(new.get(&spec).map(|a| a.text.as_str()), Some("a"));
@@ -178,7 +168,7 @@ mod tests {
         assert_eq!(spec.panels[0].annotations.len(), 1, "remplacé, pas ajouté");
         let loin = AnnotationRef { index: 5, ..new };
         assert!(!loin.set(&mut spec, AnnotationSpec::new("c", 0.0, 0.0)));
-        assert!(AnnotationRef::next_in(&spec, 3, 3).is_none());
+        assert!(AnnotationRef::next_in(&spec, 3).is_none());
         assert!(new.remove(&mut spec));
         assert!(!new.remove(&mut spec));
         assert!(spec.panels[0].annotations.is_empty());

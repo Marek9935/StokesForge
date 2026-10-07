@@ -117,10 +117,7 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
                     panel,
                     series: row.series,
                 },
-                None => PlotComponent::Text(TextTarget::Legend {
-                    row: drawn.row,
-                    column: drawn.column,
-                }),
+                None => PlotComponent::Text(TextTarget::Legend { panel: drawn.index }),
             });
         }
         if let Some(text) = drawn.texts.iter().rev().find(|text| text.contains(x, y)) {
@@ -189,6 +186,7 @@ mod tests {
         let area = |size| AxisArea { size, titled: true };
         DrawnPlot {
             panels: vec![DrawnPanel {
+                index: 0,
                 row: 0,
                 column: 0,
                 x_range: (0.0, 1.0),
@@ -330,8 +328,7 @@ mod tests {
         use stokesforge_plot::AxisSide as Side;
         let mut plot = figure();
         let left = TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: Side::Left,
         };
         plot.panels[0].texts = vec![
@@ -344,7 +341,7 @@ mod tests {
                 anchored: true,
             },
             DrawnText {
-                target: TextTarget::Legend { row: 0, column: 0 },
+                target: TextTarget::Legend { panel: 0 },
                 center: (380.0, 100.0),
                 size: (100, 60),
                 rotation: 0.0,
@@ -382,10 +379,7 @@ mod tests {
         );
         assert_eq!(
             component_at(&plot, 380.0, 72.0),
-            Some(PlotComponent::Text(TextTarget::Legend {
-                row: 0,
-                column: 0
-            })),
+            Some(PlotComponent::Text(TextTarget::Legend { panel: 0 })),
             "le cadre, hors des lignes"
         );
         plot.title = Some(DrawnText {

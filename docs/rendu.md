@@ -407,9 +407,11 @@ calculées ; `ViewState::apply` pose `auto_range = false` et les deux bornes sur
 un **clone** du spec, juste avant de résoudre. Seul le déclenchement est
 nouveau.
 
-Un panneau est identifié par `(row, column)`, **pas par son indice** :
-`DrawnPlot::panels` omet les panneaux trop petits pour être tracés (`MIN_CELL`),
-ce qui décale les indices.
+Un calque est identifié par son **indice dans `PlotSpec::panels`**
+(`DrawnPanel::index`), **pas par son rang dans `DrawnPlot::panels`** : celui-ci
+omet les panneaux trop petits pour être tracés (`MIN_CELL`), ce qui décale ses
+rangs. `(row, column)` ne sert qu'à la grille : plusieurs calques peuvent se
+superposer dans la même case (#167), donc ne l'identifient pas.
 
 Gestes câblés : Ctrl+molette (zoom ; la molette seule ne fait rien), double-clic
 (réinitialisation), plus réticule et désignation de point (`PointHit`, rayon
@@ -575,7 +577,7 @@ double-clic émet `GraphEvent::EditText` / `EditLegendEntry`. Sur un objet graph
 (`app::graph_window::annotation_interactions`) traduit les axes et courbes en
 `Action::OpenObjectProperties`, comme le
 double-clic d'une ligne de l'Object Manager ; ailleurs, il réinitialise le zoom.
-Pour un axe, l'application lit `(row, column)` dans le `DrawnPanel` désigné
+Pour un axe, l'application lit `DrawnPanel::index` dans le `DrawnPanel` désigné
 et ouvre les propriétés du calque correspondant, même si d'autres panneaux
 ont été omis du rendu. Le menu contextuel conserve cette adresse au clic.
 

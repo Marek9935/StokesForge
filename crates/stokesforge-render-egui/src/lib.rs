@@ -143,10 +143,8 @@ pub enum GraphEvent {
     /// Clic de l'outil Texte (issue #62) : poser un texte libre au point de
     /// données visé et ouvrir son éditeur. L'outil revient au pointeur.
     PlaceText {
-        /// Ligne du panneau.
-        row: usize,
-        /// Colonne du panneau.
-        column: usize,
+        /// Indice du calque dans `PlotSpec::panels`.
+        panel: usize,
         /// Abscisse de données.
         x: f64,
         /// Ordonnée de données.
@@ -177,12 +175,10 @@ pub enum GraphEvent {
     /// Double-clic sur un titre : l'éditer sur place (issue #53).
     EditText(TextTarget),
     /// Double-clic sur une entrée de la légende : renommer la série du
-    /// panneau `(row, column)` (issue #53).
+    /// calque `panel` (issue #53).
     EditLegendEntry {
-        /// Ligne du panneau.
-        row: usize,
-        /// Colonne du panneau.
-        column: usize,
+        /// Indice du calque dans `PlotSpec::panels`.
+        panel: usize,
         /// Rang de la série dans `PanelSpec::series`.
         series: usize,
     },
@@ -600,13 +596,6 @@ impl GraphView {
         }
     }
 
-    /// Indice du calque dont la grille occupe `(row, column)`.
-    fn panel_index(spec: &PlotSpec, row: usize, column: usize) -> Option<usize> {
-        spec.panels
-            .iter()
-            .position(|p| p.row == row && p.column == column)
-    }
-
     /// Le calque de l'objet sélectionné, s'il y en a un.
     fn selection_panel(&self, spec: &PlotSpec) -> Option<usize> {
         if let Some(series) = self.selected_series {
@@ -614,10 +603,10 @@ impl GraphView {
         }
         let position = self
             .selected_annotation
-            .map(|t| (t.row, t.column))
-            .or_else(|| self.selected_shape.map(|t| (t.row, t.column)))
-            .or_else(|| self.selected_text.and_then(|t| t.panel_position()))?;
-        Self::panel_index(spec, position.0, position.1)
+            .map(|t| t.panel)
+            .or_else(|| self.selected_shape.map(|t| t.panel))
+            .or_else(|| self.selected_text.and_then(|t| t.panel_index_of()))?;
+        (position < spec.panels.len()).then_some(position)
     }
 
     /// Le calque actif suit la sélection quand elle change.
@@ -640,14 +629,14 @@ impl GraphView {
         let Some(target) = self.selected_series else {
             return;
         };
-        let Some(source) = spec.panels.get(target.panel) else {
+        if target.panel >= spec.panels.len() {
             return;
-        };
-        let Some(panel) = self.last.as_ref().and_then(|plot| {
-            plot.panels
-                .iter()
-                .find(|p| p.row == source.row && p.column == source.column)
-        }) else {
+        }
+        let Some(panel) = self
+            .last
+            .as_ref()
+            .and_then(|plot| plot.panels.iter().find(|p| p.index == target.panel))
+        else {
             return;
         };
         let Some(series) = panel
@@ -759,14 +748,9 @@ impl GraphView {
     pub fn series_at(&self, pos: Pos2, spec: &PlotSpec) -> Option<stokesforge_plot::SeriesRef> {
         let pos = self.figure_position(pos)?;
         let last = self.last.as_ref()?;
-        let (row, column, index) =
+        let (panel, index) =
             stokesforge_render::series_selection::series_at(last, (pos.x as f64, pos.y as f64))?;
-        Some(stokesforge_plot::SeriesRef::new(
-            spec.panels
-                .iter()
-                .position(|p| p.row == row && p.column == column)?,
-            index,
-        ))
+        (panel < spec.panels.len()).then(|| stokesforge_plot::SeriesRef::new(panel, index))
     }
 
     /// Le texte libre sélectionné, s'il y en a un.
@@ -789,10 +773,7 @@ impl GraphView {
             PlotComponent::Text(target) => Some(target),
             PlotComponent::LegendEntry { panel, .. } => {
                 let drawn = self.last.as_ref()?.panels.get(panel)?;
-                Some(TextTarget::Legend {
-                    row: drawn.row,
-                    column: drawn.column,
-                })
+                Some(TextTarget::Legend { panel: drawn.index })
             }
             _ => None,
         }
@@ -858,8 +839,7 @@ impl GraphView {
             PlotComponent::Annotation { panel, index } => {
                 let drawn = self.last.as_ref()?.panels.get(panel)?;
                 Some(AnnotationRef {
-                    row: drawn.row,
-                    column: drawn.column,
+                    panel: drawn.index,
                     index,
                 })
             }
@@ -877,12 +857,11 @@ impl GraphView {
     }
 
     /// Où la ligne de légende de la série `series` (rang dans
-    /// `PanelSpec::series`) du panneau `(row, column)` est tracée à l'écran :
+    /// `PanelSpec::series`) du calque `panel` est tracée à l'écran :
     /// centre et taille de la ligne, sur toute la largeur du cadre.
     pub fn legend_entry_screen_box(
         &self,
-        row: usize,
-        column: usize,
+        panel: usize,
         series: usize,
     ) -> Option<(Pos2, egui::Vec2)> {
         let panel = self
@@ -890,7 +869,7 @@ impl GraphView {
             .as_ref()?
             .panels
             .iter()
-            .find(|panel| panel.row == row && panel.column == column)?;
+            .find(|drawn| drawn.index == panel)?;
         let frame = panel
             .texts
             .iter()
@@ -921,12 +900,12 @@ impl GraphView {
     /// Le titre ou la légende tracé pour `target`, dans la dernière figure.
     fn drawn_text(&self, target: TextTarget) -> Option<&DrawnText> {
         let last = self.last.as_ref()?;
-        match target.panel_position() {
+        match target.panel_index_of() {
             None => last.title.as_ref(),
-            Some((row, column)) => last
+            Some(index) => last
                 .panels
                 .iter()
-                .find(|panel| panel.row == row && panel.column == column)?
+                .find(|panel| panel.index == index)?
                 .texts
                 .iter()
                 .find(|text| text.target == target),
@@ -948,27 +927,25 @@ impl GraphView {
     }
 
     /// Le point de données sous le pixel egui `pos` (ordonnée de gauche), et
-    /// la position `(row, column)` de son panneau.
-    pub fn data_at(&self, pos: Pos2) -> Option<(usize, usize, f64, f64)> {
+    /// l'indice de son calque.
+    pub fn data_at(&self, pos: Pos2) -> Option<(usize, f64, f64)> {
         let (index, transform) = self.panel_at(pos)?;
         let figure = self.figure_position(pos)?;
         let (x, y) = transform.pixel_to_data(figure.x as f64, figure.y as f64)?;
         let panel = self.last.as_ref()?.panels.get(index)?;
-        Some((panel.row, panel.column, x, y))
+        Some((panel.index, x, y))
     }
 
     /// Le point de données au centre de la zone de tracé du calque actif
     /// (#161), ou du premier panneau tracé si celui-ci ne l'est pas — où
     /// poser un texte ajouté par la barre de menus.
-    pub fn panel_center_data(&self, spec: &PlotSpec) -> Option<(usize, usize, f64, f64)> {
+    pub fn panel_center_data(&self, spec: &PlotSpec) -> Option<(usize, f64, f64)> {
         let last = self.last.as_ref()?;
-        let active = spec.panels.get(self.active_panel(spec));
-        let panel = active
-            .and_then(|a| {
-                last.panels
-                    .iter()
-                    .find(|p| p.row == a.row && p.column == a.column)
-            })
+        let active_index = self.active_panel(spec);
+        let panel = last
+            .panels
+            .iter()
+            .find(|p| p.index == active_index)
             .or_else(|| last.panels.first())?;
         let transform = PanelTransform::of(panel)?;
         let center = (
@@ -976,7 +953,7 @@ impl GraphView {
             panel.pixel_origin.1 as f64 + panel.pixel_size.1 as f64 / 2.0,
         );
         let (x, y) = transform.pixel_to_data(center.0, center.1)?;
-        Some((panel.row, panel.column, x, y))
+        Some((panel.index, x, y))
     }
 
     /// Où un texte libre est tracé à l'écran : centre, taille du texte droit
@@ -995,7 +972,7 @@ impl GraphView {
             .as_ref()?
             .panels
             .iter()
-            .find(|panel| panel.row == target.row && panel.column == target.column)?
+            .find(|panel| panel.index == target.panel)?
             .annotations
             .iter()
             .find(|annotation| annotation.index == target.index)
@@ -1250,12 +1227,20 @@ impl GraphView {
     fn panel_at(&self, pos: Pos2) -> Option<(usize, PanelTransform)> {
         let pos = self.figure_position(pos)?;
         let last = self.last.as_ref()?;
-        last.panels.iter().enumerate().find_map(|(index, panel)| {
+        let hit = |(index, panel): (usize, &DrawnPanel)| {
             let transform = PanelTransform::of(panel)?;
             transform
                 .contains(pos.x as f64, pos.y as f64)
                 .then_some((index, transform))
-        })
+        };
+        // Des calques superposés se recouvrent : le calque actif prend le
+        // geste (#161), à défaut le premier tracé.
+        last.panels
+            .iter()
+            .enumerate()
+            .filter(|(_, panel)| panel.index == self.active_panel)
+            .find_map(hit)
+            .or_else(|| last.panels.iter().enumerate().find_map(hit))
     }
 
     /// Pose le cadrage `(x_range, y_range)` calculé pour le panneau `index`
@@ -1267,10 +1252,9 @@ impl GraphView {
         let Some(panel) = last.panels.get(panel_index) else {
             return;
         };
-        let (row, column) = (panel.row, panel.column);
+        let index = panel.index;
         self.view.set_framing(
-            row,
-            column,
+            index,
             Framing {
                 x: x_range,
                 y: y_range,
@@ -1296,10 +1280,7 @@ impl GraphView {
         if response.clicked() || response.secondary_clicked() || response.drag_started() {
             let hit = pointer
                 .and_then(|pos| self.panel_at(pos))
-                .and_then(|(i, _)| {
-                    let drawn = self.last.as_ref()?.panels.get(i)?;
-                    Self::panel_index(spec, drawn.row, drawn.column)
-                });
+                .and_then(|(i, _)| Some(self.last.as_ref()?.panels.get(i)?.index));
             if let Some(panel) = hit {
                 self.set_active_panel(panel, spec);
             }
@@ -1348,8 +1329,7 @@ impl GraphView {
                     if let Some(drawn) = self.last.as_ref().and_then(|last| last.panels.get(panel))
                     {
                         self.events.push(GraphEvent::EditLegendEntry {
-                            row: drawn.row,
-                            column: drawn.column,
+                            panel: drawn.index,
                             series,
                         });
                     }
@@ -1385,9 +1365,8 @@ impl GraphView {
 
         // Outil Texte : un clic dans la zone de tracé pose le texte.
         if self.tool == GraphTool::Text && response.clicked() {
-            if let Some((row, column, x, y)) = pointer.and_then(|pos| self.data_at(pos)) {
-                self.events
-                    .push(GraphEvent::PlaceText { row, column, x, y });
+            if let Some((panel, x, y)) = pointer.and_then(|pos| self.data_at(pos)) {
+                self.events.push(GraphEvent::PlaceText { panel, x, y });
             }
         }
 
@@ -1549,9 +1528,9 @@ impl GraphView {
             .last
             .as_ref()
             .and_then(|last| {
-                last.panels.iter().find(|panel| {
-                    panel.row == drag.target.row && panel.column == drag.target.column
-                })
+                last.panels
+                    .iter()
+                    .find(|panel| panel.index == drag.target.panel)
             })
             .and_then(|panel| PanelTransform::of_axis(panel, right))
             .and_then(|transform| transform.pixel_to_data(center.x as f64, center.y as f64));
@@ -1631,12 +1610,9 @@ impl GraphView {
         let panel = self
             .last
             .as_ref()
-            .and_then(|last| match drag.target.panel_position() {
+            .and_then(|last| match drag.target.panel_index_of() {
                 None => last.panels.first(),
-                Some((row, column)) => last
-                    .panels
-                    .iter()
-                    .find(|panel| panel.row == row && panel.column == column),
+                Some(index) => last.panels.iter().find(|panel| panel.index == index),
             });
         let moved = panel
             .and_then(|panel| PanelTransform::of_axis(panel, right))
@@ -1773,10 +1749,7 @@ fn nearest_point(
     transform: &PanelTransform,
     pos: Pos2,
 ) -> Option<PointHit> {
-    let spec_panel = spec
-        .panels
-        .iter()
-        .find(|panel| panel.row == drawn_panel.row && panel.column == drawn_panel.column)?;
+    let spec_panel = spec.panels.get(drawn_panel.index)?;
     let resolved = resolve_panel(tree, spec_panel);
     let cursor = (pos.x as f64, pos.y as f64);
 
@@ -1935,7 +1908,6 @@ mod tests {
         assert_eq!(view.framed_spec(&spec), spec, "sans zoom, rien ne change");
 
         view.view.set_framing(
-            0,
             0,
             Framing {
                 x: (2.0, 3.0),

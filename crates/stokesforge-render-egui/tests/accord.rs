@@ -718,15 +718,13 @@ fn titres_masques_accord_et_temoins_avec_et_sans_ancre() {
         let (baseline, _) = accord(tree, &visible, SIZE, "titres visibles");
         for target in [
             TextTarget::Title,
-            TextTarget::PanelTitle { row: 0, column: 0 },
+            TextTarget::PanelTitle { panel: 0 },
             TextTarget::AxisTitle {
-                row: 0,
-                column: 0,
+                panel: 0,
                 side: AxisSide::Bottom,
             },
             TextTarget::AxisTitle {
-                row: 0,
-                column: 0,
+                panel: 0,
                 side: AxisSide::Left,
             },
         ] {

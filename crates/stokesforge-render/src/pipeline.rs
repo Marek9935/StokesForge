@@ -138,6 +138,9 @@ pub const DEFAULT_FIGURE_SIZE: (u32, u32) = (480, 360);
 /// des pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawnPanel {
+    /// Indice du calque dans [`PlotSpec::panels`] : l'identité d'un calque
+    /// (plusieurs calques peuvent se superposer dans la même case).
+    pub index: usize,
     /// Position déclarée du panneau dans la grille.
     pub row: usize,
     /// Idem, en colonne.
@@ -448,7 +451,7 @@ pub fn draw_on<DB: DrawingBackend>(
             drawn.omitted_panels += 1;
             continue;
         }
-        let (panel_drawn, projection) = draw_panel(cell, &canvas, panel, background)?;
+        let (panel_drawn, projection) = draw_panel(cell, &canvas, panel, index, background)?;
         if first_projection.is_none() {
             first_projection = Some(projection);
         }
@@ -632,6 +635,7 @@ fn draw_panel<DB: DrawingBackend>(
     cell: &DrawingArea<DB, Shift>,
     canvas: &DrawingArea<DB, Shift>,
     panel: &ResolvedPanel<'_>,
+    index: usize,
     background: (u8, u8, u8, u8),
 ) -> Result<(DrawnPanel, Projection), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
@@ -710,10 +714,7 @@ fn draw_panel<DB: DrawingBackend>(
         let cell_origin = cell.get_base_pixel();
         let (cell_w, _) = cell.dim_in_pixel();
         texts.push(DrawnText {
-            target: TextTarget::PanelTitle {
-                row: spec.row,
-                column: spec.column,
-            },
+            target: TextTarget::PanelTitle { panel: index },
             center: (
                 cell_origin.0 as f64 + cell_w as f64 / 2.0,
                 cell_origin.1 as f64 + band as f64 / 2.0,
@@ -833,6 +834,7 @@ fn draw_panel<DB: DrawingBackend>(
     let threshold = decimate::threshold_for_width(size.0);
 
     let mut drawn = DrawnPanel {
+        index,
         row: spec.row,
         column: spec.column,
         x_range: data_range(x_scale, x_range),
@@ -915,11 +917,7 @@ fn draw_panel<DB: DrawingBackend>(
             ),
         };
         texts.push(DrawnText {
-            target: TextTarget::AxisTitle {
-                row: spec.row,
-                column: spec.column,
-                side,
-            },
+            target: TextTarget::AxisTitle { panel: index, side },
             center,
             size: text_size,
             rotation,
@@ -1010,10 +1008,7 @@ fn draw_panel<DB: DrawingBackend>(
     drawn.legend_entries = inscribed.entries;
     if let Some(((left, top), (frame_w, frame_h))) = inscribed.frame {
         texts.push(DrawnText {
-            target: TextTarget::Legend {
-                row: spec.row,
-                column: spec.column,
-            },
+            target: TextTarget::Legend { panel: index },
             center: (
                 left as f64 + frame_w as f64 / 2.0,
                 top as f64 + frame_h as f64 / 2.0,
@@ -1046,10 +1041,7 @@ fn draw_panel<DB: DrawingBackend>(
         let pixel = centered(anchor);
         let measured = draw_centered_text(canvas, &spec.title, &title_style, 0.0, pixel)?;
         texts.push(DrawnText {
-            target: TextTarget::PanelTitle {
-                row: spec.row,
-                column: spec.column,
-            },
+            target: TextTarget::PanelTitle { panel: index },
             center: (pixel.0 as f64, pixel.1 as f64),
             size: measured,
             rotation: 0.0,
@@ -1072,11 +1064,7 @@ fn draw_panel<DB: DrawingBackend>(
             pixel,
         )?;
         texts.push(DrawnText {
-            target: TextTarget::AxisTitle {
-                row: spec.row,
-                column: spec.column,
-                side,
-            },
+            target: TextTarget::AxisTitle { panel: index, side },
             center: (pixel.0 as f64, pixel.1 as f64),
             size: measured,
             rotation,

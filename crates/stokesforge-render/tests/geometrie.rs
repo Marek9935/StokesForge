@@ -416,8 +416,7 @@ fn un_pixel_designe_le_composant_du_graphe_qui_est_dessous() {
     assert_eq!(
         component_at(&drawn, cx, oy + h + bottom - 2.0),
         Some(PlotComponent::Text(TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: PlotAxisSide::Bottom
         })),
         "le texte du titre d'axe (issue #53) passe avant sa bande"
@@ -440,8 +439,7 @@ fn un_pixel_designe_le_composant_du_graphe_qui_est_dessous() {
     assert_eq!(
         component_at(&drawn, ox - left + 2.0, cy),
         Some(PlotComponent::Text(TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: PlotAxisSide::Left
         }))
     );
@@ -484,24 +482,22 @@ fn un_titre_deplace_est_trace_sur_son_ancre_sans_changer_la_mise_en_page() {
             .unwrap_or_else(|| panic!("{cible:?} n'est pas dans {:?}", panneau.texts))
     };
     for (cible, (x, y)) in [
-        (TextTarget::PanelTitle { row: 0, column: 0 }, (1.5, 25.0)),
+        (TextTarget::PanelTitle { panel: 0 }, (1.5, 25.0)),
         (
             TextTarget::AxisTitle {
-                row: 0,
-                column: 0,
+                panel: 0,
                 side: PlotAxisSide::Bottom,
             },
             (0.5, 12.0),
         ),
         (
             TextTarget::AxisTitle {
-                row: 0,
-                column: 0,
+                panel: 0,
                 side: PlotAxisSide::Left,
             },
             (0.25, 20.0),
         ),
-        (TextTarget::Legend { row: 0, column: 0 }, (1.0, 15.0)),
+        (TextTarget::Legend { panel: 0 }, (1.0, 15.0)),
     ] {
         let drawn = texte(cible);
         let (px, py) = attendu(x, y);
@@ -599,11 +595,10 @@ fn le_corps_d_une_zone_de_texte_change_sa_taille() {
     };
     for cible in [
         TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: PlotAxisSide::Bottom,
         },
-        TextTarget::Legend { row: 0, column: 0 },
+        TextTarget::Legend { panel: 0 },
     ] {
         let (petit, grand) = (taille(&defaut, cible), taille(&gros, cible));
         assert!(

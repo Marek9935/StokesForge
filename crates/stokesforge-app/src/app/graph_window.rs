@@ -435,7 +435,7 @@ struct ContextHit {
     /// Le pixel egui du clic : point d'insertion d'un texte ou d'une forme.
     pos: Option<egui::Pos2>,
     /// Le point de données sous le clic, pour « Add Text ».
-    point: Option<(usize, usize, f64, f64)>,
+    point: Option<(usize, f64, f64)>,
 }
 
 /// Menu contextuel de la figure (#152) : un clic droit (sans glisser — le
@@ -491,9 +491,8 @@ fn graph_context_menu(
             Some(PlotComponent::LegendEntry { panel, series }) => view
                 .last_drawn()
                 .and_then(|last| last.panels.get(panel))
-                .map(|panel| ContextText::LegendEntry {
-                    row: panel.row,
-                    column: panel.column,
+                .map(|drawn| ContextText::LegendEntry {
+                    panel: drawn.index,
                     series,
                 }),
             _ => None,
@@ -717,8 +716,8 @@ fn annotation_interactions(
 ) {
     for event in view.take_events() {
         match event {
-            stokesforge_render_egui::GraphEvent::PlaceText { row, column, x, y } => {
-                add_annotation_at(ui.ctx(), view, tree, graph, (row, column, x, y));
+            stokesforge_render_egui::GraphEvent::PlaceText { panel, x, y } => {
+                add_annotation_at(ui.ctx(), view, tree, graph, (panel, x, y));
                 view.set_tool(stokesforge_render_egui::GraphTool::Pointer);
             }
             stokesforge_render_egui::GraphEvent::EditAnnotation(target) => {
@@ -741,11 +740,9 @@ fn annotation_interactions(
             stokesforge_render_egui::GraphEvent::EditText(target) => {
                 open_text_editor(ui.ctx(), view, tree, graph, target);
             }
-            stokesforge_render_egui::GraphEvent::EditLegendEntry {
-                row,
-                column,
-                series,
-            } => open_legend_entry_editor(ui.ctx(), view, tree, graph, row, column, series),
+            stokesforge_render_egui::GraphEvent::EditLegendEntry { panel, series } => {
+                open_legend_entry_editor(ui.ctx(), view, tree, graph, panel, series)
+            }
             stokesforge_render_egui::GraphEvent::OpenAxisProperties { panel, side } => {
                 if let Some(target) = axis_target(view, panel, side) {
                     actions.push(Action::OpenObjectProperties { graph, target });
@@ -847,8 +844,7 @@ pub(super) fn request_graph_export(
 fn axis_target(view: &GraphView, panel: usize, side: AxisSide) -> Option<VisibilityTarget> {
     let drawn = view.last_drawn()?.panels.get(panel)?;
     Some(VisibilityTarget::Axis(AxisRef {
-        row: drawn.row,
-        column: drawn.column,
+        panel: drawn.index,
         side: match side {
             AxisSide::Bottom => stokesforge_plot::AxisSide::Bottom,
             AxisSide::Left => stokesforge_plot::AxisSide::Left,
@@ -1330,10 +1326,7 @@ pub(super) mod tests {
             PlotTarget::Title
         );
         assert_eq!(
-            plot_target(Some(PlotComponent::Text(T::PanelTitle {
-                row: 0,
-                column: 0
-            }))),
+            plot_target(Some(PlotComponent::Text(T::PanelTitle { panel: 0 }))),
             PlotTarget::Title
         );
         for (side, axis) in [
@@ -1342,16 +1335,12 @@ pub(super) mod tests {
             (stokesforge_plot::AxisSide::Right, PlotAxis::Right),
         ] {
             assert_eq!(
-                plot_target(Some(PlotComponent::Text(T::AxisTitle {
-                    row: 0,
-                    column: 0,
-                    side
-                }))),
+                plot_target(Some(PlotComponent::Text(T::AxisTitle { panel: 0, side }))),
                 PlotTarget::AxisTitle(axis)
             );
         }
         assert_eq!(
-            plot_target(Some(PlotComponent::Text(T::Legend { row: 0, column: 0 }))),
+            plot_target(Some(PlotComponent::Text(T::Legend { panel: 0 }))),
             PlotTarget::Legend
         );
         assert_eq!(
@@ -1539,11 +1528,7 @@ pub(super) mod tests {
         let graph = project.add_graph(project.root(), None, spec).unwrap();
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
-        let object = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let object = ShapeRef { panel: 0, index: 0 };
         let other = ShapeRef { index: 1, ..object };
         for properties in [true, false] {
             let context = super::super::test_support::contexte();
@@ -1793,11 +1778,7 @@ pub(super) mod tests {
         }
         let graph = project.add_graph(root, None, spec.clone()).unwrap();
         let _ = project.tree().clone();
-        let object = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 1,
-        };
+        let object = ShapeRef { panel: 0, index: 1 };
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         let mut actions = Vec::new();
@@ -1878,11 +1859,7 @@ pub(super) mod tests {
             ));
         }
         let graph = project.add_graph(root, None, spec.clone()).unwrap();
-        let object = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 1,
-        };
+        let object = ShapeRef { panel: 0, index: 1 };
         for (label, expected) in [
             (tr!("action-bring-to-front"), 2),
             (tr!("action-send-to-back"), 0),
@@ -1946,16 +1923,8 @@ pub(super) mod tests {
         ));
         let graph = project.add_graph(root, None, spec.clone()).unwrap();
         let tree = project.tree().clone();
-        let text = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
-        let shape = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let text = AnnotationRef { panel: 0, index: 0 };
+        let shape = ShapeRef { panel: 0, index: 0 };
         let delete = egui::Event::Key {
             key: egui::Key::Delete,
             physical_key: None,

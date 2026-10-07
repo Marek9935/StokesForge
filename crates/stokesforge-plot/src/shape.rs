@@ -109,24 +109,20 @@ impl ShapeSpec {
     }
 }
 
-/// L'adresse d'un objet graphique dans un [`PlotSpec`] : son panneau, par sa
-/// position dans la grille, et son rang dans [`crate::PanelSpec::shapes`]
+/// L'adresse d'un objet graphique dans un [`PlotSpec`] : son calque, par son
+/// indice dans [`PlotSpec::panels`], et son rang dans [`crate::PanelSpec::shapes`]
 /// (l'ordre d'empilement).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShapeRef {
-    /// Ligne du panneau.
-    pub row: usize,
-    /// Colonne du panneau.
-    pub column: usize,
+    /// Indice du calque dans [`PlotSpec::panels`].
+    pub panel: usize,
     /// Rang de l'objet dans son panneau.
     pub index: usize,
 }
 
 impl ShapeRef {
     fn panel_index(&self, spec: &PlotSpec) -> Option<usize> {
-        spec.panels
-            .iter()
-            .position(|panel| panel.row == self.row && panel.column == self.column)
+        (self.panel < spec.panels.len()).then_some(self.panel)
     }
 
     /// L'objet désigné, s'il existe.
@@ -197,17 +193,13 @@ impl ShapeRef {
         Some(Self { index: 0, ..*self })
     }
 
-    /// L'adresse du prochain objet ajouté au panneau `(row, column)`, ou
-    /// `None` si ce panneau n'existe pas.
-    pub fn next_in(spec: &PlotSpec, row: usize, column: usize) -> Option<Self> {
-        let panel = spec
-            .panels
-            .iter()
-            .find(|panel| panel.row == row && panel.column == column)?;
+    /// L'adresse du prochain objet ajouté au calque `panel`, ou `None` si ce
+    /// calque n'existe pas.
+    pub fn next_in(spec: &PlotSpec, panel: usize) -> Option<Self> {
+        let source = spec.panels.get(panel)?;
         Some(Self {
-            row,
-            column,
-            index: panel.shapes.len(),
+            panel,
+            index: source.shapes.len(),
         })
     }
 }
@@ -223,14 +215,14 @@ mod tests {
     #[test]
     fn une_adresse_ajoute_remplace_et_retire() {
         let mut spec = PlotSpec::empty("A");
-        let new = ShapeRef::next_in(&spec, 0, 0).expect("panneau 0,0");
+        let new = ShapeRef::next_in(&spec, 0).expect("panneau 0,0");
         assert_eq!(new.index, 0);
         assert!(new.set(&mut spec, rect(0.0)));
         assert!(new.set(&mut spec, rect(5.0)));
         assert_eq!(spec.panels[0].shapes.len(), 1, "remplacé, pas ajouté");
         assert_eq!(new.get(&spec).map(|s| s.x1), Some(5.0));
         assert!(!ShapeRef { index: 5, ..new }.set(&mut spec, rect(0.0)));
-        assert!(ShapeRef::next_in(&spec, 3, 3).is_none());
+        assert!(ShapeRef::next_in(&spec, 3).is_none());
         assert!(new.remove(&mut spec));
         assert!(!new.remove(&mut spec));
     }
@@ -239,14 +231,10 @@ mod tests {
     fn premier_et_arriere_plan_reordonnent_et_rendent_la_nouvelle_adresse() {
         let mut spec = PlotSpec::empty("A");
         for x in [0.0, 1.0, 2.0] {
-            let at = ShapeRef::next_in(&spec, 0, 0).unwrap();
+            let at = ShapeRef::next_in(&spec, 0).unwrap();
             at.set(&mut spec, rect(x));
         }
-        let first = ShapeRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let first = ShapeRef { panel: 0, index: 0 };
         let moved = first.bring_to_front(&mut spec).unwrap();
         assert_eq!(moved.index, 2);
         let xs: Vec<f64> = spec.panels[0].shapes.iter().map(|s| s.x1).collect();

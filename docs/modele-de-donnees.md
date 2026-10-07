@@ -171,7 +171,7 @@ renommer ou déplacer une colonne ne casse rien.
   le renderer.
 - `AnnotationSpec` : un texte libre **ancré aux données** — son centre est le
   point `(x, y)` de l'ordonnée `axis`, il suit donc le zoom ; il n'est pas borné
-  au cadrage (marges comprises, #163), seul un point hors échelle (≤ 0 en log) n'est pas tracé. `AnnotationRef { row, column, index }` l'adresse dans un
+  au cadrage (marges comprises, #163), seul un point hors échelle (≤ 0 en log) n'est pas tracé. `AnnotationRef { panel, index }` l'adresse dans un
   `PlotSpec` (`get`, `set` qui remplace ou ajoute, `remove`) : pas de commande
   dédiée, tout passe par `SetPlotSpec`. `PlotSpec::set_text_color` (thème)
   écrit aussi leur couleur.
@@ -181,7 +181,7 @@ renommer ou déplacer une colonne ne casse rien.
   Couleur de trait (vide = encre automatique), épaisseur, couleur de
   remplissage (vide = aucun ; l'opacité est l'alpha de `#RRGGBBAA`).
   `PanelSpec::shapes` est **une seule liste ordonnée** : l'ordre d'empilement
-  est le rang (le dernier est dessus) ; `ShapeRef { row, column, index }`
+  est le rang (le dernier est dessus) ; `ShapeRef { panel, index }`
   l'adresse (`get`, `set`, `remove`, `bring_to_front`, `send_to_back`). Comme
   les textes libres, aucune commande dédiée : tout passe par `SetPlotSpec`.
 - `TextAnchor { x, y, axis }` (issue #53) : la position d'un titre déplacé,

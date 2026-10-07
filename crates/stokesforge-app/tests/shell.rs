@@ -6983,11 +6983,7 @@ fn un_texte_libre_sajoute_se_deplace_et_se_retire_en_un_pas_chacun() {
     use stokesforge_plot::{AnnotationRef, AnnotationSpec};
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let target = AnnotationRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
+    let target = AnnotationRef { panel: 0, index: 0 };
     let texte = |state: &AppState| target.get(&graph_spec(state, graph)).cloned();
     let revision = |state: &AppState| state.snapshot().revision;
 
@@ -7053,11 +7049,7 @@ fn un_objet_graphique_sajoute_sempile_et_se_retire_en_un_pas_chacun() {
     use stokesforge_plot::{ShapeKind, ShapeRef, ShapeSpec};
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let at = |index| ShapeRef {
-        row: 0,
-        column: 0,
-        index,
-    };
+    let at = |index| ShapeRef { panel: 0, index };
     let formes = |state: &AppState| graph_spec(state, graph).panels[0].shapes.clone();
     let revision = |state: &AppState| state.snapshot().revision;
     let rect = |x: f64| ShapeSpec::new(ShapeKind::Rectangle, x, 0.0, x + 1.0, 1.0);
@@ -7136,11 +7128,10 @@ fn la_police_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
     let cibles = [
         TextTarget::Title,
         TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: AxisSide::Left,
         },
-        TextTarget::Legend { row: 0, column: 0 },
+        TextTarget::Legend { panel: 0 },
     ];
     let police = |state: &AppState, cible: TextTarget| cible.font(&graph_spec(state, graph));
     let voulue = TextFont {
@@ -7178,13 +7169,12 @@ fn la_couleur_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     let cibles = [
         TextTarget::Title,
-        TextTarget::PanelTitle { row: 0, column: 0 },
+        TextTarget::PanelTitle { panel: 0 },
         TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: AxisSide::Left,
         },
-        TextTarget::Legend { row: 0, column: 0 },
+        TextTarget::Legend { panel: 0 },
     ];
     let couleur = |state: &AppState, cible: TextTarget| cible.color(&graph_spec(state, graph));
     for cible in cibles {
@@ -7208,11 +7198,10 @@ fn un_titre_se_deplace_et_se_reinitialise_en_un_pas_chacun() {
     let cibles = [
         TextTarget::Title,
         TextTarget::AxisTitle {
-            row: 0,
-            column: 0,
+            panel: 0,
             side: AxisSide::Left,
         },
-        TextTarget::Legend { row: 0, column: 0 },
+        TextTarget::Legend { panel: 0 },
     ];
     let ancre = |state: &AppState, cible: TextTarget| cible.anchor(&graph_spec(state, graph));
     let revision = |state: &AppState| state.snapshot().revision;
@@ -7278,8 +7267,7 @@ fn un_titre_et_un_nom_de_legende_se_modifient_en_un_pas() {
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     let titre = TextTarget::AxisTitle {
-        row: 0,
-        column: 0,
+        panel: 0,
         side: stokesforge_plot::AxisSide::Bottom,
     };
     state.dispatch(Action::SetTextContent {
@@ -7301,7 +7289,7 @@ fn un_titre_et_un_nom_de_legende_se_modifient_en_un_pas() {
     let avant = state.snapshot().revision;
     state.dispatch(Action::SetTextContent {
         graph,
-        target: TextTarget::Legend { row: 0, column: 0 },
+        target: TextTarget::Legend { panel: 0 },
         text: "x".to_owned(),
     });
     assert_eq!(state.snapshot().revision, avant);
@@ -7758,16 +7746,8 @@ fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
     let (_session, mut state) = start(project, &dir.path().join("cache.stf"));
-    let text = AnnotationRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
-    let arrow = ShapeRef {
-        row: 0,
-        column: 0,
-        index: 3,
-    };
+    let text = AnnotationRef { panel: 0, index: 0 };
+    let arrow = ShapeRef { panel: 0, index: 3 };
     // Cachés : ni titre du graphique, ni titre de calque, ni axes, ni légende ;
     // le texte libre et les quatre formes restent.
     let hidden = object_tree_with_selection(state.tree(), graph, None, false, false).unwrap();
@@ -7841,13 +7821,7 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     // Bascule active : le groupe « Axes » et ses quatre axes, masqués par
     // défaut compris ; les autres objets du calque n'en contiennent aucun.
     let shown = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
-    let axis = |side| {
-        T::Axis(AxisRef {
-            row: 0,
-            column: 0,
-            side,
-        })
-    };
+    let axis = |side| T::Axis(AxisRef { panel: 0, side });
     assert_eq!(
         axes(&shown),
         [
@@ -7917,16 +7891,8 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
     let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
-    let text = AnnotationRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
-    let arrow = ShapeRef {
-        row: 0,
-        column: 0,
-        index: 3,
-    };
+    let text = AnnotationRef { panel: 0, index: 0 };
+    let arrow = ShapeRef { panel: 0, index: 3 };
     let model = object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), true, false)
         .unwrap();
     assert_eq!(model.objects[0].target, T::Text(TextTarget::Title));
@@ -7948,8 +7914,7 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
         .iter()
         .any(|o| o.target == T::Shape(arrow) && o.selected));
     let target = TextTarget::AxisTitle {
-        row: 0,
-        column: 0,
+        panel: 0,
         side: AxisSide::Bottom,
     };
     state.dispatch(Action::SetPlotVisibility {
@@ -8251,11 +8216,7 @@ fn le_redimensionnement_d_une_forme_est_annulable_en_un_pas() {
     use stokesforge_plot::{ShapeKind, ShapeRef, ShapeSpec};
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let target = ShapeRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
+    let target = ShapeRef { panel: 0, index: 0 };
     for kind in [
         ShapeKind::Rectangle,
         ShapeKind::Ellipse,

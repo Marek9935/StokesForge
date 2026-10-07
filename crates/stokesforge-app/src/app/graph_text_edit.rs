@@ -42,12 +42,8 @@ pub(super) struct AnnotationEditor {
 pub(super) enum ContextText {
     /// Un titre, un titre d'axe ou la légende entière.
     Title(TextTarget),
-    /// La ligne de légende de la série `series` du panneau `(row, column)`.
-    LegendEntry {
-        row: usize,
-        column: usize,
-        series: usize,
-    },
+    /// La ligne de légende de la série `series` du calque `panel`.
+    LegendEntry { panel: usize, series: usize },
 }
 
 /// Ce que l'éditeur sur place d'un titre modifie.
@@ -56,7 +52,7 @@ pub(super) enum TextEditTarget {
     /// Le texte saisi d'un titre.
     Title(TextTarget),
     /// Le nom, en légende, d'une série.
-    LegendEntry(stokesforge_plot::SeriesRef, (usize, usize)),
+    LegendEntry(stokesforge_plot::SeriesRef),
 }
 
 /// L'éditeur sur place d'un titre ou d'un nom de légende (issue #53) : un
@@ -162,32 +158,24 @@ pub(super) fn open_legend_entry_editor(
     view: &GraphView,
     tree: &Tree,
     graph: NodeId,
-    row: usize,
-    column: usize,
+    panel: usize,
     series: usize,
 ) {
     let Some(spec) = crate::state::current_plot_spec(tree, graph) else {
-        return;
-    };
-    let Some(panel) = spec
-        .panels
-        .iter()
-        .position(|panel| panel.row == row && panel.column == column)
-    else {
         return;
     };
     let address = stokesforge_plot::SeriesRef::new(panel, series);
     let Some(spec_series) = spec.series_at(address) else {
         return;
     };
-    let Some(anchor) = view.legend_entry_screen_box(row, column, series) else {
+    let Some(anchor) = view.legend_entry_screen_box(panel, series) else {
         return;
     };
     let original = crate::state::series_list_label(tree, spec_series);
     start_text_editor(
         ctx,
         view,
-        TextEditTarget::LegendEntry(address, (row, column)),
+        TextEditTarget::LegendEntry(address),
         original,
         anchor,
     );
@@ -206,9 +194,8 @@ pub(super) fn open_series_name_editor(
     let Some(value) = spec.series_at(series) else {
         return;
     };
-    let panel = &spec.panels[series.panel];
     let anchor = view
-        .legend_entry_screen_box(panel.row, panel.column, series.index)
+        .legend_entry_screen_box(series.panel, series.index)
         .unwrap_or((
             view.display_rect()
                 .map_or(ctx.content_rect().center(), |r| r.center()),
@@ -217,7 +204,7 @@ pub(super) fn open_series_name_editor(
     start_text_editor(
         ctx,
         view,
-        TextEditTarget::LegendEntry(series, (panel.row, panel.column)),
+        TextEditTarget::LegendEntry(series),
         series_list_label(tree, value),
         anchor,
     );
@@ -307,7 +294,7 @@ pub(super) fn text_editor_ui(
                     target,
                     text: editor.buffer.clone(),
                 },
-                TextEditTarget::LegendEntry(series, _) => Action::SetLegendEntryName {
+                TextEditTarget::LegendEntry(series) => Action::SetLegendEntryName {
                     graph,
                     series,
                     name: editor.buffer.clone(),
@@ -341,17 +328,17 @@ pub(super) fn open_annotation_editor(
     start_annotation_editor(ctx, view, target, original.clone(), Some(original));
 }
 
-/// Ajoute un texte au point de données `(row, column, x, y)` et ouvre
+/// Ajoute un texte au point de données `(panel, x, y)` et ouvre
 /// l'éditeur dessus : rien n'entre dans le modèle avant validation.
 pub(super) fn add_annotation_at(
     ctx: &egui::Context,
     view: &mut GraphView,
     tree: &Tree,
     graph: NodeId,
-    (row, column, x, y): (usize, usize, f64, f64),
+    (panel, x, y): (usize, f64, f64),
 ) {
     let Some(target) = crate::state::current_plot_spec(tree, graph)
-        .and_then(|spec| stokesforge_render_egui::AnnotationRef::next_in(&spec, row, column))
+        .and_then(|spec| stokesforge_render_egui::AnnotationRef::next_in(&spec, panel))
     else {
         return;
     };
@@ -679,11 +666,7 @@ mod tests {
     #[test]
     fn valider_un_texte_libre_n_envoie_qu_une_action_et_seulement_s_il_a_change() {
         let graph = NodeId::from_raw(5);
-        let target = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let target = AnnotationRef { panel: 0, index: 0 };
         let pic = AnnotationSpec::new("Pic", 1.0, 2.0);
         let blank = AnnotationSpec::new("   ", 1.0, 2.0);
         let renamed = AnnotationSpec::new("Pic 2", 1.0, 2.0);
@@ -859,7 +842,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         let series = SeriesRef::new(0, 1);
-        open(&ctx, TextEditTarget::LegendEntry(series, (0, 0)), "B");
+        open(&ctx, TextEditTarget::LegendEntry(series), "B");
         run_text_editor(&ctx, &view, graph, Vec::new());
         type_text(&ctx, "Témoin");
         assert_eq!(
@@ -877,11 +860,7 @@ mod tests {
     #[test]
     fn l_editeur_d_un_texte_libre_valide_par_un_clic_ailleurs_et_jette_l_apercu_sur_echap() {
         let graph = NodeId::from_raw(5);
-        let target = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let target = AnnotationRef { panel: 0, index: 0 };
         let draft = AnnotationSpec::new("Pic", 1.0, 2.0);
         let run = |ctx: &egui::Context, view: &mut GraphView, events: Vec<egui::Event>| {
             let mut actions = Vec::new();

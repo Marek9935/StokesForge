@@ -3975,16 +3975,10 @@ impl AppState {
                     T::Panel(i) => (PlotSettingsTab::PlotArea, None, i, None),
                     T::Group(i) => (PlotSettingsTab::Series, None, i, None),
                     T::Axes(i) => (PlotSettingsTab::Axes, None, i, None),
-                    T::Text(TextTarget::Legend { row, column }) => (
-                        PlotSettingsTab::Legend,
-                        None,
-                        spec.panels
-                            .iter()
-                            .position(|p| p.row == row && p.column == column)
-                            .unwrap_or(0),
-                        None,
-                    ),
-                    T::Text(TextTarget::AxisTitle { row, column, side }) => (
+                    T::Text(TextTarget::Legend { panel }) => {
+                        (PlotSettingsTab::Legend, None, panel, None)
+                    }
+                    T::Text(TextTarget::AxisTitle { panel, side }) => (
                         PlotSettingsTab::Axes,
                         Some(match side {
                             stokesforge_plot::AxisSide::Bottom => PlotAxis::Bottom,
@@ -3993,10 +3987,7 @@ impl AppState {
                             stokesforge_plot::AxisSide::Left => PlotAxis::Left,
                             stokesforge_plot::AxisSide::Right => PlotAxis::Right,
                         }),
-                        spec.panels
-                            .iter()
-                            .position(|p| p.row == row && p.column == column)
-                            .unwrap_or(0),
+                        panel,
                         None,
                     ),
                     T::Axis(axis) => (
@@ -4008,21 +3999,12 @@ impl AppState {
                             stokesforge_plot::AxisSide::Left => PlotAxis::Left,
                             stokesforge_plot::AxisSide::Right => PlotAxis::Right,
                         }),
-                        spec.panels
-                            .iter()
-                            .position(|p| p.row == axis.row && p.column == axis.column)
-                            .unwrap_or(0),
+                        axis.panel,
                         None,
                     ),
-                    T::Text(TextTarget::PanelTitle { row, column }) => (
-                        PlotSettingsTab::PlotArea,
-                        None,
-                        spec.panels
-                            .iter()
-                            .position(|p| p.row == row && p.column == column)
-                            .unwrap_or(0),
-                        None,
-                    ),
+                    T::Text(TextTarget::PanelTitle { panel }) => {
+                        (PlotSettingsTab::PlotArea, None, panel, None)
+                    }
                     _ => (PlotSettingsTab::Graph, None, 0, None),
                 };
                 self.open_plot_settings(graph, tab, axis);

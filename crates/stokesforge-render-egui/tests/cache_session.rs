@@ -450,11 +450,7 @@ fn glisser_un_texte_ne_signale_quau_relachement() {
     let context = contexte();
     let mut view = GraphView::new();
     let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
-    let target = stokesforge_plot::AnnotationRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
+    let target = stokesforge_plot::AnnotationRef { panel: 0, index: 0 };
 
     assert!(image_avec(&context, &mut view, &banc, rect, vec![], 0.0).is_empty());
     let (centre, _, _) = view.annotation_screen_box(target).expect("texte tracé");
@@ -524,11 +520,7 @@ fn double_cliquer_un_texte_demande_a_lediter() {
     let context = contexte();
     let mut view = GraphView::new();
     let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
-    let target = stokesforge_plot::AnnotationRef {
-        row: 0,
-        column: 0,
-        index: 0,
-    };
+    let target = stokesforge_plot::AnnotationRef { panel: 0, index: 0 };
     image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
     let (centre, _, _) = view.annotation_screen_box(target).expect("texte tracé");
     let mut signaux = Vec::new();
@@ -694,7 +686,7 @@ fn un_clic_selectionne_un_titre_ou_la_legende() {
     cliquer(&mut view, titre);
     assert_eq!(view.selected_text(), Some(TextTarget::Title));
 
-    let legende = TextTarget::Legend { row: 0, column: 0 };
+    let legende = TextTarget::Legend { panel: 0 };
     let (centre, taille, _) = view.text_screen_box(legende).expect("légende tracée");
     let entree = centre + egui::vec2(0.0, -taille.y / 2.0 + 14.0);
     cliquer(&mut view, entree);
@@ -805,11 +797,7 @@ fn glisser(
 /// Le centre, à l'écran, de l'objet `index` du premier panneau.
 fn forme_a_l_ecran(view: &GraphView, index: usize) -> (Pos2, Pos2) {
     let drawn = view
-        .drawn_shape(stokesforge_plot::ShapeRef {
-            row: 0,
-            column: 0,
-            index,
-        })
+        .drawn_shape(stokesforge_plot::ShapeRef { panel: 0, index })
         .expect("objet tracé");
     let origin = view.display_rect().expect("rect").min.to_vec2();
     (

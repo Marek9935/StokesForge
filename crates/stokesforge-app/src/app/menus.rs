@@ -1239,11 +1239,7 @@ mod tests {
             "aucun texte déplacé"
         );
 
-        let target = AnnotationRef {
-            row: 0,
-            column: 0,
-            index: 0,
-        };
+        let target = AnnotationRef { panel: 0, index: 0 };
         let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_annotation(Some(target), &spec));
         let (ctx, menu) = ouvre_chemin(
