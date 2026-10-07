@@ -24,7 +24,8 @@
 
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{
-    Cell, Column, ColumnMeta, ColumnType, ColumnValues, MixedCell, NodeId, Project, ValueBlock,
+    Cell, Column, ColumnMeta, ColumnType, ColumnValues, MixedCell, NodeCopy, NodeId, Project,
+    ValueBlock,
 };
 use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 
@@ -564,31 +565,13 @@ fn une_feuille_dupliquee_a_ses_propres_formules() {
     );
 }
 
-/// `Load` vide le mémo. Le fichier chargé est fabriqué pour que tout ce que
-/// le mémo compare coïncide avec le projet courant — mêmes identifiants,
-/// mêmes versions, même texte — alors que la source A a d'autres valeurs et
-/// que C porte des valeurs fausses. Seul l'oubli du mémo force le recalcul :
-/// un `.stf` écrit ailleurs (autre processus, version antérieure) n'a aucune
-/// raison de partager la numérotation de versions de ce projet-ci.
-#[test]
-fn le_chargement_oublie_le_memo_du_projet_remplace() {
-    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
-    let s = instantane(&handle);
-    let colonne = |id: NodeId| {
-        s.tree
-            .node(id)
-            .and_then(|node| node.as_column())
-            .expect("colonne")
-            .clone()
-    };
-    let (vraie_a, vraie_c) = (colonne(f.a), colonne(f.c));
-    assert_eq!(vraie_c.column_type(), ColumnType::Mixed);
-    assert!(vraie_c.meta().formula.is_some());
-
-    // Même construction, donc mêmes identifiants ; A et C reçoivent les
-    // versions que le mémo a notées, avec un autre contenu (`add_column`
-    // garde la version de la colonne qu'on lui donne).
+/// Un projet construit comme [`projet`] — donc aux mêmes identifiants — où
+/// A et C portent les versions `version_a` et `version_c` avec un autre
+/// contenu : A vaut `[5, 5, 5]` et C, qui garde la formule `A*2`, porte des
+/// zéros qu'aucun calcul ne justifie. C'est la coïncidence qu'un mémo non
+/// vidé prendrait pour « rien n'a changé ». `add_column` garde la version de
+/// la colonne qu'on lui donne.
+fn projet_truque(f: &Feuille, version_a: u64, version_c: u64, meta_c: ColumnMeta) -> Project {
     let mut faux = Project::new("Demo").expect("projet valide");
     let root = faux.root();
     faux.add_workbook(root, Some("Book1")).expect("classeur");
@@ -597,24 +580,58 @@ fn le_chargement_oublie_le_memo_du_projet_remplace() {
         ColumnType::Numeric,
         ValueBlock::Float(vec![5.0, 5.0, 5.0]),
         ColumnMeta::default(),
-        vraie_a.version(),
+        version_a,
     )
     .expect("A truquée");
     let fausse_c = Column::from_block_with_version(
         ColumnType::Mixed,
         ValueBlock::Mixed(vec![MixedCell::Number(0.0); 3]),
-        vraie_c.meta().clone(),
-        vraie_c.version(),
+        meta_c,
+        version_c,
     )
     .expect("C truquée");
     let ids = [
         faux.add_column(sheet, None, Some("A"), fausse_a),
-        faux.add_column(sheet, None, Some("B"), colonne(f.b)),
+        faux.add_column(
+            sheet,
+            None,
+            Some("B"),
+            Column::from_f64(&[10.0, 20.0, 30.0]),
+        ),
         faux.add_column(sheet, None, Some("C"), fausse_c),
-        faux.add_column(sheet, None, Some("D"), colonne(f.d)),
+        faux.add_column(sheet, None, Some("D"), Column::new(ColumnType::Numeric)),
     ]
     .map(|id| id.expect("colonne"));
     assert_eq!(ids, [f.a, f.b, f.c, f.d], "construction déterministe");
+    faux
+}
+
+/// Pose `C = A*2` et rend `(version de A, version de C, métadonnées de C)`
+/// telles que le mémo vient de les noter.
+fn memo_de_c(handle: &SessionHandle, f: &Feuille) -> (u64, u64, ColumnMeta) {
+    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    let s = instantane(handle);
+    assert_eq!(nombres(&s, f.c), some(&[2.0, 4.0, 6.0]));
+    let c = s
+        .tree
+        .node(f.c)
+        .and_then(|node| node.as_column())
+        .expect("C");
+    assert_eq!(c.column_type(), ColumnType::Mixed);
+    (version(&s, f.a), c.version(), c.meta().clone())
+}
+
+/// `Load` vide le mémo. Le fichier chargé reprend tout ce que le mémo
+/// compare — mêmes identifiants, mêmes versions, même texte — avec une
+/// autre source A et des valeurs de C fausses ([`projet_truque`]). Seul
+/// l'oubli du mémo force le recalcul : un `.stf` écrit ailleurs (autre
+/// processus, version antérieure) n'a aucune raison de partager la
+/// numérotation de versions de ce projet-ci.
+#[test]
+fn le_chargement_oublie_le_memo_du_projet_remplace() {
+    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
+    let (version_a, version_c, meta_c) = memo_de_c(&handle, &f);
+    let faux = projet_truque(&f, version_a, version_c, meta_c);
 
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let chemin = dir.path().join("faux.stf");
@@ -622,6 +639,43 @@ fn le_chargement_oublie_le_memo_du_projet_remplace() {
 
     handle.load(&chemin).expect("charger");
     let s = instantane(&handle);
+    assert_eq!(nombres(&s, f.a), some(&[5.0, 5.0, 5.0]));
+    assert_eq!(nombres(&s, f.c), some(&[10.0, 10.0, 10.0]));
+}
+
+/// `NewProject` vide le mémo. Une passe ordinaire purge déjà les entrées
+/// des colonnes absentes, ce qui suffit tant que la première requête du
+/// projet neuf ne crée aucune colonne-formule ; le cas qui exige l'oubli
+/// est donc un **collage** comme toute première requête. Le projet neuf
+/// repart des mêmes identifiants : le classeur collé ([`projet_truque`],
+/// capturé avec ses versions comme le fait Copier) retombe sur les
+/// identifiants et les versions que le mémo a notés.
+#[test]
+fn un_nouveau_projet_oublie_le_memo_de_l_ancien() {
+    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
+    let (version_a, version_c, meta_c) = memo_de_c(&handle, &f);
+    let faux = projet_truque(&f, version_a, version_c, meta_c);
+    let book = faux.resolve_path("[Book1]").expect("classeur truqué");
+    let copie = NodeCopy::capture(faux.tree(), book).expect("capture");
+
+    handle.new_project().expect("nouveau projet");
+    let racine = instantane(&handle).tree.root();
+    handle
+        .execute(Command::InsertCopy {
+            parent: racine,
+            copy: copie,
+            name: "Book1".into(),
+        })
+        .expect("coller le classeur, première requête du projet neuf");
+
+    let s = instantane(&handle);
+    // La coïncidence tient : la colonne collée porte l'identifiant de C, et
+    // A, que le recalcul n'écrit pas, la version que le mémo a notée.
+    assert!(
+        s.tree.node(f.c).and_then(|node| node.as_column()).is_some(),
+        "C collée sous l'identifiant que le mémo connaît"
+    );
+    assert_eq!(version(&s, f.a), version_a);
     assert_eq!(nombres(&s, f.a), some(&[5.0, 5.0, 5.0]));
     assert_eq!(nombres(&s, f.c), some(&[10.0, 10.0, 10.0]));
 }

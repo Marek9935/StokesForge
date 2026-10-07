@@ -142,9 +142,12 @@ impl Recalculator {
         for sheet in sheets {
             self.recalc_sheet(project, sheet, &mut seen);
         }
-        // Une colonne supprimée, ou qui a perdu sa formule, sort du mémo.
-        // Si elle revient (annulation), elle sera recalculée : absente du
-        // mémo, elle ne peut pas être « propre ».
+        // Une colonne supprimée, ou qui a perdu sa formule, sort du mémo :
+        // hygiène, pour que le mémo reste borné par les colonnes-formule
+        // présentes. Ce n'est pas ce qui rend le mémo juste — un identifiant
+        // n'est jamais réattribué dans un même projet (invariant 7), et
+        // `forget` couvre le projet remplacé ; une entrée périmée ne pourrait
+        // donc jamais être prise pour une autre colonne.
         self.memo.retain(|id, _| seen.contains(id));
     }
 
@@ -279,26 +282,16 @@ impl Recalculator {
         let (order, blocked) = topological_order(&edges);
 
         for id in blocked {
-            let Some((source, formula)) = parsed.get(&id) else {
+            let Some((source, _)) = parsed.get(&id) else {
                 continue;
             };
-            // Un bloc `NaN` ne dépend que de la longueur et du type de
-            // sortie, lequel ne dépend que de l'existence des colonnes
-            // désignées : leurs versions n'entrent pas dans l'empreinte. Les
-            // y mettre ferait se réécrire les membres d'un cycle à chaque
-            // passe, chacun changeant la version de l'autre.
-            let sources = formula
-                .referenced_columns()
-                .into_iter()
-                .map(|index| columns.get(index).copied())
-                .collect();
-            let fingerprint = Fingerprint::new(
-                project,
-                id,
-                source.clone(),
-                Outcome::Blocked { sources },
-                target_len,
-            );
+            // Un bloc `NaN` ne dépend que de la longueur et du type de la
+            // colonne, déjà couvert par sa propre version (le type est fixé
+            // juste au-dessus) : les sources n'entrent pas dans l'empreinte.
+            // Y mettre leurs versions ferait se réécrire les membres d'un
+            // cycle à chaque passe, chacun changeant la version de l'autre.
+            let fingerprint =
+                Fingerprint::new(project, id, source.clone(), Outcome::Blocked, target_len);
             if self.is_stale(id, &fingerprint) {
                 write_formula_column(
                     project,
@@ -415,16 +408,18 @@ impl Fingerprint {
 enum Outcome {
     /// La formule ne s'analyse pas : `NaN` partout, rien de lu.
     Unparsable,
-    /// Prise dans un cycle, ou dépendante d'un cycle : `NaN` partout. Seule
-    /// compte la colonne que désigne chaque lettre (ou son absence), qui
-    /// décide du type de sortie.
-    Blocked { sources: Vec<Option<NodeId>> },
+    /// Prise dans un cycle, ou dépendante d'un cycle : `NaN` partout, rien
+    /// de lu. Le type de sortie, qui dépend des colonnes désignées, est fixé
+    /// avant l'écriture et changer de type change la version de la colonne.
+    Blocked,
     /// Calculée. Chaque lettre référencée, avec la colonne qu'elle désigne et
     /// la version de son contenu (`None` : lettre hors de la feuille, le
     /// calcul dégrade en `NaN`). `self_index` est lu par
     /// `stokesforge_core::evaluate_formula` (auto-référence) : il entre donc
     /// dans l'empreinte, même si une auto-référence finit aujourd'hui dans
-    /// [`Outcome::Blocked`] avant d'y arriver.
+    /// [`Outcome::Blocked`] avant d'y arriver — aucun test ne peut donc le
+    /// voir manquer (`docs/tests.md`, « Recalcul ciblé », mutants), et il
+    /// reste là pour le jour où `evaluate_formula` s'en servirait autrement.
     Evaluated {
         self_index: usize,
         sources: Vec<(usize, Option<(NodeId, u64)>)>,
