@@ -10,7 +10,7 @@ use stokesforge_commands::{Command, CommandError, CommandResult, History, MacroK
 use stokesforge_core::{NodeId, Project};
 
 use crate::error::{SessionError, SessionResult};
-use crate::recalc::recalc_formulas;
+use crate::recalc::{FormulaRecalc, Recalculator};
 use crate::snapshot::{HistoryState, Revision, Snapshot};
 use crate::{ClientId, WindowGeometry};
 
@@ -134,6 +134,7 @@ pub(crate) enum Request {
 pub(crate) fn run(
     mut project: Project,
     history_limit: Option<usize>,
+    recalc: FormulaRecalc,
     rx: Receiver<Request>,
 ) -> Project {
     let mut history = match history_limit {
@@ -161,6 +162,12 @@ pub(crate) fn run(
     // pourquoi.
     let mut geometries: HashMap<NodeId, WindowGeometry> = HashMap::new();
     let mut geometry_revision: u64 = 0;
+    // #193 — ce que le recalcul des formules a vu à son dernier passage
+    // (voir `recalc`) : à côté du `Project`, comme les géométries, jamais
+    // dans l'historique ni dans le `.stf`. Le projet reçu à la création n'a
+    // jamais été recalculé par cet acteur : le mémo vide le fera entièrement
+    // à la première requête mutante, comme avant #193.
+    let mut formulas = Recalculator::new(recalc);
 
     for request in rx {
         match request {
@@ -176,7 +183,7 @@ pub(crate) fn run(
                 } else {
                     history.execute(&mut project, command).map(|()| {
                         revision += 1;
-                        recalc_formulas(&mut project);
+                        formulas.run(&mut project);
                         if purge_orphaned_geometries(&project, &mut geometries) {
                             geometry_revision += 1;
                         }
@@ -189,7 +196,7 @@ pub(crate) fn run(
                 let outcome = history.undo(&mut project).map(|reverted| {
                     reverted.then(|| {
                         revision += 1;
-                        recalc_formulas(&mut project);
+                        formulas.run(&mut project);
                         if purge_orphaned_geometries(&project, &mut geometries) {
                             geometry_revision += 1;
                         }
@@ -202,7 +209,7 @@ pub(crate) fn run(
                 let outcome = history.redo(&mut project).map(|restored| {
                     restored.then(|| {
                         revision += 1;
-                        recalc_formulas(&mut project);
+                        formulas.run(&mut project);
                         if purge_orphaned_geometries(&project, &mut geometries) {
                             geometry_revision += 1;
                         }
@@ -277,7 +284,7 @@ pub(crate) fn run(
                         // doivent l'être aussi ici, sans quoi elles
                         // resteraient sur des valeurs qu'aucune formule
                         // actuellement en vigueur ne justifie plus.
-                        recalc_formulas(&mut project);
+                        formulas.run(&mut project);
                         revision
                     })
                 };
@@ -348,8 +355,10 @@ pub(crate) fn run(
                         // Recalculer systématiquement ici est le choix
                         // retenu (peu coûteux — voir `recalc_formulas` — et
                         // toujours correct) plutôt que de faire confiance au
-                        // contenu chargé.
-                        recalc_formulas(&mut project);
+                        // contenu chargé. Le mémo est vidé : il décrit un
+                        // projet qui n'existe plus.
+                        formulas.forget();
+                        formulas.run(&mut project);
                         // A3 — l'identité du projet change : une poignée
                         // (`stokesforge_script::surface::Handle`) qui a mémorisé
                         // l'ancienne époque ne doit plus pouvoir désigner un
@@ -383,6 +392,7 @@ pub(crate) fn run(
                             project = empty;
                             let _ = history.clear();
                             geometries.clear();
+                            formulas.forget();
                             revision += 1;
                             epoch += 1;
                             geometry_revision += 1;

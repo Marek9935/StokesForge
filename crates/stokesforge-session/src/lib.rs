@@ -157,6 +157,7 @@ use stokesforge_core::{NodeId, Project};
 use actor::Request;
 
 pub use error::{SessionError, SessionResult};
+pub use recalc::FormulaRecalc;
 pub use snapshot::{HistoryState, Revision, Snapshot};
 
 /// Position et taille d'une fenêtre de l'UI — voir « Géométrie des fenêtres »
@@ -362,10 +363,22 @@ impl Session {
     /// (`None` → [`stokesforge_commands::DEFAULT_LIMIT`]). `Err` si le système
     /// d'exploitation refuse de créer le thread.
     pub fn spawn(project: Project, history_limit: Option<usize>) -> std::io::Result<Self> {
+        Self::spawn_with_recalc(project, history_limit, FormulaRecalc::Targeted)
+    }
+
+    /// Comme [`Session::spawn`], en choisissant comment l'acteur recalcule les
+    /// colonnes-formule. [`FormulaRecalc::Full`] n'existe que comme oracle du
+    /// test différentiel (`stokesforge-robustesse`, batterie `b22`) : une
+    /// session de production prend [`Session::spawn`].
+    pub fn spawn_with_recalc(
+        project: Project,
+        history_limit: Option<usize>,
+        recalc: FormulaRecalc,
+    ) -> std::io::Result<Self> {
         let (tx, rx) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("stokesforge-session".to_string())
-            .spawn(move || actor::run(project, history_limit, rx))?;
+            .spawn(move || actor::run(project, history_limit, recalc, rx))?;
         Ok(Self {
             handle: SessionHandle {
                 tx,

@@ -1,193 +1,444 @@
 //! Recalcul des colonnes-formule, rejoué par l'acteur après chaque requête
 //! qui a pu changer le projet (voir `actor::run`) — hors historique.
+//!
+//! # Ne recalculer que ce dont une source a changé (#193)
+//!
+//! Jusqu'à #193, chaque `Execute`/`Undo`/`Redo`/`AbortMacro` réussi
+//! recalculait **toutes** les colonnes-formule de toutes les feuilles, sur
+//! toutes leurs lignes — changer la couleur d'une courbe comprise. Le
+//! [`Recalculator`] garde désormais, pour chaque colonne-formule, une
+//! [`Fingerprint`] de ce qu'il a vu à son dernier calcul, et ne réécrit une
+//! colonne que si cette empreinte a changé.
+//!
+//! ## Pourquoi une comparaison, et pas « A prévient B »
+//!
+//! Un vrai abonnement (A tient la liste des formules qui la lisent)
+//! demanderait de maintenir ces listes à travers chaque annulation,
+//! déplacement, copie, suppression et chargement — autant de chemins où un
+//! oubli laisse une valeur fausse **en silence**. La comparaison n'a rien à
+//! maintenir : elle relit, après chaque commande, l'état courant et le
+//! confronte au mémo, ce qui ne coûte que des comparaisons d'entiers et de
+//! textes courts. Aucune donnée de colonne n'est lue pour une colonne propre.
+//!
+//! ## Sur quoi repose la comparaison
+//!
+//! Sur le compteur de version des colonnes ([`stokesforge_core::Column::
+//! version`]) et sa doctrine : **un numéro ne désigne jamais deux contenus
+//! d'une même colonne** (A7, `guide-de-correction-robustesse.md` §F2). Toute
+//! écriture de données, ordinaire, d'annulation ou de recalcul, reçoit un
+//! numéro neuf du compteur unique du projet
+//! (`Project::next_column_version`) ; une restauration d'arbre
+//! (`Entry::Structural`) ne ramène qu'une paire (version, contenu) qui a
+//! réellement coexisté. Égalité de version ⇒ égalité de contenu : c'est
+//! l'hypothèse dont dépend tout ce module, revérifiée dans l'acteur par la
+//! batterie `b22`. Le sens contraire n'est pas requis : un même contenu sous
+//! un numéro neuf ne coûte qu'un recalcul inutile.
+//!
+//! ## Ce que l'empreinte doit contenir — la règle à ne pas casser
+//!
+//! **Toute donnée qui entre dans le calcul d'une colonne-formule entre dans
+//! son empreinte** : le texte de la formule, la colonne que désigne chaque
+//! lettre (identifiant, pas lettre), la version de chacune, le nombre de
+//! lignes de la feuille, la position de la colonne elle-même, la version de
+//! la colonne elle-même (une saisie directe dans une colonne-formule doit
+//! être écrasée), et l'issue (formule illisible, prise dans un cycle,
+//! calculée). Un calcul qui lirait une donnée de plus — le nom d'une
+//! colonne, son unité, une autre feuille, une fonction `row()` — sans
+//! l'ajouter ici serait « propre » à tort : la valeur affichée resterait
+//! fausse sans erreur. Ce qu'il faut tester alors : `docs/tests.md`,
+//! « Recalcul ciblé ».
+//!
+//! ## L'oracle
+//!
+//! Le recalcul complet n'a pas disparu : c'est [`FormulaRecalc::Full`], la
+//! même boucle dont on ne consulte jamais le mémo. La batterie `b22` joue
+//! des suites de commandes tirées au sort dans deux sessions, l'une ciblée,
+//! l'autre complète, et exige des arbres égaux après chaque pas. Les deux
+//! modes partagent tout le code sauf la décision « propre / à recalculer » :
+//! c'est elle, et elle seule, que l'oracle éprouve.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use stokesforge_core::{
     evaluate_formula, topological_order, ColumnType, Formula, NodeId, NumericStatus, Project,
     ValueBlock,
 };
 
-/// Recalcule toutes les colonnes-formule du projet — accès **direct** à
-/// `Project` (`Project::set_length`/`Project::set_values`), jamais via
-/// `History::apply`/`Command::execute` : c'est un effet de bord silencieux
-/// rejoué après coup, pas une mutation annulable (voir la doc de tête de
-/// crate, `docs/commandes-et-historique.md`) — exactement le même statut que
-/// `actor::purge_orphaned_geometries`, qui rejoue déjà la purge de géométrie
-/// après toute exécution structurelle. Le texte de la formule
-/// (`Command::SetColumnMeta`) et les cellules sources (`Command::SetCells`,
-/// `InsertRows`, `DeleteRows`, ...) restent, eux, annulables normalement :
-/// c'est seulement le recalcul qui ne pousse jamais sa propre entrée.
-///
-/// # Portée du déclenchement
-///
-/// Appelée après **tout** `Execute`/`Undo`/`Redo`/`AbortMacro` qui a réussi
-/// (donc a pu changer le projet) et après tout `Load` (voir `run`,
-/// ci-dessus, pour chaque site d'appel et sa justification propre — en
-/// particulier `Load`, qui recalcule plutôt que de faire confiance aux
-/// valeurs lues du disque).
-///
-/// À l'intérieur de cette fonction, la portée est volontairement **large** :
-/// tout l'arbre est balayé, pas seulement « la feuille que la commande vient
-/// de toucher ». Deux raisons à ce choix plutôt qu'un déclenchement plus fin
-/// piloté par `Command::is_structural()` ou par les variantes précises de
-/// `Command` :
-///
-/// - `Undo`/`Redo`/`AbortMacro` ne portent aucune commande à inspecter ici —
-///   seule `History` sait ce qu'elle vient de restaurer, et elle ne l'expose
-///   pas (elle n'a d'ailleurs pas à le faire : c'est un détail
-///   d'implémentation d'`Entry`) ; il faudrait lui ajouter une surface
-///   dédiée rien que pour ce besoin.
-/// - Même côté `Execute`, `Command::Move` peut déplacer une **colonne**
-///   d'une feuille à une autre : les lettres de position changent à la fois
-///   dans la feuille de départ et dans celle d'arrivée, alors que `Move` ne
-///   distingue en rien ce cas d'un déplacement de dossier sans le moindre
-///   effet sur une formule.
-///
-/// Le coût de ce balayage est celui de `actor::purge_orphaned_geometries` :
-/// linéaire dans le nombre de nœuds pour trouver les feuilles, puis borné
-/// par le nombre de colonnes-formule effectivement présentes (le cas
-/// courant : aucune) — jamais par la taille des données des colonnes qui
-/// n'en portent pas.
-pub(crate) fn recalc_formulas(project: &mut Project) {
-    let sheets: Vec<NodeId> = project
-        .tree()
-        .iter()
-        .filter(|(_, node)| node.kind().is_worksheet())
-        .map(|(id, _)| id)
-        .collect();
-    for sheet in sheets {
-        recalc_sheet(project, sheet);
-    }
+/// Façon dont l'acteur recalcule les colonnes-formule après chaque requête
+/// qui a pu changer le projet (voir [`crate::Session::spawn_with_recalc`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FormulaRecalc {
+    /// Ne réécrit une colonne-formule que si une donnée de son calcul a
+    /// changé depuis le dernier (voir la doc de tête du module). Le mode de
+    /// toute session de production.
+    #[default]
+    Targeted,
+    /// Réécrit toutes les colonnes-formule de toutes les feuilles, à chaque
+    /// fois — le comportement d'avant #193. Sert d'**oracle** au test
+    /// différentiel (`stokesforge-robustesse`, batterie `b22`) : aucun
+    /// client de production ne l'emploie.
+    Full,
 }
 
-/// Recalcule les colonnes-formule d'une seule feuille, dans l'ordre de leurs
-/// dépendances (tri topologique, [`stokesforge_core::topological_order`]) — une
-/// colonne-formule qui en référence une autre lit sa valeur **déjà
-/// recalculée**, jamais celle d'avant cette passe. Un cycle de dépendance
-/// (direct ou transitif) est détecté sans boucler : chaque colonne qui y
-/// participe reçoit un bloc entièrement `NaN` et
-/// `FormulaError::Cycle` plutôt qu'une valeur qui n'aurait de toute façon
-/// aucun sens à choisir.
-fn recalc_sheet(project: &mut Project, sheet: NodeId) {
-    let Ok(columns) = project.tree().children(sheet).map(<[NodeId]>::to_vec) else {
-        return;
-    };
-    // Longueur cible commune à toute la feuille : le maximum des longueurs
-    // actuelles de ses colonnes (formule comprises), au moment où cette
-    // passe commence — la même notion que `Tree::row_count`, qui gouverne
-    // déjà `InsertRows`/`DeleteRows`.
-    let target_len = project.tree().row_count(sheet).unwrap_or(0);
+/// Le mémo du recalcul : ce que l'acteur a vu au dernier calcul de chaque
+/// colonne-formule. Vit dans l'acteur, à côté du `Project` — ni dans
+/// l'historique, ni dans le `.stf`.
+pub(crate) struct Recalculator {
+    mode: FormulaRecalc,
+    memo: HashMap<NodeId, Fingerprint>,
+}
 
-    // Formules analysées à l'avance : une erreur de *parse* est déjà un
-    // résultat final (bloc `NaN`, `FormulaError::Parse`), elle ne participe
-    // pas au graphe de dépendance — une colonne qui la référencerait la
-    // trouve immédiatement disponible (à `NaN`), pas « en attente ».
-    let mut parsed: BTreeMap<NodeId, Formula> = BTreeMap::new();
-    for &id in &columns {
-        let Some(source) = project
-            .tree()
-            .node(id)
-            .and_then(|node| node.as_column())
-            .and_then(|column| column.meta().formula.clone())
-        else {
-            continue;
-        };
-        match Formula::parse(&source) {
-            Ok(formula) => {
-                parsed.insert(id, formula);
-            }
-            Err(_error) => write_formula_column(
-                project,
-                id,
-                vec![f64::NAN; target_len],
-                &vec![NumericStatus::Missing; target_len],
-            ),
+impl Recalculator {
+    pub(crate) fn new(mode: FormulaRecalc) -> Self {
+        Self {
+            mode,
+            memo: HashMap::new(),
         }
     }
 
-    // Type de sortie d'une colonne-formule : `Numeric` si toutes les
-    // colonnes qu'elle référence sont `Numeric`/`DateTime` (l'échec est alors
-    // impossible, seules des cases manquantes peuvent apparaître), `Mixed`
-    // dès qu'une seule est `Mixed` (l'échec devient possible — voir
-    // `write_formula_column`, qui a besoin de ce type pour savoir où écrire
-    // `"---"`). Recalculé à chaque passe plutôt que figé à la création : une
-    // formule référence potentiellement une colonne dont le type change
-    // ensuite (conversion manuelle). Appliqué directement au modèle plutôt
-    // que par une commande annulable, comme `write_formula_column`
-    // ci-dessous : c'est la même dérivation « hors historique » que le
-    // recalcul des valeurs (voir la doc de tête de `recalc_sheet`), pas une
-    // saisie utilisateur à elle seule annulable.
-    for (&id, formula) in &parsed {
-        if let Some(desired) = desired_formula_column_type(formula, &columns, project) {
-            let current = project
+    /// Oublie tout : le prochain [`Recalculator::run`] recalcule chaque
+    /// colonne-formule. Appelé quand le projet est remplacé (`Load`,
+    /// `NewProject`) : un `.stf` porte des valeurs de formule qu'on ne croit
+    /// pas sur parole (voir `actor::run`, branche `Load`), et ses versions de
+    /// colonne n'ont aucun rapport avec celles du projet précédent.
+    pub(crate) fn forget(&mut self) {
+        self.memo.clear();
+    }
+
+    /// Recalcule les colonnes-formule du projet qui en ont besoin — accès
+    /// **direct** à `Project` (`Project::set_length`/`Project::set_values`),
+    /// jamais via `History::apply`/`Command::execute` : c'est un effet de
+    /// bord silencieux rejoué après coup, pas une mutation annulable (voir la
+    /// doc de tête de crate, `docs/commandes-et-historique.md`) — exactement
+    /// le même statut que `actor::purge_orphaned_geometries`. Le texte de la
+    /// formule (`Command::SetColumnMeta`) et les cellules sources
+    /// (`Command::SetCells`, `InsertRows`, `DeleteRows`, ...) restent, eux,
+    /// annulables normalement : c'est seulement le recalcul qui ne pousse
+    /// jamais sa propre entrée.
+    ///
+    /// # Portée du déclenchement
+    ///
+    /// Appelée après **tout** `Execute`/`Undo`/`Redo`/`AbortMacro` qui a
+    /// réussi et après tout `Load` (voir `actor::run`, pour chaque site
+    /// d'appel et sa justification propre).
+    ///
+    /// Tout l'arbre est **inspecté**, pas seulement « la feuille que la
+    /// commande vient de toucher » : `Undo`/`Redo`/`AbortMacro` ne portent
+    /// aucune commande à inspecter (seule `History` sait ce qu'elle vient de
+    /// restaurer, et elle ne l'expose pas), et `Command::Move` peut déplacer
+    /// une colonne d'une feuille à une autre, changeant les lettres des deux.
+    /// Inspecter n'est pas recalculer : une colonne dont l'empreinte n'a pas
+    /// bougé n'est ni lue ni réécrite. Le coût d'une passe sans rien à
+    /// recalculer est linéaire dans le nombre de nœuds, plus l'analyse de
+    /// chaque texte de formule — jamais la taille des données.
+    pub(crate) fn run(&mut self, project: &mut Project) {
+        let sheets: Vec<NodeId> = project
+            .tree()
+            .iter()
+            .filter(|(_, node)| node.kind().is_worksheet())
+            .map(|(id, _)| id)
+            .collect();
+        let mut seen = HashSet::new();
+        for sheet in sheets {
+            self.recalc_sheet(project, sheet, &mut seen);
+        }
+        // Une colonne supprimée, ou qui a perdu sa formule, sort du mémo.
+        // Si elle revient (annulation), elle sera recalculée : absente du
+        // mémo, elle ne peut pas être « propre ».
+        self.memo.retain(|id, _| seen.contains(id));
+    }
+
+    /// Vrai si `column` doit être (ré)écrite : mode complet, colonne absente
+    /// du mémo, ou empreinte différente.
+    fn is_stale(&self, column: NodeId, fingerprint: &Fingerprint) -> bool {
+        match self.mode {
+            FormulaRecalc::Full => true,
+            FormulaRecalc::Targeted => self.memo.get(&column) != Some(fingerprint),
+        }
+    }
+
+    /// Note ce qui vient d'être écrit dans `column` : l'empreinte reçoit la
+    /// version **après** écriture, celle que la prochaine passe doit
+    /// retrouver si personne d'autre n'y a touché.
+    fn record(&mut self, project: &Project, column: NodeId, mut fingerprint: Fingerprint) {
+        if self.mode == FormulaRecalc::Full {
+            return;
+        }
+        match column_version(project, column) {
+            Some(version) => {
+                fingerprint.own_version = version;
+                self.memo.insert(column, fingerprint);
+            }
+            None => {
+                self.memo.remove(&column);
+            }
+        }
+    }
+
+    /// Recalcule les colonnes-formule d'une seule feuille qui en ont besoin,
+    /// dans l'ordre de leurs dépendances (tri topologique,
+    /// [`stokesforge_core::topological_order`]) — une colonne-formule qui en
+    /// référence une autre lit sa valeur **déjà recalculée**, jamais celle
+    /// d'avant cette passe. Un cycle de dépendance (direct ou transitif) est
+    /// détecté sans boucler : chaque colonne qui y participe reçoit un bloc
+    /// entièrement `NaN` plutôt qu'une valeur qui n'aurait de toute façon
+    /// aucun sens à choisir.
+    ///
+    /// La propagation est automatique : recalculer B écrit B, donc change sa
+    /// version, et C = B + 1, qui vient après B dans l'ordre, voit son
+    /// empreinte changer dans la même passe. L'ordre des étapes ci-dessous
+    /// (illisibles, puis types, puis cycles, puis l'ordre topologique) fait
+    /// qu'aucune colonne n'est écrite après qu'une colonne qui la lit a pris
+    /// son empreinte : une seconde passe immédiate ne réécrit rien.
+    fn recalc_sheet(&mut self, project: &mut Project, sheet: NodeId, seen: &mut HashSet<NodeId>) {
+        let Ok(columns) = project.tree().children(sheet).map(<[NodeId]>::to_vec) else {
+            return;
+        };
+        // Longueur cible commune à toute la feuille : le maximum des longueurs
+        // actuelles de ses colonnes (formule comprises), au moment où cette
+        // passe commence — la même notion que `Tree::row_count`, qui gouverne
+        // déjà `InsertRows`/`DeleteRows`.
+        let target_len = project.tree().row_count(sheet).unwrap_or(0);
+
+        // Formules analysées à l'avance : une erreur de *parse* est déjà un
+        // résultat final (bloc `NaN`), elle ne participe pas au graphe de
+        // dépendance — une colonne qui la référencerait la trouve
+        // immédiatement disponible (à `NaN`), pas « en attente ».
+        let mut parsed: BTreeMap<NodeId, (String, Formula)> = BTreeMap::new();
+        for &id in &columns {
+            let Some(source) = project
                 .tree()
                 .node(id)
                 .and_then(|node| node.as_column())
-                .map(stokesforge_core::Column::column_type);
-            if current != Some(desired) {
-                let _ = project.set_column_type(id, desired);
-            }
-        }
-    }
-
-    // Graphe de dépendance entre colonnes-formule uniquement : une référence
-    // vers une colonne ordinaire n'est pas une arête à ordonner, elle est
-    // déjà disponible (voir la doc de `stokesforge_core::topological_order`).
-    let mut edges: BTreeMap<NodeId, BTreeSet<NodeId>> =
-        parsed.keys().map(|&id| (id, BTreeSet::new())).collect();
-    for (&id, formula) in &parsed {
-        for index in formula.referenced_columns() {
-            if let Some(&dep_id) = columns.get(index) {
-                if parsed.contains_key(&dep_id) {
-                    if let Some(deps) = edges.get_mut(&id) {
-                        deps.insert(dep_id);
+                .and_then(|column| column.meta().formula.clone())
+            else {
+                continue;
+            };
+            seen.insert(id);
+            match Formula::parse(&source) {
+                Ok(formula) => {
+                    parsed.insert(id, (source, formula));
+                }
+                Err(_error) => {
+                    let fingerprint =
+                        Fingerprint::new(project, id, source, Outcome::Unparsable, target_len);
+                    if self.is_stale(id, &fingerprint) {
+                        write_formula_column(
+                            project,
+                            id,
+                            vec![f64::NAN; target_len],
+                            &vec![NumericStatus::Missing; target_len],
+                        );
+                        self.record(project, id, fingerprint);
                     }
                 }
             }
         }
-    }
-    let (order, blocked) = topological_order(&edges);
 
-    for id in blocked {
-        write_formula_column(
-            project,
-            id,
-            vec![f64::NAN; target_len],
-            &vec![NumericStatus::Missing; target_len],
-        );
-    }
-    for id in order {
-        let Some(formula) = parsed.get(&id) else {
-            continue;
-        };
-        let Some(self_index) = columns.iter().position(|&c| c == id) else {
-            continue;
-        };
-        // Relu à chaque colonne, pas une fois pour toute la feuille : les
-        // colonnes-formule déjà traitées dans cette boucle (celles dont `id`
-        // dépend, forcément plus tôt dans `order`) doivent être vues à jour.
-        let values: Vec<_> = columns
-            .iter()
-            .map(|&column_id| {
-                project
+        // Type de sortie d'une colonne-formule : voir
+        // `desired_formula_column_type`. Recalculé à chaque passe plutôt que
+        // figé à la création : une formule référence potentiellement une
+        // colonne qui apparaît ou disparaît ensuite. Appliqué directement au
+        // modèle plutôt que par une commande annulable, comme
+        // `write_formula_column` ci-dessous : c'est la même dérivation « hors
+        // historique » que le recalcul des valeurs, pas une saisie
+        // utilisateur à elle seule annulable. Pas de court-circuit par le
+        // mémo ici : la comparaison des types ne lit aucune donnée, et un
+        // changement de type change la version de la colonne, donc son
+        // empreinte — elle sera réécrite plus bas.
+        for (&id, (_, formula)) in &parsed {
+            if let Some(desired) = desired_formula_column_type(formula, &columns, project) {
+                let current = project
                     .tree()
-                    .node(column_id)
+                    .node(id)
                     .and_then(|node| node.as_column())
-                    .map(|column| column.values().clone())
-            })
-            .collect();
-        // Une colonne de `columns` a disparu entre la lecture de `columns`
-        // et maintenant : ne peut pas arriver (cette fonction ne touche
-        // jamais la structure de l'arbre), garde défensive plutôt qu'un
-        // panic si l'hypothèse venait à être fausse un jour (invariant 10).
-        if values.iter().any(Option::is_none) {
-            continue;
+                    .map(stokesforge_core::Column::column_type);
+                if current != Some(desired) {
+                    let _ = project.set_column_type(id, desired);
+                }
+            }
         }
-        let values: Vec<_> = values.into_iter().flatten().collect();
-        let evaluation = evaluate_formula(formula, self_index, &values, target_len);
-        write_formula_column(project, id, evaluation.values, &evaluation.statuses);
+
+        // Graphe de dépendance entre colonnes-formule uniquement : une
+        // référence vers une colonne ordinaire n'est pas une arête à
+        // ordonner, elle est déjà disponible (voir la doc de
+        // `stokesforge_core::topological_order`).
+        let mut edges: BTreeMap<NodeId, BTreeSet<NodeId>> =
+            parsed.keys().map(|&id| (id, BTreeSet::new())).collect();
+        for (&id, (_, formula)) in &parsed {
+            for index in formula.referenced_columns() {
+                if let Some(&dep_id) = columns.get(index) {
+                    if parsed.contains_key(&dep_id) {
+                        if let Some(deps) = edges.get_mut(&id) {
+                            deps.insert(dep_id);
+                        }
+                    }
+                }
+            }
+        }
+        let (order, blocked) = topological_order(&edges);
+
+        for id in blocked {
+            let Some((source, formula)) = parsed.get(&id) else {
+                continue;
+            };
+            // Un bloc `NaN` ne dépend que de la longueur et du type de
+            // sortie, lequel ne dépend que de l'existence des colonnes
+            // désignées : leurs versions n'entrent pas dans l'empreinte. Les
+            // y mettre ferait se réécrire les membres d'un cycle à chaque
+            // passe, chacun changeant la version de l'autre.
+            let sources = formula
+                .referenced_columns()
+                .into_iter()
+                .map(|index| columns.get(index).copied())
+                .collect();
+            let fingerprint = Fingerprint::new(
+                project,
+                id,
+                source.clone(),
+                Outcome::Blocked { sources },
+                target_len,
+            );
+            if self.is_stale(id, &fingerprint) {
+                write_formula_column(
+                    project,
+                    id,
+                    vec![f64::NAN; target_len],
+                    &vec![NumericStatus::Missing; target_len],
+                );
+                self.record(project, id, fingerprint);
+            }
+        }
+        for id in order {
+            let Some((source, formula)) = parsed.get(&id) else {
+                continue;
+            };
+            let Some(self_index) = columns.iter().position(|&c| c == id) else {
+                continue;
+            };
+            // Lue ici, pas avant la boucle : les colonnes-formule déjà
+            // traitées dans cette boucle (celles dont `id` dépend, forcément
+            // plus tôt dans `order`) ont pu être réécrites, donc changer de
+            // version — c'est ce qui propage le recalcul le long d'une
+            // chaîne.
+            let sources = formula
+                .referenced_columns()
+                .into_iter()
+                .map(|index| {
+                    let resolved = columns.get(index).and_then(|&column_id| {
+                        column_version(project, column_id).map(|version| (column_id, version))
+                    });
+                    (index, resolved)
+                })
+                .collect();
+            let fingerprint = Fingerprint::new(
+                project,
+                id,
+                source.clone(),
+                Outcome::Evaluated {
+                    self_index,
+                    sources,
+                },
+                target_len,
+            );
+            if !self.is_stale(id, &fingerprint) {
+                continue;
+            }
+            let values: Vec<_> = columns
+                .iter()
+                .map(|&column_id| {
+                    project
+                        .tree()
+                        .node(column_id)
+                        .and_then(|node| node.as_column())
+                        .map(|column| column.values().clone())
+                })
+                .collect();
+            // Une colonne de `columns` a disparu entre la lecture de `columns`
+            // et maintenant : ne peut pas arriver (cette fonction ne touche
+            // jamais la structure de l'arbre), garde défensive plutôt qu'un
+            // panic si l'hypothèse venait à être fausse un jour (invariant 10).
+            // Rien n'est écrit, donc rien n'est noté : le mémo l'oublie, et la
+            // prochaine passe réessaiera.
+            if values.iter().any(Option::is_none) {
+                self.memo.remove(&id);
+                continue;
+            }
+            let values: Vec<_> = values.into_iter().flatten().collect();
+            let evaluation = evaluate_formula(formula, self_index, &values, target_len);
+            write_formula_column(project, id, evaluation.values, &evaluation.statuses);
+            self.record(project, id, fingerprint);
+        }
     }
+}
+
+/// Ce que l'acteur a vu au dernier calcul d'une colonne-formule : **toutes**
+/// les données dont dépend ce qu'il y a écrit (voir la doc de tête du
+/// module, « Ce que l'empreinte doit contenir »). Deux empreintes égales
+/// garantissent que recalculer écrirait exactement le même contenu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Fingerprint {
+    /// Texte de la formule, tel que saisi.
+    source: String,
+    /// L'issue du calcul, et les sources qu'elle a lues.
+    outcome: Outcome,
+    /// Nombre de lignes de la feuille au début de la passe : la longueur du
+    /// résultat, même pour une formule sans référence.
+    target_len: usize,
+    /// Version de la colonne-formule elle-même. Comparée à la version
+    /// courante avant d'écrire, remplacée par la version d'après écriture
+    /// dans le mémo ([`Recalculator::record`]) : une saisie directe dans la
+    /// colonne, l'annulation d'une telle saisie ou un changement de type la
+    /// font changer, et la colonne est réécrite.
+    own_version: u64,
+}
+
+impl Fingerprint {
+    fn new(
+        project: &Project,
+        column: NodeId,
+        source: String,
+        outcome: Outcome,
+        target_len: usize,
+    ) -> Self {
+        Self {
+            source,
+            outcome,
+            target_len,
+            own_version: column_version(project, column).unwrap_or(0),
+        }
+    }
+}
+
+/// L'issue d'un calcul de formule, avec ce qu'elle a lu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Outcome {
+    /// La formule ne s'analyse pas : `NaN` partout, rien de lu.
+    Unparsable,
+    /// Prise dans un cycle, ou dépendante d'un cycle : `NaN` partout. Seule
+    /// compte la colonne que désigne chaque lettre (ou son absence), qui
+    /// décide du type de sortie.
+    Blocked { sources: Vec<Option<NodeId>> },
+    /// Calculée. Chaque lettre référencée, avec la colonne qu'elle désigne et
+    /// la version de son contenu (`None` : lettre hors de la feuille, le
+    /// calcul dégrade en `NaN`). `self_index` est lu par
+    /// `stokesforge_core::evaluate_formula` (auto-référence) : il entre donc
+    /// dans l'empreinte, même si une auto-référence finit aujourd'hui dans
+    /// [`Outcome::Blocked`] avant d'y arriver.
+    Evaluated {
+        self_index: usize,
+        sources: Vec<(usize, Option<(NodeId, u64)>)>,
+    },
+}
+
+/// Version courante de `column`, `None` si ce n'est pas (ou plus) une
+/// colonne de l'arbre.
+fn column_version(project: &Project, column: NodeId) -> Option<u64> {
+    project
+        .tree()
+        .node(column)
+        .and_then(|node| node.as_column())
+        .map(stokesforge_core::Column::version)
 }
 
 /// Type que devrait porter la colonne-résultat de `formula` d'après les
