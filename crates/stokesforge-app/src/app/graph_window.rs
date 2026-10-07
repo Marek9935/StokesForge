@@ -334,7 +334,7 @@ pub(super) fn graph_view_contents(
         }
         Err(err) => {
             ui.colored_label(
-                egui::Color32::RED,
+                ui.visuals().error_fg_color,
                 crate::errors::render::error_message(&err),
             );
         }

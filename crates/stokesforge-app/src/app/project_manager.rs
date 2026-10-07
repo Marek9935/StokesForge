@@ -16,12 +16,12 @@ use std::collections::HashSet;
 
 use eframe::egui;
 
-use crate::icons::{icon_image, Icon, IconRole, ICON_SIZE};
+use crate::icons::{icon_image, Icon, IconRole};
 use crate::state::{Action, ProjectTreeNode, WindowKind};
-use crate::theme;
 use crate::tr;
 use stokesforge_core::NodeId;
 
+use super::list_row::list_row;
 use super::menu_sections::MenuSections;
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_RENAME_OBJECT};
 use super::tab::{tab_for_window, tab_node, Tab};
@@ -447,7 +447,14 @@ fn project_tree_node_ui(
             // Le salt par onglet évite que toutes les lignes partagent le même Id.
             let response = ui
                 .push_id(tab, |ui| {
-                    project_tree_row(ui, icon_image(icon.0, icon.1), name, selected, is_hidden)
+                    // #169 : une ligne de liste (`list_row`), jamais un bouton `.selected()`.
+                    list_row(
+                        ui,
+                        Some(icon_image(icon.0, icon.1)),
+                        name,
+                        selected,
+                        is_hidden,
+                    )
                 })
                 .inner;
             if response.clicked() || response.secondary_clicked() {
@@ -539,88 +546,6 @@ fn project_tree_node_ui(
         }
     }
 }
-
-/// Ligne d'une fenêtre dans l'arbre (#169, option A de la maquette des
-/// onglets) : une ligne de liste sur toute la largeur restante depuis son
-/// retrait, sans cadre de bouton. Sélectionnée, fond teinté d'accent et filet
-/// vert à gauche ; survolée, fond gris clair. Elle remplace le bouton
-/// `.selected()` de #144, dont le fond vert arrondi était aussi celui des
-/// onglets actifs : trois rôles, un seul aspect.
-fn project_tree_row(
-    ui: &mut egui::Ui,
-    icon: egui::Image<'static>,
-    name: &str,
-    selected: bool,
-    hidden: bool,
-) -> egui::Response {
-    const PADDING: egui::Vec2 = egui::vec2(6.0, 3.0);
-    const GAP: f32 = 5.0;
-    let galley_of = |ui: &egui::Ui, text: egui::RichText| {
-        egui::WidgetText::from(text).into_galley(
-            ui,
-            Some(egui::TextWrapMode::Extend),
-            f32::INFINITY,
-            egui::TextStyle::Button,
-        )
-    };
-    let galley = galley_of(
-        ui,
-        if selected {
-            theme::bold(name)
-        } else {
-            egui::RichText::new(name)
-        },
-    );
-    let natural = 2.0 * PADDING.x + ICON_SIZE + GAP + galley.size().x;
-    let size = egui::vec2(
-        ui.available_width().max(natural),
-        galley.size().y.max(ICON_SIZE) + 2.0 * PADDING.y,
-    );
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, name)
-    });
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        if selected {
-            painter.rect_filled(rect, 0.0, theme::list_row_selected_fill());
-            let mark =
-                egui::Rect::from_min_size(rect.min, egui::vec2(LIST_ROW_MARK, rect.height()));
-            painter.rect_filled(mark, 0.0, theme::accent());
-        } else if response.hovered() {
-            painter.rect_filled(rect, 0.0, theme::list_row_hover_fill());
-        }
-        let icon_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + PADDING.x, rect.center().y - ICON_SIZE / 2.0),
-            egui::Vec2::splat(ICON_SIZE),
-        );
-        icon.paint_at(ui, icon_rect);
-        let text_color = if hidden {
-            ui.visuals().weak_text_color()
-        } else if selected {
-            ui.visuals().widgets.hovered.fg_stroke.color
-        } else {
-            ui.visuals().text_color()
-        };
-        let text_pos = egui::pos2(
-            icon_rect.right() + GAP,
-            rect.center().y - galley.size().y / 2.0,
-        );
-        ui.painter().galley(text_pos, galley, text_color);
-        if response.has_focus() {
-            ui.painter().rect_stroke(
-                rect.shrink(1.0),
-                0.0,
-                ui.visuals().selection.stroke,
-                egui::StrokeKind::Inside,
-            );
-        }
-    }
-    response
-}
-
-/// Largeur du filet d'accent à gauche d'une ligne sélectionnée.
-const LIST_ROW_MARK: f32 = 3.0;
 
 /// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
 /// séparée quand il est détaché.
@@ -729,8 +654,10 @@ pub(super) mod tests {
     use stokesforge_plot::PlotSpec;
     use stokesforge_session::Session;
 
+    use super::super::list_row::LIST_ROW_MARK;
     use super::super::test_support::painted;
     use crate::state::AppState;
+    use crate::theme;
 
     /// Trouve le centre du texte peint contenant `needle` dans `shapes` —
     /// utilisé pour cliquer une entrée du Project Manager sans supposer sa

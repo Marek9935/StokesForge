@@ -74,6 +74,19 @@ pub fn bold(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).variation("wght", BOLD_WEIGHT)
 }
 
+/// Espace laissé au-dessus d'un titre de section de formulaire.
+const SECTION_SPACING: f32 = 6.0;
+
+/// **Le** titre de section d'un formulaire (propriétés du graphe, assistant
+/// d'import…) : un espace, puis le libellé en [`bold`]. Le titre suffit à
+/// séparer les groupes : jamais de `ui.separator()` juste avant
+/// (`aucun_separateur_avant_un_titre_de_section`), et jamais un libellé
+/// ordinaire qui ferait office de titre.
+pub fn section_title(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
+    ui.add_space(SECTION_SPACING);
+    ui.label(bold(text))
+}
+
 /// Les variations qu'écrit [`bold`], pour mesurer ou reconnaître un gras
 /// (largeur réservée à un onglet, tests).
 pub fn bold_variations() -> egui::epaint::text::VariationCoords {
@@ -106,6 +119,25 @@ pub fn list_row_selected_fill() -> Color32 {
 /// Fond de la ligne survolée d'une liste (#169).
 pub fn list_row_hover_fill() -> Color32 {
     Color32::from_gray(0xEC)
+}
+
+/// Contour bleu d'un fichier du système glissé au-dessus de la fenêtre
+/// (`app/file_drop.rs`). Distinct, à ce jour, du vert des dépôts internes
+/// (colonnes vers un graphe, [`header_letter_row_selected_fill`]) : l'écart
+/// est une question ouverte du suivi de #169, pas un choix arrêté.
+pub fn file_drop_outline_color() -> Color32 {
+    Color32::from_rgb(0x2a, 0x7f, 0xff)
+}
+
+/// Aperçu de l'import : ligne d'en-tête reconnue (nom, sous-en-tête, unité),
+/// dans l'esprit du code couleur de l'assistant ASCII d'OriginLab.
+pub fn import_header_line_color() -> Color32 {
+    Color32::from_rgb(80, 140, 220)
+}
+
+/// Aperçu de l'import : sous-en-tête de commentaire ou de x'.
+pub fn import_comment_line_color() -> Color32 {
+    Color32::from_rgb(200, 80, 200)
 }
 
 /// Rouge foncé et discret du contour d'un dialogue modal qui vient de

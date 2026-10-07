@@ -34,6 +34,7 @@ use super::graph_text_edit::{
     ContextText,
 };
 use super::graph_window::open_shape_properties;
+use super::list_row::{list_row_label, list_row_text, list_row_text_color, ListRowBackground};
 use super::menu_sections::MenuSections;
 use super::shortcuts::{
     shortcut_text_delete, SHORTCUT_MOVE_SERIES_DOWN, SHORTCUT_MOVE_SERIES_UP,
@@ -732,88 +733,92 @@ impl ObjectManagerPaint<'_> {
         requests: &mut Vec<ObjectManagerRequest>,
     ) -> f32 {
         ui.push_id(series.target, |ui| {
-            ui.horizontal(|ui| {
-                object_visibility(ui, self.graph, T::Series(series.target), self.spec, actions);
-                let (rect, swatch) =
-                    ui.allocate_exact_size(egui::vec2(28.0, 18.0), egui::Sense::click_and_drag());
-                ui.painter().extend(stokesforge_render_egui::series_swatch(
-                    self.tree,
-                    &series.spec,
-                    rect,
-                ));
-                let text = if series.selected {
-                    crate::theme::bold(&series.label)
-                } else {
-                    egui::RichText::new(&series.label)
-                };
-                // #151 : l'échantillon de légende fait partie de la cible,
-                // comme le nom. Garder l'ID du bouton pour son menu et unir
-                // les gestes avant de traiter sélection, glisser et propriétés.
-                let response = ui
-                    .add(
-                        egui::Button::selectable(series.selected, text)
-                            .sense(egui::Sense::click_and_drag()),
-                    )
-                    .union(swatch);
-                if response.clicked() || response.secondary_clicked() || response.drag_started() {
-                    requests.push(ObjectManagerRequest::Select(T::Series(series.target)));
-                    ui.memory_mut(|memory| memory.request_focus(self.focus));
-                }
-                if response.double_clicked() {
-                    requests.push(ObjectManagerRequest::Properties(T::Series(series.target)));
-                }
-                response.dnd_set_drag_payload(SeriesDrag {
-                    graph: self.graph,
-                    source: series.target,
-                });
-                let drop_index = response
-                    .dnd_hover_payload::<SeriesDrag>()
-                    .filter(|drag| drag.graph == self.graph)
-                    .and_then(|drag| {
+            // #169 : une ligne de liste, fond posé sous la case et l'échantillon.
+            let background = ListRowBackground::reserve(ui);
+            let row = ui
+                .horizontal(|ui| {
+                    object_visibility(ui, self.graph, T::Series(series.target), self.spec, actions);
+                    let (rect, swatch) = ui
+                        .allocate_exact_size(egui::vec2(28.0, 18.0), egui::Sense::click_and_drag());
+                    ui.painter().extend(stokesforge_render_egui::series_swatch(
+                        self.tree,
+                        &series.spec,
+                        rect,
+                    ));
+                    let text = list_row_text(&series.label, series.selected)
+                        .color(list_row_text_color(ui, series.selected, false));
+                    // #151 : l'échantillon de légende fait partie de la cible,
+                    // comme le nom. Garder l'ID du bouton pour son menu et unir
+                    // les gestes avant de traiter sélection, glisser et propriétés.
+                    let response = ui
+                        .add(
+                            list_row_label(text, series.selected)
+                                .sense(egui::Sense::click_and_drag()),
+                        )
+                        .union(swatch);
+                    if response.clicked() || response.secondary_clicked() || response.drag_started()
+                    {
+                        requests.push(ObjectManagerRequest::Select(T::Series(series.target)));
+                        ui.memory_mut(|memory| memory.request_focus(self.focus));
+                    }
+                    if response.double_clicked() {
+                        requests.push(ObjectManagerRequest::Properties(T::Series(series.target)));
+                    }
+                    response.dnd_set_drag_payload(SeriesDrag {
+                        graph: self.graph,
+                        source: series.target,
+                    });
+                    let drop_index = response
+                        .dnd_hover_payload::<SeriesDrag>()
+                        .filter(|drag| drag.graph == self.graph)
+                        .and_then(|drag| {
+                            let after = ui
+                                .input(|i| i.pointer.interact_pos())
+                                .is_some_and(|p| p.y > response.rect.center().y);
+                            crate::object_manager::series_drop(
+                                self.spec,
+                                drag.source,
+                                series.target,
+                                after,
+                            )
+                        });
+                    if let Some(index) = drop_index {
                         let after = ui
                             .input(|i| i.pointer.interact_pos())
                             .is_some_and(|p| p.y > response.rect.center().y);
-                        crate::object_manager::series_drop(
+                        let y = if after {
+                            response.rect.bottom()
+                        } else {
+                            response.rect.top()
+                        };
+                        ui.painter().hline(
+                            response.rect.x_range(),
+                            y,
+                            ui.visuals().selection.stroke,
+                        );
+                        if let Some(drag) = response.dnd_release_payload::<SeriesDrag>() {
+                            actions.push(Action::ReorderSeries {
+                                graph: self.graph,
+                                source: drag.source,
+                                index,
+                            });
+                        }
+                    }
+                    response.context_menu(|ui| {
+                        object_node_menu(
+                            ui,
+                            self.graph,
+                            T::Series(series.target),
                             self.spec,
-                            drag.source,
-                            series.target,
-                            after,
+                            actions,
+                            requests,
                         )
                     });
-                if let Some(index) = drop_index {
-                    let after = ui
-                        .input(|i| i.pointer.interact_pos())
-                        .is_some_and(|p| p.y > response.rect.center().y);
-                    let y = if after {
-                        response.rect.bottom()
-                    } else {
-                        response.rect.top()
-                    };
-                    ui.painter()
-                        .hline(response.rect.x_range(), y, ui.visuals().selection.stroke);
-                    if let Some(drag) = response.dnd_release_payload::<SeriesDrag>() {
-                        actions.push(Action::ReorderSeries {
-                            graph: self.graph,
-                            source: drag.source,
-                            index,
-                        });
-                    }
-                }
-                response.context_menu(|ui| {
-                    object_node_menu(
-                        ui,
-                        self.graph,
-                        T::Series(series.target),
-                        self.spec,
-                        actions,
-                        requests,
-                    )
-                });
-            })
-            .response
-            .rect
-            .center()
-            .y
+                })
+                .response
+                .rect;
+            background.paint(ui, row, series.selected);
+            row.center().y
         })
         .inner
     }
@@ -860,41 +865,41 @@ fn object_manager_object_row(
     requests: &mut Vec<ObjectManagerRequest>,
 ) -> f32 {
     ui.push_id(object.target, |ui| {
-        ui.horizontal(|ui| {
-            object_visibility(ui, graph, object.target, spec, actions);
-            let icon = match object.kind {
-                crate::object_manager::ObjectKind::Text => Icon::TextTool,
-                crate::object_manager::ObjectKind::Axis => Icon::Axis,
-                crate::object_manager::ObjectKind::Shape(kind) => match kind {
-                    stokesforge_plot::ShapeKind::Rectangle => Icon::ShapeRectangle,
-                    stokesforge_plot::ShapeKind::Ellipse => Icon::ShapeEllipse,
-                    stokesforge_plot::ShapeKind::Line => Icon::ShapeLine,
-                    stokesforge_plot::ShapeKind::Arrow => Icon::ShapeArrow,
-                },
-            };
-            ui.add(icon_image(icon, IconRole::Neutral))
-                .on_hover_text(&object.label);
-            let text = if object.selected {
-                crate::theme::bold(&object.label)
-            } else {
-                egui::RichText::new(&object.label)
-            };
-            let response = ui.selectable_label(object.selected, text);
-            if response.clicked() || response.secondary_clicked() {
-                requests.push(ObjectManagerRequest::Select(object.target));
-                ui.memory_mut(|m| m.request_focus(focus));
-            }
-            if response.double_clicked() {
-                requests.push(ObjectManagerRequest::Properties(object.target));
-            }
-            response.context_menu(|ui| {
-                object_node_menu(ui, graph, object.target, spec, actions, requests)
-            });
-        })
-        .response
-        .rect
-        .center()
-        .y
+        // #169 : une ligne de liste, fond posé sous la case et l'icône.
+        let background = ListRowBackground::reserve(ui);
+        let row = ui
+            .horizontal(|ui| {
+                object_visibility(ui, graph, object.target, spec, actions);
+                let icon = match object.kind {
+                    crate::object_manager::ObjectKind::Text => Icon::TextTool,
+                    crate::object_manager::ObjectKind::Axis => Icon::Axis,
+                    crate::object_manager::ObjectKind::Shape(kind) => match kind {
+                        stokesforge_plot::ShapeKind::Rectangle => Icon::ShapeRectangle,
+                        stokesforge_plot::ShapeKind::Ellipse => Icon::ShapeEllipse,
+                        stokesforge_plot::ShapeKind::Line => Icon::ShapeLine,
+                        stokesforge_plot::ShapeKind::Arrow => Icon::ShapeArrow,
+                    },
+                };
+                ui.add(icon_image(icon, IconRole::Neutral))
+                    .on_hover_text(&object.label);
+                let text = list_row_text(&object.label, object.selected)
+                    .color(list_row_text_color(ui, object.selected, false));
+                let response = ui.add(list_row_label(text, object.selected));
+                if response.clicked() || response.secondary_clicked() {
+                    requests.push(ObjectManagerRequest::Select(object.target));
+                    ui.memory_mut(|m| m.request_focus(focus));
+                }
+                if response.double_clicked() {
+                    requests.push(ObjectManagerRequest::Properties(object.target));
+                }
+                response.context_menu(|ui| {
+                    object_node_menu(ui, graph, object.target, spec, actions, requests)
+                });
+            })
+            .response
+            .rect;
+        background.paint(ui, row, object.selected);
+        row.center().y
     })
     .inner
 }
@@ -1689,6 +1694,57 @@ mod tests {
             assert!(actions.is_empty());
             assert!(!painted(&output, &tr!("action-delete-content")));
         }
+    }
+
+    /// #169 : la série sélectionnée est une ligne de liste — fond pâle
+    /// d'accent sous la case, l'échantillon et le nom, filet d'accent à
+    /// gauche, nom en gras —, comme dans le Project Manager ; plus le fond
+    /// `selection.bg_fill` d'un bouton. Témoin : les séries non choisies.
+    #[test]
+    fn la_serie_selectionnee_est_une_ligne_de_liste_a_filet() {
+        let (project, _graph, spec, model) = trois_series();
+        let ctx = super::super::test_support::contexte();
+        image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
+        let (output, _, _) = image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
+        let rects = |fill: egui::Color32| -> Vec<(usize, egui::Rect)> {
+            output
+                .shapes
+                .iter()
+                .enumerate()
+                .filter_map(|(index, shape)| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.fill == fill => Some((index, rect.rect)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let rows = rects(crate::theme::list_row_selected_fill());
+        let marks = rects(crate::theme::accent());
+        assert_eq!(rows.len(), 1, "une seule ligne sélectionnée : {rows:?}");
+        assert_eq!(marks.len(), 1, "un seul filet : {marks:?}");
+        let (row_index, row) = rows[0];
+        let (_, mark) = marks[0];
+        assert_eq!(mark.left(), row.left(), "le filet est à gauche de la ligne");
+        assert_eq!(mark.width(), super::super::list_row::LIST_ROW_MARK);
+        assert_eq!(mark.height(), row.height());
+        let premier = text_center(&output, "Premier");
+        assert!(row.y_range().contains(premier.y), "la ligne porte le nom");
+        assert!(row.left() < premier.x - 30.0, "et la case, l'échantillon");
+        assert!(
+            row.right() > 400.0,
+            "sur toute la largeur restante : {row:?}"
+        );
+        let premier_index = output
+            .shapes
+            .iter()
+            .position(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Premier"))
+            .unwrap();
+        assert!(row_index < premier_index, "le fond passe sous le nom");
+        let button_fill = ctx.global_style().visuals.selection.bg_fill;
+        assert!(rects(button_fill).is_empty(), "plus de fond de bouton");
+        let peints = super::super::test_support::textes(&output.shapes);
+        let gras = |nom: &str| peints.iter().any(|t| t.texte == nom && t.gras);
+        assert!(gras("Premier"), "la série sélectionnée est en gras");
+        assert!(!gras("Deuxième") && !gras("Dernier"), "témoin : les autres");
     }
 
     #[test]

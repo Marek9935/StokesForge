@@ -14,6 +14,7 @@ use stokesforge_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
+use crate::theme::section_title;
 use crate::tr;
 
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
@@ -188,9 +189,9 @@ fn line_role_color(ui: &egui::Ui, role: stokesforge_import::LineRole) -> egui::C
         | LineRole::Subheader
         | LineRole::SubheaderLongName
         | LineRole::SubheaderUnit
-        | LineRole::ColumnHeaderRow => egui::Color32::from_rgb(80, 140, 220),
+        | LineRole::ColumnHeaderRow => crate::theme::import_header_line_color(),
         LineRole::SubheaderComment | LineRole::SubheaderXPrime => {
-            egui::Color32::from_rgb(200, 80, 200)
+            crate::theme::import_comment_line_color()
         }
         LineRole::Footer => ui.visuals().warn_fg_color,
         LineRole::Comment | LineRole::Skipped => ui.visuals().weak_text_color(),
@@ -393,7 +394,7 @@ fn import_preview_pane(
             ui.weak(tr!("import-preview-empty"));
         }
         Some(Err(message)) => {
-            ui.colored_label(egui::Color32::RED, message);
+            ui.colored_label(ui.visuals().error_fg_color, message);
         }
         Some(Ok(file_preview)) => {
             import_line_preview_widget(ui, &file_preview, auto_cut, chosen);
@@ -604,7 +605,7 @@ fn import_file_status_rows(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.weak(tr!("import-files-row-count", count = count));
                 }
                 Err(message) => {
-                    ui.colored_label(egui::Color32::RED, message);
+                    ui.colored_label(ui.visuals().error_fg_color, message);
                 }
             }
             if icon_button(
@@ -1026,7 +1027,7 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
             return;
         }
         Some(Err(message)) => {
-            ui.colored_label(egui::Color32::RED, message);
+            ui.colored_label(ui.visuals().error_fg_color, message);
             return;
         }
         Some(Ok(columns)) => columns,
@@ -1194,7 +1195,7 @@ fn import_step_destination(
     let Some(import) = state.import_state_mut() else {
         return;
     };
-    ui.label(tr!("import-destination"));
+    section_title(ui, tr!("import-destination"));
     if let Some(book) = import.active_book {
         ui.radio_value(
             &mut import.destination,
@@ -1218,8 +1219,7 @@ fn import_step_destination(
         tr!("import-destination-new-all"),
     );
     if matches!(import.destination, ImportDestination::ActiveBook(_)) {
-        ui.separator();
-        ui.label(tr!("import-destination-mode"));
+        section_title(ui, tr!("import-destination-mode"));
         use stokesforge_import::ImportMode;
         for (mode, label) in [
             (ImportMode::NewSheet, tr!("import-mode-new-sheet")),
@@ -1231,8 +1231,7 @@ fn import_step_destination(
         }
     }
     if import.paths.len() > 1 {
-        ui.separator();
-        ui.label(tr!("import-destination-multiple"));
+        section_title(ui, tr!("import-destination-multiple"));
         use stokesforge_import::FilesLayout;
         for (layout, label) in [
             (FilesLayout::SheetPerFile, tr!("import-layout-per-file")),
@@ -1251,8 +1250,7 @@ fn import_step_destination(
         }
     });
     ui.weak(tr!("import-destination-saved-note"));
-    ui.separator();
-    ui.label(tr!("import-destination-auto"))
+    section_title(ui, tr!("import-destination-auto"))
         .on_hover_text(tr!("import-destination-auto", "hint"));
     let auto = &mut import.recipe.auto_match;
     ui.horizontal(|ui| {

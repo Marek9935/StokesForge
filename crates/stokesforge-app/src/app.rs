@@ -143,6 +143,7 @@ mod graph_text_edit;
 mod graph_window;
 mod grid;
 mod import_wizard;
+mod list_row;
 mod menu_sections;
 mod menus;
 mod object_manager_ui;

@@ -20,9 +20,11 @@ use crate::state::{
     parse_x_prime, series_list_label, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab,
     SaveTarget,
 };
+use crate::theme::section_title;
 use crate::tr;
 
 use super::dialogs::{modal_dialog, DialogOutcome};
+use super::list_row::list_row;
 use super::tab_strip::{tab_strip, TabStripSide};
 
 /// Largeur par défaut de la fenêtre des propriétés d'un graphe
@@ -325,8 +327,7 @@ fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
         &mut panel.title,
     );
     formula_memo(ui, "plot_settings_memo_panel");
-    ui.add_space(4.0);
-    ui.label(crate::theme::bold(tr!("plot-area-gridlines")));
+    section_title(ui, tr!("plot-area-gridlines"));
     commit |= ui
         .checkbox(&mut panel.bottom.grid, tr!("plot-area-gridlines-vertical"))
         .changed();
@@ -348,17 +349,24 @@ fn axes_settings_page(
     if panel.uses_right_axis() || *chosen_axis == PlotAxis::Right {
         axes.push(PlotAxis::Right);
     }
-    ui.horizontal(|ui| {
-        for axis in axes {
-            if ui
-                .selectable_label(*chosen_axis == axis, axis.label())
-                .clicked()
-            {
-                *chosen_axis = axis;
-            }
-        }
-    });
-    ui.separator();
+    // #169 : les axes sont un jeu d'onglets (une page par axe), donc la
+    // bande commune, pas une rangée de boutons sélectionnables ; son filet
+    // remplace l'ancien séparateur.
+    let tabs: Vec<(PlotAxis, String)> = axes.into_iter().map(|axis| (axis, axis.label())).collect();
+    let mut picked = None;
+    tab_strip(
+        ui,
+        TabStripSide::Top,
+        &tabs,
+        *chosen_axis,
+        |axis| picked = Some(axis),
+        None,
+        || {},
+    );
+    if let Some(axis) = picked {
+        *chosen_axis = axis;
+    }
+    ui.add_space(ui.spacing().item_spacing.y);
     let axis = match *chosen_axis {
         PlotAxis::Bottom => &mut panel.bottom,
         PlotAxis::Left => &mut panel.left,
@@ -388,10 +396,14 @@ fn series_settings_page(
         .id_salt("plot_settings_series_list")
         .max_height(140.0)
         .show(ui, |ui| {
+            // #169 : une liste, donc des lignes de liste (`list_row`).
             for (index, series) in panel.series.iter().enumerate() {
                 let label = series_list_label(tree, series);
                 if ui
-                    .selectable_label(*selected_series == index, label)
+                    .push_id(index, |ui| {
+                        list_row(ui, None, &label, *selected_series == index, false)
+                    })
+                    .inner
                     .clicked()
                 {
                     *selected_series = index;
@@ -415,7 +427,7 @@ fn theme_editor(
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
-    ui.label(crate::theme::bold(tr!("plot-theme-themes")));
+    section_title(ui, tr!("plot-theme-themes"));
     ui.horizontal(|ui| {
         for theme in &stokesforge_plot::THEMES {
             if ui.button(theme.name).clicked() {
@@ -424,8 +436,7 @@ fn theme_editor(
             }
         }
     });
-    ui.add_space(6.0);
-    ui.label(crate::theme::bold(tr!("plot-theme-global-colors")));
+    section_title(ui, tr!("plot-theme-global-colors"));
     commit |= color_field(
         ui,
         &tr!("plot-theme-background"),
@@ -527,7 +538,7 @@ fn text_field(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) ->
 /// de tête de [`plot_settings_window`].
 fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
-    ui.label(crate::theme::bold(tr!("plot-axes-title-section")));
+    section_title(ui, tr!("plot-axes-title-section"));
     commit |= text_field(
         ui,
         &tr!("plot-axes-quantity"),
@@ -550,8 +561,7 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
         env,
     );
 
-    ui.add_space(6.0);
-    ui.label(crate::theme::bold(tr!("plot-axes-scale-section")));
+    section_title(ui, tr!("plot-axes-scale-section"));
     let mut log_scale = axis.scale == stokesforge_plot::AxisScale::Log;
     if ui
         .checkbox(&mut log_scale, tr!("plot-axes-log-scale"))
@@ -592,8 +602,7 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
         commit |= max_inner.drag_stopped() || max_inner.lost_focus();
     }
 
-    ui.add_space(6.0);
-    ui.label(crate::theme::bold(tr!("plot-axes-display-section")));
+    section_title(ui, tr!("plot-axes-display-section"));
     commit |= ui
         .checkbox(&mut axis.visible, tr!("plot-axes-show-axis"))
         .changed();
@@ -681,8 +690,7 @@ fn series_editor(
         )
         .changed();
 
-    ui.separator();
-    ui.label(tr!("plot-series-line-section"));
+    section_title(ui, tr!("plot-series-line-section"));
     commit |= color_field(
         ui,
         &tr!("plot-series-line-color"),
@@ -725,8 +733,7 @@ fn series_editor(
     let width_inner = width_response.inner;
     commit |= width_inner.drag_stopped() || width_inner.lost_focus();
 
-    ui.separator();
-    ui.label(tr!("plot-series-symbol-section"));
+    section_title(ui, tr!("plot-series-symbol-section"));
     ui.horizontal(|ui| {
         ui.label(tr!("plot-series-symbol-shape"));
         let mut shape = series.symbol.shape;
@@ -1226,6 +1233,62 @@ mod tests {
         banc.state.close_plot_settings();
         banc.state.dispatch(Action::Undo);
         assert_eq!(banc.modele(), original, "la validation reste annulable");
+    }
+
+    /// #169 : l'axe choisi est l'onglet actif d'une bande `tab_strip` (gras
+    /// et accent), la série choisie une ligne de liste en gras, et les
+    /// sections « Line » / « Symbol » des titres en gras — plus des boutons
+    /// sélectionnables ni des libellés ordinaires précédés d'un filet.
+    /// Témoins : l'axe et la série non choisis restent en graisse normale.
+    #[test]
+    fn l_axe_choisi_est_un_onglet_et_la_serie_choisie_une_ligne_de_liste() {
+        let mut banc = banc(|spec| {
+            let panel = panneau(spec);
+            panel.series[0].name = "Première".into();
+            let mut seconde = panel.series[0].clone();
+            seconde.name = "Seconde".into();
+            panel.series.push(seconde);
+        });
+        let context = contexte();
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Left));
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        let gauche = texte_exact(&peints, &PlotAxis::Left.label());
+        assert!(gauche.gras, "l'axe choisi est en gras");
+        assert_eq!(gauche.couleur, crate::theme::accent(), "et dans l'accent");
+        let bas = texte_exact(&peints, &PlotAxis::Bottom.label());
+        assert!(!bas.gras, "témoin : l'axe non choisi");
+        assert_ne!(bas.couleur, crate::theme::accent());
+
+        banc.ouvrir(PlotSettingsTab::Series, None);
+        banc.state.plot_edit_mut().unwrap().selected_series = 1;
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        let spec = banc.brouillon();
+        let tree = banc.state.tree();
+        let libelle = |index: usize| series_list_label(tree, &spec.panels[0].series[index]);
+        let lignes = |index: usize| -> Vec<&Texte> {
+            peints
+                .iter()
+                .filter(|t| t.texte == libelle(index))
+                .collect()
+        };
+        assert!(
+            lignes(1).iter().any(|t| t.gras),
+            "la série choisie est une ligne en gras : {:?}",
+            lignes(1)
+        );
+        assert!(
+            lignes(0).iter().all(|t| !t.gras),
+            "témoin : la série non choisie"
+        );
+        for section in [
+            tr!("plot-series-line-section"),
+            tr!("plot-series-symbol-section"),
+        ] {
+            assert!(
+                peints.iter().any(|t| t.texte == section && t.gras),
+                "{section} : un titre de section en gras"
+            );
+        }
     }
 
     /// #124 : le retour anticipé sur une liste vide doit laisser le

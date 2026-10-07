@@ -62,7 +62,7 @@ pub(super) fn begin_file_drop(ctx: &egui::Context) {
         .rect_stroke(
             rect,
             0.0,
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(0x2a, 0x7f, 0xff)),
+            egui::Stroke::new(2.0, crate::theme::file_drop_outline_color()),
             egui::StrokeKind::Inside,
         );
     }
@@ -89,7 +89,7 @@ pub(super) fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
         ui.painter().rect_stroke(
             rect,
             0.0,
-            egui::Stroke::new(3.0, egui::Color32::from_rgb(0x2a, 0x7f, 0xff)),
+            egui::Stroke::new(3.0, crate::theme::file_drop_outline_color()),
             egui::StrokeKind::Inside,
         );
     }
