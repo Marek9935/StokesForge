@@ -590,6 +590,9 @@ pub enum Action {
         /// D'où la retirer.
         target: SaveTarget,
     },
+    /// Ouvre un sélecteur de fichiers natif sur un fil à part (issue #192) ;
+    /// la fenêtre l'intercepte, `AppState::dispatch` ne fait rien.
+    PickFile(crate::file_picker::PickRequest),
     /// Exporte un graphe en SVG, PDF ou PNG (issue #34), le format lu sur
     /// l'extension de `path` (`.svg` si elle manque).
     ///
@@ -4384,6 +4387,7 @@ impl AppState {
                 let next = self.saved_colors(target).with_removed(usage, &color);
                 self.replace_saved_colors(target, next);
             }
+            Action::PickFile(_) => {}
             Action::ExportGraph { path, spec } => self.export_graph(path, &spec),
             Action::CopyGraphFigure { spec } => self.copy_graph_figure(&spec),
             Action::SetAnnotation {

@@ -834,19 +834,12 @@ pub(super) fn request_graph_export(
         Some(view) => view.framed_spec(&spec),
         None => spec,
     };
-    if let Some(path) = rfd::FileDialog::new()
-        .set_title(tr!("export-dialog-title"))
-        .add_filter("SVG", &["svg"])
-        .add_filter("PDF", &["pdf"])
-        .add_filter("PNG", &["png"])
-        .set_file_name(export_file_name(tree, graph))
-        .save_file()
-    {
-        actions.push(Action::ExportGraph {
-            path,
+    actions.push(Action::PickFile(
+        crate::file_picker::PickRequest::ExportGraph {
             spec: Box::new(spec),
-        });
-    }
+            file_name: export_file_name(tree, graph),
+        },
+    ));
 }
 
 /// Le rang rendu peut différer du rang dans le spec (panneaux omis) :

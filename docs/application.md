@@ -973,6 +973,18 @@ partagent le même routage. Ouvrir (Ctrl+O) affiche un `rfd::FileDialog` ;
 Enregistrer sous (Ctrl+Maj+S) demande une destination ; Enregistrer
 (Ctrl+S) utilise la destination courante.
 
+**Fil à part (#192).** Tous les sélecteurs (Open, Save As, export du graphe,
+assistant d'import) passent par `Action::PickFile(PickRequest)` et
+`file_picker.rs` : `rfd` s'exécute sur un fil dédié, la réponse revient par un
+canal sondé à chaque image (`StokesForgeApp::poll_file_picker`). Avant, l'appel
+synchrone sur le fil d'egui gelait l'application quand le sélecteur se fermait
+sans que le portail ne réponde (`wait_for_response` de `rfd` n'a pas de délai) ;
+désormais, au pire, la demande reste en attente. Un seul sélecteur à la fois.
+Garde : `aucun_selecteur_rfd_hors_du_module`. À valider sur un vrai bureau
+GNOME/Wayland (clic sur l'application pendant le sélecteur) ; sur macOS, les
+sélecteurs hors fil principal restent à vérifier. Le sélecteur n'est pas encore
+attaché à la fenêtre (`set_parent`), pas nécessaire au dégel.
+
 `rfd` (feature par défaut `xdg-portal` + `wayland`) compile et se lie sans
 portail système présent : le portail (`xdg-desktop-portal`, D-Bus) n'est
 qu'une dépendance d'exécution. Vérifié par une compilation `cargo build` et

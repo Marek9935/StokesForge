@@ -43,6 +43,7 @@
 pub mod app;
 pub mod color_picker;
 pub mod errors;
+pub mod file_picker;
 pub mod history_text;
 pub mod i18n;
 pub mod icons;

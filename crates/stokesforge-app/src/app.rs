@@ -167,6 +167,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::file_picker::{FilePicker, PickRequest};
 use dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
 use file_drop::{
     begin_file_drop, finish_file_drop, open_project_in_new_window, remember_recent_imports,
@@ -224,6 +225,8 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 8;
 pub struct StokesForgeApp {
     /// L'état, seul dépositaire de la logique.
     state: AppState,
+    /// Sélecteur de fichiers natif en cours, sur un fil à part (#192).
+    file_picker: FilePicker,
     /// Les barres d'outils : disposition, visibilité et glisser en cours
     /// (issue #60).
     toolbars: ToolbarState,
@@ -438,6 +441,7 @@ impl StokesForgeApp {
 
         Self {
             state,
+            file_picker: FilePicker::default(),
             toolbars: ToolbarState::default(),
             om_detached: false,
             om_collapsed: false,
@@ -598,17 +602,10 @@ impl StokesForgeApp {
         }
     }
 
-    /// Demande le fichier à ouvrir, puis confie le chargement à
-    /// [`AppState::dispatch`] par l'action habituelle.
+    /// Demande le fichier à ouvrir : le sélecteur s'ouvre sur un fil à part
+    /// (#192), la réponse revient par [`StokesForgeApp::poll_file_picker`].
     fn choose_open_path(&mut self, actions: &mut Vec<Action>) {
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title(tr!("project-open-title"))
-            .add_filter(tr!("project-file-filter"), &["stf", "stokesforge"])
-            .pick_file()
-        {
-            self.state.set_path(path.display().to_string());
-            actions.push(Action::Load);
-        }
+        actions.push(Action::PickFile(PickRequest::OpenProject));
     }
 
     /// Reprend la disposition des barres d'outils des préférences de
@@ -642,17 +639,54 @@ impl StokesForgeApp {
         }
     }
 
-    /// Demande la destination de sauvegarde, puis confie l'écriture à
-    /// [`AppState::dispatch`] par l'action habituelle.
+    /// Demande la destination de sauvegarde ; même circuit qu'à l'ouverture.
     fn choose_save_path(&mut self, actions: &mut Vec<Action>) {
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title(tr!("project-save-title"))
-            .add_filter(tr!("project-file-filter"), &["stf", "stokesforge"])
-            .set_file_name(suggested_file_name(self.state.path()))
-            .save_file()
-        {
-            self.state.set_path(path.display().to_string());
-            actions.push(Action::Save);
+        actions.push(Action::PickFile(PickRequest::SaveProjectAs {
+            suggested: suggested_file_name(self.state.path()),
+        }));
+    }
+
+    /// Démarre les sélecteurs demandés, puis applique la réponse de celui qui
+    /// vient de finir (#192). Ne bloque jamais.
+    fn poll_file_picker(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        if self.file_picker.is_open() {
+            // Filet : le fil réveille l'interface, ceci couvre un réveil perdu.
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
+        let Some((request, picked)) = self.file_picker.poll() else {
+            return;
+        };
+        let Some(paths) = picked else { return };
+        let first = paths.first().cloned();
+        match request {
+            PickRequest::OpenProject => {
+                if let Some(path) = first {
+                    self.state.set_path(path.display().to_string());
+                    actions.push(Action::Load);
+                }
+            }
+            PickRequest::SaveProjectAs { .. } => {
+                if let Some(path) = first {
+                    self.state.set_path(path.display().to_string());
+                    actions.push(Action::Save);
+                }
+            }
+            PickRequest::ExportGraph { spec, .. } => {
+                if let Some(path) = first {
+                    actions.push(Action::ExportGraph { path, spec });
+                }
+            }
+            PickRequest::ExportImportRecipe { .. } => {
+                if let Some(path) = first {
+                    self.state.export_import_recipe(&path);
+                }
+            }
+            PickRequest::ImportImportRecipe => {
+                if let Some(path) = first {
+                    self.state.import_import_recipe(&path);
+                }
+            }
+            PickRequest::AddImportFiles { .. } => self.state.add_import_paths(paths),
         }
     }
 
@@ -804,6 +838,7 @@ impl eframe::App for StokesForgeApp {
 
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);
+        self.poll_file_picker(&ctx, &mut actions);
         publish_saved_colors(&ctx, &self.state);
         graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
         self.collect_shortcuts(&ctx, &mut actions);
@@ -1254,14 +1289,21 @@ impl StokesForgeApp {
     /// Une demande de confirmation arrête aussi les actions restantes de l’image.
     fn dispatch_actions(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
         for action in actions {
+            // Sans destination, « Enregistrer » demande d'abord où écrire ; la
+            // réponse du sélecteur pousse ensuite `Action::Save` (#192).
             let action = if matches!(action, Action::Save) && self.state.path().is_empty() {
-                let mut chosen = Vec::new();
-                self.choose_save_path(&mut chosen);
-                let Some(action) = chosen.pop() else { continue };
-                action
+                Action::PickFile(PickRequest::SaveProjectAs {
+                    suggested: suggested_file_name(self.state.path()),
+                })
             } else {
                 action
             };
+            if let Action::PickFile(request) = action {
+                let wake = ctx.clone();
+                self.file_picker
+                    .start(request, move || wake.request_repaint());
+                continue;
+            }
             let action = self.prepare_new_project_action(ctx, action);
             if self.dispatch_action(ctx, action) {
                 break;

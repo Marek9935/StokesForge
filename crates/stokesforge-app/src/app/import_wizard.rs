@@ -12,6 +12,7 @@
 use eframe::egui;
 use stokesforge_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
+use crate::file_picker::PickRequest;
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
 use crate::theme::section_title;
@@ -413,6 +414,8 @@ struct ImportWizardRequests {
     forward: bool,
     line_action: Option<(ImportLineAction, usize)>,
     import: bool,
+    /// Sélecteurs de fichiers demandés (#192), poussés comme actions.
+    picks: Vec<Action>,
 }
 
 fn recipe_combo_text(name: &str, modified: bool) -> String {
@@ -424,18 +427,18 @@ fn recipe_combo_text(name: &str, modified: bool) -> String {
 }
 
 /// Étape 1 : fichiers et modèle.
-fn import_step_files(ui: &mut egui::Ui, state: &mut AppState) {
+fn import_step_files(ui: &mut egui::Ui, state: &mut AppState, picks: &mut Vec<Action>) {
     // Sans état, l'étape ne peint rien, comme avant son découpage.
     if state.import_state().is_none() {
         return;
     }
-    import_template_controls(ui, state);
-    import_file_choices(ui, state);
+    import_template_controls(ui, state, picks);
+    import_file_choices(ui, state, picks);
     import_file_status_rows(ui, state);
 }
 
 /// Modèle sélectionné, échanges JSON et confirmation de suppression.
-fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState) {
+fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>) {
     let (names, current_name, modified, confirm) = {
         let Some(import) = state.import_state() else {
             return;
@@ -491,27 +494,16 @@ fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState) {
             .on_hover_text(tr!("import-files-export", "hint"))
             .clicked()
         {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_title(tr!("import-files-export-title"))
-                .add_filter(tr!("import-files-template-filter"), &["json"])
-                .set_file_name(format!("{current_name}.json"))
-                .save_file()
-            {
-                state.export_import_recipe(&path);
-            }
+            actions.push(Action::PickFile(PickRequest::ExportImportRecipe {
+                file_name: format!("{current_name}.json"),
+            }));
         }
         if ui
             .button(tr!("import-files-import"))
             .on_hover_text(tr!("import-files-import", "hint"))
             .clicked()
         {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_title(tr!("import-files-import-title"))
-                .add_filter(tr!("import-files-template-filter"), &["json"])
-                .pick_file()
-            {
-                state.import_import_recipe(&path);
-            }
+            actions.push(Action::PickFile(PickRequest::ImportImportRecipe));
         }
     });
     if modified {
@@ -535,24 +527,18 @@ fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 /// Ajout de fichiers et choix parmi les fichiers récemment importés.
-fn import_file_choices(ui: &mut egui::Ui, state: &mut AppState) {
+fn import_file_choices(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>) {
     ui.horizontal(|ui| {
         if ui
             .button(tr!("import-files-add"))
             .on_hover_text(tr!("import-files-add", "hint"))
             .clicked()
         {
-            let mut dialog = rfd::FileDialog::new().set_title(tr!("import-files-add-title"));
             // Le dossier du dernier fichier importé.
-            if let Some(dir) = state
+            let directory = state
                 .import_state()
-                .and_then(|import| import.recent.last_dir().map(std::path::Path::to_path_buf))
-            {
-                dialog = dialog.set_directory(dir);
-            }
-            if let Some(paths) = dialog.pick_files() {
-                state.add_import_paths(paths);
-            }
+                .and_then(|import| import.recent.last_dir().map(std::path::Path::to_path_buf));
+            actions.push(Action::PickFile(PickRequest::AddImportFiles { directory }));
         }
         ui.weak(tr!("import-files-drop"));
     });
@@ -1359,7 +1345,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
                     .max_height(body_height)
                     .auto_shrink([false, false])
                     .show(&mut columns[0], |ui| match step {
-                        ImportStep::Files => import_step_files(ui, state),
+                        ImportStep::Files => import_step_files(ui, state, &mut requests.picks),
                         ImportStep::Format => import_step_format(ui, state),
                         ImportStep::Header => import_step_header(ui, state, &mut requests),
                         ImportStep::Columns => import_step_columns(ui, state),
@@ -1383,6 +1369,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
 
     // Tout ce qui demande l'état entier est appliqué ici, une fois la fenêtre
     // peinte.
+    actions.append(&mut requests.picks);
     if requests.save_recipe {
         state.save_import_recipe();
     }
@@ -2174,11 +2161,11 @@ mod tests {
             "témoin : la recette initiale porte nos réglages Jasco"
         );
         let peints = textes(&image(&context, Vec::new(), |ui| {
-            super::import_step_files(ui, &mut banc.state)
+            super::import_step_files(ui, &mut banc.state, &mut Vec::new())
         }));
         let position = texte_exact(&peints, &tr!("import-files-reset")).centre;
         cliquer(&context, position, egui::PointerButton::Primary, |ui| {
-            super::import_step_files(ui, &mut banc.state)
+            super::import_step_files(ui, &mut banc.state, &mut Vec::new())
         });
         let import = banc.state.import_state().unwrap();
         assert_eq!(
