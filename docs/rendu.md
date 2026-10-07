@@ -505,9 +505,10 @@ donc des lignes de même hauteur.
 
 **Textes libres** (issue #35) : tracés en dernier, par-dessus la légende,
 centrés (`HPos`/`VPos::Center`) sur leur point de données projeté comme une
-série (`scale::forward`, même axe secondaire) ; un point hors du cadrage, ou
-≤ 0 sur un axe log, n'est pas tracé, mais un texte dont le point est visible
-peut déborder sur les graduations (décision du 2026-10-01). Un angle libre ne
+série (`scale::forward`, même axe secondaire) ; un point ≤ 0 sur un axe log
+n'est pas tracé, mais un point hors du cadrage l'est
+(#163, levée de la décision du 2026-10-01) : le texte peut être posé dans les
+marges, bande du titre ou aire des graduations, à l'écran comme à l'export. Un angle libre ne
 passe pas par Plotters (`FontTransform` : quarts de tour seulement) : il voyage
 dans le style (`formula::rotated_family`, famille `stokesforge-typst@<degrés>`) et
 `formula::source` enveloppe le texte dans `#stokesforge-rotate` (Typst

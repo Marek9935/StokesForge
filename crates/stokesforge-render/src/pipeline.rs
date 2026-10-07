@@ -1117,13 +1117,15 @@ fn draw_panel<DB: DrawingBackend>(
         });
     }
 
-    // 7 — les textes libres, par-dessus tout (issue #35).
+    // 7 — les textes libres, par-dessus tout (issue #35). Comme un titre
+    // ancré, ils ne sont pas bornés au cadrage : un texte posé dans les
+    // marges reste tracé (#163).
     for (index, annotation) in spec.annotations.iter().enumerate() {
         if !annotation.visible {
             continue;
         }
         let right = annotation.axis == SeriesAxis::Right && right_active;
-        let Some(point) = ranges.project(annotation.x, annotation.y, right) else {
+        let Some(point) = ranges.forward(annotation.x, annotation.y, right) else {
             continue;
         };
         let pixel = if right {
@@ -1154,23 +1156,11 @@ struct Ranges {
 
 impl Ranges {
     /// Le point `(x, y)` dans l'espace transformé, **sans** test
-    /// d'appartenance au cadrage (objets graphiques, issue #76) ; `None`
+    /// d'appartenance au cadrage (objets graphiques #76, textes libres #163) ; `None`
     /// seulement si l'échelle ne le représente pas (≤ 0 sur un axe log).
     fn forward(&self, x: f64, y: f64, right: bool) -> Option<(f64, f64)> {
         let (y_scale, _) = if right { self.y2? } else { self.y };
         Some((scale::forward(self.x.0, x)?, scale::forward(y_scale, y)?))
-    }
-
-    /// Le point `(x, y)` dans l'espace transformé, s'il tombe dans le
-    /// cadrage visible ; `None` sinon (hors zoom, ou ≤ 0 sur un axe log) —
-    /// comme un point de série hors cadre, il n'est pas dessiné.
-    fn project(&self, x: f64, y: f64, right: bool) -> Option<(f64, f64)> {
-        let inside =
-            |value: f64, (low, high): (f64, f64)| value >= low.min(high) && value <= low.max(high);
-        let (y_scale, y_range) = if right { self.y2? } else { self.y };
-        let fx = scale::forward(self.x.0, x)?;
-        let fy = scale::forward(y_scale, y)?;
-        (inside(fx, self.x.1) && inside(fy, y_range)).then_some((fx, fy))
     }
 }
 

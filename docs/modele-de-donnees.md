@@ -170,8 +170,8 @@ renommer ou déplacer une colonne ne casse rien.
   nommées (`LineStyle`, `SymbolShape`), dont la table de traduction vit dans
   le renderer.
 - `AnnotationSpec` : un texte libre **ancré aux données** — son centre est le
-  point `(x, y)` de l'ordonnée `axis`, il suit donc le zoom ; hors du cadrage,
-  il n'est pas tracé. `AnnotationRef { row, column, index }` l'adresse dans un
+  point `(x, y)` de l'ordonnée `axis`, il suit donc le zoom ; il n'est pas borné
+  au cadrage (marges comprises, #163), seul un point hors échelle (≤ 0 en log) n'est pas tracé. `AnnotationRef { row, column, index }` l'adresse dans un
   `PlotSpec` (`get`, `set` qui remplace ou ajoute, `remove`) : pas de commande
   dédiée, tout passe par `SetPlotSpec`. `PlotSpec::set_text_color` (thème)
   écrit aussi leur couleur.

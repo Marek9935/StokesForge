@@ -11,8 +11,8 @@
 //! L'ancre est exprimée dans le repère de données du **panneau** du texte —
 //! le premier panneau pour le titre du graphe, qui n'appartient à aucun
 //! panneau. Un titre vit en général **hors** de la zone de tracé : l'ancre
-//! n'est donc pas bornée au cadrage visible (contrairement à un texte libre,
-//! qui n'est pas tracé hors cadre).
+//! n'est donc pas bornée au cadrage visible — pas plus qu'un texte libre
+//! (#163) : l'un comme l'autre restent tracés dans les marges.
 
 use crate::axis::AxisSide;
 use crate::series::SeriesAxis;

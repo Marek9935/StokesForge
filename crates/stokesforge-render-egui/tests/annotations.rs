@@ -96,16 +96,17 @@ fn un_texte_suit_le_zoom() {
     );
 }
 
-/// Hors du cadrage (zoom ailleurs), ou à une valeur ≤ 0 sur un axe log :
-/// pas dessiné — comme un point de série hors cadre.
+/// Hors du cadrage (zoom ailleurs), un texte libre reste tracé — il peut
+/// sortir de la zone de tracé, dans les marges (#163) —, mais à une valeur
+/// ≤ 0 sur un axe log l'échelle ne le représente pas : pas dessiné.
 #[test]
-fn un_texte_hors_du_cadrage_nest_pas_dessine() {
+fn un_texte_hors_du_cadrage_reste_dessine_mais_pas_hors_echelle() {
     let (project, panel) = projet();
     let mut ailleurs = panel.clone();
     ailleurs.bottom.auto_range = false;
     ailleurs.bottom.range_min = Some(7.0);
     ailleurs.bottom.range_max = Some(9.0);
-    assert!(trace(&project, ailleurs).panels[0].annotations.is_empty());
+    assert_eq!(trace(&project, ailleurs).panels[0].annotations.len(), 1);
 
     let mut log = panel;
     log.left.scale = AxisScale::Log;
