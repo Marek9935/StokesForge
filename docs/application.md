@@ -979,7 +979,9 @@ assistant d'import) passent par `Action::PickFile(PickRequest)` et
 canal sondé à chaque image (`StokesForgeApp::poll_file_picker`). Avant, l'appel
 synchrone sur le fil d'egui gelait l'application quand le sélecteur se fermait
 sans que le portail ne réponde (`wait_for_response` de `rfd` n'a pas de délai) ;
-désormais, au pire, la demande reste en attente. Un seul sélecteur à la fois.
+désormais, au pire, la demande reste en attente. Un seul sélecteur suivi à la fois : une nouvelle demande remplace
+l'ancienne, sinon un sélecteur fermé sans réponse du portail bloquerait
+Ouvrir ensuite (le fil abandonné reste bloqué dans `rfd`, sans effet).
 Garde : `aucun_selecteur_rfd_hors_du_module`. À valider sur un vrai bureau
 GNOME/Wayland (clic sur l'application pendant le sélecteur) ; sur macOS, les
 sélecteurs hors fil principal restent à vérifier. Le sélecteur n'est pas encore

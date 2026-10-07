@@ -10,8 +10,11 @@
 //!
 //! Les sept sélecteurs de l'application passent par [`PickRequest`], poussé
 //! comme [`crate::state::Action::PickFile`] ; `StokesForgeApp` le démarre et
-//! applique la réponse. Un seul sélecteur à la fois : une demande reçue
-//! pendant qu'un autre est ouvert est ignorée.
+//! applique la réponse. Un seul sélecteur est *suivi* à la fois : une nouvelle
+//! demande **remplace** la précédente. Sans cela, un sélecteur fermé sans que le
+//! portail ne réponde resterait « en attente » à jamais et empêcherait d'en
+//! rouvrir un (suite de #192) ; son fil, bloqué dans `rfd`, est abandonné et sa
+//! réponse éventuelle est jetée.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
@@ -109,12 +112,10 @@ impl FilePicker {
         self.pending.is_some()
     }
 
-    /// Ouvre le sélecteur sur un fil à part. Sans effet si un autre est
-    /// ouvert. `wake` réveille l'interface quand la réponse est prête.
+    /// Ouvre le sélecteur sur un fil à part, en abandonnant celui qui était
+    /// suivi (peut-être mort côté portail). `wake` réveille l'interface quand
+    /// la réponse est prête.
     pub fn start(&mut self, request: PickRequest, wake: impl Fn() + Send + 'static) {
-        if self.pending.is_some() {
-            return;
-        }
         let dialog = request.dialog();
         let (sender, receiver) = channel();
         let worker = request.clone();
@@ -165,6 +166,22 @@ mod tests {
             "sélecteur de fichiers hors de file_picker.rs — passer par \
              Action::PickFile(PickRequest) : {fautifs:?}"
         );
+    }
+
+    /// Suite de #192 : un sélecteur fermé sans réponse du portail ne doit pas
+    /// empêcher d'en rouvrir un.
+    #[test]
+    fn une_nouvelle_demande_remplace_un_selecteur_reste_sans_reponse() {
+        let (_sender, receiver) = channel::<Picked>();
+        let mut picker = FilePicker {
+            pending: Some(Pending {
+                request: PickRequest::OpenProject,
+                receiver,
+            }),
+        };
+        picker.start(PickRequest::ImportImportRecipe, || {});
+        let pending = picker.pending.as_ref().expect("suivi");
+        assert_eq!(pending.request, PickRequest::ImportImportRecipe);
     }
 
     #[test]
