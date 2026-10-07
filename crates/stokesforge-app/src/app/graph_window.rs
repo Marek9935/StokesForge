@@ -20,8 +20,8 @@ use stokesforge_session::Snapshot;
 use crate::color_picker::{color_field, ColorUsage, PickerEnv};
 use crate::object_manager::{AxisRef, VisibilityTarget};
 use crate::state::{
-    drop_payload_action, export_file_name, Action, AppState, ColumnDragPayload, PlotAxis,
-    PlotSettingsTab, PlotTarget,
+    drop_payload_action, drop_rows_action, export_file_name, Action, AppState, ColumnDragPayload,
+    PlotAxis, PlotSettingsTab, PlotTarget, RowDragPayload,
 };
 use crate::theme;
 use crate::tr;
@@ -78,13 +78,19 @@ pub(super) fn graph_drop_target(
     // inopérant dans la fenêtre principale. La cible de dépôt n'a pas besoin
     // d'être un widget : lire le pointeur et la charge d'egui suffit.
     let pointer_in_tab = ui.rect_contains_pointer(tab_rect);
-    let hovering =
-        pointer_in_tab && egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx());
+    let hovering = pointer_in_tab
+        && (egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx())
+            || egui::DragAndDrop::has_payload_of_type::<RowDragPayload>(ui.ctx()));
     if pointer_in_tab && ui.input(|input| input.pointer.any_released()) {
+        // Calque visé : le calque actif du graphe (#161).
         if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
-            // Calque visé : le calque actif du graphe (#161).
             let panel = published_active_panel(ui.ctx(), graph_id);
             actions.push(drop_payload_action(&payload, graph_id, panel));
+        } else if let Some(payload) = egui::DragAndDrop::take_payload::<RowDragPayload>(ui.ctx()) {
+            // Des lignes (#166) : l'état décide de l'axe, et pose la question
+            // si le graphe a déjà un X.
+            let panel = published_active_panel(ui.ctx(), graph_id);
+            actions.push(drop_rows_action(&payload, graph_id, panel));
         }
     }
     graph_contents(ui, state, actions, graph_views, graph_id);

@@ -34,6 +34,22 @@ modifient par la commande `SetSavedColors`. Les couleurs enregistrées « pour
 l'utilisateur » ne sont, elles, pas dans le modèle (voir
 `docs/application.md`).
 
+**Ligne x' (#164).** `ColumnMeta::x_prime: Option<f64>` porte, par colonne, une
+abscisse propre (typiquement l'instant d'un spectre dans une cinétique). Toujours
+finie ; elle s'écrit comme les autres champs de `ColumnMeta`, donc par
+`Command::SetColumnMeta` (aucune commande nouvelle). `ColumnMeta` n'est plus
+`Eq` (un `f64`).
+
+**Série « ligne » (#166).** `SeriesSpec::row = Some(r)` : la série n'est plus une
+colonne mais la ligne `r` de la feuille de `y` (qui ne sert que d'ancre) ; ses
+points sont, pour chaque colonne de la feuille portant un x', la cellule `r` de
+cette colonne à l'abscisse x' (`NaN` si la colonne est plus courte), dans
+l'ordre de la feuille. `x` est ignoré. Résolue à la volée par
+`stokesforge_core::resolve` (donc vivante : éditer la feuille ou un x' met la
+série à jour) ; une feuille sans x' donne une série vide, la perte de l'ancre
+une référence rompue. `NodeCopy::capture` embarque toutes les colonnes x' de la
+feuille quand un graphe copié a une telle série.
+
 Les listes d'enfants vivent **dans** la nature du nœud : une colonne, un
 graphe, une matrice ou une note n'en a pas, et c'est garanti à la compilation
 plutôt que par une vérification.
@@ -155,6 +171,7 @@ PlotSpec
     ├── legend : LegendSpec
     ├── series : SeriesSpec
     │   ├── y : NodeId, x / x_error / y_error : Option<NodeId>
+    │   ├── row : Option<usize>   (série « ligne », #166 : voir ci-dessous)
     │   ├── plot_type : PlotType
     │   ├── line : LineSpec, symbol : SymbolSpec
     │   └── axis : SeriesAxis    (gauche ou droite)

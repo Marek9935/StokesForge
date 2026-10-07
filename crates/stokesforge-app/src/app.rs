@@ -199,7 +199,7 @@ use stokesforge_session::WindowGeometry;
 use crate::color_picker::publish_saved_colors;
 use crate::i18n;
 use crate::preferences::Preferences;
-use crate::state::{active_graph, Action, AppState, ImportDestination};
+use crate::state::{active_graph, Action, AppState, ImportDestination, RowAxis};
 use crate::toolbar::{BarEnv, ToolbarLayout, ToolbarState};
 use crate::tr;
 
@@ -526,6 +526,7 @@ impl StokesForgeApp {
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if self.state.new_project_pending()
             || self.state.pending_sheet_delete().is_some()
+            || self.state.pending_row_drop().is_some()
             || !self.state.pending_object_delete().is_empty()
         {
             return;
@@ -1144,6 +1145,43 @@ impl StokesForgeApp {
                 DialogOutcome::Open => {}
             }
         }
+        if self.state.pending_row_drop().is_some() {
+            // Même blocage que les autres confirmations (#166) : « Create
+            // Axis » est le choix par défaut, « Use Present Axis » le
+            // second bouton, « Cancel » abandonne le dépôt.
+            actions.clear();
+            let label = tr!("row-drop-new-axis");
+            let hint = tr!("row-drop-new-axis", "hint");
+            let mut present = false;
+            match modal_dialog_with(
+                ctx,
+                egui::Id::new("stokesforge_row_drop"),
+                &tr!("row-drop-title"),
+                egui::vec2(480.0, 170.0),
+                DialogFooter {
+                    accept_label: &label,
+                    accept_hint: &hint,
+                    accept_enabled: true,
+                },
+                |ui| {
+                    if ui
+                        .button(tr!("row-drop-present-axis"))
+                        .on_hover_text(tr!("row-drop-present-axis", "hint"))
+                        .clicked()
+                    {
+                        present = true;
+                    }
+                },
+                |ui| {
+                    ui.label(tr!("row-drop-confirm"));
+                },
+            ) {
+                _ if present => actions.push(Action::ConfirmRowDrop(Some(RowAxis::Present))),
+                DialogOutcome::Accept => actions.push(Action::ConfirmRowDrop(Some(RowAxis::New))),
+                DialogOutcome::Cancel => actions.push(Action::ConfirmRowDrop(None)),
+                DialogOutcome::Open => {}
+            }
+        }
         if let Some(sheet) = self.state.pending_sheet_delete() {
             actions.clear();
             let name = self
@@ -1386,6 +1424,7 @@ impl StokesForgeApp {
         }
         if self.state.new_project_pending()
             || self.state.pending_sheet_delete().is_some()
+            || self.state.pending_row_drop().is_some()
             || !self.state.pending_object_delete().is_empty()
         {
             ctx.request_repaint();
@@ -1719,6 +1758,87 @@ mod tests {
         app.dispatch_actions(&context, vec![Action::ConfirmNewProject(false), commit()]);
         assert!(!app.state.new_project_pending());
         assert_eq!(app.state.cell_text(column, 0), "42");
+        session.shutdown().unwrap();
+    }
+
+    /// #166 : un dépôt de lignes sur un graphe qui a déjà un X ouvre le dialogue
+    /// bloquant d'axe — « Créer un axe » est le choix par défaut (Entrée),
+    /// « Utiliser l'axe présent » le second bouton — et suspend les autres
+    /// actions de l'image ; sans question, rien n'est peint.
+    #[test]
+    fn deposer_des_lignes_sur_un_graphe_avec_x_ouvre_le_dialogue_d_axe() {
+        use super::test_support::painted;
+        use eframe::App as _;
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let columns = app.state.visible_columns(sheet);
+        app.state.dispatch(Action::SetColumnXPrime {
+            column: columns[0].0,
+            text: "3".into(),
+        });
+        let ctx = egui::Context::default();
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+        let mut paint = |app: &mut StokesForgeApp, events: Vec<egui::Event>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.ui(ui, &mut frame),
+            );
+            output.textures_delta.clear();
+            output
+        };
+        let before = app.state.plot_spec(graph).unwrap();
+        paint(&mut app, Vec::new());
+        assert!(!painted(
+            &paint(&mut app, Vec::new()),
+            &tr!("row-drop-title")
+        ));
+
+        app.dispatch_actions(
+            &ctx,
+            vec![Action::AddRowsToGraph {
+                graph,
+                panel: 0,
+                sheet,
+                rows: vec![0],
+                axis: RowAxis::Ask,
+            }],
+        );
+        assert_eq!(app.state.pending_row_drop(), Some((graph, 1)));
+        assert_eq!(
+            app.state.plot_spec(graph).unwrap(),
+            before,
+            "rien avant la réponse"
+        );
+        paint(&mut app, Vec::new());
+        let output = paint(&mut app, Vec::new());
+        for (label, texte) in [
+            ("titre", tr!("row-drop-title")),
+            ("créer un axe", tr!("row-drop-new-axis")),
+            ("axe présent", tr!("row-drop-present-axis")),
+        ] {
+            assert!(painted(&output, &texte), "{label} absent du dialogue");
+        }
+
+        // Entrée = bouton par défaut : « Créer un axe ».
+        paint(
+            &mut app,
+            vec![super::test_support::touche(egui::Key::Enter)],
+        );
+        assert_eq!(app.state.pending_row_drop(), None);
+        let spec = app.state.plot_spec(graph).unwrap();
+        assert_eq!(spec.panels.len(), 2, "nouveau calque à axe X propre");
+        assert_eq!(spec.panels[1].series[0].row, Some(0));
         session.shutdown().unwrap();
     }
 

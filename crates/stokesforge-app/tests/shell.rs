@@ -29,9 +29,9 @@ use std::sync::Mutex;
 use stokesforge_app::history_text::history_text;
 use stokesforge_app::selection::Selection;
 use stokesforge_app::state::{
-    active_graph, drop_payload_action, file_drop_plan, Action, ActiveTabKind, AppState,
-    ColumnDragPayload, GridZone, HeaderField, ImportDestination, MoveDirection, PlotAxis, PlotEdit,
-    PlotSettingsTab, PlotTarget,
+    active_graph, drop_payload_action, drop_rows_action, file_drop_plan, Action, ActiveTabKind,
+    AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination, MoveDirection, PlotAxis,
+    PlotEdit, PlotSettingsTab, PlotTarget, RowAxis,
 };
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
 use stokesforge_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
@@ -4913,6 +4913,227 @@ fn add_series_to_graph_appends_without_overwriting_existing_series() {
     );
     assert_eq!(after.panels[0].series[1].y, note);
     assert_eq!(after.panels[0].series[1].plot_type, PlotType::Scatter);
+}
+
+// -- 22 ter. Glisser des lignes vers un graphe (#166) --
+
+/// Feuille « cinétique » : trois colonnes mesurées à t = 0, 10 et 20 s (x'),
+/// plus une colonne sans x'. Rend (état, feuille, colonnes avec x').
+fn kinetics(dir: &Path) -> (Session, AppState, NodeId, Vec<NodeId>) {
+    let mut project = Project::new("Cinétique").expect("projet");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("lecture")
+        .expect("feuille");
+    let mut add = |name: &str, values: &[f64]| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(values))
+            .expect("colonne")
+    };
+    let a = add("A", &[1.0, 2.0, 3.0]);
+    let b = add("B", &[4.0, 5.0, 6.0]);
+    let c = add("C", &[7.0, 8.0, 9.0]);
+    let _sans_x = add("D", &[0.0, 0.0, 0.0]);
+    let (session, mut state) = start(project, &dir.join("projet.stokesforge"));
+    for (column, time) in [(a, "0"), (b, "10"), (c, "20")] {
+        set_header_field(&mut state, column, HeaderField::XPrime, time);
+    }
+    (session, state, sheet, vec![a, b, c])
+}
+
+/// Écrit la valeur x' de la colonne nommée `name` de `sheet`.
+fn set_x_prime(state: &mut AppState, sheet: NodeId, name: &str, text: &str) {
+    let column = column_id(state, sheet, name);
+    set_header_field(state, column, HeaderField::XPrime, text);
+}
+
+/// Un graphe créé depuis une colonne Y apparié à une colonne X (donc « avec X »).
+fn graph_with_x(state: &mut AppState, sheet: NodeId) -> NodeId {
+    let root = state.tree().root();
+    let x = column_id(state, sheet, "A");
+    let y = column_id(state, sheet, "B");
+    state.dispatch(Action::SetColumnRole {
+        column: x,
+        role: ColumnRole::X,
+    });
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![y],
+        plot_type: PlotType::Line,
+    });
+    state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graphe créé")
+}
+
+/// Le geste n'est offert que pour des **lignes entières** ET une feuille qui a
+/// une ligne x' : ni sans sélection, ni pour des colonnes, ni sans x'.
+#[test]
+fn row_drag_payload_needs_full_rows_and_an_x_prime_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state, sheet, _) = kinetics(dir.path());
+    assert_eq!(state.row_drag_payload(sheet), None, "aucune sélection");
+
+    state.select_column(sheet, column_id(&state, sheet, "A"));
+    assert_eq!(
+        state.row_drag_payload(sheet),
+        None,
+        "des colonnes, pas des lignes"
+    );
+
+    state.select_row(sheet, 1);
+    state.extend_row_selection(sheet, 2);
+    let payload = state.row_drag_payload(sheet).expect("lignes + x'");
+    assert_eq!((payload.sheet, payload.rows.clone()), (sheet, vec![1, 2]));
+
+    // Sans aucune valeur x', plus de geste.
+    for column in ["A", "B", "C"] {
+        set_x_prime(&mut state, sheet, column, "");
+    }
+    state.select_row(sheet, 1);
+    assert_eq!(state.row_drag_payload(sheet), None, "sans x'");
+
+    // Une sélection de cellules (pas de lignes entières) ne se glisse pas non plus.
+    set_x_prime(&mut state, sheet, "A", "1");
+    state.select_cell(sheet, column_id(&state, sheet, "A"), 1);
+    assert_eq!(state.row_drag_payload(sheet), None);
+}
+
+/// Graphe sans X déterminé : pas de dialogue, l'axe X principal ; une ligne =
+/// une série, dont les points sont les valeurs de la ligne placées à x'. Un
+/// seul pas d'annulation.
+#[test]
+fn dropping_rows_on_a_graph_without_x_uses_the_main_axis_with_no_dialog() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    state.dispatch(Action::AddGraph);
+    let root = state.tree().root();
+    let graph = *state.tree().node(root).unwrap().children().last().unwrap();
+    state.select_row(sheet, 0);
+    state.extend_row_selection(sheet, 1);
+    let payload = state.row_drag_payload(sheet).expect("charge");
+
+    state.dispatch(drop_rows_action(&payload, graph, 0));
+
+    assert_eq!(state.pending_row_drop(), None, "pas de question sans X");
+    let spec = state.plot_spec(graph).expect("spec");
+    assert_eq!(
+        spec.panels.len(),
+        1,
+        "axe principal : pas de nouveau calque"
+    );
+    let series = &spec.panels[0].series;
+    assert_eq!(series.len(), 2, "une série par ligne sélectionnée");
+    assert_eq!(
+        series.iter().map(|s| s.row).collect::<Vec<_>>(),
+        [Some(0), Some(1)]
+    );
+    assert_eq!(series[0].y, columns[0], "ancrée sur la première colonne x'");
+
+    let resolved = stokesforge_core::resolve_spec(state.tree(), &spec);
+    let first = &resolved.panels[0].series[0];
+    // Ligne 0 : A=1, B=4, C=7 aux instants 0, 10, 20 — la colonne D, sans x', n'en est pas.
+    assert_eq!(first.x.as_ref().unwrap().as_slice(), [0.0, 10.0, 20.0]);
+    assert_eq!(first.y.as_ref().unwrap().as_slice(), [1.0, 4.0, 7.0]);
+    let second = &resolved.panels[0].series[1];
+    assert_eq!(second.y.as_ref().unwrap().as_slice(), [2.0, 5.0, 8.0]);
+
+    state.dispatch(Action::Undo);
+    assert!(state.plot_spec(graph).unwrap().panels[0].series.is_empty());
+}
+
+/// Graphe qui a déjà un X : le dépôt ne change rien avant la réponse ; « Créer
+/// un axe » (défaut) ajoute un calque à axe X propre, **dans le même pas
+/// d'annulation** ; « Axe présent » reste dans le calque visé ; « Annuler »
+/// abandonne.
+#[test]
+fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state, sheet, _) = kinetics(dir.path());
+    let graph = graph_with_x(&mut state, sheet);
+    let before = state.plot_spec(graph).expect("spec");
+    state.select_row(sheet, 2);
+    let payload = state.row_drag_payload(sheet).expect("charge");
+
+    state.dispatch(drop_rows_action(&payload, graph, 0));
+    assert_eq!(state.pending_row_drop(), Some((graph, 1)), "question posée");
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "rien n'a changé");
+
+    // Annuler : plus de question, rien de changé.
+    state.dispatch(Action::ConfirmRowDrop(None));
+    assert_eq!(state.pending_row_drop(), None);
+    assert_eq!(state.plot_spec(graph).unwrap(), before);
+
+    // Nouvel axe : un calque superposé, axe X en haut, un seul Undo.
+    state.dispatch(drop_rows_action(&payload, graph, 0));
+    state.dispatch(Action::ConfirmRowDrop(Some(RowAxis::New)));
+    assert_eq!(state.pending_row_drop(), None);
+    let spec = state.plot_spec(graph).unwrap();
+    assert_eq!(spec.panels.len(), 2, "un calque de plus");
+    assert_eq!(
+        spec.panels[0], before.panels[0],
+        "le calque d'origine est intact"
+    );
+    assert!(spec.panels[1]
+        .overlay
+        .is_some_and(|o| o.x_top && !o.y_right));
+    assert_eq!(spec.panels[1].series.len(), 1);
+    assert_eq!(spec.panels[1].series[0].row, Some(2));
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        state.plot_spec(graph).unwrap(),
+        before,
+        "un seul pas, calque compris"
+    );
+
+    // Axe présent : les séries rejoignent le calque visé, sans nouveau calque.
+    state.dispatch(drop_rows_action(&payload, graph, 0));
+    state.dispatch(Action::ConfirmRowDrop(Some(RowAxis::Present)));
+    let spec = state.plot_spec(graph).unwrap();
+    assert_eq!(spec.panels.len(), 1);
+    assert_eq!(spec.panels[0].series.len(), 2);
+    assert_eq!(spec.panels[0].series[1].row, Some(2));
+}
+
+/// Une ligne hors de la feuille est ignorée ; une feuille sans x' refuse avec
+/// un message, sans rien écrire.
+#[test]
+fn dropping_rows_ignores_missing_rows_and_refuses_a_sheet_without_x_prime() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state, sheet, _) = kinetics(dir.path());
+    state.dispatch(Action::AddGraph);
+    let root = state.tree().root();
+    let graph = *state.tree().node(root).unwrap().children().last().unwrap();
+
+    state.dispatch(Action::AddRowsToGraph {
+        graph,
+        panel: 0,
+        sheet,
+        rows: vec![1, 99],
+        axis: RowAxis::Ask,
+    });
+    let series = &state.plot_spec(graph).unwrap().panels[0].series;
+    assert_eq!(series.len(), 1);
+    assert_eq!(series[0].row, Some(1));
+
+    for column in ["A", "B", "C"] {
+        set_x_prime(&mut state, sheet, column, "");
+    }
+    let before = state.plot_spec(graph).unwrap();
+    state.dispatch(Action::AddRowsToGraph {
+        graph,
+        panel: 0,
+        sheet,
+        rows: vec![0],
+        axis: RowAxis::Ask,
+    });
+    assert_eq!(state.plot_spec(graph).unwrap(), before);
+    assert!(state.status().expect("message").is_error);
 }
 
 // -- 23. Glisser une sélection de colonnes vers un graphe --

@@ -98,7 +98,7 @@ se recharger et produire le même découpage.
 | premières lignes de données avalées | `HeaderSkip` / `HeaderLayout` |
 | dernières lignes parasites (sommes, mentions) | `footer_skip_lines` (nombre fixe) ou `data_end` (`DataEnd`, défaut `Auto` : coupe au premier X non numérique une fois armée ; règle unique dans `data_end.rs`, partagée par `parse` et `preview`) |
 | noms de colonnes absents ou faux | `has_column_header_row`, `NameSource` |
-| nom long / unité / commentaire mal placés | `SubheaderRoles` |
+| nom long / unité / commentaire / x' (#164) mal placés | `SubheaderRoles` |
 | préfixe parasite sur chaque ligne | le retrait de caractères en tête de ligne de données |
 
 Une **colonne à types mixtes** n'est pas un échec d'import : le modèle sait

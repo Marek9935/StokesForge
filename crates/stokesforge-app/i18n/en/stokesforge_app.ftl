@@ -135,6 +135,19 @@ action-copy = Copy
     .disabled = The selected blocks share neither rows nor columns, so they cannot be copied together
 action-copy-with-header = Copy with Header
     .hint = Copies the values and the column header
+grid-drag-rows =
+    { $count ->
+        [one] { $count } row
+       *[other] { $count } rows
+    }
+graph-row-series = Row { $number }
+status-row-no-x-prime = No column of this sheet has an x' value: nothing to plot
+row-drop-title = Plot Rows
+row-drop-confirm = This graph already has an X axis. Plot the rows against a new X axis, or against the existing one?
+row-drop-new-axis = Create Axis
+    .hint = Adds a layer with its own X axis, scaled by the x' values
+row-drop-present-axis = Use Present Axis
+    .hint = Plots the rows against the X axis of the active layer
 grid-drag-columns =
     { $count ->
         [one] { $count } column

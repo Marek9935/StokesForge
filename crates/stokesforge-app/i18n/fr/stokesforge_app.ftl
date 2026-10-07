@@ -130,6 +130,19 @@ action-copy = Copier
     .disabled = Les blocs sélectionnés ne partagent ni lignes ni colonnes : ils ne se copient pas ensemble
 action-copy-with-header = Copier avec l'en-tête
     .hint = Copie les valeurs et l'en-tête de colonne
+grid-drag-rows =
+    { $count ->
+        [one] { $count } ligne
+       *[other] { $count } lignes
+    }
+graph-row-series = Ligne { $number }
+status-row-no-x-prime = Aucune colonne de cette feuille n'a de valeur x' : rien à tracer
+row-drop-title = Tracer les lignes
+row-drop-confirm = Ce graphique a déjà un axe X. Tracer les lignes contre un nouvel axe X, ou contre l'axe présent ?
+row-drop-new-axis = Créer un axe
+    .hint = Ajoute un calque avec son propre axe X, gradué par les valeurs x'
+row-drop-present-axis = Utiliser l'axe présent
+    .hint = Trace les lignes contre l'axe X du calque actif
 grid-drag-columns =
     { $count ->
         [one] { $count } colonne

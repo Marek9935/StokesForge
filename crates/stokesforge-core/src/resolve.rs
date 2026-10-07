@@ -234,6 +234,10 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree) -> String {
     if !series.name.is_empty() {
         return series.name.clone();
     }
+    if let Some(row) = series.row {
+        // Série « ligne » (#166) : la ligne est son nom, comme dans la grille.
+        return format!("Row {}", row + 1);
+    }
     let Some(y_node) = tree.node(series.y).filter(|node| node.kind().is_column()) else {
         return "(référence rompue)".to_string();
     };
@@ -266,6 +270,9 @@ fn resolve_numeric(tree: &Tree, id: NodeId) -> Option<Arc<Vec<f64>>> {
 /// (port de `resolve_series`, `resolve.py` ligne 165).
 pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries<'s> {
     let label = series_label(series, tree);
+    if let Some(row) = series.row {
+        return resolve_row_series(tree, series, row, label);
+    }
     let mut missing = Vec::new();
 
     let y = resolve_numeric(tree, series.y);
@@ -350,6 +357,62 @@ pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries
         y_error: y_error.map(|values| conform_error_values(values, n)),
         missing,
         truncated,
+    }
+}
+
+/// Résout une série « ligne » (#166) : une valeur par colonne de la feuille de
+/// `series.y` qui porte une valeur x' finie, dans l'ordre de la feuille —
+/// ordonnée = la cellule de la ligne `row` (`NaN` si la colonne est plus
+/// courte, ou si la cellule n'est pas un nombre), abscisse = le x' de la
+/// colonne. Une feuille sans aucune colonne x' donne une série vide, pas une
+/// référence rompue ; seule la perte de la colonne d'ancrage (`y`) en est une.
+fn resolve_row_series<'s>(
+    tree: &Tree,
+    series: &'s SeriesSpec,
+    row: usize,
+    label: String,
+) -> ResolvedSeries<'s> {
+    let broken = |label: String| ResolvedSeries {
+        spec: series,
+        label,
+        x: None,
+        y: None,
+        x_error: None,
+        y_error: None,
+        missing: vec![MissingRole::Y],
+        truncated: false,
+    };
+    let Some(sheet) =
+        resolve_column(tree, series.y).and_then(|_| tree.parent(series.y).ok().flatten())
+    else {
+        return broken(label);
+    };
+    let (mut x, mut y) = (Vec::new(), Vec::new());
+    for &id in tree.node(sheet).map(Node::children).unwrap_or_default() {
+        let Some(column) = resolve_column(tree, id) else {
+            continue;
+        };
+        let Some(x_prime) = column.meta().x_prime.filter(|value| value.is_finite()) else {
+            continue;
+        };
+        x.push(x_prime);
+        y.push(
+            column
+                .numeric_view()
+                .and_then(|values| values.get(row).copied())
+                .unwrap_or(f64::NAN),
+        );
+    }
+    let n = x.len();
+    ResolvedSeries {
+        spec: series,
+        label,
+        x: Some(ResolvedValues::new(Arc::new(x), n)),
+        y: Some(ResolvedValues::new(Arc::new(y), n)),
+        x_error: None,
+        y_error: None,
+        missing: Vec::new(),
+        truncated: false,
     }
 }
 
@@ -702,6 +765,107 @@ mod tests {
         assert!(slice[1].is_nan(), "la cellule texte ne se trace pas");
         assert!(slice[2].is_nan(), "la cellule vide ne se trace pas");
         assert_eq!(slice[3], 1.5);
+    }
+
+    /// Une feuille « cinétique » : A, B, C ont un x' (0, 10, 20), D n'en a pas.
+    fn kinetics() -> (Project, NodeId, Vec<NodeId>) {
+        let mut project = Project::new("Cinétique").expect("projet valide");
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).expect("classeur");
+        let sheet = project.add_worksheet(book, None).expect("feuille");
+        let mut ids = Vec::new();
+        for (name, values, x_prime) in [
+            ("A", [1.0, 2.0, 3.0], Some(0.0)),
+            ("B", [4.0, 5.0, 6.0], Some(10.0)),
+            ("C", [7.0, 8.0, 9.0], Some(20.0)),
+            ("D", [0.0, 0.0, 0.0], None),
+        ] {
+            let id = project
+                .add_column(sheet, None, Some(name), Column::from_f64(&values))
+                .expect("colonne");
+            let mut meta = project
+                .tree()
+                .node(id)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .meta()
+                .clone();
+            meta.x_prime = x_prime;
+            project.set_column_meta(id, meta).expect("x'");
+            ids.push(id);
+        }
+        (project, sheet, ids)
+    }
+
+    /// #166 : une série « ligne » trace, pour chaque colonne qui porte un x',
+    /// la cellule de sa ligne à l'abscisse x' ; la colonne sans x' n'y est pas.
+    #[test]
+    fn a_row_series_plots_the_row_against_the_x_prime_of_each_column() {
+        let (project, _, ids) = kinetics();
+        let series = SeriesSpec {
+            row: Some(1),
+            ..SeriesSpec::new(ids[0])
+        };
+        let resolved = resolve_series(project.tree(), &series);
+        assert!(resolved.ok());
+        assert_eq!(resolved.label, "Row 2");
+        assert_eq!(resolved.point_count(), 3);
+        assert_eq!(resolved.x.as_ref().unwrap().as_slice(), &[0.0, 10.0, 20.0]);
+        assert_eq!(resolved.y.as_ref().unwrap().as_slice(), &[2.0, 5.0, 8.0]);
+    }
+
+    /// Une ligne au-delà d'une colonne plus courte vaut `NaN` (le point ne se
+    /// trace pas), et l'abscisse de `x` explicite est ignorée.
+    #[test]
+    fn a_row_series_reads_nan_past_a_short_column_and_ignores_x() {
+        let (project, _, ids) = kinetics();
+        let series = SeriesSpec {
+            row: Some(7),
+            x: Some(ids[1]),
+            ..SeriesSpec::new(ids[0])
+        };
+        let resolved = resolve_series(project.tree(), &series);
+        assert!(resolved.ok());
+        assert_eq!(resolved.x.as_ref().unwrap().as_slice(), &[0.0, 10.0, 20.0]);
+        assert!(resolved
+            .y
+            .as_ref()
+            .unwrap()
+            .as_slice()
+            .iter()
+            .all(|v| v.is_nan()));
+    }
+
+    /// Sans colonne x' dans la feuille, la série est vide mais pas rompue ;
+    /// sans sa colonne d'ancrage, elle l'est.
+    #[test]
+    fn a_row_series_is_empty_without_x_prime_and_broken_without_its_anchor() {
+        let (mut project, _, ids) = kinetics();
+        for id in &ids[..3] {
+            let mut meta = project
+                .tree()
+                .node(*id)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .meta()
+                .clone();
+            meta.x_prime = None;
+            project.set_column_meta(*id, meta).expect("x'");
+        }
+        let series = SeriesSpec {
+            row: Some(0),
+            ..SeriesSpec::new(ids[0])
+        };
+        let resolved = resolve_series(project.tree(), &series);
+        assert!(!resolved.broken(), "vide, pas rompue");
+        assert_eq!(resolved.point_count(), 0);
+
+        project.remove(ids[0]).expect("suppression");
+        let resolved = resolve_series(project.tree(), &series);
+        assert!(resolved.broken());
+        assert_eq!(resolved.missing, vec![MissingRole::Y]);
     }
 
     #[test]

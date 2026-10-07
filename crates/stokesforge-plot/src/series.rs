@@ -186,6 +186,13 @@ pub struct SeriesSpec {
     pub bar_width: Option<f64>,
     /// Nombre de classes d'un histogramme, jamais nul, jamais démesuré (B4).
     pub histogram_bins: BinCount,
+    /// Ligne de la feuille de `y` tracée **en série** (#166). Présente, la
+    /// série n'est plus « une colonne » mais « une ligne » : ses points sont
+    /// les valeurs de cette ligne (0 = la première) dans les colonnes de la
+    /// feuille qui portent une valeur x', placées à l'abscisse x' de leur
+    /// colonne (cinétique : une colonne = un instant). `y` ne sert alors
+    /// qu'à désigner la feuille (une de ses colonnes) et `x` est ignoré.
+    pub row: Option<usize>,
 }
 
 impl SeriesSpec {
@@ -208,6 +215,7 @@ impl SeriesSpec {
             show_in_legend: true,
             bar_width: None,
             histogram_bins: DEFAULT_HISTOGRAM_BINS,
+            row: None,
         }
     }
 

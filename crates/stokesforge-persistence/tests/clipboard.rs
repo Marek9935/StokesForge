@@ -190,3 +190,61 @@ fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
         .is_err());
     assert_eq!(target.tree(), &before);
 }
+
+/// #166 : une série « ligne » lit toutes les colonnes x' de sa feuille, pas
+/// seulement son ancre — la copie du graphe vers un autre projet les emporte
+/// toutes (et seulement elles), et la série se résout à l'identique.
+#[test]
+fn graphe_externe_a_serie_ligne_emporte_les_colonnes_x_prime_de_la_feuille() {
+    use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
+    let mut source = Project::new("Source").unwrap();
+    let root = source.root();
+    let book = source.add_workbook(root, Some("Book1")).unwrap();
+    let sheet = source.tree().children(book).unwrap()[0];
+    let mut ids = Vec::new();
+    for (name, value, x_prime) in [
+        ("A", 1.0, Some(0.0)),
+        ("B", 2.0, Some(10.0)),
+        ("C", 3.0, None),
+    ] {
+        let id = source
+            .add_column(sheet, None, Some(name), Column::from_f64(&[value]))
+            .unwrap();
+        let mut meta = source
+            .tree()
+            .node(id)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .meta()
+            .clone();
+        meta.x_prime = x_prime;
+        source.set_column_meta(id, meta).unwrap();
+        ids.push(id);
+    }
+    let mut series = SeriesSpec::new(ids[0]);
+    series.row = Some(0);
+    let mut panel = PanelSpec::default();
+    panel.series.push(series);
+    let graph = source
+        .add_graph(
+            root,
+            Some("Graph1"),
+            PlotSpec::default().with_panels(Panels::one(panel)),
+        )
+        .unwrap();
+    let copy = NodeCopy::capture(source.tree(), graph).unwrap();
+    let (_, copies) = decode_objects(&encode_objects("source", &[copy]).unwrap()).unwrap();
+    let mut target = Project::new("Target").unwrap();
+    let root = target.root();
+    let copied = target
+        .insert_copy(root, &copies[0].clone().into_external(), "Graph1")
+        .unwrap();
+    let NodeKind::Graph { spec, .. } = target.tree().node(copied).unwrap().kind() else {
+        panic!("graphe");
+    };
+    let resolved = stokesforge_core::resolve_spec(target.tree(), spec);
+    let series = &resolved.panels[0].series[0];
+    assert_eq!(series.x.as_ref().unwrap().as_slice(), [0.0, 10.0]);
+    assert_eq!(series.y.as_ref().unwrap().as_slice(), [1.0, 2.0]);
+}

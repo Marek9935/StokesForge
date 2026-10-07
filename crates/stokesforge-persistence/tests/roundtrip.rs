@@ -748,6 +748,8 @@ fn non_trivial_spec(
         visible: false,
         show_in_legend: false,
         bar_width: Some(0.42),
+        // Série « ligne » (#166) : la ligne 4 de la feuille de `y1`.
+        row: Some(4),
         ..SeriesSpec::new_xy(x, y1)
     };
     let histogram = SeriesSpec {

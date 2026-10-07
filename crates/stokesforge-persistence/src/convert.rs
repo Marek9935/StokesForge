@@ -435,6 +435,7 @@ fn series_spec_to_record(series: &SeriesSpec) -> SeriesSpecRecord {
         show_in_legend: series.show_in_legend,
         bar_width: series.bar_width,
         histogram_bins: series.histogram_bins.get(),
+        row: series.row.map(|row| row as u64),
     }
 }
 
@@ -471,6 +472,7 @@ fn record_to_series_spec(record: SeriesSpecRecord) -> Result<SeriesSpec, Convert
         show_in_legend: record.show_in_legend,
         bar_width: record.bar_width,
         histogram_bins,
+        row: record.row.and_then(|row| usize::try_from(row).ok()),
     })
 }
 

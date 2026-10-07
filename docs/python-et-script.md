@@ -303,7 +303,8 @@ poignée rendue conserve l'époque de cet instantané.
 
 Les métadonnées `column` portent `type` (`numeric`, `datetime`, `mixed`),
 `role` (`x`, `y`, `x2`, `y2`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
-`unit`, `comment`, `display_format`, `formula` (texte ou `None`) et `version`
+`unit`, `comment`, `x_prime` (nombre ou `None`, #164, lecture seule), `display_format`,
+`formula` (texte ou `None`) et `version`
 (compteur de modification). Modifier ce dictionnaire ne touche jamais au
 modèle. Relire `info` après une modification pour obtenir l'état courant.
 

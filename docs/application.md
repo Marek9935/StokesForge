@@ -1192,6 +1192,39 @@ celui de la **dernière série** du calque, `Line` pour un calque vide
 Le calque visé est le **calque actif** du graphe (#161, ci-dessous) :
 `graph_drop_target` et « Send to » lisent `published_active_panel`.
 
+### Ligne x' et glisser de lignes vers un graphe (#164, #166)
+
+**Ligne x'.** Cinquième champ de l'en-tête empilé, **au-dessus** du nom long
+(`HeaderField::XPrime`, rang -5 ; `HeaderField::COUNT` donne le nombre de
+champs, `rank`/`from_rank` la correspondance avec l'axe en-tête/données) : une
+valeur **numérique** par colonne (`ColumnMeta::x_prime`), saisie comme les
+autres champs — un texte vide l'efface, un texte qui n'est pas un nombre fini
+est refusé (barre d'état, rien n'est écrit). `Action::SetColumnXPrime`, copier,
+coller, vider et Tab suivent les autres champs ; la mutation reste
+`Command::SetColumnMeta` (un pas d'annulation). **Import** : rôle de
+sous-en-tête `x_prime` (`SubheaderRoles::x_prime`, ligne « x' » de l'assistant,
+code `X'` de l'aperçu), lu avec le format numérique de la recette.
+**Metadata** : la fenêtre des métadonnées d'une colonne propose, devant chaque
+valeur numérique du fichier, « Utiliser comme x' » (le mini sélecteur : la clé
+choisie alimente la ligne x' de cette colonne).
+
+**Glisser de lignes.** Même geste que pour les colonnes, sur des **lignes
+entières** (gouttière des numéros) : `AppState::row_drag_payload` ne l'offre que
+si la feuille porte au moins une valeur x'. Prise par le bord haut ou bas d'un
+bloc (`app::grid::row_grip_bands`, pure, les bords se lisent sur la sélection
+et non sur les lignes peintes ; la gouttière reste libre), curseurs `Grab` /
+`Grabbing`, repère « n lignes », Échap. Charge `state::RowDragPayload`, cible
+`graph_drop_target` → `Action::AddRowsToGraph { axis: RowAxis::Ask }`. **Une
+ligne = une série** (`SeriesSpec::row`), nommée « Row n » à la création. Axe :
+un graphe **sans X** (aucune série à abscisse de colonne ni série ligne) reçoit
+les séries sur l'axe X principal du calque actif, sans question ; un graphe
+**avec X** pose le dialogue d'`StokesForgeApp::blocking_confirmations`
+(`modal_dialog_with`) — « Create Axis » (défaut) ajoute un calque superposé à
+axe X en haut (`OverlaySpec { x_top, y_right: false }`), « Use Present Axis »
+garde le calque visé, « Cancel » abandonne (`Action::ConfirmRowDrop`). Une
+seule `SetPlotSpec` : un seul pas d'annulation, calque compris. Pas de « Send
+to » pour les lignes (le menu de lignes envoie toujours des colonnes).
+
 **Calques superposés (#167).** Graph › New Layer (Top X, Right Y, Top X Right Y)
 ajoute, par `Action::AddLayer`, un `PanelSpec::overlay_on` au calque de base du
 calque actif ; les colonnes de rôle **Y2** (apparié au **X2** le plus proche à

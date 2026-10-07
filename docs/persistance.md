@@ -249,6 +249,11 @@ sans eux se relisent comme avant. Les adresses runtime (`AnnotationRef`,
 `ShapeRef`, `TextTarget`) portent l'indice du calque, rien n'en est écrit :
 seuls les textes ancrés restent rangés dans leur calque.
 
+`KindRecord::Column::x_prime` (#164, `Option<f64>`) et
+`SeriesSpecRecord::row` (#166, `Option<u64>`) s'ajoutent au schéma, tous deux
+`#[serde(default)]` : les fichiers sans eux se relisent comme avant (`None`). Un
+x' non fini lu d'un fichier est ramené à `None`.
+
 ## Visibilité des objets (#81, #85)
 
 La visibilité des séries était déjà transportée par `SeriesSpecRecord`.

@@ -15,7 +15,7 @@ comment c'est écrit.
   Ligne », pas « `AppState::plot_columns` appelle `series_from_columns` ».
 - Comparer à **Origin** quand c'est éclairant : l'appariement X/Y des colonnes,
   la case en coin qui sélectionne tout le tableau (Ctrl+A fait de même), les
-  quatre champs d'en-tête (Nom long, Unité, Commentaire, Formule) suivent
+  cinq champs d'en-tête (x', Nom long, Unité, Commentaire, Formule) suivent
   volontairement ses conventions. Gestes de sélection : Ctrl+clic ajoute ou
   retire une colonne, une ligne ou une cellule ; Maj+clic prend la plage
   depuis le dernier clic ; Ctrl+Maj+clic l'ajoute à la sélection (#159).
@@ -25,6 +25,11 @@ comment c'est écrit.
   du bloc sélectionné (le curseur devient une main) et le lâcher sur un graphe
   ouvert — les séries rejoignent le calque visé avec son type de tracé
   (#160) ; Échap annule.
+  Cinétique : la ligne **x'** (au-dessus du nom long) donne un instant par
+  colonne ; sélectionner des **lignes entières** (numéros de ligne) et attraper
+  leur bord haut ou bas les trace, une ligne = une courbe, contre les x' (#164,
+  #166). Sur un graphe qui a déjà un X, un dialogue propose un nouvel axe X
+  (défaut), l'axe présent, ou d'annuler.
 - Donner le **raccourci clavier** quand il existe : c'est souvent la vraie
   réponse à « comment je fais plus vite ».
 - Ne citer un nom de fichier ou de fonction **que si l'utilisateur veut aller

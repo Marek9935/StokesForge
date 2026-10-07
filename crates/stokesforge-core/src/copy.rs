@@ -28,12 +28,31 @@ impl NodeCopy {
         let mut graph_data = Vec::new();
         for node in &nodes {
             if let NodeKind::Graph { spec, .. } = node.kind() {
-                let referenced: HashSet<_> = spec
+                let mut referenced: HashSet<_> = spec
                     .panels
                     .iter()
                     .flat_map(|p| &p.series)
                     .flat_map(|s| s.referenced_columns())
                     .collect();
+                // Une série « ligne » (#166) lit toutes les colonnes x' de la
+                // feuille de son ancre, pas seulement l'ancre.
+                for series in spec.panels.iter().flat_map(|p| &p.series) {
+                    if series.row.is_none() {
+                        continue;
+                    }
+                    let Some(sheet) = tree.parent(series.y).ok().flatten() else {
+                        continue;
+                    };
+                    for column in tree.node(sheet).map(Node::children).unwrap_or_default() {
+                        if tree
+                            .node(*column)
+                            .and_then(Node::as_column)
+                            .is_some_and(|c| c.meta().x_prime.is_some())
+                        {
+                            referenced.insert(*column);
+                        }
+                    }
+                }
                 let sheets: Vec<_> = tree
                     .walk_all()
                     .into_iter()

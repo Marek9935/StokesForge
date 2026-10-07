@@ -85,6 +85,7 @@ l'interface, mais son mot est déjà fixé.
 |---|---|---|---|---|
 | Column | Colonne | Série de valeurs d'un même type | Champ, Variable | O |
 | Row | Ligne | Rangée de cellules d'une feuille | Enregistrement | O |
+| x' (x prime) | x' | Valeur numérique propre à une colonne (ligne spéciale de l'en-tête), abscisse d'une série « ligne » ; ne se traduit pas | X2, Temps, Instant (le temps n'est qu'un cas d'usage) | — |
 | Line | Ligne | Rangée de texte **d'un fichier** (import) | Row | G |
 | Cell | Cellule | Une valeur dans une colonne et une ligne | Case | G |
 | Selection | Sélection | Cellules, colonnes ou lignes choisies | Plage | G |

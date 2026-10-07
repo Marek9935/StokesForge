@@ -895,6 +895,9 @@ pub(crate) struct SeriesSpecRecord {
     pub(crate) show_in_legend: bool,
     pub(crate) bar_width: Option<f64>,
     pub(crate) histogram_bins: u32,
+    /// `SeriesSpec::row` (#166). Absente des fichiers antérieurs.
+    #[serde(default)]
+    pub(crate) row: Option<u64>,
 }
 
 /// [`stokesforge_plot::PlotType`], à plat.

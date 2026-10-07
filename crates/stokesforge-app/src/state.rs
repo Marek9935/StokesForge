@@ -466,6 +466,26 @@ pub enum Action {
         /// celui du calque visé (voir [`panel_plot_type`]).
         plot_type: Option<PlotType>,
     },
+    /// Trace des **lignes** entières d'une feuille vers un graphe (#166) :
+    /// une série par ligne, dont les points sont les valeurs de la ligne dans
+    /// les colonnes qui portent un x', placés selon ce x' (la ligne spéciale
+    /// x' joue le rôle d'un second X). `axis` dit où : voir [`RowAxis`]. Un
+    /// seul pas d'annulation, calque nouveau compris.
+    AddRowsToGraph {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Calque visé (le calque actif, #161).
+        panel: usize,
+        /// Feuille d'où viennent les lignes.
+        sheet: NodeId,
+        /// Lignes tracées (0 = la première).
+        rows: Vec<usize>,
+        /// Axe X des séries.
+        axis: RowAxis,
+    },
+    /// Réponse à la question de [`RowAxis::Ask`] : `Some` choisit l'axe,
+    /// `None` abandonne le dépôt.
+    ConfirmRowDrop(Option<RowAxis>),
     /// Ajoute à un graphe un calque superposé à celui de `panel` (#167), à la
     /// manière du « New Layer (Axes) » d'Origin : `x_top` affiche son axe X
     /// en haut, `y_right` son axe Y à droite, chacun avec son échelle ; un
@@ -1080,6 +1100,32 @@ fn second_layer() -> stokesforge_plot::OverlaySpec {
     }
 }
 
+/// Les colonnes de `sheet` qui portent une valeur x' finie, dans l'ordre de la
+/// feuille (#164, #166).
+pub(crate) fn x_prime_columns(tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
+    tree.node(sheet)
+        .map(Node::children)
+        .unwrap_or_default()
+        .iter()
+        .copied()
+        .filter(|id| {
+            tree.node(*id)
+                .and_then(Node::as_column)
+                .is_some_and(|column| column.meta().x_prime.is_some_and(f64::is_finite))
+        })
+        .collect()
+}
+
+/// Le graphe a-t-il déjà un X : une série dont l'abscisse vient d'une colonne
+/// de rôle X, ou une série « ligne » (abscisse = x') ? Décide si le dépôt de
+/// lignes pose la question de l'axe (#166).
+fn spec_has_x(spec: &PlotSpec) -> bool {
+    spec.panels
+        .iter()
+        .flat_map(|panel| &panel.series)
+        .any(|series| series.x.is_some() || series.row.is_some())
+}
+
 /// Le calque ordinaire que `panel` recouvre (lui-même s'il est ordinaire) :
 /// le dernier calque ordinaire qui le précède dans sa case.
 fn overlay_base(spec: &PlotSpec, panel: usize) -> usize {
@@ -1128,6 +1174,52 @@ pub(crate) fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> 
 /// unique, issue #25).
 pub(crate) fn series_list_label(tree: &Tree, series: &stokesforge_plot::SeriesSpec) -> String {
     stokesforge_core::series_label(series, tree)
+}
+
+/// Charge utile du glisser de **lignes entières** d'une feuille vers un graphe
+/// ouvert (#166) : proposée seulement quand la feuille porte une ligne x'
+/// ([`AppState::row_drag_payload`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowDragPayload {
+    /// Feuille d'où viennent les lignes.
+    pub sheet: NodeId,
+    /// Lignes glissées, croissantes (0 = la première).
+    pub rows: Vec<usize>,
+}
+
+/// L'[`Action`] produite par le dépôt de `payload` sur le calque `panel` du
+/// graphe `graph` : [`RowAxis::Ask`], l'axe étant décidé par l'état (question
+/// posée seulement si le graphe a déjà un X).
+pub fn drop_rows_action(payload: &RowDragPayload, graph: NodeId, panel: usize) -> Action {
+    Action::AddRowsToGraph {
+        graph,
+        panel,
+        sheet: payload.sheet,
+        rows: payload.rows.clone(),
+        axis: RowAxis::Ask,
+    }
+}
+
+/// Axe X des séries de lignes déposées sur un graphe (#166).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowAxis {
+    /// Laisser l'état décider : le graphe a déjà un X → dialogue (nouvel axe
+    /// par défaut, axe présent, annuler) ; sinon l'axe X principal, sans
+    /// question.
+    Ask,
+    /// Un nouveau calque superposé, avec son propre axe X (en haut).
+    New,
+    /// L'axe X du calque visé.
+    Present,
+}
+
+/// Dépôt de lignes qui attend la réponse au dialogue d'axe (#166).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRowDrop {
+    graph: NodeId,
+    panel: usize,
+    sheet: NodeId,
+    rows: Vec<usize>,
 }
 
 /// Charge utile du glisser-déposer d'une sélection de colonnes de classeur
@@ -2132,6 +2224,8 @@ pub struct AppState {
     renaming_sheet: Option<NodeId>,
     /// Feuille dont la suppression attend confirmation.
     pending_sheet_delete: Option<NodeId>,
+    /// Dépôt de lignes en attente du choix de l'axe X (#166).
+    pending_row_drop: Option<PendingRowDrop>,
     pending_object_delete: Vec<NodeId>,
     object_clipboard_origin: String,
     object_clipboard_output: Option<String>,
@@ -2281,6 +2375,7 @@ impl AppState {
             new_project_pending: false,
             renaming_sheet: None,
             pending_sheet_delete: None,
+            pending_row_drop: None,
             pending_object_delete: Vec::new(),
             object_clipboard_origin: format!(
                 "{}:{}",
@@ -2575,6 +2670,33 @@ impl AppState {
         } else {
             Some(ColumnDragPayload { sheet, columns })
         }
+    }
+
+    /// Charge utile du glisser de lignes de `sheet` vers un graphe
+    /// ([`RowDragPayload`]), ou `None` hors des deux préconditions de #166 :
+    /// une sélection de **lignes entières** (gouttière des numéros), et la
+    /// ligne spéciale x' présente — au moins une colonne de la feuille en
+    /// porte une valeur. Sans x', pas de geste : une ligne n'a pas d'abscisse.
+    pub fn row_drag_payload(&self, sheet: NodeId) -> Option<RowDragPayload> {
+        let selection = self.selection(sheet)?;
+        if !selection.is_full_rows() || x_prime_columns(&self.snapshot.tree, sheet).is_empty() {
+            return None;
+        }
+        let row_count = self.row_count(sheet);
+        let rows: Vec<usize> = selection
+            .full_row_indices()
+            .into_iter()
+            .filter(|row| *row < row_count)
+            .collect();
+        (!rows.is_empty()).then_some(RowDragPayload { sheet, rows })
+    }
+
+    /// Le dépôt de lignes qui attend le choix de l'axe X (#166), avec le
+    /// nombre de lignes concernées, ou `None`.
+    pub fn pending_row_drop(&self) -> Option<(NodeId, usize)> {
+        self.pending_row_drop
+            .as_ref()
+            .map(|pending| (pending.graph, pending.rows.len()))
     }
 
     /// Nombre de lignes de `sheet` — le **maximum** des longueurs de ses
@@ -4065,6 +4187,14 @@ impl AppState {
                 x_top,
                 y_right,
             } => self.add_layer(graph, panel, x_top, y_right),
+            Action::AddRowsToGraph {
+                graph,
+                panel,
+                sheet,
+                rows,
+                axis,
+            } => self.add_rows_to_graph(graph, panel, sheet, rows, axis),
+            Action::ConfirmRowDrop(choice) => self.confirm_row_drop(choice),
             Action::SetObjectManagerOpen(open) => {
                 self.object_manager_open = open;
                 if let Err(error) = self
@@ -4362,6 +4492,7 @@ impl AppState {
                 if self.snapshot.epoch != snapshot.epoch {
                     self.renaming_sheet = None;
                     self.pending_sheet_delete = None;
+                    self.pending_row_drop = None;
                     self.pending_object_delete.clear();
                     self.object_clipboard_output = None;
                     self.copied_objects.clear();
@@ -7454,6 +7585,111 @@ impl AppState {
             stokesforge_plot::OverlaySpec { x_top, y_right },
         ));
         self.execute(Command::SetPlotSpec { graph, spec });
+    }
+
+    /// [`Action::AddRowsToGraph`] : une série « ligne » par ligne de `rows`,
+    /// ancrée sur la première colonne x' de `sheet` (la feuille d'une série
+    /// ligne se lit sur sa colonne `y`, voir [`SeriesSpec::row`]).
+    ///
+    /// [`RowAxis::Ask`] : un graphe qui a déjà un X (une série à abscisse
+    /// issue d'une colonne X, ou une série ligne) pose la question au lieu
+    /// d'agir ([`AppState::pending_row_drop`]) ; sans X, l'axe principal.
+    /// [`RowAxis::New`] ajoute un calque superposé dont l'axe X est en haut
+    /// (l'axe Y suit celui du calque recouvert) ; [`RowAxis::Present`] ajoute
+    /// les séries au calque visé. Une seule commande, donc un seul pas
+    /// d'annulation.
+    fn add_rows_to_graph(
+        &mut self,
+        graph: NodeId,
+        panel: usize,
+        sheet: NodeId,
+        rows: Vec<usize>,
+        axis: RowAxis,
+    ) {
+        let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
+            self.fail(format!("{graph} n'est pas un graphe de ce projet"));
+            return;
+        };
+        if spec.panels.get(panel).is_none() {
+            self.fail(format!("{graph} n'a pas de calque {panel}"));
+            return;
+        }
+        let Some(&anchor) = x_prime_columns(&self.snapshot.tree, sheet).first() else {
+            self.fail(crate::tr!("status-row-no-x-prime"));
+            return;
+        };
+        let row_count = self.row_count(sheet);
+        let mut rows: Vec<usize> = rows.into_iter().filter(|row| *row < row_count).collect();
+        rows.sort_unstable();
+        rows.dedup();
+        if rows.is_empty() {
+            return;
+        }
+        let axis = match axis {
+            RowAxis::Ask if spec_has_x(&spec) => {
+                self.pending_row_drop = Some(PendingRowDrop {
+                    graph,
+                    panel,
+                    sheet,
+                    rows,
+                });
+                return;
+            }
+            RowAxis::Ask => RowAxis::Present,
+            chosen => chosen,
+        };
+        let target = match axis {
+            RowAxis::New => {
+                let base = overlay_base(&spec, panel);
+                let Some(base_panel) = spec.panels.get(base).cloned() else {
+                    return;
+                };
+                spec.panels.push(PanelSpec::overlay_on(
+                    &base_panel,
+                    stokesforge_plot::OverlaySpec {
+                        x_top: true,
+                        y_right: false,
+                    },
+                ));
+                spec.panels.len() - 1
+            }
+            _ => panel,
+        };
+        let plot_type = spec
+            .panels
+            .get(panel)
+            .map_or(PlotType::Line, panel_plot_type);
+        let Some(layer) = spec.panels.get_mut(target) else {
+            return;
+        };
+        let start = layer.series.len();
+        for (offset, row) in rows.into_iter().enumerate() {
+            let mut series = stokesforge_plot::SeriesSpec::new(anchor);
+            series.row = Some(row);
+            series.name = crate::tr!("graph-row-series", number = (row + 1));
+            series.line = stokesforge_plot::LineSpec::from_palette(start + offset);
+            series.symbol = stokesforge_plot::SymbolSpec::from_palette(start + offset);
+            series.plot_type = plot_type.clone();
+            layer.series.push(series);
+        }
+        self.execute(Command::SetPlotSpec { graph, spec });
+    }
+
+    /// [`Action::ConfirmRowDrop`] : rejoue le dépôt en attente avec l'axe
+    /// choisi, ou l'abandonne.
+    fn confirm_row_drop(&mut self, choice: Option<RowAxis>) {
+        let Some(pending) = self.pending_row_drop.take() else {
+            return;
+        };
+        if let Some(axis) = choice.filter(|axis| *axis != RowAxis::Ask) {
+            self.add_rows_to_graph(
+                pending.graph,
+                pending.panel,
+                pending.sheet,
+                pending.rows,
+                axis,
+            );
+        }
     }
 
     /// Remplace le texte d'une note, sauf s'il est déjà exactement celui-là —

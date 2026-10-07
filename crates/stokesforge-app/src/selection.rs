@@ -892,6 +892,16 @@ impl Selection {
         }
     }
 
+    /// Les lignes d'une sélection de **lignes entières**, croissantes et sans
+    /// doublon — vide pour toute autre sélection (#166) : seul le geste de la
+    /// gouttière des numéros de ligne désigne des lignes.
+    pub fn full_row_indices(&self) -> Vec<usize> {
+        self.full_row_intervals()
+            .into_iter()
+            .flat_map(|(first, last)| first..=last)
+            .collect()
+    }
+
     pub fn row_range(&self) -> Option<(usize, usize)> {
         let intervals = self.data_intervals();
         Some((intervals.first()?.0, intervals.last()?.1))
