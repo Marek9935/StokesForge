@@ -130,29 +130,47 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
     if y >= 0.0 && y < plot.title_height as f64 {
         return Some(PlotComponent::Title);
     }
+    // Les aires de graduation d'abord, tous calques confondus : des calques
+    // superposés (#167) partagent la zone de tracé, mais chacun a ses axes.
     plot.panels
         .iter()
         .enumerate()
-        .find_map(|(index, panel)| panel_component_at(index, panel, x, y))
+        .find_map(|(index, panel)| axis_component_at(index, panel, x, y))
+        .or_else(|| {
+            plot.panels.iter().enumerate().find_map(|(index, panel)| {
+                let left = panel.pixel_origin.0 as f64;
+                let top = panel.pixel_origin.1 as f64;
+                let inside = (left..=left + panel.pixel_size.0 as f64).contains(&x)
+                    && (top..=top + panel.pixel_size.1 as f64).contains(&y);
+                inside.then_some(PlotComponent::PlotArea { panel: index })
+            })
+        })
 }
 
-fn panel_component_at(index: usize, panel: &DrawnPanel, x: f64, y: f64) -> Option<PlotComponent> {
+/// L'axe d'un panneau dont l'aire de graduation contient `(x, y)`. Le côté
+/// rendu est celui de l'axe **dans le spec** : un calque superposé affiche
+/// son axe X en haut et son axe Y à droite, mais ce sont toujours `Bottom` et
+/// `Left`.
+fn axis_component_at(index: usize, panel: &DrawnPanel, x: f64, y: f64) -> Option<PlotComponent> {
     let left = panel.pixel_origin.0 as f64;
     let top = panel.pixel_origin.1 as f64;
     let right = left + panel.pixel_size.0 as f64;
     let bottom = top + panel.pixel_size.1 as f64;
     let within_x = (left..=right).contains(&x);
     let within_y = (top..=bottom).contains(&y);
-    if within_x && within_y {
-        return Some(PlotComponent::PlotArea { panel: index });
-    }
     let areas = &panel.axis_areas;
+    let right_side = if panel.overlay.is_some() {
+        AxisSide::Left
+    } else {
+        AxisSide::Right
+    };
     // Distance au bord de la zone de tracé, vers l'extérieur, dans chaque
     // aire candidate.
     let candidates = [
         (AxisSide::Bottom, within_x, y - bottom, areas.bottom),
+        (AxisSide::Bottom, within_x, top - y, areas.top),
         (AxisSide::Left, within_y, left - x, areas.left),
-        (AxisSide::Right, within_y, x - right, areas.right),
+        (right_side, within_y, x - right, areas.right),
     ];
     candidates
         .into_iter()
@@ -187,6 +205,7 @@ mod tests {
         DrawnPlot {
             panels: vec![DrawnPanel {
                 index: 0,
+                overlay: None,
                 row: 0,
                 column: 0,
                 x_range: (0.0, 1.0),
@@ -206,6 +225,7 @@ mod tests {
                     bottom: area(52),
                     left: area(64),
                     right: AxisArea::default(),
+                    top: AxisArea::default(),
                 },
                 annotations: Vec::new(),
                 shapes: Vec::new(),

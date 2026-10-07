@@ -705,6 +705,9 @@ pub(crate) struct PanelSpecRecord {
     pub(crate) right: AxisSpecRecord,
     pub(crate) top: AxisSpecRecord,
     pub(crate) legend: LegendSpecRecord,
+    /// Calque superposé (#167) ; absent d'un fichier plus ancien.
+    #[serde(default)]
+    pub(crate) overlay: Option<OverlaySpecRecord>,
     pub(crate) row: u64,
     pub(crate) column: u64,
     /// Textes libres (issue #35) : absents d'un fichier plus ancien,
@@ -714,6 +717,13 @@ pub(crate) struct PanelSpecRecord {
     /// Objets graphiques (issue #76) : absents d'un fichier plus ancien.
     #[serde(default)]
     pub(crate) shapes: Vec<ShapeSpecRecord>,
+}
+
+/// [`stokesforge_plot::OverlaySpec`], à plat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct OverlaySpecRecord {
+    pub(crate) x_top: bool,
+    pub(crate) y_right: bool,
 }
 
 /// [`stokesforge_plot::ShapeKind`], à plat.
@@ -774,6 +784,7 @@ impl Default for PanelSpecRecord {
             right: AxisSpecRecord::default(),
             top: AxisSpecRecord::hidden(),
             legend: LegendSpecRecord::default(),
+            overlay: None,
             row: 0,
             column: 0,
             annotations: Vec::new(),

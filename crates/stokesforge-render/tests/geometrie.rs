@@ -681,3 +681,70 @@ fn l_encre_des_poignees_suit_le_fond_de_la_figure() {
     spec.background = "#ffffff".to_owned();
     assert_eq!(figure_ink(&spec), DARK_INK);
 }
+
+/// #167 : un calque superposé partage la zone de tracé du calque recouvert
+/// (dimension liée), garde sa propre échelle quand son axe est affiché, et
+/// suit celle du calque recouvert sinon.
+#[test]
+fn un_calque_superpose_partage_la_zone_de_trace_et_garde_son_echelle() {
+    use stokesforge_plot::{OverlaySpec, Panels};
+    let colonnes = [
+        ("X", vec![0.0, 1.0, 2.0]),
+        ("Y", vec![10.0, 20.0, 30.0]),
+        ("X2", vec![400.0, 500.0, 800.0]),
+        ("Y2", vec![0.0, 1.0, 2.0]),
+    ];
+    let construire = |overlay: OverlaySpec| {
+        move |ids: &[NodeId]| {
+            let mut base = PanelSpec::at(0, 0);
+            base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+            let mut haut = PanelSpec::overlay_on(&base, overlay);
+            haut.series.push(SeriesSpec::new_xy(ids[2], ids[3]));
+            PlotSpec::empty("Test").with_panels(Panels::new(vec![base, haut]))
+        }
+    };
+
+    let drawn = geometrie(
+        &colonnes,
+        construire(OverlaySpec {
+            x_top: true,
+            y_right: true,
+        }),
+    );
+    assert_eq!(drawn.panels.len(), 2);
+    let (base, haut) = (&drawn.panels[0], &drawn.panels[1]);
+    assert_eq!((haut.index, haut.row, haut.column), (1, 0, 0));
+    assert_eq!(base.pixel_origin, haut.pixel_origin, "même zone de tracé");
+    assert_eq!(base.pixel_size, haut.pixel_size);
+    assert!(haut.axis_areas.top.size > 0 && haut.axis_areas.right.size > 0);
+    assert_eq!(
+        (haut.axis_areas.bottom.size, haut.axis_areas.left.size),
+        (0, 0)
+    );
+    assert!(
+        base.axis_areas.top.size == 0,
+        "l'axe du haut est celui du calque"
+    );
+    assert!(
+        haut.x_range.0 > 300.0,
+        "échelle X propre : {:?}",
+        haut.x_range
+    );
+    assert!(base.x_range.1 < 10.0, "{:?}", base.x_range);
+
+    // Axes non affichés : l'échelle est celle du calque recouvert.
+    let lie = geometrie(
+        &colonnes,
+        construire(OverlaySpec {
+            x_top: false,
+            y_right: false,
+        }),
+    );
+    assert_eq!(lie.panels[1].x_range, lie.panels[0].x_range);
+    assert_eq!(lie.panels[1].y_range, lie.panels[0].y_range);
+    assert_eq!(lie.panels[1].pixel_size, lie.panels[0].pixel_size);
+    assert!(
+        drawn.panels[0].pixel_size.0 < lie.panels[0].pixel_size.0,
+        "les axes du haut et de droite réservent leur place à tous les calques de la case"
+    );
+}

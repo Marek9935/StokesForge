@@ -407,6 +407,20 @@ calculées ; `ViewState::apply` pose `auto_range = false` et les deux bornes sur
 un **clone** du spec, juste avant de résoudre. Seul le déclenchement est
 nouveau.
 
+**Calques superposés (#167).** Un `PanelSpec` portant `overlay: Some(OverlaySpec
+{ x_top, y_right })` recouvre le dernier calque ordinaire de sa case (même
+`row`/`column`). Le pipeline réserve pour chaque case l'**union** des aires de
+graduation demandées par ses calques (`CellPlan`), si bien que tous ont la même
+zone de tracé (dimension liée) ; le calque superposé hérite de l'aire du calque
+recouvert (`BaseFrame`), n'a ni titre ni fond. Son axe `bottom` est son axe X,
+affiché **en haut** avec une échelle propre si `x_top` (sinon l'échelle X est
+celle du calque recouvert), de même `left` / `y_right` pour l'axe Y à droite.
+Ses axes sont tracés par les axes secondaires de Plotters ; ses séries
+n'ont pas d'ordonnée secondaire. `DrawnPanel::axis_areas.top` porte l'aire du
+haut ; `PlotComponent::Axis` garde le côté **du spec** (`Bottom`/`Left`) même
+quand l'axe est affiché en haut ou à droite. Test : `geometrie.rs`,
+`stokesforge-render-svg/tests/calques.rs`.
+
 Un calque est identifié par son **indice dans `PlotSpec::panels`**
 (`DrawnPanel::index`), **pas par son rang dans `DrawnPlot::panels`** : celui-ci
 omet les panneaux trop petits pour être tracés (`MIN_CELL`), ce qui décale ses

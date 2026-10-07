@@ -9,6 +9,23 @@ use crate::legend::LegendSpec;
 use crate::series::{SeriesAxis, SeriesSpec};
 use crate::text_anchor::TextAnchor;
 
+/// Calque superposé à un autre (#167), à la manière du « New Layer (Axes) »
+/// d'Origin : il partage la case de la grille **et la zone de tracé** du calque
+/// qu'il recouvre (dimension liée), sur un fond transparent.
+///
+/// Son axe `bottom` est son axe X, son axe `left` son axe Y. `x_top` le place
+/// en haut (échelle **propre** au calque) ; sinon l'axe n'est pas affiché et
+/// l'échelle X est celle du calque recouvert (échelle liée). Même règle pour
+/// `y_right` et l'axe Y, à droite. Un calque sans axe affiché (`false`,
+/// `false`) suit donc entièrement le calque recouvert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OverlaySpec {
+    /// L'axe X du calque est affiché en haut, avec son échelle propre.
+    pub x_top: bool,
+    /// L'axe Y du calque est affiché à droite, avec son échelle propre.
+    pub y_right: bool,
+}
+
 /// Un panneau et ses quatre axes.
 ///
 /// `row`/`column` placent le panneau dans la grille du [`crate::PlotSpec`] —
@@ -40,6 +57,10 @@ pub struct PanelSpec {
     pub top: AxisSpec,
     /// Légende.
     pub legend: LegendSpec,
+    /// Calque superposé à un autre de la même case (#167) ; `None` pour un
+    /// calque ordinaire. Un calque superposé recouvre le dernier calque
+    /// ordinaire qui le précède dans la même case.
+    pub overlay: Option<OverlaySpec>,
     /// Ligne du panneau dans la grille.
     pub row: usize,
     /// Colonne du panneau dans la grille.
@@ -60,6 +81,30 @@ impl PanelSpec {
             row,
             column,
             ..Self::default()
+        }
+    }
+
+    /// Un calque superposé (#167) au calque `base` : même case, sans titre ni
+    /// légende, seuls les axes que `overlay` affiche sont visibles, sans
+    /// quadrillage.
+    pub fn overlay_on(base: &PanelSpec, overlay: OverlaySpec) -> Self {
+        let axis = |visible| AxisSpec {
+            visible,
+            grid: false,
+            ..AxisSpec::default()
+        };
+        let legend = LegendSpec {
+            visible: false,
+            ..LegendSpec::default()
+        };
+        Self {
+            title_visible: false,
+            bottom: axis(overlay.x_top),
+            left: axis(overlay.y_right),
+            right: AxisSpec::hidden(),
+            legend,
+            overlay: Some(overlay),
+            ..Self::at(base.row, base.column)
         }
     }
 
@@ -123,6 +168,7 @@ impl Default for PanelSpec {
             right: AxisSpec::default(),
             top: AxisSpec::hidden(),
             legend: LegendSpec::default(),
+            overlay: None,
             row: 0,
             column: 0,
             annotations: Vec::new(),

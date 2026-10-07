@@ -101,7 +101,7 @@ pub use annotation::{AnnotationRef, AnnotationSpec};
 pub use axis::{AxisScale, AxisSide, AxisSpec};
 pub use legend::{LegendPosition, LegendSpec};
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};
-pub use panel::PanelSpec;
+pub use panel::{OverlaySpec, PanelSpec};
 pub use raw::RawVariant;
 pub use saved::{ColorUsage, SavedColors, MAX_SAVED_COLORS};
 pub use series::{

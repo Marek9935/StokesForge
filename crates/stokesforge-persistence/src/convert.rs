@@ -15,10 +15,11 @@ use stokesforge_plot::{
 
 use crate::schema::{
     AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord,
-    LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, PanelSpecRecord, PlotSpecRecord,
-    PlotTypeRecord, RoleRecord, SavedColorsRecord, SeriesAxisRecord, SeriesSpecRecord,
-    ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord,
-    TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, OverlaySpecRecord,
+    PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord, SavedColorsRecord,
+    SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord,
+    SymbolSpecRecord, TextAnchorRecord, TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY,
+    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -502,6 +503,10 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
         right: (&panel.right).into(),
         top: (&panel.top).into(),
         legend: (&panel.legend).into(),
+        overlay: panel.overlay.map(|overlay| OverlaySpecRecord {
+            x_top: overlay.x_top,
+            y_right: overlay.y_right,
+        }),
         row: panel.row as u64,
         column: panel.column as u64,
         annotations: panel
@@ -592,6 +597,10 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
         right: record.right.into(),
         top: record.top.into(),
         legend: record.legend.into(),
+        overlay: record.overlay.map(|overlay| stokesforge_plot::OverlaySpec {
+            x_top: overlay.x_top,
+            y_right: overlay.y_right,
+        }),
         row: record.row as usize,
         column: record.column as usize,
         annotations: record

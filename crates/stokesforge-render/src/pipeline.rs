@@ -141,6 +141,9 @@ pub struct DrawnPanel {
     /// Indice du calque dans [`PlotSpec::panels`] : l'identité d'un calque
     /// (plusieurs calques peuvent se superposer dans la même case).
     pub index: usize,
+    /// Le calque est superposé à un autre (#167) : son axe X est en haut si
+    /// `x_top`, son axe Y à droite si `y_right`.
+    pub overlay: Option<stokesforge_plot::OverlaySpec>,
     /// Position déclarée du panneau dans la grille.
     pub row: usize,
     /// Idem, en colonne.
@@ -296,8 +299,11 @@ pub struct AxisAreas {
     pub bottom: AxisArea,
     /// À gauche (ordonnée principale).
     pub left: AxisArea,
-    /// À droite (ordonnée secondaire), si une série s'y rattache.
+    /// À droite (ordonnée secondaire), si une série s'y rattache, ou l'axe Y
+    /// d'un calque superposé (#167).
     pub right: AxisArea,
+    /// Au-dessus de la zone de tracé : l'axe X d'un calque superposé (#167).
+    pub top: AxisArea,
 }
 
 /// Ce qu'un graphe a fini par tracer.
@@ -441,8 +447,24 @@ pub fn draw_on<DB: DrawingBackend>(
     let layout = grid_of(spec, plot.panels.len());
     let cells = area.split_evenly((layout.rows, layout.columns));
 
+    // Les aires de graduation de chaque case : l'union de ce que demandent
+    // ses calques, pour que les calques superposés (#167) partagent une zone
+    // de tracé identique. `bases` garde, par case, le dernier calque ordinaire
+    // tracé : celui qu'un calque superposé recouvre.
+    let mut plans: std::collections::HashMap<usize, CellPlan> = std::collections::HashMap::new();
     for (index, panel) in plot.panels.iter().enumerate() {
-        let Some(cell) = layout.cells.get(index).and_then(|cell| cells.get(*cell)) else {
+        if let Some(cell) = layout.cells.get(index) {
+            plans.entry(*cell).or_default().add(panel);
+        }
+    }
+    let mut bases = std::collections::HashMap::new();
+
+    for (index, panel) in plot.panels.iter().enumerate() {
+        let Some(cell_index) = layout.cells.get(index).copied() else {
+            drawn.omitted_panels += 1;
+            continue;
+        };
+        let Some(cell) = cells.get(cell_index) else {
             drawn.omitted_panels += 1;
             continue;
         };
@@ -451,7 +473,19 @@ pub fn draw_on<DB: DrawingBackend>(
             drawn.omitted_panels += 1;
             continue;
         }
-        let (panel_drawn, projection) = draw_panel(cell, &canvas, panel, index, background)?;
+        let plan = plans.get(&cell_index).copied().unwrap_or_default();
+        let (panel_drawn, projection, frame) = draw_panel(
+            cell,
+            &canvas,
+            panel,
+            index,
+            background,
+            plan,
+            bases.get(&cell_index),
+        )?;
+        if panel.spec.overlay.is_none() {
+            bases.insert(cell_index, frame);
+        }
         if first_projection.is_none() {
             first_projection = Some(projection);
         }
@@ -630,6 +664,47 @@ pub fn grid_of(spec: &PlotSpec, panels: usize) -> Layout {
     }
 }
 
+/// Les aires de graduation réservées dans une case de la grille : l'union de
+/// ce que demandent tous ses calques, pour que les calques superposés (#167)
+/// aient exactement la même zone de tracé.
+#[derive(Debug, Clone, Copy, Default)]
+struct CellPlan {
+    bottom: bool,
+    top: bool,
+    left: bool,
+    right: bool,
+}
+
+impl CellPlan {
+    fn add(&mut self, panel: &ResolvedPanel<'_>) {
+        let spec = panel.spec;
+        match spec.overlay {
+            Some(overlay) => {
+                self.top |= overlay.x_top && spec.bottom.visible;
+                self.right |= overlay.y_right && spec.left.visible;
+            }
+            None => {
+                self.bottom |= spec.bottom.visible;
+                self.left |= spec.left.visible;
+                self.right |= spec.right.visible
+                    && panel
+                        .series
+                        .iter()
+                        .any(|s| s.spec.visible && s.spec.axis == SeriesAxis::Right);
+            }
+        }
+    }
+}
+
+/// Ce qu'un calque superposé (#167) hérite du calque ordinaire qu'il recouvre.
+struct BaseFrame<DB: DrawingBackend> {
+    area: DrawingArea<DB, Shift>,
+    x_range: (f64, f64),
+    y_range: (f64, f64),
+    x_scale: AxisScale,
+    y_scale: AxisScale,
+}
+
 /// Trace un panneau dans sa cellule.
 fn draw_panel<DB: DrawingBackend>(
     cell: &DrawingArea<DB, Shift>,
@@ -637,12 +712,26 @@ fn draw_panel<DB: DrawingBackend>(
     panel: &ResolvedPanel<'_>,
     index: usize,
     background: (u8, u8, u8, u8),
-) -> Result<(DrawnPanel, Projection), DrawingAreaErrorKind<DB::ErrorType>> {
+    plan: CellPlan,
+    base: Option<&BaseFrame<DB>>,
+) -> Result<(DrawnPanel, Projection, BaseFrame<DB>), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
+    // Un calque superposé sans calque à recouvrir se trace comme un calque
+    // ordinaire.
+    let overlay = spec.overlay.filter(|_| base.is_some());
+    let base = base.filter(|_| overlay.is_some());
+    let x_own = overlay.is_none_or(|o| o.x_top);
+    let y_own = overlay.is_none_or(|o| o.y_right);
     // Encre automatique du panneau, voir `draw_on`.
     let ink = auto_ink(over_white(background));
-    let x_scale = spec.bottom.scale;
-    let y_scale = spec.left.scale;
+    let x_scale = match base {
+        Some(base) if !x_own => base.x_scale,
+        _ => spec.bottom.scale,
+    };
+    let y_scale = match base {
+        Some(base) if !y_own => base.y_scale,
+        _ => spec.left.scale,
+    };
     let y2_scale = spec.right.scale;
 
     // 1 — préparation. Une série invisible ne figure nulle part : ni tracée,
@@ -663,25 +752,39 @@ fn draw_panel<DB: DrawingBackend>(
             (rank, series::prepare(series, x_scale, scale))
         })
         .unzip();
+    // Un calque superposé n'a pas d'ordonnée secondaire : tout se trace sur
+    // son axe Y.
+    if overlay.is_some() {
+        for series in &mut prepared {
+            series.axis = SeriesAxis::Left;
+        }
+    }
 
-    let right_active = spec.right.visible
+    let right_active = overlay.is_none()
+        && spec.right.visible
         && prepared
             .iter()
             .any(|series| series.axis == SeriesAxis::Right);
 
     // 2 — cadrage, dans l'espace transformé.
-    let x_range = axis_range(
-        &spec.bottom,
-        x_scale,
-        extent_of(&prepared, series::x_extent, None),
-        false,
-    );
-    let y_range = axis_range(
-        &spec.left,
-        y_scale,
-        extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left)),
-        needs_baseline(&prepared, SeriesAxis::Left),
-    );
+    let x_range = match base {
+        Some(base) if !x_own => base.x_range,
+        _ => axis_range(
+            &spec.bottom,
+            x_scale,
+            extent_of(&prepared, series::x_extent, None),
+            false,
+        ),
+    };
+    let y_range = match base {
+        Some(base) if !y_own => base.y_range,
+        _ => axis_range(
+            &spec.left,
+            y_scale,
+            extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left)),
+            needs_baseline(&prepared, SeriesAxis::Left),
+        ),
+    };
     let y2_range = right_active.then(|| {
         axis_range(
             &spec.right,
@@ -701,7 +804,11 @@ fn draw_panel<DB: DrawingBackend>(
         PANEL_TITLE_SIZE,
         rgba_or(&spec.title_color, opaque(ink)),
     );
-    let area = if !spec.title_visible || spec.title.is_empty() {
+    let area = if let Some(base) = base {
+        // Dimension liée : la zone de tracé du calque recouvert, titre
+        // compris ; un calque superposé n'a pas de titre à lui.
+        base.area.clone()
+    } else if !spec.title_visible || spec.title.is_empty() {
         cell.clone()
     } else if panel_title_anchor.is_some() {
         reserve_title_band(cell, &spec.title, &title_style)?
@@ -709,7 +816,11 @@ fn draw_panel<DB: DrawingBackend>(
         cell.titled(&spec.title, title_style.clone())?
     };
     let mut texts: Vec<DrawnText> = Vec::new();
-    if spec.title_visible && !spec.title.is_empty() && panel_title_anchor.is_none() {
+    if base.is_none()
+        && spec.title_visible
+        && !spec.title.is_empty()
+        && panel_title_anchor.is_none()
+    {
         let band = (area.get_base_pixel().1 - cell.get_base_pixel().1).max(0);
         let cell_origin = cell.get_base_pixel();
         let (cell_w, _) = cell.dim_in_pixel();
@@ -728,14 +839,16 @@ fn draw_panel<DB: DrawingBackend>(
     // Les aires de graduation sont plafonnées à un tiers de la cellule :
     // dans une grille, 64 px de libellés sur un panneau de 150 px ne
     // laisseraient plus rien à tracer.
-    let x_label_area = label_area(spec.bottom.visible, X_LABEL_AREA, height);
-    let y_label_area = label_area(spec.left.visible, Y_LABEL_AREA, width);
-    let right_label_area = label_area(right_active, Y_LABEL_AREA, width);
+    let x_label_area = label_area(plan.bottom, X_LABEL_AREA, height);
+    let top_label_area = label_area(plan.top, X_LABEL_AREA, height);
+    let y_label_area = label_area(plan.left, Y_LABEL_AREA, width);
+    let right_label_area = label_area(plan.right, Y_LABEL_AREA, width);
 
     let mut builder = ChartBuilder::on(&area);
     builder
         .margin(MARGIN)
         .x_label_area_size(x_label_area)
+        .top_x_label_area_size(top_label_area)
         .y_label_area_size(y_label_area)
         .right_y_label_area_size(right_label_area);
     let chart = builder.build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?;
@@ -747,6 +860,31 @@ fn draw_panel<DB: DrawingBackend>(
     // d'une branche ici serait deux fois le même code de série.
     let secondary = y2_range.unwrap_or(y_range);
     let mut chart = chart.set_secondary_coord(x_range.0..x_range.1, secondary.0..secondary.1);
+    // Les aires de graduation de ce calque seul : un axe n'a d'aire que là
+    // où il est affiché (le plan de la case en réserve aussi pour les autres
+    // calques).
+    let (x_area, top_area, y_area, right_area) = match overlay {
+        Some(o) => (
+            0,
+            if o.x_top && spec.bottom.visible {
+                top_label_area
+            } else {
+                0
+            },
+            0,
+            if o.y_right && spec.left.visible {
+                right_label_area
+            } else {
+                0
+            },
+        ),
+        None => (
+            if spec.bottom.visible { x_label_area } else { 0 },
+            0,
+            if spec.left.visible { y_label_area } else { 0 },
+            if right_active { right_label_area } else { 0 },
+        ),
+    };
 
     // 4 — les axes. Chaque axe a ses couleurs (titre, échelle), et le
     // `configure_mesh` de Plotters n'a qu'un style de titre et qu'un style
@@ -772,7 +910,10 @@ fn draw_panel<DB: DrawingBackend>(
     };
     let format_x = |value: &f64| scale::format_tick(x_scale, *value);
     let format_y = |value: &f64| scale::format_tick(y_scale, *value);
-    {
+    // Un calque superposé n'a ni axe en bas ni axe à gauche : ses axes
+    // s'affichent en haut et à droite, par les axes secondaires de Plotters
+    // (même repère que le calque lui-même, voir plus bas).
+    if overlay.is_none() {
         let colors = AxisColors::of(&spec.bottom, ink);
         let mut mesh = chart.configure_mesh();
         colors.apply(&mut mesh);
@@ -791,7 +932,7 @@ fn draw_panel<DB: DrawingBackend>(
         }
         mesh.draw()?;
     }
-    {
+    if overlay.is_none() {
         let colors = AxisColors::of(&spec.left, ink);
         let mut mesh = chart.configure_mesh();
         colors.apply(&mut mesh);
@@ -826,6 +967,45 @@ fn draw_panel<DB: DrawingBackend>(
         mesh.draw()?;
     }
 
+    if let Some(o) = overlay.filter(|o| {
+        (o.x_top && spec.bottom.visible && top_area > 0)
+            || (o.y_right && spec.left.visible && right_area > 0)
+    }) {
+        let show_x = o.x_top && spec.bottom.visible && top_area > 0;
+        let show_y = o.y_right && spec.left.visible && right_area > 0;
+        // Un seul style de ligne et de libellés pour les deux axes
+        // secondaires : celui de l'axe affiché, de l'axe X si les deux le
+        // sont.
+        let colors = AxisColors::of(if show_x { &spec.bottom } else { &spec.left }, ink);
+        let mut mesh = chart.configure_secondary_axes();
+        mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+            .axis_desc_style(colors.title_style.clone())
+            .axis_style(rgba(colors.ticks))
+            .x_desc(if show_x {
+                plotters_desc(&spec.bottom, bottom_anchor)
+            } else {
+                String::new()
+            })
+            .y_desc(if show_y {
+                plotters_desc(&spec.left, left_anchor)
+            } else {
+                String::new()
+            });
+        if !show_x {
+            mesh.x_labels(0);
+        } else if scale::needs_formatter(x_scale) {
+            mesh.x_label_formatter(&format_x)
+                .x_labels(scale::decade_label_count(x_range));
+        }
+        if !show_y {
+            mesh.y_labels(0);
+        } else if scale::needs_formatter(y_scale) {
+            mesh.y_label_formatter(&format_y)
+                .y_labels(scale::decade_label_count(y_range));
+        }
+        mesh.draw()?;
+    }
+
     // 5 — les séries, en pixels.
     let plotting = chart.plotting_area();
     let origin = plotting.get_base_pixel();
@@ -835,6 +1015,7 @@ fn draw_panel<DB: DrawingBackend>(
 
     let mut drawn = DrawnPanel {
         index,
+        overlay,
         row: spec.row,
         column: spec.column,
         x_range: data_range(x_scale, x_range),
@@ -852,22 +1033,39 @@ fn draw_panel<DB: DrawingBackend>(
         decimated_points: 0,
         axis_areas: AxisAreas {
             bottom: AxisArea {
-                size: x_label_area,
-                titled: spec.bottom.title_visible
+                size: x_area,
+                titled: overlay.is_none()
+                    && spec.bottom.title_visible
                     && !spec.bottom.display_label().is_empty()
                     && bottom_anchor.is_none(),
             },
             left: AxisArea {
-                size: y_label_area,
-                titled: spec.left.title_visible
+                size: y_area,
+                titled: overlay.is_none()
+                    && spec.left.title_visible
                     && !spec.left.display_label().is_empty()
                     && left_anchor.is_none(),
             },
             right: AxisArea {
-                size: right_label_area,
-                titled: spec.right.title_visible
-                    && !spec.right.display_label().is_empty()
-                    && right_anchor.is_none(),
+                size: right_area,
+                titled: match overlay {
+                    Some(_) => {
+                        spec.left.title_visible
+                            && !spec.left.display_label().is_empty()
+                            && left_anchor.is_none()
+                    }
+                    None => {
+                        spec.right.title_visible
+                            && !spec.right.display_label().is_empty()
+                            && right_anchor.is_none()
+                    }
+                },
+            },
+            top: AxisArea {
+                size: top_area,
+                titled: spec.bottom.title_visible
+                    && !spec.bottom.display_label().is_empty()
+                    && bottom_anchor.is_none(),
             },
         },
         annotations: Vec::new(),
@@ -882,21 +1080,63 @@ fn draw_panel<DB: DrawingBackend>(
     // désigner et partir de là quand on les déplace (issue #53).
     let (plot_x, plot_y) = (origin.0 as f64, origin.1 as f64);
     let (plot_w, plot_h) = (size.0 as f64, size.1 as f64);
-    for (axis, anchor, side, area_size) in [
-        (
-            &spec.bottom,
-            bottom_anchor,
-            PlotAxisSide::Bottom,
-            x_label_area,
-        ),
-        (&spec.left, left_anchor, PlotAxisSide::Left, y_label_area),
-        (
-            &spec.right,
-            right_anchor,
-            PlotAxisSide::Right,
-            right_label_area,
-        ),
-    ] {
+    // `side` est l'axe du spec, `place` le bord où il est affiché (un calque
+    // superposé met son axe X en haut et son axe Y à droite, #167).
+    let placed: [(
+        &AxisSpec,
+        Option<TextAnchor>,
+        PlotAxisSide,
+        PlotAxisSide,
+        u32,
+    ); 3] = match overlay {
+        Some(_) => [
+            (
+                &spec.bottom,
+                bottom_anchor,
+                PlotAxisSide::Bottom,
+                PlotAxisSide::Top,
+                top_area,
+            ),
+            (
+                &spec.left,
+                left_anchor,
+                PlotAxisSide::Left,
+                PlotAxisSide::Right,
+                right_area,
+            ),
+            (
+                &spec.right,
+                None,
+                PlotAxisSide::Right,
+                PlotAxisSide::Right,
+                0,
+            ),
+        ],
+        None => [
+            (
+                &spec.bottom,
+                bottom_anchor,
+                PlotAxisSide::Bottom,
+                PlotAxisSide::Bottom,
+                x_area,
+            ),
+            (
+                &spec.left,
+                left_anchor,
+                PlotAxisSide::Left,
+                PlotAxisSide::Left,
+                y_area,
+            ),
+            (
+                &spec.right,
+                right_anchor,
+                PlotAxisSide::Right,
+                PlotAxisSide::Right,
+                if right_active { right_label_area } else { 0 },
+            ),
+        ],
+    };
+    for (axis, anchor, side, place, area_size) in placed {
         let label = axis.display_label();
         if !axis.title_visible || label.is_empty() || anchor.is_some() || area_size == 0 {
             continue;
@@ -905,13 +1145,14 @@ fn draw_panel<DB: DrawingBackend>(
         let text_size = area.estimate_text_size(&label, &colors.title_style)?;
         let half = text_size.1 as f64 / 2.0;
         let area_size = area_size as f64;
-        let (center, rotation) = match side {
+        let (center, rotation) = match place {
             PlotAxisSide::Left => ((plot_x - area_size + half, plot_y + plot_h / 2.0), 90.0),
             PlotAxisSide::Right => (
                 (plot_x + plot_w + area_size - half, plot_y + plot_h / 2.0),
                 -90.0,
             ),
-            _ => (
+            PlotAxisSide::Top => ((plot_x + plot_w / 2.0, plot_y - area_size + half), 0.0),
+            PlotAxisSide::Bottom => (
                 (plot_x + plot_w / 2.0, plot_y + plot_h + area_size - half),
                 0.0,
             ),
@@ -1137,7 +1378,14 @@ fn draw_panel<DB: DrawingBackend>(
     // le cache de `Shape` — donc pas ici, sous peine de rejouer tout le
     // pipeline à chaque mouvement de souris (`architecture-choisie.md`
     // §4.2, tâche 7.3).
-    Ok((drawn, projection))
+    let frame = BaseFrame {
+        area,
+        x_range,
+        y_range,
+        x_scale,
+        y_scale,
+    };
+    Ok((drawn, projection, frame))
 }
 
 /// Les cadrages d'un panneau, dans l'espace transformé, avec leur échelle —
