@@ -430,6 +430,11 @@ pub fn draw_on<DB: DrawingBackend>(
     };
     let mut first_projection: Option<Projection> = None;
 
+    // Toute la figure, en coordonnées d'écran : les textes déplacés (titres,
+    // légende, textes libres) s'y tracent sans être ramenés dans la cellule
+    // ou la zone de tracé (`BackendCoordOnly` rogne chaque point sur le
+    // rectangle de sa zone, #163).
+    let canvas = root.use_screen_coord();
     let layout = grid_of(spec, plot.panels.len());
     let cells = area.split_evenly((layout.rows, layout.columns));
 
@@ -443,7 +448,7 @@ pub fn draw_on<DB: DrawingBackend>(
             drawn.omitted_panels += 1;
             continue;
         }
-        let (panel_drawn, projection) = draw_panel(cell, panel, background)?;
+        let (panel_drawn, projection) = draw_panel(cell, &canvas, panel, background)?;
         if first_projection.is_none() {
             first_projection = Some(projection);
         }
@@ -625,6 +630,7 @@ pub fn grid_of(spec: &PlotSpec, panels: usize) -> Layout {
 /// Trace un panneau dans sa cellule.
 fn draw_panel<DB: DrawingBackend>(
     cell: &DrawingArea<DB, Shift>,
+    canvas: &DrawingArea<DB, Shift>,
     panel: &ResolvedPanel<'_>,
     background: (u8, u8, u8, u8),
 ) -> Result<(DrawnPanel, Projection), DrawingAreaErrorKind<DB::ErrorType>> {
@@ -985,7 +991,7 @@ fn draw_panel<DB: DrawingBackend>(
     let entries: Vec<&Prepared<'_>> = prepared.iter().filter(|s| s.in_legend()).collect();
     let legend_ink = rgba_or(&spec.legend.color, opaque(ink));
     let inscribed = legend::draw(
-        &screen,
+        canvas,
         origin,
         size,
         &spec.legend,
@@ -1038,7 +1044,7 @@ fn draw_panel<DB: DrawingBackend>(
     };
     if let Some(anchor) = panel_title_anchor {
         let pixel = centered(anchor);
-        let measured = draw_centered_text(&screen, &spec.title, &title_style, 0.0, pixel)?;
+        let measured = draw_centered_text(canvas, &spec.title, &title_style, 0.0, pixel)?;
         texts.push(DrawnText {
             target: TextTarget::PanelTitle {
                 row: spec.row,
@@ -1059,7 +1065,7 @@ fn draw_panel<DB: DrawingBackend>(
         let pixel = centered(anchor);
         let colors = AxisColors::of(axis, ink);
         let measured = draw_centered_text(
-            &screen,
+            canvas,
             &axis.display_label(),
             &colors.title_style,
             rotation,
@@ -1133,7 +1139,7 @@ fn draw_panel<DB: DrawingBackend>(
         } else {
             chart.plotting_area().map_coordinate(&point)
         };
-        if let Some(drawn_annotation) = draw_annotation(&screen, annotation, index, pixel, ink)? {
+        if let Some(drawn_annotation) = draw_annotation(canvas, annotation, index, pixel, ink)? {
             drawn.annotations.push(drawn_annotation);
         }
     }

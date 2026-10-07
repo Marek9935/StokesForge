@@ -113,3 +113,44 @@ fn un_texte_hors_du_cadrage_reste_dessine_mais_pas_hors_echelle() {
     log.annotations[0].y = -1.0;
     assert!(trace(&project, log).panels[0].annotations.is_empty());
 }
+
+/// #163 : un texte posé dans les marges est **dessiné** là où il est
+/// désigné. Plotters rogne chaque point sur le rectangle de sa zone
+/// (`BackendCoordOnly`) : tracé sur la zone de tracé, le texte restait collé
+/// à son bord alors que sa boîte de sélection, elle, sortait. Le dernier
+/// `Shape` est le texte (tracé en dernier) ; son centre doit être le centre
+/// désigné.
+#[test]
+fn un_texte_dans_les_marges_est_dessine_la_ou_il_est_designe() {
+    let (project, panel) = projet();
+    for y in [0.0, -1.0] {
+        let mut p = panel.clone();
+        p.annotations[0].text = "test".into();
+        p.annotations[0].y = y;
+        let ctx = egui::Context::default();
+        ctx.set_fonts(stokesforge_render::font_definitions());
+        let measurer = TextMeasurer::default();
+        let choice = FontChoice::default();
+        let cache: FormulaCache<_> = FormulaCache::new();
+        let spec = PlotSpec::empty("").with_panels(Panels::new(vec![p]));
+        let plot = resolve_spec(project.tree(), &spec);
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(480.0, 360.0));
+        let mut shapes = Vec::new();
+        let mut drawn = None;
+        let mut sortie = ctx.run_ui(egui::RawInput::default(), |_ui| {
+            let text = ScreenText::new(&ctx, &measurer);
+            let typst = TypstScreen::new(&ctx, &cache, &choice).expect("polices");
+            drawn = Some(
+                collect_shapes_with_typst(&mut shapes, rect, &text, typst, &plot).expect("tracé"),
+            );
+        });
+        sortie.textures_delta.clear();
+        let centre = drawn.expect("figure").panels[0].annotations[0].center;
+        let boite = shapes.last().expect("une forme").visual_bounding_rect();
+        assert!(
+            (boite.center().y as f64 - centre.1).abs() <= 2.0,
+            "y={y} : texte dessiné en {:?}, désigné en {centre:?}",
+            boite.center()
+        );
+    }
+}
