@@ -23,7 +23,7 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
 | [`stokesforge-commande`](stokesforge-commande/SKILL.md) | ajouter une commande annulable — la seule voie de mutation du modèle | toute création / suppression / modification dans le projet |
 | [`stokesforge-rendu`](stokesforge-rendu/SKILL.md) | tracé, axes, légende, export ; les deux pièges silencieux du dépôt | figure décalée, écran ≠ export, nouvelle série |
 | [`stokesforge-import`](stokesforge-import/SKILL.md) | recettes d'appareil, prévisualisation façon Origin, fichiers mal découpés | CSV/TXT/ASC, nouvel instrument, aperçu faux |
-| [`stokesforge-python`](stokesforge-python/SKILL.md) | pont PyO3, surface `pyst`, console de script ; le seul domaine où un CI vert ne prouve rien | script, GIL, numpy, `PYO3_CONFIG_FILE` |
+| [`stokesforge-python`](stokesforge-python/SKILL.md) | pont PyO3, surface `pyst`, console de script ; le seul domaine que `cargo test --workspace` ne compile pas (travail CI `test-python` dédié) | script, GIL, numpy, `PYO3_CONFIG_FILE` |
 | [`stokesforge-verification`](stokesforge-verification/SKILL.md) | écrire un test au bon endroit, puis vérifier et committer | « teste », « vérifie », « c'est bon ? », « commit » |
 | [`stokesforge-architecture`](stokesforge-architecture/SKILL.md) | répondre sur l'architecture — **pour un chimiste**, par analogies Python | « comment ça marche », « pourquoi ce découpage », « où vit X » |
 | [`stokesforge-fonctionnalites`](stokesforge-fonctionnalites/SKILL.md) | répondre sur ce que le logiciel sait faire — **pour un chimiste** venu d'Origin | « est-ce que je peux… », « comment je fais pour… » |

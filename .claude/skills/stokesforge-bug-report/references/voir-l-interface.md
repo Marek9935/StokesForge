@@ -20,7 +20,7 @@ déclarées dans `crates/stokesforge-app/src/app.rs` (`SCREENSHOT_ENV`, `AUTOQUI
 ```sh
 STOKESFORGE_APP_SCREENSHOT=/tmp/stokesforge.ppm \
 STOKESFORGE_APP_AUTOQUIT_MS=2000 \
-cargo run -p stokesforge-app -- /chemin/vers/projet.stokesforge
+cargo run -p stokesforge-app -- /chemin/vers/projet.stf
 ```
 
 L'application s'ouvre, se photographie, et se ferme toute seule au bout du

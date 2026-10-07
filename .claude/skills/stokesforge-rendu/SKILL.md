@@ -105,6 +105,17 @@ Il n'est pas arbitraire ; chaque étape dépend de ce que la précédente a appr
 5. **peindre** en pixels (`paint`) ;
 6. **la légende** en dernier, mesurée par le même chemin que les axes.
 
+**Calques superposés (#167)** : un `PanelSpec` avec `overlay: Some(OverlaySpec)`
+recouvre le dernier calque ordinaire de sa case ; le pipeline réserve
+l'**union** des aires de graduation de la case (`CellPlan`) pour que tous ses
+calques partagent la même zone de tracé. Un calque s'identifie par son
+**indice dans `PlotSpec::panels`** (`DrawnPanel::index`), jamais par son rang
+dans `DrawnPlot::panels` (qui saute les calques trop petits) ni par
+`(row, column)`. Zoom et déplacement cadrent tous les calques de la case ; la
+molette ou le glisser sur un axe ne cadrent que cette échelle. Détail :
+`docs/rendu.md` (paragraphe « Calques superposés ») ; tests `geometrie.rs`,
+`stokesforge-render-svg/tests/calques.rs`.
+
 Deux décisions déjà arbitrées, à ne pas rejouer : l'échelle log transforme
 **les valeurs**, pas le type de coordonnée (sinon la fonction de tracé
 existerait en huit monomorphisations) ; le rognage se fait **en pixels**, après
@@ -120,6 +131,7 @@ forcément une sur un axe log.
 | `stokesforge-render-egui/tests/formes.rs` | les conventions d'ancrage propres à chaque backend |
 | `stokesforge-render-egui/tests/feathering.rs` | le feathering hors de la clé de cache |
 | `stokesforge-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
+| `stokesforge-render/tests/geometrie.rs`, `stokesforge-render-svg/tests/calques.rs` | placement des calques superposés et de leurs axes en haut / à droite (#167) |
 
 Un test qui compare deux chemins peut passer parce que les deux sont justes —
 ou parce que **les deux sont faux de la même façon**. `mesure.rs` et

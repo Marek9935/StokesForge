@@ -73,6 +73,21 @@ et une seule action part à la validation. Modèle : textes libres, issue #35
 placement, testée sans fenêtre — `stokesforge_render_egui::annotation_field`, issue
 #37), et ne masque pas l'aperçu quand on règle autre chose que le texte (#36).
 
+**Un calque s'identifie par son indice dans `PlotSpec::panels`** (#167),
+jamais par `(row, column)` : plusieurs calques se superposent dans la même
+case (`OverlaySpec`, Graph › New Layer), et le rang dans `DrawnPlot::panels`
+saute les calques trop petits. Une action sans cible cliquée (dépôt, « Send
+to », Add Text, New Layer) prend le **calque actif** du graphe (#161), publié
+dans le `Context` et lu par `graph_window::published_active_panel` — identique
+en fenêtre détachée ; un geste sur un objet (double-clic sur un axe, Object
+Manager) porte l'indice de son calque jusqu'à `PlotEdit::selected_panel`.
+
+Un geste qui ajoute des séries à un graphe **réutilise l'`Action` du dépôt** :
+`state::drop_payload_action` (colonnes) ou `drop_rows_action` (lignes à x',
+#166). « Send to » (`app/graph_targets.rs`, #165) en est le modèle — la liste
+des graphiques ouverts est publiée dans le `Context` à chaque image, seul canal
+commun aux viewports. Aucune seconde voie d'ajout de série.
+
 La ligne de partage `state.rs` / `app` (`app.rs` et `src/app/`) est la colonne
 vertébrale du crate UI : `state` porte toute la logique, pilotée par un enum
 `Action`, et se teste en CI (`tests/shell.rs`) ; `app` ne fait que traduire
@@ -155,10 +170,12 @@ ou par la relecture :
   `object_manager_ui.rs`, Project Manager `project_manager.rs`, console
   `script_console.rs`, dépôt `file_drop.rs`, contenus partagés `contents.rs`,
   menus et barre d'état `menus.rs`, barres de format `format.rs`, dialogues
-  `import_wizard.rs` et `plot_settings.rs` ; fenêtres : `window_chrome.rs`
+  `import_wizard.rs` et `plot_settings.rs`, « Send to » `graph_targets.rs`,
+  copie de la figure `figure_copy.rs` ; fenêtres : `window_chrome.rs`
   (cadre commun), `window_placement.rs`, `window_stack.rs` (pile, repli,
   maximisation, `open_tab`), `window_detach.rs` ; briques communes :
-  `dialogs.rs`, `tab_strip.rs`, `shortcuts.rs`, `tab.rs`. Une entrée de menu
+  `dialogs.rs`, `tab_strip.rs`, `list_row.rs`, `menu_sections.rs`,
+  `shortcuts.rs`, `tab.rs` ; aides de test : `test_support.rs`. Une entrée de menu
   s'écrit dans `menus.rs`, un bouton de barre dans `crate::toolbar` /
   `format.rs`, du code de fenêtre dans le `window_*.rs` concerné — jamais dans
   `ui()` ;
@@ -527,7 +544,7 @@ vérifié par une suite verte : il se vérifie en regardant la fenêtre.
 `stokesforge-app` sait se photographier — procédure dans
 [`../stokesforge-bug-report/references/voir-l-interface.md`](../stokesforge-bug-report/references/voir-l-interface.md).
 Une capture avant et une après valent mieux qu'une affirmation.
-Une fonction pure extraite exprès pour être testable (`app::grid::grid_grip_side`,
+Une fonction pure extraite exprès pour être testable (`app::grid::column_grip_bands`,
 `state::active_graph`, `state::drop_payload_action`) est le motif idiomatique
 du dépôt quand une décision doit vivre près de l'UI : extraire, puis tester.
 
@@ -570,7 +587,8 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] dessin et événements dans le module de la surface (`src/app/<surface>.rs`), code de fenêtre dans le `window_*.rs` concerné, rien de nouveau dans `app.rs` hors orchestration ; surface nouvelle dans son propre module, à imports explicites, ajoutée à la table de `docs/application.md` (§2 octies)
 - [ ] barres de défilement : aucun style local, place lue via `theme::scroll_bar_allocated_width`
 - [ ] onglets par `tab_strip`, listes par `list_row`, titres par `theme::section_title`, gras par `theme::bold`, couleurs d'état par `theme.rs` (§2 ter bis)
-- [ ] icônes : composant `icons.rs`, info-bulle `tr!`, seulement si elle apporte quelque chose (`docs/icones.md`)
+- [ ] icônes : composant `icons.rs`, info-bulle `tr!`, seulement si elle apporte quelque chose (`docs/icones.md`) ; logo prévu de l'action nommé dans le compte rendu (#110)
+- [ ] calque visé par son indice dans `PlotSpec::panels` (calque actif), jamais par `(row, column)` ; ajout de séries par l'`Action` du dépôt
 - [ ] couleurs : `color_picker::color_field` avec l'usage et le `PickerEnv`, vide = automatique
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **stokesforge-commande**)

@@ -1674,17 +1674,6 @@ ne connaît que le nom et des octets bruts (C5, niveau 2,
 
 **Ce qui n'est pas fait**, explicitement hors périmètre de ce chantier :
 
-- **pas de multi-panneaux** — `stokesforge-plot` autorise plusieurs `PanelSpec`
-  par graphe (`row`/`column` dans une grille), mais aucune UI de ce banc
-  n'en crée encore un second ; la fenêtre n'édite donc que
-  `PlotSpec::panels`[0], ce qui revient, pour l'instant, à éditer *le*
-  graphe ;
-- **pas de sélecteur de couleur graphique** — trait et marqueur s'éditent
-  comme un texte `#RRGGBB`, pas comme une roue de couleurs : plus simple,
-  et ça réutilise la même convention de validation (`lost_focus()`) que
-  tous les autres champs texte de la fenêtre plutôt que d'introduire un
-  quatrième mécanisme de débounce pour un widget qui déclenche `changed()`
-  en continu pendant qu'on le glisse ;
 - **pas de largeur de barre ni de nombre de classes d'histogramme** —
   `SeriesSpec::bar_width`/`histogram_bins` existent dans `stokesforge-plot` mais
   n'ont pas de widget ici, laissé à une itération suivante ;

@@ -22,7 +22,7 @@ confirmation pour les choix courants couverts par la demande.
   « enlève » ou « supprime ». Ne passer au code que sur demande explicite
   d'implémentation dans le dépôt ; voir la règle de contexte du skill
   `stokesforge-bug-report`.
-- La licence de `rewriterust` est GPL-3.0-or-later avec la permission de
+- La licence du dépôt est GPL-3.0-or-later avec la permission de
   `LICENSE-EXCEPTION`. Toute nouvelle interface couverte s'ajoute par commit
   explicite à la liste fermée de `docs/licence-et-extensions.md` (`pyst`
   aujourd'hui). Conserver les notices tierces et les actualiser avec les

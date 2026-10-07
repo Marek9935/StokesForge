@@ -28,8 +28,14 @@ comment c'est écrit.
   Cinétique : la ligne **x'** (au-dessus du nom long) donne un instant par
   colonne ; sélectionner des **lignes entières** (numéros de ligne) et attraper
   leur bord haut ou bas les trace, une ligne = une courbe, contre les x' (#164,
-  #166). Sur un graphe qui a déjà un X, un dialogue propose un nouvel axe X
+  #166) ; le clic droit sur ces lignes (ou le menu « Workbook ») propose aussi
+  « Plot ». Sur un graphe qui a déjà un X, un dialogue propose un nouvel axe X
   (défaut), l'axe présent, ou d'annuler.
+  Sans glisser : clic droit sur une sélection de colonnes ou de lignes →
+  « Send to » → le nom d'un graphique ouvert, même dans une autre fenêtre
+  (#165 ; c'est le geste à conseiller sous Wayland, où le glisser ne passe pas
+  d'une fenêtre système à l'autre). Les séries rejoignent le **calque actif**
+  du graphique (celui qu'on a cliqué en dernier, repère numéroté, #161).
 - Donner le **raccourci clavier** quand il existe : c'est souvent la vraie
   réponse à « comment je fais plus vite ».
 - Ne citer un nom de fichier ou de fonction **que si l'utilisateur veut aller
@@ -62,7 +68,8 @@ n'existe pas encore » aussi — c'est la plus facile à se tromper.
 | annulation, macros, ce qu'un Ctrl+Z ramène | `docs/commandes-et-historique.md` | `stokesforge-commands/src/command.rs` |
 | enregistrement, format de fichier, compatibilité | `docs/persistance.md` | `stokesforge-persistence` |
 | tracé, axes, échelles, légende, export SVG/PDF/PNG, formules | `docs/rendu.md` | `stokesforge-render` |
-| import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs` |
+| import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, `stokesforge-importer` (conversion en colonnes) |
+| menus, clics droits, ce qui est grisé ou absent | `docs/menus.md` | `stokesforge-app/src/app/menus.rs` et la peinture partagée de la surface |
 | scripts Python, surface `pyst` | `docs/python-et-script.md` | `stokesforge-script`, `stokesforge-python` |
 
 ## Ce qui n'existe pas — le dire clairement
@@ -77,20 +84,27 @@ du parseur/canal et le démarrage natif ne prouvent pas le geste réel de dépô
 consulter le statut et le protocole de `vendor/winit/STOKESFORGE.md` avant
 d'affirmer sa validation sur un compositeur.
 
-`stokesforge-app` est explicitement un **banc d'intégration**, pas l'interface
-finale : la grille éditable à délégués, le panneau de propriétés et un système
-de graphes complet seront repris entièrement plus tard. Plusieurs manques sont
-donc **voulus à ce stade**, pas des oublis. Les principaux, écrits dans
-`docs/application.md` :
+`stokesforge-app` reste décrit comme un **banc d'intégration**, mais ses
+capacités avancent vite : une liste de manques recopiée ici vieillit plus vite
+que le code. Ne jamais affirmer un manque sans `rg` (le sélecteur de couleur
+et les calques multiples, longtemps listés ici comme absents, existent). Les
+manques encore vérifiés au 2026-10-08, écrits dans `docs/application.md` :
 
 - l'éditeur de matrice est un espace réservé ;
-- pas de sélecteur de couleur graphique (les couleurs se tapent en `#RRGGBB`) ;
-- pas de multi-panneaux dans la fenêtre des propriétés des graphes ;
-- pas de largeur de barre ni de nombre de classes d'histogramme dans ce
-  panneau ;
+- pas de largeur de barre ni de nombre de classes d'histogramme dans la
+  fenêtre des propriétés (les champs existent dans le modèle) ;
+- pas d'ajout ni de suppression de série ou de calque **depuis** la fenêtre
+  des propriétés (glisser, « Plot », « Send to », Graph › New Layer) ;
 - les fenêtres ouvertes et leur mode ne sont pas restaurés au démarrage (seules
   position et taille le sont) ;
 - une seule cellule éditable à la fois par fenêtre.
+
+Ce qui existe et qu'on croirait absent : un **sélecteur de couleur** (palette,
+couleurs enregistrées, nuancier, opacité) sur tout réglage de couleur ; des
+**calques superposés** à la manière d'Origin — « Graph » → « New Layer » →
+« Top X (Linked Y) », « Right Y (Linked X) » ou « Top X, Right Y » (#167),
+avec les rôles de colonne X2/Y2 ; les propriétés s'ouvrent sur le calque
+visé.
 
 **Langue de l'interface** : l'application démarre en **anglais** ; le français
 se choisit par « File » → « Language » → « Français » (tout de suite, sans
@@ -105,7 +119,11 @@ droit sur une **courbe** (elle se sélectionne) → « Show Data » (ouvre le
 classeur de *cette* courbe), « Rename », « Move Up/Down », « Hide », « Delete »,
 « Properties… » ; sur le **fond** ou la zone de tracé → « Add Text »,
 « Insert Object » (Rectangle, Ellipse, Line, Arrow, posé là où on a cliqué),
-« Export », « Properties… ». « Reset Zoom » n'est plus au clic droit : barre
+« Export » (sous-menu : Export Graph…, Copy Graph), « Properties… ».
+Sur une sélection de **colonnes entières** d'un classeur → « Plot », « Send to »
+(un graphique ouvert), presse-papiers, type et rôle, effacer ; sur des
+**lignes entières** d'une feuille à x', « Plot » et « Send to » tracent les
+lignes (une courbe par ligne). « Reset Zoom » n'est plus au clic droit : barre
 d'outils, menu « Graph », bouton du graphe zoomé ou double-clic. Le même menu
 d'objet sert dans l'Object Manager et sous « Graph » → « Selection ».
 Dans le Project Manager, un **dossier** se renomme, se colle et se supprime au
@@ -118,14 +136,20 @@ la zone de tracé → « Add Text » (ou menu « Graph »). On tape le
 texte sur place, formules comprises ; la petite barre au-dessus règle couleur,
 taille et rotation ; Entrée valide, Échap annule. Double-clic pour le
 modifier, glisser pour le déplacer, Suppr pour le retirer. Le texte est
-**attaché aux données** : il suit le zoom et disparaît si son point sort du
-cadrage. Pas encore de cadre ni de fond autour du texte.
+**attaché aux données** : il suit le zoom, et reste tracé même quand son point
+sort du cadrage — on peut le poser dans les marges (#163) ; seul un point ≤ 0
+sur un axe logarithmique ne s'affiche pas. Pas encore de cadre ni de fond
+autour du texte.
 
-**Exporter un graphe** : menu « Graph » → « Export Graph… »
-(Ctrl+E), ou clic droit sur la figure. SVG, PDF ou PNG selon l'extension du
-fichier ; l'export reprend le **zoom affiché** et les formules. La résolution
-PNG se choisit dans « Graph » → « PNG Resolution » (×4 par
-défaut). `docs/application.md` § Propriétés des graphiques.
+**Exporter un graphe** : menu « Graph » → « Export » → « Export Graph… »
+(Ctrl+E), ou clic droit sur la figure → « Export ». SVG, PDF ou PNG selon
+l'extension du fichier ; l'export reprend le **zoom affiché** et les formules.
+Le même sous-menu règle la résolution PNG (« PNG Resolution », ×4 par défaut)
+et le texte du SVG (« SVG Text » : texte modifiable par défaut, ou contours,
+#162). **Coller la figure dans une autre application** (Word, Inkscape…) :
+Ctrl+C sur le graphique sans objet sélectionné, ou « Copy Graph » dans ce
+même sous-menu — SVG, PNG et PDF à la fois (#149).
+`docs/application.md` § Propriétés des graphiques.
 
 Quatre comportements ressemblent à des manques et n'en sont pas :
 

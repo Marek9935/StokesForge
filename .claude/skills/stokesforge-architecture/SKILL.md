@@ -61,8 +61,12 @@ acteur, *backend*, tessellation.
   ne sont pas à fusionner par principe. Pour un doublon volontaire, lire sa
   justification et distinguer dette de maintenance et bug reproduit.
 - Éprouver la portée des garde-fous : les tests `no_ui_dependency.rs` lisent
-  actuellement `[dependencies]`, pas les sections conditionnelles
-  `[target.…dependencies]`. Leur succès ne prouve pas toutes les frontières.
+  les manifestes par `stokesforge-arch-guard` (#24), qui compte
+  `[dependencies]`, `[build-dependencies]`, leurs variantes conditionnelles
+  `[target.…]`, les optionnelles et le nom réel d'une dépendance renommée, mais
+  pas `[dev-dependencies]`. Ils ne voient que **leur** crate et sa liste
+  blanche : un crate sans `no_ui_dependency.rs` n'est pas gardé, et le graphe
+  transitif se vérifie par `cargo metadata`.
 - Consulter les issues GitLab ouvertes **et fermées** avant de signaler.
   Pour une demande de diagnostic seul, créer les issues autorisées avec
   preuves, portée, priorité et cohérence documentaire ; ne pas corriger le
@@ -89,14 +93,17 @@ ouvrir de fenêtre.
 | `stokesforge-commands` | les actions annulables — la pile Ctrl+Z |
 | `stokesforge-persistence` | lire et écrire le fichier `.stf` |
 | `stokesforge-session` | le gardien : un seul endroit au monde a le droit de modifier le projet |
-| `stokesforge-import` | lire les CSV/TXT/ASC des appareils |
+| `stokesforge-import` | lire les CSV/TXT/ASC des appareils (ne connaît rien du projet) |
+| `stokesforge-importer` | transformer ce qui a été lu en colonnes du projet — la même conversion pour la fenêtre, la ligne de commande et les scripts |
 | `stokesforge-render` | **tout** le dessin, indépendamment de la destination |
 | `stokesforge-render-egui` | poser ce dessin à l'écran |
 | `stokesforge-render-svg` | poser ce même dessin dans un SVG, un PDF, un PNG |
+| `stokesforge-clipboard` | offrir une figure au presse-papiers du système (SVG, PNG, PDF à la fois) |
 | `stokesforge-script` / `stokesforge-python` | exécuter des scripts Python qui pilotent le projet |
 | `stokesforge-app` | la fenêtre |
-| `stokesforge-cli` | un binaire sans interface, pour vérifier que tout se lie |
+| `stokesforge-cli` | la ligne de commande : `import` (fichier d'appareil → `.stf`) et, avec Python, `run` (exécuter un script sans fenêtre) |
 | `stokesforge-robustesse` | 21 batteries de tests qui poussent le reste à ses limites |
+| `stokesforge-arch-guard` | outil de test : lit les manifestes pour vérifier qu'aucun paquet ne dépend de ce qu'il ne doit pas connaître |
 
 **Les trois idées qui expliquent presque tout le reste** :
 
@@ -140,7 +147,11 @@ une règle tenue par la relecture se perd.
 | l'acteur, la concurrence | `docs/session.md` |
 | le tracé, les axes, l'export | `docs/rendu.md` |
 | Python embarqué, scripts | `docs/python-et-script.md` |
-| la fenêtre, la grille, les raccourcis | `docs/application.md` |
+| la fenêtre, la grille, les raccourcis | `docs/application.md` (§ Découpage du code : un module par surface) |
+| l'ordre et le rangement des menus | `docs/menus.md` |
+| les mots de l'interface, la traduction | `docs/textes-interface.md` |
+| les icônes | `docs/icones.md` |
+| la licence, ce que couvre l'exception `pyst` | `docs/licence-et-extensions.md` |
 | les tests et la CI | `docs/tests.md` |
 | le *pourquoi* d'une décision précise | le commentaire de tête (`//!`) du module concerné — c'est là qu'il vit, jamais dans les pages `docs/` |
 | une option **écartée** et sa raison | `docs/archive/` (non maintenu : ne jamais le présenter comme l'état actuel) |

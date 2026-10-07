@@ -128,7 +128,8 @@ Deux conséquences assumées : l'initialisation est explicite et paresseuse
 — source connue de plantages en sortie, sans bénéfice pour un processus qui se
 termine ; les `atexit` Python ne s'exécutent donc pas.
 
-`stokesforge-pyhello` existe pour prouver que cette isolation tient **une fois
+Le binaire `stokesforge-pyhello` (`stokesforge-python/src/bin/pyhello.rs`, feature
+`python`) existe pour prouver que cette isolation tient **une fois
 empaquetée** (`scripts/pyhello-dist.sh`, environnement nettoyé). Un changement
 de configuration d'initialisation se vérifie là, pas seulement sous `cargo test`.
 
@@ -170,7 +171,9 @@ porter aussi.
 
 `pyst.plot(y, x=None, *, graph=None, name=None, parent=None, **options)` crée
 un `PlotSpec` par `AddGraph`, ou ajoute une série au premier panneau par
-`SetPlotSpec`. Réutiliser `stokesforge-plot` : palette, couleurs, axes et styles ;
+`SetPlotSpec` — le premier calque, indice 0 de `PlotSpec::panels` (un calque
+s'identifie par son indice, jamais par `(row, column)`, #167). Réutiliser
+`stokesforge-plot` : palette, couleurs, axes et styles ;
 pas de dépendance de production à un moteur de rendu. Valider les poignées
 sur un seul instantané, puis de nouveau après acquisition de la macro.
 `add_shape` et `remove_shape` (#76) passent eux aussi par le contexte :

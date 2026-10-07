@@ -21,7 +21,9 @@ Le crate est **volontairement pur** : zéro dépendance UI, zéro dépendance à
 sortie est le plus simple qui existe — des `f64`, `NaN` pour une valeur
 manquante — précisément pour rester indépendant.
 
-C'est `stokesforge-app` qui convertit vers `stokesforge_core::Column`, de son côté.
+C'est `stokesforge-importer` qui convertit vers `stokesforge_core::Column`
+(`plan_import`, `make_import_column`), pour l'application, le CLI et
+`pyst.import_file` à la fois — jamais un consommateur de son côté.
 Conséquence pratique : **ne jamais faire entrer un type de `stokesforge-core` dans
 `stokesforge-import`** pour se simplifier la vie. Si une information manque à la
 conversion, elle s'ajoute au vocabulaire propre du crate, pas en important le
@@ -43,12 +45,14 @@ réglage nouveau ajoute sa clé (libellé de 1 à 3 mots, infobulle en attribut
 fichier sont des données : jamais traduits. Le vocabulaire de `stokesforge-import`
 (`recipe`, `SubheaderRoles`…) reste celui du code et ne passe jamais à l'écran.
 
-Et côté application : l'import écrit dans le projet, donc il passe par une
-**commande annulable** comme tout le reste (skill **stokesforge-commande**). Un
-import qu'on ne peut pas annuler serait la seule écriture non réversible du
-logiciel.
+Et côté application (et `pyst`) : l'import écrit dans un projet vivant, donc il
+passe par une **commande annulable** comme tout le reste (skill
+**stokesforge-commande**). Un import qu'on ne peut pas annuler serait la seule
+écriture non réversible du logiciel. Seul `stokesforge-cli import` construit un
+`Project` neuf directement, sans session ni historique : il n'y a rien à
+annuler.
 
-## Les quatre modules
+## Les modules
 
 | Module | Rôle |
 |---|---|
@@ -60,6 +64,9 @@ logiciel.
 | `builtin`, `choose` | modèles fournis d'office, et choix automatique d'un modèle (extension, nom, signature de contenu) |
 | `preview` | (même découpage que `parse` : séparateur résolu sur la même ligne, virgule exclue si décimale virgule — test `accord_apercu_import.rs`, issue #23) classe chaque ligne en rôle (en-tête principal, sous-en-tête et son rôle, donnée, pied) pour l'aperçu en direct |
 | `store` | enregistre et recharge les recettes (JSON) |
+| `decode` | octets → texte avant tout découpage (UTF-8, ou page de code Windows des logiciels d'appareil, `°C` en `0xB0`) |
+| `metadata` | l'en-tête (et le pied si demandé) en lignes clé / valeur ; `stokesforge-importer` les convertit en `MetaLine` |
+| `recent` | fichiers importés récemment et dossier mémorisé (`import_recent.json`), jamais de panique sur un fichier corrompu |
 
 `preview` existe pour que la fenêtre d'import montre **en direct** comment un
 fichier va être découpé pendant que l'utilisateur règle la recette — comme

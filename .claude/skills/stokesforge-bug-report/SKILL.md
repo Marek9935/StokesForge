@@ -114,11 +114,11 @@ volontaire » **ne suffit pas** à classer la demande en évolution. Il faut lir
 Cas réel (historique : la prise par le bord de la sélection, #160, a depuis
 remplacé cette zone) : la zone de prise du glisser-déposer était confinée au
 bord de la grille, et le commentaire (`grid_contents`, `src/app/grid.rs`, près
-de `COLUMN_GRIP_WIDTH` ; `app.rs:4308-4319` à l'époque) explique que couvrir **tout**
+de l'ancienne constante `COLUMN_GRIP_WIDTH` ; `app.rs:4308-4319` à l'époque) explique que couvrir **tout**
 `grid_rect` écraserait le glisser d'extension de sélection. L'utilisateur
 demandait une bande autour de **la sélection** — une troisième option, que le
 commentaire n'examine pas, et qui reste possible puisqu'une cellule fait plus
-du double de `COLUMN_GRIP_WIDTH`. La classer « évolution, comportement
+du double de cette largeur. La classer « évolution, comportement
 délibéré » était aussi faux que la classer « bug » sans rien lire.
 
 Donc : quand la demande de l'utilisateur **diffère de l'option rejetée**,

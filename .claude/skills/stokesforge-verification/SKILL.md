@@ -32,7 +32,7 @@ tester explicitement**, sinon elle valide du code mort.
 |---|---|
 | `stokesforge-python`, `stokesforge-script`, la surface `pyst` | `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE`) |
 | l'intégration Python de `stokesforge-app` ou le CLI `run` | `scripts/python-test.sh` couvre ces crates ; appliquer son environnement à Clippy ; `scripts/cli-dist.sh` si l'empaquetage CLI change |
-| les formules Typst, `stokesforge-render::formula` | rien de plus : `cargo test --workspace` les couvre (dépendance ferme) ; l'export PDF/PNG reste hors Typst tant que l'issue #34 n'est pas faite |
+| les formules Typst, `stokesforge-render::formula` | rien de plus : `cargo test --workspace` les couvre (dépendance ferme), export SVG/PDF/PNG compris (#34) ; le texte Typst d'un SVG reste du texte `<text>` par défaut (#162, `stokesforge-render-svg/tests/typst.rs`) |
 | une reproduction `#[ignore]` de robustesse | `cargo test -p stokesforge-robustesse -- --ignored` |
 | une dépendance, une ressource ou le runtime distribué | `cargo deny --locked check licenses` et génération des notices ; outils figés et packaging dans `docs/licence-et-extensions.md` ; actualiser les notices natives avec le verrou Python |
 | l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `STOKESFORGE_APP_SCREENSHOT` + `STOKESFORGE_APP_AUTOQUIT_MS`, voir [`../stokesforge-bug-report/references/voir-l-interface.md`](../stokesforge-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence. Pour un texte d'interface (nouveau libellé, zone convertie), refaire la capture avec `STOKESFORGE_LANG=en-XA` : un texte sans `[[ ]]` a échappé au catalogue, un `]]` manquant est un texte tronqué |
@@ -48,7 +48,7 @@ tester explicitement**, sinon elle valide du code mort.
 
 Logique d'interface : `stokesforge-app/tests/shell.rs`, sans fenêtre. Si une
 décision doit vivre près de l'UI, l'extraire en **fonction pure** puis la
-tester — c'est l'idiome du dépôt (`app::grid::grid_grip_side`,
+tester — c'est l'idiome du dépôt (`app::grid::column_grip_bands`,
 `state::active_graph`, `state::drop_payload_action`). Un geste **peint** (clic,
 touche, disposition lue dans les formes) se teste dans le module `tests` de sa
 surface (`src/app/<surface>.rs`), sans fenêtre ; le module `tests` d'`app.rs`
@@ -77,7 +77,7 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 
 | Test | Ce qu'il tient |
 |---|---|
-| `*/tests/no_ui_dependency.rs` | liste blanche de la section `[dependencies]` ; vérifier aussi les dépendances conditionnelles et les renommages, que ces tests ne couvrent pas actuellement (invariant 2) |
+| `*/tests/no_ui_dependency.rs` | liste blanche des dépendances du crate, lues par `stokesforge-arch-guard` (#24) : `[dependencies]`, `[build-dependencies]`, variantes conditionnelles `[target.…]`, optionnelles, nom réel des renommées ; `[dev-dependencies]` exclues (invariant 2). Un crate sans ce fichier n'est pas gardé |
 | `stokesforge-render-svg/tests/frontiere.rs` | l'export se teste sans serveur graphique |
 | `stokesforge-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
 | `stokesforge-render-egui/tests/accord.rs` | écran et export aux mêmes pixels |
