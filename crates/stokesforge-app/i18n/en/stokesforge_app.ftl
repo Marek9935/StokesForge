@@ -722,9 +722,9 @@ workbook-role-label = Label
 workbook-role-none = None
 workbook-plot-menu = Plot
 workbook-send-to-graph = Send to { $graph }
-    .hint = Adds the selected columns to a graph in another window
+    .hint = Adds the selected columns to an open graph
 workbook-send-to-graph-menu = Send to Graph
-    .hint = Adds the selected columns to a graph in another window
+    .hint = Adds the selected columns to an open graph
 
 # Workbook: grid, sheet tabs, empty states
 workbook-column-add = Add Column

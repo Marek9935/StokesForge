@@ -714,9 +714,9 @@ workbook-role-label = Étiquette
 workbook-role-none = Aucun
 workbook-plot-menu = Tracer
 workbook-send-to-graph = Envoyer vers { $graph }
-    .hint = Ajoute les colonnes sélectionnées à un graphique d'une autre fenêtre
+    .hint = Ajoute les colonnes sélectionnées à un graphique ouvert
 workbook-send-to-graph-menu = Envoyer vers un graphique
-    .hint = Ajoute les colonnes sélectionnées à un graphique d'une autre fenêtre
+    .hint = Ajoute les colonnes sélectionnées à un graphique ouvert
 
 # Classeur : grille, onglets de feuilles, états vides
 workbook-column-add = Ajouter une colonne

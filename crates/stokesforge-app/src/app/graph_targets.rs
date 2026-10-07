@@ -1,23 +1,17 @@
-//! « Envoyer vers un graphique » : le contournement du glisser de colonnes
-//! entre deux fenêtres système (#165).
+//! « Envoyer vers un graphique » : envoyer les colonnes sélectionnées vers un
+//! graphique ouvert, attaché ou détaché (#165).
 //!
-//! Le glisser de colonnes (#160) est un glisser de pointeur egui : sous
-//! Wayland, la fenêtre source garde le pointeur tant que le bouton est pris,
-//! et un graphique d'une **autre fenêtre** ne reçoit jamais le relâchement.
-//! Le clic droit sur les lettres des colonnes (et le menu Classeur) propose
-//! donc, à côté de « Plot », d'envoyer la sélection vers un graphique ouvert
-//! **dans une autre fenêtre que le classeur** — la même
-//! [`Action::AddSeriesToGraph`] que le dépôt.
+//! Le glisser de colonnes (#160) ne passe pas d'une fenêtre système à l'autre
+//! sous Wayland (la fenêtre source garde le pointeur tant que le bouton est
+//! pris) : plutôt qu'un vrai glisser-déposer du système, le clic droit sur une
+//! sélection de colonnes ou de lignes entières — lettres, numéros de ligne,
+//! cases — et le menu Classeur proposent, à côté de « Plot », **chaque
+//! graphique ouvert** : la même [`Action::AddSeriesToGraph`] que le dépôt.
+//! Sans graphique ouvert, l'entrée est absente (grammaire de `docs/menus.md`).
 //!
-//! - classeur dans la fenêtre principale : les graphiques **détachés** ;
-//! - classeur détaché : tous les graphiques ouverts (ceux de la fenêtre
-//!   principale et les autres détachés).
-//!
-//! L'entrée est **absente** quand aucune fenêtre ne justifie le contournement
-//! (grammaire de `docs/menus.md`). La disposition des fenêtres appartient à
-//! `StokesForgeApp` ; elle est publiée dans le `Context` à chaque image
-//! ([`publish`]), seul canal commun aux viewports et à leurs états dupliqués,
-//! comme les couleurs enregistrées.
+//! La liste des graphiques ouverts appartient à `StokesForgeApp` ; elle est
+//! publiée dans le `Context` à chaque image ([`publish`]), seul canal commun
+//! aux viewports et à leurs états dupliqués, comme les couleurs enregistrées.
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
@@ -26,58 +20,49 @@ use super::tab::{tab_title_from_tree, Tab};
 use crate::state::{drop_payload_action, Action, ColumnDragPayload};
 use crate::tr;
 
-/// Les graphiques ouverts et les classeurs détachés, tels que la fenêtre
-/// principale les voit.
+/// Les graphiques ouverts, dans l'ordre : attachés puis détachés.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct WindowLayout {
-    /// `(graphique, détaché ?)`, dans l'ordre d'ouverture.
-    graphs: Vec<(NodeId, bool)>,
-    detached_books: Vec<NodeId>,
+struct OpenGraphs(Vec<NodeId>);
+
+fn open_graphs_id() -> egui::Id {
+    egui::Id::new("stokesforge_open_graphs_for_send_to_graph")
 }
 
-fn layout_id() -> egui::Id {
-    egui::Id::new("stokesforge_window_layout_for_send_to_graph")
-}
-
-/// Publie la disposition des fenêtres : appelée une fois par image par
+/// Publie les graphiques ouverts : appelée une fois par image par
 /// `StokesForgeApp::ui`.
 pub(super) fn publish<'a>(
     ctx: &egui::Context,
     floating: &[Tab],
     detached: impl Iterator<Item = &'a Tab>,
 ) {
-    let mut layout = WindowLayout::default();
-    for tab in floating {
-        if let Tab::Graph(graph) = tab {
-            layout.graphs.push((*graph, false));
-        }
-    }
-    for tab in detached {
-        match tab {
-            Tab::Graph(graph) => layout.graphs.push((*graph, true)),
-            Tab::Book(book) => layout.detached_books.push(*book),
-            _ => {}
-        }
-    }
-    ctx.data_mut(|data| data.insert_temp(layout_id(), layout));
+    let mut graphs: Vec<NodeId> = floating
+        .iter()
+        .filter_map(|tab| match tab {
+            Tab::Graph(graph) => Some(*graph),
+            _ => None,
+        })
+        .collect();
+    let mut detached: Vec<NodeId> = detached
+        .filter_map(|tab| match tab {
+            Tab::Graph(graph) => Some(*graph),
+            _ => None,
+        })
+        .collect();
+    // `detached` vient d'une `HashMap` : un ordre stable évite un menu qui
+    // change d'une image à l'autre.
+    detached.sort();
+    graphs.extend(detached);
+    ctx.data_mut(|data| data.insert_temp(open_graphs_id(), OpenGraphs(graphs)));
 }
 
-/// Les graphiques vers lesquels envoyer des colonnes de `sheet`, dans une
-/// autre fenêtre que son classeur.
-fn targets(ctx: &egui::Context, tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
-    let layout: WindowLayout = ctx
-        .data(|data| data.get_temp(layout_id()))
+/// Les graphiques ouverts qui existent encore dans l'arbre.
+fn targets(ctx: &egui::Context, tree: &Tree) -> Vec<NodeId> {
+    let open: OpenGraphs = ctx
+        .data(|data| data.get_temp(open_graphs_id()))
         .unwrap_or_default();
-    let book_detached = tree
-        .parent(sheet)
-        .ok()
-        .flatten()
-        .is_some_and(|book| layout.detached_books.contains(&book));
-    layout
-        .graphs
-        .iter()
-        .filter(|(graph, detached)| (book_detached || *detached) && tree.node(*graph).is_some())
-        .map(|(graph, _)| *graph)
+    open.0
+        .into_iter()
+        .filter(|graph| tree.node(*graph).is_some())
         .collect()
 }
 
@@ -93,7 +78,7 @@ pub(super) fn send_to_graph_menu(
     if columns.is_empty() {
         return;
     }
-    let targets = targets(ui.ctx(), tree, sheet);
+    let targets = targets(ui.ctx(), tree);
     if targets.is_empty() {
         return;
     }
@@ -131,46 +116,35 @@ pub(super) fn send_to_graph_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::test_support::colonnes_xy;
     use stokesforge_core::Project;
     use stokesforge_plot::PlotSpec;
 
-    /// Les cibles dépendent de la fenêtre du classeur : seuls les graphiques
-    /// détachés quand il est dans la fenêtre principale, tous quand il est
-    /// détaché, aucun quand tout est dans la même fenêtre.
+    /// Tous les graphiques ouverts sont des cibles, attachés d'abord puis
+    /// détachés ; un classeur ou un graphique disparu de l'arbre n'en est pas
+    /// une, et sans graphique ouvert il n'y a pas de cible.
     #[test]
-    fn les_cibles_sont_les_graphiques_d_une_autre_fenetre_que_le_classeur() {
+    fn tous_les_graphiques_ouverts_sont_des_cibles() {
         let mut project = Project::new("Cibles").unwrap();
         let root = project.root();
-        let (x, _) = colonnes_xy(&mut project);
-        let sheet = project.tree().parent(x).unwrap().unwrap();
-        let book = project.tree().parent(sheet).unwrap().unwrap();
         let docked = project.add_graph(root, None, PlotSpec::empty("A")).unwrap();
         let detached = project.add_graph(root, None, PlotSpec::empty("B")).unwrap();
+        let book = project.add_empty_workbook(root, None).unwrap();
         let ctx = egui::Context::default();
         let tree = project.tree();
-        let cibles = |floating: &[Tab], detached: &[Tab]| {
-            publish(&ctx, floating, detached.iter());
-            targets(&ctx, tree, sheet)
-        };
 
-        // Tout dans la fenêtre principale : le glisser suffit, pas d'entrée.
-        assert!(cibles(&[Tab::Graph(docked), Tab::Book(book)], &[]).is_empty());
-        // Un graphique détaché : lui seul, pas celui de la fenêtre principale.
-        assert_eq!(
-            cibles(
-                &[Tab::Graph(docked), Tab::Book(book)],
-                &[Tab::Graph(detached)]
-            ),
-            vec![detached]
+        publish(&ctx, &[Tab::Book(book)], [].iter());
+        assert!(targets(&ctx, tree).is_empty());
+
+        publish(
+            &ctx,
+            &[Tab::Graph(docked), Tab::Book(book)],
+            [Tab::Graph(detached), Tab::Book(book)].iter(),
         );
-        // Classeur détaché : tous les graphiques ouverts.
-        assert_eq!(
-            cibles(
-                &[Tab::Graph(docked)],
-                &[Tab::Book(book), Tab::Graph(detached)]
-            ),
-            vec![docked, detached]
-        );
+        assert_eq!(targets(&ctx, tree), vec![docked, detached]);
+
+        // Un graphique supprimé de l'arbre reste ouvert un instant dans la
+        // liste publiée : il n'est pas proposé.
+        publish(&ctx, &[Tab::Graph(NodeId::from_raw(9999))], [].iter());
+        assert!(targets(&ctx, tree).is_empty());
     }
 }

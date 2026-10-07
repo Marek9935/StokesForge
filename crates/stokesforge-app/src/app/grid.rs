@@ -679,6 +679,33 @@ fn column_properties_menu(
     }
 }
 
+/// Le clic droit sur une case de la grille (cellule, numéro de ligne, champ
+/// d'en-tête, coin). Sur une sélection de **colonnes ou de lignes entières**,
+/// c'est le menu des lettres de colonnes — Plot, Send to, presse-papiers, type
+/// et rôle, effacer — appliqué aux colonnes de la sélection ; sur une plage de
+/// cellules ou de champs, presse-papiers et effacer seulement.
+fn selection_context_menu(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+) {
+    let whole = state
+        .selection(sheet)
+        .filter(|selection| selection.is_columns() || selection.is_full_rows())
+        .map(|selection| selection.columns(state.tree(), sheet));
+    match whole {
+        Some(columns) if !columns.is_empty() => {
+            column_properties_menu(ui, state, actions, sheet, &columns);
+        }
+        _ => {
+            if let Some(menu) = state.grid_menu(sheet) {
+                grid_edit_menu(ui, state, actions, sheet, &menu);
+            }
+        }
+    }
+}
+
 /// Ajout disponible même sans sélection, commun au classeur et au vide de grille.
 fn add_column_entry(ui: &mut egui::Ui, sheet: NodeId, actions: &mut Vec<Action>) {
     if ui.button(tr!("workbook-column-add")).clicked() {
@@ -1019,11 +1046,7 @@ fn header_field_widget(
             state.select_header_field(sheet, column, field);
         }
         // Calcul paresseux, pour la même raison que dans `cell_widget`.
-        response.context_menu(|ui| {
-            if let Some(menu) = state.grid_menu(sheet) {
-                grid_edit_menu(ui, state, actions, sheet, &menu);
-            }
-        });
+        response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
     });
 }
 
@@ -1086,11 +1109,7 @@ fn row_number_header_widget(
                 // `column_header_widget`).
                 state.select_all(sheet);
             }
-            response.context_menu(|ui| {
-                if let Some(menu) = state.grid_menu(sheet) {
-                    grid_edit_menu(ui, state, actions, sheet, &menu);
-                }
-            });
+            response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
         });
         header_row_label_widget(
             ui,
@@ -1219,11 +1238,7 @@ fn header_row_label_widget(
         // `grid_menu` **dans** la fermeture, jamais avant — même raison que
         // dans `cell_widget`/`row_number_widget` : calculée dehors, elle
         // serait recalculée à chaque image pour chacune des 4 rangées.
-        response.context_menu(|ui| {
-            if let Some(menu) = state.grid_menu(sheet) {
-                grid_edit_menu(ui, state, actions, sheet, &menu);
-            }
-        });
+        response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
     });
 }
 
@@ -1952,11 +1967,7 @@ fn row_number_widget(
     // `grid_menu` **dans** la fermeture, jamais avant — même raison que dans
     // `cell_widget` : calculée dehors, elle serait recalculée à chaque image
     // pour chaque ligne visible.
-    response.context_menu(|ui| {
-        if let Some(menu) = state.grid_menu(sheet) {
-            grid_edit_menu(ui, state, actions, sheet, &menu);
-        }
-    });
+    response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
 }
 
 /// Peint une cellule et récolte les actions qu'elle produit.
@@ -2222,11 +2233,7 @@ fn display_cell_widget(
     // parcourt l'arbre (`Selection::columns`), ce qui en ferait un coût
     // quadratique en nombre de colonnes sur une grille qui ne fait que
     // s'afficher.
-    response.context_menu(|ui| {
-        if let Some(menu) = state.grid_menu(sheet) {
-            grid_edit_menu(ui, state, actions, sheet, &menu);
-        }
-    });
+    response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
 }
 
 /// Vrai si l'appui en cours a commencé dans `rect`. L'extension de sélection
@@ -3222,6 +3229,59 @@ mod tests {
             !textes.contains(&decaler),
             "« Supprimer et décaler » n'a rien à faire dans l'en-tête : {textes:?}"
         );
+    }
+
+    /// Sur une sélection de colonnes (ou de lignes) entières, le clic droit
+    /// d'une cellule est celui des lettres : Plot, type et rôle comprises ; sur
+    /// une cellule seule, il reste celui de l'édition (témoin).
+    #[test]
+    fn le_clic_droit_d_une_selection_de_colonnes_ou_de_lignes_est_celui_des_lettres() {
+        let propres_aux_lettres = [tr!("workbook-plot-menu"), tr!("column-type")];
+
+        let mut colonnes = Banc::new();
+        colonnes
+            .state
+            .select_column(colonnes.sheet, colonnes.columns[0]);
+        colonnes.image(Vec::new());
+        colonnes.clic_bouton("102", egui::PointerButton::Secondary);
+        let textes = colonnes.textes();
+        for entree in propres_aux_lettres
+            .iter()
+            .chain([&tr!("action-copy"), &tr!("action-clear")])
+        {
+            assert!(
+                textes.contains(entree),
+                "colonne sélectionnée : {entree:?} absent de {textes:?}"
+            );
+        }
+        assert!(
+            colonnes
+                .state
+                .is_column_selected(colonnes.sheet, colonnes.columns[0]),
+            "le clic droit dans la sélection la laisse intacte"
+        );
+
+        let mut lignes = Banc::new();
+        lignes.state.select_row(lignes.sheet, 1);
+        lignes.image(Vec::new());
+        lignes.clic_bouton("102", egui::PointerButton::Secondary);
+        let textes = lignes.textes();
+        for entree in &propres_aux_lettres {
+            assert!(
+                textes.contains(entree),
+                "ligne sélectionnée : {entree:?} absent de {textes:?}"
+            );
+        }
+
+        let mut cellule = Banc::new();
+        cellule.clic_bouton("102", egui::PointerButton::Secondary);
+        let textes = cellule.textes();
+        for entree in &propres_aux_lettres {
+            assert!(
+                !textes.contains(entree),
+                "témoin : une cellule seule n'a pas {entree:?} : {textes:?}"
+            );
+        }
     }
 
     /// Choisir « Effacer » dans le menu d'une cellule pousse le vidage de la
