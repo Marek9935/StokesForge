@@ -13,7 +13,16 @@
 //! - `aucun_import_global_hors_des_tests` : imports explicites, aucun
 //!   `use …::*` hors du code de test (décision 2 de #115), sans dérogation ;
 //! - `aucun_separateur_brut_dans_un_menu` (#155) : un trait de menu ne se pose
-//!   que par la brique de sections (`menu_sections.rs`), sans dérogation.
+//!   que par la brique de sections (`menu_sections.rs`), sans dérogation ;
+//! - `aucun_bouton_selectionnable_hors_d_un_menu` (#169) : le fond de bouton
+//!   sélectionné d'egui est réservé aux choix exclusifs d'un menu, d'une liste
+//!   déroulante ou du sélecteur de couleur ; une liste passe par `list_row`,
+//!   un jeu d'onglets par `tab_strip` ;
+//! - `aucune_couleur_en_dur_hors_du_theme` (#169) : une couleur d'interface
+//!   vient de `theme.rs` (ou des `Visuals` qu'il pose), jamais d'un
+//!   `Color32::from_rgb` écrit dans une surface ;
+//! - `aucun_separateur_avant_un_titre_de_section` (#169) : un titre de
+//!   section (`theme::section_title`) sépare seul ses groupes.
 //!
 //! Chaque garde a son **témoin** : le motif interdit, posé dans un autre
 //! fichier qu'`app.rs`, est bien refusé — sans lui, une garde qui ne voit rien
@@ -24,7 +33,8 @@
 mod sources;
 
 use sources::{
-    commence_par, corps, fermante, fonction_unique, fonctions, ligne_de, mot_en, nom_court, Fichier,
+    commence_par, corps, est_ident, fermante, fonction_unique, fonctions, ident_en, ligne_de,
+    mot_en, nom_court, Fichier,
 };
 
 fn fichier(chemin: &str, texte: &str) -> Fichier {
@@ -590,6 +600,306 @@ fn la_garde_des_separateurs_voit_un_trait_a_la_main_dans_un_menu() {
     ] {
         assert!(
             separateurs_bruts_dans_un_menu(&[fichier("app/m.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fond de bouton sélectionné : réservé aux choix exclusifs (#169)
+// ---------------------------------------------------------------------------
+
+/// Les étendues où un bouton sélectionnable d'egui est à sa place : les menus
+/// ([`zones_de_menu`]), le contenu d'une liste déroulante (arguments de
+/// `.show_ui(`) et le corps d'une fonction de fenêtre surgissante (nom qui
+/// contient « popup » ou « picker » : le sélecteur de couleur).
+fn zones_de_choix(masque: &[char]) -> Vec<(usize, usize)> {
+    let mut zones = zones_de_menu(masque);
+    for (position, nom) in fonctions(masque) {
+        let nom = nom_court(&nom);
+        if nom.contains("popup") || nom.contains("picker") {
+            zones.extend(corps(masque, position));
+        }
+    }
+    for i in 0..masque.len() {
+        if commence_par(masque, i, ".show_ui(") {
+            let ouvrante = i + ".show_ui".len();
+            if let Some(fin) = fermante(masque, ouvrante) {
+                zones.push((ouvrante, fin));
+            }
+        }
+    }
+    zones
+}
+
+/// Les boutons sélectionnables (`selectable_label(`, `selectable_value(`,
+/// `Button::selectable(`) posés hors d'un menu, d'une liste déroulante ou du
+/// sélecteur de couleur, `chemin:ligne`.
+fn boutons_selectionnables_hors_d_un_choix(sources: &[Fichier]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for fichier in sources {
+        let source = fichier.production();
+        let zones = zones_de_choix(&source.masque);
+        for i in 0..source.masque.len() {
+            let vu = [
+                ".selectable_label(",
+                ".selectable_value(",
+                "Button::selectable(",
+            ]
+            .iter()
+            .any(|motif| commence_par(&source.masque, i, motif));
+            if vu && !zones.iter().any(|(debut, fin)| *debut < i && i < *fin) {
+                trouves.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle #169 (`docs/application.md`, § Onglets, listes et sélection) : le
+/// fond vert arrondi d'un bouton sélectionné d'egui ne marque qu'un **choix
+/// exclusif** dans un menu, une liste déroulante ou le sélecteur de couleur.
+/// Une entrée de liste ou d'arbre est une ligne de liste (`list_row`,
+/// `ListRowBackground`) ; un jeu d'onglets, la bande `tab_strip`. Sans
+/// dérogation.
+#[test]
+fn aucun_bouton_selectionnable_hors_d_un_menu() {
+    let sources = sources::sources();
+    let fautifs = boutons_selectionnables_hors_d_un_choix(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "bouton sélectionnable hors d'un menu ou d'une liste déroulante : une liste \
+         passe par `list_row` (`app/list_row.rs`), un jeu d'onglets par `tab_strip` : \
+         {fautifs:?}"
+    );
+    // Les briques existent.
+    assert!(fonction_unique(&sources, "list_row")
+        .corps
+        .contains("allocate_exact_size"));
+    fonction_unique(&sources, "tab_strip_with");
+}
+
+/// Le témoin : une rangée de boutons sélectionnables (des onglets à la main)
+/// et une liste de `selectable_label` sont vues ; un choix dans une liste
+/// déroulante, un menu ou le sélecteur de couleur passe.
+#[test]
+fn la_garde_des_boutons_selectionnables_voit_une_rangee_a_la_main() {
+    for code in [
+        "fn page(ui: &mut Ui) { ui.horizontal(|ui| { for a in axes { ui.selectable_label(a == b, t); } }); }",
+        "fn liste(ui: &mut Ui) { ui.selectable_value(&mut x, 1, t); }",
+        "fn ligne(ui: &mut Ui) { ui.add(egui::Button::selectable(s, t)); }",
+    ] {
+        assert_eq!(
+            boutons_selectionnables_hors_d_un_choix(&[fichier("app/p.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f(ui: &mut Ui) { ComboBox::new(a, b).show_ui(ui, |ui| { ui.selectable_value(&mut x, 1, t); }); }",
+        "fn type_menu(ui: &mut Ui) { ui.selectable_label(a, t); }",
+        "fn f(r: Response) { r.context_menu(|ui| { ui.selectable_label(a, t); }); }",
+        "fn picker_contents(ui: &mut Ui) { ui.selectable_value(&mut s, A, t); }",
+        "fn f(ui: &mut Ui) { // ui.selectable_label(a, t)\n let _ = \".selectable_label(\"; }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g(ui: &mut Ui) { ui.selectable_label(a, t); } }",
+    ] {
+        assert!(
+            boutons_selectionnables_hors_d_un_choix(&[fichier("app/p.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Couleurs : seulement par `theme.rs` (#169)
+// ---------------------------------------------------------------------------
+
+/// Les constantes de `Color32` qui ne portent pas de choix de palette : le
+/// blanc, le noir, le transparent et le témoin « pas de couleur » d'egui.
+const COULEURS_NEUTRES: [&str; 4] = ["WHITE", "BLACK", "TRANSPARENT", "PLACEHOLDER"];
+
+/// Les fichiers qui fabriquent des couleurs par métier : la palette
+/// (`theme.rs`) et le sélecteur de couleur, qui peint les couleurs choisies
+/// par l'utilisateur (nuancier, roue, damier de l'opacité).
+const FABRIQUES_DE_COULEUR: [&str; 2] = ["theme.rs", "color_picker.rs"];
+
+/// Les couleurs écrites en dur hors de la palette, `chemin:ligne` :
+/// `Color32::from_…(` et toute constante nommée de `Color32` autre que
+/// [`COULEURS_NEUTRES`].
+fn couleurs_en_dur(sources: &[Fichier]) -> Vec<String> {
+    let mut trouvees = Vec::new();
+    for fichier in sources {
+        if FABRIQUES_DE_COULEUR.contains(&fichier.chemin.as_str()) {
+            continue;
+        }
+        let source = fichier.production();
+        for i in 0..source.masque.len() {
+            if !mot_en(&source.masque, i, "Color32")
+                || !commence_par(&source.masque, i + "Color32".len(), "::")
+            {
+                continue;
+            }
+            let nom = ident_en(&source.masque, i + "Color32::".len());
+            let constante = !nom.is_empty()
+                && nom
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+            if nom.starts_with("from_") || (constante && !COULEURS_NEUTRES.contains(&nom.as_str()))
+            {
+                trouvees.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouvees
+}
+
+/// Règle #169 : une couleur d'état ou de chrome (accent, survol, filet,
+/// erreur, dépôt…) vient d'une fonction de `theme.rs` ou des `Visuals` que
+/// `theme::install` pose (`error_fg_color`, `warn_fg_color`,
+/// `selection`…), jamais d'une teinte écrite dans une surface : changer la
+/// palette se fait alors à un seul endroit. Sans dérogation hors des deux
+/// fabriques de [`FABRIQUES_DE_COULEUR`].
+#[test]
+fn aucune_couleur_en_dur_hors_du_theme() {
+    let fautifs = couleurs_en_dur(&sources::sources());
+    assert!(
+        fautifs.is_empty(),
+        "couleur écrite en dur hors de theme.rs : ajouter une fonction de palette \
+         dans `theme.rs` ou lire les `Visuals` : {fautifs:?}"
+    );
+}
+
+/// Le témoin : une teinte `from_rgb`, `from_gray` ou nommée est vue, dans
+/// toutes ses formes ; les neutres, un commentaire, du code de test et les
+/// deux fabriques passent.
+#[test]
+fn la_garde_des_couleurs_voit_une_teinte_en_dur() {
+    for code in [
+        "fn f() -> Color32 { egui::Color32::from_rgb(1, 2, 3) }",
+        "fn f() -> Color32 { Color32::from_gray(0xEC) }",
+        "fn f() -> Color32 { Color32::from_rgba_unmultiplied(1, 2, 3, 4) }",
+        "fn f(ui: &Ui) { ui.colored_label(egui::Color32::RED, t); }",
+        "fn f() -> Color32 { Color32::LIGHT_BLUE }",
+    ] {
+        assert_eq!(
+            couleurs_en_dur(&[fichier("app/c.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f() -> Color32 { Color32::WHITE }",
+        "fn f(c: Color32) -> bool { c == egui::Color32::PLACEHOLDER }",
+        "fn f() -> Color32 { theme::accent() } // Color32::from_rgb(1, 2, 3)",
+        "fn f() -> MyColor32 { MyColor32::from_rgb(1, 2, 3) }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { Color32::from_rgb(1, 2, 3); } }",
+    ] {
+        assert!(
+            couleurs_en_dur(&[fichier("app/c.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    for chemin in FABRIQUES_DE_COULEUR {
+        assert!(
+            couleurs_en_dur(&[fichier(chemin, "fn f() { Color32::from_rgb(1, 2, 3); }")])
+                .is_empty()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Titres de section : sans séparateur redondant (#169)
+// ---------------------------------------------------------------------------
+
+/// Les `.separator()` suivis directement d'un titre de section
+/// (`section_title(` ou un libellé en `theme::bold`), `chemin:ligne`.
+fn separateurs_avant_un_titre(sources: &[Fichier]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for fichier in sources {
+        let source = fichier.production();
+        let masque = &source.masque;
+        for i in 0..masque.len() {
+            if !commence_par(masque, i, ".separator();") {
+                continue;
+            }
+            let mut k = i + ".separator();".len();
+            while k < masque.len() && masque[k].is_whitespace() {
+                k += 1;
+            }
+            // Le chemin éventuel (`crate::theme::`, `theme::`) avant le nom.
+            let mut nom_debut = k;
+            while nom_debut < masque.len()
+                && (est_ident(masque[nom_debut]) || masque[nom_debut] == ':')
+            {
+                nom_debut += 1;
+            }
+            let appel: String = masque[k..nom_debut].iter().collect();
+            let titre = nom_court(&appel) == "section_title"
+                || (commence_par(masque, k, "ui.label(")
+                    && commence_par(masque, k + "ui.label(".len(), "crate::theme::bold("))
+                || (commence_par(masque, k, "ui.label(")
+                    && commence_par(masque, k + "ui.label(".len(), "theme::bold("));
+            if titre {
+                trouves.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle #169 : un titre de section de formulaire passe par
+/// `theme::section_title` (espace + gras) et sépare seul ses groupes ; un
+/// filet juste avant lui double la séparation et rend la page plus lourde
+/// que la maquette. Sans dérogation.
+#[test]
+fn aucun_separateur_avant_un_titre_de_section() {
+    let sources = sources::sources();
+    let fautifs = separateurs_avant_un_titre(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "séparateur juste avant un titre de section : le titre suffit \
+         (`theme::section_title`) : {fautifs:?}"
+    );
+    assert!(fonction_unique(&sources, "section_title")
+        .corps
+        .contains("bold("));
+}
+
+/// Le témoin : un filet suivi d'un titre, sous toutes ses formes, est vu ;
+/// un filet suivi d'autre chose ou un titre seul passent.
+#[test]
+fn la_garde_des_titres_voit_un_filet_avant_un_titre() {
+    for code in [
+        "fn f(ui: &mut Ui) { ui.separator();\n    section_title(ui, t); }",
+        "fn f(ui: &mut Ui) { ui.separator(); crate::theme::section_title(ui, t); }",
+        "fn f(ui: &mut Ui) { ui.separator(); ui.label(crate::theme::bold(t)); }",
+        "fn f(ui: &mut Ui) { ui.separator(); ui.label(theme::bold(t)); }",
+    ] {
+        assert_eq!(
+            separateurs_avant_un_titre(&[fichier("app/s.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f(ui: &mut Ui) { section_title(ui, t); }",
+        "fn f(ui: &mut Ui) { ui.separator(); ui.label(t); }",
+        "fn f(ui: &mut Ui) { ui.separator(); // section_title(ui, t)\n ui.checkbox(a, b); }",
+    ] {
+        assert!(
+            separateurs_avant_un_titre(&[fichier("app/s.rs", code)]).is_empty(),
             "faux positif : {code}"
         );
     }
