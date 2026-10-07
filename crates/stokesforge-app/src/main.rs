@@ -230,6 +230,35 @@ fn demo_project() -> anyhow::Result<Project> {
     let y = project
         .add_column(spectre, None, None, Column::from_f64(&ys))
         .context("colonne B de Spectre")?;
+    // Une cinétique pour éprouver le glisser de lignes (#166) : une colonne par
+    // instant (ligne x' = temps en s), une ligne par longueur d'onde. Sélectionner
+    // des numéros de ligne puis attraper le bord du bloc trace une courbe par
+    // ligne, contre les x'.
+    let cinetique = project
+        .add_worksheet(book, Some("Cinetique"))
+        .context("feuille Cinetique")?;
+    for temps in [0.0, 30.0, 60.0, 120.0, 240.0] {
+        let valeurs: Vec<f64> = (0..8)
+            .map(|ligne| {
+                let amplitude = 0.2 + 0.1 * ligne as f64;
+                amplitude * (1.0 - (-temps / (60.0 + 20.0 * ligne as f64)).exp())
+            })
+            .collect();
+        let colonne = project
+            .add_column(cinetique, None, None, Column::from_f64(&valeurs))
+            .context("colonne de Cinetique")?;
+        let mut meta = project
+            .tree()
+            .node(colonne)
+            .and_then(|node| node.as_column())
+            .map(|column| column.meta().clone())
+            .unwrap_or_default();
+        meta.x_prime = Some(temps);
+        meta.unit = "u.a.".into();
+        project
+            .set_column_meta(colonne, meta)
+            .context("x' de Cinetique")?;
+    }
     project
         .add_graph(root, Some("Graph1"), demo_spec(x, y))
         .context("graphe de démonstration")?;
