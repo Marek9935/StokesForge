@@ -1157,12 +1157,8 @@ fn row_number_header_widget(
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
             ui.put(
                 rect,
-                egui::Label::new(
-                    egui::RichText::new("#")
-                        .strong()
-                        .color(crate::theme::gutter_text_color()),
-                )
-                .selectable(false),
+                egui::Label::new(egui::RichText::new("#").color(crate::theme::gutter_text_color()))
+                    .selectable(false),
             );
             if response.clicked() && selected {
                 // Un second clic désélectionne (#159).
@@ -1233,7 +1229,6 @@ fn row_number_header_widget(
                     rect,
                     egui::Label::new(
                         egui::RichText::new(tr!("common-metadata"))
-                            .strong()
                             .color(crate::theme::gutter_text_color()),
                     )
                     .selectable(false)
@@ -1283,13 +1278,9 @@ fn header_row_label_widget(
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
         ui.put(
             rect,
-            egui::Label::new(
-                egui::RichText::new(label)
-                    .strong()
-                    .color(crate::theme::gutter_text_color()),
-            )
-            .selectable(false)
-            .truncate(),
+            egui::Label::new(egui::RichText::new(label).color(crate::theme::gutter_text_color()))
+                .selectable(false)
+                .truncate(),
         );
         let shift = ui.input(|i| i.modifiers.shift);
         if response.drag_started() || (response.clicked() && !shift) {

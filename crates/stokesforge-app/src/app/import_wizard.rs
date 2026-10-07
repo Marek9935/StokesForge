@@ -360,7 +360,7 @@ fn import_preview_pane(
     let auto_cut = matches!(import.recipe.data_end, stokesforge_import::DataEnd::Auto);
     let mut picked = None;
     ui.horizontal(|ui| {
-        ui.strong(tr!("import-preview-title"));
+        ui.label(crate::theme::bold(tr!("import-preview-title")));
         if names.len() > 1 {
             egui::ComboBox::from_id_salt("stokesforge_import_preview_file")
                 .selected_text(&names[current])
@@ -1064,7 +1064,7 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
                         tr!("column-role"),
                         tr!("import-columns-values"),
                     ] {
-                        ui.strong(title);
+                        ui.label(crate::theme::bold(title));
                     }
                     ui.end_row();
                     for (index, column) in columns.iter().enumerate() {
@@ -1165,7 +1165,7 @@ fn import_step_metadata(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 let mut kept = !is_excluded(recipe, &line.key);
                 let text = if line.is_section() {
-                    egui::RichText::new(&line.key).strong()
+                    crate::theme::bold(&line.key)
                 } else {
                     egui::RichText::new(format!("{} = {}", line.key, line.value))
                 };
@@ -1344,7 +1344,8 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
                     }
                     let text = format!("{} {}", i + 1, candidate.title());
                     if *candidate == step {
-                        ui.strong(text);
+                        // Comme l'onglet actif : gras et accent.
+                        ui.label(crate::theme::bold(text).color(crate::theme::accent()));
                     } else {
                         ui.weak(text);
                     }
@@ -1657,6 +1658,11 @@ mod tests {
                 assert_eq!(
                     fil.couleur, attendu,
                     "{step:?} : fil d'Ariane de {candidate:?}"
+                );
+                assert_eq!(
+                    fil.gras,
+                    *candidate == step,
+                    "{step:?} : seule l'étape courante est en gras ({candidate:?})"
                 );
             }
             for (proprietaire, libelle) in &propres {

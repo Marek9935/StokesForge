@@ -741,8 +741,11 @@ impl ObjectManagerPaint<'_> {
                     &series.spec,
                     rect,
                 ));
-                let text = egui::RichText::new(&series.label);
-                let text = if series.selected { text.strong() } else { text };
+                let text = if series.selected {
+                    crate::theme::bold(&series.label)
+                } else {
+                    egui::RichText::new(&series.label)
+                };
                 // #151 : l'échantillon de légende fait partie de la cible,
                 // comme le nom. Garder l'ID du bouton pour son menu et unir
                 // les gestes avant de traiter sélection, glisser et propriétés.
@@ -871,8 +874,11 @@ fn object_manager_object_row(
             };
             ui.add(icon_image(icon, IconRole::Neutral))
                 .on_hover_text(&object.label);
-            let text = egui::RichText::new(&object.label);
-            let text = if object.selected { text.strong() } else { text };
+            let text = if object.selected {
+                crate::theme::bold(&object.label)
+            } else {
+                egui::RichText::new(&object.label)
+            };
             let response = ui.selectable_label(object.selected, text);
             if response.clicked() || response.secondary_clicked() {
                 requests.push(ObjectManagerRequest::Select(object.target));

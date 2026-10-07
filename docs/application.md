@@ -396,11 +396,17 @@ par script) fait défiler la bande **du plus petit décalage** qui montre
 entièrement l'onglet sélectionné et ses deux voisins — cliquer sur le dernier
 onglet visible ne révèle qu'un onglet de plus (`scroll_tab_strip_to_selected`,
 issue #1). Aspect (#169) : onglets plats, sans cadre ; l'actif est écrit
-dans l'accent et porte un trait d'accent du côté du contenu (`TabStripSide` :
+en gras et dans l'accent et porte un trait d'accent du côté du contenu (`TabStripSide` :
 sous le libellé pour les pages des propriétés, au-dessus pour les feuilles),
 un filet gris sépare la bande du contenu. Le Project Manager liste ses
 fenêtres en lignes pleine largeur (`project_tree_row`) : fond pâle d'accent et
-filet vert à gauche pour la sélection, sans fond de bouton. Couleurs dans
+filet vert à gauche et texte en gras pour la sélection, sans fond de bouton.
+Le gras est **toujours** `theme::bold` (axe `wght` de Noto Sans Variable,
+graisse 600) : `RichText::strong` d'egui ne graisse rien, il est interdit
+(`aucun_strong_d_egui_hors_du_theme`) ; les titres de section des formulaires,
+l'étape courante de l'assistant d'import et l'objet sélectionné de l'Object
+Manager l'emploient. Une police sans axe `wght` (paire Fira ou Libertinus,
+police système) reste en graisse normale, sans erreur. Couleurs dans
 `theme.rs` (`accent`, `tab_rule_color`, `list_row_selected_fill`…). Les notes
 et matrices restent bornées au rectangle commun. Dans un
 graphe (`graph_view_contents`,

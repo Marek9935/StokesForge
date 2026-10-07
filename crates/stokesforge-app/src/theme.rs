@@ -58,6 +58,28 @@ pub fn gutter_text_color() -> Color32 {
     GUTTER_TEXT
 }
 
+/// Graisse du gras de l'interface (axe `wght` de Noto Sans Variable, qui va de
+/// 100 à 900) : le « semi-gras » 600 de la maquette des onglets (#169).
+const BOLD_WEIGHT: f32 = 600.0;
+
+/// **Le** gras de l'interface : l'onglet actif, la ligne sélectionnée d'une
+/// liste, un titre de section de formulaire. `egui::RichText::strong` n'est
+/// pas un gras — il ne change que la couleur, en l'occurrence l'[`ACCENT`] —
+/// et n'est donc jamais employé (`aucun_strong_d_egui_hors_du_theme`). La
+/// graisse est une coordonnée de variation de la police embarquée par
+/// `stokesforge_render::font_definitions` : avec une police sans axe `wght`
+/// (une paire Fira ou Libertinus, une police système) le texte reste en
+/// graisse normale, sans erreur.
+pub fn bold(text: impl Into<String>) -> egui::RichText {
+    egui::RichText::new(text).variation("wght", BOLD_WEIGHT)
+}
+
+/// Les variations qu'écrit [`bold`], pour mesurer ou reconnaître un gras
+/// (largeur réservée à un onglet, tests).
+pub fn bold_variations() -> egui::epaint::text::VariationCoords {
+    egui::epaint::text::VariationCoords::new([("wght", BOLD_WEIGHT)])
+}
+
 /// L'[`ACCENT`] lui-même : texte et trait de l'onglet actif, filet de la
 /// ligne sélectionnée d'une liste (#169).
 pub fn accent() -> Color32 {
@@ -281,6 +303,95 @@ mod tests {
             }
         }
         fautifs
+    }
+
+    /// Garde-fou du gras : `RichText::strong` / `Ui::strong` d'egui ne
+    /// graissent rien (une autre couleur seulement) ; tout gras passe par
+    /// [`bold`]. Toutes les sources de `src/`, commentaires exclus.
+    #[test]
+    fn aucun_strong_d_egui_hors_du_theme() {
+        let fautifs = strong_d_egui(&crate::sources::sources());
+        assert!(
+            fautifs.is_empty(),
+            "`strong()` d'egui ne met pas en gras — passer par theme::bold : {fautifs:?}"
+        );
+    }
+
+    /// Les lignes qui appellent `.strong()` hors de `theme.rs`.
+    fn strong_d_egui(sources: &[crate::sources::Fichier]) -> Vec<String> {
+        let mut fautifs = Vec::new();
+        for fichier in sources {
+            if fichier.chemin == "theme.rs" {
+                continue;
+            }
+            for (index, ligne) in fichier.code().lines().enumerate() {
+                if ligne.contains(".strong()") || ligne.contains("ui.strong(") {
+                    fautifs.push(format!("src/{}:{}", fichier.chemin, index + 1));
+                }
+            }
+        }
+        fautifs
+    }
+
+    /// Le témoin : un `.strong()` hors de `theme.rs` est vu, [`bold`] non.
+    #[test]
+    fn la_garde_du_gras_voit_un_strong() {
+        let fichier = |code: &str| crate::sources::Fichier {
+            chemin: "app/x.rs".to_string(),
+            texte: code.to_string(),
+            de_test: false,
+        };
+        assert_eq!(
+            strong_d_egui(&[fichier("let t = RichText::new(a).strong();")]),
+            ["src/app/x.rs:1"]
+        );
+        assert_eq!(
+            strong_d_egui(&[fichier("ui.strong(a);")]),
+            ["src/app/x.rs:1"]
+        );
+        assert!(strong_d_egui(&[fichier("ui.label(theme::bold(a));")]).is_empty());
+    }
+
+    /// [`bold`] pose la graisse sur le texte, et rien d'autre ne la pose.
+    #[test]
+    fn bold_pose_la_graisse() {
+        let job = egui::WidgetText::from(bold("x")).into_layout_job(
+            &egui::Style::default(),
+            egui::FontSelection::Default,
+            egui::Align::LEFT,
+        );
+        assert_eq!(job.sections[0].format.coords, bold_variations());
+        let job = egui::WidgetText::from(egui::RichText::new("x")).into_layout_job(
+            &egui::Style::default(),
+            egui::FontSelection::Default,
+            egui::Align::LEFT,
+        );
+        assert_ne!(job.sections[0].format.coords, bold_variations());
+    }
+
+    /// Avec les polices embarquées, [`bold`] graisse vraiment les glyphes
+    /// (texte plus large qu'en graisse normale) — pas seulement une
+    /// coordonnée posée dans le vide : c'est ce qui prouve que la police du
+    /// projet a un axe `wght` que epaint sait suivre.
+    #[test]
+    fn bold_elargit_vraiment_le_texte_avec_les_polices_embarquees() {
+        let ctx = Context::default();
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        install(&ctx);
+        let mut largeurs = (0.0, 0.0);
+        let mut sortie = ctx.run_ui(egui::RawInput::default(), |ui| {
+            largeurs = (
+                ui.label(egui::RichText::new("Zone de tracé")).rect.width(),
+                ui.label(bold("Zone de tracé")).rect.width(),
+            );
+        });
+        sortie.textures_delta.clear();
+        assert!(
+            largeurs.1 > largeurs.0 + 1.0,
+            "gras {} contre normal {}",
+            largeurs.1,
+            largeurs.0
+        );
     }
 
     /// Le témoin : un style de défilement posé dans un module de `src/app/` est

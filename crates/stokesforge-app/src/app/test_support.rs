@@ -112,6 +112,9 @@ pub(super) struct Texte {
     pub(super) texte: String,
     pub(super) couleur: egui::Color32,
     pub(super) centre: egui::Pos2,
+    /// Écrit en gras (`theme::bold`) : la graisse est une variation de police,
+    /// pas une couleur.
+    pub(super) gras: bool,
 }
 
 /// Tous les textes peints dans `shapes`, avec leur couleur effective.
@@ -138,6 +141,12 @@ pub(super) fn textes(shapes: &[egui::epaint::ClippedShape]) -> Vec<Texte> {
                     texte: shape.galley.job.text.clone(),
                     couleur,
                     centre: shape.pos + shape.galley.rect.center().to_vec2(),
+                    gras: shape
+                        .galley
+                        .job
+                        .sections
+                        .iter()
+                        .any(|s| s.format.coords == crate::theme::bold_variations()),
                 })
             }
             _ => None,

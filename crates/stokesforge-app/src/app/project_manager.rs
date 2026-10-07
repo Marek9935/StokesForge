@@ -555,10 +555,22 @@ fn project_tree_row(
 ) -> egui::Response {
     const PADDING: egui::Vec2 = egui::vec2(6.0, 3.0);
     const GAP: f32 = 5.0;
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let galley = ui
-        .painter()
-        .layout_no_wrap(name.to_owned(), font, egui::Color32::PLACEHOLDER);
+    let galley_of = |ui: &egui::Ui, text: egui::RichText| {
+        egui::WidgetText::from(text).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        )
+    };
+    let galley = galley_of(
+        ui,
+        if selected {
+            theme::bold(name)
+        } else {
+            egui::RichText::new(name)
+        },
+    );
     let natural = 2.0 * PADDING.x + ICON_SIZE + GAP + galley.size().x;
     let size = egui::vec2(
         ui.available_width().max(natural),
@@ -918,10 +930,26 @@ pub(super) mod tests {
             rects(&output, button_fill).is_empty(),
             "plus de fond de bouton sélectionné"
         );
+        let peints = super::super::test_support::textes(&output.shapes);
+        for nom in ["Book", "Graph1"] {
+            assert!(
+                peints
+                    .iter()
+                    .filter(|t| t.texte.contains(nom))
+                    .all(|t| t.gras),
+                "{nom} : l'entrée sélectionnée est en gras"
+            );
+        }
         banc.selection.borrow_mut().clear();
         let output = banc.paint(&context, &tree, Vec::new());
         assert!(rects(&output, theme::list_row_selected_fill()).is_empty());
         assert!(rects(&output, theme::accent()).is_empty());
+        assert!(
+            !super::super::test_support::textes(&output.shapes)
+                .iter()
+                .any(|t| t.gras),
+            "témoin : sans sélection, rien n'est en gras"
+        );
     }
 
     #[test]

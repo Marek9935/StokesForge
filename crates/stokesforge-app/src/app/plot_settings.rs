@@ -126,7 +126,7 @@ pub(super) fn column_metadata_window(
                     .show(ui, |ui| {
                         for line in &lines {
                             if line.is_section() {
-                                ui.label(egui::RichText::new(&line.key).strong());
+                                ui.label(crate::theme::bold(&line.key));
                                 ui.label("");
                             } else if line.key.is_empty() {
                                 ui.label("");
@@ -326,7 +326,7 @@ fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
     );
     formula_memo(ui, "plot_settings_memo_panel");
     ui.add_space(4.0);
-    ui.strong(tr!("plot-area-gridlines"));
+    ui.label(crate::theme::bold(tr!("plot-area-gridlines")));
     commit |= ui
         .checkbox(&mut panel.bottom.grid, tr!("plot-area-gridlines-vertical"))
         .changed();
@@ -415,7 +415,7 @@ fn theme_editor(
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
-    ui.strong(tr!("plot-theme-themes"));
+    ui.label(crate::theme::bold(tr!("plot-theme-themes")));
     ui.horizontal(|ui| {
         for theme in &stokesforge_plot::THEMES {
             if ui.button(theme.name).clicked() {
@@ -425,7 +425,7 @@ fn theme_editor(
         }
     });
     ui.add_space(6.0);
-    ui.strong(tr!("plot-theme-global-colors"));
+    ui.label(crate::theme::bold(tr!("plot-theme-global-colors")));
     commit |= color_field(
         ui,
         &tr!("plot-theme-background"),
@@ -527,7 +527,7 @@ fn text_field(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) ->
 /// de tête de [`plot_settings_window`].
 fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
-    ui.strong(tr!("plot-axes-title-section"));
+    ui.label(crate::theme::bold(tr!("plot-axes-title-section")));
     commit |= text_field(
         ui,
         &tr!("plot-axes-quantity"),
@@ -551,7 +551,7 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
     );
 
     ui.add_space(6.0);
-    ui.strong(tr!("plot-axes-scale-section"));
+    ui.label(crate::theme::bold(tr!("plot-axes-scale-section")));
     let mut log_scale = axis.scale == stokesforge_plot::AxisScale::Log;
     if ui
         .checkbox(&mut log_scale, tr!("plot-axes-log-scale"))
@@ -593,7 +593,7 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
     }
 
     ui.add_space(6.0);
-    ui.strong(tr!("plot-axes-display-section"));
+    ui.label(crate::theme::bold(tr!("plot-axes-display-section")));
     commit |= ui
         .checkbox(&mut axis.visible, tr!("plot-axes-show-axis"))
         .changed();
@@ -1905,13 +1905,14 @@ mod tests {
                 texte_exact(&peints, texte);
             }
             let visuals = context.global_style().visuals.clone();
-            assert_ne!(visuals.strong_text_color(), visuals.text_color());
             let section = texte_exact(&peints, "[Measurement]");
+            assert!(section.gras, "section en gras");
             assert_eq!(
                 section.couleur,
-                visuals.strong_text_color(),
-                "section en gras"
+                visuals.text_color(),
+                "le gras ne change pas la couleur"
             );
+            assert!(!texte_exact(&peints, "XUNITS").gras, "témoin : ligne à clé");
             assert_eq!(texte_exact(&peints, "XUNITS").couleur, visuals.text_color());
             assert!(actions.is_empty(), "ouverte, elle ne demande rien");
             // #164 : seule une valeur numérique à clé (NPOINTS) offre le

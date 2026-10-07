@@ -436,12 +436,18 @@ fn tab_strip_label(
     selected: bool,
     side: TabStripSide,
 ) -> egui::Response {
-    let galley = ui.painter().layout_no_wrap(
-        name.to_owned(),
-        egui::FontId::proportional(12.0),
-        egui::Color32::PLACEHOLDER,
-    );
-    let size = egui::vec2(galley.size().x + 2.0 * TAB_PADDING_X, TAB_STRIP_HEIGHT);
+    // La largeur est celle du libellé **en gras** pour tous les onglets : en
+    // changer la graisse à la sélection ne décale alors aucun voisin.
+    let galley_of = |ui: &egui::Ui, text: egui::RichText| {
+        egui::WidgetText::from(text.size(12.0)).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        )
+    };
+    let reserved = galley_of(ui, theme::bold(name)).size().x;
+    let size = egui::vec2(reserved + 2.0 * TAB_PADDING_X, TAB_STRIP_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, name)
@@ -475,6 +481,14 @@ fn tab_strip_label(
         } else {
             ui.visuals().text_color()
         };
+        let galley = galley_of(
+            ui,
+            if selected {
+                theme::bold(name)
+            } else {
+                egui::RichText::new(name)
+            },
+        );
         let text_pos = rect.center() - galley.size() / 2.0;
         ui.painter().galley(text_pos, galley, text_color);
         if response.has_focus() {
@@ -783,6 +797,15 @@ mod tests {
             let (actif, couleur_actif) = text("Axes");
             let (inactif, couleur_inactif) = text("Graphe");
             assert_eq!(couleur_actif, theme::accent());
+            let gras = |needle: &str| {
+                super::super::test_support::textes(&output.shapes)
+                    .into_iter()
+                    .find(|t| t.texte == needle)
+                    .unwrap()
+                    .gras
+            };
+            assert!(gras("Axes"), "{side:?} : l'onglet actif est en gras");
+            assert!(!gras("Graphe"), "{side:?} : témoin, l'inactif ne l'est pas");
             assert_ne!(couleur_inactif, theme::accent(), "{side:?} : témoin");
             assert!(mark.x_range().contains(actif.center().x), "{side:?}");
             assert!(!mark.x_range().contains(inactif.center().x), "{side:?}");
@@ -817,6 +840,46 @@ mod tests {
                 TabStripSide::Top => assert!(rule[0].y >= mark.top()),
                 TabStripSide::Bottom => assert!(rule[0].y <= mark.bottom()),
             }
+        }
+    }
+
+    /// Passer un onglet en gras à la sélection ne décale aucun onglet : la
+    /// largeur réservée est celle du gras pour tous. Le trait d'accent couvre
+    /// l'onglet actif : sa largeur, mesurée quand l'onglet est actif, doit
+    /// être celle qui sépare son bord gauche du bord gauche du suivant,
+    /// mesuré quand le précédent est inactif (écart des onglets : 2 points).
+    #[test]
+    fn changer_d_onglet_actif_ne_decale_aucun_onglet() {
+        let tabs: Vec<(u32, String)> = vec![
+            (0, "Général".into()),
+            (1, "Zone de tracé".into()),
+            (2, "Axes".into()),
+        ];
+        let trait_actif = |selected: u32| {
+            let context = contexte();
+            let mut time = 0.0;
+            let mut output = None;
+            for _ in 0..2 {
+                output = Some(
+                    peindre_onglets(&context, 600.0, &tabs, selected, &mut time, Vec::new()).1,
+                );
+            }
+            output
+                .unwrap()
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Rect(rect) if rect.fill == theme::accent() => Some(rect.rect),
+                    _ => None,
+                })
+                .expect("le trait de l'onglet actif est peint")
+        };
+        let traits: Vec<egui::Rect> = (0..3).map(trait_actif).collect();
+        for k in 0..2 {
+            assert!(
+                (traits[k + 1].left() - traits[k].left() - traits[k].width() - 2.0).abs() < 0.01,
+                "l'onglet {k} garde sa largeur quand il n'est plus actif : {traits:?}"
+            );
         }
     }
 
