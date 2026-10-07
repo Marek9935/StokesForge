@@ -687,6 +687,7 @@ fn column_letter_widget(
             state.select_column(sheet, column);
         } else if response.contains_pointer()
             && !press_here
+            && !grid_drag_in_progress(ui.ctx())
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some()
         {
@@ -1146,6 +1147,7 @@ fn header_field_widget(
         let (command, shift) = (modifiers.command, modifiers.shift);
         let dragging = response.contains_pointer()
             && !press_started_in(ui, rect)
+            && !grid_drag_in_progress(ui.ctx())
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some();
         if response.drag_started() && command {
@@ -2166,6 +2168,7 @@ fn row_number_widget(
         }
     } else if response.contains_pointer()
         && !press_started_in(ui, rect)
+        && !grid_drag_in_progress(ui.ctx())
         && ui.input(|i| i.pointer.primary_down())
         && state.selection(sheet).is_some()
     {
@@ -2417,6 +2420,7 @@ fn display_cell_widget(
         state.extend_selection(sheet, column, row);
     } else if response.contains_pointer()
         && !press_started_in(ui, rect)
+        && !grid_drag_in_progress(ui.ctx())
         && ui.input(|i| i.pointer.primary_down())
         && state.selection(sheet).is_some()
     {
@@ -2449,6 +2453,14 @@ fn display_cell_widget(
     // quadratique en nombre de colonnes sur une grille qui ne fait que
     // s'afficher.
     response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
+}
+
+/// Un glisser de colonnes ou de lignes vers un graphe est-il en cours ? Tant
+/// qu'il dure, survoler d'autres cases n'étend plus la sélection : sinon elle
+/// serait remplacée « à la volée » par une sélection de cellules (#160, #166).
+fn grid_drag_in_progress(ctx: &egui::Context) -> bool {
+    egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ctx)
+        || egui::DragAndDrop::has_payload_of_type::<RowDragPayload>(ctx)
 }
 
 /// Vrai si l'appui en cours a commencé dans `rect`. L'extension de sélection
@@ -4041,5 +4053,60 @@ mod tests {
         let depart = bord_bas(&banc, "202");
         glisse_depuis(&mut banc, depart);
         assert!(charge_de_lignes_posee(&banc));
+    }
+
+    /// Pendant le glisser de lignes, survoler d'autres cellules ne remplace pas
+    /// la sélection de lignes par une sélection de cellules.
+    #[test]
+    fn le_glisser_de_lignes_garde_la_selection_de_lignes() {
+        let mut banc = Banc::new();
+        pose_x_prime(&mut banc, "5");
+        banc.state.select_row(banc.sheet, 1);
+        banc.image(Vec::new());
+        banc.image(Vec::new());
+        let depart = bord_bas(&banc, "202");
+        banc.image(vec![egui::Event::PointerMoved(depart)]);
+        banc.image(vec![egui::Event::PointerButton {
+            pos: depart,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let cible = banc.centre_de("303").expect("cellule peinte");
+        for pas in 1..=4 {
+            let t = pas as f32 / 4.0;
+            banc.image(vec![egui::Event::PointerMoved(depart.lerp(cible, t))]);
+            banc.image(Vec::new());
+        }
+        assert!(charge_de_lignes_posee(&banc));
+        assert!(
+            banc.state.is_row_selected(banc.sheet, 1),
+            "la ligne reste sélectionnée pendant le glisser"
+        );
+    }
+
+    /// Même garantie pour un glisser de colonnes.
+    #[test]
+    fn le_glisser_de_colonnes_garde_la_selection_de_colonnes() {
+        let mut banc = Banc::new();
+        banc.state.select_column(banc.sheet, banc.columns[0]);
+        banc.image(Vec::new());
+        let y = banc.centre_de("101").expect("cellule peinte").y;
+        let depart = bord_droit(&banc, 0, y);
+        banc.image(vec![egui::Event::PointerMoved(depart)]);
+        banc.image(vec![egui::Event::PointerButton {
+            pos: depart,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let cible = banc.centre_de("303").expect("cellule peinte");
+        for pas in 1..=4 {
+            let t = pas as f32 / 4.0;
+            banc.image(vec![egui::Event::PointerMoved(depart.lerp(cible, t))]);
+            banc.image(Vec::new());
+        }
+        assert!(charge_posee(&banc));
+        assert!(banc.state.is_column_selected(banc.sheet, banc.columns[0]));
     }
 }
