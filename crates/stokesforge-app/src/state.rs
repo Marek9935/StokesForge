@@ -561,6 +561,9 @@ pub enum Action {
     },
     /// Règle l'agrandissement des exports PNG ([`PNG_EXPORT_SCALES`]).
     SetPngExportScale(f32),
+    /// Règle l'écriture du texte des exports SVG, texte ou contours (#162).
+    /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
+    SetSvgTextMode(stokesforge_render_svg::SvgTextMode),
     /// Pose un texte libre (issue #35) : remplace celui de `target`, ou
     /// l'ajoute si `target` est le rang qui suit le dernier
     /// ([`AnnotationRef::set`]). **Une** modification du modèle, donc une
@@ -4112,6 +4115,11 @@ impl AppState {
                     .map(|series| series.name = name)
                     .is_some()
             }),
+            Action::SetSvgTextMode(mode) => {
+                if let Err(error) = self.object_manager_preferences.save_svg_text_mode(mode) {
+                    self.fail(error.to_string());
+                }
+            }
             Action::SetPngExportScale(scale) => {
                 if PNG_EXPORT_SCALES.contains(&scale) {
                     self.png_export_scale = scale;
@@ -5305,6 +5313,11 @@ impl AppState {
         }
     }
 
+    /// L'écriture du texte des exports SVG (#162).
+    pub fn svg_text_mode(&self) -> stokesforge_render_svg::SvgTextMode {
+        self.object_manager_preferences.svg_text_mode()
+    }
+
     /// L'agrandissement des exports PNG.
     pub fn png_export_scale(&self) -> f32 {
         self.png_export_scale
@@ -5317,9 +5330,11 @@ impl AppState {
         if path.extension().is_none() {
             path.set_extension("svg");
         }
-        let Some(format) =
-            stokesforge_render_svg::ExportFormat::from_path(&path, self.png_export_scale)
-        else {
+        let Some(format) = stokesforge_render_svg::ExportFormat::from_path(
+            &path,
+            self.png_export_scale,
+            self.svg_text_mode(),
+        ) else {
             self.fail(format!(
                 "Format d'export inconnu pour {} : choisir .svg, .pdf ou .png",
                 path.display()
@@ -5352,7 +5367,14 @@ impl AppState {
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         let wanted = [
-            ("SVG", mime::SVG, ExportFormat::Svg),
+            // Le presse-papiers prend toujours le défaut, texte SVG (#162).
+            (
+                "SVG",
+                mime::SVG,
+                ExportFormat::Svg {
+                    text: stokesforge_render_svg::SvgTextMode::Text,
+                },
+            ),
             (
                 "PNG",
                 mime::PNG,

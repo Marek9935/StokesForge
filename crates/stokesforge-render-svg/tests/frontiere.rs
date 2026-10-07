@@ -28,6 +28,9 @@ const DEPENDANCES_DIRECTES: &[&str] = &[
     // l'arbre résolu pour une combinaison de features donnée.
     "typst",
     "typst-svg",
+    // #162 : le contour d'un glyphe sans caractère Unicode (repli par glyphe
+    // de l'émetteur de texte) ; déjà dans l'arbre via `typst`.
+    "ttf-parser",
 ];
 
 /// Ce qu'un crate d'export ne doit jamais tirer, même de loin.

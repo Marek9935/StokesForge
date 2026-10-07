@@ -152,6 +152,17 @@ fn convert(document: &str, options: &svg2pdf::usvg::Options<'_>) -> Result<Vec<u
 /// version d'`usvg`, donc le même `fontdb::Database`, que `svg2pdf` ici (voir
 /// `Cargo.lock` et `tests/frontiere.rs`).
 pub(crate) fn ensure_embedded_fallback(fontdb: &mut svg2pdf::usvg::fontdb::Database) {
+    ensure_generic_sans(fontdb);
+    // Les SVG en mode texte (#162) nomment la famille de Typst
+    // (`font-family="'Noto Sans', sans-serif"`) : sans ces polices dans la
+    // base, `usvg` abandonne silencieusement le texte au lieu de le replier.
+    for set in FontSet::ALL {
+        fontdb.load_font_data(set.sans_bytes().to_vec());
+        fontdb.load_font_data(set.math_bytes().to_vec());
+    }
+}
+
+fn ensure_generic_sans(fontdb: &mut svg2pdf::usvg::fontdb::Database) {
     let deja_resolue = fontdb
         .query(&svg2pdf::usvg::fontdb::Query {
             families: &[svg2pdf::usvg::fontdb::Family::SansSerif],

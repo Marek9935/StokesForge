@@ -40,6 +40,10 @@ resvg = "=0.45.1"
 typst = "=0.15.1"
 typst-svg = "=0.15.1"
 
+# #162 : le contour d'un glyphe sans caractère Unicode (repli par glyphe de
+# `typst_text`). Même version que celle que `typst` tire déjà.
+ttf-parser = "0.25"
+
 [dev-dependencies]
 tempfile = "3"
 toml = "0.8"

@@ -5,7 +5,7 @@ use stokesforge_core::resolve::resolve_spec;
 use stokesforge_core::Project;
 use stokesforge_plot::{PanelSpec, Panels, PlotSpec};
 use stokesforge_render::{FontChoice, TextMeasurer};
-use stokesforge_render_svg::{render_to_string, render_to_string_with_typst};
+use stokesforge_render_svg::{render_to_string, render_to_string_with_typst, SvgTextMode};
 
 fn exporte(spec: &PlotSpec) -> String {
     let project = Project::new("Couleurs").expect("projet");
@@ -83,6 +83,7 @@ fn exporte_avec_typst(spec: &PlotSpec) -> String {
         (400, 300),
         &TextMeasurer::default(),
         &FontChoice::default(),
+        SvgTextMode::Text,
     )
     .expect("export")
 }

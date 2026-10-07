@@ -18,16 +18,22 @@ use stokesforge_render::FontChoice;
 
 use crate::{
     document_to_pdf, document_to_png, render_to_string_with_typst, PdfError, PngError, SvgError,
+    SvgTextMode,
 };
 
 /// Le format d'un export.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExportFormat {
-    /// SVG, texte Typst en contours.
-    Svg,
-    /// PDF, tiré du SVG.
+    /// SVG ; `text` dit si le texte composé par Typst reste du texte SVG ou
+    /// sort en contours (#162).
+    Svg {
+        /// Texte ou contours.
+        text: SvgTextMode,
+    },
+    /// PDF, tiré du SVG en mode texte : le texte y est sélectionnable.
     Pdf,
-    /// PNG, tiré du SVG, agrandi de `scale` (1 = la taille de la figure).
+    /// PNG, tiré du SVG en contours (indépendant des polices installées),
+    /// agrandi de `scale` (1 = la taille de la figure).
     Png {
         /// Facteur appliqué à la taille de la figure.
         scale: f32,
@@ -36,12 +42,12 @@ pub enum ExportFormat {
 
 impl ExportFormat {
     /// Le format que désigne l'extension de `path`, sans casse ; un PNG est
-    /// rastérisé à `png_scale`. `None` pour une extension inconnue ou
+    /// rastérisé à `png_scale`, un SVG écrit son texte selon `svg_text`. `None` pour une extension inconnue ou
     /// absente.
-    pub fn from_path(path: &Path, png_scale: f32) -> Option<Self> {
+    pub fn from_path(path: &Path, png_scale: f32, svg_text: SvgTextMode) -> Option<Self> {
         let extension = path.extension()?.to_str()?.to_ascii_lowercase();
         match extension.as_str() {
-            "svg" => Some(Self::Svg),
+            "svg" => Some(Self::Svg { text: svg_text }),
             "pdf" => Some(Self::Pdf),
             "png" => Some(Self::Png { scale: png_scale }),
             _ => None,
@@ -71,10 +77,21 @@ pub enum ExportError {
     },
 }
 
+impl ExportFormat {
+    /// Le mode de texte du SVG d'où ce format est tiré.
+    fn text_mode(self) -> SvgTextMode {
+        match self {
+            Self::Svg { text } => text,
+            Self::Pdf => SvgTextMode::Text,
+            Self::Png { .. } => SvgTextMode::Outlines,
+        }
+    }
+}
+
 /// Le document SVG composé (Typst compris) converti vers `format`.
 fn convert(document: &str, format: ExportFormat) -> Result<Vec<u8>, ExportError> {
     Ok(match format {
-        ExportFormat::Svg => document.as_bytes().to_vec(),
+        ExportFormat::Svg { .. } => document.as_bytes().to_vec(),
         ExportFormat::Pdf => document_to_pdf(document)?,
         ExportFormat::Png { scale } => document_to_png(document, scale)?,
     })
@@ -88,15 +105,15 @@ pub fn export_bytes(
     choice: &FontChoice,
     format: ExportFormat,
 ) -> Result<Vec<u8>, ExportError> {
-    let document = render_to_string_with_typst(plot, size, measurer, choice)?;
+    let document = render_to_string_with_typst(plot, size, measurer, choice, format.text_mode())?;
     convert(&document, format)
 }
 
 /// Plusieurs formats d'une **même** figure (le presse-papiers, #149), dans
 /// l'ordre de `formats`. La figure n'est tracée et composée par Typst qu'une
-/// fois, le PDF et le PNG étant tirés du même SVG ; chaque conversion réussit
-/// ou échoue seule, de sorte qu'un format raté n'emporte pas les autres.
-/// `Err` seulement si le tracé lui-même échoue : aucun format n'existe alors.
+/// fois **par mode de texte** demandé, les conversions étant tirées de ce
+/// SVG ; chaque conversion réussit ou échoue seule, de sorte qu'un format raté
+/// n'emporte pas les autres. `Err` seulement si le tracé lui-même échoue.
 pub fn export_bytes_many(
     plot: &ResolvedPlot<'_>,
     size: (u32, u32),
@@ -104,10 +121,28 @@ pub fn export_bytes_many(
     choice: &FontChoice,
     formats: &[ExportFormat],
 ) -> Result<Vec<Result<Vec<u8>, ExportError>>, ExportError> {
-    let document = render_to_string_with_typst(plot, size, measurer, choice)?;
+    let mut documents: Vec<(SvgTextMode, String)> = Vec::new();
+    for format in formats {
+        let mode = format.text_mode();
+        if !documents.iter().any(|(known, _)| *known == mode) {
+            documents.push((
+                mode,
+                render_to_string_with_typst(plot, size, measurer, choice, mode)?,
+            ));
+        }
+    }
     Ok(formats
         .iter()
-        .map(|format| convert(&document, *format))
+        .map(|format| {
+            let mode = format.text_mode();
+            documents
+                .iter()
+                .find(|(known, _)| *known == mode)
+                .map_or_else(
+                    || Ok(Vec::new()),
+                    |(_, document)| convert(document, *format),
+                )
+        })
         .collect())
 }
 
@@ -134,8 +169,13 @@ mod tests {
 
     #[test]
     fn le_format_se_lit_sur_lextension() {
-        let png = |nom: &str| ExportFormat::from_path(Path::new(nom), 4.0);
-        assert_eq!(png("a.svg"), Some(ExportFormat::Svg));
+        let png = |nom: &str| ExportFormat::from_path(Path::new(nom), 4.0, SvgTextMode::Text);
+        assert_eq!(
+            png("a.svg"),
+            Some(ExportFormat::Svg {
+                text: SvgTextMode::Text
+            })
+        );
         assert_eq!(png("a.PDF"), Some(ExportFormat::Pdf));
         assert_eq!(png("a.png"), Some(ExportFormat::Png { scale: 4.0 }));
         assert_eq!(png("a.jpg"), None);

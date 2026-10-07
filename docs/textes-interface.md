@@ -193,6 +193,7 @@ l'interface, mais son mot est déjà fixé.
 | Saved colors | Couleurs enregistrées | Couleurs gardées dans le projet ou pour l'utilisateur | Favoris | — |
 | Hex / RGB / HSL | Hexa / RVB / TSL | Façons d'écrire une couleur | — | G |
 | Resolution | Résolution | Facteur d'échelle d'un export PNG | DPI | G |
+| Outlines | Contours | Texte d'un SVG exporté dessiné en formes plutôt qu'en texte (#162) | Courbes, Tracés | G |
 
 ### 2.6 Spectroscopie
 

@@ -29,6 +29,7 @@
 use eframe::egui;
 use stokesforge_core::NodeId;
 use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
+use stokesforge_render_svg::SvgTextMode;
 
 use crate::i18n;
 use crate::state::{active_graph, Action};
@@ -426,6 +427,31 @@ impl StokesForgeApp {
                         self.request_graph_figure_copy(graph, actions);
                         ui.close();
                     }
+                    ui.menu_button(tr!("menu-graph-svg-text"), |ui| {
+                        let current = self.state.svg_text_mode();
+                        if ui
+                            .radio(
+                                current == SvgTextMode::Text,
+                                tr!("menu-graph-svg-text-text"),
+                            )
+                            .on_hover_text(tr!("menu-graph-svg-text-text", "hint"))
+                            .clicked()
+                        {
+                            actions.push(Action::SetSvgTextMode(SvgTextMode::Text));
+                            ui.close();
+                        }
+                        if ui
+                            .radio(
+                                current == SvgTextMode::Outlines,
+                                tr!("menu-graph-svg-text-outlines"),
+                            )
+                            .on_hover_text(tr!("menu-graph-svg-text-outlines", "hint"))
+                            .clicked()
+                        {
+                            actions.push(Action::SetSvgTextMode(SvgTextMode::Outlines));
+                            ui.close();
+                        }
+                    });
                     ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
                         let current = self.state.png_export_scale();
                         for scale in crate::state::PNG_EXPORT_SCALES {
@@ -1331,6 +1357,35 @@ mod tests {
         assert_eq!(app.toolbars.layout().is_visible(id), !visible);
         let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
         assert_eq!(active(&toujours, &id.label()).toggled, Some(!visible));
+        session.shutdown().unwrap();
+    }
+
+    /// #162 : « Texte SVG » est un choix exclusif sous Export ; le choix
+    /// courant (Texte, par défaut) ne fait rien de plus qu'un clic sur l'autre.
+    #[test]
+    fn le_texte_svg_est_un_choix_exclusif_sous_export() {
+        let (session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        let (ctx, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[
+                tr!("menu-graph"),
+                tr!("menu-export"),
+                tr!("menu-graph-svg-text"),
+            ],
+        );
+        assert!(entree(&menu, &tr!("menu-graph-svg-text-text")).is_some());
+        assert_eq!(
+            clique(
+                &mut app,
+                &ctx,
+                tab,
+                active(&menu, &tr!("menu-graph-svg-text-outlines")).center
+            ),
+            vec![Action::SetSvgTextMode(SvgTextMode::Outlines)]
+        );
+        assert_ferme(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 

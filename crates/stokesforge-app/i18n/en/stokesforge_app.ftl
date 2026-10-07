@@ -78,6 +78,12 @@ menu-graph-theme = Theme…
 menu-graph-png-resolution = PNG Resolution
     .hint = Scale factor of PNG exports
 menu-graph-png-resolution-option = ×{ $scale } ({ $width } × { $height } px)
+menu-graph-svg-text = SVG Text
+    .hint = How text is written in SVG exports
+menu-graph-svg-text-text = Text
+    .hint = Keeps text as editable SVG text; the font must be installed to view it
+menu-graph-svg-text-outlines = Outlines
+    .hint = Draws text as outlines; the file looks the same everywhere
 
 action-reset-zoom = Reset Zoom
     .hint = Returns to the original axis ranges

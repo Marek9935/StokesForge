@@ -15,6 +15,7 @@
 //! au démarrage (voir [`crate::i18n::choose_language`]).
 
 use std::path::{Path, PathBuf};
+use stokesforge_render_svg::SvgTextMode;
 
 /// Familles de groupes dont le repli initial est réglable (#139).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +102,9 @@ struct PreferencesFile {
     object_manager_show_scales: Option<bool>,
     #[serde(default)]
     object_manager_settings: Option<ObjectManagerSettings>,
+    /// `"text"` ou `"outlines"` (#162) ; toute autre valeur : le défaut.
+    #[serde(default)]
+    svg_text: Option<String>,
     /// Gardée brute : c'est `toolbar::ToolbarLayout::from_json` qui la lit, en
     /// tolérant ce qu'une autre version y a écrit.
     #[serde(default)]
@@ -113,6 +117,7 @@ pub struct Preferences {
     language: Option<String>,
     object_manager_open: bool,
     object_manager_settings: ObjectManagerSettings,
+    svg_text: SvgTextMode,
     toolbars: Option<serde_json::Value>,
     path: Option<PathBuf>,
 }
@@ -150,6 +155,10 @@ impl Preferences {
             language: file.language,
             object_manager_open: file.object_manager_open.unwrap_or(true),
             object_manager_settings: settings,
+            svg_text: match file.svg_text.as_deref() {
+                Some("outlines") => SvgTextMode::Outlines,
+                _ => SvgTextMode::Text,
+            },
             toolbars: file.toolbars,
             path,
         }
@@ -218,6 +227,23 @@ impl Preferences {
 
     pub fn object_manager_settings(&self) -> ObjectManagerSettings {
         self.object_manager_settings
+    }
+
+    /// Comment un export SVG écrit le texte composé par Typst (#162) ; le
+    /// texte SVG par défaut. Retenu d'un export à l'autre, jamais dans le
+    /// `.stf`.
+    pub fn svg_text_mode(&self) -> SvgTextMode {
+        self.svg_text
+    }
+
+    /// Mémorise le mode sans remplacer les autres préférences.
+    pub fn save_svg_text_mode(&mut self, mode: SvgTextMode) -> std::io::Result<()> {
+        self.svg_text = mode;
+        let name = match mode {
+            SvgTextMode::Text => "text",
+            SvgTextMode::Outlines => "outlines",
+        };
+        self.save_field("svg_text", name.into())
     }
 
     /// Écrit les réglages ensemble en conservant les préférences étrangères.
@@ -506,5 +532,25 @@ mod object_manager_tests {
         assert!(relues.object_manager_show_scales());
         // Indépendante de la bascule des textes.
         assert!(relues.object_manager_show_texts());
+    }
+
+    /// #162 : texte SVG par défaut ; le choix des contours est retenu d'une
+    /// session à l'autre, sans écraser les autres préférences.
+    #[test]
+    fn le_mode_du_texte_svg_se_retient_et_vaut_texte_par_defaut() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        std::fs::write(&path, r#"{"language":"fr","svg_text":"n'importe quoi"}"#).unwrap();
+        let mut prefs = Preferences::load_from(Some(path.clone()));
+        assert_eq!(prefs.svg_text_mode(), SvgTextMode::Text);
+        prefs.save_svg_text_mode(SvgTextMode::Outlines).unwrap();
+        let relues = Preferences::load_from(Some(path.clone()));
+        assert_eq!(relues.svg_text_mode(), SvgTextMode::Outlines);
+        assert_eq!(relues.language(), Some("fr"));
+        prefs.save_svg_text_mode(SvgTextMode::Text).unwrap();
+        assert_eq!(
+            Preferences::load_from(Some(path)).svg_text_mode(),
+            SvgTextMode::Text
+        );
     }
 }

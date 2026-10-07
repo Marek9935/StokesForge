@@ -32,8 +32,14 @@ fn le_document_typst_contient_un_fragment_inline_sans_temoin_residuel() {
 
     let sans_typst =
         render_to_string(&plot, (400, 300), &measurer).expect("échec de l'export sans Typst");
-    let avec_typst = render_to_string_with_typst(&plot, (400, 300), &measurer, &choice)
-        .expect("échec de l'export avec Typst");
+    let avec_typst = render_to_string_with_typst(
+        &plot,
+        (400, 300),
+        &measurer,
+        &choice,
+        stokesforge_render_svg::SvgTextMode::Outlines,
+    )
+    .expect("échec de l'export avec Typst");
 
     // Le document reste un SVG valide et non vide, dans les deux cas.
     assert!(sans_typst.trim_start().starts_with("<svg"));
@@ -104,7 +110,10 @@ fn un_graphe_typst_sexporte_en_svg_pdf_et_png() {
             .unwrap_or_else(|error| panic!("export {format:?} : {error}"))
     };
 
-    let svg = String::from_utf8(exporte(ExportFormat::Svg)).expect("SVG en UTF-8");
+    let svg = String::from_utf8(exporte(ExportFormat::Svg {
+        text: stokesforge_render_svg::SvgTextMode::Text,
+    }))
+    .expect("SVG en UTF-8");
     for (debut, _) in svg.match_indices("<text") {
         let fin = svg[debut..]
             .find("</text>")
@@ -146,7 +155,9 @@ fn l_export_groupe_rend_les_memes_octets_que_l_export_isole() {
     let choice = FontChoice::default();
     let formats = [
         ExportFormat::Png { scale: 1.0 },
-        ExportFormat::Svg,
+        ExportFormat::Svg {
+            text: stokesforge_render_svg::SvgTextMode::Text,
+        },
         ExportFormat::Pdf,
     ];
     let groupe = export_bytes_many(&plot, (480, 360), &measurer, &choice, &formats)
@@ -160,7 +171,14 @@ fn l_export_groupe_rend_les_memes_octets_que_l_export_isole() {
     assert!(groupe[2].starts_with(b"%PDF"), "troisième : PDF");
     for (format, octets) in formats.iter().zip(&groupe) {
         let isole = export_bytes(&plot, (480, 360), &measurer, &choice, *format).expect("export");
-        assert_eq!(&isole, octets, "{format:?} diffère de l'export isolé");
+        if matches!(format, ExportFormat::Pdf) {
+            // `svg2pdf` ne numérote pas les polices de façon reproductible
+            // dès que le PDF porte du texte (#162) : deux exports du même
+            // SVG diffèrent par des octets d'identifiant, pas de contenu.
+            assert_eq!(isole.len(), octets.len(), "Pdf : longueur différente");
+        } else {
+            assert_eq!(&isole, octets, "{format:?} diffère de l'export isolé");
+        }
     }
     let vide = export_bytes_many(&plot, (480, 360), &measurer, &choice, &[]).expect("tracé");
     assert!(vide.is_empty());
@@ -178,7 +196,14 @@ fn la_police_d_une_zone_de_texte_change_l_export() {
     let measurer = TextMeasurer::default();
     let choice = FontChoice::default();
     let export = |plot: &stokesforge_core::resolve::ResolvedPlot<'_>| -> String {
-        render_to_string_with_typst(plot, (500, 400), &measurer, &choice).expect("export")
+        render_to_string_with_typst(
+            plot,
+            (500, 400),
+            &measurer,
+            &choice,
+            stokesforge_render_svg::SvgTextMode::Outlines,
+        )
+        .expect("export")
     };
     let defaut = export(&plot);
 
@@ -197,4 +222,151 @@ fn la_police_d_une_zone_de_texte_change_l_export() {
     if let Ok(path) = std::env::var("STOKESFORGE_TEST_SVG_OUT") {
         std::fs::write(path, &regle).expect("écriture de l'export");
     }
+}
+
+// ── #162 : le texte Typst reste du texte SVG ─────────────────────────────
+
+/// Un graphe à titre, titres d'axe, légende, formule et fraction.
+fn spec_riche() -> PlotSpec {
+    let mut panel = PanelSpec::at(0, 0);
+    panel.left.label = "$lambda_\"max\"$ (nm)".to_owned();
+    panel.bottom.label = "Temps $a/b$".to_owned();
+    let mut spec = PlotSpec::empty("").with_panels(Panels::new(vec![panel]));
+    spec.title = "Spectre alpha".to_owned();
+    spec
+}
+
+fn svg_mode(spec: &PlotSpec, mode: stokesforge_render_svg::SvgTextMode) -> String {
+    let project = Project::new("Texte").expect("projet");
+    let plot = resolve_spec(project.tree(), spec);
+    render_to_string_with_typst(
+        &plot,
+        (480, 360),
+        &TextMeasurer::default(),
+        &FontChoice::default(),
+        mode,
+    )
+    .expect("export")
+}
+
+/// Les contenus des `<text>` d'un document, concaténés.
+fn textes(svg: &str) -> String {
+    let mut out = String::new();
+    for (debut, _) in svg.match_indices("<text") {
+        let Some(open_end) = svg[debut..].find('>') else {
+            continue;
+        };
+        let fin = svg[debut..]
+            .find("</text>")
+            .map_or(svg.len(), |i| debut + i);
+        out.push_str(&svg[debut + open_end + 1..fin]);
+        out.push('\n');
+    }
+    out
+}
+
+#[test]
+fn le_texte_typst_sort_en_text_svg_et_la_geometrie_ne_bouge_pas() {
+    use stokesforge_render_svg::SvgTextMode::{Outlines, Text};
+    let spec = spec_riche();
+    let texte = svg_mode(&spec, Text);
+    let contours = svg_mode(&spec, Outlines);
+
+    let contenu = textes(&texte);
+    for attendu in ["Spectre", "alpha", "Temps", "nm"] {
+        assert!(
+            contenu.contains(attendu) || contenu.contains(&attendu.chars().collect::<String>()),
+            "{attendu:?} absent des <text> :\n{contenu}"
+        );
+    }
+    // La formule `lambda` sort comme le caractère Unicode (ou, à défaut,
+    // en contour), jamais comme la source `lambda`.
+    assert!(
+        !contenu.contains("lambda"),
+        "source Typst brute : {contenu}"
+    );
+    // Une famille nommée avec repli générique, jamais d'`@font-face`.
+    assert!(texte.contains("font-family=\"'Noto Sans', sans-serif\""));
+    assert!(!texte.contains("@font-face"));
+
+    // Le mode Contours n'écrit aucun texte, graduations comprises.
+    assert!(
+        !contours.contains("<text"),
+        "un <text> subsiste en contours :\n{contours}"
+    );
+    // Même fenêtre, même cadre : la figure ne bouge pas d'un mode à l'autre.
+    let cadre = |svg: &str| svg.lines().next().map(str::to_owned);
+    assert_eq!(cadre(&texte), cadre(&contours));
+}
+
+/// Les graduations portent la famille du graphe, comme les textes Typst.
+#[test]
+fn les_graduations_portent_la_police_du_graphe() {
+    use stokesforge_render::{FontChoice, FontSet};
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let project = Project::new("Police").expect("projet");
+    let spec = spec_riche();
+    let plot = resolve_spec(project.tree(), &spec);
+    for set in FontSet::ALL {
+        let svg = render_to_string_with_typst(
+            &plot,
+            (480, 360),
+            &TextMeasurer::with_font_choice(1.0, &FontChoice::Embedded(set)),
+            &FontChoice::Embedded(set),
+            Text,
+        )
+        .expect("export");
+        assert!(
+            !svg.contains("font-family=\"sans-serif\""),
+            "graduation générique avec {set:?}"
+        );
+        // Plotters échappe les apostrophes de l'attribut.
+        let famille = format!(
+            "font-family=\"&apos;{}&apos;, sans-serif\"",
+            set.sans_family_name()
+        );
+        assert!(svg.contains(&famille), "{famille} absent avec {set:?}");
+    }
+}
+
+/// Un glyphe sans caractère Unicode (délimiteur étiré d'une grande
+/// fraction) repasse en contour : un `<path>` avec transformation de glyphe.
+#[test]
+fn un_delimiteur_etire_repasse_en_contour() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let mut spec = spec_riche();
+    spec.title = "$ lr(( a/b )) $".to_owned();
+    let svg = svg_mode(&spec, Text);
+    assert!(
+        svg.contains("<path transform=\"translate("),
+        "aucun glyphe en contour pour un délimiteur étiré :\n{svg}"
+    );
+}
+
+/// Le PDF tiré du mode texte contient du vrai texte, extractible.
+#[test]
+fn le_pdf_contient_du_texte_extractible() {
+    use stokesforge_render_svg::{export_bytes, ExportFormat};
+    let project = Project::new("PDF").expect("projet");
+    let spec = spec_riche();
+    let plot = resolve_spec(project.tree(), &spec);
+    let pdf = export_bytes(
+        &plot,
+        (480, 360),
+        &TextMeasurer::default(),
+        &FontChoice::default(),
+        ExportFormat::Pdf,
+    )
+    .expect("PDF");
+    let document = lopdf::Document::load_mem(&pdf).expect("PDF relisible");
+    let page = *document.get_pages().keys().next().expect("une page");
+    let extrait: String = document
+        .extract_text(&[page])
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect();
+    assert!(
+        extrait.contains("Temps") && extrait.contains("Spectre"),
+        "texte du PDF non extractible : {extrait:?}"
+    );
 }

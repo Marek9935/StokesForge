@@ -73,6 +73,12 @@ menu-graph-theme = Thème…
 menu-graph-png-resolution = Résolution PNG
     .hint = Facteur d'échelle des exports PNG
 menu-graph-png-resolution-option = ×{ $scale } ({ $width } × { $height } px)
+menu-graph-svg-text = Texte SVG
+    .hint = Façon d'écrire le texte dans les exports SVG
+menu-graph-svg-text-text = Texte
+    .hint = Garde le texte modifiable dans le SVG ; la police doit être installée pour l'afficher
+menu-graph-svg-text-outlines = Contours
+    .hint = Dessine le texte en contours ; le fichier s'affiche partout pareil
 
 action-reset-zoom = Réinitialiser le zoom
     .hint = Revient aux plages d'axes d'origine

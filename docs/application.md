@@ -95,7 +95,7 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 | File | New → New Project, Add Workbook, Add Graph ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
 | Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete des objets du Project Manager |
 | Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
-| Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Reset Zoom ; Export → Export Graph…, Copy Graph, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
+| Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
 | View | Panels → Project Manager, Script Console ; Object Manager → Show, puis les réglages du fond (Show graph texts, Show Axes, Expand by Default, Reset Settings) ; Toolbars → File, Tools, Text format |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
@@ -1311,7 +1311,11 @@ le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
 dans la barre d'état. Aucune commande : le modèle n'est pas touché. La
 résolution PNG (×1, ×2, ×4 ; ×4 par défaut, soit 1920 × 1440 px) se règle dans
 « Graph » → « Export » → « PNG Resolution » (`Action::SetPngExportScale`,
-préférence de session).
+préférence de session). Le texte des SVG exportés (#162) se règle dans
+« Graph » → « Export » → « SVG Text » : **Texte** (défaut ; `<text>`
+sélectionnable, police nommée mais non embarquée) ou **Contours** ; le choix est
+retenu d'un lancement à l'autre (`preferences.json`, `Action::SetSvgTextMode`,
+ni commande ni historique ni `.stf`) et ne vaut que pour le SVG.
 
 **Copier le graphe vers une autre application** (issue #149) : menu « Graph »
 → « Export » → « Copy Graph », ou **Ctrl+C** quand une fenêtre de graphique est active au

@@ -158,8 +158,11 @@ texte (`style.color()`, via `formula::ink`) entre dans la compilation et dans la
 clé du cache : une formule n'est jamais teintée après coup (issue #30). Agrandie avec
 la fenêtre, une formule garde son maillage mais change de texture, rastérisée de
 nouveau à la taille affichée dans `scaled` (issue #31) : ne pas mettre le
-rectangle affiché dans la clé du cache principal. L'export PDF/PNG
-n'y est pas encore branché (issue #34). Une formule qui ne compile pas s'affiche
+rectangle affiché dans la clé du cache principal. L'export (SVG, PDF, PNG)
+y est branché (#34) ; le texte Typst d'un SVG reste du texte `<text>` par défaut
+(`SvgTextMode`, émetteur `typst_text.rs`, repli en contour **par glyphe** — #162),
+les contours de `typst-svg` étant l'option « Contours » : ne plus supposer que
+Typst sort des contours. Une formule qui ne compile pas s'affiche
 en texte brut, `$…$` compris — le graphe ne disparaît pas (invariant 10).
 
 ## Aperçu dans la vue, une seule écriture dans le modèle

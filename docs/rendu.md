@@ -596,7 +596,8 @@ Le partage suit la même règle que le reste :
 |---|---|
 | `stokesforge-render/formula.rs` | le `World` Typst minimal, la compilation, le cache qui l'amortit entre deux images |
 | `stokesforge-render-egui/typst_screen.rs` | `typst-render` → RGBA → texture → `Shape::Mesh` |
-| `stokesforge-render-svg/typst_export.rs` | fragments `typst-svg` inlinés |
+| `stokesforge-render-svg/typst_export.rs` | témoins, `splice`, `SvgTextMode` ; fragments `typst-svg` (mode Contours) |
+| `stokesforge-render-svg/typst_text.rs` | émetteur `<text>` d'un `Frame` Typst (mode Texte, #162) |
 
 Côté export, le mécanisme mérite d'être connu avant d'y toucher : `SVGBackend`
 écrit directement dans sa `String` cible et son champ est privé, donc
@@ -605,6 +606,36 @@ impossible d'injecter du XML au moment de dessiner. La parade est un
 invraisemblable, vert et bleu encodant un compteur), posé à la place du texte,
 puis substitué par `splice` une fois le document entier écrit, après
 revérification de la position et de la taille.
+
+**Texte ou contours** (#162, décision du 2026-10-07 ; elle clôt le point ouvert
+n° 6 d'`architecture-choisie.md`). `typst-svg` écrit toujours ses glyphes en
+contours ; pour garder une figure retouchable (Inkscape, Illustrator), le mode
+`SvgTextMode::Text` — **le défaut** — remplace son fragment par celui de
+`typst_text::frame_to_svg`, un émetteur maison qui parcourt le `Frame` compilé :
+un `<text>` par passage, un caractère par glyphe avec la position (`x`/`y`) que
+Typst a calculée, `font-family` nommant la famille suivie d'une famille
+générique (`'Noto Sans', sans-serif`), jamais d'`@font-face` ni de sous-ensemble —
+le lecteur doit avoir la police, sinon son logiciel substitue. Un glyphe que la
+table `cmap` ne relie pas exactement à son caractère (délimiteur étiré, variante
+mathématique, ligature) repasse **en contour, ce glyphe seul** ; les formes
+(trait de fraction, racine) restent des `<path>`. Les témoins et `splice` sont
+inchangés : seul le contenu du fragment change, donc la géométrie aussi peu que
+possible (vérifié par superposition des deux rendus). Les **graduations** portent
+la même famille que les textes Typst (`MeasuredSvgBackend::with_font` ; la
+mesure reste celle d'`epaint` sur la même police). `SvgTextMode::Outlines` garde
+le comportement `typst-svg` et passe aussi les graduations par Typst (texte
+littéral échappé) : aucun `<text>` dans le document.
+
+L'option vit dans `ExportFormat::Svg { text }` et ne s'applique **qu'au SVG** :
+le PDF se tire d'un SVG en mode Texte (texte sélectionnable ; `usvg` doit donc
+trouver les polices embarquées, que `pdf::ensure_embedded_fallback` charge toutes
+dans la `fontdb`), le PNG d'un SVG en contours, indépendant des polices
+installées. `export_bytes_many` compose un SVG par mode demandé. Côté
+application : « Graph › Export › SVG Text » (`Action::SetSvgTextMode`),
+préférence retenue dans `preferences.json` (`svg_text`), jamais dans le `.stf` ;
+la copie vers le presse-papiers (#149) prend toujours Texte. `svg2pdf` ne
+numérote pas ses polices de façon reproductible quand le PDF porte du texte :
+deux PDF du même SVG ont les mêmes longueurs mais pas les mêmes octets.
 
 Typst n'est plus une feature Cargo (issue #29) : `typst`, `typst-layout`,
 `typst-render` et `typst-svg` (tous `=0.15.1`) sont des dépendances fermes des

@@ -6927,6 +6927,41 @@ fn le_format_dexport_suit_lextension() {
     assert!(!dir.path().join("figure.jpg").exists());
 }
 
+/// #162 : l'export SVG garde le texte en `<text>` par défaut, passe en
+/// contours (aucun `<text>`) quand l'utilisateur le choisit ; le PDF et le PNG
+/// ne dépendent pas de ce réglage, qui n'entre ni au modèle ni à l'historique.
+#[test]
+fn le_mode_du_texte_svg_suit_la_preference_et_ne_touche_ni_modele_ni_historique() {
+    use stokesforge_render_svg::SvgTextMode;
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let mut spec = graph_spec(&state, graph);
+    spec.title = "Spectre".to_owned();
+    let spec = Box::new(spec);
+    let revision = state.revision();
+    let exporte = |state: &mut AppState, nom: &str| {
+        state.dispatch(Action::ExportGraph {
+            path: dir.path().join(nom),
+            spec: spec.clone(),
+        });
+        let status = state.status().expect("un message");
+        assert!(!status.is_error, "{}", status.text);
+        std::fs::read_to_string(dir.path().join(nom)).expect("SVG")
+    };
+
+    assert_eq!(state.svg_text_mode(), SvgTextMode::Text);
+    let texte = exporte(&mut state, "texte.svg");
+    assert!(texte.contains("<text"), "texte SVG attendu par défaut");
+    assert!(texte.contains("Spectre"));
+
+    state.dispatch(Action::SetSvgTextMode(SvgTextMode::Outlines));
+    assert_eq!(state.svg_text_mode(), SvgTextMode::Outlines);
+    let contours = exporte(&mut state, "contours.svg");
+    assert!(!contours.contains("<text"), "aucun <text> en contours");
+
+    assert_eq!(state.revision(), revision, "une commande a été émise");
+}
+
 #[test]
 fn le_nom_propose_est_celui_du_graphe() {
     let dir = tempfile::tempdir().expect("dossier temporaire");

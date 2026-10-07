@@ -352,16 +352,34 @@ fn ecran_et_export_placent_les_textes_typst_au_meme_endroit() {
     let (shapes, _) = ecran(&project, &spec, true);
     let plot = resolve_spec(project.tree(), &spec);
     let measurer = TextMeasurer::default();
-    let document = stokesforge_render_svg::render_to_string_with_typst(
-        &plot,
-        (480, 360),
-        &measurer,
-        &FontChoice::default(),
-    )
-    .expect("export");
     let ecran = origines_ecran(&shapes);
     assert_eq!(ecran.len(), 5, "titre, deux titres d'axe, deux entrées");
-    assert_eq!(ecran, origines_export(&document));
+    // Les deux écritures du texte (#162) posent les passages au même endroit.
+    for mode in [
+        stokesforge_render_svg::SvgTextMode::Outlines,
+        stokesforge_render_svg::SvgTextMode::Text,
+    ] {
+        let document = stokesforge_render_svg::render_to_string_with_typst(
+            &plot,
+            (480, 360),
+            &measurer,
+            &FontChoice::default(),
+            mode,
+        )
+        .expect("export");
+        let export = origines_export(&document);
+        match mode {
+            // Les graduations y passent aussi par Typst : leurs origines
+            // s'ajoutent à celles des cinq textes de l'écran.
+            stokesforge_render_svg::SvgTextMode::Outlines => {
+                for origine in &ecran {
+                    assert!(export.contains(origine), "{origine:?} absent : {export:?}");
+                }
+                assert!(export.len() > ecran.len(), "graduations non outlinées");
+            }
+            stokesforge_render_svg::SvgTextMode::Text => assert_eq!(ecran, export),
+        }
+    }
 
     let sans =
         stokesforge_render_svg::render_to_string(&plot, (480, 360), &measurer).expect("export");

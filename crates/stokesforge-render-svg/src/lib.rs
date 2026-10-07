@@ -51,6 +51,7 @@ pub mod pdf;
 pub mod png;
 pub mod subpixel;
 pub mod typst_export;
+mod typst_text;
 
 use std::path::Path;
 
@@ -63,6 +64,7 @@ use stokesforge_render::text::TextMeasurer;
 
 pub use backend::MeasuredSvgBackend;
 pub use export::{export_bytes, export_bytes_many, export_to_file, ExportError, ExportFormat};
+pub use typst_export::SvgTextMode;
 // Le choix de police de l'export, pour qu'un appelant sans egui (l'état de
 // l'application) n'ait pas à déclarer d'arête vers `stokesforge-render`.
 pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};
@@ -147,13 +149,15 @@ pub fn render_to_string_with_typst(
     size: (u32, u32),
     measurer: &TextMeasurer,
     choice: &stokesforge_render::FontChoice,
+    mode: SvgTextMode,
 ) -> Result<String, SvgError> {
     let cache = stokesforge_render::formula::FormulaCache::new();
-    let typst = typst_export::TypstExport::new(&cache, choice).map_err(SvgError::Typst)?;
+    let typst = typst_export::TypstExport::new(&cache, choice, mode).map_err(SvgError::Typst)?;
     let mut buffer = String::new();
     {
-        let backend =
-            MeasuredSvgBackend::with_string(&mut buffer, size, measurer).with_typst(&typst);
+        let backend = MeasuredSvgBackend::with_string(&mut buffer, size, measurer)
+            .with_typst(&typst)
+            .with_font(choice, mode);
         pipeline::draw(backend, plot)?;
     }
     Ok(typst_export::splice(&subpixel::resolve(buffer), &typst))

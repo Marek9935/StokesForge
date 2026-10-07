@@ -63,11 +63,26 @@ use stokesforge_render::FontChoice;
 use typst::text::Font;
 use typst_svg::SvgOptions;
 
+use crate::typst_text;
+
 /// `pixels_per_point` fixe utilisé pour toutes les compilations de l'export
 /// — voir la doc de [`stokesforge_render::formula::FormulaCache`] : ce terme de
 /// la clé de cache ne varie jamais côté export, un fragment SVG étant
 /// vectoriel et donc indépendant de toute résolution d'écran.
 const EXPORT_PIXELS_PER_POINT: f32 = 1.0;
+
+/// Comment le texte composé par Typst s'écrit dans le SVG (#162).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SvgTextMode {
+    /// Du **texte SVG** (`<text>`), sélectionnable et éditable dans un
+    /// logiciel de dessin ; la police est nommée, jamais embarquée. Un glyphe
+    /// sans caractère Unicode repasse en contour. Le défaut.
+    #[default]
+    Text,
+    /// Des **contours** (`<path>`, via `typst-svg`) : le document ne dépend
+    /// d'aucune police installée. Les graduations passent aussi en contours.
+    Outlines,
+}
 
 /// Un fragment SVG déjà compilé pour l'export — la valeur mise en cache
 /// (tâche 8.2), l'analogue export de `FormulaTexture` côté écran.
@@ -128,6 +143,7 @@ pub(crate) struct WitnessRect {
 pub struct TypstExport<'a> {
     cache: &'a FormulaCache<FormulaFragment>,
     choice: &'a FontChoice,
+    mode: SvgTextMode,
     sans: Font,
     math: Font,
     pending: RefCell<Vec<PendingFormula>>,
@@ -142,11 +158,13 @@ impl<'a> TypstExport<'a> {
     pub fn new(
         cache: &'a FormulaCache<FormulaFragment>,
         choice: &'a FontChoice,
+        mode: SvgTextMode,
     ) -> Result<Self, String> {
         let (sans, math) = formula::resolve_fonts(choice)?;
         Ok(Self {
             cache,
             choice,
+            mode,
             sans,
             math,
             pending: RefCell::new(Vec::new()),
@@ -192,7 +210,7 @@ impl<'a> TypstExport<'a> {
                 EXPORT_PIXELS_PER_POINT,
                 self.sans.clone(),
                 self.math.clone(),
-                |compiled| Ok(build_fragment(compiled)),
+                |compiled| Ok(build_fragment(compiled, self.mode)),
             )
             .ok()
     }
@@ -256,7 +274,7 @@ impl<'a> TypstExport<'a> {
 }
 
 /// Compile une page en fragment SVG — tâche 8.4.
-fn build_fragment(compiled: &Compiled) -> FormulaFragment {
+fn build_fragment(compiled: &Compiled, mode: SvgTextMode) -> FormulaFragment {
     let size_pt = compiled.size_pt();
     let Some(page) = compiled.page() else {
         return FormulaFragment {
@@ -264,11 +282,14 @@ fn build_fragment(compiled: &Compiled) -> FormulaFragment {
             size_pt: (0.0, 0.0),
         };
     };
-    let document = typst_svg::svg(page, &SvgOptions::default());
-    FormulaFragment {
-        inner_svg: inner_svg(&document).to_owned(),
-        size_pt,
-    }
+    let inner_svg = match mode {
+        SvgTextMode::Text => typst_text::frame_to_svg(&page.frame),
+        SvgTextMode::Outlines => {
+            let document = typst_svg::svg(page, &SvgOptions::default());
+            inner_svg(&document).to_owned()
+        }
+    };
+    FormulaFragment { inner_svg, size_pt }
 }
 
 /// Le contenu intérieur d'un document SVG autonome produit par
@@ -398,7 +419,8 @@ mod tests {
     #[test]
     fn enregistrer_une_formule_triviale_rend_une_taille_non_nulle() {
         let (cache, choice) = export();
-        let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
+        let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
+            .expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
             .record(
@@ -417,7 +439,8 @@ mod tests {
     #[test]
     fn une_formule_invalide_ne_senregistre_pas() {
         let (cache, choice) = export();
-        let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
+        let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
+            .expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         assert!(typst
             .record(
@@ -436,7 +459,8 @@ mod tests {
     #[test]
     fn splice_remplace_le_temoin_par_le_fragment() {
         let (cache, choice) = export();
-        let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
+        let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
+            .expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
             .record(
@@ -471,7 +495,8 @@ mod tests {
     #[test]
     fn sans_temoin_le_document_ne_change_pas() {
         let (cache, choice) = export();
-        let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
+        let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
+            .expect("résolution des polices échouée");
         let document = "<svg><circle/></svg>".to_string();
         assert_eq!(splice(&document, &typst), document);
     }
@@ -484,7 +509,8 @@ mod tests {
     #[test]
     fn deux_formules_differentes_ne_se_melangent_pas() {
         let (cache, choice) = export();
-        let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
+        let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
+            .expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
 
         let lambda = typst
@@ -583,7 +609,8 @@ mod tests {
     #[test]
     fn temoin_de_mauvaise_taille_nest_pas_substitue() {
         let (cache, choice) = export();
-        let typst = TypstExport::new(&cache, &choice).expect("résolution des polices échouée");
+        let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
+            .expect("résolution des polices échouée");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
             .record(

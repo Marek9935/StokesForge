@@ -39,7 +39,11 @@ use plotters::prelude::*;
 use plotters_backend::{
     BackendColor, BackendCoord, BackendStyle, BackendTextStyle, DrawingErrorKind,
 };
+use stokesforge_render::fonts::{FontSet, FontSource};
 use stokesforge_render::text::font_size;
+use stokesforge_render::FontChoice;
+
+use crate::typst_export::SvgTextMode;
 use stokesforge_render::text::{estimate, TextMeasurer};
 
 /// `SVGBackend`, augmenté de la mesure de texte partagée du chantier.
@@ -57,6 +61,73 @@ pub struct MeasuredSvgBackend<'a> {
     /// [`crate::typst_export::splice`] retrouve les témoins enregistrés
     /// pendant le tracé. Voir la doc de [`Self::with_typst`].
     typst: Option<&'a crate::typst_export::TypstExport<'a>>,
+    /// Ce qui fait écrire les graduations dans la police du graphe (#162) :
+    /// la valeur de `font-family` et le mode de texte. `None` : le
+    /// `font-family="sans-serif"` générique de Plotters.
+    font: Option<(String, SvgTextMode)>,
+}
+
+/// Un style de texte qui n'en change qu'un trait : la famille écrite dans
+/// `font-family`. Tout le reste est celui du style d'origine.
+struct NamedFamily<'s, S> {
+    style: &'s S,
+    family: &'s str,
+}
+
+impl<S: BackendTextStyle> BackendTextStyle for NamedFamily<'_, S> {
+    type FontError = S::FontError;
+
+    fn color(&self) -> BackendColor {
+        self.style.color()
+    }
+
+    fn size(&self) -> f64 {
+        self.style.size()
+    }
+
+    fn transform(&self) -> plotters_backend::FontTransform {
+        self.style.transform()
+    }
+
+    fn style(&self) -> plotters_backend::FontStyle {
+        self.style.style()
+    }
+
+    fn anchor(&self) -> plotters_backend::text_anchor::Pos {
+        self.style.anchor()
+    }
+
+    fn family(&self) -> plotters_backend::FontFamily<'_> {
+        plotters_backend::FontFamily::Name(self.family)
+    }
+
+    fn layout_box(&self, text: &str) -> Result<((i32, i32), (i32, i32)), Self::FontError> {
+        self.style.layout_box(text)
+    }
+
+    fn draw<E, DrawFunc: FnMut(i32, i32, BackendColor) -> Result<(), E>>(
+        &self,
+        text: &str,
+        pos: BackendCoord,
+        draw: DrawFunc,
+    ) -> Result<Result<(), E>, Self::FontError> {
+        self.style.draw(text, pos, draw)
+    }
+}
+
+/// La valeur de `font-family` qui nomme la police du graphe, suivie d'une
+/// famille générique de repli (#162) : « 'Noto Sans', sans-serif ». Une police
+/// système introuvable est repliée sur Noto, comme à l'écran.
+fn css_family(choice: &FontChoice) -> String {
+    let name = match stokesforge_render::fonts::resolve(choice).source {
+        FontSource::Embedded(set) => set.sans_family_name().to_owned(),
+        FontSource::System(name) => name,
+        FontSource::FallenBackToNoto { .. } => FontSet::Noto.sans_family_name().to_owned(),
+    };
+    format!(
+        "'{}', sans-serif",
+        name.replace(['\'', '"', '&', '<', '>'], "")
+    )
 }
 
 impl<'a> MeasuredSvgBackend<'a> {
@@ -66,6 +137,7 @@ impl<'a> MeasuredSvgBackend<'a> {
             inner,
             measurer,
             typst: None,
+            font: None,
         }
     }
 
@@ -86,6 +158,15 @@ impl<'a> MeasuredSvgBackend<'a> {
     /// restent inchangés, tâche 8.6.
     pub fn with_typst(mut self, typst: &'a crate::typst_export::TypstExport<'a>) -> Self {
         self.typst = Some(typst);
+        self
+    }
+
+    /// Les graduations dans la police du graphe (#162) : en mode
+    /// [`SvgTextMode::Text`], elles portent la même famille que les textes
+    /// Typst ; en mode [`SvgTextMode::Outlines`], elles passent par Typst et
+    /// sortent en contours, pour que le document reste homogène.
+    pub fn with_font(mut self, choice: &FontChoice, mode: SvgTextMode) -> Self {
+        self.font = Some((css_family(choice), mode));
         self
     }
 }
@@ -207,7 +288,39 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
                 }
             }
         }
-        self.inner.draw_text(text, style, pos)
+        match &self.font {
+            // Graduations en contours : composées par Typst, comme un texte
+            // littéral (échappé), dans la police du graphe.
+            Some((_, SvgTextMode::Outlines)) if self.typst.is_some() => {
+                if style.color().alpha == 0.0 {
+                    return Ok(());
+                }
+                if let Some(witness) = self.typst.and_then(|typst| {
+                    typst.record(
+                        &stokesforge_render::formula::escape(text),
+                        font_size(style.size()),
+                        stokesforge_render::formula::ink(style.color()),
+                        style.anchor(),
+                        style.transform(),
+                        (pos.0 as f64, pos.1 as f64),
+                    )
+                }) {
+                    let (w, h) = witness.size;
+                    return self.inner.draw_rect(
+                        (pos.0, pos.1),
+                        (pos.0 + w, pos.1 + h),
+                        &witness.color,
+                        true,
+                    );
+                }
+                self.inner.draw_text(text, style, pos)
+            }
+            Some((family, _)) => {
+                let named = NamedFamily { style, family };
+                self.inner.draw_text(text, &named, pos)
+            }
+            None => self.inner.draw_text(text, style, pos),
+        }
     }
 
     /// **La seule méthode qui n'est pas déléguée** — tâche R4.4.
@@ -217,13 +330,11 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
     /// même source » : le même appel. C'est ce qui fait que l'accord des
     /// deux backends (R4.5) se vérifie au lieu de s'espérer.
     ///
-    /// Reste l'asymétrie connue, qui n'est pas de notre ressort ici : le SVG
-    /// émet `<text font-family="sans-serif">`, donc les glyphes réellement
-    /// affichés dépendent de la font installée chez le lecteur, alors que la
-    /// mesure, elle, est faite sur nos polices embarquées. C'est le point
-    /// ouvert n°6 d'`architecture-choisie.md`, à trancher avant le premier
-    /// export destiné à une publication — et il ne se règle pas ici mais en
-    /// décidant d'outliner, ou non, le texte de l'export.
+    /// Les graduations s'écrivent dans la police du graphe
+    /// ([`Self::with_font`], #162) : la famille nommée est celle que la mesure
+    /// utilise, au lieu du `sans-serif` générique de Plotters. Sans
+    /// `with_font`, l'asymétrie ancienne demeure (mesure sur la police
+    /// embarquée, affichage sur celle du lecteur).
     fn estimate_text_size<S: BackendTextStyle>(
         &self,
         text: &str,
