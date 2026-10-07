@@ -718,12 +718,10 @@ pub(super) fn column_type_role_menus(
                     .clicked()
                 {
                     if Some(candidate) != column_type {
-                        for &target in target_columns {
-                            actions.push(Action::SetColumnType {
-                                column: target,
-                                column_type: candidate,
-                            });
-                        }
+                        actions.push(Action::SetColumnsType {
+                            columns: target_columns.to_vec(),
+                            column_type: candidate,
+                        });
                     }
                     ui.close();
                 }
@@ -746,12 +744,10 @@ pub(super) fn column_type_role_menus(
                     .clicked()
                 {
                     if Some(candidate) != role {
-                        for &target in target_columns {
-                            actions.push(Action::SetColumnRole {
-                                column: target,
-                                role: candidate,
-                            });
-                        }
+                        actions.push(Action::SetColumnsRole {
+                            columns: target_columns.to_vec(),
+                            role: candidate,
+                        });
                     }
                     ui.close();
                 }
@@ -3371,23 +3367,14 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             }]);
         }
-        let cibles: Vec<_> = banc
-            .actions
-            .iter()
-            .filter_map(|action| match action {
-                Action::SetColumnType {
-                    column,
-                    column_type: ColumnType::Numeric,
-                } => Some(*column),
-                _ => None,
-            })
-            .collect();
         assert_eq!(
-            cibles,
-            banc.columns[..2],
-            "un changement dans l'ordre des colonnes"
+            banc.actions,
+            vec![Action::SetColumnsType {
+                columns: banc.columns[..2].to_vec(),
+                column_type: ColumnType::Numeric,
+            }],
+            "une seule action, sur les deux colonnes sélectionnées, pas la voisine"
         );
-        assert_eq!(banc.actions.len(), 2, "aucune action sur la voisine");
     }
 
     // --- Sélection multiple (#159) ------------------------------------------

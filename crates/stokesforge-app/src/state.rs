@@ -315,6 +315,21 @@ pub enum Action {
         /// Feuille visée.
         sheet: NodeId,
     },
+    /// Change le type de toutes les `columns` en **un seul pas d'annulation**
+    /// (menu des colonnes sur une sélection multiple, #159).
+    SetColumnsType {
+        /// Colonnes visées.
+        columns: Vec<NodeId>,
+        /// Nouveau type.
+        column_type: ColumnType,
+    },
+    /// Change le rôle de toutes les `columns` en un seul pas d'annulation.
+    SetColumnsRole {
+        /// Colonnes visées.
+        columns: Vec<NodeId>,
+        /// Nouveau rôle.
+        role: ColumnRole,
+    },
     /// Sélectionne toutes les colonnes visibles de `sheet`, en-tête compris,
     /// même sans ligne — Ctrl+A dans la grille, Edit › Select All et case du
     /// coin (#159). État d'interface pur : ni modèle ni historique.
@@ -3799,6 +3814,18 @@ impl AppState {
                 column,
                 column_type,
             }),
+            Action::SetColumnsType {
+                columns,
+                column_type,
+            } => self.set_columns_grouped(MacroKind::SetColumnsType, &columns, |column| {
+                Command::SetColumnType {
+                    column,
+                    column_type,
+                }
+            }),
+            Action::SetColumnsRole { columns, role } => {
+                self.set_columns_role_grouped(&columns, role)
+            }
             Action::SetColumnRole { column, role } => {
                 self.set_column_meta_field(column, |meta| meta.role = role);
             }
@@ -6681,6 +6708,40 @@ impl AppState {
     /// rafraîchit rien, et `execute` ne l'a fait que **pendant** la macro :
     /// sans ce dernier `refresh`, `can_undo`/`undo_label` restent ceux d'avant
     /// la clôture jusqu'à un rafraîchissement fortuit (issue #22).
+    fn set_columns_grouped(
+        &mut self,
+        kind: MacroKind,
+        columns: &[NodeId],
+        command: impl Fn(NodeId) -> Command,
+    ) {
+        let grouped = columns.len() > 1;
+        if grouped && self.handle.begin_macro(kind).is_err() {
+            self.fail("Impossible de grouper le changement des colonnes".to_string());
+            return;
+        }
+        for &column in columns {
+            self.execute(command(column));
+        }
+        if grouped {
+            self.end_grouped_macro();
+        }
+    }
+
+    /// Rôle de plusieurs colonnes, en un seul groupe annulable.
+    fn set_columns_role_grouped(&mut self, columns: &[NodeId], role: ColumnRole) {
+        let grouped = columns.len() > 1;
+        if grouped && self.handle.begin_macro(MacroKind::SetColumnsRole).is_err() {
+            self.fail("Impossible de grouper le changement des colonnes".to_string());
+            return;
+        }
+        for &column in columns {
+            self.set_column_meta_field(column, |meta| meta.role = role);
+        }
+        if grouped {
+            self.end_grouped_macro();
+        }
+    }
+
     fn end_grouped_macro(&mut self) {
         if let Err(err) = self.handle.end_macro() {
             self.fail(format!(

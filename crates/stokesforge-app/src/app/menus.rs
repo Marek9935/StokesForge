@@ -1081,13 +1081,10 @@ mod tests {
         let pos = active(&menu, &tr!("column-type-mixed")).center;
         assert_eq!(
             clique(&mut app, &ctx, tab, pos),
-            columns
-                .iter()
-                .map(|column| Action::SetColumnType {
-                    column: *column,
-                    column_type: ColumnType::Mixed
-                })
-                .collect::<Vec<_>>()
+            vec![Action::SetColumnsType {
+                columns: columns.clone(),
+                column_type: ColumnType::Mixed
+            }]
         );
         assert_ferme(&mut app, &ctx, tab);
         // X et Y sont différents : aucun rôle n'est indiqué comme sélectionné.
@@ -1106,13 +1103,10 @@ mod tests {
         let pos = active(&menu, &tr!("workbook-role-z")).center;
         assert_eq!(
             clique(&mut app, &ctx, tab, pos),
-            columns
-                .iter()
-                .map(|column| Action::SetColumnRole {
-                    column: *column,
-                    role: ColumnRole::Z
-                })
-                .collect::<Vec<_>>()
+            vec![Action::SetColumnsRole {
+                columns: columns.clone(),
+                role: ColumnRole::Z
+            }]
         );
         assert_ferme(&mut app, &ctx, tab);
         let (ctx, menu) = ouvre_chemin(

@@ -1111,8 +1111,8 @@ feuille (gauche → droite, haut → bas), jamais celui des clics.
 - **Clic droit** : dans la sélection, le menu agit sur toute la sélection, même
   non contiguë ; hors de la sélection, il la remplace par la case visée (#152).
 - **Tracer** reçoit la liste ordonnée des colonnes sélectionnées (A en X, C et
-  E en Y…). Type ▸ et Role ▸ poussent une action par colonne, comme avant (pas
-  encore un seul groupe annulable).
+  E en Y…). Type ▸ et Role ▸ passent par `Action::SetColumnsType`/`SetColumnsRole` : un seul
+  pas d'annulation (`MacroKind::SetColumnsType`/`SetColumnsRole`) pour toutes les colonnes.
 
 Pendant un glisser, l'extension au survol ne s'applique qu'aux cases où
 l'appui n'a **pas** commencé (`press_started_in`) : sinon un Ctrl+clic, qui

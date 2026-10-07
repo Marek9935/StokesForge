@@ -8520,3 +8520,77 @@ fn toggling_off_the_last_item_clears_the_selection() {
     state.toggle_row_selection(sheet1, 1);
     assert!(state.selection(sheet1).is_none());
 }
+
+/// Type et rôle de plusieurs colonnes forment **un seul** pas d'annulation
+/// (#159) ; sur une seule colonne, pas de groupe.
+#[test]
+fn changing_type_and_role_of_several_columns_is_one_undo_step() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let role_before = (
+        state.column_meta(temps).role,
+        state.column_meta(signal).role,
+    );
+    let type_before = (
+        state
+            .tree()
+            .node(temps)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .column_type(),
+        state
+            .tree()
+            .node(signal)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .column_type(),
+    );
+
+    state.dispatch(Action::SetColumnsRole {
+        columns: vec![temps, signal],
+        role: ColumnRole::Z,
+    });
+    assert_eq!(state.column_meta(temps).role, ColumnRole::Z);
+    assert_eq!(state.column_meta(signal).role, ColumnRole::Z);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        (
+            state.column_meta(temps).role,
+            state.column_meta(signal).role
+        ),
+        role_before,
+        "un seul Annuler rend les deux rôles"
+    );
+
+    state.dispatch(Action::SetColumnsType {
+        columns: vec![temps, signal],
+        column_type: ColumnType::Mixed,
+    });
+    state.dispatch(Action::Undo);
+    let type_after = (
+        state
+            .tree()
+            .node(temps)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .column_type(),
+        state
+            .tree()
+            .node(signal)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .column_type(),
+    );
+    assert_eq!(
+        type_after, type_before,
+        "un seul Annuler rend les deux types"
+    );
+}

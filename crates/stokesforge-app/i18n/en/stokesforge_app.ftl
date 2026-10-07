@@ -412,6 +412,8 @@ history-macro-import = Import
 history-macro-add-workbook = Add Workbook
 history-macro-add-worksheet = Add Sheet
 history-macro-script = Run Script
+history-macro-set-columns-type = Change Column Types
+history-macro-set-columns-role = Change Column Roles
 
 ## Undo and Redo
 

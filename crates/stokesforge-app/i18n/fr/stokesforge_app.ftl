@@ -405,6 +405,8 @@ history-macro-import = Importer
 history-macro-add-workbook = Ajouter un classeur
 history-macro-add-worksheet = Ajouter une feuille
 history-macro-script = Exécuter le script
+history-macro-set-columns-type = Changer le type des colonnes
+history-macro-set-columns-role = Changer le rôle des colonnes
 
 ## Annuler et rétablir
 

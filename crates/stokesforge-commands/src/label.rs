@@ -74,11 +74,15 @@ pub enum MacroKind {
     AddWorksheet,
     /// Exécuter les écritures d’un script Python.
     Script,
+    /// Changer le type de plusieurs colonnes d'un coup.
+    SetColumnsType,
+    /// Changer le rôle de plusieurs colonnes d'un coup.
+    SetColumnsRole,
 }
 
 impl MacroKind {
     /// Toutes les natures de groupe, pour les tests exhaustifs.
-    pub const ALL: [MacroKind; 13] = [
+    pub const ALL: [MacroKind; 15] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
         MacroKind::DuplicateObjects,
@@ -92,6 +96,8 @@ impl MacroKind {
         MacroKind::AddWorkbook,
         MacroKind::AddWorksheet,
         MacroKind::Script,
+        MacroKind::SetColumnsType,
+        MacroKind::SetColumnsRole,
     ];
 }
 
@@ -262,6 +268,8 @@ impl fmt::Display for MacroKind {
             MacroKind::AddWorkbook => "Add Workbook",
             MacroKind::AddWorksheet => "Add Sheet",
             MacroKind::Script => "Run Script",
+            MacroKind::SetColumnsType => "Change Column Types",
+            MacroKind::SetColumnsRole => "Change Column Roles",
         })
     }
 }
