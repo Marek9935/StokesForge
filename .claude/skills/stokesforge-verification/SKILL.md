@@ -34,6 +34,7 @@ tester explicitement**, sinon elle valide du code mort.
 | l'intégration Python de `stokesforge-app` ou le CLI `run` | `scripts/python-test.sh` couvre ces crates ; appliquer son environnement à Clippy ; `scripts/cli-dist.sh` si l'empaquetage CLI change |
 | les formules Typst, `stokesforge-render::formula` | rien de plus : `cargo test --workspace` les couvre (dépendance ferme) ; l'export PDF/PNG reste hors Typst tant que l'issue #34 n'est pas faite |
 | une reproduction `#[ignore]` de robustesse | `cargo test -p stokesforge-robustesse -- --ignored` |
+| le recalcul des formules (`stokesforge-session/src/recalc.rs`), une donnée lue par une formule, une écriture de colonne | `b22` et `recalc_cible.rs` passent dans `cargo test --workspace`, mais un oracle vert ne prouve rien si le tirage ne produit pas le geste : suivre `docs/tests.md`, « Recalcul ciblé » (pas ajouté au tirage, cas nommé avec témoin, mutation de la composante) |
 | une dépendance, une ressource ou le runtime distribué | `cargo deny --locked check licenses` et génération des notices ; outils figés et packaging dans `docs/licence-et-extensions.md` ; actualiser les notices natives avec le verrou Python |
 | l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `STOKESFORGE_APP_SCREENSHOT` + `STOKESFORGE_APP_AUTOQUIT_MS`, voir [`../stokesforge-bug-report/references/voir-l-interface.md`](../stokesforge-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence. Pour un texte d'interface (nouveau libellé, zone convertie), refaire la capture avec `STOKESFORGE_LANG=en-XA` : un texte sans `[[ ]]` a échappé au catalogue, un `]]` manquant est un texte tronqué |
 | une vraie fenêtre (Wayland, `rfd`, multi-écran, glisser, fenêtre détachée) | rien : **aucun outil non interactif ne peut valider ça**. Le dire dans le compte rendu, ou demander une capture à l'utilisateur. |
@@ -44,7 +45,7 @@ tester explicitement**, sinon elle valide du code mort.
 |---|---|---|
 | unitaire | `#[cfg(test)]` dans `src/` | un comportement local, au plus près de son code |
 | intégration | `crates/*/tests/` | une propriété de crate : contrat public, frontière, accord entre chemins |
-| robustesse | `stokesforge-robustesse/tests/b1`…`b21` | le socle aux limites (index dans son `src/lib.rs`) |
+| robustesse | `stokesforge-robustesse/tests/b1`…`b22` | le socle aux limites (index dans son `src/lib.rs`) |
 
 Logique d'interface : `stokesforge-app/tests/shell.rs`, sans fenêtre. Si une
 décision doit vivre près de l'UI, l'extraire en **fonction pure** puis la

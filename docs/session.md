@@ -10,8 +10,8 @@ L'acteur détient le `&mut Project` **de la session** : un client n'a qu'un
 code : les primitives publiques de `stokesforge-core` servent aussi à *construire* un
 projet avant `Session::spawn`, aux tests, et au CLI (qui manipule un `Project`
 avec un `History`, sans session). Hors historique **par choix** : le recalcul des
-colonnes-formule (`Project::set_length`/`set_values` dans l'acteur), la
-géométrie et l'état des fenêtres, le cadrage de vue.
+colonnes-formule (`Project::set_length`/`set_values` dans l'acteur, voir
+ci-dessous), la géométrie et l'état des fenêtres, le cadrage de vue.
 
 ## Le protocole
 
@@ -133,13 +133,43 @@ C'est le même principe que `Command::SetCells { expected_version }`
 ([`commandes-et-historique.md`](commandes-et-historique.md)) : ne rien vérifier
 côté client, tout vérifier côté acteur.
 
+## Le recalcul des colonnes-formule (#193)
+
+Après chaque `Execute`, `Undo`, `Redo`, `AbortMacro` réussi et après chaque
+`Load`, l'acteur passe sur les colonnes-formule (`src/recalc.rs`). Il ne
+**réécrit** que celles dont une donnée du calcul a changé depuis leur dernier
+calcul : il garde pour chacune une *empreinte* — texte de la formule, colonne
+que désigne chaque lettre (identifiant) et sa version, nombre de lignes de la
+feuille, position, version de la colonne elle-même, issue (calculée,
+illisible, prise dans un cycle) — et la compare à l'état courant. Une
+commande sans rapport (une couleur de courbe, un dossier) ne réécrit donc
+aucune colonne ; modifier A ne réécrit que ce qui lit A, puis, par la
+version de ce qui vient d'être réécrit, ce qui le lit à son tour.
+
+| | |
+|---|---|
+| où vit le mémo | dans l'acteur, à côté du `Project` (`Recalculator`) : ni historique, ni `.stf` |
+| ce qui le vide | `Load` (les valeurs d'un fichier ne sont pas crues sur parole) et `NewProject` |
+| sur quoi il repose | la doctrine des versions : un numéro ne désigne jamais deux contenus d'une même colonne (type + valeurs, pas les métadonnées) |
+| l'oracle | `FormulaRecalc::Full`, le recalcul complet d'avant #193, par `Session::spawn_with_recalc` — jamais en production |
+| ce qui le tient | `tests/recalc_cible.rs` (un cas nommé par composante, avec témoin) et `stokesforge-robustesse` `b22` (deux sessions jumelles, mêmes arbres à chaque pas) |
+
+La règle à ne pas casser : **toute donnée qui entre dans le calcul d'une
+formule entre dans son empreinte**. Un calcul qui lirait une donnée de plus
+sans l'y ajouter afficherait une valeur fausse sans erreur. Les tests à
+écrire quand on étend le mécanisme (nouvelle fonction de formule, référence
+entre feuilles #186, analyses recalculées #184) :
+[`tests.md`](tests.md), « Recalcul ciblé ».
+
 ## Ce qu'il faut savoir avant de modifier
 
 - Ajouter une requête, c'est décider sa ligne dans la table ci-dessus. Une
   requête mutante qui n'y figure pas est un trou.
 - `tests/session.rs` porte les cas nommés ; côté robustesse, `b6`
-  (concurrence entre clients) et `b18` (ce qui reste possible pendant qu'une
-  macro est ouverte).
+  (concurrence entre clients), `b18` (ce qui reste possible pendant qu'une
+  macro est ouverte) et `b22` (recalcul ciblé contre recalcul complet).
+- Une requête qui remplace le projet doit vider le mémo du recalcul
+  (`Recalculator::forget`), comme `Load` et `NewProject`.
 
 **À lire** : `stokesforge-session/src/lib.rs` (tête, et sa table), `src/actor.rs`,
-`src/snapshot.rs`.
+`src/recalc.rs`, `src/snapshot.rs`.

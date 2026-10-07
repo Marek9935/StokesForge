@@ -911,6 +911,16 @@ impl Column {
     /// recalcul inutile, un faux « n'a pas changé » afficherait un résultat
     /// faux. Seule la première erreur est tolérable.
     ///
+    /// # Qui s'y fie
+    ///
+    /// Le recalcul ciblé des colonnes-formule (`stokesforge-session`,
+    /// `recalc.rs`, #193) ne recalcule une formule que si la version d'une de
+    /// ses sources a changé, et `Command::SetCells::expected_version` refuse
+    /// une écriture fondée sur une lecture périmée. Les deux supposent qu'un
+    /// numéro ne désigne jamais deux contenus d'une même colonne : toute
+    /// écriture passe par `Project`, qui remplace ce compteur par un numéro
+    /// neuf de son compteur unique (`Project::next_column_version`).
+    ///
     /// # Il est persisté
     ///
     /// Repartir de zéro au chargement le rendrait **menteur** : après un

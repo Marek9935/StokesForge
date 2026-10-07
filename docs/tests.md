@@ -26,7 +26,7 @@ CPython/numpy. Politique et commandes :
 |---|---|---|
 | **tests unitaires** | `#[cfg(test)]` dans `src/` | un comportement local, au plus près de son code |
 | **tests d'intégration** | `crates/*/tests/` | une propriété de crate : contrat public, frontière, accord entre chemins |
-| **banc de robustesse** | `stokesforge-robustesse/tests/` | le socle aux limites — 21 batteries `b1`…`b21` |
+| **banc de robustesse** | `stokesforge-robustesse/tests/` | le socle aux limites — 22 batteries `b1`…`b22` |
 
 ## Les garde-fous à ne pas casser
 
@@ -71,7 +71,7 @@ d'abord.
 `stokesforge-robustesse` ne contient **aucun code de production**. Il dépend de tout
 le workspace et porte deux choses :
 
-- **21 batteries** (`tests/b1…b21`) qui éprouvent le socle aux limites :
+- **22 batteries** (`tests/b1…b22`) qui éprouvent le socle aux limites :
   valeurs numériques extrêmes (`b1`), persistance (`b2`), fichiers `.stf`
   malformés puis sémantiquement hostiles (`b3`), allocateur d'identifiants
   (`b4`), macros (`b5`), concurrence entre clients (`b6`), frontière
@@ -84,7 +84,8 @@ le workspace et porte deux choses :
   le projet grandit (`b17`), ce qui reste possible pendant qu'une macro est
   ouverte (`b18`), fichier écrit par une version plus récente (`b19`), deux
   écrivains sur un même fichier (`b20`), coût et identité sur le chemin
-  d'écriture (`b21`) ;
+  d'écriture (`b21`), recalcul ciblé des formules contre le recalcul complet
+  (`b22`, voir « Recalcul ciblé » ci-dessous) ;
 - **deux sondes hors-processus**, `sonde_alloc` et `sonde_pile`, parce que les
   cas qu'elles éprouvent se terminent par un `abort()` que rien ne rattrape :
   un échec d'allocation Rust n'est pas une panique rattrapable, et un
@@ -115,6 +116,115 @@ pas de boucler sur `ConcurrentWriteError`).
 Mesurer plutôt que chronométrer : `b17` et `b21` comptent des **octets
 alloués**, pas des millisecondes, pour que l'assertion dise « ce coût ne doit
 pas croître avec X » et reste vraie sur n'importe quelle machine.
+
+## Recalcul ciblé (#193) — et ce qu'il faut tester en s'appuyant dessus
+
+Depuis #193, l'acteur ne réécrit une colonne-formule que si une donnée de son
+calcul a changé (`stokesforge-session/src/recalc.rs`, [`session.md`](session.md)).
+Ce genre d'optimisation n'a qu'un mode de défaillance, et il est
+**silencieux** : une donnée oubliée dans l'empreinte, et la valeur affichée
+reste fausse sans la moindre erreur. Les tests ci-dessous sont faits pour ce
+cas-là, et c'est sur eux que doit s'appuyer tout ce qui réutilisera le
+mécanisme (analyses recalculées #184, références entre feuilles #186,
+nouvelles fonctions de formule).
+
+### Ce qui le tient aujourd'hui
+
+| Test | Ce qu'il tient |
+|---|---|
+| `stokesforge-robustesse/tests/b22_recalcul_cible.rs` | **l'oracle** : deux sessions jumelles, l'une ciblée, l'autre en recalcul complet (`FormulaRecalc::Full`, le code d'avant #193), reçoivent les mêmes pas tirés au sort ; mêmes réponses et mêmes arbres exigés après chaque pas. Plus, à chaque pas : la doctrine version ↔ contenu **dans l'acteur** (écritures du recalcul, macros, rechargements compris), et le témoin du « ciblé » — une commande sans rapport ne change la version d'aucune colonne. Un contrôle de couverture final vérifie que le tirage a bien produit des formules calculées, non calculées et épargnées |
+| `stokesforge-session/tests/recalc_cible.rs` | un cas nommé par composante de l'empreinte (texte, colonne désignée, version des sources, nombre de lignes, version propre, issue), les gestes qui les font changer (déplacement, cycle créé ailleurs, suppression de cellules dans une colonne-formule, macro avortée, feuille dupliquée…), la stabilité d'une chaîne et d'un cycle, l'oubli du mémo par `Load` et `NewProject` sur une coïncidence d'identifiants et de versions **fabriquée et vérifiée**. Chaque assertion « pas réécrite » a son témoin en mode complet |
+| `stokesforge-session/tests/formula.rs` | le comportement des formules lui-même (antérieur à #193, inchangé) |
+| `stokesforge-robustesse/tests/b14_balayage.rs` | la doctrine version ↔ contenu sur `History` seul, sur laquelle repose tout le mécanisme |
+
+L'oracle ne voit pas une erreur **commune** aux deux modes (ordre de calcul,
+évaluation, type de sortie) : elles partagent tout le code sauf la décision
+« propre / à recalculer ». Ce sont les cas nommés et `formula.rs` qui gardent
+le calcul lui-même.
+
+### Mutants éprouvés (#193)
+
+Chaque composante a été cassée tour à tour par une mutation temporaire du
+code, retirée avant livraison ; le tableau dit ce qui a été cassé et quels
+tests le voient.
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| texte de la formule retiré de l'empreinte | `changer_le_texte_de_la_formule_recalcule`, `b22` |
+| nombre de lignes retiré | `allonger_la_feuille_ailleurs_allonge_la_formule`, `une_formule_illisible_suit_la_feuille_puis_se_corrige`, `b22` |
+| version propre ignorée (des deux côtés) | `une_colonne_formule_modifiee_directement_est_recalculee`, `b22` |
+| version propre notée **avant** l'écriture, ou jamais | les cas « ciblé » (`une_commande_sans_rapport_ne_reecrit_aucune_formule`, `une_chaine_recalculee_est_stable_a_la_commande_suivante`…), `b22` (propriété 3) |
+| versions des sources retirées | sept cas nommés (propagation, macro avortée, source promue…), `b22` |
+| colonne désignée remplacée par la colonne-formule elle-même | `deplacer_une_source_change_ce_que_designe_la_lettre`, `b22` |
+| mémo non vidé par `Load` | `le_chargement_oublie_le_memo_du_projet_remplace` seul — le tirage ne fabrique pas de coïncidence entre projets |
+| mémo non vidé par `NewProject` | `un_nouveau_projet_oublie_le_memo_de_l_ancien` seul (un collage comme première requête : sinon la purge d'une passe ordinaire suffit) |
+| tout recalculer (le « ciblé » n'en est plus un) | les cas « ciblé » et leurs témoins, `b22` (propriété 3) |
+| présence dans le mémo au lieu de l'égalité d'empreinte | quatorze cas nommés, `b22` |
+| `self_index` retiré | **personne, par construction** : une auto-référence finit dans le cycle, jamais dans `evaluate_formula`. Gardé parce que `evaluate_formula` le lit |
+| purge du mémo retirée | **personne, par construction** : un identifiant n'est jamais réattribué dans un projet, et `forget` couvre le remplacement. Hygiène mémoire |
+
+Une première version mettait dans l'empreinte d'une formule bloquée les
+colonnes qu'elle désigne : aucun mutant ne la voyait manquer, et pour cause,
+un bloc `NaN` ne les lit pas. Elle a été retirée — c'est l'usage de ce
+tableau : une composante qu'aucun test ne voit est morte ou non couverte.
+
+### Ajouter une fonctionnalité qui en dépend : les tests à écrire
+
+**A. Une donnée de plus entre dans le calcul d'une formule** (fonction
+`row()`, référence par nom de colonne, unité, colonne d'une autre feuille
+#186, paramètre d'analyse…).
+
+1. L'ajouter à l'empreinte (`Fingerprint`, ou une variante d'`Outcome`) :
+   *toute donnée que lit le calcul y entre*. Attention à ce que la version
+   d'une colonne **ne couvre pas** : elle ne change qu'avec le type et les
+   valeurs, jamais avec le nom, l'unité, la formule, la position ni la
+   feuille — une telle donnée se compare directement.
+2. Un cas nommé dans `recalc_cible.rs` qui ne change **que** cette donnée et
+   exige la nouvelle valeur.
+3. Un pas dans le tirage de `b22` qui la fait changer. Sans lui, l'oracle ne
+   peut pas voir l'oubli : il ne compare que ce que le tirage produit.
+4. Mutation : retirer la composante doit faire échouer le cas nommé **et**
+   `b22`. Une composante qu'aucun test ne voit manquer est soit morte (la
+   retirer), soit non couverte (ajouter le pas) — l'écrire dans le tableau
+   ci-dessus dans un cas comme dans l'autre.
+
+**B. Une nouvelle voie d'écriture des données d'une colonne** (primitive de
+`core`, commande, import, pont Python, recalcul d'un autre type).
+
+1. Elle tire un numéro neuf de `Project::next_column_version` : sans lui, un
+   même numéro peut désigner deux contenus, et le recalcul ciblé croit une
+   formule à jour.
+2. L'ajouter aux tirages de `b14` (doctrine sur `History`) et de `b22`
+   (doctrine et oracle dans l'acteur).
+3. Si elle peut viser une colonne-formule (comme `DeleteCells` et
+   `SetColumnType` aujourd'hui), un cas nommé : la colonne est réécrite par sa
+   formule.
+
+**C. Un nouveau calcul dérivé réutilise le mécanisme** (analyses #184).
+
+1. Même règle d'empreinte (A.1), même ordre de passe : aucune écriture après
+   qu'un lecteur a pris son empreinte, sans quoi une seconde passe réécrit et
+   le « ciblé » ne l'est plus.
+2. Garder un mode complet qui partage **tout** le code sauf la décision, et
+   une batterie jumelle sur le modèle de `b22`, avec ses trois propriétés
+   (oracle, version ↔ contenu, commande sans rapport sans réécriture) et son
+   contrôle de couverture.
+3. Les cas nommés de la famille « ciblé » avec leur **témoin** en mode
+   complet : sans témoin, une version inchangée ne prouve rien.
+4. Un résultat en erreur stable (cycle, ajustement qui ne converge pas) ne se
+   réécrit pas à chaque passe : un cas nommé le vérifie.
+5. Le mémo est vidé quand le projet est remplacé (`Load`, `NewProject`) : un
+   cas nommé fabrique une coïncidence d'identifiants et de versions, la
+   **vérifie**, puis exige le recalcul.
+6. Si le calcul coûte (ajustement), mesurer qu'une commande sans rapport ne
+   le relance pas — en comptant, comme `b17`/`b21`, pas en chronométrant.
+7. Relancer les mutants de chaque composante, et compléter le tableau.
+
+**D. Toucher à la passe elle-même** (ordre des étapes, mise en cache des
+formules analysées, nouvelle étape) : relancer `b22` à plus de cas
+(`runner(…)`) et les mutants ; une étape qui écrit après qu'une autre a pris
+son empreinte se voit par la propriété « sans rapport » de `b22` et par
+`une_chaine_recalculee_est_stable_a_la_commande_suivante`.
 
 ## Lancer
 

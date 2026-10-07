@@ -8,7 +8,7 @@ dit quoi ouvrir, dans quel ordre, et surtout **quoi ne pas ouvrir**.
 
 L'ordre est toujours le même : la page `docs/` **d'abord** (elle route et donne
 les invariants), le code ensuite. `docs/invariants.md` vaut pour tous les
-domaines — 10 règles, une table ; le lire avant de toucher au rendu, à
+domaines — 11 règles, une table ; le lire avant de toucher au rendu, à
 l'historique ou à l'acteur.
 
 ## Routage

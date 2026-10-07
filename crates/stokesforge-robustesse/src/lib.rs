@@ -2,7 +2,7 @@
 //!
 //! Il porte deux choses, et rien d'autre :
 //!
-//! - `tests/` — vingt-et-une batteries qui éprouvent le socle aux limites :
+//! - `tests/` — vingt-deux batteries qui éprouvent le socle aux limites :
 //!   valeurs numériques extrêmes, fichiers `.stf` malformés puis
 //!   sémantiquement hostiles, macros de l'historique, concurrence entre
 //!   clients de l'acteur, propriétés tirées au sort (proptest), la frontière
@@ -16,8 +16,9 @@
 //!   courantes quand le projet grandit (`b17`), ce qui reste possible pendant
 //!   qu'une macro est ouverte (`b18`), ce qu'un fichier écrit par une version
 //!   plus récente fait à ce lecteur-ci (`b19`), deux écrivains sur un même
-//!   fichier (`b20`) et le coût comme l'identité sur le chemin d'écriture
-//!   (`b21`) ;
+//!   fichier (`b20`), le coût comme l'identité sur le chemin d'écriture
+//!   (`b21`) et — #193 — le recalcul ciblé des formules confronté, pas à
+//!   pas, au recalcul complet d'une session jumelle (`b22`) ;
 //! - `src/bin/sonde_alloc.rs` et `src/bin/sonde_pile.rs` — deux sondes
 //!   hors-processus, parce que les cas qu'elles éprouvent se terminent par un
 //!   `abort()` que rien ne rattrape : un échec d'allocation pour la première,

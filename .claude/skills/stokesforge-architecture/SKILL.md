@@ -117,12 +117,21 @@ ouvrir de fenêtre.
    Distinguer les exceptions documentées : état de vue et géométrie hors
    historique, chargement du projet, recalcul des valeurs de formule par
    l'acteur comme conséquence d'une commande (sans entrée supplémentaire).
+   Ce recalcul est **ciblé** (#193) : l'acteur garde, pour chaque
+   colonne-formule, une « empreinte » de ce qu'il a lu au dernier calcul
+   (texte, colonnes désignées et leur numéro de version, nombre de lignes…)
+   et ne recalcule que si elle a changé. Analogie Python : un
+   `functools.lru_cache` dont la clé serait toutes les entrées du calcul —
+   ce que l'analogie a de faux : la clé n'est pas le contenu des colonnes
+   mais leur numéro de version, qui change à chaque écriture ; et il n'y a
+   qu'une entrée par colonne, pas un cache de résultats. Le recalcul
+   complet d'avant reste comme oracle de test (`b22`).
 3. **Le dessin est écrit une seule fois.** Une courbe à l'écran et la même
    courbe exportée en PDF passent par le **même** code ; seule la dernière
    étape (« poser un pixel » vs « écrire une balise SVG ») diffère. C'est ce
    qui garantit que ce qu'on exporte est ce qu'on voit.
 
-**Les invariants** (`docs/invariants.md`) sont les dix règles qu'aucun
+**Les invariants** (`docs/invariants.md`) sont les onze règles qu'aucun
 changement n'a le droit de casser. Leur particularité, et c'est ce qu'il faut
 expliquer quand on en parle : la colonne qui compte est « ce qui la tient ».
 Une règle tenue par le compilateur ou par un test n'a pas besoin qu'on y pense ;

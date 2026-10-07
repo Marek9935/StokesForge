@@ -20,6 +20,7 @@ tenue par la relecture se perd.
 | 8 | LIFO strict sur la pile d'historique | la structure de `History`, vérifiée par `tests/history.rs` |
 | 9 | Aucun objet Python ne traverse le canal de l'acteur | le marqueur `Ungil` de PyO3, à la compilation |
 | 10 | Un défaut de donnée dégrade, il ne plante pas | des états de première classe, pas des erreurs |
+| 11 | Un recalcul ciblé rend exactement le recalcul complet | l'empreinte contient toute donnée du calcul ; `b22` (oracle jumeau) et `stokesforge-session/tests/recalc_cible.rs` |
 
 ---
 
@@ -224,3 +225,32 @@ pas un nom.
 
 Corollaire côté UI : `AppState::dispatch` ne rend **jamais** d'erreur ; toute
 erreur devient un message de statut affiché.
+
+## 11. Un recalcul ciblé rend exactement le recalcul complet
+
+Depuis #193, l'acteur ne réécrit une colonne-formule que si une donnée de son
+calcul a changé ; il le sait en comparant une **empreinte** (texte, colonne
+que désigne chaque lettre et sa version, nombre de lignes, version propre,
+issue) à celle de son dernier calcul. Ce que la règle protège est la seule
+défaillance possible d'une telle optimisation, et elle est silencieuse : une
+donnée lue par le calcul mais absente de l'empreinte laisse une valeur fausse
+affichée, sans erreur.
+
+Deux conséquences qui traversent les crates :
+
+- **toute donnée que lit le calcul entre dans l'empreinte**
+  (`stokesforge-session/src/recalc.rs`) — une fonction de formule, une
+  référence entre feuilles ou une analyse qui lit une donnée nouvelle l'y
+  ajoute ;
+- **toute écriture de données d'une colonne tire un numéro de version neuf**
+  (`Project::next_column_version`, `stokesforge-core`) : la comparaison
+  repose sur « un numéro ne désigne jamais deux contenus d'une même
+  colonne ». Une primitive de `core` qui écrirait sans cela ferait passer une
+  formule périmée pour à jour.
+
+Le recalcul complet n'a pas disparu : c'est l'oracle (`FormulaRecalc::Full`),
+contre lequel `b22` compare le ciblé après chaque pas d'une séquence tirée au
+sort. Ce qu'il faut tester quand on étend le mécanisme :
+[`tests.md`](tests.md), « Recalcul ciblé ».
+
+**À lire** : `stokesforge-session/src/recalc.rs` (tête).
