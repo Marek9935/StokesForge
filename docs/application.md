@@ -1256,8 +1256,12 @@ les séries sur l'axe X principal du calque actif, sans question ; un graphe
 (`modal_dialog_with`) — « Create Axis » (défaut) ajoute un calque superposé à
 axe X en haut (`OverlaySpec { x_top, y_right: false }`), « Use Present Axis »
 garde le calque visé, « Cancel » abandonne (`Action::ConfirmRowDrop`). Une
-seule `SetPlotSpec` : un seul pas d'annulation, calque compris. Pas de « Send
-to » pour les lignes (le menu de lignes envoie toujours des colonnes).
+seule `SetPlotSpec` : un seul pas d'annulation, calque compris. **Menus** : sur
+une sélection de lignes entières d'une feuille à x' (clic droit sur un numéro de
+ligne, menu Classeur), Plot crée un graphe de lignes (`Action::PlotRows`, mêmes
+types de tracé) et Send to envoie les lignes (même question d'axe qu'au dépôt) ;
+le menu des colonnes n'est plus proposé dans ce cas. Sans x', une sélection de
+lignes garde le menu des colonnes qu'elles traversent.
 
 **Calques superposés (#167).** Graph › New Layer (Top X, Right Y, Top X Right Y)
 ajoute, par `Action::AddLayer`, un `PanelSpec::overlay_on` au calque de base du

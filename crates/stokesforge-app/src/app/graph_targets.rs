@@ -18,7 +18,9 @@ use stokesforge_core::{NodeId, Tree};
 
 use super::graph_window::published_active_panel;
 use super::tab::{tab_title_from_tree, Tab};
-use crate::state::{drop_payload_action, Action, ColumnDragPayload};
+use crate::state::{
+    drop_payload_action, drop_rows_action, Action, ColumnDragPayload, RowDragPayload,
+};
 use crate::tr;
 
 /// Les graphiques ouverts, dans l'ordre : attachés puis détachés.
@@ -111,6 +113,40 @@ pub(super) fn send_to_graph_menu(
                     actions.push(drop_payload_action(&payload, graph, panel));
                     ui.close();
                 }
+            }
+        });
+    }
+}
+
+/// « Envoyer vers » pour des **lignes** (#166) : la même liste de graphiques
+/// ouverts, mais l'action trace les lignes ([`drop_rows_action`], qui pose la
+/// question de l'axe si le graphique a déjà un X).
+pub(super) fn send_rows_to_graph_menu(
+    ui: &mut egui::Ui,
+    tree: &Tree,
+    actions: &mut Vec<Action>,
+    payload: &RowDragPayload,
+) {
+    let targets = targets(ui.ctx(), tree);
+    if targets.is_empty() {
+        return;
+    }
+    let mut send = |ui: &mut egui::Ui, graph: NodeId, label: String| {
+        if ui.button(label).clicked() {
+            let panel = published_active_panel(ui.ctx(), graph);
+            actions.push(drop_rows_action(payload, graph, panel));
+            ui.close();
+        }
+    };
+    if targets.len() < 3 {
+        for graph in targets {
+            let name = tab_title_from_tree(tree, Tab::Graph(graph));
+            send(ui, graph, tr!("workbook-send-to-graph", graph = name));
+        }
+    } else {
+        ui.menu_button(tr!("workbook-send-to-graph-menu"), |ui| {
+            for graph in targets {
+                send(ui, graph, tab_title_from_tree(tree, Tab::Graph(graph)));
             }
         });
     }

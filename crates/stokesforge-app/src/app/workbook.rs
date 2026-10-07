@@ -17,9 +17,9 @@ use crate::state::{Action, AppState};
 use crate::{theme, tr};
 
 use super::file_drop::claim_file_drop;
-use super::graph_targets::send_to_graph_menu;
+use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
 use super::grid::{
-    columns_menu_contents, grid_contents, metadata_row_visible, plot_menu,
+    columns_menu_contents, grid_contents, metadata_row_visible, plot_menu, plot_rows_menu,
     set_metadata_row_visible, show_grid_horizontal_bar, show_grid_vertical_bar,
     show_horizontally_scrollable_grid,
 };
@@ -54,8 +54,15 @@ pub(super) fn workbook_menu(
         ui.menu_button(tr!("menu-columns"), |ui| {
             columns_menu_contents(ui, state, actions, sheet, &columns);
         });
-        plot_menu(ui, actions, sheet, &columns);
-        send_to_graph_menu(ui, state.tree(), actions, sheet, &columns);
+        // Des lignes entières sur une feuille à x' se tracent comme des lignes
+        // (#166), pas comme les colonnes qu'elles traversent.
+        if let Some(payload) = state.row_drag_payload(sheet) {
+            plot_rows_menu(ui, actions, &payload);
+            send_rows_to_graph_menu(ui, state.tree(), actions, &payload);
+        } else {
+            plot_menu(ui, actions, sheet, &columns);
+            send_to_graph_menu(ui, state.tree(), actions, sheet, &columns);
+        }
     });
     sections.section(ui, true, |ui| {
         let mut show = metadata_row_visible(ctx);

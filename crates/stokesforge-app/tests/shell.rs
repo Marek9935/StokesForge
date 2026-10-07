@@ -5136,6 +5136,50 @@ fn dropping_rows_ignores_missing_rows_and_refuses_a_sheet_without_x_prime() {
     assert!(state.status().expect("message").is_error);
 }
 
+/// Plot d'une sélection de lignes (#166) : un graphe neuf dont chaque ligne est
+/// une série, pas toutes les colonnes traversées ; un seul pas d'annulation.
+#[test]
+fn plot_rows_creates_a_graph_with_one_row_series_per_row() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state, sheet, columns) = kinetics(dir.path());
+    let root = state.tree().root();
+    let before = state.tree().len();
+
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![2, 0, 99],
+        plot_type: PlotType::Line,
+    });
+
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graphe créé");
+    let spec = state.plot_spec(graph).expect("spec");
+    let series = &spec.panels[0].series;
+    assert_eq!(
+        series.iter().map(|s| s.row).collect::<Vec<_>>(),
+        [Some(0), Some(2)]
+    );
+    assert_eq!(series[0].y, columns[0]);
+    assert!(series.iter().all(|s| s.x.is_none()));
+    state.dispatch(Action::Undo);
+    assert_eq!(state.tree().len(), before);
+
+    // Sans x', rien n'est créé.
+    for name in ["A", "B", "C"] {
+        set_x_prime(&mut state, sheet, name, "");
+    }
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0],
+        plot_type: PlotType::Line,
+    });
+    assert_eq!(state.tree().len(), before);
+    assert!(state.status().expect("message").is_error);
+}
+
 // -- 23. Glisser une sélection de colonnes vers un graphe --
 
 /// [`AppState::column_drag_payload`] rend `None` tant que `sheet` n'a pas de

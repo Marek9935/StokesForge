@@ -483,6 +483,17 @@ pub enum Action {
         /// Axe X des séries.
         axis: RowAxis,
     },
+    /// Crée un graphe qui trace des **lignes** entières d'une feuille (menu
+    /// Plot d'une sélection de lignes, #166) : une série par ligne, contre les
+    /// x' des colonnes. Refusée sans colonne x'. Un seul pas d'annulation.
+    PlotRows {
+        /// Feuille d'où viennent les lignes.
+        sheet: NodeId,
+        /// Lignes tracées (0 = la première).
+        rows: Vec<usize>,
+        /// Type de tracé de chaque série.
+        plot_type: PlotType,
+    },
     /// Réponse à la question de [`RowAxis::Ask`] : `Some` choisit l'axe,
     /// `None` abandonne le dépôt.
     ConfirmRowDrop(Option<RowAxis>),
@@ -1098,6 +1109,28 @@ fn second_layer() -> stokesforge_plot::OverlaySpec {
         x_top: true,
         y_right: true,
     }
+}
+
+/// Les séries « ligne » (#166) de `rows`, ancrées sur `anchor`, avec les styles
+/// de palette à partir du rang `start`.
+fn row_series(
+    anchor: NodeId,
+    rows: &[usize],
+    start: usize,
+    plot_type: &PlotType,
+) -> Vec<stokesforge_plot::SeriesSpec> {
+    rows.iter()
+        .enumerate()
+        .map(|(offset, &row)| {
+            let mut series = stokesforge_plot::SeriesSpec::new(anchor);
+            series.row = Some(row);
+            series.name = crate::tr!("graph-row-series", number = (row + 1));
+            series.line = stokesforge_plot::LineSpec::from_palette(start + offset);
+            series.symbol = stokesforge_plot::SymbolSpec::from_palette(start + offset);
+            series.plot_type = plot_type.clone();
+            series
+        })
+        .collect()
 }
 
 /// Les colonnes de `sheet` qui portent une valeur x' finie, dans l'ordre de la
@@ -4195,6 +4228,11 @@ impl AppState {
                 axis,
             } => self.add_rows_to_graph(graph, panel, sheet, rows, axis),
             Action::ConfirmRowDrop(choice) => self.confirm_row_drop(choice),
+            Action::PlotRows {
+                sheet,
+                rows,
+                plot_type,
+            } => self.plot_rows(sheet, rows, plot_type),
             Action::SetObjectManagerOpen(open) => {
                 self.object_manager_open = open;
                 if let Err(error) = self
@@ -7663,16 +7701,49 @@ impl AppState {
             return;
         };
         let start = layer.series.len();
-        for (offset, row) in rows.into_iter().enumerate() {
-            let mut series = stokesforge_plot::SeriesSpec::new(anchor);
-            series.row = Some(row);
-            series.name = crate::tr!("graph-row-series", number = (row + 1));
-            series.line = stokesforge_plot::LineSpec::from_palette(start + offset);
-            series.symbol = stokesforge_plot::SymbolSpec::from_palette(start + offset);
-            series.plot_type = plot_type.clone();
-            layer.series.push(series);
-        }
+        layer
+            .series
+            .extend(row_series(anchor, &rows, start, &plot_type));
         self.execute(Command::SetPlotSpec { graph, spec });
+    }
+
+    /// [`Action::PlotRows`] : un graphe neuf, dans le dossier du classeur de
+    /// `sheet`, dont les séries sont les lignes demandées.
+    fn plot_rows(&mut self, sheet: NodeId, rows: Vec<usize>, plot_type: PlotType) {
+        let Some(&anchor) = x_prime_columns(&self.snapshot.tree, sheet).first() else {
+            self.fail(crate::tr!("status-row-no-x-prime"));
+            return;
+        };
+        let row_count = self.row_count(sheet);
+        let mut rows: Vec<usize> = rows.into_iter().filter(|row| *row < row_count).collect();
+        rows.sort_unstable();
+        rows.dedup();
+        if rows.is_empty() {
+            return;
+        }
+        let Some(parent) = self
+            .snapshot
+            .tree
+            .node(sheet)
+            .and_then(Node::parent)
+            .and_then(|book| self.snapshot.tree.node(book).and_then(Node::parent))
+        else {
+            self.fail(format!("{sheet} n'est pas une feuille de ce projet"));
+            return;
+        };
+        let panel = PanelSpec {
+            series: row_series(anchor, &rows, 0, &plot_type),
+            ..PanelSpec::default()
+        };
+        let spec = PlotSpec {
+            panels: Panels::new(vec![panel]),
+            ..PlotSpec::default()
+        };
+        self.execute(Command::AddGraph {
+            parent,
+            name: None,
+            spec,
+        });
     }
 
     /// [`Action::ConfirmRowDrop`] : rejoue le dépôt en attente avec l'axe

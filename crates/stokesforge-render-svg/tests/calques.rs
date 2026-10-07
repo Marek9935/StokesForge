@@ -58,3 +58,42 @@ fn le_calque_superpose_trace_ses_graduations_en_haut() {
     }));
     assert!(avec.contains("800.0"), "graduation X2 absente : {avec}");
 }
+
+/// #166 : une série « ligne » se trace contre les x' des colonnes — les
+/// graduations de l'axe X couvrent les instants (0…240), pas les indices.
+#[test]
+fn une_serie_ligne_se_trace_contre_les_x_prime() {
+    let mut project = Project::new("Cinétique").expect("projet");
+    let root = project.root();
+    let book = project.add_empty_workbook(root, None).expect("classeur");
+    let sheet = project.add_worksheet(book, None).expect("feuille");
+    let mut ancre = None;
+    for (temps, valeur) in [(0.0, 1.0), (120.0, 2.0), (240.0, 3.0)] {
+        let id = project
+            .add_column(sheet, None, None, Column::from_f64(&[valeur, valeur * 2.0]))
+            .expect("colonne");
+        let mut meta = project
+            .tree()
+            .node(id)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .meta()
+            .clone();
+        meta.x_prime = Some(temps);
+        project.set_column_meta(id, meta).expect("x'");
+        ancre.get_or_insert(id);
+    }
+    let mut serie = SeriesSpec::new(ancre.unwrap());
+    serie.row = Some(1);
+    let mut panel = PanelSpec::at(0, 0);
+    panel.series.push(serie);
+    let spec = PlotSpec::empty("").with_panels(Panels::new(vec![panel]));
+    let plot = resolve_spec(project.tree(), &spec);
+    let svg = render_to_string(&plot, (480, 360), &TextMeasurer::default()).expect("export");
+    assert!(svg.contains("200.0"), "graduation x' absente : {svg}");
+    assert!(
+        svg.contains("<polyline") || svg.contains("<path"),
+        "courbe absente"
+    );
+}

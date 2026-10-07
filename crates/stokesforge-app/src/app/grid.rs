@@ -28,7 +28,7 @@ use crate::state::{
 };
 use crate::{icons, tr};
 
-use super::graph_targets::send_to_graph_menu;
+use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
 use super::menu_sections::MenuSections;
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
@@ -742,6 +742,54 @@ fn column_properties_menu(
     }
 }
 
+/// Menu d'une sélection de **lignes entières** d'une feuille à x' (#166) :
+/// Plot et Send to tracent les lignes (une série par ligne, contre les x'),
+/// puis presse-papiers et effacer comme pour les colonnes.
+fn row_properties_menu(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    payload: &RowDragPayload,
+) {
+    let sheet = payload.sheet;
+    let menu = state.grid_menu(sheet);
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| {
+        plot_rows_menu(ui, actions, payload);
+        send_rows_to_graph_menu(ui, state.tree(), actions, payload);
+    });
+    if let Some(menu) = &menu {
+        grid_clipboard_section(ui, &mut sections, state, actions, sheet, menu);
+        grid_erase_section(ui, &mut sections, state, actions, sheet, menu);
+    }
+}
+
+/// « Plot » d'une sélection de lignes : les mêmes types de tracé que
+/// [`plot_menu`], poussant [`Action::PlotRows`].
+pub(super) fn plot_rows_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<Action>,
+    payload: &RowDragPayload,
+) {
+    ui.menu_button(tr!("workbook-plot-menu"), |ui| {
+        for (label, plot_type) in [
+            (tr!("plot-type-line"), PlotType::Line),
+            (tr!("plot-type-scatter"), PlotType::Scatter),
+            (tr!("plot-type-line-symbol"), PlotType::LineScatter),
+            (tr!("plot-type-bar"), PlotType::Bar),
+        ] {
+            if ui.button(label).clicked() {
+                actions.push(Action::PlotRows {
+                    sheet: payload.sheet,
+                    rows: payload.rows.clone(),
+                    plot_type,
+                });
+                ui.close();
+            }
+        }
+    });
+}
+
 /// Le clic droit sur une case de la grille (cellule, numéro de ligne, champ
 /// d'en-tête, coin). Sur une sélection de **colonnes ou de lignes entières**,
 /// c'est le menu des lettres de colonnes — Plot, Send to, presse-papiers, type
@@ -757,6 +805,12 @@ fn selection_context_menu(
         .selection(sheet)
         .filter(|selection| selection.is_columns() || selection.is_full_rows())
         .map(|selection| selection.columns(state.tree(), sheet));
+    // Des lignes entières sur une feuille à x' (#166) : tracer des **lignes**,
+    // pas toutes les colonnes qu'elles traversent.
+    if let Some(payload) = state.row_drag_payload(sheet) {
+        row_properties_menu(ui, state, actions, &payload);
+        return;
+    }
     match whole {
         Some(columns) if !columns.is_empty() => {
             column_properties_menu(ui, state, actions, sheet, &columns);
@@ -3946,5 +4000,46 @@ mod tests {
         let milieu = banc.centre_de("201").expect("cellule peinte");
         glisse_depuis(&mut banc, milieu);
         assert!(!charge_de_lignes_posee(&banc), "milieu de ligne");
+    }
+
+    /// Un glisser rapide : le pointeur quitte la bande et traverse d'autres
+    /// cellules dès la première image de mouvement. L'extension de sélection au
+    /// survol ne doit pas défaire la sélection de lignes avant que le glisser
+    /// ne démarre.
+    #[test]
+    fn un_glisser_de_lignes_rapide_garde_la_selection_et_emporte_les_lignes() {
+        let mut banc = Banc::new();
+        pose_x_prime(&mut banc, "5");
+        banc.state.select_row(banc.sheet, 0);
+        banc.image(Vec::new());
+        banc.image(Vec::new());
+        let depart = bord_bas(&banc, "201");
+        banc.image(vec![egui::Event::PointerMoved(depart)]);
+        banc.image(vec![egui::Event::PointerButton {
+            pos: depart,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for pas in 1..=4 {
+            banc.image(vec![egui::Event::PointerMoved(
+                depart + egui::vec2(60.0 * pas as f32, 25.0 * pas as f32),
+            )]);
+        }
+        assert!(charge_de_lignes_posee(&banc), "le glisser rapide a démarré");
+    }
+
+    /// Le geste complet de l'utilisateur : clic sur le numéro de ligne, puis
+    /// prise du bord bas de la ligne sélectionnée.
+    #[test]
+    fn clic_sur_le_numero_de_ligne_puis_prise_du_bord() {
+        let mut banc = Banc::new();
+        pose_x_prime(&mut banc, "5");
+        banc.clic_sur("2");
+        assert!(banc.state.is_row_selected(banc.sheet, 1));
+        banc.image(Vec::new());
+        let depart = bord_bas(&banc, "202");
+        glisse_depuis(&mut banc, depart);
+        assert!(charge_de_lignes_posee(&banc));
     }
 }
