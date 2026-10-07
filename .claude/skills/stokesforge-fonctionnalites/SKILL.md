@@ -21,6 +21,10 @@ comment c'est écrit.
   depuis le dernier clic ; Ctrl+Maj+clic l'ajoute à la sélection (#159).
   Une sélection non contiguë se trace, s'efface et se copie (bout à bout),
   mais ne se colle pas dedans.
+  Pour tracer vite : sélectionner des colonnes entières, **attraper le bord**
+  du bloc sélectionné (le curseur devient une main) et le lâcher sur un graphe
+  ouvert — les séries rejoignent le calque visé avec son type de tracé
+  (#160) ; Échap annule.
 - Donner le **raccourci clavier** quand il existe : c'est souvent la vraie
   réponse à « comment je fais plus vite ».
 - Ne citer un nom de fichier ou de fonction **que si l'utilisateur veut aller

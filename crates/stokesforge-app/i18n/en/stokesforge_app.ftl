@@ -121,6 +121,11 @@ action-copy = Copy
     .disabled = The selected blocks share neither rows nor columns, so they cannot be copied together
 action-copy-with-header = Copy with Header
     .hint = Copies the values and the column header
+grid-drag-columns =
+    { $count ->
+        [one] { $count } column
+       *[other] { $count } columns
+    }
 action-select-all = Select All
     .hint = Selects every column of the sheet, headers included
 action-paste = Paste

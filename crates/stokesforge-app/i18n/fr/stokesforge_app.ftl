@@ -116,6 +116,11 @@ action-copy = Copier
     .disabled = Les blocs sélectionnés ne partagent ni lignes ni colonnes : ils ne se copient pas ensemble
 action-copy-with-header = Copier avec l'en-tête
     .hint = Copie les valeurs et l'en-tête de colonne
+grid-drag-columns =
+    { $count ->
+        [one] { $count } colonne
+       *[other] { $count } colonnes
+    }
 action-select-all = Tout sélectionner
     .hint = Sélectionne toutes les colonnes de la feuille, en-têtes compris
 action-paste = Coller

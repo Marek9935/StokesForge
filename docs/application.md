@@ -45,7 +45,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/tab.rs` | `Tab`, l'onglet d'une fenêtre de contenu (classeur, graphe, matrice, note), ses traductions vers le modèle (`tab_for_window`, `tab_node`), son titre (`tab_title`, `tab_title_from_tree`, nœud supprimé compris) et son miroir lisible par `crate::state` (`active_tab_kind`) |
 | `app/contents.rs` | contenus partagés flottant/détaché : `tab_contents`, `note_contents`, `matrix_contents` (espace réservé) |
 | `app/workbook.rs` | classeur : `book_contents` (contenu commun flottant/détaché), `sheet_tabs`, `workbook_menu` |
-| `app/grid.rs` | grille d'une feuille : `grid_contents` prépare la table, peint ses en-têtes et son corps virtualisé, puis traite le clavier avec `grid_keyboard` (après les cellules : les éditeurs consomment d'abord Tab/Entrée et reprennent le focus), en-tête empilé, gouttière, cellules, `grid_edit_menu`, focus clavier (`GRID_KEYS`, `keyboard_focus_outside_grid`), barres déportées, `grid_grip_side`, libellés de type et de rôle |
+| `app/grid.rs` | grille d'une feuille : `grid_contents` prépare la table, peint ses en-têtes et son corps virtualisé, puis traite le clavier avec `grid_keyboard` (après les cellules : les éditeurs consomment d'abord Tab/Entrée et reprennent le focus), en-tête empilé, gouttière, cellules, `grid_edit_menu`, focus clavier (`GRID_KEYS`, `keyboard_focus_outside_grid`), barres déportées, `column_grip_bands` (prise du glisser de colonnes), libellés de type et de rôle |
 | `app/figure_copy.rs` | copier la figure du graphique actif vers une application externe (#149) : le geste Ctrl+C (`request_figure_copy`, `take_figure_copy_gesture`), l'entrée de menu (`request_graph_figure_copy`) et l'offre au système (`offer_figure`) |
 | `app/graph_window.rs` | fenêtre de graphe : `graph_view_contents` (commun flottant/détaché), `graph_drop_target`, menu contextuel de la figure, `annotation_interactions`, ordre et propriétés des objets, `request_graph_export` |
 | `app/graph_text_edit.rs` | éditeurs sur place (texte libre, titre, nom de légende) et mise en forme en attente demandée par la barre de format |
@@ -1154,51 +1154,46 @@ ci-dessous.
 ### Glisser une sélection de colonnes vers un graphe
 
 Second chemin vers `Action::AddSeriesToGraph`, complémentaire du sous-menu
-« Plot » : glisser une sélection de colonnes depuis la grille jusqu'à un
-graphe déjà ouvert y ajoute des séries, en `PlotType::Line` toujours (le
-glisser ne propose pas de choisir le type — contrairement au sous-menu
-contextuel, qui lui le demande).
+« Plot » : on **attrape le bord** d'un bloc de colonnes sélectionnées, comme la
+sélection d'Excel, et on le lâche sur un graphe ouvert (#160).
 
-**Zone de prise.** Le glisser ne part pas de n'importe où dans la grille —
-ça casserait le glisser d'extension de sélection existant
-(`cell_widget`/`extend_selection`), qui occupe déjà toute la surface des
-cellules. La zone de prise est une mince bande (`COLUMN_GRIP_WIDTH`, 10px) le
-long du bord *extérieur* gauche ou droit de la grille entière — pas de
-chaque colonne individuellement — et n'apparaît que si la feuille a déjà une
-sélection couvrant au moins une colonne (`AppState::column_drag_payload`).
-Le survol y affiche un curseur « attraper » et un petit pictogramme (une
-grille de points, peinte à la main plutôt qu'un glyphe de police — voir
-`app::grid::paint_drag_handle_icon`) à côté du pointeur. `app::grid::grid_grip_side`
-est la fonction pure qui décide si un point est dans cette bande, testée seule
-dans `app/grid.rs` (bornes de la marge comprises) ; `grid_contents` s'en sert pour peindre
-l'icône et interagit séparément sur deux rectangles confinés (gauche, droite)
-pour démarrer le glisser, afin de ne jamais intercepter le reste de la
-grille.
+**Précondition.** Une sélection de **colonnes entières** (rangée des lettres,
+case du coin, Ctrl+A ; non contiguë comprise, #159) :
+`AppState::column_drag_payload` rend `None` pour des cellules, des lignes ou un
+champ d'en-tête. Le geste emporte **toutes** les colonnes sélectionnées, dans
+l'ordre de la feuille.
 
-**Charge utile.** `AppState::column_drag_payload` construit une
-`state::ColumnDragPayload { sheet, columns }` typée — pas une chaîne —
-portée par le mécanisme natif d'egui 0.36
-(`egui::Response::dnd_set_drag_payload`/`dnd_hover_payload`/
-`dnd_release_payload`, `Any + Send + Sync`).
+**Prise.** `app::grid::column_grip_bands` (fonction pure, testée seule) pose
+une bande fine (`COLUMN_GRIP_HALF_WIDTH`, 3 pt de part et d'autre) sur chaque
+bord extérieur d'un bloc de colonnes sélectionnées qui se suivent — deux
+paires pour deux blocs séparés —, du premier champ d'en-tête au bas de la
+grille. La **rangée des lettres en est exclue** : ses bords de colonne servent
+au redimensionnement (`egui_extras`), qui garde la priorité. Les bandes sont
+posées après la table (donc au-dessus des cellules) mais n'existent que sur ces
+bords : le glisser d'extension de sélection de `cell_widget` garde toute la
+surface des cellules. Curseur `Grab` au survol, `Grabbing` pendant le glisser ;
+un repère (pictogramme du composant d'icônes + nombre de colonnes) suit le
+pointeur ; Échap annule (`egui::DragAndDrop::clear_payload`).
+
+**Charge utile.** `state::ColumnDragPayload { sheet, columns }` typée — pas une
+chaîne —, portée par le mécanisme natif d'egui 0.36
+(`egui::Response::dnd_set_drag_payload`, `egui::DragAndDrop`).
 
 **Cible.** Chaque `Tab::Graph` est enrobé par `app::graph_window::graph_drop_target`
 (appelée par `tab_contents`, seul point d'entrée commun au dock et aux
-onglets détachés — voir sa doc de tête) : un survol avec une
-`ColumnDragPayload` active dessine un contour sobre autour du graphe, à la
-teinte de sélection de `theme::header_letter_row_selected_fill` (aucune
-palette inventée) ; un relâchement au-dessus convertit la charge utile en
-`Action::AddSeriesToGraph` via `state::drop_payload_action`, une fonction
-pure elle aussi testée directement. Relâcher ailleurs qu'au-dessus d'un
-graphe ne fait rien — `dnd_release_payload` ne répond que si le pointeur est
-contenu dans le rectangle du graphe au moment du relâchement. Contour, dépôt
-et relâchement ailleurs sont testés sans fenêtre
-(`graph_window::tests::deposer_des_colonnes_sur_le_graphe_ajoute_une_serie_et_ailleurs_rien`).
+onglets détachés) : un survol avec une `ColumnDragPayload` active dessine un
+contour sobre autour du graphe ; un relâchement au-dessus convertit la charge
+en `Action::AddSeriesToGraph` via `state::drop_payload_action`. Relâcher
+ailleurs ne fait rien. L'action porte le **calque** visé (`panel`) et
+**n'impose pas de type de tracé** (`plot_type: None`) : les séries prennent
+celui de la **dernière série** du calque, `Line` pour un calque vide
+(`state::panel_plot_type`). Une seule commande annulable (`SetPlotSpec`).
+Tant que le calque actif (#161) n'existe pas, le dépôt vise le premier calque ;
+`graph_drop_target` portera alors le calque actif du graphe à la place du `0`.
 
-**Onglet détaché.** Comme `graph_drop_target` opère via `tab_contents`,
-identique pour le dock et pour une fenêtre détachée (voir la doc de tête de
-`StokesForgeApp::show_detached_tabs`), le dépôt marche dans les deux cas sans code
-séparé à maintenir — testé manuellement, `egui::DragAndDrop` étant un état
-global du `Context` plutôt que scopé à une fenêtre OS.
+**Onglet détaché.** `egui::DragAndDrop` est un état global du `Context` : le
+dépôt marche en dock et en fenêtre détachée sans code séparé, mais le passage
+d'une fenêtre OS à l'autre est à vérifier à la main sous Wayland et X11.
 
 ### Propriétés des graphiques
 

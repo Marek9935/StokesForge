@@ -3,16 +3,15 @@
 //! gouttière des numéros de ligne, cellules, menu d'édition commun à toutes
 //! ses zones ([`grid_edit_menu`]), focus clavier (Tab, Maj+Tab et les flèches
 //! appartiennent à la grille, #38 : [`GRID_KEYS`]), barres de défilement
-//! déportées et zone de prise du glisser-déposer de colonnes
-//! ([`grid_grip_side`]).
+//! déportées et prise du glisser de colonnes vers un graphe, par le bord d'un
+//! bloc de colonnes sélectionnées ([`column_grip_bands`], #160).
 //!
 //! Sorti d'`app.rs` tel quel (#120). Le classeur qui l'entoure (onglets de
 //! feuille, menu Classeur) vit dans `workbook.rs`. Les autres modules ne lisent
 //! d'ici que [`keyboard_focus_outside_grid`] (`app.rs` pour les raccourcis
 //! globaux, `dialogs.rs`, `graph_window.rs`) et la visibilité de la ligne
 //! « Metadata » (`workbook.rs`) ; [`role_label`] sert aussi au test du classeur
-//! détaché (`window_detach.rs`). `paint_drag_handle_icon`
-//! (pictogramme de la zone de prise) n'a pas d'autre utilisateur que ce module.
+//! détaché (`window_detach.rs`).
 //!
 //! Les tests sont en fin de fichier : ils peignent le classeur sans fenêtre,
 //! injectent clavier et souris, et lisent ce qui est peint (textes,
@@ -24,8 +23,8 @@ use stokesforge_core::{ColumnRole, ColumnType, NodeId};
 use stokesforge_plot::PlotType;
 
 use crate::selection::{GridCursor, Selection};
-use crate::state::{Action, AppState, GridMenu, HeaderField, MoveDirection};
-use crate::{theme, tr};
+use crate::state::{Action, AppState, ColumnDragPayload, GridMenu, HeaderField, MoveDirection};
+use crate::{icons, tr};
 
 use super::menu_sections::MenuSections;
 use super::shortcuts::{
@@ -87,48 +86,46 @@ pub(super) fn set_metadata_row_visible(ctx: &egui::Context, visible: bool) {
     });
 }
 
-/// Largeur, en points, de la zone de prise du glisser-déposer de colonnes
-/// vers un graphe — une bande le long du bord extérieur gauche ou droit de
-/// la grille (voir [`grid_grip_side`], et [`grid_contents`] pour le geste
-/// complet).
-const COLUMN_GRIP_WIDTH: f32 = 10.0;
+/// Demi-largeur, en points, de la bande de prise du glisser de colonnes : elle
+/// déborde de part et d'autre du bord vertical d'un bloc de colonnes
+/// sélectionnées (#160).
+const COLUMN_GRIP_HALF_WIDTH: f32 = 3.0;
 
-/// Bord de la grille sur lequel se trouve `pointer`, si `pointer` est à
-/// `margin` points ou moins de son bord gauche ou droit et dans ses bornes
-/// verticales — la zone de prise du glisser-déposer de colonnes vers un
-/// graphe.
-///
-/// Fonction pure sur des coordonnées brutes (`(gauche, haut, droite, bas)`,
-/// `(x, y)`), pas sur `egui::Rect`/`egui::Pos2` : testable seule, en fin de
-/// module, sans dépendre d'une fenêtre ni d'une passe de rendu — même esprit
-/// que le reste de ce module, où la décision est toujours séparée du code de
-/// peinture qui l'utilise ([`grid_contents`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GripSide {
-    /// Bord gauche de la grille.
-    Left,
-    /// Bord droit de la grille.
-    Right,
-}
+/// Étendue horizontale d'une colonne de la grille : `(colonne, gauche, droite)`.
+type ColumnExtent = (NodeId, f32, f32);
 
-/// Voir [`GripSide`].
-fn grid_grip_side(
-    grid: (f32, f32, f32, f32),
-    pointer: (f32, f32),
-    margin: f32,
-) -> Option<GripSide> {
-    let (left, top, right, bottom) = grid;
-    let (x, y) = pointer;
-    if y < top || y > bottom {
-        return None;
+/// Bandes de prise du glisser de colonnes vers un graphe (#160) : une de part
+/// et d'autre de chaque **bloc** de colonnes sélectionnées qui se suivent,
+/// sur son bord extérieur. Elles couvrent la hauteur `top..bottom` — la
+/// rangée des lettres, où les bords de colonne servent au redimensionnement,
+/// en est exclue par l'appelant. Fonction pure : testable sans fenêtre, comme
+/// le reste des décisions de ce module.
+fn column_grip_bands(
+    extents: &[ColumnExtent],
+    selected: &[NodeId],
+    top: f32,
+    bottom: f32,
+) -> Vec<egui::Rect> {
+    let mut bands = Vec::new();
+    let mut index = 0;
+    while index < extents.len() {
+        if !selected.contains(&extents[index].0) {
+            index += 1;
+            continue;
+        }
+        let first = index;
+        while index + 1 < extents.len() && selected.contains(&extents[index + 1].0) {
+            index += 1;
+        }
+        for x in [extents[first].1, extents[index].2] {
+            bands.push(egui::Rect::from_min_max(
+                egui::pos2(x - COLUMN_GRIP_HALF_WIDTH, top),
+                egui::pos2(x + COLUMN_GRIP_HALF_WIDTH, bottom),
+            ));
+        }
+        index += 1;
     }
-    if x >= left && x <= left + margin {
-        Some(GripSide::Left)
-    } else if x <= right && x >= right - margin {
-        Some(GripSide::Right)
-    } else {
-        None
-    }
+    bands
 }
 
 /// Zone de défilement horizontale de la grille. Sa propre barre est masquée :
@@ -1319,7 +1316,7 @@ pub(super) fn grid_contents(
     }
     let (grid_rect, focus_anchor) = prepare_grid(ui, sheet);
     let was_editing = state.editing().is_some() || state.header_editing().is_some();
-    let mut last_column_right = grid_rect.left();
+    let mut extents: Vec<ColumnExtent> = Vec::new();
     let header_height = stacked_header_height(metadata_row_visible(ui.ctx()));
     let mut table = TableBuilder::new(ui)
         .striped(true)
@@ -1346,21 +1343,17 @@ pub(super) fn grid_contents(
     }
     let table_output = table
         .header(header_height, |header| {
-            grid_table_header(
-                header,
-                state,
-                actions,
-                sheet,
-                &columns,
-                &mut last_column_right,
-            );
+            grid_table_header(header, state, actions, sheet, &columns, &mut extents);
         })
         .body(|body| {
             grid_table_body(body, state, actions, sheet, &columns, row_count);
         });
 
+    let last_column_right = extents
+        .last()
+        .map_or(grid_rect.left(), |&(_, _, right)| right);
     grid_blank_column_target(ui, actions, sheet, grid_rect, last_column_right);
-    grid_column_drag_source(ui, state, sheet, grid_rect);
+    grid_column_drag_source(ui, state, sheet, grid_rect, &extents);
     grid_keyboard(
         ui,
         state,
@@ -1386,7 +1379,7 @@ fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id) {
     ui.spacing_mut().item_spacing.y = 0.0;
     // Capturé *avant* la table, dont `.auto_shrink([false, false])` occupe
     // justement tout cet espace disponible : sert de référence à la zone de
-    // prise du glisser-déposer de colonnes plus bas ([`grid_grip_side`]).
+    // prise du glisser de colonnes plus bas ([`column_grip_bands`]).
     let grid_rect = ui.available_rect_before_wrap();
     // Ancrage du focus clavier de la grille (#38) : un widget focalisable
     // **seulement tant qu'il a le focus** (sinon un Tab tombant sur un
@@ -1422,14 +1415,15 @@ fn grid_table_header(
     actions: &mut Vec<Action>,
     sheet: NodeId,
     columns: &[(NodeId, String, ColumnType)],
-    last_column_right: &mut f32,
+    extents: &mut Vec<ColumnExtent>,
 ) {
     header.col(|ui| {
         row_number_header_widget(ui, state, actions, sheet);
     });
     for (index, (id, _, _)) in columns.iter().enumerate() {
         header.col(|ui| {
-            *last_column_right = ui.max_rect().right();
+            let rect = ui.max_rect();
+            extents.push((*id, rect.left(), rect.right()));
             column_header_widget(ui, state, actions, sheet, *id, index);
         });
     }
@@ -1481,70 +1475,81 @@ fn grid_blank_column_target(
     }
 }
 
+/// Glisser une sélection de **colonnes entières** vers un graphe (#160), en
+/// attrapant le bord extérieur d'un bloc de colonnes sélectionnées, comme la
+/// sélection d'Excel : curseur « main » au survol, « main fermée » pendant le
+/// glisser. Les bandes ([`column_grip_bands`]) sont posées **après** la table,
+/// donc au-dessus des cellules et des poignées de redimensionnement : elles
+/// n'existent que sur les bords des colonnes sélectionnées, hors de la rangée
+/// des lettres, si bien que le glisser d'extension de sélection des cellules
+/// et le redimensionnement gardent tout le reste de la surface.
+///
+/// La charge utile ([`AppState::column_drag_payload`]) emporte toutes les
+/// colonnes sélectionnées, dans l'ordre de la feuille. Échap annule le
+/// glisser ; un repère (nombre de colonnes) suit le pointeur.
 fn grid_column_drag_source(
     ui: &mut egui::Ui,
     state: &AppState,
     sheet: NodeId,
     grid_rect: egui::Rect,
+    extents: &[ColumnExtent],
 ) {
-    // Glisser une sélection de colonnes vers un graphe ouvert (chantier
-    // « glisser une sélection vers un graphe », suite du menu contextuel
-    // « Tracer » — voir `docs/application.md`). La zone de prise est une
-    // mince bande sur le bord *extérieur* gauche ou droit de la grille
-    // entière (pas de chaque colonne) : `left_rect`/`right_rect` ci-dessous
-    // sont volontairement confinés à `COLUMN_GRIP_WIDTH` plutôt que de
-    // couvrir `grid_rect` en entier — un `ui.interact` sur tout `grid_rect`
-    // shadowerait le glisser d'extension de sélection de `cell_widget`
-    // partout dans la grille, pas seulement sur ses bords, ce que la tâche
-    // interdit explicitement. N'apparaît que si `sheet` a déjà une sélection
-    // couvrant au moins une colonne ([`AppState::column_drag_payload`]) :
-    // sans ça, pas de zone de prise à afficher ni de payload à glisser.
-    if let Some(payload) = state.column_drag_payload(sheet) {
-        let margin = COLUMN_GRIP_WIDTH;
-        let left_rect = egui::Rect::from_min_max(
-            grid_rect.left_top(),
-            egui::pos2(grid_rect.left() + margin, grid_rect.bottom()),
-        );
-        let right_rect = egui::Rect::from_min_max(
-            egui::pos2(grid_rect.right() - margin, grid_rect.top()),
-            grid_rect.right_bottom(),
-        );
-        let left_id = ui.id().with(("column_grip_left", sheet));
-        let right_id = ui.id().with(("column_grip_right", sheet));
-        let left_response = ui.interact(left_rect, left_id, egui::Sense::drag());
-        let right_response = ui.interact(right_rect, right_id, egui::Sense::drag());
-        // `grid_grip_side` reprend la même géométrie que `left_rect`/
-        // `right_rect` ci-dessus, mais en fonction pure testée hors d'egui
-        // (`tests/shell.rs`) — décision unique, pas refaite en filigrane via
-        // `.hovered()`. Le bord exact (gauche ou droite) ne change rien à
-        // l'icône affichée, seule sa présence compte ici.
-        let pointer = ui.ctx().pointer_hover_pos();
-        let grip = pointer.and_then(|pointer| {
-            grid_grip_side(
-                (
-                    grid_rect.left(),
-                    grid_rect.top(),
-                    grid_rect.right(),
-                    grid_rect.bottom(),
-                ),
-                (pointer.x, pointer.y),
-                margin,
-            )
-        });
-        if let (Some(_), Some(pointer)) = (grip, pointer) {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-            paint_drag_handle_icon(
-                ui.painter(),
-                pointer + egui::vec2(12.0, -12.0),
-                theme::gutter_text_color(),
-            );
+    let ctx = ui.ctx().clone();
+    let dragging = egui::DragAndDrop::payload::<ColumnDragPayload>(&ctx)
+        .filter(|payload| payload.sheet == sheet);
+    if let Some(payload) = &dragging {
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            egui::DragAndDrop::clear_payload(&ctx);
+        } else {
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            column_drag_marker(&ctx, sheet, payload.columns.len());
         }
-        if left_response.drag_started() {
-            left_response.dnd_set_drag_payload(payload.clone());
-        } else if right_response.drag_started() {
-            right_response.dnd_set_drag_payload(payload);
+        return;
+    }
+    let Some(payload) = state.column_drag_payload(sheet) else {
+        return;
+    };
+    // Sous la rangée des lettres : ses bords de colonne redimensionnent.
+    let top = grid_rect.top() + HEADER_SUBROW_HEIGHT;
+    for (index, band) in column_grip_bands(extents, &payload.columns, top, grid_rect.bottom())
+        .into_iter()
+        .enumerate()
+    {
+        let response = ui.interact(
+            band,
+            ui.id().with(("column_grip", sheet, index)),
+            egui::Sense::drag(),
+        );
+        if response.hovered() {
+            ctx.set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if response.drag_started() {
+            response.dnd_set_drag_payload(payload.clone());
         }
     }
+}
+
+/// Repère qui suit le pointeur pendant le glisser de colonnes : un
+/// pictogramme du composant d'icônes et le nombre de colonnes emportées.
+fn column_drag_marker(ctx: &egui::Context, sheet: NodeId, count: usize) {
+    let Some(pointer) = ctx.pointer_latest_pos() else {
+        return;
+    };
+    egui::Area::new(egui::Id::new(("column_drag_marker", sheet)))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(pointer + egui::vec2(14.0, 14.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(icons::icon_image(
+                        icons::Icon::PlotLine,
+                        icons::IconRole::Neutral,
+                    ));
+                    ui.label(tr!("grid-drag-columns", count = count));
+                });
+            });
+        });
 }
 
 /// Après la peinture et le dépôt : reprise du focus, puis saisie, navigation et édition.
@@ -2235,24 +2240,6 @@ fn press_started_in(ui: &egui::Ui, rect: egui::Rect) -> bool {
         .is_some_and(|origin| rect.contains(origin))
 }
 
-/// Peint l'icône « prise » du glisser-déposer de colonnes ([`grid_contents`])
-/// à côté du curseur — une petite grille de points plutôt qu'un glyphe de
-/// police : la mesure de texte de l'appli passe entièrement par
-/// `stokesforge_render::text` pour le rendu de graphe (voir `CLAUDE.md`, § Pièges
-/// connus), et rien ne garantit qu'un glyphe « poignée » soit seulement
-/// présent dans la police par défaut d'egui — un pictogramme dessiné à la
-/// main évite la question.
-fn paint_drag_handle_icon(painter: &egui::Painter, at: egui::Pos2, color: egui::Color32) {
-    const DOT_RADIUS: f32 = 1.6;
-    const SPACING: f32 = 5.0;
-    for row in 0..3 {
-        for col in 0..2 {
-            let offset = egui::vec2(col as f32 * SPACING, row as f32 * SPACING);
-            painter.circle_filled(at + offset, DOT_RADIUS, color);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     //! Tests de la grille, sans fenêtre : un `egui::Context` nu, des
@@ -2267,89 +2254,41 @@ mod tests {
 
     use super::super::workbook::book_contents;
     use super::*;
+    use crate::theme;
     use stokesforge_core::{Column, Project};
     use stokesforge_session::Session;
 
-    /// La zone de prise du glisser-déposer de colonnes est une mince bande sur
-    /// le bord *extérieur* gauche ou droit de la grille — [`grid_grip_side`] est
-    /// la fonction pure qui en décide, hors de tout code de peinture. À
-    /// l'intérieur des bornes verticales de la grille, un pointeur à `margin`
-    /// points ou moins du bord gauche rend `Left`, du bord droit `Right`.
+    /// Les bandes de prise bordent le **bloc** de colonnes sélectionnées —
+    /// une de part et d'autre —, et seulement lui : un bloc qui n'est pas
+    /// contigu en a deux paires, les colonnes non sélectionnées aucune.
     #[test]
-    fn grid_grip_side_detects_the_outer_edges_of_the_grid() {
-        let grid = (100.0, 50.0, 300.0, 250.0); // (gauche, haut, droite, bas)
-        let margin = 10.0;
+    fn les_bandes_de_prise_bordent_chaque_bloc_de_colonnes_selectionnees() {
+        let ids: Vec<NodeId> = (1..=5).map(NodeId::from_raw).collect();
+        let extents: Vec<ColumnExtent> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (id, 100.0 * i as f32, 100.0 * (i + 1) as f32))
+            .collect();
+        let half = COLUMN_GRIP_HALF_WIDTH;
 
+        let bands = column_grip_bands(&extents, &[ids[1], ids[2]], 20.0, 200.0);
+        assert_eq!(bands.len(), 2, "un bloc : ses deux bords");
         assert_eq!(
-            grid_grip_side(grid, (100.0, 150.0), margin),
-            Some(GripSide::Left),
-            "tout contre le bord gauche"
+            (bands[0].left(), bands[0].right()),
+            (100.0 - half, 100.0 + half)
         );
         assert_eq!(
-            grid_grip_side(grid, (108.0, 150.0), margin),
-            Some(GripSide::Left),
-            "à l'intérieur de la marge, encore le bord gauche"
+            (bands[1].left(), bands[1].right()),
+            (300.0 - half, 300.0 + half)
         );
-        assert_eq!(
-            grid_grip_side(grid, (300.0, 150.0), margin),
-            Some(GripSide::Right),
-            "tout contre le bord droit"
-        );
-        assert_eq!(
-            grid_grip_side(grid, (293.0, 150.0), margin),
-            Some(GripSide::Right),
-            "à l'intérieur de la marge, encore le bord droit"
-        );
-        // Les bornes de la marge sont incluses, et s'arrêtent là : témoin
-        // d'une comparaison stricte qui raccourcirait la zone de prise.
-        assert_eq!(
-            grid_grip_side(grid, (110.0, 150.0), margin),
-            Some(GripSide::Left),
-            "pile à `margin` du bord gauche"
-        );
-        assert_eq!(
-            grid_grip_side(grid, (290.0, 150.0), margin),
-            Some(GripSide::Right),
-            "pile à `margin` du bord droit"
-        );
-        assert_eq!(grid_grip_side(grid, (110.5, 150.0), margin), None);
-        assert_eq!(grid_grip_side(grid, (289.5, 150.0), margin), None);
-        assert_eq!(
-            grid_grip_side(grid, (100.0, 50.0), margin),
-            Some(GripSide::Left),
-            "le bord haut de la grille compte"
-        );
-        assert_eq!(
-            grid_grip_side(grid, (100.0, 250.0), margin),
-            Some(GripSide::Left),
-            "le bord bas de la grille compte"
-        );
-    }
+        assert_eq!((bands[0].top(), bands[0].bottom()), (20.0, 200.0));
 
-    /// Hors de la marge (au milieu de la grille) ou hors de ses bornes
-    /// verticales, la zone de prise ne se déclenche pas — c'est ce qui garde le
-    /// glisser d'extension de sélection de `cell_widget` intact ailleurs dans la
-    /// grille.
-    #[test]
-    fn grid_grip_side_ignores_the_interior_and_outside_the_vertical_bounds() {
-        let grid = (100.0, 50.0, 300.0, 250.0);
-        let margin = 10.0;
+        let bands = column_grip_bands(&extents, &[ids[0], ids[3], ids[4]], 20.0, 200.0);
+        assert_eq!(bands.len(), 4, "deux blocs non contigus : deux paires");
+        assert_eq!(bands[2].center().x, 300.0);
+        assert_eq!(bands[3].center().x, 500.0);
 
-        assert_eq!(
-            grid_grip_side(grid, (200.0, 150.0), margin),
-            None,
-            "milieu de la grille : pas la zone de prise"
-        );
-        assert_eq!(
-            grid_grip_side(grid, (105.0, 30.0), margin),
-            None,
-            "au-dessus de la grille, même proche du bord gauche en x"
-        );
-        assert_eq!(
-            grid_grip_side(grid, (105.0, 260.0), margin),
-            None,
-            "en dessous de la grille"
-        );
+        assert!(column_grip_bands(&extents, &[], 20.0, 200.0).is_empty());
     }
 
     /// Un bouton voisin (« avant », premier widget focalisable venu de
@@ -3552,5 +3491,114 @@ mod tests {
         assert!(!banc.state.is_row_selected(sheet, 1));
         assert!(banc.state.is_row_selected(sheet, 2));
         assert!(!banc.state.is_selected(sheet, banc.columns[2], 1));
+    }
+
+    // --- Glisser de colonnes vers un graphe (#160) ---------------------------
+
+    /// Bord droit du bloc : un point à 1 pt à l'intérieur de la dernière
+    /// colonne (les bandes de prise débordent de 3 pt de part et d'autre).
+    fn bord_droit(banc: &Banc, derniere: usize, y: f32) -> egui::Pos2 {
+        let lettre = lettre(banc, derniere);
+        let centre = banc.centre_de(&lettre).expect("lettre peinte");
+        egui::pos2(centre.x + DEFAULT_COLUMN_WIDTH / 2.0 - 1.0, y)
+    }
+
+    fn charge_posee(banc: &Banc) -> bool {
+        egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(&banc.context)
+    }
+
+    /// Appuie en `depart` puis glisse de 30 pt vers la droite.
+    fn glisse_depuis(banc: &mut Banc, depart: egui::Pos2) {
+        banc.image(vec![egui::Event::PointerMoved(depart)]);
+        banc.image(vec![egui::Event::PointerButton {
+            pos: depart,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for pas in 1..=3 {
+            banc.image(vec![egui::Event::PointerMoved(
+                depart + egui::vec2(10.0 * pas as f32, 0.0),
+            )]);
+        }
+    }
+
+    #[test]
+    fn attraper_le_bord_d_un_bloc_de_colonnes_emporte_toute_la_selection() {
+        let mut banc = Banc::new();
+        banc.state.select_column(banc.sheet, banc.columns[0]);
+        banc.state
+            .extend_column_selection(banc.sheet, banc.columns[1]);
+        banc.image(Vec::new());
+        let y = banc.centre_de("101").expect("cellule peinte").y;
+        let depart = bord_droit(&banc, 1, y);
+
+        glisse_depuis(&mut banc, depart);
+
+        assert!(charge_posee(&banc), "le bord du bloc démarre le glisser");
+        let charge =
+            egui::DragAndDrop::payload::<ColumnDragPayload>(&banc.context).expect("charge posée");
+        assert_eq!(charge.sheet, banc.sheet);
+        assert_eq!(charge.columns, banc.columns[..2]);
+    }
+
+    #[test]
+    fn echap_annule_le_glisser_de_colonnes() {
+        let mut banc = Banc::new();
+        banc.state.select_column(banc.sheet, banc.columns[0]);
+        banc.image(Vec::new());
+        let y = banc.centre_de("101").unwrap().y;
+        let depart = bord_droit(&banc, 0, y);
+        glisse_depuis(&mut banc, depart);
+        assert!(charge_posee(&banc));
+
+        banc.image(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+
+        assert!(!charge_posee(&banc));
+    }
+
+    #[test]
+    fn des_cellules_ou_le_milieu_d_une_colonne_ne_demarrent_pas_le_glisser() {
+        // Une sélection de cellules n'offre pas le geste, même au bord.
+        let mut banc = Banc::new();
+        banc.clic_sur("101");
+        let y = banc.centre_de("101").unwrap().y;
+        let depart = bord_droit(&banc, 0, y);
+        glisse_depuis(&mut banc, depart);
+        assert!(!charge_posee(&banc), "cellules sélectionnées");
+
+        // Une colonne entière, mais loin de son bord : le glisser de cellules
+        // reste celui de l'extension de sélection.
+        let mut banc = Banc::new();
+        banc.state.select_column(banc.sheet, banc.columns[0]);
+        banc.image(Vec::new());
+        let milieu = banc.centre_de("201").expect("cellule peinte");
+        glisse_depuis(&mut banc, milieu);
+        assert!(!charge_posee(&banc), "milieu de colonne");
+        assert!(
+            banc.state.is_selected(banc.sheet, banc.columns[1], 0)
+                || banc.state.selection(banc.sheet).is_some(),
+            "le glisser a étendu ou posé une sélection de cellules"
+        );
+    }
+
+    #[test]
+    fn la_rangee_des_lettres_garde_le_redimensionnement() {
+        let mut banc = Banc::new();
+        banc.state.select_column(banc.sheet, banc.columns[0]);
+        banc.image(Vec::new());
+        let lettre = banc.centre_de(&lettre(&banc, 0)).expect("lettre peinte");
+        let depart = bord_droit(&banc, 0, lettre.y);
+        glisse_depuis(&mut banc, depart);
+        assert!(
+            !charge_posee(&banc),
+            "le bord dans la rangée des lettres redimensionne, il n'attrape pas"
+        );
     }
 }

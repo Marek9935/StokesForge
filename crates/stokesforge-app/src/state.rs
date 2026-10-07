@@ -426,16 +426,19 @@ pub enum Action {
     /// colonnes de classeur — même règle d'appariement X/Y que
     /// [`Action::PlotColumns`], mais en relisant le [`stokesforge_plot::PlotSpec`]
     /// courant du graphe plutôt qu'en en créant un nouveau
-    /// ([`Command::SetPlotSpec`]). Sert le glisser-déposer du chantier 2 :
-    /// aucun appelant ne la pousse encore depuis l'UI, mais elle existe et
-    /// est testée dès ce chantier-ci.
+    /// ([`Command::SetPlotSpec`]). Sert le glisser d'une sélection de colonnes
+    /// vers un graphe (#160) : un seul pas d'annulation.
     AddSeriesToGraph {
         /// Graphe visé.
         graph: NodeId,
+        /// Calque visé, par son rang dans le graphe. Le dépôt passe le calque
+        /// actif du graphe (#161) ; en attendant, le premier.
+        panel: usize,
         /// Colonnes à ajouter en séries.
         columns: Vec<NodeId>,
-        /// Type de tracé demandé pour chaque nouvelle série.
-        plot_type: PlotType,
+        /// Type de tracé demandé pour chaque nouvelle série ; `None` prend
+        /// celui du calque visé (voir [`panel_plot_type`]).
+        plot_type: Option<PlotType>,
     },
     /// Ouvre ou ferme le panneau ; préférence de la personne, hors historique.
     SetObjectManagerOpen(bool),
@@ -1026,16 +1029,29 @@ pub struct ColumnDragPayload {
     pub columns: Vec<NodeId>,
 }
 
-/// L'[`Action`] produite par le dépôt de `payload` sur le graphe `graph` —
-/// toujours [`Action::AddSeriesToGraph`] avec [`PlotType::Line`] par défaut,
-/// comme demandé pour ce chantier. Fonction pure, séparée du code de peinture
-/// de `crate::app::graph_window::graph_drop_target` pour être testable sans fenêtre.
-pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId) -> Action {
+/// L'[`Action`] produite par le dépôt de `payload` sur le calque `panel` du
+/// graphe `graph` — toujours [`Action::AddSeriesToGraph`], sans type de tracé
+/// imposé : les séries prennent celui du calque (#160, voir
+/// [`panel_plot_type`]). Fonction pure, séparée du code de peinture de
+/// `crate::app::graph_window::graph_drop_target` pour être testable sans
+/// fenêtre.
+pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId, panel: usize) -> Action {
     Action::AddSeriesToGraph {
         graph,
+        panel,
         columns: payload.columns.clone(),
-        plot_type: PlotType::Line,
+        plot_type: None,
     }
+}
+
+/// Type de tracé des séries ajoutées à `panel` quand le geste n'en désigne
+/// pas : celui de sa **dernière** série (un calque qui en mélange plusieurs
+/// donne le dernier), [`PlotType::Line`] pour un calque vide.
+pub(crate) fn panel_plot_type(panel: &stokesforge_plot::PanelSpec) -> PlotType {
+    panel
+        .series
+        .last()
+        .map_or(PlotType::Line, |series| series.plot_type.clone())
 }
 
 /// Corps de [`AppState::row_count`], factorisé sur un `&Tree` — voir
@@ -2354,7 +2370,13 @@ impl AppState {
     /// glisser ; ne rien avoir sélectionné y désactive la zone de prise tout
     /// entière plutôt que de la laisser démarrer un glisser vide.
     pub fn column_drag_payload(&self, sheet: NodeId) -> Option<ColumnDragPayload> {
-        let columns = self.selection(sheet)?.columns(&self.snapshot.tree, sheet);
+        let selection = self.selection(sheet)?;
+        // Seule une sélection de colonnes **entières** se glisse (#160) :
+        // pas de cases ni de lignes.
+        if !selection.is_columns() {
+            return None;
+        }
+        let columns = selection.columns(&self.snapshot.tree, sheet);
         if columns.is_empty() {
             None
         } else {
@@ -3830,9 +3852,10 @@ impl AppState {
             } => self.plot_columns(sheet, columns, plot_type),
             Action::AddSeriesToGraph {
                 graph,
+                panel,
                 columns,
                 plot_type,
-            } => self.add_series_to_graph(graph, columns, plot_type),
+            } => self.add_series_to_graph(graph, panel, columns, plot_type),
             Action::SetObjectManagerOpen(open) => {
                 self.object_manager_open = open;
                 if let Err(error) = self
@@ -7077,18 +7100,25 @@ impl AppState {
         });
     }
 
-    /// Ajoute des séries construites depuis `columns` au premier panneau du
+    /// Ajoute des séries construites depuis `columns` au calque `panel` du
     /// `PlotSpec` courant de `graph` — voir [`Action::AddSeriesToGraph`].
     /// Même règle d'appariement X/Y que [`AppState::plot_columns`], mais la
     /// feuille d'où viennent les colonnes se déduit de leur propre parent
     /// (le classeur ouvert n'est pas porté par cette action) : toutes les
-    /// colonnes de `columns` doivent donc appartenir à la même feuille. Les
-    /// nouvelles séries prolongent la palette après celles déjà présentes,
-    /// sans toucher aux séries existantes. Pas de commande envoyée si
-    /// `columns` est vide, si les colonnes n'ont pas de feuille commune, si
-    /// aucune n'est de rôle Y, ou si `graph` n'est pas un graphe de ce
+    /// colonnes de `columns` doivent donc appartenir à la même feuille. Sans
+    /// `plot_type`, les séries prennent celui du calque ([`panel_plot_type`]).
+    /// Les nouvelles séries prolongent la palette après celles déjà présentes,
+    /// sans toucher aux séries existantes, en une seule commande annulable.
+    /// Pas de commande envoyée si `columns` est vide, si aucune n'est de rôle
+    /// Y, si `panel` n'existe pas, ou si `graph` n'est pas un graphe de ce
     /// projet.
-    fn add_series_to_graph(&mut self, graph: NodeId, columns: Vec<NodeId>, plot_type: PlotType) {
+    fn add_series_to_graph(
+        &mut self,
+        graph: NodeId,
+        panel: usize,
+        columns: Vec<NodeId>,
+        plot_type: Option<PlotType>,
+    ) {
         let Some(&first) = columns.first() else {
             return;
         };
@@ -7100,23 +7130,23 @@ impl AppState {
             self.fail(format!("{graph} n'est pas un graphe de ce projet"));
             return;
         };
-        let start_index = spec.panels.first().map_or(0, |panel| panel.series.len());
+        let Some(target) = spec.panels.get_mut(panel) else {
+            self.fail(format!("{graph} n'a pas de calque {panel}"));
+            return;
+        };
+        let plot_type = plot_type.unwrap_or_else(|| panel_plot_type(target));
         let new_series = series_from_columns(
             &self.snapshot.tree,
             sheet,
             &columns,
             &plot_type,
-            start_index,
+            target.series.len(),
         );
         if new_series.is_empty() {
             self.fail("Aucune colonne de rôle Y dans la sélection : rien à ajouter".to_string());
             return;
         }
-        let Some(panel) = spec.panels.get_mut(0) else {
-            self.fail(format!("{graph} n'a aucun panneau"));
-            return;
-        };
-        panel.series.extend(new_series);
+        target.series.extend(new_series);
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 

@@ -82,7 +82,9 @@ pub(super) fn graph_drop_target(
         pointer_in_tab && egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx());
     if pointer_in_tab && ui.input(|input| input.pointer.any_released()) {
         if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
-            actions.push(drop_payload_action(&payload, graph_id));
+            // Calque visé : le premier tant que le calque actif n'existe pas
+            // (#161, prérequis de #160) ; il remplacera ce `0`.
+            actions.push(drop_payload_action(&payload, graph_id, 0));
         }
     }
     graph_contents(ui, state, actions, graph_views, graph_id);
@@ -1354,7 +1356,7 @@ pub(super) mod tests {
         let (_, actions) = paint(vec![release(inside)], false);
         assert_eq!(
             actions,
-            vec![drop_payload_action(&payload, graph)],
+            vec![drop_payload_action(&payload, graph, 0)],
             "un relâchement sur le graphe ajoute la série"
         );
 

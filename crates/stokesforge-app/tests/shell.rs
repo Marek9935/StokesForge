@@ -4695,8 +4695,9 @@ fn add_series_to_graph_appends_without_overwriting_existing_series() {
 
     state.dispatch(Action::AddSeriesToGraph {
         graph,
+        panel: 0,
         columns: vec![note],
-        plot_type: PlotType::Scatter,
+        plot_type: Some(PlotType::Scatter),
     });
 
     let after = state.plot_spec(graph).expect("spec après ajout");
@@ -4723,10 +4724,36 @@ fn column_drag_payload_is_none_without_a_column_selection() {
     assert_eq!(state.column_drag_payload(sheet1), None);
 }
 
-/// Avec une sélection de cellules couvrant une colonne, la charge utile
-/// porte la feuille et exactement les colonnes couvertes par la sélection —
-/// c'est elle que `crate::app::grid::grid_contents` glisse depuis la zone de
-/// prise, et que [`drop_payload_action`] relit au dépôt.
+/// Seule une sélection de **colonnes entières** se glisse (#160) : des
+/// cellules ou des lignes, même couvrant des colonnes, n'offrent pas le
+/// geste.
+#[test]
+fn column_drag_payload_needs_whole_columns() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 0);
+    state.extend_selection(sheet1, signal, 1);
+    assert_eq!(state.column_drag_payload(sheet1), None, "des cellules");
+
+    state.select_row(sheet1, 1);
+    assert_eq!(state.column_drag_payload(sheet1), None, "une ligne");
+
+    state.select_header_row(sheet1, HeaderField::Unit);
+    assert_eq!(
+        state.column_drag_payload(sheet1),
+        None,
+        "un champ d'en-tête"
+    );
+}
+
+/// Avec une sélection de colonnes entières, la charge utile porte la feuille
+/// et **toutes** les colonnes sélectionnées dans l'ordre de la feuille —
+/// aussi non contiguës —, que `crate::app::grid::grid_contents` glisse depuis
+/// le bord du bloc et que [`drop_payload_action`] relit au dépôt.
 #[test]
 fn column_drag_payload_carries_the_sheet_and_its_selected_columns() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -4734,23 +4761,36 @@ fn column_drag_payload_carries_the_sheet_and_its_selected_columns() {
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let temps = column_id(&state, sheet1, "Temps");
     let signal = column_id(&state, sheet1, "Signal");
-    state.select_cell(sheet1, temps, 0);
-    state.extend_selection(sheet1, signal, 1);
+    let note = column_id(&state, sheet1, "Note");
 
+    state.select_column(sheet1, signal);
+    state.extend_column_selection(sheet1, temps);
     let payload = state
         .column_drag_payload(sheet1)
         .expect("sélection couvrant Temps et Signal");
-
     assert_eq!(payload.sheet, sheet1);
     assert_eq!(payload.columns, vec![temps, signal]);
+
+    state.select_column(sheet1, note);
+    state.toggle_column_selection(sheet1, temps);
+    assert_eq!(
+        state.column_drag_payload(sheet1).unwrap().columns,
+        vec![temps, note],
+        "non contiguës, dans l'ordre de la feuille"
+    );
+
+    state.select_all(sheet1);
+    assert_eq!(
+        state.column_drag_payload(sheet1).unwrap().columns,
+        vec![temps, signal, note],
+        "la case du coin les emporte toutes"
+    );
 }
 
-/// [`drop_payload_action`] convertit toujours la charge utile en
-/// `Action::AddSeriesToGraph` avec `PlotType::Line` par défaut — le seul
-/// type de tracé demandé par ce chantier pour le glisser-déposer, quel que
-/// soit l'outil qui avait servi à construire la sélection au départ.
+/// [`drop_payload_action`] vise le calque donné et **n'impose pas** de type
+/// de tracé (`None`) : les séries prennent celui du calque (#160).
 #[test]
-fn drop_payload_action_dispatches_add_series_to_graph_with_line_by_default() {
+fn drop_payload_action_targets_the_panel_without_forcing_a_plot_type() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -4761,27 +4801,21 @@ fn drop_payload_action_dispatches_add_series_to_graph_with_line_by_default() {
         columns: vec![signal],
     };
 
-    let action = drop_payload_action(&payload, graph);
-
-    match action {
+    assert_eq!(
+        drop_payload_action(&payload, graph, 2),
         Action::AddSeriesToGraph {
-            graph: dropped_graph,
-            columns,
-            plot_type,
-        } => {
-            assert_eq!(dropped_graph, graph);
-            assert_eq!(columns, vec![signal]);
-            assert_eq!(plot_type, PlotType::Line);
+            graph,
+            panel: 2,
+            columns: vec![signal],
+            plot_type: None,
         }
-        other => panic!("attendu Action::AddSeriesToGraph, obtenu {other:?}"),
-    }
+    );
 }
 
-/// Bout en bout : dispatcher l'action produite par [`drop_payload_action`]
-/// ajoute effectivement la série au graphe visé — le même chemin que
-/// `crate::app::graph_window::graph_drop_target` emprunte au relâchement du glisser.
+/// Trace `Signal` en nuage de points, y dépose `Note` : la nouvelle série
+/// prend le type du calque (nuage), pas `Line`. Un seul pas d'annulation.
 #[test]
-fn dispatching_drop_payload_action_adds_the_series_to_the_graph() {
+fn a_dropped_series_takes_the_plot_type_of_the_target_panel() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
@@ -4792,24 +4826,83 @@ fn dispatching_drop_payload_action_adds_the_series_to_the_graph() {
     state.dispatch(Action::PlotColumns {
         sheet: sheet1,
         columns: vec![signal],
-        plot_type: PlotType::Line,
+        plot_type: PlotType::Scatter,
     });
     let graph = state
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
         .expect("le graphe a été créé");
+    let before = state.plot_spec(graph).unwrap();
 
-    state.select_cell(sheet1, note, 0);
+    state.select_column(sheet1, note);
     let payload = state
         .column_drag_payload(sheet1)
         .expect("Note sélectionnée");
-    state.dispatch(drop_payload_action(&payload, graph));
+    state.dispatch(drop_payload_action(&payload, graph, 0));
 
     let spec = state.plot_spec(graph).expect("spec après dépôt");
     assert_eq!(spec.panels[0].series.len(), 2);
     assert_eq!(spec.panels[0].series[1].y, note);
-    assert_eq!(spec.panels[0].series[1].plot_type, PlotType::Line);
+    assert_eq!(spec.panels[0].series[1].plot_type, PlotType::Scatter);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "un seul pas");
+}
+
+/// Un calque qui mélange plusieurs types donne celui de sa dernière série ;
+/// un calque vide, `Line` ; un calque inexistant n'ajoute rien.
+#[test]
+fn the_drop_plot_type_is_the_last_series_type_or_line_for_an_empty_panel() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+    let root = state.tree().root();
+
+    state.dispatch(Action::AddGraph);
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graphe vide");
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 0,
+        columns: vec![signal],
+        plot_type: None,
+    });
+    assert_eq!(
+        state.plot_spec(graph).unwrap().panels[0].series[0].plot_type,
+        PlotType::Line,
+        "calque vide : Line"
+    );
+
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 0,
+        columns: vec![note],
+        plot_type: Some(PlotType::Bar),
+    });
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 0,
+        columns: vec![signal],
+        plot_type: None,
+    });
+    let series = &state.plot_spec(graph).unwrap().panels[0].series;
+    assert_eq!(series.len(), 3);
+    assert_eq!(series[2].plot_type, PlotType::Bar, "dernière série : Bar");
+
+    let before = state.plot_spec(graph).unwrap();
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 7,
+        columns: vec![signal],
+        plot_type: None,
+    });
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "calque inconnu");
 }
 
 // -- 24. Propriétés des graphiques --
