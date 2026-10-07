@@ -86,6 +86,20 @@ nom **dans la langue de l'utilisateur** (celle de sa question), avec l'autre
 entre parenthèses la première fois : « Add Text » (« Ajouter un texte »). Les
 noms viennent des catalogues `crates/stokesforge-app/i18n/{en,fr}/stokesforge_app.ftl`.
 
+**Les clics droits** (#152, `docs/menus.md`) : le menu dépend de ce qu'on vise
+et propose des actions directes, sans sous-menu qui répète la cible — clic
+droit sur une **courbe** (elle se sélectionne) → « Show Data » (ouvre le
+classeur de *cette* courbe), « Rename », « Move Up/Down », « Hide », « Delete »,
+« Properties… » ; sur le **fond** ou la zone de tracé → « Add Text »,
+« Insert Object » (Rectangle, Ellipse, Line, Arrow, posé là où on a cliqué),
+« Export », « Properties… ». « Reset Zoom » n'est plus au clic droit : barre
+d'outils, menu « Graph », bouton du graphe zoomé ou double-clic. Le même menu
+d'objet sert dans l'Object Manager et sous « Graph » → « Selection ».
+Dans le Project Manager, un **dossier** se renomme, se colle et se supprime au
+clic droit ; une **fenêtre** propose Show/Hide, Copy/Paste, Rename/Duplicate,
+Delete. Dans un classeur, Undo/Redo ne sont plus au clic droit (menu « Edit »,
+Ctrl+Z / Ctrl+Y).
+
 **Écrire un texte sur un graphe** (outil Texte d'Origin) : clic droit dans
 la zone de tracé → « Add Text » (ou menu « Graph »). On tape le
 texte sur place, formules comprises ; la petite barre au-dessus règle couleur,

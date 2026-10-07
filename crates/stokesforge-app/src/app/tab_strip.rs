@@ -14,6 +14,7 @@ use eframe::egui;
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::tr;
 
+use super::menu_sections::MenuSections;
 use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 
 /// Hauteur fixe du panneau des onglets de feuille sous la grille.
@@ -114,13 +115,7 @@ pub(super) fn tab_strip_with<
             egui::vec2(ui.available_width(), TAB_STRIP_HEIGHT),
             egui::Sense::click(),
         )
-        .context_menu(|ui| {
-            if add_label.is_some() {
-                ui.menu_button(tr!("menu-sheet"), |ui| {
-                    tab_strip_add_menu(ui, add_label, &mut requests.add)
-                });
-            }
-        });
+        .context_menu(|ui| tab_strip_add_menu(ui, add_label, &mut requests.add));
         if requests.add {
             on_add();
         }
@@ -222,52 +217,56 @@ fn tab_strip_add_menu(ui: &mut egui::Ui, add_label: Option<&str>, requested_add:
     }
 }
 
+/// Menu d'un onglet (#152) : Add ─ Rename · Duplicate ─ Delete, à plat — le
+/// clic droit désigne déjà la feuille, pas de sous-menu « Sheet ▸ ».
 fn tab_strip_tab_menu<K: Copy>(
     ui: &mut egui::Ui,
     id: K,
     config: &TabStripConfig<'_, K>,
     requests: &mut TabStripRequests<K>,
 ) {
-    if config.ops.is_none() && config.add_label.is_none() {
-        return;
-    }
-    ui.menu_button(tr!("menu-sheet"), |ui| {
-        if let Some(ops) = config.ops {
-            let ctx = ui.ctx().clone();
-            if ui
-                .add(egui::Button::new(tr!("action-rename-sheet")))
-                .on_hover_text(tr!("action-rename-sheet", "hint"))
-                .clicked()
-            {
-                requests.events.push(TabEvent::BeginRename(id));
-                ui.close();
-            }
-            if ui
-                .add(
-                    egui::Button::new(tr!("action-duplicate-sheet"))
-                        .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
-                )
-                .on_hover_text(tr!("action-duplicate-sheet", "hint"))
-                .clicked()
-            {
-                requests.events.push(TabEvent::Duplicate(id));
-                ui.close();
-            }
-            if ui
-                .add_enabled(
-                    ops.can_delete,
-                    egui::Button::new(tr!("action-delete-sheet")),
-                )
-                .on_hover_text(tr!("action-delete-sheet", "hint"))
-                .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"))
-                .clicked()
-            {
-                requests.events.push(TabEvent::Delete(id));
-                ui.close();
-            }
-            ui.separator();
-        }
+    let mut sections = MenuSections::new();
+    sections.section(ui, config.add_label.is_some(), |ui| {
         tab_strip_add_menu(ui, config.add_label, &mut requests.add);
+    });
+    let Some(ops) = config.ops else {
+        return;
+    };
+    sections.section(ui, true, |ui| {
+        let ctx = ui.ctx().clone();
+        if ui
+            .add(egui::Button::new(tr!("action-rename-sheet")))
+            .on_hover_text(tr!("action-rename-sheet", "hint"))
+            .clicked()
+        {
+            requests.events.push(TabEvent::BeginRename(id));
+            ui.close();
+        }
+        if ui
+            .add(
+                egui::Button::new(tr!("action-duplicate-sheet"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+            )
+            .on_hover_text(tr!("action-duplicate-sheet", "hint"))
+            .clicked()
+        {
+            requests.events.push(TabEvent::Duplicate(id));
+            ui.close();
+        }
+    });
+    sections.section(ui, true, |ui| {
+        if ui
+            .add_enabled(
+                ops.can_delete,
+                egui::Button::new(tr!("action-delete-sheet")),
+            )
+            .on_hover_text(tr!("action-delete-sheet", "hint"))
+            .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"))
+            .clicked()
+        {
+            requests.events.push(TabEvent::Delete(id));
+            ui.close();
+        }
     });
 }
 
@@ -447,13 +446,7 @@ fn tab_strip_contents<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
         egui::vec2((band_width - used).max(1.0), TAB_STRIP_HEIGHT),
         egui::Sense::click(),
     );
-    empty.context_menu(|ui| {
-        if config.add_label.is_some() {
-            ui.menu_button(tr!("menu-sheet"), |ui| {
-                tab_strip_add_menu(ui, config.add_label, &mut requests.add)
-            });
-        }
-    });
+    empty.context_menu(|ui| tab_strip_add_menu(ui, config.add_label, &mut requests.add));
     TabStripContent {
         overflow: new_overflow,
         fully_visible,

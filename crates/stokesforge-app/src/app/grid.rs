@@ -27,10 +27,10 @@ use crate::selection::{GridCursor, Selection};
 use crate::state::{Action, AppState, GridMenu, HeaderField, MoveDirection};
 use crate::{theme, tr};
 
+use super::menu_sections::MenuSections;
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
-    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_REDO_Y,
-    SHORTCUT_UNDO,
+    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE,
 };
 
 /// Hauteur d'une ligne de la grille, en points.
@@ -350,133 +350,135 @@ fn grid_edit_menu(
     sheet: NodeId,
     menu: &GridMenu,
 ) {
+    let mut sections = MenuSections::new();
+    grid_clipboard_section(ui, &mut sections, state, actions, sheet, menu);
+    grid_erase_section(ui, &mut sections, state, actions, sheet, menu);
+}
+
+/// Presse-papiers de la grille, **un seul groupe** (#152) : Cut · Copy ·
+/// Copy with Header · Paste · Paste in Place. Pas d'Undo/Redo au clic droit :
+/// Edit et le clavier suffisent.
+fn grid_clipboard_section(
+    ui: &mut egui::Ui,
+    sections: &mut MenuSections,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    menu: &GridMenu,
+) {
     let ctx = ui.ctx().clone();
-
-    if ui
-        .add(egui::Button::new(tr!("action-cut")).shortcut_text(ctx.format_shortcut(&SHORTCUT_CUT)))
-        .clicked()
-    {
-        // Couper = copier puis vider, exactement comme le bloc clavier :
-        // `copy_selection` pose le presse-papier interne *et* rend le texte
-        // à pousser au presse-papier système.
-        if let Some(text) = state.copy_selection(sheet) {
-            ctx.copy_text(text);
-        }
-        state.forget_delete_repeat(sheet);
-        actions.push(Action::ClearSelectedCells { sheet });
-        ui.close();
-    }
-    if ui
-        .add(
-            egui::Button::new(tr!("action-copy"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY)),
-        )
-        .clicked()
-    {
-        if let Some(text) = state.copy_selection(sheet) {
-            ctx.copy_text(text);
-        }
-        ui.close();
-    }
-    if ui
-        .add(
-            egui::Button::new(tr!("action-copy-with-header"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY_FULL_COLUMNS)),
-        )
-        .on_hover_text(tr!("action-copy-with-header", "hint"))
-        .clicked()
-    {
-        if let Some(text) = state.copy_full_columns(sheet) {
-            ctx.copy_text(text);
-        }
-        ui.close();
-    }
-
-    ui.separator();
-
-    if ui
-        .add(
-            egui::Button::new(tr!("action-paste"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE)),
-        )
-        .clicked()
-    {
-        state.forget_delete_repeat(sheet);
-        match system_clipboard_text() {
-            Some(text) => actions.push(Action::Paste { sheet, text }),
-            None => state.notice(tr!("status-clipboard-unreadable")),
-        }
-        ui.close();
-    }
-    if ui
-        .add_enabled(
-            menu.paste_absolute_enabled,
-            egui::Button::new(tr!("action-paste-in-place"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE_ABSOLUTE)),
-        )
-        .on_hover_text(tr!("action-paste-in-place", "hint"))
-        .on_disabled_hover_text(tr!("action-paste-in-place", "disabled"))
-        .clicked()
-    {
-        state.forget_delete_repeat(sheet);
-        actions.push(Action::PasteAbsolute { sheet });
-        ui.close();
-    }
-
-    ui.separator();
-
-    if ui
-        .add(egui::Button::new(tr!("action-clear")).shortcut_text(shortcut_text_backspace()))
-        .on_hover_text(tr!("action-clear", "hint"))
-        .clicked()
-    {
-        state.forget_delete_repeat(sheet);
-        actions.push(Action::ClearSelectedCells { sheet });
-        ui.close();
-    }
-    if menu.offers_delete_shift
-        && ui
+    sections.section(ui, true, |ui| {
+        if ui
             .add(
-                egui::Button::new(tr!("action-delete-shift-up"))
-                    .shortcut_text(shortcut_text_delete()),
+                egui::Button::new(tr!("action-cut"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_CUT)),
             )
-            .on_hover_text(tr!("action-delete-shift-up", "hint"))
             .clicked()
-    {
-        // Passer par l'action directement, sans `consume_delete_key` : un
-        // menu contextuel est un geste explicite et désigné, là où la
-        // double pression sur Suppr n'existe que pour protéger d'une frappe
-        // réflexe. Le compteur en cours est quand même oublié, pour qu'une
-        // pression sur Suppr juste après ne parte pas du mauvais temps.
-        state.forget_delete_repeat(sheet);
-        actions.push(Action::DeleteSelectedCells { sheet });
-        ui.close();
-    }
+        {
+            // Couper = copier puis vider, exactement comme le bloc clavier :
+            // `copy_selection` pose le presse-papier interne *et* rend le texte
+            // à pousser au presse-papier système.
+            if let Some(text) = state.copy_selection(sheet) {
+                ctx.copy_text(text);
+            }
+            state.forget_delete_repeat(sheet);
+            actions.push(Action::ClearSelectedCells { sheet });
+            ui.close();
+        }
+        if ui
+            .add(
+                egui::Button::new(tr!("action-copy"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY)),
+            )
+            .clicked()
+        {
+            if let Some(text) = state.copy_selection(sheet) {
+                ctx.copy_text(text);
+            }
+            ui.close();
+        }
+        if ui
+            .add(
+                egui::Button::new(tr!("action-copy-with-header"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY_FULL_COLUMNS)),
+            )
+            .on_hover_text(tr!("action-copy-with-header", "hint"))
+            .clicked()
+        {
+            if let Some(text) = state.copy_full_columns(sheet) {
+                ctx.copy_text(text);
+            }
+            ui.close();
+        }
+        if ui
+            .add(
+                egui::Button::new(tr!("action-paste"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE)),
+            )
+            .clicked()
+        {
+            state.forget_delete_repeat(sheet);
+            match system_clipboard_text() {
+                Some(text) => actions.push(Action::Paste { sheet, text }),
+                None => state.notice(tr!("status-clipboard-unreadable")),
+            }
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                menu.paste_absolute_enabled,
+                egui::Button::new(tr!("action-paste-in-place"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE_ABSOLUTE)),
+            )
+            .on_hover_text(tr!("action-paste-in-place", "hint"))
+            .on_disabled_hover_text(tr!("action-paste-in-place", "disabled"))
+            .clicked()
+        {
+            state.forget_delete_repeat(sheet);
+            actions.push(Action::PasteAbsolute { sheet });
+            ui.close();
+        }
+    });
+}
 
-    ui.separator();
-
-    if ui
-        .add_enabled(
-            state.can_undo(),
-            egui::Button::new(tr!("history-undo"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
-        )
-        .clicked()
-    {
-        actions.push(Action::Undo);
-        ui.close();
-    }
-    if ui
-        .add_enabled(
-            state.can_redo(),
-            egui::Button::new(tr!("history-redo"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
-        )
-        .clicked()
-    {
-        actions.push(Action::Redo);
-        ui.close();
-    }
+/// Effacer et supprimer : Clear · Delete (Shift Up).
+fn grid_erase_section(
+    ui: &mut egui::Ui,
+    sections: &mut MenuSections,
+    state: &mut AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    menu: &GridMenu,
+) {
+    sections.section(ui, true, |ui| {
+        if ui
+            .add(egui::Button::new(tr!("action-clear")).shortcut_text(shortcut_text_backspace()))
+            .on_hover_text(tr!("action-clear", "hint"))
+            .clicked()
+        {
+            state.forget_delete_repeat(sheet);
+            actions.push(Action::ClearSelectedCells { sheet });
+            ui.close();
+        }
+        if menu.offers_delete_shift
+            && ui
+                .add(
+                    egui::Button::new(tr!("action-delete-shift-up"))
+                        .shortcut_text(shortcut_text_delete()),
+                )
+                .on_hover_text(tr!("action-delete-shift-up", "hint"))
+                .clicked()
+        {
+            // Passer par l'action directement, sans `consume_delete_key` : un
+            // menu contextuel est un geste explicite et désigné, là où la
+            // double pression sur Suppr n'existe que pour protéger d'une frappe
+            // réflexe. Le compteur en cours est quand même oublié, pour qu'une
+            // pression sur Suppr juste après ne parte pas du mauvais temps.
+            state.forget_delete_repeat(sheet);
+            actions.push(Action::DeleteSelectedCells { sheet });
+            ui.close();
+        }
+    });
 }
 
 /// En-tête empilée d'une colonne : lettre (clic → sélectionne la colonne
@@ -638,7 +640,10 @@ fn column_letter_widget(
     is_column_selected
 }
 
-/// Propriétés et tracé des colonnes visées, après le bloc d'édition commun.
+/// Menu de la rangée des lettres (#152) : tracer et ajouter, presse-papiers,
+/// type et rôle des colonnes, puis effacer — à plat, sans enveloppe
+/// « Columns ▸ ». Calcul paresseux de [`AppState::grid_menu`], pour la même
+/// raison que dans `cell_widget`.
 fn column_properties_menu(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -646,17 +651,21 @@ fn column_properties_menu(
     sheet: NodeId,
     target_columns: &[NodeId],
 ) {
-    // Le bloc d'édition d'abord (les gestes du quotidien, les
-    // mêmes que sur une cellule ou un champ d'en-tête), puis ce
-    // qui n'existe que sur la rangée des lettres : type et rôle
-    // de colonne, qui décrivent la colonne plutôt qu'ils
-    // n'agissent sur son contenu. Calcul paresseux, pour la
-    // même raison que dans `cell_widget`.
-    if let Some(menu) = state.grid_menu(sheet) {
-        grid_edit_menu(ui, state, actions, sheet, &menu);
-        ui.separator();
+    let menu = state.grid_menu(sheet);
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| {
+        plot_menu(ui, actions, sheet, target_columns);
+        add_column_entry(ui, sheet, actions);
+    });
+    if let Some(menu) = &menu {
+        grid_clipboard_section(ui, &mut sections, state, actions, sheet, menu);
     }
-    column_options_menu(ui, state, actions, sheet, target_columns);
+    sections.section(ui, true, |ui| {
+        column_type_role_menus(ui, state, actions, target_columns);
+    });
+    if let Some(menu) = &menu {
+        grid_erase_section(ui, &mut sections, state, actions, sheet, menu);
+    }
 }
 
 /// Ajout disponible même sans sélection, commun au classeur et au vide de grille.
@@ -667,13 +676,13 @@ fn add_column_entry(ui: &mut egui::Ui, sheet: NodeId, actions: &mut Vec<Action>)
     }
 }
 
-/// Options des colonnes sélectionnées : même cible et mêmes actions dans
-/// Classeur et au clic droit. Une sélection hétérogène ne coche aucun choix.
-pub(super) fn column_options_menu(
+/// Type et rôle des colonnes visées : même cible et mêmes actions dans le
+/// menu Classeur et au clic droit. Une sélection hétérogène ne coche aucun
+/// choix.
+pub(super) fn column_type_role_menus(
     ui: &mut egui::Ui,
     state: &AppState,
     actions: &mut Vec<Action>,
-    sheet: NodeId,
     target_columns: &[NodeId],
 ) {
     let columns: Vec<_> = target_columns
@@ -687,71 +696,74 @@ pub(super) fn column_options_menu(
     let role = first
         .map(|column| column.meta().role)
         .filter(|role| columns.iter().all(|column| column.meta().role == *role));
-    ui.menu_button(tr!("menu-columns"), |ui| {
-        add_column_entry(ui, sheet, actions);
-        ui.separator();
-        ui.add_enabled_ui(!target_columns.is_empty(), |ui| {
-            // Choix manuel du type de colonne — conversion destructrice
-            // assumée (`Action::SetColumnType`/`Command::
-            // SetColumnType`, `stokesforge-core::Column::set_column_type`) :
-            // texte non numérique effacé en passant en `Numeric`, comme
-            // pour toute saisie directe dans une colonne numérique.
-            ui.menu_button(tr!("column-type"), |ui| {
-                for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
-                    if ui
-                        .selectable_label(column_type == Some(candidate), type_label(candidate))
-                        .clicked()
-                    {
-                        if Some(candidate) != column_type {
-                            for &target in target_columns {
-                                actions.push(Action::SetColumnType {
-                                    column: target,
-                                    column_type: candidate,
-                                });
-                            }
+    ui.add_enabled_ui(!target_columns.is_empty(), |ui| {
+        // Choix manuel du type de colonne — conversion destructrice
+        // assumée (`Action::SetColumnType`/`Command::
+        // SetColumnType`, `stokesforge-core::Column::set_column_type`) :
+        // texte non numérique effacé en passant en `Numeric`, comme
+        // pour toute saisie directe dans une colonne numérique.
+        ui.menu_button(tr!("column-type"), |ui| {
+            for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
+                if ui
+                    .selectable_label(column_type == Some(candidate), type_label(candidate))
+                    .clicked()
+                {
+                    if Some(candidate) != column_type {
+                        for &target in target_columns {
+                            actions.push(Action::SetColumnType {
+                                column: target,
+                                column_type: candidate,
+                            });
                         }
-                        ui.close();
                     }
+                    ui.close();
                 }
-            });
-            // Le rôle décrit les colonnes, et reste partagé avec le
-            // menu Classeur comme le type.
-            ui.menu_button(tr!("column-role"), |ui| {
-                for candidate in [
-                    ColumnRole::X,
-                    ColumnRole::Y,
-                    ColumnRole::Z,
-                    ColumnRole::XError,
-                    ColumnRole::YError,
-                    ColumnRole::Label,
-                    ColumnRole::None,
-                ] {
-                    if ui
-                        .selectable_label(role == Some(candidate), role_label(candidate))
-                        .clicked()
-                    {
-                        if Some(candidate) != role {
-                            for &target in target_columns {
-                                actions.push(Action::SetColumnRole {
-                                    column: target,
-                                    role: candidate,
-                                });
-                            }
+            }
+        });
+        // Le rôle décrit les colonnes, et reste partagé avec le
+        // menu Classeur comme le type.
+        ui.menu_button(tr!("column-role"), |ui| {
+            for candidate in [
+                ColumnRole::X,
+                ColumnRole::Y,
+                ColumnRole::Z,
+                ColumnRole::XError,
+                ColumnRole::YError,
+                ColumnRole::Label,
+                ColumnRole::None,
+            ] {
+                if ui
+                    .selectable_label(role == Some(candidate), role_label(candidate))
+                    .clicked()
+                {
+                    if Some(candidate) != role {
+                        for &target in target_columns {
+                            actions.push(Action::SetColumnRole {
+                                column: target,
+                                role: candidate,
+                            });
                         }
-                        ui.close();
                     }
+                    ui.close();
                 }
-            });
+            }
         });
     });
+}
+
+/// Créer un graphe depuis les colonnes visées — chantier « tracer depuis un
+/// classeur ». La règle d'appariement X/Y (chaque Y prend la colonne X la
+/// plus proche à sa gauche) vit dans `AppState::plot_columns`/
+/// `series_from_columns` ; ce menu ne fait que choisir le type de tracé et
+/// pousser l'action sur `target_columns`. Premier niveau du clic droit des
+/// lettres comme du menu Classeur (#152).
+pub(super) fn plot_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    target_columns: &[NodeId],
+) {
     ui.add_enabled_ui(!target_columns.is_empty(), |ui| {
-        // Créer un graphe depuis les colonnes visées — chantier
-        // « tracer depuis un classeur ». La règle d'appariement X/Y
-        // (chaque Y prend la colonne X la plus proche à sa gauche)
-        // vit dans `AppState::plot_columns`/`series_from_columns` ;
-        // ce menu ne fait que choisir le type de tracé et pousser
-        // l'action sur `target_columns`, comme les deux sous-menus
-        // ci-dessus.
         ui.menu_button(tr!("workbook-plot-menu"), |ui| {
             for (label, plot_type) in [
                 (tr!("plot-type-line"), PlotType::Line),
@@ -769,6 +781,21 @@ pub(super) fn column_options_menu(
                 }
             }
         });
+    });
+}
+
+/// Menu Colonnes de la barre Classeur : Add Column, puis Type et Rôle.
+pub(super) fn columns_menu_contents(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    target_columns: &[NodeId],
+) {
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| add_column_entry(ui, sheet, actions));
+    sections.section(ui, true, |ui| {
+        column_type_role_menus(ui, state, actions, target_columns);
     });
 }
 
@@ -1261,11 +1288,9 @@ pub(super) fn grid_contents(
         let empty = ui.centered_and_justified(|ui| {
             ui.weak(tr!("workbook-grid-no-columns"));
         });
-        empty.response.context_menu(|ui| {
-            ui.menu_button(tr!("menu-columns"), |ui| {
-                add_column_entry(ui, sheet, actions)
-            });
-        });
+        empty
+            .response
+            .context_menu(|ui| add_column_entry(ui, sheet, actions));
         return None;
     }
     let (grid_rect, focus_anchor) = prepare_grid(ui, sheet);
@@ -1428,11 +1453,7 @@ fn grid_blank_column_target(
             ui.id().with(("add_column_blank", sheet)),
             egui::Sense::click(),
         );
-        response.context_menu(|ui| {
-            ui.menu_button(tr!("menu-columns"), |ui| {
-                add_column_entry(ui, sheet, actions)
-            });
-        });
+        response.context_menu(|ui| add_column_entry(ui, sheet, actions));
     }
 }
 
@@ -3147,8 +3168,6 @@ mod tests {
             tr!("action-paste"),
             tr!("action-paste-in-place"),
             tr!("action-clear"),
-            tr!("history-undo"),
-            tr!("history-redo"),
         ];
         let decaler = tr!("action-delete-shift-up");
 
@@ -3159,6 +3178,12 @@ mod tests {
             assert!(
                 textes.contains(entree),
                 "cellule : {entree:?} absent de {textes:?}"
+            );
+        }
+        for absent in [tr!("history-undo"), tr!("history-redo")] {
+            assert!(
+                !textes.contains(&absent),
+                "Undo et Redo restent à Edit et au clavier : {textes:?}"
             );
         }
         assert_eq!(
@@ -3314,7 +3339,6 @@ mod tests {
             "témoin : la voisine n'est pas sélectionnée"
         );
         assert!(banc.centre_de(&type_label(ColumnType::Numeric)).is_none());
-        banc.clic_sur(&tr!("menu-columns"));
         banc.clic_sur(&tr!("column-type"));
         let position = banc
             .centre_de(&type_label(ColumnType::Numeric))

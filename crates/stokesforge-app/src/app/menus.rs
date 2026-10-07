@@ -16,13 +16,19 @@
 //! les sous-menus évite la fermeture automatique d'egui sur une case ; chaque
 //! action appelle `ui.close()`, propagé par egui aux parents.
 //!
+//! # Grammaire (#152)
+//! Chaque menu range ses entrées par sections (`MenuSections::section`,
+//! `menu_sections.rs`) selon `docs/menus.md` : ici, la barre **enveloppe**
+//! les contenus partagés avec les clics droits (Selection, Sheet, Columns…),
+//! qui, eux, les affichent à plat.
+//!
 //! Chaque menu possède sa fonction (#124), appelée dans la même Ui et dans
 //! le même ordre ; les demandes de l'Object Manager restent différées après
 //! la fermeture du panneau. Aucun scope egui ne dépend du découpage Rust.
 
 use eframe::egui;
 use stokesforge_core::NodeId;
-use stokesforge_render_egui::{GraphView, DEFAULT_FIGURE_SIZE};
+use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
 
 use crate::i18n;
 use crate::state::{active_graph, Action};
@@ -30,15 +36,14 @@ use crate::toolbar::ToolbarId;
 use crate::tr;
 
 use super::graph_text_edit::add_annotation_at;
-use super::graph_window::{
-    disabled_shape_order_buttons, graph_properties_menu, shape_order_buttons,
-};
+use super::graph_window::graph_properties_menu;
+use super::menu_sections::MenuSections;
 use super::object_manager_ui::{
     object_manager_settings_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
 };
 use super::shortcuts::{
-    shortcut_text_delete, SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT,
-    SHORTCUT_OPEN, SHORTCUT_REDO_Y, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_UNDO,
+    SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
+    SHORTCUT_REDO_Y, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_UNDO,
 };
 use super::tab::tab_node;
 use super::tab::Tab;
@@ -99,126 +104,134 @@ impl StokesForgeApp {
     // ajouter aucun scope egui ni déplacer l'application différée des demandes.
     fn file_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
         ui.menu_button(tr!("menu-file"), |ui| {
-            ui.menu_button(tr!("menu-new"), |ui| {
-                if ui
-                    .add_enabled(
-                        self.state.can_new_project(),
-                        egui::Button::new(tr!("action-new-project"))
-                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_NEW_PROJECT)),
-                    )
-                    .on_hover_text(tr!("action-new-project", "hint"))
-                    .clicked()
-                {
-                    actions.push(Action::NewProject {
-                        pending_edits: false,
-                    });
-                    ui.close();
-                }
-                if ui
-                    .button(tr!("action-add-workbook"))
-                    .on_hover_text(tr!("action-add-workbook", "hint"))
-                    .clicked()
-                {
-                    actions.push(Action::AddWorkbook);
-                    ui.close();
-                }
-                if ui
-                    .button(tr!("action-add-graph"))
-                    .on_hover_text(tr!("action-add-graph", "hint"))
-                    .clicked()
-                {
-                    actions.push(Action::AddGraph);
-                    ui.close();
-                }
-            });
-            ui.menu_button(tr!("menu-import"), |ui| {
-                if ui
-                    .add(
-                        egui::Button::new(tr!("action-import")).shortcut_text(SHORTCUT_IMPORT_TEXT),
-                    )
-                    .on_hover_text(tr!("action-import", "hint"))
-                    .clicked()
-                {
-                    self.open_import_dialog();
-                    ui.close();
-                }
-                let active_sheet = self
-                    .active_book()
-                    .and_then(|book| self.state.selected_sheet_in(book));
-                if ui
-                    .add_enabled(
-                        active_sheet.is_some_and(|sheet| self.state.can_refresh_from_source(sheet)),
-                        egui::Button::new(tr!("action-refresh-from-source")),
-                    )
-                    .on_hover_text(tr!("action-refresh-from-source", "hint"))
-                    .clicked()
-                {
-                    if let Some(sheet) = active_sheet {
-                        actions.push(Action::RefreshFromSource { sheet });
-                    }
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        self.state.can_reopen_last_import(),
-                        egui::Button::new(tr!("action-reopen-last-import")),
-                    )
-                    .on_hover_text(tr!("action-reopen-last-import", "hint"))
-                    .clicked()
-                {
-                    actions.push(Action::ReopenLastImport);
-                    ui.close();
-                }
-            });
-            ui.separator();
-            if ui
-                .add(
-                    egui::Button::new(tr!("action-open"))
-                        .shortcut_text(ctx.format_shortcut(&SHORTCUT_OPEN)),
-                )
-                .clicked()
-            {
-                self.choose_open_path(actions);
-                ui.close();
-            }
-            if ui
-                .add(
-                    egui::Button::new(tr!("action-save"))
-                        .shortcut_text(ctx.format_shortcut(&SHORTCUT_SAVE)),
-                )
-                .clicked()
-            {
-                actions.push(Action::Save);
-                ui.close();
-            }
-            if ui
-                .add(
-                    egui::Button::new(tr!("action-save-as"))
-                        .shortcut_text(ctx.format_shortcut(&SHORTCUT_SAVE_AS)),
-                )
-                .clicked()
-            {
-                self.choose_save_path(actions);
-                ui.close();
-            }
-            ui.separator();
-            ui.menu_button(tr!("menu-language"), |ui| {
-                for language in [i18n::Language::English, i18n::Language::French] {
-                    let current = i18n::language() == language;
+            let mut sections = MenuSections::new();
+            sections.section(ui, true, |ui| {
+                ui.menu_button(tr!("menu-new"), |ui| {
                     if ui
-                        .selectable_label(current, language.native_name())
+                        .add_enabled(
+                            self.state.can_new_project(),
+                            egui::Button::new(tr!("action-new-project"))
+                                .shortcut_text(ctx.format_shortcut(&SHORTCUT_NEW_PROJECT)),
+                        )
+                        .on_hover_text(tr!("action-new-project", "hint"))
                         .clicked()
                     {
-                        self.choose_language(language);
+                        actions.push(Action::NewProject {
+                            pending_edits: false,
+                        });
                         ui.close();
                     }
+                    if ui
+                        .button(tr!("action-add-workbook"))
+                        .on_hover_text(tr!("action-add-workbook", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::AddWorkbook);
+                        ui.close();
+                    }
+                    if ui
+                        .button(tr!("action-add-graph"))
+                        .on_hover_text(tr!("action-add-graph", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::AddGraph);
+                        ui.close();
+                    }
+                });
+                ui.menu_button(tr!("menu-import"), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(tr!("action-import"))
+                                .shortcut_text(SHORTCUT_IMPORT_TEXT),
+                        )
+                        .on_hover_text(tr!("action-import", "hint"))
+                        .clicked()
+                    {
+                        self.open_import_dialog();
+                        ui.close();
+                    }
+                    let active_sheet = self
+                        .active_book()
+                        .and_then(|book| self.state.selected_sheet_in(book));
+                    if ui
+                        .add_enabled(
+                            active_sheet
+                                .is_some_and(|sheet| self.state.can_refresh_from_source(sheet)),
+                            egui::Button::new(tr!("action-refresh-from-source")),
+                        )
+                        .on_hover_text(tr!("action-refresh-from-source", "hint"))
+                        .clicked()
+                    {
+                        if let Some(sheet) = active_sheet {
+                            actions.push(Action::RefreshFromSource { sheet });
+                        }
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            self.state.can_reopen_last_import(),
+                            egui::Button::new(tr!("action-reopen-last-import")),
+                        )
+                        .on_hover_text(tr!("action-reopen-last-import", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::ReopenLastImport);
+                        ui.close();
+                    }
+                });
+            });
+            sections.section(ui, true, |ui| {
+                if ui
+                    .add(
+                        egui::Button::new(tr!("action-open"))
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_OPEN)),
+                    )
+                    .clicked()
+                {
+                    self.choose_open_path(actions);
+                    ui.close();
+                }
+                if ui
+                    .add(
+                        egui::Button::new(tr!("action-save"))
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_SAVE)),
+                    )
+                    .clicked()
+                {
+                    actions.push(Action::Save);
+                    ui.close();
+                }
+                if ui
+                    .add(
+                        egui::Button::new(tr!("action-save-as"))
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_SAVE_AS)),
+                    )
+                    .clicked()
+                {
+                    self.choose_save_path(actions);
+                    ui.close();
                 }
             });
-            ui.separator();
-            if ui.button(tr!("action-quit")).clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                ui.close();
-            }
+            sections.section(ui, true, |ui| {
+                ui.menu_button(tr!("menu-language"), |ui| {
+                    for language in [i18n::Language::English, i18n::Language::French] {
+                        let current = i18n::language() == language;
+                        if ui
+                            .selectable_label(current, language.native_name())
+                            .clicked()
+                        {
+                            self.choose_language(language);
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            sections.section(ui, true, |ui| {
+                if ui.button(tr!("action-quit")).clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    ui.close();
+                }
+            });
         });
     }
 
@@ -227,35 +240,38 @@ impl StokesForgeApp {
             // Le libellé complet (« Undo Edit Cells in Column A ») et le
             // grisage sont deux lignes distinctes ici ; Qt les tenait
             // ensemble dans une seule `QAction`.
-            let undo = self
-                .state
-                .undo_label()
-                .unwrap_or_else(|| tr!("history-undo"));
-            if ui
-                .add_enabled(
-                    self.state.can_undo(),
-                    egui::Button::new(undo).shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
-                )
-                .clicked()
-            {
-                actions.push(Action::Undo);
-                ui.close();
-            }
-            let redo = self
-                .state
-                .redo_label()
-                .unwrap_or_else(|| tr!("history-redo"));
-            if ui
-                .add_enabled(
-                    self.state.can_redo(),
-                    egui::Button::new(redo).shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
-                )
-                .clicked()
-            {
-                actions.push(Action::Redo);
-                ui.close();
-            }
-            ui.separator();
+            let mut sections = MenuSections::new();
+            sections.section(ui, true, |ui| {
+                let undo = self
+                    .state
+                    .undo_label()
+                    .unwrap_or_else(|| tr!("history-undo"));
+                if ui
+                    .add_enabled(
+                        self.state.can_undo(),
+                        egui::Button::new(undo).shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
+                    )
+                    .clicked()
+                {
+                    actions.push(Action::Undo);
+                    ui.close();
+                }
+                let redo = self
+                    .state
+                    .redo_label()
+                    .unwrap_or_else(|| tr!("history-redo"));
+                if ui
+                    .add_enabled(
+                        self.state.can_redo(),
+                        egui::Button::new(redo)
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
+                    )
+                    .clicked()
+                {
+                    actions.push(Action::Redo);
+                    ui.close();
+                }
+            });
             let ids: Vec<_> = self
                 .state
                 .tree()
@@ -263,17 +279,25 @@ impl StokesForgeApp {
                 .into_iter()
                 .filter(|id| self.pm_selection.iter().any(|tab| tab_node(*tab) == *id))
                 .collect();
-            super::project_manager::object_menu(
-                ui,
-                &ids,
-                self.state.tree().root(),
-                actions,
-                if self.pm_detached {
-                    super::project_manager::viewport_id()
-                } else {
-                    egui::ViewportId::ROOT
-                },
-            );
+            let rename_viewport = if self.pm_detached {
+                super::project_manager::viewport_id()
+            } else {
+                egui::ViewportId::ROOT
+            };
+            let root = self.state.tree().root();
+            sections.section(ui, true, |ui| {
+                ui.menu_button(tr!("menu-selected-content"), |ui| {
+                    super::project_manager::object_menu(
+                        ui,
+                        &mut MenuSections::new(),
+                        super::project_manager::ObjectMenuTarget::Windows,
+                        &ids,
+                        root,
+                        actions,
+                        rename_viewport,
+                    );
+                });
+            });
         });
     }
 
@@ -296,62 +320,25 @@ impl StokesForgeApp {
         object_requests: &mut Vec<ObjectManagerRequest>,
     ) {
         ui.menu_button(tr!("menu-graph"), |ui| {
-            if ui
-                .add_enabled(
-                    !crate::state::graph_data_books(self.state.tree(), graph).is_empty(),
-                    egui::Button::new(tr!("action-show-graph-data")),
-                )
-                .clicked()
-            {
-                actions.push(Action::ShowGraphData { graph });
-                ui.close();
-            }
-
             let spec = crate::state::current_plot_spec(self.state.tree(), graph);
             let target = self
                 .read_graph_view(graph, selected_manager_target)
                 .flatten();
-            ui.menu_button(tr!("menu-selected-content"), |ui| {
-                if let (Some(target), Some(spec)) = (target, spec.as_ref()) {
-                    object_node_menu(ui, graph, target, spec, actions, object_requests);
-                } else {
-                    ui.add_enabled(false, egui::Button::new(tr!("action-properties")));
-                    ui.add_enabled(false, egui::Button::new(tr!("action-rename-series")));
-                    ui.add_enabled(false, egui::Button::new(tr!("action-delete-content")));
-                }
-            });
-            ui.separator();
-            ui.menu_button(tr!("menu-properties"), |ui| {
-                graph_properties_menu(ui, graph, actions);
-            });
-            ui.separator();
-            if ui
-                .button(tr!("action-reset-zoom"))
-                .on_hover_text(tr!("action-reset-zoom", "hint"))
-                .clicked()
-            {
-                if let Some(view) = self.graph_views.get_mut(&graph) {
-                    view.reset_view();
-                }
-                ui.close();
-            }
-            ui.menu_button(tr!("menu-text"), |ui| {
-                let moved = crate::state::current_plot_spec(self.state.tree(), graph)
-                    .is_some_and(|spec| spec.has_text_anchors());
+            let has_data = !crate::state::graph_data_books(self.state.tree(), graph).is_empty();
+            let moved = spec.as_ref().is_some_and(|spec| spec.has_text_anchors());
+            let mut sections = MenuSections::new();
+            sections.section(ui, true, |ui| {
                 if ui
-                    .add_enabled(moved, egui::Button::new(tr!("action-reset-text-positions")))
-                    .on_hover_text(tr!("action-reset-text-positions", "hint"))
-                    .on_disabled_hover_text(tr!("action-reset-text-positions", "disabled"))
+                    .add_enabled(has_data, egui::Button::new(tr!("action-show-graph-data")))
                     .clicked()
                 {
-                    actions.push(Action::ResetTextAnchors { graph });
+                    actions.push(Action::ShowGraphData { graph });
                     ui.close();
                 }
-                // Textes libres (issue #35) : le pendant, dans la
-                // barre de menus, du clic droit et de Suppr.
-                let selected = self
-                    .read_graph_view(graph, GraphView::selected_annotation)
-                    .flatten();
+            });
+            // Textes libres (issue #35) : le pendant, dans la barre de menus,
+            // du clic droit sur le fond.
+            sections.section(ui, true, |ui| {
                 if ui
                     .button(tr!("action-add-text"))
                     .on_hover_text(tr!("action-add-text", "hint"))
@@ -365,83 +352,84 @@ impl StokesForgeApp {
                     }
                     ui.close();
                 }
-                if ui
-                    .add_enabled(
-                        selected.is_some(),
-                        egui::Button::new(tr!("action-delete-text"))
-                            .shortcut_text(shortcut_text_delete()),
-                    )
-                    .clicked()
-                {
-                    if let Some(target) = selected {
-                        actions.push(Action::RemoveAnnotation { graph, target });
-                    }
-                    if let Some(view) = self.graph_views.get_mut(&graph) {
-                        view.clear_annotation_selection();
-                    }
-                    ui.close();
-                }
-                ui.separator();
             });
-            ui.menu_button(tr!("menu-objects"), |ui| {
-                // Objets graphiques (issue #76) : l'ordre
-                // d'empilement et la suppression de l'objet
-                // sélectionné ; les outils de tracé sont dans la barre
-                // d'outils, comme l'outil Texte.
-                let object = self
-                    .graph_views
-                    .get(&graph)
-                    .and_then(GraphView::selected_shape);
-                if let Some(view) = self.graph_views.get_mut(&graph) {
-                    let tree = self.state.tree().clone();
-                    match object {
-                        Some(object) => {
-                            shape_order_buttons(ui, view, &tree, graph, object, actions)
-                        }
-                        None => disabled_shape_order_buttons(ui),
-                    }
+            // Le menu de l'objet sélectionné est celui du clic droit et de
+            // l'Object Manager ; sans sélection, l'entrée est grisée.
+            sections.section(ui, true, |ui| {
+                if let (Some(target), Some(spec)) = (target, spec.as_ref()) {
+                    ui.menu_button(tr!("menu-selected-content"), |ui| {
+                        object_node_menu(ui, graph, target, spec, actions, object_requests);
+                    });
                 } else {
-                    disabled_shape_order_buttons(ui);
+                    ui.add_enabled(false, egui::Button::new(tr!("menu-selected-content")))
+                        .on_disabled_hover_text(tr!("menu-selected-content", "disabled"));
                 }
-                ui.separator();
+                if ui
+                    .add_enabled(moved, egui::Button::new(tr!("action-reset-text-positions")))
+                    .on_hover_text(tr!("action-reset-text-positions", "hint"))
+                    .on_disabled_hover_text(tr!("action-reset-text-positions", "disabled"))
+                    .clicked()
+                {
+                    actions.push(Action::ResetTextAnchors { graph });
+                    ui.close();
+                }
             });
-            ui.menu_button(tr!("menu-export"), |ui| {
+            sections.section(ui, true, |ui| {
                 if ui
-                    .add(
-                        egui::Button::new(tr!("action-export-graph"))
-                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
-                    )
-                    .on_hover_text(tr!("action-export-graph", "hint"))
+                    .button(tr!("action-reset-zoom"))
+                    .on_hover_text(tr!("action-reset-zoom", "hint"))
                     .clicked()
                 {
-                    self.request_graph_export(graph, actions);
-                    ui.close();
-                }
-                if ui
-                    .button(tr!("action-copy-graph"))
-                    .on_hover_text(tr!("action-copy-graph", "hint"))
-                    .clicked()
-                {
-                    self.request_graph_figure_copy(graph, actions);
-                    ui.close();
-                }
-                ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
-                    let current = self.state.png_export_scale();
-                    for scale in crate::state::PNG_EXPORT_SCALES {
-                        let (w, h) = DEFAULT_FIGURE_SIZE;
-                        let (width, height) =
-                            ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
-                        let label = tr!(
-                            "menu-graph-png-resolution-option",
-                            scale = scale,
-                            width = width,
-                            height = height
-                        );
-                        if ui.radio(current == scale, label).clicked() {
-                            actions.push(Action::SetPngExportScale(scale));
-                            ui.close();
-                        }
+                    if let Some(view) = self.graph_views.get_mut(&graph) {
+                        view.reset_view();
                     }
+                    ui.close();
+                }
+            });
+            sections.section(ui, true, |ui| {
+                ui.menu_button(tr!("menu-export"), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(tr!("action-export-graph"))
+                                .shortcut_text(ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH)),
+                        )
+                        .on_hover_text(tr!("action-export-graph", "hint"))
+                        .clicked()
+                    {
+                        self.request_graph_export(graph, actions);
+                        ui.close();
+                    }
+                    if ui
+                        .button(tr!("action-copy-graph"))
+                        .on_hover_text(tr!("action-copy-graph", "hint"))
+                        .clicked()
+                    {
+                        self.request_graph_figure_copy(graph, actions);
+                        ui.close();
+                    }
+                    ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
+                        let current = self.state.png_export_scale();
+                        for scale in crate::state::PNG_EXPORT_SCALES {
+                            let (w, h) = DEFAULT_FIGURE_SIZE;
+                            let (width, height) =
+                                ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
+                            let label = tr!(
+                                "menu-graph-png-resolution-option",
+                                scale = scale,
+                                width = width,
+                                height = height
+                            );
+                            if ui.radio(current == scale, label).clicked() {
+                                actions.push(Action::SetPngExportScale(scale));
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+            });
+            sections.section(ui, true, |ui| {
+                ui.menu_button(tr!("menu-properties"), |ui| {
+                    graph_properties_menu(ui, graph, actions);
                 });
             });
         });
@@ -482,56 +470,60 @@ impl StokesForgeApp {
 
     fn window_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button(tr!("menu-window"), |ui| {
-            if let Some(tab) = self.maximized_tab {
-                if ui
-                    .button(tr!(
-                        "action-restore-window",
-                        title = tab_title(&self.state, tab)
-                    ))
-                    .on_hover_text(tr!("action-restore-window", "hint"))
+            let mut sections = MenuSections::new();
+            sections.section(ui, true, |ui| {
+                if let Some(tab) = self.maximized_tab {
+                    if ui
+                        .button(tr!(
+                            "action-restore-window",
+                            title = tab_title(&self.state, tab)
+                        ))
+                        .on_hover_text(tr!("action-restore-window", "hint"))
+                        .clicked()
+                    {
+                        self.maximized_tab = None;
+                        ui.close();
+                    }
+                } else {
+                    // La fenêtre flottante la plus récemment focalisée —
+                    // dernier élément de `floating_tabs`, voir la doc de
+                    // tête de `window_stack.rs`. Le Project Manager n'y
+                    // figure jamais, ce n'est pas une fenêtre flottante,
+                    // donc rien de spécial à exclure ici.
+                    let active = self.floating_tabs.last().copied();
+                    let can_maximize = active.is_some();
+                    if ui
+                        .add_enabled(
+                            can_maximize,
+                            egui::Button::new(tr!("action-maximize-window")),
+                        )
+                        .on_hover_text(tr!("action-maximize-window", "hint"))
+                        .clicked()
+                    {
+                        self.maximized_tab = active;
+                        ui.close();
+                    }
+                }
+            });
+            sections.section(ui, true, |ui| {
+                if self.pm_detached {
+                    if ui
+                        .button(tr!("action-reattach-project-manager"))
+                        .on_hover_text(tr!("action-reattach-project-manager", "hint"))
+                        .clicked()
+                    {
+                        self.reattach_project_manager();
+                        ui.close();
+                    }
+                } else if ui
+                    .button(tr!("action-detach-project-manager"))
+                    .on_hover_text(tr!("action-detach-project-manager", "hint"))
                     .clicked()
                 {
-                    self.maximized_tab = None;
+                    self.detach_project_manager();
                     ui.close();
                 }
-            } else {
-                // La fenêtre flottante la plus récemment focalisée —
-                // dernier élément de `floating_tabs`, voir la doc de
-                // tête de `window_stack.rs`. Le Project Manager n'y
-                // figure jamais, ce n'est pas une fenêtre flottante,
-                // donc rien de spécial à exclure ici.
-                let active = self.floating_tabs.last().copied();
-                let can_maximize = active.is_some();
-                if ui
-                    .add_enabled(
-                        can_maximize,
-                        egui::Button::new(tr!("action-maximize-window")),
-                    )
-                    .on_hover_text(tr!("action-maximize-window", "hint"))
-                    .clicked()
-                {
-                    self.maximized_tab = active;
-                    ui.close();
-                }
-            }
-            ui.separator();
-            if self.pm_detached {
-                if ui
-                    .button(tr!("action-reattach-project-manager"))
-                    .on_hover_text(tr!("action-reattach-project-manager", "hint"))
-                    .clicked()
-                {
-                    self.reattach_project_manager();
-                    ui.close();
-                }
-            } else if ui
-                .button(tr!("action-detach-project-manager"))
-                .on_hover_text(tr!("action-detach-project-manager", "hint"))
-                .clicked()
-            {
-                self.detach_project_manager();
-                ui.close();
-            }
+            });
             // Pas d'« Attacher à gauche/à droite » ici : le Project
             // Manager est un panneau fixe, figé à gauche, depuis
             // cette tâche (voir la doc de tête d'`app.rs`, § attacher
@@ -582,6 +574,7 @@ impl StokesForgeApp {
 #[cfg(test)]
 mod tests {
     use super::super::project_manager::tests::find_text_center;
+    use super::super::shortcuts::shortcut_text_delete;
     use super::super::test_support::{self, colonnes_xy};
     use super::*;
     use crate::state::AppState;
@@ -1192,11 +1185,14 @@ mod tests {
         assert!(!menus.contains(&tr!("menu-graph")), "{menus:?}");
 
         let tab = Some(Tab::Graph(graph));
-        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-text")]);
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
         assert!(active(&menu, &tr!("action-add-text")).enabled, "témoin");
+        assert!(
+            !active(&menu, &tr!("menu-selected-content")).enabled,
+            "aucune sélection"
+        );
         let (_, export) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-export")]);
         assert!(active(&export, &tr!("action-export-graph")).enabled);
-        assert!(!active(&menu, &tr!("action-delete-text")).enabled);
         assert!(
             !active(&menu, &tr!("action-reset-text-positions")).enabled,
             "aucun texte déplacé"
@@ -1209,18 +1205,19 @@ mod tests {
         };
         let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_annotation(Some(target), &spec));
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-text")]);
-        let pos = active(&menu, &tr!("action-delete-text")).center;
-        assert!(active(&menu, &tr!("action-delete-text")).enabled);
+        let (ctx, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[tr!("menu-graph"), tr!("menu-selected-content")],
+        );
+        let pos = active(&menu, &tr!("action-delete-content")).center;
+        assert!(active(&menu, &tr!("action-delete-content")).enabled);
         assert_eq!(
             clique(&mut app, &ctx, tab, pos),
-            vec![Action::RemoveAnnotation { graph, target }]
-        );
-        assert_eq!(
-            app.read_graph_view(graph, GraphView::selected_annotation)
-                .flatten(),
-            None,
-            "la sélection supprimée est oubliée"
+            vec![Action::RemovePlotObject {
+                graph,
+                target: crate::object_manager::VisibilityTarget::Annotation(target),
+            }]
         );
         session.shutdown().unwrap();
     }
@@ -1240,8 +1237,11 @@ mod tests {
             let (output, _) = peint(app, &ctx, tab, Vec::new());
             (ctx, entrees(&output))
         };
-        let (_, menu) = ouvre_le_contenu(&mut app);
-        assert!(!active(&menu, &tr!("action-properties")).enabled);
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        assert!(
+            !active(&menu, &tr!("menu-selected-content")).enabled,
+            "sans sélection, l'entrée est grisée et n'ouvre pas de sous-menu"
+        );
 
         let series = stokesforge_plot::SeriesRef::new(0, 0);
         let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
@@ -1297,7 +1297,11 @@ mod tests {
             );
             let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
             assert!(entree(&toujours, &tr!("action-show-content")).is_some());
-            assert_eq!(active(&menu, &tr!("object-manager-settings")).enabled, open);
+            assert_eq!(
+                active(&menu, &tr!("object-manager-show-texts")).enabled,
+                open,
+                "les réglages suivent l'ouverture du panneau, sans enveloppe"
+            );
         }
         let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-view"), tr!("menu-toolbars")]);
         for id in ToolbarId::ALL {
@@ -1357,9 +1361,8 @@ mod tests {
         let (_, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
         for feuille in [
             tr!("menu-graph-axes"),
-            tr!("action-add-text"),
             tr!("action-export-graph"),
-            tr!("action-delete-object"),
+            tr!("action-delete-content"),
         ] {
             assert!(
                 entree(&menu, &feuille).is_none(),
@@ -1377,8 +1380,6 @@ mod tests {
             }]
         );
         assert_ferme(&mut app, &ctx, tab);
-        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-objects")]);
-        assert!(!active(&menu, &tr!("action-delete-object")).enabled);
         session.shutdown().unwrap();
     }
 
@@ -1389,11 +1390,7 @@ mod tests {
         app.state.set_object_manager_open_for_test(true);
         // Les réglages restent accessibles sans graphique actif.
         let open = |app: &mut StokesForgeApp, child: Option<&str>| {
-            let mut path = vec![
-                tr!("menu-view"),
-                tr!("action-object-manager"),
-                tr!("object-manager-settings"),
-            ];
+            let mut path = vec![tr!("menu-view"), tr!("action-object-manager")];
             if let Some(label) = child {
                 path.push(label.to_string());
             }
@@ -1411,7 +1408,7 @@ mod tests {
                 Action::SetObjectManagerShowScales(!app.state.object_manager_show_scales()),
             ),
         ] {
-            let (ctx, menu) = open(&mut app, Some(&tr!("object-manager-display")));
+            let (ctx, menu) = open(&mut app, None);
             let row = active(&menu, &label);
             assert!(row.enabled);
             assert_eq!(row.toggled, Some(current));
@@ -1419,7 +1416,7 @@ mod tests {
             let still_open = entrees(&peint(&mut app, &ctx, None, Vec::new()).0);
             assert!(
                 entree(&still_open, &label).is_some(),
-                "la bascule garde Display ouvert"
+                "la bascule garde le menu ouvert"
             );
         }
         for (group, label) in [

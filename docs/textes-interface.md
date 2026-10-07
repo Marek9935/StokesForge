@@ -337,3 +337,17 @@ Sheet, Column, Import, Export et Selection, au pluriel lorsque le groupe
 porte plusieurs objets. Une même entrée partage sa clé dans le menu du haut
 et le clic droit. Les bascules d'affichage gardent leur case et laissent le
 menu ouvert ; les actions et les choix exclusifs le ferment.
+
+**Grammaire des menus (#152, [`menus.md`](menus.md))** — ce qu'elle impose aux
+textes :
+
+- les entrées sont des **verbes nus** (« Rename », « Delete », pas « Rename
+  Series » ni « Delete Object ») : le clic droit a déjà désigné la cible ;
+- l'**en-tête grisé** qui nomme la cible est réservé au clic droit du graphe ;
+- **Properties…** est une action directe, jamais un sous-menu « Properties ▸ »
+  au clic droit (le menu *Graph* de la barre garde son sous-menu de pages) ;
+- les noms de sous-menus qui nomment la cible (*Selection*, *Sheet*, *Columns*)
+  n'existent que dans la barre de menus, qui enveloppe le contenu du clic droit ;
+- un grisage porte une info-bulle `.disabled` qui dit pourquoi ;
+- **aucune icône** dans un menu, et un raccourci toujours rendu par
+  `format_shortcut` d'une constante `SHORTCUT_*`.

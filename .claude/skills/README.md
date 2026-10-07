@@ -17,9 +17,9 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
 
 | Skill | Pour quoi | Se déclenche sur |
 |---|---|---|
-| [`stokesforge-feature`](stokesforge-feature/SKILL.md) | implémenter une fonctionnalité de bout en bout : couche, menu contextuel, raccourci, tests, doc | « ajoute », « implémente », « je voudrais pouvoir… » |
-| [`stokesforge-bug-report`](stokesforge-bug-report/SKILL.md) | transformer un symptôme en rapport rejouable, avec test de reproduction | « ça plante », « c'est bizarre », « la valeur est fausse » |
-| [`stokesforge-bug-fix`](stokesforge-bug-fix/SKILL.md) | corriger : reproduire d'abord, réparer à la couche de la cause, sans affaiblir un test | « corrige », « répare », après un rapport |
+| [`stokesforge-feature`](stokesforge-feature/SKILL.md) | implémenter une fonctionnalité de bout en bout : couche, menu contextuel, raccourci, tests, doc | demande de réalisation dans le dépôt ; passage explicite à l'implémentation après un signalement |
+| [`stokesforge-bug-report`](stokesforge-bug-report/SKILL.md) | documenter les retours, créer ou compléter des issues | signalement, création d'issue et retours suivants tant que l'implémentation n'est pas demandée explicitement |
+| [`stokesforge-bug-fix`](stokesforge-bug-fix/SKILL.md) | corriger : reproduire d'abord, réparer à la couche de la cause, sans affaiblir un test | demande de correction dans le dépôt ; passage explicite à la correction après un signalement |
 | [`stokesforge-commande`](stokesforge-commande/SKILL.md) | ajouter une commande annulable — la seule voie de mutation du modèle | toute création / suppression / modification dans le projet |
 | [`stokesforge-rendu`](stokesforge-rendu/SKILL.md) | tracé, axes, légende, export ; les deux pièges silencieux du dépôt | figure décalée, écran ≠ export, nouvelle série |
 | [`stokesforge-import`](stokesforge-import/SKILL.md) | recettes d'appareil, prévisualisation façon Origin, fichiers mal découpés | CSV/TXT/ASC, nouvel instrument, aperçu faux |
@@ -41,7 +41,22 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
   `stokesforge-verification` : les tests couvrent la géométrie, **pas
   l'apparence**.
 
-## Cinq règles transversales, apprises à l'usage
+## Règles transversales, apprises à l'usage
+
+**Conserver le contexte de signalement.** Pendant la création ou
+l'enrichissement d'issues, les retours suivants complètent les issues, même
+formulés comme « ajoute » ou « supprime cette icône ». Le passage au code
+exige une demande explicite d'implémentation dans le dépôt ; voir la
+[règle du triage](stokesforge-bug-report/SKILL.md#avant-tout--conserver-le-contexte-de-signalement).
+
+**Ranger les menus selon la grammaire.** Toute entrée de menu ou de clic
+droit se range dans une section de [`docs/menus.md`](../../docs/menus.md)
+(#152) : ordre canonique, séparateurs par `MenuSections::section` seulement
+(garde `aucun_separateur_brut_dans_un_menu`), *absent* ou *grisé avec
+`.disabled`*, verbes nus, `Properties…` en dernier. Les skills
+`stokesforge-feature` (où et comment), `stokesforge-textes-interface` (les
+mots), `stokesforge-fonctionnalites` (les gestes décrits) et
+`stokesforge-bug-report` (signaler contre la grammaire) s'y réfèrent.
 
 **Demander plutôt que trancher.** L'utilisateur n'est pas développeur : il
 arbitre des comportements observables, jamais des structures de code. Un
@@ -92,6 +107,10 @@ demande  ──► stokesforge-feature ──┬─► stokesforge-commande ─�
                               ├─► stokesforge-import ────┤
                               └─► stokesforge-python ────┘
 ```
+
+La flèche de `stokesforge-bug-report` vers une correction ou une
+implémentation exige une demande explicite de passer au code ; elle ne suit
+pas automatiquement la création ou la validation d'une issue.
 
 `stokesforge-verification` est le passage obligé avant tout commit : c'est lui qui
 porte ce qu'un `cargo test --workspace` vert **ne prouve pas** (ni `python`, ni

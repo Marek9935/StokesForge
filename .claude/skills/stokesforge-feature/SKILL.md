@@ -1,6 +1,6 @@
 ---
 name: stokesforge-feature
-description: Implémenter une nouvelle fonctionnalité dans StokesForge (portage Rust, branche dev) — du choix de la couche jusqu'au menu contextuel, au raccourci clavier, aux tests et à la mise à jour de la doc. À utiliser dès que la demande est « ajoute », « implémente », « je voudrais pouvoir… », « il manque… », « fais que… » sur l'application, la grille, les graphes, l'import, les scripts ou le modèle — y compris quand la demande a l'air d'une simple ligne de code, parce que le coût de StokesForge n'est jamais dans la ligne mais dans les quatre surfaces (raccourci, menu, grisage, libellé) et l'entrée d'historique qu'elle oblige à tenir en accord.
+description: Implémenter une nouvelle fonctionnalité dans StokesForge (portage Rust, branche dev) — du choix de la couche jusqu'au menu contextuel, au raccourci clavier, aux tests et à la mise à jour de la doc. À utiliser quand l'utilisateur demande de réaliser une fonctionnalité dans le dépôt, y compris pour un changement d'une seule ligne. Dans un contexte de signalement ou de création d'issues, « ajoute », « je voudrais pouvoir… », « il manque… » ou « fais que… » restent des demandes à consigner tant que le passage à l'implémentation n'est pas explicite.
 ---
 
 # Implémenter une fonctionnalité dans StokesForge
@@ -8,6 +8,14 @@ description: Implémenter une nouvelle fonctionnalité dans StokesForge (portage
 StokesForge est un tableur/traceur scientifique façon OriginLab. Une fonctionnalité
 y touche presque toujours **plus d'une couche** : ce skill sert à ne pas en
 oublier une, et surtout à ne pas la câbler au mauvais endroit.
+
+## Avant de commencer : vérifier le contexte
+
+Si la conversation porte sur la création ou l'enrichissement d'issues, suivre
+la [règle de contexte du triage](../stokesforge-bug-report/SKILL.md#avant-tout--conserver-le-contexte-de-signalement).
+Une demande d'ajout, une capture ou la validation d'une issue ne déclenche
+pas une implémentation opportuniste. Ce skill s'applique alors seulement
+après une demande explicite de réaliser le changement dans le dépôt.
 
 ## 1. Avant d'écrire une ligne
 
@@ -229,11 +237,30 @@ pour la grille). Le clic droit est un raccourci vers ce que la barre de
 menus offre déjà, pas un chemin exclusif. Si la fonctionnalité n'a
 délibérément sa place dans aucun menu, l'écrire et dire pourquoi.
 
+### La grammaire des menus (#152) — toute nouvelle entrée s'y range
+
+[`docs/menus.md`](../../../docs/menus.md) est la **source unique** : ordre
+canonique des sections (principale ─ créer ─ presse-papiers ─ organiser ─
+supprimer ─ sortie ─ `Properties…` en dernier), sous-menu seulement pour un
+choix exclusif ou ≥ 3 entrées (jamais 1 ; 2 à plat), profondeur 2, *absent*
+(sans objet pour la cible) ou *grisé avec `.disabled`* (momentanément
+impossible), verbes nus, en-tête grisé réservé au graphe, raccourci par
+`SHORTCUT_*`, pas d'icône, pas d'Undo/Redo au clic droit. Avant d'ajouter une
+entrée : **choisir sa section**, la peindre dans la **peinture partagée** de la
+surface derrière `MenuSections::section(ui, présente, contenu)`
+(`app/menu_sections.rs`) — seule voie pour un trait de séparation
+(`aucun_separateur_brut_dans_un_menu`, aucune dérogation).
+
+**Contenu et enveloppe** : les peintures partagées peignent le *contenu* ; le
+menu du haut l'enveloppe dans un sous-menu qui nomme la cible (*Selection*,
+*Sheet*, *Columns*), le clic droit l'affiche à plat. Pas de seconde voie.
+
 ### Sous-menus et fermeture (#114)
 
 Les listes longues se regroupent par thème : mêmes noms et clés au menu du
 haut et au clic droit. Réutiliser `object_menu`, `object_node_menu`,
-`object_manager_settings_menu`, `column_options_menu`, `graph_properties_menu`
+`object_manager_settings_contents`, `columns_menu_contents` /
+`column_type_role_menus` / `plot_menu`, `graph_properties_menu`
 plutôt que recopier les entrées. Les cases restent pour les vraies bascules
 d'affichage, qui **gardent les menus ouverts** (choix de l'utilisateur).
 Les actions et les choix exclusifs ferment toute la chaîne par `ui.close()`.
@@ -402,26 +429,31 @@ vérifier quand une action est ajoutée :
 
 ### Ajouter une entrée de menu contextuel
 
-Le menu contextuel de la grille suit trois règles qu'il ne faut pas casser :
+Le menu contextuel de la grille suit ces règles, en plus de la grammaire de
+[`docs/menus.md`](../../../docs/menus.md) :
 
-- **Il est le miroir exact du clavier.** `app::grid::grid_edit_menu` n'offre aucune
-  action qui n'ait pas d'équivalent en raccourci. Ajouter une entrée de menu
-  sans geste clavier équivalent, c'est créer une fonctionnalité que seul le
-  clic droit atteint — décider explicitement si c'est voulu.
+- **Chaque entrée garde son équivalent** : un raccourci (le bloc de
+  `grid_contents`), la barre de menus ou la barre d'outils. Un geste atteignable
+  **seulement** au clic droit est à décider explicitement. (Plot ▸, Add Column,
+  Type ▸ et Role ▸ n'ont pas de raccourci : leur équivalent est le menu
+  *Workbook*.)
 - **La décision vit dans `AppState::grid_menu` → `GridMenu`**, pas dans le code
   egui. C'est ce qui la rend vérifiable sans fenêtre dans `tests/shell.rs` :
   quels gestes ont un sens dans cette zone (`GridZone::Header`/`Data`/
   `Columns`/`Rows`), lesquels griser, comment accorder les libellés en nombre.
-- **Les entrées sont des verbes nus** : « Copier », pas « Copier la cellule ».
-  Le clic droit vient de se poser sur ce qu'il vise et le raccourci est déjà
-  rappelé à droite ; nommer la cible allonge sans rien apprendre.
+- **Les entrées sont des verbes nus** — règle de toute la grammaire, pas
+  seulement de la grille : « Copier », pas « Copier la cellule ». Le clic droit
+  vient de se poser sur ce qu'il vise et le raccourci est déjà rappelé à droite.
   `target_label` reste disponible pour les surfaces où l'on ne voit *pas* ce
-  qu'on vise (barre de menus, ligne de statut, confirmation).
+  qu'on vise (barre de menus, ligne de statut, confirmation) ; l'en-tête grisé
+  qui nomme la cible n'existe qu'au clic droit du **graphe**.
+- **Undo / Redo n'y figurent pas** : Edit et le clavier.
 
-Un clic droit **hors** de la sélection la réduit à la case visée ; **dedans**,
-il la laisse intacte — même garde (`response.secondary_clicked() && !selected`)
-dans toutes les zones, sinon on rend impossible une action sur plusieurs
-colonnes sélectionnées.
+Un clic droit **hors** de la sélection la remplace par l'élément visé ;
+**dedans**, il la laisse intacte — même garde
+(`response.secondary_clicked() && !selected`) dans la grille, le graphe (une
+courbe cliquée est sélectionnée) et les arbres, sinon on rend impossible une
+action sur plusieurs colonnes sélectionnées.
 
 Écarts délibérés entre menu et clavier déjà en place (les connaître avant d'en
 inventer un nouveau) : « Supprimer et décaler » supprime tout de suite dans le
@@ -513,7 +545,7 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] place dans la barre de menus **et** les menus contextuels étudiée (§2 quater) ; rien n'est accessible seulement au clic droit
 - [ ] les quatre surfaces en accord : raccourci, menu, grisage, libellé
 - [ ] libellés : clés du catalogue `en` + `tr!`, aucun littéral (`aucun_libelle_en_dur`) ; un changement visuel est regardé aussi en `STOKESFORGE_LANG=en-XA`
-- [ ] menu contextuel = miroir du clavier, décision dans `GridMenu`
+- [ ] entrée de menu rangée dans une section de la grammaire (`docs/menus.md`), séparateurs par `MenuSections::section` seulement, *absente* ou *grisée avec `.disabled`* ; menu contextuel de la grille : décision dans `GridMenu`
 - [ ] test au bon endroit : décision d'`AppState` dans `tests/shell.rs`, geste peint dans le module `tests` de la surface (`src/app/<surface>.rs`), autre crate sinon
 - [ ] changement visuel **regardé** (capture), pas seulement testé
 - [ ] `//!` du module mis à jour (le *pourquoi*) + page `docs/` (le *quoi*)

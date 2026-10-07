@@ -30,14 +30,12 @@ menu-window = Fenêtre
 menu-new = Nouveau
 menu-import = Importer
 menu-properties = Propriétés
-menu-text = Texte
-menu-objects = Objets
+menu-insert-object = Insérer un objet
 menu-export = Exporter
 menu-panels = Panneaux
 menu-toolbars = Barres d’outils
 menu-sheet = Feuille
 menu-columns = Colonnes
-menu-order = Ordre
 menu-language = Langue
 
 action-add-workbook = Ajouter un classeur
@@ -87,14 +85,12 @@ action-reset-text-position = Réinitialiser la position
 action-reset-text-positions = Réinitialiser la position des textes
     .hint = Remet tous les titres et la légende à leur place par défaut
     .disabled = Aucun titre ni aucune légende n'a été déplacé
-action-delete-object = Supprimer l'objet
 action-bring-to-front = Amener devant
     .hint = Place l'objet sélectionné au-dessus des autres objets
     .disabled = Sélectionnez d'abord un objet
 action-send-to-back = Envoyer derrière
     .hint = Place l'objet sélectionné sous les autres objets
     .disabled = Sélectionnez d'abord un objet
-action-delete-text = Supprimer le texte
 action-properties = Propriétés…
     .hint = Ouvre les propriétés du graphique sur cet élément
 action-export-graph = Exporter le graphique…
@@ -846,7 +842,8 @@ object-manager-show-axes = Afficher les axes
     .hint = Liste les axes de chaque calque dans le gestionnaire d’objets. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.
 
 menu-selected-content = Sélection
-action-rename-series = Renommer la série
+    .disabled = Sélectionnez d’abord une courbe, un texte ou un objet
+action-rename-series = Renommer
 action-move-series-up = Déplacer vers le haut
 action-move-series-down = Déplacer vers le bas
 action-show-content = Afficher
@@ -896,12 +893,12 @@ error-clipboard-unsupported = Cet affichage ne peut pas recevoir un graphique co
 error-clipboard-backend = Impossible de copier le graphique : { $detail }
 
 # Réglages de vue de l’Object Manager (#139).
-object-manager-settings = Réglages du gestionnaire d’objets
-object-manager-display = Affichage
 object-manager-default-expansion = Déplier par défaut
     .hint = Définit seulement l’état initial des nouveaux groupes ; les groupes déjà dépliés ou repliés gardent leur état
 object-manager-expand-layers = Calques
 object-manager-expand-plots = Groupes de tracés
 object-manager-objects = Objets
-object-manager-reset = Réinitialiser
+object-manager-reset = Réinitialiser les réglages
     .hint = Rétablit les réglages par défaut du gestionnaire d’objets sans changer le repli courant des groupes
+
+project-manager-selection-needed = Sélectionnez d’abord au moins un objet

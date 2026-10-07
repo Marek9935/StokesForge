@@ -34,14 +34,12 @@ menu-window = Window
 menu-new = New
 menu-import = Import
 menu-properties = Properties
-menu-text = Text
-menu-objects = Objects
+menu-insert-object = Insert Object
 menu-export = Export
 menu-panels = Panels
 menu-toolbars = Toolbars
 menu-sheet = Sheet
 menu-columns = Columns
-menu-order = Order
 menu-language = Language
 
 action-add-workbook = Add Workbook
@@ -92,8 +90,6 @@ action-reset-text-position = Reset Position
 action-reset-text-positions = Reset Text Positions
     .hint = Puts every title and the legend back in their default places
     .disabled = No title or legend has been moved
-action-delete-text = Delete Text
-action-delete-object = Delete Object
 action-bring-to-front = Bring to Front
     .hint = Puts the selected object above the other objects
     .disabled = Select an object first
@@ -854,7 +850,8 @@ object-manager-show-axes = Show Axes
     .hint = Lists the axes of each layer in the Object Manager. Does not change their visibility on the graph. Not listed by default.
 
 menu-selected-content = Selection
-action-rename-series = Rename Series
+    .disabled = Select a curve, a text or an object first
+action-rename-series = Rename
 action-move-series-up = Move Up
 action-move-series-down = Move Down
 action-show-content = Show
@@ -904,12 +901,12 @@ error-clipboard-unsupported = This display cannot receive a copied graph ({ $dis
 error-clipboard-backend = Could not copy the graph: { $detail }
 
 # Réglages de vue de l’Object Manager (#139).
-object-manager-settings = Object Manager Settings
-object-manager-display = Display
 object-manager-default-expansion = Expand by Default
     .hint = Only sets the initial state of new groups; groups already expanded or collapsed keep their state
 object-manager-expand-layers = Layers
 object-manager-expand-plots = Plot groups
 object-manager-objects = Objects
-object-manager-reset = Reset
+object-manager-reset = Reset Settings
     .hint = Restores the Object Manager settings to their defaults without changing the current state of groups
+
+project-manager-selection-needed = Select at least one object first

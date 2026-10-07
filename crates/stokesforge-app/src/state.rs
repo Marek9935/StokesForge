@@ -143,6 +143,12 @@ pub enum Action {
     PasteObjects { parent: NodeId, text: String },
     /// Révèle les classeurs embarqués référencés par ce graphique.
     ShowGraphData { graph: NodeId },
+    /// Révèle le classeur des colonnes d'une seule courbe (menu de la courbe,
+    /// #152) : pas de choix ambigu entre les courbes d'un graphique.
+    ShowSeriesData {
+        graph: NodeId,
+        series: stokesforge_plot::SeriesRef,
+    },
     /// Demande la suppression de la sélection.
     DeleteObjects(Vec<NodeId>),
     /// Répond à la confirmation de suppression.
@@ -3590,19 +3596,10 @@ impl AppState {
             Action::DuplicateObjects(ids) => self.duplicate_objects(&ids),
             Action::PasteObjects { parent, text } => self.paste_objects(parent, &text),
             Action::ShowGraphData { graph } => {
-                for book in graph_data_books(self.tree(), graph) {
-                    let Some(NodeKind::Workbook { meta, .. }) =
-                        self.tree().node(book).map(Node::kind)
-                    else {
-                        continue;
-                    };
-                    let mut meta = meta.clone();
-                    if meta.hidden {
-                        meta.hidden = false;
-                        self.execute(Command::SetWindowMeta { id: book, meta });
-                    }
-                    self.copied_objects.push((book, book, false));
-                }
+                self.reveal_books(graph_data_books(self.tree(), graph));
+            }
+            Action::ShowSeriesData { graph, series } => {
+                self.reveal_books(series_data_books(self.tree(), graph, series));
             }
             Action::DeleteObjects(ids) => self.request_delete_objects(ids),
             Action::ConfirmDeleteObjects(accept) => {
@@ -5436,6 +5433,22 @@ impl AppState {
             .collect()
     }
 
+    /// Rend visibles et ouvre les classeurs de données donnés.
+    fn reveal_books(&mut self, books: Vec<NodeId>) {
+        for book in books {
+            let Some(NodeKind::Workbook { meta, .. }) = self.tree().node(book).map(Node::kind)
+            else {
+                continue;
+            };
+            let mut meta = meta.clone();
+            if meta.hidden {
+                meta.hidden = false;
+                self.execute(Command::SetWindowMeta { id: book, meta });
+            }
+            self.copied_objects.push((book, book, false));
+        }
+    }
+
     fn copy_objects(&mut self, ids: &[NodeId]) {
         let copies = self.capture_objects(ids);
         if copies.is_empty() {
@@ -7079,13 +7092,32 @@ pub fn graph_data_books(tree: &Tree, graph: NodeId) -> Vec<NodeId> {
     let Some(NodeKind::Graph { spec, .. }) = tree.node(graph).map(Node::kind) else {
         return Vec::new();
     };
+    workbooks_of_columns(
+        tree,
+        spec.panels
+            .iter()
+            .flat_map(|p| &p.series)
+            .flat_map(|s| s.referenced_columns()),
+    )
+}
+
+/// Classeurs des colonnes d'une seule courbe ; vide si la courbe n'existe plus.
+pub fn series_data_books(
+    tree: &Tree,
+    graph: NodeId,
+    series: stokesforge_plot::SeriesRef,
+) -> Vec<NodeId> {
+    let Some(NodeKind::Graph { spec, .. }) = tree.node(graph).map(Node::kind) else {
+        return Vec::new();
+    };
+    spec.series_at(series)
+        .map(|s| workbooks_of_columns(tree, s.referenced_columns()))
+        .unwrap_or_default()
+}
+
+fn workbooks_of_columns(tree: &Tree, columns: impl IntoIterator<Item = NodeId>) -> Vec<NodeId> {
     let mut books = Vec::new();
-    for column in spec
-        .panels
-        .iter()
-        .flat_map(|p| &p.series)
-        .flat_map(|s| s.referenced_columns())
-    {
+    for column in columns {
         let Some(book) = tree
             .node(column)
             .filter(|n| n.as_column().is_some())

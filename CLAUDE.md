@@ -58,7 +58,9 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 - `rustfmt` + `clippy -D warnings` obligatoires (CI `.gitlab-ci.yml`).
 - Quand un travail installe une règle nouvelle (standard d'interface, motif à suivre, frontière), mettre à jour **au besoin** les skills concernés (`.claude/skills/`) et ce fichier, dans le même commit que le code, pour garder le développement cohérent. Voir `.claude/skills/README.md` (règles transversales).
 - Bugs et évolutions se suivent en issues GitLab (`glab issue list`), pas en `.md` ; chaque issue porte une ligne « **Cohérence** » qui dit quels skills et quelles docs mettre à jour.
+- Pendant le signalement et la création ou l'enrichissement d'issues, les retours suivants complètent les issues, même formulés comme « ajoute » ou « supprime ». Ne passer au code que sur demande explicite d'implémentation dans le dépôt ; voir la règle de contexte de `stokesforge-bug-report`.
 - Commits et docs techniques en français.
+- Après fusion et push sur `dev`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Nettoyer après une fusion sur `dev` ».
 - `pyst` : les écritures de #67 réutilisent les commandes, dans une macro `Script` ouverte à la première mutation et avortée sur erreur non rattrapée/interruption. Le moteur possède sa propre identité de client ; les poignées sont revalidées après réservation. `set_values` remplace longueur et cellules sans changer le type ni la provenance ; `set_column` reste strict. `undo()` annule le groupe courant et fait un point de validation. Les objets graphiques (`add_shape`, `remove_shape`, #76) rejoignent également ce groupe, avec relecture du spec sous réservation. Contrat : `stokesforge-script/tests/mutations.rs`, `tests/graphs.rs`, `docs/python-et-script.md`.
 - `pyst` : la navigation (`root`, `children`, `info`) lit un seul instantané par appel et conserve son époque dans toutes les poignées rendues. `column` garde sa vue numpy numérique sans copie ; `values` copie les cellules en `float`/`str`/`None`, sans analyser les textes ni confondre vide, chaîne vide et NaN. Contrat : `docs/python-et-script.md`, `stokesforge-script/tests/navigation.rs` (#66).
 - `stokesforge-app` : découpage d'`app.rs` (chantier #115, #116–#124 faits) — règle retenue : de **vrais modules** dans `src/app/`, un par surface (table module → rôle dans `docs/application.md`, § Découpage du code), à imports explicites, visibilité minimale (`pub(super)` entre modules d'`app`) ; aucun `use …::*` hors du code de test (`aucun_import_global_hors_des_tests`, `tests/gardes.rs`, sans dérogation) ; **`app.rs` ne garde que l'orchestration** de l'image (`StokesForgeApp` et `new`, `ui()` et l'ordre des panneaux, `collect_shortcuts`, application différée des actions, confirmations bloquantes, drainage des fenêtres détachées) — une entrée de menu va dans `app/menus.rs`, du code de fenêtre dans `app/window_*.rs`, une surface nouvelle dans son propre module (modèle : `object_manager.rs`, `toolbar.rs`, `app/dialogs.rs`). Briques communes : `app/dialogs.rs` (`modal_dialog`, `modal_dialog_with`), `app/tab_strip.rs` (`tab_strip`), `app/shortcuts.rs` (`SHORTCUT_*`), `app/tab.rs` (`Tab`), `app/window_chrome.rs` (cadre, `show_window_in_layer`). **Les tests suivent leur code** (module `tests` de la surface ; celui d'`app.rs` n'éprouve que l'orchestration) et sont écrits/relus par un agent Opus à chaque restructuration, témoins vérifiés par mutation. Fonctions géantes redécoupées sur place (#124), jamais avec un déplacement : conserver l’imbrication des Ui/ID egui et l’ordre des événements ; les contextes privés de peinture ne regroupent que les données ou emprunts utiles à l’image. Toutes les gardes qui lisent le code passent par un lecteur unique, `tests/support/sources.rs` (tout `src/`, récursif ; fonctions cherchées par leur nom ; jamais `include_str!` ni fichier nommé, #116).
@@ -117,9 +119,19 @@ détaché : Rattacher uniquement, sans décoration système. Une fermeture OS
 rattache. Réutiliser les contenus de chaque surface et les lectures/requêtes
 de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
 
-- Menus (#114) : regrouper les longues listes par thèmes, mêmes sous-menus et
-  clés entre barre de menus et clic droit ; réutiliser les peintures partagées
-  (`object_menu`, `object_node_menu`, `object_manager_settings_menu`,
-  `column_options_menu`, `graph_properties_menu`). Les cases se limitent aux
-  vraies bascules d'affichage et laissent les menus ouverts ; une action ou
-  un choix exclusif ferme la chaîne. Ne pas créer de voie de mutation parallèle.
+- Menus (#114, #152) : la grammaire de `docs/menus.md` est la source unique
+  — sections dans l'ordre canonique (principale, créer, presse-papiers,
+  organiser, supprimer, sortie, `Properties…` en dernier), séparateurs posés
+  **seulement** par `MenuSections::section` (`app/menu_sections.rs`, garde
+  `aucun_separateur_brut_dans_un_menu`, sans dérogation), sous-menu
+  seulement pour un choix exclusif ou ≥ 3 entrées (jamais 1, 2 à plat),
+  profondeur 2, entrée *absente* (sans objet) ou *grisée avec `.disabled`*,
+  verbes nus, en-tête grisé réservé au graphe, raccourcis par `SHORTCUT_*`,
+  ni icône ni Undo/Redo au clic droit. Les peintures partagées (`object_menu`,
+  `object_node_menu`, `object_manager_settings_contents`,
+  `columns_menu_contents`/`column_type_role_menus`/`plot_menu`,
+  `graph_properties_menu`) peignent le **contenu** : le menu du haut
+  l'enveloppe dans un sous-menu qui nomme la cible, le clic droit l'affiche à
+  plat. Les cases se limitent aux vraies bascules d'affichage et laissent les
+  menus ouverts ; une action ou un choix exclusif ferme la chaîne. Ne pas
+  créer de voie de mutation parallèle.

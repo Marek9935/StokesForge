@@ -93,28 +93,38 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 | Menu | Organisation |
 |---|---|
 | File | New → New Project, Add Workbook, Add Graph ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
-| Edit | Undo, Redo ; Selection → Rename, Duplicate, Copy, Paste, Delete des objets du Project Manager |
-| Workbook (classeur actif) | Sheet → Rename Sheet, Duplicate Sheet, Delete Sheet, Add Sheet ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
-| Graph (graphique actif) | Show Data ; Selection → Properties…, Rename, Order, Show/Hide, Delete selon la cible ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… ; Reset Zoom ; Text → Reset Text Positions, Add Text, Delete Text ; Objects → Bring to Front, Send to Back, Delete Object ; Export → Export Graph…, Copy Graph, PNG Resolution |
-| View | Panels → Project Manager, Script Console ; Object Manager → Show, Object Manager Settings → Display (Show graph texts, Show Axes), Expand by Default, Reset ; Toolbars → File, Tools, Text format |
+| Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete des objets du Project Manager |
+| Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
+| Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Reset Zoom ; Export → Export Graph…, Copy Graph, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
+| View | Panels → Project Manager, Script Console ; Object Manager → Show, puis les réglages du fond (Show graph texts, Show Axes, Expand by Default, Reset Settings) ; Toolbars → File, Tools, Text format |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
-Le clic droit du Project Manager réutilise `object_menu` et son sous-menu
-Selection. Celui d'une feuille propose Sheet (même depuis la bande vide).
-Celui des lettres de colonnes garde l'édition courante au premier niveau,
-puis Columns → Type / Role et Plot, peints par `column_options_menu`,
-également appelé depuis Workbook. Le menu du haut prend les colonnes de la
-sélection courante, grise Type, Role et Plot sans sélection (Add Column reste disponible) et ne marque aucun type
-ou rôle quand les colonnes diffèrent.
+La grammaire des sections, des séparateurs et des sous-menus est dans
+[`docs/menus.md`](menus.md) (#152) ; chaque menu range ses entrées par
+`MenuSections::section` (`app/menu_sections.rs`), qui ne pose un trait
+qu'entre deux sections présentes. Les peintures partagées peignent le
+**contenu** ; le menu du haut l'enveloppe dans un sous-menu qui nomme la
+cible, le clic droit l'affiche à plat.
 
-Le fond de l'Object Manager propose Object Manager Settings et les mêmes réglages que
-View → Object Manager ; `object_manager_settings_menu` en est
-l'unique écriture. Ses nœuds partagent `object_node_menu` avec
-Graph → Selection, y compris Order pour les séries. Le clic droit du
-graphique propose Text, Objects si un objet est visé, Properties (la cible
-figée au clic et les pages générales), Reset Zoom et Export (export et
-copie). Les pages de Properties passent par `graph_properties_menu`.
-Les contenus et cibles sont identiques en fenêtres flottantes et détachées.
+Clics droits : le Project Manager réutilise `object_menu` à plat (une fenêtre :
+Show · Hide ─ Copy · Paste ─ Rename · Duplicate ─ Delete ; un dossier : Paste ─
+Rename ─ Delete, le renommage s'éditant sur place). Un onglet de feuille
+propose Add Worksheet ─ Rename · Duplicate ─ Delete, la bande vide Add
+Worksheet. Les lettres de colonnes : Plot ▸ · Add Column ─ presse-papiers ─
+Type ▸ · Role ▸ ─ Clear · Delete, au premier niveau (`column_properties_menu`),
+la grille vide Add Column ; les cellules, lignes et champs d'en-tête un seul
+groupe presse-papiers puis Clear · Delete, sans Undo/Redo.
+
+Le fond de l'Object Manager affiche à plat les réglages de
+`object_manager_settings_contents` (aussi sous View → Object Manager) ; ses
+nœuds et la figure partagent `object_node_menu`, **le** menu d'un objet
+(courbe : Show Data ─ Rename, Move Up/Down, Hide ─ Delete ─ Properties… ;
+texte, axe, objet : voir `docs/menus.md`). Le clic droit de la figure ouvre ce
+menu pour l'objet visé — une courbe est sélectionnée par le clic droit — et,
+sur le fond ou la zone de tracé, Add Text, Insert Object ▸ (la forme est posée
+au point cliqué, `GraphView::insert_shape_at`), Export ▸ et Properties… ; Reset
+Zoom n'y figure plus. Les contenus et cibles sont identiques en fenêtres
+flottantes et détachées.
 
 Les filtres de l'arbre ne changent pas la visibilité des objets du graphique.
 Les cases directement dans l'arbre restent des contrôles de visibilité du
@@ -458,8 +468,9 @@ premier graphe.
 
 ### Project Manager et fenêtres par contenu
 
-Le menu contextuel des fenêtres et le menu *Edit* proposent Renommer, Dupliquer,
-Copier, Coller et Supprimer (#105). Un clic sélectionne et ouvre l'objet ; Ctrl
+Le menu contextuel des fenêtres (à plat) et le menu *Edit* › Selection proposent
+Copier, Coller, Renommer, Dupliquer et Supprimer (#105) ; un dossier propose
+Coller, Renommer (sur place) et Supprimer (#157). Un clic sélectionne et ouvre l'objet ; Ctrl
 bascule une cible sans ouvrir, Maj sélectionne une plage parmi les lignes visibles.
 F2, Ctrl+D, Ctrl+C, Ctrl+V et Suppr s'appliquent à cette sélection quand le
 Project Manager a le focus, aussi en fenêtre détachée. Les renommages multiples
@@ -1007,8 +1018,9 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
 
 Le classeur n'a plus de bandeau d'actions au-dessus de la grille. Un clic droit
 dans l'espace vide à droite de la dernière colonne propose « Ajouter une
-colonne » ; un clic droit sur un onglet de feuille ou sur la partie vide de sa
-bande propose « Ajouter une feuille ». La bande reste sous la grille dans les
+colonne » ; un clic droit sur un onglet de feuille propose « Ajouter une
+feuille », « Renommer », « Dupliquer » et « Supprimer », sur la partie vide de
+sa bande « Ajouter une feuille » seule — directement, sans sous-menu (#158). La bande reste sous la grille dans les
 fenêtres flottantes et détachées. « Importer… » se trouve dans le menu File.
 Son dialogue choisit entre le classeur actif, un nouveau classeur par fichier
 et un seul nouveau classeur pour tout le lot. Chaque fichier valide crée sa
@@ -1018,12 +1030,14 @@ réussie. Le lot est une seule entrée d'historique annulable.
 Les cinq zones de la grille — cellule de données, champ d'en-tête d'une seule
 colonne, rangée des lettres, gouttière des numéros de ligne, libellés de champ
 entier dans cette même gouttière — portent le **même** bloc d'édition au clic
-droit (`app::grid::grid_edit_menu`) : Couper, Copier, Copier avec l'en-tête, Coller,
-Coller à l'identique, Vider, Supprimer et décaler, Annuler, Rétablir. Aucun
-n'offre d'action qui n'ait pas d'équivalent au clavier : ce bloc est le miroir
-exact du bloc de raccourcis de `grid_contents`. La rangée des lettres y ajoute
-ensuite ce qui lui est propre (type et rôle de colonne), qui décrit la colonne
-plutôt qu'il n'agit sur son contenu.
+droit (`app::grid::grid_edit_menu`) : un groupe presse-papiers (Couper, Copier,
+Copier avec l'en-tête, Coller, Coller à l'identique), puis Vider et Supprimer
+et décaler. Undo et Redo n'y sont plus (Edit et le clavier, #158) ; chaque
+entrée garde son équivalent au clavier, miroir du bloc de raccourcis de
+`grid_contents`. La rangée des lettres y entoure ce bloc de ce qui lui est
+propre : Tracer ▸ et Ajouter une colonne avant, Type ▸ et Rôle ▸ après le
+presse-papiers (ils décrivent la colonne plutôt qu'ils n'agissent sur son
+contenu).
 
 Les entrées sont des verbes **nus** : « Copier », pas « Copier la cellule » ;
 « Annuler », pas « Annuler Edit Cells in Column A ». Le clic droit vient de
@@ -1386,10 +1400,11 @@ réglage de couleur passe par ce sélecteur, avec l'usage qui lui correspond.
 **Trois façons de l'ouvrir** :
 
 - **clic droit sur un composant du graphe** (`app::graph_window::graph_context_menu`) :
-  titre, zone de tracé, axe, titre d'axe. Le menu propose « Properties » → « Properties… »,
-  qui ouvre l'onglet qui règle ce composant (`state::PlotTarget::
-  settings_page`), et « Reset Zoom ». Le composant sous le
-  pointeur est trouvé par `stokesforge_render::hit::component_at`, sur la
+  titre, zone de tracé, axe, titre d'axe, courbe, légende. Le menu est celui
+  de l'objet visé (`object_node_menu`), dont « Properties… » ouvre la page qui
+  règle ce composant (`state::PlotTarget::settings_page`) ; sur le fond et la
+  zone de tracé : Add Text, Insert Object, Export, Properties…. Le composant
+  sous le pointeur est trouvé par `stokesforge_render::hit::component_at`, sur la
   géométrie réellement allouée par Plotters (zone de tracé, aires de
   graduation, bande du titre), pas sur une reconstitution. Le clic droit
   **sans** glisser ouvre le menu ; le glisser secondaire reste le zoom
@@ -1871,8 +1886,8 @@ séries, ainsi que les objets rares, textes libres et objets graphiques
 (rectangle, ellipse, ligne, flèche), quand il y en a. Les **textes
 automatiques** (titre du graphique et des calques, titres d'axes, légende) sont
 cachés par défaut (#102) : une seule bascule, « Afficher les textes du
-graphique » (Affichage › Gestionnaire d'objets › Réglages du gestionnaire d’objets › Affichage et
-clic droit sur le fond du panneau › Réglages du gestionnaire d’objets › Affichage, même
+graphique » (Affichage › Gestionnaire d'objets et
+clic droit sur le fond du panneau, même
 `Action::SetObjectManagerShowTexts`), les liste. C'est une préférence
 d'interface (`object_manager_show_texts` dans `preferences.json`, hors `.stf`),
 et le filtre vit dans `object_tree_with_selection`. Un texte caché n'apparaît
@@ -1896,9 +1911,9 @@ son bouton Détacher ouvre une fenêtre système, Rattacher le replace à droite
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.
 
-Les réglages de vue (#139) sont regroupés dans **Affichage › Gestionnaire d’objets › Réglages du
-gestionnaire d’objets**, aussi accessible au clic droit sur le fond, même sans
-graphique actif. Le sous-menu Affichage réunit les deux filtres ; **Déplier par
+Les réglages de vue (#139) sont regroupés dans **Affichage › Gestionnaire d’objets**,
+aussi accessibles à plat au clic droit sur le fond (#152), même sans
+graphique actif. Les deux filtres sont au premier niveau ; **Déplier par
 défaut** règle graphique, calques, groupes de tracés, axes et objets. Les objets
 sont regroupés par graphique ou calque, sans modifier leur visibilité.
 Le menu est grisé lorsque le panneau est fermé. **Réinitialiser** rétablit les
@@ -1928,9 +1943,10 @@ reste sélectionnable dans l'arbre. La partie format d'objet de la barre `Tools`
 d'une série ou d'un objet ; celle de texte règle le texte sélectionné. Le
 panneau et ces barres suivent aussi une fenêtre de graphique détachée.
 
-Le clic droit et Graphique › Sélection partagent les mêmes actions :
-Propriétés, Renommer la série (F2), Déplacer vers le haut/bas (Ctrl+Haut/Bas),
-Afficher/Masquer et Supprimer (Suppr). Un clic simple sur une ligne donne
+Le clic droit dans l'arbre ou la figure et Graphique › Sélection partagent
+le même menu (`object_node_menu`, #152) : Afficher les données (courbe),
+Renommer (F2), Déplacer vers le haut/bas (Ctrl+Haut/Bas), Afficher/Masquer,
+Supprimer (Suppr) et Propriétés… en dernier, selon la cible. Un clic simple sur une ligne donne
 le focus clavier au panneau : F2, Ctrl+flèches et Suppr agissent dès ce clic,
 sans glisser préalable (#126). Le trait coloré et le nom de la série offrent
 les mêmes gestes (sélection, clic droit, double-clic et glisser, #151).

@@ -303,6 +303,41 @@ impl GraphView {
         })
     }
 
+    /// Pose un objet de la taille par défaut de `kind` au pixel egui `pos`
+    /// (menu contextuel, sans geste de tracé) : même événement
+    /// [`GraphEvent::ShapeChanged`] que le clic de l'outil de tracé, et même
+    /// sélection. Rend `false` si `pos` ne tombe dans aucun panneau tracé ou
+    /// si un axe interdit la conversion en données.
+    pub fn insert_shape_at(&mut self, pos: Pos2, kind: ShapeKind, spec: &PlotSpec) -> bool {
+        let Some((panel_index, _)) = self.panel_at(pos) else {
+            return false;
+        };
+        let Some(press) = self.figure_position(pos) else {
+            return false;
+        };
+        let Some(panel) = self
+            .last
+            .as_ref()
+            .and_then(|last| last.panels.get(panel_index))
+        else {
+            return false;
+        };
+        let Some(target) = ShapeRef::next_in(spec, panel.row, panel.column) else {
+            return false;
+        };
+        let original = ShapeSpec::new(kind, 0.0, 0.0, 0.0, 0.0);
+        let Some(shape) = self.moved_shape(target, &original, press, press + default_extent(kind))
+        else {
+            return false;
+        };
+        self.set_shape_preview(Some((target, shape.clone())));
+        self.events.push(GraphEvent::ShapeChanged { target, shape });
+        self.hold_preview();
+        self.select_shape(Some(target));
+        self.tool = GraphTool::Pointer;
+        true
+    }
+
     /// Outil de tracé actif : un glisser principal trace l'objet (aperçu),
     /// le relâchement le valide en un seul [`GraphEvent::ShapeChanged`] puis
     /// rend la main à l'outil Pointeur.

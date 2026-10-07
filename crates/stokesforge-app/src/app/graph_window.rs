@@ -21,7 +21,7 @@ use crate::color_picker::{color_field, ColorUsage, PickerEnv};
 use crate::object_manager::{AxisRef, VisibilityTarget};
 use crate::state::{
     drop_payload_action, export_file_name, Action, AppState, ColumnDragPayload, PlotAxis,
-    PlotSettingsTab, PlotTarget, ShapeOrder,
+    PlotSettingsTab, PlotTarget,
 };
 use crate::theme;
 use crate::tr;
@@ -33,8 +33,12 @@ use super::graph_text_edit::{
     text_editor_ui, AnnotationEditor, ContextText, TextEditor,
 };
 use super::grid::keyboard_focus_outside_grid;
-use super::object_manager_ui::{series_shortcuts, ObjectManagerRequest};
-use super::shortcuts::{shortcut_text_delete, SHORTCUT_EXPORT_GRAPH};
+use super::menu_sections::MenuSections;
+use super::object_manager_ui::{
+    apply_object_request, object_node_menu, select_manager_target, series_shortcuts,
+    ObjectManagerRequest,
+};
+use super::shortcuts::SHORTCUT_EXPORT_GRAPH;
 use crate::color_picker::{saved_colors_id, SavedColorRequest};
 
 /// Hauteur du seul contrôle conservé sous une figure : le retour au cadrage
@@ -336,12 +340,31 @@ fn display_backdrop(background: &str) -> Option<egui::Color32> {
         .then_some(egui::Color32::WHITE)
 }
 
-/// Menu contextuel de la figure : un clic droit (sans glisser — le glisser
-/// secondaire reste le zoom élastique de `stokesforge-render-egui`) sur un
-/// composant du graphe propose ses propriétés, qui ouvrent la fenêtre des
-/// propriétés sur l'onglet de ce composant ([`PlotTarget::settings_page`]).
-/// Le composant est lu **au moment du clic** et mémorisé : le menu reste
-/// ouvert plusieurs images, pendant lesquelles le pointeur bouge.
+/// Ce que le clic droit a visé dans la figure, lu **au moment du clic** et
+/// mémorisé : le menu reste ouvert plusieurs images, pendant lesquelles le
+/// pointeur bouge.
+#[derive(Debug, Clone, Copy)]
+struct ContextHit {
+    /// Le composant, pour l'en-tête grisé et la page des propriétés du fond.
+    target: PlotTarget,
+    /// L'objet qui a son propre menu (courbe, texte libre, objet, titre,
+    /// légende, axe) — le même que dans l'Object Manager.
+    object: Option<VisibilityTarget>,
+    /// Une entrée de légende : pas de nœud d'Object Manager, son propre menu.
+    legend_entry: Option<ContextText>,
+    /// Le pixel egui du clic : point d'insertion d'un texte ou d'une forme.
+    pos: Option<egui::Pos2>,
+    /// Le point de données sous le clic, pour « Add Text ».
+    point: Option<(usize, usize, f64, f64)>,
+}
+
+/// Menu contextuel de la figure (#152) : un clic droit (sans glisser — le
+/// glisser secondaire reste le zoom élastique de `stokesforge-render-egui`)
+/// ouvre **le menu de l'objet visé**, celui de l'Object Manager
+/// ([`object_node_menu`]), ou, sur le fond et la zone de tracé, Add Text,
+/// Insert Object, Export et Properties…. Un clic droit sur une courbe la
+/// sélectionne. L'en-tête grisé nomme la cible : la figure est le seul endroit
+/// où elle n'est pas évidente.
 fn graph_context_menu(
     ui: &egui::Ui,
     view: &mut GraphView,
@@ -352,39 +375,39 @@ fn graph_context_menu(
     let Some(response) = view.response().cloned() else {
         return;
     };
-    let target_id = response.id.with("plot_target");
-    let axis_id = response.id.with("plot_axis");
-    let point_id = response.id.with("plot_point");
-    let text_id = response.id.with("plot_text");
+    let hit_id = response.id.with("context_hit");
     if response.secondary_clicked() {
+        let spec = crate::state::current_plot_spec(tree, graph_id);
         let pos = response.interact_pointer_pos();
-        let target = pos.map_or(PlotTarget::Background, |pos| {
-            view.annotation_at(pos).map_or_else(
-                || {
-                    view.shape_at(pos)
-                        .map_or_else(|| plot_target(view.component_at(pos)), PlotTarget::Object)
-                },
-                PlotTarget::Annotation,
-            )
-        });
-        let axis = pos.and_then(|pos| match view.component_at(pos) {
-            Some(
-                PlotComponent::Axis { panel, side } | PlotComponent::AxisTitle { panel, side },
-            ) => axis_target(view, panel, side),
-            Some(PlotComponent::Text(TextTarget::AxisTitle { row, column, side })) => {
-                Some(VisibilityTarget::Axis(AxisRef { row, column, side }))
+        let component = pos.and_then(|pos| view.component_at(pos));
+        let annotation = pos.and_then(|pos| view.annotation_at(pos));
+        let shape = pos.and_then(|pos| view.shape_at(pos));
+        let series = pos
+            .filter(|_| matches!(component, None | Some(PlotComponent::PlotArea { .. })))
+            .zip(spec.as_ref())
+            .and_then(|(pos, spec)| view.series_at(pos, spec));
+        let target = match (annotation, shape) {
+            (Some(annotation), _) => PlotTarget::Annotation(annotation),
+            (None, Some(shape)) => PlotTarget::Object(shape),
+            (None, None) => plot_target(component),
+        };
+        let object = if let Some(annotation) = annotation {
+            Some(VisibilityTarget::Annotation(annotation))
+        } else if let Some(shape) = shape {
+            Some(VisibilityTarget::Shape(shape))
+        } else if let Some(series) = series {
+            Some(VisibilityTarget::Series(series))
+        } else {
+            match component {
+                Some(PlotComponent::Text(text)) => Some(VisibilityTarget::Text(text)),
+                Some(
+                    PlotComponent::Axis { panel, side } | PlotComponent::AxisTitle { panel, side },
+                ) => axis_target(view, panel, side),
+                _ => None,
             }
-            _ => None,
-        });
-        // Figer l'adresse au clic : ni le déplacement du pointeur ni un
-        // nouveau rendu pendant le menu ne doivent changer le calque visé.
-        ui.ctx().data_mut(|data| data.insert_temp(axis_id, axis));
-        let point = pos.and_then(|pos| view.data_at(pos));
-        // Titre, titre d'axe, légende ou entrée de légende visé (issue #53) :
-        // lu au clic, comme la cible, pour que le menu reste cohérent pendant
-        // que le pointeur bouge.
-        let text = pos.and_then(|pos| match view.component_at(pos) {
-            Some(PlotComponent::Text(target)) => Some(ContextText::Title(target)),
+        };
+        // Titre, titre d'axe, légende ou entrée de légende visé (issue #53).
+        let legend_entry = match component {
             Some(PlotComponent::LegendEntry { panel, series }) => view
                 .last_drawn()
                 .and_then(|last| last.panels.get(panel))
@@ -394,148 +417,134 @@ fn graph_context_menu(
                     series,
                 }),
             _ => None,
-        });
-        ui.memory_mut(|memory| {
-            memory.data.insert_temp(target_id, target);
-            memory.data.insert_temp(point_id, point);
-            memory.data.insert_temp(text_id, text);
-        });
+        };
+        // Un clic droit sur un objet le sélectionne, comme un clic simple.
+        if let (Some(spec), Some(object)) = (spec.as_ref(), object) {
+            select_manager_target(view, Some(object), spec);
+        }
+        let hit = ContextHit {
+            target,
+            object,
+            legend_entry,
+            pos,
+            point: pos.and_then(|pos| view.data_at(pos)),
+        };
+        ui.memory_mut(|memory| memory.data.insert_temp(hit_id, hit));
     }
+    let mut requests = Vec::new();
+    let mut insert = None;
     response.context_menu(|ui| {
+        let hit: ContextHit =
+            ui.memory(|memory| memory.data.get_temp(hit_id))
+                .unwrap_or(ContextHit {
+                    target: PlotTarget::Background,
+                    object: None,
+                    legend_entry: None,
+                    pos: None,
+                    point: None,
+                });
+        ui.weak(hit.target.label());
+        let spec = crate::state::current_plot_spec(tree, graph_id);
+        match (hit.object, hit.legend_entry, spec.as_ref()) {
+            (Some(object), _, Some(spec)) => {
+                object_node_menu(ui, graph_id, object, spec, actions, &mut requests)
+            }
+            (None, Some(entry), _) => {
+                legend_entry_menu(ui, graph_id, entry, hit.target, actions, &mut requests)
+            }
+            _ => background_menu(ui, view, tree, graph_id, &hit, actions, &mut insert),
+        }
+    });
+    let ctx = ui.ctx().clone();
+    for request in requests {
+        apply_object_request(&ctx, view, tree, graph_id, request, actions);
+    }
+    if let Some((pos, kind)) = insert {
+        if let Some(spec) = crate::state::current_plot_spec(tree, graph_id) {
+            view.insert_shape_at(pos, kind, &spec);
+        }
+    }
+}
+
+/// Entrée de légende : modifier son texte, puis `Properties…` (page Légende).
+fn legend_entry_menu(
+    ui: &mut egui::Ui,
+    graph_id: NodeId,
+    entry: ContextText,
+    target: PlotTarget,
+    actions: &mut Vec<Action>,
+    requests: &mut Vec<ObjectManagerRequest>,
+) {
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| {
+        if ui.button(tr!("action-edit-text")).clicked() {
+            requests.push(ObjectManagerRequest::EditText(entry));
+            ui.close();
+        }
+    });
+    sections.section(ui, true, |ui| {
+        if ui
+            .button(tr!("action-properties"))
+            .on_hover_text(tr!("action-properties", "hint"))
+            .clicked()
+        {
+            actions.push(target.open_settings(graph_id));
+            ui.close();
+        }
+    });
+}
+
+/// Fond de la figure et zone de tracé : Add Text, Insert Object ▸, Export ▸,
+/// puis `Properties…` sur la page du composant.
+fn background_menu(
+    ui: &mut egui::Ui,
+    view: &mut GraphView,
+    tree: &Tree,
+    graph_id: NodeId,
+    hit: &ContextHit,
+    actions: &mut Vec<Action>,
+    insert: &mut Option<(egui::Pos2, stokesforge_render_egui::ShapeKind)>,
+) {
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| {
         if ui
             .add_enabled(
-                !crate::state::graph_data_books(tree, graph_id).is_empty(),
-                egui::Button::new(tr!("action-show-graph-data")),
+                hit.point.is_some(),
+                egui::Button::new(tr!("action-add-text")),
             )
+            .on_hover_text(tr!("action-add-text", "hint"))
+            .on_disabled_hover_text(tr!("action-add-text", "disabled"))
             .clicked()
         {
-            actions.push(Action::ShowGraphData { graph: graph_id });
+            if let Some(point) = hit.point {
+                add_annotation_at(ui.ctx(), view, tree, graph_id, point);
+            }
             ui.close();
         }
-
-        let target: PlotTarget = ui
-            .memory(|memory| memory.data.get_temp(target_id))
-            .unwrap_or(PlotTarget::Background);
-        let point: Option<(usize, usize, f64, f64)> =
-            ui.memory(|memory| memory.data.get_temp(point_id)).flatten();
-        let text: Option<ContextText> = ui.memory(|memory| memory.data.get_temp(text_id)).flatten();
-        ui.weak(target.label());
-        ui.separator();
-        ui.menu_button(tr!("menu-text"), |ui| {
-            // Titres, légende et entrées de légende (issue #53) : modifier le
-            // texte, remettre à sa place — le pendant du double-clic et du
-            // glisser, et du menu *Graph* pour la remise à zéro générale.
-            if let Some(text) = text {
-                let editable = !matches!(text, ContextText::Title(TextTarget::Legend { .. }));
-                if editable && ui.button(tr!("action-edit-text")).clicked() {
-                    match text {
-                        ContextText::Title(target) => {
-                            open_text_editor(ui.ctx(), view, tree, graph_id, target)
-                        }
-                        ContextText::LegendEntry {
-                            row,
-                            column,
-                            series,
-                        } => open_legend_entry_editor(
-                            ui.ctx(),
-                            view,
-                            tree,
-                            graph_id,
-                            row,
-                            column,
-                            series,
-                        ),
-                    }
-                    ui.close();
-                }
-                if let ContextText::Title(target) = text {
-                    let moved = crate::state::current_plot_spec(tree, graph_id)
-                        .is_some_and(|spec| target.anchor(&spec).is_some());
-                    if ui
-                        .add_enabled(moved, egui::Button::new(tr!("action-reset-text-position")))
-                        .on_hover_text(tr!("action-reset-text-position", "hint"))
-                        .clicked()
-                    {
-                        actions.push(Action::SetTextAnchor {
-                            graph: graph_id,
-                            target,
-                            anchor: None,
-                        });
-                        ui.close();
-                    }
-                }
-                ui.separator();
-            }
-            // Textes libres (issue #35) : les mêmes gestes que la barre de menus
-            // et le clavier (double-clic, Suppr).
-            if let PlotTarget::Annotation(annotation) = target {
-                if ui.button(tr!("action-edit-text")).clicked() {
-                    open_annotation_editor(ui.ctx(), view, tree, graph_id, annotation);
-                    ui.close();
-                }
+        ui.menu_button(tr!("menu-insert-object"), |ui| {
+            for (label, kind) in [
+                (
+                    tr!("tool-rectangle"),
+                    stokesforge_render_egui::ShapeKind::Rectangle,
+                ),
+                (
+                    tr!("tool-ellipse"),
+                    stokesforge_render_egui::ShapeKind::Ellipse,
+                ),
+                (tr!("tool-line"), stokesforge_render_egui::ShapeKind::Line),
+                (tr!("tool-arrow"), stokesforge_render_egui::ShapeKind::Arrow),
+            ] {
                 if ui
-                    .add(
-                        egui::Button::new(tr!("action-delete-text"))
-                            .shortcut_text(shortcut_text_delete()),
-                    )
+                    .add_enabled(hit.point.is_some(), egui::Button::new(label))
                     .clicked()
                 {
-                    actions.push(Action::RemoveAnnotation {
-                        graph: graph_id,
-                        target: annotation,
-                    });
-                    view.clear_annotation_selection();
+                    *insert = hit.pos.map(|pos| (pos, kind));
                     ui.close();
                 }
-                ui.separator();
-            } else if !matches!(target, PlotTarget::Object(_))
-                && ui
-                    .add_enabled(point.is_some(), egui::Button::new(tr!("action-add-text")))
-                    .on_hover_text(tr!("action-add-text", "hint"))
-                    .on_disabled_hover_text(tr!("action-add-text", "disabled"))
-                    .clicked()
-            {
-                if let Some(point) = point {
-                    add_annotation_at(ui.ctx(), view, tree, graph_id, point);
-                }
-                ui.close();
             }
         });
-        if let PlotTarget::Object(object) = target {
-            view.select_shape(Some(object));
-            ui.menu_button(tr!("menu-objects"), |ui| {
-                shape_order_buttons(ui, view, tree, graph_id, object, actions);
-            });
-        }
-        ui.menu_button(tr!("menu-properties"), |ui| {
-            if ui
-                .button(tr!("action-properties"))
-                .on_hover_text(tr!("action-properties", "hint"))
-                .clicked()
-            {
-                let axis: Option<VisibilityTarget> =
-                    ui.memory(|memory| memory.data.get_temp(axis_id)).flatten();
-                actions.push(axis.map_or_else(
-                    || target.open_settings(graph_id),
-                    |target| Action::OpenObjectProperties {
-                        graph: graph_id,
-                        target,
-                    },
-                ));
-                ui.close();
-            }
-
-            ui.separator();
-            graph_properties_menu(ui, graph_id, actions);
-        });
-        if ui
-            .button(tr!("action-reset-zoom"))
-            .on_hover_text(tr!("action-reset-zoom", "hint"))
-            .clicked()
-        {
-            view.reset_view();
-            ui.close();
-        }
+    });
+    sections.section(ui, true, |ui| {
         ui.menu_button(tr!("menu-export"), |ui| {
             if ui
                 .add(
@@ -548,7 +557,6 @@ fn graph_context_menu(
                 request_graph_export(Some(view), tree, graph_id, actions);
                 ui.close();
             }
-
             if ui
                 .button(tr!("action-copy-graph"))
                 .on_hover_text(tr!("action-copy-graph", "hint"))
@@ -562,6 +570,16 @@ fn graph_context_menu(
                 ui.close();
             }
         });
+    });
+    sections.section(ui, true, |ui| {
+        if ui
+            .button(tr!("action-properties"))
+            .on_hover_text(tr!("action-properties", "hint"))
+            .clicked()
+        {
+            actions.push(hit.target.open_settings(graph_id));
+            ui.close();
+        }
     });
 }
 
@@ -608,75 +626,6 @@ pub(super) fn graph_properties_menu(ui: &mut egui::Ui, graph: NodeId, actions: &
             ui.close();
         }
     }
-}
-
-/// Signaux de la vue, éditeur sur place et Suppr — après la peinture de la
-/// figure, dans la fenêtre flottante comme dans la fenêtre détachée.
-/// Les trois entrées d'un objet graphique sélectionné : premier plan,
-/// arrière-plan, suppression (barre de menus et menu contextuel).
-pub(super) fn shape_order_buttons(
-    ui: &mut egui::Ui,
-    view: &mut GraphView,
-    tree: &Tree,
-    graph: NodeId,
-    object: stokesforge_render_egui::ShapeRef,
-    actions: &mut Vec<Action>,
-) {
-    let count = crate::state::current_plot_spec(tree, graph)
-        .and_then(|spec| {
-            spec.panels
-                .iter()
-                .find(|panel| panel.row == object.row && panel.column == object.column)
-                .map(|panel| panel.shapes.len())
-        })
-        .unwrap_or(0);
-    for order in [ShapeOrder::ToFront, ShapeOrder::ToBack] {
-        let label = match order {
-            ShapeOrder::ToFront => tr!("action-bring-to-front"),
-            ShapeOrder::ToBack => tr!("action-send-to-back"),
-        };
-        let hint = match order {
-            ShapeOrder::ToFront => tr!("action-bring-to-front", "hint"),
-            ShapeOrder::ToBack => tr!("action-send-to-back", "hint"),
-        };
-        if ui.button(label).on_hover_text(hint).clicked() {
-            actions.push(Action::ReorderShape {
-                graph,
-                target: object,
-                order,
-            });
-            // Le rang change : la sélection suit l'objet.
-            let index = match order {
-                ShapeOrder::ToFront => count.saturating_sub(1),
-                ShapeOrder::ToBack => 0,
-            };
-            view.select_shape(Some(stokesforge_render_egui::ShapeRef { index, ..object }));
-            ui.close();
-        }
-    }
-    if ui
-        .add(egui::Button::new(tr!("action-delete-object")).shortcut_text(shortcut_text_delete()))
-        .clicked()
-    {
-        actions.push(Action::RemoveShape {
-            graph,
-            target: object,
-        });
-        view.select_shape(None);
-        ui.close();
-    }
-}
-
-/// Les mêmes entrées, grisées, quand aucun objet n'est sélectionné.
-pub(super) fn disabled_shape_order_buttons(ui: &mut egui::Ui) {
-    ui.add_enabled(false, egui::Button::new(tr!("action-bring-to-front")))
-        .on_disabled_hover_text(tr!("action-bring-to-front", "disabled"));
-    ui.add_enabled(false, egui::Button::new(tr!("action-send-to-back")))
-        .on_disabled_hover_text(tr!("action-send-to-back", "disabled"));
-    ui.add_enabled(
-        false,
-        egui::Button::new(tr!("action-delete-object")).shortcut_text(shortcut_text_delete()),
-    );
 }
 
 fn annotation_interactions(
@@ -869,6 +818,7 @@ pub(super) mod tests {
     use super::super::test_support::colonnes_xy;
     use super::*;
 
+    use crate::state::ShapeOrder;
     use stokesforge_core::Project;
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec, ShapeKind, ShapeRef, ShapeSpec};
     use stokesforge_session::Session;
@@ -1257,11 +1207,6 @@ pub(super) mod tests {
             paint(events);
             if context_menu {
                 let output = paint(Vec::new());
-                let submenu = find_text_center(&output.shapes, &tr!("menu-properties"));
-                click_at(&context, submenu, egui::Modifiers::NONE, |_, events| {
-                    paint(events)
-                });
-                let output = paint(Vec::new());
                 let properties = find_text_center(&output.shapes, &tr!("action-properties"));
                 // Le menu doit garder le calque d'origine quand le pointeur le quitte.
                 click_at(&context, properties, egui::Modifiers::NONE, |_, events| {
@@ -1497,16 +1442,7 @@ pub(super) mod tests {
                 "la sélection précède toute ouverture de sous-menu"
             );
             assert!(actions.borrow().is_empty());
-            let parent = if properties {
-                tr!("menu-properties")
-            } else {
-                tr!("menu-objects")
-            };
-            let pos = find_text_center(&output.shapes, &parent);
-            click_at(&context, pos, egui::Modifiers::NONE, |_, events| {
-                paint(events)
-            });
-            let output = paint(Vec::new());
+            // Le menu de l'objet est à plat : ni « Properties ▸ » ni « Objects ▸ ».
             let label = if properties {
                 tr!("action-properties")
             } else {
@@ -1516,21 +1452,166 @@ pub(super) mod tests {
             click_at(&context, pos, egui::Modifiers::NONE, |_, events| {
                 paint(events)
             });
-            let expected = if properties {
-                Action::OpenPlotSettings {
-                    graph,
-                    tab: PlotSettingsTab::PlotArea,
-                    axis: None,
-                }
+            if properties {
+                paint(Vec::new());
+                assert!(actions.borrow().is_empty());
+                let id = view.borrow().id().with("shape_properties");
+                assert!(
+                    context
+                        .data(|data| data.get_temp::<ShapeProperties>(id))
+                        .is_some(),
+                    "Properties… ouvre la fenêtre de l'objet visé"
+                );
             } else {
-                Action::ReorderShape {
-                    graph,
-                    target: object,
-                    order: ShapeOrder::ToFront,
-                }
-            };
-            assert_eq!(*actions.borrow(), vec![expected]);
+                assert_eq!(
+                    *actions.borrow(),
+                    vec![Action::ReorderShape {
+                        graph,
+                        target: object,
+                        order: ShapeOrder::ToFront,
+                    }]
+                );
+            }
             assert!(!egui::Popup::is_any_open(&context));
+        }
+        session.shutdown().unwrap();
+    }
+
+    /// #152 : le clic droit ouvre le menu **de l'objet visé**. Sur une courbe,
+    /// Show Data, les gestes d'organisation, Delete et Properties… — sans
+    /// Add Text, Export ni Reset Zoom ; sur le fond, Add Text, Insert Object ▸,
+    /// Export ▸ et Properties… — sans Show Data, Reset Zoom ni « Properties ▸ ».
+    #[test]
+    fn le_clic_droit_de_la_figure_ouvre_le_menu_de_la_courbe_ou_celui_du_fond() {
+        use super::super::test_support::{contexte, image_de};
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+        let spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
+        let series = stokesforge_plot::SeriesRef::new(0, 0);
+        for on_curve in [true, false] {
+            let context = contexte();
+            context.all_styles_mut(|style| style.animation_time = 0.0);
+            let view = std::cell::RefCell::new(GraphView::new());
+            let actions = std::cell::RefCell::new(Vec::new());
+            let paint = |events| {
+                image_de(&context, egui::vec2(1200.0, 900.0), events, |ui| {
+                    graph_view_contents(
+                        ui,
+                        &mut view.borrow_mut(),
+                        state.snapshot(),
+                        graph,
+                        &mut actions.borrow_mut(),
+                    );
+                })
+            };
+            paint(Vec::new());
+            paint(Vec::new());
+            // Un pixel de la courbe, ou de la zone de tracé hors de toute courbe.
+            let pos = {
+                let view = view.borrow();
+                let display = view.display_rect().unwrap();
+                let mut found = None;
+                'scan: for iy in 0..120 {
+                    for ix in 0..160 {
+                        let pos = display.min
+                            + egui::vec2(
+                                display.width() * ix as f32 / 160.0,
+                                display.height() * iy as f32 / 120.0,
+                            );
+                        let hit = view.series_at(pos, &spec);
+                        let area =
+                            matches!(view.component_at(pos), Some(PlotComponent::PlotArea { .. }));
+                        if area && (hit == Some(series)) == on_curve {
+                            found = Some(pos);
+                            break 'scan;
+                        }
+                    }
+                }
+                found.expect("un pixel du cas visé")
+            };
+            paint(vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                paint(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            let output = paint(Vec::new());
+            let peint = |label: &str| {
+                output.shapes.iter().any(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) => shape.galley.job.text == label,
+                    _ => false,
+                })
+            };
+            let remises = output
+                .shapes
+                .iter()
+                .filter(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) => shape.galley.job.text == tr!("action-reset-zoom"),
+                    _ => false,
+                })
+                .count();
+            assert_eq!(
+                remises, 1,
+                "Reset Zoom reste le bouton du graphe, plus une entrée du clic droit"
+            );
+            assert!(!peint(&tr!("menu-properties")), "pas de « Properties ▸ »");
+            assert!(peint(&tr!("action-properties")), "Properties… direct");
+            if on_curve {
+                assert_eq!(view.borrow().selected_series(), Some(series));
+                for present in [
+                    tr!("action-show-graph-data"),
+                    tr!("action-rename-series"),
+                    tr!("action-move-series-up"),
+                    tr!("action-hide-content"),
+                    tr!("action-delete-content"),
+                ] {
+                    assert!(peint(&present), "{present} sur une courbe");
+                }
+                for absent in [tr!("action-add-text"), tr!("menu-export")] {
+                    assert!(!peint(&absent), "{absent} n'a pas de sens sur une courbe");
+                }
+                let at = find_text_center(&output.shapes, &tr!("action-show-graph-data"));
+                click_at(&context, at, egui::Modifiers::NONE, |_, events| {
+                    paint(events)
+                });
+                assert_eq!(
+                    *actions.borrow(),
+                    vec![Action::ShowSeriesData { graph, series }]
+                );
+            } else {
+                for present in [
+                    tr!("action-add-text"),
+                    tr!("menu-insert-object"),
+                    tr!("menu-export"),
+                ] {
+                    assert!(peint(&present), "{present} sur le fond");
+                }
+                assert!(
+                    !peint(&tr!("action-show-graph-data")),
+                    "Show Data seulement sur une courbe"
+                );
+                let at = find_text_center(&output.shapes, &tr!("menu-insert-object"));
+                click_at(&context, at, egui::Modifiers::NONE, |_, events| {
+                    paint(events)
+                });
+                let output = paint(Vec::new());
+                let at = find_text_center(&output.shapes, &tr!("tool-rectangle"));
+                click_at(&context, at, egui::Modifiers::NONE, |_, events| {
+                    paint(events)
+                });
+                paint(Vec::new());
+                assert!(
+                    actions
+                        .borrow()
+                        .iter()
+                        .any(|action| matches!(action, Action::SetShape { .. })),
+                    "la forme est posée au point cliqué : {:?}",
+                    actions.borrow()
+                );
+            }
         }
         session.shutdown().unwrap();
     }
@@ -1538,7 +1619,7 @@ pub(super) mod tests {
     /// Premier plan, arrière-plan et suppression d'un objet graphique :
     /// une action chacun, et la sélection suit l'objet à son nouveau rang.
     #[test]
-    fn l_ordre_et_la_suppression_d_un_objet_font_suivre_la_selection() {
+    fn l_ordre_et_la_suppression_d_un_objet_passent_par_son_menu_unique() {
         let mut project = Project::new("Objets").unwrap();
         let root = project.root();
         let mut spec = PlotSpec::empty("Objets");
@@ -1551,8 +1632,8 @@ pub(super) mod tests {
                 1.0,
             ));
         }
-        let graph = project.add_graph(root, None, spec).unwrap();
-        let tree = project.tree().clone();
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
+        let _ = project.tree().clone();
         let object = ShapeRef {
             row: 0,
             column: 0,
@@ -1560,8 +1641,8 @@ pub(super) mod tests {
         };
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
-        let mut view = GraphView::new();
         let mut actions = Vec::new();
+        let mut requests = Vec::new();
         let mut paint = |context: &egui::Context, events: Vec<egui::Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1572,7 +1653,14 @@ pub(super) mod tests {
                 ..Default::default()
             };
             let mut output = context.run_ui(input, |ui| {
-                shape_order_buttons(ui, &mut view, &tree, graph, object, &mut actions);
+                object_node_menu(
+                    ui,
+                    graph,
+                    VisibilityTarget::Shape(object),
+                    &spec,
+                    &mut actions,
+                    &mut requests,
+                );
             });
             output.textures_delta.clear();
             output
@@ -1580,7 +1668,7 @@ pub(super) mod tests {
         let first = paint(&context, Vec::new());
         let front = find_text_center(&first.shapes, &tr!("action-bring-to-front"));
         let back = find_text_center(&first.shapes, &tr!("action-send-to-back"));
-        let delete = find_text_center(&first.shapes, &tr!("action-delete-object"));
+        let delete = find_text_center(&first.shapes, &tr!("action-delete-content"));
 
         click_at(&context, front, egui::Modifiers::NONE, &mut paint);
         click_at(&context, back, egui::Modifiers::NONE, &mut paint);
@@ -1598,17 +1686,20 @@ pub(super) mod tests {
                     target: object,
                     order: ShapeOrder::ToBack,
                 },
-                Action::RemoveShape {
+                Action::RemovePlotObject {
                     graph,
-                    target: object,
+                    target: VisibilityTarget::Shape(object),
                 },
             ]
         );
-        assert_eq!(
-            view.selected_shape(),
-            None,
-            "l'objet supprimé n'est plus sélectionné"
-        );
+        let suivis: Vec<_> = requests
+            .iter()
+            .filter_map(|request| match request {
+                ObjectManagerRequest::Select(VisibilityTarget::Shape(shape)) => Some(shape.index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(suivis, vec![2, 0], "la sélection suit l'objet déplacé");
     }
 
     /// Le rang que la sélection prend après « premier plan » (le dernier) et
@@ -1627,8 +1718,7 @@ pub(super) mod tests {
                 1.0,
             ));
         }
-        let graph = project.add_graph(root, None, spec).unwrap();
-        let tree = project.tree().clone();
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
         let object = ShapeRef {
             row: 0,
             column: 0,
@@ -1640,8 +1730,7 @@ pub(super) mod tests {
         ] {
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
-            let mut view = GraphView::new();
-            view.select_shape(Some(object));
+            let mut requests = Vec::new();
             let mut paint = |context: &egui::Context, events: Vec<egui::Event>| {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -1652,7 +1741,14 @@ pub(super) mod tests {
                     ..Default::default()
                 };
                 let mut output = context.run_ui(input, |ui| {
-                    shape_order_buttons(ui, &mut view, &tree, graph, object, &mut Vec::new());
+                    object_node_menu(
+                        ui,
+                        graph,
+                        VisibilityTarget::Shape(object),
+                        &spec,
+                        &mut Vec::new(),
+                        &mut requests,
+                    );
                 });
                 output.textures_delta.clear();
                 output
@@ -1660,12 +1756,12 @@ pub(super) mod tests {
             let first = paint(&context, Vec::new());
             let at = find_text_center(&first.shapes, &label);
             click_at(&context, at, egui::Modifiers::NONE, &mut paint);
-            assert_eq!(
-                view.selected_shape(),
-                Some(ShapeRef {
-                    index: expected,
-                    ..object
-                }),
+            assert!(
+                requests.iter().any(|request| matches!(
+                    request,
+                    ObjectManagerRequest::Select(VisibilityTarget::Shape(shape))
+                        if *shape == ShapeRef { index: expected, ..object }
+                )),
                 "{label}"
             );
         }

@@ -1,7 +1,7 @@
 ---
 name: stokesforge-bug-report
 description: >-
-  Trier et documenter ce que l'utilisateur remonte sur StokesForge — un symptôme isolé comme un vrac de quinze remarques mêlant correctifs et demandes d'évolution. Produit une reproduction minimale, le classement bug/évolution, la localisation dans le bon crate, et les questions à trancher. À utiliser dès que l'utilisateur signale « ça plante », « ça ne marche pas », « c'est bizarre », « la valeur est fausse », « le cadre est mal placé », « il manque… », ou envoie une liste de retours en vrac — même vaguement, même sans demander de correction. Ce skill **diagnostique et documente, il ne corrige pas et ne conçoit pas** : pour corriger, stokesforge-bug-fix ; pour implémenter, stokesforge-feature.
+  Trier et documenter ce que l'utilisateur remonte sur StokesForge — un symptôme isolé comme un vrac de quinze remarques mêlant correctifs et demandes d'évolution. Produit une reproduction minimale, le classement bug/évolution, la localisation dans le bon crate, et les questions à trancher. À utiliser pour créer ou compléter des issues, ou dès que l'utilisateur signale « ça plante », « ça ne marche pas », « c'est bizarre », « la valeur est fausse », « le cadre est mal placé », « il manque… », ou envoie une liste de retours en vrac — même vaguement, même sans demander de correction. Ce skill diagnostique et documente ; le contexte de signalement persiste jusqu'à une demande explicite d'implémentation dans le dépôt.
 ---
 
 # Trier et documenter ce qui est remonté
@@ -10,6 +10,38 @@ Un rapport utile est un rapport qu'on peut rejouer, et dont chaque ligne est
 soit une cause localisée, soit une question posée. L'erreur qui coûte le plus
 cher ici n'est pas de rater un bug : c'est de **classer avec assurance ce qui
 demandait une question**.
+
+## Avant tout : conserver le contexte de signalement
+
+Quand la conversation porte sur des rapports ou sur la création et
+l'enrichissement d'issues, **rester dans ce contexte entre les messages**.
+Une capture supplémentaire ou une formulation impérative (« ajoute »,
+« corrige », « enlève », « supprime cette icône ») décrit alors le changement
+à consigner dans l'issue ; elle n'autorise pas une modification de l'application,
+même évidente ou limitée à une ligne.
+
+Créer ou compléter l'issue concernée, en conservant les retours précédents.
+La lecture du code pour localiser le problème reste possible ; ne pas modifier
+le code, les tests ou la documentation de l'état implémenté, ni lancer une
+correction opportuniste pendant ce travail.
+
+Passer à **stokesforge-bug-fix** ou **stokesforge-feature** seulement si
+l'utilisateur demande explicitement de réaliser le changement dans le dépôt
+(par exemple « implémente #152 maintenant » ou « corrige ce bug dans le code »).
+La validation du contenu d'une issue ne constitue pas cette demande. Si la
+transition reste ambiguë, continuer le travail sur l'issue ; demander une
+clarification seulement si elle est nécessaire pour poursuivre.
+
+## Un menu qui paraît faux : le comparer à la grammaire
+
+Un séparateur en trop ou orphelin, un sous-menu à une entrée, une entrée
+grisée sans info-bulle, un Undo au clic droit, un « Properties ▸ », une
+action qui ne s'applique pas à la cible visée : **lire
+[`docs/menus.md`](../../../docs/menus.md)** et signaler le menu contre la règle
+qu'il viole (nommer la règle dans l'issue). La brique de sections
+(`app/menu_sections.rs`) et sa garde (`aucun_separateur_brut_dans_un_menu`)
+empêchent déjà les traits à la main ; si la grammaire elle-même paraît
+mauvaise, c'est une question à poser à l'utilisateur, pas un bug.
 
 ## 0. Regarder, si c'est visuel
 
@@ -234,4 +266,5 @@ n'éprouve rien.
 ## 7. Ne pas corriger, ne pas concevoir
 
 Ce skill s'arrête au rapport et aux questions. Enchaîner sur **stokesforge-bug-fix**
-ou **stokesforge-feature** seulement si l'utilisateur le demande.
+ou **stokesforge-feature** seulement sur demande explicite d'implémentation
+dans le dépôt, selon la règle de contexte ci-dessus.

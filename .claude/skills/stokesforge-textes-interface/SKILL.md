@@ -98,6 +98,13 @@ est en tête de `crates/stokesforge-app/src/i18n.rs` ; la vue d'ensemble dans
    barre d'état a **une** clé `action-*`. Rédiger le texte selon le glossaire (`docs/textes-interface.md`) :
    Title Case pour menus, boutons, onglets et titres ; Sentence case pour champs,
    cases à cocher, infobulles, messages.
+
+   **Menus et clics droits (#152, `docs/menus.md`)** : verbes nus (« Rename »,
+   « Delete » — le clic droit a déjà désigné la cible), l'en-tête grisé qui
+   nomme la cible est réservé au clic droit du graphe, « Properties… » est
+   une action directe (jamais un sous-menu à une entrée), un grisage dit
+   pourquoi par `.disabled`, aucune icône dans un menu, raccourci par
+   `format_shortcut` d'une constante `SHORTCUT_*`.
 2. **L'employer par `tr!`** : `tr!("menu-file")`, ou avec arguments nommés
    `tr!("witness-count", count = n)`. Renvoie un `String`. Dans `app.rs` et les modules
    de `src/app/` : `use crate::tr;` (import explicite, jamais de glob) ; dans `main.rs` : `stokesforge_app::tr!(…)`.

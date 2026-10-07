@@ -193,12 +193,36 @@ fn graphe_collable_dans_son_projet_et_embarque_ses_donnees_dans_un_autre() {
         kind: stokesforge_app::state::WindowKind::Book,
     };
     assert!(!other.project_tree().contains(&entry));
-    other.dispatch(Action::ShowGraphData { graph: copied });
+    // #152 : « Show Data » d'une courbe ne révèle que le classeur de cette courbe.
+    let series = stokesforge_plot::SeriesRef::new(0, 0);
+    assert_eq!(
+        stokesforge_app::state::series_data_books(other.tree(), copied, series),
+        books
+    );
+    assert!(
+        stokesforge_app::state::series_data_books(
+            other.tree(),
+            copied,
+            stokesforge_plot::SeriesRef::new(0, 99)
+        )
+        .is_empty(),
+        "une courbe absente n'ouvre aucun classeur"
+    );
+    other.dispatch(Action::ShowSeriesData {
+        graph: copied,
+        series,
+    });
     assert!(
         matches!(other.tree().node(book).unwrap().kind(), NodeKind::Workbook { meta, .. } if !meta.hidden)
     );
     assert!(other.project_tree().contains(&entry));
     assert_eq!(other.take_copied_objects()[0].1, book);
+    other.dispatch(Action::ShowGraphData { graph: copied });
+    assert_eq!(
+        other.take_copied_objects()[0].1,
+        book,
+        "Show Data du graphique reste disponible"
+    );
     other.dispatch(Action::Undo);
     assert!(
         matches!(other.tree().node(book).unwrap().kind(), NodeKind::Workbook { meta, .. } if meta.hidden)

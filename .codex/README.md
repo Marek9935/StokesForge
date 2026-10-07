@@ -54,7 +54,7 @@ ci-dessus ; ne pas charger les onze systématiquement.
 | Écrire ou modifier un texte visible | [`stokesforge-textes-interface`](../.agents/skills/stokesforge-textes-interface/SKILL.md) |
 
 Les skills s'enchaînent selon le besoin : `stokesforge-feature` ou
-`stokesforge-bug-report` → `stokesforge-bug-fix` si une correction est demandée →
+`stokesforge-bug-report` → `stokesforge-bug-fix` si une correction dans le code est explicitement demandée →
 `stokesforge-verification` après une modification. Ajouter `stokesforge-commande`,
 `stokesforge-rendu`, `stokesforge-import` ou `stokesforge-python` seulement pour les domaines
 touchés. Dans Codex, on peut invoquer explicitement un skill avec
@@ -63,6 +63,12 @@ Les mentions d'outils propres à Claude, comme `AskUserQuestion`, désignent
 l'intention du workflow : utiliser l'outil de question disponible dans Codex
 si un arbitrage utilisateur est réellement nécessaire. En cas de divergence,
 suivre la demande de l'utilisateur, `AGENTS.md`, ce guide et le code actuel.
+
+Pendant la création ou l'enrichissement d'issues, conserver le contexte de
+signalement entre les messages : « ajoute », « enlève » ou « supprime »
+décrivent les changements à consigner. Ne modifier l'application que sur
+demande explicite de passer à l'implémentation dans le dépôt, selon la
+[règle du triage](../.agents/skills/stokesforge-bug-report/SKILL.md#avant-tout--conserver-le-contexte-de-signalement).
 
 ## 2. Où chercher
 
@@ -77,6 +83,7 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Sauvegarde, chargement et format `.stf` | `docs/persistance.md` | `stokesforge-persistence`, types du modèle et du graphe |
 | Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, commandes et persistance appelées |
 | Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `stokesforge-render` d'abord, puis `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
+| Menus et clics droits | `docs/menus.md` (grammaire), `docs/application.md` (§ Menus thématiques) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
 | Fenêtre, grille, raccourcis | `docs/application.md` (§ Découpage du code) | `stokesforge-app/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs`, `theme.rs` ; `stokesforge-session` |
 | Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
@@ -247,3 +254,7 @@ détails volatils déjà maintenus dans le code ou les manifestes.
 Dans le compte rendu, distinguer les tests exécutés, les échecs rencontrés
 et les vérifications non réalisées. Ne pas annoncer une validation Python
 ou visuelle à partir des seuls tests Rust par défaut.
+
+Après fusion et push sur `dev`, la livraison comprend le retrait du worktree
+temporaire et de sa branche locale fusionnée, selon
+[le nettoyage du skill de vérification](../.agents/skills/stokesforge-verification/SKILL.md#nettoyer-après-une-fusion-sur-dev).

@@ -21,6 +21,7 @@ use crate::state::{Action, ProjectTreeNode, WindowKind};
 use crate::tr;
 use stokesforge_core::NodeId;
 
+use super::menu_sections::MenuSections;
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_RENAME_OBJECT};
 use super::tab::{tab_for_window, tab_node, Tab};
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
@@ -116,10 +117,25 @@ fn selected_ids(selection: &HashSet<Tab>, order: &[Tab]) -> Vec<NodeId> {
         .collect()
 }
 
-/// Même menu pour la barre Edit et le clic droit. Le collage déclenche une
-/// demande de lecture à egui-winit, donc utilise aussi le récepteur Wayland.
+/// La cible d'un menu d'objets du Project Manager : des fenêtres, ou un
+/// dossier (qui n'a ni Copier ni Dupliquer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ObjectMenuTarget {
+    Windows,
+    Folder,
+}
+
+/// Le contenu du menu d'objets (#157), **à plat** : le clic droit l'affiche
+/// tel quel, Edit › Selection l'enveloppe. Sections de `docs/menus.md` —
+/// presse-papiers (Copy · Paste), organiser (Rename · Duplicate), supprimer.
+/// `sections` est celui du menu appelant : les entrées propres au panneau
+/// (Show · Hide) se peignent avant, sous le même compte de séparateurs.
+/// Le collage déclenche une demande de lecture à egui-winit, donc utilise
+/// aussi le récepteur Wayland.
 pub(super) fn object_menu(
     ui: &mut egui::Ui,
+    sections: &mut MenuSections,
+    target: ObjectMenuTarget,
     ids: &[NodeId],
     parent: NodeId,
     actions: &mut Vec<Action>,
@@ -127,14 +143,40 @@ pub(super) fn object_menu(
 ) {
     let memory_key = egui::Id::new(("project_manager_gestures", rename_viewport));
     let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
-    ui.menu_button(tr!("menu-selected-content"), |ui| {
-        let enabled = !ids.is_empty();
+    let windows = target == ObjectMenuTarget::Windows;
+    let enabled = !ids.is_empty();
+    sections.section(ui, true, |ui| {
+        if windows
+            && ui
+                .add_enabled(
+                    enabled,
+                    egui::Button::new(tr!("action-copy")).shortcut_text(ui.ctx().format_shortcut(
+                        &egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C),
+                    )),
+                )
+                .on_disabled_hover_text(tr!("project-manager-selection-needed"))
+                .clicked()
+        {
+            actions.push(Action::CopyObjects(ids.to_vec()));
+            ui.close();
+        }
+        if ui.button(tr!("action-paste")).clicked() {
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(paste_key, parent);
+            });
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+            ui.close();
+        }
+    });
+    sections.section(ui, true, |ui| {
         if ui
             .add_enabled(
                 enabled,
                 egui::Button::new(tr!("action-rename-project-object"))
                     .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_RENAME_OBJECT)),
             )
+            .on_disabled_hover_text(tr!("project-manager-selection-needed"))
             .clicked()
         {
             ui.ctx().data_mut(|data| {
@@ -152,43 +194,28 @@ pub(super) fn object_menu(
             }
             ui.close();
         }
-        if ui
-            .add_enabled(
-                enabled,
-                egui::Button::new(tr!("action-duplicate-project-object"))
-                    .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
-            )
-            .clicked()
+        if windows
+            && ui
+                .add_enabled(
+                    enabled,
+                    egui::Button::new(tr!("action-duplicate-project-object"))
+                        .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+                )
+                .on_disabled_hover_text(tr!("project-manager-selection-needed"))
+                .clicked()
         {
             actions.push(Action::DuplicateObjects(ids.to_vec()));
             ui.close();
         }
-        if ui
-            .add_enabled(
-                enabled,
-                egui::Button::new(tr!("action-copy")).shortcut_text(ui.ctx().format_shortcut(
-                    &egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C),
-                )),
-            )
-            .clicked()
-        {
-            actions.push(Action::CopyObjects(ids.to_vec()));
-            ui.close();
-        }
-        if ui.button(tr!("action-paste")).clicked() {
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(paste_key, parent);
-            });
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-            ui.close();
-        }
+    });
+    sections.section(ui, true, |ui| {
         if ui
             .add_enabled(
                 enabled,
                 egui::Button::new(tr!("action-delete-project-object"))
                     .shortcut_text(shortcut_text_delete()),
             )
+            .on_disabled_hover_text(tr!("project-manager-selection-needed"))
             .clicked()
         {
             actions.push(Action::DeleteObjects(ids.to_vec()));
@@ -295,6 +322,58 @@ pub(super) fn project_manager_contents_from_tree(
     }
 }
 
+/// Vrai si `id` est en cours de renommage dans ce panneau.
+fn is_renaming(ctx: &egui::Context, memory_key: egui::Id, id: NodeId) -> bool {
+    ctx.data(|data| data.get_temp::<PmMemory>(memory_key))
+        .is_some_and(|m| m.rename.first() == Some(&id))
+}
+
+/// Le champ de renommage en place d'une ligne (fenêtre ou dossier) : Entrée
+/// valide, Échap annule, la perte du focus valide ; tous les noms saisis
+/// partent en une seule `Action::RenameObjects` après la dernière ligne.
+fn rename_editor(
+    ui: &mut egui::Ui,
+    interaction: &mut PmInteraction,
+    memory_key: egui::Id,
+    id: NodeId,
+    name: &str,
+) -> egui::Response {
+    let mut memory = ui
+        .ctx()
+        .data(|data| data.get_temp::<PmMemory>(memory_key))
+        .unwrap_or_default();
+    let fresh = memory.text.is_none();
+    let text = memory.text.get_or_insert_with(|| name.to_string());
+    let response = ui.add(
+        egui::TextEdit::singleline(text)
+            .id(egui::Id::new(("pm_rename", id)))
+            .desired_width(ui.available_width()),
+    );
+    if fresh {
+        response.request_focus();
+    }
+    let escape = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let enter = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    if escape {
+        memory.rename.clear();
+        memory.renamed.clear();
+        memory.text = None;
+    } else if enter || (!fresh && response.lost_focus()) {
+        response.surrender_focus();
+        memory.renamed.push((id, text.clone()));
+        memory.rename.remove(0);
+        if memory.rename.is_empty() {
+            interaction
+                .actions
+                .push(Action::RenameObjects(std::mem::take(&mut memory.renamed)));
+        }
+        memory.text = None;
+    }
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(memory_key, memory));
+    response
+}
+
 /// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants ; rend
 /// le centre vertical de sa rangée, pour les connecteurs de son parent.
 fn project_tree_node_ui(
@@ -313,9 +392,22 @@ fn project_tree_node_ui(
             )
             .show_header(ui, |ui| {
                 ui.add(icon_image(Icon::Folder, IconRole::Folder));
+                if is_renaming(ui.ctx(), memory_key, *id) {
+                    rename_editor(ui, interaction, memory_key, *id, name);
+                    return;
+                }
                 let response = ui.label(name);
                 response.context_menu(|ui| {
-                    object_menu(ui, &[], *id, interaction.actions, ui.ctx().viewport_id())
+                    let viewport = ui.ctx().viewport_id();
+                    object_menu(
+                        ui,
+                        &mut MenuSections::new(),
+                        ObjectMenuTarget::Folder,
+                        &[*id],
+                        *id,
+                        interaction.actions,
+                        viewport,
+                    )
                 });
             })
             .body(|ui| {
@@ -343,47 +435,11 @@ fn project_tree_node_ui(
                 memory.next_order.push(tab);
                 data.insert_temp(memory_key, memory);
             });
-            let editing = ui
-                .ctx()
-                .data(|data| data.get_temp::<PmMemory>(memory_key))
-                .is_some_and(|m| m.rename.first() == Some(id));
-            if editing {
-                let mut memory = ui
-                    .ctx()
-                    .data(|data| data.get_temp::<PmMemory>(memory_key))
-                    .unwrap_or_default();
-                let fresh = memory.text.is_none();
-                let text = memory.text.get_or_insert_with(|| name.clone());
-                let response = ui.add(
-                    egui::TextEdit::singleline(text)
-                        .id(egui::Id::new(("pm_rename", id)))
-                        .desired_width(ui.available_width()),
-                );
-                if fresh {
-                    response.request_focus();
-                }
-                let escape = ui
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-                let enter = ui
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                if escape {
-                    memory.rename.clear();
-                    memory.renamed.clear();
-                    memory.text = None;
-                } else if enter || (!fresh && response.lost_focus()) {
-                    response.surrender_focus();
-                    memory.renamed.push((*id, text.clone()));
-                    memory.rename.remove(0);
-                    if memory.rename.is_empty() {
-                        interaction
-                            .actions
-                            .push(Action::RenameObjects(std::mem::take(&mut memory.renamed)));
-                    }
-                    memory.text = None;
-                }
-                ui.ctx()
-                    .data_mut(|data| data.insert_temp(memory_key, memory));
-                return response.rect.center().y;
+            if is_renaming(ui.ctx(), memory_key, *id) {
+                return rename_editor(ui, interaction, memory_key, *id, name)
+                    .rect
+                    .center()
+                    .y;
             }
             let selected = interaction.selection.contains(&tab);
             let is_hidden = interaction.hidden.contains(&tab);
@@ -450,39 +506,44 @@ fn project_tree_node_ui(
                     .data_mut(|data| data.insert_temp(memory_key, memory));
             }
             response.context_menu(|ui| {
-                if ui
-                    .button(tr!("project-manager-show"))
-                    .on_hover_text(tr!("project-manager-show", "hint"))
-                    .clicked()
-                {
-                    for &tab in interaction.selection.iter() {
-                        interaction.hidden.remove(&tab);
-                        interaction.open_requests.push(tab);
+                let mut sections = MenuSections::new();
+                sections.section(ui, true, |ui| {
+                    if ui
+                        .button(tr!("project-manager-show"))
+                        .on_hover_text(tr!("project-manager-show", "hint"))
+                        .clicked()
+                    {
+                        for &tab in interaction.selection.iter() {
+                            interaction.hidden.remove(&tab);
+                            interaction.open_requests.push(tab);
+                        }
+                        ui.close();
                     }
-                    ui.close();
-                }
-                if ui
-                    .button(tr!("project-manager-hide"))
-                    .on_hover_text(tr!("project-manager-hide", "hint"))
-                    .clicked()
-                {
-                    for &tab in interaction.selection.iter() {
-                        interaction.hidden.insert(tab);
+                    if ui
+                        .button(tr!("project-manager-hide"))
+                        .on_hover_text(tr!("project-manager-hide", "hint"))
+                        .clicked()
+                    {
+                        for &tab in interaction.selection.iter() {
+                            interaction.hidden.insert(tab);
+                        }
+                        ui.close();
                     }
-                    ui.close();
-                }
-                ui.separator();
+                });
                 let memory = ui
                     .ctx()
                     .data(|data| data.get_temp::<PmMemory>(memory_key))
                     .unwrap_or_default();
                 let ids = selected_ids(interaction.selection, &memory.order);
+                let viewport = ui.ctx().viewport_id();
                 object_menu(
                     ui,
+                    &mut sections,
+                    ObjectMenuTarget::Windows,
                     &ids,
                     interaction.root,
                     interaction.actions,
-                    ui.ctx().viewport_id(),
+                    viewport,
                 );
             });
             if response.double_clicked() && interaction.active_tab == Some(tab) {
@@ -1306,6 +1367,94 @@ pub(super) mod tests {
         let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
         assert!(painted(&menu, &tr!("project-manager-hide")));
         assert!(painted(&menu, &tr!("project-manager-show")));
+    }
+
+    /// #157 : le clic droit d'une fenêtre est **à plat** — Show · Hide ─ Copy ·
+    /// Paste ─ Rename · Duplicate ─ Delete, sans « Selection ▸ ».
+    #[test]
+    fn le_clic_droit_d_une_fenetre_est_a_plat_dans_l_ordre_des_sections() {
+        let (_session, _book_tab, _graph_tab, tree) = project_manager_fixture();
+        let context = egui::Context::default();
+        let banc = Banc::new(None, HashSet::new());
+        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        let first = paint(&context, Vec::new());
+        let graph_pos = find_text_center(&first.shapes, "Graph1");
+        click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
+        let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
+        let ordre = [
+            tr!("project-manager-show"),
+            tr!("project-manager-hide"),
+            tr!("action-copy"),
+            tr!("action-paste"),
+            tr!("action-rename-project-object"),
+            tr!("action-duplicate-project-object"),
+            tr!("action-delete-project-object"),
+        ];
+        let hauteurs: Vec<f32> = ordre
+            .iter()
+            .map(|label| find_text_center(&menu.shapes, label).y)
+            .collect();
+        assert!(
+            hauteurs.windows(2).all(|pair| pair[0] < pair[1]),
+            "l'ordre des sections : {hauteurs:?}"
+        );
+        assert!(
+            !painted(&menu, &tr!("menu-selected-content")),
+            "pas d'enveloppe au clic droit"
+        );
+    }
+
+    /// #157 : un dossier propose Paste, Rename et Delete seulement, et son
+    /// renommage s'édite sur place comme celui d'une fenêtre.
+    #[test]
+    fn le_clic_droit_d_un_dossier_propose_coller_renommer_supprimer() {
+        let dossier = NodeId::from_raw(7);
+        let tree = vec![ProjectTreeNode::Folder {
+            id: dossier,
+            name: "Mesures".into(),
+            children: Vec::new(),
+        }];
+        let context = egui::Context::default();
+        let banc = Banc::new(None, HashSet::new());
+        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        paint(&context, Vec::new());
+        let first = paint(&context, Vec::new());
+        let pos = find_text_center(&first.shapes, "Mesures");
+        let menu = ouvrir_menu_contextuel(&context, pos, paint);
+        for present in [
+            tr!("action-paste"),
+            tr!("action-rename-project-object"),
+            tr!("action-delete-project-object"),
+        ] {
+            assert!(painted(&menu, &present), "{present} sur un dossier");
+        }
+        for absent in [
+            tr!("action-copy"),
+            tr!("action-duplicate-project-object"),
+            tr!("project-manager-show"),
+            tr!("project-manager-hide"),
+        ] {
+            assert!(!painted(&menu, &absent), "{absent} n'a pas de sens ici");
+        }
+        let rename = find_text_center(&menu.shapes, &tr!("action-rename-project-object"));
+        click_at(&context, rename, egui::Modifiers::NONE, paint);
+        paint(&context, Vec::new());
+        paint(&context, Vec::new());
+        paint(
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(
+            *banc.actions.borrow(),
+            vec![Action::RenameObjects(vec![(dossier, "Mesures".into())])],
+            "le dossier se renomme sur place"
+        );
     }
 
     /// Une entrée masquée reste listée, atténuée : sa couleur diffère de celle

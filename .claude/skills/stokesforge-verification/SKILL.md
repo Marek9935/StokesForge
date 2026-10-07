@@ -131,6 +131,33 @@ Pousser avec `git push -u origin dev`. En cas d'échec réseau, réessayer
 jusqu'à 4 fois (2s, 4s, 8s, 16s). Ne pas ouvrir de *merge request* sans demande
 explicite.
 
+## Nettoyer après une fusion sur `dev`
+
+Après une fusion demandée par l'utilisateur et un push réussi sur `dev`,
+nettoyer automatiquement le worktree temporaire **et sa branche locale**
+(`codex/issue-*` ou autre nom utilisé pour cette tâche), sans attendre une
+nouvelle demande. Retirer un worktree ne supprime pas sa branche : les deux
+opérations font partie de la livraison.
+
+- Vérifier que la branche de tâche est entièrement intégrée :
+  `git merge-base --is-ancestor <branche> dev`. Examiner son
+  `git status --short` et `git worktree list` avant le retrait ; conserver
+  tout travail non livré et les fichiers nécessaires, y compris ignorés.
+- Depuis le dépôt principal sur `dev`, archiver le worktree géré par Codex
+  avec `archive_worktree` (identité fournie par `list_artifacts`) ; pour un
+  worktree Git ordinaire propre, utiliser `git worktree remove <chemin>`.
+  Vérifier que le retrait est terminé avant de supprimer la branche.
+- Supprimer la branche locale fusionnée avec `git branch -d <branche>`.
+  Ne pas utiliser `-D` ni forcer le retrait pour contourner un échec.
+- Vérifier que ni le worktree ni la branche ne restent, puis inclure ce
+  nettoyage dans le compte rendu. Si le nettoyage bloque, expliquer la
+  cause précise et conserver ce qui reste à livrer.
+
+Ce nettoyage concerne les ressources temporaires de la tâche achevée.
+Ne pas supprimer les branches d'autres travaux ni les branches distantes
+sans demande explicite. Une demande de conserver le worktree ou la branche
+prime sur ce nettoyage.
+
 ## Rendre compte
 
 Trois choses, sans les arrondir : **ce qui a changé**, **les contrôles
@@ -150,3 +177,4 @@ Un résultat vert sans les features concernées ne valide pas ces chemins.
 - [ ] doc à jour (`//!`, page `docs/`, et fichiers de routage si les chemins ont bougé)
 - [ ] diff relu, travail en cours de l'utilisateur préservé
 - [ ] commit en français, branche `dev`
+- [ ] après fusion et push sur `dev` : worktree temporaire retiré et branche locale fusionnée supprimée, sauf conservation demandée

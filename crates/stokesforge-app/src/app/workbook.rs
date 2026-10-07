@@ -18,14 +18,19 @@ use crate::{theme, tr};
 
 use super::file_drop::claim_file_drop;
 use super::grid::{
-    column_options_menu, grid_contents, metadata_row_visible, set_metadata_row_visible,
-    show_grid_horizontal_bar, show_grid_vertical_bar, show_horizontally_scrollable_grid,
+    columns_menu_contents, grid_contents, metadata_row_visible, plot_menu,
+    set_metadata_row_visible, show_grid_horizontal_bar, show_grid_vertical_bar,
+    show_horizontally_scrollable_grid,
 };
+use super::menu_sections::MenuSections;
 use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 use super::tab_strip::{tab_strip_with, TabEvent, TabOps, TabStripOutput, TAB_STRIP_HEIGHT};
 
 /// Menu « Classeur » : les gestes sur la feuille affichée, miroir du menu
 /// contextuel des onglets et du raccourci Ctrl+D (F2 édite les cellules, jamais le nom des feuilles, #130/#143).
+/// Le menu du haut **enveloppe** les mêmes contenus que les clics droits
+/// (#152) : Feuille ▸, Colonnes ▸ et Tracer ▸ nomment la cible que le clic
+/// droit, lui, désigne déjà.
 pub(super) fn workbook_menu(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -34,25 +39,34 @@ pub(super) fn workbook_menu(
     sheet: NodeId,
     actions: &mut Vec<Action>,
 ) {
-    ui.menu_button(tr!("menu-sheet"), |ui| {
-        sheet_menu(ui, ctx, state, book, sheet, actions);
-    });
     let columns = state
         .selection(sheet)
         .map(|selection| selection.columns(state.tree(), sheet))
         .unwrap_or_default();
-    column_options_menu(ui, state, actions, sheet, &columns);
-    ui.separator();
-    let mut show = metadata_row_visible(ctx);
-    if ui
-        .checkbox(&mut show, tr!("menu-window-show-metadata-row"))
-        .on_hover_text(tr!("menu-window-show-metadata-row", "hint"))
-        .changed()
-    {
-        set_metadata_row_visible(ctx, show);
-    }
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| {
+        ui.menu_button(tr!("menu-sheet"), |ui| {
+            sheet_menu(ui, ctx, state, book, sheet, actions);
+        });
+        ui.menu_button(tr!("menu-columns"), |ui| {
+            columns_menu_contents(ui, state, actions, sheet, &columns);
+        });
+        plot_menu(ui, actions, sheet, &columns);
+    });
+    sections.section(ui, true, |ui| {
+        let mut show = metadata_row_visible(ctx);
+        if ui
+            .checkbox(&mut show, tr!("menu-window-show-metadata-row"))
+            .on_hover_text(tr!("menu-window-show-metadata-row", "hint"))
+            .changed()
+        {
+            set_metadata_row_visible(ctx, show);
+        }
+    });
 }
 
+/// Contenu du menu Feuille : Add Worksheet ─ Rename · Duplicate ─ Delete,
+/// dans l'ordre du clic droit des onglets.
 fn sheet_menu(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -61,39 +75,45 @@ fn sheet_menu(
     sheet: NodeId,
     actions: &mut Vec<Action>,
 ) {
-    if ui
-        .add(egui::Button::new(tr!("action-rename-sheet")))
-        .on_hover_text(tr!("action-rename-sheet", "hint"))
-        .clicked()
-    {
-        actions.push(Action::BeginRenameSheet(sheet));
-        ui.close();
-    }
-    if ui
-        .add(
-            egui::Button::new(tr!("action-duplicate-sheet"))
-                .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
-        )
-        .on_hover_text(tr!("action-duplicate-sheet", "hint"))
-        .clicked()
-    {
-        actions.push(Action::DuplicateSheet(sheet));
-        ui.close();
-    }
-    let can_delete = state.can_delete_sheet(sheet);
-    let delete = ui
-        .add_enabled(can_delete, egui::Button::new(tr!("action-delete-sheet")))
-        .on_hover_text(tr!("action-delete-sheet", "hint"))
-        .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"));
-    if delete.clicked() {
-        actions.push(Action::RequestDeleteSheet(sheet));
-        ui.close();
-    }
-    ui.separator();
-    if ui.button(tr!("workbook-worksheet-add")).clicked() {
-        actions.push(Action::AddWorksheet { book });
-        ui.close();
-    }
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| {
+        if ui.button(tr!("workbook-worksheet-add")).clicked() {
+            actions.push(Action::AddWorksheet { book });
+            ui.close();
+        }
+    });
+    sections.section(ui, true, |ui| {
+        if ui
+            .add(egui::Button::new(tr!("action-rename-sheet")))
+            .on_hover_text(tr!("action-rename-sheet", "hint"))
+            .clicked()
+        {
+            actions.push(Action::BeginRenameSheet(sheet));
+            ui.close();
+        }
+        if ui
+            .add(
+                egui::Button::new(tr!("action-duplicate-sheet"))
+                    .shortcut_text(ctx.format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+            )
+            .on_hover_text(tr!("action-duplicate-sheet", "hint"))
+            .clicked()
+        {
+            actions.push(Action::DuplicateSheet(sheet));
+            ui.close();
+        }
+    });
+    sections.section(ui, true, |ui| {
+        let can_delete = state.can_delete_sheet(sheet);
+        let delete = ui
+            .add_enabled(can_delete, egui::Button::new(tr!("action-delete-sheet")))
+            .on_hover_text(tr!("action-delete-sheet", "hint"))
+            .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"));
+        if delete.clicked() {
+            actions.push(Action::RequestDeleteSheet(sheet));
+            ui.close();
+        }
+    });
 }
 
 /// Bande d'onglets des feuilles d'un classeur : [`tab_strip`](crate::app::tab_strip::tab_strip) avec, en plus,
@@ -615,16 +635,8 @@ mod tests {
                     pressed: false,
                     modifiers: egui::Modifiers::NONE,
                 }]);
-                let output = paint(Vec::new());
-                let submenu = centre_du_texte(
-                    &output.shapes,
-                    &if on_tabs {
-                        tr!("menu-sheet")
-                    } else {
-                        tr!("menu-columns")
-                    },
-                );
-                cliquer(&mut paint, submenu);
+                // Le clic droit désigne déjà la cible : l'ajout est direct,
+                // sans sous-menu « Sheet ▸ » ni « Columns ▸ » (#152).
                 let output = paint(Vec::new());
                 assert!(
                     output.shapes.iter().any(|painted| match &painted.shape {

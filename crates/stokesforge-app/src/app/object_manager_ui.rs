@@ -29,9 +29,16 @@ use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings};
 use crate::state::{active_graph, Action};
 use crate::tr;
 
-use super::graph_text_edit::{open_annotation_editor, open_series_name_editor};
+use super::graph_text_edit::{
+    open_annotation_editor, open_legend_entry_editor, open_series_name_editor, open_text_editor,
+    ContextText,
+};
 use super::graph_window::open_shape_properties;
-use super::shortcuts::shortcut_text_delete;
+use super::menu_sections::MenuSections;
+use super::shortcuts::{
+    shortcut_text_delete, SHORTCUT_MOVE_SERIES_DOWN, SHORTCUT_MOVE_SERIES_UP,
+    SHORTCUT_RENAME_OBJECT,
+};
 use super::tab::active_tab_kind;
 use super::tab::Tab;
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
@@ -43,6 +50,8 @@ pub(super) enum ObjectManagerRequest {
     Select(crate::object_manager::VisibilityTarget),
     Properties(crate::object_manager::VisibilityTarget),
     Rename(stokesforge_plot::SeriesRef),
+    /// Édite sur place le titre, le titre d'axe ou l'entrée de légende.
+    EditText(ContextText),
 }
 #[derive(Clone, Copy)]
 struct SeriesDrag {
@@ -95,103 +104,214 @@ pub(super) fn select_manager_target(
     }
 }
 
-/// Le grisage et les Action sont identiques dans Graph et au clic droit.
+/// **Le** menu d'un objet du graphe (#152) : le même au clic droit dans la
+/// figure, sur son nœud de l'Object Manager et sous Graph › Selection (qui
+/// l'enveloppe dans son sous-menu, le clic droit l'affiche à plat). Sections
+/// de la grammaire de `docs/menus.md`, une section sans objet pour la cible
+/// étant **absente** :
+///
+/// 1. principale — Show Data (courbe), Edit Text / Reset Position (textes) ;
+/// 2. organiser — Rename, Move Up/Down, Hide (courbe), Bring to Front /
+///    Send to Back (objet), Hide (texte, axe, groupes) ;
+/// 3. supprimer — Delete (courbe, texte libre, objet) ;
+/// 4. `Properties…`, toujours en dernier.
 pub(super) fn object_node_menu(
     ui: &mut egui::Ui,
     graph: NodeId,
-    target: crate::object_manager::VisibilityTarget,
+    target: T,
     spec: &stokesforge_plot::PlotSpec,
     actions: &mut Vec<Action>,
     requests: &mut Vec<ObjectManagerRequest>,
 ) {
-    use crate::object_manager::VisibilityTarget as T;
-    if ui
-        .add_enabled(
-            target.exists(spec),
-            egui::Button::new(tr!("action-properties")),
-        )
-        .clicked()
-    {
-        requests.push(ObjectManagerRequest::Properties(target));
-        ui.close();
-    }
-    if let T::Series(series) = target {
-        if ui
-            .add_enabled(
-                target.exists(spec),
-                egui::Button::new(tr!("action-rename-series")).shortcut_text("F2"),
-            )
-            .clicked()
-        {
-            requests.push(ObjectManagerRequest::Rename(series));
-            ui.close();
-        }
-        let moves = [
-            (
-                tr!("action-move-series-up"),
-                "Ctrl+Up",
-                series.index.checked_sub(1),
-            ),
-            (
-                tr!("action-move-series-down"),
-                "Ctrl+Down",
-                series.index.checked_add(1).filter(|i| {
-                    spec.panels
-                        .get(series.panel)
-                        .is_some_and(|p| *i < p.series.len())
-                }),
-            ),
-        ];
-        ui.menu_button(tr!("menu-order"), |ui| {
-            for (label, shortcut, index) in moves {
+    let exists = target.exists(spec);
+    let visibility = target.visibility(spec);
+    let editable_text = match target {
+        T::Annotation(_) => Some(true),
+        T::Text(text) => Some(!matches!(text, stokesforge_plot::TextTarget::Legend { .. })),
+        _ => None,
+    };
+    let text_moved = match target {
+        T::Text(text) => Some(text.anchor(spec).is_some()),
+        _ => None,
+    };
+    let hideable = !matches!(target, T::Annotation(_) | T::Shape(_));
+    let deletable = target.removable(spec) && !matches!(target, T::Text(_));
+    let mut sections = MenuSections::new();
+    sections.section(
+        ui,
+        matches!(target, T::Series(_)) || text_moved.is_some() || editable_text == Some(true),
+        |ui| {
+            if let T::Series(series) = target {
                 if ui
-                    .add_enabled(
-                        index.is_some(),
-                        egui::Button::new(label).shortcut_text(shortcut),
-                    )
+                    .add_enabled(exists, egui::Button::new(tr!("action-show-graph-data")))
                     .clicked()
                 {
-                    if let Some(index) = index {
-                        actions.push(Action::ReorderSeries {
-                            graph,
-                            source: series,
-                            index,
-                        });
-                    }
+                    actions.push(Action::ShowSeriesData { graph, series });
                     ui.close();
                 }
             }
-        });
-    }
-    let visibility = target.visibility(spec);
-    if ui
-        .add_enabled(
-            visibility.enabled,
-            egui::Button::new(if visibility.checked {
-                tr!("action-hide-content")
-            } else {
-                tr!("action-show-content")
-            }),
-        )
-        .clicked()
-    {
-        actions.push(Action::SetPlotVisibility {
-            graph,
-            target,
-            visible: !visibility.checked,
-        });
-        ui.close();
-    }
-    if ui
-        .add_enabled(
-            target.removable(spec),
-            egui::Button::new(tr!("action-delete-content")).shortcut_text(shortcut_text_delete()),
-        )
-        .clicked()
-    {
-        actions.push(Action::RemovePlotObject { graph, target });
-        ui.close();
-    }
+            if editable_text == Some(true)
+                && ui
+                    .add_enabled(exists, egui::Button::new(tr!("action-edit-text")))
+                    .clicked()
+            {
+                match target {
+                    T::Annotation(_) => requests.push(ObjectManagerRequest::Properties(target)),
+                    T::Text(text) => {
+                        requests.push(ObjectManagerRequest::EditText(ContextText::Title(text)))
+                    }
+                    _ => {}
+                }
+                ui.close();
+            }
+            if let (T::Text(text), Some(moved)) = (target, text_moved) {
+                if ui
+                    .add_enabled(moved, egui::Button::new(tr!("action-reset-text-position")))
+                    .on_hover_text(tr!("action-reset-text-position", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::SetTextAnchor {
+                        graph,
+                        target: text,
+                        anchor: None,
+                    });
+                    ui.close();
+                }
+            }
+        },
+    );
+    sections.section(
+        ui,
+        matches!(target, T::Series(_) | T::Shape(_)) || hideable,
+        |ui| {
+            if let T::Series(series) = target {
+                if ui
+                    .add_enabled(
+                        exists,
+                        egui::Button::new(tr!("action-rename-series"))
+                            .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_RENAME_OBJECT)),
+                    )
+                    .clicked()
+                {
+                    requests.push(ObjectManagerRequest::Rename(series));
+                    ui.close();
+                }
+                let last = spec.panels.get(series.panel).map_or(0, |p| p.series.len());
+                let moves = [
+                    (
+                        tr!("action-move-series-up"),
+                        SHORTCUT_MOVE_SERIES_UP,
+                        series.index.checked_sub(1),
+                    ),
+                    (
+                        tr!("action-move-series-down"),
+                        SHORTCUT_MOVE_SERIES_DOWN,
+                        series.index.checked_add(1).filter(|i| *i < last),
+                    ),
+                ];
+                for (label, shortcut, index) in moves {
+                    if ui
+                        .add_enabled(
+                            index.is_some(),
+                            egui::Button::new(label)
+                                .shortcut_text(ui.ctx().format_shortcut(&shortcut)),
+                        )
+                        .clicked()
+                    {
+                        if let Some(index) = index {
+                            actions.push(Action::ReorderSeries {
+                                graph,
+                                source: series,
+                                index,
+                            });
+                        }
+                        ui.close();
+                    }
+                }
+            }
+            if let T::Shape(object) = target {
+                let count = spec
+                    .panels
+                    .iter()
+                    .find(|panel| panel.row == object.row && panel.column == object.column)
+                    .map_or(0, |panel| panel.shapes.len());
+                for order in [
+                    crate::state::ShapeOrder::ToFront,
+                    crate::state::ShapeOrder::ToBack,
+                ] {
+                    let (label, hint, index) = match order {
+                        crate::state::ShapeOrder::ToFront => (
+                            tr!("action-bring-to-front"),
+                            tr!("action-bring-to-front", "hint"),
+                            count.saturating_sub(1),
+                        ),
+                        crate::state::ShapeOrder::ToBack => (
+                            tr!("action-send-to-back"),
+                            tr!("action-send-to-back", "hint"),
+                            0,
+                        ),
+                    };
+                    if ui
+                        .add_enabled(exists, egui::Button::new(label))
+                        .on_hover_text(hint)
+                        .clicked()
+                    {
+                        actions.push(Action::ReorderShape {
+                            graph,
+                            target: object,
+                            order,
+                        });
+                        // Le rang change : la sélection suit l'objet.
+                        requests.push(ObjectManagerRequest::Select(T::Shape(
+                            stokesforge_plot::ShapeRef { index, ..object },
+                        )));
+                        ui.close();
+                    }
+                }
+            }
+            if hideable
+                && ui
+                    .add_enabled(
+                        visibility.enabled,
+                        egui::Button::new(if visibility.checked {
+                            tr!("action-hide-content")
+                        } else {
+                            tr!("action-show-content")
+                        }),
+                    )
+                    .clicked()
+            {
+                actions.push(Action::SetPlotVisibility {
+                    graph,
+                    target,
+                    visible: !visibility.checked,
+                });
+                ui.close();
+            }
+        },
+    );
+    sections.section(ui, deletable, |ui| {
+        if ui
+            .add(
+                egui::Button::new(tr!("action-delete-content"))
+                    .shortcut_text(shortcut_text_delete()),
+            )
+            .clicked()
+        {
+            actions.push(Action::RemovePlotObject { graph, target });
+            ui.close();
+        }
+    });
+    sections.section(ui, true, |ui| {
+        if ui
+            .add_enabled(exists, egui::Button::new(tr!("action-properties")))
+            .on_hover_text(tr!("action-properties", "hint"))
+            .clicked()
+        {
+            requests.push(ObjectManagerRequest::Properties(target));
+            ui.close();
+        }
+    });
 }
 
 fn object_visibility(
@@ -219,8 +339,70 @@ fn object_visibility(
     }
 }
 
-/// Même menu depuis Affichage et le fond, y compris en fenêtre détachée.
-/// Les réglages ne touchent ni le PlotSpec ni les replis courants d'egui.
+/// Le menu des réglages d'Object Manager **à plat** (#152) : c'est le menu
+/// du clic droit sur le fond du panneau, sans enveloppe « Settings ▸ ». Les
+/// cases gardent le menu ouvert (#114). Les réglages ne touchent ni le
+/// `PlotSpec` ni les replis courants d'egui.
+pub(super) fn object_manager_settings_contents(
+    ui: &mut egui::Ui,
+    settings: ObjectManagerSettings,
+    actions: &mut Vec<Action>,
+) {
+    let config = egui::containers::menu::MenuConfig::new()
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| {
+        let mut show = settings.show_texts;
+        if ui
+            .checkbox(&mut show, tr!("object-manager-show-texts"))
+            .on_hover_text(tr!("object-manager-show-texts", "hint"))
+            .changed()
+        {
+            actions.push(Action::SetObjectManagerShowTexts(show));
+        }
+        let mut show = settings.show_scales;
+        if ui
+            .checkbox(&mut show, tr!("object-manager-show-axes"))
+            .on_hover_text(tr!("object-manager-show-axes", "hint"))
+            .changed()
+        {
+            actions.push(Action::SetObjectManagerShowScales(show));
+        }
+        egui::containers::menu::SubMenuButton::new(tr!("object-manager-default-expansion"))
+            .config(config.clone())
+            .ui(ui, |ui| {
+                for group in ObjectManagerGroup::ALL {
+                    let label = match group {
+                        ObjectManagerGroup::Graph => tr!("window-kind-graph"),
+                        ObjectManagerGroup::Layers => tr!("object-manager-expand-layers"),
+                        ObjectManagerGroup::Plots => tr!("object-manager-expand-plots"),
+                        ObjectManagerGroup::Axes => tr!("object-manager-axes"),
+                        ObjectManagerGroup::Objects => tr!("object-manager-objects"),
+                    };
+                    let mut open = settings.group_open(group);
+                    if ui.checkbox(&mut open, label).changed() {
+                        actions.push(Action::SetObjectManagerGroupOpen { group, open });
+                    }
+                }
+            })
+            .0
+            .on_hover_text(tr!("object-manager-default-expansion", "hint"));
+    });
+    sections.section(ui, true, |ui| {
+        if ui
+            .button(tr!("object-manager-reset"))
+            .on_hover_text(tr!("object-manager-reset", "hint"))
+            .clicked()
+        {
+            actions.push(Action::ResetObjectManagerSettings);
+            ui.close();
+        }
+    });
+}
+
+/// Les mêmes réglages sous View › Object Manager, grisés quand le panneau
+/// est fermé : l'enveloppe du menu du haut, le contenu étant celui du clic
+/// droit sur le fond. Fonctionne aussi en fenêtre détachée.
 pub(super) fn object_manager_settings_menu(
     ui: &mut egui::Ui,
     settings: ObjectManagerSettings,
@@ -228,69 +410,7 @@ pub(super) fn object_manager_settings_menu(
     actions: &mut Vec<Action>,
 ) {
     ui.add_enabled_ui(enabled, |ui| {
-        let config = egui::containers::menu::MenuConfig::new()
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-        egui::containers::menu::SubMenuButton::from_button(
-            egui::Button::image_and_text(
-                icon_image(Icon::Properties, IconRole::Neutral),
-                tr!("object-manager-settings"),
-            )
-            .right_text(egui::containers::menu::SubMenuButton::RIGHT_ARROW),
-        )
-        .config(config.clone())
-        .ui(ui, |ui| {
-            egui::containers::menu::SubMenuButton::new(tr!("object-manager-display"))
-                .config(config.clone())
-                .ui(ui, |ui| {
-                    let mut show = settings.show_texts;
-                    if ui
-                        .checkbox(&mut show, tr!("object-manager-show-texts"))
-                        .on_hover_text(tr!("object-manager-show-texts", "hint"))
-                        .changed()
-                    {
-                        actions.push(Action::SetObjectManagerShowTexts(show));
-                    }
-                    let mut show = settings.show_scales;
-                    if ui
-                        .checkbox(&mut show, tr!("object-manager-show-axes"))
-                        .on_hover_text(tr!("object-manager-show-axes", "hint"))
-                        .changed()
-                    {
-                        actions.push(Action::SetObjectManagerShowScales(show));
-                    }
-                });
-            egui::containers::menu::SubMenuButton::new(tr!("object-manager-default-expansion"))
-                .config(config.clone())
-                .ui(ui, |ui| {
-                    for group in ObjectManagerGroup::ALL {
-                        let label = match group {
-                            ObjectManagerGroup::Graph => tr!("window-kind-graph"),
-                            ObjectManagerGroup::Layers => tr!("object-manager-expand-layers"),
-                            ObjectManagerGroup::Plots => tr!("object-manager-expand-plots"),
-                            ObjectManagerGroup::Axes => tr!("object-manager-axes"),
-                            ObjectManagerGroup::Objects => tr!("object-manager-objects"),
-                        };
-                        let mut open = settings.group_open(group);
-                        if ui.checkbox(&mut open, label).changed() {
-                            actions.push(Action::SetObjectManagerGroupOpen { group, open });
-                        }
-                    }
-                })
-                .0
-                .on_hover_text(tr!("object-manager-default-expansion", "hint"));
-            ui.separator();
-            if ui
-                .add(egui::Button::image_and_text(
-                    icon_image(Icon::ResetZoom, IconRole::Neutral),
-                    tr!("object-manager-reset"),
-                ))
-                .on_hover_text(tr!("object-manager-reset", "hint"))
-                .clicked()
-            {
-                actions.push(Action::ResetObjectManagerSettings);
-                ui.close();
-            }
-        });
+        object_manager_settings_contents(ui, settings, actions);
     });
 }
 
@@ -312,7 +432,7 @@ pub(super) fn object_manager_contents(
     );
     egui::Popup::context_menu(&background)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| object_manager_settings_menu(ui, settings, true, actions));
+        .show(|ui| object_manager_settings_contents(ui, settings, actions));
     let (Some(model), Some(spec)) = (model, spec) else {
         ui.label(tr!("object-manager-no-graph"));
         return requests;
@@ -853,28 +973,48 @@ impl StokesForgeApp {
         request: ObjectManagerRequest,
         actions: &mut Vec<Action>,
     ) {
-        use crate::object_manager::VisibilityTarget as T;
         let tree = self.state.tree().clone();
-        let Some(spec) = crate::state::current_plot_spec(&tree, graph) else {
-            return;
-        };
-        self.with_graph_view(graph, |view| match request {
-            ObjectManagerRequest::Select(target) => {
-                select_manager_target(view, Some(target), &spec)
-            }
-            ObjectManagerRequest::Rename(series) => {
-                open_series_name_editor(ctx, view, &tree, graph, series)
-            }
-            ObjectManagerRequest::Properties(target) => {
-                select_manager_target(view, Some(target), &spec);
-                match target {
-                    T::Annotation(t) => open_annotation_editor(ctx, view, &tree, graph, t),
-                    T::Shape(t) => open_shape_properties(ctx, view, &spec, t),
-                    _ => actions.push(Action::OpenObjectProperties { graph, target }),
-                }
-            }
+        self.with_graph_view(graph, |view| {
+            apply_object_request(ctx, view, &tree, graph, request, actions)
         });
         ctx.request_repaint();
+    }
+}
+
+/// Exécute une demande d'objet sur la vue du graphe : la même pour le
+/// panneau, Graph › Selection et le clic droit dans la figure (#152).
+pub(super) fn apply_object_request(
+    ctx: &egui::Context,
+    view: &mut GraphView,
+    tree: &Tree,
+    graph: NodeId,
+    request: ObjectManagerRequest,
+    actions: &mut Vec<Action>,
+) {
+    let Some(spec) = crate::state::current_plot_spec(tree, graph) else {
+        return;
+    };
+    match request {
+        ObjectManagerRequest::Select(target) => select_manager_target(view, Some(target), &spec),
+        ObjectManagerRequest::Rename(series) => {
+            open_series_name_editor(ctx, view, tree, graph, series)
+        }
+        ObjectManagerRequest::EditText(ContextText::Title(target)) => {
+            open_text_editor(ctx, view, tree, graph, target)
+        }
+        ObjectManagerRequest::EditText(ContextText::LegendEntry {
+            row,
+            column,
+            series,
+        }) => open_legend_entry_editor(ctx, view, tree, graph, row, column, series),
+        ObjectManagerRequest::Properties(target) => {
+            select_manager_target(view, Some(target), &spec);
+            match target {
+                T::Annotation(t) => open_annotation_editor(ctx, view, tree, graph, t),
+                T::Shape(t) => open_shape_properties(ctx, view, &spec, t),
+                _ => actions.push(Action::OpenObjectProperties { graph, target }),
+            }
+        }
     }
 }
 
@@ -992,20 +1132,11 @@ mod tests {
             egui::PointerButton::Secondary,
         );
         let output = paint(Vec::new()).0;
-        assert!(painted(&output, &tr!("object-manager-settings")));
-        assert!(!painted(&output, &tr!("object-manager-show-texts")));
-        clic_menu(
-            &paint,
-            text_center(&output, &tr!("object-manager-settings")),
-            egui::PointerButton::Primary,
+        assert!(
+            painted(&output, &tr!("object-manager-show-texts")),
+            "les réglages sont au premier niveau, sans enveloppe"
         );
-        let output = paint(Vec::new()).0;
-        clic_menu(
-            &paint,
-            text_center(&output, &tr!("object-manager-display")),
-            egui::PointerButton::Primary,
-        );
-        paint(Vec::new());
+        assert!(painted(&output, &tr!("object-manager-reset")));
         for (key, expected) in [
             (
                 tr!("object-manager-show-texts"),
@@ -1027,7 +1158,7 @@ mod tests {
             assert!(egui::Popup::is_any_open(&ctx));
             let output = paint(Vec::new()).0;
             assert!(
-                painted(&output, &tr!("object-manager-settings")),
+                painted(&output, &tr!("object-manager-reset")),
                 "le menu racine reste ouvert"
             );
             assert!(painted(&output, &tr!("object-manager-show-texts")));
@@ -1052,18 +1183,13 @@ mod tests {
             egui::pos2(200.0, 150.0),
             egui::PointerButton::Secondary,
         );
-        for label in [
-            tr!("object-manager-settings"),
-            tr!("object-manager-default-expansion"),
-        ] {
-            let output = paint(Vec::new()).0;
-            clic_menu(
-                &paint,
-                text_center(&output, &label),
-                egui::PointerButton::Primary,
-            );
-            paint(Vec::new());
-        }
+        let output = paint(Vec::new()).0;
+        clic_menu(
+            &paint,
+            text_center(&output, &tr!("object-manager-default-expansion")),
+            egui::PointerButton::Primary,
+        );
+        paint(Vec::new());
         for (group, label) in [
             (ObjectManagerGroup::Graph, tr!("window-kind-graph")),
             (
@@ -1093,7 +1219,7 @@ mod tests {
             assert!(requests.is_empty());
             let output = paint(Vec::new()).0;
             assert!(egui::Popup::is_any_open(&ctx));
-            assert!(painted(&output, &tr!("object-manager-settings")));
+            assert!(painted(&output, &tr!("object-manager-show-texts")));
             assert!(painted(&output, &tr!("object-manager-default-expansion")));
             assert!(painted(&output, &label));
         }
@@ -1108,7 +1234,7 @@ mod tests {
         paint(Vec::new());
         assert!(!egui::Popup::is_any_open(&ctx));
         let output = paint(Vec::new()).0;
-        assert!(!painted(&output, &tr!("object-manager-settings")));
+        assert!(!painted(&output, &tr!("object-manager-reset")));
     }
 
     #[test]
@@ -1146,16 +1272,9 @@ mod tests {
                 ObjectManagerRequest::Select(T::Series(series)) if *series == source)));
             let output = paint(Vec::new()).0;
             assert!(
-                !painted(&output, &enabled),
-                "les déplacements sont dans Ordre"
+                painted(&output, &enabled) && painted(&output, &disabled),
+                "les déplacements sont à plat, sans sous-menu Ordre"
             );
-            clic_menu(
-                &paint,
-                text_center(&output, &tr!("menu-order")),
-                egui::PointerButton::Primary,
-            );
-            paint(Vec::new());
-            let output = paint(Vec::new()).0;
             let labels = textes(&output.shapes);
             assert_ne!(
                 texte_exact(&labels, &disabled).couleur,
@@ -1180,13 +1299,6 @@ mod tests {
                     text_center(&output, row),
                     egui::PointerButton::Secondary,
                 );
-                let output = paint(Vec::new()).0;
-                clic_menu(
-                    &paint,
-                    text_center(&output, &tr!("menu-order")),
-                    egui::PointerButton::Primary,
-                );
-                paint(Vec::new());
             }
             let output = paint(Vec::new()).0;
             let (_, actions, requests) = clic_menu(
@@ -1209,7 +1321,6 @@ mod tests {
                 "toute la chaîne de menus est fermée"
             );
             let output = paint(Vec::new()).0;
-            assert!(!painted(&output, &tr!("menu-order")));
             assert!(!painted(&output, &enabled));
         }
     }

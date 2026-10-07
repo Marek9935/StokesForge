@@ -32,6 +32,7 @@ page qui contredit le code a tort.
 | reproduire les mesures du prototype Matplotlib hors écran | [`python-matplotlib-spike.md`](python-matplotlib-spike.md) |
 | toucher à la fenêtre, aux raccourcis, à la grille | [`application.md`](application.md) |
 | ajouter ou afficher une icône (rôles de couleur, planche-contact) | [`icones.md`](icones.md) |
+| ajouter ou ranger une entrée de menu ou de clic droit | [`menus.md`](menus.md) (grammaire), puis [`application.md`](application.md) § Menus thématiques |
 | écrire ou modifier un texte visible (libellé, infobulle, message) | [`textes-interface.md`](textes-interface.md) |
 | écrire ou lancer un test, comprendre la CI | [`tests.md`](tests.md) |
 | licence, contributions, interfaces d'extension et notices tierces | [`licence-et-extensions.md`](licence-et-extensions.md) |

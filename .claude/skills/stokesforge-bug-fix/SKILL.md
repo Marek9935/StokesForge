@@ -1,6 +1,6 @@
 ---
 name: stokesforge-bug-fix
-description: Corriger un bug dans StokesForge en partant d'une reproduction qui échoue, puis en réparant à la bonne couche sans affaiblir un test ni casser un invariant. À utiliser dès que la demande est « corrige », « répare », « ça devrait faire X », « enlève ce comportement », ou après un rapport produit par stokesforge-bug-report. Couvre aussi la levée d'un `#[ignore]` de reproduction dans stokesforge-robustesse et le choix de l'endroit où poser le test de non-régression.
+description: Corriger un bug dans StokesForge en partant d'une reproduction qui échoue, puis en réparant à la bonne couche sans affaiblir un test ni casser un invariant. À utiliser quand l'utilisateur demande une correction dans le dépôt. Dans un contexte de signalement ou de création d'issues, « corrige », « répare » ou « enlève ce comportement » restent des retours à consigner tant que le passage à l'implémentation n'est pas explicite. Couvre aussi la levée d'un `#[ignore]` de reproduction dans stokesforge-robustesse et le choix de l'endroit où poser le test de non-régression.
 ---
 
 # Corriger un bug dans StokesForge
@@ -8,6 +8,15 @@ description: Corriger un bug dans StokesForge en partant d'une reproduction qui 
 L'ordre compte : **reproduire, puis corriger**. Un correctif écrit avant la
 reproduction ne sait pas ce qu'il corrige, et le dépôt a déjà une convention
 pour tenir un bug ouvert — un test.
+
+## Avant de commencer : vérifier le contexte
+
+Un rapport produit par **stokesforge-bug-report** ou une issue créée ne
+déclenche pas automatiquement ce skill. Si la conversation consiste à
+recueillir des retours et à compléter des issues, suivre la
+[règle de contexte du triage](../stokesforge-bug-report/SKILL.md#avant-tout--conserver-le-contexte-de-signalement)
+et consigner la correction demandée. Modifier le dépôt seulement après une
+demande explicite de passer à la correction dans le code.
 
 ## 1. Reproduire avant de corriger
 

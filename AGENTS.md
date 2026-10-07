@@ -17,6 +17,11 @@ confirmation pour les choix courants couverts par la demande.
 
 ## Repères permanents
 
+- Pendant le signalement et la création ou l'enrichissement d'issues, les
+  retours suivants complètent les issues, même formulés comme « ajoute »,
+  « enlève » ou « supprime ». Ne passer au code que sur demande explicite
+  d'implémentation dans le dépôt ; voir la règle de contexte du skill
+  `stokesforge-bug-report`.
 - La licence de `rewriterust` est GPL-3.0-or-later avec la permission de
   `LICENSE-EXCEPTION`. Toute nouvelle interface couverte s'ajoute par commit
   explicite à la liste fermée de `docs/licence-et-extensions.md` (`pyst`
@@ -39,6 +44,13 @@ confirmation pour les choix courants couverts par la demande.
 - Les skills de projet dans `.agents/skills/` renvoient aux sources maintenues
   dans `.claude/skills/`. Consulter le skill pertinent selon la table de
   `.codex/README.md` et ses références utiles, sans charger toute la collection.
+- Menus et clics droits (#152) : la grammaire de `docs/menus.md` est la source
+  unique (sections dans l'ordre canonique, séparateurs par
+  `MenuSections::section` seulement — garde
+  `aucun_separateur_brut_dans_un_menu` —, sous-menu pour un choix exclusif ou
+  ≥ 3 entrées, entrée absente ou grisée avec `.disabled`, verbes nus,
+  `Properties…` en dernier). Les peintures partagées peignent le contenu ; le
+  menu du haut l'enveloppe, le clic droit l'affiche à plat.
 - Les mutations métier passent par les commandes annulables et l'acteur de
   session. Respecter les exceptions documentées pour l'état de vue et la
   géométrie ; ne pas créer de voie d'écriture métier parallèle.
@@ -81,6 +93,8 @@ confirmation pour les choix courants couverts par la demande.
   `.codex/README.md`.
 
 ## Pour terminer une modification
+
+- Après fusion et push sur `dev`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Nettoyer après une fusion sur `dev` ».
 
 Exécuter les vérifications adaptées au changement, relire le diff et mettre
 à jour la documentation concernée. Ne pas masquer une régression en

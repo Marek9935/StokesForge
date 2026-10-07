@@ -11,7 +11,9 @@
 //!   la brique commune (`show_window_in_layer`, `modal_dialog_with`) ;
 //! - `la_fenetre_des_proprietes_est_construite_comme_les_autres` (#13) ;
 //! - `aucun_import_global_hors_des_tests` : imports explicites, aucun
-//!   `use …::*` hors du code de test (décision 2 de #115), sans dérogation.
+//!   `use …::*` hors du code de test (décision 2 de #115), sans dérogation ;
+//! - `aucun_separateur_brut_dans_un_menu` (#155) : un trait de menu ne se pose
+//!   que par la brique de sections (`menu_sections.rs`), sans dérogation.
 //!
 //! Chaque garde a son **témoin** : le motif interdit, posé dans un autre
 //! fichier qu'`app.rs`, est bien refusé — sans lui, une garde qui ne voit rien
@@ -21,7 +23,9 @@
 #[path = "support/sources.rs"]
 mod sources;
 
-use sources::{commence_par, fonction_unique, ligne_de, mot_en, Fichier};
+use sources::{
+    commence_par, corps, fermante, fonction_unique, fonctions, ligne_de, mot_en, nom_court, Fichier,
+};
 
 fn fichier(chemin: &str, texte: &str) -> Fichier {
     Fichier {
@@ -489,4 +493,104 @@ fn un_attribut_interieur_et_un_chemin_hors_de_src_sont_compris() {
     let trouves = imports_globaux(&sources);
     assert_eq!(trouves.len(), 1, "{trouves:?}");
     assert_eq!(trouves[0].chemin, "outils.rs");
+}
+
+// ---------------------------------------------------------------------------
+// Aucun séparateur brut dans un menu (#155)
+// ---------------------------------------------------------------------------
+
+/// Les étendues de code qui peignent un menu : le corps de toute fonction dont
+/// le nom contient « menu », et les arguments de `context_menu(`,
+/// `menu_button(` et `SubMenuButton…::ui(`.
+fn zones_de_menu(masque: &[char]) -> Vec<(usize, usize)> {
+    let mut zones = Vec::new();
+    for (position, nom) in fonctions(masque) {
+        if nom_court(&nom).contains("menu") {
+            zones.extend(corps(masque, position));
+        }
+    }
+    for motif in ["context_menu(", "menu_button(", "SubMenuButton"] {
+        for i in 0..masque.len() {
+            if commence_par(masque, i, motif) {
+                let ouvrante = (i..masque.len()).find(|k| masque[*k] == '(');
+                if let Some((ouvrante, fermante)) =
+                    ouvrante.and_then(|o| Some((o, fermante(masque, o)?)))
+                {
+                    zones.push((ouvrante, fermante));
+                }
+            }
+        }
+    }
+    zones
+}
+
+/// Les `.separator()` posés à la main dans un menu, `chemin:ligne`. La brique
+/// de sections (`section_separator`, `menu_sections.rs`) est la seule à en
+/// poser : son nom ne contient pas « menu », et ses tests sont du code de test.
+fn separateurs_bruts_dans_un_menu(sources: &[Fichier]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for fichier in sources {
+        let source = fichier.production();
+        let zones = zones_de_menu(&source.masque);
+        for i in 0..source.masque.len() {
+            if commence_par(&source.masque, i, ".separator()")
+                && zones.iter().any(|(debut, fin)| *debut < i && i < *fin)
+            {
+                trouves.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle de `docs/menus.md` : les traits d'un menu se posent **seulement** par
+/// `MenuSections::section`, qui ne les met qu'entre deux sections présentes.
+/// Un `ui.separator()` à la main laisse un trait orphelin dès qu'une section
+/// disparaît. Aucune dérogation.
+#[test]
+fn aucun_separateur_brut_dans_un_menu() {
+    let sources = sources::sources();
+    let fautifs = separateurs_bruts_dans_un_menu(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "un menu pose un séparateur à la main : passer par `MenuSections::section` \
+         (`app/menu_sections.rs`, `docs/menus.md`) : {fautifs:?}"
+    );
+    // La brique existe, et c'est elle qui trace le trait.
+    let brique = fonction_unique(&sources, "section_separator");
+    assert!(brique.corps.contains("Separator"));
+}
+
+/// Le témoin : un trait à la main est vu dans une fonction « menu », dans une
+/// fermeture de clic droit et dans un sous-menu ; un trait hors de tout menu,
+/// un commentaire et un texte ne comptent pas.
+#[test]
+fn la_garde_des_separateurs_voit_un_trait_a_la_main_dans_un_menu() {
+    for code in [
+        "fn fichier_menu(ui: &mut Ui) { ui.separator(); }",
+        "impl App { fn edit_menu(&self, ui: &mut Ui) { ui.separator(); } }",
+        "fn f(r: Response) { r.context_menu(|ui| { ui.button(a); ui.separator(); }); }",
+        "fn f(ui: &mut Ui) { ui.menu_button(t, |ui| { ui.separator(); }); }",
+    ] {
+        assert_eq!(
+            separateurs_bruts_dans_un_menu(&[fichier("app/m.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn barre(ui: &mut Ui) { ui.separator(); }",
+        "fn section_separator(ui: &mut Ui) { ui.add(Separator::default()); }",
+        "fn f_menu(ui: &mut Ui) { // ui.separator();\n let _ = \"ui.separator()\"; }",
+        "fn f_menu() {}\n#[cfg(test)]\nmod tests { fn g_menu(ui: &mut Ui) { ui.separator(); } }",
+    ] {
+        assert!(
+            separateurs_bruts_dans_un_menu(&[fichier("app/m.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
 }
