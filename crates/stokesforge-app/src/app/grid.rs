@@ -60,8 +60,8 @@ const HEADER_SUBROW_HEIGHT: f32 = 18.0;
 /// principal de la colonne.
 const HEADER_LONGNAME_HEIGHT: f32 = 20.0;
 /// Hauteur totale de l'en-tête empilé de la grille docquée (lettre, nom
-/// long, unité, commentaire, formule, métadonnées).
-const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 5.0 * HEADER_SUBROW_HEIGHT;
+/// x', nom long, unité, commentaire, formule, métadonnées).
+const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 6.0 * HEADER_SUBROW_HEIGHT;
 
 /// Hauteur de l'en-tête empilé selon que la ligne « Metadata » est affichée.
 fn stacked_header_height(show_metadata: bool) -> f32 {
@@ -520,6 +520,16 @@ fn column_header_widget(
         ui.spacing_mut().item_spacing.y = 0.0;
         let is_column_selected =
             column_letter_widget(ui, state, actions, sheet, column, column_index);
+        header_field_widget(
+            ui,
+            state,
+            actions,
+            sheet,
+            column,
+            HeaderField::XPrime,
+            HEADER_SUBROW_HEIGHT,
+            is_column_selected,
+        );
         header_field_widget(
             ui,
             state,
@@ -1120,6 +1130,15 @@ fn row_number_header_widget(
             state,
             actions,
             sheet,
+            HeaderField::XPrime,
+            HEADER_SUBROW_HEIGHT,
+            &tr!("column-x-prime"),
+        );
+        header_row_label_widget(
+            ui,
+            state,
+            actions,
+            sheet,
             HeaderField::LongName,
             HEADER_LONGNAME_HEIGHT,
             &tr!("column-long-name"),
@@ -1649,7 +1668,7 @@ fn grid_keyboard(
             });
             if let Some((column, rank)) = target {
                 if rank < 0 {
-                    state.begin_header_edit(column, HeaderField::from_index((rank + 4) as usize));
+                    state.begin_header_edit(column, HeaderField::from_rank(rank));
                 } else {
                     state.begin_edit(column, rank as usize);
                 }
@@ -3010,6 +3029,7 @@ mod tests {
         );
         let libelles = [
             "#".to_string(),
+            tr!("column-x-prime"),
             tr!("column-long-name"),
             tr!("column-units"),
             tr!("column-comments"),
@@ -3028,6 +3048,7 @@ mod tests {
         // Écart entre centres de deux rangées voisines : demi-hauteur de l'une
         // plus demi-hauteur de l'autre.
         let ecarts = [
+            HEADER_SUBROW_HEIGHT,
             (HEADER_SUBROW_HEIGHT + HEADER_LONGNAME_HEIGHT) / 2.0,
             (HEADER_LONGNAME_HEIGHT + HEADER_SUBROW_HEIGHT) / 2.0,
             HEADER_SUBROW_HEIGHT,
@@ -3044,7 +3065,7 @@ mod tests {
             );
         }
         assert!(
-            y[6] > y[5],
+            y[7] > y[6],
             "la première ligne de données est sous l'en-tête"
         );
         let y_lettre = banc
@@ -3065,9 +3086,9 @@ mod tests {
         );
         let y_donnees = banc.centre_de("1").expect("première ligne").y;
         assert!(
-            (y[6] - y_donnees - HEADER_SUBROW_HEIGHT).abs() <= 0.5,
+            (y[7] - y_donnees - HEADER_SUBROW_HEIGHT).abs() <= 0.5,
             "les données remontent d'une sous-rangée : {} → {y_donnees}",
-            y[6]
+            y[7]
         );
     }
 
@@ -3080,6 +3101,7 @@ mod tests {
         for language in [Language::English, Language::French, Language::PseudoEnglish] {
             let loader = build_loader(language);
             let libelles = [
+                tr!(in loader; "column-x-prime"),
                 tr!(in loader; "column-long-name"),
                 tr!(in loader; "column-units"),
                 tr!(in loader; "column-comments"),

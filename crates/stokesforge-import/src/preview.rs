@@ -56,6 +56,8 @@ pub enum LineRole {
     SubheaderUnit,
     /// Ligne de sous-en-tête assignée au rôle `comment`.
     SubheaderComment,
+    /// Ligne de sous-en-tête assignée au rôle `x_prime` (#164).
+    SubheaderXPrime,
     /// Ligne de noms courts de colonnes (`has_column_header_row`) — le `S`
     /// (« Short Name ») d'OriginLab.
     ColumnHeaderRow,
@@ -80,6 +82,7 @@ impl LineRole {
             LineRole::SubheaderLongName => "L",
             LineRole::SubheaderUnit => "U",
             LineRole::SubheaderComment => "C",
+            LineRole::SubheaderXPrime => "X'",
             LineRole::ColumnHeaderRow => "S",
             LineRole::Data => "",
             LineRole::Footer => "F",
@@ -202,7 +205,7 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
 /// sous-en-tête** (indépendant du nombre de lignes d'en-tête principal qui
 /// le précèdent) — une ligne qui tombe dans plusieurs plages assignées (cas
 /// improbable mais possible : rien n'empêche l'utilisateur de faire se
-/// chevaucher deux rôles) suit la priorité `long_name` > `unit` > `comment`,
+/// chevaucher deux rôles) suit la priorité `long_name` > `unit` > `comment` > `x_prime`,
 /// documentée ici plutôt que de porter plusieurs rôles à la fois — ce que
 /// [`LineRole`] ne modélise pas.
 pub(crate) fn subheader_line_role(sub_index: usize, roles: &SubheaderRoles) -> LineRole {
@@ -215,6 +218,8 @@ pub(crate) fn subheader_line_role(sub_index: usize, roles: &SubheaderRoles) -> L
         LineRole::SubheaderUnit
     } else if contains(roles.comment) {
         LineRole::SubheaderComment
+    } else if contains(roles.x_prime) {
+        LineRole::SubheaderXPrime
     } else {
         LineRole::Subheader
     }
@@ -321,6 +326,7 @@ mod tests {
             long_name: Some(SubheaderLineRange::single(1)),
             unit: Some(SubheaderLineRange::single(2)),
             comment: None,
+            x_prime: None,
             same_line_name_unit: false,
         };
         let bytes = b"Instrument XYZ\nTemperature,Pressure\ndegC,bar\n1,2\n3,4\n";

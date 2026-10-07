@@ -172,6 +172,7 @@ fn b2_aller_retour_preserve_tout() {
                 unit: "µm".into(),
                 long_name: "Nom long".into(),
                 comment: "".into(),
+                x_prime: Some(-0.5),
                 display_format: "%.3f".into(),
                 formula: None,
                 file_metadata: Vec::new(),

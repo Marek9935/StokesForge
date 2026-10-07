@@ -17,7 +17,8 @@ use stokesforge_plot::{
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
 use crate::state::{
-    series_list_label, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
+    parse_x_prime, series_list_label, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab,
+    SaveTarget,
 };
 use crate::tr;
 
@@ -91,7 +92,9 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
 /// Fenêtre de consultation des métadonnées de fichier d'une colonne (issue
 /// #5) : les lignes clé / valeur, sections comprises, en lecture seule. Même
 /// brique modale que les propriétés du graphe ; « Valider » et « Annuler »
-/// la ferment sans rien changer.
+/// la ferment sans rien changer. Seule exception : le bouton « Utiliser
+/// comme x' » d'une valeur numérique, qui l'écrit dans la ligne x' de la
+/// colonne (#164).
 pub(super) fn column_metadata_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -118,7 +121,7 @@ pub(super) fn column_metadata_window(
         |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 egui::Grid::new("stokesforge_column_metadata_grid")
-                    .num_columns(2)
+                    .num_columns(3)
                     .striped(true)
                     .show(ui, |ui| {
                         for line in &lines {
@@ -131,6 +134,20 @@ pub(super) fn column_metadata_window(
                             } else {
                                 ui.label(&line.key);
                                 ui.label(&line.value);
+                            }
+                            // Mini sélecteur d'import (#164) : une valeur
+                            // numérique du fichier peut alimenter la ligne x'.
+                            if !line.key.is_empty()
+                                && matches!(parse_x_prime(&line.value), Ok(Some(_)))
+                                && ui
+                                    .small_button(tr!("workbook-metadata-use-as-x-prime"))
+                                    .on_hover_text(tr!("workbook-metadata-use-as-x-prime", "hint"))
+                                    .clicked()
+                            {
+                                actions.push(Action::SetColumnXPrime {
+                                    column,
+                                    text: line.value.clone(),
+                                });
                             }
                             ui.end_row();
                         }
@@ -1887,6 +1904,16 @@ mod tests {
             );
             assert_eq!(texte_exact(&peints, "XUNITS").couleur, visuals.text_color());
             assert!(actions.is_empty(), "ouverte, elle ne demande rien");
+            // #164 : seule une valeur numérique à clé (NPOINTS) offre le
+            // bouton « Utiliser comme x' » ; le texte NANOMETERS non.
+            assert_eq!(
+                peints
+                    .iter()
+                    .filter(|t| t.texte == tr!("workbook-metadata-use-as-x-prime"))
+                    .count(),
+                1,
+                "un seul bouton : la valeur numérique"
+            );
 
             peindre_metadonnees(&context, &state, &mut actions, vec![touche(touche_de_fin)]);
             assert_eq!(actions, [Action::CloseColumnMetadata], "{touche_de_fin:?}");

@@ -361,6 +361,16 @@ pub enum Action {
         /// Nouveau commentaire.
         text: String,
     },
+    /// Remplace la valeur x' d'une colonne
+    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) : texte vide =
+    /// effacée ; un texte qui n'est pas un nombre fini est refusé (barre
+    /// d'état), rien n'est écrit.
+    SetColumnXPrime {
+        /// Colonne visée.
+        column: NodeId,
+        /// Valeur saisie.
+        text: String,
+    },
     /// Remplace la formule affichée d'une colonne
     /// ([`stokesforge_core::ColumnMeta::formula`]) — stockage/affichage
     /// seulement, l'évaluation reste celle de `stokesforge_core::formula` /
@@ -1218,6 +1228,9 @@ pub struct CellEdit {
 /// colonne — voir [`HeaderEdit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeaderField {
+    /// Ligne spéciale x' ([`stokesforge_core::ColumnMeta::x_prime`], #164) :
+    /// une valeur numérique par colonne, au-dessus du nom long.
+    XPrime,
     /// Nom long ([`stokesforge_core::ColumnMeta::long_name`]).
     LongName,
     /// Unité ([`stokesforge_core::ColumnMeta::unit`]).
@@ -1228,33 +1241,104 @@ pub enum HeaderField {
     Formula,
 }
 
+/// Valeur saisie dans la ligne x' : `Ok(None)` pour un texte vide, `Err`
+/// quand ce n'est pas un nombre fini (texte, NaN, infini).
+pub(crate) fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    match MixedCell::from_text(Some(trimmed.to_string())) {
+        MixedCell::Number(value) if value.is_finite() => Ok(Some(value)),
+        _ => Err(()),
+    }
+}
+
 impl HeaderField {
-    /// Position parmi les 4 champs, dans l'ordre où ils sont empilés à
-    /// l'écran (de haut en bas, 0 = `LongName`) — sert à comparer deux
+    /// Nombre de champs empilés. Le rang d'un champ dans la grille est
+    /// `index() - COUNT` (`-COUNT..=-1`), les lignes de données commençant à 0.
+    pub(crate) const COUNT: usize = 5;
+
+    /// Position parmi les champs, dans l'ordre où ils sont empilés à
+    /// l'écran (de haut en bas, 0 = `XPrime`) — sert à comparer deux
     /// champs pour savoir si l'un est « au-dessus » de l'autre, en
     /// particulier pour la plage de champs d'en-tête sélectionnée (voir
     /// [`crate::selection::Selection::is_header_field_selected`]).
     pub(crate) fn index(self) -> usize {
         match self {
-            HeaderField::LongName => 0,
-            HeaderField::Unit => 1,
-            HeaderField::Comment => 2,
-            HeaderField::Formula => 3,
+            HeaderField::XPrime => 0,
+            HeaderField::LongName => 1,
+            HeaderField::Unit => 2,
+            HeaderField::Comment => 3,
+            HeaderField::Formula => 4,
         }
     }
 
-    /// Inverse de [`HeaderField::index`] — `index` au-delà de 3 vaut
+    /// Inverse de [`HeaderField::index`] — `index` au-delà du dernier vaut
     /// `Formula`, jamais de panique : les appelants ([`crate::selection::
     /// Selection::cleared_header_fields`]/[`AppState::copy_selection`]) ne
-    /// passent que des rangs déjà bornés à `-4..=-1`, mais une saturation
+    /// passent que des rangs déjà bornés à `-COUNT..=-1`, mais une saturation
     /// silencieuse est plus sûre qu'un `match` incomplet si ça changeait.
     pub(crate) fn from_index(index: usize) -> Self {
         match index {
-            0 => HeaderField::LongName,
-            1 => HeaderField::Unit,
-            2 => HeaderField::Comment,
+            0 => HeaderField::XPrime,
+            1 => HeaderField::LongName,
+            2 => HeaderField::Unit,
+            3 => HeaderField::Comment,
             _ => HeaderField::Formula,
         }
+    }
+
+    /// Texte du champ dans `meta`, tel qu'on l'affiche et le copie.
+    pub(crate) fn text_of(self, meta: &ColumnMeta) -> String {
+        match self {
+            HeaderField::XPrime => meta.x_prime.map(format_f64_for_display).unwrap_or_default(),
+            HeaderField::LongName => meta.long_name.clone(),
+            HeaderField::Unit => meta.unit.clone(),
+            HeaderField::Comment => meta.comment.clone(),
+            HeaderField::Formula => meta.formula.clone().unwrap_or_default(),
+        }
+    }
+
+    /// Écrit `text` dans le champ de `meta`. Faux (rien n'est écrit) quand le
+    /// texte n'est pas une valeur du champ : seul x' est typé, et refuse tout
+    /// ce qui n'est pas un nombre fini — un texte vide l'efface.
+    pub(crate) fn write_text(self, meta: &mut ColumnMeta, text: String) -> bool {
+        match self {
+            HeaderField::XPrime => match parse_x_prime(&text) {
+                Ok(value) => {
+                    meta.x_prime = value;
+                    true
+                }
+                Err(()) => false,
+            },
+            HeaderField::LongName => {
+                meta.long_name = text;
+                true
+            }
+            HeaderField::Unit => {
+                meta.unit = text;
+                true
+            }
+            HeaderField::Comment => {
+                meta.comment = text;
+                true
+            }
+            HeaderField::Formula => {
+                meta.formula = (!text.trim().is_empty()).then_some(text);
+                true
+            }
+        }
+    }
+
+    /// Champ du rang `rank` (`-COUNT..=-1`) de la grille.
+    pub(crate) fn from_rank(rank: isize) -> Self {
+        Self::from_index((rank + Self::COUNT as isize) as usize)
+    }
+
+    /// Rang du champ dans la grille (`-COUNT..=-1`).
+    pub(crate) fn rank(self) -> isize {
+        self.index() as isize - Self::COUNT as isize
     }
 }
 
@@ -1433,6 +1517,7 @@ enum RelativeCopy {
 /// [`GridClipboard::FullColumns`].
 #[derive(Debug, Clone, PartialEq)]
 struct FullColumnCopy {
+    x_prime: String,
     long_name: String,
     unit: String,
     comment: String,
@@ -1454,6 +1539,7 @@ fn grid_clipboard_to_text(clipboard: &GridClipboard) -> String {
         | GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => rows_to_tsv(rows),
         GridClipboard::FullColumns(columns) => {
             let mut rows: Vec<Vec<String>> = vec![
+                columns.iter().map(|c| c.x_prime.clone()).collect(),
                 columns.iter().map(|c| c.long_name.clone()).collect(),
                 columns.iter().map(|c| c.unit.clone()).collect(),
                 columns.iter().map(|c| c.comment.clone()).collect(),
@@ -2868,20 +2954,22 @@ impl AppState {
         }
         impl Row {
             fn up(self) -> (Self, bool) {
-                use HeaderField::{Comment, Formula, LongName, Unit};
+                use HeaderField::{Comment, Formula, LongName, Unit, XPrime};
                 match self {
                     Row::Data(0) => (Row::Header(Formula), true),
                     Row::Data(row) => (Row::Data(row - 1), false),
-                    Row::Header(LongName) => (self, false),
+                    Row::Header(XPrime) => (self, false),
+                    Row::Header(LongName) => (Row::Header(XPrime), false),
                     Row::Header(Unit) => (Row::Header(LongName), false),
                     Row::Header(Comment) => (Row::Header(Unit), false),
                     Row::Header(Formula) => (Row::Header(Comment), false),
                 }
             }
             fn down(self, last_row: usize) -> (Self, bool) {
-                use HeaderField::{Comment, Formula, LongName, Unit};
+                use HeaderField::{Comment, Formula, LongName, Unit, XPrime};
                 match self {
                     Row::Header(Formula) => (Row::Data(0), true),
+                    Row::Header(XPrime) => (Row::Header(LongName), false),
                     Row::Header(LongName) => (Row::Header(Unit), false),
                     Row::Header(Unit) => (Row::Header(Comment), false),
                     Row::Header(Comment) => (Row::Header(Formula), false),
@@ -2985,8 +3073,11 @@ impl AppState {
         /// Nom long en reculant) — Tab parcourt d'abord les colonnes à champ
         /// fixe, voir la doc de [`AppState::move_selection_tab`].
         fn step_field(field: HeaderField, backward: bool) -> Option<HeaderField> {
-            use HeaderField::{Comment, Formula, LongName, Unit};
+            use HeaderField::{Comment, Formula, LongName, Unit, XPrime};
             match (field, backward) {
+                (XPrime, false) => Some(LongName),
+                (LongName, true) => Some(XPrime),
+                (XPrime, true) => None,
                 (LongName, false) => Some(Unit),
                 (Unit, false) => Some(Comment),
                 (Comment, false) => Some(Formula),
@@ -2994,7 +3085,6 @@ impl AppState {
                 (Unit, true) => Some(LongName),
                 (Comment, true) => Some(Unit),
                 (Formula, true) => Some(Comment),
-                (LongName, true) => None,
             }
         }
 
@@ -3005,7 +3095,7 @@ impl AppState {
                 }
                 GridCursor::Header(_, field) => match step_field(field, true) {
                     Some(prev) => GridCursor::Header(order[last_index], prev),
-                    None => GridCursor::Header(from_column, HeaderField::LongName),
+                    None => GridCursor::Header(from_column, HeaderField::XPrime),
                 },
                 GridCursor::Data(_, 0) if index == 0 => {
                     GridCursor::Header(order[last_index], HeaderField::Formula)
@@ -3237,11 +3327,11 @@ impl AppState {
             let ranks: Vec<isize> = ranges.iter().flat_map(|&(lo, hi)| lo..=hi).collect();
             let first = *ranks.first()?;
             if first < 0 {
-                let start = HeaderField::from_index((first + 4) as usize);
+                let start = HeaderField::from_rank(first);
                 let rows = ranks
                     .iter()
                     .map(|&rank| {
-                        let field = HeaderField::from_index((rank + 4) as usize);
+                        let field = HeaderField::from_rank(rank);
                         columns
                             .iter()
                             .map(|&column| self.header_field_display_text(column, field))
@@ -3328,6 +3418,7 @@ impl AppState {
                     .map(|row| cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, ""))
                     .collect();
                 FullColumnCopy {
+                    x_prime: HeaderField::XPrime.text_of(&meta),
                     long_name: meta.long_name,
                     unit: meta.unit,
                     comment: meta.comment,
@@ -3348,13 +3439,7 @@ impl AppState {
     /// `app::grid::header_field_widget`, factorisé ici pour être partagé
     /// avec [`AppState::copy_selection`]/[`AppState::copy_full_columns`].
     pub(crate) fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
-        let meta = self.column_meta(column);
-        match field {
-            HeaderField::LongName => meta.long_name,
-            HeaderField::Unit => meta.unit,
-            HeaderField::Comment => meta.comment,
-            HeaderField::Formula => meta.formula.unwrap_or_default(),
-        }
+        field.text_of(&self.column_meta(column))
     }
 
     /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
@@ -3375,13 +3460,7 @@ impl AppState {
     /// réclamant le focus clavier pour lui-même).
     pub fn begin_header_edit(&mut self, column: NodeId, field: HeaderField) {
         self.editing = None;
-        let meta = self.column_meta(column);
-        let buffer = match field {
-            HeaderField::LongName => meta.long_name,
-            HeaderField::Unit => meta.unit,
-            HeaderField::Comment => meta.comment,
-            HeaderField::Formula => meta.formula.unwrap_or_default(),
-        };
+        let buffer = field.text_of(&self.column_meta(column));
         self.header_editing = Some(HeaderEdit {
             column,
             field,
@@ -3416,6 +3495,10 @@ impl AppState {
             HeaderField::Formula => Action::SetColumnFormula {
                 column: edit.column,
                 formula: (!edit.buffer.trim().is_empty()).then_some(edit.buffer),
+            },
+            HeaderField::XPrime => Action::SetColumnXPrime {
+                column: edit.column,
+                text: edit.buffer,
             },
         };
         self.dispatch(action);
@@ -3946,6 +4029,7 @@ impl AppState {
             Action::SetColumnComment { column, text } => {
                 self.set_column_meta_field(column, |meta| meta.comment = text);
             }
+            Action::SetColumnXPrime { column, text } => self.set_column_x_prime(column, text),
             Action::SetColumnFormula { column, formula } => {
                 self.set_column_meta_field(column, |meta| meta.formula = formula);
             }
@@ -6261,11 +6345,8 @@ impl AppState {
             });
         }
         for (column, field) in header_fields {
-            self.set_column_meta_field(column, |meta| match field {
-                HeaderField::LongName => meta.long_name = String::new(),
-                HeaderField::Unit => meta.unit = String::new(),
-                HeaderField::Comment => meta.comment = String::new(),
-                HeaderField::Formula => meta.formula = None,
+            self.set_column_meta_field(column, |meta| {
+                field.write_text(meta, String::new());
             });
         }
         if grouped {
@@ -6457,15 +6538,7 @@ impl AppState {
     fn paste_single_value(&mut self, anchor: GridCursor, text: &str) {
         match anchor {
             GridCursor::Header(column, field) => {
-                let text = text.to_string();
-                self.set_column_meta_field(column, move |meta| match field {
-                    HeaderField::LongName => meta.long_name = text,
-                    HeaderField::Unit => meta.unit = text,
-                    HeaderField::Comment => meta.comment = text,
-                    HeaderField::Formula => {
-                        meta.formula = (!text.trim().is_empty()).then_some(text)
-                    }
-                });
+                self.paste_header_text(column, field, text.to_string());
             }
             GridCursor::Data(column, row) => {
                 let Some(kind) = self
@@ -6547,7 +6620,7 @@ impl AppState {
                     .filter_map(|(i, cells)| {
                         let origin = start.index() as isize + i as isize;
                         let target = origin + shift;
-                        (0..=3)
+                        (0..HeaderField::COUNT as isize)
                             .contains(&target)
                             .then(|| (HeaderField::from_index(target as usize), cells))
                     })
@@ -6560,14 +6633,7 @@ impl AppState {
                 for &(field, cells) in &writes {
                     for (index, &column) in targets.iter().enumerate() {
                         let text = cells.get(index).cloned().unwrap_or_default();
-                        self.set_column_meta_field(column, move |meta| match field {
-                            HeaderField::LongName => meta.long_name = text,
-                            HeaderField::Unit => meta.unit = text,
-                            HeaderField::Comment => meta.comment = text,
-                            HeaderField::Formula => {
-                                meta.formula = (!text.trim().is_empty()).then_some(text)
-                            }
-                        });
+                        self.paste_header_text(column, field, text);
                     }
                 }
                 if grouped {
@@ -6649,7 +6715,10 @@ impl AppState {
             (false, GridCursor::Data(_, row)) => row,
             _ => 0,
         };
-        let header_ops = header_from.map(|from| 4 - from).unwrap_or(0) * targets.len();
+        let header_ops = header_from
+            .map(|from| HeaderField::COUNT - from)
+            .unwrap_or(0)
+            * targets.len();
         let body_ops = targets
             .iter()
             .zip(columns)
@@ -6661,23 +6730,17 @@ impl AppState {
             return;
         }
         if let Some(from) = header_from {
-            for field_index in from..=3 {
+            for field_index in from..HeaderField::COUNT {
                 let field = HeaderField::from_index(field_index);
                 for (&column, source) in targets.iter().zip(columns) {
                     let value = match field {
+                        HeaderField::XPrime => source.x_prime.clone(),
                         HeaderField::LongName => source.long_name.clone(),
                         HeaderField::Unit => source.unit.clone(),
                         HeaderField::Comment => source.comment.clone(),
                         HeaderField::Formula => source.formula.clone().unwrap_or_default(),
                     };
-                    self.set_column_meta_field(column, move |meta| match field {
-                        HeaderField::LongName => meta.long_name = value,
-                        HeaderField::Unit => meta.unit = value,
-                        HeaderField::Comment => meta.comment = value,
-                        HeaderField::Formula => {
-                            meta.formula = (!value.trim().is_empty()).then_some(value)
-                        }
-                    });
+                    self.paste_header_text(column, field, value);
                 }
             }
         }
@@ -6707,6 +6770,31 @@ impl AppState {
     /// modifier un seul champ, puis les remplace en bloc
     /// (`Command::SetColumnMeta` — doctrine « remplacement en bloc, jamais
     /// par sous-champ » du crate `stokesforge-commands`, voir sa doc de tête).
+    /// Écrit `text` dans le champ d'en-tête `field` de `column` ; un texte
+    /// que le champ refuse (x' non numérique) est signalé sans rien écrire.
+    fn paste_header_text(&mut self, column: NodeId, field: HeaderField, text: String) {
+        let Some(mut meta) = self
+            .snapshot
+            .tree
+            .node(column)
+            .and_then(Node::as_column)
+            .map(|c| c.meta().clone())
+        else {
+            self.fail(format!("{column} n'est pas une colonne de ce projet"));
+            return;
+        };
+        if !field.write_text(&mut meta, text) {
+            self.fail(crate::tr!("status-x-prime-invalid"));
+            return;
+        }
+        self.execute(Command::SetColumnMeta { column, meta });
+    }
+
+    /// [`Action::SetColumnXPrime`].
+    fn set_column_x_prime(&mut self, column: NodeId, text: String) {
+        self.paste_header_text(column, HeaderField::XPrime, text);
+    }
+
     fn set_column_meta_field(&mut self, column: NodeId, update: impl FnOnce(&mut ColumnMeta)) {
         let Some(mut meta) = self
             .snapshot

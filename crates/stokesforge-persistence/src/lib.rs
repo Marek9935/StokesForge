@@ -821,6 +821,7 @@ mod tests {
                 formula: None,
                 file_metadata: Vec::new(),
                 import_source: None,
+                x_prime: None,
             },
         };
         let body = FileBody {
@@ -887,6 +888,7 @@ mod tests {
                 formula: None,
                 file_metadata: Vec::new(),
                 import_source: None,
+                x_prime: None,
             },
         };
         let body = FileBody {

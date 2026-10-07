@@ -1544,6 +1544,79 @@ fn external_plain_text_writes_into_whichever_anchor_is_selected() {
     assert_eq!(cell(&state, temps, 0), Cell::Float(42.0));
 }
 
+/// #164 : la ligne x' s'édite comme les autres champs d'en-tête, accepte un
+/// nombre (virgule décimale comprise), s'annule en un pas, et un texte vide
+/// l'efface.
+#[test]
+fn x_prime_is_edited_cleared_and_undone_like_a_header_field() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    assert_eq!(state.column_meta(temps).x_prime, None);
+
+    set_header_field(&mut state, temps, HeaderField::XPrime, " 12.5 ");
+    assert_eq!(state.column_meta(temps).x_prime, Some(12.5));
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.column_meta(temps).x_prime, None);
+    state.dispatch(Action::Redo);
+    assert_eq!(state.column_meta(temps).x_prime, Some(12.5));
+
+    set_header_field(&mut state, temps, HeaderField::XPrime, "");
+    assert_eq!(state.column_meta(temps).x_prime, None);
+}
+
+/// #164 : un texte qui n'est pas un nombre fini est refusé avec un message,
+/// sans rien écrire ni empiler d'historique.
+#[test]
+fn x_prime_refuses_text_nan_and_infinity() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    set_header_field(&mut state, temps, HeaderField::XPrime, "3");
+    for invalide in ["abc", "NaN", "inf", "-Infinity", "1e400"] {
+        set_header_field(&mut state, temps, HeaderField::XPrime, invalide);
+        assert_eq!(
+            state.column_meta(temps).x_prime,
+            Some(3.0),
+            "{invalide:?} ne remplace pas la valeur"
+        );
+        let status = state.status().expect("message d'état");
+        assert!(status.is_error, "{invalide:?} signalé comme erreur");
+    }
+    // Les refus n'ont rien empilé : un seul Undo retire le « 3 ».
+    state.dispatch(Action::Undo);
+    assert_eq!(state.column_meta(temps).x_prime, None);
+}
+
+/// #164 : x' se vide avec la sélection (Suppr) et se colle d'un champ à
+/// l'autre ; coller du texte sur x' est refusé.
+#[test]
+fn x_prime_is_cleared_and_pasted_as_a_header_field() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    set_header_field(&mut state, temps, HeaderField::XPrime, "7");
+    state.select_header_field(sheet1, temps, HeaderField::XPrime);
+    state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
+    assert_eq!(state.column_meta(temps).x_prime, None);
+
+    state.select_header_field(sheet1, temps, HeaderField::XPrime);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "42".to_string(),
+    });
+    assert_eq!(state.column_meta(temps).x_prime, Some(42.0));
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "pas un nombre".to_string(),
+    });
+    assert_eq!(state.column_meta(temps).x_prime, Some(42.0));
+}
+
 /// Ctrl+Maj+C promeut en colonne entière (en-tête + corps) la colonne
 /// touchée par une sélection d'une seule cellule.
 #[test]
@@ -1557,9 +1630,9 @@ fn copy_full_columns_promotes_the_touched_columns_from_a_single_cell_selection()
     state.select_cell(sheet1, temps, 2);
 
     let text = state.copy_full_columns(sheet1).expect("sélection non vide");
-    // 4 lignes d'en-tête (Nom long, Unité, Commentaire, Formule) puis tout
+    // 5 lignes d'en-tête (x', Nom long, Unité, Commentaire, Formule) puis tout
     // le corps de `Temps`, indépendamment de la cellule sélectionnée.
-    assert_eq!(text, "\ns\n\n\n0\n0.5\n1\n1.5\n2\n");
+    assert_eq!(text, "\n\ns\n\n\n0\n0.5\n1\n1.5\n2\n");
 }
 
 /// Symétrique de [`header_field_copy_pasted_onto_a_data_cell_anchor_pastes_nothing`] :
@@ -3230,20 +3303,21 @@ fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
     let file = dir.path().join("instrument.csv");
     std::fs::write(
         &file,
-        "Temperature,Pressure\ndegC,bar\nmesure lente,mesure rapide\n1,2\n3,4\n",
+        "Temperature,Pressure\ndegC,bar\nmesure lente,mesure rapide\n0.5,12\n1,2\n3,4\n",
     )
     .expect("écrit instrument.csv");
 
     let mut recipe = ImportRecipe::new("Sans titre");
     recipe.header_layout = stokesforge_import::HeaderLayout {
         main_header_lines: 0,
-        subheader_lines: 3,
+        subheader_lines: 4,
         auto_detect: false,
     };
     recipe.subheader_roles = stokesforge_import::SubheaderRoles {
         long_name: Some(stokesforge_import::SubheaderLineRange::single(1)),
         unit: Some(stokesforge_import::SubheaderLineRange::single(2)),
         comment: Some(stokesforge_import::SubheaderLineRange::single(3)),
+        x_prime: Some(stokesforge_import::SubheaderLineRange::single(4)),
         same_line_name_unit: false,
     };
     state.dispatch(Action::ImportFiles {
@@ -3259,10 +3333,12 @@ fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
     assert_eq!(meta0.long_name, "Temperature");
     assert_eq!(meta0.unit, "degC");
     assert_eq!(meta0.comment, "mesure lente");
+    assert_eq!(meta0.x_prime, Some(0.5), "ligne x' (#164)");
     let meta1 = state.column_meta(columns[1].0);
     assert_eq!(meta1.long_name, "Pressure");
     assert_eq!(meta1.unit, "bar");
     assert_eq!(meta1.comment, "mesure rapide");
+    assert_eq!(meta1.x_prime, Some(12.0));
 }
 
 // -- 14. Entrée sur la dernière ligne : ajout de ligne borné à la feuille --

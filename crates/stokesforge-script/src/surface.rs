@@ -172,7 +172,7 @@ fn children(py: Python<'_>, handle: Option<&Handle>) -> PyResult<Vec<Handle>> {
 /// `parent` (poignée ou None), `row_count` (feuille/colonne, sinon None),
 /// `column` (métadonnées d'une colonne, sinon None). Le nombre de lignes d'une
 /// feuille est le maximum des longueurs de ses colonnes, zéro si elle est vide.
-/// Les métadonnées comprennent `type`, `role`, `long_name`, `unit`, `comment`,
+/// Les métadonnées comprennent `type`, `role`, `long_name`, `unit`, `comment`, `x_prime`,
 /// `display_format`, `formula` et `version`. Une poignée périmée lève
 /// `BrokenReferenceError` ; aucune lecture ne change l'historique.
 #[pyfunction]
@@ -229,6 +229,7 @@ fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
         description.set_item("long_name", meta.long_name.as_str())?;
         description.set_item("unit", meta.unit.as_str())?;
         description.set_item("comment", meta.comment.as_str())?;
+        description.set_item("x_prime", meta.x_prime)?;
         description.set_item("display_format", meta.display_format.as_str())?;
         description.set_item("formula", meta.formula.as_deref())?;
         description.set_item("version", column.version())?;

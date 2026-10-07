@@ -217,7 +217,7 @@ pub enum ColumnRole {
 }
 
 /// Métadonnées d'affichage et de tracé d'une colonne (hors nom et type).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ColumnMeta {
     /// Rôle de tracé (X, Y, Z, barre d'erreur, étiquette, ...).
     pub role: ColumnRole,
@@ -227,6 +227,12 @@ pub struct ColumnMeta {
     pub long_name: String,
     /// Commentaire libre.
     pub comment: String,
+    /// Valeur de la ligne spéciale « x' » (#164) : une abscisse propre à la
+    /// colonne — typiquement l'instant d'un spectre dans une cinétique —,
+    /// qui joue le rôle d'un second X quand on trace une **ligne** de
+    /// données. `None` : ligne x' vide pour cette colonne. Toujours finie
+    /// (la couche d'interface refuse NaN et l'infini).
+    pub x_prime: Option<f64>,
     /// Format d'affichage (chaîne libre interprétée par la couche UI).
     pub display_format: String,
     /// Formule de calcul (`"A+B"`, `"(A-B)*2"`, ...), `None` pour une colonne

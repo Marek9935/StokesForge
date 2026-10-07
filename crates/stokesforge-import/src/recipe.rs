@@ -362,7 +362,7 @@ pub enum NameSource {
     HeaderKey(String),
 }
 
-/// Assignation des rôles `long_name`/`unit`/`comment` de
+/// Assignation des rôles `long_name`/`unit`/`comment`/`x_prime` de
 /// [`stokesforge_core::ColumnMeta`] (le crate ne dépend pas de `stokesforge-core`, voir
 /// la doc de tête de [`crate`] — les noms de rôle restent ceux de
 /// `ColumnMeta`, pas ceux d'OriginLab, précisément pour que la correspondance
@@ -376,6 +376,11 @@ pub struct SubheaderRoles {
     pub long_name: Option<SubheaderLineRange>,
     pub unit: Option<SubheaderLineRange>,
     pub comment: Option<SubheaderLineRange>,
+    /// Ligne dont chaque jeton numérique devient la valeur x'
+    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) de sa colonne — le
+    /// temps d'un spectre, dans une cinétique.
+    #[serde(default)]
+    pub x_prime: Option<SubheaderLineRange>,
     /// Coché, `unit` est ignoré : chaque jeton de la ligne `long_name` est
     /// lu comme « Nom (unité) », l'unité étant ce qui suit la première
     /// parenthèse ouvrante jusqu'à la première fermante — un jeton sans
@@ -520,6 +525,7 @@ mod tests {
                 long_name: Some(SubheaderLineRange::single(1)),
                 unit: Some(SubheaderLineRange { from: 2, to: 2 }),
                 comment: None,
+                x_prime: None,
                 same_line_name_unit: false,
             },
             skip_chars: 5,

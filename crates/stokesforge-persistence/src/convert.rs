@@ -827,6 +827,7 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                     .iter()
                     .map(|line| (line.key.clone(), line.value.clone()))
                     .collect(),
+                x_prime: meta.x_prime,
                 import_source: meta.import_source.as_ref().map(|source| {
                     (
                         source.path.clone(),
@@ -896,6 +897,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             formula,
             file_metadata,
             import_source,
+            x_prime,
         } => {
             let column_type: ColumnType = column_type.into();
             let block = match values {
@@ -930,6 +932,9 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 comment,
                 display_format,
                 formula,
+                // Un fichier peut porter n'importe quel flottant : seule une
+                // valeur finie est une abscisse.
+                x_prime: x_prime.filter(|value| value.is_finite()),
                 file_metadata: file_metadata
                     .into_iter()
                     .map(|(key, value)| stokesforge_core::MetaLine { key, value })

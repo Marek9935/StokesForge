@@ -189,7 +189,9 @@ fn line_role_color(ui: &egui::Ui, role: stokesforge_import::LineRole) -> egui::C
         | LineRole::SubheaderLongName
         | LineRole::SubheaderUnit
         | LineRole::ColumnHeaderRow => egui::Color32::from_rgb(80, 140, 220),
-        LineRole::SubheaderComment => egui::Color32::from_rgb(200, 80, 200),
+        LineRole::SubheaderComment | LineRole::SubheaderXPrime => {
+            egui::Color32::from_rgb(200, 80, 200)
+        }
         LineRole::Footer => ui.visuals().warn_fg_color,
         LineRole::Comment | LineRole::Skipped => ui.visuals().weak_text_color(),
         LineRole::Data | LineRole::Blank => ui.visuals().text_color(),
@@ -205,6 +207,7 @@ fn preview_legend(ui: &mut egui::Ui) {
             (LineRole::SubheaderLongName, tr!("column-long-name")),
             (LineRole::SubheaderUnit, tr!("column-units")),
             (LineRole::SubheaderComment, tr!("column-comments")),
+            (LineRole::SubheaderXPrime, tr!("column-x-prime")),
             (LineRole::ColumnHeaderRow, tr!("import-column-names")),
             (LineRole::Data, tr!("import-legend-data")),
             (LineRole::Footer, tr!("import-legend-footer")),
@@ -935,6 +938,13 @@ fn import_step_header(
             tr!("import-header-role-comments"),
             tr!("import-header-role-comments", "hint"),
             &mut recipe.subheader_roles.comment,
+        );
+        subheader_role_row(
+            ui,
+            "stokesforge_import_role_x_prime",
+            tr!("import-header-role-x-prime"),
+            tr!("import-header-role-x-prime", "hint"),
+            &mut recipe.subheader_roles.x_prime,
         );
     }
     ui.checkbox(
@@ -2116,6 +2126,7 @@ mod tests {
                 LineRole::SubheaderUnit,
                 LineRole::ColumnHeaderRow,
                 LineRole::SubheaderComment,
+                LineRole::SubheaderXPrime,
                 LineRole::Footer,
                 LineRole::Comment,
                 LineRole::Skipped,
@@ -2134,7 +2145,7 @@ mod tests {
                 LineRole::SubheaderUnit,
                 LineRole::ColumnHeaderRow,
             ],
-            vec![LineRole::SubheaderComment],
+            vec![LineRole::SubheaderComment, LineRole::SubheaderXPrime],
             vec![LineRole::Footer],
             vec![LineRole::Comment, LineRole::Skipped],
             vec![LineRole::Data, LineRole::Blank],

@@ -284,6 +284,7 @@ pub fn make_import_column(
         long_name,
         unit: parsed_column.unit.clone().unwrap_or_default(),
         comment: parsed_column.comment.clone().unwrap_or_default(),
+        x_prime: parsed_column.x_prime,
         // Métadonnées du fichier, copiées sur chaque colonne : plusieurs fichiers
         // dans une même feuille gardent chacun les leurs.
         file_metadata: table

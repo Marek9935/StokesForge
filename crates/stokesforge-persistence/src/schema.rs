@@ -189,6 +189,9 @@ pub(crate) enum KindRecord {
         /// Source d'import (`ColumnMeta::import_source`) : chemin, recette en
         /// JSON, index de colonne. Absente des fichiers antérieurs.
         import_source: Option<(String, String, u64, u64)>,
+        /// Valeur de la ligne spéciale x' (`ColumnMeta::x_prime`, #164).
+        /// Absente des fichiers antérieurs : `None`.
+        x_prime: Option<f64>,
     },
     /// Graphe.
     Graph {
@@ -264,6 +267,8 @@ enum KindRecordKnown {
         file_metadata: Vec<(String, String)>,
         #[serde(default)]
         import_source: Option<(String, String, u64, u64)>,
+        #[serde(default)]
+        x_prime: Option<f64>,
     },
     Graph {
         #[serde(default)]
@@ -316,6 +321,7 @@ impl From<KindRecordKnown> for KindRecord {
                 formula,
                 file_metadata,
                 import_source,
+                x_prime,
             } => KindRecord::Column {
                 column_type,
                 role,
@@ -328,6 +334,7 @@ impl From<KindRecordKnown> for KindRecord {
                 formula,
                 file_metadata,
                 import_source,
+                x_prime,
             },
             KindRecordKnown::Graph {
                 hidden,
@@ -409,6 +416,7 @@ enum KindRecordRef<'a> {
         formula: &'a Option<String>,
         file_metadata: &'a Vec<(String, String)>,
         import_source: &'a Option<(String, String, u64, u64)>,
+        x_prime: Option<f64>,
     },
     Graph {
         hidden: bool,
@@ -465,6 +473,7 @@ impl Serialize for KindRecord {
                 formula,
                 file_metadata,
                 import_source,
+                x_prime,
             } => KindRecordRef::Column {
                 column_type: *column_type,
                 role: *role,
@@ -477,6 +486,7 @@ impl Serialize for KindRecord {
                 formula,
                 file_metadata,
                 import_source,
+                x_prime: *x_prime,
             }
             .serialize(serializer),
             KindRecord::Graph {

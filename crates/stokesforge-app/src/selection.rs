@@ -15,8 +15,8 @@
 //!
 //! # Un seul axe, jamais traversé par une sélection
 //!
-//! Les 4 champs d'en-tête et les lignes de données d'une même colonne
-//! forment un seul axe ordonné (voir [`GridCursor::rank`]) : Nom long <
+//! Les 5 champs d'en-tête et les lignes de données d'une même colonne
+//! forment un seul axe ordonné (voir [`GridCursor::rank`]) : x' < Nom long <
 //! Unité < Commentaire < Formule < ligne 0 < ligne 1 < … mais un rectangle de
 //! sélection ([`SelectionKind::Rows`]) reste toujours entièrement d'un seul
 //! côté de la frontière (rang -1/0) : soit entièrement dans l'en-tête, soit
@@ -167,15 +167,15 @@ impl GridCursor {
     }
 
     /// Rang sur l'axe unique en-tête puis données (voir la doc de tête du
-    /// module) : les 4 champs d'en-tête occupent `-4..=-1` (via
-    /// [`HeaderField::index`]), les lignes de données `0..` — comparable
+    /// module) : les 5 champs d'en-tête occupent `-5..=-1` (via
+    /// [`HeaderField::rank`]), les lignes de données `0..` — comparable
     /// entre deux [`GridCursor`] de la même colonne ou de colonnes
     /// différentes, la colonne se résolvant séparément par position (voir
     /// [`order_range`]).
     fn rank(self) -> isize {
         match self {
             GridCursor::Data(_, row) => row as isize,
-            GridCursor::Header(_, field) => field.index() as isize - 4,
+            GridCursor::Header(_, field) => field.rank(),
         }
     }
 }
@@ -284,7 +284,7 @@ fn remove_point(intervals: Vec<(usize, usize)>, point: usize) -> Vec<(usize, usi
 /// Case de la colonne d'indice `column` (dans `order`) au rang `rank`.
 fn cursor_at(order: &[NodeId], column: usize, rank: isize) -> GridCursor {
     if rank < 0 {
-        GridCursor::Header(order[column], HeaderField::from_index((rank + 4) as usize))
+        GridCursor::Header(order[column], HeaderField::from_rank(rank))
     } else {
         GridCursor::Data(order[column], rank as usize)
     }
@@ -445,7 +445,7 @@ impl Selection {
         column: NodeId,
         field: HeaderField,
     ) -> bool {
-        let rank = field.index() as isize - 4;
+        let rank = field.rank();
         self.blocks(tree, sheet)
             .iter()
             .any(|block| block.lo <= rank && rank <= block.hi && block.columns.contains(&column))
@@ -599,17 +599,27 @@ impl Selection {
             return Some((self.columns(tree, sheet), vec![(first.lo, first.hi)]));
         }
         if blocks.iter().all(|b| b.columns == first.columns) {
-            // Rangs décalés de 4 pour fusionner en non signés (les champs
-            // d'en-tête occupent -4..=-1).
+            // Rangs décalés de `HeaderField::COUNT` pour fusionner en non
+            // signés (les champs d'en-tête occupent `-COUNT..=-1`).
             let merged = merge_intervals(
                 blocks
                     .iter()
-                    .map(|b| ((b.lo + 4) as usize, (b.hi + 4) as usize))
+                    .map(|b| {
+                        (
+                            (b.lo + HeaderField::COUNT as isize) as usize,
+                            (b.hi + HeaderField::COUNT as isize) as usize,
+                        )
+                    })
                     .collect(),
             );
             let ranges = merged
                 .into_iter()
-                .map(|(lo, hi)| (lo as isize - 4, hi as isize - 4))
+                .map(|(lo, hi)| {
+                    (
+                        lo as isize - HeaderField::COUNT as isize,
+                        hi as isize - HeaderField::COUNT as isize,
+                    )
+                })
                 .collect();
             return Some((first.columns.clone(), ranges));
         }
@@ -904,7 +914,7 @@ impl Selection {
                 self.row_range().map(|(lo, hi)| (lo as isize, hi as isize))
             }
             SelectionKind::HeaderRows { anchor, cursor } => {
-                let (a, b) = (anchor.index() as isize - 4, cursor.index() as isize - 4);
+                let (a, b) = (anchor.rank(), cursor.rank());
                 Some(if a <= b { (a, b) } else { (b, a) })
             }
             SelectionKind::Columns { .. } => None,
@@ -919,7 +929,7 @@ impl Selection {
             }
             for &column in &block.columns {
                 for rank in block.lo..=block.hi.min(-1) {
-                    let entry = (column, HeaderField::from_index((rank + 4) as usize));
+                    let entry = (column, HeaderField::from_rank(rank));
                     if !fields.contains(&entry) {
                         fields.push(entry);
                     }
@@ -973,7 +983,7 @@ impl Selection {
     pub fn is_header_row_selected(&self, field: HeaderField) -> bool {
         match &self.kind {
             SelectionKind::HeaderRows { .. } => self.full_rank_range().is_some_and(|(lo, hi)| {
-                let rank = field.index() as isize - 4;
+                let rank = field.rank();
                 rank >= lo && rank <= hi
             }),
             _ => false,

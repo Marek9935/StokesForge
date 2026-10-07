@@ -38,6 +38,10 @@ pub struct ParsedColumn {
     /// Commentaire extrait des lignes de sous-en-tête assignées au rôle
     /// « Comments ».
     pub comment: Option<String>,
+    /// Valeur x' lue dans la ligne assignée au rôle `x_prime` (#164), avec
+    /// le format numérique de la recette ; `None` si la ligne manque ou si le
+    /// jeton n'est pas un nombre fini.
+    pub x_prime: Option<f64>,
     /// Colonne lue comme dates et heures ([`crate::recipe::ColumnKind::DateTime`]) :
     /// `values` porte alors des timestamps POSIX en secondes.
     pub datetime: bool,
@@ -234,6 +238,7 @@ pub(crate) fn table_from_layout(
     let long_name_line = role_line(recipe.subheader_roles.long_name);
     let unit_line = role_line(recipe.subheader_roles.unit);
     let comment_line = role_line(recipe.subheader_roles.comment);
+    let x_prime_line = role_line(recipe.subheader_roles.x_prime);
 
     // Ligne d'en-tête de colonnes, le cas échéant.
     let column_names: Option<Vec<String>> = layout.column_header.map(|i| {
@@ -288,6 +293,7 @@ pub(crate) fn table_from_layout(
         long_names
     };
     let comments = role_values(comment_line);
+    let x_primes = role_values(x_prime_line);
 
     // Tokenise et analyse chaque ligne de données, en gardant le jeton
     // d'origine à côté de la valeur : c'est ce que `texts` restitue pour une
@@ -335,6 +341,11 @@ pub(crate) fn table_from_layout(
                 long_name: pick(&long_names),
                 unit: pick(&units),
                 comment: pick(&comments),
+                x_prime: x_primes
+                    .as_ref()
+                    .and_then(|v| v.get(c))
+                    .map(|token| numbers.parse(token))
+                    .filter(|value| value.is_finite()),
                 datetime: recipe.column_kind(c) == crate::recipe::ColumnKind::DateTime,
             }
         })

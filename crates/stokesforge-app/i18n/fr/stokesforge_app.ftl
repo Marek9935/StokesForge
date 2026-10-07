@@ -281,6 +281,8 @@ import-header-role-units = Unités
     .hint = Lignes de sous-en-tête qui donnent les unités
 import-header-role-comments = Commentaires
     .hint = Lignes de sous-en-tête qui donnent les commentaires
+import-header-role-x-prime = x'
+    .hint = Ligne de sous-en-tête qui donne la valeur x' de chaque colonne (par ex. son instant)
 import-header-range-from = de
 import-header-range-to = à
 import-header-names-first-line = Noms sur la première ligne
@@ -698,6 +700,8 @@ project-manager-hide = Masquer
 project-folder-empty = (vide)
 
 # Classeur : en-tête de colonne empilé (gouttière de gauche)
+column-x-prime = x'
+status-x-prime-invalid = x' doit être un nombre fini
 column-long-name = Nom long
 column-units = Unités
 column-comments = Commentaires
@@ -710,6 +714,8 @@ workbook-metadata-summary =
        *[other] { $count } clés
     }
     .hint = Affiche les métadonnées du fichier
+workbook-metadata-use-as-x-prime = Utiliser comme x'
+    .hint = Écrit cette valeur dans la ligne x' de la colonne
 workbook-metadata-title = Métadonnées du fichier
 workbook-metadata-title-named = Métadonnées — { $name }
 

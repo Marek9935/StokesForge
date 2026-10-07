@@ -287,6 +287,8 @@ import-header-role-units = Units
     .hint = Subheader lines that give the units
 import-header-role-comments = Comments
     .hint = Subheader lines that give the comments
+import-header-role-x-prime = x'
+    .hint = Subheader line that gives the x' value of each column (e.g. its time)
 import-header-range-from = from
 import-header-range-to = to
 import-header-names-first-line = Names in first line
@@ -706,6 +708,8 @@ project-manager-hide = Hide
 project-folder-empty = (empty)
 
 # Workbook: stacked column header (left gutter)
+column-x-prime = x'
+status-x-prime-invalid = x' must be a finite number
 column-long-name = Long Name
 column-units = Units
 column-comments = Comments
@@ -718,6 +722,8 @@ workbook-metadata-summary =
        *[other] { $count } keys
     }
     .hint = Shows the file metadata
+workbook-metadata-use-as-x-prime = Use as x'
+    .hint = Writes this value into the x' row of the column
 workbook-metadata-title = File Metadata
 workbook-metadata-title-named = Metadata — { $name }
 
