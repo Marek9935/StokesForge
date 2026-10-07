@@ -1197,8 +1197,13 @@ ajoute, par `Action::AddLayer`, un `PanelSpec::overlay_on` au calque de base du
 calque actif ; les colonnes de rôle **Y2** (apparié au **X2** le plus proche à
 sa gauche) partent, à la création du graphe (Plot) comme au dépôt ou à « Send
 to », sur le second calque (axe X en haut, axe Y à droite, échelles propres),
-réutilisé s'il existe. Le zoom et le déplacement visent le calque actif ;
-l'axe d'un calque superposé n'est zoomé que s'il est affiché. Rendu : `docs/rendu.md`.
+réutilisé s'il existe. Le zoom, le déplacement et le rectangle de zoom portent sur les
+**échelles** : le geste, exprimé en pixels de la zone de tracé (commune aux
+calques d'une case), s'applique à toutes les échelles propres de tous les
+calques de la case (X, Y et y2 du calque ordinaire ; X en haut / Y à droite
+d'un calque superposé), si bien que les graduations restent alignées. Une
+échelle liée n'a pas de cadrage à elle (`Framing` par échelle, `Gesture`,
+`GraphView::commit_gesture`). Zoomer un seul axe : à venir. Rendu : `docs/rendu.md`.
 
 **Calque actif (#161).** `GraphView::active_panel(spec)` : le dernier calque
 sélectionné, état d'interface hors `.stf` et hors historique, porté par la vue

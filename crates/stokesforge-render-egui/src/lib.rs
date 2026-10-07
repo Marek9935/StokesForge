@@ -127,7 +127,7 @@ pub use stokesforge_render::{
 // (voir `stokesforge_render::interact`, générique sur le backend), ce crate ne
 // fait que la consommer avec des types egui.
 pub use stokesforge_render::{
-    component_at, nearest_on_curve, AxisSide, PanelTransform, PlotComponent,
+    component_at, nearest_on_curve, AxisSide, Gesture, PanelTransform, PlotComponent,
 };
 pub use typst_screen::{FormulaTexture, TypstScreen};
 // Typst côté modèle de texte (compilation, échappement) : l'interface en a
@@ -1243,23 +1243,40 @@ impl GraphView {
             .or_else(|| last.panels.iter().enumerate().find_map(hit))
     }
 
-    /// Pose le cadrage `(x_range, y_range)` calculé pour le panneau `index`
-    /// (dans [`DrawnPlot::panels`]) sur l'état de vue, identifié par sa
-    /// position déclarée — voir `crate::view` pour la raison de cette
-    /// indirection.
-    fn commit_framing(&mut self, panel_index: usize, x_range: (f64, f64), y_range: (f64, f64)) {
+    /// Applique un geste de cadrage (zoom, glisser, rectangle) à **toutes les
+    /// échelles propres de tous les calques de la case** du calque
+    /// `panel_index` (dans [`DrawnPlot::panels`]) (#167). Les calques d'une
+    /// case partagent la même zone de tracé : la même transformation en
+    /// pixels garde donc leurs graduations alignées, y compris celles d'un
+    /// axe secondaire. Une échelle liée à un autre calque n'a pas de cadrage
+    /// à elle et suit celle qu'elle recouvre.
+    fn commit_gesture(&mut self, panel_index: usize, gesture: Gesture) {
         let Some(last) = &self.last else { return };
-        let Some(panel) = last.panels.get(panel_index) else {
+        let Some(hit) = last.panels.get(panel_index) else {
             return;
         };
-        let index = panel.index;
-        self.view.set_framing(
-            index,
-            Framing {
-                x: x_range,
-                y: y_range,
-            },
-        );
+        let cell = (hit.row, hit.column);
+        let mut updates = Vec::new();
+        for panel in last.panels.iter().filter(|p| (p.row, p.column) == cell) {
+            let (own_x, own_y) = match panel.overlay {
+                Some(overlay) => (overlay.x_top, overlay.y_right),
+                None => (true, true),
+            };
+            let mut framing = Framing::default();
+            if let Some((x, y)) = PanelTransform::of(panel).and_then(|t| t.apply(&gesture)) {
+                framing.x = own_x.then_some(x);
+                framing.y = own_y.then_some(y);
+            }
+            if panel.overlay.is_none() && panel.y2_range.is_some() {
+                framing.y2 = PanelTransform::of_axis(panel, true)
+                    .and_then(|t| t.apply(&gesture))
+                    .map(|(_, y2)| y2);
+            }
+            updates.push((panel.index, framing));
+        }
+        for (index, framing) in updates {
+            self.view.set_framing(index, framing);
+        }
     }
 
     /// Ctrl+molette (zoom), glissé principal (pan avec l'outil Pointeur,
@@ -1384,13 +1401,15 @@ impl GraphView {
                 // le cadrage d'un coup.
                 let zoom = context.input(|input| input.zoom_delta());
                 if zoom != 1.0 {
-                    if let Some((panel_index, transform)) = self.panel_at(pos.0) {
+                    if let Some((panel_index, _)) = self.panel_at(pos.0) {
                         let factor = (1.0 / zoom as f64).clamp(0.5, 2.0);
-                        if let Some((x_range, y_range)) =
-                            transform.zoom((pos.1.x as f64, pos.1.y as f64), factor)
-                        {
-                            self.commit_framing(panel_index, x_range, y_range);
-                        }
+                        self.commit_gesture(
+                            panel_index,
+                            Gesture::Zoom {
+                                anchor: (pos.1.x as f64, pos.1.y as f64),
+                                factor,
+                            },
+                        );
                     }
                 }
             }
@@ -1404,15 +1423,16 @@ impl GraphView {
                 // la zone de tracé (paner jusqu'au bord d'un panneau voisin)
                 // sans que la cible ne change en cours de route.
                 let origin = pos - delta;
-                if let Some((panel_index, transform)) =
-                    self.panel_at(origin).or_else(|| self.panel_at(pos))
+                if let Some((panel_index, _)) = self.panel_at(origin).or_else(|| self.panel_at(pos))
                 {
                     let scale = self.display_scale().unwrap_or(1.0);
-                    if let Some((x_range, y_range)) =
-                        transform.pan((delta.x / scale) as f64, (delta.y / scale) as f64)
-                    {
-                        self.commit_framing(panel_index, x_range, y_range);
-                    }
+                    self.commit_gesture(
+                        panel_index,
+                        Gesture::Pan {
+                            dx: (delta.x / scale) as f64,
+                            dy: (delta.y / scale) as f64,
+                        },
+                    );
                 }
             }
         }
@@ -1448,16 +1468,17 @@ impl GraphView {
                 // données (`pipeline::axis_range`) — un comportement correct
                 // mais surprenant pour un geste qui se voulait un zoom.
                 if start.distance(end) > 4.0 {
-                    if let Some((panel_index, transform)) = self.panel_at(start) {
+                    if let Some((panel_index, _)) = self.panel_at(start) {
                         if let (Some(start), Some(end)) =
                             (self.figure_position(start), self.figure_position(end))
                         {
-                            if let Some((x_range, y_range)) = transform.range_between(
-                                (start.x as f64, start.y as f64),
-                                (end.x as f64, end.y as f64),
-                            ) {
-                                self.commit_framing(panel_index, x_range, y_range);
-                            }
+                            self.commit_gesture(
+                                panel_index,
+                                Gesture::Box {
+                                    a: (start.x as f64, start.y as f64),
+                                    b: (end.x as f64, end.y as f64),
+                                },
+                            );
                         }
                     }
                 }
@@ -1907,13 +1928,8 @@ mod tests {
         let mut view = GraphView::new();
         assert_eq!(view.framed_spec(&spec), spec, "sans zoom, rien ne change");
 
-        view.view.set_framing(
-            0,
-            Framing {
-                x: (2.0, 3.0),
-                y: (-1.0, 1.0),
-            },
-        );
+        view.view
+            .set_framing(0, Framing::xy((2.0, 3.0), (-1.0, 1.0)));
         let framed = view.framed_spec(&spec);
         let bottom = &framed.panels[0].bottom;
         assert_eq!((bottom.range_min, bottom.range_max), (Some(2.0), Some(3.0)));

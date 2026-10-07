@@ -37,6 +37,34 @@ use stokesforge_plot::AxisScale;
 
 /// La correspondance pixel ↔ données d'un panneau déjà tracé.
 ///
+/// Un geste de cadrage, exprimé dans le repère de la zone de tracé (pixels) :
+/// le même pour tous les calques d'une case, qui partagent cette zone (#167).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Gesture {
+    /// Zoom d'un `factor` centré sur le pixel `anchor` (voir [`PanelTransform::zoom`]).
+    Zoom {
+        /// Pixel qui garde sa donnée.
+        anchor: (f64, f64),
+        /// `< 1` rapproche, `> 1` éloigne.
+        factor: f64,
+    },
+    /// Glisser de `(dx, dy)` pixels (voir [`PanelTransform::pan`]).
+    Pan {
+        /// Déplacement horizontal.
+        dx: f64,
+        /// Déplacement vertical.
+        dy: f64,
+    },
+    /// Rectangle de zoom entre deux coins en pixels (voir
+    /// [`PanelTransform::range_between`]).
+    Box {
+        /// Premier coin.
+        a: (f64, f64),
+        /// Coin opposé.
+        b: (f64, f64),
+    },
+}
+
 /// Construite à partir d'un [`DrawnPanel`] ; se reconstruit à l'identique
 /// tant que rien n'a bougé, donc bon marché à refaire à chaque frame plutôt
 /// qu'à mettre en cache.
@@ -111,6 +139,15 @@ impl PanelTransform {
         let px = self.origin.0 as f64 + fx * self.size.0 as f64;
         let py = self.origin.1 as f64 + (1.0 - fy) * self.size.1 as f64;
         Some((px, py))
+    }
+
+    /// Le cadrage `(x, y)` que ce geste donne à ces deux axes.
+    pub fn apply(&self, gesture: &Gesture) -> Option<((f64, f64), (f64, f64))> {
+        match *gesture {
+            Gesture::Zoom { anchor, factor } => self.zoom(anchor, factor),
+            Gesture::Pan { dx, dy } => self.pan(dx, dy),
+            Gesture::Box { a, b } => self.range_between(a, b),
+        }
     }
 
     /// Nouveau cadrage après un zoom centré sur `anchor` (en pixel), d'un

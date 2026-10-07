@@ -310,13 +310,15 @@ fn le_rectangle_elastique_zoome_sur_la_zone_choisie() {
         .framing(panel_avant.index)
         .expect("le panneau devrait porter un cadrage explicite");
     assert!(
-        (framing.x.0 - attendu.0 .0).abs() < 1e-6 && (framing.x.1 - attendu.0 .1).abs() < 1e-6,
+        (framing.x.unwrap().0 - attendu.0 .0).abs() < 1e-6
+            && (framing.x.unwrap().1 - attendu.0 .1).abs() < 1e-6,
         "x_range = {:?}, attendu {:?}",
         framing.x,
         attendu.0
     );
     assert!(
-        (framing.y.0 - attendu.1 .0).abs() < 1e-6 && (framing.y.1 - attendu.1 .1).abs() < 1e-6,
+        (framing.y.unwrap().0 - attendu.1 .0).abs() < 1e-6
+            && (framing.y.unwrap().1 - attendu.1 .1).abs() < 1e-6,
         "y_range = {:?}, attendu {:?}",
         framing.y,
         attendu.1
@@ -1059,4 +1061,123 @@ fn glisser_une_forme_garde_le_trace_libre() {
         view.take_events().as_slice(),
         [GraphEvent::ShapeChanged { .. }]
     ));
+}
+
+/// #167 : un geste de cadrage porte sur les **échelles** de tous les calques
+/// de la case, pas sur le seul calque touché — un calque superposé à axes
+/// propres garde ses graduations alignées sur celles du calque de base, et
+/// une échelle liée (axe non affiché) n'a pas de cadrage à elle.
+#[test]
+fn le_zoom_cadre_les_echelles_de_tous_les_calques_de_la_case() {
+    use stokesforge_plot::{OverlaySpec, Panels};
+    let mut project = Project::new("Calques").expect("projet");
+    let root = project.root();
+    let book = project.add_empty_workbook(root, None).expect("classeur");
+    let sheet = project.add_worksheet(book, None).expect("feuille");
+    let mut colonne = |nom: &str, valeurs: Vec<f64>| {
+        project
+            .add_column(sheet, None, Some(nom), numeric(&valeurs))
+            .expect("colonne")
+    };
+    let xs: Vec<f64> = (0..=100).map(f64::from).collect();
+    let x = colonne("X", xs.clone());
+    let y = colonne("Y", xs.clone());
+    let x2 = colonne("X2", xs.iter().map(|v| 400.0 + 4.0 * v).collect());
+    let y2 = colonne("Y2", xs.iter().map(|v| v / 100.0).collect());
+    let mut base = PanelSpec::at(0, 0);
+    base.series.push(SeriesSpec::new_xy(x, y));
+    let mut propre = PanelSpec::overlay_on(
+        &base,
+        OverlaySpec {
+            x_top: true,
+            y_right: true,
+        },
+    );
+    propre.series.push(SeriesSpec::new_xy(x2, y2));
+    let mut lie = PanelSpec::overlay_on(
+        &base,
+        OverlaySpec {
+            x_top: false,
+            y_right: true,
+        },
+    );
+    lie.series.push(SeriesSpec::new_xy(x, y2));
+    let spec = PlotSpec::empty("").with_panels(Panels::new(vec![base, propre, lie]));
+    let graph = project.add_graph(root, None, spec).expect("graphe");
+    let session = Session::spawn(project, None).expect("session");
+    let snapshot = session.handle().snapshot().expect("instantané");
+    let context = contexte();
+    let mut view = GraphView::new();
+    view.set_tool(stokesforge_render_egui::GraphTool::ZoomBox);
+    image(&context, &mut view, &snapshot, graph, vec![]);
+
+    let avant = view.last_drawn().expect("figure").clone();
+    let (start, end) = (Pos2::new(300.0, 200.0), Pos2::new(500.0, 400.0));
+    let attendu = |i: usize| {
+        stokesforge_render_egui::PanelTransform::of(avant.panel(i).expect("calque"))
+            .expect("transformation")
+            .range_between(
+                (start.x as f64, start.y as f64),
+                (end.x as f64, end.y as f64),
+            )
+            .expect("coins dans le cadrage")
+    };
+    for events in [
+        vec![
+            pointer_moved(start),
+            pointer_button(start, PointerButton::Primary, true),
+        ],
+        vec![pointer_moved(end)],
+        vec![pointer_button(end, PointerButton::Primary, false)],
+        vec![],
+    ] {
+        image(&context, &mut view, &snapshot, graph, events);
+    }
+
+    let proche =
+        |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6;
+    let base = view.view().framing(0).expect("cadrage du calque de base");
+    assert!(proche(base.x.unwrap(), attendu(0).0) && proche(base.y.unwrap(), attendu(0).1));
+    let propre = view
+        .view()
+        .framing(1)
+        .expect("cadrage du calque à axes propres");
+    assert!(
+        proche(propre.x.unwrap(), attendu(1).0) && proche(propre.y.unwrap(), attendu(1).1),
+        "les échelles propres suivent le même geste : {propre:?}"
+    );
+    let lie = view.view().framing(2).expect("cadrage de l'axe Y propre");
+    assert!(
+        lie.x.is_none(),
+        "l'échelle X liée n'a pas de cadrage à elle"
+    );
+    assert!(proche(lie.y.unwrap(), attendu(2).1));
+
+    // Les graduations restent alignées : la même fraction de chaque axe est
+    // visible dans le calque de base et dans le calque superposé.
+    let apres = view.last_drawn().expect("figure").clone();
+    let fraction = |panel: usize, plein: (f64, f64), vue: (f64, f64)| {
+        let _ = panel;
+        (
+            (vue.0 - plein.0) / (plein.1 - plein.0),
+            (vue.1 - plein.0) / (plein.1 - plein.0),
+        )
+    };
+    let (b0, b1) = (
+        avant.panel(0).unwrap().x_range,
+        apres.panel(0).unwrap().x_range,
+    );
+    let (p0, p1) = (
+        avant.panel(1).unwrap().x_range,
+        apres.panel(1).unwrap().x_range,
+    );
+    let (fb, fp) = (fraction(0, b0, b1), fraction(1, p0, p1));
+    assert!(
+        proche(fb, fp),
+        "fractions visibles : base {fb:?}, superposé {fp:?}"
+    );
+    assert_eq!(
+        apres.panel(2).unwrap().x_range,
+        apres.panel(0).unwrap().x_range
+    );
 }

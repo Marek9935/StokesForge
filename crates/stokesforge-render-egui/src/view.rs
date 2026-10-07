@@ -46,17 +46,32 @@ use std::collections::HashMap;
 
 use stokesforge_plot::PlotSpec;
 
-/// Un cadrage explicite pour un panneau : les bornes que le zoom/pan ont
-/// calculées, en espace de données (pas transformé — comme
+/// Le cadrage explicite des **échelles propres** d'un calque : les bornes que
+/// le zoom/pan ont calculées, en espace de données (pas transformé — comme
 /// [`stokesforge_plot::AxisSpec::range_min`]/`range_max`, dont c'est directement
-/// la valeur).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// la valeur). Une échelle absente n'est pas cadrée : une échelle liée à un
+/// autre calque (#167) n'a pas de cadrage à elle, elle suit celle du calque
+/// qu'elle recouvre.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Framing {
     /// Bornes de l'axe des abscisses. L'ordre n'importe pas : la résolution
     /// les trie de toute façon (`pipeline::axis_range`).
-    pub x: (f64, f64),
+    pub x: Option<(f64, f64)>,
     /// Bornes de l'ordonnée principale.
-    pub y: (f64, f64),
+    pub y: Option<(f64, f64)>,
+    /// Bornes de l'ordonnée de droite.
+    pub y2: Option<(f64, f64)>,
+}
+
+impl Framing {
+    /// Cadrage des seuls axes principaux.
+    pub fn xy(x: (f64, f64), y: (f64, f64)) -> Self {
+        Self {
+            x: Some(x),
+            y: Some(y),
+            y2: None,
+        }
+    }
 }
 
 /// L'état de vue d'un [`crate::GraphView`] : les cadrages explicites en
@@ -94,10 +109,14 @@ impl ViewState {
         self.framings.get(&panel).copied()
     }
 
-    /// Pose (ou remplace) le cadrage explicite d'un panneau, et fait avancer
+    /// Pose le cadrage explicite d'un calque, échelle par échelle : une
+    /// échelle absente de `framing` garde son cadrage précédent. Fait avancer
     /// la génération — donc invalide le cache.
     pub fn set_framing(&mut self, panel: usize, framing: Framing) {
-        self.framings.insert(panel, framing);
+        let entry = self.framings.entry(panel).or_default();
+        entry.x = framing.x.or(entry.x);
+        entry.y = framing.y.or(entry.y);
+        entry.y2 = framing.y2.or(entry.y2);
         self.generation += 1;
     }
 
@@ -130,12 +149,17 @@ impl ViewState {
             let Some(framing) = self.framing(index) else {
                 continue;
             };
-            panel.bottom.auto_range = false;
-            panel.bottom.range_min = Some(framing.x.0);
-            panel.bottom.range_max = Some(framing.x.1);
-            panel.left.auto_range = false;
-            panel.left.range_min = Some(framing.y.0);
-            panel.left.range_max = Some(framing.y.1);
+            for (axis, range) in [
+                (&mut panel.bottom, framing.x),
+                (&mut panel.left, framing.y),
+                (&mut panel.right, framing.y2),
+            ] {
+                if let Some(range) = range {
+                    axis.auto_range = false;
+                    axis.range_min = Some(range.0);
+                    axis.range_max = Some(range.1);
+                }
+            }
         }
     }
 }
@@ -163,13 +187,7 @@ mod tests {
     #[test]
     fn poser_un_cadrage_ne_touche_que_son_panneau() {
         let mut view = ViewState::new();
-        view.set_framing(
-            0,
-            Framing {
-                x: (1.0, 2.0),
-                y: (3.0, 4.0),
-            },
-        );
+        view.set_framing(0, Framing::xy((1.0, 2.0), (3.0, 4.0)));
         let mut spec = spec_a_deux_panneaux();
         view.apply(&mut spec);
 
@@ -189,21 +207,9 @@ mod tests {
     fn chaque_cadrage_pose_fait_avancer_la_generation() {
         let mut view = ViewState::new();
         assert_eq!(view.generation(), 0);
-        view.set_framing(
-            0,
-            Framing {
-                x: (0.0, 1.0),
-                y: (0.0, 1.0),
-            },
-        );
+        view.set_framing(0, Framing::xy((0.0, 1.0), (0.0, 1.0)));
         assert_eq!(view.generation(), 1);
-        view.set_framing(
-            0,
-            Framing {
-                x: (0.0, 2.0),
-                y: (0.0, 1.0),
-            },
-        );
+        view.set_framing(0, Framing::xy((0.0, 2.0), (0.0, 1.0)));
         assert_eq!(view.generation(), 2);
     }
 
@@ -217,13 +223,7 @@ mod tests {
     #[test]
     fn reset_efface_et_fait_avancer_la_generation_une_fois() {
         let mut view = ViewState::new();
-        view.set_framing(
-            0,
-            Framing {
-                x: (0.0, 1.0),
-                y: (0.0, 1.0),
-            },
-        );
+        view.set_framing(0, Framing::xy((0.0, 1.0), (0.0, 1.0)));
         view.reset();
         assert!(view.is_empty());
         assert_eq!(view.generation(), 2);
