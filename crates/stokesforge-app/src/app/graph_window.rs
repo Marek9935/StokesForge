@@ -83,9 +83,13 @@ pub(super) fn graph_drop_target(
             || egui::DragAndDrop::has_payload_of_type::<RowDragPayload>(ui.ctx()));
     if pointer_in_tab && ui.input(|input| input.pointer.any_released()) {
         // Calque visé : le calque actif du graphe (#161).
-        if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
-            let panel = published_active_panel(ui.ctx(), graph_id);
-            actions.push(drop_payload_action(&payload, graph_id, panel));
+        // `has_payload_of_type` avant `take_payload` : celui-ci vide la charge
+        // même quand son type ne correspond pas (les lignes étaient perdues).
+        if egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx()) {
+            if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
+                let panel = published_active_panel(ui.ctx(), graph_id);
+                actions.push(drop_payload_action(&payload, graph_id, panel));
+            }
         } else if let Some(payload) = egui::DragAndDrop::take_payload::<RowDragPayload>(ui.ctx()) {
             // Des lignes (#166) : l'état décide de l'axe, et pose la question
             // si le graphe a déjà un X.
@@ -1516,6 +1520,22 @@ pub(super) mod tests {
         paint(vec![egui::Event::PointerMoved(outside)], true);
         let (_, actions) = paint(vec![release(outside)], false);
         assert!(actions.is_empty(), "relâché hors du graphe, rien");
+
+        // Des lignes (#166) : le dépôt produit l'action de lignes. Régression :
+        // `take_payload::<ColumnDragPayload>` vidait la charge de lignes avant
+        // qu'elle ne soit lue, et rien ne se traçait.
+        let rows = RowDragPayload {
+            sheet: NodeId::from_raw(7),
+            rows: vec![0, 2],
+        };
+        egui::DragAndDrop::set_payload(&context, rows.clone());
+        paint(vec![egui::Event::PointerMoved(inside)], false);
+        let (_, actions) = paint(vec![release(inside)], false);
+        assert_eq!(
+            actions,
+            vec![drop_rows_action(&rows, graph, 0)],
+            "un relâchement de lignes sur le graphe trace les lignes"
+        );
     }
 
     #[test]
