@@ -115,6 +115,10 @@ pub(super) const SHORTCUT_COPY_FULL_COLUMNS: egui::KeyboardShortcut = egui::Keyb
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::C,
 );
+/// Ctrl+A — tout sélectionner dans la grille et dans Edit (#159), même effet
+/// que la case du coin.
+pub(super) const SHORTCUT_SELECT_ALL: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::A);
 /// Ctrl+X — couper (décoratif, voir [`SHORTCUT_COPY`]).
 pub(super) const SHORTCUT_CUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::X);

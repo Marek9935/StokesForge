@@ -1072,6 +1072,52 @@ Deux contextualisations s'y jouent :
   plage de lignes entières : supprimer une ligne fait remonter ce qui suit
   dans toutes les colonnes, exactement comme un rectangle de cellules.
 
+### Sélection multiple de la grille (#159)
+
+`selection.rs` porte la sélection de chaque feuille — état d'interface pur,
+hors historique. Elle est **d'une seule sorte** à la fois (colonnes, lignes
+ou cases), et la frontière en-tête/données reste infranchissable ; chaque
+sorte est un **ensemble** et non plus une plage `{ ancre, curseur }` :
+
+| Sorte | Contenu | Gestes |
+|---|---|---|
+| colonnes (`Columns`) | `base` (colonnes posées une à une) ∪ plage `ancre..=curseur` | clic · Ctrl+clic bascule la colonne · Maj+clic remplace tout par la plage ancre → cible · Ctrl+Maj+clic et glisser ajoutent la plage |
+| lignes (`FullRows`) | intervalles de lignes (même modèle) | mêmes gestes sur les numéros de ligne |
+| cases (`Rows`) | rectangles déjà posés (`extra`) + dernier rectangle `ancre`–`curseur` | Ctrl+clic ajoute ou retire une case (le rectangle est découpé autour) · Ctrl+glisser ajoute un rectangle · Maj+clic étend le dernier rectangle |
+
+Un Ctrl+clic d'une autre sorte, ou de l'autre côté de la frontière
+en-tête/données, repose une sélection simple. Les champs d'en-tête entiers
+(`HeaderRows`) restent des plages simples. Retirer le dernier élément lève la
+sélection.
+
+Les consommateurs raisonnent par **blocs** (`Selection::blocks`, un bloc =
+colonnes de la feuille × plage de rangs) ; l'ordre est toujours celui de la
+feuille (gauche → droite, haut → bas), jamais celui des clics.
+
+- **Case du coin « # »** et **Ctrl+A** (grille focalisée, hors édition ;
+  Edit › Select All) : `Action::SelectAll`, toutes les colonnes visibles,
+  en-tête compris, même sans ligne ; un second clic sur la case, ou Échap dans
+  la grille, lève la sélection. La case a une info-bulle et le curseur « main ».
+- **Copier / Couper** : colonnes non contiguës bout à bout dans l'ordre de la
+  feuille ; blocs de cases qui partagent leurs lignes (côte à côte) ou leurs
+  colonnes (empilés) — sinon Copy et Cut sont grisés (`GridMenu::copy_enabled`,
+  `Selection::copy_layout`). Copy with Header suit les colonnes touchées.
+- **Coller / Coller à l'identique** : grisés sur une sélection non contiguë
+  (`GridMenu::paste_enabled`, cible ambiguë) ; le collage au clavier est refusé
+  avec un message.
+- **Effacer** vide chaque bloc, en un seul groupe annulable. **Supprimer et
+  remonter** n'est offert que pour un bloc unique (des trous rendraient la
+  remontée ambiguë) ; Suppr se contente alors de vider.
+- **Clic droit** : dans la sélection, le menu agit sur toute la sélection, même
+  non contiguë ; hors de la sélection, il la remplace par la case visée (#152).
+- **Tracer** reçoit la liste ordonnée des colonnes sélectionnées (A en X, C et
+  E en Y…). Type ▸ et Role ▸ poussent une action par colonne, comme avant (pas
+  encore un seul groupe annulable).
+
+Pendant un glisser, l'extension au survol ne s'applique qu'aux cases où
+l'appui n'a **pas** commencé (`press_started_in`) : sinon un Ctrl+clic, qui
+bascule au relâchement, aurait déjà étendu la sélection pendant l'appui.
+
 ### Tracer depuis un classeur
 
 La rangée des lettres offre, en plus des types (Numeric, Mixed) et du

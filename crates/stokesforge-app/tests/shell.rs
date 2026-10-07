@@ -4331,14 +4331,16 @@ fn clicking_the_hash_gutter_selects_the_whole_table() {
     }
 }
 
-/// Une feuille sans ligne n'a rien à sélectionner : `select_all` n'y pose
-/// aucune sélection plutôt que d'en poser une vide et incohérente.
+/// Une feuille sans ligne se sélectionne quand même en entier (#159) : la
+/// case du coin et Ctrl+A prennent toutes les colonnes visibles, en-tête
+/// compris, ce qui laisse par exemple changer leur type ou leur rôle.
 #[test]
-fn select_all_on_a_sheet_without_rows_does_nothing() {
+fn select_all_on_a_sheet_without_rows_selects_every_column() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
     state.dispatch(Action::DeleteRows {
         sheet: sheet1,
         at: 0,
@@ -4347,12 +4349,24 @@ fn select_all_on_a_sheet_without_rows_does_nothing() {
     assert_eq!(state.row_count(sheet1), 0);
 
     state.select_cell(sheet1, temps, 0);
-    state.select_all(sheet1);
+    state.dispatch(Action::SelectAll { sheet: sheet1 });
 
-    assert!(
-        !state.is_all_selected(sheet1),
-        "rien à sélectionner sur une feuille vide"
-    );
+    assert!(state.is_all_selected(sheet1));
+    assert!(state.is_column_selected(sheet1, temps));
+    assert!(state.is_column_selected(sheet1, signal));
+}
+
+/// Une sélection partielle n'est pas « tout sélectionné ».
+#[test]
+fn a_partial_column_selection_is_not_all_selected() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_column(sheet1, temps);
+
+    assert!(!state.is_all_selected(sheet1));
 }
 
 /// Sélectionner une seule cellule de données « touche » sa colonne et sa
@@ -8142,4 +8156,274 @@ fn le_redimensionnement_d_une_forme_est_annulable_en_un_pas() {
         state.dispatch(Action::Redo);
         assert_eq!(target.get(&graph_spec(&state, graph)), Some(&resized));
     }
+}
+
+// -- 20. Sélection multiple de colonnes : Ctrl+clic, Maj+clic (#159) --
+
+/// Le Ctrl+clic ajoute puis retire une colonne, une par une, sans exiger
+/// qu'elle touche les autres ; l'ordre des actions est celui de la feuille.
+#[test]
+fn ctrl_click_toggles_non_contiguous_columns() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_column(sheet1, note);
+    state.toggle_column_selection(sheet1, temps);
+
+    assert!(state.is_column_selected(sheet1, temps));
+    assert!(!state.is_column_selected(sheet1, signal));
+    assert!(state.is_column_selected(sheet1, note));
+    assert_eq!(
+        state
+            .selection(sheet1)
+            .unwrap()
+            .columns(state.tree(), sheet1),
+        vec![temps, note],
+        "l'ordre de la feuille, pas celui des clics"
+    );
+
+    state.toggle_column_selection(sheet1, note);
+    assert!(!state.is_column_selected(sheet1, note));
+    assert!(state.is_column_selected(sheet1, temps));
+}
+
+/// Maj+clic remplace tout par la plage ancre → cible ; Ctrl+Maj+clic
+/// (`extend_column_selection`) l'ajoute aux colonnes déjà posées.
+#[test]
+fn shift_click_replaces_and_ctrl_shift_click_adds_a_range() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let columns: Vec<NodeId> = state
+        .visible_columns(sheet1)
+        .into_iter()
+        .map(|(id, _, _)| id)
+        .collect();
+    assert!(columns.len() >= 3);
+    let (first, last) = (columns[0], columns[columns.len() - 1]);
+
+    state.select_column(sheet1, first);
+    state.toggle_column_selection(sheet1, last);
+    // Maj+clic : la plage ancre (`last`) → `first` remplace les deux.
+    state.extend_column_selection_replacing(sheet1, first);
+    for column in &columns {
+        assert!(state.is_column_selected(sheet1, *column));
+    }
+
+    state.select_column(sheet1, first);
+    state.toggle_column_selection(sheet1, last);
+    // Ctrl+Maj+clic : ancre `last` → colonne suivante, les anciennes restent.
+    state.extend_column_selection(sheet1, columns[columns.len() - 2]);
+    assert!(state.is_column_selected(sheet1, first));
+    assert!(state.is_column_selected(sheet1, columns[columns.len() - 2]));
+    assert!(state.is_column_selected(sheet1, last));
+}
+
+/// Une sélection non contiguë grise Paste et Paste in Place (cible
+/// ambiguë) et le collage au clavier est refusé avec un message ; une
+/// sélection contiguë garde les deux.
+#[test]
+fn a_non_contiguous_selection_cannot_be_pasted_into() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_column(sheet1, temps);
+    state.toggle_column_selection(sheet1, signal);
+    assert!(state.grid_menu(sheet1).unwrap().paste_enabled);
+
+    state.select_column(sheet1, temps);
+    state.toggle_column_selection(sheet1, note);
+    assert!(!state.grid_menu(sheet1).unwrap().paste_enabled);
+
+    let before = cell(&state, temps, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "999".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 0), before, "rien n'est collé");
+}
+
+/// Copier une sélection non contiguë met les colonnes côte à côte, dans
+/// l'ordre de la feuille.
+#[test]
+fn copying_non_contiguous_columns_joins_them_in_sheet_order() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_column(sheet1, note);
+    state.toggle_column_selection(sheet1, temps);
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+
+    state.select_column(sheet1, temps);
+    state.toggle_column_selection(sheet1, signal);
+    state.toggle_column_selection(sheet1, note);
+    let all = state.copy_selection(sheet1).expect("sélection non vide");
+
+    let first_line = text.lines().next().unwrap();
+    assert_eq!(
+        first_line.split('\t').count(),
+        2,
+        "deux colonnes : {text:?}"
+    );
+    assert_eq!(all.lines().next().unwrap().split('\t').count(), 3);
+    assert_eq!(
+        first_line.split('\t').next(),
+        all.lines().next().unwrap().split('\t').next(),
+        "Temps d'abord dans les deux copies"
+    );
+}
+
+/// Une colonne retirée du modèle sort de la sélection multiple.
+#[test]
+fn toggling_a_column_off_keeps_the_others() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_column(sheet1, temps);
+    state.toggle_column_selection(sheet1, signal);
+    state.toggle_column_selection(sheet1, temps);
+
+    assert!(!state.is_column_selected(sheet1, temps));
+    assert!(state.is_column_selected(sheet1, signal));
+    // Ctrl+clic sur une cellule d'une autre sorte : une sélection simple.
+    state.select_cell(sheet1, temps, 0);
+    state.toggle_column_selection(sheet1, signal);
+    assert!(state.is_column_selected(sheet1, signal));
+    assert!(!state.is_column_selected(sheet1, temps));
+}
+
+// -- 21. Sélection multiple de lignes et de cellules (#159) --
+
+/// Retirer une cellule du milieu d'un rectangle le découpe autour d'elle ;
+/// la remettre la rajoute. Les cases voisines restent sélectionnées.
+#[test]
+fn toggling_a_cell_out_of_a_rectangle_splits_it() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 0);
+    state.extend_selection(sheet1, signal, 2);
+    state.toggle_cell_selection(sheet1, temps, 1);
+
+    assert!(!state.is_selected(sheet1, temps, 1));
+    for (column, row) in [
+        (temps, 0),
+        (temps, 2),
+        (signal, 0),
+        (signal, 1),
+        (signal, 2),
+    ] {
+        assert!(state.is_selected(sheet1, column, row), "{row}");
+    }
+    state.toggle_cell_selection(sheet1, temps, 1);
+    assert!(state.is_selected(sheet1, temps, 1));
+}
+
+/// Une seule sorte à la fois : un Ctrl+clic sur un champ d'en-tête quand des
+/// cellules de données sont sélectionnées repose une sélection simple.
+#[test]
+fn ctrl_click_never_mixes_header_and_data() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 0);
+    state.toggle_header_field_selection(sheet1, temps, HeaderField::Unit);
+
+    assert!(!state.is_selected(sheet1, temps, 0));
+    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Unit));
+}
+
+/// Deux cellules qui partagent leur ligne se copient côte à côte ; deux
+/// cellules qui ne partagent ni ligne ni colonne ne se copient pas (Copy et
+/// Cut grisés).
+#[test]
+fn copying_multiple_cells_needs_shared_rows_or_columns() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 1);
+    state.toggle_cell_selection(sheet1, signal, 1);
+    assert!(state.grid_menu(sheet1).unwrap().copy_enabled);
+    let side_by_side = state.copy_selection(sheet1).expect("même ligne");
+    assert_eq!(side_by_side.lines().count(), 1);
+    assert_eq!(side_by_side.lines().next().unwrap().split('\t').count(), 2);
+
+    // Même colonne, lignes 0 et 2 : empilées, sans la ligne 1.
+    state.select_cell(sheet1, temps, 0);
+    state.toggle_cell_selection(sheet1, temps, 2);
+    let stacked = state.copy_selection(sheet1).expect("même colonne");
+    assert_eq!(stacked.lines().count(), 2);
+
+    state.select_cell(sheet1, temps, 0);
+    state.toggle_cell_selection(sheet1, signal, 2);
+    assert!(!state.grid_menu(sheet1).unwrap().copy_enabled);
+    assert_eq!(state.copy_selection(sheet1), None);
+}
+
+/// Effacer des lignes non contiguës vide chacune ; Suppr ne décale pas (des
+/// trous rendraient la remontée ambiguë) et se contente de vider.
+#[test]
+fn clearing_non_contiguous_rows_empties_each_without_shifting() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let rows = state.row_count(sheet1);
+    assert!(rows >= 4);
+    let kept = cell(&state, temps, 1);
+
+    state.select_row(sheet1, 0);
+    state.toggle_row_selection(sheet1, 2);
+    assert!(state.is_row_selected(sheet1, 0));
+    assert!(!state.is_row_selected(sheet1, 1));
+    assert!(state.is_row_selected(sheet1, 2));
+    assert!(!state.grid_menu(sheet1).unwrap().offers_delete_shift);
+
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+
+    assert_eq!(state.row_count(sheet1), rows, "rien n'a remonté");
+    assert_eq!(cell(&state, temps, 1), kept, "la ligne 1 est intacte");
+    assert_ne!(cell(&state, temps, 0), kept);
+    state.dispatch(Action::Undo);
+}
+
+/// Ctrl+clic qui retire la dernière ligne ou colonne ne laisse pas de
+/// sélection vide.
+#[test]
+fn toggling_off_the_last_item_clears_the_selection() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_column(sheet1, temps);
+    state.toggle_column_selection(sheet1, temps);
+    assert!(state.selection(sheet1).is_none());
+
+    state.select_row(sheet1, 1);
+    state.toggle_row_selection(sheet1, 1);
+    assert!(state.selection(sheet1).is_none());
 }

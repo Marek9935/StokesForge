@@ -14,9 +14,13 @@ comment c'est écrit.
 - Décrire des **gestes** : « clic droit sur la rangée des lettres → Tracer →
   Ligne », pas « `AppState::plot_columns` appelle `series_from_columns` ».
 - Comparer à **Origin** quand c'est éclairant : l'appariement X/Y des colonnes,
-  la case en coin qui sélectionne tout le tableau, les quatre champs d'en-tête
-  (Nom long, Unité, Commentaire, Formule) suivent volontairement ses
-  conventions.
+  la case en coin qui sélectionne tout le tableau (Ctrl+A fait de même), les
+  quatre champs d'en-tête (Nom long, Unité, Commentaire, Formule) suivent
+  volontairement ses conventions. Gestes de sélection : Ctrl+clic ajoute ou
+  retire une colonne, une ligne ou une cellule ; Maj+clic prend la plage
+  depuis le dernier clic ; Ctrl+Maj+clic l'ajoute à la sélection (#159).
+  Une sélection non contiguë se trace, s'efface et se copie (bout à bout),
+  mais ne se colle pas dedans.
 - Donner le **raccourci clavier** quand il existe : c'est souvent la vraie
   réponse à « comment je fais plus vite ».
 - Ne citer un nom de fichier ou de fonction **que si l'utilisateur veut aller

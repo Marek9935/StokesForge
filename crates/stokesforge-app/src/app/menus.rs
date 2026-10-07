@@ -43,7 +43,7 @@ use super::object_manager_ui::{
 };
 use super::shortcuts::{
     SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
-    SHORTCUT_REDO_Y, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_UNDO,
+    SHORTCUT_REDO_Y, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_SELECT_ALL, SHORTCUT_UNDO,
 };
 use super::tab::tab_node;
 use super::tab::Tab;
@@ -269,6 +269,25 @@ impl StokesForgeApp {
                     .clicked()
                 {
                     actions.push(Action::Redo);
+                    ui.close();
+                }
+            });
+            let active_sheet = self
+                .active_book()
+                .and_then(|book| self.state.selected_sheet_in(book));
+            sections.section(ui, true, |ui| {
+                if ui
+                    .add_enabled(
+                        active_sheet.is_some(),
+                        egui::Button::new(tr!("action-select-all"))
+                            .shortcut_text(ctx.format_shortcut(&SHORTCUT_SELECT_ALL)),
+                    )
+                    .on_hover_text(tr!("action-select-all", "hint"))
+                    .clicked()
+                {
+                    if let Some(sheet) = active_sheet {
+                        actions.push(Action::SelectAll { sheet });
+                    }
                     ui.close();
                 }
             });

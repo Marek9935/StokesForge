@@ -315,6 +315,13 @@ pub enum Action {
         /// Feuille visée.
         sheet: NodeId,
     },
+    /// Sélectionne toutes les colonnes visibles de `sheet`, en-tête compris,
+    /// même sans ligne — Ctrl+A dans la grille, Edit › Select All et case du
+    /// coin (#159). État d'interface pur : ni modèle ni historique.
+    SelectAll {
+        /// Feuille visée.
+        sheet: NodeId,
+    },
     /// Remplace le nom long affiché d'une colonne
     /// ([`stokesforge_core::ColumnMeta::long_name`]).
     SetColumnLongName {
@@ -1194,6 +1201,14 @@ pub struct GridMenu {
     /// que rien n'a été copié depuis la grille dans cette session (un texte
     /// externe n'a pas de rang d'origine à rejouer).
     pub paste_absolute_enabled: bool,
+    /// Faux si la sélection est un ensemble de colonnes non contigu (#159) :
+    /// la cible d'un collage y serait ambiguë, Paste et Paste in Place sont
+    /// grisés.
+    pub paste_enabled: bool,
+    /// Faux si la sélection multiple n'a pas de copie univoque (#159) : des
+    /// blocs de cellules qui ne partagent ni leurs lignes ni leurs colonnes.
+    /// Copy et Cut sont alors grisés.
+    pub copy_enabled: bool,
 }
 
 impl GridMenu {
@@ -2459,6 +2474,31 @@ impl AppState {
         self.selection.insert(sheet, Selection::column(column));
     }
 
+    /// Ctrl+clic sur une lettre : ajoute ou retire `column` de la sélection
+    /// et y déplace l'ancre (#159). Repose une sélection simple si la
+    /// sélection en cours n'est pas un ensemble de colonnes — une seule sorte
+    /// à la fois.
+    pub fn toggle_column_selection(&mut self, sheet: NodeId, column: NodeId) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) if selection.is_columns() => {
+                selection.toggle_column(&self.snapshot.tree, sheet, column)
+            }
+            _ => self.select_column(sheet, column),
+        }
+        self.drop_selection_if_empty(sheet);
+    }
+
+    /// Maj+clic sur une lettre : la sélection devient la plage ancre →
+    /// `column` (les colonnes posées au Ctrl+clic disparaissent). Le
+    /// Ctrl+Maj+clic et le glisser, additifs, passent par
+    /// [`AppState::extend_column_selection`].
+    pub fn extend_column_selection_replacing(&mut self, sheet: NodeId, column: NodeId) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) if selection.is_columns() => selection.extend_columns_replacing(column),
+            _ => self.select_column(sheet, column),
+        }
+    }
+
     /// Étend la plage de colonnes courante de `sheet` jusqu'à `column`, en
     /// gardant l'ancre déjà posée — glisser ou Maj-clic sur la rangée des
     /// lettres. Pose une sélection d'une seule colonne si `sheet` n'en avait
@@ -2471,6 +2511,102 @@ impl AppState {
         match self.selection.get_mut(&sheet) {
             Some(selection) if selection.is_columns() => selection.extend_columns_to(column),
             _ => self.select_column(sheet, column),
+        }
+    }
+
+    /// Retire de `sheet` une sélection que le dernier geste a vidée (Ctrl+clic
+    /// qui retire la dernière colonne, ligne ou case).
+    fn drop_selection_if_empty(&mut self, sheet: NodeId) {
+        let empty = self
+            .selection
+            .get(&sheet)
+            .is_some_and(|selection| selection.columns(&self.snapshot.tree, sheet).is_empty());
+        if empty {
+            self.selection.remove(&sheet);
+        }
+    }
+
+    /// Ctrl+clic sur un numéro de ligne : ajoute ou retire `row` (#159).
+    pub fn toggle_row_selection(&mut self, sheet: NodeId, row: usize) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) if selection.is_full_rows() => selection.toggle_row(row),
+            _ => self.select_row(sheet, row),
+        }
+        self.drop_selection_if_empty(sheet);
+    }
+
+    /// Maj+clic sur un numéro de ligne : la plage ancre → `row` remplace
+    /// tout ; le Ctrl+Maj+clic et le glisser passent par
+    /// [`AppState::extend_row_selection`].
+    pub fn extend_row_selection_replacing(&mut self, sheet: NodeId, row: usize) {
+        match self.selection.get_mut(&sheet) {
+            Some(selection) if selection.is_full_rows() => {
+                selection.extend_full_rows_replacing(row)
+            }
+            _ => self.select_row(sheet, row),
+        }
+    }
+
+    /// Ctrl+clic sur une cellule : ajoute ou retire la case (#159). Repose
+    /// une sélection simple si la sélection en cours n'est pas un ensemble de
+    /// cases de la même zone.
+    pub fn toggle_cell_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
+        let target = GridCursor::Data(column, row);
+        let handled = match self.selection.get_mut(&sheet) {
+            Some(selection) => selection.toggle_cell(&self.snapshot.tree, sheet, target),
+            None => false,
+        };
+        if !handled {
+            self.select_cell(sheet, column, row);
+        }
+        self.drop_selection_if_empty(sheet);
+    }
+
+    /// Ctrl+clic sur un champ d'en-tête : même règle que
+    /// [`AppState::toggle_cell_selection`], côté en-tête.
+    pub fn toggle_header_field_selection(
+        &mut self,
+        sheet: NodeId,
+        column: NodeId,
+        field: HeaderField,
+    ) {
+        let target = GridCursor::Header(column, field);
+        let handled = match self.selection.get_mut(&sheet) {
+            Some(selection) => selection.toggle_cell(&self.snapshot.tree, sheet, target),
+            None => false,
+        };
+        if !handled {
+            self.select_header_field(sheet, column, field);
+        }
+        self.drop_selection_if_empty(sheet);
+    }
+
+    /// Ctrl+glisser depuis une cellule : ouvre un nouveau rectangle en
+    /// gardant les précédents (#159).
+    pub fn add_cell_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
+        let handled = match self.selection.get_mut(&sheet) {
+            Some(selection) => selection.add_cell(GridCursor::Data(column, row)),
+            None => false,
+        };
+        if !handled {
+            self.select_cell(sheet, column, row);
+        }
+    }
+
+    /// Ctrl+glisser depuis un champ d'en-tête : pendant de
+    /// [`AppState::add_cell_selection`].
+    pub fn add_header_field_selection(
+        &mut self,
+        sheet: NodeId,
+        column: NodeId,
+        field: HeaderField,
+    ) {
+        let handled = match self.selection.get_mut(&sheet) {
+            Some(selection) => selection.add_cell(GridCursor::Header(column, field)),
+            None => false,
+        };
+        if !handled {
+            self.select_header_field(sheet, column, field);
         }
     }
 
@@ -2828,27 +2964,30 @@ impl AppState {
             .is_some_and(|selection| selection.touches_row(row))
     }
 
-    /// Vrai si `sheet` est actuellement sélectionnée dans son entier (clic
-    /// sur le « # » de la gouttière) — voir [`AppState::select_all`].
+    /// Vrai si `sheet` est actuellement sélectionnée dans son entier : toutes
+    /// ses colonnes visibles, par la case du coin ou Ctrl+A (voir
+    /// [`AppState::select_all`]).
     pub fn is_all_selected(&self, sheet: NodeId) -> bool {
-        let row_count = self.row_count(sheet);
-        self.selection
-            .get(&sheet)
-            .is_some_and(|selection| selection.is_all_rows(row_count))
+        let order = self.column_order(sheet);
+        !order.is_empty()
+            && self
+                .selection
+                .get(&sheet)
+                .is_some_and(|selection| selection.columns(&self.snapshot.tree, sheet) == order)
+            && self
+                .selection
+                .get(&sheet)
+                .is_some_and(Selection::is_columns)
     }
 
-    /// Sélectionne tout le tableau de `sheet` (toutes les lignes, donc
-    /// toutes les colonnes visibles) — clic sur le « # » de la gouttière,
-    /// pendant de [`AppState::select_row`] pour tout le tableau plutôt
-    /// qu'une seule ligne. Sans effet sur une feuille sans ligne : il n'y a
-    /// alors rien à sélectionner.
+    /// Sélectionne **toutes** les colonnes visibles de `sheet`, en-tête
+    /// compris et même sans ligne (#159) — case du coin, Ctrl+A, Edit ›
+    /// Select All. Sans effet sur une feuille sans colonne.
     pub fn select_all(&mut self, sheet: NodeId) {
-        let row_count = self.row_count(sheet);
-        if row_count == 0 {
-            return;
+        let order = self.column_order(sheet);
+        if let Some(selection) = Selection::all_columns(&order) {
+            self.selection.insert(sheet, selection);
         }
-        self.selection
-            .insert(sheet, Selection::all_rows(row_count - 1));
     }
 
     /// Vrai si `(column, field)` fait partie de la plage de champs d'en-tête
@@ -2916,8 +3055,13 @@ impl AppState {
             zone,
             plural,
             multi_column,
-            offers_delete_shift: zone != GridZone::Header,
+            offers_delete_shift: zone != GridZone::Header
+                && (selection.is_columns()
+                    || selection.blocks(&self.snapshot.tree, sheet).len() <= 1),
+            copy_enabled: selection.is_columns()
+                || selection.copy_layout(&self.snapshot.tree, sheet).is_some(),
             paste_absolute_enabled: self.grid_clipboard.is_some(),
+            paste_enabled: selection.is_contiguous(&self.snapshot.tree, sheet),
         })
     }
 
@@ -2956,11 +3100,18 @@ impl AppState {
             GridClipboard::Text(self.header_field_display_text(column, field))
         } else if let Some((column, row)) = selection.single_cell() {
             GridClipboard::Text(cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, ""))
-        } else if let Some((lo, hi)) = selection.full_rank_range() {
-            if hi < 0 {
-                let start = HeaderField::from_index((lo + 4) as usize);
-                let rows = (lo..=hi)
-                    .map(|rank| {
+        } else if !selection.is_columns() {
+            // Un ou plusieurs blocs : bout à bout dans l'ordre de la feuille
+            // (#159) quand ils partagent leurs lignes ou leurs colonnes,
+            // sinon rien n'est copié (voir `Selection::copy_layout`).
+            let (columns, ranges) = selection.copy_layout(tree, sheet)?;
+            let ranks: Vec<isize> = ranges.iter().flat_map(|&(lo, hi)| lo..=hi).collect();
+            let first = *ranks.first()?;
+            if first < 0 {
+                let start = HeaderField::from_index((first + 4) as usize);
+                let rows = ranks
+                    .iter()
+                    .map(|&rank| {
                         let field = HeaderField::from_index((rank + 4) as usize);
                         columns
                             .iter()
@@ -2970,8 +3121,9 @@ impl AppState {
                     .collect();
                 GridClipboard::Relative(RelativeCopy::HeaderFields { start, rows })
             } else {
-                let rows = (lo..=hi)
-                    .map(|rank| {
+                let rows = ranks
+                    .iter()
+                    .map(|&rank| {
                         columns
                             .iter()
                             .map(|&column| {
@@ -2982,7 +3134,7 @@ impl AppState {
                     })
                     .collect();
                 GridClipboard::Relative(RelativeCopy::DataRows {
-                    start: lo as usize,
+                    start: first as usize,
                     rows,
                 })
             }
@@ -3643,6 +3795,7 @@ impl AppState {
             Action::DeleteSelectedCells { sheet } => self.delete_selected_cells(sheet),
             Action::Paste { sheet, text } => self.paste(sheet, text),
             Action::PasteAbsolute { sheet } => self.paste_absolute(sheet),
+            Action::SelectAll { sheet } => self.select_all(sheet),
             Action::SetColumnLongName { column, text } => {
                 self.set_column_meta_field(column, |meta| meta.long_name = text);
             }
@@ -6039,6 +6192,9 @@ impl AppState {
     /// [`external_clipboard_from_text`]. Voir [`AppState::apply_paste`] pour
     /// la matrice de comportement complète.
     fn paste(&mut self, sheet: NodeId, text: String) {
+        if !self.paste_target_is_unambiguous(sheet) {
+            return;
+        }
         if stokesforge_persistence::clipboard::is_object_clipboard(&text) {
             self.fail(tr!("object-clipboard-use-manager"));
             return;
@@ -6060,12 +6216,28 @@ impl AppState {
         self.apply_paste(sheet, anchor, &clipboard, false);
     }
 
+    /// Faux, avec un message d'état, si la sélection de `sheet` est non
+    /// contiguë (#159) : un collage n'a alors pas de cible univoque.
+    fn paste_target_is_unambiguous(&mut self, sheet: NodeId) -> bool {
+        let contiguous = self
+            .selection
+            .get(&sheet)
+            .is_none_or(|selection| selection.is_contiguous(&self.snapshot.tree, sheet));
+        if !contiguous {
+            self.fail(tr!("status-paste-non-contiguous"));
+        }
+        contiguous
+    }
+
     /// Colle en position absolue depuis [`AppState::grid_clipboard`] —
     /// Ctrl+Maj+V ([`Action::PasteAbsolute`]), qui n'a jamais de texte à lui
     /// (voir la doc de l'action). Sans effet si rien n'a encore été copié
     /// dans cette session : un texte externe n'a pas de rang d'origine à
     /// rejouer.
     fn paste_absolute(&mut self, sheet: NodeId) {
+        if !self.paste_target_is_unambiguous(sheet) {
+            return;
+        }
         let Some(selection) = self.selection.get(&sheet) else {
             self.fail("Aucune cellule sélectionnée pour coller".to_string());
             return;

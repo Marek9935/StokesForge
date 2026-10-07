@@ -30,7 +30,7 @@ use crate::{theme, tr};
 use super::menu_sections::MenuSections;
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
-    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE,
+    SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_SELECT_ALL,
 };
 
 /// Hauteur d'une ligne de la grille, en points.
@@ -369,10 +369,12 @@ fn grid_clipboard_section(
     let ctx = ui.ctx().clone();
     sections.section(ui, true, |ui| {
         if ui
-            .add(
+            .add_enabled(
+                menu.copy_enabled,
                 egui::Button::new(tr!("action-cut"))
                     .shortcut_text(ctx.format_shortcut(&SHORTCUT_CUT)),
             )
+            .on_disabled_hover_text(tr!("action-copy", "disabled"))
             .clicked()
         {
             // Couper = copier puis vider, exactement comme le bloc clavier :
@@ -386,10 +388,12 @@ fn grid_clipboard_section(
             ui.close();
         }
         if ui
-            .add(
+            .add_enabled(
+                menu.copy_enabled,
                 egui::Button::new(tr!("action-copy"))
                     .shortcut_text(ctx.format_shortcut(&SHORTCUT_COPY)),
             )
+            .on_disabled_hover_text(tr!("action-copy", "disabled"))
             .clicked()
         {
             if let Some(text) = state.copy_selection(sheet) {
@@ -411,10 +415,12 @@ fn grid_clipboard_section(
             ui.close();
         }
         if ui
-            .add(
+            .add_enabled(
+                menu.paste_enabled,
                 egui::Button::new(tr!("action-paste"))
                     .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE)),
             )
+            .on_disabled_hover_text(tr!("action-paste", "disabled"))
             .clicked()
         {
             state.forget_delete_repeat(sheet);
@@ -426,12 +432,16 @@ fn grid_clipboard_section(
         }
         if ui
             .add_enabled(
-                menu.paste_absolute_enabled,
+                menu.paste_enabled && menu.paste_absolute_enabled,
                 egui::Button::new(tr!("action-paste-in-place"))
                     .shortcut_text(ctx.format_shortcut(&SHORTCUT_PASTE_ABSOLUTE)),
             )
             .on_hover_text(tr!("action-paste-in-place", "hint"))
-            .on_disabled_hover_text(tr!("action-paste-in-place", "disabled"))
+            .on_disabled_hover_text(if menu.paste_enabled {
+                tr!("action-paste-in-place", "disabled")
+            } else {
+                tr!("action-paste", "disabled")
+            })
             .clicked()
         {
             state.forget_delete_repeat(sheet);
@@ -597,30 +607,32 @@ fn column_letter_widget(
             )
             .selectable(false),
         );
-        let shift = ui.input(|i| i.modifiers.shift);
-        if response.drag_started() || (response.clicked() && !shift) {
-            state.select_column(sheet, column);
-        } else if response.clicked() && shift {
-            state.extend_column_selection(sheet, column);
+        let modifiers = ui.input(|i| i.modifiers);
+        let press_here = press_started_in(ui, rect);
+        if response.clicked() || response.drag_started() {
+            // Ctrl+clic bascule la colonne, Maj+clic prend la plage ancre →
+            // colonne, Ctrl+Maj+clic l'ajoute à la sélection (#159).
+            match (modifiers.command, modifiers.shift) {
+                (true, true) => state.extend_column_selection(sheet, column),
+                (true, false) => state.toggle_column_selection(sheet, column),
+                (false, true) => state.extend_column_selection_replacing(sheet, column),
+                (false, false) => state.select_column(sheet, column),
+            }
         } else if response.secondary_clicked() && !is_column_selected {
-            // `&& !is_column_selected` : un clic droit *dans* une plage
-            // déjà posée doit la laisser intacte, seul un clic droit en
-            // dehors la réduit à cette colonne. Sans cette garde, le
-            // clic droit réduisait **toujours** la plage à une seule
-            // colonne — ce que le commentaire de `target_columns`
-            // ci-dessous supposait pourtant déjà faux : changer le type
-            // ou le rôle de trois colonnes sélectionnées d'un coup était
-            // donc impossible, la sélection s'étant effondrée entre le
-            // clic et l'ouverture du menu. Même règle que dans
-            // `cell_widget`/`header_field_widget`/`row_number_widget`.
+            // `&& !is_column_selected` : un clic droit *dans* la sélection
+            // (même non contiguë) la laisse intacte et le menu agit sur
+            // toute la sélection ; hors de la sélection, il la remplace par
+            // la colonne visée (#152, #159).
             state.select_column(sheet, column);
         } else if response.contains_pointer()
+            && !press_here
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some()
         {
-            // Même geste que pour les cellules de données : étendre
-            // pendant le glisser, pas seulement au clic de départ (voir
-            // le commentaire détaillé de `cell_widget`).
+            // Glisser parti d'une autre lettre : étendre au survol. Un appui
+            // commencé sur cette lettre ne relève pas d'ici — sinon un
+            // Ctrl+clic, qui bascule au relâchement, aurait déjà ajouté la
+            // plage ancre → colonne pendant l'appui.
             state.extend_column_selection(sheet, column);
         }
         // Colonnes visées par le menu contextuel : toute la plage
@@ -989,11 +1001,17 @@ fn header_field_widget(
         // Même logique de multi-sélection à la souris que pour les
         // cellules de données (clic/glisser/Maj-clic) — voir le
         // commentaire détaillé de `cell_widget`.
-        let shift = ui.input(|i| i.modifiers.shift);
+        let modifiers = ui.input(|i| i.modifiers);
+        let (command, shift) = (modifiers.command, modifiers.shift);
         let dragging = response.contains_pointer()
+            && !press_started_in(ui, rect)
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some();
-        if response.drag_started() || (response.clicked() && !shift) {
+        if response.drag_started() && command {
+            state.add_header_field_selection(sheet, column, field);
+        } else if response.clicked() && command && !shift {
+            state.toggle_header_field_selection(sheet, column, field);
+        } else if response.drag_started() || (response.clicked() && !shift) {
             state.select_header_field(sheet, column, field);
         } else if (response.clicked() && shift) || dragging {
             state.extend_header_field_selection(sheet, column, field);
@@ -1050,7 +1068,10 @@ fn row_number_header_widget(
                 .rect_filled(rect, 0.0, gutter_fill(selected, false));
             header_row_separator(ui, rect);
             let id = ui.id().with("stokesforge_select_all");
-            let response = ui.interact(rect, id, egui::Sense::click());
+            let response = ui
+                .interact(rect, id, egui::Sense::click())
+                .on_hover_text(tr!("action-select-all"))
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
             ui.put(
                 rect,
                 egui::Label::new(
@@ -1060,7 +1081,10 @@ fn row_number_header_widget(
                 )
                 .selectable(false),
             );
-            if response.clicked() || (response.secondary_clicked() && !selected) {
+            if response.clicked() && selected {
+                // Un second clic désélectionne (#159).
+                state.deselect_all(sheet);
+            } else if response.clicked() || (response.secondary_clicked() && !selected) {
                 // `&& !selected` : un clic droit alors que tout est déjà
                 // sélectionné ouvre le menu sans y toucher — même règle que
                 // dans les autres cases de la gouttière (voir
@@ -1610,6 +1634,14 @@ fn grid_keyboard(
             }
             return;
         }
+        // Ctrl+A : même effet que la case du coin (#159). Échap lève la
+        // sélection, comme un second clic sur la case du coin.
+        if ui.input_mut(|input| input.consume_shortcut(&SHORTCUT_SELECT_ALL)) {
+            actions.push(Action::SelectAll { sheet });
+        } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            state.deselect_all(sheet);
+        }
         start_grid_typing(ui, state, sheet);
         navigate_grid_selection(ui, state, actions, sheet);
         grid_clipboard_shortcuts(ui, state, actions, sheet);
@@ -1822,8 +1854,10 @@ fn grid_clipboard_shortcuts(
             ui.ctx().copy_text(text);
         }
     } else if copy || cut {
-        if let Some(text) = state.copy_selection(sheet) {
-            ui.ctx().copy_text(text);
+        match state.copy_selection(sheet) {
+            Some(text) => ui.ctx().copy_text(text),
+            // Copie ambiguë (#159) : Couper ne vide rien, il n'a rien copié.
+            None => cut = false,
         }
     }
     if cut || backspace {
@@ -1877,7 +1911,9 @@ fn row_number_widget(
     ui.painter()
         .rect_filled(rect, 0.0, gutter_fill(selected, touched));
     let id = ui.id().with(("stokesforge_row_number", row));
-    let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+    let response = ui
+        .interact(rect, id, egui::Sense::click_and_drag())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
     ui.put(
         rect,
         egui::Label::new(
@@ -1885,12 +1921,18 @@ fn row_number_widget(
         )
         .selectable(false),
     );
-    let shift = ui.input(|i| i.modifiers.shift);
-    if response.drag_started() || (response.clicked() && !shift) {
-        state.select_row(sheet, row);
-    } else if response.clicked() && shift {
-        state.extend_row_selection(sheet, row);
+    let modifiers = ui.input(|i| i.modifiers);
+    if response.clicked() || response.drag_started() {
+        // Ctrl+clic bascule la ligne, Maj+clic prend la plage ancre → ligne,
+        // Ctrl+Maj+clic l'ajoute à la sélection (#159) — comme les lettres.
+        match (modifiers.command, modifiers.shift) {
+            (true, true) => state.extend_row_selection(sheet, row),
+            (true, false) => state.toggle_row_selection(sheet, row),
+            (false, true) => state.extend_row_selection_replacing(sheet, row),
+            (false, false) => state.select_row(sheet, row),
+        }
     } else if response.contains_pointer()
+        && !press_started_in(ui, rect)
         && ui.input(|i| i.pointer.primary_down())
         && state.selection(sheet).is_some()
     {
@@ -2133,12 +2175,19 @@ fn display_cell_widget(
         state.begin_edit(column, row);
         return;
     }
-    let shift = ui.input(|i| i.modifiers.shift);
-    if response.drag_started() || (response.clicked() && !shift) {
+    let modifiers = ui.input(|i| i.modifiers);
+    let (command, shift) = (modifiers.command, modifiers.shift);
+    if response.drag_started() && command {
+        // Ctrl+glisser : un nouveau rectangle, les précédents restent (#159).
+        state.add_cell_selection(sheet, column, row);
+    } else if response.clicked() && command && !shift {
+        state.toggle_cell_selection(sheet, column, row);
+    } else if response.drag_started() || (response.clicked() && !shift) {
         state.select_cell(sheet, column, row);
     } else if response.clicked() && shift {
         state.extend_selection(sheet, column, row);
     } else if response.contains_pointer()
+        && !press_started_in(ui, rect)
         && ui.input(|i| i.pointer.primary_down())
         && state.selection(sheet).is_some()
     {
@@ -2175,6 +2224,15 @@ fn display_cell_widget(
             grid_edit_menu(ui, state, actions, sheet, &menu);
         }
     });
+}
+
+/// Vrai si l'appui en cours a commencé dans `rect`. L'extension de sélection
+/// au survol ne concerne que les cases où le glisser n'a **pas** commencé :
+/// sur la case d'origine, un Ctrl+clic (qui bascule au relâchement) aurait
+/// sinon déjà étendu la sélection pendant l'appui (#159).
+fn press_started_in(ui: &egui::Ui, rect: egui::Rect) -> bool {
+    ui.input(|i| i.pointer.press_origin())
+        .is_some_and(|origin| rect.contains(origin))
 }
 
 /// Peint l'icône « prise » du glisser-déposer de colonnes ([`grid_contents`])
@@ -2431,6 +2489,28 @@ mod tests {
                 }]);
             }
             // Laisse passer les images de retombée (focus, relâchement).
+            self.image(Vec::new());
+        }
+
+        /// Clic gauche sur le texte peint `texte`, `modifiers` enfoncés
+        /// (`ModifiersChanged` explicite : la grille lit `InputState::modifiers`).
+        fn clic_avec(&mut self, texte: &str, modifiers: egui::Modifiers) {
+            let position = self
+                .centre_de(texte)
+                .unwrap_or_else(|| panic!("aucun texte peint ne porte {texte:?}"));
+            self.image(vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::ModifiersChanged(modifiers),
+            ]);
+            for pressed in [true, false] {
+                self.image(vec![egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers,
+                }]);
+            }
+            self.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
             self.image(Vec::new());
         }
 
@@ -3369,5 +3449,108 @@ mod tests {
             "un changement dans l'ordre des colonnes"
         );
         assert_eq!(banc.actions.len(), 2, "aucune action sur la voisine");
+    }
+
+    // --- Sélection multiple (#159) ------------------------------------------
+
+    fn lettre(banc: &Banc, index: usize) -> String {
+        let role = banc.state.column_meta(banc.columns[index]).role;
+        format!("{}({})", column_letter(index), role_label(role))
+    }
+
+    #[test]
+    fn ctrl_clic_sur_les_lettres_pose_une_selection_non_contigue() {
+        let mut banc = Banc::new();
+        let (a, c) = (lettre(&banc, 0), lettre(&banc, 2));
+        banc.clic_sur(&a);
+        banc.clic_avec(&c, egui::Modifiers::COMMAND);
+        let sheet = banc.sheet;
+        assert!(banc.state.is_column_selected(sheet, banc.columns[0]));
+        assert!(!banc.state.is_column_selected(sheet, banc.columns[1]));
+        assert!(banc.state.is_column_selected(sheet, banc.columns[2]));
+        // Un second Ctrl+clic retire la colonne.
+        banc.clic_avec(&c, egui::Modifiers::COMMAND);
+        assert!(!banc.state.is_column_selected(sheet, banc.columns[2]));
+        assert!(banc.state.is_column_selected(sheet, banc.columns[0]));
+        // Un clic simple remplace tout.
+        banc.clic_avec(&c, egui::Modifiers::COMMAND);
+        banc.clic_sur(&lettre(&banc, 1));
+        assert!(!banc.state.is_column_selected(sheet, banc.columns[0]));
+        assert!(banc.state.is_column_selected(sheet, banc.columns[1]));
+    }
+
+    #[test]
+    fn maj_clic_remplace_et_ctrl_maj_clic_ajoute_une_plage() {
+        let mut banc = Banc::new();
+        let sheet = banc.sheet;
+        let (a, b, c) = (lettre(&banc, 0), lettre(&banc, 1), lettre(&banc, 2));
+        banc.clic_sur(&a);
+        banc.clic_avec(&b, egui::Modifiers::COMMAND);
+        // Maj+clic : plage ancre (B) → C, A disparaît.
+        banc.clic_avec(&c, egui::Modifiers::SHIFT);
+        assert!(!banc.state.is_column_selected(sheet, banc.columns[0]));
+        assert!(banc.state.is_column_selected(sheet, banc.columns[1]));
+        assert!(banc.state.is_column_selected(sheet, banc.columns[2]));
+        // Ctrl+Maj+clic : l'ajoute aux colonnes déjà posées.
+        banc.clic_sur(&a);
+        banc.clic_avec(&c, egui::Modifiers::COMMAND);
+        banc.clic_avec(&b, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
+        for column in &banc.columns {
+            assert!(banc.state.is_column_selected(sheet, *column));
+        }
+    }
+
+    #[test]
+    fn la_case_du_coin_selectionne_tout_puis_deselectionne() {
+        let mut banc = Banc::new();
+        let sheet = banc.sheet;
+        banc.clic_sur("#");
+        assert!(banc.state.is_all_selected(sheet));
+        banc.clic_sur("#");
+        assert!(banc.state.selection(sheet).is_none());
+    }
+
+    #[test]
+    fn ctrl_a_dans_la_grille_pousse_select_all_et_echap_deselectionne() {
+        let mut banc = Banc::new();
+        banc.clic_sur("101");
+        banc.image(vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            },
+        ]);
+        assert!(banc
+            .actions
+            .contains(&Action::SelectAll { sheet: banc.sheet }));
+        banc.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        banc.touche(egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(banc.state.selection(banc.sheet).is_none());
+    }
+
+    #[test]
+    fn ctrl_clic_sur_les_cellules_et_les_lignes_compose_une_selection_multiple() {
+        let mut banc = Banc::new();
+        let sheet = banc.sheet;
+        banc.clic_sur("101");
+        banc.clic_avec("303", egui::Modifiers::COMMAND);
+        assert!(banc.state.is_selected(sheet, banc.columns[0], 0));
+        assert!(banc.state.is_selected(sheet, banc.columns[2], 2));
+        assert!(!banc.state.is_selected(sheet, banc.columns[1], 1));
+        // Ctrl+clic sur une cellule déjà sélectionnée la retire.
+        banc.clic_avec("101", egui::Modifiers::COMMAND);
+        assert!(!banc.state.is_selected(sheet, banc.columns[0], 0));
+        assert!(banc.state.is_selected(sheet, banc.columns[2], 2));
+        // Les numéros de ligne : une seule sorte à la fois.
+        banc.clic_sur("1");
+        banc.clic_avec("3", egui::Modifiers::COMMAND);
+        assert!(banc.state.is_row_selected(sheet, 0));
+        assert!(!banc.state.is_row_selected(sheet, 1));
+        assert!(banc.state.is_row_selected(sheet, 2));
+        assert!(!banc.state.is_selected(sheet, banc.columns[2], 1));
     }
 }

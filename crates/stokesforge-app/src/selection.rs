@@ -78,14 +78,31 @@ enum SelectionKind {
     /// [`Selection::extend_row_to`] ramène systématiquement `cursor` à la
     /// frontière plutôt que de la laisser changer de sorte, voir la doc de
     /// tête du module.
+    ///
+    /// `extra` porte les rectangles déjà posés par Ctrl+clic ou Ctrl+glisser
+    /// (#159), tous de la même zone (en-tête ou données) ; le rectangle
+    /// `anchor`–`cursor` est le **dernier**, celui que Maj+clic étend. Il ne
+    /// compte dans la sélection que si `active` : un Ctrl+clic qui retire une
+    /// cellule laisse l'ancre sur elle sans la sélectionner.
     Rows {
+        extra: Vec<(GridCursor, GridCursor)>,
         anchor: GridCursor,
         cursor: GridCursor,
+        active: bool,
     },
-    /// Plage de colonnes entières, entre `anchor` et `cursor` (mêmes règles
-    /// que `Rows::anchor`/`cursor`, mais en colonnes plutôt qu'en cases) —
-    /// glisser ou Maj-clic sur la rangée des lettres.
-    Columns { anchor: NodeId, cursor: NodeId },
+    /// Ensemble de colonnes entières (#159) : les colonnes de `base`
+    /// (posées une à une par Ctrl+clic, ou gelées par un autre geste), plus,
+    /// si `ranged`, la plage `anchor..=cursor` (mêmes règles que
+    /// `Rows::anchor`/`cursor`, mais en colonnes plutôt qu'en cases) —
+    /// glisser ou Maj-clic sur la rangée des lettres. `anchor` est la
+    /// dernière colonne cliquée. L'ordre de `base` n'a aucun sens :
+    /// [`Selection::columns`] rend toujours l'ordre de la feuille.
+    Columns {
+        base: Vec<NodeId>,
+        anchor: NodeId,
+        cursor: NodeId,
+        ranged: bool,
+    },
     /// Plage de lignes entières, entre `anchor` et `cursor` (mêmes règles que
     /// `Columns::anchor`/`cursor`, mais en indices de ligne plutôt qu'en
     /// identifiants de colonne) — glisser ou Maj-clic sur la gouttière des
@@ -93,7 +110,16 @@ enum SelectionKind {
     /// `Columns` : elle touche toutes les colonnes visibles de la feuille et,
     /// comme elle, ne touche jamais l'en-tête (une ligne entière est une
     /// sélection de données pures, voir la doc de tête du module).
-    FullRows { anchor: usize, cursor: usize },
+    ///
+    /// Comme `Columns`, c'est un **ensemble** (#159) : les intervalles de
+    /// `base` (posés par Ctrl+clic), plus, si `ranged`, la plage
+    /// `anchor..=cursor`.
+    FullRows {
+        base: Vec<(usize, usize)>,
+        anchor: usize,
+        cursor: usize,
+        ranged: bool,
+    },
     /// Plage d'un champ d'en-tête entier, entre `anchor` et `cursor` (mêmes
     /// règles que `FullRows::anchor`/`cursor`, mais en champs plutôt qu'en
     /// indices de ligne) — glisser ou Maj-clic sur le libellé du champ dans
@@ -201,14 +227,126 @@ fn order_range(tree: &Tree, sheet: NodeId, a: NodeId, b: NodeId) -> Vec<NodeId> 
     }
 }
 
+/// Un bloc rectangulaire de la sélection : des colonnes (dans l'ordre de la
+/// feuille) et une plage de rangs `lo..=hi` (voir [`GridCursor::rank`]). Une
+/// sélection multiple (#159) en porte plusieurs ; copier, effacer et
+/// supprimer raisonnent bloc par bloc.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SelectionBlock {
+    pub(crate) columns: Vec<NodeId>,
+    pub(crate) lo: isize,
+    pub(crate) hi: isize,
+}
+
+/// Colonnes et plages de rangs d'une copie ([`Selection::copy_layout`]).
+pub(crate) type CopyLayout = (Vec<NodeId>, Vec<(isize, isize)>);
+
+fn ordered(a: usize, b: usize) -> (usize, usize) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Intervalles triés et fusionnés (les intervalles qui se touchent n'en font
+/// qu'un : `(1,2)` et `(3,4)` donnent `(1,4)`).
+fn merge_intervals(mut intervals: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    intervals.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (lo, hi) in intervals {
+        match merged.last_mut() {
+            Some(last) if lo <= last.1.saturating_add(1) => last.1 = last.1.max(hi),
+            _ => merged.push((lo, hi)),
+        }
+    }
+    merged
+}
+
+/// `intervals` privés de `point`, un intervalle coupé en deux au besoin.
+fn remove_point(intervals: Vec<(usize, usize)>, point: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    for (lo, hi) in intervals {
+        if point < lo || point > hi {
+            out.push((lo, hi));
+            continue;
+        }
+        if point > lo {
+            out.push((lo, point - 1));
+        }
+        if point < hi {
+            out.push((point + 1, hi));
+        }
+    }
+    out
+}
+
+/// Case de la colonne d'indice `column` (dans `order`) au rang `rank`.
+fn cursor_at(order: &[NodeId], column: usize, rank: isize) -> GridCursor {
+    if rank < 0 {
+        GridCursor::Header(order[column], HeaderField::from_index((rank + 4) as usize))
+    } else {
+        GridCursor::Data(order[column], rank as usize)
+    }
+}
+
+/// Bornes `((colonne min, colonne max), (rang min, rang max))` du rectangle
+/// `a`–`b`, les colonnes en indices de `order` ; `None` si une colonne a
+/// disparu.
+fn rect_bounds(
+    order: &[NodeId],
+    a: GridCursor,
+    b: GridCursor,
+) -> Option<((usize, usize), (isize, isize))> {
+    let ca = order.iter().position(|&c| c == a.column())?;
+    let cb = order.iter().position(|&c| c == b.column())?;
+    Some((ordered(ca, cb), rank_range(a, b)))
+}
+
+/// Le rectangle `a`–`b` privé de la case `(column, rank)`, en rectangles qui
+/// la contournent (au plus quatre) ; `a`–`b` tel quel s'il ne la contient pas.
+fn rect_minus_cell(
+    order: &[NodeId],
+    a: GridCursor,
+    b: GridCursor,
+    column: usize,
+    rank: isize,
+) -> Vec<(GridCursor, GridCursor)> {
+    let Some(((c0, c1), (r0, r1))) = rect_bounds(order, a, b) else {
+        return Vec::new();
+    };
+    if column < c0 || column > c1 || rank < r0 || rank > r1 {
+        return vec![(a, b)];
+    }
+    let mut pieces = Vec::new();
+    let mut push = |ca: usize, cb: usize, ra: isize, rb: isize| {
+        pieces.push((cursor_at(order, ca, ra), cursor_at(order, cb, rb)));
+    };
+    if column > c0 {
+        push(c0, column - 1, r0, r1);
+    }
+    if column < c1 {
+        push(column + 1, c1, r0, r1);
+    }
+    if rank > r0 {
+        push(column, column, r0, rank - 1);
+    }
+    if rank < r1 {
+        push(column, column, rank + 1, r1);
+    }
+    pieces
+}
+
 impl Selection {
     /// Sélection d'une seule cellule — l'ancre d'un futur rectangle.
     pub fn cell(column: NodeId, row: usize) -> Self {
         let cursor = GridCursor::Data(column, row);
         Self {
             kind: SelectionKind::Rows {
+                extra: Vec::new(),
                 anchor: cursor,
                 cursor,
+                active: true,
             },
         }
     }
@@ -217,32 +355,37 @@ impl Selection {
     pub fn column(column: NodeId) -> Self {
         Self {
             kind: SelectionKind::Columns {
+                base: Vec::new(),
                 anchor: column,
                 cursor: column,
+                ranged: true,
             },
         }
+    }
+
+    /// Sélection de **toutes** les colonnes données (dans l'ordre de la
+    /// feuille), en-tête compris — la case du coin et Ctrl+A (#159). `None`
+    /// pour une feuille sans colonne.
+    pub fn all_columns(columns: &[NodeId]) -> Option<Self> {
+        let first = *columns.first()?;
+        Some(Self {
+            kind: SelectionKind::Columns {
+                base: columns.to_vec(),
+                anchor: first,
+                cursor: first,
+                ranged: false,
+            },
+        })
     }
 
     /// Sélection d'une seule ligne entière — l'ancre d'une future plage.
     pub fn row(row: usize) -> Self {
         Self {
             kind: SelectionKind::FullRows {
+                base: Vec::new(),
                 anchor: row,
                 cursor: row,
-            },
-        }
-    }
-
-    /// Sélection de **toutes** les lignes de données, `0..=last_row` —
-    /// clic sur le « # » de la gouttière. Une plage de lignes entières
-    /// couvre déjà toutes les colonnes visibles ([`Selection::columns`]),
-    /// donc `0..=last_row` suffit à désigner tout le tableau, sans qu'il
-    /// faille une sorte de sélection dédiée.
-    pub fn all_rows(last_row: usize) -> Self {
-        Self {
-            kind: SelectionKind::FullRows {
-                anchor: 0,
-                cursor: last_row,
+                ranged: true,
             },
         }
     }
@@ -272,32 +415,29 @@ impl Selection {
         let cursor = GridCursor::Header(column, field);
         Self {
             kind: SelectionKind::Rows {
+                extra: Vec::new(),
                 anchor: cursor,
                 cursor,
+                active: true,
             },
         }
     }
 
-    /// `Some((column, field))` si la sélection est réduite à un seul champ
-    /// d'en-tête **d'une seule colonne** (ancre et curseur confondus) —
-    /// jamais pour une plage de plusieurs champs/colonnes/lignes de données,
-    /// ni une plage de colonnes, ni un champ entier (qui touche toutes les
-    /// colonnes de la feuille par construction, même sur une feuille à une
-    /// seule colonne — les deux widgets qui les posent restent distincts,
-    /// voir [`Selection::header_row`]). Sert à démarrer l'édition par simple
-    /// frappe au clavier, même règle que [`Selection::single_cell`] pour une
-    /// cellule de données : ce geste n'a de sens que pour un champ unique.
     pub fn selected_header_field(&self) -> Option<(NodeId, HeaderField)> {
-        match self.kind {
-            SelectionKind::Rows { anchor, cursor } if anchor == cursor => match anchor {
-                GridCursor::Header(column, field) => Some((column, field)),
+        match &self.kind {
+            SelectionKind::Rows {
+                extra,
+                anchor,
+                cursor,
+                active: true,
+            } if extra.is_empty() && anchor == cursor => match anchor {
+                GridCursor::Header(column, field) => Some((*column, *field)),
                 GridCursor::Data(..) => None,
             },
             _ => None,
         }
     }
 
-    /// Vrai si `(column, field)` fait partie de la plage sélectionnée.
     pub fn is_header_field_selected(
         &self,
         tree: &Tree,
@@ -305,61 +445,332 @@ impl Selection {
         column: NodeId,
         field: HeaderField,
     ) -> bool {
-        match &self.kind {
-            SelectionKind::Rows { anchor, cursor } => {
-                let columns = order_range(tree, sheet, anchor.column(), cursor.column());
-                if !columns.contains(&column) {
-                    return false;
-                }
-                let (lo, hi) = rank_range(*anchor, *cursor);
-                let rank = field.index() as isize - 4;
-                rank >= lo && rank <= hi
-            }
-            SelectionKind::HeaderRows { .. } => {
-                all_visible_columns(tree, sheet).contains(&column)
-                    && self.is_header_row_selected(field)
-            }
-            SelectionKind::Columns { .. } | SelectionKind::FullRows { .. } => false,
+        let rank = field.index() as isize - 4;
+        self.blocks(tree, sheet)
+            .iter()
+            .any(|block| block.lo <= rank && rank <= block.hi && block.columns.contains(&column))
+    }
+
+    pub fn extend_row_to(&mut self, target: GridCursor) {
+        if let SelectionKind::Rows {
+            anchor,
+            cursor,
+            active,
+            ..
+        } = &mut self.kind
+        {
+            *cursor = clamp_to_anchor_zone(*anchor, target);
+            *active = true;
         }
     }
 
-    /// Étend le rectangle en cours jusqu'à `target`, en gardant l'ancre déjà
-    /// posée — glisser ou Maj-clic, aussi bien depuis une cellule de données
-    /// que depuis un champ d'en-tête. `target` est ramené à la frontière de
-    /// la zone de l'ancre s'il n'est pas de la même sorte qu'elle (voir
-    /// [`clamp_to_anchor_zone`] et la doc de tête du module) : un glisser
-    /// qui part de l'en-tête et vise une cellule de données s'arrête au
-    /// champ Formule (le dernier champ d'en-tête) de la colonne visée ; un
-    /// glisser qui part des données et vise un champ d'en-tête s'arrête à la
-    /// ligne 0 de la colonne visée — jamais de bascule d'une zone à l'autre
-    /// en cours de glisser. Sans effet si la sélection courante n'est pas
-    /// déjà un rectangle de ce genre (c'est le cas d'une plage de colonnes :
-    /// il faut re-cliquer une cellule ou un champ pour repartir en
-    /// rectangle, voir [`crate::state::AppState::extend_selection`]/
-    /// [`crate::state::AppState::extend_header_field_selection`]).
-    pub fn extend_row_to(&mut self, target: GridCursor) {
-        if let SelectionKind::Rows { anchor, cursor } = &mut self.kind {
-            *cursor = clamp_to_anchor_zone(*anchor, target);
+    /// Ctrl+clic sur une cellule ou un champ d'en-tête (#159) : ajoute la
+    /// case à la sélection, ou la retire (le rectangle qui la contient est
+    /// découpé autour d'elle), et y pose l'ancre. `false` si la sélection
+    /// n'est pas un ensemble de cases de la même zone (en-tête ou données) :
+    /// l'appelant pose alors une sélection simple.
+    pub fn toggle_cell(&mut self, tree: &Tree, sheet: NodeId, target: GridCursor) -> bool {
+        let SelectionKind::Rows {
+            extra,
+            anchor,
+            cursor,
+            active,
+        } = &mut self.kind
+        else {
+            return false;
+        };
+        if (anchor.rank() < 0) != (target.rank() < 0) {
+            return false;
         }
+        let order = all_visible_columns(tree, sheet);
+        let Some(column) = order.iter().position(|&c| c == target.column()) else {
+            return false;
+        };
+        let rank = target.rank();
+        let mut rects = extra.clone();
+        if *active {
+            rects.push((*anchor, *cursor));
+        }
+        let hit = rects.iter().any(|&(a, b)| {
+            rect_bounds(&order, a, b).is_some_and(|((c0, c1), (r0, r1))| {
+                (c0..=c1).contains(&column) && (r0..=r1).contains(&rank)
+            })
+        });
+        if hit {
+            *extra = rects
+                .into_iter()
+                .flat_map(|(a, b)| rect_minus_cell(&order, a, b, column, rank))
+                .collect();
+            *active = false;
+        } else {
+            *extra = rects;
+            *active = true;
+        }
+        *anchor = target;
+        *cursor = target;
+        true
+    }
+
+    /// Ctrl+glisser (#159) : ouvre un nouveau rectangle en `target`, sans
+    /// toucher aux précédents ; Maj+clic et le glisser l'étendent ensuite.
+    /// `false` dans les mêmes cas que [`Selection::toggle_cell`].
+    pub fn add_cell(&mut self, target: GridCursor) -> bool {
+        let SelectionKind::Rows {
+            extra,
+            anchor,
+            cursor,
+            active,
+        } = &mut self.kind
+        else {
+            return false;
+        };
+        if (anchor.rank() < 0) != (target.rank() < 0) {
+            return false;
+        }
+        if *active {
+            extra.push((*anchor, *cursor));
+        }
+        *anchor = target;
+        *cursor = target;
+        *active = true;
+        true
     }
 
     /// Étend une plage de colonnes jusqu'à `column`, en gardant l'ancre
     /// posée par [`Selection::column`] — glisser ou Maj-clic sur la rangée
     /// des lettres. Sans effet si la sélection courante n'est pas déjà une
     /// plage de colonnes.
+    ///
+    /// Les colonnes déjà posées par Ctrl+clic restent : c'est le geste
+    /// additif (glisser, Ctrl+Maj+clic). Pour un Maj+clic simple, qui
+    /// remplace tout par la plage ancre → `column`, voir
+    /// [`Selection::extend_columns_replacing`].
     pub fn extend_columns_to(&mut self, column: NodeId) {
-        if let SelectionKind::Columns { cursor, .. } = &mut self.kind {
+        if let SelectionKind::Columns { cursor, ranged, .. } = &mut self.kind {
             *cursor = column;
+            *ranged = true;
         }
     }
 
-    /// Étend une plage de lignes jusqu'à `row`, en gardant l'ancre posée par
-    /// [`Selection::row`] — glisser ou Maj-clic sur la gouttière des numéros
-    /// de ligne. Sans effet si la sélection courante n'est pas déjà une plage
-    /// de lignes.
+    /// Maj+clic : la sélection devient exactement la plage ancre →
+    /// `column`, les colonnes posées une à une disparaissent.
+    pub fn extend_columns_replacing(&mut self, column: NodeId) {
+        if let SelectionKind::Columns { base, .. } = &mut self.kind {
+            base.clear();
+        }
+        self.extend_columns_to(column);
+    }
+
+    /// Ctrl+clic : bascule l'appartenance de `column` et déplace l'ancre
+    /// sur elle. Sans effet si la sélection n'est pas un ensemble de
+    /// colonnes (l'appelant pose alors [`Selection::column`]).
+    pub fn toggle_column(&mut self, tree: &Tree, sheet: NodeId, column: NodeId) {
+        let selected = self.columns(tree, sheet);
+        if let SelectionKind::Columns {
+            base,
+            anchor,
+            cursor,
+            ranged,
+        } = &mut self.kind
+        {
+            *anchor = column;
+            *cursor = column;
+            if selected.contains(&column) {
+                *base = selected.into_iter().filter(|&c| c != column).collect();
+                *ranged = false;
+            } else {
+                *base = selected;
+                *ranged = true;
+            }
+        }
+    }
+
+    /// Disposition de la copie (#159) : les colonnes (ordre de la feuille) et
+    /// les plages de rangs à copier, bout à bout, dans l'ordre de la feuille.
+    /// Des blocs qui partagent les **mêmes lignes** se mettent côte à côte,
+    /// ceux qui partagent les **mêmes colonnes** s'empilent ; sinon `None` :
+    /// la copie serait ambiguë (Copy et Cut grisés). Un bloc unique, comme un
+    /// ensemble de colonnes entières, est toujours copiable (`None` aussi
+    /// pour ce dernier : il se copie par colonne, sans rangs).
+    pub(crate) fn copy_layout(&self, tree: &Tree, sheet: NodeId) -> Option<CopyLayout> {
+        let blocks = self.blocks(tree, sheet);
+        let first = blocks.first()?;
+        if blocks.iter().all(|b| (b.lo, b.hi) == (first.lo, first.hi)) {
+            return Some((self.columns(tree, sheet), vec![(first.lo, first.hi)]));
+        }
+        if blocks.iter().all(|b| b.columns == first.columns) {
+            // Rangs décalés de 4 pour fusionner en non signés (les champs
+            // d'en-tête occupent -4..=-1).
+            let merged = merge_intervals(
+                blocks
+                    .iter()
+                    .map(|b| ((b.lo + 4) as usize, (b.hi + 4) as usize))
+                    .collect(),
+            );
+            let ranges = merged
+                .into_iter()
+                .map(|(lo, hi)| (lo as isize - 4, hi as isize - 4))
+                .collect();
+            return Some((first.columns.clone(), ranges));
+        }
+        None
+    }
+
+    pub fn is_contiguous(&self, tree: &Tree, sheet: NodeId) -> bool {
+        match &self.kind {
+            SelectionKind::Columns { .. } => {
+                let selected = self.columns(tree, sheet);
+                let order = all_visible_columns(tree, sheet);
+                let positions: Vec<usize> = selected
+                    .iter()
+                    .filter_map(|c| order.iter().position(|o| o == c))
+                    .collect();
+                positions.windows(2).all(|w| w[1] == w[0] + 1)
+            }
+            _ => self.blocks(tree, sheet).len() <= 1,
+        }
+    }
+
     pub fn extend_full_rows_to(&mut self, row: usize) {
-        if let SelectionKind::FullRows { cursor, .. } = &mut self.kind {
+        if let SelectionKind::FullRows { cursor, ranged, .. } = &mut self.kind {
             *cursor = row;
+            *ranged = true;
+        }
+    }
+
+    /// Maj+clic sur un numéro de ligne : la sélection devient exactement la
+    /// plage ancre → `row`, les lignes posées au Ctrl+clic disparaissent.
+    pub fn extend_full_rows_replacing(&mut self, row: usize) {
+        if let SelectionKind::FullRows { base, .. } = &mut self.kind {
+            base.clear();
+        }
+        self.extend_full_rows_to(row);
+    }
+
+    /// Ctrl+clic sur un numéro de ligne (#159) : bascule l'appartenance de
+    /// `row` et y pose l'ancre. Sans effet si la sélection n'est pas un
+    /// ensemble de lignes.
+    pub fn toggle_row(&mut self, row: usize) {
+        let selected = self.full_row_intervals();
+        if let SelectionKind::FullRows {
+            base,
+            anchor,
+            cursor,
+            ranged,
+        } = &mut self.kind
+        {
+            *anchor = row;
+            *cursor = row;
+            if selected.iter().any(|&(lo, hi)| (lo..=hi).contains(&row)) {
+                *base = remove_point(selected, row);
+                *ranged = false;
+            } else {
+                *base = selected;
+                *ranged = true;
+            }
+        }
+    }
+
+    /// Intervalles de lignes d'un ensemble de lignes entières, triés et
+    /// fusionnés ; vide pour toute autre sorte de sélection.
+    fn full_row_intervals(&self) -> Vec<(usize, usize)> {
+        match &self.kind {
+            SelectionKind::FullRows {
+                base,
+                anchor,
+                cursor,
+                ranged,
+            } => {
+                let mut intervals = base.clone();
+                if *ranged {
+                    intervals.push(ordered(*anchor, *cursor));
+                }
+                merge_intervals(intervals)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Rectangles de cases d'un ensemble de cases, le dernier compris s'il
+    /// est actif ; vide pour toute autre sorte de sélection.
+    fn rects(&self) -> Vec<(GridCursor, GridCursor)> {
+        match &self.kind {
+            SelectionKind::Rows {
+                extra,
+                anchor,
+                cursor,
+                active,
+            } => {
+                let mut rects = extra.clone();
+                if *active {
+                    rects.push((*anchor, *cursor));
+                }
+                rects
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Les blocs rectangulaires de la sélection (voir [`SelectionBlock`]) ;
+    /// vide pour un ensemble de colonnes entières, qui se lit par
+    /// [`Selection::columns`].
+    pub(crate) fn blocks(&self, tree: &Tree, sheet: NodeId) -> Vec<SelectionBlock> {
+        match &self.kind {
+            SelectionKind::Rows { .. } => self
+                .rects()
+                .into_iter()
+                .filter_map(|(a, b)| {
+                    let columns = order_range(tree, sheet, a.column(), b.column());
+                    if columns.is_empty() {
+                        return None;
+                    }
+                    let (lo, hi) = rank_range(a, b);
+                    Some(SelectionBlock { columns, lo, hi })
+                })
+                .collect(),
+            SelectionKind::FullRows { .. } => {
+                let columns = all_visible_columns(tree, sheet);
+                if columns.is_empty() {
+                    return Vec::new();
+                }
+                self.full_row_intervals()
+                    .into_iter()
+                    .map(|(lo, hi)| SelectionBlock {
+                        columns: columns.clone(),
+                        lo: lo as isize,
+                        hi: hi as isize,
+                    })
+                    .collect()
+            }
+            SelectionKind::HeaderRows { .. } => {
+                let columns = all_visible_columns(tree, sheet);
+                match self.full_rank_range() {
+                    Some((lo, hi)) if !columns.is_empty() => {
+                        vec![SelectionBlock { columns, lo, hi }]
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            SelectionKind::Columns { .. } => Vec::new(),
+        }
+    }
+
+    /// Intervalles de lignes de **données** touchés, triés et fusionnés —
+    /// sans l'arbre : une ligne n'a pas besoin des colonnes pour savoir si
+    /// elle est touchée.
+    fn data_intervals(&self) -> Vec<(usize, usize)> {
+        match &self.kind {
+            SelectionKind::Rows { .. } => merge_intervals(
+                self.rects()
+                    .into_iter()
+                    .filter_map(|(a, b)| {
+                        let (lo, hi) = rank_range(a, b);
+                        (hi >= 0).then_some((lo.max(0) as usize, hi as usize))
+                    })
+                    .collect(),
+            ),
+            SelectionKind::FullRows { .. } => self.full_row_intervals(),
+            SelectionKind::Columns { .. } | SelectionKind::HeaderRows { .. } => Vec::new(),
         }
     }
 
@@ -409,22 +820,14 @@ impl Selection {
         matches!(self.kind, SelectionKind::HeaderRows { .. })
     }
 
-    /// `Some((column, row))` si la sélection est réduite à une seule
-    /// cellule de données (ancre et curseur confondus, tous deux une
-    /// cellule — un simple clic, jamais étendu depuis, et jamais un champ
-    /// d'en-tête), `None` pour un rectangle plus grand ou toute autre sorte
-    /// de sélection.
-    ///
-    /// Sert à démarrer l'édition par simple frappe au clavier (taper sur une
-    /// cellule sélectionnée remplace tout son contenu, comme dans un
-    /// tableur) : ce geste n'a de sens que pour une cellule unique, jamais
-    /// pour une plage ni pour un champ d'en-tête (qui a son propre geste,
-    /// voir [`Selection::selected_header_field`]) — taper sur une plage
-    /// sélectionnée ne doit pas écraser silencieusement plusieurs cellules à
-    /// la fois.
     pub fn single_cell(&self) -> Option<(NodeId, usize)> {
         match &self.kind {
-            SelectionKind::Rows { anchor, cursor } if anchor == cursor => match anchor {
+            SelectionKind::Rows {
+                extra,
+                anchor,
+                cursor,
+                active: true,
+            } if extra.is_empty() && anchor == cursor => match anchor {
                 GridCursor::Data(column, row) => Some((*column, *row)),
                 GridCursor::Header(..) => None,
             },
@@ -451,85 +854,52 @@ impl Selection {
         }
     }
 
-    /// Colonnes couvertes, dans l'ordre de la feuille. Vide si l'ancre ou le
-    /// curseur ne désignent plus une colonne de `sheet` (colonne supprimée
-    /// entre-temps). Pour une plage de lignes entières ou de champ d'en-tête
-    /// entier, ce sont **toutes** les colonnes visibles de la feuille : ni
-    /// l'une ni l'autre n'a de sous-plage à résoudre, contrairement à
-    /// `Columns`/`Rows`.
     pub fn columns(&self, tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
         match &self.kind {
-            SelectionKind::Columns { anchor, cursor } => order_range(tree, sheet, *anchor, *cursor),
-            SelectionKind::Rows { anchor, cursor } => {
-                order_range(tree, sheet, anchor.column(), cursor.column())
-            }
-            SelectionKind::FullRows { .. } | SelectionKind::HeaderRows { .. } => {
-                all_visible_columns(tree, sheet)
-            }
-        }
-    }
-
-    /// Portion **données** de la plage sélectionnée, en lignes inclusives
-    /// `(min, max)` — `None` si la sélection est une plage de colonnes
-    /// entières, ou si elle est un rectangle entièrement contenu dans
-    /// l'en-tête (aucune ligne de données touchée : depuis que
-    /// [`Selection::extend_row_to`] borne la cible à la frontière, un
-    /// rectangle est toujours entièrement dans l'en-tête ou entièrement dans
-    /// les données, jamais les deux).
-    ///
-    /// Réservé aux opérations propres aux données de colonne
-    /// ([`Selection::clear_ranges`]/[`Selection::delete_at_count`]/
-    /// [`crate::state::AppState::copy_selection`]) — un champ d'en-tête n'a
-    /// pas de « ligne » au même sens. Voir [`Selection::full_rank_range`]
-    /// pour la plage complète, en-tête compris.
-    ///
-    /// Une plage de lignes entières ([`SelectionKind::FullRows`]) a, elle,
-    /// toujours un rang au sens de cette méthode — contrairement à un
-    /// rectangle de cases, elle ne peut jamais tomber entièrement dans
-    /// l'en-tête (voir la doc de tête du module : une ligne entière est une
-    /// sélection de données pures). Une plage de champ d'en-tête entier
-    /// ([`SelectionKind::HeaderRows`]) rend, à l'inverse, toujours `None` :
-    /// symétriquement, elle ne touche jamais les données.
-    pub fn row_range(&self) -> Option<(usize, usize)> {
-        match &self.kind {
-            SelectionKind::Rows { anchor, cursor } => {
-                let (lo, hi) = rank_range(*anchor, *cursor);
-                if hi < 0 {
-                    None
+            SelectionKind::Columns {
+                base,
+                anchor,
+                cursor,
+                ranged,
+            } => {
+                let range = if *ranged {
+                    order_range(tree, sheet, *anchor, *cursor)
                 } else {
-                    Some((lo.max(0) as usize, hi as usize))
-                }
-            }
-            SelectionKind::FullRows { anchor, cursor } => {
-                let (lo, hi) = if anchor <= cursor {
-                    (*anchor, *cursor)
-                } else {
-                    (*cursor, *anchor)
+                    Vec::new()
                 };
-                Some((lo, hi))
+                all_visible_columns(tree, sheet)
+                    .into_iter()
+                    .filter(|c| base.contains(c) || range.contains(c))
+                    .collect()
             }
-            SelectionKind::Columns { .. } | SelectionKind::HeaderRows { .. } => None,
+            _ => {
+                let blocks = self.blocks(tree, sheet);
+                all_visible_columns(tree, sheet)
+                    .into_iter()
+                    .filter(|c| blocks.iter().any(|block| block.columns.contains(c)))
+                    .collect()
+            }
         }
     }
 
-    /// Plage complète `[lo, hi]` de rangs (voir [`GridCursor::rank`])
-    /// couverte par le rectangle, en-tête compris (contrairement à
-    /// [`Selection::row_range`], qui n'en rend que la portion données) —
-    /// toujours entièrement négative (en-tête) ou entièrement positive ou
-    /// nulle (données), jamais à cheval (voir la doc de tête du module) —
-    /// `None` pour une plage de colonnes entières. Pour une plage de lignes
-    /// entières, identique à [`Selection::row_range`] (converti en `isize`) :
-    /// une ligne entière ne touche jamais l'en-tête, les deux méthodes
-    /// coïncident toujours. Pour une plage de champ d'en-tête entier,
-    /// toujours strictement négative — calculée directement sur les rangs
-    /// des champs (`HeaderField::index`), sans passer par un `GridCursor`
-    /// qui exigerait une colonne dont cette sélection n'a justement pas
-    /// besoin. Sert à [`crate::state::AppState::copy_selection`] (une
-    /// rangée copiée par rang couvert) et à [`Selection::
-    /// cleared_header_fields`].
+    pub fn row_range(&self) -> Option<(usize, usize)> {
+        let intervals = self.data_intervals();
+        Some((intervals.first()?.0, intervals.last()?.1))
+    }
+
     pub fn full_rank_range(&self) -> Option<(isize, isize)> {
         match &self.kind {
-            SelectionKind::Rows { anchor, cursor } => Some(rank_range(*anchor, *cursor)),
+            SelectionKind::Rows { .. } => {
+                let ranges: Vec<(isize, isize)> = self
+                    .rects()
+                    .into_iter()
+                    .map(|(a, b)| rank_range(a, b))
+                    .collect();
+                Some((
+                    ranges.iter().map(|r| r.0).min()?,
+                    ranges.iter().map(|r| r.1).max()?,
+                ))
+            }
             SelectionKind::FullRows { .. } => {
                 self.row_range().map(|(lo, hi)| (lo as isize, hi as isize))
             }
@@ -541,60 +911,36 @@ impl Selection {
         }
     }
 
-    /// Champs d'en-tête `(colonne, champ)` touchés par la sélection, un par
-    /// colonne et par champ — vide si la sélection ne touche aucun champ
-    /// (plage de colonnes, ou rectangle entièrement dans les données ; un
-    /// rectangle est toujours entièrement dans l'un ou dans l'autre, voir la
-    /// doc de tête du module). Une plage de champ d'en-tête entier vide tous
-    /// ses champs sur **toutes** les colonnes de la feuille — c'est
-    /// précisément son intérêt : « toute la ligne Long Name », pas une
-    /// colonne à la fois. Sert à [`crate::state::AppState::
-    /// clear_selected_cells`] : Retour arrière/Ctrl+X sur une sélection de
-    /// champs d'en-tête les vide tous.
-    ///
-    /// Écrite en termes de [`Selection::full_rank_range`]/[`Selection::
-    /// columns`] plutôt que par un `match` dédié à `SelectionKind::Rows` : les
-    /// deux méthodes savent déjà, pour chaque sorte de sélection, si elle
-    /// touche l'en-tête et quelles colonnes elle couvre — `lo >= 0` écarte
-    /// ici les sélections de données (rectangle ou plage de lignes
-    /// entières), `full_rank_range() == None` écarte une plage de colonnes.
     pub fn cleared_header_fields(&self, tree: &Tree, sheet: NodeId) -> Vec<(NodeId, HeaderField)> {
-        let Some((lo, hi)) = self.full_rank_range() else {
-            return Vec::new();
-        };
-        if lo >= 0 {
-            return Vec::new();
+        let mut fields: Vec<(NodeId, HeaderField)> = Vec::new();
+        for block in self.blocks(tree, sheet) {
+            if block.lo >= 0 {
+                continue;
+            }
+            for &column in &block.columns {
+                for rank in block.lo..=block.hi.min(-1) {
+                    let entry = (column, HeaderField::from_index((rank + 4) as usize));
+                    if !fields.contains(&entry) {
+                        fields.push(entry);
+                    }
+                }
+            }
         }
-        let hi = hi.min(-1);
-        let columns = self.columns(tree, sheet);
-        columns
-            .into_iter()
-            .flat_map(|column| {
-                (lo..=hi).map(move |rank| (column, HeaderField::from_index((rank + 4) as usize)))
-            })
-            .collect()
+        fields
     }
 
-    /// Vrai si `(column, row)` fait partie de la sélection.
     pub fn contains(&self, tree: &Tree, sheet: NodeId, column: NodeId, row: usize) -> bool {
         match &self.kind {
             SelectionKind::Columns { .. } => self.columns(tree, sheet).contains(&column),
-            // Un rectangle de cases, une plage de lignes entières et une
-            // plage de champ d'en-tête entier se testent de la même façon
-            // une fois `row_range`/`columns` résolus pour chacun : la ligne
-            // visée doit être dans la plage, la colonne visée dans les
-            // colonnes couvertes. `row_range()` vaut toujours `None` pour un
-            // champ d'en-tête entier (il ne touche jamais les données), donc
-            // cette branche rend systématiquement `false` pour lui — sans
-            // avoir besoin d'un bras dédié.
-            SelectionKind::Rows { .. }
-            | SelectionKind::FullRows { .. }
-            | SelectionKind::HeaderRows { .. } => match self.row_range() {
-                Some((lo, hi)) if row >= lo && row <= hi => {
-                    self.columns(tree, sheet).contains(&column)
-                }
-                _ => false,
-            },
+            _ => {
+                let row = row as isize;
+                self.blocks(tree, sheet).iter().any(|block| {
+                    block.hi >= 0
+                        && block.lo <= row
+                        && row <= block.hi
+                        && block.columns.contains(&column)
+                })
+            }
         }
     }
 
@@ -612,31 +958,10 @@ impl Selection {
         }
     }
 
-    /// Vrai si `row` fait partie de la plage de lignes sélectionnée (clic,
-    /// glisser ou Maj-clic sur la gouttière des numéros de ligne) — pendant
-    /// de [`Selection::is_column_selected`], pour la surbrillance de
-    /// `app::grid::row_number_widget`. Ne prend ni `tree` ni `sheet` :
-    /// contrairement à une colonne, une ligne n'a pas besoin de l'arbre pour
-    /// savoir si elle est dans la plage.
     pub fn is_row_selected(&self, row: usize) -> bool {
-        match &self.kind {
-            SelectionKind::FullRows { .. } => self
-                .row_range()
-                .is_some_and(|(lo, hi)| row >= lo && row <= hi),
-            _ => false,
-        }
-    }
-
-    /// Vrai si la sélection couvre **tout** le tableau — `0..=row_count - 1`
-    /// (voir [`Selection::all_rows`]), le geste posé par un clic sur le
-    /// « # » de la gouttière. `false` si `row_count` est nul : il n'y a
-    /// alors rien qui puisse être « tout sélectionné ».
-    pub fn is_all_rows(&self, row_count: usize) -> bool {
-        row_count > 0
-            && matches!(
-                self.kind,
-                SelectionKind::FullRows { anchor: 0, cursor } if cursor == row_count - 1
-            )
+        self.full_row_intervals()
+            .iter()
+            .any(|&(lo, hi)| (lo..=hi).contains(&row))
     }
 
     /// Vrai si `field` fait partie de la plage de champ d'en-tête entier
@@ -668,115 +993,86 @@ impl Selection {
         self.columns(tree, sheet).contains(&column)
     }
 
-    /// Vrai si `row` est touchée par la sélection courante, **quelle que
-    /// soit sa sorte** — pendant de [`Selection::touches_column`], pour la
-    /// gouttière des numéros de ligne. `None` pour toute sélection qui ne
-    /// touche pas les données (plage de colonnes, champ d'en-tête simple ou
-    /// entier) : [`Selection::row_range`] rend déjà `None` pour elles.
     pub fn touches_row(&self, row: usize) -> bool {
-        self.row_range()
-            .is_some_and(|(lo, hi)| row >= lo && row <= hi)
+        self.data_intervals()
+            .iter()
+            .any(|&(lo, hi)| (lo..=hi).contains(&row))
     }
 
-    /// Plages `(colonne, début, nombre)` à vider (Retour arrière/Ctrl+X),
-    /// une par colonne touchée, bornées à sa longueur réelle — vider
-    /// au-delà de la fin d'une colonne courte ne doit jamais l'allonger.
-    /// Ne couvre que la portion **données** ; voir [`Selection::
-    /// cleared_header_fields`] pour un rectangle de champs d'en-tête.
     pub fn clear_ranges(&self, tree: &Tree, sheet: NodeId) -> Vec<(NodeId, usize, usize)> {
-        self.columns(tree, sheet)
-            .into_iter()
-            .filter_map(|column| {
-                let len = tree
-                    .node(column)
-                    .and_then(stokesforge_core::Node::as_column)?
-                    .len();
-                let (start, count) = match self.row_range() {
-                    Some((lo, hi)) => (lo, hi.saturating_sub(lo) + 1),
-                    None if self.is_columns() => (0, len),
-                    None => return None,
-                };
-                if start >= len {
-                    return None;
+        let blocks = self.blocks(tree, sheet);
+        let mut ranges = Vec::new();
+        for column in self.columns(tree, sheet) {
+            let Some(len) = tree
+                .node(column)
+                .and_then(stokesforge_core::Node::as_column)
+                .map(stokesforge_core::Column::len)
+            else {
+                continue;
+            };
+            let intervals = if self.is_columns() {
+                vec![(0, len.saturating_sub(1))]
+            } else {
+                merge_intervals(
+                    blocks
+                        .iter()
+                        .filter(|block| block.hi >= 0 && block.columns.contains(&column))
+                        .map(|block| (block.lo.max(0) as usize, block.hi as usize))
+                        .collect(),
+                )
+            };
+            for (lo, hi) in intervals {
+                if lo >= len {
+                    continue;
                 }
-                let count = count.min(len - start);
-                (count > 0).then_some((column, start, count))
-            })
-            .collect()
+                let count = (hi - lo + 1).min(len - lo);
+                if count > 0 {
+                    ranges.push((column, lo, count));
+                }
+            }
+        }
+        ranges
     }
 
-    /// `(colonnes, début, nombre)` pour Suppr (vide et remonte) :
-    /// `Command::DeleteCells` applique `at`/`count` indépendamment par
-    /// colonne (une colonne plus courte que `at + count` n'est retirée que
-    /// jusqu'à sa propre fin). Pour un rectangle de cellules, `count` est la
-    /// taille de la portion données de la plage sélectionnée
-    /// (`hi - lo + 1`) — retirer *exactement* les lignes sélectionnées, ni
-    /// plus ni moins, sinon Suppr sur une seule ligne tronquerait tout ce
-    /// qui suit au lieu de ne faire remonter que cette ligne. Pour une plage
-    /// de colonnes entières (pas de plage de lignes), `count` reste calculé
-    /// sur la colonne sélectionnée la plus longue, pour qu'elle soit
-    /// intégralement compactée même si une autre colonne de la plage est
-    /// plus courte. Un rectangle entièrement dans l'en-tête (aucune donnée
-    /// touchée) rend `count == 0` : Suppr n'a pas d'équivalent sur un champ
-    /// d'en-tête, qui n'est pas répété par ligne. Une plage de lignes
-    /// entières suit exactement la même règle qu'un rectangle de cellules
-    /// (`count = hi - lo + 1`, les lignes sélectionnées et rien de plus) :
-    /// elle ne peut jamais tomber dans l'en-tête, donc jamais dans le cas
-    /// « colonne la plus longue » propre à `Columns`, qui compacte par
-    /// colonne plutôt que par ligne. Une plage de champ d'en-tête entier
-    /// rend `count == 0` pour la même raison qu'un rectangle de champs
-    /// d'en-tête : `row_range()` y vaut toujours `None`.
     pub fn delete_at_count(&self, tree: &Tree, sheet: NodeId) -> (Vec<NodeId>, usize, usize) {
         let columns = self.columns(tree, sheet);
-        let (start, count) = match &self.kind {
-            SelectionKind::Columns { .. } => {
-                let count = columns
-                    .iter()
-                    .filter_map(|&column| {
-                        tree.node(column)
-                            .and_then(stokesforge_core::Node::as_column)
-                    })
-                    .map(stokesforge_core::Column::len)
-                    .max()
-                    .unwrap_or(0);
-                (0, count)
+        let (start, count) = if self.is_columns() {
+            let count = columns
+                .iter()
+                .filter_map(|&column| {
+                    tree.node(column)
+                        .and_then(stokesforge_core::Node::as_column)
+                })
+                .map(stokesforge_core::Column::len)
+                .max()
+                .unwrap_or(0);
+            (0, count)
+        } else {
+            // Un seul bloc de données : on retire exactement ses lignes. Une
+            // sélection multiple (#159) laisserait des trous : remonter
+            // n'aurait pas de sens univoque, Suppr se contente de vider.
+            match self.blocks(tree, sheet).as_slice() {
+                [block] if block.hi >= 0 => (
+                    block.lo.max(0) as usize,
+                    (block.hi - block.lo.max(0)) as usize + 1,
+                ),
+                _ => (0, 0),
             }
-            SelectionKind::Rows { .. }
-            | SelectionKind::FullRows { .. }
-            | SelectionKind::HeaderRows { .. } => match self.row_range() {
-                Some((lo, hi)) => (lo, hi.saturating_sub(lo) + 1),
-                None => (0, 0),
-            },
         };
         (columns, start, count)
     }
 
-    /// Ancre de la sélection — la case posée au premier clic, jamais
-    /// déplacée par la suite ; la première colonne de la plage à la ligne 0
-    /// pour une plage de colonnes entières, qui n'a pas d'ancre au sens
-    /// d'une case précise ; la première colonne *visible de la feuille* à la
-    /// ligne ancrée pour une plage de lignes entières, et la première
-    /// colonne visible de la feuille au champ ancré pour une plage de champ
-    /// d'en-tête entier — dans les deux cas par symétrie : ni l'une ni
-    /// l'autre n'a de colonne propre, contrairement à une plage de colonnes
-    /// qui, elle, mémorise directement la colonne cliquée. `None` seulement
-    /// si `sheet` n'a plus aucune colonne visible, ce qui ne devrait jamais
-    /// arriver en pratique tant qu'une telle plage est affichée
-    /// (`app::grid::grid_contents` n'affiche pas de grille sans colonne)
-    /// — traité proprement plutôt que par un identifiant arbitraire. Sert de
-    /// point de départ au collage ([`crate::state::AppState::paste`]/
-    /// [`crate::state::AppState::paste_absolute`] collent à partir de
-    /// l'ancre, indépendamment de la taille de la sélection active, comme
-    /// dans tout tableur de référence) : coller sur un champ d'en-tête écrit
-    /// dans l'en-tête, coller sur une cellule écrit dans les données — voir
-    /// la matrice de comportement en tête de [`crate::state`].
     pub fn anchor(&self, tree: &Tree, sheet: NodeId) -> Option<GridCursor> {
         match &self.kind {
             SelectionKind::Rows { anchor, .. } => Some(*anchor),
-            SelectionKind::Columns { anchor, .. } => Some(GridCursor::Data(*anchor, 0)),
-            SelectionKind::FullRows { anchor, .. } => {
+            SelectionKind::Columns { .. } => self
+                .columns(tree, sheet)
+                .first()
+                .map(|&column| GridCursor::Data(column, 0)),
+            SelectionKind::FullRows { .. } => {
                 let first_column = visible_columns_in(tree, sheet).into_iter().next()?.0;
-                Some(GridCursor::Data(first_column, *anchor))
+                let first_row = self.full_row_intervals().first()?.0;
+                Some(GridCursor::Data(first_column, first_row))
             }
             SelectionKind::HeaderRows { anchor, .. } => {
                 let first_column = visible_columns_in(tree, sheet).into_iter().next()?.0;
