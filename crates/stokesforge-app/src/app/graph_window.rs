@@ -82,9 +82,9 @@ pub(super) fn graph_drop_target(
         pointer_in_tab && egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx());
     if pointer_in_tab && ui.input(|input| input.pointer.any_released()) {
         if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
-            // Calque visé : le premier tant que le calque actif n'existe pas
-            // (#161, prérequis de #160) ; il remplacera ce `0`.
-            actions.push(drop_payload_action(&payload, graph_id, 0));
+            // Calque visé : le calque actif du graphe (#161).
+            let panel = published_active_panel(ui.ctx(), graph_id);
+            actions.push(drop_payload_action(&payload, graph_id, panel));
         }
     }
     graph_contents(ui, state, actions, graph_views, graph_id);
@@ -290,6 +290,9 @@ pub(super) fn graph_view_contents(
     }
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
+            if let Some(spec) = crate::state::current_plot_spec(&snapshot.tree, graph_id) {
+                layer_badges(&figure_ui, view, &spec, graph_id, outer);
+            }
             graph_context_menu(ui, view, &snapshot.tree, graph_id, actions);
             annotation_interactions(ui, view, &snapshot.tree, graph_id, actions);
             if !keyboard_focus_outside_grid(ui.ctx()) {
@@ -328,6 +331,81 @@ pub(super) fn graph_view_contents(
                 egui::Color32::RED,
                 crate::errors::render::error_message(&err),
             );
+        }
+    }
+}
+
+/// Le calque actif de `graph`, tel que sa dernière vue peinte l'a publié
+/// (#161) : lisible depuis un menu de classeur ou une fenêtre voisine, qui
+/// n'ont pas accès à la [`GraphView`]. Le premier calque faute de vue peinte.
+pub(super) fn published_active_panel(ctx: &egui::Context, graph: NodeId) -> usize {
+    ctx.data(|data| data.get_temp(active_panel_id(graph)))
+        .unwrap_or(0)
+}
+
+fn active_panel_id(graph: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_active_panel", graph))
+}
+
+/// Repère des calques (#161), à la manière d'Origin : un petit numéro par
+/// calque dans le coin de la fenêtre, celui du calque actif en évidence ;
+/// cliquer un numéro active le calque. Repère d'interface peint par-dessus la
+/// figure : jamais dans l'export ni dans la copie de la figure.
+fn layer_badges(
+    ui: &egui::Ui,
+    view: &mut GraphView,
+    spec: &stokesforge_plot::PlotSpec,
+    graph: NodeId,
+    outer: egui::Rect,
+) {
+    let active = view.active_panel(spec);
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(active_panel_id(graph), active));
+    let side = 18.0;
+    let gap = 3.0;
+    for index in 0..spec.panels.len() {
+        let rect = egui::Rect::from_min_size(
+            outer.left_top() + egui::vec2(4.0 + index as f32 * (side + gap), 4.0),
+            egui::vec2(side, side),
+        );
+        if !outer.contains_rect(rect) {
+            break;
+        }
+        let number = index + 1;
+        let response = ui
+            .interact(
+                rect,
+                view.id().with(("layer_badge", index)),
+                egui::Sense::click(),
+            )
+            .on_hover_text(tr!("plot-layer-badge", "hint", n = number.to_string()));
+        let visuals = ui.visuals();
+        let (fill, ink) = if index == active {
+            (visuals.selection.bg_fill, visuals.selection.stroke.color)
+        } else if response.hovered() {
+            (
+                visuals.widgets.hovered.bg_fill,
+                visuals.widgets.hovered.fg_stroke.color,
+            )
+        } else {
+            (
+                visuals.widgets.inactive.bg_fill,
+                visuals.widgets.inactive.fg_stroke.color,
+            )
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, 3.0, fill);
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            number.to_string(),
+            egui::FontId::proportional(11.0),
+            ink,
+        );
+        if response.clicked() {
+            view.set_active_panel(index, spec);
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(active_panel_id(graph), index));
         }
     }
 }
@@ -1283,6 +1361,85 @@ pub(super) mod tests {
             })),
             PlotTarget::Legend
         );
+    }
+
+    /// #161 : le repère numéroté active un calque, le dépôt de colonnes le
+    /// vise, un calque qui disparaît ramène au premier.
+    #[test]
+    fn le_calque_actif_suit_le_repere_et_cible_le_depot() {
+        let (session, graph) = graphe();
+        let mut state = AppState::new(session.handle(), "test.stf".into()).unwrap();
+        let mut spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
+        spec.panels.push(PanelSpec::at(0, 1));
+        state.dispatch(Action::SetPlotSpec { graph, spec });
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let mut view = GraphView::new();
+        let origin = std::cell::Cell::new(egui::Pos2::ZERO);
+        let paint = |view: &mut GraphView, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                origin.set(ui.available_rect_before_wrap().min);
+                graph_view_contents(ui, view, state.snapshot(), graph, &mut Vec::new());
+            });
+            output.textures_delta.clear();
+        };
+        let spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
+        paint(&mut view, Vec::new());
+        assert_eq!(view.active_panel(&spec), 0, "graphe neuf : le premier");
+
+        let badge = origin.get() + egui::vec2(4.0 + 21.0 + 9.0, 4.0 + 9.0);
+        let click = |pressed| egui::Event::PointerButton {
+            pos: badge,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        paint(&mut view, vec![egui::Event::PointerMoved(badge)]);
+        paint(&mut view, vec![click(true)]);
+        paint(&mut view, vec![click(false)]);
+        assert_eq!(
+            view.active_panel(&spec),
+            1,
+            "le repère 2 active le calque 2"
+        );
+        assert_eq!(published_active_panel(&context, graph), 1);
+
+        let payload = ColumnDragPayload {
+            sheet: NodeId::from_raw(7),
+            columns: vec![NodeId::from_raw(8)],
+        };
+        assert_eq!(
+            drop_payload_action(&payload, graph, published_active_panel(&context, graph)),
+            drop_payload_action(&payload, graph, 1),
+            "le dépôt vise le calque actif"
+        );
+
+        let mut one = spec.clone();
+        one.panels = stokesforge_plot::Panels::one(PanelSpec::at(0, 0));
+        assert_eq!(view.active_panel(&one), 0, "calque disparu : le premier");
+    }
+
+    /// #161 : un nœud de calque de l'Object Manager le rend actif, sans
+    /// toucher à la sélection ; un calque inexistant est ignoré.
+    #[test]
+    fn un_noeud_de_calque_de_l_object_manager_l_active() {
+        let mut spec = stokesforge_plot::PlotSpec::empty("");
+        spec.panels.push(PanelSpec::at(0, 1));
+        let mut view = GraphView::new();
+        select_manager_target(&mut view, Some(VisibilityTarget::Panel(1)), &spec);
+        assert_eq!(view.active_panel(&spec), 1);
+        select_manager_target(&mut view, Some(VisibilityTarget::Group(7)), &spec);
+        assert_eq!(view.active_panel(&spec), 1, "calque inexistant : inchangé");
+        select_manager_target(&mut view, Some(VisibilityTarget::Axes(0)), &spec);
+        assert_eq!(view.active_panel(&spec), 0);
     }
 
     /// Le glisser de colonnes depuis un classeur : relâché sur le graphe, il

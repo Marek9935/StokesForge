@@ -672,6 +672,8 @@ plot-text-ok =
     .hint = Applique le texte (Entrée)
 plot-text-placeholder = Texte, $formule$
 plot-view-reset-zoom = Réinitialiser le zoom
+plot-layer-badge = { $n }
+    .hint = Fait du calque { $n } la cible des ajouts à ce graphique
 
 # Export
 

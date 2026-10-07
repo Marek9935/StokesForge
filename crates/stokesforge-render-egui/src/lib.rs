@@ -491,8 +491,25 @@ pub struct GraphView {
     selected_shape: Option<ShapeRef>,
     /// Série sélectionnée, commune au graphe et à Object Manager (#83).
     selected_series: Option<stokesforge_plot::SeriesRef>,
+    /// Calque actif (#161) : le dernier calque sélectionné, cible par défaut
+    /// des ajouts. État d'interface, hors modèle ; jamais dessiné dans la
+    /// figure. Lu par [`Self::active_panel`], qui le revalide.
+    active_panel: usize,
+    /// Sélection vue à l'image précédente : le calque actif suit un
+    /// changement de sélection, pas la sélection elle-même (un clic sur un
+    /// repère de calque reste donc valable tant que rien d'autre n'est
+    /// sélectionné).
+    seen_selection: SelectionKey,
     events: Vec<GraphEvent>,
 }
+
+/// Les quatre sélections d'une vue, pour détecter qu'elles ont changé.
+type SelectionKey = (
+    Option<stokesforge_plot::SeriesRef>,
+    Option<AnnotationRef>,
+    Option<ShapeRef>,
+    Option<TextTarget>,
+);
 
 impl Default for GraphView {
     fn default() -> Self {
@@ -558,7 +575,64 @@ impl GraphView {
             shape_drag: None,
             selected_shape: None,
             selected_series: None,
+            active_panel: 0,
+            seen_selection: (None, None, None, None),
             events: Vec::new(),
+        }
+    }
+
+    /// Le calque actif de `spec` (#161) : le dernier sélectionné, ou le
+    /// premier s'il a disparu. Toujours un indice valide tant que le graphe
+    /// a un calque.
+    pub fn active_panel(&self, spec: &PlotSpec) -> usize {
+        if self.active_panel < spec.panels.len() {
+            self.active_panel
+        } else {
+            0
+        }
+    }
+
+    /// Rend le calque `panel` actif (sans effet s'il n'existe pas). Repère
+    /// numéroté de la fenêtre, nœud du calque dans Object Manager.
+    pub fn set_active_panel(&mut self, panel: usize, spec: &PlotSpec) {
+        if panel < spec.panels.len() {
+            self.active_panel = panel;
+        }
+    }
+
+    /// Indice du calque dont la grille occupe `(row, column)`.
+    fn panel_index(spec: &PlotSpec, row: usize, column: usize) -> Option<usize> {
+        spec.panels
+            .iter()
+            .position(|p| p.row == row && p.column == column)
+    }
+
+    /// Le calque de l'objet sélectionné, s'il y en a un.
+    fn selection_panel(&self, spec: &PlotSpec) -> Option<usize> {
+        if let Some(series) = self.selected_series {
+            return Some(series.panel);
+        }
+        let position = self
+            .selected_annotation
+            .map(|t| (t.row, t.column))
+            .or_else(|| self.selected_shape.map(|t| (t.row, t.column)))
+            .or_else(|| self.selected_text.and_then(|t| t.panel_position()))?;
+        Self::panel_index(spec, position.0, position.1)
+    }
+
+    /// Le calque actif suit la sélection quand elle change.
+    fn follow_selection(&mut self, spec: &PlotSpec) {
+        let key = (
+            self.selected_series,
+            self.selected_annotation,
+            self.selected_shape,
+            self.selected_text,
+        );
+        if key != self.seen_selection {
+            self.seen_selection = key;
+            if let Some(panel) = self.selection_panel(spec) {
+                self.active_panel = panel;
+            }
         }
     }
 
@@ -883,10 +957,19 @@ impl GraphView {
         Some((panel.row, panel.column, x, y))
     }
 
-    /// Le point de données au centre de la zone de tracé du premier panneau
-    /// tracé — où poser un texte ajouté par la barre de menus.
-    pub fn panel_center_data(&self) -> Option<(usize, usize, f64, f64)> {
-        let panel = self.last.as_ref()?.panels.first()?;
+    /// Le point de données au centre de la zone de tracé du calque actif
+    /// (#161), ou du premier panneau tracé si celui-ci ne l'est pas — où
+    /// poser un texte ajouté par la barre de menus.
+    pub fn panel_center_data(&self, spec: &PlotSpec) -> Option<(usize, usize, f64, f64)> {
+        let last = self.last.as_ref()?;
+        let active = spec.panels.get(self.active_panel(spec));
+        let panel = active
+            .and_then(|a| {
+                last.panels
+                    .iter()
+                    .find(|p| p.row == a.row && p.column == a.column)
+            })
+            .or_else(|| last.panels.first())?;
         let transform = PanelTransform::of(panel)?;
         let center = (
             panel.pixel_origin.0 as f64 + panel.pixel_size.0 as f64 / 2.0,
@@ -1048,6 +1131,7 @@ impl GraphView {
         self.selected_annotation = self.selected_annotation.filter(|t| t.get(&spec).is_some());
         self.selected_shape = self.selected_shape.filter(|t| t.get(&spec).is_some());
         self.selected_text = self.selected_text.filter(|t| t.visible(&spec).is_some());
+        self.follow_selection(&spec);
         self.handle_navigation(&response, &context, &spec);
 
         let key = CacheKey {
@@ -1206,6 +1290,20 @@ impl GraphView {
         // aucun), un double-clic sur un texte l'édite au lieu de
         // réinitialiser le zoom.
         let pointer = response.interact_pointer_pos();
+        // Un geste commencé dans la zone de tracé d'un calque (clic, clic
+        // droit, début de glisser d'un outil) l'active (#161), même sans
+        // objet visé.
+        if response.clicked() || response.secondary_clicked() || response.drag_started() {
+            let hit = pointer
+                .and_then(|pos| self.panel_at(pos))
+                .and_then(|(i, _)| {
+                    let drawn = self.last.as_ref()?.panels.get(i)?;
+                    Self::panel_index(spec, drawn.row, drawn.column)
+                });
+            if let Some(panel) = hit {
+                self.set_active_panel(panel, spec);
+            }
+        }
         if response.clicked() {
             self.selected_series = None;
             self.selected_annotation = pointer.and_then(|pos| self.annotation_at(pos));

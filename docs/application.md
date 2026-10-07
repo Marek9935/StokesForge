@@ -1189,8 +1189,21 @@ ailleurs ne fait rien. L'action porte le **calque** visé (`panel`) et
 **n'impose pas de type de tracé** (`plot_type: None`) : les séries prennent
 celui de la **dernière série** du calque, `Line` pour un calque vide
 (`state::panel_plot_type`). Une seule commande annulable (`SetPlotSpec`).
-Tant que le calque actif (#161) n'existe pas, le dépôt vise le premier calque ;
-`graph_drop_target` portera alors le calque actif du graphe à la place du `0`.
+Le calque visé est le **calque actif** du graphe (#161, ci-dessous) :
+`graph_drop_target` et « Send to » lisent `published_active_panel`.
+
+**Calque actif (#161).** `GraphView::active_panel(spec)` : le dernier calque
+sélectionné, état d'interface hors `.stf` et hors historique, porté par la vue
+(donc identique en fenêtre détachée), revalidé à la lecture (calque disparu :
+le premier). Il change par un clic, un clic droit ou un début de glisser dans
+la zone de tracé d'un calque, par la sélection d'un objet du calque (figure ou
+Object Manager, `follow_selection`), par un clic sur le nœud du calque, de son
+groupe ou de ses axes dans l'Object Manager, et par le **repère numéroté** peint
+en haut à gauche de la fenêtre (`layer_badges`, jamais dans l'export ni la
+copie). La fenêtre publie le calque actif dans la mémoire d'egui
+(`published_active_panel`) pour les menus qui n'ont pas la vue. Suivent le
+calque actif : le dépôt de colonnes, « Send to » et Graph › Add Text ; les
+gestes qui désignent un point (clic droit, outils) visent leur calque.
 
 **Entre deux fenêtres système : pas de glisser (#165).** Le dépôt marche au sein
 d'une même fenêtre OS (dock ou fenêtre détachée), pas de l'une à l'autre : sous

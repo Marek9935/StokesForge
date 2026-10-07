@@ -68,6 +68,17 @@ fn manager_header_label(
     requests: &mut Vec<ObjectManagerRequest>,
 ) -> egui::Response {
     let response = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
+    // Un clic sur le nœud d'un calque (ou son groupe) le rend actif (#161).
+    if response.clicked()
+        && matches!(
+            target,
+            crate::object_manager::VisibilityTarget::Panel(_)
+                | crate::object_manager::VisibilityTarget::Group(_)
+                | crate::object_manager::VisibilityTarget::Axes(_)
+        )
+    {
+        requests.push(ObjectManagerRequest::Select(target));
+    }
     if response.double_clicked() {
         requests.push(ObjectManagerRequest::Properties(target));
     }
@@ -98,6 +109,16 @@ pub(super) fn select_manager_target(
             view.select_shape(Some(t));
         }
         Some(T::Text(t)) => view.select_text(Some(t), spec),
+        Some(T::Panel(i) | T::Group(i) | T::Axes(i)) => view.set_active_panel(i, spec),
+        Some(T::Axis(axis)) => {
+            if let Some(i) = spec
+                .panels
+                .iter()
+                .position(|p| p.row == axis.row && p.column == axis.column)
+            {
+                view.set_active_panel(i, spec);
+            }
+        }
         _ => {
             view.select_annotation(None, spec);
         }

@@ -680,6 +680,8 @@ plot-text-ok =
     .hint = Applies the text (Enter)
 plot-text-placeholder = Text, $formula$
 plot-view-reset-zoom = Reset Zoom
+plot-layer-badge = { $n }
+    .hint = Makes layer { $n } the target of additions to this graph
 
 # Export
 

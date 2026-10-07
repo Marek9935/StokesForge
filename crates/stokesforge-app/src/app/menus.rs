@@ -365,8 +365,10 @@ impl StokesForgeApp {
                     .clicked()
                 {
                     let tree = self.state.tree().clone();
-                    if let Some(view) = self.graph_views.get_mut(&graph) {
-                        if let Some(point) = view.panel_center_data() {
+                    if let (Some(view), Some(spec)) =
+                        (self.graph_views.get_mut(&graph), spec.as_ref())
+                    {
+                        if let Some(point) = view.panel_center_data(spec) {
                             add_annotation_at(ctx, view, &tree, graph, point);
                         }
                     }

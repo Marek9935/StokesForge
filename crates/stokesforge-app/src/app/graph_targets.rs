@@ -16,6 +16,7 @@
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
 
+use super::graph_window::published_active_panel;
 use super::tab::{tab_title_from_tree, Tab};
 use crate::state::{drop_payload_action, Action, ColumnDragPayload};
 use crate::tr;
@@ -87,12 +88,13 @@ pub(super) fn send_to_graph_menu(
         columns: columns.to_vec(),
     };
     let mut entry = |ui: &mut egui::Ui, graph: NodeId| {
+        let panel = published_active_panel(ui.ctx(), graph);
         let name = tab_title_from_tree(tree, Tab::Graph(graph));
         if ui
             .button(tr!("workbook-send-to-graph", graph = name))
             .clicked()
         {
-            actions.push(drop_payload_action(&payload, graph, 0));
+            actions.push(drop_payload_action(&payload, graph, panel));
             ui.close();
         }
     };
@@ -105,7 +107,8 @@ pub(super) fn send_to_graph_menu(
             for graph in targets {
                 let name = tab_title_from_tree(tree, Tab::Graph(graph));
                 if ui.button(name).clicked() {
-                    actions.push(drop_payload_action(&payload, graph, 0));
+                    let panel = published_active_panel(ui.ctx(), graph);
+                    actions.push(drop_payload_action(&payload, graph, panel));
                     ui.close();
                 }
             }
