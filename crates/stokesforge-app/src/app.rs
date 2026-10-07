@@ -138,6 +138,7 @@ mod dialogs;
 mod figure_copy;
 mod file_drop;
 mod format;
+mod graph_targets;
 mod graph_text_edit;
 mod graph_window;
 mod grid;
@@ -802,6 +803,7 @@ impl eframe::App for StokesForgeApp {
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);
         publish_saved_colors(&ctx, &self.state);
+        graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
         self.collect_shortcuts(&ctx, &mut actions);
         // Ctrl+C sur le graphique actif, avant que panneaux et contenus ne lisent
         // l’`Event::Copy` (#149).

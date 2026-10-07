@@ -713,6 +713,10 @@ column-role-y-error = Erreur Y
 workbook-role-label = Étiquette
 workbook-role-none = Aucun
 workbook-plot-menu = Tracer
+workbook-send-to-graph = Envoyer vers { $graph }
+    .hint = Ajoute les colonnes sélectionnées à un graphique d'une autre fenêtre
+workbook-send-to-graph-menu = Envoyer vers un graphique
+    .hint = Ajoute les colonnes sélectionnées à un graphique d'une autre fenêtre
 
 # Classeur : grille, onglets de feuilles, états vides
 workbook-column-add = Ajouter une colonne

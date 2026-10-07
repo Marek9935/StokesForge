@@ -721,6 +721,10 @@ column-role-y-error = Y Error
 workbook-role-label = Label
 workbook-role-none = None
 workbook-plot-menu = Plot
+workbook-send-to-graph = Send to { $graph }
+    .hint = Adds the selected columns to a graph in another window
+workbook-send-to-graph-menu = Send to Graph
+    .hint = Adds the selected columns to a graph in another window
 
 # Workbook: grid, sheet tabs, empty states
 workbook-column-add = Add Column

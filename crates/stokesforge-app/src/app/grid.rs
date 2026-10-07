@@ -26,6 +26,7 @@ use crate::selection::{GridCursor, Selection};
 use crate::state::{Action, AppState, ColumnDragPayload, GridMenu, HeaderField, MoveDirection};
 use crate::{icons, tr};
 
+use super::graph_targets::send_to_graph_menu;
 use super::menu_sections::MenuSections;
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
@@ -664,6 +665,7 @@ fn column_properties_menu(
     let mut sections = MenuSections::new();
     sections.section(ui, true, |ui| {
         plot_menu(ui, actions, sheet, target_columns);
+        send_to_graph_menu(ui, state.tree(), actions, sheet, target_columns);
         add_column_entry(ui, sheet, actions);
     });
     if let Some(menu) = &menu {

@@ -47,6 +47,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/workbook.rs` | classeur : `book_contents` (contenu commun flottant/détaché), `sheet_tabs`, `workbook_menu` |
 | `app/grid.rs` | grille d'une feuille : `grid_contents` prépare la table, peint ses en-têtes et son corps virtualisé, puis traite le clavier avec `grid_keyboard` (après les cellules : les éditeurs consomment d'abord Tab/Entrée et reprennent le focus), en-tête empilé, gouttière, cellules, `grid_edit_menu`, focus clavier (`GRID_KEYS`, `keyboard_focus_outside_grid`), barres déportées, `column_grip_bands` (prise du glisser de colonnes), libellés de type et de rôle |
 | `app/figure_copy.rs` | copier la figure du graphique actif vers une application externe (#149) : le geste Ctrl+C (`request_figure_copy`, `take_figure_copy_gesture`), l'entrée de menu (`request_graph_figure_copy`) et l'offre au système (`offer_figure`) |
+| `app/graph_targets.rs` | « Envoyer vers » : entrées du clic droit des lettres et du menu Classeur qui ajoutent la sélection à un graphique d'une autre fenêtre (#165) ; la disposition des fenêtres y est publiée dans le `Context` à chaque image |
 | `app/graph_window.rs` | fenêtre de graphe : `graph_view_contents` (commun flottant/détaché), `graph_drop_target`, menu contextuel de la figure, `annotation_interactions`, ordre et propriétés des objets, `request_graph_export` |
 | `app/graph_text_edit.rs` | éditeurs sur place (texte libre, titre, nom de légende) et mise en forme en attente demandée par la barre de format |
 | `app/file_drop.rs` | dépôt de fichiers : `begin_file_drop`, `claim_file_drop`, `finish_file_drop` (un emplacement par viewport), `open_project_in_new_window` |
@@ -1192,8 +1193,17 @@ Tant que le calque actif (#161) n'existe pas, le dépôt vise le premier calque 
 `graph_drop_target` portera alors le calque actif du graphe à la place du `0`.
 
 **Onglet détaché.** `egui::DragAndDrop` est un état global du `Context` : le
-dépôt marche en dock et en fenêtre détachée sans code séparé, mais le passage
-d'une fenêtre OS à l'autre est à vérifier à la main sous Wayland et X11.
+dépôt marche en dock et au sein d'une même fenêtre OS. **D'une fenêtre OS à
+l'autre il ne marche pas sous Wayland** (#165) : la fenêtre source garde le
+pointeur tant que le bouton est pris, le graphique de l'autre fenêtre ne voit ni
+survol ni relâchement, et un vrai glisser-déposer `wl_data_device` coûterait
+plusieurs jours. Contournement : le clic droit des lettres de colonnes (et le
+menu Classeur) propose « Send to <graphique> » (`app/graph_targets.rs`), la même
+`Action::AddSeriesToGraph` que le dépôt, vers les graphiques ouverts **dans une
+autre fenêtre que le classeur** — les graphiques détachés si le classeur est
+dans la fenêtre principale, tous les graphiques ouverts s'il est détaché. À partir
+de trois cibles, un sous-menu « Send to Graph » ; sans cible, l'entrée est
+absente.
 
 ### Propriétés des graphiques
 
