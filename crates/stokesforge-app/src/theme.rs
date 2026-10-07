@@ -124,7 +124,7 @@ pub fn list_row_hover_fill() -> Color32 {
 /// Contour bleu d'un fichier du système glissé au-dessus de la fenêtre
 /// (`app/file_drop.rs`). Distinct, à ce jour, du vert des dépôts internes
 /// (colonnes vers un graphe, [`header_letter_row_selected_fill`]) : l'écart
-/// est une question ouverte du suivi de #169, pas un choix arrêté.
+/// est une question ouverte de #170 (point 2), pas un choix arrêté.
 pub fn file_drop_outline_color() -> Color32 {
     Color32::from_rgb(0x2a, 0x7f, 0xff)
 }
