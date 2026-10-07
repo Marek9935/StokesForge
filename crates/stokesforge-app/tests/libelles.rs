@@ -74,6 +74,12 @@ const APPELS: &[&str] = &[
     "on_hover_text_at_pointer",
 ];
 
+/// Les fonctions libres de l'application qui posent un libellé (#169) :
+/// `theme::section_title(ui, "…")`, `theme::bold("…")`, la ligne de liste.
+/// Vues appelées seules ou par un chemin (`crate::theme::bold(`), jamais
+/// comme méthode.
+const FONCTIONS_LIBRES: &[&str] = &["section_title", "bold", "list_row", "list_row_text"];
+
 /// Les widgets bâtis par `Type::new("texte")` : `egui::Button::new("Ouvrir…")`
 /// est la forme de presque toute entrée de menu, et `RichText::new(…)` celle
 /// d'un texte stylé.
@@ -199,6 +205,14 @@ fn infractions(
             let apres = i + 1 + nom.chars().count();
             if appels.contains(&nom.as_str()) && masque.get(apres) == Some(&'(') {
                 appels_trouves.push((apres, i, format!(".{nom}(")));
+            }
+        } else if masque[i].is_lowercase()
+            && (i == 0 || !(est_ident(masque[i - 1]) || masque[i - 1] == '.'))
+        {
+            let nom = ident_en(masque, i);
+            let apres = i + nom.chars().count();
+            if FONCTIONS_LIBRES.contains(&nom.as_str()) && masque.get(apres) == Some(&'(') {
+                appels_trouves.push((apres, i, format!("{nom}(")));
             }
         } else if masque[i].is_uppercase() && (i == 0 || !est_ident(masque[i - 1])) {
             let nom = ident_en(masque, i);
@@ -519,6 +533,29 @@ fn la_zone_43_suit_ses_fonctions_hors_d_app_rs() {
 
 fn trouve(code: &str) -> Vec<Infraction> {
     infractions(&fichier("t.rs", code), APPELS, CONSTRUCTEURS, TABLES)
+}
+
+/// #169 : un littéral passé à un titre de section, à un gras ou à une ligne
+/// de liste est vu ; une clé `tr!`, une méthode homonyme et une définition
+/// passent.
+#[test]
+fn la_garde_voit_les_libelles_des_fonctions_libres_du_theme() {
+    for code in [
+        r#"fn f(ui: &mut Ui) { section_title(ui, "Échelle"); }"#,
+        r#"fn f(ui: &mut Ui) { crate::theme::section_title(ui, "Échelle"); }"#,
+        r#"fn f(ui: &mut Ui) { ui.label(theme::bold("Titre")); }"#,
+        r#"fn f(ui: &mut Ui) { list_row(ui, None, "Série", true, false); }"#,
+    ] {
+        assert_eq!(trouve(code).len(), 1, "non vu : {code}");
+    }
+    for code in [
+        r#"fn f(ui: &mut Ui) { section_title(ui, tr!("plot-axes-scale-section")); }"#,
+        r#"fn f(x: X) { x.bold("Titre"); }"#,
+        "pub fn section_title(ui: &mut Ui, text: impl Into<String>) -> Response { todo!() }",
+        r#"fn f() { my_bold("Titre"); }"#,
+    ] {
+        assert!(trouve(code).is_empty(), "faux positif : {code}");
+    }
 }
 
 /// #127 : les titres et noms de filtres natifs sont des textes d'interface,
