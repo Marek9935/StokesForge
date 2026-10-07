@@ -58,6 +58,34 @@ pub fn gutter_text_color() -> Color32 {
     GUTTER_TEXT
 }
 
+/// L'[`ACCENT`] lui-même : texte et trait de l'onglet actif, filet de la
+/// ligne sélectionnée d'une liste (#169).
+pub fn accent() -> Color32 {
+    ACCENT
+}
+
+/// Filet qui sépare une bande d'onglets de son contenu (#169).
+pub fn tab_rule_color() -> Color32 {
+    Color32::from_gray(0xD6)
+}
+
+/// Trait d'un onglet survolé, à la place de celui de l'onglet actif (#169).
+pub fn tab_hover_mark_color() -> Color32 {
+    Color32::from_gray(0xC4)
+}
+
+/// Fond de la ligne sélectionnée d'une liste (Project Manager, #169) : plus
+/// pâle que `selection.bg_fill`, le filet d'[`ACCENT`] à gauche porte la
+/// sélection.
+pub fn list_row_selected_fill() -> Color32 {
+    ACCENT.gamma_multiply(0.14)
+}
+
+/// Fond de la ligne survolée d'une liste (#169).
+pub fn list_row_hover_fill() -> Color32 {
+    Color32::from_gray(0xEC)
+}
+
 /// Rouge foncé et discret du contour d'un dialogue modal qui vient de
 /// refuser un clic ([`crate::app`], `modal_dialog`).
 pub fn blocked_flash_color() -> Color32 {

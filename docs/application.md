@@ -395,7 +395,14 @@ disparaissent quand tout tient. Changer de feuille (au clic, au clavier ou
 par script) fait défiler la bande **du plus petit décalage** qui montre
 entièrement l'onglet sélectionné et ses deux voisins — cliquer sur le dernier
 onglet visible ne révèle qu'un onglet de plus (`scroll_tab_strip_to_selected`,
-issue #1). Les notes et matrices restent bornées au rectangle commun. Dans un
+issue #1). Aspect (#169) : onglets plats, sans cadre ; l'actif est écrit
+dans l'accent et porte un trait d'accent du côté du contenu (`TabStripSide` :
+sous le libellé pour les pages des propriétés, au-dessus pour les feuilles),
+un filet gris sépare la bande du contenu. Le Project Manager liste ses
+fenêtres en lignes pleine largeur (`project_tree_row`) : fond pâle d'accent et
+filet vert à gauche pour la sélection, sans fond de bouton. Couleurs dans
+`theme.rs` (`accent`, `tab_rule_color`, `list_row_selected_fill`…). Les notes
+et matrices restent bornées au rectangle commun. Dans un
 graphe (`graph_view_contents`,
 `crates/stokesforge-app/src/app/graph_window.rs`), la figure garde le ratio de
 `DEFAULT_FIGURE_SIZE` (`stokesforge-render::pipeline`, 4:3) mais se met à l'échelle

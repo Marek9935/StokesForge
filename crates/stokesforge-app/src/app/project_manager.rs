@@ -16,8 +16,9 @@ use std::collections::HashSet;
 
 use eframe::egui;
 
-use crate::icons::{icon_image, Icon, IconRole};
+use crate::icons::{icon_image, Icon, IconRole, ICON_SIZE};
 use crate::state::{Action, ProjectTreeNode, WindowKind};
+use crate::theme;
 use crate::tr;
 use stokesforge_core::NodeId;
 
@@ -443,25 +444,10 @@ fn project_tree_node_ui(
             }
             let selected = interaction.selection.contains(&tab);
             let is_hidden = interaction.hidden.contains(&tab);
-            // #144 : le bouton porte la sélection dans sa propre forme arrondie,
-            // y compris au survol ; le cadre ne garde que l'espacement. Le salt
-            // par onglet évite que toutes les lignes partagent le même Id.
+            // Le salt par onglet évite que toutes les lignes partagent le même Id.
             let response = ui
                 .push_id(tab, |ui| {
-                    egui::Frame::NONE
-                        .inner_margin(2.0)
-                        .show(ui, |ui| {
-                            let text = if is_hidden {
-                                egui::RichText::new(name).weak()
-                            } else {
-                                egui::RichText::new(name)
-                            };
-                            ui.add(
-                                egui::Button::image_and_text(icon_image(icon.0, icon.1), text)
-                                    .selected(selected),
-                            )
-                        })
-                        .inner
+                    project_tree_row(ui, icon_image(icon.0, icon.1), name, selected, is_hidden)
                 })
                 .inner;
             if response.clicked() || response.secondary_clicked() {
@@ -553,6 +539,76 @@ fn project_tree_node_ui(
         }
     }
 }
+
+/// Ligne d'une fenêtre dans l'arbre (#169, option A de la maquette des
+/// onglets) : une ligne de liste sur toute la largeur restante depuis son
+/// retrait, sans cadre de bouton. Sélectionnée, fond teinté d'accent et filet
+/// vert à gauche ; survolée, fond gris clair. Elle remplace le bouton
+/// `.selected()` de #144, dont le fond vert arrondi était aussi celui des
+/// onglets actifs : trois rôles, un seul aspect.
+fn project_tree_row(
+    ui: &mut egui::Ui,
+    icon: egui::Image<'static>,
+    name: &str,
+    selected: bool,
+    hidden: bool,
+) -> egui::Response {
+    const PADDING: egui::Vec2 = egui::vec2(6.0, 3.0);
+    const GAP: f32 = 5.0;
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(name.to_owned(), font, egui::Color32::PLACEHOLDER);
+    let natural = 2.0 * PADDING.x + ICON_SIZE + GAP + galley.size().x;
+    let size = egui::vec2(
+        ui.available_width().max(natural),
+        galley.size().y.max(ICON_SIZE) + 2.0 * PADDING.y,
+    );
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, name)
+    });
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if selected {
+            painter.rect_filled(rect, 0.0, theme::list_row_selected_fill());
+            let mark =
+                egui::Rect::from_min_size(rect.min, egui::vec2(LIST_ROW_MARK, rect.height()));
+            painter.rect_filled(mark, 0.0, theme::accent());
+        } else if response.hovered() {
+            painter.rect_filled(rect, 0.0, theme::list_row_hover_fill());
+        }
+        let icon_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + PADDING.x, rect.center().y - ICON_SIZE / 2.0),
+            egui::Vec2::splat(ICON_SIZE),
+        );
+        icon.paint_at(ui, icon_rect);
+        let text_color = if hidden {
+            ui.visuals().weak_text_color()
+        } else if selected {
+            ui.visuals().widgets.hovered.fg_stroke.color
+        } else {
+            ui.visuals().text_color()
+        };
+        let text_pos = egui::pos2(
+            icon_rect.right() + GAP,
+            rect.center().y - galley.size().y / 2.0,
+        );
+        ui.painter().galley(text_pos, galley, text_color);
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                0.0,
+                ui.visuals().selection.stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    response
+}
+
+/// Largeur du filet d'accent à gauche d'une ligne sélectionnée.
+const LIST_ROW_MARK: f32 = 3.0;
 
 /// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
 /// séparée quand il est détaché.
@@ -814,9 +870,14 @@ pub(super) mod tests {
         }
     }
 
+    /// #169 : une entrée sélectionnée est une ligne de liste — fond pâle
+    /// d'accent sur toute la largeur restante et filet d'accent à gauche —
+    /// et non plus le fond `selection.bg_fill` des boutons, que gardent les
+    /// autres sélections de l'application. Témoin : sans sélection, ni fond
+    /// ni filet.
     #[test]
-    fn la_selection_du_project_manager_utilise_la_forme_arrondie_des_boutons() {
-        let mut project = Project::new("Sélection arrondie").unwrap();
+    fn la_selection_du_project_manager_est_une_ligne_de_liste_a_filet() {
+        let mut project = Project::new("Sélection en liste").unwrap();
         let root = project.root();
         let book = Tab::Book(project.add_empty_workbook(root, None).unwrap());
         let graph = Tab::Graph(project.add_graph(root, None, PlotSpec::default()).unwrap());
@@ -829,34 +890,38 @@ pub(super) mod tests {
         let banc = Banc::new(None, HashSet::from([book, graph, note, matrix]));
         banc.paint(&context, &tree, Vec::new());
         let output = banc.paint(&context, &tree, Vec::new());
-        let fill = context.global_style().visuals.selection.bg_fill;
-        let selected_rects: Vec<_> = output
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Rect(rect) if rect.fill == fill => Some(rect),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            selected_rects.len(),
-            4,
-            "un seul fond par entrée sélectionnée"
-        );
-        for rect in selected_rects {
-            assert_ne!(
-                rect.corner_radius,
-                egui::CornerRadius::ZERO,
-                "la sélection épouse l'arrondi du bouton"
+        let rects = |output: &egui::FullOutput, fill: egui::Color32| -> Vec<egui::Rect> {
+            output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                    _ => None,
+                })
+                .collect()
+        };
+        let rows = rects(&output, theme::list_row_selected_fill());
+        let marks = rects(&output, theme::accent());
+        assert_eq!(rows.len(), 4, "un seul fond par entrée sélectionnée");
+        assert_eq!(marks.len(), 4, "un filet par entrée sélectionnée");
+        for (row, mark) in rows.iter().zip(&marks) {
+            assert_eq!(mark.left(), row.left(), "le filet est à gauche de la ligne");
+            assert_eq!(mark.height(), row.height(), "le filet couvre la ligne");
+            assert_eq!(mark.width(), LIST_ROW_MARK);
+            assert!(
+                row.width() > 300.0,
+                "la ligne court sur toute la largeur restante : {row:?}"
             );
         }
+        let button_fill = context.global_style().visuals.selection.bg_fill;
+        assert!(
+            rects(&output, button_fill).is_empty(),
+            "plus de fond de bouton sélectionné"
+        );
         banc.selection.borrow_mut().clear();
         let output = banc.paint(&context, &tree, Vec::new());
-        assert!(
-            !output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Rect(rect) if rect.fill == fill)),
-            "le témoin sans sélection n'a pas cette teinte"
-        );
+        assert!(rects(&output, theme::list_row_selected_fill()).is_empty());
+        assert!(rects(&output, theme::accent()).is_empty());
     }
 
     #[test]

@@ -8,10 +8,21 @@
 //! `workbook.rs` (#120). Les menus, flèches, onglets et renommage sont
 //! des sections de peinture privées (#124) ; leurs appels ne créent aucune
 //! portée egui supplémentaire et les callbacks restent différés après le dessin.
+//!
+//! Aspect (#169, option A de la maquette des onglets) : onglets plats, sans
+//! cadre. L'actif est écrit dans l'accent et porte un trait **du côté du
+//! contenu** ([`TabStripSide`]) — sous le libellé pour une bande posée en
+//! haut (pages des propriétés), au-dessus pour une bande posée en bas
+//! (feuilles d'un classeur) ; un filet gris sépare la bande du contenu.
+//! Auparavant, l'onglet actif était un bouton au fond `selection.bg_fill`,
+//! le même que l'entrée sélectionnée du Project Manager : trois rôles, un
+//! seul aspect. Écartée : l'option B, onglets rectangulaires façon
+//! Origin/Excel, plus chargée avec beaucoup de feuilles.
 
 use eframe::egui;
 
 use crate::icons::{icon_button, Icon, IconRole};
+use crate::theme;
 use crate::tr;
 
 use super::menu_sections::MenuSections;
@@ -24,6 +35,22 @@ use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 /// plus de barre de défilement à loger (boutons « < » « > », voir
 /// `sheet_tabs`), et la barre horizontale de la grille est en dessous.
 pub(super) const TAB_STRIP_HEIGHT: f32 = 24.0;
+
+/// Marge horizontale d'un libellé d'onglet, de chaque côté.
+const TAB_PADDING_X: f32 = 10.0;
+
+/// Épaisseur du trait de l'onglet actif (ou survolé).
+const TAB_MARK: f32 = 2.0;
+
+/// Place de la bande par rapport à son contenu : le trait de l'onglet actif
+/// et le filet de séparation se posent du côté du contenu (#169).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TabStripSide {
+    /// Bande au-dessus du contenu (pages des propriétés du graphe).
+    Top,
+    /// Bande sous le contenu (feuilles d'un classeur).
+    Bottom,
+}
 
 /// Mémoire d'une image à l'autre de la bande d'onglets de feuille : de quoi
 /// savoir, **avant** de la dessiner (donc avant de placer les boutons « < »
@@ -64,6 +91,7 @@ pub(super) fn tab_strip<
     K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq + Send + Sync + 'static,
 >(
     ui: &mut egui::Ui,
+    side: TabStripSide,
     tabs: &[(K, String)],
     selected: K,
     on_select: impl FnMut(K),
@@ -72,6 +100,7 @@ pub(super) fn tab_strip<
 ) -> TabStripOutput {
     tab_strip_with(
         ui,
+        side,
         tabs,
         selected,
         on_select,
@@ -91,6 +120,7 @@ pub(super) fn tab_strip_with<
     K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq + Send + Sync + 'static,
 >(
     ui: &mut egui::Ui,
+    side: TabStripSide,
     tabs: &[(K, String)],
     selected: K,
     mut on_select: impl FnMut(K),
@@ -100,6 +130,7 @@ pub(super) fn tab_strip_with<
     mut on_event: impl FnMut(TabEvent<K>),
 ) -> TabStripOutput {
     let config = TabStripConfig {
+        side,
         tabs,
         selected,
         add_label,
@@ -141,7 +172,10 @@ pub(super) fn tab_strip_with<
     let mut content = TabStripContent::default();
     let mut arrows = None;
     let mut offset = 0.0;
-    ui.horizontal(|ui| {
+    // Le filet passe sous les traits des onglets : réservé avant eux, posé
+    // une fois la bande mesurée.
+    let rule = ui.painter().add(egui::Shape::Noop);
+    let band = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         (step, arrows) = tab_strip_arrows(ui, overflow);
         let band_width = ui.available_width();
@@ -166,6 +200,19 @@ pub(super) fn tab_strip_with<
             .offset
             .x;
     });
+    let band = band.response.rect;
+    let rule_y = match side {
+        TabStripSide::Top => band.bottom() - 0.5,
+        TabStripSide::Bottom => band.top() + 0.5,
+    };
+    ui.painter().set(
+        rule,
+        egui::Shape::hline(
+            band.x_range(),
+            rule_y,
+            egui::Stroke::new(1.0, theme::tab_rule_color()),
+        ),
+    );
     ui.memory_mut(|memory| memory.data.insert_temp(overflow_id, content.overflow));
     if step != 0 {
         ui.ctx().request_repaint();
@@ -190,6 +237,7 @@ pub(super) fn tab_strip_with<
 // Données et demandes d'une image, sans Ui ni identifiant propre : les
 // extractions conservent les portées egui et l'ordre des callbacks de la bande.
 struct TabStripConfig<'a, K> {
+    side: TabStripSide,
     tabs: &'a [(K, String)],
     selected: K,
     add_label: Option<&'a str>,
@@ -367,14 +415,7 @@ fn tab_strip_tab<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
     if renaming {
         tab_strip_rename(ui, id, name, requests)
     } else {
-        let tab = egui::Button::new(egui::RichText::new(name).size(12.0))
-            .small()
-            .fill(if config.selected == id {
-                ui.visuals().selection.bg_fill
-            } else {
-                egui::Color32::TRANSPARENT
-            });
-        let response = ui.add(tab);
+        let response = tab_strip_label(ui, name, config.selected == id, config.side);
         response.context_menu(|ui| tab_strip_tab_menu(ui, id, config, requests));
         if response.clicked() {
             requests.select = Some(id);
@@ -384,6 +425,68 @@ fn tab_strip_tab<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
         }
         response
     }
+}
+
+/// Un onglet plat (#169) : libellé sans cadre, écrit dans l'accent s'il est
+/// actif, avec un trait du côté du contenu — d'accent pour l'actif, gris pour
+/// le survolé.
+fn tab_strip_label(
+    ui: &mut egui::Ui,
+    name: &str,
+    selected: bool,
+    side: TabStripSide,
+) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(
+        name.to_owned(),
+        egui::FontId::proportional(12.0),
+        egui::Color32::PLACEHOLDER,
+    );
+    let size = egui::vec2(galley.size().x + 2.0 * TAB_PADDING_X, TAB_STRIP_HEIGHT);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, name)
+    });
+    if ui.is_rect_visible(rect) {
+        let hovered = response.hovered();
+        let mark = if selected {
+            Some(theme::accent())
+        } else if hovered {
+            Some(theme::tab_hover_mark_color())
+        } else {
+            None
+        };
+        if let Some(color) = mark {
+            let mark_rect = match side {
+                TabStripSide::Top => egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), rect.bottom() - TAB_MARK),
+                    rect.max,
+                ),
+                TabStripSide::Bottom => egui::Rect::from_min_max(
+                    rect.min,
+                    egui::pos2(rect.right(), rect.top() + TAB_MARK),
+                ),
+            };
+            ui.painter().rect_filled(mark_rect, 0.0, color);
+        }
+        let text_color = if selected {
+            theme::accent()
+        } else if hovered {
+            ui.visuals().widgets.hovered.fg_stroke.color
+        } else {
+            ui.visuals().text_color()
+        };
+        let text_pos = rect.center() - galley.size() / 2.0;
+        ui.painter().galley(text_pos, galley, text_color);
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                2.0,
+                ui.visuals().selection.stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    response
 }
 
 fn tab_strip_contents<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
@@ -539,7 +642,15 @@ mod tests {
         };
         let mut sortie = TabStripOutput::default();
         let mut output = context.run_ui(input, |ui| {
-            sortie = tab_strip(ui, tabs, selected, |_| {}, None, || {});
+            sortie = tab_strip(
+                ui,
+                TabStripSide::Bottom,
+                tabs,
+                selected,
+                |_| {},
+                None,
+                || {},
+            );
         });
         output.textures_delta.clear();
         (sortie, output)
@@ -617,6 +728,98 @@ mod tests {
         assert!(position(&output, &tr!("menu-sheet")).is_none());
     }
 
+    /// #169 : l'onglet actif porte un trait d'accent du côté du contenu —
+    /// sous le libellé pour une bande en haut, au-dessus pour une bande en
+    /// bas — et son texte est dans l'accent. Témoins : l'onglet inactif n'a
+    /// ni trait ni accent, et aucun onglet ne garde le fond de sélection des
+    /// boutons ; un filet gris court sous (ou sur) toute la bande.
+    #[test]
+    fn l_onglet_actif_est_souligne_du_cote_du_contenu() {
+        for side in [TabStripSide::Top, TabStripSide::Bottom] {
+            let context = contexte();
+            let tabs: Vec<(u32, String)> = vec![(0, "Graphe".into()), (1, "Axes".into())];
+            let run = || {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 100.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| {
+                    tab_strip(ui, side, &tabs, 1, |_| {}, None, || {});
+                });
+                output.textures_delta.clear();
+                output
+            };
+            run();
+            let output = run();
+            let rects = |fill: egui::Color32| -> Vec<egui::Rect> {
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|painted| match &painted.shape {
+                        egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                        _ => None,
+                    })
+                    .collect()
+            };
+            let text = |needle: &str| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|painted| match &painted.shape {
+                        egui::Shape::Text(text) if text.galley.text() == needle => {
+                            Some((text.visual_bounding_rect(), text.fallback_color))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("{needle:?} n'est pas peint"))
+            };
+            let marks = rects(theme::accent());
+            assert_eq!(marks.len(), 1, "{side:?} : un seul trait, celui de l'actif");
+            let mark = marks[0];
+            assert_eq!(mark.height(), TAB_MARK);
+            let (actif, couleur_actif) = text("Axes");
+            let (inactif, couleur_inactif) = text("Graphe");
+            assert_eq!(couleur_actif, theme::accent());
+            assert_ne!(couleur_inactif, theme::accent(), "{side:?} : témoin");
+            assert!(mark.x_range().contains(actif.center().x), "{side:?}");
+            assert!(!mark.x_range().contains(inactif.center().x), "{side:?}");
+            match side {
+                TabStripSide::Top => assert!(mark.top() >= actif.bottom(), "{mark:?} {actif:?}"),
+                TabStripSide::Bottom => {
+                    assert!(mark.bottom() <= actif.top(), "{mark:?} {actif:?}")
+                }
+            }
+            let button_fill = context.global_style().visuals.selection.bg_fill;
+            assert!(
+                rects(button_fill).is_empty(),
+                "{side:?} : plus de fond de bouton"
+            );
+            let rule = output
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::LineSegment { points, stroke }
+                        if stroke.color == theme::tab_rule_color() =>
+                    {
+                        Some(*points)
+                    }
+                    _ => None,
+                })
+                .expect("le filet de la bande est peint");
+            assert!(
+                rule[1].x - rule[0].x >= 390.0,
+                "le filet court sur la bande"
+            );
+            match side {
+                TabStripSide::Top => assert!(rule[0].y >= mark.top()),
+                TabStripSide::Bottom => assert!(rule[0].y <= mark.bottom()),
+            }
+        }
+    }
+
     /// #19 : tous les onglets d'une bande qui tient dans sa largeur sont
     /// peints, et un clic sur l'un d'eux le choisit. Le témoin : tant qu'on
     /// ne clique pas, rien n'est choisi — la sélection reconduite d'une image
@@ -643,7 +846,15 @@ mod tests {
                 ..Default::default()
             };
             let mut output = context.run_ui(input, |ui| {
-                tab_strip(ui, &tabs, 0, |tab| chosen.set(Some(tab)), None, || {});
+                tab_strip(
+                    ui,
+                    TabStripSide::Top,
+                    &tabs,
+                    0,
+                    |tab| chosen.set(Some(tab)),
+                    None,
+                    || {},
+                );
             });
             output.textures_delta.clear();
             output
@@ -887,6 +1098,7 @@ mod tests {
             let mut output = context.run_ui(input, |ui| {
                 tab_strip_with(
                     ui,
+                    TabStripSide::Bottom,
                     &tabs,
                     0,
                     |tab| choisis.push(tab),
@@ -970,6 +1182,7 @@ mod tests {
                 |ui| {
                     tab_strip_with(
                         ui,
+                        TabStripSide::Bottom,
                         &tabs,
                         0,
                         |id| appels.borrow_mut().push(Appel::Selection(id)),

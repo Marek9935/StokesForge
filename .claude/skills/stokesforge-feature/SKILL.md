@@ -320,7 +320,10 @@ onglets de feuille rendue générique : défilement horizontal sans barre,
 flèches (icônes `CaretLeft`/`CaretRight`) quand des onglets sont cachés, défilement minimal vers
 l'onglet choisi. Ne jamais écrire une rangée de `selectable_label` pour des
 onglets ; `sheet_tabs` (feuilles) et la fenêtre des propriétés du graphe en
-sont des usages. Un dialogue modal ne **peint pas de voile** sur le reste de
+sont des usages. Aspect (#169) : onglets plats soulignés, trait d'accent du
+côté du contenu donné par `TabStripSide` (`Top` : bande au-dessus du contenu,
+`Bottom` : en dessous) ; jamais le fond `selection.bg_fill` d'un bouton, qui
+confondait onglet actif et entrée sélectionnée. Un dialogue modal ne **peint pas de voile** sur le reste de
 l'application (issue #20) : il le bloque seulement.
 
 Les panneaux fixes (#100) passent par `panel_header` dans le même module :

@@ -23,7 +23,7 @@ use crate::state::{
 use crate::tr;
 
 use super::dialogs::{modal_dialog, DialogOutcome};
-use super::tab_strip::tab_strip;
+use super::tab_strip::{tab_strip, TabStripSide};
 
 /// Largeur par défaut de la fenêtre des propriétés d'un graphe
 /// ([`plot_settings_window`]).
@@ -176,8 +176,18 @@ fn plot_settings_contents(
         .iter()
         .map(|tab| (*tab, tab.label()))
         .collect();
-    tab_strip(ui, &tabs, settings.tab, |tab| chosen_tab = tab, None, || {});
-    ui.separator();
+    // La bande trace son propre filet sous les onglets (#169) : pas de
+    // séparateur en plus, seulement l'espace qu'il laissait.
+    tab_strip(
+        ui,
+        TabStripSide::Top,
+        &tabs,
+        settings.tab,
+        |tab| chosen_tab = tab,
+        None,
+        || {},
+    );
+    ui.add_space(ui.spacing().item_spacing.y);
 
     let mut commit = false;
     // Couleurs enregistrées, lues avant d'emprunter le brouillon ; les

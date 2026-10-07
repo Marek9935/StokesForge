@@ -25,7 +25,9 @@ use super::grid::{
 };
 use super::menu_sections::MenuSections;
 use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
-use super::tab_strip::{tab_strip_with, TabEvent, TabOps, TabStripOutput, TAB_STRIP_HEIGHT};
+use super::tab_strip::{
+    tab_strip_with, TabEvent, TabOps, TabStripOutput, TabStripSide, TAB_STRIP_HEIGHT,
+};
 
 /// Menu « Classeur » : les gestes sur la feuille affichée, miroir du menu
 /// contextuel des onglets et du raccourci Ctrl+D (F2 édite les cellules, jamais le nom des feuilles, #130/#143).
@@ -132,6 +134,7 @@ fn sheet_tabs(
     let add_label = tr!("workbook-worksheet-add");
     tab_strip_with(
         ui,
+        TabStripSide::Bottom,
         sheets,
         selected,
         on_select,
