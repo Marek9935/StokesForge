@@ -26,6 +26,15 @@ cargo run -p stokesforge-app -- /chemin/vers/projet.stokesforge
 L'application s'ouvre, se photographie, et se ferme toute seule au bout du
 délai. Sans `AUTOQUIT`, elle reste ouverte et bloque la session.
 
+Dans une session d'agent sans affichage réellement disponible, la fenêtre
+peut ne jamais se peindre : aucun fichier n'est écrit et le processus ne se
+ferme pas. Toujours borner la commande (`timeout 60 …`), essayer **une**
+fois (au plus une seconde avec `STOKESFORGE_X11=1`), ne pas boucler, et dire
+dans le compte rendu que l'aspect n'a pas été regardé. Les tests d'aspect du
+module de la surface (formes peintes : fonds, filets, gras via
+`test_support::textes`) restent alors le seul filet ; ils prouvent les
+formes, pas le rendu final.
+
 **Le format est du PPM binaire (`P6`)**, choisi pour ne coûter aucune
 dépendance — sept lignes de code. Il n'est pas lisible directement :
 

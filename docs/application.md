@@ -27,7 +27,7 @@ d'interface est un vrai module de `src/app/` (chantier #115, #116–#123) :
 imports explicites, visibilité minimale (`pub(super)` entre modules d'`app`),
 aucun `use …::*` hors du code de test (garde `aucun_import_global_hors_des_tests`),
 une doc de tête par module. Sens des dépendances : `app.rs` → modules de
-surface → briques communes (`dialogs`, `tab_strip`, `window_chrome`,
+surface → briques communes (`dialogs`, `tab_strip`, `list_row`, `window_chrome`,
 `crate::icons`…). Les tests internes suivent le code qu'ils éprouvent : un
 test vit dans le module de sa surface, et le module `tests` d'`app.rs`
 n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
@@ -55,6 +55,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/plot_settings.rs` | propriétés du graphe : `plot_settings_window`, ses onglets, un éditeur par page, le mémo des formules ; `column_metadata_window` |
 | `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with` |
 | `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
+| `app/list_row.rs` | brique commune de la ligne de liste sélectionnable (#169) : `list_row`, `ListRowBackground`, `list_row_label`, `list_row_text`, `LIST_ROW_MARK` ; Project Manager, Object Manager, liste des séries des propriétés |
 | `app/shortcuts.rs` | constantes `SHORTCUT_*` et leurs rappels, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
 | `app/window_chrome.rs` | cadre commun des fenêtres et panneaux : `window_header`, `panel_header`, `floating_window_frame`, contour actif, poignées, `show_window_in_layer`, `show_window_contents_bounded` |
 | `app/window_placement.rs` | placement : tailles par défaut, cascade, espace de travail fixe (`WORKSPACE_SIZE`), `clamp_to_workspace`, conversion logique → écran |
@@ -398,16 +399,36 @@ onglet visible ne révèle qu'un onglet de plus (`scroll_tab_strip_to_selected`,
 issue #1). Aspect (#169) : onglets plats, sans cadre ; l'actif est écrit
 en gras et dans l'accent et porte un trait d'accent du côté du contenu (`TabStripSide` :
 sous le libellé pour les pages des propriétés, au-dessus pour les feuilles),
-un filet gris sépare la bande du contenu. Le Project Manager liste ses
-fenêtres en lignes pleine largeur (`project_tree_row`) : fond pâle d'accent et
-filet vert à gauche et texte en gras pour la sélection, sans fond de bouton.
+un filet gris sépare la bande du contenu. Les axes de la page « Axes » des
+propriétés sont aussi un jeu d'onglets (`tab_strip`, `Top`).
+
+#### Onglets, listes et sélection : quatre aspects, quatre rôles (#169)
+
+| Rôle | Brique | Aspect |
+|---|---|---|
+| jeu d'onglets (feuilles, pages, axes) | `tab_strip` / `tab_strip_with` + `TabStripSide` | plat, actif en gras et accent, trait du côté du contenu |
+| entrée de liste ou d'arbre (Project Manager, Object Manager, liste des séries des propriétés) | `app/list_row.rs` : `list_row`, ou `ListRowBackground` + `list_row_label` pour une ligne composée | ligne pleine largeur, fond pâle d'accent, filet d'accent à gauche, gras |
+| choix exclusif dans un menu, une liste déroulante ou le sélecteur de couleur | `selectable_label` / `selectable_value` d'egui | fond de bouton sélectionné |
+| bascule d'outil d'une barre | `Button::selected` (`toolbar::tool_button`) | bouton enfoncé |
+
+Garde `aucun_bouton_selectionnable_hors_d_un_menu` (`tests/gardes.rs`) : un
+bouton sélectionnable d'egui hors d'un menu, d'un `show_ui` ou d'une fonction
+`*picker*`/`*popup*` fait échouer les tests.
+
 Le gras est **toujours** `theme::bold` (axe `wght` de Noto Sans Variable,
 graisse 600) : `RichText::strong` d'egui ne graisse rien, il est interdit
-(`aucun_strong_d_egui_hors_du_theme`) ; les titres de section des formulaires,
-l'étape courante de l'assistant d'import et l'objet sélectionné de l'Object
-Manager l'emploient. Une police sans axe `wght` (paire Fira ou Libertinus,
-police système) reste en graisse normale, sans erreur. Couleurs dans
-`theme.rs` (`accent`, `tab_rule_color`, `list_row_selected_fill`…). Les notes
+(`aucun_strong_d_egui_hors_du_theme`). Un titre de section de formulaire
+(propriétés du graphe, assistant d'import) passe par `theme::section_title`
+(espace de 6 pt puis gras) et sépare seul ses groupes, sans `ui.separator()`
+juste avant (`aucun_separateur_avant_un_titre_de_section`) ; l'étape courante
+de l'assistant d'import et l'élément sélectionné d'une liste sont aussi en
+gras. Une police sans axe `wght` (paire Fira ou Libertinus, police système)
+reste en graisse normale, sans erreur. Toute couleur d'état ou de chrome
+vient de `theme.rs` (`accent`, `tab_rule_color`, `tab_hover_mark_color`,
+`list_row_selected_fill`, `list_row_hover_fill`, `file_drop_outline_color`…)
+ou des `Visuals` qu'il pose (`error_fg_color`, `warn_fg_color`,
+`selection`) : aucun `Color32::from_…` ni teinte nommée hors de `theme.rs` et
+`color_picker.rs` (`aucune_couleur_en_dur_hors_du_theme`). Les notes
 et matrices restent bornées au rectangle commun. Dans un
 graphe (`graph_view_contents`,
 `crates/stokesforge-app/src/app/graph_window.rs`), la figure garde le ratio de

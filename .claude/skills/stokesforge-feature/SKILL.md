@@ -212,6 +212,37 @@ test egui qui dépend de l'aspect ou de la place des barres, appeler
 `theme::install(&context)` : un `Context::default()` a le style d'egui, pas
 celui de StokesForge.
 
+## 2 ter bis. Onglets, listes, gras, couleurs : l'aspect commun (#169)
+
+Quatre rôles, quatre aspects, chacun par sa brique (tableau complet dans
+`docs/application.md`, § Onglets, listes et sélection) :
+
+- **jeu d'onglets** (pages, feuilles, axes, toute rangée qui change la page
+  affichée dessous) : `tab_strip` / `tab_strip_with` avec `TabStripSide`
+  (`Top` si la bande est au-dessus du contenu, `Bottom` sinon) — jamais une
+  rangée de `selectable_label` ;
+- **entrée de liste ou d'arbre** sélectionnable : `list_row`
+  (`src/app/list_row.rs`), ou, pour une ligne composée de plusieurs widgets
+  (case, échantillon, nom), `ListRowBackground::reserve` avant les widgets,
+  `list_row_label` pour le nom, `ListRowBackground::paint` après — jamais un
+  bouton sélectionnable au fond arrondi ;
+- **choix exclusif** dans un menu, une liste déroulante (`show_ui`) ou le
+  sélecteur de couleur : `selectable_label` / `selectable_value` d'egui, et
+  nulle part ailleurs (garde `aucun_bouton_selectionnable_hors_d_un_menu`) ;
+- **bascule d'outil** d'une barre : `Button::selected` (`toolbar::tool_button`).
+
+Gras : `theme::bold` seulement ; `RichText::strong` / `ui.strong` ne
+changent que la couleur et sont interdits (`aucun_strong_d_egui_hors_du_theme`).
+Titre de section de formulaire : `theme::section_title(ui, tr!(…))`, qui pose
+l'espace et le gras ; il sépare seul ses groupes — pas de `ui.separator()`
+juste avant (`aucun_separateur_avant_un_titre_de_section`), pas de libellé
+ordinaire qui fait office de titre. Couleurs d'état et de chrome (accent,
+survol, filet, dépôt, erreur) : une fonction de `theme.rs` ou les `Visuals`
+qu'il pose (`error_fg_color`, `warn_fg_color`, `selection`) ; aucun
+`Color32::from_…` ni teinte nommée (`RED`…) hors de `theme.rs` et
+`color_picker.rs` (`aucune_couleur_en_dur_hors_du_theme`). Une teinte qui
+manque s'ajoute à `theme.rs`, nommée par son rôle.
+
 ## 2 quater. Sa place dans les menus — à étudier pour **toute** fonctionnalité
 
 Avant de coder, décider explicitement où l'utilisateur **trouvera** la
@@ -319,13 +350,9 @@ ferme (une entrée), Annuler l'avorte (modèle : `cancel_plot_settings`). **Tout
 onglets de feuille rendue générique : défilement horizontal sans barre,
 flèches (icônes `CaretLeft`/`CaretRight`) quand des onglets sont cachés, défilement minimal vers
 l'onglet choisi. Ne jamais écrire une rangée de `selectable_label` pour des
-onglets ; `sheet_tabs` (feuilles) et la fenêtre des propriétés du graphe en
-sont des usages. Aspect (#169) : onglets plats soulignés, trait d'accent du
-côté du contenu donné par `TabStripSide` (`Top` : bande au-dessus du contenu,
-`Bottom` : en dessous) ; jamais le fond `selection.bg_fill` d'un bouton, qui
-confondait onglet actif et entrée sélectionnée. Tout gras (titre de section,
-élément actif ou sélectionné) est `theme::bold` ; jamais `RichText::strong` /
-`ui.strong`, qui ne changent que la couleur (garde `aucun_strong_d_egui_hors_du_theme`). Un dialogue modal ne **peint pas de voile** sur le reste de
+onglets ; `sheet_tabs` (feuilles), les pages de la fenêtre des propriétés du
+graphe et ses axes en sont des usages. Aspect, listes, gras et couleurs d'état :
+§2 ter bis. Un dialogue modal ne **peint pas de voile** sur le reste de
 l'application (issue #20) : il le bloque seulement.
 
 Les panneaux fixes (#100) passent par `panel_header` dans le même module :
@@ -542,6 +569,7 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] état d'`AppState` nouveau recopié dans la vue détachée s'il doit y valoir ; raccourci global essayé avec un graphe actif et un classeur détaché
 - [ ] dessin et événements dans le module de la surface (`src/app/<surface>.rs`), code de fenêtre dans le `window_*.rs` concerné, rien de nouveau dans `app.rs` hors orchestration ; surface nouvelle dans son propre module, à imports explicites, ajoutée à la table de `docs/application.md` (§2 octies)
 - [ ] barres de défilement : aucun style local, place lue via `theme::scroll_bar_allocated_width`
+- [ ] onglets par `tab_strip`, listes par `list_row`, titres par `theme::section_title`, gras par `theme::bold`, couleurs d'état par `theme.rs` (§2 ter bis)
 - [ ] icônes : composant `icons.rs`, info-bulle `tr!`, seulement si elle apporte quelque chose (`docs/icones.md`)
 - [ ] couleurs : `color_picker::color_field` avec l'usage et le `PickerEnv`, vide = automatique
 - [ ] existant réutilisé plutôt que dupliqué
