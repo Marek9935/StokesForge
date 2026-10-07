@@ -266,6 +266,8 @@ pub(super) fn role_label(role: ColumnRole) -> String {
     match role {
         ColumnRole::X => tr!("workbook-role-x"),
         ColumnRole::Y => tr!("workbook-role-y"),
+        ColumnRole::X2 => tr!("workbook-role-x2"),
+        ColumnRole::Y2 => tr!("workbook-role-y2"),
         ColumnRole::Z => tr!("workbook-role-z"),
         ColumnRole::XError => tr!("column-role-x-error"),
         ColumnRole::YError => tr!("column-role-y-error"),
@@ -762,6 +764,8 @@ pub(super) fn column_type_role_menus(
             for candidate in [
                 ColumnRole::X,
                 ColumnRole::Y,
+                ColumnRole::X2,
+                ColumnRole::Y2,
                 ColumnRole::Z,
                 ColumnRole::XError,
                 ColumnRole::YError,
@@ -3158,6 +3162,8 @@ mod tests {
         let roles: Vec<String> = [
             ColumnRole::X,
             ColumnRole::Y,
+            ColumnRole::X2,
+            ColumnRole::Y2,
             ColumnRole::Z,
             ColumnRole::XError,
             ColumnRole::YError,

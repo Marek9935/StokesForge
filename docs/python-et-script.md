@@ -253,7 +253,7 @@ le [spike #69](python-matplotlib-spike.md), sans changer le rendu natif.
 
 `pyst.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311")` pose un objet
 (`rectangle`, `ellipse`, `line` ou `arrow`, pointe en `(x2, y2)`) en coordonnées
-de données du panneau `panel=(ligne, colonne)`, au-dessus des autres, et rend
+de données du calque de base de la case `panel=(ligne, colonne)` (le calque ordinaire, jamais un calque superposé, #167), au-dessus des autres, et rend
 son rang. `axis` vaut `left` ou `right`. La couleur du trait vide est
 automatique, celle du remplissage vide signifie aucun remplissage.
 `remove_shape` retire ce rang ; les objets suivants descendent d'un rang.
@@ -302,7 +302,7 @@ poignée rendue conserve l'époque de cet instantané.
 | `column` | dictionnaire ci-dessous pour une colonne ; `None` ailleurs |
 
 Les métadonnées `column` portent `type` (`numeric`, `datetime`, `mixed`),
-`role` (`x`, `y`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
+`role` (`x`, `y`, `x2`, `y2`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
 `unit`, `comment`, `display_format`, `formula` (texte ou `None`) et `version`
 (compteur de modification). Modifier ce dictionnaire ne touche jamais au
 modèle. Relire `info` après une modification pour obtenir l'état courant.

@@ -37,7 +37,7 @@ use crate::toolbar::ToolbarId;
 use crate::tr;
 
 use super::graph_text_edit::add_annotation_at;
-use super::graph_window::graph_properties_menu;
+use super::graph_window::{graph_properties_menu, published_active_panel};
 use super::menu_sections::MenuSections;
 use super::object_manager_ui::{
     object_manager_settings_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
@@ -374,6 +374,43 @@ impl StokesForgeApp {
                     }
                     ui.close();
                 }
+                // Calque superposé (#167), à la manière du « New Layer (Axes) »
+                // d'Origin, sur le calque actif.
+                ui.menu_button(tr!("menu-new-layer"), |ui| {
+                    let panel = published_active_panel(ctx, graph);
+                    for (label, hint, x_top, y_right) in [
+                        (
+                            tr!("action-new-layer-top-x"),
+                            tr!("action-new-layer-top-x", "hint"),
+                            true,
+                            false,
+                        ),
+                        (
+                            tr!("action-new-layer-right-y"),
+                            tr!("action-new-layer-right-y", "hint"),
+                            false,
+                            true,
+                        ),
+                        (
+                            tr!("action-new-layer-top-x-right-y"),
+                            tr!("action-new-layer-top-x-right-y", "hint"),
+                            true,
+                            true,
+                        ),
+                    ] {
+                        if ui.button(label).on_hover_text(hint).clicked() {
+                            actions.push(Action::AddLayer {
+                                graph,
+                                panel,
+                                x_top,
+                                y_right,
+                            });
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(tr!("menu-new-layer", "hint"));
             });
             // Le menu de l'objet sélectionné est celui du clic droit et de
             // l'Object Manager ; sans sélection, l'entrée est grisée.

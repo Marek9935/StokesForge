@@ -125,6 +125,8 @@ impl From<ColumnRole> for RoleRecord {
         match value {
             ColumnRole::X => RoleRecord::X,
             ColumnRole::Y => RoleRecord::Y,
+            ColumnRole::X2 => RoleRecord::X2,
+            ColumnRole::Y2 => RoleRecord::Y2,
             ColumnRole::Z => RoleRecord::Z,
             ColumnRole::XError => RoleRecord::XError,
             ColumnRole::YError => RoleRecord::YError,
@@ -139,6 +141,8 @@ impl From<RoleRecord> for ColumnRole {
         match value {
             RoleRecord::X => ColumnRole::X,
             RoleRecord::Y => ColumnRole::Y,
+            RoleRecord::X2 => ColumnRole::X2,
+            RoleRecord::Y2 => ColumnRole::Y2,
             RoleRecord::Z => ColumnRole::Z,
             RoleRecord::XError => ColumnRole::XError,
             RoleRecord::YError => ColumnRole::YError,

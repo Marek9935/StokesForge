@@ -432,6 +432,14 @@ fn set_graph_spec(session: &SessionHandle, graph: NodeId, spec: PlotSpec) -> Res
         .map_err(HostError::from_session)
 }
 
+/// Le calque ordinaire (non superposé) de la case `(row, column)` : celui que
+/// désigne `panel=(ligne, colonne)` côté Python (#167).
+fn base_layer_at(spec: &PlotSpec, row: usize, column: usize) -> Option<usize> {
+    spec.panels
+        .iter()
+        .position(|p| p.row == row && p.column == column && p.overlay.is_none())
+}
+
 /// `pyst.add_shape` : pose un objet graphique au-dessus des autres du panneau
 /// et rend son rang. `SetPlotSpec` rejoint le groupe d'écritures du script,
 /// même si l'objet est sa première mutation (#67 + #76).
@@ -445,11 +453,13 @@ pub(crate) fn add_shape(
     let prepare = |snapshot: &Snapshot| {
         let mut spec = graph_spec(snapshot, id, epoch)?;
         let (row, column) = args.panel;
-        let target = ShapeRef::next_in(&spec, row, column).ok_or_else(|| {
-            HostError::InvalidValue(format!(
-                "the graph has no panel at row {row}, column {column}"
-            ))
-        })?;
+        let target = base_layer_at(&spec, row, column)
+            .and_then(|layer| ShapeRef::next_in(&spec, layer))
+            .ok_or_else(|| {
+                HostError::InvalidValue(format!(
+                    "the graph has no panel at row {row}, column {column}"
+                ))
+            })?;
         target.set(&mut spec, shape.clone());
         Ok::<_, HostError>((spec, target.index))
     };
@@ -477,9 +487,9 @@ pub(crate) fn remove_shape(
 ) -> Result<(), HostError> {
     let prepare = |snapshot: &Snapshot| {
         let mut spec = graph_spec(snapshot, id, epoch)?;
+        let layer = base_layer_at(&spec, panel.0, panel.1).unwrap_or(usize::MAX);
         let target = ShapeRef {
-            row: panel.0,
-            column: panel.1,
+            panel: layer,
             index,
         };
         if !target.remove(&mut spec) {
@@ -753,17 +763,17 @@ pub(crate) fn set_column_meta(
                 meta.role = match value.as_deref() {
                     Some("x") => stokesforge_core::ColumnRole::X,
                     Some("y") => stokesforge_core::ColumnRole::Y,
+                    Some("x2") => stokesforge_core::ColumnRole::X2,
+                    Some("y2") => stokesforge_core::ColumnRole::Y2,
                     Some("z") => stokesforge_core::ColumnRole::Z,
                     Some("x_error") => stokesforge_core::ColumnRole::XError,
                     Some("y_error") => stokesforge_core::ColumnRole::YError,
                     Some("label") => stokesforge_core::ColumnRole::Label,
                     Some("none") => stokesforge_core::ColumnRole::None,
-                    _ => {
-                        return Err(HostError::InvalidValue(
-                            "unknown column role: use x, y, z, x_error, y_error, label or none"
-                                .into(),
-                        ))
-                    }
+                    _ => return Err(HostError::InvalidValue(
+                        "unknown column role: use x, y, x2, y2, z, x_error, y_error, label or none"
+                            .into(),
+                    )),
                 }
             }
             "long_name" => meta.long_name = value.unwrap_or_default(),

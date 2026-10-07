@@ -241,6 +241,14 @@ puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
 **À lire** : `stokesforge-persistence/src/lib.rs`, `src/schema.rs`,
 `src/unknown.rs` (têtes).
 
+## Calques superposés et rôles X2/Y2 (#167)
+
+`PanelSpecRecord::overlay` (`OverlaySpecRecord { x_top, y_right }`, absent =
+calque ordinaire) et `RoleRecord::X2`/`Y2` s'ajoutent au schéma ; les fichiers
+sans eux se relisent comme avant. Les adresses runtime (`AnnotationRef`,
+`ShapeRef`, `TextTarget`) portent l'indice du calque, rien n'en est écrit :
+seuls les textes ancrés restent rangés dans leur calque.
+
 ## Visibilité des objets (#81, #85)
 
 La visibilité des séries était déjà transportée par `SeriesSpecRecord`.

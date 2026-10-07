@@ -4583,6 +4583,135 @@ fn plot_columns_pairs_each_y_with_the_nearest_x_to_its_left() {
     assert_eq!(series[0].plot_type, PlotType::Line);
 }
 
+/// #167 : un Y2 s'apparie au X2 le plus proche à sa gauche et part sur un
+/// **second calque** superposé (axe X en haut, axe Y à droite) ; le Y reste
+/// sur le premier. Ajouter ensuite des colonnes au graphe réutilise ce calque.
+#[test]
+fn plot_columns_sends_y2_to_a_second_layer_paired_with_x2() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let mut project = Project::new("X2Y2").expect("projet");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("lecture")
+        .expect("feuille");
+    let mut add = |name: &str| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .expect("colonne")
+    };
+    let (x, y, x2, y2) = (add("X"), add("Y"), add("X2"), add("Y2"));
+    let (_session, mut state) = start(project, &dir.path().join("projet.stokesforge"));
+    for (column, role) in [
+        (x, ColumnRole::X),
+        (y, ColumnRole::Y),
+        (x2, ColumnRole::X2),
+        (y2, ColumnRole::Y2),
+    ] {
+        state.dispatch(Action::SetColumnRole { column, role });
+    }
+
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![x, y, x2, y2],
+        plot_type: PlotType::Line,
+    });
+
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graphe créé");
+    let spec = state.plot_spec(graph).expect("spec");
+    assert_eq!(spec.panels.len(), 2, "un calque de plus pour Y2");
+    assert_eq!(spec.panels[0].overlay, None);
+    assert_eq!(
+        (spec.panels[0].series[0].x, spec.panels[0].series[0].y),
+        (Some(x), y)
+    );
+    let second = &spec.panels[1];
+    assert!(second.overlay.is_some_and(|o| o.x_top && o.y_right));
+    assert_eq!((second.row, second.column), (0, 0), "même case");
+    assert_eq!((second.series[0].x, second.series[0].y), (Some(x2), y2));
+
+    // Un second dépôt de Y2 reprend le même calque, sans en créer un autre.
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 0,
+        columns: vec![y2],
+        plot_type: None,
+    });
+    let after = state.plot_spec(graph).expect("spec");
+    assert_eq!(after.panels.len(), 2);
+    assert_eq!(after.panels[1].series.len(), 2);
+    assert_eq!(after.panels[0].series.len(), 1);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        state.plot_spec(graph).expect("spec").panels[1].series.len(),
+        1
+    );
+}
+
+/// #167 : `AddLayer` pose un calque superposé sur le calque de base du calque
+/// visé, en un pas d'annulation ; un calque inexistant ne change rien.
+#[test]
+fn add_layer_overlays_the_base_of_the_target_layer() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graphe créé");
+
+    state.dispatch(Action::AddLayer {
+        graph,
+        panel: 0,
+        x_top: true,
+        y_right: false,
+    });
+    // Depuis le calque superposé, le nouveau recouvre le même calque de base.
+    state.dispatch(Action::AddLayer {
+        graph,
+        panel: 1,
+        x_top: false,
+        y_right: true,
+    });
+    let spec = state.plot_spec(graph).expect("spec");
+    assert_eq!(spec.panels.len(), 3);
+    assert_eq!(
+        spec.panels[1].overlay.map(|o| (o.x_top, o.y_right)),
+        Some((true, false))
+    );
+    assert_eq!(
+        spec.panels[2].overlay.map(|o| (o.x_top, o.y_right)),
+        Some((false, true))
+    );
+    assert!(spec.panels.iter().all(|p| (p.row, p.column) == (0, 0)));
+
+    state.dispatch(Action::AddLayer {
+        graph,
+        panel: 9,
+        x_top: true,
+        y_right: true,
+    });
+    assert_eq!(state.plot_spec(graph).expect("spec").panels.len(), 3);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec").panels.len(), 2);
+}
+
 /// Sans colonne X à sa gauche (aucune colonne de rôle `X` dans la feuille),
 /// l'abscisse reste implicite — comportement d'Origin sans X désigné.
 #[test]

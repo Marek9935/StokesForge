@@ -446,14 +446,30 @@ pub enum Action {
     AddSeriesToGraph {
         /// Graphe visé.
         graph: NodeId,
-        /// Calque visé, par son rang dans le graphe. Le dépôt passe le calque
-        /// actif du graphe (#161) ; en attendant, le premier.
+        /// Calque visé, par son indice dans le graphe. Le dépôt passe le
+        /// calque actif du graphe (#161). Les colonnes Y2 vont, elles, sur le
+        /// second calque superposé à celui-ci (#167), créé au besoin.
         panel: usize,
         /// Colonnes à ajouter en séries.
         columns: Vec<NodeId>,
         /// Type de tracé demandé pour chaque nouvelle série ; `None` prend
         /// celui du calque visé (voir [`panel_plot_type`]).
         plot_type: Option<PlotType>,
+    },
+    /// Ajoute à un graphe un calque superposé à celui de `panel` (#167), à la
+    /// manière du « New Layer (Axes) » d'Origin : `x_top` affiche son axe X
+    /// en haut, `y_right` son axe Y à droite, chacun avec son échelle ; un
+    /// axe non affiché suit celui du calque recouvert. Un seul pas
+    /// d'annulation.
+    AddLayer {
+        /// Graphe visé.
+        graph: NodeId,
+        /// Calque (ordinaire ou superposé) dont on recouvre le calque de base.
+        panel: usize,
+        /// Axe X du nouveau calque en haut, à l'échelle propre.
+        x_top: bool,
+        /// Axe Y du nouveau calque à droite, à l'échelle propre.
+        y_right: bool,
     },
     /// Ouvre ou ferme le panneau ; préférence de la personne, hors historique.
     SetObjectManagerOpen(bool),
@@ -967,52 +983,125 @@ pub(crate) fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, Str
         .collect()
 }
 
+/// Les séries à tracer pour une sélection de colonnes, réparties par calque
+/// (#167) : le calque principal et le calque superposé des rôles X2/Y2.
+#[derive(Debug, Default)]
+pub(crate) struct PlannedSeries {
+    /// Séries de rôle Y, sur les axes principaux.
+    pub(crate) primary: Vec<stokesforge_plot::SeriesSpec>,
+    /// Séries de rôle Y2, sur le second calque (axe X en haut, axe Y à
+    /// droite).
+    pub(crate) secondary: Vec<stokesforge_plot::SeriesSpec>,
+}
+
+impl PlannedSeries {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.primary.is_empty() && self.secondary.is_empty()
+    }
+}
+
 /// Construit les séries de [`Action::PlotColumns`]/[`Action::
-/// AddSeriesToGraph`] à partir des colonnes de rôle Y présentes dans
+/// AddSeriesToGraph`] à partir des colonnes de rôle Y (ou Y2) présentes dans
 /// `columns`, dans l'ordre où elles apparaissent dans `sheet`.
 ///
 /// Règle d'appariement, façon OriginLab : chaque Y est apparié à la colonne
 /// X la plus proche à sa **gauche** dans la feuille (rôle
 /// [`ColumnRole::X`]), en incluant les colonnes X non sélectionnées — sans X
-/// à gauche, l'abscisse reste implicite ([`SeriesSpec::new`](stokesforge_plot::SeriesSpec::new)). Chaque série
-/// prend la couleur de palette de son rang, `start_index` inclus : décalage
-/// utile à [`AppState::add_series_to_graph`], qui prolonge la palette après
-/// les séries déjà présentes dans le panneau visé plutôt que de la reprendre
-/// à zéro. Rend une liste vide si `columns` ne contient aucun Y — c'est ce
-/// que les deux appelants lisent pour refuser un graphe ou un ajout vide.
+/// à gauche, l'abscisse reste implicite ([`SeriesSpec::new`](stokesforge_plot::SeriesSpec::new)).
+/// Un Y2 suit la même règle avec les colonnes X2 : ses séries vont dans
+/// [`PlannedSeries::secondary`]. Chaque série prend la couleur de palette de
+/// son rang, `start_index` inclus : décalage utile à
+/// [`AppState::add_series_to_graph`], qui prolonge la palette après les
+/// séries déjà présentes dans le calque visé plutôt que de la reprendre à
+/// zéro (`secondary_start_index` pour le second calque). Rend des listes
+/// vides si `columns` ne contient aucun Y ni Y2 — c'est ce que les deux
+/// appelants lisent pour refuser un graphe ou un ajout vide.
 pub(crate) fn series_from_columns(
     tree: &Tree,
     sheet: NodeId,
     columns: &[NodeId],
     plot_type: &PlotType,
     start_index: usize,
-) -> Vec<stokesforge_plot::SeriesSpec> {
+    secondary_start_index: usize,
+) -> PlannedSeries {
     let ordered = visible_columns_in(tree, sheet);
     let role_of = |id: NodeId| {
         tree.node(id)
             .and_then(Node::as_column)
             .map(|column| column.meta().role)
     };
-    let mut series = Vec::new();
+    let mut planned = PlannedSeries::default();
     for (position, (column, _, _)) in ordered.iter().enumerate() {
-        if !columns.contains(column) || role_of(*column) != Some(ColumnRole::Y) {
+        if !columns.contains(column) {
             continue;
         }
+        let (x_role, list, start) = match role_of(*column) {
+            Some(ColumnRole::Y) => (ColumnRole::X, &mut planned.primary, start_index),
+            Some(ColumnRole::Y2) => (
+                ColumnRole::X2,
+                &mut planned.secondary,
+                secondary_start_index,
+            ),
+            _ => continue,
+        };
         let x = ordered[..position]
             .iter()
             .rev()
-            .find_map(|(id, _, _)| (role_of(*id) == Some(ColumnRole::X)).then_some(*id));
+            .find_map(|(id, _, _)| (role_of(*id) == Some(x_role)).then_some(*id));
         let mut spec = match x {
             Some(x) => stokesforge_plot::SeriesSpec::new_xy(x, *column),
             None => stokesforge_plot::SeriesSpec::new(*column),
         };
-        let index = start_index + series.len();
+        let index = start + list.len();
         spec.line = stokesforge_plot::LineSpec::from_palette(index);
         spec.symbol = stokesforge_plot::SymbolSpec::from_palette(index);
         spec.plot_type = plot_type.clone();
-        series.push(spec);
+        list.push(spec);
     }
-    series
+    planned
+}
+
+/// Le second calque des rôles X2/Y2 (#167) : axe X en haut et axe Y à droite,
+/// chacun avec son échelle.
+fn second_layer() -> stokesforge_plot::OverlaySpec {
+    stokesforge_plot::OverlaySpec {
+        x_top: true,
+        y_right: true,
+    }
+}
+
+/// Le calque ordinaire que `panel` recouvre (lui-même s'il est ordinaire) :
+/// le dernier calque ordinaire qui le précède dans sa case.
+fn overlay_base(spec: &PlotSpec, panel: usize) -> usize {
+    let Some(target) = spec.panels.get(panel) else {
+        return panel;
+    };
+    if target.overlay.is_none() {
+        return panel;
+    }
+    (0..panel)
+        .rev()
+        .find(|index| {
+            spec.panels.get(*index).is_some_and(|candidate| {
+                candidate.overlay.is_none()
+                    && (candidate.row, candidate.column) == (target.row, target.column)
+            })
+        })
+        .unwrap_or(panel)
+}
+
+/// L'indice du second calque (axe X en haut, axe Y à droite) posé sur le
+/// calque ordinaire `base`, s'il existe.
+fn second_layer_of(spec: &PlotSpec, base: usize) -> Option<usize> {
+    let cell = spec
+        .panels
+        .get(base)
+        .map(|panel| (panel.row, panel.column))?;
+    (base + 1..spec.panels.len()).find(|index| {
+        spec.panels.get(*index).is_some_and(|panel| {
+            panel.overlay == Some(second_layer()) && (panel.row, panel.column) == cell
+        })
+    })
 }
 
 /// Le [`PlotSpec`] courant de `graph`, ou `None` si ce n'est pas un graphe de
@@ -3886,6 +3975,12 @@ impl AppState {
                 columns,
                 plot_type,
             } => self.add_series_to_graph(graph, panel, columns, plot_type),
+            Action::AddLayer {
+                graph,
+                panel,
+                x_top,
+                y_right,
+            } => self.add_layer(graph, panel, x_top, y_right),
             Action::SetObjectManagerOpen(open) => {
                 self.object_manager_open = open;
                 if let Err(error) = self
@@ -7137,8 +7232,8 @@ impl AppState {
     /// dans `columns` : cette action de tracé ne crée rien sans Y. Un graphique
     /// vide se crée explicitement par [`Action::AddGraph`].
     fn plot_columns(&mut self, sheet: NodeId, columns: Vec<NodeId>, plot_type: PlotType) {
-        let series = series_from_columns(&self.snapshot.tree, sheet, &columns, &plot_type, 0);
-        if series.is_empty() {
+        let planned = series_from_columns(&self.snapshot.tree, sheet, &columns, &plot_type, 0, 0);
+        if planned.is_empty() {
             self.fail("Aucune colonne de rôle Y dans la sélection : rien à tracer".to_string());
             return;
         }
@@ -7151,11 +7246,20 @@ impl AppState {
             return;
         };
         let panel = PanelSpec {
-            series,
+            series: planned.primary,
             ..PanelSpec::default()
         };
+        // Les colonnes Y2 vont sur un second calque superposé : axe X en
+        // haut, axe Y à droite, échelles propres (#167).
+        let mut panels = vec![panel.clone()];
+        if !planned.secondary.is_empty() {
+            panels.push(PanelSpec {
+                series: planned.secondary,
+                ..PanelSpec::overlay_on(&panel, second_layer())
+            });
+        }
         let spec = PlotSpec {
-            panels: Panels::one(panel),
+            panels: Panels::new(panels),
             ..PlotSpec::default()
         };
         self.execute(Command::AddGraph {
@@ -7200,18 +7304,67 @@ impl AppState {
             return;
         };
         let plot_type = plot_type.unwrap_or_else(|| panel_plot_type(target));
-        let new_series = series_from_columns(
+        // Le second calque des colonnes Y2 : celui qui recouvre déjà le
+        // calque visé, à créer sinon (#167).
+        let base = overlay_base(&spec, panel);
+        let second = second_layer_of(&spec, base);
+        let secondary_start = second
+            .and_then(|index| spec.panels.get(index))
+            .map_or(0, |layer| layer.series.len());
+        let Some(target) = spec.panels.get(panel) else {
+            return;
+        };
+        let planned = series_from_columns(
             &self.snapshot.tree,
             sheet,
             &columns,
             &plot_type,
             target.series.len(),
+            secondary_start,
         );
-        if new_series.is_empty() {
+        if planned.is_empty() {
             self.fail("Aucune colonne de rôle Y dans la sélection : rien à ajouter".to_string());
             return;
         }
-        target.series.extend(new_series);
+        if let Some(target) = spec.panels.get_mut(panel) {
+            target.series.extend(planned.primary);
+        }
+        if !planned.secondary.is_empty() {
+            let index = match second {
+                Some(index) => index,
+                None => {
+                    let Some(base_panel) = spec.panels.get(base).cloned() else {
+                        return;
+                    };
+                    spec.panels
+                        .push(PanelSpec::overlay_on(&base_panel, second_layer()));
+                    spec.panels.len() - 1
+                }
+            };
+            if let Some(layer) = spec.panels.get_mut(index) {
+                layer.series.extend(planned.secondary);
+            }
+        }
+        self.execute(Command::SetPlotSpec { graph, spec });
+    }
+
+    /// Ajoute un calque superposé au calque de base de `panel` — voir
+    /// [`Action::AddLayer`]. Pas de commande si `graph` n'est pas un graphe de
+    /// ce projet ou si `panel` n'existe pas.
+    fn add_layer(&mut self, graph: NodeId, panel: usize, x_top: bool, y_right: bool) {
+        let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
+            self.fail(format!("{graph} n'est pas un graphe de ce projet"));
+            return;
+        };
+        let base = overlay_base(&spec, panel);
+        let Some(base_panel) = spec.panels.get(base).cloned() else {
+            self.fail(format!("{graph} n'a pas de calque {panel}"));
+            return;
+        };
+        spec.panels.push(PanelSpec::overlay_on(
+            &base_panel,
+            stokesforge_plot::OverlaySpec { x_top, y_right },
+        ));
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 

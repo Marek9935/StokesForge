@@ -118,6 +118,7 @@ fn spec_exact_export_stable_et_temoin_de_style() {
         (640, 480),
         &measurer,
         &stokesforge_render::FontChoice::default(),
+        stokesforge_render_svg::SvgTextMode::default(),
     )
     .unwrap();
     assert_ne!(rich, svg, "les titres markup exercent bien Typst");
@@ -225,6 +226,7 @@ pyst.plot(t, graph=g)
         (640, 480),
         &stokesforge_render::TextMeasurer::default(),
         &stokesforge_render::FontChoice::default(),
+        stokesforge_render_svg::SvgTextMode::default(),
     )
     .unwrap();
     // Typst compose aussi les textes littéraux. Leur compilation réussit,
@@ -237,6 +239,7 @@ pyst.plot(t, graph=g)
         (640, 480),
         &stokesforge_render::TextMeasurer::default(),
         &stokesforge_render::FontChoice::default(),
+        stokesforge_render_svg::SvgTextMode::default(),
     )
     .unwrap();
     assert!(typed.contains("#fonction_inconnue[x] $alpha$"));

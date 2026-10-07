@@ -92,7 +92,12 @@ Trois décisions structurent le module :
   entre l'instantané qu'un script a lu et la commande qu'il envoie.
 
 Types : `Numeric`, `DateTime`, `Text`, `Mixed`. Rôles de tracé : `X`, `Y`
-(défaut), `Z`, `XError`, `YError`, `Label`, aucun.
+(défaut), `X2`, `Y2`, `Z`, `XError`, `YError`, `Label`, aucun. `X2`/`Y2` (#167)
+alimentent un **second calque superposé** (`PanelSpec::overlay`,
+`OverlaySpec { x_top, y_right }`) : chaque Y2 s'apparie au X2 le plus proche à
+sa gauche, comme Y avec X (`state::series_from_columns`, `PlannedSeries`).
+Un calque identifie par son **indice** dans `PlotSpec::panels` ; `(row, column)`
+ne sert qu'à la grille, plusieurs calques pouvant partager une case.
 
 **À lire** : `stokesforge-core/src/column.rs`.
 

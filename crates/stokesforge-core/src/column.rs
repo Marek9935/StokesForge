@@ -199,6 +199,11 @@ pub enum ColumnRole {
     /// Ordonnée (rôle par défaut d'une colonne nouvellement créée).
     #[default]
     Y,
+    /// Abscisse du second calque (#167) : axe X en haut du graphique.
+    X2,
+    /// Ordonnée du second calque (#167), appariée à la colonne X2 la plus
+    /// proche à sa gauche : axe Y à droite du graphique.
+    Y2,
     /// Troisième axe (surfaces, matrices affichées en colonnes).
     Z,
     /// Barre d'erreur en X.

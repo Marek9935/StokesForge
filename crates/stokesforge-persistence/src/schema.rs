@@ -552,6 +552,10 @@ pub(crate) enum RoleRecord {
     X,
     /// Ordonnée.
     Y,
+    /// Abscisse du second calque (#167).
+    X2,
+    /// Ordonnée du second calque (#167).
+    Y2,
     /// Troisième axe.
     Z,
     /// Barre d'erreur en X.

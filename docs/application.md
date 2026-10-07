@@ -1192,6 +1192,14 @@ celui de la **dernière série** du calque, `Line` pour un calque vide
 Le calque visé est le **calque actif** du graphe (#161, ci-dessous) :
 `graph_drop_target` et « Send to » lisent `published_active_panel`.
 
+**Calques superposés (#167).** Graph › New Layer (Top X, Right Y, Top X Right Y)
+ajoute, par `Action::AddLayer`, un `PanelSpec::overlay_on` au calque de base du
+calque actif ; les colonnes de rôle **Y2** (apparié au **X2** le plus proche à
+sa gauche) partent, à la création du graphe (Plot) comme au dépôt ou à « Send
+to », sur le second calque (axe X en haut, axe Y à droite, échelles propres),
+réutilisé s'il existe. Le zoom et le déplacement visent le calque actif ;
+l'axe d'un calque superposé n'est zoomé que s'il est affiché. Rendu : `docs/rendu.md`.
+
 **Calque actif (#161).** `GraphView::active_panel(spec)` : le dernier calque
 sélectionné, état d'interface hors `.stf` et hors historique, porté par la vue
 (donc identique en fenêtre détachée), revalidé à la lecture (calque disparu :
