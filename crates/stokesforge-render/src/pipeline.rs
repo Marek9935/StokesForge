@@ -1030,7 +1030,9 @@ fn draw_panel<DB: DrawingBackend>(
     // droite) et un axe horizontal un pixel hors d'elle (en bas, ou en haut) :
     // les coins communs de deux axes tracés restent vides. On les comble, pour
     // toute la case (le plan réunit les axes de tous ses calques), depuis le
-    // calque ordinaire.
+    // calque ordinaire. Contournement d'un défaut de Plotters 0.3.7 (`draw_axis`
+    // borne chaque ligne à l'étendue de la zone) : à retirer quand il est
+    // corrigé en amont, voir `docs/rendu.md`, « Coins d'axes ».
     if overlay.is_none() {
         let (left, right) = (origin.0 - 1, origin.0 + size.0 as i32);
         let (top, bottom) = (origin.1 - 1, origin.1 + size.1 as i32);

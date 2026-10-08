@@ -431,7 +431,7 @@ est vérifié avec les graduations que Plotters posera réellement. Sans solutio
 indépendant. Les graduations linéaires s'écrivent sans décimale quand elles
 sont toutes entières, avec le même nombre de décimales sinon
 (`scale::TickFormat`, #175) ; tous les axes passent par un formateur. Les coins où deux axes tracés se
-rejoignent sont comblés (Plotters les laisse à un pixel d'écart).
+rejoignent sont comblés, voir « Coins d'axes » ci-dessous.
 
 Un calque est identifié par son **indice dans `PlotSpec::panels`**
 (`DrawnPanel::index`), **pas par son rang dans `DrawnPlot::panels`** : celui-ci
@@ -831,3 +831,20 @@ série et d'objet depuis l'arbre, y compris pour les contenus masqués ; une
 seule nature est sélectionnée à la fois. La revalidation écarte les adresses
 absentes du spec. Les propriétés et les barres de format réutilisent cette
 même vue en fenêtre détachée.
+
+## Coins d'axes — défaut de Plotters à surveiller
+
+`plotters` 0.3.7 (`chart/context/cartesian2d/draw_impl.rs`, `draw_axis`) trace
+chaque ligne d'axe dans l'aire de graduation voisine, bornée à l'étendue en
+pixels de la zone de tracé : l'axe Y est à `ox − 1`, l'axe X à `oy + h`, et le
+pixel du coin n'appartient à aucun des deux. Aucun réglage (`axis_style` ne
+porte que couleur et épaisseur) ne le comble ; visible surtout fenêtre agrandie.
+
+Contournement : `draw_panel` (`pipeline.rs`) pose un segment de 1 px par coin
+entre deux axes tracés, depuis le calque ordinaire de la case (test
+`les_axes_se_rejoignent_aux_coins`, `stokesforge-render-svg/tests/calques.rs`).
+
+**À surveiller** : un rapport est à déposer chez Plotters (texte dans
+`docs/plotters-coins-d-axes.md`). Quand une version corrigée sort, la
+reprendre, **retirer ce segment** (sinon il double la ligne) et adapter le test.
+Lien du rapport amont : _à renseigner une fois déposé_.
