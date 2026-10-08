@@ -28,6 +28,16 @@ pub enum ColorUsage {
 /// un fichier qui en porterait davantage est tronqué à la lecture.
 pub const MAX_SAVED_COLORS: usize = 32;
 
+/// Un nuancier enregistré (#178) : un nom choisi par l'utilisateur et ses
+/// arrêts `#RRGGBB`, au moins deux.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedGradient {
+    /// Nom, unique dans sa liste (casse indifférente).
+    pub name: String,
+    /// Arrêts, du premier au dernier.
+    pub stops: Vec<String>,
+}
+
 /// Couleurs enregistrées, par usage, de la plus ancienne à la plus récente.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SavedColors {
@@ -37,6 +47,9 @@ pub struct SavedColors {
     pub text: Vec<String>,
     /// Couleurs de fond.
     pub backgrounds: Vec<String>,
+    /// Nuanciers enregistrés (#178), du plus ancien au plus récent, bornés
+    /// comme les couleurs ([`MAX_SAVED_COLORS`]).
+    pub gradients: Vec<SavedGradient>,
 }
 
 impl SavedColors {
@@ -78,6 +91,37 @@ impl SavedColors {
         next
     }
 
+    /// Une copie où le nuancier `name` est enregistré avec les arrêts `stops` :
+    /// il remplace un nuancier de même nom (casse indifférente, accents compris), sinon va à la
+    /// fin, la plus ancienne partant au-delà de [`MAX_SAVED_COLORS`]. Un nom
+    /// vide ou moins de deux arrêts ne changent rien.
+    pub fn with_gradient_added(&self, name: &str, stops: &[String]) -> Self {
+        let name = name.trim();
+        if name.is_empty() || stops.len() < 2 {
+            return self.clone();
+        }
+        let mut next = self.with_gradient_removed(name);
+        next.gradients.push(SavedGradient {
+            name: name.to_string(),
+            stops: stops
+                .iter()
+                .map(|s| s.trim().to_ascii_lowercase())
+                .collect(),
+        });
+        let excess = next.gradients.len().saturating_sub(MAX_SAVED_COLORS);
+        next.gradients.drain(..excess);
+        next
+    }
+
+    /// Une copie sans le nuancier `name` (casse indifférente).
+    pub fn with_gradient_removed(&self, name: &str) -> Self {
+        let mut next = self.clone();
+        let name = name.trim();
+        next.gradients
+            .retain(|saved| saved.name.trim().to_lowercase() != name.to_lowercase());
+        next
+    }
+
     /// Ramène chaque liste sous [`MAX_SAVED_COLORS`] en gardant les plus
     /// récentes — pour une liste venue d'un fichier, que rien ne borne.
     pub fn bounded(mut self) -> Self {
@@ -86,12 +130,17 @@ impl SavedColors {
             let excess = list.len().saturating_sub(MAX_SAVED_COLORS);
             list.drain(..excess);
         }
+        let excess = self.gradients.len().saturating_sub(MAX_SAVED_COLORS);
+        self.gradients.drain(..excess);
         self
     }
 
     /// Vrai si aucune couleur n'est enregistrée.
     pub fn is_empty(&self) -> bool {
-        self.curves.is_empty() && self.text.is_empty() && self.backgrounds.is_empty()
+        self.curves.is_empty()
+            && self.text.is_empty()
+            && self.backgrounds.is_empty()
+            && self.gradients.is_empty()
     }
 }
 
@@ -127,5 +176,29 @@ mod tests {
             ..SavedColors::default()
         };
         assert_eq!(long.bounded().curves.len(), MAX_SAVED_COLORS);
+    }
+
+    #[test]
+    fn un_nuancier_se_remplace_par_son_nom_et_se_supprime() {
+        let stops = |a: &str, b: &str| vec![a.to_string(), b.to_string()];
+        let saved = SavedColors::default()
+            .with_gradient_added("Mon dégradé", &stops("#0000FF", "#ff0000"))
+            .with_gradient_added("autre", &stops("#000000", "#ffffff"))
+            .with_gradient_added("MON DÉGRADÉ", &stops("#00ff00", "#ff0000"));
+        assert_eq!(saved.gradients.len(), 2);
+        assert_eq!(saved.gradients[1].name, "MON DÉGRADÉ");
+        assert_eq!(saved.gradients[1].stops, ["#00ff00", "#ff0000"]);
+        assert!(!saved.is_empty());
+        let saved = saved.with_gradient_removed("autre");
+        assert_eq!(saved.gradients.len(), 1);
+        // Sans nom ou avec un seul arrêt : rien n'est enregistré.
+        assert_eq!(
+            saved.with_gradient_added("  ", &stops("#000000", "#ffffff")),
+            saved
+        );
+        assert_eq!(
+            saved.with_gradient_added("x", &["#000000".to_string()]),
+            saved
+        );
     }
 }

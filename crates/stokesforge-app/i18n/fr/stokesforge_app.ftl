@@ -653,7 +653,30 @@ curve-group-field = Groupe
 curve-group-none = Aucun
 curve-group-new = Nouveau groupe
 curve-group-entry = { $group } ({ $count })
-curve-group-style-note = Les réglages de trait et de symbole ci-dessous s'appliquent aux { $count } séries du groupe.
+curve-group-leave =
+    Quitter le groupe
+    .hint = Détache cette série de son groupe ; elle garde son style actuel
+    .disabled = Cette série n'est dans aucun groupe
+curve-scope-field = Modifier
+curve-scope-series = Cette série seulement
+curve-scope-group = Tout le groupe ({ $count } séries)
+curve-scope-group-note = Le style et l'épaisseur du trait, la forme et la taille des symboles s'appliquent à toutes les séries du groupe. Le nom, le type, la visibilité et les couleurs restent propres à chaque série ; répartissez les couleurs avec le nuancier ci-dessous.
+curve-scope-series-note = Les changements ne touchent que cette série. Elle reste dans son groupe ; « Quitter le groupe » la détache.
+curve-scope-locked = Réglage propre à une série : choisissez « Cette série seulement » pour le modifier
+curve-gradient-locked = Choisissez « Tout le groupe » pour appliquer un nuancier
+curve-gradient-needs-group = Mettez la série dans un groupe pour appliquer un nuancier
+curve-gradient-saved = { $name } ({ $target })
+curve-gradient-delete =
+    Supprimer
+    .hint = Supprime ce nuancier enregistré
+    .disabled = Seul un nuancier enregistré peut être supprimé
+curve-gradient-name-field =
+    Nom
+    .hint = Nom du nuancier
+curve-gradient-save =
+    Enregistrer
+    .hint = Enregistre le nuancier personnalisé dans le projet ou pour l'utilisateur
+    .disabled = Donnez d'abord un nom au nuancier
 curve-gradient-section = Nuancier
 curve-gradient-field = Nuancier
 curve-gradient-custom = Personnalisé
@@ -663,12 +686,12 @@ curve-gradient-remove-stop = Retirer une couleur
 curve-gradient-apply =
     Appliquer au groupe
     .hint = Répartit le nuancier régulièrement sur les séries du groupe, dans l'ordre de la liste
-curve-gradient-blue-red = Bleu → Rouge
-curve-gradient-black-red = Noir → Rouge
-curve-gradient-black-blue = Noir → Bleu
-curve-gradient-blue-yellow = Bleu → Jaune
-curve-gradient-green-red = Vert → Rouge
-curve-gradient-blue-white-red = Bleu → Blanc → Rouge
+curve-gradient-blue-red = Bleu vers Rouge
+curve-gradient-black-red = Noir vers Rouge
+curve-gradient-black-blue = Noir vers Bleu
+curve-gradient-blue-yellow = Bleu vers Jaune
+curve-gradient-green-red = Vert vers Rouge
+curve-gradient-blue-white-red = Bleu vers Blanc vers Rouge
 curve-gradient-viridis = Viridis
 curve-gradient-plasma = Plasma
 
@@ -925,7 +948,7 @@ action-object-manager = Gestionnaire d’objets
 object-manager-no-graph = Activer un graphique pour voir ses objets.
 object-manager-visibility = Afficher ou masquer ce contenu. Les séries masquées sont exclues de la légende et des bornes automatiques des axes.
 object-manager-layer = Calque { $index }
-object-manager-group = Groupe de tracés
+object-manager-group = Séries
 object-manager-axes = Axes
 object-manager-show-texts = Afficher les textes du graphique
     .hint = Liste dans le gestionnaire d’objets le titre du graphique, les titres des calques et des axes et la légende. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.

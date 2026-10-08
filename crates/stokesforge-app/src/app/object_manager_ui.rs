@@ -48,6 +48,9 @@ use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::window_detach::ObjectManagerModel;
 use super::StokesForgeApp;
 
+/// Retrait des séries d'un groupe de séries (#177), en points.
+const GROUP_INDENT: f32 = 14.0;
+
 #[derive(Clone, Copy)]
 pub(super) enum ObjectManagerRequest {
     Select(crate::object_manager::VisibilityTarget),
@@ -647,11 +650,28 @@ impl ObjectManagerPaint<'_> {
             })
             .body(|ui| {
                 crate::tree_lines::tree_children(ui, |ui, branch| {
+                    // Un groupe de séries (#177) : un en-tête, puis ses membres
+                    // en retrait ; une série seule reste au niveau du dessus.
+                    let mut previous: Option<u32> = None;
                     for series in &layer.series {
                         if series.selected {
                             *selected = Some(T::Series(series.target));
                         }
-                        let y = self.series_row(ui, series, actions, requests);
+                        let group = series.spec.group;
+                        if let (Some(group), true) = (group, group != previous) {
+                            let y = ui
+                                .horizontal(|ui| {
+                                    ui.weak(super::curve_settings::group_name(group));
+                                })
+                                .response
+                                .rect
+                                .center()
+                                .y;
+                            branch.mark(y);
+                        }
+                        previous = group;
+                        let indent = if group.is_some() { GROUP_INDENT } else { 0.0 };
+                        let y = self.series_row(ui, series, indent, actions, requests);
                         branch.mark(y);
                     }
                 })
@@ -748,6 +768,7 @@ impl ObjectManagerPaint<'_> {
         &self,
         ui: &mut egui::Ui,
         series: &SeriesRow,
+        indent: f32,
         actions: &mut Vec<Action>,
         requests: &mut Vec<ObjectManagerRequest>,
     ) -> f32 {
@@ -756,6 +777,7 @@ impl ObjectManagerPaint<'_> {
             let background = ListRowBackground::reserve(ui);
             let row = ui
                 .horizontal(|ui| {
+                    ui.add_space(indent);
                     object_visibility(
                         ui,
                         self.graph,
@@ -1780,6 +1802,38 @@ mod tests {
         let gras = |nom: &str| peints.iter().any(|t| t.texte == nom && t.gras);
         assert!(gras("Premier"), "la série sélectionnée est en gras");
         assert!(!gras("Deuxième") && !gras("Dernier"), "témoin : les autres");
+    }
+
+    /// #177 : les séries d'un groupe se rangent sous un en-tête « Group n » et
+    /// en retrait ; une série seule reste au niveau des en-têtes de groupe.
+    #[test]
+    fn les_series_d_un_groupe_sont_en_retrait_sous_leur_en_tete() {
+        let (project, graph, mut spec, _) = trois_series();
+        spec.panels.get_mut(0).unwrap().series[1].group = Some(1);
+        spec.panels.get_mut(0).unwrap().series[2].group = Some(1);
+        let mut project = project;
+        project
+            .set_plot_spec(graph, spec.clone())
+            .expect("spec avec groupe");
+        let model = crate::object_manager::object_tree(project.tree(), graph, None).unwrap();
+        let ctx = super::super::test_support::contexte();
+        image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
+        let (output, _, _) = image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
+        let seule = text_center(&output, "Premier");
+        let membre = text_center(&output, "Deuxième");
+        let en_tete = text_center(&output, &super::super::curve_settings::group_name(1));
+        assert!(
+            membre.x > seule.x + GROUP_INDENT - 1.0,
+            "le membre est en retrait : {membre:?} contre {seule:?}"
+        );
+        assert!(
+            en_tete.y > seule.y && en_tete.y < membre.y,
+            "l'en-tête précède ses membres"
+        );
+        assert!(
+            text_center(&output, "Dernier").x > seule.x + GROUP_INDENT - 4.0,
+            "le dernier membre aussi"
+        );
     }
 
     #[test]

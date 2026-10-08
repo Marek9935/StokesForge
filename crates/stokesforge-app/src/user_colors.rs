@@ -24,6 +24,9 @@ struct UserColorsFile {
     text: Vec<String>,
     #[serde(default)]
     backgrounds: Vec<String>,
+    /// Nuanciers (#178) : `(nom, arrêts)`.
+    #[serde(default)]
+    gradients: Vec<(String, Vec<String>)>,
 }
 
 /// Les couleurs de l'utilisateur, et le fichier où elles vivent.
@@ -51,6 +54,11 @@ impl UserColors {
                     curves: file.curves,
                     text: file.text,
                     backgrounds: file.backgrounds,
+                    gradients: file
+                        .gradients
+                        .into_iter()
+                        .map(|(name, stops)| stokesforge_plot::SavedGradient { name, stops })
+                        .collect(),
                 }
                 .bounded()
             })
@@ -83,6 +91,12 @@ impl UserColors {
             curves: self.colors.curves.clone(),
             text: self.colors.text.clone(),
             backgrounds: self.colors.backgrounds.clone(),
+            gradients: self
+                .colors
+                .gradients
+                .iter()
+                .map(|gradient| (gradient.name.clone(), gradient.stops.clone()))
+                .collect(),
         };
         let json = serde_json::to_string_pretty(&file)
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;

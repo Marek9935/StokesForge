@@ -163,8 +163,11 @@ l'interface, mais son mot est déjà fixé.
 | Legend entry | Entrée de légende | Une ligne de la légende | Libellé de légende | G |
 | Position | Position | Coin de la légende : Top left… ; Reset Position / Réinitialiser la position : remet un titre ou la légende à sa place par défaut | Emplacement | G |
 | Series | Série | Données tracées d'une colonne Y | Courbe, Trace, Plot, Jeu de données | G (Q3) |
-| Series Group | Groupe de séries | Séries ajoutées ensemble (ou réunies à la main) qui se règlent ensemble ; à ne pas confondre avec le nœud « Plot Group » de l'Object Manager (#177) | Groupe de courbes, Plot Group | G |
-| Color gradient | Nuancier | Dégradé de couleurs réparti sur les séries d'un groupe : Blue → Red / Bleu → Rouge… (#178) | Palette (qualitative, sans ordre), Dégradé | G |
+| Series Group | Groupe de séries | Séries ajoutées ensemble (ou réunies à la main) qui se règlent ensemble ; affiché en retrait sous un en-tête « Group n » dans l'Object Manager (#177) | Groupe de courbes | G |
+| Series (Object Manager) | Séries | Le nœud sous un calque qui liste ses séries ; ancien « Plot Group » / « Groupe de tracés », renommé ; ne pas l'appeler groupe (#177) | Plot Group, Groupe de tracés | G |
+| Whole group / This series only | Tout le groupe / Cette série seulement | Portée des réglages d'une série qui est dans un groupe ; les réglages propres à une série sont grisés en portée « groupe » (#177) | Appliquer à tous | G |
+| Leave Group | Quitter le groupe | Détache la série de son groupe, style conservé (#177) | Dissocier, Sortir | G |
+| Color gradient | Nuancier | Dégradé de couleurs réparti sur les séries d'un groupe : Blue to Red / Bleu vers Rouge… (#178 ; la flèche → n'est pas dans la police de l'interface : un carré s'affiche à sa place, ne pas l'employer) ; enregistrable dans le projet ou pour l'utilisateur, avec son nom | Palette (qualitative, sans ordre), Dégradé | G |
 | Plot type | Type de tracé | Façon de tracer une série | Mode | O |
 | Scatter | Points | Symboles seuls | Nuage de points | O (Q6) |
 | Line | Ligne | Trait seul | Courbe | O |
@@ -315,7 +318,7 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 |---|---|---|
 | Object Manager | Gestionnaire d'objets | Arbre des contenus du graphique actif |
 | Layer | Calque | Un panneau de tracé (`PlotSpec::panels`) |
-| Plot Group | Groupe de tracés | Les séries d'un calque |
+| Series | Séries | Les séries d'un calque, avec leurs groupes de séries en retrait (ancien « Plot Group », #177) |
 | Graph texts | Textes du graphique | Titres du graphique, des calques et des axes, et légende : listés dans l'Object Manager si la bascule « Show graph texts » est active (#102) |
 | Show Axes | Afficher les axes | Les axes d'un calque (ligne, graduations, libellés), listés dans l'Object Manager si la bascule « Show Axes » est active (#111, #147) ; ce filtre ne modifie pas leur visibilité sur la figure ; une ligne « X (bottom) Axis » / « Axe X (bas) » par axe, dont Secondary X (top) / X secondaire (haut) |
 | Mirror axis | Axe miroir | Axe du haut ou de droite d'un calque ordinaire qui reprend l'échelle de celui du bas ou de gauche, sans titre (#176) |

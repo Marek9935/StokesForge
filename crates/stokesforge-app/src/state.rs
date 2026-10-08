@@ -590,6 +590,25 @@ pub enum Action {
         /// D'où la retirer.
         target: SaveTarget,
     },
+    /// Enregistre un nuancier (#178) sous `name`, dans le projet (commande
+    /// annulable [`Command::SetSavedColors`]) ou pour l'utilisateur ; un
+    /// nuancier de même nom est remplacé.
+    SaveGradient {
+        /// Nom choisi par l'utilisateur.
+        name: String,
+        /// Arrêts `#RRGGBB`, au moins deux.
+        stops: Vec<String>,
+        /// Où l'enregistrer.
+        target: SaveTarget,
+    },
+    /// Supprime le nuancier enregistré `name` — pendant de
+    /// [`Action::SaveGradient`].
+    RemoveSavedGradient {
+        /// Nom du nuancier.
+        name: String,
+        /// D'où le supprimer.
+        target: SaveTarget,
+    },
     /// Ouvre un sélecteur de fichiers natif sur un fil à part (issue #192) ;
     /// la fenêtre l'intercepte, `AppState::dispatch` ne fait rien.
     PickFile(crate::file_picker::PickRequest),
@@ -4388,6 +4407,18 @@ impl AppState {
                 target,
             } => {
                 let next = self.saved_colors(target).with_removed(usage, &color);
+                self.replace_saved_colors(target, next);
+            }
+            Action::SaveGradient {
+                name,
+                stops,
+                target,
+            } => {
+                let next = self.saved_colors(target).with_gradient_added(&name, &stops);
+                self.replace_saved_colors(target, next);
+            }
+            Action::RemoveSavedGradient { name, target } => {
+                let next = self.saved_colors(target).with_gradient_removed(&name);
                 self.replace_saved_colors(target, next);
             }
             Action::PickFile(_) => {}

@@ -1661,14 +1661,25 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
   figure ou sur sa ligne de l'Object Manager, `Properties…` et Graph › Properties ›
   Series…). Liste à gauche (`list_row`, suffixe « · Group n », Move Up / Move
   Down qui changent le rang), réglages à droite : le **groupe** de la série
-  (liste déroulante Aucun / Group n / New group ; groupe créé à l'ajout
-  simultané, #177), son **style commun** (style et épaisseur du trait, forme et
-  taille du symbole : écrits dans chaque membre dès qu'on y touche) et son
-  **nuancier** (#178 : nuanciers fournis `GRADIENT_PRESETS` ou personnalisé à N
-  couleurs, aperçu, « Apply to Group » qui répartit les couleurs sur les
-  membres dans l'ordre de la liste) ; puis les réglages propres à la série. Le
-  nuancier personnalisé n'est qu'un état de fenêtre (non enregistré dans les
-  préférences). Ancienne description de la liste : (`egui::ScrollArea` bornée en hauteur,
+  (liste déroulante Aucun / Group n / New group, et « Leave Group » qui la
+  détache ; groupe créé à l'ajout simultané, #177) et, pour une série
+  groupée, la **portée** (`EditScope`) en clair — « This series only » ou
+  « Whole group (n series) » (par défaut) — avec une phrase qui dit ce qui
+  s'applique. Portée groupe : style et épaisseur du trait, forme et taille du
+  symbole se recopient dans chaque membre (`propagate_style`) ; les réglages
+  propres à une série (nom, type, visibilité, légende, couleurs) sont **grisés**
+  avec l'info-bulle `curve-scope-locked` ; le **nuancier** (#178) est actif.
+  Portée série : seule la série bouge (c'est l'exception), le nuancier est
+  grisé (info-bulle). Série sans groupe : tout est actif, nuancier grisé
+  (« mettez la série dans un groupe »). Nuanciers : fournis
+  (`GRADIENT_PRESETS`), enregistrés (projet ou utilisateur, suffixe « (Project) »
+  / « (User) », bouton Delete grisé hors nuancier enregistré) ou personnalisé à
+  N couleurs (nom + cible + Save), aperçu, « Apply to Group » qui répartit les
+  couleurs dans l'ordre de la liste. Le choix en cours est un état de fenêtre ;
+  seules les couleurs appliquées et les nuanciers enregistrés entrent dans le
+  modèle. Dans l'Object Manager, le nœud sous le calque s'appelle « Series » ; les
+  groupes y sont un en-tête « Group n » suivi de leurs séries en retrait.
+  Ancienne description de la liste : (`egui::ScrollArea` bornée en hauteur,
   `selectable_label` par série, libellé `state::series_list_label` : le nom
   de la série s'il est renseigné, sinon le nom long de la colonne Y, sinon
   son nom de nœud, sinon « (référence rompue) » — le même calcul que
