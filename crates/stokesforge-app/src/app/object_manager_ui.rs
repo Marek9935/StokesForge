@@ -291,7 +291,7 @@ pub(super) fn object_node_menu(
                 && ui
                     .add_enabled(
                         visibility.enabled,
-                        egui::Button::new(if visibility.checked || visibility.mixed {
+                        egui::Button::new(if visibility.checked {
                             tr!("action-hide-content")
                         } else {
                             tr!("action-show-content")
@@ -302,7 +302,7 @@ pub(super) fn object_node_menu(
                 actions.push(Action::SetPlotVisibility {
                     graph,
                     target,
-                    visible: !(visibility.checked || visibility.mixed),
+                    visible: !visibility.checked,
                 });
                 ui.close();
             }
@@ -350,12 +350,10 @@ fn object_visibility(
         .on_hover_text(tr!("object-manager-visibility"))
         .changed()
     {
-        // Case mixte : le premier clic efface tout, le suivant affiche tout ;
-        // on peut ainsi cacher une partie sans tout réafficher.
         actions.push(Action::SetPlotVisibility {
             graph,
             target,
-            visible: checked && !state.mixed,
+            visible: checked,
         });
     }
 }
