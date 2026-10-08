@@ -162,11 +162,11 @@ assert description['name'] == 'A' and description['kind'] == 'column'
 assert description['row_count'] == 3
 assert pyst.info(description['parent'])['name'] == 'Sheet1'
 meta = description['column']
-assert set(meta) == {'type', 'role', 'long_name', 'unit', 'comment', 'display_format', 'formula', 'version'}
+assert set(meta) == {'type', 'role', 'long_name', 'unit', 'comment', 'x_prime', 'display_format', 'formula', 'version'}
 assert meta['type'] == 'numeric' and meta['role'] == 'x'
 assert meta['long_name'] == 'Température' and meta['unit'] == '°C'
 assert meta['comment'] == 'Essai μ' and meta['display_format'] == '.2f'
-assert meta['formula'] is None and isinstance(meta['version'], int)
+assert meta['formula'] is None and meta['x_prime'] is None and isinstance(meta['version'], int)
 assert pyst.info(pyst.resolve('[Book1]Sheet1!Date'))['column']['type'] == 'datetime'
 assert pyst.info(pyst.resolve('[Book1]Sheet1!T'))['column']['type'] == 'mixed'
 assert pyst.children(a) == []
