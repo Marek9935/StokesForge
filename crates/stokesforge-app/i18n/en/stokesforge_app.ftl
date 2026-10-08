@@ -1052,3 +1052,35 @@ analysis-output-peak = Peak { $index } of { $column }
 analysis-output-background = Background of { $column }
 analysis-output-peaks-sum = Sum of peaks of { $column }
 analysis-output-deconvolved = { $name } (deconvolved)
+
+## Analysis — errors of a calculation (#181)
+error-analysis-not-enough-points = Only { $found } usable points, at least { $needed } are needed. Check the range and the data
+error-analysis-duplicate-x = Two points share the same X value. Remove or average the duplicates first
+error-analysis-bad-expression = The model expression is invalid: { $detail }
+error-analysis-no-free-parameter = Every parameter is fixed. Free at least one parameter
+error-analysis-empty-bounds = The bounds of { $name } are inverted (minimum { $min } is above maximum { $max }). Fix the bounds
+error-analysis-non-finite-model = The model gives no valid value with the starting values. Change the starting values
+error-analysis-singular-system = The data do not determine the parameters. Fix a parameter or widen the range
+error-analysis-not-converged = The fit did not converge after { $iterations } iterations. Change the starting values or the model
+error-analysis-not-enough-anchors = The baseline needs at least { $needed } anchor points, { $found } given
+error-analysis-zones-too-small = The background zones hold { $found } points, { $needed } are needed for degree { $degree }. Widen the zones or lower the degree
+error-analysis-duplicate-anchor = Two anchor points share the same X value. Move one of them
+error-analysis-empty-reference = The reference column has no usable value. Choose another column
+error-analysis-empty-response = The instrument response has no usable signal. Choose another column
+error-analysis-empty-range = The range holds no point. Widen it
+error-analysis-invalid-parameter = The value of { $name } is invalid
+error-analysis-length-mismatch = A series and its X column do not have the same number of rows
+
+## Analysis — status messages and what is missing (#181)
+status-analysis-no-series = Select at least one Y column to analyze
+status-analysis-gone = This calculation no longer exists
+status-analysis-recalculated = Calculations recalculated
+analysis-title = { $kind } of { $column }
+analysis-issue-no-series = Select at least one Y column
+analysis-issue-needs-reference = Choose a reference column
+analysis-issue-needs-response = Choose the instrument response column
+analysis-issue-needs-points = Place at least { $needed } points ({ $have } placed)
+analysis-issue-needs-zone = Draw at least one background zone
+analysis-issue-no-parameter = The model has no parameter
+analysis-issue-bad-model = The model is invalid: { $detail }
+analysis-issue-missing-column = A column of this calculation no longer exists

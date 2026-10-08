@@ -561,6 +561,137 @@ pub mod formula {
     }
 }
 
+/// Erreurs d'un calcul d'analyse (`stokesforge-analysis`, #181).
+pub mod analysis {
+    use stokesforge_analysis::AnalysisError;
+
+    use crate::tr;
+
+    /// Un compte pour Fluent, qui ne convertit pas `usize`.
+    fn number(count: usize) -> i64 {
+        i64::try_from(count).unwrap_or(i64::MAX)
+    }
+
+    /// La phrase d'une [`AnalysisError`].
+    pub fn error_message(error: &AnalysisError) -> String {
+        match error {
+            AnalysisError::NotEnoughPoints { found, needed } => tr!(
+                "error-analysis-not-enough-points",
+                found = number(*found),
+                needed = number(*needed)
+            ),
+            AnalysisError::DuplicateX => tr!("error-analysis-duplicate-x"),
+            AnalysisError::BadExpression(detail) => {
+                tr!("error-analysis-bad-expression", detail = detail.to_string())
+            }
+            AnalysisError::NoFreeParameter => tr!("error-analysis-no-free-parameter"),
+            AnalysisError::EmptyBounds { name, min, max } => tr!(
+                "error-analysis-empty-bounds",
+                name = name.as_str(),
+                min = min.to_string(),
+                max = max.to_string()
+            ),
+            AnalysisError::NonFiniteModel => tr!("error-analysis-non-finite-model"),
+            AnalysisError::SingularSystem => tr!("error-analysis-singular-system"),
+            AnalysisError::NotConverged { iterations } => tr!(
+                "error-analysis-not-converged",
+                iterations = number(*iterations)
+            ),
+            AnalysisError::NotEnoughAnchors { found, needed } => tr!(
+                "error-analysis-not-enough-anchors",
+                found = number(*found),
+                needed = number(*needed)
+            ),
+            AnalysisError::ZonesTooSmall {
+                found,
+                needed,
+                degree,
+            } => tr!(
+                "error-analysis-zones-too-small",
+                found = number(*found),
+                needed = number(*needed),
+                degree = i64::from(*degree)
+            ),
+            AnalysisError::DuplicateAnchor => tr!("error-analysis-duplicate-anchor"),
+            AnalysisError::EmptyReference => tr!("error-analysis-empty-reference"),
+            AnalysisError::EmptyResponse => tr!("error-analysis-empty-response"),
+            AnalysisError::EmptyRange => tr!("error-analysis-empty-range"),
+            AnalysisError::InvalidParameter { name } => {
+                tr!("error-analysis-invalid-parameter", name = name.as_str())
+            }
+            AnalysisError::LengthMismatch => tr!("error-analysis-length-mismatch"),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+            let samples = [
+                AnalysisError::NotEnoughPoints {
+                    found: 2,
+                    needed: 3,
+                },
+                AnalysisError::DuplicateX,
+                AnalysisError::BadExpression(
+                    stokesforge_analysis::expr::Expr::parse("a*").unwrap_err(),
+                ),
+                AnalysisError::NoFreeParameter,
+                AnalysisError::EmptyBounds {
+                    name: "tau".into(),
+                    min: 2.0,
+                    max: 1.0,
+                },
+                AnalysisError::NonFiniteModel,
+                AnalysisError::SingularSystem,
+                AnalysisError::NotConverged { iterations: 100 },
+                AnalysisError::NotEnoughAnchors {
+                    found: 1,
+                    needed: 2,
+                },
+                AnalysisError::ZonesTooSmall {
+                    found: 1,
+                    needed: 4,
+                    degree: 3,
+                },
+                AnalysisError::DuplicateAnchor,
+                AnalysisError::EmptyReference,
+                AnalysisError::EmptyResponse,
+                AnalysisError::EmptyRange,
+                AnalysisError::InvalidParameter {
+                    name: "peaks".into(),
+                },
+                AnalysisError::LengthMismatch,
+            ];
+            // Un `match` sans `_` : une variante sans exemple ne compile pas.
+            for sample in &samples {
+                match sample {
+                    AnalysisError::NotEnoughPoints { .. }
+                    | AnalysisError::DuplicateX
+                    | AnalysisError::BadExpression(_)
+                    | AnalysisError::NoFreeParameter
+                    | AnalysisError::EmptyBounds { .. }
+                    | AnalysisError::NonFiniteModel
+                    | AnalysisError::SingularSystem
+                    | AnalysisError::NotConverged { .. }
+                    | AnalysisError::NotEnoughAnchors { .. }
+                    | AnalysisError::ZonesTooSmall { .. }
+                    | AnalysisError::DuplicateAnchor
+                    | AnalysisError::EmptyReference
+                    | AnalysisError::EmptyResponse
+                    | AnalysisError::EmptyRange
+                    | AnalysisError::InvalidParameter { .. }
+                    | AnalysisError::LengthMismatch => {}
+                }
+                crate::errors::tests_support::check(sample, &error_message(sample));
+            }
+            assert_eq!(samples.len(), 16);
+        }
+    }
+}
+
 /// Erreurs d'affichage d'un graphe à l'écran (`stokesforge-render-egui`).
 pub mod render {
     use stokesforge_render_egui::RenderError;

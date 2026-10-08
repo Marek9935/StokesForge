@@ -1044,3 +1044,35 @@ analysis-output-peak = Pic { $index } de { $column }
 analysis-output-background = Fond de { $column }
 analysis-output-peaks-sum = Somme des pics de { $column }
 analysis-output-deconvolved = { $name } (déconvolué)
+
+## Analysis — errors of a calculation (#181)
+error-analysis-not-enough-points = Seulement { $found } points utilisables, au moins { $needed } sont nécessaires. Vérifiez la plage et les données
+error-analysis-duplicate-x = Deux points ont la même valeur de X. Supprimez ou moyennez d'abord les doublons
+error-analysis-bad-expression = L'expression du modèle est invalide : { $detail }
+error-analysis-no-free-parameter = Tous les paramètres sont fixés. Libérez au moins un paramètre
+error-analysis-empty-bounds = Les bornes de { $name } sont inversées (le minimum { $min } dépasse le maximum { $max }). Corrigez les bornes
+error-analysis-non-finite-model = Le modèle ne donne aucune valeur valide avec les valeurs de départ. Changez les valeurs de départ
+error-analysis-singular-system = Les données ne déterminent pas les paramètres. Fixez un paramètre ou élargissez la plage
+error-analysis-not-converged = L'ajustement n'a pas convergé après { $iterations } itérations. Changez les valeurs de départ ou le modèle
+error-analysis-not-enough-anchors = La ligne de base demande au moins { $needed } points d'ancrage, { $found } posés
+error-analysis-zones-too-small = Les zones de fond contiennent { $found } points, { $needed } sont nécessaires pour le degré { $degree }. Élargissez les zones ou baissez le degré
+error-analysis-duplicate-anchor = Deux points d'ancrage ont la même valeur de X. Déplacez l'un d'eux
+error-analysis-empty-reference = La colonne de référence n'a aucune valeur utilisable. Choisissez une autre colonne
+error-analysis-empty-response = La réponse instrumentale n'a aucun signal utilisable. Choisissez une autre colonne
+error-analysis-empty-range = La plage ne contient aucun point. Élargissez-la
+error-analysis-invalid-parameter = La valeur de { $name } est invalide
+error-analysis-length-mismatch = Une série et sa colonne X n'ont pas le même nombre de lignes
+
+## Analysis — status messages and what is missing (#181)
+status-analysis-no-series = Sélectionnez au moins une colonne Y à analyser
+status-analysis-gone = Ce calcul n'existe plus
+status-analysis-recalculated = Calculs recalculés
+analysis-title = { $kind } de { $column }
+analysis-issue-no-series = Sélectionnez au moins une colonne Y
+analysis-issue-needs-reference = Choisissez une colonne de référence
+analysis-issue-needs-response = Choisissez la colonne de la réponse instrumentale
+analysis-issue-needs-points = Placez au moins { $needed } points ({ $have } placés)
+analysis-issue-needs-zone = Tracez au moins une zone de fond
+analysis-issue-no-parameter = Le modèle n'a aucun paramètre
+analysis-issue-bad-model = Le modèle est invalide : { $detail }
+analysis-issue-missing-column = Une colonne de ce calcul n'existe plus

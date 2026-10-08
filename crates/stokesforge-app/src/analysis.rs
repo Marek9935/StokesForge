@@ -969,3 +969,22 @@ impl Setup {
         }
     }
 }
+
+/// Ce qui manque ou ce qui a échoué, en phrase de l'interface.
+pub fn issue_message(issue: &Issue) -> String {
+    match issue {
+        Issue::NoSeries => tr!("analysis-issue-no-series"),
+        Issue::NeedsReference => tr!("analysis-issue-needs-reference"),
+        Issue::NeedsResponse => tr!("analysis-issue-needs-response"),
+        Issue::NeedsPoints { needed, have } => tr!(
+            "analysis-issue-needs-points",
+            needed = i64::try_from(*needed).unwrap_or(i64::MAX),
+            have = i64::try_from(*have).unwrap_or(i64::MAX)
+        ),
+        Issue::NeedsZone => tr!("analysis-issue-needs-zone"),
+        Issue::BadModel(detail) if detail.is_empty() => tr!("analysis-issue-no-parameter"),
+        Issue::BadModel(detail) => tr!("analysis-issue-bad-model", detail = detail.as_str()),
+        Issue::MissingColumn => tr!("analysis-issue-missing-column"),
+        Issue::Failed(error) => crate::errors::analysis::error_message(error),
+    }
+}
