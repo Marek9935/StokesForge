@@ -5142,6 +5142,7 @@ dependencies = [
  "rmpv",
  "serde",
  "serde_bytes",
+ "stokesforge-analysis",
  "stokesforge-arch-guard",
  "stokesforge-core",
  "stokesforge-plot",

@@ -239,3 +239,20 @@ Les classeurs cachés et les graphes sont créés atomiquement dans la même
 entrée structurelle, avec remplacement des références. Dans le même projet,
 les dépendances ne sont pas insérées. La révélation du classeur réutilise
 `SetWindowMeta`, donc son delta et son annulation.
+
+## Calculs d'analyse (#181)
+
+`AddCalculation`, `UpdateCalculation` et `RemoveCalculation` sont des commandes
+**structurelles** (instantané de l'arbre) : un calcul crée, réécrit ou supprime des
+colonnes de sortie en même temps que son enregistrement, et l'annulation doit tout
+rendre d'un bloc — une entrée d'historique par geste, comme une macro, sans en
+ouvrir une. Libellés : `HistoryLabel::AddCalculation(kind)`,
+`UpdateCalculation(kind)`, `RemoveCalculation { kind, with_columns }` (la famille
+d'opération est une donnée, `OperationKind`).
+
+- `RemoveCalculation { with_columns: false }` « détache » : les colonnes restent,
+  ordinaires et de nouveau éditables.
+- Une colonne produite par un calcul est **en lecture seule** pour les commandes de
+  cellules (`CoreError::CalculatedColumnReadOnly`, contrôle de `check_writable_cells`).
+- Le recalcul automatique (`Project::refresh_calculation`, côté session) ne passe pas
+  par l'historique : c'est une mise à jour dérivée, comme le recalcul des formules.

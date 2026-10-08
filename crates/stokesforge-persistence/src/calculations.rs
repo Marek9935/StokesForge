@@ -1,0 +1,371 @@
+//! Calculs d'analyse (#181) : enregistrement sur disque et conversion.
+//!
+//! L'opération traverse le fichier sous la forme d'un arbre générique
+//! (`stokesforge_analysis::tree::Tree`, converti en `rmpv::Value`) : un réglage
+//! nouveau ne change donc pas le schéma. Lecture tolérante (invariant 10) :
+//! un calcul dont l'opération est illisible est écarté — ses colonnes restent
+//! des colonnes ordinaires —, une valeur de résultat ou un avertissement
+//! inconnu est ignoré.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use rmpv::Value;
+use serde::{Deserialize, Serialize};
+use stokesforge_analysis::ops::{Operation, Warning};
+use stokesforge_analysis::tree::Tree;
+use stokesforge_core::{
+    AuxRef, Calculation, NodeId, OutputRef, ResultValue, SeriesRef, SeriesResult, Staleness,
+    Tree as ModelTree,
+};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct CalculationRecord {
+    pub(crate) id: u64,
+    pub(crate) operation: Value,
+    #[serde(default)]
+    pub(crate) series: Vec<SeriesRefRecord>,
+    #[serde(default)]
+    pub(crate) aux: Option<AuxRefRecord>,
+    #[serde(default)]
+    pub(crate) outputs: Vec<OutputRefRecord>,
+    #[serde(default)]
+    pub(crate) results: Vec<SeriesResultRecord>,
+    #[serde(default)]
+    pub(crate) keep_results: bool,
+    #[serde(default)]
+    pub(crate) auto_recalc: bool,
+    /// `"manual"` ou `"input_missing"` ; un échec de recalcul s'écrit
+    /// `"manual"` (le prochain recalcul retrouve l'erreur).
+    #[serde(default)]
+    pub(crate) stale: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SeriesRefRecord {
+    #[serde(default)]
+    pub(crate) x: Option<u64>,
+    pub(crate) y: u64,
+    #[serde(default)]
+    pub(crate) sigma: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuxRefRecord {
+    #[serde(default)]
+    pub(crate) x: Option<u64>,
+    pub(crate) y: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct OutputRefRecord {
+    pub(crate) series: u64,
+    pub(crate) key: String,
+    #[serde(default)]
+    pub(crate) index: Option<u64>,
+    #[serde(default)]
+    pub(crate) column: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub(crate) struct SeriesResultRecord {
+    #[serde(default)]
+    pub(crate) values: Vec<ResultValueRecord>,
+    #[serde(default)]
+    pub(crate) skipped: u64,
+    #[serde(default)]
+    pub(crate) warnings: Vec<WarningRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ResultValueRecord {
+    pub(crate) key: String,
+    #[serde(default)]
+    pub(crate) index: Option<u64>,
+    pub(crate) value: f64,
+    #[serde(default)]
+    pub(crate) error: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WarningRecord {
+    pub(crate) kind: String,
+    #[serde(default)]
+    pub(crate) count: u64,
+}
+
+// ── Arbre d'opération ↔ valeur MessagePack ──────────────────────────────
+
+fn tree_to_value(tree: &Tree) -> Value {
+    match tree {
+        Tree::Null => Value::Nil,
+        Tree::Bool(b) => Value::Boolean(*b),
+        Tree::Num(n) => Value::F64(*n),
+        Tree::Text(t) => Value::String(t.as_str().into()),
+        Tree::List(items) => Value::Array(items.iter().map(tree_to_value).collect()),
+        Tree::Map(entries) => Value::Map(
+            entries
+                .iter()
+                .map(|(k, v)| (Value::String(k.as_str().into()), tree_to_value(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn value_to_tree(value: &Value) -> Tree {
+    match value {
+        Value::Boolean(b) => Tree::Bool(*b),
+        Value::Integer(i) => i.as_f64().map(Tree::Num).unwrap_or(Tree::Null),
+        Value::F32(f) => Tree::Num(f64::from(*f)),
+        Value::F64(f) => Tree::Num(*f),
+        Value::String(s) => s
+            .as_str()
+            .map(|t| Tree::Text(t.to_string()))
+            .unwrap_or(Tree::Null),
+        Value::Array(items) => Tree::List(items.iter().map(value_to_tree).collect()),
+        Value::Map(entries) => Tree::Map(
+            entries
+                .iter()
+                .filter_map(|(k, v)| Some((k.as_str()?.to_string(), value_to_tree(v))))
+                .collect(),
+        ),
+        Value::Nil | Value::Binary(_) | Value::Ext(..) => Tree::Null,
+    }
+}
+
+// ── Modèle → enregistrement ─────────────────────────────────────────────
+
+fn warning_to_record(w: &Warning) -> WarningRecord {
+    match w {
+        Warning::SignalStepNotUniform => WarningRecord {
+            kind: "signal_step_not_uniform".into(),
+            count: 0,
+        },
+        Warning::IrfStepMismatch => WarningRecord {
+            kind: "irf_step_mismatch".into(),
+            count: 0,
+        },
+        Warning::NegativeClipped(n) => WarningRecord {
+            kind: "negative_clipped".into(),
+            count: *n as u64,
+        },
+    }
+}
+
+fn record_to_warning(r: &WarningRecord) -> Option<Warning> {
+    match r.kind.as_str() {
+        "signal_step_not_uniform" => Some(Warning::SignalStepNotUniform),
+        "irf_step_mismatch" => Some(Warning::IrfStepMismatch),
+        "negative_clipped" => Some(Warning::NegativeClipped(r.count as usize)),
+        _ => None,
+    }
+}
+
+pub(crate) fn calculations_to_records(tree: &ModelTree) -> Vec<CalculationRecord> {
+    tree.calculations()
+        .iter()
+        .map(|(id, calc)| CalculationRecord {
+            id: id.raw(),
+            operation: tree_to_value(&calc.operation.to_tree()),
+            series: calc
+                .series
+                .iter()
+                .map(|s| SeriesRefRecord {
+                    x: s.x.map(NodeId::raw),
+                    y: s.y.raw(),
+                    sigma: s.sigma.map(NodeId::raw),
+                })
+                .collect(),
+            aux: calc.aux.as_ref().map(|a| AuxRefRecord {
+                x: a.x.map(NodeId::raw),
+                y: a.y.raw(),
+            }),
+            outputs: calc
+                .outputs
+                .iter()
+                .map(|o| OutputRefRecord {
+                    series: o.series as u64,
+                    key: o.key.clone(),
+                    index: o.index.map(|i| i as u64),
+                    column: o.column.map(NodeId::raw),
+                })
+                .collect(),
+            results: calc
+                .results
+                .iter()
+                .map(|r| SeriesResultRecord {
+                    values: r
+                        .values
+                        .iter()
+                        .map(|v| ResultValueRecord {
+                            key: v.key.clone(),
+                            index: v.index.map(|i| i as u64),
+                            value: v.value,
+                            error: v.error,
+                        })
+                        .collect(),
+                    skipped: r.skipped as u64,
+                    warnings: r.warnings.iter().map(warning_to_record).collect(),
+                })
+                .collect(),
+            keep_results: calc.keep_results,
+            auto_recalc: calc.auto_recalc,
+            stale: calc.stale.as_ref().map(|s| {
+                match s {
+                    Staleness::InputMissing => "input_missing",
+                    Staleness::Manual | Staleness::Failed(_) => "manual",
+                }
+                .to_string()
+            }),
+        })
+        .collect()
+}
+
+// ── Enregistrement → modèle ─────────────────────────────────────────────
+
+/// Un identifiant au-delà de `max` écarte le calcul entier (même borne que
+/// les nœuds, B1) ; l'opération illisible aussi. Rend les calculs gardés.
+pub(crate) fn records_to_calculations(
+    records: Vec<CalculationRecord>,
+    max_id: u64,
+) -> BTreeMap<NodeId, Arc<Calculation>> {
+    let mut out = BTreeMap::new();
+    for r in records {
+        let mut all_ids = std::iter::once(r.id)
+            .chain(
+                r.series
+                    .iter()
+                    .flat_map(|s| std::iter::once(s.y).chain(s.x).chain(s.sigma)),
+            )
+            .chain(r.aux.iter().flat_map(|a| std::iter::once(a.y).chain(a.x)))
+            .chain(r.outputs.iter().filter_map(|o| o.column));
+        if !all_ids.all(|i| i <= max_id) {
+            continue;
+        }
+        let Ok(operation) = Operation::from_tree(&value_to_tree(&r.operation)) else {
+            continue;
+        };
+        let id = NodeId::from_raw(r.id);
+        let node = |i: u64| NodeId::from_raw(i);
+        let calc = Calculation {
+            operation,
+            series: r
+                .series
+                .iter()
+                .map(|s| SeriesRef {
+                    x: s.x.map(node),
+                    y: node(s.y),
+                    sigma: s.sigma.map(node),
+                })
+                .collect(),
+            aux: r.aux.as_ref().map(|a| AuxRef {
+                x: a.x.map(node),
+                y: node(a.y),
+            }),
+            outputs: r
+                .outputs
+                .iter()
+                .map(|o| OutputRef {
+                    series: o.series as usize,
+                    key: o.key.clone(),
+                    index: o.index.map(|i| i as usize),
+                    column: o.column.map(node),
+                })
+                .collect(),
+            results: r
+                .results
+                .iter()
+                .map(|s| SeriesResult {
+                    values: s
+                        .values
+                        .iter()
+                        .map(|v| ResultValue {
+                            key: v.key.clone(),
+                            index: v.index.map(|i| i as usize),
+                            value: v.value,
+                            error: v.error,
+                        })
+                        .collect(),
+                    skipped: s.skipped as usize,
+                    warnings: s.warnings.iter().filter_map(record_to_warning).collect(),
+                })
+                .collect(),
+            keep_results: r.keep_results,
+            auto_recalc: r.auto_recalc,
+            stale: match r.stale.as_deref() {
+                Some("input_missing") => Some(Staleness::InputMissing),
+                Some(_) => Some(Staleness::Manual),
+                None => None,
+            },
+        };
+        out.insert(id, Arc::new(calc));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(operation: Value, y: u64) -> CalculationRecord {
+        CalculationRecord {
+            id: 50,
+            operation,
+            series: vec![SeriesRefRecord {
+                x: None,
+                y,
+                sigma: None,
+            }],
+            aux: None,
+            outputs: vec![],
+            results: vec![],
+            keep_results: false,
+            auto_recalc: true,
+            stale: None,
+        }
+    }
+
+    fn good_operation() -> Value {
+        tree_to_value(
+            &Operation::Correct {
+                op: stokesforge_analysis::correct::CorrectOp::Divide,
+            }
+            .to_tree(),
+        )
+    }
+
+    #[test]
+    fn une_operation_illisible_ecarte_le_calcul_sans_echec() {
+        let kept = records_to_calculations(vec![record(good_operation(), 7)], 1000);
+        assert_eq!(kept.len(), 1);
+        let junk = Value::Map(vec![(Value::from("kind"), Value::from("teleportation"))]);
+        assert!(records_to_calculations(vec![record(junk, 7)], 1000).is_empty());
+        assert!(records_to_calculations(vec![record(Value::Nil, 7)], 1000).is_empty());
+    }
+
+    #[test]
+    fn un_identifiant_hors_borne_ecarte_le_calcul() {
+        assert!(records_to_calculations(vec![record(good_operation(), 5000)], 1000).is_empty());
+    }
+
+    #[test]
+    fn un_avertissement_inconnu_est_ignore() {
+        let mut r = record(good_operation(), 7);
+        r.results = vec![SeriesResultRecord {
+            warnings: vec![
+                WarningRecord {
+                    kind: "from_the_future".into(),
+                    count: 0,
+                },
+                WarningRecord {
+                    kind: "irf_step_mismatch".into(),
+                    count: 0,
+                },
+            ],
+            ..Default::default()
+        }];
+        let kept = records_to_calculations(vec![r], 1000);
+        let calc = kept.values().next().unwrap();
+        assert_eq!(calc.results[0].warnings, vec![Warning::IrfStepMismatch]);
+    }
+}
