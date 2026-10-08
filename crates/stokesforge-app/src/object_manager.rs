@@ -64,13 +64,31 @@ impl AxisRef {
     }
 }
 
-/// Les quatre axes, dans l'ordre d'affichage de l'arbre.
+/// Les quatre axes d'un calque ordinaire, dans l'ordre d'affichage de l'arbre.
 pub const AXIS_SIDES: [AxisSide; 4] = [
     AxisSide::Bottom,
     AxisSide::Left,
     AxisSide::Right,
     AxisSide::Top,
 ];
+
+/// Les axes qu'un calque affiche vraiment, donc ceux que l'arbre liste (#171).
+///
+/// Un calque superposé range son axe X dans `bottom` et son axe Y dans
+/// `left`, mais les affiche en haut et à droite, et seulement s'il a une
+/// échelle propre (`x_top` / `y_right`) : ses autres lignes seraient mortes.
+pub fn axis_sides(panel: &stokesforge_plot::PanelSpec) -> Vec<AxisSide> {
+    match panel.overlay {
+        Some(overlay) => [
+            (overlay.x_top, AxisSide::Bottom),
+            (overlay.y_right, AxisSide::Left),
+        ]
+        .into_iter()
+        .filter_map(|(shown, side)| shown.then_some(side))
+        .collect(),
+        None => AXIS_SIDES.to_vec(),
+    }
+}
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Visibility {
     pub checked: bool,
@@ -82,10 +100,10 @@ impl VisibilityTarget {
     /// Feuilles concernées ; un titre vide ne rend pas un parent indéterminé.
     pub fn contents(self, spec: &PlotSpec) -> Vec<Self> {
         if let Self::Axes(index) = self {
-            if spec.panels.get(index).is_none() {
+            let Some(panel) = spec.panels.get(index) else {
                 return Vec::new();
-            }
-            return AXIS_SIDES
+            };
+            return axis_sides(panel)
                 .into_iter()
                 .map(|side| Self::Axis(AxisRef { panel: index, side }))
                 .collect();
@@ -406,7 +424,16 @@ pub struct ObjectTree {
     pub objects: Vec<ObjectRow>,
 }
 
-fn axis_label(side: AxisSide) -> String {
+/// Le nom d'un axe **à l'endroit où il est affiché** : l'axe X d'un calque
+/// superposé est en haut, son axe Y à droite (#171).
+fn axis_label(panel: &stokesforge_plot::PanelSpec, side: AxisSide) -> String {
+    if panel.overlay.is_some() {
+        let axis = match side {
+            AxisSide::Left => crate::tr!("plot-axis-overlay-y"),
+            _ => crate::tr!("plot-axis-overlay-x"),
+        };
+        return crate::tr!("plot-target-axis", axis = axis);
+    }
     let axis = match side {
         AxisSide::Bottom => crate::tr!("plot-axis-bottom"),
         AxisSide::Left => crate::tr!("plot-axis-left"),
@@ -480,13 +507,13 @@ pub fn object_tree_with_selection(
                 let axes: Vec<ObjectRow> = if !show_scales {
                     Vec::new()
                 } else {
-                    AXIS_SIDES
+                    axis_sides(panel)
                         .into_iter()
                         .map(|side| {
                             let target = VisibilityTarget::Axis(AxisRef { panel: index, side });
                             ObjectRow {
                                 target,
-                                label: axis_label(side),
+                                label: axis_label(panel, side),
                                 kind: ObjectKind::Axis,
                                 selected: selected == Some(target),
                             }
@@ -554,6 +581,44 @@ pub fn object_tree_with_selection(
 mod tests {
     use stokesforge_core::NodeId;
     use stokesforge_plot::{PlotSpec, SeriesRef, SeriesSpec};
+
+    /// #171 : un calque superposé ne liste que les axes qu'il affiche, nommés
+    /// là où ils sont affichés ; la case de son groupe « Axes » ne commande
+    /// que ceux-là.
+    #[test]
+    fn un_calque_superpose_liste_ses_axes_la_ou_ils_sont_affiches() {
+        use crate::object_manager::{axis_label, axis_sides, VisibilityTarget as T};
+        use stokesforge_plot::{AxisSide, OverlaySpec, PanelSpec, Panels};
+        let base = PanelSpec::at(0, 0);
+        let both = PanelSpec::overlay_on(
+            &base,
+            OverlaySpec {
+                x_top: true,
+                y_right: true,
+            },
+        );
+        let only_y = PanelSpec::overlay_on(
+            &base,
+            OverlaySpec {
+                x_top: false,
+                y_right: true,
+            },
+        );
+        let linked = PanelSpec::overlay_on(&base, OverlaySpec::default());
+        assert_eq!(axis_sides(&base).len(), 4);
+        assert_eq!(axis_sides(&both), [AxisSide::Bottom, AxisSide::Left]);
+        assert_eq!(axis_sides(&only_y), [AxisSide::Left]);
+        assert!(axis_sides(&linked).is_empty());
+        let (x, y) = (
+            axis_label(&both, AxisSide::Bottom),
+            axis_label(&both, AxisSide::Left),
+        );
+        assert_ne!(x, axis_label(&base, AxisSide::Bottom));
+        assert_ne!(x, y);
+        let spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![base, both]));
+        assert_eq!(T::Axes(0).contents(&spec).len(), 4);
+        assert_eq!(T::Axes(1).contents(&spec).len(), 2);
+    }
     #[test]
     fn supprimer_un_voisin_ne_selectionne_pas_le_suivant() {
         use crate::object_manager::{selection_after_remove, VisibilityTarget as T};

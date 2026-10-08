@@ -552,6 +552,8 @@ plot-axis-bottom = X (bas)
 plot-axis-left = Y (gauche)
 plot-axis-right = Y secondaire (droite)
 plot-axis-top = X secondaire (haut)
+plot-axis-overlay-x = X (haut)
+plot-axis-overlay-y = Y (droite)
 
 # Ce que désigne un clic droit (tête du menu contextuel)
 

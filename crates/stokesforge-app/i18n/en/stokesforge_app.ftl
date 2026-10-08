@@ -560,6 +560,8 @@ plot-axis-bottom = X (bottom)
 plot-axis-left = Y (left)
 plot-axis-right = Secondary Y (right)
 plot-axis-top = Secondary X (top)
+plot-axis-overlay-x = X (top)
+plot-axis-overlay-y = Y (right)
 
 # What a right-click designates (head of the context menu)
 

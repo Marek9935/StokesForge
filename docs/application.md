@@ -2062,7 +2062,11 @@ quatre, bas, gauche, droite et haut, y compris ceux masqués par défaut — ave
 une seule case qui commande `AxisSpec::visible` (ligne d'axe, graduations et
 libellés d'un coup ; le titre garde son `title_visible`). La case du groupe
 « Axes » commande ses quatre axes et reste mixte tant que droite et haut sont
-masqués ; ses Propriétés ouvrent l'onglet Axes. Le groupe est **replié par
+masqués ; ses Propriétés ouvrent l'onglet Axes. Un **calque superposé** (#171)
+ne liste que les axes qu'il affiche (`object_manager::axis_sides`) : son axe X
+nommé « X (haut) » si `x_top`, son axe Y nommé « Y (droite) » si `y_right`,
+chacun commandant l'`AxisSpec` `bottom` / `left` qui le porte ; ses lignes
+`right` / `top`, mortes, n'existent pas. Le groupe est **replié par
 défaut** (#138) : un clic sur sa flèche déplie les lignes d'axe, sans toucher
 au modèle. Les cases du graphique, du
 calque et du groupe de tracés ne commandent **pas** les axes : Droite et Haut sont masqués par défaut, le parent
