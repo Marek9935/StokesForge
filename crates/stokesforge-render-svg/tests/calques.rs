@@ -111,7 +111,11 @@ fn les_axes_se_rejoignent_aux_coins() {
                     .split([',', ' ', '"'])
                     .filter_map(|v| v.parse().ok())
                     .collect();
-                n.len() == 4 && (n[0] - n[2]).abs() == 1.0 && n[1] == n[3]
+                n.len() == 6
+                    && (n[0] - n[2]).abs() == 1.0
+                    && n[1] == n[3]
+                    && n[2] == n[4]
+                    && (n[3] - n[5]).abs() == 1.0
             })
             .count()
     };

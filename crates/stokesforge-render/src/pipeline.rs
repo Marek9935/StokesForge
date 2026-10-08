@@ -1044,8 +1044,14 @@ fn draw_panel<DB: DrawingBackend>(
             (plan.right, plan.top, right, top),
         ] {
             if vertical && horizontal {
-                let inside = if x == left { x + 1 } else { x - 1 };
-                canvas.draw(&PathElement::new(vec![(x, y), (inside, y)], ink))?;
+                // En L, recouvrant les deux lignes d'axe : un simple point du coin
+                // ne les rejoindrait qu'en diagonale.
+                let along_x = if x == left { x + 1 } else { x - 1 };
+                let along_y = if y == top { y + 1 } else { y - 1 };
+                canvas.draw(&PathElement::new(
+                    vec![(along_x, y), (x, y), (x, along_y)],
+                    ink,
+                ))?;
             }
         }
     }
