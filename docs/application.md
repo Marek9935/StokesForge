@@ -98,7 +98,7 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 | File | New → New Project, Add Workbook, Add Graph ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
 | Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete des objets du Project Manager |
 | Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
-| Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
+| Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Top / Right Mirror Axis (cases, calque actif ordinaire, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
 | View | Panels → Project Manager, Script Console ; Object Manager → Show, puis les réglages du fond (Show graph texts, Show Axes, Expand by Default, Reset Settings) ; Toolbars → File, Tools, Text format |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
@@ -2074,21 +2074,30 @@ motif avec leur propre bascule, « Afficher les axes »
 même sous-menu Affichage et dans le menu du fond) : non listés par défaut, ils
 ajoutent sous chaque calque, après le groupe de tracés, un groupe « Axes »
 (`VisibilityTarget::Axes`, `LayerRow::axes`) qui réunit une ligne par axe — les
-axes que la figure trace : bas et gauche, la droite seulement avec une série
-rattachée, jamais le haut avant les axes miroirs de #176 — avec
+axes que la figure trace : bas, gauche, droite et haut, ces deux derniers
+étant, sur un calque ordinaire, des **axes miroirs** (#176) — avec
 une seule case qui commande `AxisSpec::visible` (ligne d'axe, graduations et
-libellés d'un coup ; le titre garde son `title_visible`). La case du groupe
-« Axes » commande ses quatre axes et reste mixte tant que droite et haut sont
-masqués ; ses Propriétés ouvrent l'onglet Axes. Un **calque superposé** (#171)
+libellés d'un coup ; le titre garde son `title_visible`) ; pour le haut, et la
+droite quand aucune série n'y est rattachée, elle commande `AxisSpec::mirror`
+(`AxisRef::is_mirror`), et se grise quand un calque superposé de la case
+occupe ce côté (`AxisRef::blocked`). La case du groupe
+« Axes » commande ses axes et reste mixte tant qu'un miroir est décoché ; ses
+Propriétés ouvrent l'onglet Axes (pages Haut et Droite : `mirror_axis_editor`,
+« afficher l'axe miroir » et « afficher les étiquettes de graduation », ni
+titre ni couleur). Un **calque superposé** (#171)
 ne liste que les axes qu'il affiche (`object_manager::axis_sides`) : son axe X
 nommé « X (haut) » si `x_top`, son axe Y nommé « Y (droite) » si `y_right`,
 chacun commandant l'`AxisSpec` `bottom` / `left` qui le porte ; ses lignes
 `right` / `top`, mortes, n'existent pas. Le groupe est **replié par
 défaut** (#138) : un clic sur sa flèche déplie les lignes d'axe, sans toucher
 au modèle. Les cases du graphique, du
-calque et du groupe de tracés ne commandent **pas** les axes : Droite et Haut sont masqués par défaut, le parent
-serait indéterminé dès l'ouverture et « tout afficher » ferait apparaître deux
-axes non demandés. Le panneau est redimensionnable à droite ;
+calque et du groupe de tracés ne commandent **pas** les axes : « tout
+afficher » ferait apparaître des axes non demandés. Elles ne comptent pas non
+plus les **textes automatiques cachés** (#173) : sans la bascule « Show graph
+texts », l'état coché d'un parent et son basculement ne regardent que les
+enfants listés (`VisibilityTarget::contents_shown`, `visibility_shown`,
+`set_shown`) ; un texte caché garde son état, et activer la bascule recalcule
+les parents. `Action::SetPlotVisibility` lit la bascule dans l'état. Le panneau est redimensionnable à droite ;
 son bouton Détacher ouvre une fenêtre système, Rattacher le replace à droite. Il est
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.

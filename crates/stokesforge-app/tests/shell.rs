@@ -119,6 +119,22 @@ fn start(project: Project, path: &Path) -> (Session, AppState) {
     (session, state)
 }
 
+/// Comme [`start`], avec les textes automatiques listés dans Object Manager
+/// (#173) ; les préférences vivent dans `dir`, jamais dans la configuration
+/// réelle.
+fn start_showing_texts(project: Project, dir: &Path, file: &str) -> (Session, AppState) {
+    use stokesforge_app::preferences::Preferences;
+    let session = Session::spawn(project, None).expect("thread de session");
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        dir.join(file).display().to_string(),
+        Preferences::load_from(Some(dir.join("preferences.json"))),
+    )
+    .expect("état applicatif initial");
+    state.dispatch(Action::SetObjectManagerShowTexts(true));
+    (session, state)
+}
+
 /// Session sur le projet de démonstration, fichier de travail dans `dir`.
 fn start_demo(dir: &Path) -> (Session, AppState) {
     start(demo_project(), &dir.join("projet.stokesforge"))
@@ -8281,7 +8297,9 @@ fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
     use stokesforge_plot::{AnnotationRef, ShapeRef, TextTarget};
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
-    let (_session, mut state) = start(project, &dir.path().join("cache.stf"));
+    // Préférences dans le dossier temporaire : la bascule des textes y reste.
+    let (_session, mut state) = start_showing_texts(project, dir.path(), "cache.stf");
+    state.dispatch(Action::SetObjectManagerShowTexts(false));
     let text = AnnotationRef { panel: 0, index: 0 };
     let arrow = ShapeRef { panel: 0, index: 3 };
     // Cachés : ni titre du graphique, ni titre de calque, ni axes, ni légende ;
@@ -8320,7 +8338,23 @@ fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
     let shown = object_tree_with_selection(state.tree(), graph, None, true, false).unwrap();
     assert_eq!(shown.objects.len(), 1);
     assert_eq!(shown.layers[0].objects.len(), 9);
-    // La case du graphique commande toujours les textes cachés.
+    // #173 : la case du graphique ne commande que ce que l'arbre affiche ; les
+    // textes cachés gardent leur état, et ne rendent pas la case indéterminée.
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::Graph,
+        visible: false,
+    });
+    let spec = graph_spec(&state, graph);
+    assert!(spec.title_visible);
+    assert!(spec.panels[0].bottom.title_visible);
+    assert!(!T::Graph.visibility_shown(&spec, false).checked);
+    assert!(!T::Graph.visibility_shown(&spec, false).mixed);
+    assert!(!spec.panels[0].series[0].visible);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+    // Textes listés : la même case les commande aussi.
+    state.dispatch(Action::SetObjectManagerShowTexts(true));
     state.dispatch(Action::SetPlotVisibility {
         graph,
         target: T::Graph,
@@ -8354,12 +8388,21 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     // Cachées par défaut, même textes affichés.
     let hidden = object_tree_with_selection(state.tree(), graph, None, true, false).unwrap();
     assert!(axes(&hidden).is_empty());
-    // Bascule active : le groupe « Axes » et les axes que la figure trace
-    // (bas, gauche ; la droite seulement avec une série rattachée, le haut
-    // jamais avant #176) ; les autres objets du calque n'en contiennent aucun.
+    // Bascule active : le groupe « Axes » et ses quatre lignes, dont le haut et
+    // la droite, axes miroirs (#176) ; les autres objets du calque n'en
+    // contiennent aucun.
     let shown = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
     let axis = |side| T::Axis(AxisRef { panel: 0, side });
-    assert_eq!(axes(&shown), [AxisSide::Bottom, AxisSide::Left].map(axis));
+    assert_eq!(
+        axes(&shown),
+        [
+            AxisSide::Bottom,
+            AxisSide::Left,
+            AxisSide::Right,
+            AxisSide::Top
+        ]
+        .map(axis)
+    );
     assert!(shown.layers[0]
         .objects
         .iter()
@@ -8367,7 +8410,9 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     // Une case par axe : `AxisSpec::visible`, une seule entrée d'historique.
     let left = axis(AxisSide::Left);
     assert!(left.visibility(&before).checked);
-    assert!(!T::Axes(0).visibility(&before).mixed);
+    // Les miroirs du haut et de la droite sont décochés d'office (#176) : le
+    // groupe est mixte dès l'ouverture.
+    assert!(T::Axes(0).visibility(&before).mixed);
     state.dispatch(Action::SetPlotVisibility {
         graph,
         target: left,
@@ -8409,7 +8454,7 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
     use stokesforge_plot::{AnnotationRef, AxisSide, ShapeRef, TextTarget};
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
-    let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
+    let (_session, mut state) = start_showing_texts(project, dir.path(), "objets.stf");
     let text = AnnotationRef { panel: 0, index: 0 };
     let arrow = ShapeRef { panel: 0, index: 3 };
     let model = object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), true, false)

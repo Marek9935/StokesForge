@@ -134,6 +134,17 @@ impl PanelSpec {
         self.series.iter().any(|s| s.axis == SeriesAxis::Right)
     }
 
+    /// L'axe du haut est un miroir de celui du bas (#176).
+    pub fn mirrors_top(&self) -> bool {
+        self.overlay.is_none() && self.top.mirror
+    }
+
+    /// L'axe de droite est un miroir de celui de gauche (#176) : seulement
+    /// quand aucune série n'y est rattachée, sinon c'est un vrai axe.
+    pub fn mirrors_right(&self) -> bool {
+        self.overlay.is_none() && self.right.mirror && !self.uses_right_axis()
+    }
+
     /// Colonnes référencées par les séries du panneau, sans doublon, dans
     /// l'ordre de première apparition.
     pub fn referenced_columns(&self) -> Vec<NodeId> {

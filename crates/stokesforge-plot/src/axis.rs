@@ -66,6 +66,14 @@ pub struct AxisSpec {
     /// Couleur de l'échelle — ligne d'axe, graduations et leurs libellés, et
     /// la grille, atténuée (`#RRGGBB`). Vide = automatique.
     pub tick_color: String,
+    /// Axe miroir (#176) : sur un calque ordinaire, l'axe du haut ou de droite
+    /// reprend l'échelle, les bornes et les graduations de celui du bas ou de
+    /// gauche, sans titre. Sans effet sur les autres axes, ni sur l'axe de
+    /// droite quand une série y est rattachée (c'est alors un vrai axe).
+    pub mirror: bool,
+    /// Libellés des graduations affichés ; faux = la ligne et les tirets
+    /// seulement (#176).
+    pub tick_labels: bool,
 }
 
 impl AxisSpec {
@@ -111,6 +119,8 @@ impl Default for AxisSpec {
             title_anchor: None,
             title_font: crate::TextFont::default(),
             tick_color: String::new(),
+            mirror: false,
+            tick_labels: true,
         }
     }
 }

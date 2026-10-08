@@ -136,11 +136,12 @@ pub(super) fn object_node_menu(
     graph: NodeId,
     target: T,
     spec: &stokesforge_plot::PlotSpec,
+    show_texts: bool,
     actions: &mut Vec<Action>,
     requests: &mut Vec<ObjectManagerRequest>,
 ) {
     let exists = target.exists(spec);
-    let visibility = target.visibility(spec);
+    let visibility = target.visibility_shown(spec, show_texts);
     let editable_text = match target {
         T::Annotation(_) => Some(true),
         T::Text(text) => Some(!matches!(text, stokesforge_plot::TextTarget::Legend { .. })),
@@ -334,9 +335,10 @@ fn object_visibility(
     graph: NodeId,
     target: crate::object_manager::VisibilityTarget,
     spec: &stokesforge_plot::PlotSpec,
+    show_texts: bool,
     actions: &mut Vec<Action>,
 ) {
-    let state = target.visibility(spec);
+    let state = target.visibility_shown(spec, show_texts);
     let mut checked = state.checked;
     if ui
         .add_enabled(
@@ -512,10 +514,25 @@ impl ObjectManagerPaint<'_> {
         actions: &mut Vec<Action>,
         requests: &mut Vec<ObjectManagerRequest>,
     ) {
-        object_visibility(ui, self.graph, target, self.spec, actions);
+        object_visibility(
+            ui,
+            self.graph,
+            target,
+            self.spec,
+            self.settings.show_texts,
+            actions,
+        );
         let response = manager_header_label(ui, text, target, requests);
         response.context_menu(|ui| {
-            object_node_menu(ui, self.graph, target, self.spec, actions, requests)
+            object_node_menu(
+                ui,
+                self.graph,
+                target,
+                self.spec,
+                self.settings.show_texts,
+                actions,
+                requests,
+            )
         });
     }
 
@@ -737,7 +754,14 @@ impl ObjectManagerPaint<'_> {
             let background = ListRowBackground::reserve(ui);
             let row = ui
                 .horizontal(|ui| {
-                    object_visibility(ui, self.graph, T::Series(series.target), self.spec, actions);
+                    object_visibility(
+                        ui,
+                        self.graph,
+                        T::Series(series.target),
+                        self.spec,
+                        self.settings.show_texts,
+                        actions,
+                    );
                     let (rect, swatch) = ui
                         .allocate_exact_size(egui::vec2(28.0, 18.0), egui::Sense::click_and_drag());
                     ui.painter().extend(stokesforge_render_egui::series_swatch(
@@ -810,6 +834,7 @@ impl ObjectManagerPaint<'_> {
                             self.graph,
                             T::Series(series.target),
                             self.spec,
+                            self.settings.show_texts,
                             actions,
                             requests,
                         )
@@ -869,7 +894,7 @@ fn object_manager_object_row(
         let background = ListRowBackground::reserve(ui);
         let row = ui
             .horizontal(|ui| {
-                object_visibility(ui, graph, object.target, spec, actions);
+                object_visibility(ui, graph, object.target, spec, true, actions);
                 let icon = match object.kind {
                     crate::object_manager::ObjectKind::Text => Icon::TextTool,
                     crate::object_manager::ObjectKind::Axis => Icon::Axis,
@@ -893,7 +918,7 @@ fn object_manager_object_row(
                     requests.push(ObjectManagerRequest::Properties(object.target));
                 }
                 response.context_menu(|ui| {
-                    object_node_menu(ui, graph, object.target, spec, actions, requests)
+                    object_node_menu(ui, graph, object.target, spec, true, actions, requests)
                 });
             })
             .response

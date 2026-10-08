@@ -100,6 +100,8 @@ pub const MARGIN: u32 = 12;
 pub const X_LABEL_AREA: u32 = 52;
 /// Largeur réservée aux graduations et au titre d'un axe vertical.
 pub const Y_LABEL_AREA: u32 = 64;
+/// Aire de graduation d'un axe miroir sans libellés (#176) : les tirets seuls.
+pub const BARE_LABEL_AREA: u32 = 12;
 /// Famille de police demandée à Plotters. Elle est traduite en
 /// [`epaint::FontFamily::Proportional`] par [`crate::text::font_id`] ; ce que
 /// Plotters en fait par lui-même n'a aucune importance, ses fonts étant
@@ -458,6 +460,22 @@ pub fn draw_on<DB: DrawingBackend>(
         }
     }
     let mut bases = std::collections::HashMap::new();
+    // La légende d'un calque ordinaire liste aussi les courbes des calques
+    // superposés qui le recouvrent (#172) : `overlays_of` donne, par indice de
+    // calque ordinaire, les calques superposés qui le suivent dans sa case.
+    let mut overlays_of: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    let mut last_base: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (index, panel) in plot.panels.iter().enumerate() {
+        let Some(cell) = layout.cells.get(index).copied() else {
+            continue;
+        };
+        if panel.spec.overlay.is_none() {
+            last_base.insert(cell, index);
+        } else if let Some(base) = last_base.get(&cell) {
+            overlays_of.entry(*base).or_default().push(index);
+        }
+    }
 
     for (index, panel) in plot.panels.iter().enumerate() {
         let Some(cell_index) = layout.cells.get(index).copied() else {
@@ -474,6 +492,12 @@ pub fn draw_on<DB: DrawingBackend>(
             continue;
         }
         let plan = plans.get(&cell_index).copied().unwrap_or_default();
+        let overlay_panels: Vec<&ResolvedPanel<'_>> = overlays_of
+            .get(&index)
+            .into_iter()
+            .flatten()
+            .filter_map(|&i| plot.panels.get(i))
+            .collect();
         let (panel_drawn, projection, frame) = draw_panel(
             cell,
             &canvas,
@@ -482,6 +506,7 @@ pub fn draw_on<DB: DrawingBackend>(
             background,
             plan,
             bases.get(&cell_index),
+            &overlay_panels,
         )?;
         if panel.spec.overlay.is_none() {
             bases.insert(cell_index, frame);
@@ -673,6 +698,18 @@ struct CellPlan {
     top: bool,
     left: bool,
     right: bool,
+    /// Un calque superposé de la case a son propre axe en haut / à droite :
+    /// il prime sur un axe miroir (#176).
+    top_overlay: bool,
+    right_overlay: bool,
+    /// Un calque ordinaire de la case demande un axe miroir en haut / à
+    /// droite, et si l'un d'eux garde ses libellés.
+    top_mirror: bool,
+    right_mirror: bool,
+    top_labels: bool,
+    right_labels: bool,
+    /// Une série est rattachée à l'axe de droite : c'est un vrai axe.
+    right_data: bool,
 }
 
 impl CellPlan {
@@ -680,18 +717,65 @@ impl CellPlan {
         let spec = panel.spec;
         match spec.overlay {
             Some(overlay) => {
+                self.top_overlay |= overlay.x_top && spec.bottom.visible;
+                self.right_overlay |= overlay.y_right && spec.left.visible;
                 self.top |= overlay.x_top && spec.bottom.visible;
                 self.right |= overlay.y_right && spec.left.visible;
             }
             None => {
+                if spec.mirrors_top() {
+                    self.top_mirror = true;
+                    self.top = true;
+                    self.top_labels |= spec.top.tick_labels;
+                }
+                if spec.mirrors_right() {
+                    self.right_mirror = true;
+                    self.right = true;
+                    self.right_labels |= spec.right.tick_labels;
+                }
                 self.bottom |= spec.bottom.visible;
                 self.left |= spec.left.visible;
-                self.right |= spec.right.visible
+                let data = spec.right.visible
                     && panel
                         .series
                         .iter()
                         .any(|s| s.spec.visible && s.spec.axis == SeriesAxis::Right);
+                self.right |= data;
+                self.right_data |= data;
             }
+        }
+    }
+}
+
+impl CellPlan {
+    /// Le miroir du haut est tracé : demandé, et pas d'axe propre d'un calque
+    /// superposé à cet endroit.
+    fn mirror_top(&self) -> bool {
+        self.top_mirror && !self.top_overlay
+    }
+
+    /// Le miroir de droite est tracé, même règle.
+    fn mirror_right(&self) -> bool {
+        self.right_mirror && !self.right_overlay
+    }
+
+    /// La taille voulue pour l'aire du haut : un miroir sans libellés n'a
+    /// besoin que de ses tirets.
+    fn top_wanted(&self) -> u32 {
+        if self.top_overlay || self.top_labels {
+            X_LABEL_AREA
+        } else {
+            BARE_LABEL_AREA
+        }
+    }
+
+    /// Même chose pour l'aire de droite (un vrai axe de droite y garde la
+    /// sienne : `right` est alors déjà vrai sans miroir).
+    fn right_wanted(&self) -> u32 {
+        if self.right_data || self.right_overlay || self.right_labels {
+            Y_LABEL_AREA
+        } else {
+            BARE_LABEL_AREA
         }
     }
 }
@@ -706,6 +790,7 @@ struct BaseFrame<DB: DrawingBackend> {
 }
 
 /// Trace un panneau dans sa cellule.
+#[allow(clippy::too_many_arguments)]
 fn draw_panel<DB: DrawingBackend>(
     cell: &DrawingArea<DB, Shift>,
     canvas: &DrawingArea<DB, Shift>,
@@ -714,6 +799,7 @@ fn draw_panel<DB: DrawingBackend>(
     background: (u8, u8, u8, u8),
     plan: CellPlan,
     base: Option<&BaseFrame<DB>>,
+    legend_overlays: &[&ResolvedPanel<'_>],
 ) -> Result<(DrawnPanel, Projection, BaseFrame<DB>), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
     // Un calque superposé sans calque à recouvrir se trace comme un calque
@@ -760,6 +846,9 @@ fn draw_panel<DB: DrawingBackend>(
         }
     }
 
+    // Axes miroirs (#176), sauf là où un calque superposé a son propre axe.
+    let mirror_top = overlay.is_none() && plan.mirror_top() && spec.mirrors_top();
+    let mirror_right = overlay.is_none() && plan.mirror_right() && spec.mirrors_right();
     let right_active = overlay.is_none()
         && spec.right.visible
         && prepared
@@ -856,9 +945,9 @@ fn draw_panel<DB: DrawingBackend>(
     // dans une grille, 64 px de libellés sur un panneau de 150 px ne
     // laisseraient plus rien à tracer.
     let x_label_area = label_area(plan.bottom, X_LABEL_AREA, height);
-    let top_label_area = label_area(plan.top, X_LABEL_AREA, height);
+    let top_label_area = label_area(plan.top, plan.top_wanted(), height);
     let y_label_area = label_area(plan.left, Y_LABEL_AREA, width);
-    let right_label_area = label_area(plan.right, Y_LABEL_AREA, width);
+    let right_label_area = label_area(plan.right, plan.right_wanted(), width);
 
     let mut builder = ChartBuilder::on(&area);
     builder
@@ -896,9 +985,13 @@ fn draw_panel<DB: DrawingBackend>(
         ),
         None => (
             if spec.bottom.visible { x_label_area } else { 0 },
-            0,
+            if mirror_top { top_label_area } else { 0 },
             if spec.left.visible { y_label_area } else { 0 },
-            if right_active { right_label_area } else { 0 },
+            if right_active || mirror_right {
+                right_label_area
+            } else {
+                0
+            },
         ),
     };
 
@@ -928,6 +1021,22 @@ fn draw_panel<DB: DrawingBackend>(
     let tick_y = scale::TickFormat::new(y_scale, y_range);
     let format_x = |value: &f64| tick_x.format(*value);
     let format_y = |value: &f64| tick_y.format(*value);
+    // Sans libellés (#176) : les tirets restent, les nombres disparaissent.
+    let blank = |_: &f64| String::new();
+    let shown_x = |shown: bool| -> &dyn Fn(&f64) -> String {
+        if shown {
+            &format_x
+        } else {
+            &blank
+        }
+    };
+    let shown_y = |shown: bool| -> &dyn Fn(&f64) -> String {
+        if shown {
+            &format_y
+        } else {
+            &blank
+        }
+    };
     // Un calque superposé n'a ni axe en bas ni axe à gauche : ses axes
     // s'affichent en haut et à droite, par les axes secondaires de Plotters
     // (même repère que le calque lui-même, voir plus bas).
@@ -944,7 +1053,7 @@ fn draw_panel<DB: DrawingBackend>(
         if !spec.bottom.visible {
             mesh.disable_x_axis();
         }
-        mesh.x_label_formatter(&format_x)
+        mesh.x_label_formatter(shown_x(spec.bottom.tick_labels))
             .x_labels(scale::label_count(x_scale, x_range));
         mesh.draw()?;
     }
@@ -961,14 +1070,20 @@ fn draw_panel<DB: DrawingBackend>(
         if !spec.left.visible {
             mesh.disable_y_axis();
         }
-        mesh.y_label_formatter(&format_y)
+        mesh.y_label_formatter(shown_y(spec.left.tick_labels))
             .y_labels(scale::label_count(y_scale, y_range));
         mesh.draw()?;
     }
 
     if let Some(range) = y2_range {
         let tick_y2 = scale::TickFormat::new(y2_scale, range);
-        let format_y2 = |value: &f64| tick_y2.format(*value);
+        let format_y2 = |value: &f64| {
+            if spec.right.tick_labels {
+                tick_y2.format(*value)
+            } else {
+                String::new()
+            }
+        };
         let colors = AxisColors::of(&spec.right, ink);
         let mut mesh = chart.configure_secondary_axes();
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
@@ -977,6 +1092,33 @@ fn draw_panel<DB: DrawingBackend>(
             .y_desc(plotters_desc(&spec.right, right_anchor));
         mesh.y_label_formatter(&format_y2)
             .y_labels(scale::label_count(y2_scale, range));
+        if mirror_top {
+            mesh.x_label_formatter(shown_x(spec.top.tick_labels))
+                .x_labels(scale::label_count(x_scale, x_range));
+        }
+        mesh.draw()?;
+    }
+
+    // Les axes miroirs (#176) : mêmes échelle, bornes et graduations que le
+    // bas et la gauche, sans titre. Un axe de droite à données est déjà tracé
+    // plus haut ; seul le miroir du haut s'ajoute alors.
+    if (mirror_top || mirror_right) && y2_range.is_none() {
+        let colors = AxisColors::of(&spec.bottom, ink);
+        let mut mesh = chart.configure_secondary_axes();
+        mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+            .axis_style(rgba(colors.ticks));
+        if mirror_top {
+            mesh.x_label_formatter(shown_x(spec.top.tick_labels))
+                .x_labels(scale::label_count(x_scale, x_range));
+        } else {
+            mesh.x_labels(0);
+        }
+        if mirror_right {
+            mesh.y_label_formatter(shown_y(spec.right.tick_labels))
+                .y_labels(scale::label_count(y_scale, y_range));
+        } else {
+            mesh.y_labels(0);
+        }
         mesh.draw()?;
     }
 
@@ -1268,7 +1410,34 @@ fn draw_panel<DB: DrawingBackend>(
         .filter(|(_, series)| series.in_legend())
         .map(|(index, _)| source[index])
         .collect();
-    let entries: Vec<&Prepared<'_>> = prepared.iter().filter(|s| s.in_legend()).collect();
+    // Les courbes des calques superposés suivent, calque par calque (#172) ;
+    // elles n'ont pas de rang dans ce panneau, donc pas de ligne désignable.
+    let overlay_prepared: Vec<Prepared<'_>> = legend_overlays
+        .iter()
+        .flat_map(|layer| {
+            let own = layer.spec.overlay.unwrap_or_default();
+            let x = if own.x_top {
+                layer.spec.bottom.scale
+            } else {
+                x_scale
+            };
+            let y = if own.y_right {
+                layer.spec.left.scale
+            } else {
+                y_scale
+            };
+            layer
+                .series
+                .iter()
+                .filter(|series| series.spec.visible)
+                .map(move |series| series::prepare(series, x, y))
+        })
+        .collect();
+    let entries: Vec<&Prepared<'_>> = prepared
+        .iter()
+        .chain(&overlay_prepared)
+        .filter(|s| s.in_legend())
+        .collect();
     let legend_ink = rgba_or(&spec.legend.color, opaque(ink));
     let inscribed = legend::draw(
         canvas,

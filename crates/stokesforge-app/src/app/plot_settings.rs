@@ -364,7 +364,10 @@ fn axes_settings_page(
 ) -> bool {
     let mut commit = false;
     let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
-    if panel.uses_right_axis() || *chosen_axis == PlotAxis::Right {
+    if panel.overlay.is_none() {
+        // Haut et droite : les axes miroirs (#176), toujours proposés.
+        axes.extend([PlotAxis::Right, PlotAxis::Top]);
+    } else if panel.uses_right_axis() || *chosen_axis == PlotAxis::Right {
         axes.push(PlotAxis::Right);
     }
     // #169 : les axes sont un jeu d'onglets (une page par axe), donc la
@@ -385,12 +388,22 @@ fn axes_settings_page(
         *chosen_axis = axis;
     }
     ui.add_space(ui.spacing().item_spacing.y);
+    // Le haut est toujours un miroir ; la droite l'est tant qu'aucune série n'y
+    // est rattachée (sinon c'est un vrai axe, éditeur complet).
+    let mirror = panel.overlay.is_none()
+        && (*chosen_axis == PlotAxis::Top
+            || (*chosen_axis == PlotAxis::Right && !panel.uses_right_axis()));
     let axis = match *chosen_axis {
         PlotAxis::Bottom => &mut panel.bottom,
         PlotAxis::Left => &mut panel.left,
         PlotAxis::Right => &mut panel.right,
+        PlotAxis::Top => &mut panel.top,
     };
-    commit |= axis_editor(ui, axis, env);
+    commit |= if mirror {
+        mirror_axis_editor(ui, axis)
+    } else {
+        axis_editor(ui, axis, env)
+    };
     commit
 }
 
@@ -509,6 +522,24 @@ fn text_field(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) ->
     .lost_focus()
 }
 
+/// Édite un axe miroir (#176) : il reprend l'échelle de l'axe opposé et n'a ni
+/// titre ni couleur propres ; on choisit seulement de l'afficher, avec ou sans
+/// étiquettes de graduation.
+fn mirror_axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
+    section_title(ui, tr!("plot-axes-display-section"));
+    let mut commit = ui
+        .checkbox(&mut axis.mirror, tr!("plot-axes-show-mirror"))
+        .changed();
+    commit |= ui
+        .add_enabled(
+            axis.mirror,
+            egui::Checkbox::new(&mut axis.tick_labels, tr!("plot-axes-show-tick-labels")),
+        )
+        .changed();
+    ui.weak(tr!("plot-axes-mirror-note"));
+    commit
+}
+
 /// Édite un [`AxisSpec`], en trois groupes : le titre de l'axe (libellé,
 /// unité), son échelle (logarithmique, inversée, bornes) et son affichage
 /// (axe, grille). Rend `true` si le brouillon doit être validé — voir la doc
@@ -582,6 +613,9 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
     section_title(ui, tr!("plot-axes-display-section"));
     commit |= ui
         .checkbox(&mut axis.visible, tr!("plot-axes-show-axis"))
+        .changed();
+    commit |= ui
+        .checkbox(&mut axis.tick_labels, tr!("plot-axes-show-tick-labels"))
         .changed();
     commit |= ui
         .checkbox(&mut axis.grid, tr!("plot-axes-show-gridlines"))
@@ -1152,18 +1186,19 @@ mod tests {
         assert!(est_peint(&peints, &axes), "la page des axes est peinte");
     }
 
-    /// L'onglet « Axes » propose X et Y ; l'ordonnée secondaire n'apparaît
-    /// que si une série l'emploie ou qu'on l'a demandée. Un clic sur un axe
-    /// le choisit, sans rien modifier.
+    /// L'onglet « Axes » propose X, Y et les deux axes miroirs (#176) ; un
+    /// calque superposé n'a pas de miroir. Un clic sur un axe le choisit, sans
+    /// rien modifier.
     #[test]
-    fn l_onglet_des_axes_choisit_l_axe_et_ne_montre_la_droite_que_si_utile() {
+    fn l_onglet_des_axes_choisit_l_axe_et_propose_les_miroirs() {
         let mut banc = banc(|_| {});
         banc.ouvrir(PlotSettingsTab::Axes, None);
         let context = contexte();
         let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
         assert!(est_peint(&peints, &PlotAxis::Bottom.label()));
         assert!(est_peint(&peints, &PlotAxis::Left.label()));
-        assert!(!est_peint(&peints, &PlotAxis::Right.label()));
+        assert!(est_peint(&peints, &PlotAxis::Right.label()));
+        assert!(est_peint(&peints, &PlotAxis::Top.label()));
         assert_eq!(banc.state.plot_settings().unwrap().axis, PlotAxis::Bottom);
 
         let original = banc.modele();
@@ -1174,6 +1209,25 @@ mod tests {
         banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Right));
         let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
         assert!(est_peint(&peints, &PlotAxis::Right.label()));
+    }
+
+    /// #176 : l'onglet d'un axe miroir ne propose ni titre ni couleur, seulement
+    /// de l'afficher et de garder ou non les étiquettes de graduation.
+    #[test]
+    fn l_onglet_d_un_axe_miroir_ne_propose_que_l_affichage() {
+        let mut banc = banc(|_| {});
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Top));
+        let context = contexte();
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(est_peint(&peints, &tr!("plot-axes-show-mirror")));
+        assert!(est_peint(&peints, &tr!("plot-axes-show-tick-labels")));
+        assert!(!est_peint(&peints, &tr!("plot-axes-quantity")));
+        assert!(!est_peint(&peints, &tr!("plot-axes-color")));
+
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(est_peint(&peints, &tr!("plot-axes-quantity")));
+        assert!(!est_peint(&peints, &tr!("plot-axes-show-mirror")));
     }
 
     /// #124 : la page choisit le calque du brouillon ; le premier calque

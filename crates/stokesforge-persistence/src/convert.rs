@@ -369,6 +369,8 @@ impl From<&AxisSpec> for AxisSpecRecord {
             title_anchor: value.title_anchor.map(anchor_to_record),
             title_font: font_to_record(&value.title_font),
             tick_color: value.tick_color.clone(),
+            mirror: value.mirror,
+            tick_labels: value.tick_labels,
         }
     }
 }
@@ -390,6 +392,8 @@ impl From<AxisSpecRecord> for AxisSpec {
             title_anchor: value.title_anchor.map(record_to_anchor),
             title_font: record_to_font(value.title_font),
             tick_color: value.tick_color,
+            mirror: value.mirror,
+            tick_labels: value.tick_labels,
         }
     }
 }

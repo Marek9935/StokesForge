@@ -318,6 +318,7 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | Plot Group | Groupe de tracés | Les séries d'un calque |
 | Graph texts | Textes du graphique | Titres du graphique, des calques et des axes, et légende : listés dans l'Object Manager si la bascule « Show graph texts » est active (#102) |
 | Show Axes | Afficher les axes | Les axes d'un calque (ligne, graduations, libellés), listés dans l'Object Manager si la bascule « Show Axes » est active (#111, #147) ; ce filtre ne modifie pas leur visibilité sur la figure ; une ligne « X (bottom) Axis » / « Axe X (bas) » par axe, dont Secondary X (top) / X secondaire (haut) |
+| Mirror axis | Axe miroir | Axe du haut ou de droite d'un calque ordinaire qui reprend l'échelle de celui du bas ou de gauche, sans titre (#176) |
 | Axes | Axes | Le groupe qui réunit les quatre axes d'un calque dans l'Object Manager (#111, #147) |
 | Detach / Reattach | Détacher / Rattacher | Ouvrir une fenêtre système / replacer le panneau à son emplacement fixe (#100) |
 

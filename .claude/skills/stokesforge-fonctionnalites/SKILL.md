@@ -36,6 +36,11 @@ comment c'est écrit.
   (#165 ; c'est le geste à conseiller sous Wayland, où le glisser ne passe pas
   d'une fenêtre système à l'autre). Les séries rejoignent le **calque actif**
   du graphique (celui qu'on a cliqué en dernier, repère numéroté, #161).
+  Plusieurs calques : la légende du calque 1 liste les courbes de tous les
+  calques (#172). Échelles du haut et de droite identiques à celles du bas et
+  de gauche (« axes miroirs », sans titre) : cocher les lignes « Haut » et
+  « Droite » du groupe Axes de l'Object Manager, ou l'onglet Axes des
+  propriétés (avec ou sans les nombres, #176).
 - Donner le **raccourci clavier** quand il existe : c'est souvent la vraie
   réponse à « comment je fais plus vite ».
 - Ne citer un nom de fichier ou de fonction **que si l'utilisateur veut aller

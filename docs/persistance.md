@@ -227,7 +227,8 @@ puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
   au schéma : plusieurs options y sont déjà écartées avec leurs raisons.
 - Tout nouveau champ porte `#[serde(default)]`. Sans lui, le fichier de la
   veille devient illisible.
-  Exemple : les couleurs de texte (`PlotSpecRecord::title_color`,
+  Exemple : `AxisSpecRecord::mirror` / `tick_labels` (#176, ce dernier vrai par
+  défaut) ; les couleurs de texte (`PlotSpecRecord::title_color`,
   `AxisSpecRecord::title_color`/`tick_color`) — un fichier plus ancien se
   relit avec des chaînes vides, c'est-à-dire en couleur automatique (test
   `un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique`). Ou

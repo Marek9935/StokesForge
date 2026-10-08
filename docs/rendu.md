@@ -421,6 +421,24 @@ haut ; `PlotComponent::Axis` garde le côté **du spec** (`Bottom`/`Left`) même
 quand l'axe est affiché en haut ou à droite. Test : `geometrie.rs`,
 `stokesforge-render-svg/tests/calques.rs`.
 
+**Légende commune (#172).** La légende d'un calque ordinaire liste d'abord ses
+courbes puis, calque par calque dans l'ordre de `PlotSpec::panels`, celles des
+calques superposés qui le recouvrent (`overlays_of` dans `draw_on`, préparées
+par `draw_panel` avec les échelles propres de chaque calque). La légende du
+calque superposé reste masquée à sa création ; l'afficher en produit une
+seconde, limitée à ses courbes. Les lignes ajoutées n'ont pas de rang dans le
+calque ordinaire : `DrawnPlot::legend_rows` ne les désigne pas (pas de glisser
+ni de sélection par elles). Test : `geometrie.rs`.
+
+**Axes miroirs (#176).** Sur un calque ordinaire, `AxisSpec::mirror` du haut
+(`top`) et de la droite (`right`, quand aucune série n'y est rattachée) trace
+un axe qui reprend l'échelle, les bornes et les graduations du bas et de la
+gauche, **sans titre**, par les axes secondaires de Plotters. Un calque
+superposé de la case qui occupe ce côté prime (`CellPlan::mirror_top` /
+`mirror_right`). `AxisSpec::tick_labels` faux garde la ligne et les tirets sans
+les nombres (formateur vide) ; l'aire de graduation d'un miroir sans libellés
+n'est que `BARE_LABEL_AREA`. Test : `stokesforge-render-svg/tests/miroirs.rs`.
+
 Les échelles linéaires propres d'un calque superposé sont **jointes** à celles
 du calque recouvert (#174) : sans étendue fixée à la main, `scale::aligned_range`
 choisit un pas rond et une position telle que l'intervalle enveloppe les données

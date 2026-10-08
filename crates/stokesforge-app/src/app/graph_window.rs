@@ -536,7 +536,7 @@ fn graph_context_menu(
         let spec = crate::state::current_plot_spec(tree, graph_id);
         match (hit.object, hit.legend_entry, spec.as_ref()) {
             (Some(object), _, Some(spec)) => {
-                object_node_menu(ui, graph_id, object, spec, actions, &mut requests)
+                object_node_menu(ui, graph_id, object, spec, true, actions, &mut requests)
             }
             (None, Some(entry), _) => {
                 legend_entry_menu(ui, graph_id, entry, hit.target, actions, &mut requests)
@@ -1817,6 +1817,7 @@ pub(super) mod tests {
                     graph,
                     VisibilityTarget::Shape(object),
                     &spec,
+                    true,
                     &mut actions,
                     &mut requests,
                 );
@@ -1901,6 +1902,7 @@ pub(super) mod tests {
                         graph,
                         VisibilityTarget::Shape(object),
                         &spec,
+                        true,
                         &mut Vec::new(),
                         &mut requests,
                     );

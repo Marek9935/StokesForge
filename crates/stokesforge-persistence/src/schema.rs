@@ -834,6 +834,12 @@ pub(crate) struct AxisSpecRecord {
     /// Ajouté après coup, comme `PlotSpecRecord::title_color`.
     #[serde(default)]
     pub(crate) tick_color: String,
+    /// Axe miroir (#176).
+    #[serde(default)]
+    pub(crate) mirror: bool,
+    /// Libellés des graduations (#176).
+    #[serde(default = "visible_by_default")]
+    pub(crate) tick_labels: bool,
 }
 
 impl AxisSpecRecord {
@@ -864,6 +870,8 @@ impl Default for AxisSpecRecord {
             title_anchor: None,
             title_font: TextFontRecord::default(),
             tick_color: String::new(),
+            mirror: false,
+            tick_labels: true,
         }
     }
 }

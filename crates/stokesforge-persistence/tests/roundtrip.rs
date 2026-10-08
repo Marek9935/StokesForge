@@ -784,6 +784,9 @@ fn non_trivial_spec(
                 size: Some(18.0),
             },
             tick_color: "#fefefe".to_string(),
+            // #176 : axe miroir, sans étiquettes de graduation.
+            mirror: true,
+            tick_labels: false,
         },
         title_visible: true,
         title_anchor: Some(stokesforge_plot::TextAnchor {

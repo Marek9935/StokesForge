@@ -1862,6 +1862,8 @@ pub enum PlotAxis {
     Left,
     /// Ordonnée secondaire, à droite.
     Right,
+    /// Abscisse secondaire, en haut : l'axe miroir du bas (#176).
+    Top,
 }
 
 impl PlotAxis {
@@ -1871,6 +1873,7 @@ impl PlotAxis {
             PlotAxis::Bottom => tr!("plot-axis-bottom"),
             PlotAxis::Left => tr!("plot-axis-left"),
             PlotAxis::Right => tr!("plot-axis-right"),
+            PlotAxis::Top => tr!("plot-axis-top"),
         }
     }
 }
@@ -4270,7 +4273,8 @@ impl AppState {
                 visible,
             } => {
                 if let Some(mut spec) = current_plot_spec(self.tree(), graph) {
-                    if target.set(&mut spec, visible) {
+                    let show_texts = self.object_manager_show_texts();
+                    if target.set_shown(&mut spec, visible, show_texts) {
                         self.execute(Command::EditPlotSpec {
                             graph,
                             spec,
@@ -4333,8 +4337,7 @@ impl AppState {
                         PlotSettingsTab::Axes,
                         Some(match side {
                             stokesforge_plot::AxisSide::Bottom => PlotAxis::Bottom,
-                            // Axe réservé dans le modèle, sans page ni rendu.
-                            stokesforge_plot::AxisSide::Top => return,
+                            stokesforge_plot::AxisSide::Top => PlotAxis::Top,
                             stokesforge_plot::AxisSide::Left => PlotAxis::Left,
                             stokesforge_plot::AxisSide::Right => PlotAxis::Right,
                         }),
@@ -4345,8 +4348,7 @@ impl AppState {
                         PlotSettingsTab::Axes,
                         Some(match axis.side {
                             stokesforge_plot::AxisSide::Bottom => PlotAxis::Bottom,
-                            // Axe réservé dans le modèle, sans page ni rendu.
-                            stokesforge_plot::AxisSide::Top => return,
+                            stokesforge_plot::AxisSide::Top => PlotAxis::Top,
                             stokesforge_plot::AxisSide::Left => PlotAxis::Left,
                             stokesforge_plot::AxisSide::Right => PlotAxis::Right,
                         }),

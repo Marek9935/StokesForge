@@ -7,16 +7,17 @@
 //! clic. Les adresses restent locales au spec : un déplacement suit le contenu,
 //! une suppression efface la sélection plutôt que de viser son voisin.
 //!
-//! Axes (#111, #147) : sous chaque calque, un groupe « Axes » réunit une ligne
-//! par axe — les quatre, masqués par défaut compris. Il est caché par défaut et
-//! listé par sa propre bascule « Show Axes » (même motif que les textes,
+//! Axes (#111, #147, #171, #176) : sous chaque calque, un groupe « Axes »
+//! réunit une ligne par axe tracé. Il est caché par défaut et listé par sa
+//! propre bascule « Show Axes » (même motif que les textes,
 //! `object_manager_show_scales`). La case d'un axe commande `AxisSpec::visible`
-//! (ligne, graduations et libellés d'un coup) ; celle du groupe
-//! ([`VisibilityTarget::Axes`]) commande ses quatre axes et se montre mixte
-//! tant que Right et Top restent masqués. Les cases du graphique, du calque et
-//! du groupe de tracés **ne commandent pas** les axes : le parent serait
-//! indéterminé dès l'ouverture, et « tout afficher » ferait apparaître deux
-//! axes que l'utilisateur n'a pas demandés.
+//! (ligne, graduations et libellés d'un coup) ; pour le haut et la droite d'un
+//! calque ordinaire, ce sont des **axes miroirs** (#176) et la case commande
+//! `AxisSpec::mirror` — grisée quand un calque superposé occupe ce côté. La
+//! case du groupe ([`VisibilityTarget::Axes`]) commande ses axes. Les cases du
+//! graphique, du calque et du groupe de tracés **ne commandent pas** les axes :
+//! le parent serait indéterminé dès l'ouverture, et « tout afficher » ferait
+//! apparaître des axes que l'utilisateur n'a pas demandés.
 //!
 //! Vue par défaut (#102) : calques, groupes de tracés et séries, plus les
 //! objets rares (formes, textes libres). Les textes automatiques — titre du
@@ -24,7 +25,9 @@
 //! bascule « Show graph texts » est active (préférence d'interface, hors `.stf`) ;
 //! le filtre vit dans [`object_tree_with_selection`]. Les cases du graphique et
 //! du calque commandent toujours le contenu complet, textes cachés compris
-//! ([`VisibilityTarget::contents`]).
+//! ([`VisibilityTarget::contents`]) ; l'état d'une case parente et son
+//! basculement ne comptent que les enfants **affichés** dans l'arbre (#173,
+//! [`VisibilityTarget::contents_shown`]).
 
 use stokesforge_core::{series_label, NodeId, Tree};
 use stokesforge_plot::{
@@ -57,6 +60,53 @@ impl AxisRef {
     fn get(self, spec: &PlotSpec) -> Option<&stokesforge_plot::AxisSpec> {
         spec.panels.get(self.panel).map(|p| p.axis(self.side))
     }
+    /// L'axe est un miroir (#176) : le haut d'un calque ordinaire, ou sa droite
+    /// quand aucune série n'y est rattachée. Sa case commande alors
+    /// `AxisSpec::mirror`, et non `visible`.
+    fn is_mirror(self, spec: &PlotSpec) -> bool {
+        spec.panels.get(self.panel).is_some_and(|panel| {
+            panel.overlay.is_none()
+                && match self.side {
+                    AxisSide::Top => true,
+                    AxisSide::Right => !panel.uses_right_axis(),
+                    _ => false,
+                }
+        })
+    }
+    /// Un miroir que la figure ignore : un calque superposé de la même case a
+    /// déjà son propre axe de ce côté (#176). Sa case est grisée.
+    fn blocked(self, spec: &PlotSpec) -> bool {
+        let Some(panel) = spec.panels.get(self.panel) else {
+            return false;
+        };
+        self.is_mirror(spec)
+            && spec.panels.iter().any(|other| {
+                (other.row, other.column) == (panel.row, panel.column)
+                    && other.overlay.is_some_and(|overlay| match self.side {
+                        AxisSide::Top => overlay.x_top && other.bottom.visible,
+                        _ => overlay.y_right && other.left.visible,
+                    })
+            })
+    }
+    /// La valeur de la case : le miroir ou la visibilité de l'axe.
+    fn shown(self, spec: &PlotSpec) -> Option<bool> {
+        let axis = self.get(spec)?;
+        Some(if self.is_mirror(spec) {
+            axis.mirror
+        } else {
+            axis.visible
+        })
+    }
+    fn set_shown(self, spec: &mut PlotSpec, shown: bool) {
+        let mirror = self.is_mirror(spec);
+        if let Some(axis) = self.get_mut(spec) {
+            if mirror {
+                axis.mirror = shown;
+            } else {
+                axis.visible = shown;
+            }
+        }
+    }
     fn get_mut(self, spec: &mut PlotSpec) -> Option<&mut stokesforge_plot::AxisSpec> {
         spec.panels
             .get_mut(self.panel)
@@ -87,16 +137,9 @@ pub fn axis_sides(panel: &stokesforge_plot::PanelSpec) -> Vec<AxisSide> {
         .into_iter()
         .filter_map(|(shown, side)| shown.then_some(side))
         .collect(),
-        // Haut : jamais tracé avant les axes miroirs (#176). Droite : tracé
-        // seulement si une série y est rattachée.
-        None => AXIS_SIDES
-            .into_iter()
-            .filter(|side| match side {
-                AxisSide::Top => false,
-                AxisSide::Right => panel.uses_right_axis(),
-                _ => true,
-            })
-            .collect(),
+        // Haut et droite : un axe miroir de celui du bas / de gauche (#176), ou,
+        // à droite, le vrai axe des séries qui y sont rattachées.
+        None => AXIS_SIDES.to_vec(),
     }
 }
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -109,6 +152,12 @@ pub struct Visibility {
 impl VisibilityTarget {
     /// Feuilles concernées ; un titre vide ne rend pas un parent indéterminé.
     pub fn contents(self, spec: &PlotSpec) -> Vec<Self> {
+        self.contents_shown(spec, true)
+    }
+    /// Feuilles que l'arbre **affiche** sous ce parent (#173) : sans les
+    /// textes automatiques tant que `show_texts` est faux, un texte caché
+    /// ne compte ni dans l'état de la case ni dans son basculement.
+    pub fn contents_shown(self, spec: &PlotSpec, show_texts: bool) -> Vec<Self> {
         if let Self::Axes(index) = self {
             let Some(panel) = spec.panels.get(index) else {
                 return Vec::new();
@@ -122,7 +171,7 @@ impl VisibilityTarget {
             return vec![self];
         }
         let mut leaves = Vec::new();
-        if self == Self::Graph && !spec.title.is_empty() {
+        if self == Self::Graph && show_texts && !spec.title.is_empty() {
             leaves.push(Self::Text(TextTarget::Title));
         }
         for (index, panel) in spec.panels.iter().enumerate() {
@@ -139,7 +188,9 @@ impl VisibilityTarget {
             if matches!(self, Self::Group(_)) {
                 continue;
             }
-            leaves.extend(panel_texts(spec, index).into_iter().map(Self::Text));
+            if show_texts {
+                leaves.extend(panel_texts(spec, index).into_iter().map(Self::Text));
+            }
             leaves.extend(panel.annotations.iter().enumerate().map(|(rank, _)| {
                 Self::Annotation(AnnotationRef {
                     panel: index,
@@ -161,26 +212,36 @@ impl VisibilityTarget {
             Self::Text(t) => t.visible(spec),
             Self::Annotation(t) => t.get(spec).map(|a| a.visible),
             Self::Shape(t) => t.get(spec).map(|s| s.visible),
-            Self::Axis(t) => t.get(spec).map(|a| a.visible),
+            Self::Axis(t) => t.shown(spec),
             Self::Graph | Self::Panel(_) | Self::Group(_) | Self::Axes(_) => None,
         }
     }
     pub fn visibility(self, spec: &PlotSpec) -> Visibility {
+        self.visibility_shown(spec, true)
+    }
+    /// État de la case, d'après les seuls enfants affichés (#173).
+    pub fn visibility_shown(self, spec: &PlotSpec, show_texts: bool) -> Visibility {
         let values: Vec<bool> = self
-            .contents(spec)
+            .contents_shown(spec, show_texts)
             .into_iter()
             .filter_map(|t| t.value(spec))
             .collect();
+        let blocked = matches!(self, Self::Axis(axis) if axis.blocked(spec));
         Visibility {
             checked: !values.is_empty() && values.iter().all(|v| *v),
             mixed: values.iter().any(|v| *v) && values.iter().any(|v| !v),
-            enabled: !values.is_empty(),
+            enabled: !values.is_empty() && !blocked,
         }
     }
     /// Cible périmée ou valeur identique : aucune entrée d'historique.
     pub fn set(self, spec: &mut PlotSpec, visible: bool) -> bool {
+        self.set_shown(spec, visible, true)
+    }
+    /// Comme [`Self::set`], sur les seuls enfants affichés (#173) : un texte
+    /// caché garde son état.
+    pub fn set_shown(self, spec: &mut PlotSpec, visible: bool, show_texts: bool) -> bool {
         let mut changed = false;
-        for leaf in self.contents(spec) {
+        for leaf in self.contents_shown(spec, show_texts) {
             if leaf.value(spec).is_none_or(|value| value == visible) {
                 continue;
             }
@@ -206,11 +267,7 @@ impl VisibilityTarget {
                         t.set(spec, s);
                     }
                 }
-                Self::Axis(t) => {
-                    if let Some(axis) = t.get_mut(spec) {
-                        axis.visible = visible;
-                    }
-                }
+                Self::Axis(t) => t.set_shown(spec, visible),
                 Self::Graph | Self::Panel(_) | Self::Group(_) | Self::Axes(_) => {}
             }
         }
@@ -615,7 +672,7 @@ mod tests {
             },
         );
         let linked = PanelSpec::overlay_on(&base, OverlaySpec::default());
-        assert_eq!(axis_sides(&base), [AxisSide::Bottom, AxisSide::Left]);
+        assert_eq!(axis_sides(&base), crate::object_manager::AXIS_SIDES);
         assert_eq!(axis_sides(&both), [AxisSide::Bottom, AxisSide::Left]);
         assert_eq!(axis_sides(&only_y), [AxisSide::Left]);
         assert!(axis_sides(&linked).is_empty());
@@ -626,9 +683,78 @@ mod tests {
         assert_ne!(x, axis_label(&base, AxisSide::Bottom));
         assert_ne!(x, y);
         let spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![base, both]));
-        assert_eq!(T::Axes(0).contents(&spec).len(), 2);
+        assert_eq!(T::Axes(0).contents(&spec).len(), 4);
         assert_eq!(T::Axes(1).contents(&spec).len(), 2);
     }
+    /// #176 : les lignes haut et droite d'un calque ordinaire commandent le
+    /// miroir ; un calque superposé qui occupe le côté grise la case.
+    #[test]
+    fn les_cases_haut_et_droite_commandent_les_miroirs() {
+        use crate::object_manager::{AxisRef, VisibilityTarget as T};
+        use stokesforge_plot::{AxisSide, OverlaySpec, PanelSpec, Panels};
+        let base = PanelSpec::at(0, 0);
+        let top = T::Axis(AxisRef {
+            panel: 0,
+            side: AxisSide::Top,
+        });
+        let right = T::Axis(AxisRef {
+            panel: 0,
+            side: AxisSide::Right,
+        });
+        let mut spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![base.clone()]));
+        assert!(!top.visibility(&spec).checked && top.visibility(&spec).enabled);
+        assert!(top.set(&mut spec, true) && right.set(&mut spec, true));
+        let panel = &spec.panels[0];
+        assert!(panel.top.mirror && panel.right.mirror);
+        assert!(
+            !panel.top.visible,
+            "la visibilité de l'axe n'est pas touchée"
+        );
+        assert!(panel.mirrors_top() && panel.mirrors_right());
+        assert!(top.visibility(&spec).checked);
+        // Un calque superposé aux axes propres prime : cases grisées.
+        let haut = PanelSpec::overlay_on(
+            &base,
+            OverlaySpec {
+                x_top: true,
+                y_right: false,
+            },
+        );
+        spec.panels = Panels::new(vec![spec.panels[0].clone(), haut]);
+        assert!(!top.visibility(&spec).enabled);
+        assert!(right.visibility(&spec).enabled);
+    }
+
+    /// #173 : un texte automatique caché dans l'arbre ne rend pas son parent
+    /// indéterminé et n'est pas basculé par un clic sur ce parent.
+    #[test]
+    fn un_parent_ne_tient_compte_que_des_enfants_affiches() {
+        use crate::object_manager::VisibilityTarget as T;
+        use stokesforge_plot::{OverlaySpec, PanelSpec, Panels, TextTarget};
+        let mut base = PanelSpec::at(0, 0);
+        base.series.push(SeriesSpec::new(NodeId::from_raw(900)));
+        let mut haut = PanelSpec::overlay_on(&base, OverlaySpec::default());
+        haut.series.push(SeriesSpec::new(NodeId::from_raw(901)));
+        let mut spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![base, haut]));
+        spec.title = String::new();
+        // La légende du calque 2 est masquée à la création.
+        let legende = T::Text(TextTarget::Legend { panel: 1 });
+        assert_eq!(legende.value(&spec), Some(false));
+        for parent in [T::Graph, T::Panel(1)] {
+            let tout = parent.visibility_shown(&spec, true);
+            assert!(tout.mixed, "avec les textes, la légende cachée compte");
+            let affiche = parent.visibility_shown(&spec, false);
+            assert!(affiche.checked && !affiche.mixed, "{parent:?}");
+        }
+        // Décocher le parent laisse le texte caché dans son état.
+        assert!(T::Panel(1).set_shown(&mut spec, false, false));
+        assert_eq!(legende.value(&spec), Some(false));
+        assert!(T::Panel(1).set_shown(&mut spec, true, false));
+        assert_eq!(legende.value(&spec), Some(false));
+        assert!(T::Panel(1).set_shown(&mut spec, true, true));
+        assert_eq!(legende.value(&spec), Some(true));
+    }
+
     #[test]
     fn supprimer_un_voisin_ne_selectionne_pas_le_suivant() {
         use crate::object_manager::{selection_after_remove, VisibilityTarget as T};

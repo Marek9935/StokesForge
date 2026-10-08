@@ -794,3 +794,38 @@ fn les_echelles_d_un_calque_superpose_sont_jointes_a_celles_du_calque_recouvert(
         assert!(other.0 <= data.0 && other.1 >= data.1, "{other:?}");
     }
 }
+
+/// #172 : la légende du calque ordinaire liste aussi les courbes des calques
+/// superposés ; celle du calque superposé, masquée à la création, n'en fait pas
+/// une seconde, et l'afficher la limite à ses propres courbes.
+#[test]
+fn la_legende_du_calque_ordinaire_liste_les_courbes_des_calques_superposes() {
+    use stokesforge_plot::{OverlaySpec, Panels};
+    let colonnes = [
+        ("X", vec![0.0, 1.0, 2.0]),
+        ("Y", vec![10.0, 20.0, 30.0]),
+        ("Y2", vec![0.0, 1.0, 2.0]),
+    ];
+    let construire = |legende_haut: bool| {
+        move |ids: &[NodeId]| {
+            let mut base = PanelSpec::at(0, 0);
+            base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+            let mut haut = PanelSpec::overlay_on(
+                &base,
+                OverlaySpec {
+                    x_top: false,
+                    y_right: true,
+                },
+            );
+            haut.legend.visible = legende_haut;
+            haut.series.push(SeriesSpec::new_xy(ids[0], ids[2]));
+            PlotSpec::empty("Test").with_panels(Panels::new(vec![base, haut]))
+        }
+    };
+    let drawn = geometrie(&colonnes, construire(false));
+    assert_eq!(drawn.panels[0].legend_entries, 2, "tous les calques");
+    assert_eq!(drawn.panels[1].legend_entries, 0, "pas de seconde légende");
+    let drawn = geometrie(&colonnes, construire(true));
+    assert_eq!(drawn.panels[0].legend_entries, 2);
+    assert_eq!(drawn.panels[1].legend_entries, 1, "ses propres courbes");
+}

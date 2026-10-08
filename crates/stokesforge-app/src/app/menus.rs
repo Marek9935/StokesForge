@@ -341,6 +341,7 @@ impl StokesForgeApp {
     ) {
         ui.menu_button(tr!("menu-graph"), |ui| {
             let spec = crate::state::current_plot_spec(self.state.tree(), graph);
+            let show_texts = self.state.object_manager_show_texts();
             let target = self
                 .read_graph_view(graph, selected_manager_target)
                 .flatten();
@@ -417,7 +418,15 @@ impl StokesForgeApp {
             sections.section(ui, true, |ui| {
                 if let (Some(target), Some(spec)) = (target, spec.as_ref()) {
                     ui.menu_button(tr!("menu-selected-content"), |ui| {
-                        object_node_menu(ui, graph, target, spec, actions, object_requests);
+                        object_node_menu(
+                            ui,
+                            graph,
+                            target,
+                            spec,
+                            show_texts,
+                            actions,
+                            object_requests,
+                        );
                     });
                 } else {
                     ui.add_enabled(false, egui::Button::new(tr!("menu-selected-content")))
@@ -431,6 +440,50 @@ impl StokesForgeApp {
                 {
                     actions.push(Action::ResetTextAnchors { graph });
                     ui.close();
+                }
+            });
+            // Axes miroirs (#176) du calque actif : de vraies bascules
+            // d'affichage, elles gardent le menu ouvert.
+            sections.section(ui, true, |ui| {
+                let panel = published_active_panel(ctx, graph);
+                for (side, label, hint) in [
+                    (
+                        stokesforge_plot::AxisSide::Top,
+                        tr!("action-mirror-axis-top"),
+                        tr!("action-mirror-axis-top", "hint"),
+                    ),
+                    (
+                        stokesforge_plot::AxisSide::Right,
+                        tr!("action-mirror-axis-right"),
+                        tr!("action-mirror-axis-right", "hint"),
+                    ),
+                ] {
+                    let target = crate::object_manager::VisibilityTarget::Axis(
+                        crate::object_manager::AxisRef { panel, side },
+                    );
+                    let ordinary = spec
+                        .as_ref()
+                        .and_then(|spec| spec.panels.get(panel))
+                        .is_some_and(|layer| layer.overlay.is_none());
+                    let state = spec
+                        .as_ref()
+                        .map(|spec| target.visibility(spec))
+                        .unwrap_or_default();
+                    let mut checked = state.checked;
+                    if ui
+                        .add_enabled(
+                            ordinary && state.enabled,
+                            egui::Checkbox::new(&mut checked, label),
+                        )
+                        .on_hover_text(hint)
+                        .changed()
+                    {
+                        actions.push(Action::SetPlotVisibility {
+                            graph,
+                            target,
+                            visible: checked,
+                        });
+                    }
                 }
             });
             sections.section(ui, true, |ui| {
@@ -1220,6 +1273,41 @@ mod tests {
         app.open_tab(Tab::Graph(graph));
         let (_, menu) = ouvre(&mut app, Some(Tab::Graph(graph)), &tr!("menu-graph"));
         assert!(!active(&menu, &tr!("action-show-graph-data")).enabled);
+        session.shutdown().unwrap();
+    }
+
+    /// #176 : les axes miroirs se cochent depuis le menu Graphique, comme la
+    /// case de l'Object Manager (même `Action::SetPlotVisibility`), et la case
+    /// garde le menu ouvert.
+    #[test]
+    fn les_axes_miroirs_se_cochent_depuis_le_menu_graphique() {
+        use crate::object_manager::{AxisRef, VisibilityTarget};
+        let (session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        for (label, side) in [
+            (
+                tr!("action-mirror-axis-top"),
+                stokesforge_plot::AxisSide::Top,
+            ),
+            (
+                tr!("action-mirror-axis-right"),
+                stokesforge_plot::AxisSide::Right,
+            ),
+        ] {
+            let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+            let case = active(&menu, &label);
+            assert_eq!(case.toggled, Some(false));
+            assert_eq!(
+                clique(&mut app, &ctx, tab, case.center),
+                vec![Action::SetPlotVisibility {
+                    graph,
+                    target: VisibilityTarget::Axis(AxisRef { panel: 0, side }),
+                    visible: true,
+                }]
+            );
+            let ouvert = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
+            assert!(entree(&ouvert, &label).is_some(), "la case garde le menu");
+        }
         session.shutdown().unwrap();
     }
 
