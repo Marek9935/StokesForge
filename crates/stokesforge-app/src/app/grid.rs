@@ -731,6 +731,15 @@ fn column_properties_menu(
         plot_menu(ui, actions, sheet, target_columns);
         send_to_graph_menu(ui, state.tree(), actions, sheet, target_columns);
         add_column_entry(ui, sheet, actions);
+        super::analysis_menu::analysis_submenu(
+            ui,
+            state,
+            actions,
+            super::analysis_menu::AnalysisTarget {
+                sheet,
+                columns: target_columns,
+            },
+        );
     });
     if let Some(menu) = &menu {
         grid_clipboard_section(ui, &mut sections, state, actions, sheet, menu);
@@ -738,6 +747,7 @@ fn column_properties_menu(
     sections.section(ui, true, |ui| {
         column_type_role_menus(ui, state, actions, target_columns);
     });
+    super::analysis_menu::calculation_section(ui, &mut sections, state, actions, target_columns);
     if let Some(menu) = &menu {
         grid_erase_section(ui, &mut sections, state, actions, sheet, menu);
     }

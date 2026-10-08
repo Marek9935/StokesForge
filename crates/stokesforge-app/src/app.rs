@@ -133,6 +133,7 @@
 //! tourne — sans quoi, egui ne redessinant que sur événement d'entrée, la fin
 //! du script n'apparaîtrait qu'au prochain mouvement de souris.
 
+mod analysis_menu;
 mod contents;
 mod curve_settings;
 mod dialogs;
