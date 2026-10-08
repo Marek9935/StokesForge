@@ -139,12 +139,21 @@ Après chaque `Execute`, `Undo`, `Redo`, `AbortMacro` réussi et après chaque
 `Load`, l'acteur passe sur les colonnes-formule (`src/recalc.rs`). Il ne
 **réécrit** que celles dont une donnée du calcul a changé depuis leur dernier
 calcul : il garde pour chacune une *empreinte* — texte de la formule, colonne
-que désigne chaque lettre (identifiant) et sa version, nombre de lignes de la
-feuille, position, version de la colonne elle-même, issue (calculée,
+que désigne chaque lettre (identifiant) et sa version, longueur du résultat,
+position, version de la colonne elle-même, issue (calculée,
 illisible, prise dans un cycle) — et la compare à l'état courant. Une
 commande sans rapport (une couleur de courbe, un dossier) ne réécrit donc
 aucune colonne ; modifier A ne réécrit que ce qui lit A, puis, par la
 version de ce qui vient d'être réécrit, ce qui le lit à son tour.
+
+**Longueur du résultat (#194).** Une colonne-formule a la longueur de la
+plus longue des colonnes qu'elle lit ; au-delà de la longueur d'une colonne
+plus courte, la ligne vaut `NaN`. À défaut de colonne lue — constante,
+formule illisible, prise dans un cycle —, elle prend la longueur de la plus
+longue colonne **ordinaire** (sans formule) de la feuille, jamais celle d'une
+autre colonne-formule : une formule ne s'allonge donc ni avec une colonne
+qu'elle ne lit pas, ni avec une autre formule, et redevient courte quand on
+annule l'allongement de sa source.
 
 | | |
 |---|---|

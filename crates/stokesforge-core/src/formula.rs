@@ -414,10 +414,10 @@ impl FormulaEvaluation {
 /// feuille (l'ordre des enfants du nœud `Worksheet`) ; `self_index` est la
 /// position de la colonne-formule elle-même dans cette même feuille, pour
 /// détecter l'auto-référence. `target_len` est la longueur voulue du
-/// résultat (typiquement le nombre de lignes de la feuille) —
-/// **indépendante** des longueurs des colonnes référencées :
-/// [`ColumnValues::get`] rend déjà `NaN`/`None` au-delà de leur longueur
-/// propre, donc une colonne plus courte que la feuille complète
+/// résultat, choisie par l'appelant (l'acteur prend la plus longue des
+/// colonnes lues, #194) — elle peut dépasser la longueur de certaines
+/// colonnes référencées : [`ColumnValues::get`] rend déjà `NaN`/`None`
+/// au-delà de leur longueur propre, donc une colonne plus courte complète
 /// naturellement à `NaN`, sans que ce soit une erreur.
 ///
 /// Toute référence invalide (colonne hors bornes, non numérique,

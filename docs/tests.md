@@ -133,7 +133,7 @@ nouvelles fonctions de formule).
 | Test | Ce qu'il tient |
 |---|---|
 | `stokesforge-robustesse/tests/b22_recalcul_cible.rs` | **l'oracle** : deux sessions jumelles, l'une ciblée, l'autre en recalcul complet (`FormulaRecalc::Full`, le code d'avant #193), reçoivent les mêmes pas tirés au sort ; mêmes réponses et mêmes arbres exigés après chaque pas. Plus, à chaque pas : la doctrine version ↔ contenu **dans l'acteur** (écritures du recalcul, macros, rechargements compris), et le témoin du « ciblé » — une commande sans rapport ne change la version d'aucune colonne. Un contrôle de couverture final exige des formules calculées, non calculées et épargnées, et **au moins vingt passes par nature de pas** : un geste toujours refusé ne prouverait rien. Le tirage est rejouable à l'identique : aucune cible n'y est choisie dans l'ordre de `Tree::iter` (table de hachage à graine aléatoire) |
-| `stokesforge-session/tests/recalc_cible.rs` | un cas nommé par composante de l'empreinte (texte, colonne désignée, version des sources, nombre de lignes, version propre, issue), les gestes qui les font changer (déplacement, cycle créé ailleurs, suppression de cellules dans une colonne-formule, macro avortée, feuille dupliquée…), la stabilité d'une chaîne et d'un cycle, l'oubli du mémo par `Load` et `NewProject` sur une coïncidence d'identifiants et de versions **fabriquée et vérifiée**. Chaque assertion « pas réécrite » a son témoin en mode complet |
+| `stokesforge-session/tests/recalc_cible.rs` | un cas nommé par composante de l'empreinte (texte, colonne désignée, version des sources, longueur du résultat, version propre, issue), les gestes qui les font changer (déplacement, cycle créé ailleurs, suppression de cellules dans une colonne-formule, macro avortée, feuille dupliquée…), la stabilité d'une chaîne et d'un cycle, l'oubli du mémo par `Load` et `NewProject` sur une coïncidence d'identifiants et de versions **fabriquée et vérifiée**. Chaque assertion « pas réécrite » a son témoin en mode complet |
 | `stokesforge-session/tests/formula.rs` | le comportement des formules lui-même (antérieur à #193, inchangé) |
 | `stokesforge-robustesse/tests/b14_balayage.rs` | la doctrine version ↔ contenu sur `History` seul, sur laquelle repose tout le mécanisme — y compris pour une colonne ajoutée avec un numéro déjà porté |
 | `stokesforge-core` (`project.rs`, `une_colonne_inseree_fait_passer_le_compteur_au_dela_de_sa_version`) | l'insertion d'une colonne fait passer le compteur au-delà de sa version |
@@ -152,8 +152,8 @@ tests le voient.
 | Mutant (ce qui est cassé) | Vu par |
 |---|---|
 | texte de la formule retiré de l'empreinte | `changer_le_texte_de_la_formule_recalcule`, `b22` |
-| nombre de lignes retiré | `allonger_la_feuille_ailleurs_allonge_la_formule`, `un_cycle_suit_la_longueur_de_la_feuille`, `une_formule_illisible_suit_la_feuille_puis_se_corrige`, `b22` |
-| nombre de lignes retiré pour une formule bloquée seulement | `un_cycle_suit_la_longueur_de_la_feuille`, `b22` |
+| longueur du résultat retirée (revu par #194 : pour une formule calculée, elle découle des versions des sources ; elle ne compte que pour les autres issues et les constantes) | `un_cycle_suit_la_longueur_de_la_feuille`, `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige`, `b22` |
+| longueur retirée pour une formule bloquée seulement | `un_cycle_suit_la_longueur_de_la_feuille`, `b22` |
 | version propre ignorée (des deux côtés) | `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
 | version propre ignorée pour une formule bloquée, ou illisible, seulement | `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
 | version propre notée **avant** l'écriture, ou jamais | les cas « ciblé » (`une_commande_sans_rapport_ne_reecrit_aucune_formule`, `une_chaine_recalculee_est_stable_a_la_commande_suivante`, `un_cycle_stable_ne_se_reecrit_pas`…), `b22` (propriété 3) |
@@ -175,6 +175,21 @@ La relecture critique de #193 (agent indépendant) a ajouté trois lignes : les
 composantes « par issue », que seul `b22` voyait, ont reçu leurs cas
 nommés, et l'insertion d'une colonne numérotée, un vrai faux « propre »
 latent, a été corrigée dans `core`.
+
+### Mutants éprouvés (#194, longueur du résultat)
+
+#194 a changé **le calcul**, pas la décision « propre / à recalculer » :
+une formule a la longueur de la plus longue colonne qu'elle lit, à défaut
+celle de la plus longue colonne ordinaire. Ces mutants touchent du code
+commun aux deux modes : `b22` ne peut pas les voir, et ne les voit pas. Seuls
+les cas nommés les tiennent — toute règle de calcul nouvelle doit donc avoir
+les siens.
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| retour à la longueur de la feuille (toutes colonnes confondues) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
+| colonnes lues ignorées (toujours la longueur des ordinaires) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
+| colonnes-formule comptées dans la longueur de repli | `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
 
 ### Ajouter une fonctionnalité qui en dépend : les tests à écrire
 

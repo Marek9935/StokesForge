@@ -40,8 +40,9 @@
 //!
 //! **Toute donnée qui entre dans le calcul d'une colonne-formule entre dans
 //! son empreinte** : le texte de la formule, la colonne que désigne chaque
-//! lettre (identifiant, pas lettre), la version de chacune, le nombre de
-//! lignes de la feuille, la position de la colonne elle-même, la version de
+//! lettre (identifiant, pas lettre), la version de chacune, la longueur du
+//! résultat (#194 : la plus longue des colonnes lues, à défaut celle des
+//! colonnes ordinaires de la feuille), la position de la colonne elle-même, la version de
 //! la colonne elle-même (une saisie directe dans une colonne-formule doit
 //! être écrasée), et l'issue (formule illisible, prise dans un cycle,
 //! calculée). Un calcul qui lirait une donnée de plus — le nom d'une
@@ -199,11 +200,23 @@ impl Recalculator {
         let Ok(columns) = project.tree().children(sheet).map(<[NodeId]>::to_vec) else {
             return;
         };
-        // Longueur cible commune à toute la feuille : le maximum des longueurs
-        // actuelles de ses colonnes (formule comprises), au moment où cette
-        // passe commence — la même notion que `Tree::row_count`, qui gouverne
-        // déjà `InsertRows`/`DeleteRows`.
-        let target_len = project.tree().row_count(sheet).unwrap_or(0);
+        // Longueur d'un résultat (#194) : celle de la plus longue des colonnes
+        // que la formule lit (calculée plus bas, colonne par colonne). À
+        // défaut — formule illisible, prise dans un cycle, ou sans aucune
+        // référence résolue — celle de la plus longue colonne **ordinaire**
+        // de la feuille. Jamais une longueur qui compte les colonnes-formule
+        // elles-mêmes : avant #194, `Tree::row_count` les comptait, et une
+        // colonne-formule une fois allongée s'entretenait à cette longueur
+        // (annuler l'allongement d'une source ne la raccourcissait plus).
+        // Les colonnes ordinaires ne sont jamais écrites par la passe : cette
+        // longueur est fixe pendant toute la passe.
+        let ordinary_len = columns
+            .iter()
+            .filter_map(|&id| project.tree().node(id).and_then(|node| node.as_column()))
+            .filter(|column| column.meta().formula.is_none())
+            .map(stokesforge_core::Column::len)
+            .max()
+            .unwrap_or(0);
 
         // Formules analysées à l'avance : une erreur de *parse* est déjà un
         // résultat final (bloc `NaN`), elle ne participe pas au graphe de
@@ -226,13 +239,13 @@ impl Recalculator {
                 }
                 Err(_error) => {
                     let fingerprint =
-                        Fingerprint::new(project, id, source, Outcome::Unparsable, target_len);
+                        Fingerprint::new(project, id, source, Outcome::Unparsable, ordinary_len);
                     if self.is_stale(id, &fingerprint) {
                         write_formula_column(
                             project,
                             id,
-                            vec![f64::NAN; target_len],
-                            &vec![NumericStatus::Missing; target_len],
+                            vec![f64::NAN; ordinary_len],
+                            &vec![NumericStatus::Missing; ordinary_len],
                         );
                         self.record(project, id, fingerprint);
                     }
@@ -292,14 +305,16 @@ impl Recalculator {
             // juste au-dessus) : les sources n'entrent pas dans l'empreinte.
             // Y mettre leurs versions ferait se réécrire les membres d'un
             // cycle à chaque passe, chacun changeant la version de l'autre.
+            // Leur longueur non plus : dans un cycle, elle se définirait par
+            // elle-même ; c'est celle des colonnes ordinaires.
             let fingerprint =
-                Fingerprint::new(project, id, source.clone(), Outcome::Blocked, target_len);
+                Fingerprint::new(project, id, source.clone(), Outcome::Blocked, ordinary_len);
             if self.is_stale(id, &fingerprint) {
                 write_formula_column(
                     project,
                     id,
-                    vec![f64::NAN; target_len],
-                    &vec![NumericStatus::Missing; target_len],
+                    vec![f64::NAN; ordinary_len],
+                    &vec![NumericStatus::Missing; ordinary_len],
                 );
                 self.record(project, id, fingerprint);
             }
@@ -316,7 +331,7 @@ impl Recalculator {
             // plus tôt dans `order`) ont pu être réécrites, donc changer de
             // version — c'est ce qui propage le recalcul le long d'une
             // chaîne.
-            let sources = formula
+            let sources: Vec<_> = formula
                 .referenced_columns()
                 .into_iter()
                 .map(|index| {
@@ -326,6 +341,15 @@ impl Recalculator {
                     (index, resolved)
                 })
                 .collect();
+            // La plus longue des colonnes lues, lue elle aussi après les
+            // colonnes-formule dont `id` dépend ; leur longueur suit leur
+            // version, déjà dans l'empreinte.
+            let target_len = sources
+                .iter()
+                .filter_map(|(_, resolved)| *resolved)
+                .filter_map(|(column_id, _)| column_len(project, column_id))
+                .max()
+                .unwrap_or(ordinary_len);
             let fingerprint = Fingerprint::new(
                 project,
                 id,
@@ -377,8 +401,10 @@ struct Fingerprint {
     source: String,
     /// L'issue du calcul, et les sources qu'elle a lues.
     outcome: Outcome,
-    /// Nombre de lignes de la feuille au début de la passe : la longueur du
-    /// résultat, même pour une formule sans référence.
+    /// Longueur du résultat : la plus longue des colonnes lues, ou à défaut
+    /// la plus longue colonne ordinaire de la feuille (#194). Pour une
+    /// formule calculée, elle découle des versions des sources ; pour les
+    /// autres issues, c'est la seule trace de la feuille dans l'empreinte.
     target_len: usize,
     /// Version de la colonne-formule elle-même. Comparée à la version
     /// courante avant d'écrire, remplacée par la version d'après écriture
@@ -426,6 +452,16 @@ enum Outcome {
         self_index: usize,
         sources: Vec<(usize, Option<(NodeId, u64)>)>,
     },
+}
+
+/// Longueur courante de `column`, `None` si ce n'est pas (ou plus) une
+/// colonne de l'arbre.
+fn column_len(project: &Project, column: NodeId) -> Option<usize> {
+    project
+        .tree()
+        .node(column)
+        .and_then(|node| node.as_column())
+        .map(stokesforge_core::Column::len)
 }
 
 /// Version courante de `column`, `None` si ce n'est pas (ou plus) une
