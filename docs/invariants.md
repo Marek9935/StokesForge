@@ -230,7 +230,7 @@ erreur devient un message de statut affiché.
 
 Depuis #193, l'acteur ne réécrit une colonne-formule que si une donnée de son
 calcul a changé ; il le sait en comparant une **empreinte** (texte, colonne
-que désigne chaque lettre et sa version, nombre de lignes, version propre,
+que désigne chaque lettre et sa version, longueur du résultat, version propre,
 issue) à celle de son dernier calcul. Ce que la règle protège est la seule
 défaillance possible d'une telle optimisation, et elle est silencieuse : une
 donnée lue par le calcul mais absente de l'empreinte laisse une valeur fausse

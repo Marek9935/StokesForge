@@ -342,10 +342,10 @@ fn deplacer_une_source_vers_une_autre_feuille() {
             index: 0,
         })
         .expect("A part dans l'autre feuille");
-    // Feuille : B, C, D → « B » désigne C, vide, et D ne lit plus rien
-    // de numérique.
+    // Feuille : B, C, D → « B » désigne C, vide : D lit une colonne vide et
+    // en prend la longueur (#194).
     let s = instantane(&handle);
-    assert_eq!(nombres(&s, f.d), vec![None, None, None]);
+    assert_eq!(nombres(&s, f.d), vec![]);
 
     handle.undo().expect("annuler le déplacement");
     assert_eq!(
@@ -393,51 +393,91 @@ fn une_colonne_formule_modifiee_directement_est_recalculee() {
     );
 
     // Annuler la suppression réinsère une cellule dans C, qui passe à
-    // quatre lignes et allonge la feuille : la colonne-formule les garde
-    // (voir `allonger_la_feuille_ailleurs_allonge_la_formule`).
+    // quatre lignes ; le recalcul la ramène à la longueur de A (#194).
     handle.undo().expect("annuler le changement de type");
     handle.undo().expect("annuler la suppression");
-    assert_eq!(
-        nombres(&instantane(&handle), f.c),
-        vec![Some(2.0), Some(4.0), Some(6.0), None]
-    );
+    assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
 }
 
-/// Joue « allonger la feuille par D, puis annuler » et rend la colonne C
-/// après chaque étape.
-fn allonger_puis_annuler(mode: FormulaRecalc) -> (Vec<Option<f64>>, Vec<Option<f64>>) {
-    let (_session, handle, f) = demarrer(mode);
+/// Le résultat a la longueur de la plus longue des colonnes que la formule
+/// lit (#194) : allonger A allonge C = A*2, annuler l'allongement la
+/// raccourcit. Avant #194, la longueur était celle de la feuille, comptée
+/// colonne-formule comprise : C, une fois allongée, ne raccourcissait plus.
+#[test]
+fn le_resultat_suit_la_longueur_des_colonnes_lues() {
+    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
     handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(saisir(f.a, 4, &[5.0]))
+        .expect("A descend à 5 lignes");
+    assert_eq!(
+        nombres(&instantane(&handle), f.c),
+        vec![Some(2.0), Some(4.0), Some(6.0), None, Some(10.0)]
+    );
+    handle.undo().expect("annuler l'allongement de A");
+    assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
+
+    // Deux sources de longueurs différentes : la plus longue l'emporte.
+    handle.execute(formule(f.d, "A+B")).expect("D = A+B");
+    handle
+        .execute(saisir(f.b, 3, &[40.0]))
+        .expect("B descend à 4 lignes");
+    let s = instantane(&handle);
+    assert_eq!(
+        nombres(&s, f.d),
+        vec![Some(11.0), Some(22.0), Some(33.0), None]
+    );
+    assert_eq!(nombres(&s, f.c).len(), 3, "C ne lit pas B");
+}
+
+/// Une formule sans référence (constante) a la longueur des colonnes
+/// ordinaires, et la perd avec elles (#194).
+#[test]
+fn une_constante_suit_les_colonnes_ordinaires() {
+    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
+    handle.execute(formule(f.c, "1+2")).expect("C = 1+2");
+    assert_eq!(nombres(&instantane(&handle), f.c), some(&[3.0, 3.0, 3.0]));
     handle
         .execute(saisir(f.d, 4, &[1.0]))
         .expect("D descend à 5 lignes");
-    let allongee = nombres(&instantane(&handle), f.c);
+    assert_eq!(nombres(&instantane(&handle), f.c), some(&[3.0; 5]));
     handle.undo().expect("annuler");
-    (allongee, nombres(&instantane(&handle), f.c))
+    assert_eq!(nombres(&instantane(&handle), f.c), some(&[3.0, 3.0, 3.0]));
 }
 
-/// Allonger la feuille par une colonne qu'aucune formule ne lit allonge
-/// quand même le résultat (composante « nombre de lignes »).
-///
-/// Après l'annulation, la colonne-formule garde ses cinq lignes : le nombre
-/// de lignes de la feuille compte la colonne-formule elle-même, déjà
-/// allongée. C'est le comportement d'avant #193, que le recalcul ciblé doit
-/// reproduire tel quel — d'où la comparaison au mode complet plutôt qu'une
-/// valeur écrite en dur.
+/// Joue « allonger D, que la formule ne lit pas » et rend
+/// `(C après, C est-elle restée à sa version ?)`.
+fn allonger_une_colonne_non_lue(mode: FormulaRecalc) -> (Vec<Option<f64>>, bool) {
+    let (_session, handle, f) = demarrer(mode);
+    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    let avant = instantane(&handle);
+    handle
+        .execute(saisir(f.d, 4, &[1.0]))
+        .expect("D descend à 5 lignes");
+    let apres = instantane(&handle);
+    (
+        nombres(&apres, f.c),
+        version(&avant, f.c) == version(&apres, f.c),
+    )
+}
+
+/// Allonger une colonne que la formule ne lit pas ne l'allonge plus (#194),
+/// et le ciblé ne la réécrit même pas ; témoin : le complet la réécrit, à
+/// l'identique.
 #[test]
-fn allonger_la_feuille_ailleurs_allonge_la_formule() {
-    let (allongee, annulee) = allonger_puis_annuler(FormulaRecalc::Targeted);
-    assert_eq!(allongee, vec![Some(2.0), Some(4.0), Some(6.0), None, None]);
-    assert_eq!(
-        (allongee, annulee),
-        allonger_puis_annuler(FormulaRecalc::Full),
-        "le ciblé rend exactement ce que rend le complet"
-    );
+fn allonger_une_colonne_non_lue_ne_change_pas_la_formule() {
+    let (cible, epargnee) = allonger_une_colonne_non_lue(FormulaRecalc::Targeted);
+    assert_eq!(cible, some(&[2.0, 4.0, 6.0]));
+    assert!(epargnee, "C n'a pas été réécrite");
+    let (complet, epargnee) = allonger_une_colonne_non_lue(FormulaRecalc::Full);
+    assert_eq!(complet, cible);
+    assert!(!epargnee, "témoin : le recalcul complet la réécrit");
 }
 
-/// Une formule illisible est réécrite à la bonne longueur quand la feuille
-/// grandit (issue `Unparsable`, composante « nombre de lignes »), puis
-/// calculée une fois corrigée.
+/// Une formule illisible prend la longueur des colonnes ordinaires de la
+/// feuille et la suit quand l'une d'elles grandit (issue `Unparsable`,
+/// composante « longueur »), puis, corrigée, celle des colonnes qu'elle lit
+/// (#194).
 #[test]
 fn une_formule_illisible_suit_la_feuille_puis_se_corrige() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
@@ -451,11 +491,15 @@ fn une_formule_illisible_suit_la_feuille_puis_se_corrige() {
     let s = instantane(&handle);
     assert_eq!(nombres(&s, f.c).len(), 5, "la colonne suit la feuille");
 
+    // Et raccourcit avec elle : la longueur « ordinaire » ne compte pas la
+    // colonne-formule elle-même, qui sinon s'entretiendrait à cinq lignes
+    // (#194).
+    handle.undo().expect("annuler l'allongement de D");
+    assert_eq!(nombres(&instantane(&handle), f.c).len(), 3);
+    handle.redo().expect("rétablir");
+
     handle.execute(formule(f.c, "A*2")).expect("C corrigée");
-    assert_eq!(
-        nombres(&instantane(&handle), f.c),
-        vec![Some(2.0), Some(4.0), Some(6.0), None, None]
-    );
+    assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
 }
 
 /// Un cycle créé **par une autre colonne** bloque une formule dont ni le
