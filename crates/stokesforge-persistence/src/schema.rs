@@ -100,6 +100,16 @@ pub(crate) struct SavedColorsRecord {
     pub(crate) text: Vec<String>,
     #[serde(default)]
     pub(crate) backgrounds: Vec<String>,
+    /// Nuanciers enregistrés (#178). Absents des fichiers antérieurs.
+    #[serde(default)]
+    pub(crate) gradients: Vec<SavedGradientRecord>,
+}
+
+/// [`stokesforge_plot::SavedGradient`], à plat.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SavedGradientRecord {
+    pub(crate) name: String,
+    pub(crate) stops: Vec<String>,
 }
 
 /// Un nœud de l'arbre, à plat (l'appartenance aux enfants d'un parent est

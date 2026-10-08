@@ -661,7 +661,30 @@ curve-group-field = Group
 curve-group-none = None
 curve-group-new = New group
 curve-group-entry = { $group } ({ $count })
-curve-group-style-note = Line and symbol settings below apply to the { $count } series of the group.
+curve-group-leave =
+    Leave Group
+    .hint = Detaches this series from its group; it keeps its current style
+    .disabled = This series is not in a group
+curve-scope-field = Edit
+curve-scope-series = This series only
+curve-scope-group = Whole group ({ $count } series)
+curve-scope-group-note = Line style, line width, symbol shape and size apply to every series of the group. Name, type, visibility and colors stay per series; spread colors with the gradient below.
+curve-scope-series-note = Changes apply to this series only. It stays in its group; use Leave Group to detach it.
+curve-scope-locked = Per-series setting: switch to "This series only" to change it
+curve-gradient-locked = Switch to "Whole group" to apply a gradient
+curve-gradient-needs-group = Put the series in a group to apply a gradient
+curve-gradient-saved = { $name } ({ $target })
+curve-gradient-delete =
+    Delete
+    .hint = Deletes this saved gradient
+    .disabled = Only a saved gradient can be deleted
+curve-gradient-name-field =
+    Name
+    .hint = Name of the gradient
+curve-gradient-save =
+    Save
+    .hint = Saves the custom gradient in the project or for the user
+    .disabled = Give the gradient a name first
 curve-gradient-section = Color gradient
 curve-gradient-field = Gradient
 curve-gradient-custom = Custom
@@ -671,12 +694,12 @@ curve-gradient-remove-stop = Remove Color
 curve-gradient-apply =
     Apply to Group
     .hint = Spreads the gradient evenly over the series of the group, in list order
-curve-gradient-blue-red = Blue → Red
-curve-gradient-black-red = Black → Red
-curve-gradient-black-blue = Black → Blue
-curve-gradient-blue-yellow = Blue → Yellow
-curve-gradient-green-red = Green → Red
-curve-gradient-blue-white-red = Blue → White → Red
+curve-gradient-blue-red = Blue to Red
+curve-gradient-black-red = Black to Red
+curve-gradient-black-blue = Black to Blue
+curve-gradient-blue-yellow = Blue to Yellow
+curve-gradient-green-red = Green to Red
+curve-gradient-blue-white-red = Blue to White to Red
 curve-gradient-viridis = Viridis
 curve-gradient-plasma = Plasma
 
@@ -933,7 +956,7 @@ action-object-manager = Object Manager
 object-manager-no-graph = Activate a graph to see its objects.
 object-manager-visibility = Show or hide this content. Hidden series are excluded from the legend and automatic axis limits.
 object-manager-layer = Layer { $index }
-object-manager-group = Plot Group
+object-manager-group = Series
 object-manager-axes = Axes
 object-manager-show-texts = Show graph texts
     .hint = Lists the graph title, layer titles, axis titles and legend in the Object Manager. Does not change their visibility on the graph. Not listed by default.

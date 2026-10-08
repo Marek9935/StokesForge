@@ -977,7 +977,9 @@ fn saved_colors_survive_save_and_load() {
         SavedColors::default()
             .with_added(ColorUsage::Curves, "#ff0000")
             .with_added(ColorUsage::Text, "#20202080")
-            .with_added(ColorUsage::Background, "#ffffff00"),
+            .with_added(ColorUsage::Background, "#ffffff00")
+            // Nuancier enregistré (#178).
+            .with_gradient_added("Chaud", &["#000000".to_string(), "#ff0000".to_string()]),
     );
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let path = dir.path().join("couleurs.plyx");

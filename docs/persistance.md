@@ -255,6 +255,9 @@ seuls les textes ancrés restent rangés dans leur calque.
 `#[serde(default)]` : les fichiers sans eux se relisent comme avant (`None`). Un
 x' non fini lu d'un fichier est ramené à `None`.
 
+`SavedColorsRecord::gradients` (#178, liste de `{ name, stops }`, `#[serde(default)]`)
+transporte les nuanciers enregistrés du projet.
+
 `SeriesSpecRecord::group` (#177, `Option<u32>`) : `#[serde(default)]`, les
 fichiers sans lui se relisent sans groupe.
 

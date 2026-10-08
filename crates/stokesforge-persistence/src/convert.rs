@@ -17,9 +17,9 @@ use crate::schema::{
     AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord,
     LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, OverlaySpecRecord,
     PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord, SavedColorsRecord,
-    SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord,
-    SymbolSpecRecord, TextAnchorRecord, TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY,
-    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord,
+    SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord, TextFontRecord, TypeRecord,
+    ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -640,6 +640,14 @@ pub(crate) fn saved_colors_to_record(colors: &stokesforge_plot::SavedColors) -> 
         curves: colors.curves.clone(),
         text: colors.text.clone(),
         backgrounds: colors.backgrounds.clone(),
+        gradients: colors
+            .gradients
+            .iter()
+            .map(|gradient| SavedGradientRecord {
+                name: gradient.name.clone(),
+                stops: gradient.stops.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -651,6 +659,14 @@ pub(crate) fn record_to_saved_colors(record: SavedColorsRecord) -> stokesforge_p
         curves: record.curves,
         text: record.text,
         backgrounds: record.backgrounds,
+        gradients: record
+            .gradients
+            .into_iter()
+            .map(|gradient| stokesforge_plot::SavedGradient {
+                name: gradient.name,
+                stops: gradient.stops,
+            })
+            .collect(),
     }
 }
 

@@ -59,15 +59,21 @@ Le numéro n'a de sens que dans son calque (`next_group_id`, `group_members`,
 `group_ids`). Un groupe n'est **pas** un nœud ni une commande : c'est un champ du
 `PlotSpec`, modifié par `EditPlotSpec`/`SetPlotSpec` comme le reste. Son style
 commun n'est pas stocké à part : la fenêtre des séries l'écrit dans chaque
-membre (une série réglée seule ensuite garde son exception). Le groupe n'est
-pas l'ancien nœud « Plot Group » de l'Object Manager, qui liste toutes les
-séries d'un calque (`VisibilityTarget::Group`).
+membre (une série réglée seule ensuite garde son exception). Le nœud de
+l'Object Manager sous un calque (`VisibilityTarget::Group`, ancien « Plot Group »,
+affiché « Series ») liste toutes les séries du calque ; les groupes de séries y
+sont en retrait sous un en-tête « Group n ».
 
 **Nuanciers (#178).** `stokesforge_plot::gradient` : `GRADIENT_PRESETS` (bleu →
 rouge, noir → rouge…) et `gradient_colors(arrêts, n)`, couleurs `#RRGGBB`
 régulièrement espacées entre le premier et le dernier arrêt, quel que soit `n`.
-Rien n'est stocké : « Appliquer au groupe » écrit les couleurs dans les séries
-(le nuancier appliqué vit donc dans le `.stf` par les couleurs des courbes).
+Rien n'est stocké au moment d'appliquer : « Appliquer au groupe » écrit les
+couleurs dans les séries. Un nuancier **personnalisé** s'enregistre sous un nom :
+`SavedColors::gradients` (`SavedGradient { name, stops }`, bornés comme les
+couleurs, `with_gradient_added` remplace par le nom, `with_gradient_removed`),
+donc dans le projet (`SetSavedColors`, annulable, `.stf`) ou pour l'utilisateur
+(`couleurs.json`, hors historique), par `Action::SaveGradient` /
+`RemoveSavedGradient`.
 
 Les listes d'enfants vivent **dans** la nature du nœud : une colonne, un
 graphe, une matrice ou une note n'en a pas, et c'est garanti à la compilation

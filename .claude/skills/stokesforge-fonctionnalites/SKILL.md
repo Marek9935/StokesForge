@@ -101,8 +101,10 @@ manques encore vérifiés au 2026-10-08, écrits dans `docs/application.md` :
 - pas d'ajout ni de suppression de série ou de calque **depuis** la fenêtre
   des propriétés (glisser, « Plot », « Send to », Graph › New Layer) ;
 - les séries ont leur fenêtre (#179 : double-clic sur une courbe) avec groupes
-  (séries ajoutées ensemble, #177) et nuanciers (#178) ; les scripts `pyst`
-  ajoutent une série à la fois, donc ne créent pas de groupe ;
+  (séries ajoutées ensemble, #177 ; portée « cette série / tout le groupe »,
+  « Quitter le groupe ») et nuanciers (#178, enregistrables dans le projet ou
+  pour l'utilisateur) ; les scripts `pyst` ajoutent une série à la fois, donc ne
+  créent pas de groupe (#196) ;
 - les fenêtres ouvertes et leur mode ne sont pas restaurés au démarrage (seules
   position et taille le sont) ;
 - une seule cellule éditable à la fois par fenêtre.

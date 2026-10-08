@@ -208,6 +208,7 @@ fn plot_settings_contents(
     }
 
     let mut commit = false;
+    let mut gradient_actions: Vec<Action> = Vec::new();
     // Couleurs enregistrées, lues avant d'emprunter le brouillon ; les
     // demandes du sélecteur (enregistrer, retirer) sont traduites en actions
     // après.
@@ -246,7 +247,14 @@ fn plot_settings_contents(
         if chosen_tab == PlotSettingsTab::Series {
             // Deux colonnes qui défilent chacune : pas de défilement commun.
             if let Some(panel) = spec.panels.get_mut(edit.selected_panel) {
-                commit |= curve_settings_page(ui, panel, tree, &mut edit.selected_series, &mut env);
+                commit |= curve_settings_page(
+                    ui,
+                    panel,
+                    tree,
+                    &mut edit.selected_series,
+                    &mut env,
+                    &mut gradient_actions,
+                );
             }
         } else {
             egui::ScrollArea::vertical()
@@ -283,6 +291,9 @@ fn plot_settings_contents(
     }
     if commit {
         state.commit_plot_edit();
+    }
+    for action in gradient_actions {
+        state.dispatch(action);
     }
     for request in env.requests {
         state.dispatch(match request.edit {
@@ -642,74 +653,88 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
 /// peut y revenir alors que rien ne sait le reconstruire. Une série qui le
 /// porte s'affiche quand même, en lecture seule pour ce seul champ — le
 /// reste (nom, visibilité...) reste éditable normalement.
+///
+/// `locked` (#177) : on règle le **groupe** de la série, pas la série seule.
+/// Les réglages propres à une série (nom, type, visibilité, présence en
+/// légende, couleurs) sont alors grisés, avec une info-bulle qui dit pourquoi ;
+/// les autres (style du trait, forme et taille du symbole) restent actifs et la
+/// page les recopie dans tout le groupe.
 pub(super) fn series_editor(
     ui: &mut egui::Ui,
     series: &mut stokesforge_plot::SeriesSpec,
     env: &mut PickerEnv,
+    locked: bool,
 ) -> bool {
     let mut commit = false;
 
-    commit |= text_field(
-        ui,
-        &tr!("plot-series-name"),
-        &tr!("plot-series-name", "hint"),
-        &mut series.name,
-    );
+    commit |= per_series(ui, locked, |ui| {
+        text_field(
+            ui,
+            &tr!("plot-series-name"),
+            &tr!("plot-series-name", "hint"),
+            &mut series.name,
+        )
+    });
     formula_memo(ui, "plot_settings_memo_series");
 
-    ui.horizontal(|ui| {
-        ui.label(tr!("plot-series-plot-type"));
-        match &series.plot_type {
-            PlotType::Unknown(_) => {
-                ui.weak(tr!("plot-series-type-unknown"));
-            }
-            current => {
-                let mut selected = current.clone();
-                egui::ComboBox::new("plot_config_series_type", "")
-                    .selected_text(plot_type_label(&selected))
-                    .show_ui(ui, |ui| {
-                        for candidate in [
-                            PlotType::Scatter,
-                            PlotType::Line,
-                            PlotType::LineScatter,
-                            PlotType::Bar,
-                            PlotType::Histogram,
-                            PlotType::ErrorBar,
-                        ] {
-                            let text = plot_type_label(&candidate);
-                            let is_selected = candidate == selected;
-                            if ui.selectable_label(is_selected, text).clicked() {
-                                selected = candidate;
+    commit |= per_series(ui, locked, |ui| {
+        let mut commit = false;
+        ui.horizontal(|ui| {
+            ui.label(tr!("plot-series-plot-type"));
+            match &series.plot_type {
+                PlotType::Unknown(_) => {
+                    ui.weak(tr!("plot-series-type-unknown"));
+                }
+                current => {
+                    let mut selected = current.clone();
+                    egui::ComboBox::new("plot_config_series_type", "")
+                        .selected_text(plot_type_label(&selected))
+                        .show_ui(ui, |ui| {
+                            for candidate in [
+                                PlotType::Scatter,
+                                PlotType::Line,
+                                PlotType::LineScatter,
+                                PlotType::Bar,
+                                PlotType::Histogram,
+                                PlotType::ErrorBar,
+                            ] {
+                                let text = plot_type_label(&candidate);
+                                let is_selected = candidate == selected;
+                                if ui.selectable_label(is_selected, text).clicked() {
+                                    selected = candidate;
+                                }
                             }
-                        }
-                    });
-                if selected != series.plot_type {
-                    series.plot_type = selected;
-                    commit = true;
+                        });
+                    if selected != series.plot_type {
+                        series.plot_type = selected;
+                        commit = true;
+                    }
                 }
             }
-        }
+        });
+        commit |= ui
+            .checkbox(&mut series.visible, tr!("plot-series-show"))
+            .changed();
+        commit |= ui
+            .checkbox(
+                &mut series.show_in_legend,
+                tr!("plot-series-show-in-legend"),
+            )
+            .changed();
+        commit
     });
 
-    commit |= ui
-        .checkbox(&mut series.visible, tr!("plot-series-show"))
-        .changed();
-    commit |= ui
-        .checkbox(
-            &mut series.show_in_legend,
-            tr!("plot-series-show-in-legend"),
-        )
-        .changed();
-
     section_title(ui, tr!("plot-series-line-section"));
-    commit |= color_field(
-        ui,
-        &tr!("plot-series-line-color"),
-        &mut series.line.color,
-        ColorUsage::Curves,
-        None,
-        env,
-    );
+    commit |= per_series(ui, locked, |ui| {
+        color_field(
+            ui,
+            &tr!("plot-series-line-color"),
+            &mut series.line.color,
+            ColorUsage::Curves,
+            None,
+            env,
+        )
+    });
 
     ui.horizontal(|ui| {
         ui.label(tr!("plot-series-line-style"));
@@ -780,16 +805,28 @@ pub(super) fn series_editor(
     let size_inner = size_response.inner;
     commit |= size_inner.drag_stopped() || size_inner.lost_focus();
 
-    commit |= color_field(
-        ui,
-        &tr!("plot-series-symbol-color"),
-        &mut series.symbol.color,
-        ColorUsage::Curves,
-        Some(&tr!("plot-color-same-as-line")),
-        env,
-    );
+    commit |= per_series(ui, locked, |ui| {
+        color_field(
+            ui,
+            &tr!("plot-series-symbol-color"),
+            &mut series.symbol.color,
+            ColorUsage::Curves,
+            Some(&tr!("plot-color-same-as-line")),
+            env,
+        )
+    });
 
     commit
+}
+
+/// Un réglage propre à une série : grisé, avec l'info-bulle qui dit pourquoi,
+/// quand on règle le groupe entier (`locked`, voir [`series_editor`]).
+fn per_series(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -> bool) -> bool {
+    let out = ui.add_enabled_ui(!locked, add);
+    if locked {
+        out.response.on_hover_text(tr!("curve-scope-locked"));
+    }
+    out.inner
 }
 
 /// Édite un [`stokesforge_plot::LegendSpec`] : visibilité, coin d'ancrage. Rend
@@ -1382,10 +1419,7 @@ mod tests {
         let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
         assert!(!est_peint(&peints, &PlotSettingsTab::Graph.label()));
         assert!(est_peint(&peints, &tr!("curve-group-section")));
-        assert!(est_peint(
-            &peints,
-            &tr!("curve-group-style-note", count = 2)
-        ));
+        assert!(est_peint(&peints, &tr!("curve-scope-group-note")));
         let original = banc.modele();
 
         cliquer_libelle(&context, &mut banc.state, &tr!("curve-gradient-apply"));
@@ -1399,6 +1433,40 @@ mod tests {
         assert_eq!(
             apres.panels[0].series[2], original.panels[0].series[2],
             "la série d'un autre groupe n'est pas touchée"
+        );
+    }
+
+    /// #177 : portée « tout le groupe » — les réglages propres à une série sont
+    /// grisés (le clic ne fait rien) ; portée « cette série seulement » — ils
+    /// se rouvrent et ne touchent que la série choisie.
+    #[test]
+    fn la_portee_grise_les_reglages_propres_a_une_serie() {
+        let mut banc = banc(|spec| {
+            let panel = panneau(spec);
+            let modele = panel.series[0].clone();
+            panel.series.clear();
+            panel.push_series_batch(vec![modele.clone(), modele]);
+        });
+        let context = contexte();
+        banc.ouvrir(PlotSettingsTab::Series, None);
+        banc.state.plot_edit_mut().unwrap().selected_series = 1;
+        let original = banc.modele();
+
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-series-show"));
+        assert_eq!(banc.modele(), original, "grisé : le clic ne change rien");
+
+        cliquer_libelle(&context, &mut banc.state, &tr!("curve-scope-series"));
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-series-show"));
+        let apres = banc.modele();
+        assert!(
+            apres.panels[0].series[0].visible,
+            "l'autre membre est intact"
+        );
+        assert!(!apres.panels[0].series[1].visible);
+        assert_eq!(
+            apres.panels[0].series[1].group,
+            Some(1),
+            "reste dans son groupe"
         );
     }
 

@@ -8,23 +8,31 @@
 //! La fenêtre est celle de [`super::plot_settings`] (même brouillon, même
 //! validation, même macro d'historique) : [`PlotSettingsTab::Series`] ne
 //! figure plus dans la bande d'onglets du graphe, elle choisit cette page.
-//! Le style commun d'un groupe s'**écrit dans chaque série** au moment du
-//! réglage : une série qu'on règle ensuite seule garde son exception, sans
-//! drapeau à tenir.
+//! Une série d'un groupe se règle selon une **portée** choisie en clair
+//! ([`EditScope`]) : « cette série » (rien ne touche les autres, c'est
+//! l'exception) ou « tout le groupe » (style du trait et du symbole recopiés
+//! dans chaque membre, nuancier appliqué ; les réglages propres à une série —
+//! nom, type, visibilité, couleurs — sont grisés avec une info-bulle). Le
+//! style commun s'**écrit dans chaque série** : aucun drapeau d'exception à
+//! tenir, et « Quitter le groupe » rend une série à elle-même.
+//!
+//! Nuanciers (#178) : fournis, enregistrés dans le projet ou pour
+//! l'utilisateur (même motif que les couleurs, `SavedColors::gradients`),
+//! ou personnalisés ; ils se suppriment depuis la même liste.
 //!
 //! [`PlotSettingsTab::Series`]: crate::state::PlotSettingsTab::Series
 
 use eframe::egui;
 use stokesforge_core::Tree;
-use stokesforge_plot::{gradient_colors, LineStyle, PanelSpec, SymbolShape, GRADIENT_PRESETS};
+use stokesforge_plot::{gradient_colors, PanelSpec, SavedColors, SeriesSpec, GRADIENT_PRESETS};
 
 use crate::color_picker::{color_field, gradient_strip, ColorUsage, PickerEnv};
-use crate::state::series_list_label;
+use crate::state::{series_list_label, Action, SaveTarget};
 use crate::theme::section_title;
 use crate::tr;
 
 use super::list_row::list_row;
-use super::plot_settings::{line_style_label, series_editor, symbol_shape_label};
+use super::plot_settings::series_editor;
 
 /// Largeur de la liste des séries, à gauche.
 const LIST_WIDTH: f32 = 190.0;
@@ -35,15 +43,37 @@ const CUSTOM_STOPS: [&str; 2] = ["#0000ff", "#ff0000"];
 /// Nombre d'échantillons de l'aperçu d'un nuancier.
 const PREVIEW_STEPS: usize = 24;
 
+/// Sur quoi portent les réglages d'une série qui est dans un groupe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditScope {
+    /// Cette série seulement : les autres membres ne bougent pas.
+    Series,
+    /// Tout le groupe.
+    Group,
+}
+
+/// Le nuancier choisi dans la liste (état de fenêtre, jamais écrit au modèle).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GradientChoice {
+    /// Un nuancier fourni : rang dans `GRADIENT_PRESETS`.
+    Preset(usize),
+    /// Un nuancier enregistré : où et sous quel nom.
+    Saved(SaveTarget, String),
+    /// Les arrêts saisis dans la fenêtre.
+    Custom,
+}
+
 /// Page des séries du calque `panel` : la liste, puis le groupe et les
 /// réglages de la série `selected`. Rend `true` si le brouillon doit être
-/// validé — voir la doc de tête de `plot_settings_window`.
+/// validé — voir la doc de tête de `plot_settings_window`. Les enregistrements
+/// et suppressions de nuanciers sortent en `actions`.
 pub(super) fn curve_settings_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     tree: &Tree,
     selected: &mut usize,
     env: &mut PickerEnv,
+    actions: &mut Vec<Action>,
 ) -> bool {
     if panel.series.is_empty() {
         ui.weak(tr!("plot-series-empty"));
@@ -62,18 +92,38 @@ pub(super) fn curve_settings_page(
                 .id_salt("curve_settings_editor")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    commit |= group_editor(ui, panel, *selected, env);
-                    if let Some(series) = panel.series.get_mut(*selected) {
-                        commit |= series_editor(ui, series, env);
-                    }
+                    commit |= series_page(ui, panel, *selected, env, actions);
                 });
         });
     });
     commit
 }
 
+/// Tout le groupe : recopie dans les membres de `group` ce que la série `index`
+/// vient de changer dans son style de trait et de symbole par rapport à
+/// `before` (seulement ce qui a changé : les exceptions déjà posées sur les
+/// autres champs sont gardées).
+fn propagate_style(panel: &mut PanelSpec, group: u32, before: &SeriesSpec, index: usize) {
+    let edited = panel.series[index].clone();
+    for member in panel.group_members(group) {
+        let other = &mut panel.series[member];
+        if edited.line.style != before.line.style {
+            other.line.style = edited.line.style;
+        }
+        if edited.line.width != before.line.width {
+            other.line.width = edited.line.width;
+        }
+        if edited.symbol.shape != before.symbol.shape {
+            other.symbol.shape = edited.symbol.shape;
+        }
+        if edited.symbol.size != before.symbol.size {
+            other.symbol.size = edited.symbol.size;
+        }
+    }
+}
+
 /// Le nom d'un groupe : « Group 2 ».
-fn group_name(group: u32) -> String {
+pub(crate) fn group_name(group: u32) -> String {
     tr!("curve-group-name", number = group)
 }
 
@@ -136,13 +186,40 @@ fn series_list(
     commit
 }
 
-/// Le groupe de la série `index` : son appartenance, puis, si elle en a un, le
-/// style commun et le nuancier de tout le groupe.
-fn group_editor(
+/// Le côté droit : groupe, portée, nuancier, puis les réglages de la série.
+fn series_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     index: usize,
     env: &mut PickerEnv,
+    actions: &mut Vec<Action>,
+) -> bool {
+    let scope_id = egui::Id::new("curve_edit_scope");
+    let mut scope = ui
+        .data(|d| d.get_temp(scope_id))
+        .unwrap_or(EditScope::Group);
+    let mut commit = membership_editor(ui, panel, index, &mut scope);
+    let group = panel.series[index].group;
+    let whole_group = group.is_some() && scope == EditScope::Group;
+    commit |= gradient_editor(ui, panel, group, whole_group, env, actions);
+
+    let before = panel.series[index].clone();
+    commit |= series_editor(ui, &mut panel.series[index], env, whole_group);
+    if let (true, Some(group)) = (whole_group, group) {
+        propagate_style(panel, group, &before, index);
+    }
+    ui.data_mut(|d| d.insert_temp(scope_id, scope));
+    commit
+}
+
+/// Appartenance de la série `index` : liste déroulante, « Quitter le groupe »,
+/// et, si elle est dans un groupe, le choix de portée avec sa phrase
+/// d'explication.
+fn membership_editor(
+    ui: &mut egui::Ui,
+    panel: &mut PanelSpec,
+    index: usize,
+    scope: &mut EditScope,
 ) -> bool {
     let mut commit = false;
     let group = panel.series[index].group;
@@ -172,6 +249,14 @@ fn group_editor(
                     new_group = true;
                 }
             });
+        if ui
+            .add_enabled(group.is_some(), egui::Button::new(tr!("curve-group-leave")))
+            .on_hover_text(tr!("curve-group-leave", "hint"))
+            .on_disabled_hover_text(tr!("curve-group-leave", "disabled"))
+            .clicked()
+        {
+            chosen = None;
+        }
     });
     if new_group {
         chosen = Some(panel.next_group_id());
@@ -181,102 +266,21 @@ fn group_editor(
         commit = true;
     }
     if let Some(group) = chosen {
-        commit |= group_style_editor(ui, panel, index, group);
-        commit |= gradient_editor(ui, panel, group, env);
+        let count = panel.group_members(group).len();
+        ui.horizontal(|ui| {
+            ui.label(tr!("curve-scope-field"));
+            ui.radio_value(scope, EditScope::Series, tr!("curve-scope-series"));
+            ui.radio_value(
+                scope,
+                EditScope::Group,
+                tr!("curve-scope-group", count = count),
+            );
+        });
+        ui.weak(match scope {
+            EditScope::Group => tr!("curve-scope-group-note"),
+            EditScope::Series => tr!("curve-scope-series-note"),
+        });
     }
-    commit
-}
-
-/// Style commun : trait et symbole, écrits dans **toutes** les séries du groupe
-/// dès qu'on y touche (la couleur a son nuancier, plus bas). Les valeurs
-/// affichées sont celles de la série `index`.
-fn group_style_editor(ui: &mut egui::Ui, panel: &mut PanelSpec, index: usize, group: u32) -> bool {
-    let members = panel.group_members(group);
-    let reference = panel.series[index].clone();
-    let mut commit = false;
-    ui.weak(tr!("curve-group-style-note", count = members.len()));
-
-    let mut style = reference.line.style;
-    ui.horizontal(|ui| {
-        ui.label(tr!("plot-series-line-style"));
-        egui::ComboBox::from_id_salt("curve_group_line_style")
-            .selected_text(line_style_label(style))
-            .show_ui(ui, |ui| {
-                for candidate in [
-                    LineStyle::None,
-                    LineStyle::Solid,
-                    LineStyle::Dash,
-                    LineStyle::Dot,
-                    LineStyle::DashDot,
-                ] {
-                    ui.selectable_value(&mut style, candidate, line_style_label(candidate));
-                }
-            });
-    });
-    if style != reference.line.style {
-        for &member in &members {
-            panel.series[member].line.style = style;
-        }
-        commit = true;
-    }
-
-    let mut width = reference.line.width;
-    let response = ui
-        .horizontal(|ui| {
-            ui.label(tr!("plot-series-line-width"));
-            ui.add(
-                egui::DragValue::new(&mut width)
-                    .speed(0.1)
-                    .range(0.0..=20.0),
-            )
-        })
-        .inner;
-    if response.changed() {
-        for &member in &members {
-            panel.series[member].line.width = width;
-        }
-    }
-    commit |= response.drag_stopped() || response.lost_focus();
-
-    let mut shape = reference.symbol.shape;
-    ui.horizontal(|ui| {
-        ui.label(tr!("plot-series-symbol-shape"));
-        egui::ComboBox::from_id_salt("curve_group_symbol_shape")
-            .selected_text(symbol_shape_label(shape))
-            .show_ui(ui, |ui| {
-                for candidate in [
-                    SymbolShape::None,
-                    SymbolShape::Circle,
-                    SymbolShape::Square,
-                    SymbolShape::Triangle,
-                    SymbolShape::Diamond,
-                    SymbolShape::Plus,
-                    SymbolShape::Cross,
-                ] {
-                    ui.selectable_value(&mut shape, candidate, symbol_shape_label(candidate));
-                }
-            });
-    });
-    if shape != reference.symbol.shape {
-        for &member in &members {
-            panel.series[member].symbol.shape = shape;
-        }
-        commit = true;
-    }
-
-    let mut size = reference.symbol.size;
-    let response = ui
-        .horizontal(|ui| {
-            ui.label(tr!("plot-series-symbol-size"));
-            ui.add(egui::DragValue::new(&mut size).speed(0.1).range(0.0..=40.0))
-        })
-        .inner;
-    if response.changed() {
-        for &member in &members {
-            panel.series[member].symbol.size = size;
-        }
-    }
-    commit |= response.drag_stopped() || response.lost_focus();
     commit
 }
 
@@ -295,90 +299,216 @@ fn gradient_label(id: &str) -> String {
     }
 }
 
-/// Nuanciers (#178) : un nuancier fourni ou personnalisé (N couleurs), aperçu,
-/// et « Appliquer », qui répartit les couleurs régulièrement sur les séries du
-/// groupe, dans l'ordre de la liste. Le choix en cours n'est qu'un état de
-/// fenêtre ; seules les couleurs appliquées entrent dans le graphe.
+/// Les couleurs enregistrées de la cible `target`.
+fn saved_of(env: &PickerEnv, target: SaveTarget) -> &SavedColors {
+    match target {
+        SaveTarget::Project => &env.project,
+        SaveTarget::User => &env.user,
+    }
+}
+
+/// Les arrêts du nuancier choisi ; `custom` pour un nuancier personnalisé (ou
+/// un nuancier enregistré qui a disparu).
+fn choice_stops(choice: &GradientChoice, env: &PickerEnv, custom: &[String]) -> Vec<String> {
+    match choice {
+        GradientChoice::Preset(index) => GRADIENT_PRESETS.get(*index).map_or_else(
+            || custom.to_vec(),
+            |preset| preset.stops.iter().map(|s| (*s).to_string()).collect(),
+        ),
+        GradientChoice::Saved(target, name) => saved_of(env, *target)
+            .gradients
+            .iter()
+            .find(|gradient| &gradient.name == name)
+            .map_or_else(|| custom.to_vec(), |gradient| gradient.stops.clone()),
+        GradientChoice::Custom => custom.to_vec(),
+    }
+}
+
+/// Nuanciers (#178) : choisir (fourni, enregistré, personnalisé), voir l'aperçu,
+/// enregistrer ou supprimer un nuancier enregistré, et « Appliquer au
+/// groupe », qui répartit les couleurs régulièrement sur les séries du groupe
+/// dans l'ordre de la liste. Grisé tant que la portée n'est pas « tout le
+/// groupe » (`enabled`), avec l'info-bulle qui le dit. Le choix en cours n'est
+/// qu'un état de fenêtre ; seules les couleurs appliquées entrent dans le
+/// graphe.
 fn gradient_editor(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
-    group: u32,
+    group: Option<u32>,
+    enabled: bool,
     env: &mut PickerEnv,
+    actions: &mut Vec<Action>,
 ) -> bool {
     let choice_id = egui::Id::new("curve_gradient_choice");
     let stops_id = egui::Id::new("curve_gradient_stops");
-    let custom = GRADIENT_PRESETS.len();
-    let mut choice: usize = ui.data(|d| d.get_temp(choice_id)).unwrap_or(0);
-    let mut stops: Vec<String> = ui
+    let name_id = egui::Id::new("curve_gradient_name");
+    let target_id = egui::Id::new("curve_gradient_target");
+    let mut choice: GradientChoice = ui
+        .data(|d| d.get_temp(choice_id))
+        .unwrap_or(GradientChoice::Preset(0));
+    let mut custom: Vec<String> = ui
         .data(|d| d.get_temp(stops_id))
         .unwrap_or_else(|| CUSTOM_STOPS.iter().map(|s| (*s).to_string()).collect());
+    let mut name: String = ui.data(|d| d.get_temp(name_id)).unwrap_or_default();
+    let mut target: SaveTarget = ui.data(|d| d.get_temp(target_id)).unwrap_or_default();
 
     section_title(ui, tr!("curve-gradient-section"));
-    ui.horizontal(|ui| {
-        ui.label(tr!("curve-gradient-field"));
-        egui::ComboBox::from_id_salt("curve_gradient_combo")
-            .selected_text(match GRADIENT_PRESETS.get(choice) {
-                Some(preset) => gradient_label(preset.id),
-                None => tr!("curve-gradient-custom"),
-            })
-            .show_ui(ui, |ui| {
-                for (index, preset) in GRADIENT_PRESETS.iter().enumerate() {
-                    ui.selectable_value(&mut choice, index, gradient_label(preset.id));
-                }
-                ui.selectable_value(&mut choice, custom, tr!("curve-gradient-custom"));
-            });
-    });
-    if choice == custom {
-        let mut remove = None;
-        for (index, stop) in stops.iter_mut().enumerate() {
-            ui.push_id(index, |ui| {
-                color_field(
-                    ui,
-                    &tr!("curve-gradient-stop", number = (index + 1)),
-                    stop,
-                    ColorUsage::Curves,
-                    None,
-                    env,
-                );
-            });
-        }
+    let mut commit = false;
+    let out = ui.add_enabled_ui(enabled, |ui| {
         ui.horizontal(|ui| {
-            if ui.button(tr!("curve-gradient-add-stop")).clicked() {
-                let last = stops.last().cloned().unwrap_or_default();
-                stops.push(last);
-            }
+            ui.label(tr!("curve-gradient-field"));
+            let selected_text = match &choice {
+                GradientChoice::Preset(index) => GRADIENT_PRESETS
+                    .get(*index)
+                    .map_or_else(String::new, |preset| gradient_label(preset.id)),
+                GradientChoice::Saved(target, name) => tr!(
+                    "curve-gradient-saved",
+                    name = name.as_str(),
+                    target = target.label()
+                ),
+                GradientChoice::Custom => tr!("curve-gradient-custom"),
+            };
+            egui::ComboBox::from_id_salt("curve_gradient_combo")
+                .selected_text(selected_text)
+                .show_ui(ui, |ui| {
+                    for (index, preset) in GRADIENT_PRESETS.iter().enumerate() {
+                        ui.selectable_value(
+                            &mut choice,
+                            GradientChoice::Preset(index),
+                            gradient_label(preset.id),
+                        );
+                    }
+                    for saved_target in [SaveTarget::Project, SaveTarget::User] {
+                        for gradient in &saved_of(env, saved_target).gradients {
+                            ui.selectable_value(
+                                &mut choice,
+                                GradientChoice::Saved(saved_target, gradient.name.clone()),
+                                tr!(
+                                    "curve-gradient-saved",
+                                    name = gradient.name.as_str(),
+                                    target = saved_target.label()
+                                ),
+                            );
+                        }
+                    }
+                    ui.selectable_value(
+                        &mut choice,
+                        GradientChoice::Custom,
+                        tr!("curve-gradient-custom"),
+                    );
+                });
+            let saved = match &choice {
+                GradientChoice::Saved(target, name) => Some((*target, name.clone())),
+                _ => None,
+            };
             if ui
                 .add_enabled(
-                    stops.len() > 2,
-                    egui::Button::new(tr!("curve-gradient-remove-stop")),
+                    saved.is_some(),
+                    egui::Button::new(tr!("curve-gradient-delete")),
                 )
+                .on_hover_text(tr!("curve-gradient-delete", "hint"))
+                .on_disabled_hover_text(tr!("curve-gradient-delete", "disabled"))
                 .clicked()
             {
-                remove = Some(stops.len() - 1);
+                if let Some((target, name)) = saved {
+                    actions.push(Action::RemoveSavedGradient { name, target });
+                    choice = GradientChoice::Preset(0);
+                }
             }
         });
-        if let Some(index) = remove {
-            stops.remove(index);
+        if choice == GradientChoice::Custom {
+            let mut remove = None;
+            for (index, stop) in custom.iter_mut().enumerate() {
+                ui.push_id(index, |ui| {
+                    color_field(
+                        ui,
+                        &tr!("curve-gradient-stop", number = (index + 1)),
+                        stop,
+                        ColorUsage::Curves,
+                        None,
+                        env,
+                    );
+                });
+            }
+            ui.horizontal(|ui| {
+                if ui.button(tr!("curve-gradient-add-stop")).clicked() {
+                    let last = custom.last().cloned().unwrap_or_default();
+                    custom.push(last);
+                }
+                if ui
+                    .add_enabled(
+                        custom.len() > 2,
+                        egui::Button::new(tr!("curve-gradient-remove-stop")),
+                    )
+                    .clicked()
+                {
+                    remove = Some(custom.len() - 1);
+                }
+            });
+            if let Some(index) = remove {
+                custom.remove(index);
+            }
+            ui.horizontal(|ui| {
+                ui.label(tr!("curve-gradient-name-field"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut name)
+                        .hint_text(tr!("curve-gradient-name-field", "hint"))
+                        .desired_width(120.0),
+                );
+                egui::ComboBox::from_id_salt("curve_gradient_target")
+                    .selected_text(target.label())
+                    .show_ui(ui, |ui| {
+                        for candidate in [SaveTarget::Project, SaveTarget::User] {
+                            ui.selectable_value(&mut target, candidate, candidate.label());
+                        }
+                    });
+                if ui
+                    .add_enabled(
+                        !name.trim().is_empty(),
+                        egui::Button::new(tr!("curve-gradient-save")),
+                    )
+                    .on_hover_text(tr!("curve-gradient-save", "hint"))
+                    .on_disabled_hover_text(tr!("curve-gradient-save", "disabled"))
+                    .clicked()
+                {
+                    actions.push(Action::SaveGradient {
+                        name: name.trim().to_string(),
+                        stops: custom.clone(),
+                        target,
+                    });
+                    choice = GradientChoice::Saved(target, name.trim().to_string());
+                }
+            });
         }
-    }
-    let active: Vec<String> = match GRADIENT_PRESETS.get(choice) {
-        Some(preset) => preset.stops.iter().map(|s| (*s).to_string()).collect(),
-        None => stops.clone(),
-    };
-    gradient_strip(ui, &gradient_colors(&active, PREVIEW_STEPS));
-
-    let mut commit = false;
-    if ui
-        .button(tr!("curve-gradient-apply"))
-        .on_hover_text(tr!("curve-gradient-apply", "hint"))
-        .clicked()
-    {
-        apply_gradient(panel, group, &active);
-        commit = true;
+        let active = choice_stops(&choice, env, &custom);
+        gradient_strip(ui, &gradient_colors(&active, PREVIEW_STEPS));
+        if ui
+            .add_enabled(
+                group.is_some(),
+                egui::Button::new(tr!("curve-gradient-apply")),
+            )
+            .on_hover_text(tr!("curve-gradient-apply", "hint"))
+            .clicked()
+        {
+            if let Some(group) = group {
+                apply_gradient(panel, group, &active);
+                commit = true;
+            }
+        }
+    });
+    if !enabled {
+        let reason = if group.is_some() {
+            tr!("curve-gradient-locked")
+        } else {
+            tr!("curve-gradient-needs-group")
+        };
+        out.response.on_hover_text(reason);
     }
     ui.data_mut(|d| {
         d.insert_temp(choice_id, choice);
-        d.insert_temp(stops_id, stops);
+        d.insert_temp(stops_id, custom);
+        d.insert_temp(name_id, name);
+        d.insert_temp(target_id, target);
     });
     commit
 }
@@ -398,7 +528,7 @@ fn apply_gradient(panel: &mut PanelSpec, group: u32, stops: &[String]) {
 mod tests {
     use super::*;
     use stokesforge_core::NodeId;
-    use stokesforge_plot::SeriesSpec;
+    use stokesforge_plot::LineStyle;
 
     fn panneau() -> PanelSpec {
         let mut panel = PanelSpec::default();
@@ -426,6 +556,26 @@ mod tests {
         assert!(panel.series[1..]
             .iter()
             .all(|s| s.symbol.color == s.line.color));
+    }
+
+    #[test]
+    fn le_style_modifie_se_recopie_dans_le_groupe_sans_ecraser_le_reste() {
+        let mut panel = panneau();
+        panel.series[2].line.width = 4.0; // exception posée à la main
+        let avant = panel.series[1].clone();
+        panel.series[1].line.style = LineStyle::Dash;
+        panel.series[1].symbol.size = 11.0;
+        propagate_style(&mut panel, 1, &avant, 1);
+        for member in [1, 2, 3] {
+            assert_eq!(panel.series[member].line.style, LineStyle::Dash);
+            assert_eq!(panel.series[member].symbol.size, 11.0);
+        }
+        assert_eq!(panel.series[2].line.width, 4.0, "champ non touché : gardé");
+        assert_eq!(panel.series[0].line.style, LineStyle::Solid, "hors groupe");
+        assert_eq!(
+            panel.series[0].symbol.size,
+            SeriesSpec::new(NodeId::from_raw(1)).symbol.size
+        );
     }
 
     #[test]

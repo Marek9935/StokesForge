@@ -6026,6 +6026,55 @@ fn saving_a_color_for_the_user_writes_the_user_file() {
     assert!(state.saved_colors(SaveTarget::User).is_empty());
 }
 
+/// #178 : un nuancier se range dans le projet (annulable) ou chez l'utilisateur
+/// (fichier, hors historique), se remplace par son nom et se supprime.
+#[test]
+fn les_nuanciers_s_enregistrent_dans_le_projet_ou_chez_l_utilisateur_et_se_suppriment() {
+    use stokesforge_app::state::SaveTarget;
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let path = dir.path().join("config").join("couleurs.json");
+    state.use_user_colors_file(path.clone());
+    let stops = vec!["#112233".to_string(), "#aabbcc".to_string()];
+
+    state.dispatch(Action::SaveGradient {
+        name: "Mon nuancier".to_string(),
+        stops: stops.clone(),
+        target: SaveTarget::Project,
+    });
+    let projet = state.saved_colors(SaveTarget::Project).gradients;
+    assert_eq!(projet.len(), 1);
+    assert_eq!(projet[0].name, "Mon nuancier");
+    assert_eq!(projet[0].stops, stops);
+    assert!(state.saved_colors(SaveTarget::User).gradients.is_empty());
+    state.dispatch(Action::Undo);
+    assert!(state.saved_colors(SaveTarget::Project).gradients.is_empty());
+
+    state.dispatch(Action::SaveGradient {
+        name: "Perso".to_string(),
+        stops,
+        target: SaveTarget::User,
+    });
+    assert_eq!(state.saved_colors(SaveTarget::User).gradients.len(), 1);
+    assert!(!state.can_undo(), "hors historique");
+    assert!(std::fs::read_to_string(&path)
+        .expect("fichier écrit")
+        .contains("Perso"));
+    // Un nuancier du même nom (casse indifférente) est remplacé, pas doublé.
+    state.dispatch(Action::SaveGradient {
+        name: "perso".to_string(),
+        stops: vec!["#000000".to_string(), "#ffffff".to_string()],
+        target: SaveTarget::User,
+    });
+    assert_eq!(state.saved_colors(SaveTarget::User).gradients.len(), 1);
+
+    state.dispatch(Action::RemoveSavedGradient {
+        name: "PERSO".to_string(),
+        target: SaveTarget::User,
+    });
+    assert!(state.saved_colors(SaveTarget::User).gradients.is_empty());
+}
+
 /// Un graphe créé depuis le classeur n'a pas de fond : « aucune couleur »
 /// (transparent) est le fond par défaut.
 #[test]

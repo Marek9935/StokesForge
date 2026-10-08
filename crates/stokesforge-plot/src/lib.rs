@@ -106,7 +106,7 @@ pub use legend::{LegendPosition, LegendSpec};
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};
 pub use panel::{OverlaySpec, PanelSpec};
 pub use raw::RawVariant;
-pub use saved::{ColorUsage, SavedColors, MAX_SAVED_COLORS};
+pub use saved::{ColorUsage, SavedColors, SavedGradient, MAX_SAVED_COLORS};
 pub use series::{
     BinCount, PlotType, SeriesAxis, SeriesSpec, DEFAULT_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS,
 };
