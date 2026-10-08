@@ -1031,3 +1031,16 @@ analysis-kind-peaks = Décomposition en pics
 analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Déconvolution directe
 error-model-calculated-column-read-only = Cette colonne est produite par un calcul. La détacher du calcul pour modifier ses valeurs
+
+## Analysis — names of the columns an operation produces (#181)
+analysis-output-baseline-corrected = { $name } ({ $column }-corr.)
+analysis-output-corrected = { $name } (corrigé)
+analysis-output-baseline = Ligne de base de { $column }
+analysis-output-cumulative = Intégrale cumulée de { $column }
+analysis-output-normalized = Intégrale normalisée de { $column }
+analysis-output-fit = { $name } (ajusté)
+analysis-output-residuals = { $name } (résid.)
+analysis-output-peak = Pic { $index } de { $column }
+analysis-output-background = Fond de { $column }
+analysis-output-peaks-sum = Somme des pics de { $column }
+analysis-output-deconvolved = { $name } (déconvolué)

@@ -40,6 +40,7 @@
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+pub mod analysis;
 pub mod app;
 pub mod color_picker;
 pub mod errors;

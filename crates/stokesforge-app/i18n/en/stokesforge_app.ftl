@@ -1039,3 +1039,16 @@ analysis-kind-peaks = Peak Decomposition
 analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Direct Deconvolution
 error-model-calculated-column-read-only = This column is produced by a calculation. Detach it from the calculation to edit its values
+
+## Analysis — names of the columns an operation produces (#181)
+analysis-output-baseline-corrected = { $name } ({ $column }-corr)
+analysis-output-corrected = { $name } (corrected)
+analysis-output-baseline = Baseline of { $column }
+analysis-output-cumulative = Cumulative integral of { $column }
+analysis-output-normalized = Normalized integral of { $column }
+analysis-output-fit = { $name } (fit)
+analysis-output-residuals = { $name } (resid.)
+analysis-output-peak = Peak { $index } of { $column }
+analysis-output-background = Background of { $column }
+analysis-output-peaks-sum = Sum of peaks of { $column }
+analysis-output-deconvolved = { $name } (deconvolved)
