@@ -52,6 +52,7 @@ quand sa colonne « reste à faire » sera vide.
 |---|---|
 | [`retours-2026-09-23-features.md`](chantiers/retours-2026-09-23-features.md) | neuf évolutions à développer, avec les arbitrages déjà rendus |
 | [`prevision-import.md`](chantiers/prevision-import.md) | prévisualisation d'import |
+| [`analyse-maquettes.md`](chantiers/analyse-maquettes.md) | traitement mathématique (#181) : maquettes M1–M15 et choix du 2026-10-09, reportés dans #181–#190 |
 
 **Les bugs n'y vivent pas** : leur état est suivi dans les issues GitLab du
 projet (`glab issue list --label bug`). Les anciens rapports
