@@ -123,6 +123,14 @@ pub(crate) enum Request {
     NewProject {
         reply: Sender<SessionResult<Revision>>,
     },
+    /// Relance des calculs d'analyse (#181), hors historique : `ids` vide pour
+    /// tous les calculs périmés. Refusée (`ForeignMacro`) si une macro est
+    /// ouverte par un autre émetteur, comme toute écriture.
+    Recalculate {
+        ids: Vec<NodeId>,
+        client: ClientId,
+        reply: Sender<CommandResult<Revision>>,
+    },
     /// Demande l'arrêt de l'acteur.
     Shutdown,
 }
@@ -287,6 +295,16 @@ pub(crate) fn run(
                         formulas.run(&mut project);
                         revision
                     })
+                };
+                let _ = reply.send(outcome);
+            }
+            Request::Recalculate { ids, client, reply } => {
+                let outcome = if history.in_macro() && macro_owner != Some(client) {
+                    Err(CommandError::ForeignMacro("recalculate"))
+                } else {
+                    formulas.recalculate(&mut project, &ids);
+                    revision += 1;
+                    Ok(revision)
                 };
                 let _ = reply.send(outcome);
             }

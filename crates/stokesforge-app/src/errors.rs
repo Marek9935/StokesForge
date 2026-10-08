@@ -82,6 +82,9 @@ pub mod model {
             CoreError::FormulaColumnReadOnly { .. } => {
                 tr!("error-model-formula-column-read-only")
             }
+            CoreError::CalculatedColumnReadOnly { .. } => {
+                tr!("error-model-calculated-column-read-only")
+            }
         }
     }
 
@@ -110,8 +113,12 @@ pub mod model {
                 CoreError::FormulaColumnReadOnly {
                     column: NodeId::from_raw(7),
                 },
+                CoreError::CalculatedColumnReadOnly {
+                    column: NodeId::from_raw(7),
+                    calculation: NodeId::from_raw(8),
+                },
             ];
-            let mut seen = [false; 10];
+            let mut seen = [false; 11];
             for sample in &samples {
                 let index = match sample {
                     CoreError::InvalidName(_) => 0,
@@ -124,6 +131,7 @@ pub mod model {
                     CoreError::IdentifiersExhausted => 7,
                     CoreError::ConcurrentModification { .. } => 8,
                     CoreError::FormulaColumnReadOnly { .. } => 9,
+                    CoreError::CalculatedColumnReadOnly { .. } => 10,
                 };
                 seen[index] = true;
             }

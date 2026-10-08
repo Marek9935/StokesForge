@@ -18,6 +18,7 @@ default = []
 python = ["dep:stokesforge-script", "dep:stokesforge-python"]
 
 [dependencies]
+stokesforge-analysis = { path = "../stokesforge-analysis" }
 stokesforge-core = { path = "../stokesforge-core" }
 stokesforge-commands = { path = "../stokesforge-commands" }
 stokesforge-import = { path = "../stokesforge-import" }

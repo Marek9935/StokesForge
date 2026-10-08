@@ -1024,3 +1024,18 @@ object-manager-reset = Reset Settings
     .hint = Restores the Object Manager settings to their defaults without changing the current state of groups
 
 project-manager-selection-needed = Select at least one object first
+
+history-add-calculation = Add { $kind } Calculation
+history-edit-calculation = Edit { $kind } Calculation
+history-delete-calculation = Delete { $kind } Calculation
+history-detach-calculation = Detach { $kind } Calculation
+history-delete-calculation-any = Delete Calculation
+history-detach-calculation-any = Detach Calculation
+analysis-kind-baseline = Baseline
+analysis-kind-correct = Correction
+analysis-kind-integrate = Integration
+analysis-kind-fit = Fit
+analysis-kind-peaks = Peak Decomposition
+analysis-kind-reconvolution = Reconvolution
+analysis-kind-direct-deconvolution = Direct Deconvolution
+error-model-calculated-column-read-only = This column is produced by a calculation. Detach it from the calculation to edit its values

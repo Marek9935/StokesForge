@@ -8,6 +8,7 @@
 //! décision consciente plutôt qu'un import qui se glisse.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
+    "stokesforge-analysis", // recalcul des calculs d'analyse (#181) : lit `Operation`, rien d'UI
     "stokesforge-core",
     "stokesforge-commands",
     "stokesforge-persistence",

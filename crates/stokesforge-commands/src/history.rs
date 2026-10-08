@@ -1282,6 +1282,17 @@ impl History {
                 })
             }
             Command::SetColumnMeta { column, meta } => {
+                // Une formule sur une colonne de sortie d'un calcul : deux
+                // sources de vérité pour les mêmes cellules.
+                if meta.formula.is_some() {
+                    if let Some((calculation, _)) = project.tree().calculation_of_column(column) {
+                        return Err(CoreError::CalculatedColumnReadOnly {
+                            column,
+                            calculation,
+                        }
+                        .into());
+                    }
+                }
                 let before = project.set_column_meta(column, meta.clone())?;
                 // Voir la doc de `DataDelta::ColumnMeta::values_before` :
                 // capturé seulement à la transition « pas de formule avant,

@@ -242,3 +242,45 @@ fn un_echec_ne_laisse_ni_entree_ni_changement() {
         .is_err());
     assert_eq!(w.history.len(), 0);
 }
+
+#[test]
+fn une_formule_ne_se_pose_pas_sur_une_colonne_produite() {
+    let mut w = world();
+    add(&mut w, vec![1.0, 2.0, 3.0]);
+    let id = calc_id(&w);
+    let out = w.project.tree().calculation(id).unwrap().outputs[0]
+        .column
+        .unwrap();
+    let before = w.project.tree().clone();
+    let err = w
+        .history
+        .execute(
+            &mut w.project,
+            Command::SetColumnMeta {
+                column: out,
+                meta: ColumnMeta {
+                    formula: Some("A*2".into()),
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        stokesforge_commands::CommandError::Core(CoreError::CalculatedColumnReadOnly { .. })
+    ));
+    assert_eq!(w.project.tree(), &before);
+    // Un autre réglage de métadonnées (nom long, unité) reste permis.
+    w.history
+        .execute(
+            &mut w.project,
+            Command::SetColumnMeta {
+                column: out,
+                meta: ColumnMeta {
+                    long_name: "Corrigé".into(),
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+}

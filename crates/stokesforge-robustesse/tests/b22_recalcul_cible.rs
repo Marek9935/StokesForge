@@ -58,10 +58,14 @@ use std::path::PathBuf;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+use stokesforge_analysis::correct::CorrectOp;
+use stokesforge_analysis::fit::FitSpec;
+use stokesforge_analysis::model::Model;
+use stokesforge_analysis::ops::Operation;
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{
-    Cell, Column, ColumnMeta, ColumnType, ColumnValues, MixedCell, NodeCopy, NodeId, Project, Tree,
-    ValueBlock,
+    compute, AuxRef, Calculation, CalculationDraft, Cell, Column, ColumnMeta, ColumnType,
+    ColumnValues, MixedCell, NodeCopy, NodeId, OutputDraft, Project, SeriesRef, Tree, ValueBlock,
 };
 use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 use tempfile::TempDir;
@@ -159,6 +163,22 @@ enum Pas {
     SupprimerFeuille {
         feuille: usize,
     },
+    /// Un calcul d'analyse (#181) sur deux colonnes de la feuille : un
+    /// ajustement linéaire, ou une correction par deux autres colonnes.
+    AjouterCalcul {
+        feuille: usize,
+        x: usize,
+        y: usize,
+        correction: bool,
+        automatique: bool,
+    },
+    /// Retire le `rang`-ième calcul (par identifiant), colonnes comprises ou non.
+    RetirerCalcul {
+        rang: usize,
+        avec_colonnes: bool,
+    },
+    /// « Recalculate Out of Date » : relance les calculs périmés.
+    RecalculerPerimes,
     Annuler,
     Retablir,
     /// `k` annulations puis `k` rétablissements : sans lui, un rétablissement
@@ -269,7 +289,19 @@ fn pas() -> impl Strategy<Value = Pas> {
         1 => f.clone().prop_map(|feuille| Pas::DupliquerFeuille { feuille }),
         1 => f.clone().prop_map(|feuille| Pas::CollerFeuille { feuille }),
         1 => f.clone().prop_map(|feuille| Pas::CollerClasseur { feuille }),
-        1 => f.prop_map(|feuille| Pas::SupprimerFeuille { feuille }),
+        1 => f.clone().prop_map(|feuille| Pas::SupprimerFeuille { feuille }),
+        4 => (f, 0usize..8, 0usize..8, any::<bool>(), any::<bool>()).prop_map(
+            |(feuille, x, y, correction, automatique)| Pas::AjouterCalcul {
+                feuille,
+                x,
+                y,
+                correction,
+                automatique,
+            }
+        ),
+        1 => (0usize..4, any::<bool>())
+            .prop_map(|(rang, avec_colonnes)| Pas::RetirerCalcul { rang, avec_colonnes }),
+        2 => Just(Pas::RecalculerPerimes),
         4 => Just(Pas::Annuler),
         2 => Just(Pas::Retablir),
         2 => (1usize..5).prop_map(|k| Pas::AnnulerPuisRetablir { k }),
@@ -300,6 +332,9 @@ const NOMS_DE_PAS: &[&str] = &[
     "CollerFeuille",
     "CollerClasseur",
     "SupprimerFeuille",
+    "AjouterCalcul",
+    "RetirerCalcul",
+    "RecalculerPerimes",
     "Annuler",
     "Retablir",
     "AnnulerPuisRetablir",
@@ -330,6 +365,9 @@ fn nom(pas: &Pas) -> &'static str {
         Pas::CollerFeuille { .. } => "CollerFeuille",
         Pas::CollerClasseur { .. } => "CollerClasseur",
         Pas::SupprimerFeuille { .. } => "SupprimerFeuille",
+        Pas::AjouterCalcul { .. } => "AjouterCalcul",
+        Pas::RetirerCalcul { .. } => "RetirerCalcul",
+        Pas::RecalculerPerimes => "RecalculerPerimes",
         Pas::Annuler => "Annuler",
         Pas::Retablir => "Retablir",
         Pas::AnnulerPuisRetablir { .. } => "AnnulerPuisRetablir",
@@ -607,11 +645,85 @@ fn commande(pas: &Pas, tree: &Tree, rang: usize) -> Option<Command> {
         Pas::SupprimerFeuille { feuille: f } => {
             feuille(f).map(|sheet| Command::RemoveNode { id: sheet })
         }
+        Pas::AjouterCalcul {
+            feuille: f,
+            x,
+            y,
+            correction,
+            automatique,
+        } => {
+            let cols = colonnes(tree, feuille(f));
+            let (cx, cy) = (choisir(&cols, x)?, choisir(&cols, y)?);
+            if cx == cy {
+                return None;
+            }
+            let (operation, aux) = if correction {
+                (
+                    Operation::Correct {
+                        op: CorrectOp::Divide,
+                    },
+                    Some(AuxRef {
+                        x: choisir(&cols, x + 1),
+                        y: choisir(&cols, y + 2)?,
+                    }),
+                )
+            } else {
+                (
+                    Operation::Fit {
+                        spec: FitSpec {
+                            model: Model::Linear,
+                            params: vec![],
+                        },
+                        range: None,
+                        residuals: false,
+                    },
+                    None,
+                )
+            };
+            let series = vec![SeriesRef {
+                x: Some(cx),
+                y: cy,
+                sigma: None,
+            }];
+            let calcule = compute(tree, &operation, &series, aux.as_ref()).ok()?;
+            Some(Command::AddCalculation {
+                draft: CalculationDraft {
+                    operation,
+                    series,
+                    aux,
+                    outputs: calcule
+                        .columns
+                        .iter()
+                        .map(|c| OutputDraft {
+                            series: c.series,
+                            key: c.key.clone(),
+                            index: c.index,
+                            meta: ColumnMeta::default(),
+                            data: c.data.clone(),
+                        })
+                        .collect(),
+                    results: calcule.results,
+                    keep_results: true,
+                    auto_recalc: automatique,
+                },
+            })
+        }
+        Pas::RetirerCalcul {
+            rang,
+            avec_colonnes,
+        } => {
+            let ids: Vec<NodeId> = tree.calculations().keys().copied().collect();
+            choisir(&ids, rang).map(|id| Command::RemoveCalculation {
+                id,
+                with_columns: avec_colonnes,
+            })
+        }
         Pas::SansRapport => Some(Command::AddFolder {
             parent: tree.root(),
             name: format!("Temoin{rang}"),
         }),
-        Pas::Annuler
+        Pas::RecalculerPerimes
+        | Pas::Annuler
         | Pas::Retablir
         | Pas::AnnulerPuisRetablir { .. }
         | Pas::OuvrirMacro
@@ -657,6 +769,7 @@ fn jouer(
     nom: &str,
 ) -> Reponse {
     match pas {
+        Pas::RecalculerPerimes => Reponse::de(handle.recalculate(&[]), |_| true),
         Pas::Annuler => Reponse::de(handle.undo(), Option::is_some),
         Pas::Retablir => Reponse::de(handle.redo(), Option::is_some),
         Pas::AnnulerPuisRetablir { k } => {
@@ -729,6 +842,9 @@ struct Couverture {
     epargnees: usize,
     /// Pas acceptés par les deux sessions, passe de recalcul ou non.
     acceptes: usize,
+    /// Calculs d'analyse présents après une passe, dont les périmés.
+    calculs: usize,
+    calculs_perimes: usize,
     /// Par nature de pas : combien ont été acceptés **avec** une passe de
     /// recalcul. Un geste qui ne passe jamais ne prouve rien à l'oracle.
     par_pas: BTreeMap<&'static str, usize>,
@@ -740,6 +856,8 @@ impl Couverture {
         self.non_calculees += autre.non_calculees;
         self.epargnees += autre.epargnees;
         self.acceptes += autre.acceptes;
+        self.calculs += autre.calculs;
+        self.calculs_perimes += autre.calculs_perimes;
         for (nom, n) in autre.par_pas {
             *self.par_pas.entry(nom).or_default() += n;
         }
@@ -755,6 +873,10 @@ impl Couverture {
         } else {
             versions(avant)
         };
+        for calcul in apres.calculations().values() {
+            self.calculs += 1;
+            self.calculs_perimes += usize::from(Calculation::clone(calcul).stale.is_some());
+        }
         for (id, node) in apres.iter() {
             let Some(colonne) = node.as_column() else {
                 continue;
@@ -825,7 +947,9 @@ fn derouler(tirage: &[Pas]) -> Result<Couverture, TestCaseError> {
         // 1. oracle
         prop_assert!(
             *s_cible.tree == *s_complet.tree,
-            "pas {rang} ({pas:?}) : le recalcul ciblé diverge du recalcul complet"
+            "pas {rang} ({pas:?}) : le recalcul ciblé diverge du recalcul complet\ncalculs ciblé : {:?}\ncalculs complet : {:?}",
+            s_cible.tree.calculations(),
+            s_complet.tree.calculations()
         );
 
         // 2. version ↔ contenu, dans chaque session.
@@ -894,6 +1018,8 @@ fn b22_le_recalcul_cible_rend_exactement_le_recalcul_complet() {
     assert!(total.calculees > 1000, "{total:?}");
     assert!(total.non_calculees > 100, "{total:?}");
     assert!(total.epargnees > 1000, "{total:?}");
+    assert!(total.calculs > 200, "{total:?}");
+    assert!(total.calculs_perimes > 30, "{total:?}");
     // Chaque geste qui lance une passe l'a fait assez souvent pour que
     // l'oracle ait eu l'occasion de voir ce qu'il casserait. Ouvrir et
     // fermer une macro ne lancent jamais de passe.

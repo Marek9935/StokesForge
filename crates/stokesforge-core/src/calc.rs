@@ -37,13 +37,14 @@
 
 use std::sync::Arc;
 
-use stokesforge_analysis::ops::{Operation, Value, Warning};
+use stokesforge_analysis::ops::{self, AuxInput, Operation, SeriesInput, Value, Warning};
 use stokesforge_analysis::AnalysisError;
 
 use crate::column::{Column, ColumnMeta, ValueBlock};
 use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
 use crate::project::Project;
+use crate::tree::Tree;
 
 /// Les colonnes d'une courbe traitée : son Y, son X apparié et, pour un
 /// ajustement pondéré, sa colonne d'écart-type.
@@ -415,7 +416,7 @@ impl Project {
     /// Réécrit les valeurs d'une colonne si elles diffèrent (version neuve du
     /// projet à chaque écriture réelle ; rien si le contenu est identique, pour
     /// ne pas relancer en cascade les calculs qui la lisent).
-    fn write_column_data(&mut self, column: NodeId, data: &[f64]) -> CoreResult<()> {
+    fn write_column_data(&mut self, column: NodeId, data: &[f64]) -> CoreResult<bool> {
         let same = self
             .tree()
             .get(column)?
@@ -425,28 +426,32 @@ impl Project {
                 cur.len() == data.len() && cur.iter().zip(data).all(|(a, b)| same_float(*a, *b))
             });
         if same {
-            return Ok(());
+            return Ok(false);
         }
         self.set_length(column, data.len())?;
         self.set_values(column, 0, ValueBlock::Float(data.to_vec()))?;
-        Ok(())
+        Ok(true)
     }
 
     /// **Hors historique** — appelée par le recalcul de la session. Réécrit les
     /// colonnes de sortie (`data` : une entrée par sortie de `Calculation::
     /// outputs`, dans leur ordre ; `None` laisse la colonne telle quelle),
     /// remplace les résultats si le calcul les garde, et lève l'état périmé.
+    /// Rend `true` si quelque chose a réellement changé (une colonne, les
+    /// résultats ou l'état) : c'est ce qui dit au recalcul de la session de
+    /// repasser sur les formules et les calculs qui lisent ces colonnes.
     pub fn refresh_calculation(
         &mut self,
         id: NodeId,
         data: &[Option<Vec<f64>>],
         results: Vec<SeriesResult>,
-    ) -> CoreResult<()> {
+    ) -> CoreResult<bool> {
         let calc = self
             .tree()
             .calculation(id)
             .cloned()
             .ok_or(CoreError::UnknownNode(id))?;
+        let mut changed = false;
         for (out, d) in calc.outputs.iter().zip(data) {
             if let (Some(col), Some(d)) = (out.column, d) {
                 if self
@@ -454,7 +459,7 @@ impl Project {
                     .node(col)
                     .is_some_and(|n| n.as_column().is_some())
                 {
-                    self.write_column_data(col, d)?;
+                    changed |= self.write_column_data(col, d)?;
                 }
             }
         }
@@ -467,8 +472,43 @@ impl Project {
             Arc::make_mut(self.tree_arc_mut())
                 .calculations_mut()
                 .insert(id, Arc::new(next));
+            changed = true;
         }
-        Ok(())
+        Ok(changed)
+    }
+
+    /// **Hors historique** — comme [`Project::refresh_calculation`], à partir
+    /// du résultat de [`compute`]. Chaque colonne calculée retrouve sa sortie
+    /// par (série, clé, rang) ; une sortie que le calcul ne produit plus (moins
+    /// de pics détectés) est vidée en `NaN` — le recalcul ne crée ni ne
+    /// supprime de colonne, cela reste le fait de `UpdateCalculation`.
+    pub fn refresh_calculation_from(&mut self, id: NodeId, computed: Computed) -> CoreResult<bool> {
+        let calc = self
+            .tree()
+            .calculation(id)
+            .cloned()
+            .ok_or(CoreError::UnknownNode(id))?;
+        let data: Vec<Option<Vec<f64>>> =
+            calc.outputs
+                .iter()
+                .map(|out| {
+                    let found = computed.columns.iter().find(|c| {
+                        c.series == out.series && c.key == out.key && c.index == out.index
+                    });
+                    Some(match found {
+                        Some(c) => c.data.clone(),
+                        None => {
+                            let len = out
+                                .column
+                                .and_then(|c| self.tree().node(c))
+                                .and_then(|n| n.as_column())
+                                .map_or(0, Column::len);
+                            vec![f64::NAN; len]
+                        }
+                    })
+                })
+                .collect();
+        self.refresh_calculation(id, &data, computed.results)
     }
 
     /// **Hors historique** — marque un calcul périmé (ou à jour avec `None`).
@@ -506,4 +546,122 @@ impl Project {
             None => map.remove(&id),
         }
     }
+}
+
+// ── Calculer ────────────────────────────────────────────────────────────
+
+/// Pourquoi un calcul n'a pas pu être exécuté.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum ComputeError {
+    /// Une colonne d'entrée n'existe plus (ou n'est plus une colonne).
+    #[error("input column {0} no longer exists")]
+    MissingInput(NodeId),
+    /// L'opération elle-même a échoué.
+    #[error(transparent)]
+    Analysis(#[from] AnalysisError),
+}
+
+/// Une colonne calculée, avant d'être posée dans le classeur.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComputedColumn {
+    pub series: usize,
+    pub key: String,
+    pub index: Option<usize>,
+    pub data: Vec<f64>,
+}
+
+/// Le résultat d'une opération sur les colonnes du projet : de quoi bâtir un
+/// [`CalculationDraft`] (création) ou rafraîchir un calcul (recalcul).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Computed {
+    pub columns: Vec<ComputedColumn>,
+    /// Une entrée par série.
+    pub results: Vec<SeriesResult>,
+}
+
+/// Les nombres d'une colonne, `NaN` pour une cellule vide ou textuelle, prolongés
+/// de `NaN` jusqu'à `len`.
+fn numbers(tree: &Tree, column: NodeId, len: usize) -> Result<Vec<f64>, ComputeError> {
+    let col = tree
+        .node(column)
+        .and_then(|n| n.as_column())
+        .ok_or(ComputeError::MissingInput(column))?;
+    let values = col.values();
+    Ok((0..len).map(|r| values.number_at(r)).collect())
+}
+
+fn column_len(tree: &Tree, column: NodeId) -> Result<usize, ComputeError> {
+    tree.node(column)
+        .and_then(|n| n.as_column())
+        .map(Column::len)
+        .ok_or(ComputeError::MissingInput(column))
+}
+
+/// X, Y et, au besoin, une colonne d'incertitude, lus ligne à ligne.
+type ReadColumns = (Vec<f64>, Vec<f64>, Option<Vec<f64>>);
+
+/// Une paire (X, Y) lue dans `tree`. Sans colonne X, l'abscisse est le numéro
+/// de ligne (à partir de 1). Les deux colonnes sont prolongées de `NaN` à la
+/// plus longue : une ligne incomplète est écartée par l'opération.
+fn read_pair(
+    tree: &Tree,
+    x: Option<NodeId>,
+    y: NodeId,
+    extra: Option<NodeId>,
+) -> Result<ReadColumns, ComputeError> {
+    let mut len = column_len(tree, y)?;
+    if let Some(x) = x {
+        len = len.max(column_len(tree, x)?);
+    }
+    if let Some(e) = extra {
+        len = len.max(column_len(tree, e)?);
+    }
+    let xs = match x {
+        Some(x) => numbers(tree, x, len)?,
+        None => (1..=len).map(|r| r as f64).collect(),
+    };
+    let ys = numbers(tree, y, len)?;
+    let es = extra.map(|e| numbers(tree, e, len)).transpose()?;
+    Ok((xs, ys, es))
+}
+
+/// Exécute `op` sur les colonnes citées de `tree`. C'est la lecture du modèle
+/// que partagent la création (application, `pyst`) et le recalcul de la
+/// session ; l'opération elle-même est `stokesforge_analysis::ops::run`.
+pub fn compute(
+    tree: &Tree,
+    op: &Operation,
+    series: &[SeriesRef],
+    aux: Option<&AuxRef>,
+) -> Result<Computed, ComputeError> {
+    let mut inputs = Vec::with_capacity(series.len());
+    for s in series {
+        let (x, y, sigma) = read_pair(tree, s.x, s.y, s.sigma)?;
+        inputs.push(SeriesInput { x, y, sigma });
+    }
+    let aux_input = match aux {
+        Some(a) => {
+            let (x, y, _) = read_pair(tree, a.x, a.y, None)?;
+            Some(AuxInput { x, y })
+        }
+        None => None,
+    };
+    let outcomes = ops::run(op, &inputs, aux_input.as_ref())?;
+    let mut computed = Computed::default();
+    for (rank, outcome) in outcomes.iter().enumerate() {
+        for c in &outcome.columns {
+            computed.columns.push(ComputedColumn {
+                series: rank,
+                key: c.key.to_string(),
+                index: c.index,
+                data: c.data.clone(),
+            });
+        }
+        computed.results.push(SeriesResult {
+            values: outcome.values.iter().map(ResultValue::from).collect(),
+            skipped: outcome.skipped,
+            warnings: outcome.warnings.clone(),
+        });
+    }
+    Ok(computed)
 }

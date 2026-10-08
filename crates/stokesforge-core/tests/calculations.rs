@@ -415,3 +415,97 @@ fn restaurer_l_arbre_d_avant_une_suppression_ramene_le_calcul() {
     assert_eq!(f.project.tree(), &before);
     assert!(f.project.tree().calculation(id).is_some());
 }
+
+// ── compute : la lecture du modèle partagée par la création et le recalcul ──
+
+use stokesforge_core::{compute, AuxRef, ComputeError};
+
+#[test]
+fn compute_lit_les_colonnes_et_aligne_les_sorties_sur_les_lignes() {
+    let f = fixture();
+    // Référence : Y constant = 2 sur le même X → Divide donne y / 2.
+    let mut project = f.project;
+    let rx = project
+        .add_column(
+            f.sheet,
+            None,
+            Some("RX"),
+            Column::from_f64(&[1.0, 2.0, 3.0]),
+        )
+        .unwrap();
+    let ry = project
+        .add_column(
+            f.sheet,
+            None,
+            Some("RY"),
+            Column::from_f64(&[2.0, 2.0, 2.0]),
+        )
+        .unwrap();
+    let computed = compute(
+        project.tree(),
+        &Operation::Correct {
+            op: CorrectOp::Divide,
+        },
+        &[SeriesRef {
+            x: Some(f.x),
+            y: f.y1,
+            sigma: None,
+        }],
+        Some(&AuxRef { x: Some(rx), y: ry }),
+    )
+    .unwrap();
+    assert_eq!(computed.columns.len(), 1);
+    assert_eq!(computed.columns[0].key, "corrected");
+    assert_eq!(computed.columns[0].data, vec![5.0, 10.0, 15.0]);
+    assert_eq!(computed.results.len(), 1);
+}
+
+#[test]
+fn compute_nomme_la_colonne_d_entree_disparue() {
+    let mut f = fixture();
+    f.project.remove(f.y1).unwrap();
+    let err = compute(
+        f.project.tree(),
+        &Operation::Correct {
+            op: CorrectOp::Divide,
+        },
+        &[SeriesRef {
+            x: Some(f.x),
+            y: f.y1,
+            sigma: None,
+        }],
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(err, ComputeError::MissingInput(f.y1));
+}
+
+#[test]
+fn refresh_dit_s_il_a_ecrit_quelque_chose() {
+    let mut f = fixture();
+    let id = f
+        .project
+        .add_calculation(draft(
+            &f,
+            vec![out(0, "corrected", vec![1.0, 2.0, 3.0], "C")],
+        ))
+        .unwrap();
+    let same = f
+        .project
+        .refresh_calculation(
+            id,
+            &[Some(vec![1.0, 2.0, 3.0])],
+            vec![SeriesResult::default(), SeriesResult::default()],
+        )
+        .unwrap();
+    assert!(!same, "mêmes données, rien d'écrit");
+    let diff = f
+        .project
+        .refresh_calculation(
+            id,
+            &[Some(vec![1.0, 2.0, 4.0])],
+            vec![SeriesResult::default(), SeriesResult::default()],
+        )
+        .unwrap();
+    assert!(diff);
+}

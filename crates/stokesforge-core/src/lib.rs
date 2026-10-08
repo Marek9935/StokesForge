@@ -64,8 +64,9 @@ pub mod resolve;
 pub mod tree;
 
 pub use calc::{
-    AuxRef, Calculation, CalculationDraft, OutputDraft, OutputRef, ResultValue, SeriesRef,
-    SeriesResult, Staleness, MAX_CALCULATION_SERIES,
+    compute, AuxRef, Calculation, CalculationDraft, ComputeError, Computed, ComputedColumn,
+    OutputDraft, OutputRef, ResultValue, SeriesRef, SeriesResult, Staleness,
+    MAX_CALCULATION_SERIES,
 };
 pub use column::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, ImportSource, MetaLine,

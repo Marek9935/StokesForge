@@ -60,11 +60,44 @@
 //! modes partagent tout le code sauf la décision « propre / à recalculer » :
 //! c'est elle, et elle seule, que l'oracle éprouve.
 
+//! # Calculs d'analyse (#181)
+//!
+//! Le même mécanisme suit les **calculs d'analyse** (`Tree::calculations`),
+//! rejoués après les formules, hors historique (`Project::refresh_calculation_from`
+//! réécrit les colonnes de sortie, les résultats et la péremption). Ce qui change :
+//!
+//! - l'**empreinte** d'un calcul est `CalcFingerprint` — la version de chaque
+//!   colonne qu'il lit, et sa *définition* (opération, drapeaux, colonnes de
+//!   sortie avec leur version). La règle du paragraphe précédent vaut ici aussi :
+//!   toute donnée lue par `stokesforge_core::compute` entre dans l'empreinte ;
+//! - un calcul **automatique** se recalcule quand l'empreinte change (toujours en
+//!   mode `Full`) ; un **échec** garde les dernières valeurs et pose
+//!   `Staleness::Failed`, sans nouvel essai tant que l'empreinte ne bouge pas ; une
+//!   entrée disparue pose `Staleness::InputMissing` ;
+//! - un calcul **manuel** (reconvolution, déconvolution, lots de plus de 20 séries)
+//!   ne se relance jamais seul : un changement d'entrée le marque `Manual`. Il
+//!   compare le **contenu** de ses entrées à celui du dernier calcul (`CalcMemo::seen`)
+//!   plutôt que leurs versions — le mode complet réécrit les colonnes-formule à
+//!   chaque passe, ce qui ferait changer les versions sans changer le contenu ;
+//!   un changement de *définition* (`UpdateCalculation`, annulation) est un geste
+//!   de l'utilisateur : le résultat est à jour par construction (`Trust`) ;
+//! - au chargement le mémo est vidé : les automatiques sont recalculés, les manuels
+//!   crus (leur marqueur de péremption vient du fichier) ;
+//! - formules et calculs se nourrissent mutuellement : `run` alterne les deux
+//!   jusqu'à ce qu'un calcul n'écrive plus rien (au plus [`MAX_ROUNDS`] tours). Une
+//!   boucle qui traverse un calcul (sa sortie nourrit une formule qui nourrit son
+//!   entrée) ne se stabiliserait jamais : ses calculs sont marqués `Manual` et
+//!   laissés tels quels (`calculations_in_a_cycle`).
+//!
+//! Tests : `tests/analyse.rs` (cas nommés), batterie `b22` (pas `AjouterCalcul`,
+//! `RetirerCalcul`, `RecalculerPerimes`), mutants dans `docs/tests.md`.
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use stokesforge_analysis::ops::Operation;
 use stokesforge_core::{
-    evaluate_formula, topological_order, ColumnType, Formula, NodeId, NumericStatus, Project,
-    ValueBlock,
+    compute, evaluate_formula, topological_order, Calculation, ColumnType, ColumnValues,
+    ComputeError, Formula, NodeId, NumericStatus, Project, Staleness, ValueBlock,
 };
 
 /// Façon dont l'acteur recalcule les colonnes-formule après chaque requête
@@ -89,13 +122,24 @@ pub enum FormulaRecalc {
 pub(crate) struct Recalculator {
     mode: FormulaRecalc,
     memo: HashMap<NodeId, Fingerprint>,
+    /// Pendant du mémo pour les calculs d'analyse (#181) : voir la section
+    /// « Calculs d'analyse » de la doc de tête.
+    calc_memo: HashMap<NodeId, CalcMemo>,
 }
+
+/// Nombre maximal de tours « formules → calculs » d'une passe : une chaîne
+/// formule → calcul → formule → calcul se stabilise en autant de tours que de
+/// maillons ; un cycle (la sortie d'un calcul qui nourrit sa propre entrée par
+/// une formule) ne se stabilise jamais et s'arrête ici, sur le dernier état
+/// calculé.
+const MAX_ROUNDS: usize = 8;
 
 impl Recalculator {
     pub(crate) fn new(mode: FormulaRecalc) -> Self {
         Self {
             mode,
             memo: HashMap::new(),
+            calc_memo: HashMap::new(),
         }
     }
 
@@ -106,6 +150,7 @@ impl Recalculator {
     /// colonne n'ont aucun rapport avec celles du projet précédent.
     pub(crate) fn forget(&mut self) {
         self.memo.clear();
+        self.calc_memo.clear();
     }
 
     /// Recalcule les colonnes-formule du projet qui en ont besoin — accès
@@ -135,6 +180,31 @@ impl Recalculator {
     /// recalculer est linéaire dans le nombre de nœuds, plus l'analyse de
     /// chaque texte de formule — jamais la taille des données.
     pub(crate) fn run(&mut self, project: &mut Project) {
+        self.run_formulas(project);
+        self.run_calculation_rounds(project, None);
+    }
+
+    /// Relance des calculs d'analyse, quel que soit leur état (action
+    /// « Recalculate »). `ids` vide : tous ceux qui portent un marqueur de
+    /// péremption (« Recalculate Out of Date »). Hors historique, comme
+    /// [`Recalculator::run`] dont elle reprend la propagation.
+    pub(crate) fn recalculate(&mut self, project: &mut Project, ids: &[NodeId]) {
+        let forced: HashSet<NodeId> = if ids.is_empty() {
+            project
+                .tree()
+                .calculations()
+                .iter()
+                .filter(|(_, calc)| calc.stale.is_some())
+                .map(|(id, _)| *id)
+                .collect()
+        } else {
+            ids.iter().copied().collect()
+        };
+        self.run_formulas(project);
+        self.run_calculation_rounds(project, Some(forced));
+    }
+
+    fn run_formulas(&mut self, project: &mut Project) {
         let sheets: Vec<NodeId> = project
             .tree()
             .iter()
@@ -566,4 +636,338 @@ fn write_formula_column(
         return;
     }
     let _ = project.set_values(column, 0, block);
+}
+
+// ── Calculs d'analyse (#181) ────────────────────────────────────────────
+
+/// Ce que le recalcul a vu d'un calcul d'analyse à son dernier passage : les
+/// versions des colonnes qu'il **lit**, et ce qui le **définit** (opération,
+/// colonnes de sortie et leur version).
+///
+/// La séparation sert aux calculs manuels : un changement d'entrée les rend
+/// périmés ; un changement de définition (`UpdateCalculation`, annulation) est
+/// un geste de l'utilisateur dont le résultat est à jour par construction.
+#[derive(Debug, Clone, PartialEq)]
+struct CalcFingerprint {
+    inputs: Vec<(NodeId, u64)>,
+    definition: CalcDefinition,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CalcDefinition {
+    operation: Operation,
+    auto_recalc: bool,
+    keep_results: bool,
+    outputs: Vec<(NodeId, Option<u64>)>,
+}
+
+/// L'empreinte de `calc`, ou la première colonne d'entrée qui n'existe plus.
+fn calc_fingerprint(project: &Project, calc: &Calculation) -> Result<CalcFingerprint, NodeId> {
+    let mut inputs = Vec::new();
+    for column in calc.input_columns() {
+        match column_version(project, column) {
+            Some(version) => inputs.push((column, version)),
+            None => return Err(column),
+        }
+    }
+    Ok(CalcFingerprint {
+        inputs,
+        definition: CalcDefinition {
+            operation: calc.operation.clone(),
+            auto_recalc: calc.auto_recalc,
+            keep_results: calc.keep_results,
+            outputs: calc
+                .outputs
+                .iter()
+                .filter_map(|o| o.column)
+                .map(|c| (c, column_version(project, c)))
+                .collect(),
+        },
+    })
+}
+
+/// Le mémo d'un calcul : son empreinte et, pour un calcul **manuel** seulement,
+/// le contenu de ses entrées à son dernier calcul (un `Arc` cloné, pas une
+/// copie tant que la colonne n'est pas modifiée). Sans lui, une colonne
+/// réécrite à l'identique — ce que fait le recalcul complet des formules à
+/// chaque passe — périmerait un calcul que rien n'a changé.
+struct CalcMemo {
+    fingerprint: CalcFingerprint,
+    seen: Vec<ColumnValues>,
+}
+
+/// Le contenu de chaque entrée est-il celui qu'on a vu ?
+fn same_contents(project: &Project, inputs: &[(NodeId, u64)], seen: &[ColumnValues]) -> bool {
+    inputs.len() == seen.len()
+        && inputs.iter().zip(seen).all(|((column, _), before)| {
+            project
+                .tree()
+                .node(*column)
+                .and_then(|n| n.as_column())
+                .is_some_and(|c| c.values() == before)
+        })
+}
+
+fn snapshot_inputs(project: &Project, inputs: &[(NodeId, u64)]) -> Vec<ColumnValues> {
+    inputs
+        .iter()
+        .filter_map(|(column, _)| {
+            project
+                .tree()
+                .node(*column)
+                .and_then(|n| n.as_column())
+                .map(|c| c.values().clone())
+        })
+        .collect()
+}
+
+enum CalcAction {
+    Skip,
+    /// Les versions ont changé, pas le contenu : on retient les nouvelles.
+    Renumber,
+    /// Fait confiance aux données présentes (calcul manuel jamais vu, ou
+    /// redéfini) : note l'empreinte, ne calcule rien.
+    Trust,
+    /// Une entrée a changé sous un calcul manuel.
+    MarkStale,
+    Recompute,
+}
+
+impl Recalculator {
+    /// Parcourt les calculs dans l'ordre de leurs dépendances (la sortie de l'un
+    /// peut être l'entrée d'un autre) ; si l'un a réécrit des données, repasse
+    /// sur les formules — qui peuvent lire ces sorties — puis recommence, dans
+    /// la limite de [`MAX_ROUNDS`]. Sans calcul dans le projet, ne coûte rien.
+    fn run_calculation_rounds(&mut self, project: &mut Project, forced: Option<HashSet<NodeId>>) {
+        if project.tree().calculations().is_empty() {
+            self.calc_memo.clear();
+            return;
+        }
+        let mut forced = forced;
+        for _ in 0..MAX_ROUNDS {
+            let changed = self.run_calculations(project, forced.take().as_ref());
+            if !changed {
+                break;
+            }
+            self.run_formulas(project);
+        }
+        let present = project.tree().calculations();
+        self.calc_memo.retain(|id, _| present.contains_key(id));
+    }
+
+    /// Un tour sur tous les calculs. Rend `true` si des données ont changé.
+    fn run_calculations(
+        &mut self,
+        project: &mut Project,
+        forced: Option<&HashSet<NodeId>>,
+    ) -> bool {
+        // Qui produit quelle colonne ; un calcul dépend de ceux dont il lit une sortie.
+        let mut producer: HashMap<NodeId, NodeId> = HashMap::new();
+        for (&id, calc) in project.tree().calculations() {
+            for column in calc.outputs.iter().filter_map(|o| o.column) {
+                producer.insert(column, id);
+            }
+        }
+        let mut edges: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
+        for (&id, calc) in project.tree().calculations() {
+            let deps = calc
+                .input_columns()
+                .into_iter()
+                .filter_map(|c| producer.get(&c).copied())
+                .filter(|&p| p != id)
+                .collect();
+            edges.insert(id, deps);
+        }
+        let (order, blocked) = topological_order(&edges);
+        let mut blocked: HashSet<NodeId> = blocked.into_iter().collect();
+        blocked.extend(calculations_in_a_cycle(project));
+
+        let mut changed = false;
+        for id in order {
+            if blocked.contains(&id) {
+                continue;
+            }
+            changed |=
+                self.update_calculation(project, id, forced.is_some_and(|f| f.contains(&id)));
+        }
+        // Un cycle (entre calculs, ou calcul → formule → calcul) n'a pas
+        // d'ordre de calcul, et le relancer ne se stabiliserait jamais : on
+        // les signale périmés sans y toucher.
+        for id in blocked {
+            let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
+        }
+        changed
+    }
+
+    /// Note l'empreinte vue de `calc` (et le contenu de ses entrées s'il est manuel).
+    fn remember(
+        &mut self,
+        project: &Project,
+        id: NodeId,
+        calc: &Calculation,
+        fingerprint: CalcFingerprint,
+    ) {
+        let seen = if calc.auto_recalc {
+            Vec::new()
+        } else {
+            snapshot_inputs(project, &fingerprint.inputs)
+        };
+        self.calc_memo.insert(id, CalcMemo { fingerprint, seen });
+    }
+
+    fn update_calculation(&mut self, project: &mut Project, id: NodeId, force: bool) -> bool {
+        let Some(calc) = project.tree().calculation(id).cloned() else {
+            return false;
+        };
+        let fingerprint = match calc_fingerprint(project, &calc) {
+            Ok(fingerprint) => fingerprint,
+            Err(_missing) => {
+                // Une colonne lue a disparu : les dernières valeurs restent, le
+                // calcul est périmé. Retrouver la colonne (annulation) fait
+                // repartir de zéro.
+                let _ = project.set_calculation_stale(id, Some(Staleness::InputMissing));
+                self.calc_memo.remove(&id);
+                return false;
+            }
+        };
+        let previous = self.calc_memo.get(&id);
+        let action = if force {
+            CalcAction::Recompute
+        } else if calc.auto_recalc {
+            match (self.mode, previous) {
+                (FormulaRecalc::Targeted, Some(p)) if p.fingerprint == fingerprint => {
+                    CalcAction::Skip
+                }
+                _ => CalcAction::Recompute,
+            }
+        } else {
+            // Un calcul manuel n'obéit pas au mode : ses entrées se comparent
+            // par le contenu, dans les deux modes (voir `CalcMemo`).
+            match previous {
+                None => CalcAction::Trust,
+                Some(p) if p.fingerprint.definition != fingerprint.definition => CalcAction::Trust,
+                Some(p) if p.fingerprint.inputs == fingerprint.inputs => CalcAction::Skip,
+                Some(p) if same_contents(project, &fingerprint.inputs, &p.seen) => {
+                    CalcAction::Renumber
+                }
+                Some(_) => CalcAction::MarkStale,
+            }
+        };
+        match action {
+            CalcAction::Skip => false,
+            CalcAction::Renumber => {
+                if let Some(memo) = self.calc_memo.get_mut(&id) {
+                    memo.fingerprint = fingerprint;
+                }
+                false
+            }
+            CalcAction::Trust => {
+                if calc.stale == Some(Staleness::InputMissing) {
+                    // Les colonnes sont revenues mais rien ne dit que les
+                    // valeurs gardées leur correspondent.
+                    let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
+                }
+                self.remember(project, id, &calc, fingerprint);
+                false
+            }
+            CalcAction::MarkStale => {
+                if !matches!(calc.stale, Some(Staleness::Failed(_))) {
+                    let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
+                }
+                false
+            }
+            CalcAction::Recompute => {
+                match compute(
+                    project.tree(),
+                    &calc.operation,
+                    &calc.series,
+                    calc.aux.as_ref(),
+                ) {
+                    Ok(computed) => {
+                        let changed = project
+                            .refresh_calculation_from(id, computed)
+                            .unwrap_or(false);
+                        // L'empreinte d'après écriture : celle que le prochain
+                        // passage doit retrouver si personne n'y touche.
+                        if let Some((after, fresh)) = project
+                            .tree()
+                            .calculation(id)
+                            .cloned()
+                            .and_then(|c| Some((calc_fingerprint(project, &c).ok()?, c)))
+                        {
+                            self.remember(project, id, &fresh, after);
+                        }
+                        changed
+                    }
+                    Err(ComputeError::MissingInput(_)) => {
+                        let _ = project.set_calculation_stale(id, Some(Staleness::InputMissing));
+                        self.calc_memo.remove(&id);
+                        false
+                    }
+                    Err(ComputeError::Analysis(error)) => {
+                        // Les dernières valeurs valides restent ; pas de nouvel
+                        // essai tant qu'aucune entrée ne change.
+                        let _ = project.set_calculation_stale(id, Some(Staleness::Failed(error)));
+                        self.remember(project, id, &calc, fingerprint);
+                        false
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Les calculs pris dans une boucle qui traverse des colonnes-formule : la
+/// sortie d'un calcul nourrit une formule qui nourrit (de proche en proche) une
+/// entrée du même calcul. Une boucle faite de formules seules est déjà traitée
+/// par `recalc_sheet` (colonnes à `NaN`) ; ici on cherche celles qui passent
+/// par un calcul — le graphe complet moins le graphe des formules.
+fn calculations_in_a_cycle(project: &Project) -> HashSet<NodeId> {
+    let tree = project.tree();
+    let mut formula_edges: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
+    for (sheet, node) in tree.iter() {
+        if !node.kind().is_worksheet() {
+            continue;
+        }
+        let Ok(columns) = tree.children(sheet) else {
+            continue;
+        };
+        for &id in columns {
+            let deps = formula_edges.entry(id).or_default();
+            let source = tree
+                .node(id)
+                .and_then(|n| n.as_column())
+                .and_then(|c| c.meta().formula.clone());
+            if let Some(Ok(formula)) = source.as_deref().map(Formula::parse) {
+                deps.extend(
+                    formula
+                        .referenced_columns()
+                        .into_iter()
+                        .filter_map(|index| columns.get(index).copied()),
+                );
+            }
+        }
+    }
+    let mut full_edges = formula_edges.clone();
+    for calc in tree.calculations().values() {
+        let inputs = calc.input_columns();
+        for output in calc.outputs.iter().filter_map(|o| o.column) {
+            full_edges
+                .entry(output)
+                .or_default()
+                .extend(inputs.iter().copied());
+        }
+    }
+    let (_, blocked_full) = topological_order(&full_edges);
+    let (_, blocked_formulas) = topological_order(&formula_edges);
+    tree.calculations()
+        .iter()
+        .filter(|(_, calc)| {
+            calc.outputs
+                .iter()
+                .filter_map(|o| o.column)
+                .any(|c| blocked_full.contains(&c) && !blocked_formulas.contains(&c))
+        })
+        .map(|(id, _)| *id)
+        .collect()
 }

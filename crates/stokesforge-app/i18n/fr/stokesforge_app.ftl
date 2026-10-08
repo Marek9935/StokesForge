@@ -1016,3 +1016,18 @@ object-manager-reset = Réinitialiser les réglages
     .hint = Rétablit les réglages par défaut du gestionnaire d’objets sans changer le repli courant des groupes
 
 project-manager-selection-needed = Sélectionnez d’abord au moins un objet
+
+history-add-calculation = Ajouter un calcul : { $kind }
+history-edit-calculation = Modifier le calcul : { $kind }
+history-delete-calculation = Supprimer le calcul : { $kind }
+history-detach-calculation = Détacher le calcul : { $kind }
+history-delete-calculation-any = Supprimer le calcul
+history-detach-calculation-any = Détacher le calcul
+analysis-kind-baseline = Ligne de base
+analysis-kind-correct = Correction
+analysis-kind-integrate = Intégration
+analysis-kind-fit = Ajustement
+analysis-kind-peaks = Décomposition en pics
+analysis-kind-reconvolution = Reconvolution
+analysis-kind-direct-deconvolution = Déconvolution directe
+error-model-calculated-column-read-only = Cette colonne est produite par un calcul. La détacher du calcul pour modifier ses valeurs
