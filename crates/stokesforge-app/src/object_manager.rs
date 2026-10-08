@@ -15,9 +15,8 @@
 //! calque ordinaire, ce sont des **axes miroirs** (#176) et la case commande
 //! `AxisSpec::mirror` — grisée quand un calque superposé occupe ce côté. La
 //! case du groupe ([`VisibilityTarget::Axes`]) commande ses axes. Les cases du
-//! graphique, du calque et du groupe de tracés **ne commandent pas** les axes :
-//! le parent serait indéterminé dès l'ouverture, et « tout afficher » ferait
-//! apparaître des axes que l'utilisateur n'a pas demandés.
+//! graphique et du calque ne comptent les axes que **listés** (bascule « Show
+//! Axes », [`Shown::scales`]) ; la case du groupe de tracés n'a que ses séries.
 //!
 //! Vue par défaut (#102) : calques, groupes de tracés et séries, plus les
 //! objets rares (formes, textes libres). Les textes automatiques — titre du
@@ -142,6 +141,36 @@ pub fn axis_sides(panel: &stokesforge_plot::PanelSpec) -> Vec<AxisSide> {
         None => AXIS_SIDES.to_vec(),
     }
 }
+/// Ce que l'arbre affiche, donc ce que comptent les cases parentes (#173) :
+/// les textes automatiques et le groupe « Axes » sont listés par leurs bascules.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Shown {
+    pub texts: bool,
+    pub scales: bool,
+}
+
+impl Shown {
+    /// Les textes seuls (feuilles : la valeur n'importe pas).
+    pub const TEXTS: Self = Self {
+        texts: true,
+        scales: false,
+    };
+    /// Ni textes ni axes.
+    pub const NONE: Self = Self {
+        texts: false,
+        scales: false,
+    };
+}
+
+impl From<crate::preferences::ObjectManagerSettings> for Shown {
+    fn from(settings: crate::preferences::ObjectManagerSettings) -> Self {
+        Self {
+            texts: settings.show_texts,
+            scales: settings.show_scales,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Visibility {
     pub checked: bool,
@@ -152,12 +181,12 @@ pub struct Visibility {
 impl VisibilityTarget {
     /// Feuilles concernées ; un titre vide ne rend pas un parent indéterminé.
     pub fn contents(self, spec: &PlotSpec) -> Vec<Self> {
-        self.contents_shown(spec, true)
+        self.contents_shown(spec, Shown::TEXTS)
     }
     /// Feuilles que l'arbre **affiche** sous ce parent (#173) : sans les
     /// textes automatiques tant que `show_texts` est faux, un texte caché
     /// ne compte ni dans l'état de la case ni dans son basculement.
-    pub fn contents_shown(self, spec: &PlotSpec, show_texts: bool) -> Vec<Self> {
+    pub fn contents_shown(self, spec: &PlotSpec, shown: Shown) -> Vec<Self> {
         if let Self::Axes(index) = self {
             let Some(panel) = spec.panels.get(index) else {
                 return Vec::new();
@@ -171,7 +200,7 @@ impl VisibilityTarget {
             return vec![self];
         }
         let mut leaves = Vec::new();
-        if self == Self::Graph && show_texts && !spec.title.is_empty() {
+        if self == Self::Graph && shown.texts && !spec.title.is_empty() {
             leaves.push(Self::Text(TextTarget::Title));
         }
         for (index, panel) in spec.panels.iter().enumerate() {
@@ -188,7 +217,10 @@ impl VisibilityTarget {
             if matches!(self, Self::Group(_)) {
                 continue;
             }
-            if show_texts {
+            if shown.scales {
+                leaves.extend(Self::Axes(index).contents_shown(spec, shown));
+            }
+            if shown.texts {
                 leaves.extend(panel_texts(spec, index).into_iter().map(Self::Text));
             }
             leaves.extend(panel.annotations.iter().enumerate().map(|(rank, _)| {
@@ -217,12 +249,12 @@ impl VisibilityTarget {
         }
     }
     pub fn visibility(self, spec: &PlotSpec) -> Visibility {
-        self.visibility_shown(spec, true)
+        self.visibility_shown(spec, Shown::TEXTS)
     }
     /// État de la case, d'après les seuls enfants affichés (#173).
-    pub fn visibility_shown(self, spec: &PlotSpec, show_texts: bool) -> Visibility {
+    pub fn visibility_shown(self, spec: &PlotSpec, shown: Shown) -> Visibility {
         let values: Vec<bool> = self
-            .contents_shown(spec, show_texts)
+            .contents_shown(spec, shown)
             .into_iter()
             .filter_map(|t| t.value(spec))
             .collect();
@@ -235,13 +267,13 @@ impl VisibilityTarget {
     }
     /// Cible périmée ou valeur identique : aucune entrée d'historique.
     pub fn set(self, spec: &mut PlotSpec, visible: bool) -> bool {
-        self.set_shown(spec, visible, true)
+        self.set_shown(spec, visible, Shown::TEXTS)
     }
     /// Comme [`Self::set`], sur les seuls enfants affichés (#173) : un texte
     /// caché garde son état.
-    pub fn set_shown(self, spec: &mut PlotSpec, visible: bool, show_texts: bool) -> bool {
+    pub fn set_shown(self, spec: &mut PlotSpec, visible: bool, shown: Shown) -> bool {
         let mut changed = false;
-        for leaf in self.contents_shown(spec, show_texts) {
+        for leaf in self.contents_shown(spec, shown) {
             if leaf.value(spec).is_none_or(|value| value == visible) {
                 continue;
             }
@@ -725,11 +757,38 @@ mod tests {
         assert!(right.visibility(&spec).enabled);
     }
 
+    /// Axes listés (« Show Axes ») : les cases du calque et du graphique les
+    /// comptent et les commandent, comme tout enfant affiché ; le groupe de
+    /// tracés, lui, n'a que ses séries.
+    #[test]
+    fn les_axes_listes_comptent_pour_le_calque_et_le_graphique() {
+        use crate::object_manager::{Shown, VisibilityTarget as T};
+        use stokesforge_plot::{PanelSpec, Panels};
+        let mut base = PanelSpec::at(0, 0);
+        base.series.push(SeriesSpec::new(NodeId::from_raw(900)));
+        let mut spec = PlotSpec::empty("T").with_panels(Panels::new(vec![base]));
+        let axes = Shown {
+            texts: false,
+            scales: true,
+        };
+        // Série décochée, axes cochés : le calque et le graphique sont mixtes.
+        assert!(T::Group(0).set_shown(&mut spec, false, axes));
+        assert!(T::Group(0).visibility_shown(&spec, axes).enabled);
+        for parent in [T::Panel(0), T::Graph] {
+            assert!(parent.visibility_shown(&spec, axes).mixed, "{parent:?}");
+            assert!(!parent.visibility_shown(&spec, Shown::NONE).mixed);
+        }
+        // Un clic sur le calque ne laisse pas les axes seuls cochés.
+        assert!(T::Panel(0).set_shown(&mut spec, false, axes));
+        assert!(!spec.panels[0].bottom.visible && !spec.panels[0].left.visible);
+        assert!(!T::Panel(0).visibility_shown(&spec, axes).mixed);
+    }
+
     /// #173 : un texte automatique caché dans l'arbre ne rend pas son parent
     /// indéterminé et n'est pas basculé par un clic sur ce parent.
     #[test]
     fn un_parent_ne_tient_compte_que_des_enfants_affiches() {
-        use crate::object_manager::VisibilityTarget as T;
+        use crate::object_manager::{Shown, VisibilityTarget as T};
         use stokesforge_plot::{OverlaySpec, PanelSpec, Panels, TextTarget};
         let mut base = PanelSpec::at(0, 0);
         base.series.push(SeriesSpec::new(NodeId::from_raw(900)));
@@ -741,17 +800,17 @@ mod tests {
         let legende = T::Text(TextTarget::Legend { panel: 1 });
         assert_eq!(legende.value(&spec), Some(false));
         for parent in [T::Graph, T::Panel(1)] {
-            let tout = parent.visibility_shown(&spec, true);
+            let tout = parent.visibility_shown(&spec, Shown::TEXTS);
             assert!(tout.mixed, "avec les textes, la légende cachée compte");
-            let affiche = parent.visibility_shown(&spec, false);
+            let affiche = parent.visibility_shown(&spec, Shown::NONE);
             assert!(affiche.checked && !affiche.mixed, "{parent:?}");
         }
         // Décocher le parent laisse le texte caché dans son état.
-        assert!(T::Panel(1).set_shown(&mut spec, false, false));
+        assert!(T::Panel(1).set_shown(&mut spec, false, Shown::NONE));
         assert_eq!(legende.value(&spec), Some(false));
-        assert!(T::Panel(1).set_shown(&mut spec, true, false));
+        assert!(T::Panel(1).set_shown(&mut spec, true, Shown::NONE));
         assert_eq!(legende.value(&spec), Some(false));
-        assert!(T::Panel(1).set_shown(&mut spec, true, true));
+        assert!(T::Panel(1).set_shown(&mut spec, true, Shown::TEXTS));
         assert_eq!(legende.value(&spec), Some(true));
     }
 

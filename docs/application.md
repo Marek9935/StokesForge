@@ -2090,14 +2090,13 @@ nommé « X (haut) » si `x_top`, son axe Y nommé « Y (droite) » si `y_right`
 chacun commandant l'`AxisSpec` `bottom` / `left` qui le porte ; ses lignes
 `right` / `top`, mortes, n'existent pas. Le groupe est **replié par
 défaut** (#138) : un clic sur sa flèche déplie les lignes d'axe, sans toucher
-au modèle. Les cases du graphique, du
-calque et du groupe de tracés ne commandent **pas** les axes : « tout
-afficher » ferait apparaître des axes non demandés. Elles ne comptent pas non
-plus les **textes automatiques cachés** (#173) : sans la bascule « Show graph
-texts », l'état coché d'un parent et son basculement ne regardent que les
-enfants listés (`VisibilityTarget::contents_shown`, `visibility_shown`,
-`set_shown`) ; un texte caché garde son état, et activer la bascule recalcule
-les parents. `Action::SetPlotVisibility` lit la bascule dans l'état. Le panneau est redimensionnable à droite ;
+au modèle. Les cases du graphique et du
+calque ne comptent que les **enfants listés** (#173), regroupés dans `Shown` :
+les textes automatiques sans la bascule « Show graph texts », les axes sans
+« Show Axes » ; un enfant non listé garde son état. Axes listés, ils comptent
+(calque et graphique mixtes si un miroir est décoché) ; la case du groupe de
+tracés n'a que ses séries (`VisibilityTarget::contents_shown`,
+`visibility_shown`, `set_shown`). Activer une bascule recalcule les parents. `Action::SetPlotVisibility` lit la bascule dans l'état. Le panneau est redimensionnable à droite ;
 son bouton Détacher ouvre une fenêtre système, Rattacher le replace à droite. Il est
 visible par défaut ; l'ouverture ou la fermeture choisie se mémorise dans
 `preferences.json`, hors du projet et de l'historique.

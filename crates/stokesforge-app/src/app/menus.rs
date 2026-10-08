@@ -341,7 +341,7 @@ impl StokesForgeApp {
     ) {
         ui.menu_button(tr!("menu-graph"), |ui| {
             let spec = crate::state::current_plot_spec(self.state.tree(), graph);
-            let show_texts = self.state.object_manager_show_texts();
+            let shown = crate::object_manager::Shown::from(self.state.object_manager_settings());
             let target = self
                 .read_graph_view(graph, selected_manager_target)
                 .flatten();
@@ -418,15 +418,7 @@ impl StokesForgeApp {
             sections.section(ui, true, |ui| {
                 if let (Some(target), Some(spec)) = (target, spec.as_ref()) {
                     ui.menu_button(tr!("menu-selected-content"), |ui| {
-                        object_node_menu(
-                            ui,
-                            graph,
-                            target,
-                            spec,
-                            show_texts,
-                            actions,
-                            object_requests,
-                        );
+                        object_node_menu(ui, graph, target, spec, shown, actions, object_requests);
                     });
                 } else {
                     ui.add_enabled(false, egui::Button::new(tr!("menu-selected-content")))

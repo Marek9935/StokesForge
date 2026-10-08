@@ -8348,8 +8348,16 @@ fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
     let spec = graph_spec(&state, graph);
     assert!(spec.title_visible);
     assert!(spec.panels[0].bottom.title_visible);
-    assert!(!T::Graph.visibility_shown(&spec, false).checked);
-    assert!(!T::Graph.visibility_shown(&spec, false).mixed);
+    assert!(
+        !T::Graph
+            .visibility_shown(&spec, stokesforge_app::object_manager::Shown::NONE)
+            .checked
+    );
+    assert!(
+        !T::Graph
+            .visibility_shown(&spec, stokesforge_app::object_manager::Shown::NONE)
+            .mixed
+    );
     assert!(!spec.panels[0].series[0].visible);
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);

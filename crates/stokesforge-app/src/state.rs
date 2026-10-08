@@ -4273,8 +4273,8 @@ impl AppState {
                 visible,
             } => {
                 if let Some(mut spec) = current_plot_spec(self.tree(), graph) {
-                    let show_texts = self.object_manager_show_texts();
-                    if target.set_shown(&mut spec, visible, show_texts) {
+                    let shown = crate::object_manager::Shown::from(self.object_manager_settings());
+                    if target.set_shown(&mut spec, visible, shown) {
                         self.execute(Command::EditPlotSpec {
                             graph,
                             spec,
