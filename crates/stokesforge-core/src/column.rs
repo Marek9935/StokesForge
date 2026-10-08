@@ -919,7 +919,9 @@ impl Column {
     /// une écriture fondée sur une lecture périmée. Les deux supposent qu'un
     /// numéro ne désigne jamais deux contenus d'une même colonne : toute
     /// écriture passe par `Project`, qui remplace ce compteur par un numéro
-    /// neuf de son compteur unique (`Project::next_column_version`).
+    /// neuf de son compteur unique (`Project::next_column_version`), et une
+    /// colonne insérée avec son numéro fait passer ce compteur au-delà
+    /// (`Project::insert_node`).
     ///
     /// # Il est persisté
     ///

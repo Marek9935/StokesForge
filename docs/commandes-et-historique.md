@@ -91,10 +91,11 @@ Ce compteur sert aussi au recalcul ciblé des colonnes-formule (#193,
 version d'une de ses sources a changé. Toute écriture de données d'une
 colonne — commande, annulation, rétablissement — doit donc recevoir un
 numéro neuf du compteur unique du projet (`Project::next_column_version`),
-et une restauration d'arbre ne doit ramener que des paires (version, contenu)
-qui ont réellement coexisté (`restamp_regressed_versions`). Une commande qui
-écrirait des cellules autrement ferait passer une formule périmée pour à
-jour (invariant 11).
+une colonne insérée avec un numéro (`AddColumn`, collage) fait passer ce
+compteur au-delà (`Project::insert_node`), et une restauration d'arbre ne
+doit ramener que des paires (version, contenu) qui ont réellement coexisté
+(`restamp_regressed_versions`). Une commande qui écrirait des cellules
+autrement ferait passer une formule périmée pour à jour (invariant 11).
 
 ## L'historique est hybride, et c'est une décision de coût
 

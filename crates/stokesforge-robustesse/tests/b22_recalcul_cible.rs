@@ -31,12 +31,17 @@
 //!
 //! Le tirage couvre ce qui peut changer une donnée d'une formule : saisies
 //! (nombres, textes qui promeuvent en mixte), formules posées, changées,
-//! illisibles, auto-référentes, en cycle, retirées ; colonnes ajoutées,
+//! illisibles, auto-référentes, en cycle, retirées ; colonnes ajoutées (y
+//! compris avec une version déjà portée, ou clonées d'un instantané),
 //! supprimées, déplacées dans la feuille ou vers une autre ; types changés ;
 //! lignes insérées, supprimées ; cellules supprimées (y compris dans une
-//! colonne-formule) ; feuilles dupliquées ; annuler, rétablir ; macros
-//! fermées ou avortées ; sauvegarde et rechargement, y compris d'un état
-//! plus ancien.
+//! colonne-formule) ; feuilles dupliquées, collées, supprimées ; classeurs
+//! collés ; annuler, rétablir, et des séries d'annulations suivies d'autant
+//! de rétablissements (le rétablissement d'une entrée structurelle est le
+//! seul chemin qui ne réestampille pas les versions) ; macros fermées ou
+//! avortées ; sauvegarde et rechargement, y compris d'un état plus ancien.
+//! Un contrôle final exige que chaque nature de pas ait lancé au moins vingt
+//! passes : un geste toujours refusé ne prouverait rien.
 //!
 //! **Une fonctionnalité qui ajoute une donnée au calcul d'une formule doit
 //! ajouter ici le pas qui la fait changer** — voir `docs/tests.md`,
@@ -44,16 +49,18 @@
 //!
 //! Le tirage est **déterministe** (`TestRng::deterministic_rng`), comme
 //! celui de `b14` : un échec se reproduit à l'identique et aucun fichier de
-//! régression n'est écrit.
+//! régression n'est écrit. Pour le rester, rien ici ne choisit une cible
+//! dans l'ordre de `Tree::iter` (une table de hachage à graine aléatoire) :
+//! les feuilles se prennent dans l'ordre du parcours depuis la racine.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{
-    Cell, Column, ColumnMeta, ColumnType, ColumnValues, MixedCell, NodeId, Project, Tree,
+    Cell, Column, ColumnMeta, ColumnType, ColumnValues, MixedCell, NodeCopy, NodeId, Project, Tree,
     ValueBlock,
 };
 use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
@@ -91,10 +98,21 @@ enum Pas {
         feuille: usize,
         colonne: usize,
     },
+    /// `version` non nulle : une colonne venue d'ailleurs (fichier, autre
+    /// projet) qui porte déjà un numéro, peut-être au-delà du compteur.
     AjouterColonne {
         feuille: usize,
         index: usize,
         longueur: usize,
+        version: u64,
+    },
+    /// Ajoute, par `AddColumn`, le clone d'une colonne de l'instantané —
+    /// version comprise, comme le ferait un client qui garde une colonne lue
+    /// avant un chargement.
+    AjouterClone {
+        feuille: usize,
+        colonne: usize,
+        vers: usize,
     },
     SupprimerColonne {
         feuille: usize,
@@ -130,8 +148,25 @@ enum Pas {
     DupliquerFeuille {
         feuille: usize,
     },
+    /// Copier-coller (`InsertCopy`) d'une feuille dans son classeur.
+    CollerFeuille {
+        feuille: usize,
+    },
+    /// Copier-coller (`InsertCopy`) du classeur d'une feuille à la racine.
+    CollerClasseur {
+        feuille: usize,
+    },
+    SupprimerFeuille {
+        feuille: usize,
+    },
     Annuler,
     Retablir,
+    /// `k` annulations puis `k` rétablissements : sans lui, un rétablissement
+    /// d'entrée structurelle (le seul chemin qui ne réestampille pas les
+    /// versions) n'arrive presque jamais.
+    AnnulerPuisRetablir {
+        k: usize,
+    },
     OuvrirMacro,
     FermerMacro,
     AvorterMacro,
@@ -173,11 +208,23 @@ fn pas() -> impl Strategy<Value = Pas> {
         }),
         1 => (f.clone(), c.clone())
             .prop_map(|(feuille, colonne)| Pas::RetirerFormule { feuille, colonne }),
-        2 => (f.clone(), 0usize..8, 0usize..7).prop_map(|(feuille, index, longueur)| {
-            Pas::AjouterColonne {
+        2 => (
+            f.clone(),
+            0usize..8,
+            0usize..7,
+            prop_oneof![Just(0u64), 1u64..120]
+        )
+            .prop_map(|(feuille, index, longueur, version)| Pas::AjouterColonne {
                 feuille,
                 index,
                 longueur,
+                version,
+            }),
+        1 => (f.clone(), c.clone(), f.clone()).prop_map(|(feuille, colonne, vers)| {
+            Pas::AjouterClone {
+                feuille,
+                colonne,
+                vers,
             }
         }),
         1 => (f.clone(), c.clone())
@@ -219,9 +266,13 @@ fn pas() -> impl Strategy<Value = Pas> {
                 combien,
             }
         }),
-        1 => f.prop_map(|feuille| Pas::DupliquerFeuille { feuille }),
+        1 => f.clone().prop_map(|feuille| Pas::DupliquerFeuille { feuille }),
+        1 => f.clone().prop_map(|feuille| Pas::CollerFeuille { feuille }),
+        1 => f.clone().prop_map(|feuille| Pas::CollerClasseur { feuille }),
+        1 => f.prop_map(|feuille| Pas::SupprimerFeuille { feuille }),
         4 => Just(Pas::Annuler),
         2 => Just(Pas::Retablir),
+        2 => (1usize..5).prop_map(|k| Pas::AnnulerPuisRetablir { k }),
         1 => Just(Pas::OuvrirMacro),
         1 => Just(Pas::FermerMacro),
         1 => Just(Pas::AvorterMacro),
@@ -229,6 +280,66 @@ fn pas() -> impl Strategy<Value = Pas> {
         1 => (0usize..8).prop_map(|sauvegarde| Pas::RevenirA { sauvegarde }),
         3 => Just(Pas::SansRapport),
     ]
+}
+
+/// Toutes les natures de pas, pour le contrôle de couverture.
+const NOMS_DE_PAS: &[&str] = &[
+    "Saisir",
+    "SaisirTexte",
+    "PoserFormule",
+    "RetirerFormule",
+    "AjouterColonne",
+    "AjouterClone",
+    "SupprimerColonne",
+    "DeplacerColonne",
+    "ChangerType",
+    "InsererLignes",
+    "SupprimerLignes",
+    "SupprimerCellules",
+    "DupliquerFeuille",
+    "CollerFeuille",
+    "CollerClasseur",
+    "SupprimerFeuille",
+    "Annuler",
+    "Retablir",
+    "AnnulerPuisRetablir",
+    "OuvrirMacro",
+    "FermerMacro",
+    "AvorterMacro",
+    "Recharger",
+    "RevenirA",
+    "SansRapport",
+];
+
+/// Nom de la nature d'un pas (une entrée de [`NOMS_DE_PAS`]).
+fn nom(pas: &Pas) -> &'static str {
+    match pas {
+        Pas::Saisir { .. } => "Saisir",
+        Pas::SaisirTexte { .. } => "SaisirTexte",
+        Pas::PoserFormule { .. } => "PoserFormule",
+        Pas::RetirerFormule { .. } => "RetirerFormule",
+        Pas::AjouterColonne { .. } => "AjouterColonne",
+        Pas::AjouterClone { .. } => "AjouterClone",
+        Pas::SupprimerColonne { .. } => "SupprimerColonne",
+        Pas::DeplacerColonne { .. } => "DeplacerColonne",
+        Pas::ChangerType { .. } => "ChangerType",
+        Pas::InsererLignes { .. } => "InsererLignes",
+        Pas::SupprimerLignes { .. } => "SupprimerLignes",
+        Pas::SupprimerCellules { .. } => "SupprimerCellules",
+        Pas::DupliquerFeuille { .. } => "DupliquerFeuille",
+        Pas::CollerFeuille { .. } => "CollerFeuille",
+        Pas::CollerClasseur { .. } => "CollerClasseur",
+        Pas::SupprimerFeuille { .. } => "SupprimerFeuille",
+        Pas::Annuler => "Annuler",
+        Pas::Retablir => "Retablir",
+        Pas::AnnulerPuisRetablir { .. } => "AnnulerPuisRetablir",
+        Pas::OuvrirMacro => "OuvrirMacro",
+        Pas::FermerMacro => "FermerMacro",
+        Pas::AvorterMacro => "AvorterMacro",
+        Pas::Recharger => "Recharger",
+        Pas::RevenirA { .. } => "RevenirA",
+        Pas::SansRapport => "SansRapport",
+    }
 }
 
 /// Runner à graine fixe, sans fichier de régression sur le disque du dépôt.
@@ -306,11 +417,13 @@ impl Jumelle {
     }
 }
 
-/// Les feuilles de l'arbre, dans l'ordre du parcours.
+/// Les feuilles de l'arbre, dans l'ordre du parcours depuis la racine —
+/// jamais celui de `Tree::iter`, adossé à une table de hachage dont la
+/// graine change à chaque processus : le tirage ne serait plus rejouable.
 fn feuilles(tree: &Tree) -> Vec<NodeId> {
-    tree.iter()
-        .filter(|(_, node)| node.kind().is_worksheet())
-        .map(|(id, _)| id)
+    tree.walk_all()
+        .into_iter()
+        .filter(|&id| tree.node(id).is_some_and(|node| node.kind().is_worksheet()))
         .collect()
 }
 
@@ -388,11 +501,33 @@ fn commande(pas: &Pas, tree: &Tree, rang: usize) -> Option<Command> {
             feuille: f,
             index,
             longueur,
-        } => feuille(f).map(|sheet| Command::AddColumn {
-            sheet,
-            index: Some(index),
-            name: None,
-            column: Column::from_f64(&(0..longueur).map(|k| k as f64 + 0.5).collect::<Vec<_>>()),
+            version,
+        } => feuille(f).and_then(|sheet| {
+            Some(Command::AddColumn {
+                sheet,
+                index: Some(index % (colonnes(tree, Some(sheet)).len() + 1)),
+                name: None,
+                column: Column::from_block_with_version(
+                    ColumnType::Numeric,
+                    ValueBlock::Float((0..longueur).map(|k| k as f64 + 0.5).collect()),
+                    ColumnMeta::default(),
+                    version,
+                )
+                .ok()?,
+            })
+        }),
+        Pas::AjouterClone {
+            feuille: f,
+            colonne: c,
+            vers,
+        } => colonne(f, c).zip(feuille(vers)).and_then(|(id, sheet)| {
+            let clone = tree.node(id)?.as_column()?.clone();
+            Some(Command::AddColumn {
+                sheet,
+                index: None,
+                name: None,
+                column: clone,
+            })
         }),
         Pas::SupprimerColonne {
             feuille: f,
@@ -408,7 +543,9 @@ fn commande(pas: &Pas, tree: &Tree, rang: usize) -> Option<Command> {
             .map(|(id, new_parent)| Command::Move {
                 id,
                 new_parent,
-                index,
+                // Un index au-delà de la feuille est refusé : le ramener dans
+                // ses bornes, sans quoi trois déplacements sur quatre l'étaient.
+                index: index % (colonnes(tree, Some(new_parent)).len() + 1),
             }),
         Pas::ChangerType {
             feuille: f,
@@ -452,12 +589,31 @@ fn commande(pas: &Pas, tree: &Tree, rang: usize) -> Option<Command> {
                 name: format!("Copie{rang}"),
             })
         }
+        Pas::CollerFeuille { feuille: f } => feuille(f).and_then(|sheet| {
+            Some(Command::InsertCopy {
+                parent: tree.parent(sheet).ok()??,
+                copy: NodeCopy::capture(tree, sheet).ok()?,
+                name: format!("Collee{rang}"),
+            })
+        }),
+        Pas::CollerClasseur { feuille: f } => feuille(f).and_then(|sheet| {
+            let book = tree.parent(sheet).ok()??;
+            Some(Command::InsertCopy {
+                parent: tree.root(),
+                copy: NodeCopy::capture(tree, book).ok()?,
+                name: format!("Colle{rang}"),
+            })
+        }),
+        Pas::SupprimerFeuille { feuille: f } => {
+            feuille(f).map(|sheet| Command::RemoveNode { id: sheet })
+        }
         Pas::SansRapport => Some(Command::AddFolder {
             parent: tree.root(),
             name: format!("Temoin{rang}"),
         }),
         Pas::Annuler
         | Pas::Retablir
+        | Pas::AnnulerPuisRetablir { .. }
         | Pas::OuvrirMacro
         | Pas::FermerMacro
         | Pas::AvorterMacro
@@ -468,7 +624,9 @@ fn commande(pas: &Pas, tree: &Tree, rang: usize) -> Option<Command> {
 
 /// Réponse d'une session à un pas : c'est elle que les deux jumelles
 /// doivent partager.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Ordonnée du moins au plus : la réponse d'un pas composé est la plus
+/// forte de ses requêtes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Reponse {
     Refuse,
     /// Accepté sans passe de recalcul : ouvrir ou fermer une macro, annuler
@@ -501,6 +659,16 @@ fn jouer(
     match pas {
         Pas::Annuler => Reponse::de(handle.undo(), Option::is_some),
         Pas::Retablir => Reponse::de(handle.redo(), Option::is_some),
+        Pas::AnnulerPuisRetablir { k } => {
+            let mut reponses = Vec::new();
+            for _ in 0..*k {
+                reponses.push(Reponse::de(handle.undo(), Option::is_some));
+            }
+            for _ in 0..*k {
+                reponses.push(Reponse::de(handle.redo(), Option::is_some));
+            }
+            reponses.into_iter().max().unwrap_or(Reponse::Refuse)
+        }
         Pas::OuvrirMacro => Reponse::de(handle.begin_macro(MacroKind::PasteCells), |_| false),
         Pas::FermerMacro => Reponse::de(handle.end_macro(), |_| false),
         Pas::AvorterMacro => Reponse::de(handle.abort_macro(), |_| true),
@@ -550,7 +718,7 @@ fn verifier_versions(jumelle: &mut Jumelle, tree: &Tree) -> Option<(NodeId, u64)
 /// Ce que le tirage a réellement atteint, compté sur la session ciblée
 /// après chaque pas qui a lancé une passe de recalcul, colonne-formule non
 /// vide par colonne-formule non vide.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 struct Couverture {
     /// Au moins une cellule calculée.
     calculees: usize,
@@ -561,6 +729,9 @@ struct Couverture {
     epargnees: usize,
     /// Pas acceptés par les deux sessions, passe de recalcul ou non.
     acceptes: usize,
+    /// Par nature de pas : combien ont été acceptés **avec** une passe de
+    /// recalcul. Un geste qui ne passe jamais ne prouve rien à l'oracle.
+    par_pas: BTreeMap<&'static str, usize>,
 }
 
 impl Couverture {
@@ -569,10 +740,21 @@ impl Couverture {
         self.non_calculees += autre.non_calculees;
         self.epargnees += autre.epargnees;
         self.acceptes += autre.acceptes;
+        for (nom, n) in autre.par_pas {
+            *self.par_pas.entry(nom).or_default() += n;
+        }
     }
 
-    fn compter(&mut self, avant: &Tree, apres: &Tree) {
-        let versions_avant = versions(avant);
+    /// `chargement` : un `Load` repart des versions du fichier, et une
+    /// colonne réécrite peut retomber par hasard sur le numéro qu'elle
+    /// portait avant — comparer les versions de part et d'autre ne dit
+    /// alors rien, et le compte dépendrait de la numérotation.
+    fn compter(&mut self, avant: &Tree, apres: &Tree, chargement: bool) {
+        let versions_avant = if chargement {
+            HashMap::new()
+        } else {
+            versions(avant)
+        };
         for (id, node) in apres.iter() {
             let Some(colonne) = node.as_column() else {
                 continue;
@@ -680,7 +862,12 @@ fn derouler(tirage: &[Pas]) -> Result<Couverture, TestCaseError> {
         }
         let passe = reponse_cible == Reponse::AccepteAvecPasse;
         if passe {
-            couverture.compter(&avant.tree, &s_cible.tree);
+            couverture.compter(
+                &avant.tree,
+                &s_cible.tree,
+                matches!(pas, Pas::Recharger | Pas::RevenirA { .. }),
+            );
+            *couverture.par_pas.entry(nom(pas)).or_default() += 1;
         }
         memo_amorce |= passe;
     }
@@ -694,19 +881,27 @@ fn derouler(tirage: &[Pas]) -> Result<Couverture, TestCaseError> {
 /// formules seraient en erreur, passerait l'oracle trivialement.
 #[test]
 fn b22_le_recalcul_cible_rend_exactement_le_recalcul_complet() {
-    let total = std::cell::Cell::new(Couverture::default());
+    let total = std::cell::RefCell::new(Couverture::default());
     runner(128)
         .run(&prop::collection::vec(pas(), 40..90), |tirage| {
             let couverture = derouler(&tirage)?;
-            let mut cumul = total.get();
-            cumul.ajouter(couverture);
-            total.set(cumul);
+            total.borrow_mut().ajouter(couverture);
             Ok(())
         })
         .expect("le recalcul ciblé suit l'oracle à chaque pas");
-    let total = total.get();
+    let total = total.into_inner();
     eprintln!("b22 : {total:?}");
     assert!(total.calculees > 1000, "{total:?}");
     assert!(total.non_calculees > 100, "{total:?}");
     assert!(total.epargnees > 1000, "{total:?}");
+    // Chaque geste qui lance une passe l'a fait assez souvent pour que
+    // l'oracle ait eu l'occasion de voir ce qu'il casserait. Ouvrir et
+    // fermer une macro ne lancent jamais de passe.
+    for geste in NOMS_DE_PAS {
+        if matches!(*geste, "OuvrirMacro" | "FermerMacro") {
+            continue;
+        }
+        let n = total.par_pas.get(geste).copied().unwrap_or(0);
+        assert!(n >= 20, "{geste} : {n} passes seulement — {total:?}");
+    }
 }

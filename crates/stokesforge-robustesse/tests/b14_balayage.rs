@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 use stokesforge_commands::{Command, History};
-use stokesforge_core::{Column, ColumnType, ColumnValues, NodeId, Project, ValueBlock};
+use stokesforge_core::{Column, ColumnMeta, ColumnType, ColumnValues, NodeId, Project, ValueBlock};
 use tempfile::TempDir;
 
 // -- tirage ---------------------------------------------------------------
@@ -41,8 +41,13 @@ enum Pas {
         debut: usize,
         combien: usize,
     },
+    /// `version` non nulle : une colonne qui porte déjà un numéro (venue
+    /// d'un fichier, d'un autre projet), peut-être au-delà du compteur du
+    /// projet — c'est le cas qui a montré, en relecture de #193, qu'une
+    /// insertion doit faire passer le compteur au-delà.
     AjouterColonne {
         index: usize,
+        version: u64,
     },
     SupprimerColonne {
         colonne: usize,
@@ -84,7 +89,8 @@ fn pas() -> impl Strategy<Value = Pas> {
             debut,
             combien
         }),
-        (0usize..6).prop_map(|index| Pas::AjouterColonne { index }),
+        (0usize..6, prop_oneof![Just(0u64), 1u64..80])
+            .prop_map(|(index, version)| Pas::AjouterColonne { index, version }),
         (0usize..6).prop_map(|colonne| Pas::SupprimerColonne { colonne }),
         (0usize..6, 0usize..4).prop_map(|(colonne, nom)| Pas::RenommerColonne { colonne, nom }),
         (0usize..4).prop_map(|nom| Pas::AjouterDossier { nom }),
@@ -161,11 +167,18 @@ impl Monde {
                 values: ValueBlock::Float((0..*combien).map(|k| k as f64 + 0.5).collect()),
                 expected_version: None,
             }),
-            Pas::AjouterColonne { index } => Some(Command::AddColumn {
+            Pas::AjouterColonne { index, version } => Column::from_block_with_version(
+                ColumnType::Numeric,
+                ValueBlock::Float(vec![7.0, 8.0]),
+                ColumnMeta::default(),
+                *version,
+            )
+            .ok()
+            .map(|column| Command::AddColumn {
                 sheet: self.sheet,
                 index: Some(*index),
                 name: None,
-                column: Column::from_f64(&[7.0, 8.0]),
+                column,
             }),
             Pas::SupprimerColonne { colonne } => {
                 choisir(*colonne).map(|c| Command::DeleteColumn { column: c })

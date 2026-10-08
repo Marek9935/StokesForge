@@ -27,12 +27,14 @@
 //! d'une même colonne** (A7, `guide-de-correction-robustesse.md` §F2). Toute
 //! écriture de données, ordinaire, d'annulation ou de recalcul, reçoit un
 //! numéro neuf du compteur unique du projet
-//! (`Project::next_column_version`) ; une restauration d'arbre
-//! (`Entry::Structural`) ne ramène qu'une paire (version, contenu) qui a
-//! réellement coexisté. Égalité de version ⇒ égalité de contenu : c'est
-//! l'hypothèse dont dépend tout ce module, revérifiée dans l'acteur par la
-//! batterie `b22`. Le sens contraire n'est pas requis : un même contenu sous
-//! un numéro neuf ne coûte qu'un recalcul inutile.
+//! (`Project::next_column_version`) ; une colonne insérée avec un numéro
+//! (`AddColumn`, collage) fait passer ce compteur au-delà
+//! (`Project::insert_node`) ; une restauration d'arbre (`Entry::Structural`)
+//! ne ramène qu'une paire (version, contenu) qui a réellement coexisté.
+//! Égalité de version ⇒ égalité de contenu : c'est l'hypothèse dont dépend
+//! tout ce module, revérifiée dans l'acteur par la batterie `b22` et sur
+//! l'historique par `b14`. Le sens contraire n'est pas requis : un même
+//! contenu sous un numéro neuf ne coûte qu'un recalcul inutile.
 //!
 //! ## Ce que l'empreinte doit contenir — la règle à ne pas casser
 //!

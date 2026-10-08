@@ -213,13 +213,10 @@ fn modifier_une_source_ne_recalcule_que_ses_dependantes() {
     }
 }
 
-/// Une deuxième passe immédiate ne réécrit rien : l'ordre des étapes du
-/// recalcul (illisibles, types, cycles, ordre topologique) ne laisse aucune
-/// colonne écrite après qu'une colonne qui la lit a pris son empreinte.
-/// Sans cette propriété, chaque commande recalculerait une chaîne entière.
-#[test]
-fn une_chaine_recalculee_est_stable_a_la_commande_suivante() {
-    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
+/// Joue « D = C+1, C = A*2, saisie dans A, puis une commande sans rapport »
+/// et rend vrai si C et D ont gardé leur version pendant cette dernière.
+fn chaine_inchangee_par_une_commande_sans_rapport(mode: FormulaRecalc) -> bool {
+    let (_session, handle, f) = demarrer(mode);
     // D lit C qui lit A ; C est posée **après** D, pour que l'ordre de
     // déclaration ne coïncide pas avec l'ordre de calcul.
     handle.execute(formule(f.d, "C+1")).expect("D = C+1");
@@ -235,8 +232,22 @@ fn une_chaine_recalculee_est_stable_a_la_commande_suivante() {
         .execute(sans_rapport(&avant, 0))
         .expect("commande sans rapport");
     let apres = instantane(&handle);
-    assert_eq!(version(&avant, f.c), version(&apres, f.c));
-    assert_eq!(version(&avant, f.d), version(&apres, f.d));
+    version(&avant, f.c) == version(&apres, f.c) && version(&avant, f.d) == version(&apres, f.d)
+}
+
+/// Une deuxième passe immédiate ne réécrit rien : l'ordre des étapes du
+/// recalcul (illisibles, types, cycles, ordre topologique) ne laisse aucune
+/// colonne écrite après qu'une colonne qui la lit a pris son empreinte.
+/// Sans cette propriété, chaque commande recalculerait une chaîne entière.
+#[test]
+fn une_chaine_recalculee_est_stable_a_la_commande_suivante() {
+    assert!(chaine_inchangee_par_une_commande_sans_rapport(
+        FormulaRecalc::Targeted
+    ));
+    assert!(
+        !chaine_inchangee_par_une_commande_sans_rapport(FormulaRecalc::Full),
+        "témoin : le recalcul complet réécrit la chaîne"
+    );
 }
 
 // -- juste : chaque composante de l'empreinte a sa raison ---------------------
@@ -466,19 +477,89 @@ fn un_cycle_cree_ailleurs_bloque_la_formule_et_se_defait() {
     assert!(tout_non_calcule(&s, f.c), "C est prise dans le cycle");
     assert!(tout_non_calcule(&s, f.b), "B aussi");
 
-    // Un cycle stable ne se réécrit pas à chaque commande : ses membres ne
-    // se renvoient pas leurs versions.
-    handle.execute(sans_rapport(&s, 0)).expect("sans rapport");
-    let apres = instantane(&handle);
-    assert_eq!(version(&s, f.b), version(&apres, f.b));
-    assert_eq!(version(&s, f.c), version(&apres, f.c));
-
-    handle.undo().expect("annuler la commande sans rapport");
     handle.undo().expect("annuler la formule de B");
     assert_eq!(
         nombres(&instantane(&handle), f.c),
         some(&[20.0, 40.0, 60.0])
     );
+}
+
+/// Pose le cycle « C = B*2, B = C+1 » et rend vrai si une commande sans
+/// rapport laisse les versions de B et C intactes.
+fn cycle_inchange_par_une_commande_sans_rapport(mode: FormulaRecalc) -> bool {
+    let (_session, handle, f) = demarrer(mode);
+    handle.execute(formule(f.c, "B*2")).expect("C = B*2");
+    handle
+        .execute(formule(f.b, "C+1"))
+        .expect("B = C+1 : cycle");
+    let avant = instantane(&handle);
+    assert!(tout_non_calcule(&avant, f.b) && tout_non_calcule(&avant, f.c));
+    handle
+        .execute(sans_rapport(&avant, 0))
+        .expect("sans rapport");
+    let apres = instantane(&handle);
+    version(&avant, f.b) == version(&apres, f.b) && version(&avant, f.c) == version(&apres, f.c)
+}
+
+/// Un cycle stable ne se réécrit pas à chaque commande : ses membres ne se
+/// renvoient pas leurs versions (les sources d'une formule bloquée
+/// n'entrent pas dans son empreinte).
+#[test]
+fn un_cycle_stable_ne_se_reecrit_pas() {
+    assert!(cycle_inchange_par_une_commande_sans_rapport(
+        FormulaRecalc::Targeted
+    ));
+    assert!(
+        !cycle_inchange_par_une_commande_sans_rapport(FormulaRecalc::Full),
+        "témoin : le recalcul complet réécrit le cycle"
+    );
+}
+
+/// Un cycle suit la longueur de la feuille : l'allonger par une colonne
+/// qu'aucune formule ne lit allonge ses membres (issue `Blocked`, composante
+/// « nombre de lignes »).
+#[test]
+fn un_cycle_suit_la_longueur_de_la_feuille() {
+    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
+    handle.execute(formule(f.c, "B*2")).expect("C = B*2");
+    handle
+        .execute(formule(f.b, "C+1"))
+        .expect("B = C+1 : cycle");
+    handle
+        .execute(saisir(f.d, 4, &[1.0]))
+        .expect("D descend à 5 lignes");
+    let s = instantane(&handle);
+    for membre in [f.b, f.c] {
+        assert_eq!(nombres(&s, membre).len(), 5, "le cycle suit la feuille");
+        assert!(tout_non_calcule(&s, membre));
+    }
+}
+
+/// Une formule bloquée ou illisible, modifiée directement (suppression de
+/// cellules), est réécrite (composante « version de la colonne elle-même »
+/// pour les issues `Blocked` et `Unparsable`) : sans quoi elle garderait
+/// une ligne de moins que la feuille.
+#[test]
+fn une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite() {
+    for (texte, cycle) in [("B*2", true), ("A*", false)] {
+        let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
+        handle.execute(formule(f.c, texte)).expect("formule de C");
+        if cycle {
+            handle
+                .execute(formule(f.b, "C+1"))
+                .expect("B = C+1 : cycle");
+        }
+        handle
+            .execute(Command::DeleteCells {
+                columns: vec![f.c],
+                at: 0,
+                count: 1,
+            })
+            .expect("supprimer une cellule de C");
+        let s = instantane(&handle);
+        assert_eq!(nombres(&s, f.c).len(), 3, "{texte} : C suit la feuille");
+        assert!(tout_non_calcule(&s, f.c), "{texte}");
+    }
 }
 
 /// Changer le type d'une source (saisie de texte qui promeut en mixte)
@@ -512,8 +593,9 @@ fn avorter_une_macro_recalcule() {
     assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
 }
 
-/// Supprimer une colonne-formule puis annuler : elle revient juste, et une
-/// source modifiée entre-temps est prise en compte.
+/// Supprimer une colonne-formule puis annuler : elle revient juste. (Une
+/// source modifiée « entre-temps » ne peut pas l'être : l'historique est
+/// strictement LIFO, annuler la suppression défait d'abord ce qui a suivi.)
 #[test]
 fn une_colonne_formule_restauree_est_juste() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
@@ -527,11 +609,10 @@ fn une_colonne_formule_restauree_est_juste() {
     assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
 }
 
-/// Une feuille dupliquée calcule ses propres formules sur ses propres
-/// colonnes : le mémo est tenu par identifiant, pas par nom ni par lettre.
-#[test]
-fn une_feuille_dupliquee_a_ses_propres_formules() {
-    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
+/// Duplique la feuille, saisit dans la copie de A, et rend vrai si la
+/// colonne-formule **originale** a gardé sa version.
+fn original_inchange_par_une_saisie_dans_la_copie(mode: FormulaRecalc) -> bool {
+    let (_session, handle, f) = demarrer(mode);
     handle.execute(formule(f.c, "A*2")).expect("C = A*2");
     handle
         .execute(Command::DuplicateWorksheet {
@@ -558,10 +639,20 @@ fn une_feuille_dupliquee_a_ses_propres_formules() {
     let apres = instantane(&handle);
     assert_eq!(nombres(&apres, c2), some(&[18.0, 4.0, 6.0]));
     assert_eq!(nombres(&apres, f.c), some(&[2.0, 4.0, 6.0]));
-    assert_eq!(
-        version(&s, f.c),
-        version(&apres, f.c),
-        "l'original n'est pas concerné"
+    version(&s, f.c) == version(&apres, f.c)
+}
+
+/// Une feuille dupliquée calcule ses propres formules sur ses propres
+/// colonnes : le mémo est tenu par identifiant, pas par nom ni par lettre,
+/// et l'original n'est pas réécrit par une saisie dans la copie.
+#[test]
+fn une_feuille_dupliquee_a_ses_propres_formules() {
+    assert!(original_inchange_par_une_saisie_dans_la_copie(
+        FormulaRecalc::Targeted
+    ));
+    assert!(
+        !original_inchange_par_une_saisie_dans_la_copie(FormulaRecalc::Full),
+        "témoin : le recalcul complet réécrit l'original"
     );
 }
 
@@ -678,4 +769,74 @@ fn un_nouveau_projet_oublie_le_memo_de_l_ancien() {
     assert_eq!(version(&s, f.a), version_a);
     assert_eq!(nombres(&s, f.a), some(&[5.0, 5.0, 5.0]));
     assert_eq!(nombres(&s, f.c), some(&[10.0, 10.0, 10.0]));
+}
+
+/// Une colonne ajoutée avec une version déjà portée (venue d'un autre
+/// projet, d'un instantané d'avant un chargement, d'un fichier) ne doit pas
+/// voir ce numéro resservir pour un autre de ses contenus : le compteur du
+/// projet passe au-delà à l'insertion, comme pour un collage. Sinon, A
+/// ajoutée en version 40 retombe sur 40 après quelques écritures, avec un
+/// autre contenu, et C = A*2 se croit à jour (faux « propre » trouvé en
+/// relecture de #193).
+fn colonne_ajoutee_avec_sa_version(mode: FormulaRecalc) -> (Vec<Option<f64>>, u64) {
+    const V: u64 = 40;
+    let mut project = Project::new("Demo").expect("projet valide");
+    let root = project.root();
+    project.add_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+    let session = Session::spawn_with_recalc(project, None, mode).expect("acteur démarré");
+    let handle = session.handle();
+    let ajouter = |nom: &str, colonne: Column| {
+        handle
+            .execute(Command::AddColumn {
+                sheet,
+                index: None,
+                name: Some(nom.into()),
+                column: colonne,
+            })
+            .expect("colonne");
+    };
+    ajouter(
+        "A",
+        Column::from_block_with_version(
+            ColumnType::Numeric,
+            ValueBlock::Float(vec![1.0, 2.0, 3.0]),
+            ColumnMeta::default(),
+            V,
+        )
+        .expect("A en version 40"),
+    );
+    ajouter("B", Column::from_f64(&[0.0]));
+    let mut c = Column::new(ColumnType::Numeric);
+    c.set_meta(ColumnMeta {
+        formula: Some("A*2".into()),
+        ..Default::default()
+    });
+    ajouter("C", c);
+    let ids = instantane(&handle)
+        .tree
+        .children(sheet)
+        .expect("feuille")
+        .to_vec();
+    let (a, b, c) = (ids[0], ids[1], ids[2]);
+    assert_eq!(nombres(&instantane(&handle), c), some(&[2.0, 4.0, 6.0]));
+
+    // Des saisies dans B, que C ne lit pas, amènent le compteur jusqu'à V.
+    while version(&instantane(&handle), b) < V - 1 {
+        handle.execute(saisir(b, 0, &[1.0])).expect("saisie dans B");
+    }
+    handle
+        .execute(saisir(a, 0, &[100.0]))
+        .expect("saisie dans A");
+    let s = instantane(&handle);
+    (nombres(&s, c), version(&s, a))
+}
+
+#[test]
+fn une_colonne_ajoutee_avec_sa_version_ne_fait_pas_resservir_ce_numero() {
+    let (complet, _) = colonne_ajoutee_avec_sa_version(FormulaRecalc::Full);
+    assert_eq!(complet, some(&[200.0, 4.0, 6.0]), "oracle");
+    let (cible, version_a) = colonne_ajoutee_avec_sa_version(FormulaRecalc::Targeted);
+    assert!(version_a > 40, "A ne retombe pas sur 40 : {version_a}");
+    assert_eq!(cible, complet, "le ciblé rend le complet");
 }

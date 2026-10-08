@@ -59,9 +59,11 @@ Conventions déjà arbitrées, à suivre plutôt qu'à rejouer :
   envoie.
 - **toute écriture de données d'une colonne tire une version neuve**
   (`Project::next_column_version`, comme `set_values`, `set_length`,
-  `set_column_type`, `insert_rows`…) : le recalcul ciblé des formules (#193,
-  invariant 11) compare des versions et croit à jour une formule dont une
-  source aurait changé sous un ancien numéro. Une nouvelle commande qui écrit
+  `set_column_type`, `insert_rows`…), et une colonne **insérée** avec un
+  numéro déjà porté fait passer le compteur au-delà (`Project::insert_node`,
+  que tout ajout de nœud doit emprunter) : le recalcul ciblé des formules
+  (#193, invariant 11) compare des versions et croit à jour une formule dont
+  une source aurait changé sous un ancien numéro. Une nouvelle commande qui écrit
   des cellules passe donc par ces primitives, jamais par la `Column` en
   direct ; si elle peut viser une colonne-formule, un cas nommé dans
   `stokesforge-session/tests/recalc_cible.rs` vérifie que la formule la

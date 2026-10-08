@@ -132,10 +132,11 @@ nouvelles fonctions de formule).
 
 | Test | Ce qu'il tient |
 |---|---|
-| `stokesforge-robustesse/tests/b22_recalcul_cible.rs` | **l'oracle** : deux sessions jumelles, l'une ciblée, l'autre en recalcul complet (`FormulaRecalc::Full`, le code d'avant #193), reçoivent les mêmes pas tirés au sort ; mêmes réponses et mêmes arbres exigés après chaque pas. Plus, à chaque pas : la doctrine version ↔ contenu **dans l'acteur** (écritures du recalcul, macros, rechargements compris), et le témoin du « ciblé » — une commande sans rapport ne change la version d'aucune colonne. Un contrôle de couverture final vérifie que le tirage a bien produit des formules calculées, non calculées et épargnées |
+| `stokesforge-robustesse/tests/b22_recalcul_cible.rs` | **l'oracle** : deux sessions jumelles, l'une ciblée, l'autre en recalcul complet (`FormulaRecalc::Full`, le code d'avant #193), reçoivent les mêmes pas tirés au sort ; mêmes réponses et mêmes arbres exigés après chaque pas. Plus, à chaque pas : la doctrine version ↔ contenu **dans l'acteur** (écritures du recalcul, macros, rechargements compris), et le témoin du « ciblé » — une commande sans rapport ne change la version d'aucune colonne. Un contrôle de couverture final exige des formules calculées, non calculées et épargnées, et **au moins vingt passes par nature de pas** : un geste toujours refusé ne prouverait rien. Le tirage est rejouable à l'identique : aucune cible n'y est choisie dans l'ordre de `Tree::iter` (table de hachage à graine aléatoire) |
 | `stokesforge-session/tests/recalc_cible.rs` | un cas nommé par composante de l'empreinte (texte, colonne désignée, version des sources, nombre de lignes, version propre, issue), les gestes qui les font changer (déplacement, cycle créé ailleurs, suppression de cellules dans une colonne-formule, macro avortée, feuille dupliquée…), la stabilité d'une chaîne et d'un cycle, l'oubli du mémo par `Load` et `NewProject` sur une coïncidence d'identifiants et de versions **fabriquée et vérifiée**. Chaque assertion « pas réécrite » a son témoin en mode complet |
 | `stokesforge-session/tests/formula.rs` | le comportement des formules lui-même (antérieur à #193, inchangé) |
-| `stokesforge-robustesse/tests/b14_balayage.rs` | la doctrine version ↔ contenu sur `History` seul, sur laquelle repose tout le mécanisme |
+| `stokesforge-robustesse/tests/b14_balayage.rs` | la doctrine version ↔ contenu sur `History` seul, sur laquelle repose tout le mécanisme — y compris pour une colonne ajoutée avec un numéro déjà porté |
+| `stokesforge-core` (`project.rs`, `une_colonne_inseree_fait_passer_le_compteur_au_dela_de_sa_version`) | l'insertion d'une colonne fait passer le compteur au-delà de sa version |
 
 L'oracle ne voit pas une erreur **commune** aux deux modes (ordre de calcul,
 évaluation, type de sortie) : elles partagent tout le code sauf la décision
@@ -151,15 +152,18 @@ tests le voient.
 | Mutant (ce qui est cassé) | Vu par |
 |---|---|
 | texte de la formule retiré de l'empreinte | `changer_le_texte_de_la_formule_recalcule`, `b22` |
-| nombre de lignes retiré | `allonger_la_feuille_ailleurs_allonge_la_formule`, `une_formule_illisible_suit_la_feuille_puis_se_corrige`, `b22` |
-| version propre ignorée (des deux côtés) | `une_colonne_formule_modifiee_directement_est_recalculee`, `b22` |
-| version propre notée **avant** l'écriture, ou jamais | les cas « ciblé » (`une_commande_sans_rapport_ne_reecrit_aucune_formule`, `une_chaine_recalculee_est_stable_a_la_commande_suivante`…), `b22` (propriété 3) |
-| versions des sources retirées | sept cas nommés (propagation, macro avortée, source promue…), `b22` |
+| nombre de lignes retiré | `allonger_la_feuille_ailleurs_allonge_la_formule`, `un_cycle_suit_la_longueur_de_la_feuille`, `une_formule_illisible_suit_la_feuille_puis_se_corrige`, `b22` |
+| nombre de lignes retiré pour une formule bloquée seulement | `un_cycle_suit_la_longueur_de_la_feuille`, `b22` |
+| version propre ignorée (des deux côtés) | `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
+| version propre ignorée pour une formule bloquée, ou illisible, seulement | `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
+| version propre notée **avant** l'écriture, ou jamais | les cas « ciblé » (`une_commande_sans_rapport_ne_reecrit_aucune_formule`, `une_chaine_recalculee_est_stable_a_la_commande_suivante`, `un_cycle_stable_ne_se_reecrit_pas`…), `b22` (propriété 3) |
+| versions des sources retirées | huit cas nommés (propagation, macro avortée, source promue…), `b22` |
 | colonne désignée remplacée par la colonne-formule elle-même | `deplacer_une_source_change_ce_que_designe_la_lettre`, `b22` |
 | mémo non vidé par `Load` | `le_chargement_oublie_le_memo_du_projet_remplace` seul — le tirage ne fabrique pas de coïncidence entre projets |
 | mémo non vidé par `NewProject` | `un_nouveau_projet_oublie_le_memo_de_l_ancien` seul (un collage comme première requête : sinon la purge d'une passe ordinaire suffit) |
+| insertion d'une colonne sans faire passer le compteur au-delà de sa version (`Project::insert_node`) | `une_colonne_ajoutee_avec_sa_version_ne_fait_pas_resservir_ce_numero`, le test unitaire de `core`, `b14` — pas `b22`, dont le tirage ne retombe pas sur le numéro |
 | tout recalculer (le « ciblé » n'en est plus un) | les cas « ciblé » et leurs témoins, `b22` (propriété 3) |
-| présence dans le mémo au lieu de l'égalité d'empreinte | quatorze cas nommés, `b22` |
+| présence dans le mémo au lieu de l'égalité d'empreinte | quinze cas nommés, `b22` |
 | `self_index` retiré | **personne, par construction** : une auto-référence finit dans le cycle, jamais dans `evaluate_formula`. Gardé parce que `evaluate_formula` le lit |
 | purge du mémo retirée | **personne, par construction** : un identifiant n'est jamais réattribué dans un projet, et `forget` couvre le remplacement. Hygiène mémoire |
 
@@ -167,6 +171,10 @@ Une première version mettait dans l'empreinte d'une formule bloquée les
 colonnes qu'elle désigne : aucun mutant ne la voyait manquer, et pour cause,
 un bloc `NaN` ne les lit pas. Elle a été retirée — c'est l'usage de ce
 tableau : une composante qu'aucun test ne voit est morte ou non couverte.
+La relecture critique de #193 (agent indépendant) a ajouté trois lignes : les
+composantes « par issue », que seul `b22` voyait, ont reçu leurs cas
+nommés, et l'insertion d'une colonne numérotée, un vrai faux « propre »
+latent, a été corrigée dans `core`.
 
 ### Ajouter une fonctionnalité qui en dépend : les tests à écrire
 
@@ -193,7 +201,9 @@ tableau : une composante qu'aucun test ne voit est morte ou non couverte.
 
 1. Elle tire un numéro neuf de `Project::next_column_version` : sans lui, un
    même numéro peut désigner deux contenus, et le recalcul ciblé croit une
-   formule à jour.
+   formule à jour. Une voie qui **insère** une colonne déjà numérotée (fichier,
+   presse-papiers, instantané gardé par un client) passe par
+   `Project::insert_node`, qui fait avancer le compteur au-delà.
 2. L'ajouter aux tirages de `b14` (doctrine sur `History`) et de `b22`
    (doctrine et oracle dans l'acteur).
 3. Si elle peut viser une colonne-formule (comme `DeleteCells` et
@@ -208,7 +218,10 @@ tableau : une composante qu'aucun test ne voit est morte ou non couverte.
 2. Garder un mode complet qui partage **tout** le code sauf la décision, et
    une batterie jumelle sur le modèle de `b22`, avec ses trois propriétés
    (oracle, version ↔ contenu, commande sans rapport sans réécriture) et son
-   contrôle de couverture.
+   contrôle de couverture **par nature de pas**. Le tirage doit rester
+   rejouable : ne jamais choisir une cible dans l'ordre de `Tree::iter`, et
+   ne pas comparer des versions de part et d'autre d'un chargement (le
+   compteur y repart du fichier, une coïncidence n'y prouve rien).
 3. Les cas nommés de la famille « ciblé » avec leur **témoin** en mode
    complet : sans témoin, une version inchangée ne prouve rien.
 4. Un résultat en erreur stable (cycle, ajustement qui ne converge pas) ne se

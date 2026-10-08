@@ -243,10 +243,14 @@ Deux conséquences qui traversent les crates :
   référence entre feuilles ou une analyse qui lit une donnée nouvelle l'y
   ajoute ;
 - **toute écriture de données d'une colonne tire un numéro de version neuf**
-  (`Project::next_column_version`, `stokesforge-core`) : la comparaison
-  repose sur « un numéro ne désigne jamais deux contenus d'une même
-  colonne ». Une primitive de `core` qui écrirait sans cela ferait passer une
-  formule périmée pour à jour.
+  (`Project::next_column_version`, `stokesforge-core`), **et toute insertion
+  d'une colonne qui porte déjà un numéro fait passer le compteur au-delà**
+  (`Project::insert_node`) : la comparaison repose sur « un numéro ne désigne
+  jamais deux contenus d'une même colonne ». Une primitive de `core` qui
+  écrirait sans cela, ou une insertion qui laisserait le compteur en deçà
+  (trouvé en relecture : `AddColumn` d'une colonne venue d'un fichier ou d'un
+  instantané d'avant un chargement), ferait passer une formule périmée pour
+  à jour.
 
 Le recalcul complet n'a pas disparu : c'est l'oracle (`FormulaRecalc::Full`),
 contre lequel `b22` compare le ciblé après chaque pas d'une séquence tirée au
