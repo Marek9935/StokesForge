@@ -421,6 +421,17 @@ haut ; `PlotComponent::Axis` garde le côté **du spec** (`Bottom`/`Left`) même
 quand l'axe est affiché en haut ou à droite. Test : `geometrie.rs`,
 `stokesforge-render-svg/tests/calques.rs`.
 
+Les échelles linéaires propres d'un calque superposé sont **jointes** à celles
+du calque recouvert (#174) : sans étendue fixée à la main, `scale::aligned_range`
+choisit un pas rond et une position telle que l'intervalle enveloppe les données
+du calque et que ses graduations tombent aux mêmes fractions de l'axe que
+celles du calque recouvert (le 0 du haut en face du 0 du bas) ; chaque candidat
+est vérifié avec les graduations que Plotters posera réellement. Sans solution,
+échelle logarithmique ou étendue explicite (zoom compris) : cadrage
+indépendant. Les graduations linéaires s'écrivent sans décimale quand elles
+sont toutes entières, avec le même nombre de décimales sinon
+(`scale::TickFormat`, #175) ; tous les axes passent par un formateur.
+
 Un calque est identifié par son **indice dans `PlotSpec::panels`**
 (`DrawnPanel::index`), **pas par son rang dans `DrawnPlot::panels`** : celui-ci
 omet les panneaux trop petits pour être tracés (`MIN_CELL`), ce qui décale ses

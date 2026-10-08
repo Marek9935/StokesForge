@@ -64,9 +64,153 @@ pub fn inverse(scale: AxisScale, t: f64) -> f64 {
     }
 }
 
-/// Vrai pour une échelle qui demande un étiquetage à part.
-pub fn needs_formatter(scale: AxisScale) -> bool {
-    matches!(scale, AxisScale::Log)
+/// Nombre de graduations que Plotters vise par défaut sur un axe.
+pub const DEFAULT_LABELS: usize = 11;
+
+/// Combien de graduations demander : une par décade sur une échelle
+/// logarithmique ([`decade_label_count`]), le défaut de Plotters sinon.
+pub fn label_count(scale: AxisScale, range: (f64, f64)) -> usize {
+    match scale {
+        AxisScale::Linear => DEFAULT_LABELS,
+        AxisScale::Log => decade_label_count(range),
+    }
+}
+
+/// Les graduations que Plotters posera sur un intervalle linéaire.
+pub fn linear_key_points(range: (f64, f64), labels: usize) -> Vec<f64> {
+    use plotters::coord::ranged1d::{BoldPoints, Ranged};
+    use plotters::coord::types::RangedCoordf64;
+    if !range.0.is_finite() || !range.1.is_finite() {
+        return Vec::new();
+    }
+    RangedCoordf64::from(range.0..range.1).key_points(BoldPoints(labels))
+}
+
+/// Le plus petit nombre de décimales qui écrit toutes les graduations d'un
+/// axe sans les altérer : 0 quand elles sont toutes entières.
+fn decimals_for(points: &[f64]) -> usize {
+    (0..=10)
+        .find(|&decimals| {
+            let factor = 10f64.powi(decimals as i32);
+            points.iter().all(|value| {
+                let scaled = value * factor;
+                (scaled - scaled.round()).abs() <= 1e-6 * scaled.abs().max(1.0)
+            })
+        })
+        .unwrap_or(10)
+}
+
+/// Comment écrire les graduations d'un axe : le même nombre de décimales
+/// partout, aucune quand toutes sont entières (« 0, 100, 200 », pas
+/// « 0.0, 100.0, 200.0 » que donne le formatage par défaut de Plotters).
+#[derive(Debug, Clone, Copy)]
+pub struct TickFormat {
+    scale: AxisScale,
+    decimals: usize,
+}
+
+impl TickFormat {
+    /// Le format de l'axe de cet intervalle (dans l'espace transformé).
+    pub fn new(scale: AxisScale, range: (f64, f64)) -> Self {
+        let decimals = match scale {
+            AxisScale::Linear => decimals_for(&linear_key_points(range, label_count(scale, range))),
+            AxisScale::Log => 0,
+        };
+        Self { scale, decimals }
+    }
+
+    /// L'étiquette d'une graduation, dans l'espace transformé.
+    pub fn format(&self, t: f64) -> String {
+        match self.scale {
+            AxisScale::Linear => format_fixed(t, self.decimals),
+            AxisScale::Log => format_decade(t),
+        }
+    }
+}
+
+fn format_fixed(value: f64, decimals: usize) -> String {
+    if !value.is_finite() {
+        return String::new();
+    }
+    let text = format!("{value:.decimals$}");
+    // « -0 » et « -0.0 » : un zéro n'a pas de signe sur un axe.
+    match text.strip_prefix('-') {
+        Some(rest) if rest.chars().all(|c| c == '0' || c == '.') => rest.to_owned(),
+        _ => text,
+    }
+}
+
+/// Cadre un axe linéaire de calque superposé (#174) pour que ses graduations
+/// tombent **en face** de celles de l'axe du calque recouvert.
+///
+/// `base` est l'intervalle de l'axe recouvert, `wanted` celui qui ne ferait
+/// qu'envelopper les données du calque ; tous deux dans le même sens. On
+/// cherche un pas « rond » et une position de la première graduation tels que
+/// l'intervalle obtenu contienne `wanted`, compte autant de graduations que
+/// `base` et les pose aux mêmes fractions de l'axe. Chaque candidat est
+/// vérifié avec les graduations que Plotters posera réellement : on ne devine
+/// pas son algorithme. `None` si rien ne convient (l'appelant garde alors
+/// `wanted`).
+pub fn aligned_range(base: (f64, f64), wanted: (f64, f64)) -> Option<(f64, f64)> {
+    let inverted = base.0 > base.1;
+    if (wanted.0 > wanted.1) != inverted {
+        return None;
+    }
+    let (b0, b1) = if inverted { (base.1, base.0) } else { base };
+    let (d0, d1) = if inverted {
+        (wanted.1, wanted.0)
+    } else {
+        wanted
+    };
+    if ![b0, b1, d0, d1].iter().all(|v| v.is_finite()) || b1 <= b0 || d1 <= d0 {
+        return None;
+    }
+    let base_points = linear_key_points((b0, b1), DEFAULT_LABELS);
+    if base_points.len() < 2 {
+        return None;
+    }
+    let base_step = base_points[1] - base_points[0];
+    if base_step <= 0.0 {
+        return None;
+    }
+    // Les graduations de base, en fraction de l'axe.
+    let fractions: Vec<f64> = base_points.iter().map(|t| (t - b0) / (b1 - b0)).collect();
+    let steps_in_axis = (b1 - b0) / base_step;
+    let first_offset = (base_points[0] - b0) / base_step;
+
+    let smallest = (d1 - d0) / steps_in_axis;
+    let decade = 10f64.powf(smallest.log10().floor());
+    const MANTISSAS: [f64; 11] = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 7.5, 8.0];
+    for exponent in [1.0, 10.0, 100.0] {
+        for mantissa in MANTISSAS {
+            let step = decade * exponent * mantissa;
+            let span = steps_in_axis * step;
+            if span < d1 - d0 {
+                continue;
+            }
+            // Première graduation `j · step`, placée à `first_offset` pas du
+            // bord bas : le bord bas vaut `(j − first_offset) · step`.
+            let lowest = (d1 - span) / step + first_offset;
+            let highest = d0 / step + first_offset;
+            let (lo_j, hi_j) = ((lowest - 1e-9).ceil(), (highest + 1e-9).floor());
+            if lo_j > hi_j {
+                continue;
+            }
+            let j = ((lowest + highest) / 2.0).round().clamp(lo_j, hi_j);
+            let low = (j - first_offset) * step;
+            let high = low + span;
+            let points = linear_key_points((low, high), DEFAULT_LABELS);
+            let aligned = points.len() == fractions.len()
+                && points
+                    .iter()
+                    .zip(&fractions)
+                    .all(|(t, f)| ((t - low) / (high - low) - f).abs() < 1e-6);
+            if aligned {
+                return Some(if inverted { (high, low) } else { (low, high) });
+            }
+        }
+    }
+    None
 }
 
 /// Élargit un intervalle logarithmique aux décades entières qui l'encadrent.
@@ -214,5 +358,64 @@ mod tests {
         assert_eq!(decade_label_count((0.0, 3.0)), 4);
         assert_eq!(decade_label_count((0.0, 40.0)), 11);
         assert_eq!(decade_label_count((1.0, 1.0)), 2);
+    }
+
+    fn ticks(range: (f64, f64)) -> Vec<String> {
+        let format = TickFormat::new(AxisScale::Linear, range);
+        linear_key_points(range, DEFAULT_LABELS)
+            .into_iter()
+            .map(|t| format.format(t))
+            .collect()
+    }
+
+    #[test]
+    fn des_graduations_entieres_s_ecrivent_sans_decimale() {
+        let labels = ticks((-40.0, 840.0));
+        assert!(labels.contains(&"0".to_owned()), "{labels:?}");
+        assert!(labels.contains(&"200".to_owned()), "{labels:?}");
+        assert!(labels.iter().all(|l| !l.contains('.')), "{labels:?}");
+    }
+
+    #[test]
+    fn des_graduations_fractionnaires_gardent_le_meme_nombre_de_decimales() {
+        let labels = ticks((-0.6, 0.6));
+        assert!(labels.contains(&"0.0".to_owned()), "{labels:?}");
+        assert!(labels.contains(&"-0.2".to_owned()), "{labels:?}");
+        assert!(labels
+            .iter()
+            .all(|l| l.ends_with(|c: char| c.is_ascii_digit())));
+    }
+
+    #[test]
+    fn un_zero_n_a_pas_de_signe() {
+        assert_eq!(format_fixed(-0.0, 0), "0");
+        assert_eq!(format_fixed(-1e-12, 1), "0.0");
+        assert_eq!(format_fixed(-2.0, 0), "-2");
+    }
+
+    #[test]
+    fn un_axe_aligne_pose_ses_graduations_en_face() {
+        let base = (-40.0, 840.0);
+        let wanted = (-6.0, 126.0);
+        let range = aligned_range(base, wanted).expect("un cadrage aligné");
+        assert!(range.0 <= wanted.0 && range.1 >= wanted.1, "{range:?}");
+        let fractions = |r: (f64, f64)| -> Vec<f64> {
+            linear_key_points(r, DEFAULT_LABELS)
+                .iter()
+                .map(|t| (t - r.0) / (r.1 - r.0))
+                .collect()
+        };
+        let (a, b) = (fractions(base), fractions(range));
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(&b) {
+            assert!((x - y).abs() < 1e-6, "{a:?} / {b:?}");
+        }
+    }
+
+    #[test]
+    fn l_alignement_respecte_le_sens_de_l_axe() {
+        let inverted = aligned_range((840.0, -40.0), (126.0, -6.0)).expect("aligné");
+        assert!(inverted.0 > inverted.1);
+        assert_eq!(aligned_range((-40.0, 840.0), (126.0, -6.0)), None);
     }
 }

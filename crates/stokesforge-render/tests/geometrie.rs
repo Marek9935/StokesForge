@@ -748,3 +748,49 @@ fn un_calque_superpose_partage_la_zone_de_trace_et_garde_son_echelle() {
         "les axes du haut et de droite réservent leur place à tous les calques de la case"
     );
 }
+
+/// #174 : les échelles d'un calque superposé sont jointes à celles du calque
+/// recouvert — mêmes fractions de l'axe pour les graduations, donc le 0 du
+/// haut en face du 0 du bas — tout en enveloppant ses propres données.
+#[test]
+fn les_echelles_d_un_calque_superpose_sont_jointes_a_celles_du_calque_recouvert() {
+    use stokesforge_plot::{OverlaySpec, Panels};
+    use stokesforge_render::scale::{linear_key_points, DEFAULT_LABELS};
+    let colonnes = [
+        ("X", vec![0.0, 400.0, 800.0]),
+        ("Y", vec![0.0, 5.0, 10.0]),
+        ("X2", vec![0.0, 60.0, 120.0]),
+        ("Y2", vec![0.0, 0.4, 0.9]),
+    ];
+    let drawn = geometrie(&colonnes, |ids: &[NodeId]| {
+        let mut base = PanelSpec::at(0, 0);
+        base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+        let mut haut = PanelSpec::overlay_on(
+            &base,
+            OverlaySpec {
+                x_top: true,
+                y_right: true,
+            },
+        );
+        haut.series.push(SeriesSpec::new_xy(ids[2], ids[3]));
+        PlotSpec::empty("Test").with_panels(Panels::new(vec![base, haut]))
+    });
+    let (base, haut) = (&drawn.panels[0], &drawn.panels[1]);
+    let fractions = |range: (f64, f64)| -> Vec<f64> {
+        linear_key_points(range, DEFAULT_LABELS)
+            .iter()
+            .map(|t| (t - range.0) / (range.1 - range.0))
+            .collect()
+    };
+    for (own, other, data) in [
+        (base.x_range, haut.x_range, (0.0, 120.0)),
+        (base.y_range, haut.y_range, (0.0, 0.9)),
+    ] {
+        let (a, b) = (fractions(own), fractions(other));
+        assert_eq!(a.len(), b.len(), "{own:?} / {other:?}");
+        for (x, y) in a.iter().zip(&b) {
+            assert!((x - y).abs() < 1e-6, "{own:?} / {other:?}");
+        }
+        assert!(other.0 <= data.0 && other.1 >= data.1, "{other:?}");
+    }
+}

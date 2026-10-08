@@ -769,21 +769,37 @@ fn draw_panel<DB: DrawingBackend>(
     // 2 — cadrage, dans l'espace transformé.
     let x_range = match base {
         Some(base) if !x_own => base.x_range,
-        _ => axis_range(
-            &spec.bottom,
-            x_scale,
-            extent_of(&prepared, series::x_extent, None),
-            false,
-        ),
+        _ => {
+            let own = axis_range(
+                &spec.bottom,
+                x_scale,
+                extent_of(&prepared, series::x_extent, None),
+                false,
+            );
+            join_to_base(
+                &spec.bottom,
+                x_scale,
+                own,
+                base.map(|b| (b.x_scale, b.x_range)),
+            )
+        }
     };
     let y_range = match base {
         Some(base) if !y_own => base.y_range,
-        _ => axis_range(
-            &spec.left,
-            y_scale,
-            extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left)),
-            needs_baseline(&prepared, SeriesAxis::Left),
-        ),
+        _ => {
+            let own = axis_range(
+                &spec.left,
+                y_scale,
+                extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left)),
+                needs_baseline(&prepared, SeriesAxis::Left),
+            );
+            join_to_base(
+                &spec.left,
+                y_scale,
+                own,
+                base.map(|b| (b.y_scale, b.y_range)),
+            )
+        }
     };
     let y2_range = right_active.then(|| {
         axis_range(
@@ -908,8 +924,10 @@ fn draw_panel<DB: DrawingBackend>(
             axis.display_label()
         }
     };
-    let format_x = |value: &f64| scale::format_tick(x_scale, *value);
-    let format_y = |value: &f64| scale::format_tick(y_scale, *value);
+    let tick_x = scale::TickFormat::new(x_scale, x_range);
+    let tick_y = scale::TickFormat::new(y_scale, y_range);
+    let format_x = |value: &f64| tick_x.format(*value);
+    let format_y = |value: &f64| tick_y.format(*value);
     // Un calque superposé n'a ni axe en bas ni axe à gauche : ses axes
     // s'affichent en haut et à droite, par les axes secondaires de Plotters
     // (même repère que le calque lui-même, voir plus bas).
@@ -926,10 +944,8 @@ fn draw_panel<DB: DrawingBackend>(
         if !spec.bottom.visible {
             mesh.disable_x_axis();
         }
-        if scale::needs_formatter(x_scale) {
-            mesh.x_label_formatter(&format_x)
-                .x_labels(scale::decade_label_count(x_range));
-        }
+        mesh.x_label_formatter(&format_x)
+            .x_labels(scale::label_count(x_scale, x_range));
         mesh.draw()?;
     }
     if overlay.is_none() {
@@ -945,25 +961,22 @@ fn draw_panel<DB: DrawingBackend>(
         if !spec.left.visible {
             mesh.disable_y_axis();
         }
-        if scale::needs_formatter(y_scale) {
-            mesh.y_label_formatter(&format_y)
-                .y_labels(scale::decade_label_count(y_range));
-        }
+        mesh.y_label_formatter(&format_y)
+            .y_labels(scale::label_count(y_scale, y_range));
         mesh.draw()?;
     }
 
-    let format_y2 = |value: &f64| scale::format_tick(y2_scale, *value);
     if let Some(range) = y2_range {
+        let tick_y2 = scale::TickFormat::new(y2_scale, range);
+        let format_y2 = |value: &f64| tick_y2.format(*value);
         let colors = AxisColors::of(&spec.right, ink);
         let mut mesh = chart.configure_secondary_axes();
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
             .axis_desc_style(colors.title_style.clone())
             .axis_style(rgba(colors.ticks))
             .y_desc(plotters_desc(&spec.right, right_anchor));
-        if scale::needs_formatter(y2_scale) {
-            mesh.y_label_formatter(&format_y2)
-                .y_labels(scale::decade_label_count(range));
-        }
+        mesh.y_label_formatter(&format_y2)
+            .y_labels(scale::label_count(y2_scale, range));
         mesh.draw()?;
     }
 
@@ -993,15 +1006,15 @@ fn draw_panel<DB: DrawingBackend>(
             });
         if !show_x {
             mesh.x_labels(0);
-        } else if scale::needs_formatter(x_scale) {
+        } else {
             mesh.x_label_formatter(&format_x)
-                .x_labels(scale::decade_label_count(x_range));
+                .x_labels(scale::label_count(x_scale, x_range));
         }
         if !show_y {
             mesh.y_labels(0);
-        } else if scale::needs_formatter(y_scale) {
+        } else {
             mesh.y_label_formatter(&format_y)
-                .y_labels(scale::decade_label_count(y_range));
+                .y_labels(scale::label_count(y_scale, y_range));
         }
         mesh.draw()?;
     }
@@ -1672,6 +1685,28 @@ fn axis_range(
         (max, min)
     } else {
         (min, max)
+    }
+}
+
+/// Joint l'axe d'un calque superposé à celui du calque recouvert (#174) : mêmes
+/// bornes aux coins, graduations en face. Sans effet hors calque superposé, en
+/// échelle logarithmique (les décades s'alignent déjà) ou avec une étendue
+/// fixée à la main.
+fn join_to_base(
+    spec: &AxisSpec,
+    scale: AxisScale,
+    own: (f64, f64),
+    base: Option<(AxisScale, (f64, f64))>,
+) -> (f64, f64) {
+    match base {
+        Some((base_scale, base_range))
+            if scale == AxisScale::Linear
+                && base_scale == AxisScale::Linear
+                && !spec.has_explicit_range() =>
+        {
+            scale::aligned_range(base_range, own).unwrap_or(own)
+        }
+        _ => own,
     }
 }
 

@@ -46,17 +46,17 @@ fn exporte(overlay: Option<OverlaySpec>) -> String {
     svg
 }
 
-/// Les graduations 400…800 du calque superposé n'existent que dans l'export
+/// Les graduations 400…800 (écrites sans décimale, #175) du calque superposé n'existent que dans l'export
 /// qui le contient : témoin sans calque.
 #[test]
 fn le_calque_superpose_trace_ses_graduations_en_haut() {
     let sans = exporte(None);
-    assert!(!sans.contains("800.0"), "témoin : pas de graduation 800");
+    assert!(!sans.contains("\n800\n"), "témoin : pas de graduation 800");
     let avec = exporte(Some(OverlaySpec {
         x_top: true,
         y_right: true,
     }));
-    assert!(avec.contains("800.0"), "graduation X2 absente : {avec}");
+    assert!(avec.contains("\n800\n"), "graduation X2 absente : {avec}");
 }
 
 /// #166 : une série « ligne » se trace contre les x' des colonnes — les
@@ -91,7 +91,7 @@ fn une_serie_ligne_se_trace_contre_les_x_prime() {
     let spec = PlotSpec::empty("").with_panels(Panels::new(vec![panel]));
     let plot = resolve_spec(project.tree(), &spec);
     let svg = render_to_string(&plot, (480, 360), &TextMeasurer::default()).expect("export");
-    assert!(svg.contains("200.0"), "graduation x' absente : {svg}");
+    assert!(svg.contains("\n200\n"), "graduation x' absente : {svg}");
     assert!(
         svg.contains("<polyline") || svg.contains("<path"),
         "courbe absente"
