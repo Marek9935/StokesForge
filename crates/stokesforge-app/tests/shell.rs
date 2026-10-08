@@ -4915,6 +4915,72 @@ fn add_series_to_graph_appends_without_overwriting_existing_series() {
     assert_eq!(after.panels[0].series[1].plot_type, PlotType::Scatter);
 }
 
+/// #177 : des séries ajoutées **en même temps** forment un groupe ; une série
+/// ajoutée seule n'en a pas. Un nouvel ajout multiple ouvre un autre groupe
+/// sans toucher au premier.
+#[test]
+fn des_series_ajoutees_ensemble_forment_un_groupe_une_seule_non() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+    let root = state.tree().root();
+    let last_graph = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graphe")
+    };
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let seul = last_graph(&state);
+    assert_eq!(
+        state.plot_spec(seul).unwrap().panels[0].series[0].group,
+        None
+    );
+
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![temps, signal, note],
+        plot_type: PlotType::Line,
+    });
+    let graph = last_graph(&state);
+    let panel = state.plot_spec(graph).unwrap().panels[0].clone();
+    assert!(panel.series.len() >= 2);
+    assert!(panel.series.iter().all(|s| s.group == Some(1)), "{panel:?}");
+
+    // Une seule colonne ajoutée : pas de groupe ; deux ensemble : un second.
+    state.dispatch(Action::AddSeriesToGraph {
+        graph: seul,
+        panel: 0,
+        columns: vec![note],
+        plot_type: None,
+    });
+    let seul_apres = state.plot_spec(seul).unwrap();
+    assert!(seul_apres.panels[0]
+        .series
+        .iter()
+        .all(|s| s.group.is_none()));
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 0,
+        columns: vec![signal, note],
+        plot_type: None,
+    });
+    let apres = state.plot_spec(graph).unwrap().panels[0].clone();
+    let n = panel.series.len();
+    assert!(apres.series[..n].iter().all(|s| s.group == Some(1)));
+    assert!(apres.series[n..].iter().all(|s| s.group == Some(2)));
+    assert_eq!(apres.series.len(), n + 2);
+}
+
 // -- 22 ter. Glisser des lignes vers un graphe (#166) --
 
 /// Feuille « cinétique » : trois colonnes mesurées à t = 0, 10 et 20 s (x'),

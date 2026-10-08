@@ -213,7 +213,8 @@ cellules exactes, undo/redo, refus, époques, interruption et imports).
 racine ; sans `x`, l'abscisse est l'indice de ligne. `parent` accepte un
 dossier, `name` choisit le nom (automatique `GraphN` sinon). `graph=g` ajoute
 une série au premier panneau d'un graphe existant et conserve ses autres
-panneaux, séries et réglages ; `name` et `parent` sont alors refusés.
+panneaux, séries et réglages ; `name` et `parent` sont alors refusés. Un appel
+ajoute une seule série : il ne crée jamais de groupe de séries (#177).
 Sans option `title`, un graphe neuf n'a pas de titre ; le nom du graphe
 sert à identifier sa fenêtre, pas à titrer la figure (#103).
 

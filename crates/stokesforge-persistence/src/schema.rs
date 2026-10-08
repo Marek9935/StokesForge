@@ -898,6 +898,9 @@ pub(crate) struct SeriesSpecRecord {
     /// `SeriesSpec::row` (#166). Absente des fichiers antérieurs.
     #[serde(default)]
     pub(crate) row: Option<u64>,
+    /// `SeriesSpec::group` (#177). Absent des fichiers antérieurs.
+    #[serde(default)]
+    pub(crate) group: Option<u32>,
 }
 
 /// [`stokesforge_plot::PlotType`], à plat.

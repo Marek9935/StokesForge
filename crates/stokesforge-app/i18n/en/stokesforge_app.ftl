@@ -644,6 +644,35 @@ plot-series-symbol-shape = Shape
 plot-series-symbol-size = Size (pt)
 plot-series-symbol-color = Symbol color
 
+# Series window and groups (#177–#179)
+
+curve-window-title = Series Properties — { $name }
+curve-group-name = Group { $number }
+curve-list-label = { $name } · { $group }
+curve-group-section = Group
+curve-group-field = Group
+curve-group-none = None
+curve-group-new = New group
+curve-group-entry = { $group } ({ $count })
+curve-group-style-note = Line and symbol settings below apply to the { $count } series of the group.
+curve-gradient-section = Color gradient
+curve-gradient-field = Gradient
+curve-gradient-custom = Custom
+curve-gradient-stop = Color { $number }
+curve-gradient-add-stop = Add Color
+curve-gradient-remove-stop = Remove Color
+curve-gradient-apply =
+    Apply to Group
+    .hint = Spreads the gradient evenly over the series of the group, in list order
+curve-gradient-blue-red = Blue → Red
+curve-gradient-black-red = Black → Red
+curve-gradient-black-blue = Black → Blue
+curve-gradient-blue-yellow = Blue → Yellow
+curve-gradient-green-red = Green → Red
+curve-gradient-blue-white-red = Blue → White → Red
+curve-gradient-viridis = Viridis
+curve-gradient-plasma = Plasma
+
 plot-type-scatter = Scatter
 plot-type-line = Line
 plot-type-line-symbol = Line + Symbol

@@ -163,6 +163,8 @@ l'interface, mais son mot est déjà fixé.
 | Legend entry | Entrée de légende | Une ligne de la légende | Libellé de légende | G |
 | Position | Position | Coin de la légende : Top left… ; Reset Position / Réinitialiser la position : remet un titre ou la légende à sa place par défaut | Emplacement | G |
 | Series | Série | Données tracées d'une colonne Y | Courbe, Trace, Plot, Jeu de données | G (Q3) |
+| Series Group | Groupe de séries | Séries ajoutées ensemble (ou réunies à la main) qui se règlent ensemble ; à ne pas confondre avec le nœud « Plot Group » de l'Object Manager (#177) | Groupe de courbes, Plot Group | G |
+| Color gradient | Nuancier | Dégradé de couleurs réparti sur les séries d'un groupe : Blue → Red / Bleu → Rouge… (#178) | Palette (qualitative, sans ordre), Dégradé | G |
 | Plot type | Type de tracé | Façon de tracer une série | Mode | O |
 | Scatter | Points | Symboles seuls | Nuage de points | O (Q6) |
 | Line | Ligne | Trait seul | Courbe | O |

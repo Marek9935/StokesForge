@@ -148,6 +148,46 @@ impl PanelSpec {
         seen
     }
 
+    /// Le premier numéro de groupe (#177) qu'aucune série du panneau ne porte.
+    pub fn next_group_id(&self) -> u32 {
+        self.series
+            .iter()
+            .filter_map(|s| s.group)
+            .max()
+            .map_or(1, |max| max.saturating_add(1))
+    }
+
+    /// Ajoute des séries **ensemble** (#177) : à deux ou plus, elles forment un
+    /// nouveau groupe ; une série seule n'en a pas. Les numéros de groupe que
+    /// les séries portaient déjà sont écartés.
+    pub fn push_series_batch(&mut self, series: Vec<SeriesSpec>) {
+        let group = (series.len() > 1).then(|| self.next_group_id());
+        self.series.extend(series.into_iter().map(|mut s| {
+            s.group = group;
+            s
+        }));
+    }
+
+    /// Rangs, dans [`PanelSpec::series`], des séries du groupe `group`.
+    pub fn group_members(&self, group: u32) -> Vec<usize> {
+        self.series
+            .iter()
+            .enumerate()
+            .filter_map(|(index, s)| (s.group == Some(group)).then_some(index))
+            .collect()
+    }
+
+    /// Les numéros de groupe présents, dans l'ordre de première apparition.
+    pub fn group_ids(&self) -> Vec<u32> {
+        let mut ids = Vec::new();
+        for group in self.series.iter().filter_map(|s| s.group) {
+            if !ids.contains(&group) {
+                ids.push(group);
+            }
+        }
+        ids
+    }
+
     /// Vrai si une série du panneau référence cette colonne.
     pub fn references(&self, column: NodeId) -> bool {
         self.series.iter().any(|s| s.references(column))
@@ -174,5 +214,26 @@ impl Default for PanelSpec {
             annotations: Vec::new(),
             shapes: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+
+    fn serie(n: u64) -> SeriesSpec {
+        SeriesSpec::new(NodeId::from_raw(n))
+    }
+
+    #[test]
+    fn des_series_ajoutees_ensemble_forment_un_groupe_une_seule_non() {
+        let mut panel = PanelSpec::default();
+        panel.push_series_batch(vec![serie(1)]);
+        assert_eq!(panel.series[0].group, None);
+        panel.push_series_batch(vec![serie(2), serie(3)]);
+        assert_eq!(panel.group_members(1), [1, 2]);
+        panel.push_series_batch(vec![serie(4), serie(5)]);
+        assert_eq!(panel.group_ids(), [1, 2]);
+        assert_eq!(panel.next_group_id(), 3);
     }
 }

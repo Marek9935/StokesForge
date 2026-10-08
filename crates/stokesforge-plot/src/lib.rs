@@ -39,6 +39,7 @@
 //!     └── series : SeriesSpec
 //!         ├── y : NodeId, x / x_error / y_error : Option<NodeId>
 //!         ├── plot_type : scatter | line | line+scatter | bar | histogram | error_bar
+//!         ├── group : Option<u32>   (groupe de courbes du panneau, #177)
 //!         ├── line : LineSpec      (style, épaisseur, couleur)
 //!         ├── symbol : SymbolSpec  (forme, taille, couleurs)
 //!         └── axis : SeriesAxis    (gauche ou droite, et rien d'autre)
@@ -84,6 +85,7 @@
 
 pub mod annotation;
 pub mod axis;
+pub mod gradient;
 pub mod legend;
 pub mod palettes;
 pub mod panel;
@@ -99,6 +101,7 @@ pub mod theme;
 
 pub use annotation::{AnnotationRef, AnnotationSpec};
 pub use axis::{AxisScale, AxisSide, AxisSpec};
+pub use gradient::{gradient_colors, GradientPreset, GRADIENT_PRESETS};
 pub use legend::{LegendPosition, LegendSpec};
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};
 pub use panel::{OverlaySpec, PanelSpec};

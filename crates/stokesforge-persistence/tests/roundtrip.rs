@@ -750,6 +750,8 @@ fn non_trivial_spec(
         bar_width: Some(0.42),
         // Série « ligne » (#166) : la ligne 4 de la feuille de `y1`.
         row: Some(4),
+        // Groupe de courbes (#177).
+        group: Some(3),
         ..SeriesSpec::new_xy(x, y1)
     };
     let histogram = SeriesSpec {

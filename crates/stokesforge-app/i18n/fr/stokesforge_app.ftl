@@ -636,6 +636,35 @@ plot-series-symbol-shape = Forme
 plot-series-symbol-size = Taille (pt)
 plot-series-symbol-color = Couleur du symbole
 
+# Fenêtre des séries et groupes (#177–#179)
+
+curve-window-title = Propriétés des séries — { $name }
+curve-group-name = Groupe { $number }
+curve-list-label = { $name } · { $group }
+curve-group-section = Groupe
+curve-group-field = Groupe
+curve-group-none = Aucun
+curve-group-new = Nouveau groupe
+curve-group-entry = { $group } ({ $count })
+curve-group-style-note = Les réglages de trait et de symbole ci-dessous s'appliquent aux { $count } séries du groupe.
+curve-gradient-section = Nuancier
+curve-gradient-field = Nuancier
+curve-gradient-custom = Personnalisé
+curve-gradient-stop = Couleur { $number }
+curve-gradient-add-stop = Ajouter une couleur
+curve-gradient-remove-stop = Retirer une couleur
+curve-gradient-apply =
+    Appliquer au groupe
+    .hint = Répartit le nuancier régulièrement sur les séries du groupe, dans l'ordre de la liste
+curve-gradient-blue-red = Bleu → Rouge
+curve-gradient-black-red = Noir → Rouge
+curve-gradient-black-blue = Noir → Bleu
+curve-gradient-blue-yellow = Bleu → Jaune
+curve-gradient-green-red = Vert → Rouge
+curve-gradient-blue-white-red = Bleu → Blanc → Rouge
+curve-gradient-viridis = Viridis
+curve-gradient-plasma = Plasma
+
 plot-type-scatter = Points
 plot-type-line = Ligne
 plot-type-line-symbol = Ligne + symboles

@@ -134,6 +134,7 @@
 //! du script n'apparaîtrait qu'au prochain mouvement de souris.
 
 mod contents;
+mod curve_settings;
 mod dialogs;
 mod figure_copy;
 mod file_drop;

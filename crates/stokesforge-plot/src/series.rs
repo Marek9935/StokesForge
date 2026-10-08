@@ -193,6 +193,11 @@ pub struct SeriesSpec {
     /// colonne (cinétique : une colonne = un instant). `y` ne sert alors
     /// qu'à désigner la feuille (une de ses colonnes) et `x` est ignoré.
     pub row: Option<usize>,
+    /// Groupe de courbes du panneau (#177) : les séries qui portent le même
+    /// numéro se règlent ensemble (style commun, nuancier). `None` : courbe
+    /// seule. Le numéro n'a de sens que dans son panneau ; voir
+    /// [`crate::PanelSpec::push_series_batch`].
+    pub group: Option<u32>,
 }
 
 impl SeriesSpec {
@@ -216,6 +221,7 @@ impl SeriesSpec {
             bar_width: None,
             histogram_bins: DEFAULT_HISTOGRAM_BINS,
             row: None,
+            group: None,
         }
     }
 

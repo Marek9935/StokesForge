@@ -343,7 +343,11 @@ const ZONE_43: &[&str] = &[
     "graph_settings_page",
     "plot_area_settings_page",
     "axes_settings_page",
-    "series_settings_page",
+    "curve_settings_page",
+    "series_list",
+    "group_editor",
+    "group_style_editor",
+    "gradient_editor",
     "theme_editor",
     "formula_memo",
     "text_field",
@@ -479,7 +483,7 @@ fn la_zone_43_garde_les_pages_extraites_des_proprietes() {
         "graph_settings_page",
         "plot_area_settings_page",
         "axes_settings_page",
-        "series_settings_page",
+        "curve_settings_page",
     ] {
         let code =
             format!("fn {page}(ui: &mut Ui) {{ champ(ui, \"Titre non traduit\", &mut x); }}");

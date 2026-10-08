@@ -50,6 +50,25 @@ série à jour) ; une feuille sans x' donne une série vide, la perte de l'ancre
 une référence rompue. `NodeCopy::capture` embarque toutes les colonnes x' de la
 feuille quand un graphe copié a une telle série.
 
+**Groupe de séries (#177).** `SeriesSpec::group: Option<u32>` : les séries d'un
+calque qui portent le même numéro forment un groupe. Il naît à l'**ajout
+simultané** de deux séries ou plus (`PanelSpec::push_series_batch` : Plot ▸ sur
+plusieurs colonnes, dépôt de colonnes ou de lignes, via `plot_columns`,
+`add_series_to_graph`, `add_rows_to_graph`) ; une série ajoutée seule n'en a pas.
+Le numéro n'a de sens que dans son calque (`next_group_id`, `group_members`,
+`group_ids`). Un groupe n'est **pas** un nœud ni une commande : c'est un champ du
+`PlotSpec`, modifié par `EditPlotSpec`/`SetPlotSpec` comme le reste. Son style
+commun n'est pas stocké à part : la fenêtre des séries l'écrit dans chaque
+membre (une série réglée seule ensuite garde son exception). Le groupe n'est
+pas l'ancien nœud « Plot Group » de l'Object Manager, qui liste toutes les
+séries d'un calque (`VisibilityTarget::Group`).
+
+**Nuanciers (#178).** `stokesforge_plot::gradient` : `GRADIENT_PRESETS` (bleu →
+rouge, noir → rouge…) et `gradient_colors(arrêts, n)`, couleurs `#RRGGBB`
+régulièrement espacées entre le premier et le dernier arrêt, quel que soit `n`.
+Rien n'est stocké : « Appliquer au groupe » écrit les couleurs dans les séries
+(le nuancier appliqué vit donc dans le `.stf` par les couleurs des courbes).
+
 Les listes d'enfants vivent **dans** la nature du nœud : une colonne, un
 graphe, une matrice ou une note n'en a pas, et c'est garanti à la compilation
 plutôt que par une vérification.

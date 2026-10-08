@@ -398,6 +398,31 @@ struct PickerMemory {
     hsv: (f32, f32, f32),
 }
 
+/// Hauteur de la bande d'aperçu d'un nuancier.
+const GRADIENT_STRIP_HEIGHT: f32 = 14.0;
+
+/// Aperçu d'un nuancier (#178) : une bande de tranches, une par couleur
+/// `#RRGGBB` de `colors`, sur toute la largeur disponible. Une couleur
+/// illisible laisse sa tranche vide.
+pub(crate) fn gradient_strip(ui: &mut egui::Ui, colors: &[String]) {
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), GRADIENT_STRIP_HEIGHT),
+        egui::Sense::hover(),
+    );
+    if colors.is_empty() {
+        return;
+    }
+    let step = rect.width() / colors.len() as f32;
+    for (index, color) in colors.iter().enumerate() {
+        if let Some(rgba) = parse_hex(color) {
+            let min = rect.min + Vec2::new(index as f32 * step, 0.0);
+            let slice =
+                Rect::from_min_size(min, Vec2::new(step.ceil(), rect.height())).intersect(rect);
+            paint_swatch(ui.painter(), slice, rgba);
+        }
+    }
+}
+
 /// Peint `rgba` dans `rect`, sur un damier si elle n'est pas opaque.
 fn paint_swatch(painter: &egui::Painter, rect: Rect, [r, g, b, a]: [u8; 4]) {
     if a < 255 {

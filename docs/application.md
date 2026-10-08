@@ -40,6 +40,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`) |
 | `app/format.rs` | barres de format de texte et d'objet, barre contextuelle : `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (les barres elles-mêmes : `crate::toolbar`) |
 | `app/project_manager.rs` | Project Manager : `project_manager_panel` (panneau fixe) et l'arbre `project_manager_contents_from_tree`, commun au panneau et à la fenêtre détachée |
+| `app/curve_settings.rs` | fenêtre des propriétés des séries (#177–#179) : liste, groupe, style commun, nuanciers (`curve_settings_page`) ; ouverte comme onglet `PlotSettingsTab::Series` de `plot_settings_window` |
 | `app/object_manager_ui.rs` | Object Manager peint : `object_manager_panel`, `run_object_manager_request`, lignes, cases, menus, glisser des séries (le modèle : `crate::object_manager`) |
 | `app/script_console.rs` | console de script : `script_panel`, lecture `ScriptConsoleModel`, contenu commun attaché/détaché, saisie, Exécuter/Arrêter, sortie |
 | `app/tab.rs` | `Tab`, l'onglet d'une fenêtre de contenu (classeur, graphe, matrice, note), ses traductions vers le modèle (`tab_for_window`, `tab_node`), son titre (`tab_title`, `tab_title_from_tree`, nœud supprimé compris) et son miroir lisible par `crate::state` (`active_tab_kind`) |
@@ -1499,8 +1500,9 @@ sélectionner un graphique au premier plan sans rien y sélectionner, Ctrl+C, pu
 **Onglets** (`state::PlotSettingsTab`, clés `plot-tab-*`, en anglais) :
 « General » (titre et sa couleur, fond), « Plot Area » (titre du calque,
 quadrillage), « Axes » (un axe à la fois, choisi en tête de page : titre de
-l'axe — grandeur et unités —, échelle, affichage, couleur de l'axe), « Series »,
-« Legend » et « Theme ». Les textes de toute la fenêtre sont des clés `plot-*`
+l'axe — grandeur et unités —, échelle, affichage, couleur de l'axe),
+« Legend » et « Theme ». Les séries n'ont plus d'onglet (#179) : elles ont leur
+propre fenêtre, **Series Properties**, décrite plus bas. Les textes de toute la fenêtre sont des clés `plot-*`
 du catalogue `en` (infobulle en attribut `.hint`), selon le glossaire
 `docs/textes-interface.md` ; les noms saisis (titres, noms de série, thèmes)
 sont des données, jamais traduits.
@@ -1652,7 +1654,21 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
   `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`,
   `inverted`, `auto_range`, et `range_min`/`range_max` quand `auto_range`
   est décoché ;
-- **Séries** — une liste (`egui::ScrollArea` bornée en hauteur,
+- **Séries** (#179 : fenêtre à part, `app/curve_settings.rs` ; `PlotSettingsTab::Series`
+  n'est plus dans `PlotSettingsTab::ALL` mais choisit cette page dans
+  `plot_settings_window` — même brouillon, autre titre `curve-window-title`, autre
+  identité egui et autre taille ; ouverte par le double-clic sur une courbe de la
+  figure ou sur sa ligne de l'Object Manager, `Properties…` et Graph › Properties ›
+  Series…). Liste à gauche (`list_row`, suffixe « · Group n », Move Up / Move
+  Down qui changent le rang), réglages à droite : le **groupe** de la série
+  (liste déroulante Aucun / Group n / New group ; groupe créé à l'ajout
+  simultané, #177), son **style commun** (style et épaisseur du trait, forme et
+  taille du symbole : écrits dans chaque membre dès qu'on y touche) et son
+  **nuancier** (#178 : nuanciers fournis `GRADIENT_PRESETS` ou personnalisé à N
+  couleurs, aperçu, « Apply to Group » qui répartit les couleurs sur les
+  membres dans l'ordre de la liste) ; puis les réglages propres à la série. Le
+  nuancier personnalisé n'est qu'un état de fenêtre (non enregistré dans les
+  préférences). Ancienne description de la liste : (`egui::ScrollArea` bornée en hauteur,
   `selectable_label` par série, libellé `state::series_list_label` : le nom
   de la série s'il est renseigné, sinon le nom long de la colonne Y, sinon
   son nom de nœud, sinon « (référence rompue) » — le même calcul que

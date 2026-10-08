@@ -254,6 +254,9 @@ seuls les textes ancrés restent rangés dans leur calque.
 `#[serde(default)]` : les fichiers sans eux se relisent comme avant (`None`). Un
 x' non fini lu d'un fichier est ramené à `None`.
 
+`SeriesSpecRecord::group` (#177, `Option<u32>`) : `#[serde(default)]`, les
+fichiers sans lui se relisent sans groupe.
+
 ## Visibilité des objets (#81, #85)
 
 La visibilité des séries était déjà transportée par `SeriesSpecRecord`.

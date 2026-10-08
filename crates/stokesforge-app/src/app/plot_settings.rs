@@ -17,14 +17,13 @@ use stokesforge_plot::{
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
 use crate::state::{
-    parse_x_prime, series_list_label, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab,
-    SaveTarget,
+    parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
 use crate::theme::section_title;
 use crate::tr;
 
+use super::curve_settings::curve_settings_page;
 use super::dialogs::{modal_dialog, DialogOutcome};
-use super::list_row::list_row;
 use super::tab_strip::{tab_strip, TabStripSide};
 
 /// Largeur par défaut de la fenêtre des propriétés d'un graphe
@@ -34,6 +33,10 @@ const PLOT_SETTINGS_WIDTH: f32 = 380.0;
 /// se redimensionne ensuite librement, y compris plus haut que son contenu
 /// (voir [`plot_settings_contents`]).
 const PLOT_SETTINGS_HEIGHT: f32 = 460.0;
+/// Dimensions par défaut de la fenêtre des séries (#179) : une liste et un
+/// éditeur côte à côte.
+const CURVE_SETTINGS_WIDTH: f32 = 640.0;
+const CURVE_SETTINGS_HEIGHT: f32 = 500.0;
 
 /// Fenêtre des propriétés d'un graphe : un dialogue flottant (même famille
 /// que `import_window`), ouvert par le clic droit sur un composant du
@@ -75,15 +78,26 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
         state.cancel_plot_settings();
         return;
     };
-    let title = tr!("plot-window-title", name = node.name());
+    // Les séries ont leur propre fenêtre (#179) : même brouillon, autre titre,
+    // autre taille, autre identité (donc sa propre place à l'écran).
+    let curves = settings.tab == PlotSettingsTab::Series;
+    let (title, id, size) = if curves {
+        (
+            tr!("curve-window-title", name = node.name()),
+            "stokesforge_curve_settings",
+            egui::vec2(CURVE_SETTINGS_WIDTH, CURVE_SETTINGS_HEIGHT),
+        )
+    } else {
+        (
+            tr!("plot-window-title", name = node.name()),
+            "stokesforge_plot_settings",
+            egui::vec2(PLOT_SETTINGS_WIDTH, PLOT_SETTINGS_HEIGHT),
+        )
+    };
     state.begin_plot_edit(settings.graph);
-    let outcome = modal_dialog(
-        ctx,
-        egui::Id::new("stokesforge_plot_settings"),
-        &title,
-        egui::vec2(PLOT_SETTINGS_WIDTH, PLOT_SETTINGS_HEIGHT),
-        |ui| plot_settings_contents(ui, state, &tree, settings),
-    );
+    let outcome = modal_dialog(ctx, egui::Id::new(id), &title, size, |ui| {
+        plot_settings_contents(ui, state, &tree, settings)
+    });
     match outcome {
         DialogOutcome::Open => {}
         DialogOutcome::Accept => state.close_plot_settings(),
@@ -174,22 +188,24 @@ fn plot_settings_contents(
     let mut chosen_axis = settings.axis;
     // Même bande que les onglets de feuille (`tab_strip`, issue #19) : elle
     // défile au lieu de rétrécir quand la fenêtre est étroite.
-    let tabs: Vec<(PlotSettingsTab, String)> = PlotSettingsTab::ALL
-        .iter()
-        .map(|tab| (*tab, tab.label()))
-        .collect();
-    // La bande trace son propre filet sous les onglets (#169) : pas de
-    // séparateur en plus, seulement l'espace qu'il laissait.
-    tab_strip(
-        ui,
-        TabStripSide::Top,
-        &tabs,
-        settings.tab,
-        |tab| chosen_tab = tab,
-        None,
-        || {},
-    );
-    ui.add_space(ui.spacing().item_spacing.y);
+    if settings.tab != PlotSettingsTab::Series {
+        let tabs: Vec<(PlotSettingsTab, String)> = PlotSettingsTab::ALL
+            .iter()
+            .map(|tab| (*tab, tab.label()))
+            .collect();
+        // La bande trace son propre filet sous les onglets (#169) : pas de
+        // séparateur en plus, seulement l'espace qu'il laissait.
+        tab_strip(
+            ui,
+            TabStripSide::Top,
+            &tabs,
+            settings.tab,
+            |tab| chosen_tab = tab,
+            None,
+            || {},
+        );
+        ui.add_space(ui.spacing().item_spacing.y);
+    }
 
     let mut commit = false;
     // Couleurs enregistrées, lues avant d'emprunter le brouillon ; les
@@ -227,41 +243,43 @@ fn plot_settings_contents(
         // `egui::Window` redimensionnable se recale sur la hauteur de son
         // contenu, et on ne pouvait pas l'agrandir au-delà. Le même réglage
         // la fait défiler quand la fenêtre est plus petite que la page.
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| match chosen_tab {
-                PlotSettingsTab::Graph => {
-                    commit |= graph_settings_page(ui, spec, &mut env);
-                }
-                PlotSettingsTab::PlotArea => {
-                    let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
-                        return;
-                    };
-                    commit |= plot_area_settings_page(ui, panel);
-                }
-                PlotSettingsTab::Axes => {
-                    let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
-                        return;
-                    };
-                    commit |= axes_settings_page(ui, panel, &mut chosen_axis, &mut env);
-                }
-                PlotSettingsTab::Series => {
-                    let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
-                        return;
-                    };
-                    commit |=
-                        series_settings_page(ui, panel, tree, &mut edit.selected_series, &mut env);
-                }
-                PlotSettingsTab::Theme => {
-                    commit |= theme_editor(ui, spec, &mut env);
-                }
-                PlotSettingsTab::Legend => {
-                    let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
-                        return;
-                    };
-                    commit |= legend_editor(ui, &mut panel.legend);
-                }
-            });
+        if chosen_tab == PlotSettingsTab::Series {
+            // Deux colonnes qui défilent chacune : pas de défilement commun.
+            if let Some(panel) = spec.panels.get_mut(edit.selected_panel) {
+                commit |= curve_settings_page(ui, panel, tree, &mut edit.selected_series, &mut env);
+            }
+        } else {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| match chosen_tab {
+                    PlotSettingsTab::Graph => {
+                        commit |= graph_settings_page(ui, spec, &mut env);
+                    }
+                    PlotSettingsTab::PlotArea => {
+                        let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
+                            return;
+                        };
+                        commit |= plot_area_settings_page(ui, panel);
+                    }
+                    PlotSettingsTab::Axes => {
+                        let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
+                            return;
+                        };
+                        commit |= axes_settings_page(ui, panel, &mut chosen_axis, &mut env);
+                    }
+                    // Les séries ont leur fenêtre : voir plus haut.
+                    PlotSettingsTab::Series => {}
+                    PlotSettingsTab::Theme => {
+                        commit |= theme_editor(ui, spec, &mut env);
+                    }
+                    PlotSettingsTab::Legend => {
+                        let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
+                            return;
+                        };
+                        commit |= legend_editor(ui, &mut panel.legend);
+                    }
+                });
+        }
     }
     if commit {
         state.commit_plot_edit();
@@ -373,47 +391,6 @@ fn axes_settings_page(
         PlotAxis::Right => &mut panel.right,
     };
     commit |= axis_editor(ui, axis, env);
-    commit
-}
-
-/// Page des séries : liste et éditeur de la sélection, sans valider le choix seul.
-fn series_settings_page(
-    ui: &mut egui::Ui,
-    panel: &mut PanelSpec,
-    tree: &Tree,
-    selected_series: &mut usize,
-    env: &mut PickerEnv,
-) -> bool {
-    let mut commit = false;
-    if panel.series.is_empty() {
-        ui.weak(tr!("plot-series-empty"));
-        return false;
-    }
-    if *selected_series >= panel.series.len() {
-        *selected_series = panel.series.len() - 1;
-    }
-    egui::ScrollArea::vertical()
-        .id_salt("plot_settings_series_list")
-        .max_height(140.0)
-        .show(ui, |ui| {
-            // #169 : une liste, donc des lignes de liste (`list_row`).
-            for (index, series) in panel.series.iter().enumerate() {
-                let label = series_list_label(tree, series);
-                if ui
-                    .push_id(index, |ui| {
-                        list_row(ui, None, &label, *selected_series == index, false)
-                    })
-                    .inner
-                    .clicked()
-                {
-                    *selected_series = index;
-                }
-            }
-        });
-    ui.separator();
-    if let Some(series) = panel.series.get_mut(*selected_series) {
-        commit |= series_editor(ui, series, env);
-    }
     commit
 }
 
@@ -631,7 +608,7 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
 /// peut y revenir alors que rien ne sait le reconstruire. Une série qui le
 /// porte s'affiche quand même, en lecture seule pour ce seul champ — le
 /// reste (nom, visibilité...) reste éditable normalement.
-fn series_editor(
+pub(super) fn series_editor(
     ui: &mut egui::Ui,
     series: &mut stokesforge_plot::SeriesSpec,
     env: &mut PickerEnv,
@@ -831,7 +808,7 @@ fn plot_type_label(plot_type: &PlotType) -> String {
 }
 
 /// Libellé d'un [`LineStyle`].
-fn line_style_label(style: LineStyle) -> String {
+pub(super) fn line_style_label(style: LineStyle) -> String {
     match style {
         LineStyle::None => tr!("plot-line-style-none"),
         LineStyle::Solid => tr!("plot-line-style-solid"),
@@ -842,7 +819,7 @@ fn line_style_label(style: LineStyle) -> String {
 }
 
 /// Libellé d'un [`SymbolShape`].
-fn symbol_shape_label(shape: SymbolShape) -> String {
+pub(super) fn symbol_shape_label(shape: SymbolShape) -> String {
     match shape {
         SymbolShape::None => tr!("plot-symbol-none"),
         SymbolShape::Circle => tr!("plot-symbol-circle"),
@@ -1326,6 +1303,49 @@ mod tests {
         assert_eq!(apres.panels[0].series[0], original.panels[0].series[0]);
         assert!(!apres.panels[0].series[1].visible);
         assert_eq!(apres.panels[0].series[1].name, "Seconde");
+    }
+
+    /// #177–#179 : les séries ont leur fenêtre — la bande du graphe ne les
+    /// propose plus — qui montre le groupe de la série choisie, et « Appliquer
+    /// au groupe » répartit le nuancier sur ses seules séries, jusqu'au modèle.
+    #[test]
+    fn la_fenetre_des_series_regle_un_groupe_et_lui_applique_un_nuancier() {
+        let mut banc = banc(|spec| {
+            let panel = panneau(spec);
+            let modele = panel.series[0].clone();
+            panel.series.clear();
+            panel.push_series_batch(vec![modele.clone(), modele.clone()]);
+            panel.push_series_batch(vec![modele]);
+        });
+        let context = contexte();
+
+        banc.ouvrir(PlotSettingsTab::Graph, None);
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(!est_peint(&peints, &PlotSettingsTab::Series.label()));
+
+        banc.ouvrir(PlotSettingsTab::Series, None);
+        banc.state.plot_edit_mut().unwrap().selected_series = 1;
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(!est_peint(&peints, &PlotSettingsTab::Graph.label()));
+        assert!(est_peint(&peints, &tr!("curve-group-section")));
+        assert!(est_peint(
+            &peints,
+            &tr!("curve-group-style-note", count = 2)
+        ));
+        let original = banc.modele();
+
+        cliquer_libelle(&context, &mut banc.state, &tr!("curve-gradient-apply"));
+        let apres = banc.modele();
+        let couleurs: Vec<&str> = apres.panels[0]
+            .series
+            .iter()
+            .map(|s| s.line.color.as_str())
+            .collect();
+        assert_eq!(couleurs[..2], ["#0000ff", "#ff0000"]);
+        assert_eq!(
+            apres.panels[0].series[2], original.panels[0].series[2],
+            "la série d'un autre groupe n'est pas touchée"
+        );
     }
 
     /// #124 : vérifie le retour de la page du graphe jusqu'à la validation

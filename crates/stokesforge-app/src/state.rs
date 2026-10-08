@@ -1820,7 +1820,8 @@ pub enum PlotSettingsTab {
     PlotArea,
     /// Un axe : titre, échelle, bornes, affichage.
     Axes,
-    /// Les séries tracées.
+    /// Les séries tracées : pas un onglet de la fenêtre du graphe mais leur
+    /// propre fenêtre (#179), ouverte par le double-clic sur une courbe.
     Series,
     /// La légende.
     Legend,
@@ -1829,12 +1830,12 @@ pub enum PlotSettingsTab {
 }
 
 impl PlotSettingsTab {
-    /// Tous les onglets, dans l'ordre d'affichage.
-    pub const ALL: [PlotSettingsTab; 6] = [
+    /// Les onglets de la fenêtre du graphe, dans l'ordre d'affichage (les séries
+    /// ont leur fenêtre, #179).
+    pub const ALL: [PlotSettingsTab; 5] = [
         PlotSettingsTab::Graph,
         PlotSettingsTab::PlotArea,
         PlotSettingsTab::Axes,
-        PlotSettingsTab::Series,
         PlotSettingsTab::Legend,
         PlotSettingsTab::Theme,
     ];
@@ -7506,18 +7507,16 @@ impl AppState {
             self.fail(format!("{book} n'a pas de dossier parent"));
             return;
         };
-        let panel = PanelSpec {
-            series: planned.primary,
-            ..PanelSpec::default()
-        };
+        // Des courbes tracées ensemble forment un groupe (#177).
+        let mut panel = PanelSpec::default();
+        panel.push_series_batch(planned.primary);
         // Les colonnes Y2 vont sur un second calque superposé : axe X en
         // haut, axe Y à droite, échelles propres (#167).
         let mut panels = vec![panel.clone()];
         if !planned.secondary.is_empty() {
-            panels.push(PanelSpec {
-                series: planned.secondary,
-                ..PanelSpec::overlay_on(&panel, second_layer())
-            });
+            let mut layer = PanelSpec::overlay_on(&panel, second_layer());
+            layer.push_series_batch(planned.secondary);
+            panels.push(layer);
         }
         let spec = PlotSpec {
             panels: Panels::new(panels),
@@ -7588,7 +7587,7 @@ impl AppState {
             return;
         }
         if let Some(target) = spec.panels.get_mut(panel) {
-            target.series.extend(planned.primary);
+            target.push_series_batch(planned.primary);
         }
         if !planned.secondary.is_empty() {
             let index = match second {
@@ -7603,7 +7602,7 @@ impl AppState {
                 }
             };
             if let Some(layer) = spec.panels.get_mut(index) {
-                layer.series.extend(planned.secondary);
+                layer.push_series_batch(planned.secondary);
             }
         }
         self.execute(Command::SetPlotSpec { graph, spec });
@@ -7705,9 +7704,7 @@ impl AppState {
             return;
         };
         let start = layer.series.len();
-        layer
-            .series
-            .extend(row_series(anchor, &rows, start, &plot_type));
+        layer.push_series_batch(row_series(anchor, &rows, start, &plot_type));
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 
@@ -7735,10 +7732,8 @@ impl AppState {
             self.fail(format!("{sheet} n'est pas une feuille de ce projet"));
             return;
         };
-        let panel = PanelSpec {
-            series: row_series(anchor, &rows, 0, &plot_type),
-            ..PanelSpec::default()
-        };
+        let mut panel = PanelSpec::default();
+        panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type));
         let spec = PlotSpec {
             panels: Panels::new(vec![panel]),
             ..PlotSpec::default()
