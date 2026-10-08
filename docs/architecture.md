@@ -63,7 +63,7 @@ dépendances.
 | `stokesforge-cli` | import et scripts Python sans interface | [application](application.md) |
 | `stokesforge-importer` | du résultat de `stokesforge-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
 | `stokesforge-clipboard` | offre d'un même contenu au presse-papiers système sous plusieurs types MIME (la figure d'un graphe : SVG, PNG, PDF) ; Wayland, X11, Windows, macOS ; indépendant du reste du workspace | [application](application.md) |
-| `stokesforge-robustesse` | 21 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
+| `stokesforge-robustesse` | 22 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
 | `stokesforge-arch-guard` | lecture commune des `Cargo.toml` pour les garde-fous de dépendances (dev-dependency) | [tests](tests.md) |
 
 ## Les trois lignes de séparation

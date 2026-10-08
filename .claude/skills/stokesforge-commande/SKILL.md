@@ -57,6 +57,17 @@ Conventions déjà arbitrées, à suivre plutôt qu'à rejouer :
   `Column::version` vaille encore `v` **au moment d'appliquer** — c'est ce qui
   ferme le TOCTOU entre l'instantané qu'un script a lu et la commande qu'il
   envoie.
+- **toute écriture de données d'une colonne tire une version neuve**
+  (`Project::next_column_version`, comme `set_values`, `set_length`,
+  `set_column_type`, `insert_rows`…), et une colonne **insérée** avec un
+  numéro déjà porté fait passer le compteur au-delà (`Project::insert_node`,
+  que tout ajout de nœud doit emprunter) : le recalcul ciblé des formules
+  (#193, invariant 11) compare des versions et croit à jour une formule dont
+  une source aurait changé sous un ancien numéro. Une nouvelle commande qui écrit
+  des cellules passe donc par ces primitives, jamais par la `Column` en
+  direct ; si elle peut viser une colonne-formule, un cas nommé dans
+  `stokesforge-session/tests/recalc_cible.rs` vérifie que la formule la
+  réécrit (`docs/tests.md`, « Recalcul ciblé », B).
 
 ## Structurelle ou données — la question qui décide du coût
 
@@ -132,6 +143,7 @@ Dans cet ordre, en s'arrêtant aux maillons que la commande touche réellement :
 | nature structurelle | l'ordre LIFO tient dans une macro (`stokesforge-commands/tests/history.rs`) |
 | persistance | aller-retour `.stf` (`stokesforge-persistence/tests/roundtrip.rs`) |
 | chemin d'écriture non annulable | `b21` doit rester vert |
+| écriture de données de colonne | le geste ajouté aux tirages de `b14` (version ↔ contenu) et de `b22` (recalcul ciblé contre complet) |
 | mémoire | `stokesforge-commands/tests/memory_pinning.rs` : l'historique n'épingle pas indéfiniment de gros buffers |
 | interface | `stokesforge-app/tests/shell.rs` pour l'`Action` correspondante |
 
@@ -150,6 +162,7 @@ dans `stokesforge-robustesse/src/lib.rs`.
 - [ ] transport `.stf` ajouté si l'état doit survivre au rechargement
 - [ ] `Action` + `dispatch` + rafraîchissement de l'instantané côté UI
 - [ ] tests : undo/redo, macro LIFO, aller-retour `.stf`, `b21`
+- [ ] écriture de cellules : version neuve par `Project`, geste ajouté à `b14` et `b22`
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts
 
 ## Copie générique (#105–106)

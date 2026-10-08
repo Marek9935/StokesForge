@@ -404,12 +404,8 @@ impl Project {
                     }
                 }
                 // Une version venue d'un autre projet ne doit jamais être
-                // réattribuée plus tard à un autre contenu de cette colonne.
-                if let NodeKind::Column(column) = &kind {
-                    self.column_version_counter = self
-                        .column_version_counter
-                        .max(column.version().saturating_add(1));
-                }
+                // réattribuée plus tard à un autre contenu de cette colonne :
+                // `insert_node`, ci-dessous, fait passer le compteur au-delà.
                 if let Some(children) = kind.children_mut() {
                     children.clear();
                 }
@@ -522,6 +518,15 @@ impl Project {
 
     /// Insère un nœud générique **sans enfants** à `index` dans `parent`.
     /// Façade bas niveau des méthodes `add_*`.
+    ///
+    /// Une colonne garde la version qu'elle porte (venue d'un fichier, d'un
+    /// autre projet, d'un instantané d'avant un chargement), mais le compteur
+    /// du projet passe au-delà : sans quoi une écriture future de cette
+    /// colonne pourrait retirer ce numéro pour un autre contenu, et le
+    /// recalcul ciblé des formules (#193) croirait à jour une formule qui la
+    /// lit — faux « propre » trouvé en relecture, verrouillé par
+    /// `une_colonne_ajoutee_avec_sa_version_ne_fait_pas_resservir_ce_numero`
+    /// (`stokesforge-session/tests/recalc_cible.rs`).
     pub fn insert_node(
         &mut self,
         parent: NodeId,
@@ -533,9 +538,18 @@ impl Project {
         // l'arbre ni consommer un identifiant.
         self.tree.validate_insert(parent, index, name, &kind)?;
         let id = self.ids.next()?;
+        let version = match &kind {
+            NodeKind::Column(column) => Some(column.version()),
+            _ => None,
+        };
         let node = Node::new(id, name, kind)?;
         let tree = Arc::make_mut(&mut self.tree);
-        tree.insert(parent, index, node)
+        let inserted = tree.insert(parent, index, node)?;
+        if let Some(version) = version {
+            self.column_version_counter =
+                self.column_version_counter.max(version.saturating_add(1));
+        }
+        Ok(inserted)
     }
 
     /// Retire `id` et toute sa descendance. Rend l'index qu'il occupait.
@@ -1070,6 +1084,42 @@ mod tests {
     // Le helper a suivi la résolution dans `tree.rs` ; son test reste ici,
     // inchangé, et l'importe de son nouveau domicile.
     use crate::tree::display_folders;
+
+    /// Une colonne insérée avec sa version la garde, et le compteur passe
+    /// au-delà : aucune écriture future ne retirera ce numéro (#193). Le
+    /// témoin : une colonne neuve (version 0) ne fait pas reculer le
+    /// compteur, qui reste au-delà de ce qu'il a déjà donné.
+    #[test]
+    fn une_colonne_inseree_fait_passer_le_compteur_au_dela_de_sa_version() {
+        let mut project = Project::new("Demo").expect("projet");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("classeur");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+        let venue = Column::from_block_with_version(
+            ColumnType::Numeric,
+            ValueBlock::Float(vec![1.0]),
+            ColumnMeta::default(),
+            40,
+        )
+        .expect("colonne");
+        let id = project
+            .add_column(sheet, None, None, venue)
+            .expect("insertion");
+        assert_eq!(
+            project
+                .tree()
+                .node(id)
+                .and_then(Node::as_column)
+                .map(Column::version),
+            Some(40)
+        );
+        assert_eq!(project.next_column_version(), 41);
+
+        project
+            .add_column(sheet, None, None, Column::from_f64(&[2.0]))
+            .expect("insertion");
+        assert_eq!(project.next_column_version(), 42, "témoin : pas de recul");
+    }
 
     #[test]
     fn spreadsheet_names_follow_the_reference_algorithm() {
