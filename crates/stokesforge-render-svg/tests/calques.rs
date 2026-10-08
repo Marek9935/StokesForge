@@ -97,3 +97,28 @@ fn une_serie_ligne_se_trace_contre_les_x_prime() {
         "courbe absente"
     );
 }
+
+/// Les axes tracés se rejoignent aux coins : Plotters les laisse à un pixel
+/// l'un de l'autre, le pipeline comble ce coin vide.
+#[test]
+fn les_axes_se_rejoignent_aux_coins() {
+    let coins = |svg: &str| {
+        svg.lines()
+            .filter(|l| l.contains("<polyline"))
+            .filter_map(|l| l.split("points=\"").nth(1))
+            .filter(|p| {
+                let n: Vec<f64> = p
+                    .split([',', ' ', '"'])
+                    .filter_map(|v| v.parse().ok())
+                    .collect();
+                n.len() == 4 && (n[0] - n[2]).abs() == 1.0 && n[1] == n[3]
+            })
+            .count()
+    };
+    assert_eq!(coins(&exporte(None)), 1, "bas-gauche seul");
+    let avec = exporte(Some(OverlaySpec {
+        x_top: true,
+        y_right: true,
+    }));
+    assert_eq!(coins(&avec), 4);
+}

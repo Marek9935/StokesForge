@@ -2058,7 +2058,8 @@ motif avec leur propre bascule, « Afficher les axes »
 même sous-menu Affichage et dans le menu du fond) : non listés par défaut, ils
 ajoutent sous chaque calque, après le groupe de tracés, un groupe « Axes »
 (`VisibilityTarget::Axes`, `LayerRow::axes`) qui réunit une ligne par axe — les
-quatre, bas, gauche, droite et haut, y compris ceux masqués par défaut — avec
+axes que la figure trace : bas et gauche, la droite seulement avec une série
+rattachée, jamais le haut avant les axes miroirs de #176 — avec
 une seule case qui commande `AxisSpec::visible` (ligne d'axe, graduations et
 libellés d'un coup ; le titre garde son `title_visible`). La case du groupe
 « Axes » commande ses quatre axes et reste mixte tant que droite et haut sont

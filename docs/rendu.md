@@ -430,7 +430,8 @@ est vérifié avec les graduations que Plotters posera réellement. Sans solutio
 échelle logarithmique ou étendue explicite (zoom compris) : cadrage
 indépendant. Les graduations linéaires s'écrivent sans décimale quand elles
 sont toutes entières, avec le même nombre de décimales sinon
-(`scale::TickFormat`, #175) ; tous les axes passent par un formateur.
+(`scale::TickFormat`, #175) ; tous les axes passent par un formateur. Les coins où deux axes tracés se
+rejoignent sont comblés (Plotters les laisse à un pixel d'écart).
 
 Un calque est identifié par son **indice dans `PlotSpec::panels`**
 (`DrawnPanel::index`), **pas par son rang dans `DrawnPlot::panels`** : celui-ci

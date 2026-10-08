@@ -8288,55 +8288,38 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     // Cachées par défaut, même textes affichés.
     let hidden = object_tree_with_selection(state.tree(), graph, None, true, false).unwrap();
     assert!(axes(&hidden).is_empty());
-    // Bascule active : le groupe « Axes » et ses quatre axes, masqués par
-    // défaut compris ; les autres objets du calque n'en contiennent aucun.
+    // Bascule active : le groupe « Axes » et les axes que la figure trace
+    // (bas, gauche ; la droite seulement avec une série rattachée, le haut
+    // jamais avant #176) ; les autres objets du calque n'en contiennent aucun.
     let shown = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
     let axis = |side| T::Axis(AxisRef { panel: 0, side });
-    assert_eq!(
-        axes(&shown),
-        [
-            AxisSide::Bottom,
-            AxisSide::Left,
-            AxisSide::Right,
-            AxisSide::Top
-        ]
-        .map(axis)
-    );
+    assert_eq!(axes(&shown), [AxisSide::Bottom, AxisSide::Left].map(axis));
     assert!(shown.layers[0]
         .objects
         .iter()
         .all(|o| !matches!(o.kind, ObjectKind::Axis)));
     // Une case par axe : `AxisSpec::visible`, une seule entrée d'historique.
-    let top = axis(AxisSide::Top);
-    assert!(!top.visibility(&before).checked);
+    let left = axis(AxisSide::Left);
+    assert!(left.visibility(&before).checked);
+    assert!(!T::Axes(0).visibility(&before).mixed);
     state.dispatch(Action::SetPlotVisibility {
         graph,
-        target: top,
-        visible: true,
+        target: left,
+        visible: false,
     });
     let spec = graph_spec(&state, graph);
-    assert!(spec.panels[0].top.visible);
-    assert!(top.visibility(&spec).checked);
-    state.dispatch(Action::Undo);
-    assert_eq!(graph_spec(&state, graph), before);
-    // La case du groupe commande ses quatre axes en une écriture ; mixte tant
-    // que droite et haut sont masqués.
-    assert!(T::Axes(0).visibility(&before).mixed);
+    assert!(!spec.panels[0].left.visible);
+    assert!(!left.visibility(&spec).checked);
+    // La case du groupe est mixte dès qu'un de ses axes est masqué, et les
+    // commande tous en une écriture.
+    assert!(T::Axes(0).visibility(&spec).mixed);
     state.dispatch(Action::SetPlotVisibility {
         graph,
         target: T::Axes(0),
         visible: true,
     });
-    let spec = graph_spec(&state, graph);
-    assert!([
-        AxisSide::Bottom,
-        AxisSide::Left,
-        AxisSide::Right,
-        AxisSide::Top
-    ]
-    .iter()
-    .all(|side| spec.panels[0].axis(*side).visible));
-    assert!(T::Axes(0).visibility(&spec).checked);
+    assert!(T::Axes(0).visibility(&graph_spec(&state, graph)).checked);
+    state.dispatch(Action::Undo);
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
     // Les cases du graphique et du calque ne touchent pas aux axes.

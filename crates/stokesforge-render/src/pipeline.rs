@@ -1026,6 +1026,28 @@ fn draw_panel<DB: DrawingBackend>(
     let screen = plotting.use_screen_coord();
     let threshold = decimate::threshold_for_width(size.0);
 
+    // Plotters trace un axe vertical un pixel hors de la zone (à gauche, ou à
+    // droite) et un axe horizontal un pixel hors d'elle (en bas, ou en haut) :
+    // les coins communs de deux axes tracés restent vides. On les comble, pour
+    // toute la case (le plan réunit les axes de tous ses calques), depuis le
+    // calque ordinaire.
+    if overlay.is_none() {
+        let (left, right) = (origin.0 - 1, origin.0 + size.0 as i32);
+        let (top, bottom) = (origin.1 - 1, origin.1 + size.1 as i32);
+        let ink = rgba(AxisColors::of(&spec.bottom, ink).ticks);
+        for (vertical, horizontal, x, y) in [
+            (plan.left, plan.bottom, left, bottom),
+            (plan.right, plan.bottom, right, bottom),
+            (plan.left, plan.top, left, top),
+            (plan.right, plan.top, right, top),
+        ] {
+            if vertical && horizontal {
+                let inside = if x == left { x + 1 } else { x - 1 };
+                canvas.draw(&PathElement::new(vec![(x, y), (inside, y)], ink))?;
+            }
+        }
+    }
+
     let mut drawn = DrawnPanel {
         index,
         overlay,

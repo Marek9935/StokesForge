@@ -73,6 +73,7 @@ pub const AXIS_SIDES: [AxisSide; 4] = [
 ];
 
 /// Les axes qu'un calque affiche vraiment, donc ceux que l'arbre liste (#171).
+/// Un axe que la figure ne trace pas n'a pas de ligne : sa case serait sans effet.
 ///
 /// Un calque superposé range son axe X dans `bottom` et son axe Y dans
 /// `left`, mais les affiche en haut et à droite, et seulement s'il a une
@@ -86,7 +87,16 @@ pub fn axis_sides(panel: &stokesforge_plot::PanelSpec) -> Vec<AxisSide> {
         .into_iter()
         .filter_map(|(shown, side)| shown.then_some(side))
         .collect(),
-        None => AXIS_SIDES.to_vec(),
+        // Haut : jamais tracé avant les axes miroirs (#176). Droite : tracé
+        // seulement si une série y est rattachée.
+        None => AXIS_SIDES
+            .into_iter()
+            .filter(|side| match side {
+                AxisSide::Top => false,
+                AxisSide::Right => panel.uses_right_axis(),
+                _ => true,
+            })
+            .collect(),
     }
 }
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -605,7 +615,7 @@ mod tests {
             },
         );
         let linked = PanelSpec::overlay_on(&base, OverlaySpec::default());
-        assert_eq!(axis_sides(&base).len(), 4);
+        assert_eq!(axis_sides(&base), [AxisSide::Bottom, AxisSide::Left]);
         assert_eq!(axis_sides(&both), [AxisSide::Bottom, AxisSide::Left]);
         assert_eq!(axis_sides(&only_y), [AxisSide::Left]);
         assert!(axis_sides(&linked).is_empty());
@@ -616,7 +626,7 @@ mod tests {
         assert_ne!(x, axis_label(&base, AxisSide::Bottom));
         assert_ne!(x, y);
         let spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![base, both]));
-        assert_eq!(T::Axes(0).contents(&spec).len(), 4);
+        assert_eq!(T::Axes(0).contents(&spec).len(), 2);
         assert_eq!(T::Axes(1).contents(&spec).len(), 2);
     }
     #[test]
