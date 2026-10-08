@@ -1071,6 +1071,18 @@ impl History {
                 project.remove(id)?;
                 Ok(structural(before, project, label))
             }
+            Command::AddCalculation { draft } => {
+                project.add_calculation(draft)?;
+                Ok(structural(before, project, label))
+            }
+            Command::UpdateCalculation { id, draft } => {
+                project.update_calculation(id, draft)?;
+                Ok(structural(before, project, label))
+            }
+            Command::RemoveCalculation { id, with_columns } => {
+                project.remove_calculation(id, with_columns)?;
+                Ok(structural(before, project, label))
+            }
             Command::SetCells { .. }
             | Command::SetCellsPromoting { .. }
             | Command::SetColumnType { .. }
@@ -1328,7 +1340,10 @@ impl History {
             | Command::AddGraph { .. }
             | Command::AddMatrix { .. }
             | Command::AddNote { .. }
-            | Command::RemoveNode { .. } => {
+            | Command::RemoveNode { .. }
+            | Command::AddCalculation { .. }
+            | Command::UpdateCalculation { .. }
+            | Command::RemoveCalculation { .. } => {
                 unreachable!("apply_data appelée avec une commande structurelle")
             }
         }
@@ -1590,6 +1605,7 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
 ///    colonne-formule n'accepte l'écriture directe de cellules d'aucun
 ///    client : ses valeurs ne sont recalculées que par
 ///    `stokesforge-session::actor` après coup, en dehors de l'historique.
+///    Même refus pour une colonne produite par un calcul d'analyse (#181).
 ///
 /// Une colonne absente ou d'un autre type n'est traitée ni par l'un ni par
 /// l'autre : c'est `Project::set_values`, ensuite, qui rendra l'erreur
@@ -1620,6 +1636,13 @@ fn check_writable_cells(
     }
     if target.is_some_and(|column| column.meta().formula.is_some()) {
         return Err(CoreError::FormulaColumnReadOnly { column }.into());
+    }
+    if let Some((calculation, _)) = project.tree().calculation_of_column(column) {
+        return Err(CoreError::CalculatedColumnReadOnly {
+            column,
+            calculation,
+        }
+        .into());
     }
     Ok(())
 }
@@ -1941,6 +1964,9 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::AddMatrix { .. }
         | Command::AddNote { .. }
         | Command::RemoveNode { .. }
+        | Command::AddCalculation { .. }
+        | Command::UpdateCalculation { .. }
+        | Command::RemoveCalculation { .. }
         | Command::SetWindowMeta { .. }
         | Command::SetNoteText { .. }
         | Command::SetColumnMeta { .. }

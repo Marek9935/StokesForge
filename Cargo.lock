@@ -5088,6 +5088,7 @@ name = "stokesforge-commands"
 version = "0.0.0"
 dependencies = [
  "proptest",
+ "stokesforge-analysis",
  "stokesforge-arch-guard",
  "stokesforge-core",
  "stokesforge-plot",
@@ -5100,6 +5101,7 @@ name = "stokesforge-core"
 version = "0.0.0"
 dependencies = [
  "proptest",
+ "stokesforge-analysis",
  "stokesforge-arch-guard",
  "stokesforge-id",
  "stokesforge-plot",

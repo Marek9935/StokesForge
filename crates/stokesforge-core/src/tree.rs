@@ -11,11 +11,12 @@
 //! mutation du crate. Chacune valide **tout** avant d'écrire quoi que ce soit,
 //! pour qu'un échec laisse l'arbre inchangé.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use stokesforge_plot::SavedColors;
 
+use crate::calc::Calculation;
 use crate::column::Column;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
@@ -45,6 +46,9 @@ pub struct Tree {
     /// pour voyager avec lui : un instantané de session, un retour arrière
     /// structurel et la persistance les voient sans chemin à part.
     saved_colors: SavedColors,
+    /// Calculs d'analyse (#181) — voir [`crate::calc`]. Portés par l'arbre pour
+    /// voyager avec lui, comme les couleurs enregistrées.
+    calculations: BTreeMap<NodeId, Arc<Calculation>>,
 }
 
 impl Tree {
@@ -75,6 +79,7 @@ impl Tree {
             nodes,
             root: id,
             saved_colors: SavedColors::default(),
+            calculations: BTreeMap::new(),
         }
     }
 
@@ -93,6 +98,38 @@ impl Tree {
 
     pub(crate) fn saved_colors_mut(&mut self) -> &mut SavedColors {
         &mut self.saved_colors
+    }
+
+    /// Les calculs d'analyse, par identifiant.
+    pub fn calculations(&self) -> &BTreeMap<NodeId, Arc<Calculation>> {
+        &self.calculations
+    }
+
+    /// Le calcul `id`, s'il existe.
+    pub fn calculation(&self, id: NodeId) -> Option<&Arc<Calculation>> {
+        self.calculations.get(&id)
+    }
+
+    /// Le calcul qui a produit `column`, et le rang de la sortie correspondante
+    /// dans `Calculation::outputs`.
+    pub fn calculation_of_column(&self, column: NodeId) -> Option<(NodeId, usize)> {
+        self.calculations.iter().find_map(|(id, calc)| {
+            calc.outputs
+                .iter()
+                .position(|o| o.column == Some(column))
+                .map(|rank| (*id, rank))
+        })
+    }
+
+    /// Le même arbre, avec ces calculs — pour la persistance, qui reconstruit
+    /// l'arbre puis y repose ce que le fichier portait.
+    pub fn with_calculations(mut self, calculations: BTreeMap<NodeId, Arc<Calculation>>) -> Self {
+        self.calculations = calculations;
+        self
+    }
+
+    pub(crate) fn calculations_mut(&mut self) -> &mut BTreeMap<NodeId, Arc<Calculation>> {
+        &mut self.calculations
     }
 
     /// Reconstruit un arbre depuis une liste de nœuds (persistance). Valide
@@ -114,6 +151,7 @@ impl Tree {
             nodes: map,
             root,
             saved_colors: SavedColors::default(),
+            calculations: BTreeMap::new(),
         };
         tree.validate_loaded()?;
         Ok(tree)

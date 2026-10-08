@@ -10,6 +10,9 @@ const ALLOWED_DEPENDENCIES: &[&str] = &[
     // le PlotSpec que NodeKind::Graph porte (phase R3) — pas de dépendance de
     // dessin : cargo tree -p stokesforge-plot ne montre toujours que stokesforge-id
     "stokesforge-plot",
+    // les types d'une opération d'analyse que le modèle enregistre (#181) :
+    // calcul pur, sans autre dépendance que thiserror (voir son propre garde-fou)
+    "stokesforge-analysis",
 ];
 
 #[test]

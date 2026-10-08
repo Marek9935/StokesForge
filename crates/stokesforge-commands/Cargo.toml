@@ -9,6 +9,7 @@ description = "Commandes du modèle et pile d'historique à deux natures (snapsh
 workspace = true
 
 [dependencies]
+stokesforge-analysis = { path = "../stokesforge-analysis" }
 stokesforge-core = { path = "../stokesforge-core" }
 stokesforge-plot = { path = "../stokesforge-plot" }
 thiserror = "2"

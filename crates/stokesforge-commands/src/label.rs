@@ -26,6 +26,8 @@
 
 use std::fmt;
 
+use stokesforge_analysis::ops::OperationKind;
+
 /// Désignation d'une **colonne** dans un libellé : sa position dans sa
 /// feuille, jamais son nom de nœud.
 ///
@@ -201,6 +203,17 @@ pub enum HistoryLabel {
     },
     /// Modification des couleurs enregistrées du projet.
     SetSavedColors,
+    /// Enregistrement d'un calcul d'analyse (#181).
+    AddCalculation(OperationKind),
+    /// Modification des paramètres d'un calcul d'analyse.
+    UpdateCalculation(OperationKind),
+    /// Retrait d'un calcul d'analyse.
+    RemoveCalculation {
+        /// Famille du calcul retiré, si on la connaît encore.
+        kind: Option<OperationKind>,
+        /// Ses colonnes de sortie sont supprimées avec lui.
+        with_columns: bool,
+    },
     /// Édition ciblée du contenu du graphe, toujours par remplacement du spec.
     EditPlotSpec(PlotEditKind),
     /// Un groupe d'actions annulé d'un bloc.
@@ -331,7 +344,34 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::SetPlotSpec { name: None } => f.write_str("Edit Graph"),
             HistoryLabel::EditPlotSpec(kind) => kind.fmt(f),
             HistoryLabel::SetSavedColors => f.write_str("Edit Saved Colors"),
+            HistoryLabel::AddCalculation(kind) => {
+                write!(f, "Add {} Calculation", kind_title(*kind))
+            }
+            HistoryLabel::UpdateCalculation(kind) => {
+                write!(f, "Edit {} Calculation", kind_title(*kind))
+            }
+            HistoryLabel::RemoveCalculation { kind, with_columns } => {
+                let verb = if *with_columns { "Delete" } else { "Detach" };
+                match kind {
+                    Some(kind) => write!(f, "{verb} {} Calculation", kind_title(*kind)),
+                    None => write!(f, "{verb} Calculation"),
+                }
+            }
             HistoryLabel::Macro(kind) => kind.fmt(f),
         }
+    }
+}
+
+/// Nom anglais d'une famille d'opération, pour le `Display` brut (journaux,
+/// CLI). L'application a ses propres clés traduites.
+fn kind_title(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Baseline => "Baseline",
+        OperationKind::Correct => "Correction",
+        OperationKind::Integrate => "Integration",
+        OperationKind::Fit => "Fit",
+        OperationKind::Peaks => "Peak Decomposition",
+        OperationKind::Reconvolution => "Reconvolution",
+        OperationKind::DirectDeconvolution => "Direct Deconvolution",
     }
 }
