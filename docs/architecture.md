@@ -1,6 +1,6 @@
 # Architecture
 
-Dix-sept crates, une seule direction de dépendance, et une feature
+Dix-huit crates, une seule direction de dépendance, et une feature
 optionnelle (`python`). Cette page donne la carte ; le détail de chaque étage est dans
 sa propre page.
 
@@ -11,6 +11,11 @@ Flèche = « dépend de » (manifestes `Cargo.toml`, vérifiés par
 
 ```text
 stokesforge-id            NodeId seul, zéro dépendance
+   ↑
+stokesforge-analysis      calcul pur (lignes de base, intégrales, ajustements, pics,
+                          déconvolution) : f64 en entrée et en sortie, aucune
+                          dépendance stokesforge — lu par core, commands,
+                          persistence, session, script et app
    ↑
 stokesforge-plot          PlotSpec : quoi tracer, sans savoir comment
    ↑
@@ -23,7 +28,7 @@ stokesforge-session       l'acteur : le &mut Project de la session
 (commands, persistence, core)
    ↑            ↑
 stokesforge-script   stokesforge-render-egui (core, plot, render, session)
-(commands, core, import, importer, plot, python, session)
+(analysis, commands, core, import, importer, plot, python, session)
 + stokesforge-python (aucune dépendance stokesforge)
 
 stokesforge-cli    (core, commands, import, importer, persistence)
@@ -34,7 +39,7 @@ stokesforge-importer (core, import) — plan de feuilles et colonnes du modèle,
                commandes : partagé par l'application, le CLI et les scripts
 stokesforge-clipboard (aucune dépendance stokesforge) — offre multi-format au
                presse-papiers système (SVG, PNG, PDF), un backend par affichage
-stokesforge-app    (clipboard, commands, core, import, importer, persistence, plot,
+stokesforge-app    (analysis, clipboard, commands, core, import, importer, persistence, plot,
                python, render-egui, render-svg, script, session)
 ```
 
@@ -48,6 +53,7 @@ dépendances.
 | Crate | Rôle | Page |
 |---|---|---|
 | `stokesforge-id` | `NodeId`, et rien d'autre | [modèle](modele-de-donnees.md) |
+| `stokesforge-analysis` | traitement mathématique pur (#181) : lignes de base, correction par référence, intégrales, ajustements, pics, déconvolution ; `f64` où `NaN` dit « vide », résultats à clés stables ; ni UI, ni Python, ni autre crate du workspace | [modèle](modele-de-donnees.md) |
 | `stokesforge-plot` | `PlotSpec` : la description d'un graphe, neutre vis-à-vis du renderer | [modèle](modele-de-donnees.md) |
 | `stokesforge-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` | [modèle](modele-de-donnees.md) |
 | `stokesforge-commands` | les commandes, la pile d'undo hybride, les macros | [commandes](commandes-et-historique.md) |
@@ -71,7 +77,7 @@ dépendances.
 Le découpage n'est pas décoratif ; chacune de ces trois frontières est
 **vérifiée par un test** et non par la relecture.
 
-1. **Aucune dépendance UI sous `stokesforge-session`.** `stokesforge-core`,
+1. **Aucune dépendance UI sous `stokesforge-session`.** `stokesforge-analysis`, `stokesforge-core`,
    `stokesforge-plot`, `stokesforge-commands`, `stokesforge-persistence`, `stokesforge-session`,
    `stokesforge-script`, `stokesforge-import`, `stokesforge-importer` et `stokesforge-clipboard` portent chacun un
    `tests/no_ui_dependency.rs` : une liste blanche de dépendances, qui force

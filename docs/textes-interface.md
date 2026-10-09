@@ -237,6 +237,27 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Fit† | Ajuster | Faire coller un modèle aux données | Fitter, Lisser | D |
 | Offset (stack)† | Décalage (empilement) | Translation verticale entre spectres superposés | Espacement | D |
 
+### 2.7 Analyse (#181)
+
+| Anglais | Français | Définition | Refusés | Réf. |
+|---|---|---|---|---|
+| Analysis | Analyse | Menu et fenêtre des traitements mathématiques | Traitement | D |
+| Results | Résultats | Volet sous la grille : calculs conservés et leurs valeurs | Sorties | D |
+| Calculation | Calcul | Un traitement enregistré, avec ses colonnes de sortie | Opération | D |
+| Out of date | Pas à jour | Calcul dont une entrée a changé ou disparu | Périmé, Obsolète | D |
+| Recalculate | Recalculer | Refaire un calcul sur les données actuelles | Rafraîchir | D |
+| Anchor point | Point d'ancrage | Point posé sur l'aperçu pour tracer une ligne de base | Ancre | D |
+| Zone | Zone | Intervalle d'abscisses choisi sur l'aperçu | Région, Plage | D |
+| Reference | Référence | Colonne par laquelle on corrige une série | Témoin | D |
+| IRF (instrument response) | Réponse de l'instrument | Réponse temporelle de l'appareil, à déconvoluer | — | I |
+| Reconvolution | Reconvolution | Ajuster un modèle convolué avec la réponse de l'instrument | — | D |
+| Deconvolution | Déconvolution | Retrouver le signal avant la réponse de l'instrument | — | D |
+| Residuals | Résidus | Écart entre les données et l'ajustement | Erreurs | I |
+| Fitted | Ajusté | Valeur du modèle ajusté | Fitté | D |
+| Std. error | Erreur type | Incertitude d'un paramètre ajusté | Écart-type, Sigma | I |
+| Prominence | Proéminence | Hauteur d'un pic au-dessus de son entourage | Saillance | D |
+| Shift | Décalage | Translation en abscisse de la réponse (≠ *chemical shift*) | Shift | D |
+
 ## 3. Exemples avant / après
 
 Libellés réels, cités tels quels. Règle : numéro de la section 1 ou terme du

@@ -38,6 +38,11 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 |---|---|
 | `app.rs` | orchestration : `StokesForgeApp` et ses champs, `new` (disposition initiale, restauration de l'état des fenêtres), `ui()` et l'**ordre des panneaux**, `collect_shortcuts` (raccourcis globaux, consommés avant les widgets), application différée des actions et ouvertures après la peinture, confirmations bloquantes (nouveau projet, suppression de feuille), drainage des fenêtres détachées, capture et auto-fermeture de vérification. Aucun module de `src/app/` ne lui emprunte d'aide : ce qu'ils partagent vit dans `tab.rs`, `window_detach.rs` ou `crate::color_picker` (#128) |
 | `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`) |
+| `app/analysis_menu.rs` | menu Analysis (#181) : `analysis_menu_contents` (barre de menus et clic droit de colonne, un seul contenu), `analysis_submenu`, `calculation_section` (Edit / Recalculate / Detach / Delete sur une colonne calculée) |
+| `app/analysis_dialog.rs` | fenêtre d'analyse (`modal_dialog_with`, deux colonnes : formulaire + aperçu) et confirmation de suppression d'un calcul (`calculation_delete_window`) |
+| `app/analysis_forms.rs` | les formulaires par famille (`form_body`, `value_row`, tableau des paramètres) |
+| `app/analysis_preview.rs` | l'aperçu peint à la main : outils Points / Zone / Zoom, aimant (Maj), moyenne (Maj + molette), bande des résidus, cache en mémoire temporaire d'egui |
+| `app/results_pane.rs` | volet Results sous la grille d'un classeur : compteur, portée Feuille / Classeur, liste et tableau série × valeur |
 | `app/format.rs` | barres de format de texte et d'objet, barre contextuelle : `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (les barres elles-mêmes : `crate::toolbar`) |
 | `app/project_manager.rs` | Project Manager : `project_manager_panel` (panneau fixe) et l'arbre `project_manager_contents_from_tree`, commun au panneau et à la fenêtre détachée |
 | `app/curve_settings.rs` | fenêtre des propriétés des séries (#177–#179) : liste, groupe, style commun, nuanciers (`curve_settings_page`) ; ouverte comme onglet `PlotSettingsTab::Series` de `plot_settings_window` |
@@ -81,6 +86,31 @@ peinture regroupent uniquement les données ou emprunts disjoints nécessaires
 à une image ; ils n'ajoutent ni état métier ni sous-`Ui`. Les ouvertures et
 fermetures restent appliquées après le parcours de la pile. Une redécoupe
 future reste dans un commit séparé d'un déplacement.
+
+### Analyse : fenêtre, menu, volet Results (#181)
+
+L'interface du traitement mathématique est répartie ainsi :
+
+- `src/analysis.rs` — **le modèle de formulaire** `AnalysisForm` (sans egui) :
+  famille, réglages de chaque famille (tous conservés quand on change de
+  famille), séries, auxiliaire (référence, réponse), `issues()` (ce qui bloque
+  Apply), `operation_for(for_preview)`, `preview(tree)`, `draft(tree)` (noms
+  longs des colonnes de sortie, M6), `from_calculation` (édition), les gestes
+  de l'aperçu (`add_point`, `add_zone`, `remove_near`). Testé sans fenêtre
+  (`tests/analysis.rs`).
+- `src/state/analysis.rs` — l'état et les `Action` (`OpenAnalysis`,
+  `EditCalculation`, `ApplyAnalysis`, `RecalculateCalculations`,
+  `DetachCalculation`, `RequestDeleteCalculation`/`ConfirmDeleteCalculation`) ;
+  Apply passe par `AddCalculation`/`UpdateCalculation` et garde la fenêtre
+  ouverte sur erreur.
+- Les surfaces de `src/app/` : `analysis_menu`, `analysis_dialog`,
+  `analysis_forms`, `analysis_preview`, `results_pane` (table des modules plus haut).
+- L'aperçu est peint à la main (pas de graphe du projet) et **calculé sur le fil
+  de l'interface** : acceptable aux tailles actuelles, suivi en issue.
+- Colonnes périmées : grisées dans la grille, lettre teintée (`theme::stale_color`)
+  et info-bulle ; le volet Results (replié par défaut) liste les calculs
+  conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
+- Les erreurs viennent de `errors::analysis::error_message` (match exhaustif).
 
 ### Menus thématiques (#114)
 

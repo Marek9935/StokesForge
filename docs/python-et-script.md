@@ -137,6 +137,21 @@ avec toute session, y compris une session sans interface.
 | `undo()` | termine puis annule le groupe courant, ou annule le dernier groupe déjà terminé ; `False` si l'historique est vide |
 | `import_file(path, recipe=None)` | import dans un classeur neuf, une macro annulable ; poignées des feuilles créées |
 
+### `pyst.analysis` (#181)
+
+Sous-module des calculs du menu Analysis : `baseline`, `correct`, `integrate`,
+`fit`, `peaks`, `reconvolve`, `deconvolve`. Chaque appel décrit une opération
+sur **une** colonne Y (poignée, X facultatif) et l'enregistre comme un calcul du
+projet par `Command::AddCalculation`, dans le groupe d'écritures du script : un
+seul `pyst.undo()` l'annule avec ses colonnes. Même `compute` que l'interface,
+même recalcul automatique (`auto_recalc`) et même option `keep_results`.
+Retour : un dictionnaire `{columns, values, errors, warnings}` aux clés stables
+du crate de calcul (`"area.total"`, `"param.tau"`, `"peak.height.1"`…) ;
+les avertissements sont en anglais. Les noms longs des colonnes de sortie sont
+anglais aussi. **Limites** : une série par appel (ni lot, ni ajustement global).
+Contrat : `stokesforge-script/tests/analysis.rs`. La dépendance de `script` à
+`stokesforge-analysis` est déclarée dans sa liste blanche (`no_ui_dependency.rs`).
+
 ### Écritures et annulation d'un script (#67)
 
 Les écritures passent par les commandes déjà utilisées par l'application.
