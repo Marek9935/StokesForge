@@ -12,6 +12,7 @@ use eframe::egui;
 use stokesforge_core::NodeId;
 
 use super::analysis_dialog::format_value;
+use super::analysis_handles::select_calculation;
 use super::list_row::list_row;
 use crate::analysis::{kind_title, series_label, value_label, value_unit, with_unit};
 use crate::icons::{icon_button, Icon, IconRole};
@@ -118,6 +119,7 @@ pub(super) fn results_pane(
                                     .clicked()
                                 {
                                     pane.selected = Some(*calc);
+                                    select_calculation(ui.ctx(), pane.selected);
                                 }
                             }
                         });

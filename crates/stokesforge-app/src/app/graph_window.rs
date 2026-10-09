@@ -26,6 +26,7 @@ use crate::state::{
 use crate::theme;
 use crate::tr;
 
+use super::analysis_handles::calculation_handles;
 use super::dialogs::{modal_dialog, DialogOutcome};
 use super::graph_text_edit::{
     add_annotation_at, annotation_editor_id, annotation_editor_ui, open_annotation_editor,
@@ -305,6 +306,9 @@ pub(super) fn graph_view_contents(
             }
             graph_context_menu(ui, view, &snapshot.tree, graph_id, actions);
             annotation_interactions(ui, view, &snapshot.tree, graph_id, actions);
+            if let Some(spec) = crate::state::current_plot_spec(&snapshot.tree, graph_id) {
+                calculation_handles(ui, view, &snapshot.tree, graph_id, &spec, actions);
+            }
             if !keyboard_focus_outside_grid(ui.ctx()) {
                 if let Some(spec) = crate::state::current_plot_spec(&snapshot.tree, graph_id) {
                     if let Some(group) = view.selected_group() {

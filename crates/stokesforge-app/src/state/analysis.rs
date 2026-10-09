@@ -95,6 +95,31 @@ impl AppState {
         }
     }
 
+    /// Un glisser de poignée (#199) : les réglages du calcul changent comme
+    /// dans la fenêtre d'analyse, et c'est la même commande, donc un pas
+    /// d'historique par geste. Rien ne change (et rien n'entre dans
+    /// l'historique) si la poignée n'a pas bougé.
+    pub(super) fn move_calculation_handle(
+        &mut self,
+        id: NodeId,
+        slot: crate::analysis::HandleSlot,
+        x: f64,
+        y: f64,
+    ) {
+        let Some(calc) = self.snapshot.tree.calculation(id) else {
+            self.fail(tr!("status-analysis-gone"));
+            return;
+        };
+        let mut form = AnalysisForm::from_calculation(id, calc);
+        if !form.move_handle(slot, x, y) {
+            return;
+        }
+        match form.draft(&self.snapshot.tree) {
+            Ok(draft) => self.execute(Command::UpdateCalculation { id, draft }),
+            Err(issue) => self.fail(issue_message(&issue)),
+        }
+    }
+
     /// Valide la fenêtre : un calcul neuf ou la modification de l'existant,
     /// en une entrée d'historique. La fenêtre reste ouverte si le calcul
     /// échoue.

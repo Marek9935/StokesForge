@@ -447,6 +447,14 @@ pub enum Action {
     },
     /// Rouvre un calcul existant dans la fenêtre d'analyse.
     EditCalculation(NodeId),
+    /// Fin d'un glisser de poignée sur le graphe (#199) : le calcul reçoit la
+    /// nouvelle position, en **une** entrée d'historique (`UpdateCalculation`).
+    MoveCalculationHandle {
+        calculation: NodeId,
+        slot: crate::analysis::HandleSlot,
+        x: f64,
+        y: f64,
+    },
     /// Ferme la fenêtre d'analyse sans rien enregistrer.
     CloseAnalysis,
     /// Valide la fenêtre d'analyse : un calcul neuf ou modifié, une seule
@@ -4302,6 +4310,12 @@ impl AppState {
                 columns,
             } => self.open_analysis(&preset, sheet, &columns),
             Action::EditCalculation(id) => self.edit_calculation(id),
+            Action::MoveCalculationHandle {
+                calculation,
+                slot,
+                x,
+                y,
+            } => self.move_calculation_handle(calculation, slot, x, y),
             Action::CloseAnalysis => self.analysis = None,
             Action::ApplyAnalysis => self.apply_analysis(),
             Action::RecalculateCalculations(ids) => self.recalculate_calculations(&ids),

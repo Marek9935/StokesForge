@@ -1196,6 +1196,180 @@ impl AnalysisForm {
     }
 }
 
+/// Un ensemble de plages d'un calcul : celui dont on déplace une borne.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RangeSet {
+    /// Les zones de fond d'une ligne de base.
+    BaselineZones,
+    /// Les plages d'une intégrale.
+    Integrate,
+    /// La plage d'un ajustement.
+    Fit,
+    /// La plage d'une décomposition en pics.
+    Peaks,
+    /// La fenêtre d'une reconvolution.
+    Window,
+}
+
+/// Une borne d'une plage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Edge {
+    Lo,
+    Hi,
+}
+
+/// Ce qu'une poignée déplace dans les réglages d'un calcul (#199).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HandleSlot {
+    /// Un point de droite ou d'ancrage : X **et** Y se déplacent.
+    Point(usize),
+    /// La position de départ d'un pic : seul X se déplace.
+    Seed(usize),
+    /// La borne d'une plage : seul X se déplace.
+    Edge(RangeSet, usize, Edge),
+}
+
+/// Une poignée posée sur la figure : où elle est, en données. `y` est `None`
+/// pour les poignées qui ne portent qu'une abscisse.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Handle {
+    pub slot: HandleSlot,
+    pub x: f64,
+    pub y: Option<f64>,
+}
+
+impl AnalysisForm {
+    /// Les poignées que les réglages courants exposent sur le graphe (#199) :
+    /// points d'ancrage, bornes de zones et de plages, positions de pics.
+    pub fn handles(&self) -> Vec<Handle> {
+        let mut out = Vec::new();
+        let mut edges = |set: RangeSet, ranges: &[(f64, f64)]| {
+            for (i, (a, b)) in ranges.iter().enumerate() {
+                out.push(Handle {
+                    slot: HandleSlot::Edge(set, i, Edge::Lo),
+                    x: *a,
+                    y: None,
+                });
+                out.push(Handle {
+                    slot: HandleSlot::Edge(set, i, Edge::Hi),
+                    x: *b,
+                    y: None,
+                });
+            }
+        };
+        let s = &self.setup;
+        match self.kind {
+            OperationKind::Baseline => {
+                if s.baseline.shape == BaselineShape::Zones {
+                    edges(RangeSet::BaselineZones, &s.baseline.zones);
+                } else {
+                    let points = s.baseline.points.clone();
+                    for (i, (x, y)) in points.into_iter().enumerate() {
+                        out.push(Handle {
+                            slot: HandleSlot::Point(i),
+                            x,
+                            y: Some(y),
+                        });
+                    }
+                }
+            }
+            OperationKind::Integrate => edges(RangeSet::Integrate, &s.integrate.ranges),
+            OperationKind::Fit => {
+                edges(RangeSet::Fit, &s.fit.range.into_iter().collect::<Vec<_>>())
+            }
+            OperationKind::Peaks => {
+                edges(
+                    RangeSet::Peaks,
+                    &s.peaks.range.into_iter().collect::<Vec<_>>(),
+                );
+                for (i, seed) in s.peaks.seeds.iter().enumerate() {
+                    out.push(Handle {
+                        slot: HandleSlot::Seed(i),
+                        x: seed.center,
+                        y: None,
+                    });
+                }
+            }
+            OperationKind::Reconvolution => edges(
+                RangeSet::Window,
+                &s.reconv.spec.window.into_iter().collect::<Vec<_>>(),
+            ),
+            _ => {}
+        }
+        out
+    }
+
+    /// Déplace la poignée `slot` en `(x, y)`. Une borne ne franchit pas sa
+    /// jumelle (la plage garde au moins un pas) ; des points d'ancrage
+    /// restent triés. Rend faux quand rien n'a changé (poignée disparue,
+    /// valeur non finie, plage réduite à un point).
+    pub fn move_handle(&mut self, slot: HandleSlot, x: f64, y: f64) -> bool {
+        if !x.is_finite() || !y.is_finite() {
+            return false;
+        }
+        fn edge(range: &mut (f64, f64), which: Edge, x: f64) -> bool {
+            let (lo, hi) = match which {
+                Edge::Lo => (x, range.1),
+                Edge::Hi => (range.0, x),
+            };
+            if lo == hi {
+                return false;
+            }
+            let next = (lo.min(hi), lo.max(hi));
+            let changed = next != *range;
+            *range = next;
+            changed
+        }
+        let s = &mut self.setup;
+        match slot {
+            HandleSlot::Point(i) => {
+                let Some(point) = s.baseline.points.get_mut(i) else {
+                    return false;
+                };
+                let changed = *point != (x, y);
+                *point = (x, y);
+                if s.baseline.shape == BaselineShape::Anchors {
+                    s.baseline.points.sort_by(|p, q| p.0.total_cmp(&q.0));
+                }
+                changed
+            }
+            HandleSlot::Seed(i) => {
+                let Some(seed) = s.peaks.seeds.get_mut(i) else {
+                    return false;
+                };
+                let changed = seed.center != x;
+                seed.center = x;
+                s.peaks.seeds.sort_by(|p, q| p.center.total_cmp(&q.center));
+                changed
+            }
+            HandleSlot::Edge(set, i, which) => match set {
+                RangeSet::BaselineZones => s
+                    .baseline
+                    .zones
+                    .get_mut(i)
+                    .is_some_and(|r| edge(r, which, x)),
+                RangeSet::Integrate => s
+                    .integrate
+                    .ranges
+                    .get_mut(i)
+                    .is_some_and(|r| edge(r, which, x)),
+                RangeSet::Fit => i == 0 && s.fit.range.as_mut().is_some_and(|r| edge(r, which, x)),
+                RangeSet::Peaks => {
+                    i == 0 && s.peaks.range.as_mut().is_some_and(|r| edge(r, which, x))
+                }
+                RangeSet::Window => {
+                    i == 0
+                        && s.reconv
+                            .spec
+                            .window
+                            .as_mut()
+                            .is_some_and(|r| edge(r, which, x))
+                }
+            },
+        }
+    }
+}
+
 /// Les valeurs de X et de Y de **chaque ligne** d'une série, `NaN` pour une
 /// cellule vide ou textuelle ; sans colonne X, le numéro de ligne à partir de 1
 /// (comme le calcul).

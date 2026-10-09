@@ -10,6 +10,7 @@ use stokesforge_app::analysis::{
     model_formula_source, preset_of, value_unit, with_unit, AnalysisForm, BaselineShape, Issue,
     Preset, DEFAULT_AVERAGE,
 };
+use stokesforge_app::analysis::{Edge, HandleSlot, RangeSet};
 use stokesforge_app::i18n::{self, Language};
 use stokesforge_core::{Column, ColumnMeta, NodeId, Project, SeriesRef};
 
@@ -526,4 +527,55 @@ fn every_builtin_model_formula_compiles_in_typst() {
             ),
         }
     }
+}
+
+#[test]
+fn handles_expose_points_edges_and_seeds_and_move_them() {
+    let f = fixture();
+    // Ancrages : X et Y se déplacent, les points restent triés.
+    let mut form = AnalysisForm::new(&Preset::BaselineAnchors, series(&f), false);
+    form.add_point(1.0, 2.0);
+    form.add_point(5.0, 1.0);
+    let handles = form.handles();
+    assert_eq!(handles.len(), 2);
+    assert_eq!(handles[1].y, Some(1.0));
+    assert!(form.move_handle(HandleSlot::Point(0), 7.0, 3.0));
+    assert_eq!(form.setup.baseline.points, vec![(5.0, 1.0), (7.0, 3.0)]);
+    assert!(
+        !form.move_handle(HandleSlot::Point(9), 1.0, 1.0),
+        "disparue"
+    );
+    assert!(!form.move_handle(HandleSlot::Point(0), f64::NAN, 1.0));
+
+    // Zones : deux bornes par zone, jamais croisées ni réduites à un point.
+    let mut form = AnalysisForm::new(&Preset::BaselinePolynomial, series(&f), false);
+    form.add_zone(2.0, 8.0);
+    let edge = |e| HandleSlot::Edge(RangeSet::BaselineZones, 0, e);
+    assert_eq!(form.handles().len(), 2);
+    assert!(form.move_handle(edge(Edge::Lo), 4.0, 0.0));
+    assert_eq!(form.setup.baseline.zones, vec![(4.0, 8.0)]);
+    assert!(form.move_handle(edge(Edge::Lo), 10.0, 0.0));
+    assert_eq!(
+        form.setup.baseline.zones,
+        vec![(8.0, 10.0)],
+        "ordre rétabli"
+    );
+    assert!(!form.move_handle(edge(Edge::Hi), 8.0, 0.0), "plage nulle");
+
+    // Intégrale, ajustement, pics : plages et positions.
+    let mut form = AnalysisForm::new(&Preset::Integrate, series(&f), false);
+    form.add_zone(1.0, 3.0);
+    assert!(form.move_handle(HandleSlot::Edge(RangeSet::Integrate, 0, Edge::Hi), 6.0, 0.0));
+    assert_eq!(form.setup.integrate.ranges, vec![(1.0, 6.0)]);
+    let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
+    assert!(form.handles().is_empty(), "pas de plage, pas de poignée");
+    form.add_zone(1.0, 3.0);
+    assert!(form.move_handle(HandleSlot::Edge(RangeSet::Fit, 0, Edge::Lo), 0.5, 0.0));
+    assert_eq!(form.setup.fit.range, Some((0.5, 3.0)));
+    let mut form = AnalysisForm::new(&Preset::Peaks, series(&f), false);
+    form.add_point(3.0, 1.0);
+    form.add_point(7.0, 1.0);
+    assert!(form.move_handle(HandleSlot::Seed(0), 9.0, 0.0));
+    let centers: Vec<f64> = form.setup.peaks.seeds.iter().map(|s| s.center).collect();
+    assert_eq!(centers, vec![7.0, 9.0]);
 }

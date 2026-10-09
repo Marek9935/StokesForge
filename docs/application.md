@@ -41,6 +41,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/analysis_menu.rs` | menu Analysis (#181) : `analysis_menu_contents` (barre de menus), `analysis_entry` (clic droit de colonne : une entrée `Analysis…`, #202), `calculation_section` (Edit / Recalculate / Detach / Delete sur une colonne calculée) |
 | `app/analysis_dialog.rs` | fenêtre d'analyse (`modal_dialog_with`, deux colonnes : formulaire + aperçu) et confirmation de suppression d'un calcul (`calculation_delete_window`) |
 | `app/analysis_forms.rs` | les formulaires par famille (`form_body`, `value_row`, tableau des paramètres) |
+| `app/analysis_handles.rs` | poignées déplaçables d'un calcul sur le graphe du projet (#199) : visibles quand le calcul est sélectionné (sa courbe, ou sa ligne du volet Results), un glisser = un `MoveCalculationHandle` |
 | `app/analysis_preview.rs` | l'aperçu peint à la main : outils Points / Zone / Zoom, aimant (Maj), moyenne (Maj + molette), bande des résidus, cache en mémoire temporaire d'egui |
 | `app/results_pane.rs` | volet Results sous la grille d'un classeur : compteur, portée Feuille / Classeur, liste et tableau série × valeur |
 | `app/format.rs` | barres de format de texte et d'objet, barre contextuelle : `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (les barres elles-mêmes : `crate::toolbar`) |
@@ -108,6 +109,16 @@ L'interface du traitement mathématique est répartie ainsi :
   `analysis_forms`, `analysis_preview`, `results_pane` (table des modules plus haut).
 - L'aperçu est peint à la main (pas de graphe du projet) et **calculé sur le fil
   de l'interface** : acceptable aux tailles actuelles, suivi en issue.
+- Poignées sur le graphe (#199) : `AnalysisForm::handles` / `move_handle` (modèle,
+  sans egui) listent et déplacent points d'ancrage, bornes de zones/plages et
+  positions de pics ; `app/analysis_handles.rs` les peint par-dessus la figure
+  (jamais dans `stokesforge-render`, donc jamais à l'export) pour le calcul
+  dont une courbe est sélectionnée ou dont la ligne du volet Results est
+  choisie. Pendant le glisser, la ligne de base est recalculée à la volée ;
+  au lâcher, `Action::MoveCalculationHandle` rouvre le calcul comme la fenêtre
+  et pousse un `UpdateCalculation` : **un pas d'historique par geste**, aucun
+  si la poignée n'a pas bougé. Le nœud de l'Object Manager n'existe pas (un
+  calcul n'est pas un nœud).
 - Colonnes périmées : grisées dans la grille, lettre teintée (`theme::stale_color`)
   et info-bulle ; le volet Results (replié par défaut) liste les calculs
   conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
