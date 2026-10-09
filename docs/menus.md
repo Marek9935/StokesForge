@@ -130,7 +130,7 @@ tant qu'aucune colonne Y n'est visée, jamais absentes.
 des sous-menus (Baseline, Fit, Peaks and Deconvolution), soit trois niveaux.
 C'est le même contenu que le menu du haut, partagé comme l'exige « une seule
 peinture » ; l'aplatir mêlerait une vingtaine d'entrées au menu de la colonne.
-La règle est à trancher : voir l'issue de suivi du chantier #181.
+La règle est à trancher : issue #202.
 
 ### Barre de menus
 
