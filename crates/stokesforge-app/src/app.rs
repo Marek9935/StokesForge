@@ -147,6 +147,7 @@ mod graph_targets;
 mod graph_text_edit;
 mod graph_window;
 mod grid;
+mod hover_help;
 mod import_wizard;
 mod list_row;
 mod menu_sections;
@@ -1367,7 +1368,16 @@ impl StokesForgeApp {
             action,
             Action::NewProject { .. } | Action::ConfirmNewProject(true)
         );
-        let history_selections: Vec<_> = if matches!(action, Action::Undo | Action::Redo) {
+        // L'historique et les gestes qui changent le rang des séries ou la
+        // composition d'un groupe (#197) font suivre la sélection par contenu.
+        let history_selections: Vec<_> = if matches!(
+            action,
+            Action::Undo
+                | Action::Redo
+                | Action::MoveSeries { .. }
+                | Action::MoveSeriesGroup { .. }
+                | Action::UngroupSeries { .. }
+        ) {
             let graphs =
                 self.graph_views
                     .keys()

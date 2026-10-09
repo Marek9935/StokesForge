@@ -163,7 +163,10 @@ l'interface, mais son mot est déjà fixé.
 | Legend entry | Entrée de légende | Une ligne de la légende | Libellé de légende | G |
 | Position | Position | Coin de la légende : Top left… ; Reset Position / Réinitialiser la position : remet un titre ou la légende à sa place par défaut | Emplacement | G |
 | Series | Série | Données tracées d'une colonne Y | Courbe, Trace, Plot, Jeu de données | G (Q3) |
-| Series Group | Groupe de séries | Séries ajoutées ensemble (ou réunies à la main) qui se règlent ensemble ; affiché en retrait sous un en-tête « Group n » dans l'Object Manager (#177) | Groupe de courbes | G |
+| Series Group | Groupe de séries | Séries ajoutées ensemble (ou réunies à la main) qui se règlent ensemble ; nœud repliable de l'Object Manager et de la liste des séries, nommé « Group n » tant qu'on ne l'a pas renommé (#177, #197) | Groupe de courbes | G |
+| Ungroup | Dissoudre le groupe | Chaque série du groupe devient une série simple, style gardé ; ne supprime rien (#197). À ne pas confondre avec « Delete Group » / « Supprimer le groupe », qui retire aussi les séries | Dégrouper, Éclater | G |
+| Delete Group | Supprimer le groupe | Retire du graphique le groupe et toutes ses séries (#197) ; dans les menus, c'est « Delete » / « Supprimer » appliqué au groupe | Effacer le groupe | G |
+| Select Members | Sélectionner les membres | Sélectionne le groupe : les poignées de toutes ses séries s'affichent (#197) | Sélectionner le groupe | G |
 | Series (Object Manager) | Séries | Le nœud sous un calque qui liste ses séries ; ancien « Plot Group » / « Groupe de tracés », renommé ; ne pas l'appeler groupe (#177) | Plot Group, Groupe de tracés | G |
 | Whole group / This series only | Tout le groupe / Cette série seulement | Portée des réglages d'une série qui est dans un groupe ; les réglages propres à une série sont grisés en portée « groupe » (#177) | Appliquer à tous | G |
 | Leave Group | Quitter le groupe | Détache la série de son groupe, style conservé (#177) | Dissocier, Sortir | G |

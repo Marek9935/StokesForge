@@ -647,7 +647,6 @@ plot-series-symbol-color = Couleur du symbole
 
 curve-window-title = Propriétés des séries — { $name }
 curve-group-name = Groupe { $number }
-curve-list-label = { $name } · { $group }
 curve-group-section = Groupe
 curve-group-field = Groupe
 curve-group-none = Aucun
@@ -657,6 +656,21 @@ curve-group-leave =
     Quitter le groupe
     .hint = Détache cette série de son groupe ; elle garde son style actuel
     .disabled = Cette série n'est dans aucun groupe
+curve-group-name-field =
+    Nom
+    .hint = Nom du groupe dans l'Object Manager et la liste des séries. Laisser vide pour le nom automatique.
+curve-group-ungroup =
+    Dissoudre le groupe
+    .hint = Chaque série du groupe devient une série simple ; elle garde son style
+curve-group-delete =
+    Supprimer le groupe
+    .hint = Retire du graphique le groupe et toutes ses séries
+curve-group-move-up =
+    Monter le groupe
+    .hint = Remonte tout le groupe dans l'ordre de tracé
+curve-group-move-down =
+    Descendre le groupe
+    .hint = Fait descendre tout le groupe dans l'ordre de tracé
 curve-scope-field = Modifier
 curve-scope-series = Cette série seulement
 curve-scope-group = Tout le groupe ({ $count } séries)
@@ -745,7 +759,7 @@ plot-formula-full = Formule complète
 plot-formula-upright = Texte droit dans une formule
 plot-formula-format = Mise en forme du texte
 plot-formula-escape = Le caractère lui-même
-plot-formula-footer = Le texte entre $ … $ est une formule, le reste est du texte simple. Syntaxe complète : { $url }
+plot-formula-footer = Le texte entre $ … $ est une formule, le reste est du texte simple. C'est la syntaxe de Typst ; référence complète : { $url }
 
 # Texte sur le graphique (éditeur en place) et vue du graphique
 
@@ -958,6 +972,13 @@ object-manager-show-axes = Afficher les axes
 menu-selected-content = Sélection
     .disabled = Sélectionnez d’abord une courbe, un texte ou un objet
 action-rename-series = Renommer
+action-rename-group = Renommer
+action-ungroup-series =
+    Dissoudre le groupe
+    .hint = Chaque série de ce groupe devient une série simple ; elle garde son style
+action-select-group-series =
+    Sélectionner les membres
+    .hint = Sélectionne le groupe et affiche les poignées de toutes ses séries
 action-move-series-up = Déplacer vers le haut
 action-move-series-down = Déplacer vers le bas
 action-show-content = Afficher
@@ -972,6 +993,10 @@ history-plot-remove-series = Supprimer la série
 history-plot-remove-text = Supprimer le texte
 history-plot-remove-object = Supprimer l'objet
 history-plot-reorder-object = Réordonner les objets
+history-plot-rename-group = Renommer le groupe
+history-plot-dissolve-group = Dissoudre le groupe
+history-plot-remove-group = Supprimer le groupe
+history-plot-reorder-group = Réordonner le groupe
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau

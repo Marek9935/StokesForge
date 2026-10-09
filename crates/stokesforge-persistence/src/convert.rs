@@ -14,12 +14,12 @@ use stokesforge_plot::{
 };
 
 use crate::schema::{
-    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, KindRecord, LegendPositionRecord,
-    LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, OverlaySpecRecord,
-    PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord, SavedColorsRecord,
-    SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord,
-    SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord, TextFontRecord, TypeRecord,
-    ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, GroupNameRecord, KindRecord,
+    LegendPositionRecord, LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord,
+    OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord,
+    SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord,
+    ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord, TextFontRecord,
+    TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -537,6 +537,14 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
             })
             .collect(),
         shapes: panel.shapes.iter().map(shape_to_record).collect(),
+        group_names: panel
+            .group_names
+            .iter()
+            .map(|(group, name)| GroupNameRecord {
+                group: *group,
+                name: name.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -631,6 +639,12 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
             })
             .collect(),
         shapes: record.shapes.into_iter().map(record_to_shape).collect(),
+        group_names: record
+            .group_names
+            .into_iter()
+            .filter(|entry| !entry.name.is_empty())
+            .map(|entry| (entry.group, entry.name))
+            .collect(),
     })
 }
 

@@ -487,6 +487,10 @@ pub struct GraphView {
     selected_shape: Option<ShapeRef>,
     /// Série sélectionnée, commune au graphe et à Object Manager (#83).
     selected_series: Option<stokesforge_plot::SeriesRef>,
+    /// Le groupe de séries sélectionné (#197), avec la série qui le désigne :
+    /// il ne vaut que tant que `selected_series` est cette série, donc un clic
+    /// sur une autre courbe le lève sans rien à nettoyer ailleurs.
+    selected_group: Option<(stokesforge_plot::SeriesRef, u32)>,
     /// Où est parti le glisser de navigation en cours : décidé à la première
     /// image du geste, pour que le curseur puisse en sortir sans changer de
     /// cible.
@@ -583,6 +587,7 @@ impl GraphView {
             shape_drag: None,
             selected_shape: None,
             selected_series: None,
+            selected_group: None,
             nav_drag: None,
             active_panel: 0,
             seen_selection: (None, None, None, None),
@@ -639,9 +644,33 @@ impl GraphView {
     }
 
     fn paint_series_selection(&self, painter: &egui::Painter, spec: &PlotSpec) {
-        let Some(target) = self.selected_series else {
+        let Some(selected) = self.selected_series else {
             return;
         };
+        // Un groupe sélectionné (#197) montre les poignées de tous ses membres.
+        let members = self.selected_group().and_then(|group| {
+            spec.panels
+                .get(group.panel)
+                .map(|panel| panel.group_members(group.group))
+        });
+        let targets = match members {
+            Some(members) => members
+                .into_iter()
+                .map(|index| stokesforge_plot::SeriesRef::new(selected.panel, index))
+                .collect(),
+            None => vec![selected],
+        };
+        for target in targets {
+            self.paint_series_handles(painter, spec, target);
+        }
+    }
+
+    fn paint_series_handles(
+        &self,
+        painter: &egui::Painter,
+        spec: &PlotSpec,
+        target: stokesforge_plot::SeriesRef,
+    ) {
         if target.panel >= spec.panels.len() {
             return;
         }
@@ -730,12 +759,44 @@ impl GraphView {
 
     /// Sélection d'interface : elle ne change ni le modèle, ni son historique.
     pub fn select_series(&mut self, target: Option<stokesforge_plot::SeriesRef>, spec: &PlotSpec) {
+        self.selected_group = None;
         self.selected_series = target.filter(|target| spec.series_at(*target).is_some());
         if self.selected_series.is_some() {
             self.selected_annotation = None;
             self.selected_shape = None;
             self.selected_text = None;
             self.tool = GraphTool::Pointer;
+        }
+    }
+
+    /// Le groupe de séries sélectionné (#197), s'il y en a un.
+    pub fn selected_group(&self) -> Option<stokesforge_plot::SeriesGroupRef> {
+        let (series, group) = self.selected_group?;
+        (self.selected_series == Some(series))
+            .then(|| stokesforge_plot::SeriesGroupRef::new(series.panel, group))
+    }
+
+    /// Sélectionne un groupe de séries depuis Object Manager (#197) : la série
+    /// qui le désigne est la première de ses membres.
+    pub fn select_series_group(
+        &mut self,
+        target: Option<stokesforge_plot::SeriesGroupRef>,
+        spec: &PlotSpec,
+    ) {
+        let first = target.and_then(|group| {
+            let index = *spec
+                .panels
+                .get(group.panel)?
+                .group_members(group.group)
+                .first()?;
+            Some((
+                stokesforge_plot::SeriesRef::new(group.panel, index),
+                group.group,
+            ))
+        });
+        self.select_series(first.map(|(series, _)| series), spec);
+        if self.selected_series.is_some() {
+            self.selected_group = first;
         }
     }
 

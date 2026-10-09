@@ -30,7 +30,8 @@
 
 use stokesforge_core::{series_label, NodeId, Tree};
 use stokesforge_plot::{
-    AnnotationRef, AxisSide, PlotSpec, SeriesRef, SeriesSpec, ShapeKind, ShapeRef, TextTarget,
+    AnnotationRef, AxisSide, PanelSpec, PlotSpec, SeriesGroupRef, SeriesRef, SeriesSlot,
+    SeriesSpec, ShapeKind, ShapeRef, TextTarget,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,6 +39,9 @@ pub enum VisibilityTarget {
     Graph,
     Panel(usize),
     Group(usize),
+    /// Un groupe de séries (#197) : un parent comme les autres, dont la case
+    /// ne commande que ses membres.
+    SeriesGroup(SeriesGroupRef),
     Series(SeriesRef),
     Text(TextTarget),
     Annotation(AnnotationRef),
@@ -196,6 +200,16 @@ impl VisibilityTarget {
                 .map(|side| Self::Axis(AxisRef { panel: index, side }))
                 .collect();
         }
+        if let Self::SeriesGroup(group) = self {
+            return spec
+                .panels
+                .get(group.panel)
+                .map(|panel| panel.group_members(group.group))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|rank| Self::Series(SeriesRef::new(group.panel, rank)))
+                .collect();
+        }
         if !matches!(self, Self::Graph | Self::Panel(_) | Self::Group(_)) {
             return vec![self];
         }
@@ -245,7 +259,11 @@ impl VisibilityTarget {
             Self::Annotation(t) => t.get(spec).map(|a| a.visible),
             Self::Shape(t) => t.get(spec).map(|s| s.visible),
             Self::Axis(t) => t.shown(spec),
-            Self::Graph | Self::Panel(_) | Self::Group(_) | Self::Axes(_) => None,
+            Self::Graph
+            | Self::Panel(_)
+            | Self::Group(_)
+            | Self::SeriesGroup(_)
+            | Self::Axes(_) => None,
         }
     }
     pub fn visibility(self, spec: &PlotSpec) -> Visibility {
@@ -300,7 +318,11 @@ impl VisibilityTarget {
                     }
                 }
                 Self::Axis(t) => t.set_shown(spec, visible),
-                Self::Graph | Self::Panel(_) | Self::Group(_) | Self::Axes(_) => {}
+                Self::Graph
+                | Self::Panel(_)
+                | Self::Group(_)
+                | Self::SeriesGroup(_)
+                | Self::Axes(_) => {}
             }
         }
         changed
@@ -309,6 +331,10 @@ impl VisibilityTarget {
         match self {
             Self::Graph => true,
             Self::Panel(i) | Self::Group(i) | Self::Axes(i) => spec.panels.get(i).is_some(),
+            Self::SeriesGroup(group) => spec
+                .panels
+                .get(group.panel)
+                .is_some_and(|panel| !panel.group_members(group.group).is_empty()),
             _ => self.value(spec).is_some(),
         }
     }
@@ -317,6 +343,7 @@ impl VisibilityTarget {
             && matches!(
                 self,
                 Self::Series(_)
+                    | Self::SeriesGroup(_)
                     | Self::Annotation(_)
                     | Self::Shape(_)
                     | Self::Text(
@@ -466,9 +493,10 @@ pub fn series_drop(
     onto: SeriesRef,
     after: bool,
 ) -> Option<usize> {
-    spec.series_at(source)?;
-    spec.series_at(onto)?;
-    if source.panel != onto.panel || source == onto {
+    let (dragged, target) = (spec.series_at(source)?, spec.series_at(onto)?);
+    // Un groupe reste contigu (#197) : on ne dépose pas une série dans un
+    // groupe qui n'est pas le sien, ni hors du sien.
+    if source.panel != onto.panel || source == onto || dragged.group != target.group {
         return None;
     }
     let slot = onto.index + usize::from(after);
@@ -507,10 +535,31 @@ pub struct ObjectRow {
     pub kind: ObjectKind,
     pub selected: bool,
 }
+/// Un groupe de séries listé sous un calque (#197).
+#[derive(Debug, Clone)]
+pub struct GroupRow {
+    pub target: SeriesGroupRef,
+    /// Le nom affiché : celui qu'on a donné, sinon « Group n ».
+    pub name: String,
+    /// Rangs des membres dans [`LayerRow::series`].
+    pub members: Vec<usize>,
+    pub selected: bool,
+}
+/// Un emplacement de la liste des séries d'un calque : la projection commune
+/// à l'Object Manager et à la fenêtre des séries (#197).
+#[derive(Debug, Clone)]
+pub enum LayerSlot {
+    /// Rang d'une série hors groupe dans [`LayerRow::series`].
+    Single(usize),
+    Group(GroupRow),
+}
 #[derive(Debug, Clone)]
 pub struct LayerRow {
     pub index: usize,
     pub series: Vec<SeriesRow>,
+    /// Les séries rangées en emplacements : une série seule ou un groupe et
+    /// tous ses membres (`PanelSpec::slots`).
+    pub slots: Vec<LayerSlot>,
     /// Les lignes du groupe « Axes » (#111) ; vide sans la bascule.
     pub axes: Vec<ObjectRow>,
     pub objects: Vec<ObjectRow>,
@@ -540,6 +589,16 @@ fn axis_label(panel: &stokesforge_plot::PanelSpec, side: AxisSide) -> String {
         AxisSide::Top => crate::tr!("plot-axis-top"),
     };
     crate::tr!("plot-target-axis", axis = axis)
+}
+
+/// Le nom affiché d'un groupe de séries (#197) : celui qu'on lui a donné,
+/// sinon « Group n ». Partout où un groupe porte un nom (liste des séries,
+/// Object Manager, choix d'appartenance), il vient d'ici.
+pub fn group_title(panel: &PanelSpec, group: u32) -> String {
+    panel.group_label(group).map_or_else(
+        || crate::tr!("curve-group-name", number = group),
+        str::to_string,
+    )
 }
 
 pub fn object_tree(tree: &Tree, graph: NodeId, selected: Option<SeriesRef>) -> Option<ObjectTree> {
@@ -653,6 +712,23 @@ pub fn object_tree_with_selection(
                     index,
                     axes,
                     objects,
+                    slots: panel
+                        .slots()
+                        .into_iter()
+                        .map(|slot| match slot {
+                            SeriesSlot::Single(rank) => LayerSlot::Single(rank),
+                            SeriesSlot::Group { id, members } => {
+                                let target = SeriesGroupRef::new(index, id);
+                                LayerSlot::Group(GroupRow {
+                                    target,
+                                    name: group_title(panel, id),
+                                    members,
+                                    selected: selected
+                                        == Some(VisibilityTarget::SeriesGroup(target)),
+                                })
+                            }
+                        })
+                        .collect(),
                     series: panel
                         .series
                         .iter()

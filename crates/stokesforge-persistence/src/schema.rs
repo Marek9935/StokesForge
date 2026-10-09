@@ -746,6 +746,17 @@ pub(crate) struct PanelSpecRecord {
     /// Objets graphiques (issue #76) : absents d'un fichier plus ancien.
     #[serde(default)]
     pub(crate) shapes: Vec<ShapeSpecRecord>,
+    /// Noms des groupes de séries (#197) ; absents d'un fichier plus ancien,
+    /// donc tous automatiques.
+    #[serde(default)]
+    pub(crate) group_names: Vec<GroupNameRecord>,
+}
+
+/// Le nom d'un groupe de séries (#197), à plat.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct GroupNameRecord {
+    pub(crate) group: u32,
+    pub(crate) name: String,
 }
 
 /// [`stokesforge_plot::OverlaySpec`], à plat.
@@ -818,6 +829,7 @@ impl Default for PanelSpecRecord {
             column: 0,
             annotations: Vec::new(),
             shapes: Vec::new(),
+            group_names: Vec::new(),
         }
     }
 }

@@ -19,11 +19,12 @@ use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
 use crate::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
-use crate::theme::section_title;
+use crate::theme::{bold, section_title};
 use crate::tr;
 
 use super::curve_settings::curve_settings_page;
 use super::dialogs::{modal_dialog, DialogOutcome};
+use super::hover_help::hover_help;
 use super::tab_strip::{tab_strip, TabStripSide};
 
 /// Largeur par défaut de la fenêtre des propriétés d'un graphe
@@ -250,6 +251,7 @@ fn plot_settings_contents(
                 commit |= curve_settings_page(
                     ui,
                     panel,
+                    edit.selected_panel,
                     tree,
                     &mut edit.selected_series,
                     &mut env,
@@ -318,13 +320,12 @@ fn plot_settings_contents(
 /// Page du graphe : titre et fond, sans ajouter de sous-Ui aux widgets.
 fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
-    commit |= text_field(
+    commit |= formula_field(
         ui,
         &tr!("plot-general-title"),
         &tr!("plot-general-title", "hint"),
         &mut spec.title,
     );
-    formula_memo(ui, "plot_settings_memo_graph");
     commit |= color_field(
         ui,
         &tr!("plot-title-color"),
@@ -349,13 +350,12 @@ fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerE
 /// Page du calque : titre et lignes de grille.
 fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
     let mut commit = false;
-    commit |= text_field(
+    commit |= formula_field(
         ui,
         &tr!("plot-area-layer-title"),
         &tr!("plot-area-layer-title", "hint"),
         &mut panel.title,
     );
-    formula_memo(ui, "plot_settings_memo_panel");
     section_title(ui, tr!("plot-area-gridlines"));
     commit |= ui
         .checkbox(&mut panel.bottom.grid, tr!("plot-area-gridlines-vertical"))
@@ -476,38 +476,36 @@ fn theme_editor(
     commit
 }
 
-/// Le mémo de syntaxe des textes du graphe (issue #33), replié par défaut,
-/// sous les champs de titre, de libellé et de nom de série.
+/// Le rappel de syntaxe des textes du graphe (issues #33, #197), en bulle de
+/// survol sur l'icône d'aide posée à droite du champ.
 ///
 /// Ces textes sont composés par Typst et lus comme du **markup** (issue
 /// #32) : un chimiste venu d'Origin n'en connaît pas la syntaxe, et un `_`
-/// ou un `$` isolé change le rendu sans prévenir. Une section repliable
-/// plutôt qu'une bulle d'aide : la fenêtre des propriétés est un dialogue
-/// modal, où une fenêtre surgissante de plus se disputerait l'unique place
-/// qu'egui leur réserve (issue #9).
-fn formula_memo(ui: &mut egui::Ui, id_salt: &str) {
-    egui::CollapsingHeader::new(tr!("plot-formula-memo-header"))
-        .id_salt(id_salt)
-        .default_open(false)
-        .show(ui, |ui| {
-            egui::Grid::new(id_salt)
-                .num_columns(2)
-                .spacing([12.0, 2.0])
-                .show(ui, |ui| {
-                    for (source, effect) in formula_memo_rows() {
-                        ui.monospace(source);
-                        ui.weak(effect);
-                        ui.end_row();
-                    }
-                });
-            ui.weak(tr!(
-                "plot-formula-footer",
-                url = "typst.app/docs/reference/math"
-            ));
-        });
+/// ou un `$` isolé change le rendu sans prévenir. Le rappel nomme Typst et
+/// donne la page de référence. Une icône au bout du champ plutôt qu'un mémo
+/// repliable dessous : le lien avec le champ se voit, et l'aide ne prend plus
+/// de hauteur dans la fenêtre (voir [`super::hover_help`]).
+fn formula_help(ui: &mut egui::Ui) {
+    hover_help(ui, |ui| {
+        ui.label(bold(tr!("plot-formula-memo-header")));
+        egui::Grid::new("plot_formula_help")
+            .num_columns(2)
+            .spacing([12.0, 2.0])
+            .show(ui, |ui| {
+                for (source, effect) in formula_memo_rows() {
+                    ui.monospace(source);
+                    ui.weak(effect);
+                    ui.end_row();
+                }
+            });
+        ui.weak(tr!(
+            "plot-formula-footer",
+            url = "typst.app/docs/reference/math"
+        ));
+    });
 }
 
-/// Les lignes du mémo de [`formula_memo`] : ce qu'on tape (de la syntaxe
+/// Les lignes du rappel de [`formula_help`] : ce qu'on tape (de la syntaxe
 /// Typst, jamais traduite), ce qu'on obtient (traduit).
 fn formula_memo_rows() -> [(&'static str, String); 7] {
     [
@@ -521,16 +519,21 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
     ]
 }
 
-/// Un champ texte libellé, validé à la perte de focus ; `hint` est son
-/// infobulle. Rend `true` si le brouillon doit être validé — voir la doc de
-/// tête de [`plot_settings_window`].
-fn text_field(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) -> bool {
+/// Un champ texte libellé qui accepte une formule (#197), validé à la perte de
+/// focus ; `hint` est son infobulle. Tout à droite, l'icône d'aide à la syntaxe
+/// Typst ([`formula_help`]). Rend `true` si le brouillon doit être validé —
+/// voir la doc de tête de [`plot_settings_window`].
+fn formula_field(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) -> bool {
     ui.horizontal(|ui| {
         ui.label(label).on_hover_text(hint);
-        ui.text_edit_singleline(value).on_hover_text(hint)
+        let lost = ui
+            .text_edit_singleline(value)
+            .on_hover_text(hint)
+            .lost_focus();
+        formula_help(ui);
+        lost
     })
     .inner
-    .lost_focus()
 }
 
 /// Édite un axe miroir (#176) : il reprend l'échelle de l'axe opposé et n'a ni
@@ -558,19 +561,18 @@ fn mirror_axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
 fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
     section_title(ui, tr!("plot-axes-title-section"));
-    commit |= text_field(
+    commit |= formula_field(
         ui,
         &tr!("plot-axes-quantity"),
         &tr!("plot-axes-quantity", "hint"),
         &mut axis.label,
     );
-    commit |= text_field(
+    commit |= formula_field(
         ui,
         &tr!("plot-axes-units"),
         &tr!("plot-axes-units", "hint"),
         &mut axis.unit,
     );
-    formula_memo(ui, "plot_settings_memo_axis");
     commit |= color_field(
         ui,
         &tr!("plot-title-color"),
@@ -668,14 +670,13 @@ pub(super) fn series_editor(
     let mut commit = false;
 
     commit |= per_series(ui, locked, |ui| {
-        text_field(
+        formula_field(
             ui,
             &tr!("plot-series-name"),
             &tr!("plot-series-name", "hint"),
             &mut series.name,
         )
     });
-    formula_memo(ui, "plot_settings_memo_series");
 
     commit |= per_series(ui, locked, |ui| {
         let mut commit = false;
@@ -924,9 +925,9 @@ mod tests {
     use stokesforge_session::Session;
 
     use super::{
-        column_metadata_window, formula_memo, formula_memo_rows, legend_position_label,
-        line_style_label, plot_settings_window, plot_type_label, symbol_shape_label, text_field,
-        theme_editor,
+        column_metadata_window, formula_field, formula_help, formula_memo_rows,
+        legend_position_label, line_style_label, plot_settings_window, plot_type_label,
+        symbol_shape_label, theme_editor,
     };
     use crate::color_picker::PickerEnv;
     use crate::i18n::{self, pseudo, Language, LANGUAGE_VARIABLE};
@@ -1471,7 +1472,7 @@ mod tests {
     }
 
     /// #124 : vérifie le retour de la page du graphe jusqu'à la validation
-    /// commune, en plus du test local de `text_field`. Une frappe doit
+    /// commune, en plus du test local de `formula_field`. Une frappe doit
     /// seulement changer le brouillon, puis un clic ailleurs dans la page
     /// doit atteindre le modèle sans fermer le dialogue.
     #[test]
@@ -1593,7 +1594,7 @@ mod tests {
         assert_eq!(banc.modele().panels[0].legend.visible, !avant);
     }
 
-    /// Le résultat de chaque image de [`text_field`] sur `valeur`, et ses
+    /// Le résultat de chaque image de [`formula_field`] sur `valeur`, et ses
     /// textes peints à la dernière.
     fn champ(
         context: &egui::Context,
@@ -1604,13 +1605,13 @@ mod tests {
         let mut peints = Vec::new();
         for events in images {
             peints = textes(&image(context, events, |ui| {
-                rendus.push(text_field(ui, "Grandeur", "Aide", valeur));
+                rendus.push(formula_field(ui, "Grandeur", "Aide", valeur));
             }));
         }
         (rendus, peints)
     }
 
-    /// [`text_field`] ne valide qu'à la perte de focus — Entrée ou clic
+    /// [`formula_field`] ne valide qu'à la perte de focus — Entrée ou clic
     /// ailleurs —, jamais à chaque frappe : la saisie arrive dans la valeur
     /// (aperçu) sans demander de validation.
     #[test]
@@ -1891,34 +1892,55 @@ mod tests {
         distincts(&lignes, |(source, _)| source.to_string());
     }
 
-    /// #33 : le mémo est replié par défaut (seul son titre est peint) ; un
-    /// clic le déplie sur toutes ses lignes — ce qu'on tape, ce qu'on
-    /// obtient — et son pied de page.
+    /// #33, #197 : le rappel de syntaxe n'est pas peint au repos — l'icône
+    /// seule l'est, tout à droite du champ — et le survol de l'icône montre
+    /// toutes ses lignes (ce qu'on tape, ce qu'on obtient) et un pied de page
+    /// qui nomme Typst.
     #[test]
-    fn le_memo_des_formules_se_deplie_sur_toutes_ses_lignes() {
+    fn le_rappel_des_formules_s_affiche_au_survol_de_l_icone() {
         let context = contexte();
-        let peindre = |ui: &mut egui::Ui| formula_memo(ui, "memo_test");
-        let peints = textes(&image(&context, Vec::new(), peindre));
-        let titre = tr!("plot-formula-memo-header");
+        context.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let icone = std::cell::Cell::new(egui::Rect::NOTHING);
+        let champ = std::cell::Cell::new(egui::Rect::NOTHING);
+        let mut texte = String::new();
+        let mut peindre = |ui: &mut egui::Ui| {
+            ui.horizontal(|ui| {
+                champ.set(ui.text_edit_singleline(&mut texte).rect);
+                icone.set(hover_help_pour_test(ui));
+            });
+        };
+        let peints = textes(&image(&context, Vec::new(), &mut peindre));
         let pied = tr!("plot-formula-footer", url = "typst.app/docs/reference/math");
         for (source, effet) in formula_memo_rows() {
-            assert!(!est_peint(&peints, source), "replié : {source:?} peint");
+            assert!(!est_peint(&peints, source), "au repos : {source:?} peint");
             assert!(!est_peint(&peints, &effet));
         }
         assert!(!est_peint(&peints, &pied));
+        assert!(
+            icone.get().left() >= champ.get().right(),
+            "l'icône est à droite du champ : {:?} contre {:?}",
+            icone.get(),
+            champ.get()
+        );
 
-        let pos = texte_exact(&peints, &titre).centre;
-        cliquer(&context, pos, egui::PointerButton::Primary, peindre);
-        // Laisse l'animation de dépliage aller au bout.
+        let survol = vec![egui::Event::PointerMoved(icone.get().center())];
         let mut peints = Vec::new();
-        for _ in 0..5 {
-            peints = textes(&image(&context, Vec::new(), peindre));
+        for _ in 0..4 {
+            peints = textes(&image(&context, survol.clone(), &mut peindre));
         }
         for (source, effet) in formula_memo_rows() {
-            assert!(est_peint(&peints, source), "déplié : {source:?} absent");
-            assert!(est_peint(&peints, &effet), "déplié : {effet:?} absent");
+            assert!(est_peint(&peints, source), "survolé : {source:?} absent");
+            assert!(est_peint(&peints, &effet), "survolé : {effet:?} absent");
         }
         assert!(est_peint(&peints, &pied));
+        assert!(pied.contains("Typst"), "le rappel nomme Typst");
+    }
+
+    /// Peint l'icône d'aide des formules et rend son rectangle.
+    fn hover_help_pour_test(ui: &mut egui::Ui) -> egui::Rect {
+        let avant = ui.cursor().min;
+        formula_help(ui);
+        egui::Rect::from_min_max(avant, ui.min_rect().max)
     }
 
     // -- Les libellés des choix ---------------------------------------------

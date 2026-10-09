@@ -24,9 +24,12 @@
 
 use eframe::egui;
 use stokesforge_core::Tree;
-use stokesforge_plot::{gradient_colors, PanelSpec, SavedColors, SeriesSpec, GRADIENT_PRESETS};
+use stokesforge_plot::{
+    gradient_colors, PanelSpec, SavedColors, SeriesSlot, SeriesSpec, GRADIENT_PRESETS,
+};
 
 use crate::color_picker::{color_field, gradient_strip, ColorUsage, PickerEnv};
+use crate::object_manager::group_title;
 use crate::state::{series_list_label, Action, SaveTarget};
 use crate::theme::section_title;
 use crate::tr;
@@ -70,6 +73,7 @@ enum GradientChoice {
 pub(super) fn curve_settings_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
+    layer: usize,
     tree: &Tree,
     selected: &mut usize,
     env: &mut PickerEnv,
@@ -84,7 +88,7 @@ pub(super) fn curve_settings_page(
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(LIST_WIDTH);
-            commit |= series_list(ui, panel, tree, selected);
+            commit |= series_list(ui, panel, layer, tree, selected);
         });
         ui.separator();
         ui.vertical(|ui| {
@@ -92,7 +96,7 @@ pub(super) fn curve_settings_page(
                 .id_salt("curve_settings_editor")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    commit |= series_page(ui, panel, *selected, env, actions);
+                    commit |= series_page(ui, panel, layer, selected, env, actions);
                 });
         });
     });
@@ -122,16 +126,34 @@ fn propagate_style(panel: &mut PanelSpec, group: u32, before: &SeriesSpec, index
     }
 }
 
-/// Le nom d'un groupe : « Group 2 ».
-pub(crate) fn group_name(group: u32) -> String {
-    tr!("curve-group-name", number = group)
+/// Une ligne de série de la liste ; rend le centre vertical de la ligne.
+fn series_row(
+    ui: &mut egui::Ui,
+    panel: &PanelSpec,
+    tree: &Tree,
+    index: usize,
+    selected: &mut usize,
+) -> f32 {
+    let label = series_list_label(tree, &panel.series[index]);
+    let response = ui
+        .push_id(index, |ui| {
+            list_row(ui, None, &label, *selected == index, false)
+        })
+        .inner;
+    if response.clicked() {
+        *selected = index;
+    }
+    response.rect.center().y
 }
 
-/// La liste des séries (une ligne chacune, groupe en suffixe) et la rangée
-/// qui change leur ordre. Rend `true` si l'ordre a changé.
+/// La liste des séries, rangée comme l'Object Manager (#197) : une série seule
+/// est une ligne, un groupe est un nœud repliable (réduire ne masque aucune
+/// courbe) dont les membres sont en branche. Dessous, la rangée qui change
+/// l'ordre. Rend `true` si l'ordre a changé.
 fn series_list(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
+    layer: usize,
     tree: &Tree,
     selected: &mut usize,
 ) -> bool {
@@ -140,47 +162,52 @@ fn series_list(
         .auto_shrink([false, false])
         .max_height((ui.available_height() - LIST_FOOTER).max(60.0))
         .show(ui, |ui| {
+            crate::tree_lines::begin_tree(ui);
             // #169 : une liste, donc des lignes de liste (`list_row`).
-            for (index, series) in panel.series.iter().enumerate() {
-                let name = series_list_label(tree, series);
-                let label = match series.group {
-                    Some(group) => tr!(
-                        "curve-list-label",
-                        name = name.as_str(),
-                        group = group_name(group)
-                    ),
-                    None => name,
-                };
-                if ui
-                    .push_id(index, |ui| {
-                        list_row(ui, None, &label, *selected == index, false)
-                    })
-                    .inner
-                    .clicked()
-                {
-                    *selected = index;
+            for slot in panel.slots() {
+                match slot {
+                    SeriesSlot::Single(index) => {
+                        series_row(ui, panel, tree, index, selected);
+                    }
+                    SeriesSlot::Group { id, members } => {
+                        let state = ui.make_persistent_id(("curve_list_group", layer, id));
+                        egui::collapsing_header::CollapsingState::load_with_default_open(
+                            ui.ctx(),
+                            state,
+                            true,
+                        )
+                        .show_header(ui, |ui| {
+                            if list_row(ui, None, &group_title(panel, id), false, false).clicked() {
+                                if let Some(first) = members.first() {
+                                    *selected = *first;
+                                }
+                            }
+                        })
+                        .body(|ui| {
+                            crate::tree_lines::tree_children(ui, |ui, branch| {
+                                for &member in &members {
+                                    let y = series_row(ui, panel, tree, member, selected);
+                                    branch.mark(y);
+                                }
+                            })
+                        });
+                    }
                 }
             }
         });
     let mut commit = false;
     ui.horizontal(|ui| {
-        let up = ui.add_enabled(
-            *selected > 0,
-            egui::Button::new(tr!("action-move-series-up")),
-        );
-        if up.clicked() {
-            panel.series.swap(*selected, *selected - 1);
-            *selected -= 1;
-            commit = true;
-        }
-        let down = ui.add_enabled(
-            *selected + 1 < panel.series.len(),
-            egui::Button::new(tr!("action-move-series-down")),
-        );
-        if down.clicked() {
-            panel.series.swap(*selected, *selected + 1);
-            *selected += 1;
-            commit = true;
+        for (label, up) in [
+            (tr!("action-move-series-up"), true),
+            (tr!("action-move-series-down"), false),
+        ] {
+            let movable = panel.can_move_series(*selected, up);
+            if ui.add_enabled(movable, egui::Button::new(label)).clicked() {
+                if let Some(index) = panel.move_series(*selected, up) {
+                    *selected = index;
+                    commit = true;
+                }
+            }
         }
     });
     commit
@@ -190,7 +217,8 @@ fn series_list(
 fn series_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
-    index: usize,
+    layer: usize,
+    index: &mut usize,
     env: &mut PickerEnv,
     actions: &mut Vec<Action>,
 ) -> bool {
@@ -198,31 +226,39 @@ fn series_page(
     let mut scope = ui
         .data(|d| d.get_temp(scope_id))
         .unwrap_or(EditScope::Group);
-    let mut commit = membership_editor(ui, panel, index, &mut scope);
-    let group = panel.series[index].group;
+    let mut commit = membership_editor(ui, panel, layer, index, &mut scope);
+    ui.data_mut(|d| d.insert_temp(scope_id, scope));
+    // Supprimer un groupe peut vider le calque : rien à régler ensuite.
+    if panel.series.is_empty() {
+        return commit;
+    }
+    *index = (*index).min(panel.series.len() - 1);
+    let group = panel.series[*index].group;
     let whole_group = group.is_some() && scope == EditScope::Group;
     commit |= gradient_editor(ui, panel, group, whole_group, env, actions);
 
-    let before = panel.series[index].clone();
-    commit |= series_editor(ui, &mut panel.series[index], env, whole_group);
+    let before = panel.series[*index].clone();
+    commit |= series_editor(ui, &mut panel.series[*index], env, whole_group);
     if let (true, Some(group)) = (whole_group, group) {
-        propagate_style(panel, group, &before, index);
+        propagate_style(panel, group, &before, *index);
     }
-    ui.data_mut(|d| d.insert_temp(scope_id, scope));
     commit
 }
 
 /// Appartenance de la série `index` : liste déroulante, « Quitter le groupe »,
-/// et, si elle est dans un groupe, le choix de portée avec sa phrase
-/// d'explication.
+/// puis, si elle est dans un groupe, ses gestes (nom, ordre, dissoudre,
+/// supprimer) et le choix de portée avec sa phrase d'explication. Un groupe
+/// reste contigu (#197) : changer d'appartenance déplace la série, `index`
+/// la suit.
 fn membership_editor(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
-    index: usize,
+    layer: usize,
+    index: &mut usize,
     scope: &mut EditScope,
 ) -> bool {
     let mut commit = false;
-    let group = panel.series[index].group;
+    let group = panel.series[*index].group;
     section_title(ui, tr!("curve-group-section"));
     let mut chosen = group;
     let mut new_group = false;
@@ -231,7 +267,7 @@ fn membership_editor(
         let entry = |id: u32| {
             tr!(
                 "curve-group-entry",
-                group = group_name(id),
+                group = group_title(panel, id),
                 count = panel.group_members(id).len()
             )
         };
@@ -262,10 +298,13 @@ fn membership_editor(
         chosen = Some(panel.next_group_id());
     }
     if chosen != group {
-        panel.series[index].group = chosen;
-        commit = true;
+        if let Some(moved) = panel.set_series_group(*index, chosen) {
+            *index = moved;
+            commit = true;
+        }
     }
-    if let Some(group) = chosen {
+    if let Some(group) = panel.series[*index].group {
+        commit |= group_editor(ui, panel, layer, group);
         let count = panel.group_members(group).len();
         ui.horizontal(|ui| {
             ui.label(tr!("curve-scope-field"));
@@ -281,6 +320,79 @@ fn membership_editor(
             EditScope::Series => tr!("curve-scope-series-note"),
         });
     }
+    commit
+}
+
+/// Les gestes du groupe `group` (#197) : son nom, son rang dans l'ordre de
+/// tracé, sa dissolution (les séries restent) et sa suppression avec ses
+/// séries. Rend `true` si le groupe a changé.
+fn group_editor(ui: &mut egui::Ui, panel: &mut PanelSpec, layer: usize, group: u32) -> bool {
+    let mut commit = false;
+    // Le texte en cours de frappe ne vit que le temps du focus : le reste du
+    // temps, le champ relit le modèle (nom changé ailleurs, autre groupe).
+    let name_id = egui::Id::new(("curve_group_name", layer, group));
+    let mut name: String = ui
+        .data(|d| d.get_temp(name_id))
+        .unwrap_or_else(|| panel.group_label(group).unwrap_or_default().to_string());
+    ui.horizontal(|ui| {
+        ui.label(tr!("curve-group-name-field"));
+        let field = ui
+            .add(
+                egui::TextEdit::singleline(&mut name)
+                    .hint_text(tr!("curve-group-name", number = group))
+                    .desired_width(160.0),
+            )
+            .on_hover_text(tr!("curve-group-name-field", "hint"));
+        if field.lost_focus() && panel.rename_group(group, &name) {
+            commit = true;
+        }
+        if field.has_focus() {
+            ui.data_mut(|d| d.insert_temp(name_id, name.clone()));
+        } else {
+            ui.data_mut(|d| d.remove::<String>(name_id));
+        }
+    });
+    ui.horizontal(|ui| {
+        for up in [true, false] {
+            let (label, hint) = if up {
+                (
+                    tr!("curve-group-move-up"),
+                    tr!("curve-group-move-up", "hint"),
+                )
+            } else {
+                (
+                    tr!("curve-group-move-down"),
+                    tr!("curve-group-move-down", "hint"),
+                )
+            };
+            if ui
+                .add_enabled(panel.can_move_group(group, up), egui::Button::new(label))
+                .on_hover_text(hint)
+                .clicked()
+                && panel.move_group(group, up)
+            {
+                commit = true;
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        if ui
+            .button(tr!("curve-group-ungroup"))
+            .on_hover_text(tr!("curve-group-ungroup", "hint"))
+            .clicked()
+            && panel.dissolve_group(group)
+        {
+            commit = true;
+        }
+        if ui
+            .button(tr!("curve-group-delete"))
+            .on_hover_text(tr!("curve-group-delete", "hint"))
+            .clicked()
+            && panel.remove_group(group)
+        {
+            commit = true;
+        }
+    });
     commit
 }
 
@@ -491,8 +603,7 @@ fn gradient_editor(
             .clicked()
         {
             if let Some(group) = group {
-                apply_gradient(panel, group, &active);
-                commit = true;
+                commit |= panel.apply_group_gradient(group, &active);
             }
         }
     });
@@ -513,17 +624,6 @@ fn gradient_editor(
     commit
 }
 
-/// Répartit le nuancier d'arrêts `stops` sur les séries du groupe `group`, dans
-/// l'ordre du calque : trait et remplissage des symboles prennent la couleur.
-/// Rien ne change si aucun arrêt n'est lisible.
-fn apply_gradient(panel: &mut PanelSpec, group: u32, stops: &[String]) {
-    let members = panel.group_members(group);
-    for (&member, color) in members.iter().zip(gradient_colors(stops, members.len())) {
-        panel.series[member].line.color = color.clone();
-        panel.series[member].symbol.color = color;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,23 +639,6 @@ mod tests {
                 .collect(),
         );
         panel
-    }
-
-    #[test]
-    fn le_nuancier_colore_les_series_du_groupe_dans_l_ordre_et_elles_seules() {
-        let mut panel = panneau();
-        let seule = panel.series[0].clone();
-        let stops = ["#000000".to_string(), "#ff0000".to_string()];
-        apply_gradient(&mut panel, 1, &stops);
-        assert_eq!(panel.series[0], seule, "la série hors groupe est intacte");
-        let couleurs: Vec<&str> = panel.series[1..]
-            .iter()
-            .map(|s| s.line.color.as_str())
-            .collect();
-        assert_eq!(couleurs, ["#000000", "#800000", "#ff0000"]);
-        assert!(panel.series[1..]
-            .iter()
-            .all(|s| s.symbol.color == s.line.color));
     }
 
     #[test]
@@ -578,11 +661,172 @@ mod tests {
         );
     }
 
+    /// Un calque « A, [B C D] » dont le groupe s'appelle « Lots » ; les séries
+    /// portent le nom de leur lettre.
+    fn calque_avec_groupe() -> PanelSpec {
+        let mut panel = PanelSpec::default();
+        for (n, name) in [(1, "A"), (2, "B"), (3, "C"), (4, "D")] {
+            let mut series = SeriesSpec::new(NodeId::from_raw(n));
+            series.name = name.into();
+            panel.series.push(series);
+        }
+        for member in 1..=3 {
+            panel.series[member].group = Some(1);
+        }
+        assert!(panel.rename_group(1, "Lots"));
+        panel
+    }
+
+    /// Une image de la page des séries : rend ce qui a été peint et si elle
+    /// demande la validation.
+    fn page(
+        ctx: &egui::Context,
+        panel: &mut PanelSpec,
+        selected: &mut usize,
+        events: Vec<egui::Event>,
+    ) -> (egui::FullOutput, bool) {
+        let project = stokesforge_core::Project::new("Séries").unwrap();
+        let mut env = PickerEnv::default();
+        let mut actions = Vec::new();
+        let mut commit = false;
+        let output =
+            super::super::test_support::image_de(ctx, egui::vec2(900.0, 700.0), events, |ui| {
+                commit |= curve_settings_page(
+                    ui,
+                    panel,
+                    0,
+                    project.tree(),
+                    selected,
+                    &mut env,
+                    &mut actions,
+                );
+            });
+        (output, commit)
+    }
+
+    fn centre(output: &egui::FullOutput, texte: &str) -> egui::Pos2 {
+        super::super::test_support::textes(&output.shapes)
+            .into_iter()
+            .find(|t| t.texte == texte)
+            .unwrap_or_else(|| panic!("texte absent : {texte}"))
+            .centre
+    }
+
+    /// Bord gauche du texte peint : l'alignement d'une ligne, quelle que soit
+    /// la longueur de son libellé.
+    fn gauche(output: &egui::FullOutput, texte: &str) -> f32 {
+        output
+            .shapes
+            .iter()
+            .find_map(|peint| match &peint.shape {
+                egui::Shape::Text(shape) if shape.galley.text() == texte => {
+                    Some(shape.visual_bounding_rect().left())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("texte absent : {texte}"))
+    }
+
+    fn clic(
+        ctx: &egui::Context,
+        panel: &mut PanelSpec,
+        selected: &mut usize,
+        pos: egui::Pos2,
+    ) -> bool {
+        let mut commit = page(ctx, panel, selected, vec![egui::Event::PointerMoved(pos)]).1;
+        for pressed in [true, false] {
+            commit |= page(
+                ctx,
+                panel,
+                selected,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            )
+            .1;
+        }
+        commit
+    }
+
+    /// #197 : la liste des séries range un groupe comme l'Object Manager — un
+    /// en-tête qui porte son nom, ses membres en retrait dessous — et ne le
+    /// montre plus en suffixe de chaque ligne.
     #[test]
-    fn un_nuancier_illisible_ne_change_rien() {
-        let mut panel = panneau();
-        let avant = panel.clone();
-        apply_gradient(&mut panel, 1, &["pas une couleur".to_string()]);
-        assert_eq!(panel, avant);
+    fn la_liste_range_un_groupe_sous_son_en_tete_nomme() {
+        let ctx = super::super::test_support::contexte();
+        let mut panel = calque_avec_groupe();
+        let mut selected = 0;
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (seule, en_tete, membre) = (
+            centre(&output, "A"),
+            centre(&output, "Lots"),
+            centre(&output, "B"),
+        );
+        assert!(seule.y < en_tete.y && en_tete.y < membre.y);
+        assert!(
+            gauche(&output, "B") > gauche(&output, "A") + 10.0,
+            "les membres sont en retrait d'une série seule"
+        );
+        assert!(
+            super::super::test_support::textes(&output.shapes)
+                .iter()
+                .all(|t| !t.texte.contains('·')),
+            "plus de groupe en suffixe"
+        );
+    }
+
+    /// #197 : Dissoudre rend ses séries simples (style gardé), Supprimer le
+    /// groupe les retire ; les deux demandent la validation du brouillon.
+    #[test]
+    fn dissoudre_et_supprimer_un_groupe_depuis_la_fenetre() {
+        let ctx = super::super::test_support::contexte();
+        let mut panel = calque_avec_groupe();
+        panel.series[1].line.width = 4.5;
+        let mut selected = 1;
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let pos = centre(&output, &tr!("curve-group-ungroup"));
+        assert!(clic(&ctx, &mut panel, &mut selected, pos));
+        assert!(panel.series.iter().all(|s| s.group.is_none()));
+        assert_eq!(panel.series[1].line.width, 4.5, "le style reste");
+        assert_eq!(panel.series.len(), 4);
+
+        let mut panel = calque_avec_groupe();
+        let mut selected = 3;
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let pos = centre(&output, &tr!("curve-group-delete"));
+        assert!(clic(&ctx, &mut panel, &mut selected, pos));
+        assert_eq!(panel.series.len(), 1, "A reste seule");
+        assert!(panel.group_names.is_empty());
+        let (_, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        assert_eq!(selected, 0, "la sélection retombe sur une série existante");
+    }
+
+    /// #197 : rejoindre un groupe place la série à la suite de ses membres, et
+    /// la sélection suit la série.
+    #[test]
+    fn rejoindre_un_groupe_deplace_la_serie_et_la_selection_la_suit() {
+        let mut panel = calque_avec_groupe();
+        let mut ui_selected = 0;
+        let ctx = super::super::test_support::contexte();
+        // « A » (rang 0) rejoint le groupe 1 par la même voie que la liste déroulante.
+        let moved = panel.set_series_group(ui_selected, Some(1)).unwrap();
+        ui_selected = moved;
+        assert_eq!(ui_selected, 3);
+        assert_eq!(
+            panel
+                .series
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            ["B", "C", "D", "A"]
+        );
+        let (output, _) = page(&ctx, &mut panel, &mut ui_selected, Vec::new());
+        assert!(centre(&output, "A").y > centre(&output, "D").y);
     }
 }

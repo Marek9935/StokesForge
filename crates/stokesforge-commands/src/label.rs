@@ -230,9 +230,17 @@ pub enum PlotEditKind {
     RemoveText,
     RemoveObject,
     ReorderObject,
+    /// Nom d'un groupe de séries (#197).
+    RenameGroup,
+    /// Un groupe de séries dissous : ses séries restent (#197).
+    DissolveGroup,
+    /// Un groupe de séries supprimé avec ses séries (#197).
+    RemoveGroup,
+    /// Un groupe de séries déplacé en bloc (#197).
+    ReorderGroup,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 11] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -240,6 +248,10 @@ impl PlotEditKind {
         Self::RemoveText,
         Self::RemoveObject,
         Self::ReorderObject,
+        Self::RenameGroup,
+        Self::DissolveGroup,
+        Self::RemoveGroup,
+        Self::ReorderGroup,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -252,6 +264,10 @@ impl std::fmt::Display for PlotEditKind {
             Self::RemoveText => "Delete Text",
             Self::RemoveObject => "Delete Object",
             Self::ReorderObject => "Reorder Object",
+            Self::RenameGroup => "Rename Group",
+            Self::DissolveGroup => "Ungroup Series",
+            Self::RemoveGroup => "Delete Group",
+            Self::ReorderGroup => "Reorder Group",
         })
     }
 }

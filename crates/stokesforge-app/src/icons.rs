@@ -86,6 +86,8 @@ pub enum Icon {
     FillColor,
     TextColor,
     Axis,
+    /// L'aide au survol d'un champ (#197) : un point d'interrogation.
+    Help,
 }
 
 macro_rules! svg {
@@ -289,6 +291,7 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         svg!("text-a-underline-modify.neutral.svg"),
     ),
     (Icon::Axis, IconRole::Neutral, svg!("ruler.neutral.svg")),
+    (Icon::Help, IconRole::Neutral, svg!("question.neutral.svg")),
 ];
 
 /// Inatteignable tant que chaque icône a une variante (test `le_tableau_…`).

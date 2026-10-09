@@ -123,6 +123,10 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::RemoveText => tr!("history-plot-remove-text"),
             PlotEditKind::RemoveObject => tr!("history-plot-remove-object"),
             PlotEditKind::ReorderObject => tr!("history-plot-reorder-object"),
+            PlotEditKind::RenameGroup => tr!("history-plot-rename-group"),
+            PlotEditKind::DissolveGroup => tr!("history-plot-dissolve-group"),
+            PlotEditKind::RemoveGroup => tr!("history-plot-remove-group"),
+            PlotEditKind::ReorderGroup => tr!("history-plot-reorder-group"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::AddCalculation(kind) => {
