@@ -2037,4 +2037,131 @@ pub(super) mod tests {
         // Témoin : sans sélection, Suppr ne retire rien.
         assert!(run(&mut GraphView::new(), false).is_empty());
     }
+
+    /// #209 : les raccourcis d'un **groupe** sélectionné dans le graphe (#197)
+    /// — Suppr, F2, Ctrl+↑/↓ — visent le groupe, pas sa première série ;
+    /// Ctrl+↑/↓ ne demande rien quand le groupe est déjà au bord, et une
+    /// saisie en cours garde ses touches. Calque « A, [B C] ».
+    #[test]
+    fn les_raccourcis_d_un_groupe_selectionne_visent_le_groupe() {
+        use super::super::object_manager_ui::group_rename_pending;
+        use crate::object_manager::VisibilityTarget;
+        use stokesforge_plot::{SeriesGroupRef, SeriesRef};
+
+        let mut project = Project::new("Groupes").unwrap();
+        let root = project.root();
+        let (x, y) = colonnes_xy(&mut project);
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new_xy(x, y));
+        panel.push_series_batch(vec![SeriesSpec::new_xy(x, y), SeriesSpec::new_xy(x, y)]);
+        let spec = PlotSpec::empty("Groupes").with_panels(panel);
+        let group = SeriesGroupRef::new(0, spec.panels[0].group_ids()[0]);
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let snapshot = session.handle().snapshot().unwrap();
+
+        let key = |key: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        // Deux images : la première peint le graphe (et pose ou non le focus
+        // sur un champ), la seconde envoie la touche. Rend les actions et le
+        // contexte, qui garde l'éditeur de nom éventuel.
+        let run = |view: &mut GraphView, event: egui::Event, typing: bool| {
+            let context = egui::Context::default();
+            context.set_fonts(stokesforge_render_egui::font_definitions());
+            let mut actions = Vec::new();
+            let mut buffer = String::new();
+            for events in [Vec::new(), vec![event.clone()]] {
+                let first = events.is_empty();
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 700.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| {
+                    let field = ui.text_edit_singleline(&mut buffer);
+                    if typing && first {
+                        field.request_focus();
+                    }
+                    graph_view_contents(ui, view, &snapshot, graph, &mut actions);
+                });
+                output.textures_delta.clear();
+            }
+            (actions, context)
+        };
+        let group_view = || {
+            let mut view = GraphView::new();
+            view.select_series_group(Some(group), &spec);
+            assert_eq!(view.selected_group(), Some(group));
+            view
+        };
+
+        let delete = key(egui::Key::Delete, egui::Modifiers::NONE);
+        assert_eq!(
+            run(&mut group_view(), delete.clone(), false).0,
+            vec![Action::RemovePlotObject {
+                graph,
+                target: VisibilityTarget::SeriesGroup(group),
+            }]
+        );
+        // Témoin : la même touche sur la première série seule ne vise qu'elle.
+        let mut view = GraphView::new();
+        view.select_series(Some(SeriesRef::new(0, 1)), &spec);
+        assert_eq!(
+            run(&mut view, delete.clone(), false).0,
+            vec![Action::RemovePlotObject {
+                graph,
+                target: VisibilityTarget::Series(SeriesRef::new(0, 1)),
+            }]
+        );
+        assert!(
+            run(&mut group_view(), delete, true).0.is_empty(),
+            "Suppr appartient au champ"
+        );
+
+        assert_eq!(
+            run(
+                &mut group_view(),
+                key(egui::Key::ArrowUp, egui::Modifiers::CTRL),
+                false
+            )
+            .0,
+            vec![Action::MoveSeriesGroup {
+                graph,
+                group,
+                up: true
+            }]
+        );
+        assert!(
+            run(
+                &mut group_view(),
+                key(egui::Key::ArrowDown, egui::Modifiers::CTRL),
+                false
+            )
+            .0
+            .is_empty(),
+            "le groupe est déjà en bas"
+        );
+
+        let (actions, context) = run(
+            &mut group_view(),
+            key(egui::Key::F2, egui::Modifiers::NONE),
+            false,
+        );
+        assert!(actions.is_empty(), "F2 n'agit pas sur le modèle");
+        assert!(group_rename_pending(&context, graph, group));
+        // Témoin : F2 sur une série seule ne renomme pas son groupe.
+        let mut view = GraphView::new();
+        view.select_series(Some(SeriesRef::new(0, 1)), &spec);
+        let (_, context) = run(&mut view, key(egui::Key::F2, egui::Modifiers::NONE), false);
+        assert!(!group_rename_pending(&context, graph, group));
+        session.shutdown().unwrap();
+    }
 }

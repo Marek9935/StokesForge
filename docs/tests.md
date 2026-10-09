@@ -395,3 +395,18 @@ Les nouveaux cas sont éprouvés par des mutations temporaires retirées avant
 livraison. Les comparaisons de formes egui avant/après (texte, positions,
 couleurs, rognage) complètent les tests de gestes ; elles ne remplacent pas une
 validation interactive des fenêtres OS détachées ou des sélecteurs natifs.
+
+## Groupes de séries (#196, #197, #209)
+
+Les gestes passent par les événements egui, jamais par un appel direct de la
+méthode de `PanelSpec` qu'ils déclenchent : un test qui appelle
+`set_series_group` lui-même ne voit pas l'éditeur perdre sa série.
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| `membership_editor` : la sélection ne suit plus la série déplacée (`*index = moved` retiré) | `la_liste_deroulante_fait_rejoindre_un_groupe_et_l_editeur_suit_la_serie` (`app/curve_settings.rs`) |
+| graphe : la branche « groupe sélectionné » sautée, Suppr vise la première série | `les_raccourcis_d_un_groupe_selectionne_visent_le_groupe` (`app/graph_window.rs`) |
+| Ctrl+↑/↓ sans la borne `can_move_group` | idem |
+| F2 n'ouvre plus le renommage du groupe | idem |
+| `.stf` : noms de groupe vides gardés au chargement | `un_nom_de_groupe_vide_est_ecarte_au_chargement` (`stokesforge-persistence/src/convert.rs`) |
+| `.stf` : `#[serde(default)]` retiré de `group_names` (ancien fichier illisible) | `un_calque_sans_noms_de_groupe_se_relit_avec_ses_groupes` |
