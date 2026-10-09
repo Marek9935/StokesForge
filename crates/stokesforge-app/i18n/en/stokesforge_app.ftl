@@ -1291,3 +1291,8 @@ results-scope-book = Workbook
 results-empty = No kept results here
 results-no-values = This calculation produced no values
 results-stale-suffix = { $title } (out of date)
+
+## Analysis — out-of-date columns (#181)
+analysis-stale-manual = Out of date: the source data changed. Recalculate to update this column
+analysis-stale-input-missing = Out of date: a source column was deleted. Edit the calculation or detach this column
+analysis-stale-failed = Out of date: the last recalculation failed ({ $detail })

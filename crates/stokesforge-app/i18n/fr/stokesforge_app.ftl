@@ -1283,3 +1283,8 @@ results-scope-book = Classeur
 results-empty = Aucun résultat gardé ici
 results-no-values = Ce calcul n'a produit aucune valeur
 results-stale-suffix = { $title } (pas à jour)
+
+## Analysis — out-of-date columns (#181)
+analysis-stale-manual = Pas à jour : les données sources ont changé. Recalculez pour mettre cette colonne à jour
+analysis-stale-input-missing = Pas à jour : une colonne source a été supprimée. Modifiez le calcul ou détachez cette colonne
+analysis-stale-failed = Pas à jour : le dernier recalcul a échoué ({ $detail })

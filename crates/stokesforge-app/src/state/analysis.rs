@@ -206,3 +206,26 @@ impl AppState {
             .collect()
     }
 }
+
+impl AppState {
+    /// Pourquoi une colonne de sortie n'est pas à jour, si elle appartient à
+    /// un calcul périmé (M9 a).
+    pub fn column_staleness(&self, column: NodeId) -> Option<&stokesforge_core::Staleness> {
+        let (id, _) = self.snapshot.tree.calculation_of_column(column)?;
+        self.snapshot.tree.calculation(id)?.stale.as_ref()
+    }
+
+    /// La phrase qui dit pourquoi `column` est périmée, pour l'info-bulle de
+    /// son en-tête ; `None` si la colonne est à jour.
+    pub fn column_stale_text(&self, column: NodeId) -> Option<String> {
+        use stokesforge_core::Staleness;
+        Some(match self.column_staleness(column)? {
+            Staleness::Manual => tr!("analysis-stale-manual"),
+            Staleness::InputMissing => tr!("analysis-stale-input-missing"),
+            Staleness::Failed(error) => tr!(
+                "analysis-stale-failed",
+                detail = errors::analysis::error_message(error)
+            ),
+        })
+    }
+}

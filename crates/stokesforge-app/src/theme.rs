@@ -140,6 +140,16 @@ pub fn import_comment_line_color() -> Color32 {
     Color32::from_rgb(200, 80, 200)
 }
 
+/// Teinte d'une colonne calculée qui n'est plus à jour (lettre d'en-tête et
+/// cellules), #181.
+pub fn stale_color(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(230, 170, 70)
+    } else {
+        Color32::from_rgb(170, 100, 0)
+    }
+}
+
 /// Courbe de résultat de l'aperçu d'analyse (ajustement, signal corrigé,
 /// somme des pics), #181.
 pub fn preview_result_color(dark: bool) -> Color32 {
