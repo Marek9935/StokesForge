@@ -440,6 +440,7 @@ history-macro-add-worksheet = Ajouter une feuille
 history-macro-script = Exécuter le script
 history-macro-set-columns-type = Changer le type des colonnes
 history-macro-set-columns-role = Changer le rôle des colonnes
+history-macro-analysis-to-graph = Analyser et tracer
 
 ## Annuler et rétablir
 
@@ -1300,6 +1301,8 @@ analysis-direct-noise = Rapport de bruit
 analysis-output-baseline-column = Écrire la ligne de base
 analysis-output-peak-columns = Écrire une colonne par pic
 analysis-output-sum-column = Écrire la somme des pics
+analysis-output-to-graph = Ajouter au graphique
+    .hint = Trace les nouvelles colonnes sur le graphique qui montre cette courbe, dans la même étape d'annulation
 analysis-output-show = Montrer
     .hint = Écrit les colonnes seulement ; les valeurs ne sont pas gardées
 analysis-output-keep = Garder dans les résultats

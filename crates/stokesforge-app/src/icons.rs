@@ -88,6 +88,9 @@ pub enum Icon {
     Axis,
     /// L'aide au survol d'un champ (#197) : un point d'interrogation.
     Help,
+    /// Un calcul d'analyse pas à jour (#200) : triangle d'avertissement, en tête
+    /// de la colonne produite et sur la série qui la trace.
+    Stale,
 }
 
 macro_rules! svg {
@@ -292,6 +295,7 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     ),
     (Icon::Axis, IconRole::Neutral, svg!("ruler.neutral.svg")),
     (Icon::Help, IconRole::Neutral, svg!("question.neutral.svg")),
+    (Icon::Stale, IconRole::Neutral, svg!("warning.neutral.svg")),
 ];
 
 /// Inatteignable tant que chaque icône a une variante (test `le_tableau_…`).

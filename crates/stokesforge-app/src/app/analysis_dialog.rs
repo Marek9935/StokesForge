@@ -113,6 +113,11 @@ pub(super) fn analysis_window(
 ) {
     let tree = state.tree().clone();
     let revision = state.snapshot().revision;
+    let ys: Vec<stokesforge_core::NodeId> = state
+        .analysis_form()
+        .map(|form| form.series.iter().map(|s| s.y).collect())
+        .unwrap_or_default();
+    let graphs = state.graphs_plotting(&ys);
     let Some(form) = state.analysis_form_mut() else {
         return;
     };
@@ -161,7 +166,7 @@ pub(super) fn analysis_window(
                         egui::ScrollArea::vertical()
                             .id_salt("stokesforge_analysis_form")
                             .auto_shrink([false, false])
-                            .show(ui, |ui| form_body(ui, id, form, &tree));
+                            .show(ui, |ui| form_body(ui, id, form, &tree, &graphs));
                     },
                 );
                 ui.separator();

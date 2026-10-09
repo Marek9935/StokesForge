@@ -109,6 +109,10 @@ struct PreferencesFile {
     /// tolérant ce qu'une autre version y a écrit.
     #[serde(default)]
     toolbars: Option<serde_json::Value>,
+    /// Sortie par défaut des analyses : `true` « Keep in Results », `false`
+    /// « Show » (#200, maquette M5).
+    #[serde(default)]
+    analysis_keep_results: Option<bool>,
 }
 
 /// Les préférences de l'utilisateur, et le fichier d'où elles viennent.
@@ -119,6 +123,7 @@ pub struct Preferences {
     object_manager_settings: ObjectManagerSettings,
     svg_text: SvgTextMode,
     toolbars: Option<serde_json::Value>,
+    analysis_keep_results: bool,
     path: Option<PathBuf>,
 }
 
@@ -160,6 +165,7 @@ impl Preferences {
                 _ => SvgTextMode::Text,
             },
             toolbars: file.toolbars,
+            analysis_keep_results: file.analysis_keep_results.unwrap_or(false),
             path,
         }
     }
@@ -246,6 +252,18 @@ impl Preferences {
         self.save_field("svg_text", name.into())
     }
 
+    /// La sortie par défaut des analyses : garder les valeurs dans Results
+    /// (`true`) ou seulement les montrer (`false`, défaut).
+    pub fn analysis_keep_results(&self) -> bool {
+        self.analysis_keep_results
+    }
+
+    /// Mémorise le choix sans remplacer les autres préférences.
+    pub fn save_analysis_keep_results(&mut self, keep: bool) -> std::io::Result<()> {
+        self.analysis_keep_results = keep;
+        self.save_field("analysis_keep_results", keep.into())
+    }
+
     /// Écrit les réglages ensemble en conservant les préférences étrangères.
     pub fn save_object_manager_settings(
         &mut self,
@@ -312,6 +330,17 @@ fn default_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_sortie_par_defaut_des_analyses_est_ecrite_et_relue_sans_perdre_la_langue() {
+        let (_dir, path) = written(r#"{ "language": "fr" }"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        assert!(!preferences.analysis_keep_results(), "Show par défaut");
+        preferences.save_analysis_keep_results(true).unwrap();
+        let reloaded = Preferences::load_from(Some(path));
+        assert!(reloaded.analysis_keep_results());
+        assert_eq!(reloaded.language(), Some("fr"));
+    }
 
     fn written(content: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("dossier temporaire");

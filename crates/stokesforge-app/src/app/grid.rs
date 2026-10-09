@@ -675,6 +675,20 @@ fn column_letter_widget(
                 .selectable(false),
         );
         if let Some(text) = stale_text {
+            // L'icône d'avertissement à gauche de la lettre (#200), si la colonne
+            // est assez large pour ne pas la mordre.
+            if rect.width() >= 3.0 * crate::icons::ICON_SIZE {
+                let size = egui::Vec2::splat(crate::icons::ICON_SIZE);
+                let at = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + 2.0, rect.center().y - size.y / 2.0),
+                    size,
+                );
+                crate::icons::icon_image(
+                    crate::icons::Icon::Stale,
+                    crate::icons::IconRole::Neutral,
+                )
+                .paint_at(ui, at);
+            }
             response.clone().on_hover_text(text);
         }
         let modifiers = ui.input(|i| i.modifiers);
@@ -3580,6 +3594,44 @@ mod tests {
                 "témoin : une cellule seule n'a pas {entree:?} : {textes:?}"
             );
         }
+    }
+
+    /// L'en-tête d'une colonne produite par un calcul pas à jour porte une icône
+    /// d'avertissement (#200) ; à jour, il n'en porte pas (témoin).
+    #[test]
+    fn l_en_tete_d_une_colonne_perimee_porte_l_icone_d_avertissement() {
+        use crate::analysis::Preset;
+        let mut banc = Banc::new();
+        egui_extras::install_image_loaders(&banc.context);
+        let icones = |banc: &mut Banc| {
+            banc.image(Vec::new());
+            banc.image(Vec::new());
+            crate::app::window_chrome::tests::find_icon_centers(
+                &banc.dernier.as_ref().unwrap().shapes,
+            )
+            .len()
+        };
+        banc.state.dispatch(Action::OpenAnalysis {
+            preset: Preset::Integrate,
+            sheet: banc.sheet,
+            columns: vec![banc.columns[0]],
+        });
+        {
+            let form = banc.state.analysis_form_mut().unwrap();
+            form.setup.integrate.cumulative = true;
+            form.auto_recalc = false;
+            form.auto_recalc_chosen = true;
+        }
+        banc.state.dispatch(Action::ApplyAnalysis);
+        let a_jour = icones(&mut banc);
+        banc.state.dispatch(Action::CommitCell {
+            column: banc.columns[0],
+            row: 0,
+            text: "999".to_string(),
+        });
+        assert_eq!(banc.state.stale_calculations().len(), 1);
+        let perime = icones(&mut banc);
+        assert_eq!(perime, a_jour + 1, "une icône d'avertissement de plus");
     }
 
     /// Choisir « Effacer » dans le menu d'une cellule pousse le vidage de la

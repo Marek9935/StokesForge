@@ -447,6 +447,7 @@ history-macro-add-worksheet = Add Sheet
 history-macro-script = Run Script
 history-macro-set-columns-type = Change Column Types
 history-macro-set-columns-role = Change Column Roles
+history-macro-analysis-to-graph = Analyze and Plot
 
 ## Undo and Redo
 
@@ -1308,6 +1309,8 @@ analysis-direct-noise = Noise ratio
 analysis-output-baseline-column = Write the baseline
 analysis-output-peak-columns = Write one column per peak
 analysis-output-sum-column = Write the sum of the peaks
+analysis-output-to-graph = Add to graph
+    .hint = Plots the new columns on the graph that shows this curve, in the same undo step
 analysis-output-show = Show
     .hint = Writes the columns only; the values are not kept
 analysis-output-keep = Keep in Results

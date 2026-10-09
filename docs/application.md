@@ -122,6 +122,14 @@ L'interface du traitement mathématique est répartie ainsi :
   suit l'échelle des données) ; une aire s'affiche avec le produit des unités de
   X et de Y quand les deux existent (`value_unit`) ; la fenêtre des pics borne
   les centres (`center_window`, aussi `pyst.analysis.peaks`).
+- Finitions (#200) : « Add to graph » (case de la sortie, visible quand un
+  graphique montre la courbe ; `AppState::graphs_plotting`) crée le calcul **et**
+  trace ses colonnes (hors résidus, `PanelSpec::push_series_batch` via
+  `AddSeriesToGraph`) dans une seule macro `MacroKind::AnalysisToGraph` ;
+  Show / Keep in Results se souvient du dernier choix d'une session à l'autre
+  (`preferences.json`, `analysis_keep_results`) ; l'en-tête d'une colonne pas à
+  jour porte l'icône `Icon::Stale` (Phosphor `warning`, rôle neutre) à gauche de
+  sa lettre teintée.
 - Le choix du type d'analyse se fait dans la fenêtre (liste « Analysis type »,
   `family_chooser`) tant qu'elle crée un calcul ; un calcul rouvert garde sa
   famille (#202).

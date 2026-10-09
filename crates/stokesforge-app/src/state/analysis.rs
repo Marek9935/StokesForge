@@ -8,11 +8,12 @@
 //! recalcul des formules. Le formulaire lui-même est un état d'interface :
 //! jamais dans l'historique tant que l'utilisateur n'a pas validé.
 
-use stokesforge_commands::Command;
-use stokesforge_core::{Node, NodeId, SeriesRef};
+use stokesforge_commands::HistoryLabel;
+use stokesforge_commands::{Command, MacroKind};
+use stokesforge_core::{Node, NodeId, NodeKind, SeriesRef};
 use stokesforge_plot::PlotType;
 
-use super::{series_from_columns, AppState};
+use super::{current_plot_spec, history_text, series_from_columns, AppState};
 use crate::analysis::{issue_message, AnalysisForm, Preset};
 use crate::errors;
 use crate::tr;
@@ -113,11 +114,90 @@ impl AppState {
             Some(id) => Command::UpdateCalculation { id, draft },
             None => Command::AddCalculation { draft },
         };
-        self.execute(command);
+        let target = match (form.editing, form.add_to_graph, form.graph) {
+            (None, true, Some(graph)) => Some(graph),
+            _ => None,
+        };
+        match target {
+            Some(graph) => self.add_calculation_to_graph(command, graph, &form),
+            None => self.execute(command),
+        }
         if self.status.as_ref().is_some_and(|status| !status.is_error) {
             self.analysis_keep_results = form.keep_results;
+            // Le dernier choix devient le défaut des prochaines sessions (#200).
+            // Un fichier de préférences illisible ne doit pas défaire un calcul réussi.
+            let _ = self
+                .object_manager_preferences
+                .save_analysis_keep_results(form.keep_results);
             self.analysis = None;
         }
+    }
+
+    /// Les graphiques qui tracent au moins une des colonnes `ys` : ceux où
+    /// « Add to graph » a un sens (#200).
+    pub fn graphs_plotting(&self, ys: &[NodeId]) -> Vec<(NodeId, String)> {
+        self.graphs()
+            .into_iter()
+            .filter(|(id, _)| {
+                matches!(
+                    self.snapshot.tree.node(*id).map(Node::kind),
+                    Some(NodeKind::Graph { spec, .. })
+                        if spec.panels.iter().any(|panel| {
+                            panel.series.iter().any(|series| ys.contains(&series.y))
+                        })
+                )
+            })
+            .collect()
+    }
+
+    /// Crée le calcul **et** trace ses colonnes sur `graph`, en une seule
+    /// entrée d'historique (#200). Les résidus ne sont pas tracés : leur échelle
+    /// écraserait la courbe. Un échec à n'importe quelle étape avorte tout.
+    fn add_calculation_to_graph(&mut self, command: Command, graph: NodeId, form: &AnalysisForm) {
+        if self.handle.begin_macro(MacroKind::AnalysisToGraph).is_err() {
+            return;
+        }
+        let before: Vec<NodeId> = self.snapshot.tree.calculations().keys().copied().collect();
+        self.execute(command);
+        let failed = |state: &Self| state.status.as_ref().is_some_and(|s| s.is_error);
+        if failed(self) {
+            let _ = self.handle.abort_macro();
+            self.refresh();
+            return;
+        }
+        let tree = &self.snapshot.tree;
+        let columns: Vec<NodeId> = tree
+            .calculations()
+            .iter()
+            .find(|(id, _)| !before.contains(id))
+            .map(|(_, calc)| {
+                calc.live_outputs(tree)
+                    .filter(|output| output.key != "residuals")
+                    .filter_map(|output| output.column)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let ys: Vec<NodeId> = form.series.iter().map(|s| s.y).collect();
+        let panel = current_plot_spec(tree, graph)
+            .and_then(|spec| {
+                spec.panels
+                    .iter()
+                    .position(|p| p.series.iter().any(|s| ys.contains(&s.y)))
+            })
+            .unwrap_or(0);
+        self.add_series_to_graph(graph, panel, columns, None);
+        if failed(self) {
+            let _ = self.handle.abort_macro();
+            self.refresh();
+            return;
+        }
+        match self.handle.end_macro() {
+            Ok(_) => self.notice(history_text(&HistoryLabel::Macro(
+                MacroKind::AnalysisToGraph,
+            ))),
+            Err(err) => self.fail(errors::session::error_message(&err)),
+        }
+        self.refresh();
     }
 
     /// Recalcule `ids` ; vide : tous les calculs périmés.

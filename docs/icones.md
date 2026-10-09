@@ -118,6 +118,11 @@ L'aide au survol d'un champ (#197, `app/hover_help.rs`) utilise `question`
 (`Icon::Help`, rôle neutre) estompée par `theme::help_icon_tint` : le point
 d'interrogation ne distingue pas un type d'objet, il dit « un rappel existe ici ».
 
+L'état « pas à jour » d'un calcul d'analyse (#200) utilise `warning`
+(`Icon::Stale`, rôle neutre) : en-tête de la colonne produite, et ligne de la
+série qui la trace. La teinte d'avertissement reste celle de la lettre
+(`theme::stale_color`), pas un rôle de palette.
+
 ## Échantillons de couleur (#89)
 
 Un réglage de couleur est un **petit carré** (`color_picker::color_button`).

@@ -2488,6 +2488,7 @@ impl AppState {
         preferences: Preferences,
     ) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
+        let keep_results_default = preferences.analysis_keep_results();
         let saved_revision = std::path::Path::new(&path)
             .is_file()
             .then_some((snapshot.revision, snapshot.geometry_revision));
@@ -2533,7 +2534,7 @@ impl AppState {
             projects_to_open: Vec::new(),
             metadata_view: None,
             analysis: None,
-            analysis_keep_results: false,
+            analysis_keep_results: keep_results_default,
             pending_calculation_delete: None,
             import_job: None,
             last_import: None,

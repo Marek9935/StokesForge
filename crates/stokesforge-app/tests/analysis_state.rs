@@ -216,3 +216,107 @@ fn a_manual_calculation_goes_out_of_date_and_recalculates_on_demand() {
         .dispatch(Action::RecalculateCalculations(Vec::new()));
     assert!(s.state.stale_calculations().is_empty());
 }
+
+fn graphs_count(s: &Setup) -> usize {
+    s.state.graphs().len()
+}
+
+fn plotted_columns(s: &Setup) -> Vec<NodeId> {
+    let graph = s.state.graphs()[0].0;
+    match s.state.tree().node(graph).unwrap().kind() {
+        stokesforge_core::NodeKind::Graph { spec, .. } => spec
+            .panels
+            .iter()
+            .flat_map(|p| p.series.iter().map(|series| series.y))
+            .collect(),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn add_to_graph_plots_the_new_columns_in_the_same_undo_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    // Sans graphique qui montre la courbe, aucun candidat.
+    assert!(s.state.graphs_plotting(&[s.y]).is_empty());
+    s.state.dispatch(Action::PlotColumns {
+        sheet: s.sheet,
+        columns: vec![s.x, s.y],
+        plot_type: stokesforge_plot::PlotType::Line,
+    });
+    assert_eq!(graphs_count(&s), 1);
+    let graph = s.state.graphs()[0].0;
+    assert_eq!(s.state.graphs_plotting(&[s.y]).len(), 1);
+    assert_eq!(plotted_columns(&s), vec![s.y]);
+
+    open(&mut s, Preset::Fit(Model::Linear));
+    {
+        let form = s.state.analysis_form_mut().unwrap();
+        form.setup.fit.residuals = true;
+        form.add_to_graph = true;
+        form.graph = Some(graph);
+    }
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert!(
+        !s.state.status().unwrap().is_error,
+        "{:?}",
+        s.state.status()
+    );
+    let plotted = plotted_columns(&s);
+    // La source et l'ajustement ; les résidus ne sont pas tracés.
+    assert_eq!(plotted.len(), 2, "{plotted:?}");
+    assert_eq!(plotted[0], s.y);
+    assert_eq!(columns(&s), 4);
+
+    // Un seul Ctrl+Z défait le calcul, ses colonnes et leur tracé.
+    s.state.dispatch(Action::Undo);
+    assert!(s.state.tree().calculations().is_empty());
+    assert_eq!(columns(&s), 2);
+    assert_eq!(plotted_columns(&s), vec![s.y]);
+    s.state.dispatch(Action::Redo);
+    assert_eq!(plotted_columns(&s).len(), 2);
+}
+
+#[test]
+fn without_the_box_nothing_is_plotted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    s.state.dispatch(Action::PlotColumns {
+        sheet: s.sheet,
+        columns: vec![s.x, s.y],
+        plot_type: stokesforge_plot::PlotType::Line,
+    });
+    open(&mut s, Preset::Fit(Model::Linear));
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert_eq!(plotted_columns(&s), vec![s.y], "témoin : case décochée");
+}
+
+#[test]
+fn the_output_choice_is_remembered_across_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("preferences.json");
+    let make = |keep_expected: bool| {
+        let mut s = setup(dir.path());
+        let preferences = stokesforge_app::preferences::Preferences::load_from(Some(file.clone()));
+        assert_eq!(preferences.analysis_keep_results(), keep_expected);
+        s.state = AppState::new_with_preferences(
+            s._session.handle(),
+            dir.path().join("p.stokesforge").display().to_string(),
+            preferences,
+        )
+        .unwrap();
+        s
+    };
+    let mut s = make(false);
+    open(&mut s, Preset::Fit(Model::Linear));
+    assert!(
+        !s.state.analysis_form().unwrap().keep_results,
+        "Show par défaut"
+    );
+    s.state.analysis_form_mut().unwrap().keep_results = true;
+    s.state.dispatch(Action::ApplyAnalysis);
+    // Une session neuve retrouve le choix.
+    let mut s = make(true);
+    open(&mut s, Preset::Fit(Model::Linear));
+    assert!(s.state.analysis_form().unwrap().keep_results);
+}
