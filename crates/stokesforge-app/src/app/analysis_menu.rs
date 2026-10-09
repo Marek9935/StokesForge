@@ -73,9 +73,17 @@ fn fit_label(model: &Model) -> (String, String) {
             tr!("analysis-fit-polynomial"),
             tr!("analysis-fit-polynomial", "hint"),
         ),
-        Model::Exponential | Model::ExponentialOffset | Model::Exponential2 => (
+        Model::Exponential => (
             tr!("analysis-fit-exponential"),
             tr!("analysis-fit-exponential", "hint"),
+        ),
+        Model::ExponentialOffset => (
+            tr!("analysis-fit-exponential-offset"),
+            tr!("analysis-fit-exponential-offset", "hint"),
+        ),
+        Model::Exponential2 => (
+            tr!("analysis-fit-exponential2"),
+            tr!("analysis-fit-exponential2", "hint"),
         ),
         Model::Logarithm => (
             tr!("analysis-fit-logarithm"),

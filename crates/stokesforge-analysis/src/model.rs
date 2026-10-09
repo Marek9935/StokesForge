@@ -263,8 +263,72 @@ impl CompiledModel {
                 let g = peak_guess(x, y);
                 vec![g.y0, g.height, g.center, g.fwhm]
             }
-            Model::Custom { .. } => vec![1.0; self.params.len()],
+            Model::Custom { .. } => self.guess_free(x, y),
         }
+    }
+
+    /// Départ d'un modèle libre (#204, bouton « Auto ») : tous les paramètres à 1,
+    /// puis deux passes qui testent, un paramètre à la fois, une grille de
+    /// valeurs (0 et ±10ᵏ × l'échelle de 1, de Y, de X, de 1/X) et gardent
+    /// celle qui fait baisser la somme des carrés. Jamais pire que « tout à 1 » ;
+    /// sur au plus 400 points régulièrement espacés pour rester instantané.
+    fn guess_free(&self, x: &[f64], y: &[f64]) -> Vec<f64> {
+        let k = self.params.len();
+        let mut p = vec![1.0; k];
+        let stride = x.len().div_ceil(400).max(1);
+        let pts: Vec<(f64, f64)> = x
+            .iter()
+            .zip(y)
+            .step_by(stride)
+            .map(|(&a, &b)| (a, b))
+            .collect();
+        let sse = |p: &[f64]| -> f64 {
+            let v: f64 = pts
+                .iter()
+                .map(|&(xi, yi)| (yi - self.eval(p, xi)).powi(2))
+                .sum();
+            if v.is_finite() {
+                v
+            } else {
+                f64::INFINITY
+            }
+        };
+        let magnitude = |it: &mut dyn Iterator<Item = f64>| {
+            let m = it.fold(0.0_f64, |a, v| a.max(v.abs()));
+            if m.is_finite() && m > 0.0 {
+                m
+            } else {
+                1.0
+            }
+        };
+        let (ys, xs) = (
+            magnitude(&mut y.iter().copied()),
+            magnitude(&mut x.iter().copied()),
+        );
+        let mut candidates = vec![0.0];
+        for scale in [1.0, ys, xs, 1.0 / xs] {
+            for e in -2..=2 {
+                let v = scale * 10f64.powi(e);
+                candidates.push(v);
+                candidates.push(-v);
+            }
+        }
+        let mut best = sse(&p);
+        for _ in 0..2 {
+            for j in 0..k {
+                for &c in &candidates {
+                    let old = p[j];
+                    p[j] = c;
+                    let s = sse(&p);
+                    if s < best {
+                        best = s;
+                    } else {
+                        p[j] = old;
+                    }
+                }
+            }
+        }
+        p
     }
 }
 
@@ -397,6 +461,32 @@ mod tests {
             .collect();
         let y = x.iter().map(|&v| f(v)).collect();
         Series::new(x, y)
+    }
+
+    /// Le départ d'un modèle libre est meilleur que « tout à 1 » quand les
+    /// données sont loin de cette échelle, et reste fini (#204).
+    #[test]
+    fn le_depart_d_un_modele_libre_suit_l_echelle_des_donnees() {
+        let model = Model::Custom {
+            formula: "a*exp(-x/b) + c".into(),
+        }
+        .compile()
+        .unwrap();
+        let s = series(|x| 500.0 * (-x / 40.0).exp() + 30.0, 0.0, 200.0, 120);
+        let sse = |p: &[f64]| -> f64 {
+            s.x.iter()
+                .zip(&s.y)
+                .map(|(&x, &y)| (y - model.eval(p, x)).powi(2))
+                .sum()
+        };
+        let guess = model.guess(&s);
+        assert!(guess.iter().all(|v| v.is_finite()));
+        assert!(
+            sse(&guess) < 0.1 * sse(&[1.0, 1.0, 1.0]),
+            "départ {guess:?} : {} contre {}",
+            sse(&guess),
+            sse(&[1.0, 1.0, 1.0])
+        );
     }
 
     #[test]

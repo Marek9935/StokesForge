@@ -112,6 +112,19 @@ L'interface du traitement mathématique est répartie ainsi :
   et info-bulle ; le volet Results (replié par défaut) liste les calculs
   conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
 - Les erreurs viennent de `errors::analysis::error_message` (match exhaustif).
+- Fenêtre d'ajustement (#204) : trois exponentielles distinctes (`Exponential`,
+  `Exponential with Plateau`, `Two Exponentials`, mêmes noms que `pyst` :
+  `exponential`, `exponential_offset`, `exponential2`) ; la formule du modèle
+  est composée par Typst (`model_formula_source` →
+  `stokesforge_render_egui::formula_label`, cache et polices gardés dans la
+  mémoire d'egui) ; `Auto` remplit les valeurs de départ par
+  `CompiledModel::guess` (pour le modèle libre, un balayage par paramètre qui
+  suit l'échelle des données) ; une aire s'affiche avec le produit des unités de
+  X et de Y quand les deux existent (`value_unit`) ; la fenêtre des pics borne
+  les centres (`center_window`, aussi `pyst.analysis.peaks`).
+- Le choix du type d'analyse se fait dans la fenêtre (liste « Analysis type »,
+  `family_chooser`) tant qu'elle crée un calcul ; un calcul rouvert garde sa
+  famille (#202).
 - Lignes écartées et comptées (`skipped`) : X ou Y non fini, et, en ajustement
   pondéré, σ vide, nul ou négatif (#205) — jamais un échec de tout l'ajustement.
   Un paramètre que les données ne déterminent pas (colonne du jacobien nulle ou

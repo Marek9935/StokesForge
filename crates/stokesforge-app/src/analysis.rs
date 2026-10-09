@@ -91,11 +91,13 @@ impl Preset {
 
     /// Les modèles proposés par `Fit ▸` (le modèle libre se saisit dans la
     /// fenêtre, il n'a pas d'entrée de menu qui le préremplisse).
-    pub fn fit_models() -> [Model; 8] {
+    pub fn fit_models() -> [Model; 10] {
         [
             Model::Linear,
             Model::Polynomial { degree: 3 },
+            Model::Exponential,
             Model::ExponentialOffset,
+            Model::Exponential2,
             Model::Logarithm,
             Model::Power,
             Model::Gaussian,
@@ -215,6 +217,34 @@ impl FitSetup {
         self.params = vec![ParamSetting::default(); self.param_count()];
     }
 
+    /// Remplit les valeurs de départ avec l'estimation automatique du modèle
+    /// sur les points `(x, y)` donnés, restreints à la plage ajustée (bouton
+    /// « Auto », #204). Sans effet si le modèle ne se compile pas.
+    pub fn auto_initial(&mut self, x: &[f64], y: &[f64]) {
+        let Ok(compiled) = self.model.compile() else {
+            return;
+        };
+        let (lo, hi) = self
+            .range
+            .map_or((f64::NEG_INFINITY, f64::INFINITY), |(a, b)| {
+                (a.min(b), a.max(b))
+            });
+        let (xs, ys): (Vec<f64>, Vec<f64>) = x
+            .iter()
+            .zip(y)
+            .filter(|(x, _)| **x >= lo && **x <= hi)
+            .map(|(x, y)| (*x, *y))
+            .unzip();
+        let guess = compiled.guess(&stokesforge_analysis::series::Series::new(xs, ys));
+        self.params
+            .resize(compiled.param_count(), ParamSetting::default());
+        for (setting, value) in self.params.iter_mut().zip(guess) {
+            if !setting.fixed {
+                setting.initial = Some(value);
+            }
+        }
+    }
+
     /// Le modèle change : réglages remis à zéro.
     pub fn set_model(&mut self, model: Model) {
         self.model = model;
@@ -235,6 +265,9 @@ pub struct PeaksSetup {
     /// Positions de départ posées à la main ; vides, la détection les trouve.
     pub seeds: Vec<PeakSeed>,
     pub link_widths: bool,
+    /// Demi-largeur (en X) dans laquelle chaque position reste bornée autour de
+    /// son point de départ ; `None` : positions libres (#204).
+    pub center_window: Option<f64>,
     /// Proéminence minimale pour la détection, en % de l'étendue de Y.
     pub prominence_percent: f64,
     pub max_peaks: usize,
@@ -253,6 +286,7 @@ impl Default for PeaksSetup {
             background: PeakBackground::Constant,
             seeds: Vec::new(),
             link_widths: false,
+            center_window: None,
             prominence_percent: 5.0,
             max_peaks: 6,
             range: None,
@@ -635,7 +669,7 @@ impl AnalysisForm {
                         background: p.background,
                         seeds: p.seeds.clone(),
                         link_widths: p.link_widths,
-                        center_window: None,
+                        center_window: p.center_window,
                     },
                     auto: Some(AutoDetect {
                         min_prominence: p.prominence_percent / 100.0,
@@ -962,6 +996,7 @@ impl Setup {
                 p.background = spec.background;
                 p.seeds = spec.seeds.clone();
                 p.link_widths = spec.link_widths;
+                p.center_window = spec.center_window;
                 p.range = *range;
                 p.residuals = *residuals;
                 if let Some(a) = auto {
@@ -1257,6 +1292,54 @@ pub fn aux_for(tree: &Tree, y: NodeId) -> AuxRef {
         })
     });
     AuxRef { x, y }
+}
+
+/// La formule d'un modèle, en Typst, pour la fenêtre d'ajustement (#204). Les
+/// noms de paramètres sont ceux du tableau (`A`, `tau`, `y0`…). `None` pour le
+/// modèle libre : sa formule est celle que l'utilisateur écrit.
+pub fn model_formula_source(model: &Model) -> Option<&'static str> {
+    Some(match model {
+        Model::Linear => r#"$ y = "intercept" + "slope" dot x $"#,
+        Model::Polynomial { .. } => "$ y = c_0 + c_1 x + c_2 x^2 + dots.c + c_n x^n $",
+        Model::Exponential => "$ y = A e^(-x/tau) $",
+        Model::ExponentialOffset => "$ y = y_0 + A e^(-x/tau) $",
+        Model::Exponential2 => "$ y = y_0 + A_1 e^(-x/tau_1) + A_2 e^(-x/tau_2) $",
+        Model::Logarithm => "$ y = a + b ln x $",
+        Model::Power => "$ y = a x^b $",
+        Model::Gaussian => r#"$ y = y_0 + A exp(-4 ln 2 (x - x_c)^2 / "fwhm"^2) $"#,
+        Model::Lorentzian => r#"$ y = y_0 + A / (1 + 4 (x - x_c)^2 / "fwhm"^2) $"#,
+        Model::Custom { .. } => return None,
+    })
+}
+
+/// L'unité d'une valeur calculée : pour une aire, le produit des unités de X et
+/// de Y (`nm·counts`), sans conversion, écrite seulement si les deux sont
+/// renseignées (#187, #204) ; vide pour tout le reste.
+pub fn value_unit(tree: &Tree, series: &SeriesRef, key: &str) -> String {
+    if !matches!(key, "area" | "area.total" | "peak.area") {
+        return String::new();
+    }
+    let unit_of = |id: Option<NodeId>| {
+        id.and_then(|id| tree.node(id))
+            .and_then(|n| n.as_column())
+            .map(|c| c.meta().unit.trim().to_string())
+            .unwrap_or_default()
+    };
+    let (x, y) = (unit_of(series.x), unit_of(Some(series.y)));
+    if x.is_empty() || y.is_empty() {
+        String::new()
+    } else {
+        format!("{x}·{y}")
+    }
+}
+
+/// Une valeur et son erreur, suivies de leur unité quand elle existe.
+pub fn with_unit(text: String, unit: &str) -> String {
+    if unit.is_empty() {
+        text
+    } else {
+        format!("{text} {unit}")
+    }
 }
 
 /// Le libellé d'une valeur calculée (`area`, `param.tau`, `stat.r_squared`…),

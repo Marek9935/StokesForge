@@ -13,7 +13,7 @@ use stokesforge_core::NodeId;
 
 use super::analysis_dialog::format_value;
 use super::list_row::list_row;
-use crate::analysis::{kind_title, series_label, value_label};
+use crate::analysis::{kind_title, series_label, value_label, value_unit, with_unit};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState};
 use crate::{theme, tr};
@@ -210,7 +210,12 @@ fn detail(
                                 .and_then(|r| {
                                     r.values.iter().find(|v| &v.key == key && v.index == *index)
                                 })
-                                .map(|v| format_value(v.value, v.error))
+                                .map(|v| {
+                                    with_unit(
+                                        format_value(v.value, v.error),
+                                        &value_unit(state.tree(), series, key),
+                                    )
+                                })
                                 .unwrap_or_default();
                             ui.label(text);
                         }

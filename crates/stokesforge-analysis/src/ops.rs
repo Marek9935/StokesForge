@@ -408,6 +408,9 @@ impl Operation {
             Operation::Peaks { auto, .. } if auto.is_some_and(|a| a.max_peaks > 100) => {
                 bad("max_peaks")
             }
+            Operation::Peaks { spec, .. } if spec.center_window.is_some_and(|w| !w.is_finite()) => {
+                bad("center_window")
+            }
             Operation::DirectDeconvolution { method, .. } => match method {
                 DirectMethod::RichardsonLucy { iterations }
                     if !(1..=MAX_ITERATIONS).contains(iterations) =>

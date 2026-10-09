@@ -285,6 +285,67 @@ pub fn mesh(
     egui::Shape::Mesh(Arc::new(m))
 }
 
+/// L'environnement des étiquettes de formule de l'interface (#204) : un cache
+/// de textures et les polices, résolus une fois et gardés dans la mémoire
+/// d'egui — ni `GraphView` ni figure n'y participent.
+struct LabelEnv {
+    cache: FormulaCache<FormulaTexture>,
+    choice: FontChoice,
+    fonts: Option<(Font, Font)>,
+}
+
+/// Plafond des formules gardées : une fenêtre n'en montre que quelques-unes,
+/// le cache ne sert qu'à éviter de recompiler à chaque image.
+const LABEL_CACHE_LIMIT: usize = 64;
+
+/// Peint `source` (du Typst, souvent `$ … $`) comme une étiquette de l'interface
+/// à `size_pt` de corps et à `color`, et rend sa réponse. `None` si la formule
+/// ne compile pas ou qu'aucune police n'est disponible : l'appelant n'affiche
+/// alors rien (une formule d'aide n'est jamais indispensable).
+pub fn formula_label(
+    ui: &mut egui::Ui,
+    source: &str,
+    size_pt: f32,
+    color: Color32,
+) -> Option<egui::Response> {
+    let id = egui::Id::new("stokesforge-formula-label-env");
+    let env: Arc<LabelEnv> = match ui.data(|d| d.get_temp::<Arc<LabelEnv>>(id)) {
+        Some(env) => env,
+        None => {
+            let choice = FontChoice::default();
+            let env = Arc::new(LabelEnv {
+                fonts: formula::resolve_fonts(&choice).ok(),
+                cache: FormulaCache::new(),
+                choice,
+            });
+            ui.data_mut(|d| d.insert_temp(id, Arc::clone(&env)));
+            env
+        }
+    };
+    if env.cache.len() > LABEL_CACHE_LIMIT {
+        env.cache.clear();
+    }
+    let fonts = env.fonts.clone()?;
+    let screen = TypstScreen::with_fonts(ui.ctx(), &env.cache, &env.choice, fonts);
+    let ink: Ink = color.to_array();
+    let texture = screen.render(source, size_pt, ink, screen.pixels_per_point())?;
+    let (width, height) = texture.size_pt;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width as f32, height as f32),
+        egui::Sense::hover(),
+    );
+    ui.painter().add(mesh(
+        &texture,
+        rect.min,
+        Pos::new(
+            plotters_backend::text_anchor::HPos::Left,
+            plotters_backend::text_anchor::VPos::Top,
+        ),
+        FontTransform::None,
+    ));
+    Some(response)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,5 +510,36 @@ mod tests {
         assert!((bounds.min.y - 20.0).abs() < 0.01);
         assert!((bounds.width() - texture.size_pt.0 as f32).abs() < 0.01);
         assert!((bounds.height() - texture.size_pt.1 as f32).abs() < 0.01);
+    }
+
+    /// Une étiquette de formule d'interface alloue la boîte de sa formule et
+    /// peint un maillage texturé ; une source invalide ne peint rien (#204).
+    #[test]
+    fn une_etiquette_de_formule_peint_un_maillage_et_dit_son_echec() {
+        let ctx = context();
+        let mut drawn = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            drawn = formula_label(ui, "$ y = a + b x $", 14.0, Color32::BLACK).map(|r| r.rect);
+        });
+        output.textures_delta.clear();
+        let rect = drawn.expect("une formule valide se peint");
+        assert!(rect.width() > 10.0 && rect.height() > 5.0, "{rect:?}");
+        let meshes = output
+            .shapes
+            .iter()
+            .filter(|s| matches!(s.shape, egui::Shape::Mesh(_)))
+            .count();
+        assert_eq!(meshes, 1);
+
+        let mut invalid_painted = true;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            invalid_painted =
+                formula_label(ui, "#nonexistent_function()", 14.0, Color32::BLACK).is_some();
+        });
+        output.textures_delta.clear();
+        assert!(
+            !invalid_painted,
+            "témoin : une source invalide ne peint rien"
+        );
     }
 }

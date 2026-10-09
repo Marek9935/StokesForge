@@ -390,9 +390,9 @@ fn model_name(model: &Model) -> String {
     match model {
         Model::Linear => tr!("analysis-model-linear"),
         Model::Polynomial { .. } => tr!("analysis-model-polynomial"),
-        Model::Exponential | Model::ExponentialOffset | Model::Exponential2 => {
-            tr!("analysis-model-exponential")
-        }
+        Model::Exponential => tr!("analysis-model-exponential"),
+        Model::ExponentialOffset => tr!("analysis-model-exponential-offset"),
+        Model::Exponential2 => tr!("analysis-model-exponential2"),
         Model::Logarithm => tr!("analysis-model-logarithm"),
         Model::Power => tr!("analysis-model-power"),
         Model::Gaussian => tr!("analysis-model-gaussian"),
@@ -404,6 +404,11 @@ fn model_name(model: &Model) -> String {
 fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     let has_sigma = form.series.iter().any(|s| s.sigma.is_some());
     let multi = form.series.len() > 1;
+    let (shown_x, shown_y) = form
+        .series
+        .get(form.current)
+        .map(|s| crate::analysis::series_points(tree, s))
+        .unwrap_or_default();
     let f = &mut form.setup.fit;
     ui.horizontal(|ui| {
         ui.label(tr!("analysis-fit-model"));
@@ -418,6 +423,10 @@ fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tre
                 }
             });
     });
+    if let Some(source) = crate::analysis::model_formula_source(&f.model) {
+        let color = ui.visuals().text_color();
+        stokesforge_render_egui::formula_label(ui, source, 15.0, color);
+    }
     match &mut f.model {
         Model::Polynomial { degree } => {
             let before = *degree;
@@ -445,6 +454,14 @@ fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tre
     if f.params.len() != f.param_count() {
         f.reset_params();
     }
+    if f.param_count() > 0
+        && ui
+            .button(tr!("analysis-fit-auto"))
+            .on_hover_text(tr!("analysis-fit-auto", "hint"))
+            .clicked()
+    {
+        f.auto_initial(&shown_x, &shown_y);
+    }
     params_table(
         ui,
         id.with("fit-params"),
@@ -461,7 +478,6 @@ fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tre
             .on_hover_text(tr!("analysis-fit-weighted", "hint"));
     }
     ui.checkbox(&mut f.residuals, tr!("analysis-fit-residuals"));
-    let _ = tree;
 }
 
 /// Le tableau des paramètres d'un ajustement : valeur de départ, fixé, bornes
@@ -547,6 +563,20 @@ fn peaks_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
         );
     });
     ui.checkbox(&mut p.link_widths, tr!("analysis-peaks-link-widths"));
+    ui.horizontal(|ui| {
+        let mut bounded = p.center_window.is_some();
+        if ui
+            .checkbox(&mut bounded, tr!("analysis-peaks-center-window"))
+            .on_hover_text(tr!("analysis-peaks-center-window", "hint"))
+            .changed()
+        {
+            p.center_window = bounded.then_some(1.0);
+        }
+        if let Some(window) = &mut p.center_window {
+            number(ui, window);
+            *window = window.abs();
+        }
+    });
     caption(ui, tr!("analysis-peaks-hint"));
     let mut remove = None;
     for (i, seed) in p.seeds.iter_mut().enumerate() {

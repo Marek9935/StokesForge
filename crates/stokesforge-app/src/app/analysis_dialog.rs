@@ -15,7 +15,7 @@ use stokesforge_analysis::ops::Warning;
 use super::analysis_forms::{form_body, value_row};
 use super::analysis_preview::{preview, reset_view, PreviewOutcome};
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
-use crate::analysis::{kind_title, value_label, PreviewTool};
+use crate::analysis::{kind_title, value_label, value_unit, with_unit, PreviewTool};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, CalculationDelete};
 use crate::{theme, tr};
@@ -66,7 +66,12 @@ pub(super) fn warning_text(warning: &Warning) -> String {
 }
 
 /// Les valeurs de la série montrée, sous l'aperçu.
-fn values_panel(ui: &mut egui::Ui, outcome: &PreviewOutcome) {
+fn values_panel(
+    ui: &mut egui::Ui,
+    outcome: &PreviewOutcome,
+    tree: &stokesforge_core::Tree,
+    series: Option<&stokesforge_core::SeriesRef>,
+) {
     egui::ScrollArea::vertical()
         .id_salt("stokesforge_analysis_values")
         .max_height(VALUES_HEIGHT)
@@ -91,7 +96,10 @@ fn values_panel(ui: &mut egui::Ui, outcome: &PreviewOutcome) {
                 value_row(
                     ui,
                     &value_label(&value.key, value.index),
-                    &format_value(value.value, value.error),
+                    &with_unit(
+                        format_value(value.value, value.error),
+                        &series.map_or_else(String::new, |s| value_unit(tree, s, &value.key)),
+                    ),
                 );
             }
         });
@@ -109,6 +117,7 @@ pub(super) fn analysis_window(
         return;
     };
     let id = egui::Id::new("stokesforge_analysis");
+    let series_shown = form.series.get(form.current).cloned();
     let kind = kind_title(form.kind);
     let title = if form.editing.is_some() {
         tr!("analysis-window-edit", kind = kind.as_str())
@@ -199,7 +208,7 @@ pub(super) fn analysis_window(
                             )
                             .inner;
                         ui.data_mut(|data| data.insert_temp(failed_id, result.issue.is_some()));
-                        values_panel(ui, &result);
+                        values_panel(ui, &result, &tree, series_shown.as_ref());
                     },
                 );
             });

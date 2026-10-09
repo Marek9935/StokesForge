@@ -248,6 +248,43 @@ print('ok')
     assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
 }
 
+/// #204 : `"exponential"` est l'exponentielle simple (`A·exp(−x/τ)`), comme dans
+/// le menu Fit ; l'avec-palier et la double ont leur propre nom ; la fenêtre
+/// de centre borne les pics.
+#[test]
+fn les_trois_exponentielles_et_la_fenetre_de_centre_ont_leur_nom() {
+    let banc = banc();
+    let outcome = run(
+        &banc,
+        r#"
+import numpy as np
+book = pyst.create_workbook('Declin')
+sheet = pyst.create_worksheet(book, 'S')
+t = pyst.create_column(sheet, 'T')
+v = pyst.create_column(sheet, 'V')
+ts = np.linspace(0, 10, 201)
+pyst.set_values(t, ts)
+pyst.set_column_meta(t, role='x')
+pyst.set_values(v, 4.0 * np.exp(-ts / 2.5) + 1.0)
+simple = pyst.analysis.fit(v, t, model='exponential', initial={'A': 4.0, 'tau': 2.5}, fixed=['A'])
+assert sorted(k for k in simple['values'] if k.startswith('param.')) == ['param.A', 'param.tau'], simple['values']
+offset = pyst.analysis.fit(v, t, model='exponential_offset')
+assert abs(offset['values']['param.y0'] - 1.0) < 1e-4, offset['values']
+assert abs(offset['values']['param.tau'] - 2.5) < 1e-4, offset['values']
+double = pyst.analysis.fit(v, t, model='exponential2')
+assert 'param.tau2' in double['values'], double['values']
+ps = 3 * np.exp(-0.5 * ((ts - 3) / 0.4) ** 2) + 0.1
+pyst.set_values(v, ps)
+free = pyst.analysis.peaks(v, t, centers=[3.2], max_peaks=1)
+bound = pyst.analysis.peaks(v, t, centers=[3.2], center_window=0.1, max_peaks=1)
+assert abs(bound['values']['peak.center.1'] - 3.2) <= 0.1 + 1e-9, bound['values']
+assert abs(free['values']['peak.center.1'] - 3.0) < 0.05, free['values']
+print('ok')
+"#,
+    );
+    assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
+}
+
 /// scipy fait partie de la pile embarquée (#191) : un script `pyst` ajuste une
 /// exponentielle avec `scipy.optimize.curve_fit` et retrouve les paramètres,
 /// puis les écrit dans une colonne annulable. L'interface n'en dépend pas ;
