@@ -107,8 +107,6 @@ L'interface du traitement mathématique est répartie ainsi :
   ouverte sur erreur.
 - Les surfaces de `src/app/` : `analysis_menu`, `analysis_dialog`,
   `analysis_forms`, `analysis_preview`, `results_pane` (table des modules plus haut).
-- L'aperçu est peint à la main (pas de graphe du projet) et **calculé sur le fil
-  de l'interface** : acceptable aux tailles actuelles, suivi en issue.
 - Poignées sur le graphe (#199) : `AnalysisForm::handles` / `move_handle` (modèle,
   sans egui) listent et déplacent points d'ancrage, bornes de zones/plages et
   positions de pics ; `app/analysis_handles.rs` les peint par-dessus la figure
@@ -119,7 +117,6 @@ L'interface du traitement mathématique est répartie ainsi :
   et pousse un `UpdateCalculation` : **un pas d'historique par geste**, aucun
   si la poignée n'a pas bougé. Le nœud de l'Object Manager n'existe pas (un
   calcul n'est pas un nœud).
-
 - L'aperçu est peint à la main (pas de graphe du projet) et **calculé sur un fil
   de travail** (#201, `analysis_preview.rs`, `PreviewJobs`) : un seul fil à la
   fois, la demande la plus récente remplace celle qui attend, l'image attend

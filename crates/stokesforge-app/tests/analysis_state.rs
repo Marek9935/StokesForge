@@ -257,6 +257,7 @@ fn dragging_a_handle_is_one_undoable_step_that_changes_the_data() {
     });
     s.state.dispatch(Action::Redo);
     assert_eq!(range(&s), vec![(2.0, 6.0)], "le Redo est resté disponible");
+}
 
 fn graphs_count(s: &Setup) -> usize {
     s.state.graphs().len()
