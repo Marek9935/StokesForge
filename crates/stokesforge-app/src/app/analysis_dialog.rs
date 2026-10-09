@@ -15,7 +15,7 @@ use stokesforge_analysis::ops::Warning;
 use super::analysis_forms::{form_body, value_row};
 use super::analysis_preview::{preview, reset_view, PreviewOutcome};
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
-use crate::analysis::{kind_title, value_label, PreviewTool};
+use crate::analysis::{kind_title, value_label, value_unit, with_unit, PreviewTool};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, CalculationDelete};
 use crate::{theme, tr};
@@ -58,11 +58,20 @@ pub(super) fn warning_text(warning: &Warning) -> String {
             "analysis-warning-negative-clipped",
             count = i64::try_from(*count).unwrap_or(i64::MAX)
         ),
+        Warning::Undetermined(count) => tr!(
+            "analysis-warning-undetermined",
+            count = i64::try_from(*count).unwrap_or(i64::MAX)
+        ),
     }
 }
 
 /// Les valeurs de la série montrée, sous l'aperçu.
-fn values_panel(ui: &mut egui::Ui, outcome: &PreviewOutcome) {
+fn values_panel(
+    ui: &mut egui::Ui,
+    outcome: &PreviewOutcome,
+    tree: &stokesforge_core::Tree,
+    series: Option<&stokesforge_core::SeriesRef>,
+) {
     egui::ScrollArea::vertical()
         .id_salt("stokesforge_analysis_values")
         .max_height(VALUES_HEIGHT)
@@ -87,7 +96,10 @@ fn values_panel(ui: &mut egui::Ui, outcome: &PreviewOutcome) {
                 value_row(
                     ui,
                     &value_label(&value.key, value.index),
-                    &format_value(value.value, value.error),
+                    &with_unit(
+                        format_value(value.value, value.error),
+                        &series.map_or_else(String::new, |s| value_unit(tree, s, &value.key)),
+                    ),
                 );
             }
         });
@@ -105,6 +117,7 @@ pub(super) fn analysis_window(
         return;
     };
     let id = egui::Id::new("stokesforge_analysis");
+    let series_shown = form.series.get(form.current).cloned();
     let kind = kind_title(form.kind);
     let title = if form.editing.is_some() {
         tr!("analysis-window-edit", kind = kind.as_str())
@@ -195,7 +208,7 @@ pub(super) fn analysis_window(
                             )
                             .inner;
                         ui.data_mut(|data| data.insert_temp(failed_id, result.issue.is_some()));
-                        values_panel(ui, &result);
+                        values_panel(ui, &result, &tree, series_shown.as_ref());
                     },
                 );
             });
@@ -371,6 +384,36 @@ mod tests {
             frame(&ctx, &mut state);
             session.shutdown().unwrap();
         }
+    }
+
+    /// La fenêtre ouverte depuis le clic droit (#202) change de famille à chaud.
+    #[test]
+    fn la_liste_operation_change_de_famille_a_chaud() {
+        use stokesforge_analysis::ops::OperationKind;
+        let ctx = contexte();
+        let (session, mut state, sheet, ids) = banc();
+        state.dispatch(Action::OpenAnalysis {
+            preset: Preset::BaselineLine,
+            sheet,
+            columns: vec![ids[0], ids[1]],
+        });
+        frame(&ctx, &mut state);
+        let (output, _) = frame(&ctx, &mut state);
+        let all = textes(&output.shapes);
+        let combo = texte_exact(&all, &kind_title(OperationKind::Baseline));
+        let mut actions = Vec::new();
+        cliquer(&ctx, combo.centre, egui::PointerButton::Primary, |ui| {
+            analysis_window(ui.ctx(), &mut state, &mut actions);
+        });
+        let (output, _) = frame(&ctx, &mut state);
+        let all = textes(&output.shapes);
+        let fit = texte_exact(&all, &kind_title(OperationKind::Fit));
+        cliquer(&ctx, fit.centre, egui::PointerButton::Primary, |ui| {
+            analysis_window(ui.ctx(), &mut state, &mut actions);
+        });
+        frame(&ctx, &mut state);
+        assert_eq!(state.analysis_form().unwrap().kind, OperationKind::Fit);
+        session.shutdown().unwrap();
     }
 
     #[test]

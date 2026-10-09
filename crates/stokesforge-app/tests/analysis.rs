@@ -7,7 +7,8 @@ use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::{Operation, OperationKind, HEAVY_BATCH};
 use stokesforge_app::analysis::{
-    preset_of, AnalysisForm, BaselineShape, Issue, Preset, DEFAULT_AVERAGE,
+    model_formula_source, preset_of, value_unit, with_unit, AnalysisForm, BaselineShape, Issue,
+    Preset, DEFAULT_AVERAGE,
 };
 use stokesforge_app::i18n::{self, Language};
 use stokesforge_core::{Column, ColumnMeta, NodeId, Project, SeriesRef};
@@ -397,4 +398,132 @@ fn the_preview_is_not_recomputed_for_the_tool_or_the_average() {
     );
     other.setup.baseline.points.push((1.0, 1.0));
     assert!(!form.same_preview(&other), "un point posé le change");
+}
+
+#[test]
+fn the_three_exponentials_are_three_distinct_fit_models() {
+    let models = Preset::fit_models();
+    for wanted in [
+        Model::Exponential,
+        Model::ExponentialOffset,
+        Model::Exponential2,
+    ] {
+        assert!(models.contains(&wanted), "{wanted:?} absent du menu Fit");
+    }
+    // Chaque variante a son propre nombre de paramètres : choisir l'une dans la
+    // fenêtre n'en lance pas une autre (#204).
+    let counts: Vec<usize> = [
+        Model::Exponential,
+        Model::ExponentialOffset,
+        Model::Exponential2,
+    ]
+    .iter()
+    .map(|m| {
+        AnalysisForm::new(&Preset::Fit(m.clone()), Vec::new(), false)
+            .setup
+            .fit
+            .param_count()
+    })
+    .collect();
+    assert_eq!(counts, [2, 3, 5]);
+}
+
+#[test]
+fn the_center_window_of_the_peaks_reaches_the_operation_and_comes_back() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::Peaks, series(&f), false);
+    form.setup.peaks.center_window = Some(0.75);
+    let Some(Operation::Peaks { spec, .. }) = form.operation() else {
+        panic!("une opération de pics est attendue");
+    };
+    assert_eq!(spec.center_window, Some(0.75));
+    let op = form.operation().unwrap();
+    let mut reopened = AnalysisForm::new(&preset_of(&op), series(&f), false);
+    reopened.setup.load(&op);
+    assert_eq!(reopened.setup.peaks.center_window, Some(0.75));
+    // Témoin : sans fenêtre, les positions restent libres.
+    form.setup.peaks.center_window = None;
+    let Some(Operation::Peaks { spec, .. }) = form.operation() else {
+        panic!("une opération de pics est attendue");
+    };
+    assert_eq!(spec.center_window, None);
+}
+
+#[test]
+fn the_area_unit_is_the_product_of_the_units_and_only_when_both_exist() {
+    let mut f = fixture();
+    let x_unit = |project: &mut Project, x: NodeId, unit: &str| {
+        let meta = ColumnMeta {
+            unit: unit.to_string(),
+            ..ColumnMeta::default()
+        };
+        project.set_column_meta(x, meta).unwrap();
+    };
+    let s = series(&f).remove(0);
+    assert_eq!(value_unit(f.project.tree(), &s, "area"), "", "X sans unité");
+    x_unit(&mut f.project, f.x, "nm");
+    assert_eq!(value_unit(f.project.tree(), &s, "area"), "nm·counts");
+    assert_eq!(value_unit(f.project.tree(), &s, "area.total"), "nm·counts");
+    assert_eq!(value_unit(f.project.tree(), &s, "peak.area"), "nm·counts");
+    assert_eq!(
+        value_unit(f.project.tree(), &s, "param.tau"),
+        "",
+        "pas une aire"
+    );
+    assert_eq!(with_unit("12".into(), "nm·counts"), "12 nm·counts");
+    assert_eq!(with_unit("12".into(), ""), "12");
+}
+
+#[test]
+fn auto_fills_the_starting_values_of_a_free_model_from_the_data() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(
+        &Preset::Fit(Model::Custom {
+            formula: "a*x + b".into(),
+        }),
+        series(&f),
+        false,
+    );
+    let xs: Vec<f64> = (0..50).map(f64::from).collect();
+    let ys: Vec<f64> = xs.iter().map(|x| 300.0 * x + 40.0).collect();
+    assert!(form.setup.fit.params.iter().all(|p| p.initial.is_none()));
+    form.setup.fit.auto_initial(&xs, &ys);
+    let initial: Vec<f64> = form
+        .setup
+        .fit
+        .params
+        .iter()
+        .map(|p| p.initial.expect("une valeur de départ"))
+        .collect();
+    assert_eq!(initial.len(), 2);
+    assert!(initial.iter().all(|v| v.is_finite()));
+    assert!(
+        initial.iter().any(|v| v.abs() > 10.0),
+        "le départ suit l'échelle des données, pas « tout à 1 » : {initial:?}"
+    );
+    // Un paramètre fixé garde sa valeur.
+    form.setup.fit.params[0].fixed = true;
+    form.setup.fit.params[0].initial = Some(7.0);
+    form.setup.fit.auto_initial(&xs, &ys);
+    assert_eq!(form.setup.fit.params[0].initial, Some(7.0));
+}
+
+#[test]
+fn every_builtin_model_formula_compiles_in_typst() {
+    use stokesforge_render_egui::formula;
+    let fonts =
+        formula::resolve_fonts(&stokesforge_render_egui::FontChoice::default()).expect("polices");
+    for model in Preset::fit_models() {
+        match model_formula_source(&model) {
+            Some(source) => {
+                let (sans, math) = fonts.clone();
+                formula::compile(source, 14.0, [0, 0, 0, 255], sans, math)
+                    .unwrap_or_else(|error| panic!("{model:?} : {source:?} : {error}"));
+            }
+            None => assert!(
+                matches!(model, Model::Custom { .. }),
+                "seul le modèle libre n'a pas de formule fixe : {model:?}"
+            ),
+        }
+    }
 }

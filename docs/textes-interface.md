@@ -260,6 +260,8 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Std. error | Erreur type | Incertitude d'un paramètre ajusté | Écart-type, Sigma | I |
 | Prominence | Proéminence | Hauteur d'un pic au-dessus de son entourage | Saillance | D |
 | Shift | Décalage | Translation en abscisse de la réponse (≠ *chemical shift*) | Shift | D |
+| Plateau | Palier | Niveau constant vers lequel une exponentielle se stabilise (≠ *Offset* de l'empilement) | Décalage, Offset | D |
+| Analysis type | Type d'analyse | Famille de calcul choisie dans la fenêtre d'analyse | Opération | D |
 
 ## 3. Exemples avant / après
 

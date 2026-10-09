@@ -84,6 +84,9 @@ pub struct Solution {
     /// Incertitude-type de chaque case ; `None` pour une case fixée ou si la
     /// covariance n'est pas calculable.
     pub errors: Vec<Option<f64>>,
+    /// Case libre que les données ne déterminent pas (colonne du jacobien nulle
+    /// ou combinaison des précédentes, #203) : son incertitude est `None`.
+    pub undetermined: Vec<bool>,
     /// Somme pondérée des carrés des résidus.
     pub chi2: f64,
     pub dof: usize,
@@ -232,16 +235,33 @@ pub fn solve_problem(
     let dof = m.saturating_sub(free.len());
     let reduced_chi2 = if dof > 0 { chi2 / dof as f64 } else { f64::NAN };
     let mut errors = vec![None; slots.len()];
-    if let Some(cov) = invert(&jac.gram()) {
+    let mut undetermined = vec![false; slots.len()];
+    let determined = determined_columns(&jac);
+    if !determined.iter().any(|d| *d) {
+        return Err(AnalysisError::SingularSystem);
+    }
+    for (k, &i) in free.iter().enumerate() {
+        undetermined[i] = !determined[k];
+    }
+    // Covariance des seules cases déterminées : une case sans effet ne rend
+    // pas muettes les incertitudes des autres.
+    let kept: Vec<usize> = (0..free.len()).filter(|&k| determined[k]).collect();
+    let mut sub = Matrix::zeros(m, kept.len());
+    for row in 0..m {
+        for (c, &k) in kept.iter().enumerate() {
+            sub.set(row, c, jac.get(row, k));
+        }
+    }
+    if let Some(cov) = invert(&sub.gram()) {
         let scale = if opts.scale_errors && dof > 0 {
             reduced_chi2
         } else {
             1.0
         };
-        for (k, &i) in free.iter().enumerate() {
-            let var = cov.get(k, k) * scale;
+        for (c, &k) in kept.iter().enumerate() {
+            let var = cov.get(c, c) * scale;
             if var.is_finite() && var >= 0.0 {
-                errors[i] = Some(var.sqrt());
+                errors[free[k]] = Some(var.sqrt());
             }
         }
     }
@@ -269,12 +289,45 @@ pub fn solve_problem(
     Ok(Solution {
         values,
         errors,
+        undetermined,
         chi2,
         dof,
         reduced_chi2,
         iterations,
         terms: stats,
     })
+}
+
+/// Pour chaque colonne du jacobien, `true` si les données la déterminent : sa
+/// part non portée par les colonnes précédentes (Gram-Schmidt modifié) dépasse
+/// un millionième de sa norme. Une colonne nulle (paramètre sans effet) ou
+/// combinaison des précédentes (X tous égaux pour une droite) est écartée.
+fn determined_columns(jac: &Matrix) -> Vec<bool> {
+    let (m, n) = (jac.rows(), jac.cols());
+    let mut basis: Vec<Vec<f64>> = Vec::new();
+    let mut out = vec![false; n];
+    for k in 0..n {
+        let mut col: Vec<f64> = (0..m).map(|r| jac.get(r, k)).collect();
+        let norm = col.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if !(norm.is_finite() && norm > 0.0) {
+            continue;
+        }
+        for b in &basis {
+            let dot: f64 = col.iter().zip(b).map(|(a, c)| a * c).sum();
+            for (a, c) in col.iter_mut().zip(b) {
+                *a -= dot * c;
+            }
+        }
+        let rest = col.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if rest > 1e-6 * norm {
+            for v in &mut col {
+                *v /= rest;
+            }
+            basis.push(col);
+            out[k] = true;
+        }
+    }
+    out
 }
 
 /// `J[i][k] = ∂résidu_i/∂case_libre_k`, en différences centrées.

@@ -129,7 +129,7 @@ pub use stokesforge_render::{
 pub use stokesforge_render::{
     component_at, nearest_on_curve, AxisSide, Gesture, PanelTransform, PlotComponent,
 };
-pub use typst_screen::{FormulaTexture, TypstScreen};
+pub use typst_screen::{formula_label, FormulaTexture, TypstScreen};
 // Typst côté modèle de texte (compilation, échappement) : l'interface en a
 // besoin pour vérifier ce qu'elle propose d'écrire (mémo de syntaxe des
 // propriétés), sans déclarer d'arête vers `stokesforge-render`.

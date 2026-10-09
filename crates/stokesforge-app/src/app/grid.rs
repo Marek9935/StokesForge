@@ -740,7 +740,7 @@ fn column_properties_menu(
         plot_menu(ui, actions, sheet, target_columns);
         send_to_graph_menu(ui, state.tree(), actions, sheet, target_columns);
         add_column_entry(ui, sheet, actions);
-        super::analysis_menu::analysis_submenu(
+        super::analysis_menu::analysis_entry(
             ui,
             state,
             actions,
@@ -3542,10 +3542,11 @@ mod tests {
         colonnes.image(Vec::new());
         colonnes.clic_bouton("102", egui::PointerButton::Secondary);
         let textes = colonnes.textes();
-        for entree in propres_aux_lettres
-            .iter()
-            .chain([&tr!("action-copy"), &tr!("action-clear")])
-        {
+        for entree in propres_aux_lettres.iter().chain([
+            &tr!("action-copy"),
+            &tr!("action-clear"),
+            &tr!("action-analysis-open"),
+        ]) {
             assert!(
                 textes.contains(entree),
                 "colonne sélectionnée : {entree:?} absent de {textes:?}"

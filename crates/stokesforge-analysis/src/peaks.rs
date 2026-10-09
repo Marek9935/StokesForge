@@ -239,6 +239,8 @@ pub struct PeaksFit {
     pub r_squared: f64,
     pub reduced_chi2: f64,
     pub dof: usize,
+    /// Nombre de paramètres libres que les données ne déterminent pas (#203).
+    pub undetermined: usize,
 }
 
 /// Décompose `series` en pics selon `spec`.
@@ -413,6 +415,7 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
         r_squared: sol.terms[0].r_squared,
         reduced_chi2: sol.reduced_chi2,
         dof: sol.dof,
+        undetermined: sol.undetermined.iter().filter(|u| **u).count(),
     })
 }
 
@@ -584,17 +587,17 @@ mod tests {
             shape: PeakShape::Gaussian,
             background: PeakBackground::None,
             seeds: vec![PeakSeed {
-                center: 13.0,
+                center: 14.0,
                 height: Some(4.0),
                 fwhm: Some(2.0),
             }],
             link_widths: false,
-            // Le vrai centre (15) est hors de 13 ± 0,5.
+            // Le vrai centre (15) est hors de 14 ± 0,5.
             center_window: Some(0.5),
         };
         let r = decompose(&s, &spec).unwrap();
         assert!(
-            r.peaks[0].center <= 13.5 + 1e-12,
+            r.peaks[0].center <= 14.5 + 1e-12,
             "centre {}",
             r.peaks[0].center
         );

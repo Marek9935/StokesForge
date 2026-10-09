@@ -53,6 +53,15 @@ les `atexit` Python ne s'exécutent pas.
 `stokesforge-pyhello` existe pour prouver que cette isolation tient une fois
 empaquetée (`scripts/pyhello-dist.sh`, environnement nettoyé).
 
+### `pyst.analysis.fit` : modèles (#204)
+
+`model=` accepte `linear`, `polynomial` (`degree`), `exponential`
+(`A·exp(−x/τ)`), `exponential_offset` (avec `y0`), `exponential2` (deux
+composantes et `y0`), `logarithm`, `power`, `gaussian`, `lorentzian`, ou une
+formule. `pyst.analysis.peaks(center_window=…)` borne chaque centre à ± cette
+distance de sa position de départ. Témoin :
+`les_trois_exponentielles_et_la_fenetre_de_centre_ont_leur_nom`.
+
 ### scipy dans le préfixe embarqué (#191)
 
 La pile embarquée porte numpy **et scipy** (`SCIPY_VERSION` de

@@ -118,19 +118,16 @@ Selection ▸ ne subsiste que dans Edit.
 
 ### Colonne : Analysis (#181)
 
-`Analysis ▸` est dans la section « créer » du clic droit d'un en-tête de
-colonne (après `Plot ▸` et Add Column) ; sur une colonne que produit un calcul,
-une section de gestes du calcul (Edit · Recalculate · Detach · Delete) suit
-Type/Role. Le menu du haut (`analysis_menu_contents`) est le même contenu :
-Baseline ▸ · Correct… · Integrate… · Fit ▸ · Peaks and Deconvolution ▸ ─
-Recalculate Out of Date. Les entrées sont **grisées** (info-bulle `.disabled`)
-tant qu'aucune colonne Y n'est visée, jamais absentes.
-
-**Exception à la profondeur 2 au clic droit** : `Analysis ▸` y contient encore
-des sous-menus (Baseline, Fit, Peaks and Deconvolution), soit trois niveaux.
-C'est le même contenu que le menu du haut, partagé comme l'exige « une seule
-peinture » ; l'aplatir mêlerait une vingtaine d'entrées au menu de la colonne.
-La règle est à trancher : issue #202.
+Le clic droit d'un en-tête de colonne a **une seule entrée** `Analysis…` dans
+la section « créer » (après `Plot ▸` et Add Column) : elle ouvre la fenêtre
+d'analyse, dont la liste « Analysis type » choisit la famille (#202, décision du
+2026-10-09 ; un sous-menu aurait fait trois niveaux, au-delà de la profondeur
+2). Sur une colonne que produit un calcul, une section de gestes du calcul
+(Edit · Recalculate · Detach · Delete) suit Type/Role. Le menu du haut
+(`analysis_menu_contents`) garde une entrée par méthode : Baseline ▸ ·
+Correct… · Integrate… · Fit ▸ · Peaks and Deconvolution ▸ ─ Recalculate Out of
+Date. Les entrées sont **grisées** (info-bulle `.disabled`) tant qu'aucune
+colonne Y n'est visée, jamais absentes.
 
 ### Barre de menus
 

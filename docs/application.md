@@ -38,7 +38,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 |---|---|
 | `app.rs` | orchestration : `StokesForgeApp` et ses champs, `new` (disposition initiale, restauration de l'état des fenêtres), `ui()` et l'**ordre des panneaux**, `collect_shortcuts` (raccourcis globaux, consommés avant les widgets), application différée des actions et ouvertures après la peinture, confirmations bloquantes (nouveau projet, suppression de feuille), drainage des fenêtres détachées, capture et auto-fermeture de vérification. Aucun module de `src/app/` ne lui emprunte d'aide : ce qu'ils partagent vit dans `tab.rs`, `window_detach.rs` ou `crate::color_picker` (#128) |
 | `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`) |
-| `app/analysis_menu.rs` | menu Analysis (#181) : `analysis_menu_contents` (barre de menus et clic droit de colonne, un seul contenu), `analysis_submenu`, `calculation_section` (Edit / Recalculate / Detach / Delete sur une colonne calculée) |
+| `app/analysis_menu.rs` | menu Analysis (#181) : `analysis_menu_contents` (barre de menus), `analysis_entry` (clic droit de colonne : une entrée `Analysis…`, #202), `calculation_section` (Edit / Recalculate / Detach / Delete sur une colonne calculée) |
 | `app/analysis_dialog.rs` | fenêtre d'analyse (`modal_dialog_with`, deux colonnes : formulaire + aperçu) et confirmation de suppression d'un calcul (`calculation_delete_window`) |
 | `app/analysis_forms.rs` | les formulaires par famille (`form_body`, `value_row`, tableau des paramètres) |
 | `app/analysis_preview.rs` | l'aperçu peint à la main : outils Points / Zone / Zoom, aimant (Maj), moyenne (Maj + molette), bande des résidus, cache en mémoire temporaire d'egui |
@@ -112,6 +112,25 @@ L'interface du traitement mathématique est répartie ainsi :
   et info-bulle ; le volet Results (replié par défaut) liste les calculs
   conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
 - Les erreurs viennent de `errors::analysis::error_message` (match exhaustif).
+- Fenêtre d'ajustement (#204) : trois exponentielles distinctes (`Exponential`,
+  `Exponential with Plateau`, `Two Exponentials`, mêmes noms que `pyst` :
+  `exponential`, `exponential_offset`, `exponential2`) ; la formule du modèle
+  est composée par Typst (`model_formula_source` →
+  `stokesforge_render_egui::formula_label`, cache et polices gardés dans la
+  mémoire d'egui) ; `Auto` remplit les valeurs de départ par
+  `CompiledModel::guess` (pour le modèle libre, un balayage par paramètre qui
+  suit l'échelle des données) ; une aire s'affiche avec le produit des unités de
+  X et de Y quand les deux existent (`value_unit`) ; la fenêtre des pics borne
+  les centres (`center_window`, aussi `pyst.analysis.peaks`).
+- Le choix du type d'analyse se fait dans la fenêtre (liste « Analysis type »,
+  `family_chooser`) tant qu'elle crée un calcul ; un calcul rouvert garde sa
+  famille (#202).
+- Lignes écartées et comptées (`skipped`) : X ou Y non fini, et, en ajustement
+  pondéré, σ vide, nul ou négatif (#205) — jamais un échec de tout l'ajustement.
+  Un paramètre que les données ne déterminent pas (colonne du jacobien nulle ou
+  combinaison des précédentes) n'a pas d'incertitude et lève
+  `Warning::Undetermined(n)` ; si aucun paramètre libre n'est déterminé,
+  l'ajustement est refusé (`SingularSystem`, #203).
 
 ### Menus thématiques (#114)
 

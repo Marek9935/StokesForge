@@ -266,6 +266,9 @@ fn run(
             Warning::SignalStepNotUniform => "the X step is not constant".to_string(),
             Warning::IrfStepMismatch => "the response has a different X step".to_string(),
             Warning::NegativeClipped(n) => format!("{n} negative points were set to zero"),
+            Warning::Undetermined(n) => {
+                format!("{n} parameter(s) are not determined by the data (no uncertainty)")
+            }
         })?;
     }
     result.set_item("columns", columns)?;
@@ -432,7 +435,8 @@ fn integrate(
 }
 
 /// Ajustement : `model` = `"linear"`, `"polynomial"` (avec `degree`),
-/// `"exponential"`, `"logarithm"`, `"power"`, `"gaussian"`, `"lorentzian"` ou
+/// `"exponential"` (`A·exp(−x/τ)`), `"exponential_offset"` (avec `y0`),
+/// `"exponential2"` (deux composantes), `"logarithm"`, `"power"`, `"gaussian"`, `"lorentzian"` ou
 /// une formule (`model="a*exp(-x/b)+c"`). `initial`, `bounds` (nom →
 /// `(min, max)`) et `fixed` (noms) règlent les paramètres ; `sigma` pondère.
 #[pyfunction]
@@ -456,7 +460,9 @@ fn fit(
     let model = match model {
         "linear" => Model::Linear,
         "polynomial" => Model::Polynomial { degree },
-        "exponential" => Model::ExponentialOffset,
+        "exponential" => Model::Exponential,
+        "exponential_offset" => Model::ExponentialOffset,
+        "exponential2" => Model::Exponential2,
         "logarithm" => Model::Logarithm,
         "power" => Model::Power,
         "gaussian" => Model::Gaussian,
@@ -511,8 +517,10 @@ fn fit(
 
 /// Décomposition en pics : `centers=[…]` place les pics, sinon ils sont
 /// détectés (`prominence` en fraction de l'étendue, `max_peaks`).
+/// `center_window` borne chaque centre à ± cette distance de sa position de
+/// départ.
 #[pyfunction]
-#[pyo3(signature = (y, x=None, *, shape="gaussian", background="constant", centers=None, link_widths=false, prominence=0.05, max_peaks=6, fit_range=None, residuals=false, keep_results=false, auto_recalc=true))]
+#[pyo3(signature = (y, x=None, *, shape="gaussian", background="constant", centers=None, link_widths=false, center_window=None, prominence=0.05, max_peaks=6, fit_range=None, residuals=false, keep_results=false, auto_recalc=true))]
 #[allow(clippy::too_many_arguments)]
 fn peaks(
     py: Python<'_>,
@@ -522,6 +530,7 @@ fn peaks(
     background: &str,
     centers: Option<Vec<f64>>,
     link_widths: bool,
+    center_window: Option<f64>,
     prominence: f64,
     max_peaks: usize,
     fit_range: Option<(f64, f64)>,
@@ -565,7 +574,7 @@ fn peaks(
             background,
             seeds,
             link_widths,
-            center_window: None,
+            center_window,
         },
         auto: Some(AutoDetect {
             min_prominence: prominence,
